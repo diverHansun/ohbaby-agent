@@ -10,6 +10,8 @@
 3. **压缩持久化由多次独立写组成。** 当前没有显式事务端口、durable begin/end 标记或恢复协议；这构成真实架构风险，但是否在现有存储/调用约束下可达，必须由 failpoint 测试证明。
 4. **设计文档明显落后于 improve-4～5 的实现。** 模块文档仍描述 85% 阈值、已不存在的 assembler/compressor/pruner 文件和旧公共接口，使审查者难以判断测试应以哪份契约为准。
 5. **测试本身也需要被审查。** 测试数量不能自动等于可靠性：误导性名称、mock 过深、没有重建存储、没有竞态编排或只断言“不抛错”，都可能产生假安全感。
+6. **压缩请求也受 Context Window 约束，但当前没有自救路径。** 普通模型请求能在 overflow 后 force prepare/retry；summary 请求却一次性发送待压缩历史，首次 overflow 就返回 failed，恰好在最需要压缩时失去压缩能力。
+7. **scope 已进入状态身份，但没有完整进入 Context event 身份。** history、calibration、cache key 等使用 `sessionId + contextScopeId`，现有 ContextEvent payload 却只有 `sessionId`，且 summary failure 没有对应 terminal event。
 
 ## 1.2 当前请求与状态数据流
 
@@ -63,6 +65,7 @@ Lifecycle each model step
 | MCP loaded set / tool sequence | dynamic tool menu 与 sequence owner | scope/process-local | 新 epoch | 重启后首次 miss 可接受，随后必须稳定 |
 | Provider usage/cache breakdown | Provider response → normalized usage | observation | 不作为模型视图事实 | inclusive 语义与 observed/unavailable 不混淆 |
 | UI context window | primary tracker/projection | process/UI projection | 可重建/可能暂空 | 不得伪装成 child scope 的精确占用 |
+| Context progress/terminal event | in-process Bus | ephemeral observation | 不重放 | 所有 Context event 必须带 session/scope；compaction event 另带 attempt；每次 accepted attempt 有且只有一个 terminal outcome；不能反向改写 durable truth |
 
 当前 `ContextManager` 通过四个 scoped Map 保存 calibration、mask cutoff、thrash lock 和 turn compaction count，并提供 `disposeScope()` / `disposeSession()`；代码锚点是 `context-manager.ts:403-483`。这些 Map 是否需要持久化不是本轮预设答案；本轮首先把“有意重置”和“必须恢复”写成可执行契约。
 
@@ -155,10 +158,13 @@ uncached + cacheRead + cacheWrite == inputTokens
 |---|---|---|
 | 缺少多动作状态机/属性测试 | 仓库未引入 `fast-check`，无 Context seed/trace runner | 人工列举无法覆盖动作排列组合和重复压缩 |
 | 缺少存储 failpoint | summary/prune 通过多个 `MessageManager` 写操作提交 | happy-path mock 不会模拟第 N 次写失败或 SIGKILL |
+| 缺少 summary request overflow | 现有 summary error 用例把任意异常直接视为 failed | 没有证明压缩请求在真实 Provider 窗口更小时能有界缩小并成功 |
 | 缺少重建等价测试 | 现有测试多在同一 manager 实例内断言 | process-local Map、durable parts 与恢复视图的边界没有被同时验证 |
 | runtime 幂等只测顺序重复 | `manager.unit.test.ts:495` 连续调用两次 | 两个调用并发经过 read/check/append 时，顺序测试无法暴露竞态 |
 | primary/subagent 并发不等于同 message 竞态 | `manager.unit.test.ts:810` 使用不同 session/message | 能证明隔离，不能证明 initiating part 原子幂等 |
 | manual compact 只证明 tools 一致 | `manager.unit.test.ts:2525` | 没有证明与 automatic 路径在 mask projection 后等价 |
+| compact 并发只覆盖异 scope 隔离 | `manager.unit.test.ts:810` 等并发用例操作不同 scope/message | 不证明同 scope auto+auto、manual+auto、manual+manual 的唯一提交 |
+| Context event 没有 scope/失败终态测试 | `core/context/events.ts` schema 只有 `sessionId`；failed compression 不产生 `CompactSkipped` | INV-11 若只写在文档里会永久假绿 |
 | 阈值测试名称误导 | `manager.unit.test.ts:2256` 名称写 85%，测试只算 `85/100=0.85` | 它没有调用 `decideCompactionRung()`，不能证明 85% 会触发压缩 |
 | 外部门禁依赖环境 | real provider/compiled Web 需要凭据、构建与可用端点 | 外部 skip 不能被当成普通 CI 已证明的能力 |
 | Summary 只测结构/体积 | 现有测试检查 structured prompt、inflation 和 metadata 过滤 | 不证明目标、约束、决定和未解决错误被语义保留 |
@@ -186,6 +192,8 @@ uncached + cacheRead + cacheWrite == inputTokens
 
 `pruneHistory()` 也逐 part 调用 `updatePart()`，代码锚点：`context-manager.ts:823-890`。`MessageManager` 公共接口只有单条 create/append/update，没有 compaction transaction/batch 契约，见 `packages/ohbaby-agent/src/core/message/types.ts:206-214`。
 
+Database MessageStore 已有 `withImmediateTransaction()`，但当前只包裹单次 append/update，见 `packages/ohbaby-agent/src/core/message/database-store.ts:92-108,205-270`。因此“窄原子 compaction commit”在现有存储上技术可行，不需要先引入全量事件日志；仍须由 failpoint 证明具体不变量后再扩端口。
+
 待证实失败形状：
 
 - summary part 已存在，旧原文只标记一半；
@@ -206,7 +214,7 @@ uncached + cacheRead + cacheWrite == inputTokens
 
 严重性：P0，因为 identity/幂等属于 correctness；若上层已经保证同一 initiating message 不会并发，应由契约测试证明该不可达，而不是依赖口头假设。
 
-### P0-PR-09：manual compact 与 prompt 没有共用同 scope 写串行边界
+### P0-PR-09：同 scope compaction 与 prompt 没有共用写串行边界
 
 `submitPromptAcceptedInternal()` 通过 prompt scheduler 接纳请求，真正执行前使用 `waitForPromptSlot()` 协调同 session prompt。但 `compactSessionInternal()` 直接调用 `runtime.compactSession()`，没有进入这条排队边界；`ContextManager` 内也没有 session/scope mutex。
 
@@ -217,9 +225,21 @@ uncached + cacheRead + cacheWrite == inputTokens
 - `ui-inprocess.ts:2126-2146`：`waitForPromptSlot()` 只协调 prompt owner；
 - `packages/ohbaby-agent/src/adapters/ui-runtime/composition.ts:906-925`：runtime 直接进入 `contextManager.compact()`。
 
-待证实失败形状：prompt 在 compact 生成 summary 期间追加 history，导致 compact candidate、`compactedAt` 标记与下一次 request 基于不同快照，甚至与 PR-01 的部分提交组合。
+待证实失败形状：auto+auto、manual+auto、manual+manual 或 prompt 在 compact 生成 summary 期间追加 history，导致两个 candidate 同时提交，或 candidate、`compactedAt` 标记与下一次 request 基于不同快照，甚至与 PR-01 的部分提交组合。
 
-严重性：P0。推荐契约不是阻塞 UI 接纳，而是让同 scope 的 manual compact 与 prompt Context durable mutation 共用一条 exclusive lane。先用 barrier 测试证明当前竞态，再决定 lane 放在 UI runtime 还是 Context/Message 写边界。
+严重性：P0。推荐契约不是阻塞 UI 接纳，而是让同 scope 的 auto/manual compact 与 prompt Context durable mutation 共用一条 exclusive lane，并在摘要 await 后、提交前复核 durable revision。lane 必须位于 primary/subagent 共用的 Context/request 写边界，不能只修 Web primary；不同 scope 仍允许并发。
+
+### P0-PR-10：summary 请求自身 overflow 后无法有界收缩
+
+`createContextSummaryClient().generateSummary()` 把 `serializeHistory(input.history)` 作为单条 user message 一次性发送。它只为“空摘要”重试两次，不分类处理 Provider context overflow：
+
+- `packages/ohbaby-agent/src/adapters/ui-runtime/prompt-context.ts:79-117`：两次尝试使用相同完整 history；
+- `packages/ohbaby-agent/src/core/context/context-manager.ts:893-952`：`generateSummaryCandidate()` 捕获任意错误后直接返回 `failed`；
+- `packages/ohbaby-agent/src/core/lifecycle/lifecycle.ts:522-578`：普通 agent request 有 overflow → forced prepare → retry，但这条恢复链不包围 summary request。
+
+已证实失败形状：当 Provider 的真实输入窗口小于本地声明/估算时，原请求因过大触发 compaction，summary 请求也因携带同一大段历史而 overflow，compaction 返回 failed，下一次原请求仍然过大。这不是普通可用性下降，而是压缩在最需要时无法自救。
+
+严重性：P0。目标行为是按最旧完整 turn 逐步缩小 summary 输入、清理前导孤儿 tool result、保留近期用户边界与 tool pairing；每轮必须减少输入且有硬重试上限。不能按单条 message 盲切，也不能把 observed provider window 自适应混进这项最小恢复。
 
 ### P1-PR-03：manual/automatic projection 不完全对称
 
@@ -278,6 +298,14 @@ uncached + cacheRead + cacheWrite == inputTokens
 
 结构测试不应承担模型语义质量；需要新增独立 eval，放在 nightly/release，而不是普通 unit。
 
+### P1-PR-11：Context event 缺少 scope 与完整 terminal outcome
+
+`packages/ohbaby-agent/src/core/context/events.ts:42-83` 的 `Compressed`、`Pruned`、`TurnPrepared`、`CompactSkipped`、`Masked` payload 都只有 `sessionId`，没有 `contextScopeId`。另一方面，`skippedReasonForCompression()` 只映射 `inflated/skipped`，`failed` 返回 `undefined`，见 `context-manager.ts:215-225,1120-1133`；因此 summary generation failure 没有对应的 Context terminal event。
+
+Bus 会隔离 subscriber 异常，见 `packages/ohbaby-agent/src/bus/bus.ts:11-35`，这意味着 durable commit 后发布事件是合理顺序；但事件本身还不能满足“每个 session/scope attempt 可解释”的文档契约。
+
+严重性：P1。它不直接改变模型视图，但会让 shared child session 的观测串线、UI/trace attempt 悬挂，也会令 INV-11 无法实现。回归应先固定 payload/terminal 语义：所有 Context event 都有 session/scope identity；只有 compaction progress/terminal event 需要共享 `attemptId`；primary 的 wire payload 可省略 `contextScopeId`，但消费者必须归一为 primary identity，不能把缺省解释为“所有 scope”。恢复/replay 不得重发 observable event。
+
 ### P2-PR-07：`ContextManager` 的变化原因过多
 
 当前文件约 1550 行，同时承担：
@@ -298,6 +326,12 @@ SWE 判断：难测的部分失败和恢复是边界过宽的设计信号；但�
 1. 纯 RequestAssembler/measurement；
 2. 纯 CompactionPolicy；
 3. 有恢复语义的 CompactionCommitter。
+
+### P2-PR-12：Provider 实际窗口只修正估算因子，不形成 adaptive ceiling
+
+当前 calibration 会按 `sessionId + contextScopeId` 调整启发式 token estimate，但 Provider overflow 不会把“实际可用窗口低于声明值”的观察保存为 model/provider ceiling。Kimi 的 `observedMaxContextTokensByModel` 证明这种策略可行，但它同时引入 Provider/model identity、持久化范围、衰减/过期和错误分类的新产品决策。
+
+严重性：P2、已知限制。本轮用 PR-10 保证 summary 自救并记录真实 Provider 证据，不顺带实现 adaptive ceiling；只有后续 telemetry 证明误报窗口稳定存在时再单独设计。
 
 ## 1.7 文档与实现对照
 
@@ -363,7 +397,10 @@ SWE 判断：难测的部分失败和恢复是边界过宽的设计信号；但�
 | PR-06 | Summary 语义无 eval | 产品质量 P1 | 已证实 | AI eval、正确性 | nightly corpus/eval |
 | PR-07 | ContextManager 多变化原因 | 架构级 P2 | 已证实 | SRP、可测试性 | 先测后选择性抽边界 |
 | PR-08 | 模块 architecture/test 文档过期 | 设计级 P1 | 已证实 | 活文档、维护性 | R0/R6 更新权威文档 |
-| PR-09 | manual compact/prompt 同 scope 并发写未串行 | 架构级 P0 | 调度缺口已证实，状态损坏待 barrier 证实 | 竞态自由、原子性、最小惊讶 | LIF-08 + CMP 交叉测试 |
+| PR-09 | 同 scope compact/prompt 并发写未串行 | 架构级 P0 | 调度缺口已证实，状态损坏待 barrier 证实 | 竞态自由、原子性、最小惊讶 | LIF-08 + CMP-09a～09c |
+| PR-10 | summary request 自身 overflow 无收缩恢复 | 可靠性 P0 | 请求路径已证实，真实失败需 scripted/Provider gate | 有界恢复、进展保证、正确性 | CMP-13 |
+| PR-11 | Context event 缺 scope/failed terminal | 设计级 P1 | schema 与发布路径已证实 | 可观测性、隔离性、事实源 | OBS-01～05 + SCP-11 |
+| PR-12 | 无 observed provider-window adaptive ceiling | 产品/策略 P2 | 已证实 | 韧性、成本、YAGNI | 记录限制；本轮不实现 |
 
 ## 1.10 结论
 

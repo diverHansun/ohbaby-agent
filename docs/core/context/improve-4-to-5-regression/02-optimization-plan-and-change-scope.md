@@ -10,11 +10,11 @@
 ```text
 R0 规格/状态所有权
   ↓
-R1 参考状态机 + 属性不变量
+R1 核心参考状态机 + 属性不变量
   ↓
 R2 primary/subagent + Lifecycle/MCP 并发集成
   ↓
-R3 压缩 failpoint + 重建恢复
+R3 summary 自溢出 + 压缩 failpoint + 重建恢复
   ↓
 R4 请求/投影/幂等差异修复
   ↓
@@ -103,17 +103,19 @@ needsSummary =
 
 代价：旧 85% 产品目标需要在 R0 明确标记为 superseded/history；好处是回归不混入行为调参，失败容易归因。
 
-### D4：压缩恢复方案必须由 failpoint 结果决定
+### D4：failpoint 决定是否修复；修复时优先窄原子提交端口
 
 如果 R3 证明部分写入可以形成歧义，候选如下：
 
 | 候选 | 做法 | 优点 | 代价 | 推荐条件 |
 |---|---|---|---|---|
-| 窄原子提交端口 | Context 定义一次性 commit 输入，由 Message adapter 在同一事务写 summary + compacted marks | 终态简单；不把恢复逻辑扩散到 ContextManager | 需要 in-memory/DB 两种 store conformance；端口形状需谨慎 | 存储能保证原子事务时优先 |
-| Durable operation marker | begin → summary/mutations → end；重建识别 orphan 并恢复/回滚 | SIGKILL 可检测；跨非事务介质也成立 | 新 durable state、版本/清理/恢复复杂度 | 无法跨写原子提交时使用 |
+| 窄原子提交端口 | Context 定义一次性 commit 输入，由 Message adapter 在同一事务写 summary + compacted marks | 终态简单；复用现有 SQLite 事务；不把恢复逻辑扩散到 ContextManager | 需要 in-memory/DB 两种 store conformance；端口形状需谨慎 | **红测试成立时的默认选择** |
+| Durable operation marker | begin → summary/mutations → end；重建识别 orphan 并恢复/前滚 | SIGKILL 可检测；跨非事务介质也成立 | 新 durable state、版本/清理/恢复复杂度 | 只有真实存储无法提供原子边界时使用 |
 | catch 中手工 rollback | 写失败后逆向更新 | 局部改动小 | SIGKILL 时无效；rollback 也会失败 | **拒绝** |
 
-不可在测试前选择“全量事件溯源”。若窄原子端口足以满足 failpoint/SIGKILL 契约，按 KISS 选择它；只有存储约束证明不足时才升级 durable marker。
+不可在测试前声称当前实现已经损坏，也不可选择“全量事件溯源”。但修复取舍已经收敛：若 failpoint 变红，优先窄原子端口；只有真实介质证明事务不足时才升级 durable marker。
+
+若使用 marker，不能把所有 unmatched begin 一律当 stale 或一律当 busy。marker 至少包含 operation id、`sessionId + contextScopeId`、lifecycle epoch 和 phase；当前 lifecycle 的 unmatched begin 是 active/busy，旧 epoch 的 unmatched begin 才是 stale/orphan。恢复策略必须前滚到唯一合法 view 或明确封堵，不能在重建时重新调用 LLM，也不能靠 catch-only rollback。
 
 ### D5：runtime 注入幂等应落在写边界
 
@@ -135,11 +137,34 @@ R4 先用 metamorphic test 比较同 history/tools/scope 的两条路径。如�
 - nightly/release：固定长会话语料，验证目标、约束、决定、文件状态、未解决错误的语义保留。
 - LLM-as-judge 不能成为唯一判断；先做规则断言并以小规模人工校准 judge。
 
-### D8：manual compact 与 prompt 的接纳/执行分离
+### D8：同 scope compaction/mutation lane + 提交前 revision 复核
 
 - prompt scheduler 仍可快速返回 accepted receipt，不让长时间 summary 生成卡住 Web 请求。
-- 同 `sessionId + contextScopeId` 的 manual compact 和 prompt Context durable mutation 必须进入同一 exclusive lane；不同 scope 不因此全局串行。
-- lane 的实现位置由 LIF-08/CMP 交叉红测试决定：优先选最窄、同时能覆盖 UI 和非 UI 调用的写边界，不加全局 mutex。
+- 同 `sessionId + contextScopeId` 的 auto+auto、manual+auto、manual+manual 和 prompt Context durable mutation 必须进入同一 exclusive lane；不同 scope 不因此全局串行。
+- lane 必须位于 primary/subagent 共用的 Context/request 写边界，不能只在 Web primary 的 `compactSessionInternal()` 打补丁。
+- 一次 logical compaction 从 candidate snapshot 到 commit/terminal 持有本 scope lease；它可以跨 summary Provider await，但只阻塞该 scope 的 Context mutation。auto compact 若在已有 prompt owner 内触发，必须复用 owner token 或由协调器安全转交，不能嵌套加锁死锁。
+- 获得候选后、提交前仍必须复核 durable revision/选中历史身份。这层检查用于防御多 manager、legacy/out-of-lane writer 和未来入口；若已变化，则跳过或基于新快照重算，不能提交 stale candidate。
+- UI scheduler 负责“何时接纳”，Context lane 负责“何时写 durable state”；两者职责不能混成 session 级全局 mutex。
+
+### D9：summary overflow 使用有界、turn-aware 的输入收缩
+
+summary 请求的恢复算法必须满足：
+
+1. 首次请求使用当前合法 `historyToCompress`；只对明确分类为 context overflow 的错误进入收缩。
+2. 每次从最旧端删除至少一个完整 turn/API round，并清理由此产生的前导 tool result；不得拆散 tool call/result pairing。
+3. 保留最近用户边界和当前任务所需尾部；不足以继续收缩时明确失败。
+4. 最大尝试次数与最小 token/消息进展有硬上限；abort 立即终止，不与普通 transient retry 叠加成乘法预算。
+5. 每次尝试的输入规模、删除单元数和 terminal reason 可观测，但不记录敏感全文。
+
+这条恢复只解决“摘要请求无法装入真实窗口”，不在本轮持久化 Kimi 式 observed provider ceiling。
+
+### D10：确定性 repair 与事件事实源
+
+- 任意 synthetic tool repair 的 ID、文本、status 必须由 durable call id/status/schema version 纯函数生成；禁止使用当前时间或随机数破坏 replay/prefix 稳定性。
+- 真实 tool result 到达时优先于 synthetic projection；不得把 unknown/interrupted 写成成功。
+- 所有 Context event 携带 scoped identity：`sessionId` 必填，`contextScopeId` 仅 primary wire payload 可省略且必须被消费者归一为 primary，不能表示“聚合所有 scope”。
+- compaction progress/terminal event 另带 opaque `attemptId`；同一 accepted attempt 的所有 progress 与唯一 terminal 共用该 ID。terminal `outcome` 只能是 `success/failed/inflated/skipped/aborted`；`success` 另以 rung/result 区分 mask、prune、summary。
+- durable store 是事实源；事件 publish 或 subscriber 失败不回滚已提交历史，resume/replay 不重新发历史 observable event。
 
 ## 2.5 分批实施
 
@@ -149,7 +174,7 @@ R4 先用 metamorphic test 比较同 history/tools/scope 的两条路径。如�
 
 工作：
 
-- 确认 D1～D8 与 04 的不变量。
+- 确认 D1～D10 与 04 的不变量。
 - 在 Context 模块文档中统一：`PreparedModelRequest`、`tailDirectives`、input budget、95% + 4096、primary/subagent scope、run snapshot、durable/ephemeral 状态。
 - 删除或改写不存在的 assembler/compressor/pruner 文件布局与旧接口示例。
 - 将 `manager.unit.test.ts` 中“85 percent compression threshold”重命名为只描述 ratio calculation，另以 `decideCompactionRung` 用例证明触发公式。
@@ -161,15 +186,16 @@ R4 先用 metamorphic test 比较同 history/tools/scope 的两条路径。如�
 
 DoD：文档与当前代码无 85/95、接口、文件布局冲突；lint/typecheck/unit 不因纯文档/测试基线改坏。
 
-### R1 — Reference Model 与确定性属性测试
+### R1 — 核心 Reference Model 与确定性属性测试
 
 **目标**：第一次跨动作序列验证 Context 不变量，不改生产行为。
 
 工作：
 
-- 引入 `fast-check`（待确认）或固定 seed runner。
+- 引入已确认的 `fast-check`，记录 seed 并使用 shrinking；只有依赖安装被客观阻塞时才退化为固定 seed runner，且验收必须显式记录能力降级。
 - 建立合法 action generator、reference reducer、invariant assertions、trace serializer。
-- 覆盖 append、tool call/result、mask、auto/manual compact、retry、abort、restart、spawn/dispose scope、tool epoch。
+- 核心 generator 只覆盖 message/request/usage/tool pairing、mask、auto/manual compact、overflow、abort、restart；先证明最承重的模型视图与 durable 不变量。
+- MCP load、permission、session switching、memory edit、spawn/dispose scope 不塞进首个 generator；分别在 R2/R5 的 scoped property/integration suite 扩展并复用同一 canonical model-view assertion。
 - PR 跑固定 seed/较小 runs；nightly 扩大 runs。
 
 建议新增：
@@ -178,7 +204,7 @@ DoD：文档与当前代码无 85/95、接口、文件布局冲突；lint/typech
 - `packages/ohbaby-agent/src/core/context/context-state-machine.unit.test.ts`
 - 只供测试使用的 fixture/helper 放在 Context 最小公共测试目录，不导出到生产 API。
 
-DoD：失败输出 seed + shrunk actions + expected/actual model view diff；100% 可重复；没有 wall-clock sleep。
+DoD：核心动作失败输出 seed + shrunk actions + expected/actual model view diff；100% 可重复；没有 wall-clock sleep；扩展动作未接入不能被报告成“全状态模型已覆盖”。
 
 ### R2 — 主/子代理、Lifecycle、MCP 并发集成
 
@@ -191,7 +217,8 @@ DoD：失败输出 seed + shrunk actions + expected/actual model view diff；100
 - prepare/send 间加载工具，证明 immutable request 不变、下一 step 新 epoch 生效。
 - close scope 时 Context/MCP/tool sequence/sandbox 清理幂等；兄弟 scope 不受影响。
 - final-step、overflow retry、abort 与动态 tool set 组合。
-- 用 barrier 交叉 manual compact 和同 scope prompt：先证明当前是否并发写，再按 D8 做最小串行化修复；异 scope 仍允许并发。
+- 用 barrier 分别交叉同 scope auto+auto、manual+auto、manual+manual、manual compact+prompt；按 D8 验证唯一提交、revision 复核与执行顺序，异 scope 仍允许并发。
+- 固化 Context event 的 scope/attempt terminal contract；primary、两个 sibling child scope 的事件不可按 session 聚合混淆。
 
 主要改动面：
 
@@ -200,9 +227,9 @@ DoD：失败输出 seed + shrunk actions + expected/actual model view diff；100
 - `packages/ohbaby-agent/src/mcp/integration/*test.ts`
 - 必要时新增专门的 `context-agent-concurrency.integration.test.ts`
 
-DoD：primary 与至少两个 sibling subagent 的 model request、history、cache key、tool order、events 均按 scope 验证；LIF-08 中同 scope 写串行、异 scope 可并发；不以 session-only 断言代替。
+DoD：primary 与至少两个 sibling subagent 的 model request、history、cache key、tool order、events 均按 scope 验证；三类 compact 并发与 LIF-08 中同 scope 写串行、异 scope 可并发；stale candidate 不提交；不以 session-only 断言代替。
 
-### R3 — 压缩 failpoint、真实存储重建与证据驱动修复
+### R3 — Summary 自溢出、压缩 failpoint、真实存储重建与证据驱动修复
 
 **目标**：验证 durable truth 在每个部分失败点后仍唯一、合法、可恢复。
 
@@ -210,8 +237,9 @@ DoD：primary 与至少两个 sibling subagent 的 model request、history、cac
 
 - 为测试提供 failpoint-capable Message port/adapter，按第 N 次 create/append/update 失败。
 - 使用真实临时数据库执行 summary/prune，失败后销毁全部 manager/store 实例并重新打开。
+- scripted Provider 让首次/多次 summary request 返回 context overflow，验证 D9 的输入严格收缩、tool pairing、abort 和最大尝试；增加真实 Provider capability 用例作为最后佐证。
 - 增加 child scope 与 primary 对称用例。
-- 在可控子进程中增加至少一个 hard-crash/SIGKILL 场景；平台不支持时明确分类为 platform-gated integration，不让普通确定性用例 skip。
+- 在可控子进程中增加至少一个 hard-crash/SIGKILL 场景；父进程必须等待预创建 marker 的**确定内容**而非仅等文件存在，再执行 SIGKILL。平台不支持时明确分类为 platform-gated integration，不让普通确定性用例 skip。
 - 若红测试成立，按 D4 选择最小可恢复提交方案，并为 Message store 增加 conformance suite。
 
 故障点：
@@ -222,7 +250,9 @@ DoD：primary 与至少两个 sibling subagent 的 model request、history、cac
 4. prune 第 N 个 part 更新后；
 5. durable commit 后、event publish 前；
 6. tool intent 持久化后、tool result 前；
-7. summary Provider stream 中断/abort。
+7. summary Provider stream 中断/abort；
+8. summary Provider 在完整输入及前若干次收缩后返回 context overflow；
+9. 原子 commit 或 marker close 完成前 hard crash；若采用 marker，分别构造 current-lifecycle busy 与 prior-lifecycle stale orphan。
 
 主要改动面（由测试结果裁剪）：
 
@@ -230,7 +260,7 @@ DoD：primary 与至少两个 sibling subagent 的 model request、history、cac
 - `packages/ohbaby-agent/src/core/message/{types,manager,store,database-store}.ts`
 - Context/Message unit + database integration + 新 restart/fault integration tests
 
-DoD：所有 failpoint 重建后都满足 04 的 `CMP` 场景与相关 `INV` 不变量；没有 catch-only rollback；production 修改由对应红测试解释。
+DoD：所有 failpoint 重建后都满足 04 的 `CMP` 场景与相关 `INV` 不变量；CMP-13 能在有界次数内成功或明确终止；resume 期间 summary LLM 调用数为 0、observable replay event 为 0；没有 catch-only rollback；production 修改由对应红测试解释。
 
 ### R4 — runtime 并发幂等与 manual/automatic 同量纲
 
@@ -311,6 +341,7 @@ DoD：外部门禁在提供凭据时真实运行而非 skip；compiled Web 使�
 | `packages/ohbaby-agent/src/mcp/` | 主要补集成测试 | tool epoch、顺序、scope cleanup、prepare/send race |
 | `packages/ohbaby-agent/src/services/interface-providers/` | 补 contract/诊断 | TokenUsage/cache 语义不变 |
 | `packages/ohbaby-agent/src/runtime/`、`adapters/ui-*` | 补集成/E2E；按 LIF-08 红测试条件修改 | run identity、scope events、manual compact/prompt 串行、primary UI projection |
+| `packages/ohbaby-agent/src/bus/`、`core/context/events.ts` | R2 修改 + contract | Context event scope、attempt identity、terminal outcome；subscriber 失败不改变 durable truth |
 | `tests/integration/core/` | 新增/扩充 | 跨模块、真实存储、restart、primary/subagent |
 | `scripts/` | 条件新增 | context soak/eval/真实外部门禁编排 |
 | `package.json`、`pnpm-lock.yaml` | 条件修改 | 引入 `fast-check` 与便捷测试脚本时 |
@@ -320,6 +351,7 @@ DoD：外部门禁在提供凭据时真实运行而非 skip；compiled Web 使�
 - R0～R2 默认不改变 production API/schema。
 - R3 若需要原子提交端口，它应是内部 Context↔Message port，不扩公开 SDK/UI 协议。
 - R3 若需要 durable operation marker，必须单独说明旧数据库兼容、orphan 恢复、清理与回滚；这是本计划中唯一可能接近单向门的决策，需要用户二次确认。
+- R3 的 summary overflow 收缩是内部恢复行为，不改变 Provider wire protocol；普通 transient retry 与 overflow shrink 分开计数，防止重试预算相乘。
 - runtime part、summary part 和旧 `time.compacted` 数据必须继续可读；不得为测试方便清空历史。
 - TokenUsage、PromptCachePolicy、cache key 和 `PreparedModelRequest` 的已发布语义不得破坏。
 - primary/subagent 不新增两套外部接口；公开静态 window 查询仍不接受不可信 child identity。
@@ -331,6 +363,9 @@ DoD：外部门禁在提供凭据时真实运行而非 skip；compiled Web 使�
 | 属性 suite 过慢 | PR 固定较小 runs，nightly 扩大；记录时长预算 | 降低 runs，不删除不变量 |
 | 随机测试 flaky | 固定 seed、shrinking、fake clock/barrier、无 sleep | 隔离有问题 generator；不能靠 retry 隐藏 |
 | 新事务端口扩大 Message 职责 | Context 定义窄 port；Message adapter 实现；conformance suite | 保留测试，回退生产抽象并重新选 durable marker |
+| per-scope lane 变成全局锁 | key 强制为 session+scope；异 scope barrier 必须证明真实并行 | 回退实现，保留并发契约测试 |
+| summary overflow shrink 丢 tool pairing/近期约束 | 只删除完整 turn/API round；每轮重新 normalize/校验 | 停止提交，保留原文并返回明确 terminal failure |
+| event schema 扩展影响消费者 | primary wire scope 可选以兼容旧 payload，但内部先归一为 primary identity；event catalog/adapter contract 全跑 | 保留 durable 改动，兼容投影旧 payload 读取 |
 | failpoint test 绑定实现步骤 | 故障点按 durable boundary 命名，不断言私有 helper | 重写 fixture，不降低终态不变量 |
 | Summary eval 不稳定 | 规则断言为主，judge nightly + 人工校准 | judge 不阻塞 commit，保留结构硬门 |
 | 真实 Provider 波动 | 明确 opt-in、记录 provider capability 与响应 | 不回退确定性 gate；外部失败单独归因 |
@@ -343,9 +378,10 @@ DoD：外部门禁在提供凭据时真实运行而非 skip；compiled Web 使�
 1. `test(context): define joint regression invariants`
 2. `test(context): add scoped state-machine coverage`
 3. `test(context): cover compaction failure recovery`
-4. `fix(context): make proven state transitions recoverable`（仅红测试成立时）
-5. `test(context): verify memory and cache prefix stability`
-6. `test(context): add context soak and release gates`
+4. `fix(context): bound summary overflow and serialize scoped compaction`（仅红测试成立时）
+5. `fix(context): make proven state transitions recoverable`（仅红测试成立时）
+6. `test(context): verify memory and cache prefix stability`
+7. `test(context): add context soak and release gates`
 
 每批独立审查问题：
 
@@ -360,6 +396,7 @@ DoD：外部门禁在提供凭据时真实运行而非 skip；compiled Web 使�
 
 - 自动长期记忆、Memory 工具、RAG/embedding。
 - 基于 telemetry 的压缩阈值重新调优。
+- Provider overflow 后的 observed-window adaptive ceiling、持久化和过期策略。
 - 全仓库测试规范重写；本轮沿用既有 unit/contract/integration/smoke 分类。
 - 无证据的 Context 全量拆包或事件溯源迁移。
 - improve-4～5 之外的全产品回归。

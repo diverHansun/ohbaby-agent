@@ -1,6 +1,6 @@
 # 讨论记录与已确认要点
 
-> 2026-08-24 基于 improve-4、improve-4.1、improve-5 的实施结果及后续讨论整理。正式诊断与方案见 01～04。
+> 2026-08-24 基于 improve-4、improve-4.1、improve-5 的实施结果整理；2026-08-25 吸收六项目源码调研、OpenCode 独立审查及用户确认。正式诊断与方案见 01～04。
 
 ## 1. 背景与动机
 
@@ -25,6 +25,10 @@
 | 外部验证 | 真实 OpenAI-compatible、Anthropic 和 compiled Web 是最后一层门禁，不替代单元/集成/故障测试 |
 | 文档优先 | 先完成本目录规划，经用户及其子代理审查确认后再进入实施 |
 | 实施纪律 | 后续按批次实施；每批完成定向测试、仓库门禁和独立审查，再进入下一批 |
+| 摘要自溢出 | summary 请求自身 context overflow 定为 P0；必须按完整 turn/tool pairing 有界缩小，不能直接失败回到仍超限的原请求 |
+| 压缩提交 | failpoint 先行；若证实部分写损坏，优先窄原子提交端口，durable marker 仅作存储能力不足时的后备 |
+| 并发契约 | 同 scope 的 auto/manual compact 与 prompt Context durable mutation 共用 exclusive lane，并在提交前复核快照/版本；异 scope 保持并发 |
+| 事件契约 | 所有 Context event 携带 session/scope；compaction progress/terminal 另带 attempt 与唯一终态；durable store 是事实源，事件失败不回滚已提交状态 |
 
 ## 3. 已确认：重点测试方向
 
@@ -40,10 +44,12 @@
 ### 3.2 需要测试证实的风险
 
 - summary 创建、summary part 写入、旧 part 标记是多次持久化写；中途失败是否会形成 summary 与原文双可见。
+- summary 请求把待压缩历史一次性发送；Provider 若报告 context overflow，当前是否会直接失败且无法自救。
 - prune 逐 part 更新时中途失败，是否会留下不可解释的部分裁剪状态。
 - 相同 initiating user message 被并发启动时，runtime model context 是否可能重复追加。
-- manual compact 与同 scope prompt 并发时，当前没有共用的 Context mutation lane，是否会交叉写 history/summary。
+- 同 scope 的 auto+auto、manual+auto、manual+manual，以及 manual compact+prompt 是否会交叉写 history/summary。
 - manual `compact()` 与 automatic `prepareTurn()` 在 mask/usage projection 下是否产生不同的 `usageAfter` 和下一请求视图。
+- Context events 当前只有 `sessionId`，且 summary generation failure 没有对应 Context terminal event，是否会造成 child scope 观测串线或 attempt 悬挂。
 - Manager/进程重建后，durable 与 ephemeral 状态的恢复边界是否明确且可预测。
 - 现有大量阶段内用例能否组合证明长工具循环、重复压缩、重试、abort、子代理并发等状态演化不变量。
 
@@ -75,6 +81,7 @@
 | 用 E2E 覆盖全部组合 | 不做；E2E 只守关键真实路径 |
 | 真实凭据入库 | 禁止；仅环境变量，缺失时只允许外部门禁 skip |
 | improve-4～5 之外的全面产品回归 | 不做；不属于本批范围 |
+| Provider observed-window 自适应 | 本轮只记录为 P2 已知限制；不新增持久化/过期/Provider 特化策略 |
 
 ## 6. 与已有阶段文档的关系
 
@@ -83,13 +90,15 @@
 - improve-5 `04/05` 证明 Provider 协议、`PreparedModelRequest`、稳定 prefix/cache 和主/子代理同链路。
 - improve-5 明确把 improve-4～5 全方位联合回归留给后续工作；本目录承接该范围。
 
-## 7. 待用户/独立审查者最终确认
+## 7. 已确认的工程取舍
 
-以下是推荐但仍允许调整的工程取舍：
-
-1. 属性测试优先使用 `fast-check`，利用 seed 与 shrinking；代价是新增一个 dev dependency。
-2. 压缩决策以当前 `summary=0.95` 作为行为基线，同时正式采用“占用率或剩余输入安全余量”双条件；旧 85% 文档改为历史目标，不在回归阶段顺便调参。
-3. Summary 语义评测进入 nightly/release，不阻塞每个 commit；确定性结构不变量仍是硬门。
-4. 压缩原子性修复方案不在规划期提前锁死：先用 failpoint 复现，再在“窄原子提交端口”和“持久化 begin/end 恢复标记”之间决策。
-5. `02` 不提供符号/行号级关键改动清单；用户没有要求该附加交付，包/文件级改动面已足够用于规划审查。
-6. manual compact 与同 scope prompt 采用“接纳与执行分离”：UI 可先接纳 prompt，但 Context durable mutation 必须在 per-scope exclusive lane 中串行；这是本轮新识别的待确认契约。
+1. 属性测试使用 `fast-check` 的 seed/shrinking，但先建立核心动作模型；MCP、permission、session switching、memory 与 scope lifecycle 分到后续专门 suite，避免一个 generator 同时承担全部偶然复杂度。
+2. 压缩决策以当前 `summary=0.95`、`minRemainingInputTokens=4096` 为行为基线；旧 85% 只作为历史目标，不在回归阶段调参。
+3. Summary 语义评测进入 nightly/release；确定性结构、隐私、请求身份和恢复不变量仍是硬门。
+4. 压缩提交先做 failpoint；若红，SQLite/in-memory store 优先实现同语义的窄原子 commit。只有原子事务不能覆盖真实介质时才引入 durable marker；marker 必须有 lifecycle epoch，能区分 active/busy 与 stale/orphan。
+5. Summary 请求自身 overflow 按最旧完整 turn 逐步缩小，并清理前导孤儿 tool result；重试次数和最小进展量必须有硬上限，保留最近用户边界和 tool pairing。
+6. 同 scope 使用 exclusive Context mutation lane，并在摘要生成后、提交前复核 durable revision；不同 scope 不使用全局锁。UI prompt 可先 accepted，但实际 Context 写排在 manual compact 之后。
+7. 任意 synthetic tool repair 的 ID、文本和状态必须是 durable call identity/status/schema version 的确定性函数；真实 result 到达时覆盖 synthetic，禁止时间戳/随机文案扰动稳定前缀。
+8. 所有 Context event 补齐 scoped identity；compaction progress/terminal 另带 `attemptId` 与 success/failed/inflated/skipped/aborted 唯一终态；重放不得重新发 observable event，也不得为恢复偷偷调用 LLM。
+9. Provider observed-window 自适应保持 P2/out of scope；当前只通过错误分类、校准与真实 Provider 证据记录限制。
+10. `02` 不提供符号/行号级关键改动清单；包/文件级改动面足以指导后续实施。

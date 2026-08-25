@@ -5,13 +5,15 @@
 
 ## 4.1 测试回答的核心问题
 
-联合回归必须回答五个问题：
+联合回归必须回答七个问题：
 
 1. **请求是真的吗？** 测量、压缩判断、Provider 发送和 cache 观测是否针对同一份 `PreparedModelRequest`。
 2. **历史合法吗？** mask/prune/summary/abort/restart 后，模型可见 history 是否唯一且 tool pairing 合法。
 3. **状态隔离吗？** primary、shared child session 中多个 subagent scope、不同 session 是否互不污染。
 4. **失败能恢复吗？** 任意承重写入点失败或进程被杀后，重新打开存储能否得到确定终态。
 5. **设计可继续维护吗？** 测试是否暴露稳定边界，而不是依靠深 mock、sleep 和私有实现断言维持假绿。
+6. **压缩能自救吗？** 原请求和 summary 请求都超过 Provider 实际窗口时，是否能有界缩小且保持 turn/tool pairing。
+7. **观测能归属吗？** 所有 Context 事件是否属于正确 session/scope，compaction 事件是否另属正确 attempt，且重放不会重新发事件或偷偷调用 LLM。
 
 ## 4.2 测试层次与职责
 
@@ -57,9 +59,9 @@
 
 ## 4.4 Reference Model
 
-### 4.4.1 动作集合
+### 4.4.1 核心动作集合
 
-生成器只产生领域合法动作：
+第一批 generator 只产生 Context durable truth 最承重的领域合法动作：
 
 | Action | 说明 |
 |---|---|
@@ -69,21 +71,28 @@
 | `appendToolResult` | 完成、失败或 interrupted result |
 | `prepareStep` | 用当前 ordered tools 创建 `PreparedModelRequest` |
 | `observeUsage` | 注入 Provider usage/cache observation 并更新 calibration |
-| `lazyLoadMcpTool` | 给某 scope 增加新 schema，递增 tool epoch |
-| `changePermission` | 使下一 step 的 executable tool set 改变 |
 | `autoCompact` | 按阈值执行 mask/prune/summary |
 | `manualCompact` | 强制执行用户触发 compact |
 | `providerOverflow` | Provider 报 context overflow，触发 force prepare/retry |
 | `abortRun` | 在 prepare、stream、tool、summary 或 backoff 中断 |
 | `restartManager` | 保留 durable store，重建 process-local state |
-| `spawnChildScope` | 在 child session 创建独立 subagent scope |
-| `disposeScope` | 关闭 scope，清理 Context/MCP/tool sequence 等 transient state |
-| `switchSession` | 在多个 primary/child session 间交错动作 |
-| `editMemoryFile` | 修改 OHBABY.md，验证 run 内/下一 run 边界 |
 
 非法动作由 generator 前置条件排除，例如没有 pending tool call 时不生成对应 result；专门的 malformed/recovery tests 负责非法 durable 输入。
 
-### 4.4.2 Reference Model 只保留最小知识
+### 4.4.2 扩展动作集合
+
+以下动作复用同一 Reference Model identity/canonical view assertion，但在 R2/R5 的专门 property/integration suite 接入，不作为首个 generator 的“全绿”条件：
+
+| Action | 归属 |
+|---|---|
+| `lazyLoadMcpTool` / `changePermission` | R2 tool epoch、immutable request、permission boundary |
+| `spawnChildScope` / `disposeScope` | R2 primary/sibling child scope lifecycle |
+| `switchSession` | R2 多 session/scope 调度与事件归属 |
+| `editMemoryFile` | R5 run snapshot 与下一 run 刷新 |
+
+验收报告必须分别写“核心动作集”和“扩展动作集”的覆盖状态，禁止核心 generator 全绿就声称全部动作已建模。
+
+### 4.4.3 Reference Model 只保留最小知识
 
 Reference Model 不复制 TokenCounter、LLM summary prompt 或 cut-point 算法。它只维护：
 
@@ -92,7 +101,8 @@ Reference Model 不复制 TokenCounter、LLM summary prompt 或 cut-point 算法
 - run snapshot identity；
 - tool epoch 和 ordered tool ids/hash；
 - compaction attempt phase；
-- expected cache scope key identity。
+- expected cache scope key identity；
+- deterministic repair identity：由 durable call id/status/schema version 推导，不保存随机/当前时间。
 
 真正的 summary 文本由固定 scripted summarizer 返回；Reference Model 只判断“summary 与被替代原文是否唯一活跃”。这样能避免测试把生产算法复制一份后一起写错。
 
@@ -105,16 +115,16 @@ Reference Model 不复制 TokenCounter、LLM summary prompt 或 cut-point 算法
 | INV-01 | `onRequestMeasured` 捕获的最后 request 与 Provider 实际输入的 `{ messages, tools }` 投影深等价 | 测量/发送旁路重现 | P0 |
 | INV-02 | 返回的 `PreparedModelRequest` 不被后续 MCP load、permission change、retry 或调用方 mutation 改写 | snapshot 不稳定 | P0 |
 | INV-03 | `inputTokens` 为 inclusive occupancy；cache breakdown 可选但有值时求和等于 input | 窗口/命中率语义错误 | P0 |
-| INV-04 | 模型可见 tool call 都有且只有一个合法 result，或显式 interrupted/unknown repair | Provider 请求非法或副作用被误判 | P0 |
+| INV-04 | 模型可见 tool call 都有且只有一个合法 result，或显式 interrupted/unknown repair；repair 的 ID/文本/status 是 durable call identity/status/schema version 的确定性函数，真实 result 优先 | Provider 请求非法、副作用被误判或 replay/prefix 抖动 | P0 |
 | INV-05 | 同一 initiating user message 的 `model-context:runtime:v1` 基数不超过 1 | runtime 重复/缓存破坏 | P0 |
 | INV-06 | 成功提交 summary 后，被替代原文与 summary 不会同时 active；失败时不能声称完成 | durable truth 歧义 | P0 |
-| INV-07 | `status=compacted` 时最终真实 request usage 必须低于 `usageBefore`；否则只能是 pruned/inflated/failed/skipped | 状态撒谎 | P0 |
+| INV-07 | 在相同 model、tools、tailDirectives、reasoning projection 下，`status=compacted` 后**下一次真实 `prepareTurn()` request** usage 必须低于触发前 `usageBefore`；否则只能是 pruned/inflated/failed/skipped | 使用不同投影自证压缩成功，状态撒谎 | P0 |
 | INV-08 | scope A 的动作不改变 scope B 的 history、calibration、mask、thrash、tool epoch、cache key | subagent 隔离失败 | P0 |
 | INV-09 | `disposeScope(A)` 幂等且不改变兄弟 B；`disposeSession` 才能清理全部 scope | cleanup 越界/泄漏 | P0 |
-| INV-10 | 从同一 durable store 重建后，模型可见 view 等价；只允许明确列出的 ephemeral 数值重置 | 恢复不确定 | P0 |
-| INV-11 | context progress/window/cache events 属于正确 session/scope，并且每次 attempt 有 terminal outcome | UI/运行状态串线或悬挂 | P1 |
+| INV-10 | 从同一 durable store 重建后，模型可见 view 与 deterministic repair 等价；只允许明确列出的 ephemeral 数值重置；resume 不调用 LLM、不重写 store | 恢复不确定或偷偷重新生成事实 | P0 |
+| INV-11 | 所有 Context event 属于正确 session/scope；compaction progress/terminal 另属于同一 attempt；每次 accepted attempt 恰有一个 terminal outcome；replay 不重发历史 observable event | UI/运行状态串线、重复或悬挂 | P1 |
 | INV-12 | 同一 run 的 system/memory snapshot 稳定；文件变化只进入下一 run；subagent 不自动加载 Memory | 长期/工作记忆混层 | P1 |
-| INV-13 | 同 session/scope/tool epoch 的稳定前缀相同；有意 epoch 变化只影响下一 request 并随后稳定 | cache prefix 抖动 | P1 |
+| INV-13 | 同 session/scope/tool epoch 的稳定前缀相同；deterministic repair 重建不改变 prefix；有意 epoch 变化只影响下一 request 并随后稳定 | cache prefix 抖动 | P1 |
 | INV-14 | 自动压缩尝试受 per-turn cap/thrash lock 约束；错误/零收益不会形成热循环 | 成本与可用性风险 | P1 |
 | INV-15 | summary/title/export 不包含 runtime metadata、secret 或 UI-only 文本 | 隐私/缓存/语义污染 | P0 |
 | INV-16 | prefix-only append 不修改之前已经持久化/准备的 message objects | 历史可变/快照污染 | P1 |
@@ -140,20 +150,23 @@ Reference Model 不复制 TokenCounter、LLM summary prompt 或 cut-point 算法
 
 | ID | 故障点/场景 | 类型 | 重建后必须满足 | 对应风险 |
 |---|---|---|---|---|
-| CMP-01 | summary generation 失败 | unit | 无 summary、原文 active、attempt terminal=failed | PR-01/PR-06 |
+| CMP-01 | summary generation 非 overflow 失败 | unit + event contract | 无 summary、原文 active、attempt terminal=failed 且 scope 正确 | PR-01/PR-06/PR-11 |
 | CMP-02 | summary inflation 两次 | unit | 不提交 summary；thrash/attempt 有界 | PR-06 |
 | CMP-03 | summary message create 后失败 | fault integration | 不存在 active 空 summary 或双可见 | PR-01 |
 | CMP-04 | summary part append 后失败 | fault integration | summary/原文只有一种合法 active 组合 | PR-01 |
 | CMP-05 | 第 N 个旧 part update 后失败 | fault + property | 任意 N 重建都不产生部分完成歧义 | PR-01 |
 | CMP-06 | prune 第 N 个 part update 后失败 | fault + property | tool pairing 合法；结果不谎报完整 prune | PR-01 |
-| CMP-07 | durable commit 后、event 前失败 | fault integration | 重建可识别已提交；event/projection 可恢复或至少不反向改写历史 | PR-01 |
-| CMP-08 | summary stream abort | integration | attempt terminal=cancelled/failed；下一 turn 可继续 | PR-01/PR-06 |
-| CMP-09 | 同 scope 两个 auto compact 并发 | barrier integration | 至多一个提交；另一个等待/跳过/基于新快照重算 | PR-01 |
+| CMP-07 | durable commit 后、event 前失败 | fault integration | 重建以 store 为事实源识别已提交；不得回滚历史，resume 不补发旧 observable event | PR-01/PR-11 |
+| CMP-08 | summary stream abort | integration | attempt terminal=aborted/failed；下一 turn 可继续 | PR-01/PR-06 |
+| CMP-09a | 同 scope auto + auto | barrier integration | 至多一个 stale snapshot 提交；另一个等待/跳过/基于新 revision 重算 | PR-01/PR-09 |
+| CMP-09b | 同 scope manual + auto | barrier integration | manual/auto 不重复提交；terminal event 各自可解释；无 threshold 路径叠加 | PR-09 |
+| CMP-09c | 同 scope manual + manual | barrier integration | 明确排队/拒绝/合并契约，最终只有合法提交；无永久 busy | PR-09 |
 | CMP-10 | primary 与 child 同时 compact | integration | 独立成功/失败；无跨 scope mutation | PR-01/INV-08 |
 | CMP-11 | repeated compaction | property/soak | 上一 summary 不被重复展开；模型视图仍唯一 | PR-01/INV-10 |
-| CMP-12 | hard SIGKILL at durable boundary | subprocess integration | 重新启动后 view 合法，orphan 可检测/恢复 | PR-01 |
+| CMP-12 | hard SIGKILL at durable boundary | subprocess integration | 父进程等待 marker 精确内容后 kill；重启 view 合法；若有 marker，current lifecycle=busy、prior lifecycle=stale/orphan 并可恢复 | PR-01 |
+| CMP-13 | summary request 自身 context overflow | unit + integration + real capability | 每次按完整 turn/API round 严格缩小并清前导 tool result；保留近期边界；有 max/abort；成功或明确 terminal failure | PR-10 |
 
-CMP-03～CMP-07、CMP-12 是本轮最重要的新测试；没有这些，不能声称验证了 Context 鲁棒性。
+CMP-03～CMP-07、CMP-09a～09c、CMP-12、CMP-13 是本轮最重要的新测试；没有这些，不能声称验证了 Context 鲁棒性。
 
 ### 4.6.3 runtime injection 与恢复
 
@@ -184,6 +197,17 @@ CMP-03～CMP-07、CMP-12 是本轮最重要的新测试；没有这些，不能�
 | SCP-08 | dispose A 两次 | integration | 幂等，B Context/MCP/tool sequence/sandbox 不变 |
 | SCP-09 | public static window 查询 child session | contract | 返回 unavailable/null，不聚合兄弟 scope伪精度 |
 | SCP-10 | primary 与 child overflow/abort 同时发生 | integration | retry/progress/terminal event 分别归属正确身份 |
+| SCP-11 | primary 与 sibling child 发布同类 ContextEvent | contract/integration | primary 缺省 scope 归一为 primary，child 带精确 scope；compaction 带 attempt identity；不得只按 session 聚合 |
+
+### 4.6.5 Context event 身份与终态
+
+| ID | 场景 | 类型 | 断言 |
+|---|---|---|---|
+| OBS-01 | primary/child 的 window、cache、prepare event | contract | `sessionId` 必填；primary 缺省 scope 只表示 primary，child 带精确 `contextScopeId`；消费者不得把缺省当全 scope 聚合 |
+| OBS-02 | summary success/failed/inflated/skipped/abort | table-driven unit/contract | 每个 accepted attempt 的 progress/terminal 共用一个 `attemptId`；terminal 恰好一次且 outcome 属于固定枚举；success 另带 rung/result |
+| OBS-03 | primary 与两个 sibling child 的 attempt 交错 | barrier integration | 三条 event stream 可按 session/scope/attempt 无歧义分组；一个 attempt 失败不终止或覆盖另一个 |
+| OBS-04 | durable commit 后 publish/subscriber 抛错 | fault integration | durable model view 保持已提交；错误可观测但不得生成第二 terminal 或回滚 store |
+| OBS-05 | reopen/resume 已提交、失败或 orphan 状态 | restart integration | 历史 observable event 数为 0；恢复不调用 LLM；新 attempt 使用新 identity，不冒充旧 attempt continuation |
 
 ## 4.7 P1 可靠性与设计测试矩阵
 
@@ -215,6 +239,7 @@ CMP-03～CMP-07、CMP-12 是本轮最重要的新测试；没有这些，不能�
 | PFX-09 | stable system + initiating runtime | contract | runtime 不在每 step 尾部重复注入 |
 | PFX-10 | cache key | unit/contract | key 基于 sessionId+contextScope；tool epoch 不写入 key |
 | PFX-11 | manager restart 新 tool epoch | integration/real provider | 首次 miss 允许，之后稳定；不虚构恢复 hit |
+| PFX-12 | 同一 unfinished tool durable state 重建 | unit/integration | synthetic repair id/text/status 字节稳定；真实 result 覆盖 synthetic；稳定 prefix 不因时间/随机变化 |
 
 ### 4.7.3 Memory 与 run snapshot
 
@@ -236,13 +261,14 @@ CMP-03～CMP-07、CMP-12 是本轮最重要的新测试；没有这些，不能�
 | LIF-01 | abort during prepare | unit/integration | 不发送 Provider 请求；状态可再次启动 |
 | LIF-02 | abort during assistant stream | integration | partial 内容按既有契约持久化；无重复 final |
 | LIF-03 | abort running tool | integration | partial output + interrupted/abort notice；tool pairing 合法 |
-| LIF-04 | process dies after tool intent before result | crash integration | 重建补 interrupted/unknown，不假定副作用成功 |
+| LIF-04 | process dies after tool intent before result | crash integration | 重建补 deterministic interrupted/unknown，不假定副作用成功；真实 result 存在时覆盖 synthetic |
 | LIF-05 | transient summary/provider stream failure | unit/integration | 只重试可重试错误；有 max/abort |
 | LIF-06 | non-overflow provider failure | unit | 不进入 force compaction retry |
 | LIF-07 | overflow retry also overflows | unit/integration | 明确 terminal failure，不无限循环 |
-| LIF-08 | prompt submitted during manual compact | integration | prompt 可先被 UI scheduler 接受，但同 scope 的 Context durable mutation 必须排在 compact 之后；不得与 compact 并发写 |
+| LIF-08 | prompt submitted during manual compact | integration | prompt 可先被 UI scheduler 接受，但同 scope 的 Context durable mutation 必须排在 compact terminal 之后；不同 scope 可继续；auto compact 复用 owner 不发生嵌套死锁 |
+| LIF-09 | reopen/resume with summary/tool/compaction durable state | integration | `failOnResumeGenerate` 保证 LLM 调用为 0；store 无新增 repair 写（除非协议显式要求）；observable replay event 为 0 |
 
-LIF-08 的推荐契约是“接纳与执行分离”：保留现有 prompt scheduler 的快速接纳，同时让 manual compact 与 prompt 的 Context 写入共用 per-scope exclusive mutation lane。代码交叉核验表明，当前 `compactSessionInternal()` 直接进入 `runtime.compactSession()`，没有经过 `waitForPromptSlot()`，`ContextManager` 也没有 session/scope lock；因此当前并发行为是已识别缺口，而不是可依赖的规范。
+LIF-08 的推荐契约是“接纳与执行分离”：保留现有 prompt scheduler 的快速接纳；logical compaction 从 snapshot 到 terminal 持有 per-scope lease，prompt 的 Context 写入随后执行。auto compact 在 prompt owner 内复用/转交 owner token，不能嵌套死锁；revision recheck 再防御多 manager 或漏接入口。代码交叉核验表明，当前 `compactSessionInternal()` 直接进入 `runtime.compactSession()`，没有经过 `waitForPromptSlot()`，`ContextManager` 也没有 session/scope lock；因此当前并发行为是已识别缺口，而不是可依赖的规范。
 
 ## 4.8 变形测试（Metamorphic Tests）
 
@@ -256,7 +282,7 @@ LIF-08 的推荐契约是“接纳与执行分离”：保留现有 prompt sched
 | META-04 | tool epoch 有意增加一次 | 旧 PreparedModelRequest | 下一 request 与 cache observation |
 | META-05 | dispose scope A | scope B 全部状态 | A 不可再观察的 transient state |
 | META-06 | 同 history 同 tools 手工/自动 compact | 最终 model view、真实 usage 量纲 | progress event、force reason |
-| META-07 | 重建 manager | durable model view | calibration/mask/thrash 等明确 ephemeral state |
+| META-07 | 重建 manager | durable model view、deterministic repair、稳定 prefix | calibration/mask/thrash 等明确 ephemeral state |
 | META-08 | OHBABY.md run 中变化 | 当前 run request | 下一 run snapshot |
 
 ## 4.9 Summary 语义评测
@@ -299,6 +325,8 @@ LIF-08 的推荐契约是“接纳与执行分离”：保留现有 prompt sched
 | failpoint Message adapter | 在 create/append/第 N 次 update/durable commit 后失败 |
 | store conformance suite | 同一组 atomic/idempotent/reopen 契约跑 in-memory 与 database store |
 | barrier/latch | 控制 snapshot、MCP load、compact、tool execution 的竞态 |
+| content-gated crash marker | marker 预创建为空；父进程等待 `request-dispatched`/`commit-entered` 等精确内容后 SIGKILL |
+| fail-on-resume ContextLLMClient | resume/replay 期间一旦调用 LLM 立即失败，证明恢复只依赖 durable truth |
 | fake clock | 验证 compactedAt、事件顺序、lease/backoff，不用 sleep |
 | canonical model-view serializer | 输出稳定、可 diff 的 messages/tools/active parts |
 | secret-free eval corpus | 固定 summary 语义样本，不含真实用户 secret |
@@ -398,9 +426,9 @@ test:context:eval        → nightly/release summary semantic eval
 | 02 批次 | 必须通过 |
 |---|---|
 | R0 | BUD-01～03；权威文档以 95% + remaining floor 为当前契约，85% 只作明确标记的历史目标；无旧接口冲突；现有 unit/contract |
-| R1 | Reference Model scaffold 及其可表达的 `INV-04/06/08/09/10/13/14/16`；固定 seed property 全绿且可 replay/shrink |
-| R2 | REQ-02/05～07、SCP-01～10、PFX-01～06、LIF 组合场景，特别是 LIF-08 同 scope 串行/异 scope 并发 |
-| R3 | CMP-03～07、CMP-09～12、INV-04/06/10/11；真实 store reopen |
+| R1 | 核心 Reference Model scaffold 及其可表达的 `INV-04/06/10/13/14/16`；固定 seed property 全绿且可 replay/shrink；不冒充扩展动作已覆盖 |
+| R2 | REQ-02/05～07、SCP-01～11、OBS-01～03、PFX-01～06、LIF 组合场景；CMP-09a～09c 与 LIF-08 同 scope 串行/异 scope 并发 |
+| R3 | CMP-03～07、CMP-12/13、OBS-04/05、LIF-09、INV-04/06/10/11；真实 store reopen；resume 零 LLM/零 replay event |
 | R4 | RUN-02/03、BUD-08、META-06；所有 request identity 回归 |
 | R5 | MEM-01～08、PFX-07～11、EVAL-01～07；Provider contract 全绿 |
 | R6 | nightly soak 无未解释失败；real-provider 非 skip；compiled Web 真实运行 |
@@ -412,21 +440,27 @@ test:context:eval        → nightly/release summary semantic eval
 1. P0 不变量 INV-01～10、INV-15 全部有确定性自动测试。
 2. primary 与 subagent 在 request、compaction、MCP、cache、restart 场景中都有对称证据。
 3. 所有 compaction failpoint 在 manager/store 重建后产生唯一合法 model view。
-4. 同 initiating message 的并发 runtime 注入幂等，或跨层契约证明该并发不可达。
-5. manual/automatic projection 的差异已被测试解释：等价，或文档明确为有意差异。
-6. Context 权威文档与实际接口、状态所有权、95% + remaining floor 契约一致。
-7. unit、contract、integration、lint、typecheck、build 全绿；普通 suite 无新增 skip/flaky retry。
-8. nightly soak 保存 seed 且无未解释失败；summary eval 无 privacy/runtime metadata 泄漏。
-9. 提供凭据时，OpenAI-compatible/Anthropic/M13 真实 cache gate 实际运行；compiled Web 使用本次构建产物完成主路径。
-10. 独立审查对照 02/04，所有偏差写入实施后的 `05-implementation-acceptance.md`，不回写本规划伪造完成状态。
+4. summary 请求自身 overflow 能在有界次数内严格缩小后成功，或以明确 terminal failure 结束；无无限循环、无 tool pairing 破坏。
+5. 同 initiating message 的并发 runtime 注入幂等，或跨层契约证明该并发不可达。
+6. 三类同 scope compact 并发、manual compact+prompt 均满足 exclusive lane + revision 复核；异 scope 仍真实并发。
+7. 所有 Context event 携带正确 scope；compaction event 携带正确 attempt 且每个 accepted attempt 唯一终态；resume 零 LLM、零历史 observable replay event。
+8. manual/automatic projection 的差异已被测试解释：等价，或文档明确为有意差异。
+9. Context 权威文档与实际接口、状态所有权、95% + remaining floor 契约一致。
+10. unit、contract、integration、lint、typecheck、build 全绿；普通 suite 无新增 skip/flaky retry。
+11. nightly soak 保存 seed 且无未解释失败；summary eval 无 privacy/runtime metadata 泄漏。
+12. 提供凭据时，OpenAI-compatible/Anthropic/M13 真实 cache gate 实际运行；compiled Web 使用本次构建产物完成主路径。
+13. 独立审查对照 02/04，所有偏差写入实施后的 `05-implementation-acceptance.md`，不回写本规划伪造完成状态。
 
 ## 4.15 对抗性审查重点
 
 | 攻击面 | 防御 | 残余风险 |
 |---|---|---|
 | summary 写一半进程死亡 | 每个 durable boundary failpoint + reopen + hard crash；原子端口或 orphan recovery | OS/文件系统极端故障仍需底层 DB 保证 |
+| summary 请求自身也超窗口 | turn-aware 严格收缩 + pairing normalize + max/abort + 进展断言 | Provider 错误分类错误仍可能使不可恢复错误走错分支 |
+| auto/manual compact 交叉提交 | per-scope lane + commit revision 复核 + 三类 barrier 测试 | 外部未走 Context port 的新写入口需持续纳入 lane |
 | 同 message 并发 runtime append | barrier + multi-manager database test；durable idempotency | 分布式多进程若超出本机存储模型需另评估 |
 | child session 聚合兄弟 scope | 所有 helper/event/key 必带 scope；dispose 对称测试 | 无 scope 的历史 legacy 数据需继续安全处理 |
+| replay 重发事件或偷偷摘要 | fail-on-resume LLM + observable event count=0 + durable view parity | 未来显式 repair migration 需另定义版本化副作用 |
 | Provider usage/cache 字段漂移 | 表驱动 contract + real capability gate；observed/unavailable | 第三方 compatible endpoint 可能非标准，需显式 capability |
 | cache 优化掩盖权限变化 | request correctness 优先；permission/tool epoch 必须改变下一 request | Provider 内部 cache 行为不可完全控制 |
 | 随机 suite 假稳定/难复现 | seed + shrinking + no sleep + canonical diff | generator 分布仍需通过历史失败反馈调优 |

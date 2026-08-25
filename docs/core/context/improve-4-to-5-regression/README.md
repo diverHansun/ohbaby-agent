@@ -1,6 +1,6 @@
 # improve-4～5 Context 联合回归
 
-> 状态：规划草案，等待用户与独立审查者确认。
+> 状态：规划修订稿；2026-08-25 已吸收用户确认与独立审查反馈，等待修订后复核。
 > 规划基线：`301de2da7996703e2c4254b330f981bf51507e1f`（2026-08-24）。
 > 本目录只定义回归、诊断与后续修复契约；规划阶段不修改生产代码。
 
@@ -35,6 +35,7 @@ improve-4、improve-4.1 和 improve-5 已分别完成定向实施与验收，但
 - improve-5：`PreparedModelRequest`、TokenUsage/cache 语义、稳定 runtime prefix、tool epoch、MCP 动态加载、cache key、主/子代理统一请求链的回归。
 - Context 与 Lifecycle、Message、Memory、SystemPrompt、ToolScheduler、MCP、Provider adapter、RunManager、Web projection 的承重集成边界。
 - 属性/状态机、故障注入、并发、重建/恢复、长序列 soak、真实 Provider 和 compiled Web 分层验证。
+- 摘要请求自身 context overflow 的有界收缩与恢复，以及 compaction 事件的 scope/terminal 契约。
 - 用测试证实后暴露的生产缺陷，以及与事实不一致的 Context 权威文档修订。
 
 ### Out of scope
@@ -42,6 +43,7 @@ improve-4、improve-4.1 和 improve-5 已分别完成定向实施与验收，但
 - 新增长期记忆 CRUD、向量检索、自动提取、主动召回或 `memory_*` 工具。
 - 全量事件溯源重写、数据库整体迁移或无失败证据的“大重构”。
 - improve-4～5 之外的产品功能回归；仅在其破坏 Context 承重链路时纳入。
+- 根据一次 Provider overflow 持久化“观测窗口上限”并自适应调参；本轮仅记录为 P2 已知限制。
 - 用真实 Provider E2E 替代确定性测试，或将外部网络波动当作架构正确性的唯一证据。
 - 在规划阶段写生产代码、提交或推送。
 
@@ -49,10 +51,11 @@ improve-4、improve-4.1 和 improve-5 已分别完成定向实施与验收，但
 
 | 文档 | 作用 |
 |---|---|
-| [00-discussion.md](./00-discussion.md) | 冻结已确认目标、边界、术语和待确认决策 |
+| [00-discussion.md](./00-discussion.md) | 冻结已确认目标、边界、术语和工程取舍 |
 | [01-problem-analysis-and-current-state.md](./01-problem-analysis-and-current-state.md) | 说明现有实现、测试可信度、风险证据和文档漂移 |
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 定义测试优先的分批实施契约、设计岔路、风险与回滚 |
 | [03-reference-projects.md](./03-reference-projects.md) | 记录六个参考项目中 adopt/adapt/reject 的具体取舍 |
+| [context-references/README.md](./context-references/README.md) | 六个项目的逐项目源码调研索引；作为 03 的补充证据，不单独定义方案 |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 定义状态机、不变量、故障矩阵、CI/外部门禁与验收标准 |
 | `05-implementation-acceptance.md` | 实施完成后由独立验收会话创建；规划期不存在 |
 
@@ -60,17 +63,19 @@ improve-4、improve-4.1 和 improve-5 已分别完成定向实施与验收，但
 
 - improve-4、4.1、5 的 `00`～`05` 保留为各阶段历史契约和验收记录，不回写实施进度。
 - 本目录是三阶段**联合回归**的规划契约，不反向声称旧阶段验收无效。
-- `docs/core/context/{goals-duty,architecture,data-model,dfd-interface,test}.md` 仍是模块级权威文档，但当前存在阈值、接口和文件布局漂移；本轮先记录差异，待 R0 决策后统一修订。
-- 如果本目录与上述模块级文档冲突，在用户确认前视为“待决策差异”，不能默默选择一方。
+- `docs/core/context/{goals-duty,architecture,data-model,dfd-interface,test}.md` 仍是模块级权威文档，但当前存在阈值、接口和文件布局漂移；本目录已经冻结联合回归的目标契约，R0 必须把模块级文档同步到该契约。
+- R0 落地前，冲突项按 01 的“现状事实/文档漂移”处理：现有行为以代码证据为准，后续目标与验收以本目录 00～04 为准；不得把旧文档当成重新打开已关闭决策的依据。
 
-## 六、规划闸门
+## 六、已关闭的规划闸门
 
-正式实施前需要用户与独立审查者确认：
+2026-08-25 已确认以下实施契约；修订后复核只检查文档是否准确表达这些结论，不重新打开已关闭决策：
 
-1. Design Goals 的优先级是否正确。
-2. P0 测试点是否确实对准 Context 的最大风险。
-3. 压缩阈值采用“输入预算占用率 + 剩余输入安全余量”公式，并以当前 95% 作为不改变行为的回归基线，是否接受。
-4. 是否接受引入 `fast-check` 作为测试期 dev dependency；若不接受，则使用自研确定性生成器，但缺少自动 shrinking。
-5. 故障测试证实缺陷后，是优先增加窄的原子提交端口，还是采用可恢复的持久化操作标记；不得在证据出现前拍板。
-6. Summary 语义评测是 nightly/release 门，而不是每次提交的硬门，是否接受。
-7. 是否接受 manual compact 与同 scope prompt 的“接纳与执行分离”契约：UI 可先接纳 prompt，Context durable mutation 必须在 per-scope exclusive lane 中串行。
+1. Design Goals 以正确性、可靠性、隔离性优先，测试对准 durable truth、请求身份和恢复，而非覆盖率数量。
+2. 压缩阈值采用“输入预算占用率 + 剩余输入安全余量”，以当前 95% + 4096 作为不调参的回归基线。
+3. 属性测试优先采用 `fast-check`；Reference Model 先覆盖核心动作，MCP/permission/memory/scope lifecycle 在后续专门 suite 扩展。
+4. Summary 语义评测属于 nightly/release 门；确定性结构、隐私和恢复不变量属于 commit/PR 硬门。
+5. Compaction 部分写失败若被证实，优先增加窄的原子提交端口；durable marker 仅在存储事务不足时使用，并必须区分 active/busy 与 stale/orphan lifecycle。
+6. 同 `sessionId + contextScopeId` 的 auto/manual compaction 与 prompt Context 写入共用 exclusive mutation lane；提交前还要复核快照/版本，不同 scope 保持并发。
+7. Summary 请求自身 overflow 是 P0：按完整 turn/tool pairing 有界缩小后重试，必须保证每轮有进展并有终止上限。
+8. 所有 Context 事件必须携带正确 scope；compaction progress/terminal 另带 attempt identity 和唯一 terminal outcome。durable store 是事实源，事件发布失败不得反向改写已提交历史。
+9. Provider observed-window 自适应作为 P2 已知限制记录，不在本轮顺带实现。
