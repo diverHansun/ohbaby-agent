@@ -243,6 +243,7 @@ export interface MessageManager {
   createMessage(input: CreateMessageInput): Promise<Message>;
   updateMessage(messageId: string, patch: UpdateMessagePatch): Promise<Message>;
   appendPart(messageId: string, input: CreatePartInput): Promise<Part>;
+  appendModelContextPart(messageId: string, text: string): Promise<TextPart>;
   updatePart(partId: string, patch: UpdatePartPatch): Promise<Part>;
   commitCompaction(
     input: CommitCompactionInput,
@@ -269,6 +270,12 @@ export interface MessageStore {
     readonly data: CreatePartInput;
     readonly updatedAt: number;
   }): Promise<Part>;
+  appendModelContextPart(input: {
+    readonly messageId: string;
+    readonly partId: string;
+    readonly text: string;
+    readonly updatedAt: number;
+  }): Promise<{ readonly inserted: boolean; readonly part: TextPart }>;
   updatePart(
     partId: string,
     patch: Omit<UpdatePartPatch, "delta">,

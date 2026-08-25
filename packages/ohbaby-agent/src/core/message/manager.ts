@@ -15,6 +15,7 @@ import type {
   MessageStore,
   MessageWithParts,
   Part,
+  TextPart,
   UpdateMessagePatch,
   UpdatePartPatch,
 } from "./types.js";
@@ -99,6 +100,21 @@ export function createMessageManager(
     },
 
     appendPart,
+    async appendModelContextPart(
+      messageId: string,
+      text: string,
+    ): Promise<TextPart> {
+      const result = await options.store.appendModelContextPart({
+        messageId,
+        partId: idGenerator.partId(),
+        text,
+        updatedAt: now(),
+      });
+      if (result.inserted) {
+        options.bus.publish(MessageEvent.PartUpdated, { part: result.part });
+      }
+      return result.part;
+    },
     updatePart,
 
     async commitCompaction(

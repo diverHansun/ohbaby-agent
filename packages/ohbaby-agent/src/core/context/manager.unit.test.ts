@@ -64,6 +64,19 @@ interface ContextFixture {
   readonly turnPrepared: readonly unknown[];
 }
 
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
 function createMessageIds(): MessageIdGenerator {
   let nextMessageId = 1;
   let nextPartId = 1;
@@ -629,6 +642,56 @@ describe("ContextManager", () => {
     });
     expect(JSON.stringify(first.request.messages)).toContain("runtime-1");
     expect(JSON.stringify(first.request.messages)).not.toContain("runtime-2");
+  });
+
+  it("attaches one runtime part when snapshots race on the same manager", async () => {
+    const messageManager = createMessageManagerFixture();
+    const user = await messageManager.createMessage({
+      agent: "build",
+      id: "concurrent_user",
+      role: "user",
+      sessionId: "session_1",
+    });
+    await messageManager.appendPart(user.id, {
+      text: "concurrent request",
+      type: "text",
+    });
+    const bothBuilding = deferred<undefined>();
+    const releaseBuild = deferred<undefined>();
+    let builders = 0;
+    const { manager } = createManager({
+      messageManager,
+      systemPromptProvider: {
+        build: () => Promise.resolve("stable"),
+        buildRuntimeContext: async () => {
+          builders += 1;
+          if (builders === 2) {
+            bothBuilding.resolve(undefined);
+          }
+          await releaseBuild.promise;
+          return `runtime-${String(builders)}`;
+        },
+      },
+    });
+    const input = {
+      directory: "/repo",
+      initiatingUserMessageId: user.id,
+      isSubagent: false,
+      sessionId: "session_1",
+      toolNames: [],
+    } as const;
+
+    const first = manager.createRunPromptSnapshot(input);
+    const second = manager.createRunPromptSnapshot(input);
+    await bothBuilding.promise;
+    releaseBuild.resolve(undefined);
+    await Promise.all([first, second]);
+
+    const runtimeParts = (await messageManager.listBySession("session_1"))
+      .flatMap((message) => message.parts)
+      .filter(isModelContextPart);
+    expect(builders).toBe(2);
+    expect(runtimeParts).toHaveLength(1);
   });
 
   it("does not attach runtime context for resume and rejects a cross-scope initiating message", async () => {

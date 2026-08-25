@@ -60,7 +60,6 @@ import {
 } from "../llm-client/index.js";
 import {
   isModelContextPart,
-  MODEL_CONTEXT_RUNTIME_KIND,
   type MessageWithParts,
   type Part,
 } from "../message/index.js";
@@ -865,12 +864,10 @@ export function createContextManager(
         const runtimeContext =
           await options.systemPromptProvider.buildRuntimeContext?.(input);
         if (runtimeContext !== undefined && runtimeContext.trim() !== "") {
-          await options.messageManager.appendPart(initiatingMessage.info.id, {
-            metadata: { kind: MODEL_CONTEXT_RUNTIME_KIND },
-            synthetic: true,
-            text: `\n\n${runtimeContext}`,
-            type: "text",
-          });
+          await options.messageManager.appendModelContextPart(
+            initiatingMessage.info.id,
+            `\n\n${runtimeContext}`,
+          );
         }
       }
     }

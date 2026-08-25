@@ -17,6 +17,7 @@ import type {
   UpdatePartPatch,
   StoreCompactionInput,
 } from "./types.js";
+import { isModelContextPart, MODEL_CONTEXT_RUNTIME_KIND } from "./origin.js";
 
 interface MessageRow {
   readonly id: string;
@@ -241,6 +242,61 @@ export function createDatabaseMessageStore(
           );
           touchMessage(input.message.id, input.updatedAt);
           return clone(part);
+        }),
+      );
+    },
+
+    appendModelContextPart(input: {
+      readonly messageId: string;
+      readonly partId: string;
+      readonly text: string;
+      readonly updatedAt: number;
+    }): Promise<{ readonly inserted: boolean; readonly part: TextPart }> {
+      return withAsyncBoundary(() =>
+        withImmediateTransaction(() => {
+          const messageRow = getMessageRow(input.messageId);
+          if (!messageRow) {
+            throw new Error(`Message not found: ${input.messageId}`);
+          }
+          const message = rowToMessage(messageRow);
+          const existing = db
+            .prepare<PartRow>(
+              `SELECT * FROM ${schema.part.tableName}
+               WHERE message_id = ? ORDER BY order_index ASC`,
+            )
+            .all(input.messageId)
+            .map(rowToPart)
+            .find(isModelContextPart);
+          if (existing?.type === "text") {
+            return { inserted: false, part: clone(existing) };
+          }
+          const part: TextPart = {
+            contextScopeId: message.contextScopeId,
+            id: input.partId,
+            messageId: input.messageId,
+            metadata: { kind: MODEL_CONTEXT_RUNTIME_KIND },
+            orderIndex: nextOrderIndex(input.messageId),
+            sessionId: message.sessionId,
+            synthetic: true,
+            text: input.text,
+            type: "text",
+          };
+          db.prepare(
+            `INSERT INTO ${schema.part.tableName}
+              (id, message_id, session_id, type, order_index, created_at, updated_at, data)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            part.id,
+            part.messageId,
+            part.sessionId,
+            part.type,
+            part.orderIndex,
+            input.updatedAt,
+            input.updatedAt,
+            partToRowData(part),
+          );
+          touchMessage(input.messageId, input.updatedAt);
+          return { inserted: true, part: clone(part) };
         }),
       );
     },

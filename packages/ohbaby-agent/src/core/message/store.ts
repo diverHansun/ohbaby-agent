@@ -11,6 +11,7 @@ import type {
   StoreCompactionInput,
   TextPart,
 } from "./types.js";
+import { isModelContextPart, MODEL_CONTEXT_RUNTIME_KIND } from "./origin.js";
 
 export function createInMemoryMessageStore(): MessageStore {
   const messages = new Map<string, Message>();
@@ -104,6 +105,40 @@ export function createInMemoryMessageStore(): MessageStore {
       parts.set(part.id, clone(part));
       touchMessage(input.message.id, input.updatedAt);
       return Promise.resolve(clone(part));
+    },
+
+    appendModelContextPart(input: {
+      readonly messageId: string;
+      readonly partId: string;
+      readonly text: string;
+      readonly updatedAt: number;
+    }): Promise<{ readonly inserted: boolean; readonly part: TextPart }> {
+      const message = messages.get(input.messageId);
+      if (!message) {
+        return Promise.reject(
+          new Error(`Message not found: ${input.messageId}`),
+        );
+      }
+      const existing = listPartsForMessage(input.messageId).find(
+        isModelContextPart,
+      );
+      if (existing?.type === "text") {
+        return Promise.resolve({ inserted: false, part: existing });
+      }
+      const part: TextPart = {
+        contextScopeId: message.contextScopeId,
+        id: input.partId,
+        messageId: input.messageId,
+        metadata: { kind: MODEL_CONTEXT_RUNTIME_KIND },
+        orderIndex: listPartsForMessage(input.messageId).length,
+        sessionId: message.sessionId,
+        synthetic: true,
+        text: input.text,
+        type: "text",
+      };
+      parts.set(part.id, clone(part));
+      touchMessage(input.messageId, input.updatedAt);
+      return Promise.resolve({ inserted: true, part: clone(part) });
     },
 
     updatePart(

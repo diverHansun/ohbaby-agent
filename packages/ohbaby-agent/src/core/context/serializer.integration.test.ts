@@ -24,18 +24,18 @@ import { serializeForLlm } from "./serializer.js";
 const cleanupPaths: string[] = [];
 let databasePath = "";
 
-function createMessageIds(): MessageIdGenerator {
+function createMessageIds(prefix = ""): MessageIdGenerator {
   let nextMessageId = 1;
   let nextPartId = 1;
 
   return {
     messageId(): string {
-      const id = `message_${String(nextMessageId)}`;
+      const id = `${prefix}message_${String(nextMessageId)}`;
       nextMessageId += 1;
       return id;
     },
     partId(): string {
-      const id = `part_${String(nextPartId)}`;
+      const id = `${prefix}part_${String(nextPartId)}`;
       nextPartId += 1;
       return id;
     },
@@ -91,6 +91,131 @@ afterEach(async () => {
 });
 
 describe("serializeForLlm database metadata projection", () => {
+  it("attaches one runtime part across managers and a database restart", async () => {
+    const seedManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createMessageIds("seed_"),
+      now: createClock(),
+    });
+    const user = await seedManager.createMessage({
+      agent: "build",
+      role: "user",
+      sessionId: "session_1",
+    });
+    await seedManager.appendPart(user.id, {
+      text: "race two managers",
+      type: "text",
+    });
+
+    let builders = 0;
+    let releaseBuild!: (value: undefined) => void;
+    let markBothBuilding!: (value: undefined) => void;
+    const buildReleased = new Promise<undefined>((resolve) => {
+      releaseBuild = resolve;
+    });
+    const bothBuilding = new Promise<undefined>((resolve) => {
+      markBothBuilding = resolve;
+    });
+    const systemPromptProvider = {
+      build: vi.fn().mockResolvedValue("stable"),
+      buildRuntimeContext: vi.fn(async () => {
+        builders += 1;
+        if (builders === 2) {
+          markBothBuilding(undefined);
+        }
+        await buildReleased;
+        return "runtime";
+      }),
+    };
+    const createManager = (
+      prefix: string,
+    ): ReturnType<typeof createContextManager> =>
+      createContextManager({
+        bus: createBus(),
+        llmClient: {
+          generateSummary: vi.fn().mockResolvedValue("summary"),
+        },
+        memory: {
+          load: vi
+            .fn()
+            .mockResolvedValue({ global: "", merged: "", project: "" }),
+        },
+        messageManager: createMessageManager({
+          bus: createBus(),
+          store: createDatabaseMessageStore(),
+          idGenerator: createMessageIds(prefix),
+          now: createClock(),
+        }),
+        systemPromptProvider,
+        tokenCounter: {
+          estimateTokens: (content) => content.length,
+          getLimit: () => 100_000,
+        },
+      });
+    const input = {
+      directory: "/repo",
+      initiatingUserMessageId: user.id,
+      isSubagent: false,
+      sessionId: "session_1",
+      toolNames: [],
+    } as const;
+    const first = createManager("left_").createRunPromptSnapshot(input);
+    const second = createManager("right_").createRunPromptSnapshot(input);
+    await bothBuilding;
+    releaseBuild(undefined);
+    await Promise.all([first, second]);
+
+    expect(builders).toBe(2);
+    expect(
+      (await seedManager.listBySession("session_1"))
+        .flatMap((message) => message.parts)
+        .filter(isModelContextPart),
+    ).toHaveLength(1);
+
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const reopenedMessageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createMessageIds("reopened_"),
+      now: createClock(),
+    });
+    const rebuildRuntimeContext = vi.fn().mockResolvedValue("replacement");
+    const reopenedContextManager = createContextManager({
+      bus: createBus(),
+      llmClient: {
+        generateSummary: vi.fn().mockResolvedValue("summary"),
+      },
+      memory: {
+        load: vi
+          .fn()
+          .mockResolvedValue({ global: "", merged: "", project: "" }),
+      },
+      messageManager: reopenedMessageManager,
+      systemPromptProvider: {
+        build: vi.fn().mockResolvedValue("stable"),
+        buildRuntimeContext: rebuildRuntimeContext,
+      },
+      tokenCounter: {
+        estimateTokens: (content) => content.length,
+        getLimit: () => 100_000,
+      },
+    });
+    await reopenedContextManager.createRunPromptSnapshot(input);
+    await reopenedContextManager.createRunPromptSnapshot({
+      ...input,
+      initiatingUserMessageId: undefined,
+    });
+
+    expect(rebuildRuntimeContext).not.toHaveBeenCalled();
+    expect(
+      (await reopenedMessageManager.listBySession("session_1"))
+        .flatMap((message) => message.parts)
+        .filter(isModelContextPart),
+    ).toHaveLength(1);
+  });
+
   it("keeps persisted runtime context model-visible after a database round trip", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),

@@ -97,6 +97,19 @@ function createMessageManager(
   const removeMessage = vi.fn((): Promise<void> => Promise.resolve());
   const manager: MessageManager = {
     appendPart,
+    appendModelContextPart: vi.fn<MessageManager["appendModelContextPart"]>(
+      (messageId, text) =>
+        Promise.resolve({
+          id: "runtime_part",
+          messageId,
+          metadata: { kind: "model-context:runtime:v1" },
+          orderIndex: 1,
+          sessionId: "session_child",
+          synthetic: true,
+          text,
+          type: "text",
+        }),
+    ),
     commitCompaction: vi.fn<MessageManager["commitCompaction"]>(() =>
       Promise.reject(new Error("Compaction is not used by this fixture")),
     ),
