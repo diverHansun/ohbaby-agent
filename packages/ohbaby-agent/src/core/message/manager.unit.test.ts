@@ -199,6 +199,36 @@ describe("MessageManager", () => {
     ).resolves.toEqual([{ content: "B only", role: "user" }]);
   });
 
+  it("distinguishes an exact primary-scope query from an unfiltered session query", async () => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const primary = await manager.createMessage({
+      agent: "build",
+      role: "user",
+      sessionId: "shared_1",
+    });
+    const child = await manager.createMessage({
+      agent: "explore",
+      contextScopeId: "scope_a",
+      role: "user",
+      sessionId: "shared_1",
+    });
+    await manager.appendPart(primary.id, {
+      text: "primary only",
+      type: "text",
+    });
+    await manager.appendPart(child.id, { text: "child only", type: "text" });
+
+    await expect(manager.listBySession("shared_1")).resolves.toHaveLength(2);
+    await expect(
+      manager.listBySession("shared_1", { contextScopeId: undefined }),
+    ).resolves.toMatchObject([{ info: { id: primary.id } }]);
+  });
+
   it("allocates distinct part order indexes during concurrent appends", async () => {
     const manager = createMessageManager({
       bus: createBus(),

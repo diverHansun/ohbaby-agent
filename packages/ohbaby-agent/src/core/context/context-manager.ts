@@ -754,11 +754,9 @@ export function createContextManager(
           isSubagent: input.isSubagent,
           toolNames: input.toolNames,
         }),
-      input.contextScopeId === undefined
-        ? options.messageManager.listBySession(sessionId)
-        : options.messageManager.listBySession(sessionId, {
-            contextScopeId: input.contextScopeId,
-          }),
+      options.messageManager.listBySession(sessionId, {
+        contextScopeId: input.contextScopeId,
+      }),
     ]);
     return assembleFromRawHistory({
       assembledAt: now(),
@@ -785,12 +783,10 @@ export function createContextManager(
 
     const systemPrompt = await options.systemPromptProvider.build(input);
     if (input.initiatingUserMessageId !== undefined) {
-      const history =
-        input.contextScopeId === undefined
-          ? await options.messageManager.listBySession(input.sessionId)
-          : await options.messageManager.listBySession(input.sessionId, {
-              contextScopeId: input.contextScopeId,
-            });
+      const history = await options.messageManager.listBySession(
+        input.sessionId,
+        { contextScopeId: input.contextScopeId },
+      );
       const initiatingMessage = history.find(
         (message) => message.info.id === input.initiatingUserMessageId,
       );
@@ -1328,12 +1324,10 @@ export function createContextManager(
       sessionId: req.sessionId,
       usageBefore: req.usageBefore,
     });
-    const committedRawHistory =
-      req.contextScopeId === undefined
-        ? await options.messageManager.listBySession(req.sessionId)
-        : await options.messageManager.listBySession(req.sessionId, {
-            contextScopeId: req.contextScopeId,
-          });
+    const committedRawHistory = await options.messageManager.listBySession(
+      req.sessionId,
+      { contextScopeId: req.contextScopeId },
+    );
     const committedContext = assembleFromRawHistory({
       assembledAt: now(),
       isSubagent: req.isSubagent,

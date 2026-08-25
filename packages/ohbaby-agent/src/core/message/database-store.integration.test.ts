@@ -100,6 +100,22 @@ describe("createDatabaseMessageStore", () => {
     ]);
   });
 
+  it("distinguishes exact primary scope from an unfiltered session query", async () => {
+    const store = createDatabaseMessageStore();
+    const primary = userMessage("message_primary");
+    const child = {
+      ...userMessage("message_child"),
+      contextScopeId: "scope_a",
+    };
+    await store.insertMessage(primary);
+    await store.insertMessage(child);
+
+    await expect(store.listBySession("session_1")).resolves.toHaveLength(2);
+    await expect(
+      store.listBySession("session_1", { contextScopeId: undefined }),
+    ).resolves.toMatchObject([{ info: { id: primary.id } }]);
+  });
+
   it("round-trips raw metadata inside completed tool state", async () => {
     const store = createDatabaseMessageStore();
     await store.insertMessage({

@@ -8,6 +8,7 @@ import {
   type TokenCounter,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import { estimateWireHeuristic } from "../../../packages/ohbaby-agent/src/core/context/token-estimation.js";
+import { createScopedPromptCacheKey } from "../../../packages/ohbaby-agent/src/core/llm-client/prompt-cache.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -24,6 +25,115 @@ function createIds(): MessageIdGenerator {
 }
 
 describe("subagent scoped context integration", () => {
+  it("isolates primary and sibling child views inside one shared session", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      idGenerator: createIds(),
+      store: createInMemoryMessageStore(),
+    });
+    const append = async (
+      text: string,
+      contextScopeId?: string,
+    ): Promise<void> => {
+      const message = await messageManager.createMessage({
+        ...(contextScopeId === undefined ? {} : { contextScopeId }),
+        agent: contextScopeId === undefined ? "build" : "explore",
+        role: "user",
+        sessionId: "shared_1",
+      });
+      await messageManager.appendPart(message.id, { text, type: "text" });
+    };
+    await append("primary-sentinel");
+    await append("scope-a-sentinel", "scope_a");
+    await append("scope-b-sentinel", "scope_b");
+
+    const manager = createContextManager({
+      bus,
+      llmClient: {
+        generateSummary: vi.fn().mockResolvedValue("unused"),
+      },
+      memory: {
+        load: vi
+          .fn()
+          .mockResolvedValue({ global: "", merged: "", project: "" }),
+      },
+      messageManager,
+      systemPromptProvider: {
+        build: vi.fn().mockResolvedValue("stable"),
+      },
+      tokenCounter: {
+        estimateTokens: (content: string) => content.length,
+        getLimit: () => 100_000,
+      },
+    });
+    const prepare = (contextScopeId?: string) =>
+      manager.prepareTurn({
+        ...(contextScopeId === undefined ? {} : { contextScopeId }),
+        directory: "/repo",
+        isSubagent: contextScopeId !== undefined,
+        modelId: "fake-model",
+        sessionId: "shared_1",
+        toolNames:
+          contextScopeId === "scope_b" ? ["write_file"] : ["read_file"],
+        tools:
+          contextScopeId === "scope_b"
+            ? [
+                {
+                  function: {
+                    name: "write_file",
+                    parameters: { type: "object" },
+                  },
+                  type: "function" as const,
+                },
+              ]
+            : [
+                {
+                  function: {
+                    name: "read_file",
+                    parameters: { type: "object" },
+                  },
+                  type: "function" as const,
+                },
+              ],
+      });
+
+    const [primary, scopeA, scopeB] = await Promise.all([
+      prepare(),
+      prepare("scope_a"),
+      prepare("scope_b"),
+    ]);
+
+    const primaryWire = JSON.stringify(primary.request);
+    const scopeAWire = JSON.stringify(scopeA.request);
+    const scopeBWire = JSON.stringify(scopeB.request);
+    expect(primaryWire).toContain("primary-sentinel");
+    expect(primaryWire).not.toContain("scope-a-sentinel");
+    expect(primaryWire).not.toContain("scope-b-sentinel");
+    expect(scopeAWire).toContain("scope-a-sentinel");
+    expect(scopeAWire).not.toContain("primary-sentinel");
+    expect(scopeAWire).not.toContain("scope-b-sentinel");
+    expect(scopeBWire).toContain("scope-b-sentinel");
+    expect(scopeBWire).not.toContain("primary-sentinel");
+    expect(scopeBWire).not.toContain("scope-a-sentinel");
+    expect(scopeB.request.tools?.[0]?.function.name).toBe("write_file");
+
+    const primaryCacheKey = createScopedPromptCacheKey({
+      sessionId: "shared_1",
+    });
+    const scopeACacheKey = createScopedPromptCacheKey({
+      contextScopeId: "scope_a",
+      sessionId: "shared_1",
+    });
+    const scopeBCacheKey = createScopedPromptCacheKey({
+      contextScopeId: "scope_b",
+      sessionId: "shared_1",
+    });
+    expect(
+      new Set([primaryCacheKey, scopeACacheKey, scopeBCacheKey]).size,
+    ).toBe(3);
+  });
+
   it("automatically compacts only the over-limit scope in a shared child session", async () => {
     const bus = createBus();
     const messageManager = createMessageManager({

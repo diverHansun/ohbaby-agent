@@ -126,7 +126,7 @@ export function createInMemoryMessageStore(): MessageStore {
         .filter((message) => message.sessionId === sessionId)
         .filter(
           (message) =>
-            options?.contextScopeId === undefined ||
+            options === undefined ||
             message.contextScopeId === options.contextScopeId,
         )
         .sort((left, right) => left.time.created - right.time.created);

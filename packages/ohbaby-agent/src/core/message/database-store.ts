@@ -282,19 +282,26 @@ export function createDatabaseMessageStore(
       return withAsyncBoundary(() => {
         const contextScopeId = options?.contextScopeId;
         const query =
-          contextScopeId === undefined
+          options === undefined
             ? {
                 params: [sessionId],
                 sql: `SELECT * FROM ${schema.message.tableName}
               WHERE session_id = ?
               ORDER BY created_at ASC, rowid ASC`,
               }
-            : {
-                params: [sessionId, contextScopeId],
-                sql: `SELECT * FROM ${schema.message.tableName}
+            : contextScopeId === undefined
+              ? {
+                  params: [sessionId],
+                  sql: `SELECT * FROM ${schema.message.tableName}
+              WHERE session_id = ? AND context_scope_id IS NULL
+              ORDER BY created_at ASC, rowid ASC`,
+                }
+              : {
+                  params: [sessionId, contextScopeId],
+                  sql: `SELECT * FROM ${schema.message.tableName}
               WHERE session_id = ? AND context_scope_id = ?
               ORDER BY created_at ASC, rowid ASC`,
-              };
+                };
         const messageRows = db
           .prepare<MessageRow>(query.sql)
           .all(...query.params);

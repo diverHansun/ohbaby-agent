@@ -200,7 +200,11 @@ export interface MessageIdGenerator {
 }
 
 export interface MessageScopeFilter {
-  readonly contextScopeId?: string;
+  /**
+   * Exact scope to read. `undefined` means the primary scope; omitting the
+   * filter argument means all scopes in the session.
+   */
+  readonly contextScopeId: string | undefined;
 }
 
 export interface MessageManager {
