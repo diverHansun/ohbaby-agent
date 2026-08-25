@@ -644,4 +644,32 @@ describe("Context reference state machine", () => {
       { numRuns: 30, seed: PROPERTY_SEED + 1 },
     );
   });
+
+  it("soaks long primary and subagent traces with replayable seeds", async () => {
+    for (const [index, isSubagent] of [false, true].entries()) {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(actionArbitrary, { maxLength: 120, minLength: 100 }),
+          async (actions) => {
+            const harness = createHarness(isSubagent);
+            try {
+              for (const action of actions) {
+                await applyAction(harness, action);
+              }
+            } catch (error) {
+              throw new Error(
+                `Long reference trace failed:\n${serializeReferenceTrace(harness.trace)}`,
+                { cause: error },
+              );
+            }
+          },
+        ),
+        {
+          numRuns: 3,
+          seed: PROPERTY_SEED + 10 + index,
+          verbose: 2,
+        },
+      );
+    }
+  });
 });
