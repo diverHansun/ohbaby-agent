@@ -258,12 +258,12 @@ describe("MessageManager", () => {
 
     const committed = await manager.commitCompaction({
       compactedAt: 1_700_000_000_100,
-      compactedPartIds: [firstPart.id, secondPart.id],
+      expectedParts: [firstPart, secondPart],
       sessionId: "session_1",
       summary: { agent: "context-summary", text: "summary" },
     });
 
-    expect(committed.summary).toMatchObject({
+    expect(committed?.summary).toMatchObject({
       message: { role: "assistant", sessionId: "session_1" },
       part: {
         metadata: { kind: "context-summary" },
@@ -271,13 +271,13 @@ describe("MessageManager", () => {
         text: "summary",
       },
     });
-    expect(committed.updatedParts).toMatchObject([
+    expect(committed?.updatedParts).toMatchObject([
       { id: firstPart.id, time: { compacted: 1_700_000_000_100 } },
       { id: secondPart.id, time: { compacted: 1_700_000_000_100 } },
     ]);
   });
 
-  it("does not create a summary when any compaction target is invalid", async () => {
+  it("returns stale without writes when a compaction snapshot changed", async () => {
     const manager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -293,15 +293,18 @@ describe("MessageManager", () => {
       text: "active",
       type: "text",
     });
+    if (part.type !== "text") {
+      throw new Error("Expected a text part");
+    }
 
     await expect(
       manager.commitCompaction({
         compactedAt: 1_700_000_000_100,
-        compactedPartIds: [part.id, "missing-part"],
+        expectedParts: [{ ...part, text: "changed snapshot" }],
         sessionId: "session_1",
         summary: { agent: "context-summary", text: "must-not-persist" },
       }),
-    ).rejects.toThrow(/Compaction part not found/u);
+    ).resolves.toBeUndefined();
 
     const history = await manager.listBySession("session_1");
     expect(history).toHaveLength(1);

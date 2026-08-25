@@ -157,7 +157,7 @@ savedTokens
 | mask cutoff | session + scope | 重算 |
 | thrash lock | session + scope | 重置 |
 | per-turn compaction count | session + scope | 新 turn/reset |
-| mutation lane owner/queue | session + scope | 进程内；durable revision 防跨 manager stale commit |
+| mutation lane owner/queue | session + scope | 进程内；store 事务内的 selected-Part snapshot precondition 防跨 manager stale commit |
 | UI context window tracker | primary session | projection，可从后续请求重建 |
 
 这些状态不是模型事实；重建后的模型 view 必须等价，但允许上述明确数值重新校准。
@@ -218,6 +218,6 @@ type CompactionTerminalOutcome =
 `CompressionResult.status="skipped"` 时，`reason` 对当前可观测分支显式区分：
 
 - `too-short`：active history 不足以生成有效 summary；
-- `stale`：summary Provider await 期间 durable history revision 已变化，候选未提交。
+- `stale`：summary Provider await 期间被选中的 Part 已修改、删除或 compacted，候选未提交；无关尾部 append 不使旧 prefix 候选失效。
 
 `CompressionResult` 是按 `status` 判别的 union，而不是一组可任意组合的 optional 字段：`compressed` 必有 `summaryMessageId`，`skipped` 必有 skip `reason`，`failed` 必有 `error`，summary overflow 另以 `summary-overflow-exhausted | summary-overflow-minimum` 表示有界终止原因。

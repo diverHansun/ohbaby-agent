@@ -81,7 +81,7 @@ measure usage
 ```text
 acquire scope mutation lease
   ↓
-read scoped active history + revision
+read scoped active history
   ↓
 find legal turn cut point
   ↓
@@ -93,9 +93,9 @@ generate summary candidate
   ↓
 validate candidate is smaller and tool pairing legal
   ↓
-recheck durable revision/history identity
-  ├─ changed → skip/recompute; never commit stale candidate
-  └─ stable → atomic durable commit
+atomic commit validates selected Part snapshots
+  ├─ changed/deleted/compacted → stale skip; zero writes
+  └─ unchanged → summary + compacted marks commit together
   ↓
 release lease → publish one terminal event
 ```
@@ -115,7 +115,7 @@ auto compact ────────────┘
 - prompt 的 durable Context mutation 排在同 scope manual compact 之后；
 - auto compact 在已有 prompt owner 内复用/转交 owner token，避免嵌套死锁；
 - 不同 scope 的 lane 互不阻塞；
-- revision check 防御多 manager 和遗漏入口，不用全局 mutex。
+- store 事务内的 selected-Part snapshot precondition 防御多 manager 和遗漏入口，不用全局 mutex 或持久化 revision 字段。
 
 ## 六、restart/replay
 
@@ -197,12 +197,12 @@ messageManager.commitCompaction({
   sessionId,
   contextScopeId,
   compactedAt,
-  compactedPartIds,
+  expectedParts,
   summary?: { agent, text },
 })
 ```
 
-Context 只提交业务意图；Message adapter 分配 summary message/part identity，store 在一个原子边界内校验 scope、写可选 summary 并标记全部 parts。SQLite 事务失败或进程在 commit 前终止时不留下 active 空 summary、部分 mark 或双可见 view；该结论由 SQL failpoint 与事务中途 `SIGKILL` 后 reopen 共同验证。Message/Context events 只在 store commit 返回后发布。
+Context 提交被选中 Part 的瞬时快照，而不是新增持久化 revision 字段；Message adapter 分配 summary message/part identity，store 在一个原子边界内深比较快照、校验 scope、写可选 summary 并标记全部 parts。快照已变化时返回 stale 且零写入；SQLite 事务失败或进程在 commit 前终止时不留下 active 空 summary、部分 mark 或双可见 view。该结论由并发 barrier、SQL failpoint 与事务中途 `SIGKILL` 后 reopen 共同验证。Message/Context events 只在 store commit 返回后发布。
 
 ### 7.6 Scoped cleanup
 
@@ -219,7 +219,7 @@ disposeSession(sessionId: string): void
 
 - 所有 event：`sessionId` + primary/child scope identity；primary wire payload 可省略 `contextScopeId`，但只表示 primary；
 - compaction progress/terminal：另有相同 `attemptId`；
-- summary attempt progress 的最小 payload 为 `attempt/inputTokens/droppedRounds`，不含正文；
+- summary attempt progress 的最小 payload 为 `attempt/estimatedHistoryTokens/droppedRounds`，其中 token 值只估算 history，round 数为累计值，不含正文；
 - terminal outcome：`success | failed | inflated | skipped | aborted`；
 - `context.compaction.started` 与 `context.compaction.finished` 建立一次 attempt 的开始/唯一终态；`success` 另带具体 rung，prune/summary 细节仍由同 attempt 的领域事件携带；
 - durable commit 先于 success event；event 失败不回滚；replay 不补发。

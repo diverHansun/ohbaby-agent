@@ -10,6 +10,9 @@ import { isActivePart } from "./filters.js";
 import { isSummaryMessage } from "./summary.js";
 import { formatToolResultContentForModel } from "./tool-metadata-projection.js";
 
+const INTERRUPTED_TOOL_RESULT =
+  "Tool execution was interrupted before a durable result was recorded. Side effects may have occurred; verify before retrying.";
+
 export function appendMemoryToSystemPrompt(
   systemPrompt: string,
   memory: string,
@@ -126,17 +129,17 @@ function serializeAssistantMessage(
   parts: readonly Part[],
   activeReasoningByMessageId?: ReadonlyMap<string, string>,
 ): ChatCompletionMessage[] {
-  const completedToolParts = parts.filter(isCompletedToolPart);
+  const projectedToolParts = parts.filter(isToolPart);
   const content = textContentFromParts(parts);
 
-  if (completedToolParts.length === 0) {
+  if (projectedToolParts.length === 0) {
     return content === "" ? [] : [{ role: "assistant", content }];
   }
 
   const assistantMessage = {
     role: "assistant",
     content: content === "" ? null : content,
-    tool_calls: completedToolParts.map((part) => ({
+    tool_calls: projectedToolParts.map((part) => ({
       id: part.callId,
       type: "function",
       function: {
@@ -156,7 +159,7 @@ function serializeAssistantMessage(
 
   return [
     assistantWithReasoning,
-    ...completedToolParts.map((part) => ({
+    ...projectedToolParts.map((part) => ({
       role: "tool" as const,
       tool_call_id: part.callId,
       content: toolResultContent(part),
@@ -175,13 +178,8 @@ function textContentFromParts(parts: readonly Part[]): string {
     .join("");
 }
 
-function isCompletedToolPart(part: Part): part is ToolPart {
-  return (
-    part.type === "tool" &&
-    (part.state.status === "completed" ||
-      part.state.status === "error" ||
-      part.state.status === "aborted")
-  );
+function isToolPart(part: Part): part is ToolPart {
+  return part.type === "tool";
 }
 
 function toolResultContent(part: ToolPart): string {
@@ -208,8 +206,8 @@ function toolResultContent(part: ToolPart): string {
         tool: part.tool,
       });
     case "pending":
-      return part.state.raw;
+      return INTERRUPTED_TOOL_RESULT;
     case "running":
-      return part.state.title ?? "";
+      return INTERRUPTED_TOOL_RESULT;
   }
 }

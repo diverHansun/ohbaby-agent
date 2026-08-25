@@ -433,6 +433,99 @@ describe("serializeForLlm database metadata projection", () => {
     ]);
   });
 
+  it("projects deterministic unknown results for in-flight tools after restart", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createMessageIds(),
+      now: createClock(),
+    });
+    const assistant = await messageManager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+    });
+    await messageManager.appendPart(assistant.id, {
+      type: "tool",
+      callId: "call_pending_write",
+      tool: "write_file",
+      state: {
+        status: "pending",
+        input: { path: "result.txt", content: "value" },
+        raw: '{"path":"result.txt","content":"value"}',
+      },
+    });
+    await messageManager.appendPart(assistant.id, {
+      type: "tool",
+      callId: "call_running_shell",
+      tool: "bash",
+      state: {
+        status: "running",
+        input: { command: "deploy" },
+      },
+    });
+
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const reopenedMessageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createMessageIds("reopened_"),
+      now: createClock(),
+    });
+    const history = await reopenedMessageManager.listBySession("session_1");
+    const first = serializeForLlm({
+      history,
+      isSubagent: false,
+      memory: { global: "", project: "", merged: "" },
+      systemPrompt: "",
+    });
+    const second = serializeForLlm({
+      history,
+      isSubagent: false,
+      memory: { global: "", project: "", merged: "" },
+      systemPrompt: "",
+    });
+
+    expect(first).toEqual(second);
+    expect(first).toEqual([
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "call_pending_write",
+            type: "function",
+            function: {
+              name: "write_file",
+              arguments: '{"path":"result.txt","content":"value"}',
+            },
+          },
+          {
+            id: "call_running_shell",
+            type: "function",
+            function: {
+              name: "bash",
+              arguments: '{"command":"deploy"}',
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call_pending_write",
+        content:
+          "Tool execution was interrupted before a durable result was recorded. Side effects may have occurred; verify before retrying.",
+      },
+      {
+        role: "tool",
+        tool_call_id: "call_running_shell",
+        content:
+          "Tool execution was interrupted before a durable result was recorded. Side effects may have occurred; verify before retrying.",
+      },
+    ]);
+  });
+
   it("injects active reasoning only on assistant messages with tool calls", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),

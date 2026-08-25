@@ -143,11 +143,11 @@ summary rung 先应用模型投影/prune，再生成候选；只有下一次真�
 
 ## 七、并发与恢复
 
-R2 已完成同一 `ContextManager` 内的 per-scope 排队和候选 revision 复核；R3 继续验证 durable commit 的 crash consistency：
+R2 已完成同一 `ContextManager` 内的 per-scope 排队；R3/R4 通过 store 事务内的 selected-Part snapshot precondition 与 atomic commit 覆盖跨 manager 竞态和 crash consistency：
 
 1. 同 scope 的 auto+auto、manual+auto、manual+manual 及 prompt Context mutation 共用 exclusive lane；异 scope 保持并发。
 2. logical compaction 从 snapshot 到 terminal 持有 scope lease；`prepareTurn()` 内部直接执行 compaction core，不重复进入 lane，因此不会嵌套死锁。
-3. candidate await 后、提交前重读精确 scope history，并复核非 summary active history 的语义 revision；stale candidate 以 `CompressionResult { status: "skipped", reason: "stale" }` 结束，不提交旧候选，prepare 路径使用重读后的最新 view。
+3. candidate await 后把选中 Part 的原快照交给 `commitCompaction()`；store 在任何写入前原子深比较当前值。被选中 Part 已修改、删除或 compacted 时以 `CompressionResult { status: "skipped", reason: "stale" }` 结束并重读最新 view；安全追加到尾部的消息不误伤旧 prefix summary。
 4. failpoint 已证明旧的 summary/mark 多步写存在部分终态窗口；当前由窄的 `commitCompaction()` 端口修复，SQLite 使用 `BEGIN IMMEDIATE`，in-memory 在写前完整校验，不做 catch-only rollback。子进程在首个 part update 后被 `SIGKILL` 的 reopen 测试确认 SQLite 会回滚整个未提交事务。
 5. summary request 自身 overflow 已使用单一路径恢复：总 Provider 调用最多 4 次，每次从最旧 user round 裁到下一个 user 边界；保留最近 user round，非 overflow 不进入该重试，abort signal 贯通主/子代理共用 Lifecycle 与 summary client。
 
@@ -155,7 +155,7 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队和候选 revision �
 
 - 所有 Context event 具有 session/scope identity；primary wire payload 可省略 scope，但消费者归一为 primary。
 - compaction progress/terminal event 具有 `attemptId`，每个 accepted attempt 只有一个 terminal outcome。
-- summary 每次 Provider attempt 只观测 `attempt/inputTokens/droppedRounds`，不记录 message 正文或额外通用状态。
+- summary 每次 Provider attempt 只观测 `attempt/estimatedHistoryTokens/droppedRounds`；token 值明确只是 history heuristic，round 数为累计值，不记录 message 正文或额外通用状态。
 - durable commit 先于 success event；subscriber 错误不得回滚已提交状态。
 - primary UI 只消费 `UiContextWindowUsage` tracker；child scope 不显示 session-only 聚合的伪精确窗口。
 - resume/replay 不重新发布历史 observable event，也不重新调用 LLM。
@@ -166,7 +166,7 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队和候选 revision �
 |---|---|---|
 | Context 存储范式 | 继续使用 MessageStore + 窄端口 | 不获得全量 event sourcing 的统一 replay，但避免高迁移复杂度 |
 | Compaction 修复 | `commitCompaction()` atomic port | 不增加 durable marker；当前 SQLite/in-memory 都能提供原子边界 |
-| 并发控制 | per-scope lane + revision check | 同 scope 长 summary 会排队，但 correctness 优先且异 scope 不阻塞 |
+| 并发控制 | per-scope lane + atomic selected-Part precondition | 同 scope 长 summary 会排队；跨 manager 冲突 stale-skip，不增加全局锁或持久化 revision |
 | Memory | primary run snapshot 只读 | 本轮不增加自动长期记忆、RAG 或 child MemoryView |
 | Provider window | 声明 budget + calibration + bounded recovery | 不持久化 observed adaptive ceiling |
 

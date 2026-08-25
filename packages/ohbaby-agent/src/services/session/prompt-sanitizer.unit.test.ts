@@ -24,6 +24,20 @@ describe("session prompt sanitizer", () => {
     expect(sanitized).not.toContain("hunter2");
   });
 
+  it("redacts credential values from JSON-shaped prompt text", () => {
+    const sanitized = sanitizePromptForSessionTitle(
+      JSON.stringify({
+        apiKey: "json-api-key-canary",
+        nested: { password: "json-password-canary" },
+      }),
+    );
+
+    expect(sanitized).toContain('"apiKey":"[redacted]"');
+    expect(sanitized).toContain('"password":"[redacted]"');
+    expect(sanitized).not.toContain("json-api-key-canary");
+    expect(sanitized).not.toContain("json-password-canary");
+  });
+
   it("collapses whitespace and truncates first-message prompt text", () => {
     const sanitized = sanitizePromptForSessionTitle(
       `  first line\n\nsecond line ${"x".repeat(200)}`,

@@ -32,7 +32,7 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 - cache read/write/uncached 是 inclusive input breakdown，不改变窗口占用总量。
 - summary 与被替代原文不同时 active；失败不声称成功。
 - 同 initiating message 的 runtime part 基数不超过 1，包括并发/多 manager/restart。
-- 同 scope compaction/prompt mutation 串行，提交前 revision recheck；异 scope 可并发。
+- 同 scope compaction/prompt mutation 串行，store 在提交事务内校验 selected-Part snapshots；异 scope 可并发。
 - restart 后 canonical model view 与 deterministic repair 等价；恢复零 LLM、零历史 event。
 - primary/subagent 的 history、calibration、mask、thrash、tool epoch、cache identity 和 event 不串。
 

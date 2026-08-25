@@ -96,7 +96,7 @@ export const ContextEvent = {
       attemptId: z.string(),
       attempt: z.number().int().positive(),
       droppedRounds: z.number().int().nonnegative(),
-      inputTokens: z.number().nonnegative(),
+      estimatedHistoryTokens: z.number().nonnegative(),
     }),
   ),
   Compressed: BusEvent.define(

@@ -29,9 +29,6 @@ export interface ReferenceMessage {
 
 export interface ReferenceContextState {
   readonly messages: readonly ReferenceMessage[];
-  readonly compactionAttempts: number;
-  readonly runSnapshotRevision: number;
-  readonly toolEpoch: number;
 }
 
 export interface ReferenceCompactionCommit {
@@ -42,12 +39,7 @@ export interface ReferenceCompactionCommit {
 }
 
 export function createReferenceContextState(): ReferenceContextState {
-  return {
-    compactionAttempts: 0,
-    messages: [],
-    runSnapshotRevision: 0,
-    toolEpoch: 0,
-  };
+  return { messages: [] };
 }
 
 export function recordReferenceMessage(
@@ -163,12 +155,6 @@ export function abortReferenceTools(
   };
 }
 
-export function recordReferenceCompactionAttempt(
-  state: ReferenceContextState,
-): ReferenceContextState {
-  return { ...state, compactionAttempts: state.compactionAttempts + 1 };
-}
-
 export function applyReferenceCompactionCommit(
   state: ReferenceContextState,
   input: ReferenceCompactionCommit,
@@ -199,18 +185,6 @@ export function applyReferenceCompactionCommit(
       },
     ],
   };
-}
-
-export function restartReferenceManager(
-  state: ReferenceContextState,
-): ReferenceContextState {
-  return { ...state, runSnapshotRevision: 0 };
-}
-
-export function observeReferenceUsage(
-  state: ReferenceContextState,
-): ReferenceContextState {
-  return state;
 }
 
 export function projectReferenceHistory(
@@ -256,11 +230,8 @@ export function projectReferenceHistory(
       }
 
       const tools = active.filter(
-        (
-          part,
-        ): part is Extract<ReferencePart, { kind: "tool" }> & {
-          readonly status: ReferenceToolTerminalStatus;
-        } => part.kind === "tool" && part.status !== "pending",
+        (part): part is Extract<ReferencePart, { kind: "tool" }> =>
+          part.kind === "tool",
       );
       if (tools.length === 0) {
         return content === "" ? [] : [{ content, role: "assistant" as const }];
@@ -280,7 +251,10 @@ export function projectReferenceHistory(
           })),
         },
         ...tools.map((part) => ({
-          content: part.result ?? "",
+          content:
+            part.status === "pending"
+              ? "Tool execution was interrupted before a durable result was recorded. Side effects may have occurred; verify before retrying."
+              : (part.result ?? ""),
           role: "tool" as const,
           tool_call_id: part.callId,
         })),

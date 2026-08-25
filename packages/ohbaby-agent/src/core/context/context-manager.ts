@@ -91,7 +91,6 @@ type SummaryCandidate =
       readonly originalTokens: number;
       readonly savedTokens: number;
       readonly snapshot: string;
-      readonly sourceRevision: string;
     };
 
 type CommittableSummaryCandidate = Extract<
@@ -389,22 +388,6 @@ function getActiveHistory(
   }
 
   return [...summaries, ...nonSummary];
-}
-
-function revisionForHistory(history: readonly MessageWithParts[]): string {
-  return JSON.stringify(
-    history.map((message) => {
-      const { time, ...identity } = message.info;
-      return {
-        identity,
-        parts: message.parts,
-        time: {
-          completed: time.completed,
-          created: time.created,
-        },
-      };
-    }),
-  );
 }
 
 function markCompactedParts(
@@ -885,11 +868,14 @@ export function createContextManager(
       readonly sessionId: string;
     },
     history: readonly MessageWithParts[],
-  ): Promise<{
-    readonly compactedAt?: number;
-    readonly compactedPartIds: ReadonlySet<string>;
-    readonly result: PruneResult;
-  }> {
+  ): Promise<
+    | {
+        readonly compactedAt?: number;
+        readonly compactedPartIds: ReadonlySet<string>;
+        readonly result: PruneResult;
+      }
+    | undefined
+  > {
     const candidates: { readonly part: Part; readonly tokens: number }[] = [];
 
     for (const message of history) {
@@ -936,12 +922,15 @@ export function createContextManager(
     const compactedAt = now();
     const commit = await options.messageManager.commitCompaction({
       compactedAt,
-      compactedPartIds: prunable.map((candidate) => candidate.part.id),
+      expectedParts: prunable.map((candidate) => candidate.part),
       ...(identity.contextScopeId === undefined
         ? {}
         : { contextScopeId: identity.contextScopeId }),
       sessionId: identity.sessionId,
     });
+    if (commit === undefined) {
+      return undefined;
+    }
     const compactedPartIds = new Set(
       commit.updatedParts.map((part) => part.id),
     );
@@ -1015,7 +1004,7 @@ export function createContextManager(
           ...identity,
           attempt: providerAttempts,
           droppedRounds,
-          inputTokens: tokenCount(
+          estimatedHistoryTokens: tokenCount(
             options.tokenCounter,
             serializeHistory(summaryHistory, { includeModelContext: false }),
           ),
@@ -1069,7 +1058,7 @@ export function createContextManager(
             };
           }
           summaryHistory = shrink.history;
-          droppedRounds = shrink.droppedRounds;
+          droppedRounds += shrink.droppedRounds;
         }
       }
       if (!generatedForPrompt) {
@@ -1102,38 +1091,6 @@ export function createContextManager(
       newTokens,
       savedTokens: originalTokens - newTokens,
       snapshot,
-      sourceRevision: revisionForHistory(activeHistory),
-    };
-  }
-
-  async function inspectSummaryCandidateRevision(
-    assembled: AssembledContext,
-    candidate: CommittableSummaryCandidate,
-  ): Promise<{
-    readonly context: AssembledContext;
-    readonly isCurrent: boolean;
-  }> {
-    const rawHistory = await options.messageManager.listBySession(
-      assembled.sessionId,
-      {
-        contextScopeId: assembled.contextScopeId,
-      },
-    );
-    const context = assembleFromRawHistory({
-      assembledAt: now(),
-      contextScopeId: assembled.contextScopeId,
-      isSubagent: assembled.isSubagent,
-      memory: assembled.memory,
-      rawHistory,
-      sessionId: assembled.sessionId,
-      systemPrompt: assembled.systemPrompt,
-    });
-    const activeHistory = context.history.filter(
-      (message) => !isSummaryMessage(message),
-    );
-    return {
-      context,
-      isCurrent: revisionForHistory(activeHistory) === candidate.sourceRevision,
     };
   }
 
@@ -1144,14 +1101,14 @@ export function createContextManager(
       readonly sessionId: string;
     },
     candidate: CommittableSummaryCandidate,
-  ): Promise<CompressionResult> {
+  ): Promise<CompressionResult | undefined> {
     const compactedAt = now();
     const commit = await options.messageManager.commitCompaction({
       compactedAt,
-      compactedPartIds: candidate.historyToCompress.flatMap((message) =>
+      expectedParts: candidate.historyToCompress.flatMap((message) =>
         message.parts
           .filter((part) => part.time?.compacted === undefined)
-          .map((part) => part.id),
+          .map((part) => part),
       ),
       ...(identity.contextScopeId === undefined
         ? {}
@@ -1162,6 +1119,9 @@ export function createContextManager(
         text: candidate.snapshot,
       },
     });
+    if (commit === undefined) {
+      return undefined;
+    }
     if (commit.summary === undefined) {
       throw new Error("Compaction commit did not return its summary");
     }
@@ -1306,6 +1266,38 @@ export function createContextManager(
     };
   }
 
+  async function reloadCompactionState(
+    req: AcceptedCompactionRequest,
+  ): Promise<{
+    readonly context: AssembledContext;
+    readonly usage: ContextUsage;
+  }> {
+    const rawHistory = await options.messageManager.listBySession(
+      req.sessionId,
+      { contextScopeId: req.contextScopeId },
+    );
+    const context = assembleFromRawHistory({
+      assembledAt: now(),
+      contextScopeId: req.contextScopeId,
+      isSubagent: req.isSubagent,
+      memory: req.assembled.memory,
+      rawHistory,
+      sessionId: req.sessionId,
+      systemPrompt: req.assembled.systemPrompt,
+    });
+    return {
+      context,
+      usage: measureContext({
+        tailDirectives: req.tailDirectives,
+        activeReasoningByMessageId: req.activeReasoningByMessageId,
+        context: req.projectForUsage?.(context) ?? context,
+        isSubagent: req.isSubagent,
+        modelId: req.modelId,
+        tools: req.tools,
+      }).usage,
+    };
+  }
+
   async function runCompactionCore(
     req: AcceptedCompactionRequest,
   ): Promise<CompactionOutcome> {
@@ -1363,6 +1355,22 @@ export function createContextManager(
       },
       req.assembled.history,
     );
+    if (pruneOutcome === undefined) {
+      const current = await reloadCompactionState(req);
+      options.bus.publish(ContextEvent.CompactSkipped, {
+        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+        attemptId: req.attemptId,
+        reason: "stale",
+        usage: current.usage,
+      });
+      return {
+        status: "not-needed",
+        usageBefore: req.usageBefore,
+        usageAfterPrune: current.usage,
+        usageAfter: current.usage,
+        projectedContext: current.context,
+      };
+    }
     const historyAfterPrune = markCompactedParts(
       req.assembled.history,
       pruneOutcome.compactedPartIds,
@@ -1410,6 +1418,7 @@ export function createContextManager(
       afterPrune.history,
       req.signal,
     );
+    req.signal?.throwIfAborted();
     if (candidate.status !== "candidate") {
       if (candidate.status === "inflated") {
         recordThrashSavings({
@@ -1440,49 +1449,6 @@ export function createContextManager(
         usageAfter: usageAfterPrune,
         projectedContext: afterPrune,
         ...(candidate.status === "failed" ? { error: candidate.error } : {}),
-      };
-    }
-
-    const revision = await inspectSummaryCandidateRevision(
-      afterPrune,
-      candidate,
-    );
-    if (!revision.isCurrent) {
-      const compression = {
-        newTokens: candidate.newTokens,
-        originalTokens: candidate.originalTokens,
-        reason: "stale",
-        savedTokens: 0,
-        status: "skipped",
-      } satisfies CompressionResult;
-      const currentUsage = measureContext({
-        tailDirectives: req.tailDirectives,
-        activeReasoningByMessageId: req.activeReasoningByMessageId,
-        context: req.projectForUsage?.(revision.context) ?? revision.context,
-        isSubagent: req.isSubagent,
-        modelId: req.modelId,
-        tools: req.tools,
-      }).usage;
-      options.bus.publish(ContextEvent.CompactSkipped, {
-        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
-        attemptId: req.attemptId,
-        reason: "stale",
-        usage: currentUsage,
-      });
-      return {
-        compression,
-        prune: pruneOutcome.result,
-        projectedContext: revision.context,
-        status: pruneReducedContext({
-          pruneResult: pruneOutcome.result,
-          usageAfterPrune,
-          usageBefore: req.usageBefore,
-        })
-          ? "pruned"
-          : "not-needed",
-        usageAfter: currentUsage,
-        usageAfterPrune,
-        usageBefore: req.usageBefore,
       };
     }
 
@@ -1529,6 +1495,7 @@ export function createContextManager(
       };
     }
 
+    req.signal?.throwIfAborted();
     const compression = await commitSummaryCandidate(
       {
         ...scopedEventIdentity(req.sessionId, req.contextScopeId),
@@ -1536,6 +1503,37 @@ export function createContextManager(
       },
       candidate,
     );
+    if (compression === undefined) {
+      const staleCompression = {
+        newTokens: candidate.newTokens,
+        originalTokens: candidate.originalTokens,
+        reason: "stale",
+        savedTokens: 0,
+        status: "skipped",
+      } satisfies CompressionResult;
+      const current = await reloadCompactionState(req);
+      options.bus.publish(ContextEvent.CompactSkipped, {
+        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+        attemptId: req.attemptId,
+        reason: "stale",
+        usage: current.usage,
+      });
+      return {
+        compression: staleCompression,
+        prune: pruneOutcome.result,
+        projectedContext: current.context,
+        status: pruneReducedContext({
+          pruneResult: pruneOutcome.result,
+          usageAfterPrune,
+          usageBefore: req.usageBefore,
+        })
+          ? "pruned"
+          : "not-needed",
+        usageAfter: current.usage,
+        usageAfterPrune,
+        usageBefore: req.usageBefore,
+      };
+    }
     recordThrashSavings({
       compression,
       contextScopeId: req.contextScopeId,

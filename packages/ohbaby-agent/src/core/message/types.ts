@@ -209,7 +209,7 @@ export interface MessageScopeFilter {
 
 export interface CommitCompactionInput {
   readonly compactedAt: number;
-  readonly compactedPartIds: readonly string[];
+  readonly expectedParts: readonly Part[];
   readonly contextScopeId?: string;
   readonly sessionId: string;
   readonly summary?: {
@@ -228,7 +228,7 @@ export interface CommitCompactionResult {
 
 export interface StoreCompactionInput {
   readonly compactedAt: number;
-  readonly compactedPartIds: readonly string[];
+  readonly expectedParts: readonly Part[];
   readonly contextScopeId?: string;
   readonly sessionId: string;
   readonly summary?: {
@@ -247,7 +247,7 @@ export interface MessageManager {
   updatePart(partId: string, patch: UpdatePartPatch): Promise<Part>;
   commitCompaction(
     input: CommitCompactionInput,
-  ): Promise<CommitCompactionResult>;
+  ): Promise<CommitCompactionResult | undefined>;
   listBySession(
     sessionId: string,
     options?: MessageScopeFilter,
@@ -283,7 +283,7 @@ export interface MessageStore {
   ): Promise<Part>;
   commitCompaction(
     input: StoreCompactionInput,
-  ): Promise<CommitCompactionResult>;
+  ): Promise<CommitCompactionResult | undefined>;
   listBySession(
     sessionId: string,
     options?: MessageScopeFilter,

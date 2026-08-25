@@ -228,10 +228,11 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     scope: "session",
     audience: ["domain", "tests"],
     frequency: "low",
-    requiredContext: ["sessionId", "contextScopeId", "attemptId"],
+    requiredContext: ["sessionId", "attemptId"],
     contextStatus: "complete",
     uiVisible: "no",
-    decision: "Starts one scoped compaction attempt event stream.",
+    decision:
+      "Starts one scoped compaction attempt; contextScopeId is omitted only for primary.",
   },
   {
     event: ContextEvent.CompactionFinished,
@@ -239,16 +240,11 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     scope: "session",
     audience: ["domain", "tests"],
     frequency: "low",
-    requiredContext: [
-      "sessionId",
-      "contextScopeId",
-      "attemptId",
-      "outcome",
-      "status",
-    ],
+    requiredContext: ["sessionId", "attemptId", "outcome", "status"],
     contextStatus: "complete",
     uiVisible: "no",
-    decision: "Terminates one scoped compaction attempt exactly once.",
+    decision:
+      "Terminates one scoped compaction attempt exactly once; contextScopeId is omitted only for primary.",
   },
   {
     event: ContextEvent.CompactionProgress,
@@ -258,15 +254,15 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     frequency: "low",
     requiredContext: [
       "sessionId",
-      "contextScopeId",
       "attemptId",
       "attempt",
-      "inputTokens",
+      "estimatedHistoryTokens",
       "droppedRounds",
     ],
     contextStatus: "complete",
     uiVisible: "no",
-    decision: "Records bounded summary attempts without model-visible content.",
+    decision:
+      "Records bounded history estimates; contextScopeId is omitted only for primary.",
   },
   {
     event: ContextEvent.Compressed,
@@ -274,10 +270,11 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     scope: "session",
     audience: ["domain", "tests"],
     frequency: "low",
-    requiredContext: ["sessionId", "contextScopeId", "attemptId", "result"],
+    requiredContext: ["sessionId", "attemptId", "result"],
     contextStatus: "complete",
     uiVisible: "no",
-    decision: "Internal domain event only.",
+    decision:
+      "Internal domain event; contextScopeId is omitted only for primary.",
   },
   {
     event: ContextEvent.Pruned,
@@ -285,10 +282,11 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     scope: "session",
     audience: ["domain", "tests"],
     frequency: "low",
-    requiredContext: ["sessionId", "contextScopeId", "attemptId", "result"],
+    requiredContext: ["sessionId", "attemptId", "result"],
     contextStatus: "complete",
     uiVisible: "no",
-    decision: "Internal domain event only.",
+    decision:
+      "Internal domain event; contextScopeId is omitted only for primary.",
   },
   {
     event: ContextEvent.TurnPrepared,
@@ -296,10 +294,11 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     scope: "session",
     audience: ["domain", "tests"],
     frequency: "medium",
-    requiredContext: ["sessionId", "contextScopeId", "usage", "tookMs"],
+    requiredContext: ["sessionId", "usage", "tookMs"],
     contextStatus: "complete",
     uiVisible: "no",
-    decision: "Run stream owns user-visible run context events.",
+    decision:
+      "Run stream owns user-visible context events; contextScopeId is omitted only for primary.",
   },
   {
     event: ContextEvent.CompactSkipped,
@@ -307,16 +306,11 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     scope: "session",
     audience: ["domain", "tests"],
     frequency: "low",
-    requiredContext: [
-      "sessionId",
-      "contextScopeId",
-      "attemptId",
-      "reason",
-      "usage",
-    ],
+    requiredContext: ["sessionId", "attemptId", "reason", "usage"],
     contextStatus: "complete",
     uiVisible: "no",
-    decision: "Internal domain event only.",
+    decision:
+      "Internal domain event; contextScopeId is omitted only for primary.",
   },
   {
     event: ContextEvent.Masked,
@@ -326,7 +320,6 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     frequency: "medium",
     requiredContext: [
       "sessionId",
-      "contextScopeId",
       "enabled",
       "maskedPartIds",
       "maskedTokens",
@@ -336,7 +329,7 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     contextStatus: "complete",
     uiVisible: "no",
     decision:
-      "Internal projection telemetry; run stream owns user-visible context updates.",
+      "Internal projection telemetry; contextScopeId is omitted only for primary.",
   },
   {
     event: ToolSchedulerEvent.StatusChanged,

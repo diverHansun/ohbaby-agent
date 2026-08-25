@@ -119,7 +119,7 @@ export function createMessageManager(
 
     async commitCompaction(
       input: CommitCompactionInput,
-    ): Promise<CommitCompactionResult> {
+    ): Promise<CommitCompactionResult | undefined> {
       const summaryMessage =
         input.summary === undefined
           ? undefined
@@ -136,7 +136,7 @@ export function createMessageManager(
       }
       const result = await options.store.commitCompaction({
         compactedAt: input.compactedAt,
-        compactedPartIds: input.compactedPartIds,
+        expectedParts: input.expectedParts,
         ...(input.contextScopeId === undefined
           ? {}
           : { contextScopeId: input.contextScopeId }),
@@ -157,6 +157,9 @@ export function createMessageManager(
             }),
         updatedAt: now(),
       });
+      if (result === undefined) {
+        return undefined;
+      }
       if (result.summary !== undefined) {
         options.bus.publish(MessageEvent.Updated, {
           info: result.summary.message,

@@ -2183,7 +2183,7 @@ describe("ContextManager", () => {
     expect(wireEstimateCalls).toBe(2);
   });
 
-  it("rechecks durable history before compaction commit without reloading memory", async () => {
+  it("commits expected part snapshots without reloading memory", async () => {
     const messageManager = createMessageManagerFixture();
     const listBySession = vi.spyOn(messageManager, "listBySession");
     const loadMemory = vi
@@ -2253,7 +2253,7 @@ describe("ContextManager", () => {
         ),
       ).toHaveLength(1);
     }
-    expect(listBySession).toHaveBeenCalledTimes(3);
+    expect(listBySession).toHaveBeenCalledTimes(2);
     expect(loadMemory).toHaveBeenCalledTimes(1);
     expect(onCompactionStarted).toHaveBeenCalledTimes(1);
   });
@@ -3448,10 +3448,21 @@ describe("ContextManager", () => {
       {
         attempt: 3,
         contextScopeId: "child_1",
-        droppedRounds: 1,
+        droppedRounds: 2,
         sessionId: "session_1",
       },
     ]);
+    const estimatedHistoryTokens = compactionProgress.map(
+      (event) =>
+        (event as { readonly estimatedHistoryTokens: number })
+          .estimatedHistoryTokens,
+    );
+    expect(estimatedHistoryTokens[1]).toBeLessThan(
+      estimatedHistoryTokens[0] ?? 0,
+    );
+    expect(estimatedHistoryTokens[2]).toBeLessThan(
+      estimatedHistoryTokens[1] ?? 0,
+    );
   });
 
   it("bounds repeated summary overflow and leaves original history active", async () => {
@@ -3574,6 +3585,38 @@ describe("ContextManager", () => {
     expect(compactionFinished).toMatchObject([
       { outcome: "aborted", sessionId: "session_1", status: "failed" },
     ]);
+  });
+
+  it("does not commit a summary when cancellation wins after generation", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addSummaryOverflowHistory(messageManager, 8);
+    const controller = new AbortController();
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockImplementation(() => {
+        controller.abort(new DOMException("cancelled", "AbortError"));
+        return Promise.resolve("short summary");
+      });
+    const { manager } = createManager({
+      llmClient: { generateSummary },
+      messageManager,
+      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
+    });
+
+    await expect(
+      manager.prepareTurn({
+        directory: "D:/repo",
+        force: true,
+        modelId: "model-a",
+        sessionId: "session_1",
+        signal: controller.signal,
+        toolNames: [],
+        tools: undefined,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    await expect(
+      summaryMessageCount(messageManager, "session_1"),
+    ).resolves.toBe(0);
   });
 
   it("locks automatic compaction after repeated zero-savings summary attempts", async () => {

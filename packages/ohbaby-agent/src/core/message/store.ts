@@ -158,26 +158,43 @@ export function createInMemoryMessageStore(): MessageStore {
 
     commitCompaction(
       input: StoreCompactionInput,
-    ): Promise<CommitCompactionResult> {
-      const compactedPartIds = [...new Set(input.compactedPartIds)];
-      const targets = compactedPartIds.map((partId) => {
-        const part = parts.get(partId);
+    ): Promise<CommitCompactionResult | undefined> {
+      const expectedPartIds = new Set(
+        input.expectedParts.map((part) => part.id),
+      );
+      if (expectedPartIds.size !== input.expectedParts.length) {
+        throw new Error("Compaction expected parts contain duplicate ids");
+      }
+      const targets: Part[] = [];
+      for (const expectedPart of input.expectedParts) {
+        if (
+          expectedPart.sessionId !== input.sessionId ||
+          expectedPart.contextScopeId !== input.contextScopeId
+        ) {
+          throw new Error(
+            `Compaction part belongs to another scope: ${expectedPart.id}`,
+          );
+        }
+        const part = parts.get(expectedPart.id);
         if (!part) {
-          throw new Error(`Compaction part not found: ${partId}`);
+          return Promise.resolve(undefined);
         }
         if (
           part.sessionId !== input.sessionId ||
           part.contextScopeId !== input.contextScopeId
         ) {
           throw new Error(
-            `Compaction part belongs to another scope: ${partId}`,
+            `Compaction part belongs to another scope: ${expectedPart.id}`,
           );
         }
-        if (part.time?.compacted !== undefined) {
-          throw new Error(`Compaction part is already compacted: ${partId}`);
+        if (
+          part.time?.compacted !== undefined ||
+          JSON.stringify(part) !== JSON.stringify(expectedPart)
+        ) {
+          return Promise.resolve(undefined);
         }
-        return part;
-      });
+        targets.push(part);
+      }
       if (input.summary !== undefined) {
         if (messages.has(input.summary.message.id)) {
           throw new Error(

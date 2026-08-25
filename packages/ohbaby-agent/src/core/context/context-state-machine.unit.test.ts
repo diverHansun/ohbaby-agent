@@ -24,11 +24,8 @@ import {
   createReferenceContextState,
   getPendingReferenceCallIds,
   getReferenceMessage,
-  observeReferenceUsage,
   projectReferenceHistory,
-  recordReferenceCompactionAttempt,
   recordReferenceMessage,
-  restartReferenceManager,
   serializeReferenceTrace,
 } from "./testing/context-reference-model.js";
 import type {
@@ -63,8 +60,8 @@ type RawAction =
     }
   | { readonly type: "autoCompact" }
   | { readonly type: "manualCompact" }
-  | { readonly type: "providerOverflow" }
-  | { readonly type: "abortRun" }
+  | { readonly type: "forcePrepare" }
+  | { readonly type: "abortPendingTools" }
   | { readonly type: "restartManager" };
 
 type ToolName = "bash" | "read" | "write";
@@ -276,11 +273,9 @@ async function applyAction(
         action.sentHeuristic,
         harness.contextScopeId,
       );
-      harness.reference = observeReferenceUsage(harness.reference);
       break;
     }
     case "autoCompact": {
-      harness.reference = recordReferenceCompactionAttempt(harness.reference);
       await harness.contextManager.compact(SESSION_ID, {
         ...(harness.contextScopeId === undefined
           ? {}
@@ -297,7 +292,6 @@ async function applyAction(
       break;
     }
     case "manualCompact": {
-      harness.reference = recordReferenceCompactionAttempt(harness.reference);
       await harness.contextManager.compact(SESSION_ID, {
         ...(harness.contextScopeId === undefined
           ? {}
@@ -313,13 +307,12 @@ async function applyAction(
       harness.currentAssistantId = undefined;
       break;
     }
-    case "providerOverflow": {
-      harness.reference = recordReferenceCompactionAttempt(harness.reference);
+    case "forcePrepare": {
       await prepareAndSynchronize(harness, [], true);
       harness.currentAssistantId = undefined;
       break;
     }
-    case "abortRun": {
+    case "abortPendingTools": {
       const history = await listHistory(harness);
       for (const part of history.flatMap((message) => message.parts)) {
         if (part.type !== "tool" || part.state.status === "completed") {
@@ -346,7 +339,6 @@ async function applyAction(
     case "restartManager": {
       const before = await materializeModelView(harness);
       harness.rebuildManager();
-      harness.reference = restartReferenceManager(harness.reference);
       const after = await materializeModelView(harness);
       expect(after).toEqual(before);
       harness.currentAssistantId = undefined;
@@ -590,8 +582,8 @@ const actionArbitrary: fc.Arbitrary<RawAction> = fc.oneof(
   }),
   fc.constant({ type: "autoCompact" as const }),
   fc.constant({ type: "manualCompact" as const }),
-  fc.constant({ type: "providerOverflow" as const }),
-  fc.constant({ type: "abortRun" as const }),
+  fc.constant({ type: "forcePrepare" as const }),
+  fc.constant({ type: "abortPendingTools" as const }),
   fc.constant({ type: "restartManager" as const }),
 );
 

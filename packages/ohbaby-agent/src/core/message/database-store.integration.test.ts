@@ -100,6 +100,56 @@ describe("createDatabaseMessageStore", () => {
     ]);
   });
 
+  it("returns stale atomically when an expected compaction part changed", async () => {
+    const store = createDatabaseMessageStore();
+    await store.insertMessage(userMessage());
+    const expectedPart = await store.appendPart({
+      message: userMessage(),
+      partId: "part_1",
+      data: { type: "text", text: "before" },
+      updatedAt: 2_000,
+    });
+    await store.updatePart(expectedPart.id, { text: "after" }, 3_000);
+
+    await expect(
+      store.commitCompaction({
+        compactedAt: 4_000,
+        expectedParts: [expectedPart],
+        sessionId: "session_1",
+        summary: {
+          data: {
+            metadata: { kind: "context-summary" },
+            synthetic: true,
+            text: "must-not-persist",
+            type: "text",
+          },
+          message: {
+            agent: "context-summary",
+            id: "summary_1",
+            role: "assistant",
+            sessionId: "session_1",
+            time: { created: 4_000 },
+          },
+          partId: "summary_part_1",
+        },
+        updatedAt: 4_000,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(store.listBySession("session_1")).resolves.toMatchObject([
+      {
+        info: { id: "message_1" },
+        parts: [
+          {
+            id: "part_1",
+            text: "after",
+          },
+        ],
+      },
+    ]);
+    const history = await store.listBySession("session_1");
+    expect(history[0]?.parts[0]?.time?.compacted).toBeUndefined();
+  });
+
   it("distinguishes exact primary scope from an unfiltered session query", async () => {
     const store = createDatabaseMessageStore();
     const primary = userMessage("message_primary");

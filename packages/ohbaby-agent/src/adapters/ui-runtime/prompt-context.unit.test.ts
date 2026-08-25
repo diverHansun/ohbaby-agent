@@ -245,9 +245,11 @@ describe("createContextSummaryClient", () => {
   });
 
   it("redacts credential canaries before and after summary generation", async () => {
-    const canary = "sk-eval-canary-12345678";
+    const canary = "json-summary-secret-canary";
     streamChatCompletionMock.mockReturnValueOnce(
-      streamWithContent(`## Goal\n- keep OPENAI_API_KEY=${canary}`),
+      streamWithContent(
+        `## Goal\n- keep ${JSON.stringify({ password: canary })}`,
+      ),
     );
     const client = createContextSummaryClient({} as LLMClientInstance);
 
@@ -267,7 +269,7 @@ describe("createContextSummaryClient", () => {
               messageId: "message_1",
               orderIndex: 0,
               sessionId: "session_1",
-              text: `Do not expose OPENAI_API_KEY=${canary}`,
+              text: `Do not expose ${JSON.stringify({ apiKey: canary })}`,
               type: "text",
             },
           ],

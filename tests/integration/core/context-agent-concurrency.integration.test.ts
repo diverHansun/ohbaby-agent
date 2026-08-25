@@ -179,6 +179,116 @@ describe("context scoped mutation coordination", () => {
     ).resolves.toBe(1);
   });
 
+  it("treats a cross-manager compaction conflict as stale", async () => {
+    const baseMessageManager = createMessageManager({
+      bus: createBus(),
+      idGenerator: createIds(),
+      store: createInMemoryMessageStore(),
+    });
+    await appendHistory(baseMessageManager, {
+      contextScopeId: "scope_a",
+      sentinel: "scope-a",
+      sessionId: "shared_1",
+    });
+    const bothAtCommit = deferred<void>();
+    const releaseCommits = deferred<void>();
+    let commitCount = 0;
+    const withCommitBarrier = (): MessageManager => ({
+      ...baseMessageManager,
+      async commitCompaction(input) {
+        commitCount += 1;
+        if (commitCount === 2) {
+          bothAtCommit.resolve();
+        }
+        await releaseCommits.promise;
+        return baseMessageManager.commitCompaction(input);
+      },
+    });
+    const firstManager = createManager(
+      withCommitBarrier(),
+      async () => "first-summary",
+    );
+    const secondManager = createManager(
+      withCommitBarrier(),
+      async () => "second-summary",
+    );
+
+    const first = compact(firstManager, "shared_1", "scope_a");
+    const second = compact(secondManager, "shared_1", "scope_a");
+    await bothAtCommit.promise;
+    releaseCommits.resolve();
+
+    const results = await Promise.all([first, second]);
+    expect(results.map((result) => result.status).sort()).toEqual([
+      "compacted",
+      "not-needed",
+    ]);
+    expect(
+      results.some(
+        (result) =>
+          result.compression?.status === "skipped" &&
+          result.compression.reason === "stale",
+      ),
+    ).toBe(true);
+    await expect(
+      summaryCount(baseMessageManager, "shared_1", "scope_a"),
+    ).resolves.toBe(1);
+  });
+
+  it("does not compact a selected part that changed before commit", async () => {
+    const baseMessageManager = createMessageManager({
+      bus: createBus(),
+      idGenerator: createIds(),
+      store: createInMemoryMessageStore(),
+    });
+    await appendHistory(baseMessageManager, {
+      contextScopeId: "scope_a",
+      sentinel: "scope-a",
+      sessionId: "shared_1",
+    });
+    const commitReached = deferred<void>();
+    const releaseCommit = deferred<void>();
+    let selectedPartId = "";
+    const barrierMessageManager: MessageManager = {
+      ...baseMessageManager,
+      async commitCompaction(input) {
+        selectedPartId = input.expectedParts[0]?.id ?? "";
+        commitReached.resolve();
+        await releaseCommit.promise;
+        return baseMessageManager.commitCompaction(input);
+      },
+    };
+    const manager = createManager(
+      barrierMessageManager,
+      async () => "candidate-summary",
+    );
+
+    const resultPromise = compact(manager, "shared_1", "scope_a");
+    await commitReached.promise;
+    expect(selectedPartId).not.toBe("");
+    await baseMessageManager.updatePart(selectedPartId, {
+      text: "updated-before-commit",
+    });
+    releaseCommit.resolve();
+
+    const result = await resultPromise;
+    expect(result).toMatchObject({
+      compression: { reason: "stale", status: "skipped" },
+      status: "not-needed",
+    });
+    await expect(
+      summaryCount(baseMessageManager, "shared_1", "scope_a"),
+    ).resolves.toBe(0);
+    const history = await baseMessageManager.listBySession("shared_1", {
+      contextScopeId: "scope_a",
+    });
+    const selectedPart = history
+      .flatMap((message) => message.parts)
+      .find((part) => part.id === selectedPartId);
+    expect(selectedPart).toMatchObject({ text: "updated-before-commit" });
+    expect(selectedPart?.time?.compacted).toBeUndefined();
+  });
+
   it("serializes two same-scope automatic prepares", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -302,7 +412,7 @@ describe("context scoped mutation coordination", () => {
     ]);
   });
 
-  it("rejects a summary candidate when durable history changes during generation", async () => {
+  it("keeps a newly appended tail active while compacting the selected prefix", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),
       idGenerator: createIds(),
@@ -318,7 +428,7 @@ describe("context scoped mutation coordination", () => {
     const manager = createManager(messageManager, async () => {
       candidateStarted.resolve();
       await releaseCandidate.promise;
-      return "stale-summary";
+      return "prefix-summary";
     });
 
     const resultPromise = compact(manager, "shared_1", "scope_a");
@@ -336,23 +446,18 @@ describe("context scoped mutation coordination", () => {
     releaseCandidate.resolve();
 
     const result = await resultPromise;
-    expect(result.status).toBe("not-needed");
-    expect(result.compression).toMatchObject({
-      reason: "stale",
-      status: "skipped",
-    });
+    expect(result.status).toBe("compacted");
     await expect(
       summaryCount(messageManager, "shared_1", "scope_a"),
-    ).resolves.toBe(0);
+    ).resolves.toBe(1);
     const history = await messageManager.listBySession("shared_1", {
       contextScopeId: "scope_a",
     });
     expect(JSON.stringify(history)).toContain("arrived-during-summary");
-    expect(
-      history
-        .flatMap((message) => message.parts)
-        .every((part) => part.time?.compacted === undefined),
-    ).toBe(true);
+    const appended = history.find(
+      (message) => message.info.id === newMessage.id,
+    );
+    expect(appended?.parts[0]?.time?.compacted).toBeUndefined();
   });
 
   it("emits one scoped terminal event for each accepted attempt", async () => {

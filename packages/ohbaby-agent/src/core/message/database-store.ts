@@ -336,18 +336,32 @@ export function createDatabaseMessageStore(
 
     commitCompaction(
       input: StoreCompactionInput,
-    ): Promise<CommitCompactionResult> {
+    ): Promise<CommitCompactionResult | undefined> {
       return withAsyncBoundary(() =>
         withImmediateTransaction(() => {
-          const compactedPartIds = [...new Set(input.compactedPartIds)];
-          const targets = compactedPartIds.map((partId) => {
+          const expectedPartIds = new Set(
+            input.expectedParts.map((part) => part.id),
+          );
+          if (expectedPartIds.size !== input.expectedParts.length) {
+            throw new Error("Compaction expected parts contain duplicate ids");
+          }
+          const targets: Part[] = [];
+          for (const expectedPart of input.expectedParts) {
+            if (
+              expectedPart.sessionId !== input.sessionId ||
+              expectedPart.contextScopeId !== input.contextScopeId
+            ) {
+              throw new Error(
+                `Compaction part belongs to another scope: ${expectedPart.id}`,
+              );
+            }
             const row = db
               .prepare<PartRow>(
                 `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
               )
-              .get(partId);
+              .get(expectedPart.id);
             if (!row) {
-              throw new Error(`Compaction part not found: ${partId}`);
+              return undefined;
             }
             const part = rowToPart(row);
             if (
@@ -355,16 +369,17 @@ export function createDatabaseMessageStore(
               part.contextScopeId !== input.contextScopeId
             ) {
               throw new Error(
-                `Compaction part belongs to another scope: ${partId}`,
+                `Compaction part belongs to another scope: ${expectedPart.id}`,
               );
             }
-            if (part.time?.compacted !== undefined) {
-              throw new Error(
-                `Compaction part is already compacted: ${partId}`,
-              );
+            if (
+              part.time?.compacted !== undefined ||
+              partToRowData(part) !== partToRowData(expectedPart)
+            ) {
+              return undefined;
             }
-            return part;
-          });
+            targets.push(part);
+          }
 
           let summaryPart: TextPart | undefined;
           if (input.summary !== undefined) {
