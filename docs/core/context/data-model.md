@@ -1,319 +1,215 @@
-# context 模块 data-model.md
+# Context 模块：数据模型
 
-本文档定义 `context` 模块的核心概念与数据模型。重点是统一"认知模型"，而非冻结实现细节。
+本文定义 Context 数据结构的语义、所有权和生命周期。TypeScript 字段以 `packages/ohbaby-agent/src/core/context/types.ts` 为准；这里解释字段为何存在、何时稳定、能否持久化。
 
----
+## 一、身份模型
 
-## 一、Core Concepts（核心概念）
+### Scoped context identity
 
-### 概念 1: AssembledContext（组装后的上下文）
+```typescript
+interface ContextIdentity {
+  readonly sessionId: string
+  readonly contextScopeId?: string
+}
+```
 
-**定义**：AssembledContext 是从多个来源收集并组装后的上下文，准备传递给 LLM 使用。
+- primary 的 `contextScopeId` 缺省，但只表示 primary scope；
+- subagent 必须带显式 scope；
+- key、event、calibration、mask、thrash、compaction 和 cache observation 使用同一身份语义；
+- 缺省 scope 不能解释为“聚合整个 session”。
 
-**特点**：
-- 包含系统提示词、记忆内容、历史消息
-- 提供 token 使用量估算
-- 是 LLM 调用的输入数据源
+## 二、请求数据模型
 
-### 概念 2: CompressionResult（压缩结果）
+### 2.1 `AgentRunPromptSnapshot`
 
-**定义**：CompressionResult 是上下文压缩操作的返回值，包含压缩状态和统计信息。
+```typescript
+interface AgentRunPromptSnapshot {
+  readonly systemPrompt: string
+  readonly memory: MergedMemory
+}
+```
 
-**特点**：
-- 标识压缩是否成功
-- 提供压缩前后的 token 对比
-- 包含错误信息（如压缩失败）
+值对象，run-local immutable，不持久化。primary 在 initiating turn 读取 System/Memory；subagent 的 Memory 为空。文件变化只影响下一 run。
 
-### 概念 3: ContextUsage（上下文使用情况）
-
-**定义**：ContextUsage 描述当前上下文的 token 使用情况，用于判断是否需要压缩。
-
-**特点**：
-- 包含当前 token 数和模型限额
-- 计算使用率百分比
-- 提供剩余可用空间
-
-### 概念 4: CompressionSnapshot（压缩快照）
-
-**定义**：CompressionSnapshot 是压缩后生成的结构化摘要，使用 XML 格式存储关键信息。
-
-**特点**：
-- 包含用户目标、关键知识、文件状态等
-- 结构化格式便于 LLM 理解
-- 替代被压缩的历史消息
-
-### 概念 5: PruneResult（Prune 结果）
-
-**定义**：PruneResult 是 Prune 操作的返回值，包含被标记的 tool output 统计。
-
-**特点**：
-- 标识被 Prune 的 Part 数量
-- 提供释放的 token 估算
-- 是可逆操作的结果
-
----
-
-## 二、Entity / Value Object 区分
-
-| 概念 | 分类 | 理由 |
-|------|------|------|
-| AssembledContext | Value Object（值对象） | 临时组装的数据，无持久化身份 |
-| CompressionResult | Value Object（值对象） | 操作结果，无独立身份 |
-| ContextUsage | Value Object（值对象） | 统计数据，无独立身份 |
-| CompressionSnapshot | Value Object（值对象） | 嵌入在 Message Part 中 |
-| PruneResult | Value Object（值对象） | 操作结果，无独立身份 |
-
-**说明**：Context 模块主要处理临时数据和操作结果，不维护持久化实体。持久化由 Message 模块负责（summary Message、compacted Part）。
-
----
-
-## 三、类型定义
-
-### 3.1 AssembledContext（组装后的上下文）
+### 2.2 `AssembledContext`
 
 ```typescript
 interface AssembledContext {
-  // ======== 内容 ========
-  /** 系统提示词 */
-  systemPrompt: string
-  
-  /** 记忆内容（来自 Memory 模块） */
-  memory: {
-    global: string
-    project: string
-    merged: string
-  }
-  
-  /** 历史消息（来自 Message 模块） */
-  history: MessageWithParts[]
-  
-  // ======== 统计 ========
-  /** 预估 token 数 */
-  estimatedTokens: number
-  
-  /** 是否已包含压缩后的 summary */
-  hasSummary: boolean
-  
-  // ======== 元数据 ========
-  /** 组装时间戳 */
-  assembledAt: number
-  
-  /** 关联的 sessionId */
-  sessionId: string
+  readonly systemPrompt: string
+  readonly memory: MergedMemory
+  readonly history: readonly MessageWithParts[]
+  readonly hasSummary: boolean
+  readonly assembledAt: number
+  readonly sessionId: string
+  readonly contextScopeId?: string
+  readonly isSubagent: boolean
 }
 ```
 
-### 3.2 ContextUsage（上下文使用情况）
+它是“某一时刻 scoped durable history + run snapshot”的只读组装结果，不是最终 Provider request：
+
+- 不包含 tools；工具属于 request epoch；
+- 不包含 `tailDirectives` 或 active reasoning；它们是单次请求输入；
+- 不持久化；durable truth 仍在 MessageStore。
+
+### 2.3 `PreparedModelRequest`
+
+```typescript
+interface PreparedModelRequest {
+  readonly messages: readonly ChatCompletionMessage[]
+  readonly tools: ChatCompletionCreateParams["tools"]
+}
+```
+
+它是测量和 Provider 发送的单一请求快照：
+
+- `messages` 已合入 system/memory、active history、reasoning 和 `tailDirectives`；
+- `tools` 保留 caller 解析后的顺序和 schema；
+- 创建后深冻结，retry/lazy MCP/permission change 不得原地修改；
+- cache policy 是 adapter capability，不强塞入该值对象。
+
+### 2.4 `PreparedTurn`
+
+```typescript
+interface PreparedTurn {
+  readonly request: PreparedModelRequest
+  readonly usage: ContextUsage
+  readonly compaction?: CompactResult
+  readonly assembledAt: number
+  readonly hasSummary: boolean
+  readonly sentHeuristic: number
+}
+```
+
+`request` 与 `usage/sentHeuristic` 必须来自同一次投影。`compaction` 解释本次 prepare 是否改变了 active view。
+
+## 三、Token 与预算语义
 
 ```typescript
 interface ContextUsage {
-  /** 当前 token 数 */
-  currentTokens: number
-  
-  /** 模型 context limit */
-  contextLimit: number
-  
-  /** 使用率（0-1） */
-  usageRatio: number
-  
-  /** 剩余可用 token */
-  remainingTokens: number
-  
-  /** 是否需要压缩 */
-  shouldCompress: boolean
-  
-  /** 使用的模型 ID */
-  modelId: string
+  readonly currentTokens: number
+  readonly contextLimit: number
+  readonly inputBudgetTokens?: number
+  readonly reservedOutputTokens?: number
+  readonly safetyMarginTokens?: number
+  readonly usageRatio: number
+  readonly remainingTokens: number
+  readonly modelId: string
 }
 ```
 
-### 3.3 CompressionResult（压缩结果）
+| 字段 | 语义 |
+|---|---|
+| `currentTokens` | 当次 `messages + tools` 的 calibrated input occupancy；cache read 仍包含在内 |
+| `contextLimit` | 模型声明的完整 context window |
+| `inputBudgetTokens` | 扣除 output reserve 与 safety margin 后可供输入使用的预算 |
+| `usageRatio` | 有 budget 时为 `currentTokens / inputBudgetTokens`，否则回退完整 limit |
+| `remainingTokens` | 剩余 input budget；不是“未缓存 token” |
+
+Provider `TokenUsage.inputTokens` 是 inclusive input；可选 breakdown 满足 `uncached + cacheRead + cacheWrite = inputTokens`。Context 只消费归一化后的口径，不把 hit 当作空闲窗口。
+
+## 四、Compaction 数据模型
+
+### 4.1 结果类型
 
 ```typescript
-interface CompressionResult {
-  /** 压缩状态 */
-  status: CompressionStatus
-  
-  /** 压缩前 token 数 */
-  originalTokens: number
-  
-  /** 压缩后 token 数 */
-  newTokens: number
-  
-  /** 节省的 token 数 */
-  savedTokens: number
-  
-  /** 创建的 summary Message ID（成功时） */
-  summaryMessageId?: string
-  
-  /** 错误信息（失败时） */
-  error?: string
+type CompressionStatus = "compressed" | "skipped" | "failed" | "inflated"
+type CompactStatus = "not-needed" | "pruned" | "compacted" | "failed" | "inflated"
+```
+
+- `compressed/compacted`：候选已经 durable commit，且下一真实投影变小；
+- `pruned`：只提交 prune，未提交 summary；
+- `inflated`：候选不比被替代输入小，不得提交；
+- `failed`：生成或提交失败，不得声称完成；
+- `skipped/not-needed`：未达到条件或没有合法 cut point。
+
+### 4.2 Summary candidate
+
+candidate 是进程内值对象：
+
+```text
+historyToCompress
+snapshot
+originalTokens
+newTokens
+savedTokens
+```
+
+它不是事实。只有在 scope lease、revision recheck 和 durable commit 成功后，才成为 active summary。
+
+### 4.3 Durable compaction state
+
+当前 durable 数据仍由 Message 模块拥有：
+
+| 数据 | 载体 | 所有者 |
+|---|---|---|
+| 原始 user/assistant/tool history | Message + Part | MessageStore |
+| Summary | assistant Message + text Part + summary metadata | MessageStore |
+| 被替代/被 prune 标记 | `Part.time.compacted` | MessageStore |
+
+联合回归若证明多步写会形成非法终态，Message port 增加一次性 atomic compaction commit；Context 不接管数据库事务细节。
+
+## 五、Ephemeral scoped state
+
+| 状态 | Key | 重启语义 |
+|---|---|---|
+| calibration factor | session + scope | 重置为 `1.0` |
+| mask cutoff | session + scope | 重算 |
+| thrash lock | session + scope | 重置 |
+| per-turn compaction count | session + scope | 新 turn/reset |
+| mutation lane owner/queue | session + scope | 进程内；durable revision 防跨 manager stale commit |
+| UI context window tracker | primary session | projection，可从后续请求重建 |
+
+这些状态不是模型事实；重建后的模型 view 必须等价，但允许上述明确数值重新校准。
+
+## 六、Tool exchange 与 deterministic repair
+
+模型可见的每个 tool call 必须有一个 result，或显式 `interrupted/unknown` repair。若需要 synthetic repair：
+
+- ID、文本、status 是 durable call id/status/schema version 的纯函数；
+- 不使用当前时间、随机数或进程顺序；
+- 真实 result 优先覆盖 synthetic projection；
+- repair 默认不写回 store，除非未来定义显式版本化 migration。
+
+这样 live/restart 的 model view 与 cache prefix 字节稳定。
+
+## 七、事件数据模型
+
+所有 Context event 具有：
+
+```typescript
+interface ScopedContextEventIdentity {
+  readonly sessionId: string
+  readonly contextScopeId?: string // absent means primary only
+}
+```
+
+compaction progress/terminal 另具有：
+
+```typescript
+interface CompactionAttemptIdentity {
+  readonly attemptId: string
 }
 
-type CompressionStatus = 
-  | 'compressed'     // 压缩成功
-  | 'skipped'        // 跳过（不需要压缩或历史太短）
-  | 'failed'         // 压缩失败
-  | 'inflated'       // 压缩后反而变大（失败）
+type CompactionTerminalOutcome =
+  | "success"
+  | "failed"
+  | "inflated"
+  | "skipped"
+  | "aborted"
 ```
 
-### 3.4 PruneResult（Prune 结果）
+`success` 另带 rung/result 说明 mask、prune 或 summary。事件是 ephemeral observation：不持久化、不在 replay 时重发、不反向修改 durable data。
 
-```typescript
-interface PruneResult {
-  /** 被标记的 Part 数量 */
-  prunedCount: number
-  
-  /** 释放的 token 估算 */
-  freedTokens: number
-  
-  /** 保护的 Part 数量（未被 Prune） */
-  protectedCount: number
-  
-  /** 总扫描的 Part 数量 */
-  totalScanned: number
-}
-```
+## 八、生命周期与所有权总表
 
-### 3.5 CompressionSnapshot（压缩快照）
-
-压缩快照使用 XML 格式，存储在 summary Message 的 TextPart 中：
-
-```xml
-<state_snapshot>
-    <overall_goal>
-        <!-- 用户的高层目标 -->
-    </overall_goal>
-
-    <key_knowledge>
-        <!-- 关键知识点（列表） -->
-        - 构建命令: `npm run build`
-        - 测试框架: Vitest
-    </key_knowledge>
-
-    <file_system_state>
-        <!-- 文件系统状态 -->
-        - CWD: `/home/user/project/src`
-        - MODIFIED: `services/auth.ts`
-    </file_system_state>
-
-    <recent_actions>
-        <!-- 最近的重要动作 -->
-        - 执行了 `npm test`，发现 3 个测试失败
-    </recent_actions>
-
-    <current_plan>
-        <!-- 当前计划（标记完成状态） -->
-        1. [DONE] 分析代码结构
-        2. [IN PROGRESS] 修复测试
-        3. [TODO] 重构模块
-    </current_plan>
-</state_snapshot>
-```
-
----
-
-## 四、常量定义
-
-```typescript
-// constants.ts
-
-/** 自动压缩触发阈值（context limit 的百分比） */
-export const COMPRESSION_THRESHOLD = 0.85
-
-/** 压缩时保留的历史比例（最新的 N%） */
-export const COMPRESSION_PRESERVE_RATIO = 0.3
-
-/** Prune 保护的 token 数（保护最近的 N tokens） */
-export const PRUNE_PROTECT_TOKENS = 40_000
-
-/** Prune 最小释放 token 数（低于此值不执行） */
-export const PRUNE_MINIMUM_TOKENS = 20_000
-```
-
----
-
-## 五、与其他模块类型的关系
-
-### 5.1 与 Message 模块的类型关联
-
-| Context 类型 | Message 类型 | 说明 |
-|--------------|--------------|------|
-| `AssembledContext.history` | `MessageWithParts[]` | 使用 Message 模块的消息类型 |
-| Summary Message | `AssistantMessage` with `summary: true` | 压缩结果存储在 Message 中 |
-| Prune 标记 | `ToolPart.state.time.compacted` | 使用 Part 中的 compacted 时间戳 |
-
-### 5.2 与 Memory 模块的类型关联
-
-| Context 类型 | Memory 类型 | 说明 |
-|--------------|-------------|------|
-| `AssembledContext.memory` | `MergedMemory` | 直接使用 Memory 模块的返回类型 |
-
-### 5.3 与 tokenCounting 模块的类型关联
-
-| Context 类型 | tokenCounting 类型 | 说明 |
-|--------------|--------------------|------|
-| `ContextUsage.contextLimit` | `TokenLimit` | 使用 tokenCounting 的限额类型 |
-
----
-
-## 六、Lifecycle & Ownership（生命周期与归属）
-
-### AssembledContext 生命周期
-
-```
-创建（Context.assemble）
-    │
-    ├── 从各模块收集数据
-    ├── 计算 token 估算
-    │
-    ▼
-使用中
-    │
-    ├── 传递给 lifecycle
-    ├── 用于 LLM 请求
-    │
-    ▼
-生命周期结束
-    │
-    └── 临时对象，使用后丢弃（不持久化）
-```
-
-### CompressionResult 生命周期
-
-```
-创建（Context.compress 返回）
-    │
-    ├── 返回压缩状态和统计
-    │
-    ▼
-使用中
-    │
-    ├── UI 显示压缩结果
-    ├── 日志记录
-    │
-    ▼
-生命周期结束
-    │
-    └── 临时对象，使用后丢弃
-```
-
-### 数据归属
-
-| 数据 | 创建者 | 管理者 | 持久化 |
-|------|--------|--------|--------|
-| AssembledContext | ContextAssembler | Context 模块 | 否 |
-| CompressionResult | ContextCompressor | 调用方 | 否 |
-| Summary Message | ContextCompressor | Message 模块 | 是 |
-| Compacted 标记 | ContextPruner | Message 模块 | 是 |
-
----
-
-## 七、文档自检
-
-- [x] 每个概念都能用自然语言解释
-- [x] 不存在"为了设计而设计"的抽象
-- [x] 所有概念在后续接口和数据流中都有使用场景
-- [x] 与 Message、Memory、tokenCounting 模块的类型关系明确
-- [x] 生命周期和归属清晰
-- [x] 压缩快照格式参考 Gemini 实践
+| 数据 | 创建 | 生命周期 | 事实源 |
+|---|---|---|---|
+| Message/Part | Message/Lifecycle/Tools | durable | MessageStore |
+| `AgentRunPromptSnapshot` | Context | one run | initiating run input |
+| `AssembledContext` | Context | one assembly | MessageStore + run snapshot |
+| `PreparedModelRequest` | Context | one provider attempt | immutable prepared request |
+| `ContextUsage` | Context | one measurement | prepared request heuristic + budget |
+| Summary candidate | ContextLLMClient | one compaction attempt | 非事实，提交前可丢弃 |
+| Context event | Context/adapter | in-process | 非事实，best effort |
+| UI window | tracker | primary projection | 可重建 projection |

@@ -1,202 +1,153 @@
-# context 模块 goals-duty.md
+# Context 模块：目标与职责
 
-本文档定义 `context` 模块的设计目标与职责边界。
-
----
+本文定义 `packages/ohbaby-agent/src/core/context/` 的模块目标、责任边界与当前行为契约。联合回归的实施与验收以 [improve-4-to-5-regression](./improve-4-to-5-regression/README.md) 为补充契约。
 
 ## 一、模块定位
 
-**一句话说明**：context 模块负责组装、压缩和管理传递给 LLM 的上下文信息，确保对话不会超出 token 限制，并为上下文扩展提供统一入口。
+Context 把 durable Message history、run-local System/Memory snapshot、当次 ordered tools 和 ephemeral directives 投影为模型可见请求，并在输入预算不足时执行可解释、可恢复的 mask/prune/summary。
 
-**如果没有这个模块**：
-- 长对话会话超出 LLM 的 token 限制，导致请求失败
-- 压缩逻辑分散在 lifecycle 中，导致职责膨胀
-- 未来增加 IDE 上下文、RAG 等新上下文源时，没有统一入口
-- 无法提供 `/compact` 命令给用户主动管理上下文
+```text
+durable MessageStore
+  + AgentRunPromptSnapshot
+  + current ordered tools
+  + active reasoning / tail directives
+            ↓
+     Context projection + measurement
+            ↓
+       PreparedModelRequest
+            ↓
+       Lifecycle → Provider
+```
 
----
+没有 Context 模块时，请求测量、发送、压缩和 UI 占用会各自组装输入，容易产生窗口判断错误、工具权限漂移及主/子代理串线。
 
-## 二、Design Goals（设计目标）
+## 二、Design Goals
 
-### G1: 统一上下文组装
+### G1：请求单一真相源
 
-从多个来源（Memory、SystemPrompt、Message 历史）收集上下文，组装成 LLM 可用的格式。提供统一的入口，屏蔽底层数据源的差异。
+`prepareTurn()` 返回的 `PreparedModelRequest { messages, tools }` 是测量和 Provider 发送共同消费的不可变快照。不得在 Lifecycle、retry、final-step 或 adapter 中重新组装一份等价请求。
 
-### G2: 自动上下文压缩
+### G2：预算感知的自动保护
 
-当上下文使用量达到阈值（85% context limit）时，自动触发压缩，避免请求失败。压缩过程对用户透明，不中断对话流程。
+自动 summary rung 在以下任一条件成立时触发：
 
-### G3: 手动压缩命令支持
+```text
+usageRatio >= 0.95
+OR remainingInputTokens < 4096
+```
 
-提供 `/compact` 命令支持，允许用户主动触发上下文压缩。用户可以在感觉对话变慢时主动清理上下文。
+- 分母优先使用模型 input budget，而不是完整 context window。
+- cached input 仍占用输入窗口；cache hit 不等于释放 token。
+- `0.95 + 4096` 是当前行为基线，不在联合回归中顺带调参。
 
-### G4: Prune 策略
+### G3：合法且唯一的模型视图
 
-支持 Prune 策略，自动丢弃旧的 tool output 以释放上下文空间。Prune 不删除数据，只标记为已压缩，保持历史完整性。
+mask、prune、summary、abort、retry 和 restart 后，模型只看到一个合法视图：被 summary 替代的原文与 summary 不得同时 active；tool call/result 必须配对，或显式投影为 interrupted/unknown。
 
-### G5: 可扩展的上下文源
+### G4：主/子代理同契约、按 scope 隔离
 
-为未来的上下文源扩展预留接口（如 IDE 上下文、RAG 结果），但当前版本只实现 Memory + History。
+primary 与 subagent 都通过同一 `ContextManager`/Lifecycle 链路。隔离身份是 `sessionId + contextScopeId`：
 
-### G6: 简单可靠
+- primary 的 `contextScopeId` 缺省，语义上是 primary scope，不表示“所有 scope”；
+- child/sibling scope 的 history、calibration、mask、thrash、compaction count、tool epoch 与 cache identity 互不污染；
+- subagent 不自动加载 `OHBABY.md` Memory。
 
-遵循 KISS 原则，避免过度设计。压缩和 Prune 策略使用成熟的阈值配置，减少运行时决策复杂度。
+### G5：稳定前缀与正确权限
 
----
+同一 run 的 System/Memory snapshot 稳定；runtime model context 只附着 initiating user message；同 tool epoch 的工具顺序稳定。缓存优化不能保留已失效的权限、工具或历史。
 
-## 三、Duties（职责）
+### G6：故障可解释、状态可恢复
 
-### D1: 上下文组装
+durable store 是事实源。Context event 只用于观测，发布或订阅失败不得回滚已提交历史。恢复不得重新调用 summary LLM，也不得重发旧 observable event。
 
-从多个来源收集上下文并组装：
-- 调用 Memory 模块获取记忆内容
-- 调用 SystemPrompt 模块获取系统提示词
-- 调用 Message 模块获取历史消息
-- 合并成 LLM 可用的请求格式
+### G7：简单且可测试
 
-**核心接口**：`Context.assemble(sessionId, directory, { isSubagent, toolNames, contextScopeId?, agentName? }): Promise<AssembledContext>`
+核心策略尽量保持纯函数；IO、时间、LLM、MessageStore 和 Bus 位于端口边界。抽象只隐藏已经证实会独立变化的决策，不为假想的 Context source 或 Provider 策略预建框架。
 
-**子代理模式**（`isSubagent = true`）：
-- 不加载 Memory（子代理不继承父代理的 Memory）
-- 只读取同一 child Session 下匹配 `contextScopeId` 的历史消息
-- 使用子代理专属的 SystemPrompt
-- history、calibration 与自动压缩状态按 `sessionId + contextScopeId` 隔离
-- 不提供静态占用查询、手动 compact 或 UI 展示
+## 三、Duties
 
-详见 `docs/agents/context-isolation.md`
+### D1：创建 run-local prompt snapshot
 
-### D2: Token 使用量计算
+`createRunPromptSnapshot()` 在 initiating turn 捕获 SystemPrompt 与 Memory，并可向 initiating user message 幂等附着动态、仅模型可见的 runtime context。
 
-调用 tokenCounting 模块计算当前上下文的 token 使用情况：
-- 将组装结果序列化为实际 provider messages
-- 按当次请求的 `messages + tool schemas` 估算 wire payload；不重复单算 system prompt 或 tools
-- 与模型的 context limit 对比
-- 对同一 wire heuristic 应用 session/scope calibration factor
-- 返回使用率和剩余空间
+### D2：组装 scoped durable history
 
-**核心接口**：`Context.getUsage({ context, modelId, tools }): ContextUsage`
+`assemble()`：
 
-Context 只消费已解析的 schemas 数据，不负责访问 ToolScheduler、MCP registry 或 provider transport。
+- 按 session/scope 读取 Message history；
+- 使用调用方提供或新建的 `AgentRunPromptSnapshot`；
+- primary 加载 Memory，subagent 使用空 Memory；
+- 返回 `AssembledContext`，但不把工具 schema 固化为会话状态。
 
-### D3: 自动压缩触发
+### D3：投影并测量一次请求
 
-监控上下文使用量，达到阈值时自动触发压缩：
-- 阈值：85% 的 context limit
-- 在 lifecycle 调用 assemble 后检查
-- 触发后执行压缩流程
+`prepareTurn()` / `getUsage()`：
 
-**核心接口**：`Context.shouldCompress(usage): boolean`
+- 把 system、active history、active reasoning、tail directives 序列化为 Provider messages；
+- 把调用方已经解析的 ordered tools 放入同一请求；
+- 对同一个 wire heuristic 计算 `ContextUsage`；
+- 返回深冻结的 `PreparedModelRequest`。
 
-### D4: 上下文压缩
+### D4：选择 compaction rung
 
-调用 LLM 将旧历史压缩成结构化摘要：
-- 保留最近 30% 的历史（基于 token）
-- 将更早的历史交给 LLM 总结成 XML snapshot
-- 创建 summary Message 持久化压缩结果
+`decideCompactionRung()` 根据 `force`、usage ratio、remaining input floor、thrash lock 和 per-turn cap 返回 `none | mask | prune-summary | force`。策略不访问数据库、LLM、UI 或 MCP。
 
-**核心接口**：`Context.compress(sessionId, force): Promise<CompressionResult>`
+### D5：执行 mask、prune 与 summary
 
-### D5: Prune 策略执行
+- mask 只改变模型投影，不删除 durable part；
+- prune 为旧 tool output 写 `time.compacted`；
+- summary 生成候选、验证体积收益，再把 summary 与原文替代关系提交到 MessageStore；
+- manual `compact()` 与 automatic `prepareTurn()` 使用同一请求投影和计量口径。
 
-自动丢弃旧的 tool output 以释放空间：
-- 保护最近的 tool output（约 40k tokens）
-- 对更早的 tool output 标记 `time.compacted` 时间戳
-- 不删除 Part，只标记，保持历史完整
+### D6：维护 scoped ephemeral 状态
 
-**核心接口**：`Context.prune(sessionId): Promise<PruneResult>`
+calibration factor、mask cutoff、thrash lock 与 per-turn compaction count 按 `sessionId + contextScopeId` 管理。`disposeScope()` 只清一个 child scope，`disposeSession()` 清理整个 session。
 
-### D6: 提供压缩提示词
+### D7：发布 Context 观测事件
 
-定义压缩时使用的提示词模板：
-- 使用 Gemini 风格的结构化 XML 格式
-- 包含 overall_goal、key_knowledge、file_system_state、recent_actions、current_plan
-
-### D7: 事件发布
-
-通过 Bus 发布上下文相关事件：
-- `Context.Event.Compressed`：压缩完成后发布
-- `Context.Event.Pruned`：Prune 完成后发布
-
----
-
-## 四、Non-Duties（非职责）
-
-### N1: 不负责 Memory 文件的 CRUD
-
-Memory 文件（OHBABY.md）的读写由 Memory 模块负责。Context 只调用 `Memory.load()` 获取内容。
-
-### N2: 不负责 SystemPrompt 构建
-
-系统提示词的模板和构建逻辑由 SystemPrompt 模块负责。Context 只调用其接口获取内容。
-
-### N3: 不负责 Message 存储
-
-消息的存储和 CRUD 由 Message 模块负责。Context 只调用接口获取历史和更新 Part。
-
-### N4: 不负责 Token 估算算法
-
-Token 的估算算法由 tokenCounting 模块负责。Context 只调用接口获取估算结果。
-
-### N5: 不负责 LLM 调用
-
-实际的 LLM 调用由 LLMClient 模块负责。Context 只调用其接口执行压缩总结。
-
-### N6: 不负责执行循环协调
-
-对话的执行流程由 lifecycle 模块负责。Context 只提供上下文组装和压缩接口。
-
-### N7: 不负责 toModelMessages 过滤
-
-过滤已压缩 tool output 的逻辑由 Message 模块的 `toModelMessages()` 函数负责。Context 只负责标记 compacted。
-
-### N8: 不实现 IDE 上下文和 RAG 集成
-
-当前版本不实现 IDE 上下文和 RAG 集成。这些功能预留接口，在后续版本实现。
-
----
-
-## 五、设计约束与假设
-
-### 约束
-
-1. **依赖 Memory 模块**：调用 `Memory.load()` 获取记忆内容
-2. **依赖 Message 模块**：调用 `getMessages()` 获取历史，`updatePart()` 标记 compacted，`updateMessage()` 创建 summary
-3. **依赖 tokenCounting 模块**：调用其接口进行 token 估算
-4. **依赖 LLMClient 模块**：调用其接口执行压缩总结
-5. **依赖 Bus 模块**：发布上下文相关事件
-6. **自动压缩阈值**：固定为 85%，不可运行时配置（MVP）
-7. **保留比例**：固定为 30%，不可运行时配置（MVP）
-
-### 假设
-
-1. tokenCounting 模块的估算结果足够准确，误差在可接受范围内
-2. LLM 能够有效地将历史压缩成结构化摘要
-3. 同一 sessionId 在同一时刻只有一个压缩操作在执行
-4. 压缩后的 summary 能够有效保留上下文信息
-
----
-
-## 六、与其他模块的关系
-
-| 模块 | 代码位置 | 关系 | 调用接口 | 说明 |
-|------|----------|------|----------|------|
-| Memory | `src/core/memory/` | 依赖 | `Memory.load()` | 获取记忆内容 |
-| Message | `src/core/message/` | 依赖 | `getMessages()`, `updatePart()`, `updateMessage()` | 获取历史、标记 compacted、创建 summary |
-| tokenCounting | `src/services/llm-model/tokenCounting/` | 依赖 | `estimateTokens()`, `getLimit()` | Token 估算和限额查询 |
-| LLMClient | `src/core/llm-client/` | 依赖 | `generateContent()` | 执行压缩总结 |
-| SystemPrompt | `src/core/system-prompt/` | 依赖 | `getSystemPrompt()` | 获取系统提示词 |
-| lifecycle | `src/core/lifecycle/` | 被依赖 | `Context.assemble()`, `Context.compress()` | lifecycle 调用 Context 接口 |
-| Commands | `src/commands/` | 被依赖 | `Context.compress({ force: true })` | `/compact` 命令调用 |
-| Bus | `src/bus/` | 依赖 | `Bus.publish()` | 发布上下文事件 |
-
----
-
-## 七、文档自检
-
-- [x] 可以用一句话说明模块存在的意义
-- [x] 可以清楚回答"这个模块不该做什么"
-- [x] 不存在职责与其他模块明显重叠的风险
-- [x] 所有职责可被测试或验证
-- [x] 设计目标服务于 KISS 和 YAGNI 原则
-- [x] 与 Memory、Message、tokenCounting、LLMClient 的关系明确
-- [x] Prune 策略只标记不删除，保持历史完整性
+所有 Context event 带 session/scope identity；compaction progress/terminal event 另带 attempt identity。每个 accepted attempt 只有一个 terminal outcome；事件不是 durable truth。
+
+## 四、Non-Duties
+
+- 不解析 ToolScheduler/MCP registry；Context 只消费调用方已解析的 names/schemas。
+- 不负责 Provider transport、streaming 或普通请求 retry；Lifecycle/adapter 消费 `PreparedModelRequest`。
+- 不负责 Memory CRUD、自动提取、RAG 或 `memory_*` 工具。
+- 不负责 SystemPrompt 模板内容，只消费 `SystemPromptProvider`。
+- 不拥有 Message 实体；持久化、事务与查询由 Message port/adapter 提供。
+- 不把 UI tracker 当 child scope 的精确状态源。
+- 不持久化 Provider observed-window adaptive ceiling；该能力另行设计。
+
+## 五、依赖与方向
+
+| 依赖 | Context 依赖的抽象 | 边界 |
+|---|---|---|
+| Message | `MessageManager` / 后续窄 atomic commit port | durable history 与变更提交 |
+| Memory | `MemoryReader` | 只读 merged Memory |
+| SystemPrompt | `SystemPromptProvider` | run snapshot 内容 |
+| Token counting | `TokenCounter` | request heuristic 与 budget |
+| Summary LLM | `ContextLLMClient` | 只生成候选，不拥有提交 |
+| Bus | `BusInstance` | best-effort observable event |
+
+依赖方向遵循 DIP：Context 的领域策略不依赖 SQLite、Web、MCP SDK 或具体 Provider；adapter 依赖 Context 的窄契约。
+
+## 六、当前约束与假设
+
+1. 当前 summary threshold 为 `0.95`，remaining input floor 为 `4096`，preserve ratio 为 `0.3`。
+2. primary scope 以 `contextScopeId === undefined` 表示；所有 scoped key helper 必须使用同一归一化语义。
+3. 压缩 LLM 会失败、超窗或被 abort；所有循环必须有进展与次数上限。
+4. 部分持久化和同 scope 并发不能靠调用顺序假设；联合回归用 failpoint/barrier 决定是否扩展窄端口。
+5. summary 的语义质量由独立 eval 验证，普通 unit 只验证确定性结构、隐私、体积和恢复。
+
+## 七、关键公共接口
+
+- `ContextManager.assemble()`
+- `ContextManager.createRunPromptSnapshot()`
+- `ContextManager.getUsage()`
+- `ContextManager.prepareTurn()`
+- `ContextManager.compact()`
+- `ContextManager.disposeScope()` / `disposeSession()`
+- `PreparedModelRequest`
+- `ContextUsage`
+- `CompactResult`
+
+接口的实际 TypeScript 定义以 `packages/ohbaby-agent/src/core/context/types.ts` 为准；本文记录语义和责任，不复制全部字段。

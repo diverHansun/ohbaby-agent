@@ -12,6 +12,8 @@ import type {
   MessageWithParts,
 } from "../message/index.js";
 import {
+  COMPACTION_MIN_REMAINING_INPUT_TOKENS,
+  COMPRESSION_THRESHOLD,
   ContextEvent,
   createContextManager,
   decideCompactionRung,
@@ -2253,7 +2255,7 @@ describe("ContextManager", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it("calculates context usage with the 85 percent compression threshold", () => {
+  it("calculates fallback usage against the full context limit", () => {
     const usage = getContextUsage(85, "model-a", {
       getLimit: () => 100,
     });
@@ -2323,6 +2325,41 @@ describe("ContextManager", () => {
       decideCompactionRung({
         force: false,
         usage,
+      }),
+    ).toBe("prune-summary");
+  });
+
+  it("uses the 95 percent threshold and a strict 4096-token remaining floor", () => {
+    const usage = (
+      usageRatio: number,
+      remainingTokens: number,
+    ): ReturnType<typeof getContextUsage> => ({
+      contextLimit: 100_000,
+      currentTokens: 100_000 - remainingTokens,
+      inputBudgetTokens: 100_000,
+      modelId: "large-model",
+      remainingTokens,
+      usageRatio,
+    });
+
+    expect(COMPRESSION_THRESHOLD).toBe(0.95);
+    expect(COMPACTION_MIN_REMAINING_INPUT_TOKENS).toBe(4_096);
+    expect(
+      decideCompactionRung({
+        force: false,
+        usage: usage(0.95, 5_000),
+      }),
+    ).toBe("prune-summary");
+    expect(
+      decideCompactionRung({
+        force: false,
+        usage: usage(0.94, 4_096),
+      }),
+    ).toBe("mask");
+    expect(
+      decideCompactionRung({
+        force: false,
+        usage: usage(0.94, 4_095),
       }),
     ).toBe("prune-summary");
   });

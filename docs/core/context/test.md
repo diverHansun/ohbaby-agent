@@ -1,425 +1,150 @@
-# context 模块 test.md
+# Context 模块：测试策略
 
-本文档描述 `context` 模块的测试策略与验证方法。重点是验证模块在协作环境中是否按照既定职责运行。
+本文定义 Context 的长期测试职责。improve-4～5 联合回归的完整 ID、故障矩阵和发布门见 [04-test-and-acceptance.md](./improve-4-to-5-regression/04-test-and-acceptance.md)。
 
----
+## 一、测试回答什么
 
-## 一、Test Scope（测试范围）
+1. 测量和 Provider 是否消费同一 `PreparedModelRequest`？
+2. mask/prune/summary/retry/restart 后模型可见 history 是否唯一、tool pairing 是否合法？
+3. primary、child/sibling scope 是否隔离？
+4. 部分写、并发、abort 和 hard crash 后 durable truth 是否可恢复？
+5. 同 run/epoch 的 system、runtime、tools 前缀是否稳定？
+6. summary 请求自身超窗时能否有界缩小，而不是无限失败？
+7. Context event 是否属于正确 scope/attempt，且不会冒充 durable truth？
 
-### 覆盖的职责
+## 二、分层职责
 
-| 职责 | 测试重点 |
-|------|----------|
-| D1: 上下文组装 | 正确合并 Memory、SystemPrompt、History |
-| D2: Token 使用量计算 | 正确调用 tokenCounting 并返回使用率 |
-| D3: 自动压缩触发 | 85% 阈值判断正确 |
-| D4: 上下文压缩 | 正确分割历史、调用 LLM、创建 summary |
-| D5: Prune 策略 | 正确标记旧 tool output |
-| D7: 事件发布 | 正确发布 Compressed 和 Pruned 事件 |
+| 层 | 典型对象 | 目标 |
+|---|---|---|
+| unit | compaction policy、cut point、projection、usage、serializer、reference reducer | 快速验证纯逻辑和边界 |
+| contract | `PreparedModelRequest`、Context event、Message atomic/idempotent port、Provider cache usage | 防止消费者可见语义漂移 |
+| integration | Context + MessageStore + Lifecycle + ToolScheduler/MCP + Bus | 验证真实数据流、并发和重建 |
+| smoke/e2e | build、serve/Web、真实 Provider | 验证发布产物和外部 capability |
+| property/fault/soak | 上述层的运行方式 | 扩大动作组合、故障点和序列长度 |
 
-### 不在测试范围
+E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
-| 内容 | 理由 |
-|------|------|
-| Memory 模块的文件读写 | Memory 模块自行测试 |
-| Message 模块的存储逻辑 | Message 模块自行测试 |
-| tokenCounting 的估算算法 | tokenCounting 模块自行测试 |
-| LLM 的响应质量 | 外部依赖，非 Context 职责 |
-| SystemPrompt 的构建逻辑 | SystemPrompt 模块自行测试 |
+## 三、关键不变量
 
----
+- measured `{ messages, tools }` 与 adapter 实际输入深等价。
+- `PreparedModelRequest` 创建后不可被 MCP load、permission change、retry 或调用方 mutation 改写。
+- `ContextUsage` 使用 input budget；`ratio >= 0.95` 或 `remaining < 4096` 触发 summary rung，`remaining === 4096` 仅靠 floor 不触发。
+- cache read/write/uncached 是 inclusive input breakdown，不改变窗口占用总量。
+- summary 与被替代原文不同时 active；失败不声称成功。
+- 同 initiating message 的 runtime part 基数不超过 1，包括并发/多 manager/restart。
+- 同 scope compaction/prompt mutation 串行，提交前 revision recheck；异 scope 可并发。
+- restart 后 canonical model view 与 deterministic repair 等价；恢复零 LLM、零历史 event。
+- primary/subagent 的 history、calibration、mask、thrash、tool epoch、cache identity 和 event 不串。
 
-## 二、Critical Scenarios（关键场景）
+## 四、重点场景
 
-### 2.1 上下文组装场景
+### 4.1 Request
 
-#### 场景 1: 正常组装
+- ordinary primary/subagent step；
+- final-step `tailDirectives` 只出现一次且 tools=`[]`；
+- overflow → force prepare → retry 发送新 request；
+- prepare 后 lazy MCP/permission change 不改当前 request，只改下一 request；
+- active reasoning/tool loop 不修改已发送 prefix。
 
-**前置条件**：
-- Memory 返回有效的记忆内容
-- Message 返回会话历史
-- SystemPrompt 返回系统提示词
+### 4.2 Budget ladder
 
-**操作**：
-```typescript
-const context = await Context.assemble(sessionId, directory)
+| 输入 | 预期 |
+|---|---|
+| ratio `0.94999`、remaining `>=4096` | 不进入 summary |
+| ratio `0.95` | `prune-summary` |
+| ratio `<0.95`、remaining `4096` | 不因 floor 进入 summary |
+| ratio `<0.95`、remaining `4095` | `prune-summary` |
+| ratio `>=0.50` 且未进 summary | `mask` |
+| `force=true` | `force`，不受 thrash lock 拦截 |
+
+### 4.3 Compaction/failure
+
+- summary 非 overflow 失败、inflated、stream abort；
+- summary request context overflow 后按完整 turn/API round 严格缩小，清前导 orphan tool result，有 max/abort；
+- create summary、append part、第 N 个 compacted update、prune 第 N 个 update、commit 后 event 前故障；
+- hard SIGKILL 等待 marker 精确内容，不只等待文件存在；
+- auto+auto、manual+auto、manual+manual、manual+prompt；
+- primary 与 child 同时 compact；
+- repeated compaction 不重复展开旧 summary。
+
+### 4.4 Scope/event/replay
+
+- primary 缺省 scope 只归一为 primary；child 带精确 scope；
+- sibling event 交错可按 session/scope/attempt 唯一分组；
+- accepted attempt 的 progress/terminal 共用 ID 且 terminal 恰好一次；
+- event publish/subscriber 失败不回滚 durable commit；
+- reopen 不重发 event、不调用 summary LLM。
+
+### 4.5 Memory/prefix/cache
+
+- global/project `OHBABY.md` 路径边界、失败降级、run 内稳定；
+- subagent 不加载 Memory；
+- runtime metadata 不进入 UI/summary/title/export；
+- 同 tool epoch wire order 稳定，有意 epoch 变化只失效一次后重新稳定；
+- cache key 基于 session + scope，tool epoch 不写入 key；
+- Provider usage 的 observed zero 与 unavailable 区分。
+
+## 五、测试支撑件
+
+| Fixture | 作用 |
+|---|---|
+| deterministic `TokenCounter` | 构造精确预算/cut point |
+| scripted `ContextLLMClient` | summary success/failure/inflation/overflow/abort |
+| request-capturing Provider | 对比 measured/sent wire input |
+| failpoint Message adapter | 在 durable boundary 第 N 次失败 |
+| store conformance suite | 同一契约跑 in-memory/SQLite |
+| barrier/latch | 控制 snapshot/MCP/compact/tool 时序 |
+| fail-on-resume client | 恢复期调用 LLM 立即失败 |
+| fake clock | 验证 metadata/event/lease，不使用 sleep |
+| canonical model-view serializer | live/restart 可稳定 diff |
+
+fixture 必须实现真实 typed port；禁止万能 mock、test-only production getter 或预置 `usageAfter` 自证成功。
+
+## 六、测试组织
+
+- co-located unit/contract：`packages/ohbaby-agent/src/core/context/*.unit.test.ts`、`*.contract.test.ts`；
+- Context serializer/store integration：同源码目录的 `*.integration.test.ts`；
+- 跨模块集成：`tests/integration/core/`；
+- 外部 gate：`*.real.test.ts`、`scripts/run-real-cache-smoke.mjs`、compiled Web runner。
+
+真实故障必须以问题形状命名，不使用 `case1`。属性失败必须输出 seed、shrunk trace、session/scope、expected/actual canonical diff。
+
+## 七、执行门禁
+
+```bash
+pnpm run format:check
+pnpm run lint
+pnpm run typecheck
+pnpm run test:unit
+pnpm run test:contract
+pnpm run test:integration
+pnpm run test:smoke
+pnpm run build
 ```
 
-**预期结果**：
-- `context.memory.merged` 包含全局和项目记忆
-- `context.history` 包含历史消息
-- `context.systemPrompt` 不为空
-- `context.estimatedTokens > 0`
+联合回归新增入口实施后应包括：
 
-#### 场景 2: Memory 加载失败时降级
-
-**前置条件**：
-- Memory.load 抛出错误（如文件不可读）
-
-**操作**：
-```typescript
-const context = await Context.assemble(sessionId, directory)
+```text
+test:context:regression
+test:context:property
+test:context:restart
+test:context:soak
+test:context:eval
 ```
 
-**预期结果**：
-- 组装成功（不抛出错误）
-- `context.memory.merged` 为空字符串
-- 记录警告日志
+这些脚本不存在时不得在验收报告中宣称已运行。
 
-#### 场景 3: 空会话
+## 八、防假绿规则
 
-**前置条件**：
-- 新创建的会话，没有历史消息
+- 不只断言“不抛错”或 `toBeTruthy()`。
+- 不在同一 manager/store 对象里模拟 restart。
+- 不用 wall-clock `sleep()` 制造竞态。
+- 不自动 retry flaky 测试后报绿。
+- 不把 real-provider skip 写成 pass。
+- 不只测 primary 后宣称 subagent 覆盖。
+- 不只比较 cache key 字符串而忽略 Provider-relevant prefix。
+- 不用不同 model/tools/tail directives 的 usage 比较证明压缩成功。
 
-**操作**：
-```typescript
-const context = await Context.assemble(sessionId, directory)
-```
+## 九、验收关系
 
-**预期结果**：
-- `context.history.length === 0`
-- `context.hasSummary === false`
-- 组装成功
-
-### 2.2 压缩触发场景
-
-#### 场景 4: 低于阈值不压缩
-
-**前置条件**：
-- 上下文使用率为 50%（低于 85%）
-
-**操作**：
-```typescript
-const usage = Context.getUsage(context, modelId)
-```
-
-**预期结果**：
-- `usage.usageRatio === 0.5`
-- `usage.shouldCompress === false`
-
-#### 场景 5: 达到阈值触发压缩
-
-**前置条件**：
-- 上下文使用率为 90%（高于 85%）
-
-**操作**：
-```typescript
-const usage = Context.getUsage(context, modelId)
-```
-
-**预期结果**：
-- `usage.usageRatio === 0.9`
-- `usage.shouldCompress === true`
-
-### 2.3 压缩执行场景
-
-#### 场景 6: 成功压缩
-
-**前置条件**：
-- 会话有足够的历史消息
-- LLM 正常返回压缩摘要
-
-**操作**：
-```typescript
-const result = await Context.compress(sessionId, true)
-```
-
-**预期结果**：
-- `result.status === 'compressed'`
-- `result.newTokens < result.originalTokens`
-- `result.summaryMessageId` 不为空
-- Message 中创建了 summary Message
-
-#### 场景 7: 历史太短跳过压缩
-
-**前置条件**：
-- 会话只有 1-2 条消息
-
-**操作**：
-```typescript
-const result = await Context.compress(sessionId, true)
-```
-
-**预期结果**：
-- `result.status === 'skipped'`
-- 不创建 summary Message
-
-#### 场景 8: 压缩后 token 增加
-
-**前置条件**：
-- LLM 返回的摘要比原历史还长
-
-**操作**：
-```typescript
-const result = await Context.compress(sessionId, true)
-```
-
-**预期结果**：
-- `result.status === 'inflated'`
-- 不创建 summary Message
-- 不替换历史
-
-#### 场景 9: LLM 调用失败
-
-**前置条件**：
-- LLMClient.generateContent 抛出错误
-
-**操作**：
-```typescript
-const result = await Context.compress(sessionId, true)
-```
-
-**预期结果**：
-- `result.status === 'failed'`
-- `result.error` 包含错误信息
-- 不创建 summary Message
-
-### 2.4 Prune 场景
-
-#### 场景 10: 成功 Prune
-
-**前置条件**：
-- 会话有多个已完成的 tool output
-- 总 tool output 超过 PRUNE_PROTECT（40k）
-
-**操作**：
-```typescript
-const result = await Context.prune(sessionId)
-```
-
-**预期结果**：
-- `result.prunedCount > 0`
-- `result.freedTokens >= PRUNE_MINIMUM`
-- 旧的 ToolPart 被标记 `time.compacted`
-
-#### 场景 11: tool output 不足跳过 Prune
-
-**前置条件**：
-- tool output 总量 < PRUNE_PROTECT
-
-**操作**：
-```typescript
-const result = await Context.prune(sessionId)
-```
-
-**预期结果**：
-- `result.prunedCount === 0`
-- 没有 Part 被标记
-
-#### 场景 12: 保护最近的 tool output
-
-**前置条件**：
-- 会话有大量 tool output
-
-**操作**：
-```typescript
-const result = await Context.prune(sessionId)
-```
-
-**预期结果**：
-- 最近的 tool output（约 40k tokens）未被标记
-- 只有更早的 tool output 被标记
-- `result.protectedCount > 0`
-
-### 2.5 事件发布场景
-
-#### 场景 13: 压缩完成发布事件
-
-**前置条件**：
-- 压缩成功完成
-
-**操作**：
-```typescript
-await Context.compress(sessionId, true)
-```
-
-**预期结果**：
-- Bus 发布了 `context.compressed` 事件
-- 事件包含 sessionId 和 result
-
-#### 场景 14: Prune 完成发布事件
-
-**前置条件**：
-- Prune 执行完成
-
-**操作**：
-```typescript
-await Context.prune(sessionId)
-```
-
-**预期结果**：
-- Bus 发布了 `context.pruned` 事件
-- 事件包含 sessionId 和 result
-
----
-
-## 三、Integration Points（集成点测试）
-
-### 3.1 与 Memory 模块集成
-
-| 测试点 | 验证内容 |
-|--------|----------|
-| 正常加载 | Memory.load 返回内容被正确合并到 AssembledContext |
-| 加载失败 | Memory.load 失败时降级处理，不中断组装 |
-
-### 3.2 与 Message 模块集成
-
-| 测试点 | 验证内容 |
-|--------|----------|
-| 获取历史 | Message.getMessages 返回的消息被正确包含在 history 中 |
-| 创建 summary | 压缩后正确调用 Message.updateMessage 创建 summary |
-| 更新 Part | Prune 时正确调用 Message.updatePart 标记 compacted |
-| compacted 过滤 | 已标记 compacted 的 tool output 不出现在 toModelMessages 结果中 |
-
-### 3.3 与 tokenCounting 模块集成
-
-| 测试点 | 验证内容 |
-|--------|----------|
-| token 估算 | 调用 estimateTokens 返回的值被用于计算 usageRatio |
-| 限额查询 | 调用 getLimit 返回的值被用于判断是否需要压缩 |
-
-### 3.4 与 LLMClient 模块集成
-
-| 测试点 | 验证内容 |
-|--------|----------|
-| 压缩调用 | 压缩时正确调用 generateContent |
-| 错误处理 | LLM 调用失败时返回 failed 状态 |
-
-### 3.5 与 Bus 模块集成
-
-| 测试点 | 验证内容 |
-|--------|----------|
-| 压缩事件 | 压缩完成后发布 context.compressed 事件 |
-| Prune 事件 | Prune 完成后发布 context.pruned 事件 |
-
----
-
-## 四、Verification Strategy（验证策略）
-
-### 4.1 单元测试
-
-| 组件 | Mock 对象 | 测试重点 |
-|------|-----------|----------|
-| ContextAssembler | Memory, Message, SystemPrompt | 组装逻辑、降级处理 |
-| ContextCompressor | Message, LLMClient, tokenCounting | 分割逻辑、压缩流程 |
-| ContextPruner | Message | 扫描逻辑、标记逻辑 |
-| ContextManager | 所有子组件 | API 协调、阈值判断 |
-
-### 4.2 集成测试
-
-使用真实的 Message 和 Memory 模块（mock Storage 和 LLMClient）：
-
-- 完整的组装流程
-- 完整的压缩流程
-- Prune 后 toModelMessages 正确过滤
-
-### 4.3 Mock 策略
-
-```typescript
-// Mock Memory 模块
-const mockMemory = {
-  load: vi.fn().mockResolvedValue({
-    global: 'global memory',
-    project: 'project memory',
-    merged: 'global memory\n---\nproject memory'
-  })
-}
-
-// Mock Message 模块
-const mockMessage = {
-  getMessages: vi.fn().mockResolvedValue([
-    { info: { id: 'msg1', role: 'user', ... }, parts: [...] },
-    { info: { id: 'msg2', role: 'assistant', ... }, parts: [...] }
-  ]),
-  updateMessage: vi.fn().mockResolvedValue({ id: 'summary_msg', ... }),
-  updatePart: vi.fn().mockResolvedValue({ id: 'part1', ... })
-}
-
-// Mock tokenCounting 模块
-const mockTokenCounting = {
-  estimateTokens: vi.fn().mockReturnValue(50000),
-  getLimit: vi.fn().mockReturnValue(100000)
-}
-
-// Mock LLMClient 模块
-const mockLLMClient = {
-  generateContent: vi.fn().mockResolvedValue({
-    text: '<state_snapshot>...</state_snapshot>'
-  })
-}
-
-// Mock Bus 模块
-const mockBus = {
-  publish: vi.fn()
-}
-```
-
-### 4.4 边界条件测试
-
-| 边界条件 | 测试内容 |
-|----------|----------|
-| 空会话 | history 为空时组装和压缩行为 |
-| 单条消息 | 只有一条消息时压缩跳过 |
-| 恰好 85% | usageRatio = 0.85 时是否触发压缩 |
-| 恰好 30% | 分割时边界消息归属 |
-| 全部是 tool output | Prune 时的保护逻辑 |
-| 没有 tool output | Prune 跳过 |
-
----
-
-## 五、测试数据准备
-
-### 5.1 典型消息历史
-
-```typescript
-const typicalHistory: MessageWithParts[] = [
-  {
-    info: { id: 'msg1', role: 'user', sessionId, time: { created: 1000 }, ... },
-    parts: [{ id: 'part1', type: 'text', text: 'Hello' }]
-  },
-  {
-    info: { id: 'msg2', role: 'assistant', sessionId, parentId: 'msg1', ... },
-    parts: [
-      { id: 'part2', type: 'text', text: 'Hi there!' },
-      { id: 'part3', type: 'tool', tool: 'read_file', state: { status: 'completed', output: '...' } }
-    ]
-  },
-  // ... 更多消息
-]
-```
-
-### 5.2 压缩快照示例
-
-```xml
-<state_snapshot>
-  <overall_goal>用户正在开发一个 TypeScript 项目</overall_goal>
-  <key_knowledge>
-    - 项目使用 Vitest 测试框架
-    - 构建命令: npm run build
-  </key_knowledge>
-  <file_system_state>
-    - CWD: /home/user/project
-    - MODIFIED: src/index.ts
-  </file_system_state>
-  <recent_actions>
-    - 执行了 npm test
-    - 修复了 2 个测试
-  </recent_actions>
-  <current_plan>
-    1. [DONE] 分析代码
-    2. [IN PROGRESS] 实现功能
-    3. [TODO] 编写文档
-  </current_plan>
-</state_snapshot>
-```
-
----
-
-## 六、文档自检
-
-- [x] 所有关键职责都有对应的验证场景
-- [x] 明确了模块与外部交互时的失败处理预期
-- [x] 避免了与具体实现细节的绑定
-- [x] Mock 策略清晰
-- [x] 边界条件覆盖充分
-- [x] 测试数据准备完整
+本文件描述长期模块规则；联合回归的可执行 ID 与最终门以 `improve-4-to-5-regression/04-test-and-acceptance.md` 为准。实施完成后实际证据、偏差和剩余风险写入同目录的 `05-implementation-acceptance.md`，不得回写本文件伪造测试进度。
