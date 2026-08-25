@@ -1947,7 +1947,15 @@ describe("Lifecycle.run", () => {
     );
 
     expect(events.filter((event) => event === "llm:retrying")).toHaveLength(5);
+    expect(prepareTurn).toHaveBeenCalledTimes(1);
     expect(requests).toHaveLength(6);
+    expect(
+      requests.every(
+        (request) =>
+          JSON.stringify(request.messages) ===
+          JSON.stringify([{ role: "user", content: "Say hello" }]),
+      ),
+    ).toBe(true);
     expect(result).toMatchObject({
       finalResponse: expect.stringContaining("after 5 retries") as string,
       finishReason: "error",
@@ -1956,7 +1964,7 @@ describe("Lifecycle.run", () => {
     });
   });
 
-  it("fails clearly when overflow retry also overflows", async () => {
+  it("fails clearly when a final-step overflow retry also overflows", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -1991,6 +1999,7 @@ describe("Lifecycle.run", () => {
     const { events, result } = await consumeLifecycleEvents(
       lifecycle.run({
         directory: "D:/repo",
+        maxSteps: 1,
         modelId: "fake-model",
         sessionId: "session_test",
       }),
@@ -2001,6 +2010,16 @@ describe("Lifecycle.run", () => {
       expect.objectContaining({ force: true }),
     );
     expect(requests).toHaveLength(2);
+    expect(requests.every((request) => request.tools?.length === 0)).toBe(true);
+    for (const request of requests) {
+      expect(
+        request.messages.filter(
+          (message) =>
+            typeof message.content === "string" &&
+            message.content.includes("Maximum lifecycle steps reached"),
+        ),
+      ).toHaveLength(1);
+    }
     expect(events).toEqual([
       "turn:start",
       "context:prepared",

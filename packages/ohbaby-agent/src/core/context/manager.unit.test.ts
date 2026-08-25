@@ -2711,6 +2711,71 @@ describe("ContextManager", () => {
     ).toBe(true);
   });
 
+  it("keeps forced manual and automatic compaction on the same model view and usage scale", async () => {
+    async function createSeededFixture(): Promise<{
+      readonly manager: FixtureContextManager;
+    }> {
+      const messageManager = createMessageManagerFixture();
+      for (const [index, role] of ["user", "assistant", "user"].entries()) {
+        await addTextMessage(messageManager, {
+          role: role as "user" | "assistant",
+          sessionId: "session_1",
+          text: `${String(index)} ${"same context ".repeat(40)}`,
+        });
+      }
+      return createManager({
+        messageManager,
+        tokenCounter: {
+          estimateTokens: (content) => content.length,
+          getLimit: () => 100_000,
+        },
+      });
+    }
+
+    const tools = [
+      {
+        function: {
+          name: "read_file",
+          parameters: { type: "object" },
+        },
+        type: "function" as const,
+      },
+    ];
+    const manual = await createSeededFixture();
+    const automatic = await createSeededFixture();
+    const compacted = await manual.manager.compact("session_1", {
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+      toolNames: ["read_file"],
+      tools,
+    });
+    const manualPrepared = await manual.manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+      toolNames: ["read_file"],
+      tools,
+    });
+    const automaticPrepared = await automatic.manager.prepareTurn({
+      directory: "D:/repo",
+      force: true,
+      modelId: "model-a",
+      sessionId: "session_1",
+      toolNames: ["read_file"],
+      tools,
+    });
+
+    expect(compacted.status).toBe("compacted");
+    expect(automaticPrepared.compaction?.status).toBe("compacted");
+    expect(manualPrepared.request).toEqual(automaticPrepared.request);
+    expect(manualPrepared.usage).toEqual(automaticPrepared.usage);
+    expect(compacted.usageAfter).toEqual(manualPrepared.usage);
+    expect(automaticPrepared.compaction?.usageAfter).toEqual(
+      automaticPrepared.usage,
+    );
+  });
+
   it("prunes old completed tool output while protecting recent output", async () => {
     const messageManager = createMessageManagerFixture();
     const oldMessage = await messageManager.createMessage({
