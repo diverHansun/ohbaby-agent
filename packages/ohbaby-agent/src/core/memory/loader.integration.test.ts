@@ -51,6 +51,72 @@ describe("MemoryLoader", () => {
     expect(memory.merged).toContain("---");
   });
 
+  it("does not discover project memory when the start directory is outside the project root", async () => {
+    const outside = path.join(tempDir, "outside", "nested");
+    await fs.mkdir(outside, { recursive: true });
+    await fs.writeFile(
+      path.join(tempDir, "outside", "OHBABY.md"),
+      "outside memory",
+      "utf8",
+    );
+    const loader = createMemoryLoader({
+      globalMemoryPath: globalPath,
+      projectResolver: {
+        fromDirectory: () => ({ id: "project:test", rootPath: projectRoot }),
+      },
+    });
+
+    const memory = await loader.load(outside);
+
+    expect(memory.project).toBe("");
+    expect(memory.merged).not.toContain("outside memory");
+  });
+
+  it("does not follow a project memory symlink outside the project root", async () => {
+    const externalMemory = path.join(tempDir, "external-memory.md");
+    await fs.writeFile(externalMemory, "external memory", "utf8");
+    await fs.symlink(externalMemory, path.join(projectRoot, "OHBABY.md"));
+    const loader = createMemoryLoader({
+      globalMemoryPath: globalPath,
+      projectResolver: {
+        fromDirectory: () => ({ id: "project:test", rootPath: projectRoot }),
+      },
+    });
+
+    const memory = await loader.load(path.join(projectRoot, "src"));
+
+    expect(memory.project).toBe("");
+    expect(memory.merged).not.toContain("external memory");
+  });
+
+  it("degrades missing and unreadable memory to empty without aborting", async () => {
+    const warnings: string[] = [];
+    const loader = createMemoryLoader({
+      globalMemoryPath: globalPath,
+      onWarning: (message) => warnings.push(message),
+      projectResolver: {
+        fromDirectory: () => ({ id: "project:test", rootPath: projectRoot }),
+      },
+    });
+
+    await expect(loader.load(projectRoot)).resolves.toEqual({
+      global: "",
+      merged: "",
+      project: "",
+    });
+    expect(warnings).toEqual([]);
+
+    await fs.mkdir(path.join(projectRoot, "OHBABY.md"));
+    await expect(loader.load(projectRoot)).resolves.toEqual({
+      global: "",
+      merged: "",
+      project: "",
+    });
+    expect(warnings).toEqual([
+      expect.stringContaining("Unable to read memory file") as string,
+    ]);
+  });
+
   it("is read-only and has no CRUD or event surface", () => {
     const loader = createMemoryLoader();
 

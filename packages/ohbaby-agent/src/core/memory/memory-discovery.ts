@@ -10,18 +10,41 @@ export function getGlobalMemoryPath(options: OhbabyPathOptions = {}): string {
   return path.join(resolveOhbabyHome(options), MEMORY_FILENAME);
 }
 
+async function canonicalPath(filePath: string): Promise<string> {
+  try {
+    return await fs.realpath(filePath);
+  } catch {
+    return path.resolve(filePath);
+  }
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return (
+    relative === "" ||
+    (relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
 export async function findProjectMemoryPath(
   startDirectory: string,
   projectRoot: string,
 ): Promise<string | null> {
-  const root = path.resolve(projectRoot);
-  let current = path.resolve(startDirectory);
+  const root = await canonicalPath(projectRoot);
+  let current = await canonicalPath(startDirectory);
+  if (!isWithin(root, current)) {
+    return null;
+  }
 
   for (;;) {
     const candidate = path.join(current, MEMORY_FILENAME);
     try {
-      await fs.access(candidate);
-      return candidate;
+      const canonicalCandidate = await fs.realpath(candidate);
+      if (isWithin(root, canonicalCandidate)) {
+        return canonicalCandidate;
+      }
     } catch {
       // Continue walking upward until project root or filesystem root.
     }
