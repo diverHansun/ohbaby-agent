@@ -16,7 +16,7 @@
 
 | ID | 场景 | 类型 | 验证点 | 02 Phase |
 |----|------|------|--------|----------|
-| U1 | 仅 system + builtin tools | unit | 两类 >0，mcp/skills/summary/subagent=0 | A |
+| U1 | 非空 initiating user message + system + builtin tool schemas；无 MCP/skill/summary/subagent | unit | `system-prompt`、`builtin-tools`、`conversation` 三类 >0；`mcp`、`skills`、`summarized-conversation`、`subagent-exchanges` 四类 =0 | A |
 | U2 | 含 MCP schema | unit | mcp>0 且不计入 builtin-tools | A |
 | U3 | skill 工具 description 含 `<available_skills>` | unit | `skill` 与 `skill_resource` 均计入 skills，不计入 builtin-tools | A |
 | U4 | 已 load 的 SKILL.md tool result | unit | 计入 conversation，不计入 skills | A |

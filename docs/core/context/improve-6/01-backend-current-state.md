@@ -17,12 +17,12 @@ AssembledContext + ResolvedStepTools（definitions + requestTools）
         → 校准后总量（现有 ContextUsage）
         → PreparedTurn / context:prepared（composition 与 usage 分离）
         → UiContextWindowUsage（optional composition）
-                ↘ Web 小环 / click 面板（无 cache）
-                ↘ /status 详细占用
+                ↘ Web 小环 / click / `/status` 详细占用（无 cache）
+                ↘ TUI footer / `/status`（本轮 total-only）
 
 LifecycleTokenUsage.inputBreakdown（下一轮）
         → 独立 cache 通道（session aggregate）
-        → /status Cache 行（`Cache hit —` ≠ 0%）
+        → Web / TUI `/status` Cache 行（`Cache hit —` ≠ 0%）
 ```
 
 主代理才进用户占用 UI。子代理 scope 继续内部计量。

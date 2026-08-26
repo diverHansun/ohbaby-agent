@@ -19,9 +19,9 @@ improve-4～5 与联合回归已经把请求占用总量、tools-aware 分母和
 | 关键改动清单 | 写入 02；承重项到符号 + 行号快照，禁止全量文件表 |
 | 占用对象 | 只展示**主代理**当前窗口。子代理内部仍按 `sessionId + contextScopeId` 计量/压缩，不进用户主占用 UI |
 | 计量入口 | 分桶不能只靠最终 `PreparedModelRequest.tools`（`toOpenAiTools` 丢 `source`）。Lifecycle 每步显式保留窄的 `ResolvedStepTools { definitions, requestTools }`；Context 同时消费实际请求 tools、带 `source` 的 definitions 与带来源元数据的 history。总量仍走现有启发式 + 校准 |
-| 数字呈现 | 总量百分比与 `~used / window` 跟校准后的 `UiContextWindowUsage` 一致；分类行加 `~`。彩条**长度**跟总量百分比，**颜色比例**跟七类启发式之和，不强制各类精确加总等于总量 |
+| 数字呈现 | Web 诊断面板的总量用 `~used / window`，分类行也加 `~`；百分比跟校准后的 `UiContextWindowUsage` 一致。TUI 本轮保留既有 `{used} / {window} ({percent})`，不加 `~`。这是有意的平台差异，不要求统一。彩条**长度**跟总量百分比，**颜色比例**跟七类启发式之和，不强制各类精确加总等于总量 |
 | 环形 UI | **Web 紧凑态使用小占用环**（hover 前可见）。TUI 不用环，也不做 hover/click |
-| Web 交互 | 小环 → hover 粗信息（百分比 + `used / window`）→ click 彩条 + 七类数量。Click 面板**不含** cache |
+| Web 交互 | 小环 → hover 粗信息（百分比 + `~used / window`）→ click 彩条 + 七类数量。Click 面板**不含** cache |
 | TUI 交互 | 不使用 hover/click；本轮底栏和 `/status` 均保留现有总占用，不展示七类，不做 ASCII 堆叠条 |
 | `/status` | Web **已有** slash `/status` 卡片（`StatusCommandResult`），本批展示七类详细占用；TUI `/status` 本批仍为总量。Cache 行下一轮加入（设计已冻结，见 §2.4） |
 | Cache（**下一轮实施**，本批只冻结设计） | 不画进占用彩条。显示口径：**session aggregate 唯一**（Cache-Read Share，公式见 §2.4）；run aggregate 后端继续计数作 session 累加原料，**前端不显示**。不完整轮**尽力而为**跳过，不降级整会话显示。文案极简：`Cache hit 61%` / `Cache hit —`。cached input 仍占窗口 |

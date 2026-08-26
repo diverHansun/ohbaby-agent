@@ -42,7 +42,7 @@ PreparedTurn { usage: ContextUsage, composition? }
 | 七类 key | 见 00 §2.1 | 对标 Cursor，且 summary/runtime/subagent 已有 provenance | 三类；Rules/Memory 行 | Skills 正文进 conversation；runtime 菜单归 System prompt |
 | runtime 归因 | `model-context:runtime:v1` 归 `system-prompt`，wire role 不变 | 内容由 Ohbaby 生成；占用归因不等于 provider role | 继续归 Conversation；移动到 `role: system`；解析 runtime XML 再细拆 | MCP lazy menu 本轮也归 System prompt |
 | `module` | 并入 `builtin-tools` | 生产无 module 工具 | 第八行 | 将来 module 不可见为独立类 |
-| 总量 vs 组成 | 条长=校准总量%；段宽=组成相对比例；行数字 `~` | 学 dsh | 强制七类加总=currentTokens | 用户看到「对不齐」需文案 `~` |
+| 总量 vs 组成 | Web 条长=校准总量%；段宽=组成相对比例；Web 总量/分类数字标 `~`；TUI 保持既有总量格式、不标 `~` | 学 dsh；同时保持已回归的 TUI 契约 | 强制七类加总=currentTokens；为表面统一改 TUI formatter | 用户看到「对不齐」需 Web `~`；存在有意的平台显示差异 |
 | composition 所在层 | `ContextUsage` 不变；composition 放 `PreparedTurn`/事件兄弟字段，由 adapter 投影 | 防止 UI 解释字段反向影响压缩控制 | 把 buckets 塞进 `ContextUsage` | 事件/adapter 多传一个 optional 字段 |
 | Cache 类型（下一轮） | 独立于 `UiContextWindowUsage` 展示字段 | 00；cache 与占用是两种事实 | 塞进 occupancy | `/status` 多一个读取口 |
 | Cache 口径（下一轮） | **session aggregate 唯一显示**；run aggregate 后端计数作原料、前端不显示 | 00 §2.4；dsh StatsLine | last-step 百分比；双口径并显 | 需新增 session 级累加器 |
@@ -160,7 +160,7 @@ interface PreparedTurn {
 
 | 风险 | 缓解 | 回滚 |
 |------|------|------|
-| 七类加总 ≠ 总量被当成 bug | UI `~`；测试断言的是规则不是等式 | 隐藏 composition，总量条保留 |
+| 七类加总 ≠ 总量被当成 bug | Web UI `~`；测试断言的是规则不是等式 | 隐藏 composition，总量条保留 |
 | 把 SKILL.md 误计入 Skills | 正文只走 tool result → conversation；单测锁死 | — |
 | runtime 因 wire role 被误算 Conversation | 明确按 `isModelContextPart` 归因；不移动真实 message | 回退总量-only |
 | 自动压缩后仍展示压缩前组成 | 只对 final context/request 计算一次；集成测试覆盖 summary 与被裁剪 parts | 临时隐藏 composition |

@@ -67,6 +67,8 @@ cache          Cache hit 61%
 | 七行 | `composition[key]`，缺 composition 时详情只显示总量、不画假分类 |
 | `/status` cache（下一轮） | `promptCache.cacheReadShare === null` → `Cache hit —`；否则 `Cache hit {n}%` |
 
+平台差异是有意的：Web 属于解释性诊断界面，因此总量和分类数字都标 `~`；TUI 本轮锁定既有总量 formatter，不标 `~`。两端共享同一占用事实，但不要求为了表面一致而改动 TUI 文案。
+
 显示名写死英文，不跟 UI locale 走（00）。
 
 ## 无障碍
