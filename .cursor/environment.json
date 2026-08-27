@@ -1,0 +1,17 @@
+{
+  "name": "ohbaby-agent",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "web",
+      "command": "bash -lc 'node packages/ohbaby-cli/dist/bin.js serve --open false --host 127.0.0.1 --port 4096'",
+      "description": "ohbaby local web daemon serving the web UI at http://127.0.0.1:4096"
+    }
+  ],
+  "ports": [
+    {
+      "name": "ohbaby web",
+      "port": 4096
+    }
+  ]
+}
