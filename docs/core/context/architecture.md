@@ -33,12 +33,13 @@ durable truth
           ↓
 scoped active history
           ↓
-run snapshot + dynamic request inputs
+run snapshot + dynamic request inputs + step-local tool definitions
           ↓
 canonical model projection
           ↓
 PreparedModelRequest { messages, tools }
           ├─→ wire heuristic / ContextUsage
+          ├─→ final attribution / ContextOccupancyComposition?
           └─→ Lifecycle provider request
                   ↓
              TokenUsage/cache observation
@@ -158,6 +159,10 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队；R3/R4 通过 store
 - summary 每次 Provider attempt 只观测 `attempt/estimatedHistoryTokens/droppedRounds`；token 值明确只是 history heuristic，round 数为累计值，不记录 message 正文或额外通用状态。
 - durable commit 先于 success event；subscriber 错误不得回滚已提交状态。
 - primary UI 只消费 `UiContextWindowUsage` tracker；child scope 不显示 session-only 聚合的伪精确窗口。
+- `ContextUsage` 继续只承载窗口控制总量；七类 `ContextOccupancyComposition` 是最终 `PreparedTurn` 的 optional 解释字段，不参与 compaction 决策。
+- composition 只从 compaction/reduction 后的最终 context、实际 request 与同一步 definitions 计算一次；重建 messages 与 final request 不一致或缺少非空 tool schema provenance 时省略整份 composition，不猜来源。
+- `context:prepared` 的 `usage + composition?` 经 worker 进入 stream bridge：raw event 分支更新 primary UI tracker，run-event-source 分支重建 LifecycleEvent；total-only 更新整对象覆盖并清旧 composition。
+- Web 顶栏和 Web `/status` 可解释七类；TUI footer 与 TUI `/status` 本轮仍只显示总量。Provider cache 是独立事实，不进入 composition；命中率展示留给下一轮 cache 通道。
 - resume/replay 不重新发布历史 observable event，也不重新调用 LLM。
 
 ## 九、架构取舍
