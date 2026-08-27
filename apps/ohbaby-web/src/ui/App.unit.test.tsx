@@ -1775,6 +1775,14 @@ describe("OhbabyWebApp slash command interactions", () => {
       "Subagent exchanges~0",
     ]);
     expect(contextRow?.textContent).not.toContain("Cache");
+    const cacheRow = Array.from(
+      app.container.querySelectorAll(".ohb-status-result > div"),
+    ).find((row) => row.querySelector("span")?.textContent === "cache");
+    expect(
+      Array.from(cacheRow?.querySelectorAll("span") ?? []).map(
+        (part) => part.textContent,
+      ),
+    ).toEqual(["cache", "hit 61%"]);
   });
 
   it("keeps slash rows on the same grid when argsHint is absent", async () => {
@@ -3096,6 +3104,12 @@ async function showStatusModal(fake: FakeRuntime): Promise<void> {
               sessionId: "session_1",
             },
             permission: { level: "default", mode: "auto" },
+            promptCacheUsage: {
+              accountedInputTokens: 10_000,
+              cacheReadShare: 0.614,
+              cacheReadTokens: 6_140,
+              sessionId: "session_1",
+            },
             projectRoot: "/repo",
             sessionId: "session_1",
             status: "idle",

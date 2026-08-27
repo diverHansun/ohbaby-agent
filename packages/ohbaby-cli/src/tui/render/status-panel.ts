@@ -1,4 +1,4 @@
-import type { UiContextWindowUsage } from "ohbaby-sdk";
+import type { UiContextWindowUsage, UiPromptCacheUsage } from "ohbaby-sdk";
 import { formatContextWindowUsage } from "./usage.js";
 
 const LABEL_WIDTH = 8;
@@ -23,6 +23,9 @@ export function renderStatusPanel(data: Record<string, unknown>): string {
   const tools = formatTools(getRecord(data, "tools"));
   const mcps = formatMcps(getRecord(data, "mcps"));
   const projectRoot = getString(data, "projectRoot");
+  const promptCacheUsage = toPromptCacheUsage(
+    getRecord(data, "promptCacheUsage"),
+  );
 
   if (sessionId) {
     rows.push(row("Session", sessionId));
@@ -34,6 +37,9 @@ export function renderStatusPanel(data: Record<string, unknown>): string {
     rows.push(row("Model", model));
   }
   rows.push(row("Context", formatContextWindow(data)));
+  if (promptCacheUsage) {
+    rows.push(row("Cache", formatPromptCacheUsage(promptCacheUsage)));
+  }
   if (tools) {
     rows.push(row("Tools", tools));
   }
@@ -45,6 +51,59 @@ export function renderStatusPanel(data: Record<string, unknown>): string {
   }
 
   return ["╭─ Status ─", ...rows, "╰──────────"].join("\n");
+}
+
+function formatPromptCacheUsage(usage: UiPromptCacheUsage): string {
+  return usage.cacheReadShare === null
+    ? "hit —"
+    : `hit ${String(Math.round(usage.cacheReadShare * 100))}%`;
+}
+
+function toPromptCacheUsage(
+  record: Record<string, unknown> | undefined,
+): UiPromptCacheUsage | null {
+  if (!record) {
+    return null;
+  }
+  const accountedInputTokens = getNonNegativeInteger(
+    record,
+    "accountedInputTokens",
+  );
+  const cacheReadTokens = getNonNegativeInteger(record, "cacheReadTokens");
+  const sessionId = getNonEmptyString(record, "sessionId");
+  const cacheReadShare = record.cacheReadShare;
+  if (
+    accountedInputTokens === undefined ||
+    cacheReadTokens === undefined ||
+    sessionId === undefined ||
+    cacheReadTokens > accountedInputTokens
+  ) {
+    return null;
+  }
+  if (accountedInputTokens === 0) {
+    return cacheReadTokens === 0 && cacheReadShare === null
+      ? {
+          accountedInputTokens,
+          cacheReadShare,
+          cacheReadTokens,
+          sessionId,
+        }
+      : null;
+  }
+  if (
+    typeof cacheReadShare !== "number" ||
+    !Number.isFinite(cacheReadShare) ||
+    cacheReadShare < 0 ||
+    cacheReadShare > 1
+  ) {
+    return null;
+  }
+  return {
+    accountedInputTokens,
+    cacheReadShare,
+    cacheReadTokens,
+    sessionId,
+  };
 }
 
 function row(label: string, value: string): string {
@@ -104,7 +163,9 @@ function formatPermission(
   return mode && level ? `${mode} / ${level}` : undefined;
 }
 
-function formatTools(tools: Record<string, unknown> | undefined): string | null {
+function formatTools(
+  tools: Record<string, unknown> | undefined,
+): string | null {
   if (!tools) {
     return null;
   }
@@ -155,6 +216,27 @@ function getString(
 ): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function getNonEmptyString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = getString(record, key);
+  return value && value.length > 0 ? value : undefined;
+}
+
+function getNonNegativeInteger(
+  record: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = getNumber(record, key);
+  return value !== undefined &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value >= 0
+    ? value
+    : undefined;
 }
 
 function getNumber(
