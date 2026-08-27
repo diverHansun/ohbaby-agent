@@ -180,8 +180,22 @@ savedTokens
 | per-turn compaction count | session + scope | 新 turn/reset |
 | mutation lane owner/queue | session + scope | 进程内；store 事务内的 selected-Part snapshot precondition 防跨 manager stale commit |
 | UI context window tracker | primary session | projection，可从后续请求重建；total-only 更新清旧 composition |
+| UI prompt-cache tracker | primary session | 进程内 session 累计；compact/换模型不清，归档/删除/dispose 清理 |
 
 这些状态不是模型事实；重建后的模型 view 必须等价，但允许上述明确数值重新校准。
+
+`UiPromptCacheUsage` 是与 `UiContextWindowUsage` 平级且分离的 `/status` 投影：
+
+```typescript
+interface UiPromptCacheUsage {
+  readonly sessionId: string
+  readonly accountedInputTokens: number
+  readonly cacheReadTokens: number
+  readonly cacheReadShare: number | null
+}
+```
+
+它累计同一主代理 session 历次可信 run 的输入分桶，`cacheReadShare = cacheReadTokens / accountedInputTokens`；无可信样本时分母、read 均为 0 且 share 为 `null`。它不描述当前窗口库存，不进入 occupancy composition 或 snapshot，compact 与换模型也不回减/清空。完整可信规则和生命周期见 [session-cache-hit](../../problem-lists/2026-08-27-session-cache-hit/README.md)。
 
 ## 六、Tool exchange 与 deterministic repair
 
@@ -236,6 +250,7 @@ type CompactionTerminalOutcome =
 | Atomic compaction commit | MessageManager/MessageStore | one durable transaction | 可选 summary + 全部 compacted marks；全成或全不成 |
 | Context event | Context/adapter | in-process | 非事实，best effort |
 | UI window | tracker | primary projection | 可重建 projection |
+| UI prompt-cache usage | UI adapter tracker | primary session、in-process | provider usage 的累计 projection；非窗口事实 |
 
 `CompressionResult.status="skipped"` 时，`reason` 对当前可观测分支显式区分：
 

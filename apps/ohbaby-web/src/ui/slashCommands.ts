@@ -5,7 +5,7 @@ import {
   type UiWebCommandCatalog,
   type UiWebCommandSpec,
 } from "ohbaby-sdk";
-import type { UiContextWindowUsage } from "ohbaby-sdk";
+import type { UiContextWindowUsage, UiPromptCacheUsage } from "ohbaby-sdk";
 import type { CommandNotice } from "../api/daemon/wire.js";
 import type { HeaderModel, ViewModel } from "./selectors.js";
 
@@ -166,6 +166,7 @@ export function statusRows(
     ? data.contextWindow
     : undefined;
   const model = isRecord(data?.model) ? data.model : undefined;
+  const promptCacheUsage = statusPromptCacheUsage(data);
   const rows = [
     {
       label: "session",
@@ -188,6 +189,14 @@ export function statusRows(
         formatContextWindow(contextWindow) ??
         (header.contextLabel === "0 / 0" ? "pending" : header.contextLabel),
     },
+    ...(promptCacheUsage === null
+      ? []
+      : [
+          {
+            label: "cache",
+            value: formatPromptCacheUsage(promptCacheUsage),
+          },
+        ]),
     { label: "connection", value: header.connectionKind },
     {
       label: "permission",
@@ -202,6 +211,50 @@ export function statusRows(
     { label: "status", value: stringValue(data?.status) ?? "idle" },
   ];
   return rows.filter((row) => row.value.length > 0);
+}
+
+export function statusPromptCacheUsage(
+  data: Record<string, unknown> | null,
+): UiPromptCacheUsage | null {
+  const value = isRecord(data?.promptCacheUsage)
+    ? data.promptCacheUsage
+    : undefined;
+  const accountedInputTokens = nonNegativeInteger(value?.accountedInputTokens);
+  const cacheReadTokens = nonNegativeInteger(value?.cacheReadTokens);
+  const sessionId = stringValue(value?.sessionId);
+  const cacheReadShare = value?.cacheReadShare;
+  if (
+    accountedInputTokens === undefined ||
+    cacheReadTokens === undefined ||
+    sessionId === undefined ||
+    cacheReadTokens > accountedInputTokens
+  ) {
+    return null;
+  }
+  if (accountedInputTokens === 0) {
+    return cacheReadTokens === 0 && cacheReadShare === null
+      ? {
+          accountedInputTokens,
+          cacheReadShare,
+          cacheReadTokens,
+          sessionId,
+        }
+      : null;
+  }
+  if (
+    typeof cacheReadShare !== "number" ||
+    !Number.isFinite(cacheReadShare) ||
+    cacheReadShare < 0 ||
+    cacheReadShare > 1
+  ) {
+    return null;
+  }
+  return {
+    accountedInputTokens,
+    cacheReadShare,
+    cacheReadTokens,
+    sessionId,
+  };
 }
 
 export function statusContextWindowUsage(
@@ -308,6 +361,12 @@ function formatContextWindow(
   return current !== undefined && limit !== undefined
     ? `${compactNumber(current)} / ${compactNumber(limit)}`
     : undefined;
+}
+
+function formatPromptCacheUsage(usage: UiPromptCacheUsage): string {
+  return usage.cacheReadShare === null
+    ? "hit —"
+    : `hit ${String(Math.round(usage.cacheReadShare * 100))}%`;
 }
 
 function compactNumber(value: number): string {

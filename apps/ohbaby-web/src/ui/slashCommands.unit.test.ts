@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UiWebCommandCatalog } from "ohbaby-sdk";
 import type { CommandNotice } from "../api/daemon/wire.js";
+import type { HeaderModel, ViewModel } from "./selectors.js";
 import {
   createCommandResultModel,
   createSlashPaletteItems,
@@ -8,6 +9,8 @@ import {
   selectedSlashItem,
   slashCompletionSuffix,
   statusContextWindowUsage,
+  statusPromptCacheUsage,
+  statusRows,
 } from "./slashCommands.js";
 
 function commandCatalog(): UiWebCommandCatalog {
@@ -93,6 +96,46 @@ function commandCatalog(): UiWebCommandCatalog {
       },
     ],
     version: "commands-v1",
+  };
+}
+
+function statusModels(): {
+  readonly header: HeaderModel;
+  readonly view: ViewModel;
+} {
+  const header: HeaderModel = {
+    connectionKind: "idle",
+    contextLabel: "38k / 100k",
+    contextRatio: 0.38,
+    contextWindowUsage: null,
+    modelLabel: "model-a",
+    statusLabel: "Idle",
+  };
+  return {
+    header,
+    view: {
+      activeGoal: null,
+      activeSession: null,
+      activeTodoList: null,
+      commandCatalogVersion: null,
+      commandNotices: [],
+      composer: {
+        canSend: true,
+        canStop: false,
+        disabled: false,
+        hint: "",
+        isRunning: false,
+        mode: "auto",
+        permissionLevel: "default",
+      },
+      error: null,
+      header,
+      isEmpty: true,
+      pendingPermissions: [],
+      queuedPrompts: [],
+      reasoningByMessageId: {},
+      snapshot: null,
+    },
   };
 }
 
@@ -227,5 +270,117 @@ describe("ohbaby-web slash commands UI helpers", () => {
 
     expect(usage).not.toBeNull();
     expect(usage).not.toHaveProperty("composition");
+  });
+
+  it("inserts a cache row after context with rounded session share", () => {
+    const { header, view } = statusModels();
+    const rows = statusRows(
+      {
+        promptCacheUsage: {
+          accountedInputTokens: 10_000,
+          cacheReadShare: 0.614,
+          cacheReadTokens: 6_140,
+          sessionId: "session_1",
+        },
+      },
+      header,
+      view,
+    );
+
+    expect(rows.find((row) => row.label === "cache")).toEqual({
+      label: "cache",
+      value: "hit 61%",
+    });
+    expect(rows.map((row) => row.label).slice(1, 5)).toEqual([
+      "model",
+      "context",
+      "cache",
+      "connection",
+    ]);
+  });
+
+  it.each([
+    {
+      expectedShare: null,
+      expectedValue: "hit —",
+      input: {
+        accountedInputTokens: 0,
+        cacheReadShare: null,
+        cacheReadTokens: 0,
+        sessionId: "session_1",
+      },
+    },
+    {
+      expectedShare: 0,
+      expectedValue: "hit 0%",
+      input: {
+        accountedInputTokens: 100,
+        cacheReadShare: 0,
+        cacheReadTokens: 0,
+        sessionId: "session_1",
+      },
+    },
+  ])(
+    "accepts cache usage state $expectedShare",
+    ({ expectedShare, expectedValue, input }) => {
+      const data = { promptCacheUsage: input };
+      const { header, view } = statusModels();
+      expect(statusPromptCacheUsage(data)?.cacheReadShare).toBe(expectedShare);
+      expect(statusRows(data, header, view)).toContainEqual({
+        label: "cache",
+        value: expectedValue,
+      });
+    },
+  );
+
+  it.each([
+    {},
+    { promptCacheUsage: null },
+    {
+      promptCacheUsage: {
+        accountedInputTokens: 100,
+        cacheReadShare: 0.5,
+        cacheReadTokens: 101,
+        sessionId: "session_1",
+      },
+    },
+    {
+      promptCacheUsage: {
+        accountedInputTokens: 100,
+        cacheReadShare: Number.NaN,
+        cacheReadTokens: 50,
+        sessionId: "session_1",
+      },
+    },
+    {
+      promptCacheUsage: {
+        accountedInputTokens: 100,
+        cacheReadShare: 1.1,
+        cacheReadTokens: 50,
+        sessionId: "session_1",
+      },
+    },
+    {
+      promptCacheUsage: {
+        accountedInputTokens: 0,
+        cacheReadShare: 0,
+        cacheReadTokens: 0,
+        sessionId: "session_1",
+      },
+    },
+    {
+      promptCacheUsage: {
+        accountedInputTokens: 100,
+        cacheReadShare: 0.5,
+        cacheReadTokens: 50,
+        sessionId: "",
+      },
+    },
+  ])("fails closed for absent or malformed cache usage", (data) => {
+    const { header, view } = statusModels();
+    expect(statusPromptCacheUsage(data)).toBeNull();
+    expect(
+      statusRows(data, header, view).map((row) => row.label),
+    ).not.toContain("cache");
   });
 });

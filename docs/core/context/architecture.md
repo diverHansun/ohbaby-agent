@@ -162,7 +162,7 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队；R3/R4 通过 store
 - `ContextUsage` 继续只承载窗口控制总量；七类 `ContextOccupancyComposition` 是最终 `PreparedTurn` 的 optional 解释字段，不参与 compaction 决策。
 - composition 只从 compaction/reduction 后的最终 context、实际 request 与同一步 definitions 计算一次；重建 messages 与 final request 不一致或缺少非空 tool schema provenance 时省略整份 composition，不猜来源。
 - `context:prepared` 的 `usage + composition?` 经 worker 进入 stream bridge：raw event 分支更新 primary UI tracker，run-event-source 分支重建 LifecycleEvent；total-only 更新整对象覆盖并清旧 composition。
-- Web 顶栏和 Web `/status` 可解释七类；TUI footer 与 TUI `/status` 本轮仍只显示总量。Provider cache 是独立事实，不进入 composition；命中率展示留给下一轮 cache 通道。
+- Web 顶栏和 Web `/status` 可解释七类；TUI footer 与 TUI `/status` 的 Context 行仍只显示总量。Provider cache 是独立事实，不进入 composition；Web/TUI `/status` 通过独立 `promptCacheUsage` 投影在 Context 后显示 session 累计命中率，见 [session-cache-hit](../../problem-lists/2026-08-27-session-cache-hit/README.md)。
 - resume/replay 不重新发布历史 observable event，也不重新调用 LLM。
 
 ## 九、架构取舍

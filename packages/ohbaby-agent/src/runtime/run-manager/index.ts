@@ -11,6 +11,8 @@ export type {
   HookExecutor,
   MultitaskStrategy,
   RunCompletion,
+  RunCompletionObservation,
+  RunCompletionObserver,
   RunContext,
   RunDefaults,
   RunDefaultsPolicy,

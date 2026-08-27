@@ -28,6 +28,7 @@ import {
   type RunDefaultsPolicy,
   type RunHookContext,
   type RunLifecycle,
+  type RunCompletionObserver,
   type SandboxLease,
   type SandboxManager,
 } from "./index.js";
@@ -346,6 +347,10 @@ class CompletingLifecycle implements RunLifecycle {
 }
 
 class UsageLifecycle implements RunLifecycle {
+  constructor(
+    private readonly terminalReason?: LifecycleResult["terminalReason"],
+  ) {}
+
   async *run(
     params: LifecycleSessionParams,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
@@ -361,6 +366,9 @@ class UsageLifecycle implements RunLifecycle {
       success: true,
       finishReason: "stop",
       finalResponse: "done",
+      ...(this.terminalReason === undefined
+        ? {}
+        : { terminalReason: this.terminalReason }),
       usage: {
         inputTokens: 7,
         outputTokens: 5,
@@ -761,6 +769,7 @@ function createManagerWithOverrides(input: {
   readonly lifecycle: RunLifecycle;
   readonly bridge?: StreamBridge;
   readonly hookExecutor?: HookExecutor;
+  readonly onRunCompleted?: RunCompletionObserver;
   readonly sandboxManager?: SandboxManager;
 }): ManagerFixture {
   const fixture = createManager(input.lifecycle);
@@ -769,6 +778,9 @@ function createManagerWithOverrides(input: {
     runLedger: fixture.ledger,
     streamBridge: input.bridge ?? fixture.bridge,
     hookExecutor: input.hookExecutor ?? fixture.hooks,
+    ...(input.onRunCompleted === undefined
+      ? {}
+      : { onRunCompleted: input.onRunCompleted }),
     sandboxManager: input.sandboxManager ?? fixture.sandboxManager,
     policy,
     now: createClock(10_000),
@@ -1152,6 +1164,118 @@ describe("RunManager", () => {
     });
   });
 
+  it("observes completed usage exactly once across repeated waits", async () => {
+    const observations: Parameters<RunCompletionObserver>[0][] = [];
+    const { manager } = createManagerWithOverrides({
+      lifecycle: new UsageLifecycle(),
+      onRunCompleted(observation): void {
+        observations.push(observation);
+      },
+    });
+    const record = await manager.create({
+      directory: "D:/repo",
+      isSubagent: false,
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await Promise.all([
+      manager.waitForCompletion(record.runId),
+      manager.waitForCompletion(record.runId),
+    ]);
+
+    expect(observations).toEqual([
+      {
+        isSubagent: false,
+        sessionId: "session_1",
+        usage: {
+          inputTokens: 7,
+          outputTokens: 5,
+          totalTokens: 12,
+          usageComplete: true,
+        },
+      },
+    ]);
+  });
+
+  it("does not let a completion observer failure reject the run", async () => {
+    const { manager } = createManagerWithOverrides({
+      lifecycle: new UsageLifecycle(),
+      onRunCompleted(): void {
+        throw new Error("projection failed");
+      },
+    });
+    const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
+      status: "succeeded",
+      usage: {
+        inputTokens: 7,
+        outputTokens: 5,
+        totalTokens: 12,
+        usageComplete: true,
+      },
+    });
+  });
+
+  it("preserves returned usage when cancellation lands in the post-run hook", async () => {
+    const managerRef: { current?: RunManager } = {};
+    const observations: Parameters<RunCompletionObserver>[0][] = [];
+    const hookExecutor: HookExecutor = {
+      execute(point, context): Promise<void> {
+        if (point === "post-run") {
+          managerRef.current?.cancel(context.runId, "late cancellation");
+        }
+        return Promise.resolve();
+      },
+    };
+    const fixture = createManagerWithOverrides({
+      hookExecutor,
+      lifecycle: new UsageLifecycle("completed"),
+      onRunCompleted(observation): void {
+        observations.push(observation);
+      },
+    });
+    managerRef.current = fixture.manager;
+    const record = await fixture.manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await expect(
+      fixture.manager.waitForCompletion(record.runId),
+    ).resolves.toEqual({
+      error: "late cancellation",
+      status: "cancelled",
+      terminalReason: "cancelled",
+      usage: {
+        inputTokens: 7,
+        outputTokens: 5,
+        totalTokens: 12,
+        usageComplete: true,
+      },
+    });
+    expect(observations).toEqual([
+      {
+        sessionId: "session_1",
+        usage: {
+          inputTokens: 7,
+          outputTokens: 5,
+          totalTokens: 12,
+          usageComplete: true,
+        },
+      },
+    ]);
+  });
+
   it("forwards maxSteps to the lifecycle", async () => {
     const lifecycle = new CompletingLifecycle();
     const { manager } = createManager(lifecycle);
@@ -1313,7 +1437,13 @@ describe("RunManager", () => {
 
   it("propagates cancel through AbortSignal and marks the run cancelled", async () => {
     const lifecycle = new AbortAwareLifecycle();
-    const { manager, ledger, bridge } = createManager(lifecycle);
+    const observations: Parameters<RunCompletionObserver>[0][] = [];
+    const { manager, ledger, bridge } = createManagerWithOverrides({
+      lifecycle,
+      onRunCompleted(observation): void {
+        observations.push(observation);
+      },
+    });
     const record = await manager.create({
       directory: "D:/repo",
       modelId: "fake-model",
@@ -1328,12 +1458,14 @@ describe("RunManager", () => {
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "cancelled",
       error: "user requested stop",
+      terminalReason: "cancelled",
     });
     await expect(ledger.get(record.runId)).resolves.toMatchObject({
       status: "cancelled",
       error: "user requested stop",
     });
-    expect(bridge.endedScopes).toEqual(["run/run_1"]);
+    expect(bridge.endedScopes).toEqual(["run/run_override"]);
+    expect(observations).toEqual([{ sessionId: "session_1" }]);
   });
 
   it("resolves completion and closes the stream when sandbox release fails", async () => {
@@ -1458,6 +1590,7 @@ describe("RunManager", () => {
     await expect(manager.waitForCompletion(first.runId)).resolves.toEqual({
       status: "cancelled",
       error: "interrupted by replacement run",
+      terminalReason: "cancelled",
     });
     await expect(manager.waitForCompletion(second.runId)).resolves.toEqual({
       status: "succeeded",

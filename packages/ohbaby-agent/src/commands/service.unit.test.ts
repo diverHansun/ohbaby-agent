@@ -813,8 +813,16 @@ describe("CommandService", () => {
       sessionId: "session_1",
     };
     const getContextWindowUsage = vi.fn(() => contextWindowUsage);
+    const promptCacheUsage = {
+      accountedInputTokens: 10_000,
+      cacheReadShare: 0.61,
+      cacheReadTokens: 6_100,
+      sessionId: "session_1",
+    };
+    const getPromptCacheUsage = vi.fn(() => promptCacheUsage);
     const { events, service } = createServiceHarness({
       getContextWindowUsage,
+      getPromptCacheUsage,
       getProjectRoot() {
         return "D:/Projects/app";
       },
@@ -861,6 +869,9 @@ describe("CommandService", () => {
     expect(getContextWindowUsage).toHaveBeenCalledWith({
       sessionId: "session_1",
     });
+    expect(getPromptCacheUsage).toHaveBeenCalledWith({
+      sessionId: "session_1",
+    });
     const statusOutput = dataOutputFrom(events.at(-1));
     expect(statusOutput?.data).not.toHaveProperty("context");
     expect(statusOutput).toMatchObject({
@@ -878,6 +889,7 @@ describe("CommandService", () => {
           mode: "auto",
           sessionRules: [],
         },
+        promptCacheUsage,
         projectRoot: "D:/Projects/app",
         sessionId: "session_1",
         skillsCount: 2,
@@ -947,6 +959,26 @@ describe("CommandService", () => {
           mode: "auto",
           sessionRules: [],
         },
+        sessionId: "session_1",
+        status: "idle",
+      },
+      kind: "data",
+      subject: "status",
+    });
+  });
+
+  it("keeps /status available when prompt cache usage cannot refresh", async () => {
+    const { events, service } = createServiceHarness({
+      getPromptCacheUsage() {
+        throw new Error("cache usage unavailable");
+      },
+    });
+
+    await service.executeCommand(makeInvocation("status", ["status"]));
+
+    expect(dataOutputFrom(events.at(-1))).toMatchObject({
+      data: {
+        promptCacheUsage: null,
         sessionId: "session_1",
         status: "idle",
       },

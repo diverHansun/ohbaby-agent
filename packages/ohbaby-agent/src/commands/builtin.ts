@@ -6,6 +6,7 @@ import type {
   UiCommandSpec,
   UiCommandSurface,
   UiContextWindowUsage,
+  UiPromptCacheUsage,
 } from "ohbaby-sdk";
 import type {
   CommandHandler,
@@ -234,22 +235,45 @@ async function getStatusContextWindowUsage(
   }
 }
 
+async function getStatusPromptCacheUsage(
+  options: CommandServiceOptions,
+  sessionId: string | undefined,
+): Promise<UiPromptCacheUsage | null> {
+  if (!sessionId || !options.getPromptCacheUsage) {
+    return null;
+  }
+  try {
+    return await options.getPromptCacheUsage({ sessionId });
+  } catch {
+    return null;
+  }
+}
+
 async function handleStatus(
   options: CommandServiceOptions,
   invocation: UiCommandInvocation,
   context: CommandRunContext,
 ): Promise<void> {
   const permission = currentPermissionState(options);
-  const [models, model, tools, skills, mcpServers, contextWindow, projectRoot] =
-    await Promise.all([
-      listModels(options),
-      currentModel(options),
-      options.tools?.listTools() ?? [],
-      listSkills(options),
-      listMcpServers(options),
-      getStatusContextWindowUsage(options, invocation.sessionId),
-      options.getProjectRoot?.() ?? null,
-    ]);
+  const [
+    models,
+    model,
+    tools,
+    skills,
+    mcpServers,
+    contextWindow,
+    promptCacheUsage,
+    projectRoot,
+  ] = await Promise.all([
+    listModels(options),
+    currentModel(options),
+    options.tools?.listTools() ?? [],
+    listSkills(options),
+    listMcpServers(options),
+    getStatusContextWindowUsage(options, invocation.sessionId),
+    getStatusPromptCacheUsage(options, invocation.sessionId),
+    options.getProjectRoot?.() ?? null,
+  ]);
   context.emitOutput(
     dataOutput("status", {
       contextWindow,
@@ -257,6 +281,7 @@ async function handleStatus(
       model,
       models,
       permission,
+      promptCacheUsage,
       projectRoot,
       sessionId: invocation.sessionId ?? null,
       skillsCount: skills.length,

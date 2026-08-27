@@ -856,6 +856,7 @@ function sanitizeStatusPanelData(
     "contextWindow",
     "mcps",
     "permission",
+    "promptCacheUsage",
     "projectRoot",
     "sessionId",
     "skillsCount",

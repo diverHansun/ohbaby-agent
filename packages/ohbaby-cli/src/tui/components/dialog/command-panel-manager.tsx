@@ -9,6 +9,10 @@ import type { ReactElement } from "react";
 import { useRef, useState } from "react";
 import { useTuiLayout } from "../../layout/context.js";
 import { formatContextWindowUsage } from "../../render/usage.js";
+import {
+  formatPromptCacheUsage,
+  toPromptCacheUsage,
+} from "../../render/status-panel.js";
 import { useTheme } from "../../theme/index.js";
 import type {
   CommandPanelState,
@@ -220,6 +224,9 @@ function StatusPanel({
   const tools = getRecord(data, "tools");
   const mcps = getRecord(data, "mcps");
   const contextWindow = toContextWindowUsage(getRecord(data, "contextWindow"));
+  const promptCacheUsage = toPromptCacheUsage(
+    getRecord(data, "promptCacheUsage"),
+  );
 
   return (
     <Box flexDirection="column">
@@ -234,6 +241,12 @@ function StatusPanel({
         label="Context"
         value={formatUsageOrUnavailable(contextWindow)}
       />
+      {promptCacheUsage ? (
+        <PanelRow
+          label="Cache"
+          value={formatPromptCacheUsage(promptCacheUsage)}
+        />
+      ) : null}
       <PanelRow label="Tools" value={formatTools(tools)} />
       <PanelRow label="MCP" value={formatMcpSummary(mcps)} />
       <PanelRow label="Project" value={getString(data, "projectRoot")} />
