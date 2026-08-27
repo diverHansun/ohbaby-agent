@@ -26,7 +26,10 @@ import { serializeForLlm } from "./serializer.js";
 import { createScopedExclusiveLane } from "./scoped-exclusive-lane.js";
 import { shrinkSummaryHistory } from "./summary-overflow.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
-import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
+import {
+  estimateContextOccupancyComposition,
+  estimatePreparedRequestHeuristic,
+} from "./token-estimation.js";
 import {
   decideCompactionRung,
   getContextUsage,
@@ -1595,6 +1598,16 @@ export function createContextManager(
           });
     const usage = finalMeasurement.usage;
     const request = finalMeasurement.request;
+    const composition = estimateContextOccupancyComposition(
+      {
+        activeReasoningByMessageId: input.activeReasoningByMessageId,
+        context: reducedFinalContext,
+        request,
+        tailDirectives: input.tailDirectives,
+        toolDefinitions: input.toolDefinitions,
+      },
+      options.tokenCounter,
+    );
 
     options.bus.publish(ContextEvent.TurnPrepared, {
       ...scopedEventIdentity(input.sessionId, input.contextScopeId),
@@ -1607,6 +1620,7 @@ export function createContextManager(
     return {
       assembledAt: finalContext.assembledAt,
       compaction,
+      ...(composition === undefined ? {} : { composition }),
       hasSummary: finalContext.hasSummary,
       request,
       sentHeuristic: finalMeasurement.sentHeuristic,

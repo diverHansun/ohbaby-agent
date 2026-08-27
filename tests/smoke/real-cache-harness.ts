@@ -653,7 +653,10 @@ export async function createRealCacheHarness(
         visible,
       );
       latestEpochs.set(scopeKey(sessionId, contextScopeId), snapshot.epoch);
-      return toOpenAiTools(snapshot.tools);
+      return {
+        definitions: snapshot.tools,
+        requestTools: toOpenAiTools(snapshot.tools),
+      };
     },
     toolScheduler: scheduler,
   });

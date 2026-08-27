@@ -10,12 +10,14 @@ import type {
 import type {
   CompactResult,
   ContextManager,
+  ContextOccupancyComposition,
   ContextUsage,
   PreparedTurn,
 } from "../context/index.js";
 import type { MessageManager } from "../message/index.js";
 import type {
   ToolCallResult,
+  ToolDefinition,
   ToolExecutionEnvironment,
   ToolSchedulerInstance,
 } from "../tool-scheduler/index.js";
@@ -27,11 +29,13 @@ export interface LifecycleDeps {
   readonly contextManager: ContextManager;
   readonly resolveTools?: (
     input: LifecycleToolResolutionInput,
-  ) =>
-    | Promise<ChatCompletionCreateParams["tools"] | undefined>
-    | ChatCompletionCreateParams["tools"]
-    | undefined;
+  ) => Promise<ResolvedStepTools | undefined> | ResolvedStepTools | undefined;
   readonly generateToolCallId?: () => string;
+}
+
+export interface ResolvedStepTools {
+  readonly definitions: readonly ToolDefinition[];
+  readonly requestTools: ChatCompletionCreateParams["tools"];
 }
 
 export interface LifecycleToolResolutionInput {
@@ -131,6 +135,7 @@ export type LifecycleEvent =
       readonly step: number;
       readonly timestamp: number;
       readonly usage: ContextUsage;
+      readonly composition?: ContextOccupancyComposition;
       readonly compaction?: CompactResult;
       readonly hasSummary: boolean;
     }
