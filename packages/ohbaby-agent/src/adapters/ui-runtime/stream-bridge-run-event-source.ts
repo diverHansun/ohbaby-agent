@@ -12,6 +12,10 @@ type LlmCompleteEvent = Extract<
   LifecycleEvent,
   { readonly type: "llm:complete" }
 >;
+type PreparedComposition = Extract<
+  LifecycleEvent,
+  { readonly type: "context:prepared" }
+>["composition"];
 
 function objectData(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -86,6 +90,34 @@ function tokenUsageData(value: unknown): LlmCompleteEvent["tokenUsage"] {
     inputTokens,
     outputTokens,
     totalTokens: inputTokens + outputTokens,
+  };
+}
+
+function contextCompositionData(value: unknown): PreparedComposition {
+  const data = objectData(value);
+  if (!data) {
+    return undefined;
+  }
+  const keys = [
+    "system-prompt",
+    "builtin-tools",
+    "mcp",
+    "skills",
+    "conversation",
+    "summarized-conversation",
+    "subagent-exchanges",
+  ] as const;
+  if (keys.some((key) => !nonNegativeInteger(data[key]))) {
+    return undefined;
+  }
+  return {
+    "system-prompt": data["system-prompt"] as number,
+    "builtin-tools": data["builtin-tools"] as number,
+    mcp: data.mcp as number,
+    skills: data.skills as number,
+    conversation: data.conversation as number,
+    "summarized-conversation": data["summarized-conversation"] as number,
+    "subagent-exchanges": data["subagent-exchanges"] as number,
   };
 }
 
@@ -250,6 +282,7 @@ function lifecycleEventFromStream(
     };
   }
   if (item.event === "run.context.prepared") {
+    const composition = contextCompositionData(data.composition);
     return {
       ...scopeData(data),
       compaction: data.compaction as Extract<
@@ -261,6 +294,7 @@ function lifecycleEventFromStream(
       step: numberData(data, "step") ?? 0,
       timestamp,
       type: "context:prepared",
+      ...(composition === undefined ? {} : { composition }),
       usage: data.usage as Extract<
         LifecycleEvent,
         { readonly type: "context:prepared" }

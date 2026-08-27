@@ -796,6 +796,15 @@ describe("CommandService", () => {
 
   it("aggregates extended backend status fields", async () => {
     const contextWindowUsage = {
+      composition: {
+        "system-prompt": 10_000,
+        "builtin-tools": 5_000,
+        mcp: 2_000,
+        skills: 1_000,
+        conversation: 15_000,
+        "summarized-conversation": 4_000,
+        "subagent-exchanges": 1_400,
+      },
       contextWindowRatio: 0.0384,
       contextWindowTokens: 1_000_000,
       currentTokens: 38_400,

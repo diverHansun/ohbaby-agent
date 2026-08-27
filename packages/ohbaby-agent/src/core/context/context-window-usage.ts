@@ -1,9 +1,10 @@
 import type { UiContextWindowUsage } from "ohbaby-sdk";
-import type { ContextUsage } from "./types.js";
+import type { ContextOccupancyComposition, ContextUsage } from "./types.js";
 
 export interface ContextWindowUsageInput {
   readonly sessionId: string;
   readonly usage: ContextUsage;
+  readonly composition?: ContextOccupancyComposition;
   readonly now?: () => string;
 }
 
@@ -14,6 +15,7 @@ export interface ContextWindowUsageTracker {
   updateFromContextUsage(
     sessionId: string,
     usage: ContextUsage,
+    composition?: ContextOccupancyComposition,
   ): UiContextWindowUsage | null;
 }
 
@@ -34,6 +36,9 @@ export function contextUsageToContextWindowUsage(
     contextWindowRatio: currentTokens / contextWindowTokens,
     contextWindowTokens,
     currentTokens,
+    ...(input.composition === undefined
+      ? {}
+      : { composition: input.composition }),
     estimatedAt: input.now?.() ?? new Date().toISOString(),
     modelId: input.usage.modelId,
     sessionId: input.sessionId,
@@ -62,8 +67,10 @@ export function createContextWindowUsageTracker(
     updateFromContextUsage(
       sessionId: string,
       usage: ContextUsage,
+      composition?: ContextOccupancyComposition,
     ): UiContextWindowUsage | null {
       const contextWindowUsage = contextUsageToContextWindowUsage({
+        ...(composition === undefined ? {} : { composition }),
         now,
         sessionId,
         usage,

@@ -266,8 +266,7 @@ export class RunWorker {
       ...(this.context.initiatingUserMessageId === undefined
         ? {}
         : {
-            initiatingUserMessageId:
-              this.context.initiatingUserMessageId,
+            initiatingUserMessageId: this.context.initiatingUserMessageId,
           }),
       ...(this.context.parentMessageId === undefined
         ? {}
@@ -372,6 +371,10 @@ export class RunWorker {
           timestamp: event.timestamp,
           step: event.step,
           usage: safeJsonValue(event.usage),
+          composition:
+            event.composition === undefined
+              ? undefined
+              : safeJsonValue(event.composition),
           compaction:
             event.compaction === undefined
               ? undefined

@@ -422,6 +422,15 @@ class SessionLifecycle implements RunLifecycle {
       type: "context:compacting",
     };
     yield {
+      composition: {
+        "system-prompt": 2,
+        "builtin-tools": 1,
+        mcp: 0,
+        skills: 0,
+        conversation: 5,
+        "summarized-conversation": 4,
+        "subagent-exchanges": 0,
+      },
       compaction: {
         status: "compacted",
         usageAfter: {
@@ -817,6 +826,12 @@ describe("RunManager", () => {
       bridge.events.find((event) => event.event === "run.context.prepared")
         ?.data,
     ).toMatchObject({
+      composition: {
+        "system-prompt": 2,
+        "builtin-tools": 1,
+        conversation: 5,
+        "summarized-conversation": 4,
+      },
       compaction: {
         status: "compacted",
       },
@@ -1047,9 +1062,7 @@ describe("RunManager", () => {
     await manager.waitForCompletion(resume.runId);
 
     expect(
-      lifecycle.calls.find(
-        (call) => call.contextScopeId === "subagent_scope",
-      ),
+      lifecycle.calls.find((call) => call.contextScopeId === "subagent_scope"),
     ).toMatchObject({
       initiatingUserMessageId: "user_subagent",
       parentMessageId: "parent_subagent",

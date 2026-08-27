@@ -38,6 +38,66 @@ describe("createStreamBridgeRunEventSource", () => {
     await expect(iterator.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("preserves context composition on prepared events", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const source = createStreamBridgeRunEventSource(streamBridge);
+    const iterator = source.subscribeRunEvents("run_1")[Symbol.asyncIterator]();
+    const composition = {
+      "system-prompt": 10,
+      "builtin-tools": 20,
+      mcp: 30,
+      skills: 40,
+      conversation: 50,
+      "summarized-conversation": 60,
+      "subagent-exchanges": 70,
+    };
+
+    streamBridge.publish("run/run_1", "run.context.prepared", {
+      composition,
+      hasSummary: true,
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 123,
+      usage: {
+        contextLimit: 1_000,
+        currentTokens: 280,
+        modelId: "fake-model",
+        remainingTokens: 720,
+        usageRatio: 0.28,
+      },
+    });
+
+    await expect(nextEvent(iterator)).resolves.toMatchObject({
+      composition,
+      hasSummary: true,
+      sessionId: "session_1",
+      step: 2,
+      timestamp: 123,
+      type: "context:prepared",
+    });
+
+    streamBridge.publish("run/run_1", "run.context.prepared", {
+      composition: { ...composition, conversation: 50.5 },
+      hasSummary: true,
+      sessionId: "session_1",
+      step: 3,
+      timestamp: 124,
+      usage: {
+        contextLimit: 1_000,
+        currentTokens: 281,
+        modelId: "fake-model",
+        remainingTokens: 719,
+        usageRatio: 0.281,
+      },
+    });
+    const malformed = await nextEvent(iterator);
+    expect(malformed).toMatchObject({ step: 3, type: "context:prepared" });
+    expect(malformed).not.toHaveProperty("composition");
+
+    streamBridge.end("run/run_1");
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+  });
+
   it("translates llm start events from the run stream", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const source = createStreamBridgeRunEventSource(streamBridge);

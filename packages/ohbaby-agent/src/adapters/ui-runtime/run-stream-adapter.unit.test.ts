@@ -375,7 +375,18 @@ describe("startRunStreamProjection", () => {
       timestamp: () => "2026-05-26T00:00:01.000Z",
     });
 
+    projection.start();
+
     streamBridge.publish("run/run_1", "run.context.prepared", {
+      composition: {
+        "system-prompt": 10_000,
+        "builtin-tools": 5_000,
+        mcp: 2_000,
+        skills: 1_000,
+        conversation: 15_000,
+        "summarized-conversation": 4_000,
+        "subagent-exchanges": 1_400,
+      },
       hasSummary: false,
       runId: "run_1",
       sessionId: "session_1",
@@ -390,20 +401,62 @@ describe("startRunStreamProjection", () => {
         usageRatio: 38_400 / 950_000,
       },
     });
-    streamBridge.end("run/run_1");
+    await vi.waitFor(() => {
+      expect(contextWindowUsage.get("session_1")).toEqual({
+        composition: {
+          "system-prompt": 10_000,
+          "builtin-tools": 5_000,
+          mcp: 2_000,
+          skills: 1_000,
+          conversation: 15_000,
+          "summarized-conversation": 4_000,
+          "subagent-exchanges": 1_400,
+        },
+        contextWindowRatio: 0.0384,
+        contextWindowTokens: 1_000_000,
+        currentTokens: 38_400,
+        estimatedAt: "2026-06-06T00:00:00.000Z",
+        modelId: "deepseek-v4-pro",
+        sessionId: "session_1",
+      });
+    });
 
-    projection.start();
+    streamBridge.publish("run/run_1", "run.context.prepared", {
+      composition: {
+        "system-prompt": 10_000,
+        "builtin-tools": 5_000,
+        mcp: 2_000,
+        skills: 1_000,
+        conversation: 15_000.5,
+        "summarized-conversation": 4_000,
+        "subagent-exchanges": 1_400,
+      },
+      hasSummary: false,
+      runId: "run_1",
+      sessionId: "session_1",
+      step: 3,
+      timestamp: 4,
+      usage: {
+        contextLimit: 1_000_000,
+        currentTokens: 40_000,
+        inputBudgetTokens: 950_000,
+        modelId: "deepseek-v4-pro",
+        remainingTokens: 910_000,
+        usageRatio: 40_000 / 950_000,
+      },
+    });
+    streamBridge.end("run/run_1");
     await projection.done;
 
     expect(contextWindowUsage.get("session_1")).toEqual({
-      contextWindowRatio: 0.0384,
+      contextWindowRatio: 0.04,
       contextWindowTokens: 1_000_000,
-      currentTokens: 38_400,
+      currentTokens: 40_000,
       estimatedAt: "2026-06-06T00:00:00.000Z",
       modelId: "deepseek-v4-pro",
       sessionId: "session_1",
     });
-    expect(publish).toHaveBeenCalledWith({
+    expect(publish).toHaveBeenLastCalledWith({
       type: "context.window.updated",
       usage: contextWindowUsage.get("session_1"),
     });
