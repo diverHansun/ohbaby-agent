@@ -5,6 +5,15 @@ describe("renderStatusPanel", () => {
   it("renders a bordered status panel with context window usage", () => {
     const panel = renderStatusPanel({
       contextWindow: {
+        composition: {
+          "system-prompt": 10_000,
+          "builtin-tools": 5_000,
+          mcp: 2_000,
+          skills: 1_000,
+          conversation: 15_000,
+          "summarized-conversation": 4_000,
+          "subagent-exchanges": 1_400,
+        },
         contextWindowRatio: 0.0384,
         contextWindowTokens: 1_000_000,
         currentTokens: 38_400,
@@ -43,6 +52,8 @@ describe("renderStatusPanel", () => {
     expect(panel).toContain("│ Permission auto / default");
     expect(panel).toContain("│ Model    GPT-5.5");
     expect(panel).toContain("│ Context  38.4K / 1M (4%)");
+    expect(panel).not.toContain("System prompt");
+    expect(panel).not.toContain("Subagent exchanges");
     expect(panel).toContain("│ Tools    1 builtin, 1 module, 1 skill, 1 mcp");
     expect(panel).toContain("│ MCP      1 connected");
     expect(panel).toContain("│ Project  D:/Projects/app");
