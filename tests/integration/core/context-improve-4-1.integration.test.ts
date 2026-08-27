@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { UiEvent, UiSnapshot } from "ohbaby-sdk";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
 import {
+  createContextWindowUsageTracker,
   createContextManager,
   type ContextLLMClient,
+  type ContextOccupancyComposition,
   type PreparedModelRequest,
   type ContextUsage,
   type MemoryReader,
@@ -23,6 +25,14 @@ import {
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
 import type { ToolSchedulerInstance } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
 import { createInProcessUiBackendClient } from "../../../packages/ohbaby-agent/src/adapters/ui-inprocess.js";
+import { startRunStreamProjection } from "../../../packages/ohbaby-agent/src/adapters/ui-runtime/run-stream-adapter.js";
+import { createInMemoryUiStateStore } from "../../../packages/ohbaby-agent/src/adapters/ui-state/index.js";
+import { RunWorker } from "../../../packages/ohbaby-agent/src/runtime/run-manager/worker.js";
+import type {
+  RunContext,
+  RunRecord,
+} from "../../../packages/ohbaby-agent/src/runtime/run-manager/index.js";
+import { createInMemoryStreamBridge } from "../../../packages/ohbaby-agent/src/runtime/stream-bridge/index.js";
 
 interface FakeSdkClient {
   readonly kind: "fake";
@@ -73,21 +83,172 @@ function fakeLlmClient(input: {
 }
 
 async function consumeLifecycle(loop: ReturnType<Lifecycle["run"]>): Promise<{
+  readonly compositions: readonly (ContextOccupancyComposition | undefined)[];
   readonly result: Awaited<ReturnType<typeof loop.next>>["value"];
   readonly usages: ContextUsage[];
 }> {
+  const compositions: (ContextOccupancyComposition | undefined)[] = [];
   const usages: ContextUsage[] = [];
   let next = await loop.next();
   while (!next.done) {
     if (next.value.type === "context:prepared") {
+      compositions.push(next.value.composition);
       usages.push(next.value.usage);
     }
     next = await loop.next();
   }
-  return { result: next.value, usages };
+  return { compositions, result: next.value, usages };
 }
 
 describe("context improve-4.1 integration", () => {
+  it("round-trips production-resolved composition through worker, bridge, and the primary tracker", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const user = await messageManager.createMessage({
+      agent: "build",
+      role: "user",
+      sessionId: "session_roundtrip",
+    });
+    await messageManager.appendPart(user.id, {
+      text: "Use read_file if useful",
+      type: "text",
+    });
+    const contextManager = createContextManager({
+      bus,
+      llmClient: {
+        generateSummary: vi
+          .fn<ContextLLMClient["generateSummary"]>()
+          .mockResolvedValue("summary"),
+      },
+      memory: {
+        load: vi
+          .fn()
+          .mockResolvedValue({ global: "", merged: "", project: "" }),
+      },
+      messageManager,
+      systemPromptProvider: {
+        build: vi.fn().mockResolvedValue("stable system prompt"),
+      },
+      tokenCounter: {
+        estimateTokens: (content) => content.length,
+        getLimit: () => 100_000,
+      },
+    });
+    const requests: ProviderRequest[] = [];
+    const lifecycle = new Lifecycle({
+      contextManager,
+      llmClient: fakeLlmClient({
+        batches: [[{ finishReason: "stop", textDelta: "done" }]],
+        requests,
+      }),
+      messageManager,
+      resolveTools: () => ({
+        definitions: [
+          {
+            category: "readonly",
+            description: "Read one file",
+            name: "read_file",
+            parameters: { type: "object" },
+            source: "builtin",
+          },
+        ],
+        requestTools: [
+          {
+            function: {
+              description: "Read one file",
+              name: "read_file",
+              parameters: { type: "object" },
+            },
+            type: "function",
+          },
+        ],
+      }),
+      toolScheduler: {
+        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const contextWindowUsage = createContextWindowUsageTracker({
+      now: () => "2026-08-27T00:00:00.000Z",
+    });
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_roundtrip",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-08-27T00:00:00.000Z",
+          id: "session_roundtrip",
+          messages: [],
+          title: "Roundtrip",
+          updatedAt: "2026-08-27T00:00:00.000Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_roundtrip" },
+    });
+    const projection = startRunStreamProjection({
+      assistantMessageId: "assistant_roundtrip",
+      autoStart: false,
+      contextWindowUsage,
+      nextMessageId: () => "message_next",
+      publish: vi.fn(),
+      runId: "run_roundtrip",
+      sessionId: "session_roundtrip",
+      stateStore,
+      streamBridge,
+      timestamp: () => "2026-08-27T00:00:01.000Z",
+    });
+    const abortController = new AbortController();
+    const context: RunContext = {
+      abortSignal: abortController.signal,
+      directory: "/repo",
+      initiatingUserMessageId: user.id,
+      modelId: "fake-model",
+      permissionProfileId: "interactive",
+      runId: "run_roundtrip",
+      sandboxLease: {} as RunContext["sandboxLease"],
+      sessionId: "session_roundtrip",
+      triggerSource: "user",
+    };
+    const run: RunRecord = {
+      createdAt: 1,
+      disconnectMode: "continue",
+      multitaskStrategy: "reject",
+      permissionProfileId: "interactive",
+      runId: "run_roundtrip",
+      sessionId: "session_roundtrip",
+      status: "pending",
+      triggerSource: "user",
+    };
+
+    projection.start();
+    const completion = await new RunWorker(context, {
+      lifecycle,
+      streamBridge,
+    }).start({ onRunning: () => Promise.resolve(), run });
+    streamBridge.end("run/run_roundtrip");
+    await projection.done;
+
+    expect(completion.status).toBe("succeeded");
+    expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual([
+      "read_file",
+    ]);
+    expect(
+      contextWindowUsage.get("session_roundtrip")?.composition?.[
+        "builtin-tools"
+      ],
+    ).toBeGreaterThan(0);
+    expect(contextWindowUsage.get("session_roundtrip")?.composition).toEqual(
+      expect.objectContaining({
+        conversation: expect.any(Number) as number,
+        "system-prompt": expect.any(Number) as number,
+      }),
+    );
+  });
+
   it("derives prompt names, measurement schemas, and provider schemas from one resolved tool set", async () => {
     const bus = createBus();
     const messageManager = createMessageManager({
@@ -150,7 +311,19 @@ describe("context improve-4.1 integration", () => {
         type: "function" as const,
       },
     ];
-    const resolveTools = vi.fn().mockResolvedValue(resolvedTools);
+    const resolvedToolDefinitions = [
+      {
+        category: "readonly" as const,
+        description: "Read one file",
+        name: "read_file",
+        parameters: { type: "object" },
+        source: "builtin" as const,
+      },
+    ];
+    const resolveTools = vi.fn().mockResolvedValue({
+      definitions: resolvedToolDefinitions,
+      requestTools: resolvedTools,
+    });
     const requests: ProviderRequest[] = [];
     const lifecycle = new Lifecycle({
       contextManager,
@@ -198,6 +371,7 @@ describe("context improve-4.1 integration", () => {
 
     expect(resolveTools).toHaveBeenCalledTimes(2);
     expect(requests[0]?.tools).toEqual(resolvedTools);
+    expect(regular.compositions[0]?.["builtin-tools"]).toBeGreaterThan(0);
     expect({
       messages: requests[0]?.messages,
       tools: requests[0]?.tools,
@@ -212,6 +386,7 @@ describe("context improve-4.1 integration", () => {
       ),
     );
     expect(requests[1]?.tools).toEqual([]);
+    expect(final.compositions[0]?.["builtin-tools"]).toBe(0);
     expect({
       messages: requests[1]?.messages,
       tools: requests[1]?.tools,
@@ -267,6 +442,14 @@ describe("context improve-4.1 integration", () => {
           title: "Primary",
           updatedAt: "2026-08-22T00:00:00.000Z",
         },
+        {
+          createdAt: "2026-08-22T00:00:00.000Z",
+          id: "session_static",
+          messages: [],
+          projectRoot,
+          title: "Static only",
+          updatedAt: "2026-08-22T00:00:00.000Z",
+        },
       ],
       status: { kind: "idle" },
     };
@@ -275,12 +458,14 @@ describe("context improve-4.1 integration", () => {
       initialSnapshot: snapshot,
       llmClient: fakeLlmClient({
         batches: [
+          [{ finishReason: "stop", textDelta: "seeded composition" }],
           [
             {
               finishReason: "stop",
               textDelta: "<state_snapshot>short</state_snapshot>",
             },
           ],
+          [{ finishReason: "stop", textDelta: "rebuilt composition" }],
         ],
         requests,
       }),
@@ -290,9 +475,17 @@ describe("context improve-4.1 integration", () => {
     const events: UiEvent[] = [];
     client.subscribeEvents((event) => events.push(event));
 
-    const staticUsage = await client.getContextWindowUsage({
+    const staticOnlyUsage = await client.getContextWindowUsage({
+      sessionId: "session_static",
+    });
+    expect(staticOnlyUsage).not.toHaveProperty("composition");
+    await client.submitPromptAndWait("seed a measured request", {
       sessionId: "session_1",
     });
+    const measuredUsage = await client.getContextWindowUsage({
+      sessionId: "session_1",
+    });
+    expect(measuredUsage?.composition).toBeDefined();
     const compact = await client.compactSession({ sessionId: "session_1" });
     const postCompactMessage = await messageManager.createMessage({
       agent: "build",
@@ -313,7 +506,7 @@ describe("context improve-4.1 integration", () => {
       sessionId: "session_1",
       surface: "tui",
     });
-    const windowEvent = events.find(
+    const windowEvent = events.findLast(
       (event): event is Extract<UiEvent, { type: "context.window.updated" }> =>
         event.type === "context.window.updated",
     );
@@ -327,17 +520,21 @@ describe("context improve-4.1 integration", () => {
     );
 
     expect(compact.status).toBe("compacted");
-    expect(staticUsage).toMatchObject({
+    expect(measuredUsage).toMatchObject({
+      composition: expect.any(Object) as object,
       contextWindowTokens: compact.usageBefore.contextLimit,
-      currentTokens: compact.usageBefore.currentTokens,
       modelId: compact.usageBefore.modelId,
     });
+    expect(measuredUsage?.currentTokens).toBeLessThanOrEqual(
+      compact.usageBefore.currentTokens,
+    );
     expect(compact.usageAfter.currentTokens).toBeLessThan(
       compact.usageBefore.currentTokens,
     );
     expect(windowEvent?.usage.currentTokens).toBe(
       compact.usageAfter.currentTokens,
     );
+    expect(windowEvent?.usage).not.toHaveProperty("composition");
     expect(statusEvent?.output).toMatchObject({
       data: { contextWindow: windowEvent?.usage },
       kind: "data",
@@ -346,6 +543,15 @@ describe("context improve-4.1 integration", () => {
     if (statusEvent?.output?.kind === "data") {
       expect(statusEvent.output.data).not.toHaveProperty("context");
     }
-    expect(requests).toHaveLength(1);
+    expect(requests).toHaveLength(2);
+
+    await client.submitPromptAndWait("rebuild measured composition", {
+      sessionId: "session_1",
+    });
+    const rebuiltUsage = await client.getContextWindowUsage({
+      sessionId: "session_1",
+    });
+    expect(rebuiltUsage?.composition).toBeDefined();
+    expect(requests).toHaveLength(3);
   });
 });

@@ -1751,6 +1751,32 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
+  it("replaces the /status context row with the seven-bucket detail", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    await showStatusModal(fake);
+
+    const contextRow = app.container.querySelector(".ohb-status-context-row");
+    expect(contextRow).not.toBeNull();
+    expect(
+      Array.from(
+        contextRow?.querySelectorAll(".ohb-context-composition-row") ?? [],
+      ).map((row) => row.textContent),
+    ).toEqual([
+      "System prompt~10K",
+      "Built-in tools~5K",
+      "MCP tools~2K",
+      "Skills~1K",
+      "Conversation~15K",
+      "Summarized conversation~4K",
+      "Subagent exchanges~0",
+    ]);
+    expect(contextRow?.textContent).not.toContain("Cache");
+  });
+
   it("keeps slash rows on the same grid when argsHint is absent", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -3017,6 +3043,65 @@ async function showSkillsModal(
           },
           kind: "data",
           subject: "skills",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.result.delivered",
+      },
+      3,
+    );
+    await Promise.resolve();
+  });
+  await waitFor(() =>
+    Boolean(fake.store.getSnapshot().view.commandNotices.length),
+  );
+}
+
+async function showStatusModal(fake: FakeRuntime): Promise<void> {
+  await act(async () => {
+    fake.store.applyEvent(
+      {
+        command: {
+          clientInvocationId: "invoke_status",
+          commandId: "status",
+          commandRunId: "command_status",
+          path: ["status"],
+          surface: "tui",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      },
+      2,
+    );
+    fake.store.applyEvent(
+      {
+        clientInvocationId: "invoke_status",
+        commandRunId: "command_status",
+        output: {
+          data: {
+            contextWindow: {
+              composition: {
+                "system-prompt": 10_000,
+                "builtin-tools": 5_000,
+                mcp: 2_000,
+                skills: 1_000,
+                conversation: 15_000,
+                "summarized-conversation": 4_000,
+                "subagent-exchanges": 0,
+              },
+              contextWindowRatio: 0.37,
+              contextWindowTokens: 100_000,
+              currentTokens: 37_000,
+              estimatedAt: timestamp,
+              modelId: "model-a",
+              sessionId: "session_1",
+            },
+            permission: { level: "default", mode: "auto" },
+            projectRoot: "/repo",
+            sessionId: "session_1",
+            status: "idle",
+          },
+          kind: "data",
+          subject: "status",
         },
         timestamp: Date.parse(timestamp),
         type: "command.result.delivered",

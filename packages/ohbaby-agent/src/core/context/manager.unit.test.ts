@@ -412,6 +412,15 @@ describe("ContextManager", () => {
         type: "function" as const,
       },
     ];
+    const toolDefinitions = [
+      {
+        category: "readonly" as const,
+        description: "Read a file",
+        name: "read_file",
+        parameters: { type: "object" },
+        source: "builtin" as const,
+      },
+    ];
 
     const messagesOnly = await manager.prepareTurn({
       directory: "D:/repo",
@@ -424,6 +433,14 @@ describe("ContextManager", () => {
       directory: "D:/repo",
       modelId: "model-a",
       sessionId: "session_1",
+      toolNames: ["read_file"],
+      tools,
+    });
+    const withToolDefinitions = await manager.prepareTurn({
+      directory: "D:/repo",
+      modelId: "model-a",
+      sessionId: "session_1",
+      toolDefinitions,
       toolNames: ["read_file"],
       tools,
     });
@@ -444,6 +461,12 @@ describe("ContextManager", () => {
     expect(withTools.usage.currentTokens).toBeGreaterThan(
       messagesOnly.usage.currentTokens,
     );
+    expect(withTools.composition).toBeUndefined();
+    expect(withToolDefinitions.request).toEqual(withTools.request);
+    expect(withToolDefinitions.composition?.["builtin-tools"]).toBeGreaterThan(
+      0,
+    );
+    expect(withToolDefinitions.composition?.conversation).toBeGreaterThan(0);
 
     manager.updateCalibrationFactor(
       "session_1",
@@ -454,12 +477,20 @@ describe("ContextManager", () => {
       directory: "D:/repo",
       modelId: "model-a",
       sessionId: "session_1",
+      toolDefinitions,
       toolNames: ["read_file"],
       tools,
     });
     expect(calibrated.usage.currentTokens).toBe(
       Math.round(calibrated.sentHeuristic * 1.5),
     );
+    expect(calibrated.composition).toEqual(withToolDefinitions.composition);
+    const compositionTokens = Object.values(
+      calibrated.composition ?? {},
+    ) as number[];
+    expect(
+      compositionTokens.reduce((total, tokens) => total + tokens, 0),
+    ).not.toBe(calibrated.usage.currentTokens);
   });
 
   it("includes tail directives in the measured request without persisting them", async () => {
@@ -1018,8 +1049,25 @@ describe("ContextManager", () => {
 
   it("compacts a request containing runtime context without duplicating it as a tail directive", async () => {
     const messageManager = createMessageManagerFixture();
+    const oldConversationMarker = "OLD_CONVERSATION_MUST_BE_COMPACTED";
+    const oldSubagentMarker = "OLD_SUBAGENT_MUST_BE_COMPACTED";
+    const oldSubagent = await messageManager.createMessage({
+      agent: "build",
+      role: "assistant",
+      sessionId: "session_1",
+    });
+    await messageManager.appendPart(oldSubagent.id, {
+      callId: "call_old_subagent",
+      state: {
+        input: { prompt: oldSubagentMarker },
+        output: oldSubagentMarker,
+        status: "completed",
+      },
+      tool: "subagent_run",
+      type: "tool",
+    });
     for (const [role, text] of [
-      ["user", "old user ".repeat(20)],
+      ["user", `${oldConversationMarker} ${"old user ".repeat(20)}`],
       ["assistant", "old assistant ".repeat(20)],
       ["user", "middle user ".repeat(20)],
       ["assistant", "middle assistant ".repeat(20)],
@@ -1078,6 +1126,15 @@ describe("ContextManager", () => {
       JSON.stringify(value).split(marker).length - 1;
 
     expect(prepared.compaction?.status).toBe("compacted");
+    expect(prepared.composition?.["summarized-conversation"]).toBeGreaterThan(
+      0,
+    );
+    expect(prepared.composition?.["system-prompt"]).toBeGreaterThan(0);
+    expect(prepared.composition?.["subagent-exchanges"]).toBe(0);
+    expect(JSON.stringify(prepared.request)).not.toContain(
+      oldConversationMarker,
+    );
+    expect(JSON.stringify(prepared.request)).not.toContain(oldSubagentMarker);
     expect(measurements.some((request) => markerCount(request) === 1)).toBe(
       true,
     );
@@ -2136,7 +2193,7 @@ describe("ContextManager", () => {
     expect(maskedEvent?.maskedPartIds).toContain("part_1");
   });
 
-  it("reuses unchanged projection measurements on the mask-off no-compaction path", async () => {
+  it("reuses request measurements and estimates final composition once on the unchanged path", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {
       sessionId: "session_1",
@@ -2165,7 +2222,7 @@ describe("ContextManager", () => {
       sessionId: "session_1",
     });
 
-    expect(wireEstimateCalls).toBe(2);
+    expect(wireEstimateCalls).toBe(4);
   });
 
   it("commits expected part snapshots without reloading memory", async () => {

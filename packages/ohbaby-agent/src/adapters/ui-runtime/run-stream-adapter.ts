@@ -8,6 +8,7 @@ import type {
 } from "ohbaby-sdk";
 import type {
   CompactResult,
+  ContextOccupancyComposition,
   ContextUsage,
   ContextWindowUsageTracker,
 } from "../../core/context/index.js";
@@ -79,6 +80,15 @@ export interface RunStreamProjection {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    Number.isFinite(value) &&
+    value >= 0
+    ? value
+    : undefined;
 }
 
 function eventData(event: StreamBridgeEvent): Record<string, unknown> {
@@ -514,6 +524,7 @@ export function startRunStreamProjection(
     const usage = options.contextWindowUsage.updateFromContextUsage(
       options.sessionId,
       data.usage as unknown as ContextUsage,
+      contextOccupancyComposition(data.composition),
     );
     if (!usage) {
       return;
@@ -522,6 +533,43 @@ export function startRunStreamProjection(
       type: "context.window.updated",
       usage,
     });
+  }
+
+  function contextOccupancyComposition(
+    value: unknown,
+  ): ContextOccupancyComposition | undefined {
+    if (!isRecord(value)) {
+      return undefined;
+    }
+    const systemPrompt = nonNegativeInteger(value["system-prompt"]);
+    const builtinTools = nonNegativeInteger(value["builtin-tools"]);
+    const mcp = nonNegativeInteger(value.mcp);
+    const skills = nonNegativeInteger(value.skills);
+    const conversation = nonNegativeInteger(value.conversation);
+    const summarizedConversation = nonNegativeInteger(
+      value["summarized-conversation"],
+    );
+    const subagentExchanges = nonNegativeInteger(value["subagent-exchanges"]);
+    if (
+      systemPrompt === undefined ||
+      builtinTools === undefined ||
+      mcp === undefined ||
+      skills === undefined ||
+      conversation === undefined ||
+      summarizedConversation === undefined ||
+      subagentExchanges === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      "system-prompt": systemPrompt,
+      "builtin-tools": builtinTools,
+      mcp,
+      skills,
+      conversation,
+      "summarized-conversation": summarizedConversation,
+      "subagent-exchanges": subagentExchanges,
+    };
   }
 
   function handleContextCompacting(): void {

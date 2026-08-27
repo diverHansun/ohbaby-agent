@@ -27,6 +27,7 @@ export interface HeaderModel {
   readonly statusLabel: string;
   readonly contextLabel: string;
   readonly contextRatio: number;
+  readonly contextWindowUsage: UiContextWindowUsage | null;
   readonly modelLabel: string;
 }
 
@@ -117,7 +118,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
       statusLabel: selectStatusLabel(snapshot.connectionState, runStatus),
       ...selectContextModel(
         daemonSnapshot,
-        activeSession?.id,
+        activeSessionId,
         snapshot.currentModel?.model,
       ),
     },
@@ -261,7 +262,7 @@ function selectStatusLabel(
 
 function selectContextModel(
   snapshot: UiSnapshot | null,
-  sessionId: string | undefined,
+  sessionId: string | null | undefined,
   configuredModel: string | undefined,
 ): Omit<HeaderModel, "connectionKind" | "statusLabel"> {
   const usage = selectContextUsage(snapshot, sessionId);
@@ -269,6 +270,7 @@ function selectContextModel(
     return {
       contextLabel: "0 / 0",
       contextRatio: 0,
+      contextWindowUsage: null,
       modelLabel: configuredModel ?? "model pending",
     };
   }
@@ -277,21 +279,24 @@ function selectContextModel(
       usage.contextWindowTokens,
     )}`,
     contextRatio: clamp01(usage.contextWindowRatio),
+    contextWindowUsage: usage,
     modelLabel: usage.modelId,
   };
 }
 
 function selectContextUsage(
   snapshot: UiSnapshot | null,
-  sessionId: string | undefined,
+  sessionId: string | null | undefined,
 ): UiContextWindowUsage | undefined {
-  if (!snapshot?.contextWindowUsages?.length) {
+  if (
+    !snapshot?.contextWindowUsages?.length ||
+    sessionId === null ||
+    sessionId === undefined
+  ) {
     return undefined;
   }
-  return (
-    snapshot.contextWindowUsages.find(
-      (usage) => usage.sessionId === sessionId,
-    ) ?? snapshot.contextWindowUsages[0]
+  return snapshot.contextWindowUsages.find(
+    (usage) => usage.sessionId === sessionId,
   );
 }
 

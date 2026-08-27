@@ -74,6 +74,7 @@ interface PreparedModelRequest {
 interface PreparedTurn {
   readonly request: PreparedModelRequest
   readonly usage: ContextUsage
+  readonly composition?: ContextOccupancyComposition
   readonly compaction?: CompactResult
   readonly assembledAt: number
   readonly hasSummary: boolean
@@ -81,7 +82,27 @@ interface PreparedTurn {
 }
 ```
 
-`request` 与 `usage/sentHeuristic` 必须来自同一次投影。`compaction` 解释本次 prepare 是否改变了 active view。
+`request` 与 `usage/sentHeuristic` 必须来自同一次投影。`compaction` 解释本次 prepare 是否改变了 active view。`composition` 是对 compaction/reduction 后最终请求的解释性估算，不进入 `ContextUsage`，也不改变阈值或预算语义。
+
+### 2.5 `ContextOccupancyComposition`
+
+```typescript
+interface ContextOccupancyComposition {
+  readonly "system-prompt": number
+  readonly "builtin-tools": number
+  readonly mcp: number
+  readonly skills: number
+  readonly conversation: number
+  readonly "summarized-conversation": number
+  readonly "subagent-exchanges": number
+}
+```
+
+- 七个值是用现有 `TokenCounter` 得出的非负整数 heuristic，允许加总不等于校准后的 `ContextUsage.currentTokens`；UI 必须用 `~` 表达分类估算。
+- runtime `model-context:runtime:v1` 按 provenance 归 `system-prompt`，不按物理 user wire role 归 Conversation。
+- context summary 单列；父窗口中的 `subagent_run/status/close` call 与回写单列，child transcript 不聚合进 primary。
+- tool schema 来源取同一步 `ToolDefinition.source`：`builtin/module → builtin-tools`、`mcp → mcp`、`skill → skills`；加载后的 SKILL.md 正文作为 tool result 归 Conversation。
+- 当最终 `request.messages` 与同一 final context/reasoning/tail directives 的重建结果不一致，或请求含非空 flattened tools 却没有同一步 definitions、两者名称/顺序不一致时，composition 整体省略。final step 同时把 definitions/request tools 清空。
 
 ## 三、Token 与预算语义
 
@@ -158,7 +179,7 @@ savedTokens
 | thrash lock | session + scope | 重置 |
 | per-turn compaction count | session + scope | 新 turn/reset |
 | mutation lane owner/queue | session + scope | 进程内；store 事务内的 selected-Part snapshot precondition 防跨 manager stale commit |
-| UI context window tracker | primary session | projection，可从后续请求重建 |
+| UI context window tracker | primary session | projection，可从后续请求重建；total-only 更新清旧 composition |
 
 这些状态不是模型事实；重建后的模型 view 必须等价，但允许上述明确数值重新校准。
 
@@ -210,6 +231,7 @@ type CompactionTerminalOutcome =
 | `AssembledContext` | Context | one assembly | MessageStore + run snapshot |
 | `PreparedModelRequest` | Context | one provider attempt | immutable prepared request |
 | `ContextUsage` | Context | one measurement | prepared request heuristic + budget |
+| `ContextOccupancyComposition` | Context | one final prepare | final context/request + step-local tool provenance |
 | Summary candidate | ContextLLMClient | one compaction attempt | 非事实，提交前可丢弃 |
 | Atomic compaction commit | MessageManager/MessageStore | one durable transaction | 可选 summary + 全部 compacted marks；全成或全不成 |
 | Context event | Context/adapter | in-process | 非事实，best effort |

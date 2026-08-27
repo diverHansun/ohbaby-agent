@@ -60,6 +60,7 @@ import type { CommandNotice } from "../api/daemon/wire.js";
 import type { WorkspaceSnapshot } from "../api/daemon/wire.js";
 import type { SearchApiKeyRequest } from "../api/daemon/wire.js";
 import { MarkdownBlock } from "./MarkdownBlock.js";
+import { ContextUsageControl, ContextUsageDetails } from "./ContextUsage.js";
 import { DirectoryPickerDialog } from "./directory-picker/DirectoryPickerDialog.js";
 import { isImeComposing } from "./ime.js";
 import {
@@ -78,6 +79,7 @@ import {
   selectedSlashItem,
   slashCommandLabel,
   slashCompletionSuffix,
+  statusContextWindowUsage,
   statusRows,
   type CommandResultModel,
   type SlashPaletteItem,
@@ -1275,6 +1277,8 @@ function StatusBar(props: {
   readonly header: HeaderModel;
   readonly onOpenGoalPanel: (intent?: GoalPanelIntent) => void;
 }): ReactElement {
+  const hasTrailingStatus =
+    props.header.contextWindowUsage !== null || props.activeGoal !== null;
   return (
     <header className="ohb-statusbar">
       <div className="ohb-brand" aria-label="ohbaby">
@@ -1293,15 +1297,8 @@ function StatusBar(props: {
         />
         <span className="ohb-divider" />
         <span className="ohb-model">{props.header.modelLabel}</span>
-        <span className="ohb-divider" />
-        <span className="ohb-context">
-          <span className="ohb-context-bar">
-            <span
-              style={{ width: `${String(props.header.contextRatio * 100)}%` }}
-            />
-          </span>
-          <span>{props.header.contextLabel}</span>
-        </span>
+        {hasTrailingStatus ? <span className="ohb-divider" /> : null}
+        <ContextUsageControl usage={props.header.contextWindowUsage} />
         <GoalStatusChip
           goal={props.activeGoal}
           onOpen={props.onOpenGoalPanel}
@@ -1648,15 +1645,24 @@ function StatusCommandResult(props: {
   readonly header: HeaderModel;
   readonly view: ViewModel;
 }): ReactElement {
+  const usage =
+    statusContextWindowUsage(props.data) ?? props.header.contextWindowUsage;
   return (
     <div className="ohb-command-modal-body">
       <div className="ohb-status-result">
-        {statusRows(props.data, props.header, props.view).map((row) => (
-          <div key={row.label}>
-            <span>{row.label}</span>
-            <span>{row.value}</span>
-          </div>
-        ))}
+        {statusRows(props.data, props.header, props.view).map((row) =>
+          row.label === "context" && usage?.composition ? (
+            <div className="ohb-status-context-row" key={row.label}>
+              <span>{row.label}</span>
+              <ContextUsageDetails usage={usage} />
+            </div>
+          ) : (
+            <div key={row.label}>
+              <span>{row.label}</span>
+              <span>{row.value}</span>
+            </div>
+          ),
+        )}
       </div>
     </div>
   );

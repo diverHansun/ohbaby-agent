@@ -1,93 +1,53 @@
-# StatusBar 状态栏组件
+# Context 占用状态 UI（Web / TUI）
 
-## 一、职责
+本文记录当前实现，不再使用旧版 `UiContextUsage`、`runtime.context.usedTokens` 或单行 `workingDirectory | model | ...` 草图。占用数据的权威契约是 SDK `UiContextWindowUsage`；Context 架构见 [architecture.md](../../core/context/architecture.md)，improve-6 交互细节见 [02-web-ui.md](../../core/context/improve-6/02-web-ui.md)。
 
-StatusBar 在终端底部固定显示系统运行状态的摘要信息，提供用户对当前环境的持续感知。它是只读展示组件，不包含任何交互逻辑。
+## 一、共享事实
 
-对应职责追溯：goals-duty.md D5（状态栏显示）。
+`UiContextWindowUsage` 按 session 保存：
 
-## 二、视觉结构
+- `currentTokens / contextWindowTokens / contextWindowRatio` 是窗口总占用；
+- `composition?` 是七类可选估算，不参与压缩控制；
+- 缓存命中率不是占用组成，本轮不显示；
+- active session 没有 usage 时不借用其他 session（尤其 child）的数值。
 
+## 二、Web 顶栏
+
+实现：`apps/ohbaby-web/src/ui/App.tsx` 的 `StatusBar` 与同目录 `ContextUsage.tsx`。
+
+```text
+[OHBABY]  status  ·  model  ·  (context ring)  ·  optional goal
 ```
-~/projects/myapp | claude-sonnet | Agent (auto) | 1.2k (10%) | main-session
-```
 
-状态栏为单行水平排列，各段之间以分隔符 `|` 间隔。当终端宽度不足时，优先保留左侧信息，右侧信息按优先级截断。
+- 无 usage：不渲染空环，只保留 model。
+- 有 usage：显示约 14px SVG 占用环；不再并排显示旧细条或 `used / window` 短标签。
+- hover/focus：tooltip 显示 `{n}% context used` 与 `~used / window tokens`。
+- click/Enter：打开轻量 popover；Escape、点外部或关闭按钮退出。
+- popover 始终显示总量；只有 `composition` 存在时才显示堆叠条和七行，禁止把缺失 composition 伪装成七个 0。
+- 七行固定为 System prompt、Built-in tools、MCP tools、Skills、Conversation、Summarized conversation、Subagent exchanges；0 值保留文字行但不画色段。
+- 环按钮包含百分比与 used/window 的 `aria-label`，使用 `aria-expanded`、`aria-haspopup="dialog"`；详情不只靠颜色表达。
 
-### 信息段定义
+Web `/status` 使用同一个 `ContextUsageDetails`：有 composition 时替换旧 context 粗行，无 composition 时保留旧单行总量。本轮不得出现 Cache 行。
 
-| 段 | 显示内容 | 优先级 | 示例 |
-|----|---------|--------|------|
-| 工作目录 | 项目根目录（缩写） | 高 | `~/projects/myapp` |
-| 模型名称 | 当前 LLM 模型 | 高 | `claude-sonnet` |
-| 运行模式 | 模式 + Agent 子状态 | 中 | `Agent (auto)` |
-| Token 用量 | 已消耗 + 占比 | 中 | `1.2k (10%)` |
-| 会话名称 | 当前会话标识 | 低 | `main-session` |
+## 三、TUI
 
-### 运行模式显示规则
+实现：
 
-| mode | agentState | 显示 |
-|------|-----------|------|
-| `ask` | -- | `Ask` |
-| `plan` | -- | `Plan` |
-| `agent` | `ask-before-edit` | `Agent (ask)` |
-| `agent` | `edit-automatically` | `Agent (auto)` |
+- 常驻 footer：`packages/ohbaby-cli/src/tui/app.tsx` + `render/usage.ts`；
+- `/status`：`components/dialog/command-panel-manager.tsx` / `render/status-panel.ts`。
 
-## 三、数据来源
+TUI 本轮锁定 total-only：
 
-StatusBar 从 TuiStore 的 `useRuntime()` selector 获取只读运行视图状态。它不再读取 ConfigContext 或 SessionContext。
+- 格式为 `38.4K / 1M (4%)`；非零且不足 1% 显示 `<1%`；
+- optional composition 到达 SDK/store 后继续忽略，不增加七行或 ASCII 堆叠条；
+- 缺 usage 时显示既有 unavailable 状态；
+- 本轮不显示 Cache 行。
 
-| 字段 | 类型 | 说明 | 上游事件 |
-|------|------|------|---------|
-| `workingDirectory` | string | 项目根目录 | `runtime.updated` |
-| `model` | UiModelSummary | 当前 provider/model | `runtime.updated` |
-| `mode` | string | 运行模式 | `runtime.updated` |
-| `agentState` | string | Agent 子状态 | `runtime.updated` |
-| `context` | UiContextUsage | token 用量和 context window 占比 | `runtime.updated` |
-| `activeSession` | UiSessionSummary 或 null | 当前会话摘要 | `runtime.updated` / `session.updated` |
+Web 的 `~` 是对解释性估算的诚实标注；TUI 沿用既有 formatter，不为了表面对齐改文案。
 
-### 3.3 Token 显示
+## 四、测试与变更边界
 
-Token 显示直接来自 runtime view state：
-
-1. **已消耗 token 数**：`runtime.context.usedTokens`，显示格式为缩写数字（如 `1.2k`、`15.3k`）。
-2. **Context 窗口占比**：`runtime.context.percentUsed`，表示当前会话占模型 context window 的百分比。
-
-组合显示格式：`{consumed} ({percent}%)`，例如 `1.2k (10%)`
-
-## 四、样式规则
-
-| 元素 | 颜色 | 说明 |
-|------|------|------|
-| 工作目录 | dimColor | 辅助信息 |
-| 模型名称 | accent（强调色） | 视觉焦点 |
-| 运行模式 | 默认文本色 | -- |
-| Token 用量 | 默认文本色 | -- |
-| 分隔符 `\|` | dimColor | 弱化 |
-| 会话名称 | dimColor | 辅助信息 |
-
-## 五、宽度适配
-
-终端宽度可能不足以显示所有信息段。StatusBar 采用优先级截断策略：
-
-1. 计算所有段的总宽度（含分隔符）
-2. 如果超出终端宽度，从最低优先级的段开始移除
-3. 截断顺序：会话名称 --> Token 用量 --> 运行模式
-4. 工作目录和模型名称始终保留（必要时截断路径为 `...` 后缀）
-
-宽度信息从 Ink 的 `useStdout().columns` 获取。
-
-## 六、设计约束
-
-1. **纯展示，无交互**：StatusBar 不响应键盘或鼠标事件
-2. **单行限制**：始终占据终端底部一行，不换行
-3. **不显示警告**：context 模块在 85% 阈值时自动触发压缩，StatusBar 只显示当前占比
-4. **更新频率控制**：runtime 更新由 TuiStore selector 控制，只在 runtime 切片引用变化时重渲染
-
-## 七、文档自检
-
-- [x] 5 个信息段全部定义，含优先级
-- [x] 数据来源追溯到 TuiStore runtime selector
-- [x] Token 双源显示逻辑已说明（consumed + percentUsed）
-- [x] 宽度适配策略已定义
-- [x] 运行模式的组合显示规则完整
+- Web：`ContextUsage.unit.test.tsx`、`App.unit.test.tsx`、`selectors.unit.test.ts`、`slashCommands.unit.test.ts`。
+- TUI：`render/usage.unit.test.ts`、`render/status-panel.unit.test.ts`。
+- compiled Web 与实际 TUI 进程仍需 smoke；完整发布门见 improve-6 [04-test-and-acceptance.md](../../core/context/improve-6/04-test-and-acceptance.md)。
+- 下一轮若实施 cache，只能增加独立的 cache 数据通道与显示行，不得画进占用环/堆叠条。

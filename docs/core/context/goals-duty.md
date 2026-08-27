@@ -86,6 +86,7 @@ durable store 是事实源。Context event 只用于观测，发布或订阅失�
 - 把 system、active history、active reasoning、tail directives 序列化为 Provider messages；
 - 把调用方已经解析的 ordered tools 放入同一请求；
 - 对同一个 wire heuristic 计算 `ContextUsage`；
+- 仅在最终 compaction/reduction 投影确定后，用同一步 tool definitions 对七类 `ContextOccupancyComposition` 估算一次；provenance 不足时省略而不猜测；
 - 返回深冻结的 `PreparedModelRequest`。
 
 ### D4：选择 compaction rung
@@ -115,6 +116,7 @@ calibration factor、mask cutoff、thrash lock 与 per-turn compaction count 按
 - 不负责 SystemPrompt 模板内容，只消费 `SystemPromptProvider`。
 - 不拥有 Message 实体；持久化、事务与查询由 Message port/adapter 提供。
 - 不把 UI tracker 当 child scope 的精确状态源。
+- 不解析 Provider cache 命中字段，也不把 cache 塞进 occupancy composition；cache 聚合与显示使用独立通道。
 - 不持久化 Provider observed-window adaptive ceiling；该能力另行设计。
 
 ## 五、依赖与方向
@@ -148,6 +150,7 @@ calibration factor、mask cutoff、thrash lock 与 per-turn compaction count 按
 - `ContextManager.disposeScope()` / `disposeSession()`
 - `PreparedModelRequest`
 - `ContextUsage`
+- `ContextOccupancyComposition`
 - `CompactResult`
 
 接口的实际 TypeScript 定义以 `packages/ohbaby-agent/src/core/context/types.ts` 为准；本文记录语义和责任，不复制全部字段。

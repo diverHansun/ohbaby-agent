@@ -409,7 +409,19 @@ describe("Lifecycle.run", () => {
         type: "function" as const,
       },
     ];
-    const resolveTools = vi.fn().mockResolvedValue(resolvedTools);
+    const resolvedToolDefinitions = [
+      {
+        category: "readonly" as const,
+        description: "Read a file",
+        name: "read_file",
+        parameters: { type: "object" },
+        source: "builtin" as const,
+      },
+    ];
+    const resolveTools = vi.fn().mockResolvedValue({
+      definitions: resolvedToolDefinitions,
+      requestTools: resolvedTools,
+    });
     const lifecycle = new Lifecycle({
       contextManager,
       llmClient: createSequentialFakeLLMClient(
@@ -463,6 +475,7 @@ describe("Lifecycle.run", () => {
         isSubagent: undefined,
         modelId: "fake-model",
         sessionId: "session_test",
+        toolDefinitions: resolvedToolDefinitions,
         toolNames: ["read_file"],
         tools: resolvedTools,
       }),
@@ -474,6 +487,7 @@ describe("Lifecycle.run", () => {
         isSubagent: undefined,
         modelId: "fake-model",
         sessionId: "session_test",
+        toolDefinitions: resolvedToolDefinitions,
         toolNames: ["read_file"],
         tools: resolvedTools,
       }),
@@ -1487,7 +1501,11 @@ describe("Lifecycle.run", () => {
     expect(requests[0]?.tools).toEqual([]);
     expect(resolveTools).toHaveBeenCalledOnce();
     expect(prepareTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ toolNames: ["read_file"], tools: [] }),
+      expect.objectContaining({
+        toolDefinitions: [],
+        toolNames: ["read_file"],
+        tools: [],
+      }),
     );
     expect(result).toMatchObject({
       finishReason: "error",
@@ -1837,7 +1855,19 @@ describe("Lifecycle.run", () => {
         type: "function" as const,
       },
     ];
-    const resolveTools = vi.fn().mockResolvedValue(resolvedTools);
+    const resolvedToolDefinitions = [
+      {
+        category: "readonly" as const,
+        description: "Read a file",
+        name: "read_file",
+        parameters: { type: "object" },
+        source: "builtin" as const,
+      },
+    ];
+    const resolveTools = vi.fn().mockResolvedValue({
+      definitions: resolvedToolDefinitions,
+      requestTools: resolvedTools,
+    });
     const lifecycle = new Lifecycle({
       contextManager: createContextManagerMock(prepareTurn, {
         assembleRequestFromInput: false,
@@ -1869,6 +1899,7 @@ describe("Lifecycle.run", () => {
         isSubagent: undefined,
         modelId: "fake-model",
         sessionId: "session_test",
+        toolDefinitions: resolvedToolDefinitions,
         tools: resolvedTools,
       }),
     );
@@ -1880,6 +1911,7 @@ describe("Lifecycle.run", () => {
         isSubagent: undefined,
         modelId: "fake-model",
         sessionId: "session_test",
+        toolDefinitions: resolvedToolDefinitions,
         tools: resolvedTools,
       }),
     );

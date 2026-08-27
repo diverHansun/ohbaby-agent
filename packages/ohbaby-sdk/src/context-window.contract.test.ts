@@ -28,6 +28,15 @@ function promptCompletion(): UiPromptCompletion {
 describe("context window UI contract", () => {
   it("represents session scoped context window usage in snapshots and events", () => {
     const usage: UiContextWindowUsage = {
+      composition: {
+        "system-prompt": 10_000,
+        "builtin-tools": 5_000,
+        mcp: 2_000,
+        skills: 1_000,
+        conversation: 15_000,
+        "summarized-conversation": 4_000,
+        "subagent-exchanges": 1_400,
+      },
       contextWindowRatio: 0.0384,
       contextWindowTokens: 1_000_000,
       currentTokens: 38_400,
@@ -55,6 +64,7 @@ describe("context window UI contract", () => {
       type: "context.window.updated",
       usage,
     });
+    expect(event.usage.composition?.["summarized-conversation"]).toBe(4_000);
   });
 
   it("allows message lifecycle metadata for precise reasoning folding", () => {

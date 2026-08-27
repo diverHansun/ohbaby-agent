@@ -1,14 +1,26 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InterfaceProviderRequest } from "../../packages/ohbaby-agent/src/services/interface-providers/index.js";
 import {
   assertAppendExtension,
   assertCacheableStablePrefix,
   CACHE_FIXTURE_FORCE_MARKER,
+  CACHE_FIXTURE_READ_TOOL,
+  createRealCacheHarness,
   installFixtureToolChoice,
   projectRequest,
   resolveAnthropicProfile,
   resolveOpenAiCompatibleProfile,
 } from "../smoke/real-cache-harness.js";
+
+function openAiSse(chunks: readonly unknown[]): Response {
+  return new Response(
+    `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`,
+    { headers: { "content-type": "text/event-stream" }, status: 200 },
+  );
+}
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -31,6 +43,97 @@ function request(
 }
 
 describe("real cache harness preflight", () => {
+  it("carries the resolved tool snapshot into the first provider request", async () => {
+    const evidenceDirectory = await mkdtemp(
+      join(tmpdir(), "ohbaby-cache-harness-unit-"),
+    );
+    const requests: Record<string, unknown>[] = [];
+    vi.stubEnv("OHBABY_CACHE_HARNESS_TEST_KEY", "test-only");
+    vi.stubEnv("OHBABY_REAL_CACHE_EVIDENCE_DIR", evidenceDirectory);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        requests.push(body);
+        if (requests.length === 1) {
+          return openAiSse([
+            {
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: '{"path":"fixture.txt"}',
+                          name: CACHE_FIXTURE_READ_TOOL,
+                        },
+                        id: "call_cache_fixture",
+                        index: 0,
+                        type: "function",
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                  index: 0,
+                },
+              ],
+            },
+            {
+              choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }],
+            },
+          ]);
+        }
+        return openAiSse([
+          {
+            choices: [
+              {
+                delta: { content: "done" },
+                finish_reason: null,
+                index: 0,
+              },
+            ],
+          },
+          {
+            choices: [{ delta: {}, finish_reason: "stop", index: 0 }],
+          },
+        ]);
+      }),
+    );
+    const harness = await createRealCacheHarness({
+      apiKeyEnv: "OHBABY_CACHE_HARNESS_TEST_KEY",
+      baseUrl: "https://cache-harness.invalid/v1",
+      interfaceProvider: "openai-compatible",
+      minimumCacheableTokens: 1,
+      model: "fixture-model",
+      provider: "fixture",
+    });
+
+    try {
+      const turn = await harness.runTurn({
+        maxSteps: 2,
+        prompt: `${CACHE_FIXTURE_FORCE_MARKER} read fixture.txt`,
+        sessionId: "session_tools",
+      });
+      const firstTools = requests[0]?.tools;
+
+      expect(Array.isArray(firstTools)).toBe(true);
+      expect(firstTools).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            function: expect.objectContaining({
+              name: CACHE_FIXTURE_READ_TOOL,
+            }),
+          }),
+        ]),
+      );
+      expect(turn.projections[0]?.toolNames).toContain(CACHE_FIXTURE_READ_TOOL);
+      expect(harness.fixtureExecutions()).toBe(1);
+    } finally {
+      await harness.close();
+      await rm(evidenceDirectory, { force: true, recursive: true });
+    }
+  });
+
   it("fails before provider setup when the configured cache threshold is too high", () => {
     const stableTokens = assertCacheableStablePrefix(4_096);
 

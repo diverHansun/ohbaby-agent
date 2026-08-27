@@ -735,7 +735,10 @@ describe("lifecycle tool scheduler integration", () => {
           visible,
         );
         epochs.push(snapshot.epoch);
-        return toOpenAiTools(snapshot.tools);
+        return {
+          definitions: snapshot.tools,
+          requestTools: toOpenAiTools(snapshot.tools),
+        };
       },
       toolScheduler: scheduler,
     });

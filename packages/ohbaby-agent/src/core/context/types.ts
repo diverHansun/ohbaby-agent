@@ -3,6 +3,7 @@ import type { ChatCompletionCreateParams } from "openai/resources/chat/completio
 import type { ChatCompletionMessage } from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
+import type { ToolDefinition } from "../tool-scheduler/index.js";
 import type { CompactionThresholds } from "./constants.js";
 
 export interface MemoryReader {
@@ -102,6 +103,16 @@ export interface ContextUsage {
   readonly modelId: string;
 }
 
+export interface ContextOccupancyComposition {
+  readonly "system-prompt": number;
+  readonly "builtin-tools": number;
+  readonly mcp: number;
+  readonly skills: number;
+  readonly conversation: number;
+  readonly "summarized-conversation": number;
+  readonly "subagent-exchanges": number;
+}
+
 export type CompressionStatus =
   | "compressed"
   | "skipped"
@@ -184,6 +195,7 @@ export interface PrepareTurnInput {
   /** Ephemeral model-only directives measured and sent exactly once, but never persisted. */
   readonly tailDirectives?: readonly ChatCompletionMessage[];
   readonly toolNames: readonly string[];
+  readonly toolDefinitions?: readonly ToolDefinition[];
   readonly tools: ChatCompletionCreateParams["tools"];
   readonly isSubagent?: boolean;
   readonly force?: boolean;
@@ -193,6 +205,7 @@ export interface PreparedTurn {
   /** The single measured request snapshot consumed by the provider call. */
   readonly request: PreparedModelRequest;
   readonly usage: ContextUsage;
+  readonly composition?: ContextOccupancyComposition;
   readonly compaction?: CompactResult;
   readonly assembledAt: number;
   readonly hasSummary: boolean;

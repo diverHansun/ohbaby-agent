@@ -351,14 +351,18 @@ export class Lifecycle {
       }
 
       const isFinalStep = step === maxSteps;
-      const resolvedTools =
+      const resolvedStepTools =
         (await this.deps.resolveTools?.({
           agentName: params.agent,
           contextScopeId: params.contextScopeId,
           isSubagent: params.isSubagent,
           sessionId: params.sessionId,
           step,
-        })) ?? params.tools;
+        })) ??
+        (params.tools === undefined
+          ? undefined
+          : { definitions: undefined, requestTools: params.tools });
+      const resolvedTools = resolvedStepTools?.requestTools;
       const toolNames = toolNamesFromSchemas(resolvedTools);
       promptSnapshot ??= await contextManager.createRunPromptSnapshot({
         ...(params.contextScopeId === undefined
@@ -374,6 +378,7 @@ export class Lifecycle {
         toolNames,
       });
       const tools = isFinalStep ? [] : resolvedTools;
+      const toolDefinitions = isFinalStep ? [] : resolvedStepTools?.definitions;
       const tailDirectives = isFinalStep
         ? [buildMaxStepsFinalizationMessage()]
         : undefined;
@@ -393,6 +398,7 @@ export class Lifecycle {
         sessionId: params.sessionId,
         ...(params.signal === undefined ? {} : { signal: params.signal }),
         step,
+        ...(toolDefinitions === undefined ? {} : { toolDefinitions }),
         toolNames,
         tools,
       });
@@ -487,6 +493,7 @@ export class Lifecycle {
           sessionId: params.sessionId,
           ...(params.signal === undefined ? {} : { signal: params.signal }),
           step,
+          ...(toolDefinitions === undefined ? {} : { toolDefinitions }),
           toolNames,
           tools,
         });
@@ -1124,6 +1131,9 @@ export class Lifecycle {
   }): LifecycleEvent {
     return {
       type: "context:prepared",
+      ...(input.prepared.composition === undefined
+        ? {}
+        : { composition: input.prepared.composition }),
       compaction: input.prepared.compaction,
       contextScopeId: input.contextScopeId,
       hasSummary: input.prepared.hasSummary,

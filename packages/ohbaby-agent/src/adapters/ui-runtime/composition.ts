@@ -15,6 +15,7 @@ import {
   type ContextUsage,
 } from "../../core/context/index.js";
 import { Lifecycle } from "../../core/lifecycle/index.js";
+import type { ResolvedStepTools } from "../../core/lifecycle/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
 import { createMemoryLoader } from "../../core/memory/index.js";
@@ -508,15 +509,18 @@ export async function createUiRuntimeComposition(
     contextManager,
     llmClient: options.llmClient,
     messageManager: options.messageManager,
-    resolveTools: async (input): Promise<ReturnType<typeof toOpenAiTools>> =>
-      toOpenAiTools(
-        await resolvePromptTools({
-          agentName: input.agentName,
-          contextScopeId: input.contextScopeId,
-          isSubagent: input.isSubagent ?? false,
-          sessionId: input.sessionId,
-        }),
-      ),
+    resolveTools: async (input): Promise<ResolvedStepTools> => {
+      const definitions = await resolvePromptTools({
+        agentName: input.agentName,
+        contextScopeId: input.contextScopeId,
+        isSubagent: input.isSubagent ?? false,
+        sessionId: input.sessionId,
+      });
+      return {
+        definitions,
+        requestTools: toOpenAiTools(definitions),
+      };
+    },
     toolScheduler,
   });
 
