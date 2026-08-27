@@ -57,6 +57,7 @@ export type {
   UiContextOccupancyComposition,
   UiContextWindowUsage,
 } from "./context-window.js";
+export type { UiPromptCacheUsage } from "./prompt-cache-usage.js";
 export type {
   UiCurrentModelConfig,
   UiConnectModelInput,
