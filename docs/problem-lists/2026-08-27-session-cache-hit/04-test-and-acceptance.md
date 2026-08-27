@@ -75,7 +75,7 @@
 | G6 文档 | Phase D 点名的 architecture、data-model、status-bar、context/lifecycle goals-duty 与 improve-6 README 全部同步 | 人工 diff + 文档审查 |
 | G7 真实 cache | 不要求 | 明确 skip，不写进本批 pass |
 
-建议命令（实施时按实际文件名调整）：
+验收命令基线（实际执行结果见 05）：
 
 ```text
 pnpm exec vitest run <prompt-cache-usage unit>

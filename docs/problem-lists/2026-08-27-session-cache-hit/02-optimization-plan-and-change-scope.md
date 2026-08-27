@@ -1,6 +1,6 @@
 # 2. 优化方案与改动面
 
-> 给后续开发会话的执行契约。本规划会话不写代码。
+> 开发前冻结的执行契约；当前实现与验收状态见 [05-implementation-acceptance.md](./05-implementation-acceptance.md)。
 
 ## 2.1 方案总览
 

@@ -1,8 +1,9 @@
 # session prompt-cache hit · `/status` 观测通道
 
-> 状态：**规划已按开发前讨论修订，待用户审查；本目录只含规划文档，不改生产代码。**
+> 状态：**已实施并完成审查与端到端验收，等待用户最终审核；尚未 push / merge。**
 > 日期：2026-08-27
 > 规划基线：`5774fe4`（`main`）
+> 实施 HEAD：`08d38cf`（本地分支 `docs/session-cache-hit-plan`）
 > 落点：`docs/problem-lists/2026-08-27-session-cache-hit/`
 >
 > 前序：[context improve-5](../../core/context/improve-5/README.md) 已冻结 provider-neutral usage 与 `observed`；[context improve-6](../../core/context/improve-6/README.md) 已落地占用七类 UI，并把 cache 设计冻在 00 §2.4、实施留到本批。improve-6 不再承接本议题。
@@ -39,7 +40,7 @@
 
 ## 3. 文档地图
 
-阅读顺序：README → 00 → 01 → 02 → 03 → 04。实施以 **02 + 04** 为准；与 00 冲突时先改文档。
+阅读顺序：README → 00 → 01 → 02 → 03 → 04 → 05。设计与实现以 **02 + 04** 为契约，实际交付与验收证据见 05。
 
 | 文档 | 作用 |
 |------|------|
@@ -48,7 +49,7 @@
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 实施契约 |
 | [03-reference-projects.md](./03-reference-projects.md) | dsh 可验证源码 / improve-6 UI 契约 / 明确不抄的设计 |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 测试与发布门 |
-| `05-implementation-acceptance.md` | 实施完成后由验收模式写入（规划期不存在） |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实际提交、测试、E2E 与审查结论 |
 
 02 不含关键改动清单（本规划会话用户未要求）。
 
@@ -61,8 +62,8 @@
 | [improve-6 04 §4.7](../../core/context/improve-6/04-test-and-acceptance.md) | 被本目录 04 **supersede** |
 | [context/goals-duty.md](../../core/context/goals-duty.md) | cache 不是 Context 职责；本批遵守 |
 | [llm-client/goals-duty.md](../../core/llm-client/goals-duty.md) | llm-client 只透传 usage、不管 session 统计；本批不把累加器放进去 |
-| [architecture.md §八](../../core/context/architecture.md) | 实施时改「命中率留给下一轮」为本目录 |
+| [architecture.md §八](../../core/context/architecture.md) | 已改为 session cache usage 独立观测通道，并指向本目录 |
 
-## 5. 实施入口
+## 5. 实施状态
 
-用户审查并明确允许后，再提交本分支文档并在**后续实施会话**按 02 + 04 改代码。当前阶段不提交、不实施。
+02 + 04 已按七个本地分批 commit 落地，代码、文档、Web/TUI E2E 和两轮子代理审查均已完成。当前分支保留给用户审核；在用户明确允许前不 push、不 merge `main`。完整记录见 [05-implementation-acceptance.md](./05-implementation-acceptance.md)。
