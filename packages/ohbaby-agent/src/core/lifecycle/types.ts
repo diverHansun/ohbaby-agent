@@ -34,7 +34,7 @@ export interface LifecycleDeps {
 }
 
 export interface ResolvedStepTools {
-  readonly definitions: readonly ToolDefinition[];
+  readonly definitions: readonly ToolDefinition[] | undefined;
   readonly requestTools: ChatCompletionCreateParams["tools"];
 }
 

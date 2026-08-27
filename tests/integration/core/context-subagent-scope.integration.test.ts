@@ -25,7 +25,7 @@ function createIds(): MessageIdGenerator {
 }
 
 describe("subagent scoped context integration", () => {
-  it("isolates primary and sibling child views inside one shared session", async () => {
+  it("keeps child transcripts out of the parent view and composition", async () => {
     const bus = createBus();
     const messageManager = createMessageManager({
       bus,
@@ -67,15 +67,25 @@ describe("subagent scoped context integration", () => {
         getLimit: () => 100_000,
       },
     });
-    const prepare = (contextScopeId?: string) =>
-      manager.prepareTurn({
+    const prepare = (contextScopeId?: string) => {
+      const toolName =
+        contextScopeId === "scope_b" ? "write_file" : "read_file";
+      return manager.prepareTurn({
         ...(contextScopeId === undefined ? {} : { contextScopeId }),
         directory: "/repo",
         isSubagent: contextScopeId !== undefined,
         modelId: "fake-model",
         sessionId: "shared_1",
-        toolNames:
-          contextScopeId === "scope_b" ? ["write_file"] : ["read_file"],
+        toolDefinitions: [
+          {
+            category: toolName === "write_file" ? "write" : "readonly",
+            description: `${toolName} description`,
+            name: toolName,
+            parameters: { type: "object" },
+            source: "builtin",
+          },
+        ],
+        toolNames: [toolName],
         tools:
           contextScopeId === "scope_b"
             ? [
@@ -97,6 +107,7 @@ describe("subagent scoped context integration", () => {
                 },
               ],
       });
+    };
 
     const [primary, scopeA, scopeB] = await Promise.all([
       prepare(),
@@ -117,6 +128,19 @@ describe("subagent scoped context integration", () => {
     expect(scopeBWire).not.toContain("primary-sentinel");
     expect(scopeBWire).not.toContain("scope-a-sentinel");
     expect(scopeB.request.tools?.[0]?.function.name).toBe("write_file");
+
+    expect(primary.composition).toBeDefined();
+    await append("scope-a-later-child-transcript", "scope_a");
+    const primaryAfterChildTranscript = await prepare();
+    expect(primaryAfterChildTranscript.composition).toEqual(
+      primary.composition,
+    );
+    expect(primaryAfterChildTranscript.usage.currentTokens).toBe(
+      primary.usage.currentTokens,
+    );
+    expect(JSON.stringify(primaryAfterChildTranscript.request)).not.toContain(
+      "scope-a-later-child-transcript",
+    );
 
     const primaryCacheKey = createScopedPromptCacheKey({
       sessionId: "shared_1",
