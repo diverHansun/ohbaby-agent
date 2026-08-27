@@ -2673,6 +2673,12 @@ describe("OhbabyTerminalApp", () => {
             mode: "auto",
             sessionRules: [],
           },
+          promptCacheUsage: {
+            accountedInputTokens: 1_000,
+            cacheReadShare: 0.614,
+            cacheReadTokens: 614,
+            sessionId: "session_1",
+          },
           projectRoot: "D:/Projects/Code-cli/ohbaby-agent",
           sessionId: "session_1",
           status: "idle",
@@ -2694,6 +2700,9 @@ describe("OhbabyTerminalApp", () => {
         nextFrame.includes("idle"),
     );
     expect(frame).toContain("38.4K / 1M (4%)");
+    expect(frame).toContain("Cache      hit 61%");
+    expect(frame.indexOf("Context")).toBeLessThan(frame.indexOf("Cache"));
+    expect(frame.indexOf("Cache")).toBeLessThan(frame.indexOf("Tools"));
 
     app.stdin.write("\u001B");
     await waitForFrame(

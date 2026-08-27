@@ -53,13 +53,13 @@ export function renderStatusPanel(data: Record<string, unknown>): string {
   return ["╭─ Status ─", ...rows, "╰──────────"].join("\n");
 }
 
-function formatPromptCacheUsage(usage: UiPromptCacheUsage): string {
+export function formatPromptCacheUsage(usage: UiPromptCacheUsage): string {
   return usage.cacheReadShare === null
     ? "hit —"
     : `hit ${String(Math.round(usage.cacheReadShare * 100))}%`;
 }
 
-function toPromptCacheUsage(
+export function toPromptCacheUsage(
   record: Record<string, unknown> | undefined,
 ): UiPromptCacheUsage | null {
   if (!record) {
