@@ -1,6 +1,6 @@
-# context improve-6 · seven-bucket occupancy breakdown（+ 下一轮 cache 观测通道设计）
+# context improve-6 · seven-bucket occupancy breakdown（+ cache 通道移交）
 
-> 状态：规划边界已由用户确认；cache 批次设计已冻结、实施留到下一轮。规划会话只更新文档，不改生产代码。
+> 状态：improve-6 占用分类已完成；后继 cache 累计与 `/status` 显示由 [session-cache-hit](../../../problem-lists/2026-08-27-session-cache-hit/README.md) 独立实施。
 > 日期：2026-08-26
 > 规划基线：`d82d213`
 > 落点：`docs/core/context/improve-6/`
@@ -11,7 +11,7 @@
 
 ## 1. 一句话目标
 
-让主代理窗口占用可解释：后端产出七类 composition，Web 用小环 + hover 粗信息 + click/`/status` 分类详情；TUI 本轮继续只显示现有总占用。**Cache 命中率（session aggregate）设计已冻结（见 [00](./00-discussion.md) §2.4），实施留到下一轮**。
+让主代理窗口占用可解释：后端产出七类 composition，Web 用小环 + hover 粗信息 + click/`/status` 分类详情；TUI 的 Context 表达继续只显示现有总占用。Cache 命中率已移交独立 `promptCacheUsage` 通道，不改变本批 occupancy 语义。
 
 ## 2. 范围
 
@@ -23,9 +23,9 @@
 4. 后端测量从 step-local `ResolvedStepTools`（definitions + 实际 request tools）与可识别来源的 history 分桶；总量仍与现有校准占用对齐。
 5. 02 写入关键改动清单（承重锚点，非全量文件表；cache 批次承重项单列 N1–N6）。
 
-### 下一轮（设计已冻结，本批不动代码）
+### 后继 cache 批次（独立实施）
 
-- Cache：session aggregate 唯一显示口径（Cache-Read Share，分母含 cacheWrite）；run aggregate 后端计数作原料、前端不显示；不完整轮尽力而为跳过；文案 `Cache hit {n}%` / `Cache hit —`；通道为 `/status` 的 `promptCache` 字段。详见 00 §2.4、02 Phase C 与 §2.9 N 表、04 §4.7。
+- Cache：session aggregate 唯一显示口径（Cache-Read Share，分母含 cacheWrite）；run aggregate 只作原料；不完整轮跳过；Web/TUI `/status` 独立显示 `Cache hit {n}% / Cache hit —`；正式字段为 `promptCacheUsage`。实现与验收以 [session-cache-hit](../../../problem-lists/2026-08-27-session-cache-hit/README.md) 为准。
 
 ### Out of scope
 
@@ -60,10 +60,10 @@
 |------|------|
 | [improve-4](../improve-4/README.md) | 曾把占用三类 UI 推迟；本批在后端/Web 落地，分类扩为七类英文 key |
 | [improve-4.1](../improve-4.1/README.md) | 本批是其路线图第 5 项；静态/手动 tools-aware 计量已还清 |
-| [improve-5](../improve-5/README.md) | cache 语义与 `observed` 不变量下一轮投影到 `/status`；公式不改（session 累计见 00 §2.4） |
+| [improve-5](../improve-5/README.md) | cache 语义与 `observed` 不变量由后继 session-cache-hit 批次投影到 `/status`；公式不改 |
 | [goals-duty.md](../goals-duty.md) | cached input 仍占窗口；子代理自身窗口/child transcript 不进主占用 UI，父窗口 exchanges 仍按七类规则计入 |
-| [architecture.md](../architecture.md) | 实施时补充 occupancy composition 投影；cache 通道（下一轮）与占用分家 |
+| [architecture.md](../architecture.md) | occupancy composition 与独立 cache 通道保持分家 |
 
 ## 5. 实施入口
 
-用户审查并明确允许实施后，在**后续实施会话**按 02 + 02-web + 02-tui + 04 改代码。本规划会话只提交文档。
+improve-6 occupancy 已按 02 + 02-web + 02-tui + 04 完成。后续不要在本目录继续扩展 cache；session 累计、生命周期和 Web/TUI `/status` 验收统一进入 [session-cache-hit](../../../problem-lists/2026-08-27-session-cache-hit/README.md)。

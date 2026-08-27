@@ -70,6 +70,8 @@
 - 执行时间
 - Token 使用统计（如可获取）
 
+Lifecycle 只聚合并返回本 run 的 `LifecycleTokenUsage`。RunManager 可在 run 完成后通过同步、optional 的窄 observer 向 adapter 投影 `{ sessionId, isSubagent, usage }`；observer 失败不得改变 run completion。
+
 ### D5: 提供执行事件
 
 通过 AsyncGenerator yield 执行过程中的事件，事件类型包括：
@@ -163,6 +165,10 @@ Session 的创建、销毁、多会话管理不在本模块职责范围内。本
 
 对话历史的底层存储由 Message 模块负责。本模块通过 Message 接口读取历史消息，执行过程中实时写入新消息。
 
+### N8: 不负责 session 级 cache 累计与 UI
+
+Lifecycle 不保存跨 run 的 cache 账本、不判断主/子 session 的显示策略，也不生成 `/status` 文案。该累计由 UI adapter 外层 tracker 消费完成 usage 后维护；compact、换模型和窗口占用不会反向修改它。
+
 ---
 
 ## 五、设计约束与假设
@@ -192,6 +198,7 @@ Session 的创建、销毁、多会话管理不在本模块职责范围内。本
 | SystemPrompt | 间接依赖 | 通过 AgentManager 间接使用 |
 | ConfirmationBus | 间接依赖 | 通过 ToolScheduler 间接交互 |
 | Session | 被依赖 | Session 模块可能调用本模块执行请求 |
+| RunManager | 被依赖 | 消费 run 结果并可通过窄 observer 投影完成 usage |
 | SubagentExecutor | 被依赖 | 子代理执行时调用本模块 |
 | CLI/UI | 被依赖 | 用户界面层调用本模块并消费事件 |
 

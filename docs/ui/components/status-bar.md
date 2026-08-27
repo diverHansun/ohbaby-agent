@@ -8,7 +8,7 @@
 
 - `currentTokens / contextWindowTokens / contextWindowRatio` 是窗口总占用；
 - `composition?` 是七类可选估算，不参与压缩控制；
-- 缓存命中率不是占用组成，本轮不显示；
+- 缓存命中率不是占用组成；只在 `/status` 通过独立 `promptCacheUsage` 行显示；
 - active session 没有 usage 时不借用其他 session（尤其 child）的数值。
 
 ## 二、Web 顶栏
@@ -27,7 +27,7 @@
 - 七行固定为 System prompt、Built-in tools、MCP tools、Skills、Conversation、Summarized conversation、Subagent exchanges；0 值保留文字行但不画色段。
 - 环按钮包含百分比与 used/window 的 `aria-label`，使用 `aria-expanded`、`aria-haspopup="dialog"`；详情不只靠颜色表达。
 
-Web `/status` 使用同一个 `ContextUsageDetails`：有 composition 时替换旧 context 粗行，无 composition 时保留旧单行总量。本轮不得出现 Cache 行。
+Web `/status` 使用同一个 `ContextUsageDetails`：有 composition 时替换旧 context 粗行，无 composition 时保留旧单行总量。其后可独立显示 `cache` + `hit — / hit 0% / hit {n}%`；最终可见文案为 `cache hit …`，Cache 不进入七类详情、占用环或堆叠条。
 
 ## 三、TUI
 
@@ -36,12 +36,12 @@ Web `/status` 使用同一个 `ContextUsageDetails`：有 composition 时替换�
 - 常驻 footer：`packages/ohbaby-cli/src/tui/app.tsx` + `render/usage.ts`；
 - `/status`：`components/dialog/command-panel-manager.tsx` / `render/status-panel.ts`。
 
-TUI 本轮锁定 total-only：
+TUI 的 Context 表达锁定 total-only：
 
 - 格式为 `38.4K / 1M (4%)`；非零且不足 1% 显示 `<1%`；
 - optional composition 到达 SDK/store 后继续忽略，不增加七行或 ASCII 堆叠条；
 - 缺 usage 时显示既有 unavailable 状态；
-- 本轮不显示 Cache 行。
+- `/status` 在 Context 与 Tools 之间可独立显示 `Cache` + `hit — / hit 0% / hit {n}%`；常驻 footer 不显示 cache，最终可见文案为 `Cache hit …`。
 
 Web 的 `~` 是对解释性估算的诚实标注；TUI 沿用既有 formatter，不为了表面对齐改文案。
 
@@ -50,4 +50,4 @@ Web 的 `~` 是对解释性估算的诚实标注；TUI 沿用既有 formatter，
 - Web：`ContextUsage.unit.test.tsx`、`App.unit.test.tsx`、`selectors.unit.test.ts`、`slashCommands.unit.test.ts`。
 - TUI：`render/usage.unit.test.ts`、`render/status-panel.unit.test.ts`。
 - compiled Web 与实际 TUI 进程仍需 smoke；完整发布门见 improve-6 [04-test-and-acceptance.md](../../core/context/improve-6/04-test-and-acceptance.md)。
-- 下一轮若实施 cache，只能增加独立的 cache 数据通道与显示行，不得画进占用环/堆叠条。
+- Cache 数据通道与显示契约见 [session-cache-hit](../../problem-lists/2026-08-27-session-cache-hit/README.md)；不得画进占用环/堆叠条。
