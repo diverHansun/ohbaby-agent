@@ -415,10 +415,16 @@ export function createInProcessUiBackendClient(
   const contextWindowUsage: ContextWindowUsageTracker =
     createContextWindowUsageTracker({ now: timestamp });
   const promptCacheUsage = createPromptCacheUsageTracker();
+  let acceptsPromptCacheUsage = true;
+  const retiredPromptCacheSessionIds = new Set<string>();
+  const retirePromptCacheSession = (sessionId: string): void => {
+    retiredPromptCacheSessionIds.add(sessionId);
+    promptCacheUsage.clearSession(sessionId);
+  };
   const unsubscribePromptCacheUsageSessionRemoved = bus.subscribe(
     SessionEvent.Removed,
     ({ sessionId }) => {
-      promptCacheUsage.clearSession(sessionId);
+      retirePromptCacheSession(sessionId);
     },
   );
   const uiGoalsBySession = new Map<string, UiGoal>();
@@ -493,7 +499,11 @@ export function createInProcessUiBackendClient(
         hookExecutor: options.hookExecutor,
         now: () => now().getTime(),
         onRunCompleted({ isSubagent, sessionId, usage }): void {
-          if (isSubagent === true) {
+          if (
+            !acceptsPromptCacheUsage ||
+            isSubagent === true ||
+            retiredPromptCacheSessionIds.has(sessionId)
+          ) {
             return;
           }
           promptCacheUsage.record(sessionId, usage);
@@ -1527,12 +1537,12 @@ export function createInProcessUiBackendClient(
     }
 
     await options.sessionManager.update(sessionId, { status: "archived" });
+    retirePromptCacheSession(sessionId);
     await stateStore.removeSession?.(sessionId);
     goalSnapshotsBySession.delete(sessionId);
     uiGoalsBySession.delete(sessionId);
     uiTodosBySession.delete(sessionId);
     todoProjectionScopesBySession.delete(sessionId);
-    promptCacheUsage.clearSession(sessionId);
 
     if (snapshot.activeSessionId === sessionId) {
       const remainingSessions = (
@@ -2513,11 +2523,13 @@ export function createInProcessUiBackendClient(
   );
   return {
     async dispose(): Promise<void> {
+      acceptsPromptCacheUsage = false;
       promptScheduler.close();
       interactionBroker.abortAll("daemon-stopping");
       eventRouter.dispose();
       unsubscribePromptCacheUsageSessionRemoved();
       promptCacheUsage.clear();
+      retiredPromptCacheSessionIds.clear();
       await runtimeController.resetRuntime();
     },
 

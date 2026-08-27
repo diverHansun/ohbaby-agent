@@ -94,7 +94,7 @@ Share：`ΣcacheRead / Σ(uncached+cacheRead+cacheWrite)`；没有任何可信�
 |---------|------|------|------|------|
 | `ohbaby-agent/src/core/lifecycle/` | — | — | 无 | 不改 `aggregateTokenUsage`，不放 session tracker |
 | `ohbaby-agent/src/runtime/run-manager/` | — | `types.ts` 增加窄完成回调；`manager.ts` 保留取消前已完成 result，并在 finalize 后恰好一次调用、隔离错误 | 无 | 不依赖 cache 类型或 tracker |
-| `ohbaby-agent/src/adapters/ui-inprocess/` | `prompt-cache-usage.ts` + unit | `ui-inprocess.ts` 外层创建 tracker、订阅 SessionEvent.Removed、注入 callback、child get→null、archive/dispose 清桶并取消订阅 | 无 | 跨 runtime reset 存活；不共用 occupancy Map |
+| `ohbaby-agent/src/adapters/ui-inprocess/` | `prompt-cache-usage.ts` + unit | `ui-inprocess.ts` 外层创建 tracker、订阅 SessionEvent.Removed、注入 callback、child get→null、archive/dispose 清桶并取消订阅 | 无 | 跨 runtime reset 存活；删除/归档后拒绝迟到的完成回调，防止桶复活；不共用 occupancy Map |
 | `ohbaby-agent/src/adapters/ui-runtime/` | — | composition options 透传完成回调到 RunManager | 无 | 只做装配，不持有 tracker |
 | `ohbaby-agent/src/commands/` | — | `types.ts`、`builtin.ts` `handleStatus` | 无 | 正式字段 `promptCacheUsage` |
 | `ohbaby-sdk/` | cache usage 类型文件 | `index.ts` | 无 | 不改 `UiContextWindowUsage` |

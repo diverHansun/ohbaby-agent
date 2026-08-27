@@ -38,6 +38,7 @@ import {
   createInMemorySessionStore,
   createSessionManager,
   createTemporarySessionTitle,
+  SessionEvent,
   type Session,
 } from "../services/session/index.js";
 import {
@@ -279,6 +280,51 @@ function createBlockingLLMClient(
       temperature: 0,
       maxTokens: 128,
       ...config,
+    },
+  };
+}
+
+function createControlledCacheUsageLLMClient(
+  runStarted: Deferred<undefined>,
+  releaseRun: Deferred<undefined>,
+): LLMClientInstance<FakeSdkClient> {
+  const client = createFakeLLMClient([]);
+  return {
+    ...client,
+    provider: {
+      ...client.provider,
+      streamChatCompletion(
+        request: InterfaceProviderRequest,
+      ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+        if (isTitleGenerationRequest(request)) {
+          return Promise.resolve(createTitleProviderStream(request));
+        }
+        runStarted.resolve(undefined);
+        return Promise.resolve(
+          (async function* (): AsyncGenerator<
+            InterfaceProviderStreamEvent,
+            void,
+            unknown
+          > {
+            await releaseRun.promise;
+            yield {
+              finishReason: "stop",
+              textDelta: "Done",
+              tokenUsage: {
+                inputBreakdown: {
+                  cacheRead: 75,
+                  cacheWrite: 0,
+                  observed: { cacheRead: true, cacheWrite: false },
+                  uncached: 25,
+                },
+                inputTokens: 100,
+                outputTokens: 10,
+                totalTokens: 110,
+              },
+            };
+          })(),
+        );
+      },
     },
   };
 }
@@ -1906,6 +1952,63 @@ describe("createInProcessUiBackendClient", () => {
           cacheReadShare: 0.6,
           cacheReadTokens: 1_200,
           sessionId: "session_1",
+        },
+      });
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it("clears only the removed session cache bucket", async () => {
+    const bus = createBus();
+    const client = createInProcessUiBackendClient({
+      bus,
+      initialSnapshot: createInitialSnapshotWithTwoSessions(),
+      llmClient: createFakeLLMClient([
+        {
+          finishReason: "stop",
+          textDelta: "Done",
+          tokenUsage: {
+            inputBreakdown: {
+              cacheRead: 60,
+              cacheWrite: 0,
+              observed: { cacheRead: true, cacheWrite: false },
+              uncached: 40,
+            },
+            inputTokens: 100,
+            outputTokens: 10,
+            totalTokens: 110,
+          },
+        },
+      ]),
+    });
+
+    try {
+      await client.submitPromptAndWait("Cache session one", {
+        sessionId: "session_1",
+      });
+      await client.submitPromptAndWait("Cache session two", {
+        sessionId: "session_2",
+      });
+
+      bus.publish(SessionEvent.Removed, { sessionId: "session_1" });
+
+      await expect(
+        executeStatusData(client, "session_1", "inv_removed_cache"),
+      ).resolves.toMatchObject({
+        promptCacheUsage: {
+          accountedInputTokens: 0,
+          cacheReadShare: null,
+          cacheReadTokens: 0,
+        },
+      });
+      await expect(
+        executeStatusData(client, "session_2", "inv_retained_cache"),
+      ).resolves.toMatchObject({
+        promptCacheUsage: {
+          accountedInputTokens: 100,
+          cacheReadShare: 0.6,
+          cacheReadTokens: 60,
         },
       });
     } finally {
@@ -7961,8 +8064,9 @@ describe("createInProcessUiBackendClient", () => {
     });
     await sessionManager.create(projectRoot, { title: "Only" });
     const runStarted = createDeferred<undefined>();
+    const releaseRun = createDeferred<undefined>();
     const client = createInProcessUiBackendClient({
-      llmClient: createInterruptibleGoalLLMClient([], runStarted),
+      llmClient: createControlledCacheUsageLLMClient(runStarted, releaseRun),
       messageManager,
       projectDirectory: projectRoot,
       sessionManager,
@@ -8003,9 +8107,22 @@ describe("createInProcessUiBackendClient", () => {
         sessions: [],
         status: { kind: "idle" },
       });
-    } finally {
-      await client.abortRun(runningEvent.status.runId);
+
+      releaseRun.resolve(undefined);
       await submission;
+      await expect(
+        executeStatusData(client, "session_1", "inv_late_archived_cache"),
+      ).resolves.toMatchObject({
+        promptCacheUsage: {
+          accountedInputTokens: 0,
+          cacheReadShare: null,
+          cacheReadTokens: 0,
+        },
+      });
+    } finally {
+      releaseRun.resolve(undefined);
+      await submission.catch(() => undefined);
+      await client.dispose();
     }
   });
 

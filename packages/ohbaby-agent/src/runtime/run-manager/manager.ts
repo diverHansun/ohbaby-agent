@@ -250,6 +250,7 @@ export class RunManager {
           ...outcome,
           status: "cancelled",
           error: record.cancelReason ?? "run cancelled",
+          terminalReason: "cancelled",
         };
       }
     } catch (error) {

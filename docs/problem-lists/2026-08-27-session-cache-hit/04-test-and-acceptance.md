@@ -32,8 +32,8 @@
 | I5 | 同一 run 多次 `waitForCompletion` 或多处等待 | unit/integration | `finalizeRun` 只触发一次完成回调，累计不重复 | B |
 | I6 | 完成回调抛错 | unit | run 原本的成功/失败/取消结果不被改变；错误仅作内部诊断 | B |
 | I7 | 换模型触发 runtime reset/rebuild | integration | 外层 tracker 实例仍在，同一 session 累计连续 | B |
-| I8 | session 删除、UI 归档、后端 dispose | integration/unit | 删除/归档只清目标 session；dispose 清全部；不会误清其它 session | B |
-| I9 | provider 已返回完整 usage 后收到取消 / usage 完整前取消 | unit/integration | 前者 completion 保留 usage 并累计，后者无可信 usage、不累计；两者终态都为 cancelled | B |
+| I8 | session 删除、UI 归档、后端 dispose | integration/unit | 删除/归档只清目标 session；dispose 清全部；不会误清其它 session；删除/归档后迟到的完成回调不得复活目标桶 | B |
+| I9 | provider 已返回完整 usage 后收到取消 / usage 完整前取消 | unit/integration | 前者 completion 保留 usage 并累计，后者无可信 usage、不累计；两者终态和 `terminalReason` 都为 cancelled | B |
 | C1 | 无 `promptCacheUsage` 的旧 data | contract | 解析成功；不显示 Cache 行；Context 行仍在 | B/C |
 | C2 | 新 DTO 与两个 UI adapter | contract | DTO 仅含 `sessionId/accountedInputTokens/cacheReadTokens/cacheReadShare`；Web/TUI 对正常、零、未知、read>accounted、空 sessionId、非法数值 fixture 得出等价结果 | B/C |
 | W1 | Web 主 session 有效值 | unit | 占用块后独立 label `cache` + value `hit 61%`，最终可见文案只有一次 `cache hit 61%`；七类占用块 text 不含 Cache | C |
@@ -52,7 +52,7 @@
 - child guard 与 `getContextWindowUsageInternal` 同层：`isSubagent` session 不展示 cache。
 - **禁止** Context 解析 vendor cache 字段；**禁止** llm-client 主动调用 tracker；**禁止**在多个 wait/submit 路径重复 record。
 - compact / `context.window.updated` / occupancy total-only 更新 / 换模型 **不得**调用 cache clear。
-- 外层 tracker 直接订阅 `SessionEvent.Removed`；session 删除与 UI 归档清目标桶，backend dispose 取消订阅并清全部桶。进程重启后的归零是本轮明确边界，不做恢复。
+- 外层 tracker 直接订阅 `SessionEvent.Removed`；session 删除与 UI 归档清目标桶，并把目标 session 置为 retired，拒绝仍在飞行中的 run 迟到回写；backend dispose 取消订阅并清全部桶。进程重启后的归零是本轮明确边界，不做恢复。
 
 ## 4.4 回归清单
 
