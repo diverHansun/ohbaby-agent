@@ -28,6 +28,15 @@ function baseSnapshot(): UiSnapshot {
     activeSessionId: "session_1",
     contextWindowUsages: [
       {
+        composition: {
+          "system-prompt": 8_000,
+          "builtin-tools": 4_000,
+          mcp: 2_000,
+          skills: 1_000,
+          conversation: 30_000,
+          "summarized-conversation": 4_000,
+          "subagent-exchanges": 1_000,
+        },
         contextWindowRatio: 0.25,
         contextWindowTokens: 200_000,
         currentTokens: 50_000,
@@ -94,6 +103,10 @@ describe("ohbaby-web ui selectors", () => {
       contextRatio: 0.25,
       modelLabel: "glm-5.1",
       statusLabel: "idle",
+    });
+    expect(view.header.contextWindowUsage).toMatchObject({
+      composition: { conversation: 30_000 },
+      sessionId: "session_1",
     });
     expect(view.composer).toMatchObject({
       canSend: true,
@@ -163,7 +176,35 @@ describe("ohbaby-web ui selectors", () => {
     expect(view.header).toMatchObject({
       contextLabel: "0 / 0",
       contextRatio: 0,
+      contextWindowUsage: null,
       modelLabel: "deepseek-v4-pro",
+    });
+  });
+
+  it("does not use another session's context usage for the active header", () => {
+    const snapshot = baseSnapshot();
+    const view = selectViewModel(
+      store({
+        ...snapshot,
+        contextWindowUsages: [
+          {
+            ...snapshot.contextWindowUsages?.[0],
+            contextWindowRatio: 0.9,
+            contextWindowTokens: 200_000,
+            currentTokens: 180_000,
+            estimatedAt: timestamp,
+            modelId: "child-model",
+            sessionId: "session_child",
+          },
+        ],
+      }),
+    );
+
+    expect(view.header).toMatchObject({
+      contextLabel: "0 / 0",
+      contextRatio: 0,
+      contextWindowUsage: null,
+      modelLabel: "model pending",
     });
   });
 
@@ -172,11 +213,24 @@ describe("ohbaby-web ui selectors", () => {
       store({
         ...baseSnapshot(),
         activeSessionId: null,
+        contextWindowUsages: [
+          {
+            contextWindowRatio: 0.9,
+            contextWindowTokens: 200_000,
+            currentTokens: 180_000,
+            estimatedAt: timestamp,
+            modelId: "child-model",
+            sessionId: "session_child",
+          },
+        ],
       }),
     );
 
     expect(view.activeSession).toBeNull();
     expect(view.composer.activeSessionId).toBeUndefined();
+    expect(view.header.contextWindowUsage).toBeNull();
+    expect(view.header.contextLabel).toBe("0 / 0");
+    expect(view.header.modelLabel).toBe("model pending");
     expect(view.isEmpty).toBe(true);
   });
 

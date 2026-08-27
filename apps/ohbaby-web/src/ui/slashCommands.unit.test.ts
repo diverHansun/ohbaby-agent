@@ -7,6 +7,7 @@ import {
   safeHelpCommands,
   selectedSlashItem,
   slashCompletionSuffix,
+  statusContextWindowUsage,
 } from "./slashCommands.js";
 
 function commandCatalog(): UiWebCommandCatalog {
@@ -170,5 +171,61 @@ describe("ohbaby-web slash commands UI helpers", () => {
         ],
       }).map((command) => command.id),
     ).toEqual(["status"]);
+  });
+
+  it("reads optional seven-bucket context composition from status output", () => {
+    const usage = statusContextWindowUsage({
+      contextWindow: {
+        composition: {
+          "system-prompt": 10,
+          "builtin-tools": 20,
+          mcp: 30,
+          skills: 40,
+          conversation: 50,
+          "summarized-conversation": 60,
+          "subagent-exchanges": 0,
+        },
+        contextWindowRatio: 0.21,
+        contextWindowTokens: 1_000,
+        currentTokens: 210,
+        estimatedAt: "2026-08-27T00:00:00.000Z",
+        modelId: "model-a",
+        sessionId: "session_1",
+      },
+    });
+
+    expect(usage).toMatchObject({
+      composition: {
+        "system-prompt": 10,
+        "subagent-exchanges": 0,
+      },
+      currentTokens: 210,
+      sessionId: "session_1",
+    });
+  });
+
+  it("keeps valid status totals but drops malformed composition", () => {
+    const usage = statusContextWindowUsage({
+      contextWindow: {
+        composition: {
+          "system-prompt": 10,
+          "builtin-tools": 20,
+          mcp: 30,
+          skills: 40,
+          conversation: 50.5,
+          "summarized-conversation": 60,
+          "subagent-exchanges": 0,
+        },
+        contextWindowRatio: 0.21,
+        contextWindowTokens: 1_000,
+        currentTokens: 210,
+        estimatedAt: "2026-08-27T00:00:00.000Z",
+        modelId: "model-a",
+        sessionId: "session_1",
+      },
+    });
+
+    expect(usage).not.toBeNull();
+    expect(usage).not.toHaveProperty("composition");
   });
 });

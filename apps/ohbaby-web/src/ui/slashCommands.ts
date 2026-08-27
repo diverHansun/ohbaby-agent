@@ -5,6 +5,7 @@ import {
   type UiWebCommandCatalog,
   type UiWebCommandSpec,
 } from "ohbaby-sdk";
+import type { UiContextWindowUsage } from "ohbaby-sdk";
 import type { CommandNotice } from "../api/daemon/wire.js";
 import type { HeaderModel, ViewModel } from "./selectors.js";
 
@@ -85,8 +86,7 @@ export function createSlashPaletteItems(
 
 function isWebPaletteCommand(command: UiWebCommandSpec): boolean {
   return (
-    command.action !== "executeCommand" ||
-    isWebPassthroughCommandId(command.id)
+    command.action !== "executeCommand" || isWebPassthroughCommandId(command.id)
   );
 }
 
@@ -204,6 +204,38 @@ export function statusRows(
   return rows.filter((row) => row.value.length > 0);
 }
 
+export function statusContextWindowUsage(
+  data: Record<string, unknown> | null,
+): UiContextWindowUsage | null {
+  const value = isRecord(data?.contextWindow) ? data.contextWindow : undefined;
+  const currentTokens = nonNegativeNumber(value?.currentTokens);
+  const contextWindowTokens = positiveNumber(value?.contextWindowTokens);
+  const contextWindowRatio = nonNegativeNumber(value?.contextWindowRatio);
+  const estimatedAt = stringValue(value?.estimatedAt);
+  const modelId = stringValue(value?.modelId);
+  const sessionId = stringValue(value?.sessionId);
+  if (
+    currentTokens === undefined ||
+    contextWindowTokens === undefined ||
+    contextWindowRatio === undefined ||
+    estimatedAt === undefined ||
+    modelId === undefined ||
+    sessionId === undefined
+  ) {
+    return null;
+  }
+  const composition = contextComposition(value?.composition);
+  return {
+    ...(composition === undefined ? {} : { composition }),
+    contextWindowRatio,
+    contextWindowTokens,
+    currentTokens,
+    estimatedAt,
+    modelId,
+    sessionId,
+  };
+}
+
 export function outputAsJson(output: UiSlashCommandOutput | undefined): string {
   if (!output) {
     return "";
@@ -292,6 +324,58 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value)
     ? value
     : undefined;
+}
+
+function nonNegativeNumber(value: unknown): number | undefined {
+  const parsed = numberValue(value);
+  return parsed !== undefined && parsed >= 0 ? parsed : undefined;
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  const parsed = nonNegativeNumber(value);
+  return parsed !== undefined && Number.isInteger(parsed) ? parsed : undefined;
+}
+
+function positiveNumber(value: unknown): number | undefined {
+  const parsed = numberValue(value);
+  return parsed !== undefined && parsed > 0 ? parsed : undefined;
+}
+
+function contextComposition(
+  value: unknown,
+): UiContextWindowUsage["composition"] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const systemPrompt = nonNegativeInteger(value["system-prompt"]);
+  const builtinTools = nonNegativeInteger(value["builtin-tools"]);
+  const mcp = nonNegativeInteger(value.mcp);
+  const skills = nonNegativeInteger(value.skills);
+  const conversation = nonNegativeInteger(value.conversation);
+  const summarizedConversation = nonNegativeInteger(
+    value["summarized-conversation"],
+  );
+  const subagentExchanges = nonNegativeInteger(value["subagent-exchanges"]);
+  if (
+    systemPrompt === undefined ||
+    builtinTools === undefined ||
+    mcp === undefined ||
+    skills === undefined ||
+    conversation === undefined ||
+    summarizedConversation === undefined ||
+    subagentExchanges === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    "system-prompt": systemPrompt,
+    "builtin-tools": builtinTools,
+    mcp,
+    skills,
+    conversation,
+    "summarized-conversation": summarizedConversation,
+    "subagent-exchanges": subagentExchanges,
+  };
 }
 
 function stringValue(value: unknown): string | undefined {
