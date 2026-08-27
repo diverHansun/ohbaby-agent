@@ -28,6 +28,7 @@ import {
   type RunDefaultsPolicy,
   type RunHookContext,
   type RunLifecycle,
+  type RunCompletionObserver,
   type SandboxLease,
   type SandboxManager,
 } from "./index.js";
@@ -761,6 +762,7 @@ function createManagerWithOverrides(input: {
   readonly lifecycle: RunLifecycle;
   readonly bridge?: StreamBridge;
   readonly hookExecutor?: HookExecutor;
+  readonly onRunCompleted?: RunCompletionObserver;
   readonly sandboxManager?: SandboxManager;
 }): ManagerFixture {
   const fixture = createManager(input.lifecycle);
@@ -769,6 +771,9 @@ function createManagerWithOverrides(input: {
     runLedger: fixture.ledger,
     streamBridge: input.bridge ?? fixture.bridge,
     hookExecutor: input.hookExecutor ?? fixture.hooks,
+    ...(input.onRunCompleted === undefined
+      ? {}
+      : { onRunCompleted: input.onRunCompleted }),
     sandboxManager: input.sandboxManager ?? fixture.sandboxManager,
     policy,
     now: createClock(10_000),
@@ -1143,6 +1148,102 @@ describe("RunManager", () => {
 
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      usage: {
+        inputTokens: 7,
+        outputTokens: 5,
+        totalTokens: 12,
+        usageComplete: true,
+      },
+    });
+  });
+
+  it("observes completed usage exactly once across repeated waits", async () => {
+    const observations: Parameters<RunCompletionObserver>[0][] = [];
+    const { manager } = createManagerWithOverrides({
+      lifecycle: new UsageLifecycle(),
+      onRunCompleted(observation): void {
+        observations.push(observation);
+      },
+    });
+    const record = await manager.create({
+      directory: "D:/repo",
+      isSubagent: false,
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await Promise.all([
+      manager.waitForCompletion(record.runId),
+      manager.waitForCompletion(record.runId),
+    ]);
+
+    expect(observations).toEqual([
+      {
+        isSubagent: false,
+        sessionId: "session_1",
+        usage: {
+          inputTokens: 7,
+          outputTokens: 5,
+          totalTokens: 12,
+          usageComplete: true,
+        },
+      },
+    ]);
+  });
+
+  it("does not let a completion observer failure reject the run", async () => {
+    const { manager } = createManagerWithOverrides({
+      lifecycle: new UsageLifecycle(),
+      onRunCompleted(): void {
+        throw new Error("projection failed");
+      },
+    });
+    const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
+      status: "succeeded",
+      usage: {
+        inputTokens: 7,
+        outputTokens: 5,
+        totalTokens: 12,
+        usageComplete: true,
+      },
+    });
+  });
+
+  it("preserves returned usage when cancellation lands in the post-run hook", async () => {
+    const managerRef: { current?: RunManager } = {};
+    const hookExecutor: HookExecutor = {
+      execute(point, context): Promise<void> {
+        if (point === "post-run") {
+          managerRef.current?.cancel(context.runId, "late cancellation");
+        }
+        return Promise.resolve();
+      },
+    };
+    const fixture = createManagerWithOverrides({
+      hookExecutor,
+      lifecycle: new UsageLifecycle(),
+    });
+    managerRef.current = fixture.manager;
+    const record = await fixture.manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await expect(
+      fixture.manager.waitForCompletion(record.runId),
+    ).resolves.toEqual({
+      error: "late cancellation",
+      status: "cancelled",
       usage: {
         inputTokens: 7,
         outputTokens: 5,

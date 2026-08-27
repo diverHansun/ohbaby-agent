@@ -247,6 +247,7 @@ export class RunManager {
       });
       if (record.abortController.signal.aborted) {
         outcome = {
+          ...outcome,
           status: "cancelled",
           error: record.cancelReason ?? "run cancelled",
         };
@@ -296,6 +297,18 @@ export class RunManager {
       }
       this.publishRunUpdated(record);
       this.endStream(record);
+    }
+
+    try {
+      this.deps.onRunCompleted?.({
+        sessionId: record.sessionId,
+        ...(record.options.isSubagent === undefined
+          ? {}
+          : { isSubagent: record.options.isSubagent }),
+        ...(completion.usage === undefined ? {} : { usage: completion.usage }),
+      });
+    } catch {
+      // Completion observers are diagnostic projections and cannot change run completion.
     }
 
     return completion;

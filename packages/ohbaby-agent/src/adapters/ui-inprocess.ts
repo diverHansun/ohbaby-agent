@@ -10,6 +10,7 @@ import type {
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
   UiPromptCompletion,
+  UiPromptCacheUsage,
   UiPromptEditLease,
   UiPromptReceipt,
   UiPromptSubmission,
@@ -80,6 +81,7 @@ import type {
   MessageWithParts,
 } from "../core/message/index.js";
 import type { Session as CoreSession } from "../services/session/index.js";
+import { createPromptCacheUsageTracker } from "./ui-inprocess/prompt-cache-usage.js";
 import {
   promptRecordToCompletion,
   promptRecordToUi,
@@ -91,6 +93,7 @@ import {
   isDefaultSessionTitle,
   resolveSessionDisplayTitle,
   sameSessionProjectRoot,
+  SessionEvent,
 } from "../services/session/index.js";
 import {
   createPermissionManager,
@@ -411,6 +414,13 @@ export function createInProcessUiBackendClient(
   const interactionBroker = createInteractionBroker({ bus });
   const contextWindowUsage: ContextWindowUsageTracker =
     createContextWindowUsageTracker({ now: timestamp });
+  const promptCacheUsage = createPromptCacheUsageTracker();
+  const unsubscribePromptCacheUsageSessionRemoved = bus.subscribe(
+    SessionEvent.Removed,
+    ({ sessionId }) => {
+      promptCacheUsage.clearSession(sessionId);
+    },
+  );
   const uiGoalsBySession = new Map<string, UiGoal>();
   const goalSnapshotsBySession = new Map<string, GoalSnapshot>();
   for (const goal of initialSnapshot.goals ?? []) {
@@ -482,6 +492,12 @@ export function createInProcessUiBackendClient(
         messageManager,
         hookExecutor: options.hookExecutor,
         now: () => now().getTime(),
+        onRunCompleted({ isSubagent, sessionId, usage }): void {
+          if (isSubagent === true) {
+            return;
+          }
+          promptCacheUsage.record(sessionId, usage);
+        },
         onGoalChange: (event) => {
           publishGoalUpdated(event.sessionId, event.snapshot);
         },
@@ -1516,6 +1532,7 @@ export function createInProcessUiBackendClient(
     uiGoalsBySession.delete(sessionId);
     uiTodosBySession.delete(sessionId);
     todoProjectionScopesBySession.delete(sessionId);
+    promptCacheUsage.clearSession(sessionId);
 
     if (snapshot.activeSessionId === sessionId) {
       const remainingSessions = (
@@ -1805,6 +1822,20 @@ export function createInProcessUiBackendClient(
       sessionId: input.sessionId,
     });
     return contextWindowUsage.updateFromContextUsage(input.sessionId, usage);
+  }
+
+  async function getPromptCacheUsageInternal(input: {
+    readonly sessionId: string;
+  }): Promise<UiPromptCacheUsage | null> {
+    const [coreSession, uiSession] = await Promise.all([
+      options.sessionManager?.get(input.sessionId),
+      stateStore.getSession(input.sessionId),
+    ]);
+    if (coreSession?.isSubagent === true || (!coreSession && !uiSession)) {
+      return null;
+    }
+
+    return promptCacheUsage.get(input.sessionId);
   }
 
   async function submitPromptInternal(
@@ -2445,6 +2476,9 @@ export function createInProcessUiBackendClient(
     getContextWindowUsage(input) {
       return getContextWindowUsageInternal(input);
     },
+    getPromptCacheUsage(input) {
+      return getPromptCacheUsageInternal(input);
+    },
     getProjectRoot: resolveProjectRoot,
   });
 
@@ -2482,6 +2516,8 @@ export function createInProcessUiBackendClient(
       promptScheduler.close();
       interactionBroker.abortAll("daemon-stopping");
       eventRouter.dispose();
+      unsubscribePromptCacheUsageSessionRemoved();
+      promptCacheUsage.clear();
       await runtimeController.resetRuntime();
     },
 

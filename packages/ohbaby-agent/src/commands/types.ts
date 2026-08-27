@@ -12,6 +12,7 @@ import type {
   UiContextWindowUsage,
   UiInteractionResponse,
   UiPromptCompletion,
+  UiPromptCacheUsage,
   UiSetSearchApiKeyInput,
   UiSetSearchApiKeyResult,
   UiSnapshot,
@@ -205,6 +206,9 @@ export interface CommandServiceOptions {
   readonly getContextWindowUsage?: (input: {
     readonly sessionId: string;
   }) => Promise<UiContextWindowUsage | null> | UiContextWindowUsage | null;
+  readonly getPromptCacheUsage?: (input: {
+    readonly sessionId: string;
+  }) => Promise<UiPromptCacheUsage | null> | UiPromptCacheUsage | null;
   readonly getProjectRoot?: () => Promise<string> | string;
   readonly createCommandRunId?: () => string;
   readonly now?: () => number;

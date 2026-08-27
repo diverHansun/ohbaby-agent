@@ -1461,6 +1461,41 @@ function selectSessionThroughResumeCommand(
   });
 }
 
+async function executeStatusData(
+  client: UiBackendClient,
+  sessionId: string,
+  clientInvocationId: string,
+): Promise<Record<string, unknown>> {
+  const events: UiEvent[] = [];
+  const unsubscribe = client.subscribeEvents((event) => {
+    events.push(event);
+  });
+  try {
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId,
+      commandId: "status",
+      path: ["status"],
+      raw: "/status",
+      rawArgs: "",
+      sessionId,
+      surface: "tui",
+    });
+  } finally {
+    unsubscribe();
+  }
+  const delivered = events.findLast(
+    (event): event is Extract<UiEvent, { type: "command.result.delivered" }> =>
+      event.type === "command.result.delivered" &&
+      event.output?.kind === "data" &&
+      event.output.subject === "status",
+  );
+  if (delivered?.output?.kind !== "data") {
+    throw new Error("Status command did not deliver data");
+  }
+  return delivered.output.data;
+}
+
 async function flushAsyncProjection(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -1836,6 +1871,48 @@ describe("createInProcessUiBackendClient", () => {
     ]);
   });
 
+  it("accumulates trusted cache-read usage across primary-session runs", async () => {
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([
+        {
+          finishReason: "stop",
+          textDelta: "Done",
+          tokenUsage: {
+            inputBreakdown: {
+              cacheRead: 600,
+              cacheWrite: 100,
+              observed: { cacheRead: true, cacheWrite: true },
+              uncached: 300,
+            },
+            inputTokens: 1_000,
+            outputTokens: 25,
+            totalTokens: 1_025,
+          },
+        },
+      ]),
+    });
+
+    try {
+      await client.submitPromptAndWait("First cache-aware prompt");
+      await client.submitPromptAndWait("Second cache-aware prompt", {
+        sessionId: "session_1",
+      });
+
+      await expect(
+        executeStatusData(client, "session_1", "inv_cache_status"),
+      ).resolves.toMatchObject({
+        promptCacheUsage: {
+          accountedInputTokens: 2_000,
+          cacheReadShare: 0.6,
+          cacheReadTokens: 1_200,
+          sessionId: "session_1",
+        },
+      });
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("streams reasoning through UI events without persisting it as message parts", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-reasoning-db-"));
     const bus = createBus();
@@ -2060,6 +2137,127 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("keeps session cache usage across a model-triggered runtime reset", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-cache-reset-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "ohbaby-cache-reset-home-"));
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const previousApiKey = process.env.ZENMUX_API_KEY;
+    const previousFetch = globalThis.fetch;
+    let client: ReturnType<typeof createInProcessUiBackendClient> | undefined;
+
+    try {
+      process.env.HOME = homeDir;
+      process.env.USERPROFILE = homeDir;
+      globalThis.fetch = (): Promise<Response> =>
+        Promise.reject(new Error("metadata probe unavailable"));
+      await mkdir(join(homeDir, ".ohbaby"), { recursive: true });
+      await writeFile(
+        join(homeDir, ".ohbaby", "model.json"),
+        JSON.stringify({
+          apiConfig: {
+            apiKeyEnv: "ZENMUX_API_KEY",
+            baseUrl: "https://old.example/v1",
+            interfaceProvider: "openai-compatible",
+            promptCache: "auto",
+          },
+          defaultModel: "old-model",
+          llmParams: { maxTokens: 4096, temperature: 0.7 },
+          provider: "old-provider",
+        }),
+        "utf-8",
+      );
+      const cacheAwareClient = createFakeLLMClient([
+        {
+          finishReason: "stop",
+          textDelta: "Done",
+          tokenUsage: {
+            inputBreakdown: {
+              cacheRead: 500,
+              cacheWrite: 0,
+              observed: { cacheRead: true, cacheWrite: false },
+              uncached: 500,
+            },
+            inputTokens: 1_000,
+            outputTokens: 25,
+            totalTokens: 1_025,
+          },
+        },
+      ]);
+      client = createInProcessUiBackendClient({
+        createLLMClient: () => Promise.resolve(cacheAwareClient),
+        initialSnapshot: {
+          activeSessionId: "session_1",
+          permissions: [],
+          runs: [],
+          sessions: [
+            {
+              createdAt: "2026-08-27T00:00:00.000Z",
+              id: "session_1",
+              messages: [],
+              projectRoot,
+              title: "Cache session",
+              updatedAt: "2026-08-27T00:00:00.000Z",
+            },
+          ],
+          status: { kind: "idle" },
+        },
+        projectDirectory: projectRoot,
+      });
+
+      await client.submitPromptAndWait("Measure cache", {
+        sessionId: "session_1",
+      });
+      const beforeReset = await executeStatusData(
+        client,
+        "session_1",
+        "inv_cache_before_model_reset",
+      );
+      await client.connectModel({
+        apiKey: "cache-reset-contract-key",
+        apiKeyEnv: "ZENMUX_API_KEY",
+        baseUrl: "https://new.example/v1",
+        interfaceProvider: "openai-compatible",
+        maxOutputTokens: 8192,
+        model: "new-model",
+        provider: "new-provider",
+      });
+      const afterReset = await executeStatusData(
+        client,
+        "session_1",
+        "inv_cache_after_model_reset",
+      );
+
+      expect(beforeReset.promptCacheUsage).toEqual({
+        accountedInputTokens: 1_000,
+        cacheReadShare: 0.5,
+        cacheReadTokens: 500,
+        sessionId: "session_1",
+      });
+      expect(afterReset.promptCacheUsage).toEqual(beforeReset.promptCacheUsage);
+    } finally {
+      await client?.dispose();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = previousUserProfile;
+      }
+      if (previousApiKey === undefined) {
+        delete process.env.ZENMUX_API_KEY;
+      } else {
+        process.env.ZENMUX_API_KEY = previousApiKey;
+      }
+      globalThis.fetch = previousFetch;
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("reads the current saved model config without requiring an api key", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-current-model-"));
     const homeDir = await mkdtemp(join(tmpdir(), "ohbaby-current-model-home-"));
@@ -2249,6 +2447,9 @@ describe("createInProcessUiBackendClient", () => {
       client.getContextWindowUsage({ sessionId: "session_child" }),
     ).resolves.toBeNull();
     expect(createClient).toHaveBeenCalledOnce();
+    await expect(
+      executeStatusData(client, "session_child", "inv_child_cache_status"),
+    ).resolves.toMatchObject({ promptCacheUsage: null });
   });
 
   it("prepends a runtime system prompt to model requests without storing it in UI history", async () => {
@@ -2717,6 +2918,145 @@ describe("createInProcessUiBackendClient", () => {
     });
     if (statusEvent?.output?.kind === "data") {
       expect(statusEvent.output.data).not.toHaveProperty("context");
+    }
+  });
+
+  it("keeps cache totals through compact and resumes accounting agent steps", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    await addCoreTextMessage(messageManager, {
+      role: "user",
+      sessionId: "session_1",
+      text: "first message ".repeat(20),
+    });
+    await addCoreTextMessage(messageManager, {
+      role: "assistant",
+      sessionId: "session_1",
+      text: "second message ".repeat(20),
+    });
+    await addCoreTextMessage(messageManager, {
+      role: "user",
+      sessionId: "session_1",
+      text: "third message",
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const cacheUsage = (cacheRead: number): InterfaceProviderStreamEvent => ({
+      finishReason: "stop",
+      textDelta: "Done",
+      tokenUsage: {
+        inputBreakdown: {
+          cacheRead,
+          cacheWrite: 0,
+          observed: { cacheRead: true, cacheWrite: false },
+          uncached: 100 - cacheRead,
+        },
+        inputTokens: 100,
+        outputTokens: 10,
+        totalTokens: 110,
+      },
+    });
+    const client = createInProcessUiBackendClient({
+      bus,
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-08-27T00:00:00.000Z",
+            id: "session_1",
+            messages: [],
+            title: "Existing",
+            updatedAt: "2026-08-27T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [cacheUsage(50)],
+          [
+            {
+              finishReason: "stop",
+              textDelta: "<state_snapshot>summary</state_snapshot>",
+              tokenUsage: {
+                inputBreakdown: {
+                  cacheRead: 900,
+                  cacheWrite: 0,
+                  observed: { cacheRead: true, cacheWrite: false },
+                  uncached: 100,
+                },
+                inputTokens: 1_000,
+                outputTokens: 20,
+                totalTokens: 1_020,
+              },
+            },
+          ],
+          [cacheUsage(20)],
+        ],
+        requests,
+      ),
+      messageManager,
+    });
+
+    try {
+      await client.submitPromptAndWait("Before compact", {
+        sessionId: "session_1",
+      });
+      const beforeCompact = await executeStatusData(
+        client,
+        "session_1",
+        "inv_cache_before_compact",
+      );
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "inv_cache_compact",
+        commandId: "compact",
+        path: ["compact"],
+        raw: "/compact",
+        rawArgs: "",
+        sessionId: "session_1",
+        surface: "tui",
+      });
+      const afterCompact = await executeStatusData(
+        client,
+        "session_1",
+        "inv_cache_after_compact",
+      );
+      await client.submitPromptAndWait("After compact", {
+        sessionId: "session_1",
+      });
+      const afterNextRun = await executeStatusData(
+        client,
+        "session_1",
+        "inv_cache_after_next_run",
+      );
+
+      expect(beforeCompact.promptCacheUsage).toEqual({
+        accountedInputTokens: 100,
+        cacheReadShare: 0.5,
+        cacheReadTokens: 50,
+        sessionId: "session_1",
+      });
+      expect(afterCompact.promptCacheUsage).toEqual(
+        beforeCompact.promptCacheUsage,
+      );
+      expect(afterNextRun.promptCacheUsage).toEqual({
+        accountedInputTokens: 200,
+        cacheReadShare: 0.35,
+        cacheReadTokens: 70,
+        sessionId: "session_1",
+      });
+      expect(requests.map((request) => request.purpose)).toEqual([
+        "agent-step",
+        "context-summary",
+        "agent-step",
+      ]);
+    } finally {
+      await client.dispose();
     }
   });
 
@@ -7488,7 +7828,7 @@ describe("createInProcessUiBackendClient", () => {
   it("archives the active persistent session and selects the newest remaining active session", async () => {
     let nextId = 1;
     let nowMs = 1_000;
-    const projectRoot = "/repo";
+    const projectRoot = process.cwd();
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
@@ -7516,7 +7856,23 @@ describe("createInProcessUiBackendClient", () => {
     nowMs = 2_000;
     await sessionManager.create(projectRoot, { title: "Remaining" });
     const client = createInProcessUiBackendClient({
-      llmClient: createFakeLLMClient([]),
+      llmClient: createFakeLLMClient([
+        {
+          finishReason: "stop",
+          textDelta: "Done",
+          tokenUsage: {
+            inputBreakdown: {
+              cacheRead: 75,
+              cacheWrite: 0,
+              observed: { cacheRead: true, cacheWrite: false },
+              uncached: 25,
+            },
+            inputTokens: 100,
+            outputTokens: 10,
+            totalTokens: 110,
+          },
+        },
+      ]),
       messageManager,
       projectDirectory: projectRoot,
       sessionManager,
@@ -7533,6 +7889,19 @@ describe("createInProcessUiBackendClient", () => {
       events.push(event);
     });
 
+    await client.submitPromptAndWait("Use cached context", {
+      sessionId: "session_1",
+    });
+    await expect(
+      executeStatusData(client, "session_1", "inv_cache_before_archive"),
+    ).resolves.toMatchObject({
+      promptCacheUsage: {
+        accountedInputTokens: 100,
+        cacheReadShare: 0.75,
+        cacheReadTokens: 75,
+      },
+    });
+
     await (
       client as unknown as {
         archiveSession(input: { readonly sessionId: string }): Promise<void>;
@@ -7541,6 +7910,15 @@ describe("createInProcessUiBackendClient", () => {
 
     await expect(sessionManager.get("session_1")).resolves.toMatchObject({
       status: "archived",
+    });
+    await expect(
+      executeStatusData(client, "session_1", "inv_cache_after_archive"),
+    ).resolves.toMatchObject({
+      promptCacheUsage: {
+        accountedInputTokens: 0,
+        cacheReadShare: null,
+        cacheReadTokens: 0,
+      },
     });
     await expect(client.getSnapshot()).resolves.toMatchObject({
       activeSessionId: "session_2",

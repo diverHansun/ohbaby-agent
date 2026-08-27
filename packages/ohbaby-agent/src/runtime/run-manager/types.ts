@@ -67,6 +67,16 @@ export interface RunCompletion {
   readonly usage?: LifecycleResult["usage"];
 }
 
+export interface RunCompletionObservation {
+  readonly sessionId: string;
+  readonly isSubagent?: boolean;
+  readonly usage?: LifecycleResult["usage"];
+}
+
+export type RunCompletionObserver = (
+  observation: RunCompletionObservation,
+) => void;
+
 export type { SandboxLease };
 export type SandboxManager = SandboxManagerPort;
 
@@ -123,6 +133,7 @@ export interface RunManagerDeps {
   readonly policy: RunDefaultsPolicy;
   readonly now?: () => number;
   readonly createRunId?: () => string;
+  readonly onRunCompleted?: RunCompletionObserver;
 }
 
 export interface RunWorkerResult {

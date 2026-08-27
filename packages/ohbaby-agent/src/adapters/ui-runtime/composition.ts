@@ -97,6 +97,7 @@ import {
   RunManager,
   RunManagerNotFoundError,
   type HookExecutor,
+  type RunCompletionObserver,
   type RunDefaultsPolicy,
 } from "../../runtime/run-manager/index.js";
 import {
@@ -142,6 +143,7 @@ export interface UiRuntimeCompositionOptions {
     },
   ) => void;
   readonly hookExecutor?: HookExecutor;
+  readonly onRunCompleted?: RunCompletionObserver;
   readonly mcpManager?: McpManagerPort;
   readonly permission?: PermissionPort;
   readonly permissionState: PermissionStateStore;
@@ -531,6 +533,9 @@ export async function createUiRuntimeComposition(
     lifecycle,
     hookExecutor: options.hookExecutor,
     now: options.now,
+    ...(options.onRunCompleted === undefined
+      ? {}
+      : { onRunCompleted: options.onRunCompleted }),
     policy: DEFAULT_RUN_POLICY,
     runLedger,
     sandboxManager,
