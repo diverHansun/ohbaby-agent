@@ -25,7 +25,7 @@
 └─────────────────────┘          └─────────────────────┘
 ```
 
-SDK 内部由五类能力组成：
+SDK 内部由六类能力组成：
 
 | 组件 | 职责 |
 |------|------|
@@ -33,6 +33,7 @@ SDK 内部由五类能力组成：
 | Command grammar | 提供 slash command 词法解析和 argv 切分 |
 | Catalog resolver | 基于 backend catalog 做匹配、alias 解析和补全过滤 |
 | Client contracts | Query、Prompt Command、Queue Command 与完整 backend 能力组合 |
+| In-process RPC seam | 在保留 JSON clone、异步、错误与 AbortSignal 边界的同时，把 connected implementation 作为 method receiver 调用 |
 | Observation contract | `UiCommandRecord`、recorder 端口、脱敏 builder 与 fail-open helper |
 
 ---
@@ -80,6 +81,12 @@ Slash command 解析拆成纯词法解析和 catalog resolver。
 
 **未使用全局 registry**：catalog 由 backend 下发，SDK 不维护静态命令表。
 
+### 6. Receiver-safe In-process RPC
+
+`createRPC()` 每次按 method name 从当前 connected implementation 动态取方法，并以该 implementation 作为 JavaScript receiver 调用。这样 object literal、closure、bound/arrow function 与 class prototype method 都遵守各自的标准调用语义；transport 不需要预绑定原型链或维护方法清单。
+
+该 seam 只模拟传输边界：参数和结果继续跨 JSON clone，错误继续序列化重建，`AbortSignal` 继续 out-of-band 传递，callback API 继续直通。
+
 ---
 
 ## 三、Module Structure & File Layout（模块结构与文件组织）
@@ -94,6 +101,9 @@ packages/ohbaby-sdk/src/
 ├── command-record.ts        # 记录合同、脱敏与 fail-open helper
 ├── events.ts                # UiEvent union 与事件命名
 ├── snapshot.ts              # UiSnapshot / runtime state
+├── rpc/
+│   ├── types.ts             # CoreAPI / SDKAPI 正反向端口
+│   └── proxy.ts             # receiver-safe in-process RPC seam
 ├── slash-command/
 │   ├── types.ts             # UiCommandSpec / invocation / result metadata
 │   ├── parse.ts             # parseSlashInput()
@@ -112,6 +122,8 @@ packages/ohbaby-sdk/src/
 - `UiSnapshot`
 - `UiCommandSpec`
 - `UiCommandInvocation`
+- `CoreAPI` / `SDKAPI`
+- `createRPC()`
 - `parseSlashInput()`
 - `resolveCommand()`
 - `filterCommandCatalog()`
@@ -149,3 +161,11 @@ packages/ohbaby-sdk/src/
 **代价**：熟练用户少一个快捷写法。
 
 **理由**：命令可能改变状态，执行路径必须可预期。
+
+### 约束 4: Connected implementation 保留 receiver
+
+**当前选择**：fake-RPC 调用 method 时显式使用 connected implementation 作为 receiver。
+
+**代价**：所有 implementation method 都获得标准对象方法语义；不支持依赖 `this === undefined` 的非标准实现。
+
+**理由**：`CoreAPI` 的合法实现可以是持有连接状态的 class。transport 不能在抽取 method 后破坏其契约，也不应把绑定责任泄漏给每个 adapter。

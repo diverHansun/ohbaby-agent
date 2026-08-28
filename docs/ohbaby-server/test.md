@@ -15,6 +15,7 @@
 - interaction owner/claim（未知、越权和重复在 backend 前拒绝；终态与失败回滚只允许一个获胜）。
 - REST/RPC command gateway 的单次、脱敏、fail-open 记录。
 - remote client ↔ server 契约一致性。
+- CLI fake-RPC ↔ 真实 remote client ↔ server 的跨包组合边界。
 - foreground 生命周期（启动打印 address/token、Ctrl+C 优雅关闭）。
 
 **不覆盖**（外部职责）：
@@ -48,6 +49,7 @@
 |---------|---------|-----------|
 | agent backend（`createPersistentUiBackendClient`） | 本包能正确驱动真实 backend 并回流 UiEvent | backend 错误以 RPC 错误信封返回，不崩 server |
 | remote client ↔ server | 二者在 `UiBackendClient` 契约上行为一致 | 契约偏差应被契约测试捕获 |
+| CLI fake-RPC ↔ remote client ↔ server | class method receiver、初始化、snapshot、prompt 与 event 能穿过真实组合缝 | receiver 或装配语义丢失即测试失败 |
 | 多客户端并发 | 两个 client 各自订阅/审批/排队互不串扰 | 隔离失效即测试失败 |
 | in-process vs http 两条路径 | 同一 `UiBackendClient` 契约下行为等价 | 行为分叉即失败 |
 
@@ -59,6 +61,7 @@
 
 - **单元（`.unit.test.ts`）**：event-bus 序号/缓冲淘汰/replay 区间计算、auth fail-closed + 常量时间、CORS 判定、prompt-queue lane 顺序、permission-router 归属——这些纯逻辑用真实实现、不需网络。
 - **集成（`.integration.test.ts`）**：启动真实 server（绑随机端口）+ 真实 backend，用 remote client 跑完整 RPC/SSE/replay/审批/FIFO 流程。沿用现有 `server.integration.test.ts` / `client.integration.test.ts` 迁移并扩充。
+- **CLI 组合集成**：`tests/integration/cli/daemon-terminal.integration.test.ts` 必须让 `createRemoteCoreApiHost()` 返回的真实 class client 再经过 SDK `createRPC()`，不可用 direct remote client 冒充 terminal composition。
 - **mock 边界**：只在需要制造"断线/弱网/缓冲淘汰"等难复现场景时 mock 传输层；backend 尽量用真实实例（领域真相不该被 mock 掩盖）。
 - **回归红线**：
   - `docs/problem-lists/terminal-daemon/` 的终端闪烁修复不得回退。

@@ -1,6 +1,6 @@
 # Remote TUI → daemon RPC receiver 丢失
 
-> 状态：**根因已复现并定位，推荐方案已经用户确认（见 00 §0.5）；本目录只含规划文档，不改生产代码。**
+> 状态：**实施与验收已完成，G1–G8 全部通过；详见 05。**
 > 日期：2026-08-28
 > 代码基线：`8484474`（`main`，已与 `origin/main` 对齐）
 > 规划来源分支：本地 `docs/remote-tui-daemon-rpc-plan`，不推送远端
@@ -39,7 +39,7 @@
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 推荐方案、替代方案、改动面与回滚 |
 | [03-reference-projects.md](./03-reference-projects.md) | Kimi Code / deepseek-harness / opencode / pi / claude-code-best / codex 的 receiver 处理方式 |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 单元、集成、E2E 与发布门 |
-| `05-implementation-acceptance.md` | 实施完成后由验收会话写入（规划期不存在） |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实际改动、测试证据、SWE 评估与残余风险 |
 
 ## 4. 证据摘要
 
@@ -50,4 +50,4 @@
 
 ## 5. 实施闸门
 
-用户已确认 02 的推荐方案与 04 的验收深度，可以进入独立实施分支。实施必须按 02 改动、按 04 验收；临时分支只保留本地，最终仅合并并推送 `main`。
+02 的推荐方案已经按 04 完成验收：SDK 单点 receiver 修复、CLI/daemon 组合回归、全量自动化门与真实 compiled TUI PTY 均通过。临时分支只保留本地，最终仅合并并推送 `main`。
