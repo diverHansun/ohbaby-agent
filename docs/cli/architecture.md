@@ -18,6 +18,8 @@ packages/ohbaby-cli/src/bin.ts
 
 Agent in-process host 与 Server remote host 都直接复用真实 client 对象作为 `core`，不再维护逐方法转发清单。
 
+CLI 组合根随后统一用 SDK `createRPC()` 包裹两类 host。该 in-process seam 保留 JSON clone、异步、错误与 AbortSignal 边界，并在调用时保留真实 `core` 的 method receiver；因此持有连接状态的 Server remote class 与本地 object/closure implementation 不需要不同的装配分支。
+
 ## 三条用户路径
 
 ### 默认 TUI
@@ -37,3 +39,4 @@ Agent in-process host 与 Server remote host 都直接复用真实 client 对象
 - `submitPromptAndWait` 是 `submitPromptAccepted + waitForPrompt` 的组合，不拥有第三条执行逻辑。
 - TUI 提交采用 accepted 语义，并从事件流观察后续状态。
 - CLI 不把普通领域终态转换成传输异常；只按退出策略映射 process exit code。
+- local/remote host 必须共同经过 receiver-safe fake-RPC seam；不得为 remote 手写 method facade、逐方法 bind 或绕过 transport boundary。
