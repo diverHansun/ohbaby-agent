@@ -177,9 +177,7 @@ export function createRPC<API extends object>(): {
       }
       try {
         return await cloneAcrossBoundary(
-          await (method as (...input: readonly unknown[]) => unknown)(
-            ...clonedArgs,
-          ),
+          await Reflect.apply(method, impl, clonedArgs),
         );
       } catch (error) {
         throw deserializeError(

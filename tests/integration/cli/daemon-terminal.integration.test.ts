@@ -2,9 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { UiEvent } from "../../../packages/ohbaby-sdk/src/index.js";
 import {
-  createRemoteUiBackendClient,
+  createRPC,
+  type CoreAPI,
+  type UiEvent,
+} from "../../../packages/ohbaby-sdk/src/index.js";
+import {
+  createRemoteCoreApiHost,
   startDaemonServer,
 } from "../../../packages/ohbaby-server/src/index.js";
 import { createFakeLLMClient } from "../tui/helpers.js";
@@ -43,7 +47,15 @@ async function waitUntil(
   throw new Error("Timed out waiting for daemon terminal condition");
 }
 
-describe("explicit daemon remote terminal flow", () => {
+function createTerminalClient(
+  host: ReturnType<typeof createRemoteCoreApiHost>,
+): CoreAPI & typeof host.callbacks {
+  const rpc = createRPC<CoreAPI>();
+  rpc.connectImpl(host.core);
+  return rpc.createProxy(host.callbacks);
+}
+
+describe("explicit daemon remote terminal composition", () => {
   it("starts fresh by default and resumes history only on explicit continue", async () => {
     const home = await tempDirectory("ohbaby-daemon-terminal-");
     const authToken = "token_1";
@@ -65,24 +77,27 @@ describe("explicit daemon remote terminal flow", () => {
 
     try {
       const events: UiEvent[] = [];
-      const firstClient = createRemoteUiBackendClient({
+      const firstHost = createRemoteCoreApiHost({
         authToken,
         clientId: "terminal_a",
         directory: home,
         host: daemon.host,
         port: daemon.port,
       });
+      const firstClient = createTerminalClient(firstHost);
       const unsubscribe = firstClient.subscribeEvents((event) => {
         events.push(event);
       });
 
       try {
+        const initialSnapshot = await firstClient.getSnapshot();
+        expect(initialSnapshot.activeSessionId).toBeNull();
         await delay(25);
         await firstClient.submitPromptAndWait("hello daemon");
         await waitUntil(() => JSON.stringify(events).includes("daemon reply"));
       } finally {
         unsubscribe();
-        await firstClient.dispose();
+        await firstHost.dispose();
       }
 
       const eventTypes = events.map((event) => event.type);
@@ -94,13 +109,14 @@ describe("explicit daemon remote terminal flow", () => {
         ]),
       );
 
-      const secondClient = createRemoteUiBackendClient({
+      const secondHost = createRemoteCoreApiHost({
         authToken,
         clientId: "terminal_b",
         directory: home,
         host: daemon.host,
         port: daemon.port,
       });
+      const secondClient = createTerminalClient(secondHost);
       try {
         const snapshot = await secondClient.getSnapshot();
         const serializedSnapshot = JSON.stringify(snapshot);
@@ -110,10 +126,10 @@ describe("explicit daemon remote terminal flow", () => {
         expect(snapshot.sessions[0]?.messages).toEqual([]);
         expect(serializedSnapshot).not.toContain("daemon reply");
       } finally {
-        await secondClient.dispose();
+        await secondHost.dispose();
       }
 
-      const continuedClient = createRemoteUiBackendClient({
+      const continuedHost = createRemoteCoreApiHost({
         authToken,
         clientId: "terminal_c",
         directory: home,
@@ -121,6 +137,7 @@ describe("explicit daemon remote terminal flow", () => {
         port: daemon.port,
         startupIntent: { startupSessionMode: { type: "continue" } },
       });
+      const continuedClient = createTerminalClient(continuedHost);
       try {
         const snapshot = await continuedClient.getSnapshot();
         const serializedSnapshot = JSON.stringify(snapshot);
@@ -129,7 +146,7 @@ describe("explicit daemon remote terminal flow", () => {
         expect(serializedSnapshot).toContain("hello daemon");
         expect(serializedSnapshot).toContain("daemon reply");
       } finally {
-        await continuedClient.dispose();
+        await continuedHost.dispose();
       }
     } finally {
       await daemon.stop();

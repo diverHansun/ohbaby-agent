@@ -2,7 +2,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import type { UiPromptCompletion } from "ohbaby-sdk";
+import type { CoreAPI, UiPromptCompletion } from "ohbaby-sdk";
 import type { CliCommandRuntime } from "./cli/commands/types.js";
 
 describe("runOhbabyCli", () => {
@@ -393,6 +393,51 @@ describe("runOhbabyCli", () => {
       startupIntent: { startupSessionMode: { type: "fresh" } },
     });
     expect(buildCoreAPIImpl).not.toHaveBeenCalled();
+    expect(renderTerminalUi).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves receiver-dependent methods on explicit remote hosts", async () => {
+    vi.resetModules();
+    const core = Object.assign(createCore(), {
+      snapshotCalls: 0,
+      getSnapshot(): Promise<void> {
+        this.snapshotCalls += 1;
+        return Promise.resolve();
+      },
+    });
+    const dispose = vi.fn(() => Promise.resolve());
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const createRemoteCoreApiHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      dispose,
+    }));
+    const renderTerminalUi = vi.fn((options: { readonly client: CoreAPI }) => ({
+      waitUntilExit: async (): Promise<void> => {
+        await options.client.getSnapshot();
+      },
+    }));
+    vi.doMock("ohbaby-agent", () => ({
+      buildCoreAPIImpl: vi.fn(() => {
+        throw new Error("agent host should not be used for explicit remote");
+      }),
+      loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
+    }));
+    vi.doMock("ohbaby-server", () => ({
+      createRemoteCoreApiHost,
+      readDaemonStatus: vi.fn(),
+      startDaemonServer: vi.fn(),
+      stopDaemonFromState: vi.fn(),
+    }));
+    vi.doMock("./tui/index.js", () => ({ renderTerminalUi }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(["node", "ohbaby", "--remote-port", "4096"]),
+    ).resolves.toBe(0);
+    expect(core.snapshotCalls).toBe(1);
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
   });

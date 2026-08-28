@@ -25,7 +25,27 @@ interface PromptWaitAPI {
   ) => Promise<string>;
 }
 
+interface ReceiverAPI {
+  readonly readValue: () => Promise<string>;
+}
+
 describe("createRPC", () => {
+  it("preserves the connected implementation as the method receiver", async () => {
+    class ReceiverImplementation implements ReceiverAPI {
+      private readonly value = "receiver state";
+
+      readValue(): Promise<string> {
+        return Promise.resolve(this.value);
+      }
+    }
+
+    const rpc = createRPC<ReceiverAPI>();
+    rpc.connectImpl(new ReceiverImplementation());
+    const proxy = rpc.createProxy({});
+
+    await expect(proxy.readValue()).resolves.toBe("receiver state");
+  });
+
   it("serializes calls and results across the boundary", async () => {
     const rpc = createRPC<DemoAPI>();
     const state = { nested: { value: "backend" } };
