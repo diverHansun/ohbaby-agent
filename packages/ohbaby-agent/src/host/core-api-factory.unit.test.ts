@@ -246,6 +246,38 @@ describe("buildCoreAPIImpl", () => {
     expect(closePersistentUiBackendDatabase).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves an injected recorder lifecycle with its caller", async () => {
+    vi.resetModules();
+    const client = createPersistentClientMock();
+    vi.doMock("../adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: vi.fn(),
+      createPersistentUiBackendClient: vi.fn(() => client),
+    }));
+    vi.doMock("../mcp/index.js", () => ({
+      McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+    }));
+    const recorder = {
+      flush: vi.fn(() => Promise.resolve()),
+      record: vi.fn(),
+    };
+
+    const { buildCoreAPIImpl } = await import("./core-api-factory.js");
+    const host = await buildCoreAPIImpl({ commandRecorder: recorder });
+    await host.core.executeCommand({
+      argv: [],
+      clientInvocationId: "invoke_external_recorder",
+      commandId: "status",
+      path: ["status"],
+      raw: "/status",
+      rawArgs: "",
+      surface: "tui",
+    });
+    await host.dispose();
+
+    expect(recorder.record).toHaveBeenCalledTimes(2);
+    expect(recorder.flush).not.toHaveBeenCalled();
+  });
+
   it("passes continue startup mode to the persistent backend", async () => {
     vi.resetModules();
     const createPersistentUiBackendClient = vi.fn(() => ({
@@ -309,27 +341,71 @@ describe("buildCoreAPIImpl", () => {
     expect(createPersistentUiBackendClient).not.toHaveBeenCalled();
   });
 
-  it("uses the in-process persistent backend by default", async () => {
+  it.each([
+    ["production", undefined],
+    ["production", false],
+    ["test", undefined],
+    ["test", false],
+    ["development", undefined],
+    ["development", false],
+  ] as const)(
+    "keeps the default Agent host off terminal streams with NODE_ENV=%s and commandRecorder=%s",
+    async (nodeEnv, commandRecorder) => {
+      vi.resetModules();
+      vi.stubEnv("NODE_ENV", nodeEnv);
+      const stdout = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+      const stderr = vi
+        .spyOn(process.stderr, "write")
+        .mockImplementation(() => true);
+      const client = createPersistentClientMock();
+      const createPersistentUiBackendClient = vi.fn(() => client);
+      vi.doMock("../adapters/ui-persistent.js", () => ({
+        closePersistentUiBackendDatabase: vi.fn(),
+        createPersistentUiBackendClient,
+      }));
+      vi.doMock("../mcp/index.js", () => ({
+        McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+      }));
+
+      const { buildCoreAPIImpl } = await import("./core-api-factory.js");
+
+      try {
+        const host = await buildCoreAPIImpl(
+          commandRecorder === false ? { commandRecorder } : {},
+        );
+        expect(createPersistentUiBackendClient).toHaveBeenCalledWith({});
+        await host.core.executeCommand({
+          argv: [],
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          path: ["status"],
+          raw: "/status",
+          rawArgs: "",
+          surface: "tui",
+        });
+        await expect(host.dispose()).resolves.toBeUndefined();
+
+        expect(stdout.mock.calls.flat().join("\n")).not.toContain(
+          "ui.command.",
+        );
+        expect(stderr.mock.calls.flat().join("\n")).not.toContain(
+          "ui.command.",
+        );
+      } finally {
+        stdout.mockRestore();
+        stderr.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it("keeps Agent host business writes successful and terminal-silent when the recorder fails", async () => {
     vi.resetModules();
-    const client = createPersistentClientMock();
-    const createPersistentUiBackendClient = vi.fn(() => client);
-    vi.doMock("../adapters/ui-persistent.js", () => ({
-      closePersistentUiBackendDatabase: vi.fn(),
-      createPersistentUiBackendClient,
-    }));
-    vi.doMock("../mcp/index.js", () => ({
-      McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
-    }));
-
-    const { buildCoreAPIImpl } = await import("./core-api-factory.js");
-
-    const host = await buildCoreAPIImpl({});
-    expect(createPersistentUiBackendClient).toHaveBeenCalledWith({});
-    await expect(host.dispose()).resolves.toBeUndefined();
-  });
-
-  it("uses a fixed diagnostic when an Agent host recorder fails", async () => {
-    vi.resetModules();
+    const stdout = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     const stderr = vi
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
@@ -371,15 +447,12 @@ describe("buildCoreAPIImpl", () => {
       await expect(
         api.core.submitPromptAccepted("private prompt"),
       ).resolves.toMatchObject({ promptId: "prompt_1" });
-      expect(stderr).toHaveBeenCalledWith(
-        expect.stringContaining('"type":"ui.command.observation.failure"'),
-      );
-      expect(stderr.mock.calls.flat().join("\n")).not.toContain(
-        "private-recorder-name",
-      );
+      expect(stdout.mock.calls.flat().join("\n")).not.toContain("ui.command.");
+      expect(stderr.mock.calls.flat().join("\n")).not.toContain("ui.command.");
       await api.dispose();
       expect(dispose).toHaveBeenCalledOnce();
     } finally {
+      stdout.mockRestore();
       stderr.mockRestore();
     }
   });

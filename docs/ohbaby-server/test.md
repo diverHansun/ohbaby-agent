@@ -39,6 +39,7 @@
 | prompt FIFO | 同 session 多 prompt 严格按序执行 |
 | interaction claim | 只有 owner 可原子回答一次；仅明确未消费的校验失败可条件回滚 |
 | command recording | 正常 sink 下 REST/RPC 每个原子写各产生一条 started/completed；两阶段分别 best-effort，复用 operationId；未授权请求和组合方法不重复记账 |
+| 默认 command terminal policy | recorder 未提供或为 `false` 时，在任意 `NODE_ENV` 都 no-op；业务调用与 dispose 前后 stdout/stderr 均无 `ui.command.*` |
 | 优雅关闭 | Ctrl+C 后端口释放、连接收尾、无残留 |
 
 ---
@@ -67,6 +68,7 @@
   - `docs/problem-lists/terminal-daemon/` 的终端闪烁修复不得回退。
   - `docs/problem-lists/sessions-ui-backend/` 的 session 切换修复不得回退。
   - 默认 CLI（in-process）路径不得因本包变更被拖入 server 依赖。
+  - `ohbaby serve` 默认不得把 command record 或 observation failure 写到 daemon 终端；显式 recorder 失败仍不影响 REST/RPC 结果，且 Server 不 flush 外部 recorder。
 - **人工验证**：`npm pack` + 本机全局安装，分别验证默认 `ohbaby`（不建 daemon 状态）与 `ohbaby serve`/`attach` 两条路径。
 
 ---

@@ -1,7 +1,6 @@
 import type {
   CoreAPI,
   SDKAPI,
-  UiCommandObservationDiagnostic,
   UiCommandRecorder,
   UiSnapshot,
 } from "ohbaby-sdk";
@@ -10,10 +9,6 @@ import {
   createPersistentUiBackendClient,
 } from "../adapters/ui-persistent.js";
 import { McpManager } from "../mcp/index.js";
-import {
-  createStructuredUiCommandRecorder,
-  type StructuredUiCommandRecorder,
-} from "./command-recorder.js";
 import { createUiCommandGateway } from "./ui-command-gateway.js";
 
 export interface CoreApiFactoryOptions {
@@ -31,30 +26,13 @@ const NOOP_COMMAND_RECORDER: UiCommandRecorder = {
   },
 };
 
-function reportCommandObservationFailure(
-  diagnostic: UiCommandObservationDiagnostic,
-): void {
-  const name = diagnostic.error instanceof Error ? "Error" : "NonError";
-  process.stderr.write(
-    `${JSON.stringify({ name, stage: diagnostic.stage, type: "ui.command.observation.failure" })}\n`,
-  );
-}
-
-function commandRecorderFromOptions(options: CoreApiFactoryOptions): {
-  readonly recorder: UiCommandRecorder;
-  readonly structured?: StructuredUiCommandRecorder;
-} {
-  if (options.commandRecorder === false) {
-    return { recorder: NOOP_COMMAND_RECORDER };
-  }
-  if (options.commandRecorder !== undefined) {
-    return { recorder: options.commandRecorder };
-  }
-  if (process.env.NODE_ENV === "test") {
-    return { recorder: NOOP_COMMAND_RECORDER };
-  }
-  const structured = createStructuredUiCommandRecorder();
-  return { recorder: structured, structured };
+function commandRecorderFromOptions(
+  options: CoreApiFactoryOptions,
+): UiCommandRecorder {
+  return options.commandRecorder === undefined ||
+    options.commandRecorder === false
+    ? NOOP_COMMAND_RECORDER
+    : options.commandRecorder;
 }
 
 export interface CoreApiHost {
@@ -103,11 +81,9 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
       ? {}
       : { resumeSessionId: options.resume }),
   });
-  const commandRecording = commandRecorderFromOptions(options);
   const client = createUiCommandGateway(rawClient, {
     entryPoint: "agent-host",
-    onDiagnostic: reportCommandObservationFailure,
-    recorder: commandRecording.recorder,
+    recorder: commandRecorderFromOptions(options),
   });
 
   return {
@@ -121,7 +97,6 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
       try {
         try {
           await rawClient.dispose();
-          await commandRecording.structured?.flush();
         } finally {
           await McpManager.disposeAll();
         }

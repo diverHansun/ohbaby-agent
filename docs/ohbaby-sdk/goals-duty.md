@@ -87,7 +87,7 @@ SDK 不依赖 `ohbaby-agent`、`ohbaby-cli` 或任何业务模块。它包含类
 
 ### D6: 写操作记录合同
 
-定义 `UiCommandRecord`、`UiCommandRecorder` 和 fail-open 包装函数。`operationId` 只标识一次外部原子写调用；record 通过 correlation 保留 prompt、session、run、permission、interaction 与 transport 等领域 ID。SDK 不负责真实 I/O，Agent/Server gateway 提供有界、保序 recorder。
+定义 `UiCommandRecord`、`UiCommandRecorder` 和 fail-open 包装函数。`operationId` 只标识一次外部原子写调用；record 通过 correlation 保留 prompt、session、run、permission、interaction 与 transport 等领域 ID。SDK 不负责真实 I/O，也不提供默认 recorder 目的地；Agent/Server gateway 接受显式注入的 recorder，默认 composition 使用本地 no-op。需要队列投递的集成者必须显式提供 sink，并拥有 recorder 的 flush/dispose 生命周期。
 
 ---
 

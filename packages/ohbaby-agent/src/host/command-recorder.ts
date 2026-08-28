@@ -4,7 +4,7 @@ const DEFAULT_CAPACITY = 256;
 
 export interface StructuredUiCommandRecorderOptions {
   readonly capacity?: number;
-  readonly sink?: (record: UiCommandRecord) => Promise<void> | void;
+  readonly sink: (record: UiCommandRecord) => Promise<void> | void;
   readonly onDiagnostic?: (error: unknown) => void;
 }
 
@@ -12,20 +12,15 @@ export interface StructuredUiCommandRecorder extends UiCommandRecorder {
   flush(): Promise<void>;
 }
 
-function defaultSink(record: UiCommandRecord): void {
-  process.stdout.write(
-    `${JSON.stringify({
-      record,
-      type: "ui.command.record",
-    })}\n`,
-  );
-}
+const NOOP_DIAGNOSTIC = (): void => undefined;
 
-function defaultDiagnostic(error: unknown): void {
-  const name = error instanceof Error ? "Error" : "NonError";
-  process.stderr.write(
-    `${JSON.stringify({ name, type: "ui.command.recorder.failure" })}\n`,
-  );
+function assertExplicitSink(
+  options: unknown,
+): asserts options is StructuredUiCommandRecorderOptions {
+  const candidate = options as { readonly sink?: unknown } | null | undefined;
+  if (typeof candidate?.sink !== "function") {
+    throw new TypeError("UI command recorder sink must be a function");
+  }
 }
 
 class BoundedStructuredUiCommandRecorder implements StructuredUiCommandRecorder {
@@ -37,6 +32,7 @@ class BoundedStructuredUiCommandRecorder implements StructuredUiCommandRecorder 
   private flushScheduled = false;
 
   constructor(options: StructuredUiCommandRecorderOptions) {
+    assertExplicitSink(options);
     const capacity = options.capacity ?? DEFAULT_CAPACITY;
     if (!Number.isSafeInteger(capacity) || capacity < 1) {
       throw new TypeError(
@@ -44,8 +40,8 @@ class BoundedStructuredUiCommandRecorder implements StructuredUiCommandRecorder 
       );
     }
     this.capacity = capacity;
-    this.onDiagnostic = options.onDiagnostic ?? defaultDiagnostic;
-    this.sink = options.sink ?? defaultSink;
+    this.onDiagnostic = options.onDiagnostic ?? NOOP_DIAGNOSTIC;
+    this.sink = options.sink;
   }
 
   record(entry: UiCommandRecord): void {
@@ -105,7 +101,7 @@ class BoundedStructuredUiCommandRecorder implements StructuredUiCommandRecorder 
 }
 
 export function createStructuredUiCommandRecorder(
-  options: StructuredUiCommandRecorderOptions = {},
+  options: StructuredUiCommandRecorderOptions,
 ): StructuredUiCommandRecorder {
   return new BoundedStructuredUiCommandRecorder(options);
 }

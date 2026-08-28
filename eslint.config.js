@@ -37,6 +37,26 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/ohbaby-agent/src/host/command-recorder.ts"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        {
+          message:
+            "Structured command recorders require an explicitly injected sink.",
+          object: "process",
+          property: "stdout",
+        },
+        {
+          message:
+            "Structured command recorder diagnostics must be explicitly injected.",
+          object: "process",
+          property: "stderr",
+        },
+      ],
+    },
+  },
+  {
     ignores: [
       "**/dist/**",
       "**/node_modules/**",

@@ -36,6 +36,8 @@ SDK 内部由六类能力组成：
 | In-process RPC seam | 在保留 JSON clone、异步、错误与 AbortSignal 边界的同时，把 connected implementation 作为 method receiver 调用 |
 | Observation contract | `UiCommandRecord`、recorder 端口、脱敏 builder 与 fail-open helper |
 
+Observation contract 只描述“记录什么”和“如何 best-effort 提交”，不决定“写到哪里”。默认 Agent/Server composition 注入本地 no-op；需要持久化或转发的集成者显式注入 recorder，并由创建者管理 drain/flush。任何低层 recorder 都不得隐式选择 stdout/stderr。
+
 ---
 
 ## 二、Design Pattern & Rationale（设计模式与理由）

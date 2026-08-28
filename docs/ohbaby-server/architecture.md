@@ -39,6 +39,8 @@
 
 `CoreApiHost`/`CoreAPI` 若保留名称，只能是从 SDK 权威能力派生的 RPC seam，不再手抄一份 client 方法表。REST 与 JSON-RPC gateway 注入 raw backend；它们分别是 `server-rest`、`server-rpc` 写操作的唯一 `UiCommandRecord` owner，Agent 内部与 browser client 不重复记账。
 
+Server composition 默认给两个 gateway 注入本地 no-op recorder，不按 `NODE_ENV` 自动创建 sink，也不把 command observation 写入 foreground daemon 的 stdout/stderr。需要记录的集成者必须显式注入 recorder；该 recorder 是借入端口，其 flush/dispose 由创建者负责，Server shutdown 不替外部对象 drain。
+
 Prompt transport 只有两个 primitive：接单 `submitPromptAccepted` 与查询 `waitForPrompt`。便利方法 `submitPromptAndWait` 由 client 组合，因此 server 没有同义的第三条执行路径。生产 backend 的 queue edit/cancel/lease 为必选能力。
 
 ---

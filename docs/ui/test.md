@@ -11,6 +11,7 @@
 3. 验证 slash command hints、Tab 补全和 exact execution。
 4. 验证 model/session interaction 能打开对应 selector 并回填 response。
 5. 验证 command result/error 渲染。
+6. 验证 in-process slash command 操作中及退出后不出现 `ui.command.*` raw JSON，Ink 保持终端输出所有权。
 
 ---
 
@@ -43,6 +44,10 @@
 - 选择后调用 `respondInteraction()`。
 - `interaction.requested select-one:session` 打开会话选择器。
 - permission dialog 优先级高于普通 interaction。
+
+### 2.4 In-process 终端集成测试
+
+以真实 Agent composition 执行不依赖外部模型的 slash command，捕获完整 stdout/stderr 直到 dispose 和进程退出。测试必须显式使用 production 环境和隔离 HOME/cwd，断言两个 stream 都不含 `ui.command.*`；不得通过 TUI JSON 过滤器或 `NODE_ENV=test` no-op 分支获得假绿。
 
 ---
 

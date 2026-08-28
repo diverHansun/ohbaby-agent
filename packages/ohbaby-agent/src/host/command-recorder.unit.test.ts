@@ -19,6 +19,28 @@ function record(
 }
 
 describe("createStructuredUiCommandRecorder", () => {
+  it("requires an explicit sink without writing to terminal streams", () => {
+    const stdout = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+
+    try {
+      expect(() =>
+        createStructuredUiCommandRecorder(
+          {} as Parameters<typeof createStructuredUiCommandRecorder>[0],
+        ),
+      ).toThrow("UI command recorder sink must be a function");
+      expect(stdout).not.toHaveBeenCalled();
+      expect(stderr).not.toHaveBeenCalled();
+    } finally {
+      stdout.mockRestore();
+      stderr.mockRestore();
+    }
+  });
+
   it("delivers accepted records to an async sink in order", async () => {
     const delivered: string[] = [];
     const recorder = createStructuredUiCommandRecorder({
@@ -66,14 +88,13 @@ describe("createStructuredUiCommandRecorder", () => {
     expect(diagnostic).toHaveBeenCalledTimes(1);
   });
 
-  it("does not expose caller-controlled error names in default diagnostics", async () => {
-    const writes: string[] = [];
-    const write = vi
+  it("contains sink failures without default terminal diagnostics", async () => {
+    const stdout = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const stderr = vi
       .spyOn(process.stderr, "write")
-      .mockImplementation((chunk): boolean => {
-        writes.push(String(chunk));
-        return true;
-      });
+      .mockImplementation(() => true);
     const error = new Error("sink failed");
     error.name = "caller-secret-name";
 
@@ -83,12 +104,13 @@ describe("createStructuredUiCommandRecorder", () => {
       });
 
       recorder.record(record("operation_1", "started"));
-      await recorder.flush();
+      await expect(recorder.flush()).resolves.toBeUndefined();
 
-      expect(writes.join("\n")).toContain('"name":"Error"');
-      expect(writes.join("\n")).not.toContain("caller-secret-name");
+      expect(stdout).not.toHaveBeenCalled();
+      expect(stderr).not.toHaveBeenCalled();
     } finally {
-      write.mockRestore();
+      stdout.mockRestore();
+      stderr.mockRestore();
     }
   });
 });

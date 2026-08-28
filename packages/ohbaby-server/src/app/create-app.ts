@@ -18,14 +18,11 @@ import {
   type UiSlashCommandInvocation,
   type UiSnapshot,
   type UiUnsubscribe,
-  type UiCommandObservationDiagnostic,
   type UiCommandCorrelation,
   type UiCommandRecorder,
 } from "ohbaby-sdk";
 import {
-  createStructuredUiCommandRecorder,
   createUiCommandGateway,
-  type StructuredUiCommandRecorder,
   type UiPromptQueueExecutionPort,
 } from "ohbaby-agent";
 import { isAuthorizedDaemonRequest } from "../auth/token.js";
@@ -98,15 +95,6 @@ const NOOP_COMMAND_RECORDER: UiCommandRecorder = {
     return;
   },
 };
-
-function reportCommandObservationFailure(
-  diagnostic: UiCommandObservationDiagnostic,
-): void {
-  const name = diagnostic.error instanceof Error ? "Error" : "NonError";
-  process.stderr.write(
-    `${JSON.stringify({ name, stage: diagnostic.stage, type: "ui.command.observation.failure" })}\n`,
-  );
-}
 
 function reportInteractionCleanupFailure(): void {
   process.stderr.write(
@@ -829,9 +817,6 @@ class DaemonServerAppRuntime {
   readonly app = new Hono();
   private readonly clientDisconnectRetentionMs: number;
   private readonly commandRecorder: UiCommandRecorder;
-  private readonly structuredCommandRecorder:
-    | StructuredUiCommandRecorder
-    | undefined;
   private readonly clientViews = new DaemonClientViewCoordinator();
   private readonly clients = new Set<SseClient>();
   private readonly createSessionId: () => string;
@@ -859,20 +844,10 @@ class DaemonServerAppRuntime {
       options.clientDisconnectRetentionMs,
     );
     this.createSessionId = options.createSessionId ?? randomUUID;
-    if (options.commandRecorder === false || process.env.NODE_ENV === "test") {
-      this.commandRecorder =
-        options.commandRecorder === false
-          ? NOOP_COMMAND_RECORDER
-          : (options.commandRecorder ?? NOOP_COMMAND_RECORDER);
-      this.structuredCommandRecorder = undefined;
-    } else if (options.commandRecorder !== undefined) {
-      this.commandRecorder = options.commandRecorder;
-      this.structuredCommandRecorder = undefined;
-    } else {
-      const recorder = createStructuredUiCommandRecorder();
-      this.commandRecorder = recorder;
-      this.structuredCommandRecorder = recorder;
-    }
+    this.commandRecorder =
+      options.commandRecorder === undefined || options.commandRecorder === false
+        ? NOOP_COMMAND_RECORDER
+        : options.commandRecorder;
     this.eventBus =
       options.eventBufferCapacity === undefined
         ? new EventBus()
@@ -902,6 +877,8 @@ class DaemonServerAppRuntime {
     }
   }
 
+  // Preserve rejected-Promise semantics if any synchronous cleanup step throws.
+  // eslint-disable-next-line @typescript-eslint/require-await
   async dispose(): Promise<void> {
     for (const controller of this.waitControllers) controller.abort();
     this.waitControllers.clear();
@@ -922,7 +899,6 @@ class DaemonServerAppRuntime {
     this.clientViews.resetRuntimeState();
     this.replayEventsBySeqNum.clear();
     this.started = false;
-    await this.structuredCommandRecorder?.flush();
   }
 
   private commandBackend(
@@ -932,7 +908,6 @@ class DaemonServerAppRuntime {
     return createUiCommandGateway(this.options.backend, {
       correlation,
       entryPoint,
-      onDiagnostic: reportCommandObservationFailure,
       recorder: this.commandRecorder,
     });
   }

@@ -106,7 +106,9 @@ ohbaby-agent adapter
 | Resolved command | SDK resolver | 按 catalog 做确定匹配 |
 | Command result event | backend adapter | 将 command 输出转为 SDK 事件 |
 | Interaction response | UI surface | 只表达用户选择，不执行业务 |
-| UiCommandRecord | 最外层 Agent/Server gateway | 对 started/completed 分别 best-effort 提交并复用 operationId；raw backend 不记录 |
+| UiCommandRecord | 最外层 Agent/Server gateway | 对 started/completed 分别 best-effort 提交并复用 operationId；raw backend 不记录；默认 composition 提交给本地 no-op，只有显式 recorder 集成才产生外部 I/O |
+
+显式 recorder 是借入端口：Agent/Server 不探测或调用 `flush()` 等端口外方法。创建带队列 recorder 的集成者负责其 sink、diagnostic 与完整生命周期。
 
 ---
 

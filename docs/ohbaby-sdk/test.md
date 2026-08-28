@@ -14,6 +14,7 @@
 6. 验证 Prompt completion 只有四种严格终态，scheduler close/fault/abort 不悬空 waiter。
 7. 验证 client 能力拆分、accepted + wait 唯一组合和 fake-RPC signal 的 out-of-band 传递。
 8. 验证 command record 的 operationId、phase、correlation、脱敏和 fail-open 语义。
+9. 验证默认 Agent/Server composition 不把 command observation 写入 stdout/stderr，且该策略不依赖 `NODE_ENV`。
 
 ---
 
@@ -49,7 +50,7 @@
 
 ### 2.5 Command record 对抗测试
 
-覆盖 returned/threw、recorder 同步失败、慢 sink、clock/ID/details/diagnostic 自身抛错；断言正文、apiKey、token、env 值、stack 和响应正文不会进入 record。Agent host、Server REST、Server RPC 各记录一次，`submitPromptAndWait` 与 skill 内部接单不重复记录。
+覆盖 returned/threw、recorder 同步失败、慢 sink、clock/ID/details/diagnostic 自身抛错；断言正文、apiKey、token、env 值、stack 和响应正文不会进入 record。Agent host、Server REST、Server RPC 各记录一次，`submitPromptAndWait` 与 skill 内部接单不重复记录。structured recorder 缺 sink 必须在构造期失败，未注入 diagnostic 时 sink 失败保持静默；默认 composition 还需通过显式 `NODE_ENV=production` 的子进程捕获 stdout/stderr，并覆盖 dispose 后的 late output。
 
 ---
 

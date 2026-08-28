@@ -1008,7 +1008,99 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("keeps REST and RPC writes successful when the recorder fails", async () => {
+  it.each([
+    ["production", undefined],
+    ["production", false],
+    ["test", undefined],
+    ["test", false],
+    ["development", undefined],
+    ["development", false],
+  ] as const)(
+    "keeps the default Server app off terminal streams with NODE_ENV=%s and commandRecorder=%s",
+    async (nodeEnv, commandRecorder) => {
+      vi.stubEnv("NODE_ENV", nodeEnv);
+      const stdout = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+      const stderr = vi
+        .spyOn(process.stderr, "write")
+        .mockImplementation(() => true);
+      const handle = createApp(
+        new FakeBackend(),
+        commandRecorder === false ? { commandRecorder } : {},
+      );
+      let stderrOutput = "";
+      let stdoutOutput = "";
+      await handle.start();
+      try {
+        const response = await handle.app.request("/api/rpc", {
+          body: JSON.stringify({
+            clientId: "client_rpc",
+            id: "rpc_default_silent",
+            method: "submitPromptAccepted",
+            params: ["private prompt", { clientRequestId: "request_1" }],
+          }),
+          headers: { ...authHeaders(), "content-type": "application/json" },
+          method: "POST",
+        });
+
+        expect(response.status).toBe(200);
+      } finally {
+        await handle.dispose();
+        stdoutOutput = stdout.mock.calls.flat().join("\n");
+        stderrOutput = stderr.mock.calls.flat().join("\n");
+        stdout.mockRestore();
+        stderr.mockRestore();
+        vi.unstubAllEnvs();
+      }
+      expect(stdoutOutput).not.toContain("ui.command.");
+      expect(stderrOutput).not.toContain("ui.command.");
+    },
+  );
+
+  it("leaves an injected recorder lifecycle with its caller", async () => {
+    const recorder = {
+      flush: vi.fn(() => Promise.resolve()),
+      record: vi.fn(),
+    };
+    const handle = createApp(new FakeBackend(), {
+      commandRecorder: recorder,
+    });
+    await handle.start();
+    try {
+      const response = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          clientId: "client_rpc",
+          id: "rpc_external_recorder",
+          method: "executeCommand",
+          params: [
+            {
+              argv: [],
+              clientInvocationId: "invoke_external_recorder",
+              commandId: "status",
+              path: ["status"],
+              raw: "/status",
+              rawArgs: "",
+              surface: "web",
+            },
+          ],
+        }),
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        method: "POST",
+      });
+      expect(response.status).toBe(200);
+    } finally {
+      await handle.dispose();
+    }
+
+    expect(recorder.record).toHaveBeenCalledTimes(2);
+    expect(recorder.flush).not.toHaveBeenCalled();
+  });
+
+  it("keeps REST and RPC writes successful and terminal-silent when the recorder fails", async () => {
+    const stdout = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     const stderr = vi
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
@@ -1050,14 +1142,11 @@ describe("createDaemonServerApp", () => {
         method: "PATCH",
       });
       expect(rest.status).toBe(200);
-      expect(stderr).toHaveBeenCalledWith(
-        expect.stringContaining('"type":"ui.command.observation.failure"'),
-      );
-      expect(stderr.mock.calls.flat().join("\n")).not.toContain(
-        "secret-recorder-name",
-      );
+      expect(stdout.mock.calls.flat().join("\n")).not.toContain("ui.command.");
+      expect(stderr.mock.calls.flat().join("\n")).not.toContain("ui.command.");
     } finally {
       await handle.dispose();
+      stdout.mockRestore();
       stderr.mockRestore();
     }
   });

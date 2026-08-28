@@ -28,7 +28,7 @@
 2. auth 中间件校验 AuthToken；失败即拒（fail-closed），流终止。
 3. CORS 中间件按 origin 白名单放行（web 跨 origin）。
 4. protocols 适配器解析信封 → 调用由 SDK 能力派生的 `CoreApiHost` 对应方法。
-5. 原子写操作在外部 gateway 生成 `operationId`，记录脱敏的 started/completed；recorder fail-open，raw backend 不重复记录。
+5. 原子写操作在外部 gateway 生成 `operationId`，记录脱敏的 started/completed；recorder fail-open，raw backend 不重复记录。默认 Server composition 使用本地 no-op，不向 daemon stdout/stderr 输出 command record；只有显式注入 recorder 的集成才产生外部记录。
 6. Prompt 接单经 scheduler 持久化并返回 receipt；按 `promptId` 的 wait 只等待严格终态，不重复执行也不重复记录。
 7. backend 执行，结果沿原路返回前端；四种业务终态正常返回，技术故障走 transport error。
 
@@ -49,6 +49,8 @@
 1. `ohbaby serve` → lifecycle/foreground → 装配 transport + 注入 backend → 监听 → 返回 ServerHandle。
 2. ServerHandle 打印 address + authToken + 停止方式（显式，G4）。
 3. Ctrl+C → 优雅关闭连接、停 backend、释放端口。
+
+显式注入的 recorder 不属于 ServerHandle 生命周期。若它具有队列，创建者必须在合适的更外层 shutdown 阶段自行 flush/dispose。
 
 ---
 

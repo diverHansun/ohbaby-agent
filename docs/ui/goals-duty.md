@@ -41,6 +41,8 @@ UI 根据 `interaction.requested` 的 `kind` 和 `subject` 渲染自己的 dialo
 
 消息、命令结果、错误、状态栏、表格和列表的视觉呈现属于 UI。Backend 只提供结构化事件。
 
+TUI 与 in-process backend 共享 Node.js 进程时，backend 不得旁路写入 command observation 到 stdout/stderr；否则 Ink 无法维护帧与输入节奏。该约束在 recorder/composition 边界落实，TUI 不通过过滤 raw JSON 掩盖问题。
+
 ---
 
 ## 三、Duties（职责）
