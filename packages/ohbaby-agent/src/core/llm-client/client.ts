@@ -17,11 +17,11 @@ import { getLLMConfig } from "../../config/index.js";
 import { createInterfaceProvider } from "../../services/interface-providers/index.js";
 import type { LLMClientInstance } from "./types.js";
 import {
-  emitDiagnostic,
   NOOP_LOGGER,
   tokenUsageNormalization,
   type Logger,
 } from "../../observability/index.js";
+import { emitDiagnostic } from "../../observability/logger.js";
 
 export interface CreateLLMClientOptions {
   readonly projectDirectory?: string;

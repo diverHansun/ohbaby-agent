@@ -8,11 +8,11 @@ import {
   sanitizePromptForSessionTitle,
 } from "./prompt-sanitizer.js";
 import {
-  emitDiagnostic,
   NOOP_LOGGER,
   sessionTitleGenerationFailed,
   type Logger,
 } from "../../observability/index.js";
+import { emitDiagnostic } from "../../observability/logger.js";
 
 const DEFAULT_TITLE_GENERATION_TIMEOUT_MS = 5_000;
 const GENERATED_TITLE_MAX_LENGTH = 80;

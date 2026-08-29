@@ -22,6 +22,20 @@ const safeEvent = defineDiagnosticEvent({
   level: "trace",
 });
 
+const builtinSkillEvent = defineDiagnosticEvent({
+  component: "diagnostics",
+  event: "diagnostics.builtin_skill",
+  fields: { skill: diagnosticField.stringEnum(["read"]) },
+  level: "trace",
+});
+
+const userSkillEvent = defineDiagnosticEvent({
+  component: "diagnostics",
+  event: "diagnostics.user_skill",
+  fields: { skill: diagnosticField.userEntityName("skill") },
+  level: "trace",
+});
+
 describe("diagnostic event contract", () => {
   it("encodes only declared fields with policy-aware encoders", () => {
     const encoded = encodeDiagnosticEvent(
@@ -93,6 +107,25 @@ describe("diagnostic event contract", () => {
       fields: {},
       level: "debug",
     });
+  });
+
+  it("keeps allowlisted builtin names but hashes the same user-defined name", () => {
+    const builtin = encodeDiagnosticEvent(
+      builtinSkillEvent,
+      { skill: "read" },
+      { roots: {} },
+      "2026-08-29T00:00:00.000Z",
+    );
+    const user = encodeDiagnosticEvent(
+      userSkillEvent,
+      { skill: "read" },
+      { roots: {} },
+      "2026-08-29T00:00:00.000Z",
+    );
+
+    expect(builtin.record.skill).toBe("read");
+    expect(user.record.skill).toMatch(/^skill_[a-f0-9]{12}$/);
+    expect(user.record.skill).not.toBe("read");
   });
 
   it("rejects invalid definitions and field values", () => {

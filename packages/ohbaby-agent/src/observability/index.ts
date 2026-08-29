@@ -2,7 +2,6 @@ export {
   NOOP_LOGGER,
   defineDiagnosticEvent,
   diagnosticField,
-  emitDiagnostic,
 } from "./logger.js";
 export type {
   DiagnosticEventDefinition,
