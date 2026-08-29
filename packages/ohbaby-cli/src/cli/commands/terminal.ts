@@ -83,6 +83,7 @@ export function createTerminalCommand(
       }
       const host = await runtime.createCoreHost({
         ...(args.continue === true ? { continue: true } : {}),
+        diagnosticsRole: "tui",
         ...(remotePort === undefined ? { inProcess: true } : {}),
         ...(args.mode === undefined ? {} : { mode: args.mode }),
         ...(args.permission === undefined
@@ -106,11 +107,23 @@ export function createTerminalCommand(
         const instance = runtime.renderTerminalUi({
           clearOnStart: resume === undefined && args.continue !== true,
           client: host.core,
+          initialNotices: runtime.takeStartupNotices?.() ?? [],
           subscribeEvents: (handler) => host.callbacks.subscribeEvents(handler),
+          ...(host.subscribeDiagnosticsUnavailable === undefined
+            ? {}
+            : {
+                subscribeDiagnosticsUnavailable:
+                  host.subscribeDiagnosticsUnavailable,
+              }),
         });
         await instance.waitUntilExit?.();
       } finally {
         await host.dispose();
+        if (host.diagnosticsUnavailable?.() === true) {
+          runtime.stderr.write(
+            "Diagnostics file logging became unavailable; the session continued without it.\n",
+          );
+        }
       }
     },
   };

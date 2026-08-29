@@ -52,9 +52,7 @@ type InputForFields<Fields extends FieldMap> = {
   readonly [Key in keyof Fields]: FieldInput<Fields[Key]>;
 };
 
-type LiteralString<Value extends string> = string extends Value
-  ? never
-  : Value;
+type LiteralString<Value extends string> = string extends Value ? never : Value;
 
 const diagnosticEventDefinitionBrand: unique symbol = Symbol(
   "DiagnosticEventDefinition",
@@ -64,8 +62,9 @@ export interface DiagnosticEventDefinition<Input> {
   readonly [diagnosticEventDefinitionBrand]: (input: Input) => Input;
 }
 
-interface InternalDiagnosticEventDefinition<Input>
-  extends DiagnosticEventDefinition<Input> {
+interface InternalDiagnosticEventDefinition<
+  Input,
+> extends DiagnosticEventDefinition<Input> {
   readonly component: DiagnosticsComponent;
   readonly event: string;
   readonly fields: Readonly<Record<string, InternalFieldEncoder<unknown>>>;
@@ -122,7 +121,10 @@ function assertFinite(value: number, label: string): number {
 
 function pathHasPrefix(value: string, root: string): boolean {
   const relative = path.relative(root, value);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
 }
 
 function normalizeRelativePath(value: string): string {
@@ -189,7 +191,10 @@ function safeErrorCode(error: Error): string | undefined {
     : undefined;
 }
 
-function sanitizedStack(error: Error, roots: DiagnosticRoots): string | undefined {
+function sanitizedStack(
+  error: Error,
+  roots: DiagnosticRoots,
+): string | undefined {
   if (typeof error.stack !== "string") {
     return undefined;
   }
@@ -197,7 +202,8 @@ function sanitizedStack(error: Error, roots: DiagnosticRoots): string | undefine
     .split("\n")
     .slice(1)
     .map((frame) => {
-      const filePattern = /(file:\/\/[^\s)]+|\/[^\s):]+(?:\/[^\s):]+)+|[A-Za-z]:\\[^\s):]+)/g;
+      const filePattern =
+        /(file:\/\/[^\s)]+|\/[^\s):]+(?:\/[^\s):]+)+|[A-Za-z]:\\[^\s):]+)/g;
       return frame.replace(filePattern, (match) => {
         const candidate = match.startsWith("file://")
           ? fileURLToPath(match)
@@ -225,14 +231,17 @@ export function safeError(
     }
     const trustedMessage = options.trustedMessage === true;
     const message = trustedMessage
-      ? truncateUtf8(cleanCredentialShapes(value.message), MAX_SAFE_STRING_BYTES)
+      ? truncateUtf8(
+          cleanCredentialShapes(value.message),
+          MAX_SAFE_STRING_BYTES,
+        )
       : "An external operation failed";
     return {
-      ...(safeErrorCode(value) === undefined ? {} : { code: safeErrorCode(value) }),
+      ...(safeErrorCode(value) === undefined
+        ? {}
+        : { code: safeErrorCode(value) }),
       message,
-      name: /^[A-Za-z][A-Za-z0-9]*$/.test(value.name)
-        ? value.name
-        : "Error",
+      name: /^[A-Za-z][A-Za-z0-9]*$/.test(value.name) ? value.name : "Error",
       ...(trustedMessage
         ? ((): { readonly stack?: string } => {
             const stack = sanitizedStack(value, options.roots ?? {});
@@ -254,9 +263,7 @@ export const diagnosticField = Object.freeze({
       return value;
     });
   },
-  entityName(
-    kind: "agent" | "mcp" | "skill",
-  ): DiagnosticFieldEncoder<{
+  entityName(kind: "agent" | "mcp" | "skill"): DiagnosticFieldEncoder<{
     readonly name: string;
     readonly provenance: "builtin" | "unknown" | "user";
   }> {
@@ -288,7 +295,9 @@ export const diagnosticField = Object.freeze({
     );
   },
   number(): DiagnosticFieldEncoder<number> {
-    return createEncoder((value) => assertFinite(value, "diagnostic number field"));
+    return createEncoder((value) =>
+      assertFinite(value, "diagnostic number field"),
+    );
   },
   optional<Input>(
     encoder: DiagnosticFieldEncoder<Input>,
@@ -372,7 +381,7 @@ export function defineDiagnosticEvent<
 export interface Logger {
   emit<Input>(
     definition: DiagnosticEventDefinition<Input>,
-    input: Input,
+    input: NoInfer<Input>,
   ): void;
 }
 
@@ -389,7 +398,7 @@ export interface EncodedDiagnosticEvent {
 
 export function encodeDiagnosticEvent<Input>(
   definition: DiagnosticEventDefinition<Input>,
-  input: Input,
+  input: NoInfer<Input>,
   context: EncodingContext,
   timestamp: string,
 ): EncodedDiagnosticEvent {

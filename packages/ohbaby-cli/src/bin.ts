@@ -23,6 +23,15 @@ import { createStdoutRenderer } from "./cli/stdout-renderer.js";
 import { getCliPackageVersion } from "./package-version.js";
 import { readServeCoexistenceNotice } from "./serve-awareness.js";
 import { renderTerminalUi } from "./tui/index.js";
+import type {
+  DiagnosticEventDefinition,
+  LoadRuntimeEnvOptions,
+  LoadRuntimeEnvResult,
+  Logger,
+  OhbabyMigrationReport,
+  ProcessLoggerHandle,
+} from "ohbaby-agent";
+import { StartupNoticeBuffer } from "./cli/startup-notice-buffer.js";
 
 const VERSION = getCliPackageVersion();
 const AGENT_RUNTIME_MODULE = "ohbaby-agent";
@@ -66,7 +75,9 @@ export interface RunOhbabyCliDependencies {
   readonly listDaemonConnections?: NonNullable<
     CliCommandRuntime["listDaemonConnections"]
   >;
-  readonly loadRuntimeEnvIntoProcessEnv?: () => Promise<void> | void;
+  readonly loadRuntimeEnvIntoProcessEnv?: (
+    options?: LoadRuntimeEnvOptions,
+  ) => Promise<void> | void;
   readonly openUrl?: CliCommandRuntime["openUrl"];
   readonly readServeCoexistenceNotice?: () => Promise<string | undefined>;
   readonly readDaemonStatus?: CliCommandRuntime["readDaemonStatus"];
@@ -93,8 +104,46 @@ interface RemoteDaemonClientOptions {
 
 interface AgentRuntimeModule {
   readonly buildCoreAPIImpl?: unknown;
+  readonly configMigrationCompleted?: unknown;
+  readonly createProcessLogger?: unknown;
+  readonly dataMigrationCompleted?: unknown;
   readonly loadRuntimeEnvIntoProcessEnv?: unknown;
   readonly migrateOhbabyData?: unknown;
+}
+
+type AgentCoreFactoryOptions = CliGlobalOptions & {
+  readonly diagnosticsFilePath?: string;
+  readonly logger?: Logger;
+};
+
+type DefaultStartDaemonServerOptions = Parameters<
+  NonNullable<CliCommandRuntime["startDaemonServer"]>
+>[0] & {
+  readonly diagnosticsFactory?: (context: {
+    readonly ohbabyHome: string;
+    readonly workspaceRoot: string;
+  }) => Promise<ProcessLoggerHandle | undefined>;
+  readonly onDataMigrationReport?: (report: OhbabyMigrationReport) => void;
+};
+
+type DefaultStartDaemonServer = (
+  options: DefaultStartDaemonServerOptions,
+) => ReturnType<NonNullable<CliCommandRuntime["startDaemonServer"]>>;
+
+interface MigrationCounts {
+  readonly conflicts: number;
+  readonly copied: number;
+  readonly merged: number;
+  readonly skipped: number;
+}
+
+function migrationCounts(report: OhbabyMigrationReport): MigrationCounts {
+  return {
+    conflicts: report.conflicts.length,
+    copied: report.copied.length,
+    merged: report.merged.length,
+    skipped: report.skipped.length,
+  };
 }
 
 interface ServerRuntimeModule {
@@ -112,6 +161,12 @@ function createRpcCoreHost(host: CliCoreHost): CliCoreHost {
     callbacks: host.callbacks,
     core: rpc.createProxy(host.callbacks),
     dispose: host.dispose,
+    ...(host.diagnosticsFilePath === undefined
+      ? {}
+      : { diagnosticsFilePath: host.diagnosticsFilePath }),
+    ...(host.diagnosticsUnavailable === undefined
+      ? {}
+      : { diagnosticsUnavailable: host.diagnosticsUnavailable }),
   };
 }
 
@@ -210,7 +265,9 @@ function remoteHostOptionsFromCliOptions(
   };
 }
 
-async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
+async function loadDefaultDependencies(
+  onServeDiagnosticsUnavailable: () => void,
+): Promise<RunOhbabyCliDependencies> {
   const runtimeModule = (await importRuntimeModule(
     AGENT_RUNTIME_MODULE,
   )) as AgentRuntimeModule;
@@ -218,20 +275,38 @@ async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
     runtimeModule.buildCoreAPIImpl,
     "buildCoreAPIImpl",
     AGENT_RUNTIME_MODULE,
-  ) as (options: CliGlobalOptions) => CliCoreHost | Promise<CliCoreHost>;
+  ) as (options: AgentCoreFactoryOptions) => CliCoreHost | Promise<CliCoreHost>;
+  const createProcessLogger = (options: {
+    readonly ohbabyHome?: string;
+    readonly onUnavailable?: () => void;
+    readonly role: "serve" | "tui";
+    readonly workspaceRoot: string;
+  }): Promise<ProcessLoggerHandle> => {
+    const createLogger = requireFunction(
+      runtimeModule.createProcessLogger,
+      "createProcessLogger",
+      AGENT_RUNTIME_MODULE,
+    ) as (input: typeof options) => Promise<ProcessLoggerHandle>;
+    return createLogger(options);
+  };
   const loadRuntimeEnvIntoProcessEnv = requireFunction(
     runtimeModule.loadRuntimeEnvIntoProcessEnv,
     "loadRuntimeEnvIntoProcessEnv",
     AGENT_RUNTIME_MODULE,
-  ) as () => Promise<void> | void;
+  ) as (
+    options?: LoadRuntimeEnvOptions,
+  ) => Promise<LoadRuntimeEnvResult> | LoadRuntimeEnvResult;
   const migrateOhbabyDataExport = optionalRuntimeExport(
     runtimeModule as Record<string, unknown>,
     "migrateOhbabyData",
   );
   const migrateOhbabyData =
     typeof migrateOhbabyDataExport === "function"
-      ? (migrateOhbabyDataExport as () => Promise<void> | void)
+      ? (migrateOhbabyDataExport as () =>
+          | Promise<OhbabyMigrationReport>
+          | OhbabyMigrationReport)
       : undefined;
+  let runtimeEnvResult: LoadRuntimeEnvResult | undefined;
 
   let serverRuntimePromise: Promise<ServerRuntimeModule> | undefined;
   const loadServerRuntimeModule = (): Promise<ServerRuntimeModule> => {
@@ -253,6 +328,7 @@ async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
 
   return {
     async createCoreHost(options): Promise<CliCoreHost> {
+      const { diagnosticsRole, ...agentOptions } = options;
       const remoteOptions = remoteHostOptionsFromCliOptions(options);
       if (remoteOptions !== undefined) {
         const createRemoteCoreApiHost = (await requireServerFunction(
@@ -262,12 +338,78 @@ async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
         ) => CliCoreHost | Promise<CliCoreHost>;
         return createRemoteCoreApiHost(remoteOptions);
       }
-      if (migrateOhbabyData !== undefined) {
-        await migrateOhbabyData();
+      if (diagnosticsRole !== "tui") {
+        if (migrateOhbabyData !== undefined) {
+          await migrateOhbabyData();
+        }
+        return buildCoreAPIImpl(agentOptions);
       }
-      return buildCoreAPIImpl(options);
+      let diagnosticsUnavailable = false;
+      const diagnosticsUnavailableListeners = new Set<() => void>();
+      const handle = await createProcessLogger({
+        onUnavailable(): void {
+          if (diagnosticsUnavailable) {
+            return;
+          }
+          diagnosticsUnavailable = true;
+          for (const listener of diagnosticsUnavailableListeners) {
+            listener();
+          }
+        },
+        role: "tui",
+        workspaceRoot: runtimeEnvResult?.projectRoot ?? process.cwd(),
+      });
+      const diagnosticsFilePath = handle.logFilePath;
+      try {
+        const configReport = runtimeEnvResult?.configMigrationReport;
+        if (configReport) {
+          handle.logger.emit(
+            runtimeModule.configMigrationCompleted as DiagnosticEventDefinition<MigrationCounts>,
+            migrationCounts(configReport),
+          );
+        }
+        if (migrateOhbabyData !== undefined) {
+          const dataReport = await migrateOhbabyData();
+          handle.logger.emit(
+            runtimeModule.dataMigrationCompleted as DiagnosticEventDefinition<MigrationCounts>,
+            migrationCounts(dataReport),
+          );
+        }
+        const host = await buildCoreAPIImpl({
+          ...agentOptions,
+          ...(diagnosticsFilePath === undefined ? {} : { diagnosticsFilePath }),
+          logger: handle.logger,
+        });
+        return {
+          ...host,
+          ...(diagnosticsFilePath === undefined ? {} : { diagnosticsFilePath }),
+          diagnosticsUnavailable: () => diagnosticsUnavailable,
+          subscribeDiagnosticsUnavailable(listener): () => void {
+            if (diagnosticsUnavailable) {
+              listener();
+              return () => undefined;
+            }
+            diagnosticsUnavailableListeners.add(listener);
+            return (): void => {
+              diagnosticsUnavailableListeners.delete(listener);
+            };
+          },
+          async dispose(): Promise<void> {
+            try {
+              await host.dispose();
+            } finally {
+              await handle.dispose();
+            }
+          },
+        };
+      } catch (error) {
+        await handle.dispose();
+        throw error;
+      }
     },
-    loadRuntimeEnvIntoProcessEnv,
+    async loadRuntimeEnvIntoProcessEnv(options): Promise<void> {
+      runtimeEnvResult = await loadRuntimeEnvIntoProcessEnv(options);
+    },
     async listDaemonConnections(): Promise<
       readonly import("./cli/commands/types.js").CliDaemonConnection[]
     > {
@@ -289,8 +431,42 @@ async function loadDefaultDependencies(): Promise<RunOhbabyCliDependencies> {
     ): ReturnType<CliCommandRuntime["startDaemonServer"]> {
       const startDaemonServer = (await requireServerFunction(
         "startDaemonServer",
-      )) as CliCommandRuntime["startDaemonServer"];
-      return startDaemonServer(options);
+      )) as DefaultStartDaemonServer;
+      let diagnosticsHandle: ProcessLoggerHandle | undefined;
+      return startDaemonServer({
+        ...options,
+        diagnosticsFactory: async (context: {
+          readonly ohbabyHome: string;
+          readonly workspaceRoot: string;
+        }): Promise<ProcessLoggerHandle | undefined> => {
+          const handle = await createProcessLogger({
+            ohbabyHome: context.ohbabyHome,
+            onUnavailable(): void {
+              onServeDiagnosticsUnavailable();
+            },
+            role: "serve",
+            workspaceRoot: context.workspaceRoot,
+          });
+          if (handle.logFilePath === undefined) {
+            return undefined;
+          }
+          diagnosticsHandle = handle;
+          const configReport = runtimeEnvResult?.configMigrationReport;
+          if (configReport) {
+            handle.logger.emit(
+              runtimeModule.configMigrationCompleted as DiagnosticEventDefinition<MigrationCounts>,
+              migrationCounts(configReport),
+            );
+          }
+          return handle;
+        },
+        onDataMigrationReport(report: OhbabyMigrationReport): void {
+          diagnosticsHandle?.logger.emit(
+            runtimeModule.dataMigrationCompleted as DiagnosticEventDefinition<MigrationCounts>,
+            migrationCounts(report),
+          );
+        },
+      });
     },
     async stopDaemonFromState(): ReturnType<
       CliCommandRuntime["stopDaemonFromState"]
@@ -311,10 +487,15 @@ export async function runOhbabyCli(
   const stderr = io.stderr ?? process.stderr;
   const stdin = io.stdin ?? process.stdin;
   const stdout = io.stdout ?? process.stdout;
+  const startupNotices = new StartupNoticeBuffer();
   const defaultDependencies =
     dependencies.createCoreHost && dependencies.loadRuntimeEnvIntoProcessEnv
       ? undefined
-      : await loadDefaultDependencies();
+      : await loadDefaultDependencies(() => {
+          stderr.write(
+            "Diagnostics file logging became unavailable; the server continued without it.\n",
+          );
+        });
   const createCoreHost =
     dependencies.createCoreHost ?? defaultDependencies?.createCoreHost;
   const loadRuntimeEnvIntoProcessEnv =
@@ -400,10 +581,21 @@ export async function runOhbabyCli(
     stderr,
     stdout,
     stopDaemonFromState,
+    takeStartupNotices: () => startupNotices.takeAll(),
+  };
+
+  const presentStartupNotices = (): void => {
+    for (const notice of startupNotices.takeAll()) {
+      stderr.write(`${notice}\n`);
+    }
   };
 
   try {
-    await loadRuntimeEnvIntoProcessEnv();
+    await loadRuntimeEnvIntoProcessEnv({
+      onWarning(message: string): void {
+        startupNotices.push(message);
+      },
+    });
     await yargs(hideBin([...argv]))
       .scriptName("ohbaby")
       .option("mode", {
@@ -423,6 +615,11 @@ export async function runOhbabyCli(
       .strict()
       .help()
       .version(VERSION)
+      .middleware((args) => {
+        if (args._.length > 0) {
+          presentStartupNotices();
+        }
+      }, true)
       .exitProcess(false)
       .fail((message) => {
         throw new CliUsageError(message);
@@ -435,6 +632,8 @@ export async function runOhbabyCli(
       return EXIT_CODES.usage;
     }
     throw error;
+  } finally {
+    presentStartupNotices();
   }
 }
 

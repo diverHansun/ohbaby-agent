@@ -2,6 +2,7 @@ import type {
   ChatCompletionCreateParams,
   ChatCompletionMessageParam,
 } from "openai/resources/chat/completions/completions";
+import type { TokenUsageDiagnosticReporter } from "./token-usage.js";
 
 export type InterfaceProviderKind = "openai-compatible" | "anthropic";
 
@@ -88,6 +89,7 @@ export interface CreateInterfaceProviderOptions {
   interfaceProvider?: InterfaceProviderKind;
   apiKey: string;
   baseUrl: string;
+  readonly tokenUsageReporter?: TokenUsageDiagnosticReporter;
 }
 
 export interface InterfaceProviderInstance<TClient = unknown> {

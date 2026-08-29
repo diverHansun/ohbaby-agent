@@ -85,9 +85,10 @@ function buildRequestParams(
 
 function buildStreamEvent(
   chunk: ChatCompletionChunk,
+  report: NonNullable<CreateInterfaceProviderOptions["tokenUsageReporter"]>,
 ): InterfaceProviderStreamEvent | null {
   if (chunk.choices.length === 0) {
-    const tokenUsage = normalizeOpenAICompatibleUsage(chunk.usage);
+    const tokenUsage = normalizeOpenAICompatibleUsage(chunk.usage, report);
     return tokenUsage ? { tokenUsage } : null;
   }
 
@@ -105,7 +106,7 @@ function buildStreamEvent(
   const textDelta = nonEmptyString(choice.delta.content);
   const reasoningDelta = reasoningDeltaFromChoiceDelta(choice.delta);
   const finishReason = mapFinishReason(choice.finish_reason);
-  const tokenUsage = normalizeOpenAICompatibleUsage(chunk.usage);
+  const tokenUsage = normalizeOpenAICompatibleUsage(chunk.usage, report);
   const event: InterfaceProviderStreamEvent = {
     ...(textDelta === undefined ? {} : { textDelta }),
     ...(reasoningDelta === undefined ? {} : { reasoningDelta }),
@@ -145,6 +146,8 @@ function isUsageOnlyEvent(event: InterfaceProviderStreamEvent): boolean {
 export function createOpenAICompatibleProvider(
   options: CreateInterfaceProviderOptions,
 ): InterfaceProviderInstance<OpenAI> {
+  const reportTokenUsage =
+    options.tokenUsageReporter ?? ((_diagnostic): void => undefined);
   const client = new OpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseUrl,
@@ -173,7 +176,7 @@ export function createOpenAICompatibleProvider(
         let pendingTerminalEvent: InterfaceProviderStreamEvent | null = null;
 
         for await (const chunk of stream) {
-          const event = buildStreamEvent(chunk);
+          const event = buildStreamEvent(chunk, reportTokenUsage);
           if (event) {
             if (pendingTerminalEvent) {
               if (isUsageOnlyEvent(event)) {

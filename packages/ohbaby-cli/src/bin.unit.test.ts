@@ -67,11 +67,30 @@ describe("runOhbabyCli", () => {
       dispose,
     }));
     const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
-    const migrateOhbabyData = vi.fn(() => Promise.resolve());
+    const migrateOhbabyData = vi.fn(() =>
+      Promise.resolve({
+        conflicts: [],
+        copied: [],
+        merged: [],
+        skipped: [],
+      }),
+    );
+    const logger = { emit: vi.fn() };
+    const disposeDiagnostics = vi.fn(() => Promise.resolve());
+    const createProcessLogger = vi.fn(() =>
+      Promise.resolve({
+        dispose: disposeDiagnostics,
+        flush: vi.fn(() => Promise.resolve()),
+        logFilePath: "/logs/tui.jsonl",
+        logger,
+      }),
+    );
     const waitUntilExit = vi.fn(() => Promise.resolve());
     const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
     vi.doMock("ohbaby-agent", () => ({
       buildCoreAPIImpl,
+      createProcessLogger,
+      dataMigrationCompleted: {},
       loadRuntimeEnvIntoProcessEnv,
       migrateOhbabyData,
     }));
@@ -95,10 +114,13 @@ describe("runOhbabyCli", () => {
       buildCoreAPIImpl.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
     expect(buildCoreAPIImpl).toHaveBeenCalledWith({
+      diagnosticsFilePath: "/logs/tui.jsonl",
       inProcess: true,
+      logger,
     });
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
+    expect(disposeDiagnostics).toHaveBeenCalledTimes(1);
   });
 
   it("starts the terminal UI through injected host dependencies", async () => {
@@ -135,6 +157,7 @@ describe("runOhbabyCli", () => {
     ).resolves.toBe(0);
     expect(loadRuntimeEnvIntoProcessEnv).toHaveBeenCalledTimes(1);
     expect(createCoreHost).toHaveBeenCalledWith({
+      diagnosticsRole: "tui",
       inProcess: true,
       mode: "plan",
       permission: "full-access",
@@ -162,6 +185,73 @@ describe("runOhbabyCli", () => {
     expect(subscribeEvents).toHaveBeenCalledWith(handler);
     expect(waitUntilExit).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("presents config migration warnings inside the terminal UI once", async () => {
+    vi.resetModules();
+    const stderr: string[] = [];
+    const core = createCore();
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const renderTerminalUi = vi.fn(() => ({
+      waitUntilExit: vi.fn(() => Promise.resolve()),
+    }));
+    vi.doMock("ohbaby-agent", () => {
+      throw new Error("agent should be loaded only by the default loader");
+    });
+    vi.doMock("./tui/index.js", () => ({ renderTerminalUi }));
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(
+        ["node", "ohbaby"],
+        { stderr: { write: (chunk: string) => stderr.push(chunk) } },
+        {
+          createCoreHost: vi.fn(() => ({
+            callbacks: { subscribeEvents },
+            core,
+            dispose: vi.fn(() => Promise.resolve()),
+          })),
+          loadRuntimeEnvIntoProcessEnv: vi.fn((options?: {
+            readonly onWarning?: (message: string) => void;
+          }) => {
+            options?.onWarning?.("Legacy configuration conflict.");
+          }),
+        },
+      ),
+    ).resolves.toBe(0);
+
+    expect(renderTerminalUi).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialNotices: ["Legacy configuration conflict."],
+      }),
+    );
+    expect(stderr.join("")).not.toContain("Legacy configuration conflict.");
+  });
+
+  it("falls back to one stderr warning when parsing fails before a presenter", async () => {
+    vi.resetModules();
+    const stderr: string[] = [];
+    vi.doMock("ohbaby-agent", () => ({
+      buildCoreAPIImpl: vi.fn(),
+      loadRuntimeEnvIntoProcessEnv: vi.fn(
+        (options: { readonly onWarning?: (message: string) => void }) => {
+          options.onWarning?.("Legacy configuration conflict.");
+        },
+      ),
+    }));
+    vi.doMock("./tui/index.js", () => ({ renderTerminalUi: vi.fn() }));
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(["node", "ohbaby", "--unknown"], {
+        stderr: { write: (chunk: string) => stderr.push(chunk) },
+        stdout: { write: vi.fn() },
+      }),
+    ).resolves.toBe(2);
+
+    expect(
+      stderr.join("").match(/Legacy configuration conflict\./gu),
+    ).toHaveLength(1);
   });
 
   it("prints a lightweight coexistence notice before starting an in-process terminal", async () => {
@@ -303,6 +393,7 @@ describe("runOhbabyCli", () => {
       ),
     ).resolves.toBe(0);
     expect(createCoreHost).toHaveBeenCalledWith({
+      diagnosticsRole: "tui",
       inProcess: true,
       resume: "session_2",
     });
@@ -344,6 +435,7 @@ describe("runOhbabyCli", () => {
       ),
     ).resolves.toBe(0);
     expect(createCoreHost).toHaveBeenCalledWith({
+      diagnosticsRole: "tui",
       remoteHost: "127.0.0.1",
       remotePort: 4096,
     });
@@ -546,6 +638,7 @@ describe("runOhbabyCli", () => {
       ),
     ).resolves.toBe(0);
     expect(createCoreHost).toHaveBeenCalledWith({
+      diagnosticsRole: "tui",
       remoteAuthToken: "token_1",
       remoteHost: "127.0.0.1",
       remotePort: 4096,
@@ -586,6 +679,7 @@ describe("runOhbabyCli", () => {
       ),
     ).resolves.toBe(0);
     expect(createCoreHost).toHaveBeenCalledWith({
+      diagnosticsRole: "tui",
       remoteHost: "127.0.0.1",
       remotePort: 4096,
       resume: "session_1",
@@ -629,6 +723,7 @@ describe("runOhbabyCli", () => {
     ).resolves.toBe(0);
     expect(createCoreHost).toHaveBeenCalledWith({
       continue: true,
+      diagnosticsRole: "tui",
       inProcess: true,
     });
     expect(core.getSnapshot).toHaveBeenCalledTimes(1);

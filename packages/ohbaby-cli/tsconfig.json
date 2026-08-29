@@ -11,6 +11,9 @@
   "exclude": ["dist", "coverage", "node_modules"],
   "references": [
     {
+      "path": "../ohbaby-agent"
+    },
+    {
       "path": "../ohbaby-sdk"
     },
     {

@@ -10,6 +10,7 @@ import type {
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
+import { formatError } from "ohbaby-agent";
 import { DialogManager } from "./dialogs/manager.js";
 import { CommandPanelManager } from "./components/dialog/command-panel-manager.js";
 import {
@@ -49,25 +50,33 @@ export const NEW_SESSION_CLEAR_SEQUENCE = SESSION_VIEW_CLEAR_SEQUENCE;
 
 export const ESC_INTERRUPT_WINDOW_MS = 1500;
 const ESC_INTERRUPT_HINT = "Press Esc again to interrupt";
+const EMPTY_INITIAL_NOTICES: readonly string[] = [];
 
 type TranscriptSurfaceResetReason = "new-session" | "switch-session";
 
 export interface TerminalUiOptions {
   readonly clearOnStart?: boolean;
   readonly client: CoreAPI;
+  readonly initialNotices?: readonly string[];
   readonly subscribeEvents: (handler: UiEventHandler) => UiUnsubscribe;
+  readonly subscribeDiagnosticsUnavailable?: (
+    listener: () => void,
+  ) => () => void;
 }
 
 export function OhbabyTerminalApp({
   clearOnStart = false,
   client,
+  initialNotices = EMPTY_INITIAL_NOTICES,
   subscribeEvents,
+  subscribeDiagnosticsUnavailable,
 }: TerminalUiOptions): ReactElement {
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
   const keyboardCommandSequenceRef = useRef(0);
   const catalogRequestSequenceRef = useRef(0);
   const contextRefreshSequenceRef = useRef(0);
   const contextNoticeSequenceRef = useRef(0);
+  const diagnosticsNoticeSequenceRef = useRef(0);
   const snapshotRefreshSequenceRef = useRef(0);
   const didClearOnStartRef = useRef(false);
   const disposedRef = useRef(false);
@@ -212,6 +221,40 @@ export function OhbabyTerminalApp({
     },
     [],
   );
+
+  useEffect(() => {
+    const emitNotice = (input: {
+      readonly message: string;
+      readonly source: string;
+      readonly title: string;
+    }): void => {
+      diagnosticsNoticeSequenceRef.current += 1;
+      store.dispatch({
+        notice: {
+          createdAt: new Date().toISOString(),
+          id: `diagnostics_notice_${String(diagnosticsNoticeSequenceRef.current)}`,
+          level: "warning",
+          ...input,
+        },
+        type: "notice.emitted",
+      });
+    };
+    for (const notice of initialNotices) {
+      emitNotice({
+        message: notice,
+        source: "startup",
+        title: "Startup warning",
+      });
+    }
+    return subscribeDiagnosticsUnavailable?.(() => {
+      emitNotice({
+        message:
+          "File logging became unavailable; this session is continuing without it.",
+        source: "diagnostics",
+        title: "Diagnostics unavailable",
+      });
+    });
+  }, [initialNotices, store, subscribeDiagnosticsUnavailable]);
   const resetTranscriptSurface = useCallback(
     (_reason: TranscriptSurfaceResetReason): void => {
       writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
@@ -1010,8 +1053,4 @@ function nextPermissionModeCommand(
     sessionId,
     surface: "tui",
   };
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : "TUI backend request failed";
 }

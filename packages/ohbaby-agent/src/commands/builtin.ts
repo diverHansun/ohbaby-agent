@@ -277,6 +277,7 @@ async function handleStatus(
   context.emitOutput(
     dataOutput("status", {
       contextWindow,
+      diagnosticsFilePath: options.getDiagnosticsFilePath?.() ?? null,
       mcps: summarizeMcpServers(mcpServers),
       model,
       models,

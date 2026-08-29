@@ -450,6 +450,8 @@ function buildStreamEvent(
 export function createAnthropicProvider(
   options: CreateInterfaceProviderOptions,
 ): InterfaceProviderInstance<Anthropic> {
+  const reportTokenUsage =
+    options.tokenUsageReporter ?? ((_diagnostic): void => undefined);
   const client = new Anthropic({
     apiKey: options.apiKey,
     baseURL: options.baseUrl,
@@ -472,7 +474,7 @@ export function createAnthropicProvider(
           void,
           unknown
         > {
-          const usage = createAnthropicUsageAccumulator();
+          const usage = createAnthropicUsageAccumulator(reportTokenUsage);
           for await (const rawEvent of stream) {
             const tokenUsage =
               rawEvent.type === "message_start"

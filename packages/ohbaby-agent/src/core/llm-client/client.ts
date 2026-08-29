@@ -16,12 +16,18 @@ import * as path from "node:path";
 import { getLLMConfig } from "../../config/index.js";
 import { createInterfaceProvider } from "../../services/interface-providers/index.js";
 import type { LLMClientInstance } from "./types.js";
+import {
+  NOOP_LOGGER,
+  tokenUsageNormalization,
+  type Logger,
+} from "../../observability/index.js";
 
 export interface CreateLLMClientOptions {
   readonly projectDirectory?: string;
   readonly modelJsonPath?: string;
   readonly envPath?: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly logger?: Logger;
 }
 
 /**
@@ -57,6 +63,16 @@ export async function createLLMClient(
     interfaceProvider: config.interfaceProvider,
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
+    tokenUsageReporter(diagnostic): void {
+      (options.logger ?? NOOP_LOGGER).emit(tokenUsageNormalization, {
+        code: diagnostic.code,
+        field: diagnostic.field,
+        normalizedTotal: diagnostic.normalizedTotal,
+        protocol: diagnostic.protocol,
+        received: diagnostic.received,
+        retained: diagnostic.retained,
+      });
+    },
   });
 
   // Return configured client instance

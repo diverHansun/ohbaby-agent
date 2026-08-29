@@ -1,4 +1,11 @@
-import { chmod, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,9 +14,17 @@ import {
   createProcessLogger,
   createProcessLoggerWithLimits,
   DiagnosticsConfigurationError,
+  type ProcessLoggerHandle,
 } from "./process-logger.js";
 
 const temporaryDirectories: string[] = [];
+
+function requireLogFilePath(handle: ProcessLoggerHandle): string {
+  if (handle.logFilePath === undefined) {
+    throw new Error("expected the process logger to create a log file");
+  }
+  return handle.logFilePath;
+}
 
 async function temporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(path.join(os.tmpdir(), "ohbaby-log-test-"));
@@ -56,8 +71,9 @@ describe("process logger", () => {
     handle.logger.emit(infoEvent, { count: 2 });
     await handle.dispose();
     await handle.dispose();
+    const logFilePath = requireLogFilePath(handle);
 
-    const lines = (await readFile(handle.logFilePath, "utf8"))
+    const lines = (await readFile(logFilePath, "utf8"))
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as Record<string, unknown>);
@@ -69,10 +85,8 @@ describe("process logger", () => {
     expect(stdout).not.toHaveBeenCalled();
     expect(stderr).not.toHaveBeenCalled();
     if (process.platform !== "win32") {
-      expect((await stat(path.dirname(handle.logFilePath))).mode & 0o777).toBe(
-        0o700,
-      );
-      expect((await stat(handle.logFilePath)).mode & 0o777).toBe(0o600);
+      expect((await stat(path.dirname(logFilePath))).mode & 0o777).toBe(0o700);
+      expect((await stat(logFilePath)).mode & 0o777).toBe(0o600);
     }
   });
 
@@ -93,10 +107,12 @@ describe("process logger", () => {
       handle.logger.emit(infoEvent, { count });
     }
     await handle.dispose();
-    const files = await readdir(path.dirname(handle.logFilePath));
+    const logFilePath = requireLogFilePath(handle);
+    const logDirectory = path.dirname(logFilePath);
+    const files = await readdir(logDirectory);
     expect(files.filter((file) => file.endsWith(".jsonl"))).toHaveLength(3);
     for (const file of files) {
-      const contents = await readFile(path.join(path.dirname(handle.logFilePath), file), "utf8");
+      const contents = await readFile(path.join(logDirectory, file), "utf8");
       for (const line of contents.trim().split("\n")) {
         expect(() => {
           JSON.parse(line) as unknown;

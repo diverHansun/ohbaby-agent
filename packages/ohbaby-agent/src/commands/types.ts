@@ -210,6 +210,7 @@ export interface CommandServiceOptions {
     readonly sessionId: string;
   }) => Promise<UiPromptCacheUsage | null> | UiPromptCacheUsage | null;
   readonly getProjectRoot?: () => Promise<string> | string;
+  readonly getDiagnosticsFilePath?: () => string;
   readonly createCommandRunId?: () => string;
   readonly now?: () => number;
   readonly extraCommands?: readonly UiCommandSpec[];

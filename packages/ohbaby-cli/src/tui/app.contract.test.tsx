@@ -229,6 +229,37 @@ afterEach(() => {
 });
 
 describe("OhbabyTerminalApp", () => {
+  it("shows startup and active diagnostics warnings inside the TUI", async () => {
+    const client = createFakeClient(snapshot());
+    let diagnosticsUnavailable: (() => void) | undefined;
+    const unsubscribe = vi.fn();
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        initialNotices={["Legacy configuration needs attention."]}
+        subscribeDiagnosticsUnavailable={(listener) => {
+          diagnosticsUnavailable = listener;
+          return unsubscribe;
+        }}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    expect(app.lastFrame()).toContain("Startup warning");
+    expect(app.lastFrame()).toContain("Legacy configuration needs attention.");
+
+    diagnosticsUnavailable?.();
+    await flush();
+    expect(app.lastFrame()).toContain("Diagnostics");
+    expect(app.lastFrame()).toContain("unavailable:");
+    expect(app.lastFrame()).toContain("File logging became unavailable;");
+    expect(app.lastFrame()).toContain("continuing without it.");
+
+    app.unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   it("renders compact todos above the prompt and toggles overflow with Ctrl+T", async () => {
     const todos = Array.from({ length: 10 }, (_, index) => ({
       content: `todo ${String(index + 1)}`,

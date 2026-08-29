@@ -23,6 +23,7 @@ export function renderStatusPanel(data: Record<string, unknown>): string {
   const tools = formatTools(getRecord(data, "tools"));
   const mcps = formatMcps(getRecord(data, "mcps"));
   const projectRoot = getString(data, "projectRoot");
+  const diagnosticsFilePath = getString(data, "diagnosticsFilePath");
   const promptCacheUsage = toPromptCacheUsage(
     getRecord(data, "promptCacheUsage"),
   );
@@ -48,6 +49,9 @@ export function renderStatusPanel(data: Record<string, unknown>): string {
   }
   if (projectRoot) {
     rows.push(row("Project", projectRoot));
+  }
+  if (diagnosticsFilePath) {
+    rows.push(row("Log", diagnosticsFilePath));
   }
 
   return ["╭─ Status ─", ...rows, "╰──────────"].join("\n");

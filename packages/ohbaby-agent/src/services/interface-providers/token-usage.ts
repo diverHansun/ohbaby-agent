@@ -16,7 +16,11 @@ export interface TokenUsageNormalizationDiagnostic {
     | "non-monotonic-cumulative-field"
     | "raw-total-mismatch";
   readonly protocol: "anthropic" | "openai-compatible";
-  readonly field?: string;
+  readonly field?:
+    | "cache_creation_input_tokens"
+    | "cache_read_input_tokens"
+    | "input_tokens"
+    | "output_tokens";
   readonly received?: number;
   readonly retained?: number;
   readonly normalizedTotal?: number;
@@ -26,13 +30,10 @@ export type TokenUsageDiagnosticReporter = (
   diagnostic: TokenUsageNormalizationDiagnostic,
 ) => void;
 
-function reportTokenUsageDiagnostic(
-  diagnostic: TokenUsageNormalizationDiagnostic,
+function ignoreTokenUsageDiagnostic(
+  _diagnostic: TokenUsageNormalizationDiagnostic,
 ): void {
-  if (!process.env.OHBABY_DEBUG) {
-    return;
-  }
-  process.stderr.write(`${JSON.stringify(diagnostic)}\n`);
+  return;
 }
 
 function record(value: unknown): UnknownRecord | undefined {
@@ -143,7 +144,7 @@ function reportBreakdownConflict(report: TokenUsageDiagnosticReporter): void {
 
 export function normalizeOpenAICompatibleUsage(
   rawUsage: unknown,
-  report: TokenUsageDiagnosticReporter = reportTokenUsageDiagnostic,
+  report: TokenUsageDiagnosticReporter = ignoreTokenUsageDiagnostic,
 ): InterfaceProviderTokenUsage | undefined {
   const usage = record(rawUsage);
   if (!usage) {
@@ -255,7 +256,7 @@ function monotonic(current: number | undefined, incoming: number): number {
 }
 
 export function createAnthropicUsageAccumulator(
-  report: TokenUsageDiagnosticReporter = reportTokenUsageDiagnostic,
+  report: TokenUsageDiagnosticReporter = ignoreTokenUsageDiagnostic,
 ): AnthropicUsageAccumulator {
   let uncached: number | undefined;
   let cacheRead: number | undefined;

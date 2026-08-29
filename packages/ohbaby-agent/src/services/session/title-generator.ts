@@ -7,6 +7,11 @@ import {
   isDefaultSessionTitle,
   sanitizePromptForSessionTitle,
 } from "./prompt-sanitizer.js";
+import {
+  NOOP_LOGGER,
+  sessionTitleGenerationFailed,
+  type Logger,
+} from "../../observability/index.js";
 
 const DEFAULT_TITLE_GENERATION_TIMEOUT_MS = 5_000;
 const GENERATED_TITLE_MAX_LENGTH = 80;
@@ -27,6 +32,7 @@ const TITLE_GENERATION_SYSTEM_PROMPT = [
 export interface GenerateSessionTitleInput {
   readonly firstUserMessage: string;
   readonly llmClient: LLMClientInstance;
+  readonly logger?: Logger;
   readonly sessionId?: string;
   readonly timeoutMs?: number;
 }
@@ -34,6 +40,7 @@ export interface GenerateSessionTitleInput {
 export async function generateSessionTitle({
   firstUserMessage,
   llmClient,
+  logger = NOOP_LOGGER,
   sessionId,
   timeoutMs = DEFAULT_TITLE_GENERATION_TIMEOUT_MS,
 }: GenerateSessionTitleInput): Promise<string | null> {
@@ -58,7 +65,7 @@ export async function generateSessionTitle({
     abortController.signal,
     sessionId,
   ).catch((caught: unknown) => {
-    logTitleGenerationFailure(caught);
+    logger.emit(sessionTitleGenerationFailed, { error: caught });
     return null;
   });
   const timeout = new Promise<null>((resolve) => {
@@ -97,22 +104,6 @@ export function cleanGeneratedSessionTitle(rawTitle: string): string {
     .trim();
 
   return truncateGeneratedTitle(stripWrappingQuotes(title));
-}
-
-/**
- * Title failures degrade gracefully (the temporary title stays), so they are
- * not surfaced to the UI. Gate diagnostics behind OHBABY_DEBUG: unconditional
- * stderr writes would corrupt the TUI frame.
- */
-function logTitleGenerationFailure(caught: unknown): void {
-  const debug = process.env.OHBABY_DEBUG;
-  if (debug === undefined || debug === "") {
-    return;
-  }
-  const message = caught instanceof Error ? caught.message : String(caught);
-  process.stderr.write(
-    `[ohbaby] session title generation failed: ${message}\n`,
-  );
 }
 
 async function collectGeneratedTitle(

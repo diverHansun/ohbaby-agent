@@ -1,0 +1,53 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { ESLint } from "eslint";
+import { describe, expect, it } from "vitest";
+
+const repositoryRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../..",
+);
+const backendProbePath = path.join(
+  repositoryRoot,
+  "packages/ohbaby-agent/src/host/command-recorder.ts",
+);
+const sqliteWarningAllowlistPath = path.join(
+  repositoryRoot,
+  "packages/ohbaby-agent/src/services/database/connection.ts",
+);
+
+async function lintProbe(
+  source: string,
+  filePath = backendProbePath,
+): Promise<readonly string[]> {
+  const eslint = new ESLint({ cwd: repositoryRoot });
+  const [result] = await eslint.lintText(source, { filePath });
+  return result.messages.map(
+    (message) => `${message.ruleId ?? "parser"}:${message.message}`,
+  );
+}
+
+describe("backend output ownership lint", () => {
+  it.each([
+    ["stdout", 'process.stdout.write("leak");'],
+    ["stderr", 'process.stderr.write("leak");'],
+    ["global warning", 'process.emitWarning("leak");'],
+    ["console", 'console.error("leak");'],
+  ])("rejects direct %s output", async (_label, source) => {
+    await expect(lintProbe(source)).resolves.toEqual([
+      expect.stringMatching(/^(?:no-console|no-restricted-properties):/u),
+    ]);
+  });
+
+  it("keeps the audited SQLite warning interceptor narrow", async () => {
+    await expect(
+      lintProbe(
+        'process.emitWarning("forwarded by the SQLite interceptor");',
+        sqliteWarningAllowlistPath,
+      ),
+    ).resolves.toEqual([]);
+    await expect(
+      lintProbe('process.stderr.write("leak");', sqliteWarningAllowlistPath),
+    ).resolves.toEqual([expect.stringMatching(/^no-restricted-properties:/u)]);
+  });
+});

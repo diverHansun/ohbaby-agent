@@ -79,11 +79,7 @@ async function exists(filePath: string): Promise<boolean> {
 }
 
 function warn(options: OhbabyMigrationOptions, message: string): void {
-  if (options.onWarning) {
-    options.onWarning(message);
-    return;
-  }
-  process.emitWarning(message, { code: "OHBABY_MIGRATION" });
+  options.onWarning?.(message);
 }
 
 function processIsAlive(pid: number): boolean {

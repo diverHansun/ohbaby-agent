@@ -66,6 +66,12 @@ describe("project env loading", () => {
     });
 
     expect(result).toEqual({
+      configMigrationReport: {
+        conflicts: [],
+        copied: [],
+        merged: [],
+        skipped: [],
+      },
       globalEnvPath: path.join(homeDirectory, ".ohbaby", ".env"),
       projectEnvPath: path.join(repoRoot, ".env"),
       projectRoot: repoRoot,

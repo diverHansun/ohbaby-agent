@@ -10,6 +10,7 @@ import {
 } from "../adapters/ui-persistent.js";
 import { McpManager } from "../mcp/index.js";
 import { createUiCommandGateway } from "./ui-command-gateway.js";
+import type { Logger } from "../observability/index.js";
 
 export interface CoreApiFactoryOptions {
   readonly commandRecorder?: UiCommandRecorder | false;
@@ -18,6 +19,8 @@ export interface CoreApiFactoryOptions {
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";
   readonly resume?: string;
+  readonly logger?: Logger;
+  readonly diagnosticsFilePath?: string;
 }
 
 const NOOP_COMMAND_RECORDER: UiCommandRecorder = {
@@ -80,6 +83,10 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
     ...(options.resume === undefined
       ? {}
       : { resumeSessionId: options.resume }),
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+    ...(options.diagnosticsFilePath === undefined
+      ? {}
+      : { diagnosticsFilePath: options.diagnosticsFilePath }),
   });
   const client = createUiCommandGateway(rawClient, {
     entryPoint: "agent-host",

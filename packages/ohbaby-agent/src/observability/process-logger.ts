@@ -39,7 +39,7 @@ export interface CreateProcessLoggerOptions {
 }
 
 export interface ProcessLoggerHandle {
-  readonly logFilePath: string;
+  readonly logFilePath?: string;
   readonly logger: Logger;
   dispose(): Promise<void>;
   flush(): Promise<void>;
@@ -297,7 +297,12 @@ function encodeLine(
     return line;
   }
   for (const key of Object.keys(record).reverse()) {
-    if (key === "ts" || key === "level" || key === "event" || key === "component") {
+    if (
+      key === "ts" ||
+      key === "level" ||
+      key === "event" ||
+      key === "component"
+    ) {
       continue;
     }
     record = withoutKey(record, key);
@@ -341,7 +346,7 @@ class ProcessFileLogger implements Logger {
 
   emit<Input>(
     definition: DiagnosticEventDefinition<Input>,
-    input: Input,
+    input: NoInfer<Input>,
   ): void {
     if (!this.accepting || this.disabled) {
       return;
@@ -468,12 +473,9 @@ class ProcessFileLogger implements Logger {
       await Promise.race([
         drain,
         new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(
-            () => {
-              reject(new Error("diagnostics drain timed out"));
-            },
-            this.limits.disposeTimeoutMs,
-          );
+          timer = setTimeout(() => {
+            reject(new Error("diagnostics drain timed out"));
+          }, this.limits.disposeTimeoutMs);
           timer.unref();
         }),
       ]);
@@ -487,7 +489,7 @@ class ProcessFileLogger implements Logger {
   }
 }
 
-function disabledHandle(logFilePath: string): ProcessLoggerHandle {
+function disabledHandle(): ProcessLoggerHandle {
   return {
     dispose(): Promise<void> {
       return Promise.resolve();
@@ -495,7 +497,6 @@ function disabledHandle(logFilePath: string): ProcessLoggerHandle {
     flush(): Promise<void> {
       return Promise.resolve();
     },
-    logFilePath,
     logger: NOOP_LOGGER,
   };
 }
@@ -514,7 +515,6 @@ export async function createProcessLoggerWithLimits(
   const logRoot = resolveLogRoot(options);
   const directory = path.join(logRoot.root, options.role);
   const instance = `${timestampForFilename(new Date())}-${String(process.pid)}-${randomUUID().slice(0, 8)}`;
-  const logFilePath = path.join(directory, `${instance}.jsonl`);
   const unavailable = notifyOnce(options.onUnavailable);
   let writer: RotatingFileWriter;
   try {
@@ -528,7 +528,7 @@ export async function createProcessLoggerWithLimits(
       );
     }
     unavailable("initialize");
-    return disabledHandle(logFilePath);
+    return disabledHandle();
   }
   void cleanExpiredLogs(directory, instance, limits);
   const logger = new ProcessFileLogger(

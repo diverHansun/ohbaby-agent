@@ -29,6 +29,7 @@ export interface CliStartDaemonServerOptions {
 }
 
 export interface CliRunningDaemonServer {
+  readonly diagnosticsFilePath?: string;
   readonly url: string;
   readonly host: string;
   readonly port: number;
@@ -45,6 +46,7 @@ export interface CliDaemonConnection {
 
 export interface CliGlobalOptions {
   readonly continue?: boolean;
+  readonly diagnosticsRole?: "tui";
   readonly inProcess?: boolean;
   readonly mode?: "plan" | "auto";
   readonly permission?: "default" | "full-access";
@@ -58,6 +60,11 @@ export interface CliCoreHost {
   readonly core: CoreAPI;
   readonly callbacks: SDKAPI;
   readonly dispose: () => Promise<void>;
+  readonly diagnosticsFilePath?: string;
+  readonly diagnosticsUnavailable?: () => boolean;
+  readonly subscribeDiagnosticsUnavailable?: (
+    listener: () => void,
+  ) => () => void;
 }
 
 export type CliCoreHostResult = CliCoreHost | Promise<CliCoreHost>;
@@ -84,10 +91,15 @@ export interface CliCommandRuntime {
   readonly renderTerminalUi: (options: {
     readonly clearOnStart?: boolean;
     readonly client: CoreAPI;
+    readonly initialNotices?: readonly string[];
     readonly subscribeEvents: (handler: UiEventHandler) => UiUnsubscribe;
+    readonly subscribeDiagnosticsUnavailable?: (
+      listener: () => void,
+    ) => () => void;
   }) => TerminalUiLifecycle;
   readonly setExitCode: (code: number) => void;
   readonly showServeCoexistenceNotice?: () => Promise<void>;
+  readonly takeStartupNotices?: () => readonly string[];
   readonly startDaemonServer: (
     options: CliStartDaemonServerOptions,
   ) => Promise<CliRunningDaemonServer>;

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Box, Text, useInput } from "ink";
+import { formatError } from "ohbaby-agent";
 import type {
   CoreAPI,
   UiCommandInvocation,
@@ -515,10 +516,6 @@ function formatDockStatus(input: {
     parts.push(input.activeSessionId);
   }
   return parts.join(" · ");
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : "Command failed";
 }
 
 async function submitInput(

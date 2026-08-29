@@ -40,12 +40,18 @@ export const tokenUsageNormalization = defineDiagnosticEvent({
       "non-monotonic-cumulative-field",
       "raw-total-mismatch",
     ]),
-    previousInputTokens: diagnosticField.optional(diagnosticField.integer()),
-    previousOutputTokens: diagnosticField.optional(diagnosticField.integer()),
+    field: diagnosticField.optional(
+      diagnosticField.stringEnum([
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "input_tokens",
+        "output_tokens",
+      ]),
+    ),
+    normalizedTotal: diagnosticField.optional(diagnosticField.integer()),
     protocol: diagnosticField.stringEnum(["anthropic", "openai-compatible"]),
-    rawInputTokens: diagnosticField.optional(diagnosticField.integer()),
-    rawOutputTokens: diagnosticField.optional(diagnosticField.integer()),
-    rawTotalTokens: diagnosticField.optional(diagnosticField.integer()),
+    received: diagnosticField.optional(diagnosticField.integer()),
+    retained: diagnosticField.optional(diagnosticField.integer()),
   },
   level: "debug",
 });

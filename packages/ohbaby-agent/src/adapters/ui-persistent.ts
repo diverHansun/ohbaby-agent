@@ -515,6 +515,8 @@ export function createPersistentUiBackendClient(
       hookExecutor,
       initialSnapshot: options.initialSnapshot,
       llmClient: options.llmClient,
+      logger: options.logger,
+      diagnosticsFilePath: options.diagnosticsFilePath,
       messageManager,
       now: options.now,
       projectDirectory: options.projectDirectory,

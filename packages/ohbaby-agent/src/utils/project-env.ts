@@ -1,6 +1,9 @@
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
-import { migrateOhbabyConfig } from "../migration/index.js";
+import {
+  migrateOhbabyConfig,
+  type OhbabyMigrationReport,
+} from "../migration/index.js";
 import { OHBABY_DIR_NAME, resolveOhbabyHome } from "../paths/index.js";
 import { Project } from "../project/index.js";
 
@@ -9,11 +12,13 @@ export const ENV_FILE_NAME = ".env";
 
 export interface LoadRuntimeEnvOptions {
   readonly homeDirectory?: string;
+  readonly onWarning?: (message: string) => void;
   readonly projectDirectory?: string;
 }
 
 export interface LoadRuntimeEnvResult {
   readonly globalEnvPath: string;
+  readonly configMigrationReport: OhbabyMigrationReport;
   readonly projectEnvPath: string;
   readonly projectRoot: string;
 }
@@ -36,14 +41,22 @@ export async function loadRuntimeEnvIntoProcessEnv(
   const projectEnvPath = getProjectEnvPath(projectRoot);
 
   loadDotenv({ path: projectEnvPath, override: false });
-  await migrateOhbabyConfig({
+  const configMigrationReport = await migrateOhbabyConfig({
     ...(options.homeDirectory === undefined
       ? {}
       : { homeDirectory: options.homeDirectory }),
     projectDirectory: projectRoot,
+    ...(options.onWarning === undefined
+      ? {}
+      : { onWarning: options.onWarning }),
   });
   const globalEnvPath = getGlobalEnvPath(options.homeDirectory);
   loadDotenv({ path: globalEnvPath, override: false });
 
-  return { globalEnvPath, projectEnvPath, projectRoot };
+  return {
+    configMigrationReport,
+    globalEnvPath,
+    projectEnvPath,
+    projectRoot,
+  };
 }

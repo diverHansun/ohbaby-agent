@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import { sessionTitleGenerationFailed } from "../../observability/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -95,35 +96,25 @@ describe("session title generator", () => {
     ).resolves.toBe("Cache-aware title");
   });
 
-  it("logs title generation failures to stderr when OHBABY_DEBUG is set", async () => {
-    vi.stubEnv("OHBABY_DEBUG", "1");
-    const write = vi
-      .spyOn(process.stderr, "write")
-      .mockImplementation(() => true);
-    try {
-      const client = createRejectingLLMClient(new Error("provider offline"));
+  it("emits a structured diagnostic when title generation fails", async () => {
+    const failure = new Error("provider offline");
+    const client = createRejectingLLMClient(failure);
+    const emit = vi.fn();
 
-      await expect(
-        generateSessionTitle({
-          firstUserMessage: "Please name this session",
-          llmClient: client,
-        }),
-      ).resolves.toBeNull();
+    await expect(
+      generateSessionTitle({
+        firstUserMessage: "Please name this session",
+        llmClient: client,
+        logger: { emit },
+      }),
+    ).resolves.toBeNull();
 
-      expect(write).toHaveBeenCalledWith(
-        expect.stringContaining("session title generation failed"),
-      );
-      expect(write).toHaveBeenCalledWith(
-        expect.stringContaining("provider offline"),
-      );
-    } finally {
-      write.mockRestore();
-      vi.unstubAllEnvs();
-    }
+    expect(emit).toHaveBeenCalledWith(sessionTitleGenerationFailed, {
+      error: failure,
+    });
   });
 
-  it("stays silent about failures when OHBABY_DEBUG is not set", async () => {
-    vi.stubEnv("OHBABY_DEBUG", "");
+  it("stays silent on process stderr when no logger is injected", async () => {
     const write = vi
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
@@ -140,7 +131,6 @@ describe("session title generator", () => {
       expect(write).not.toHaveBeenCalled();
     } finally {
       write.mockRestore();
-      vi.unstubAllEnvs();
     }
   });
 

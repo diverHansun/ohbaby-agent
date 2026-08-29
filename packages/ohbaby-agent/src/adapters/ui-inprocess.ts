@@ -101,6 +101,7 @@ import {
 } from "../permission/index.js";
 import type { PermissionResponse as CorePermissionResponse } from "../permission/index.js";
 import { Project } from "../project/index.js";
+import { IrisError } from "../utils/index.js";
 import type { AgentManager } from "../agents/index.js";
 import type { SubagentInstanceStore } from "../agents/index.js";
 import {
@@ -173,6 +174,7 @@ import {
   type InProcessSessionManager,
 } from "./ui-inprocess/session-controller.js";
 import type { NoticeDraft } from "./ui-inprocess/types.js";
+import { NOOP_LOGGER, type Logger } from "../observability/index.js";
 
 const EMPTY_SNAPSHOT: UiSnapshot = {
   sessions: [],
@@ -222,6 +224,8 @@ export interface InProcessUiBackendOptions {
   readonly hookExecutor?: HookExecutor;
   readonly initialSnapshot?: UiSnapshot;
   readonly llmClient?: LLMClientInstance;
+  readonly logger?: Logger;
+  readonly diagnosticsFilePath?: string;
   readonly createLLMClient?: (
     options?: CreateLLMClientOptions,
   ) => Promise<LLMClientInstance>;
@@ -1268,7 +1272,10 @@ export function createInProcessUiBackendClient(
     if (options.createLLMClient) {
       return options.createLLMClient({ projectDirectory });
     }
-    return createLLMClient({ projectDirectory });
+    return createLLMClient({
+      logger: options.logger ?? NOOP_LOGGER,
+      projectDirectory,
+    });
   }
 
   async function currentModelFromOptions(): Promise<CommandModelSummary | null> {
@@ -1689,6 +1696,7 @@ export function createInProcessUiBackendClient(
       const generatedTitle = await generateSessionTitle({
         firstUserMessage: input.firstUserMessage,
         llmClient,
+        logger: options.logger ?? NOOP_LOGGER,
         sessionId: input.sessionId,
       });
       if (!generatedTitle || generatedTitle === input.expectedTitle) {
@@ -2091,6 +2099,7 @@ export function createInProcessUiBackendClient(
       } catch (error) {
         await projection.done.catch(() => undefined);
         const errorStatus = {
+          ...(IrisError.isInstance(error) ? { code: error.code } : {}),
           kind: "error" as const,
           message: getErrorMessage(error),
           recoverable: true,
@@ -2416,6 +2425,7 @@ export function createInProcessUiBackendClient(
     },
   };
 
+  const diagnosticsFilePath = options.diagnosticsFilePath;
   const commandService = createCommandService({
     bus,
     goals: goalCommandBackend,
@@ -2490,6 +2500,9 @@ export function createInProcessUiBackendClient(
       return getPromptCacheUsageInternal(input);
     },
     getProjectRoot: resolveProjectRoot,
+    ...(diagnosticsFilePath === undefined
+      ? {}
+      : { getDiagnosticsFilePath: (): string => diagnosticsFilePath }),
   });
 
   eventRouter.addSubscriptions(
