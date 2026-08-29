@@ -44,6 +44,18 @@ describe("IrisError", () => {
     expect(formatError(new IrisError("CODE", "A problem"))).toBe(
       "[CODE] A problem",
     );
+    expect(
+      formatError(
+        Object.assign(new Error("Deserialized problem"), {
+          code: "STABLE_CODE",
+        }),
+      ),
+    ).toBe("[STABLE_CODE] Deserialized problem");
+    expect(
+      formatError(
+        Object.assign(new Error("Unsafe code"), { code: "unsafe\ncode" }),
+      ),
+    ).toBe("Unsafe code");
     expect(formatError(new Error("Native problem"))).toBe("Native problem");
     expect(formatError("plain")).toBe("plain");
     expect(getErrorMessage({ message: "object message" })).toBe(

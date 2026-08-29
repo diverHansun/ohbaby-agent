@@ -111,6 +111,33 @@ describe("createRPC", () => {
     });
   });
 
+  it("preserves only stable error codes across the boundary", async () => {
+    const createFailingProxy = (code: unknown): Pick<DemoAPI, "fail"> => {
+      const rpc = createRPC<Pick<DemoAPI, "fail">>();
+      rpc.connectImpl({
+        fail() {
+          return Promise.reject(
+            Object.assign(new Error("backend exploded"), { code }),
+          );
+        },
+      });
+      return rpc.createProxy({});
+    };
+
+    await expect(createFailingProxy("STABLE_CODE").fail()).rejects.toMatchObject(
+      {
+        code: "STABLE_CODE",
+        message: "backend exploded",
+      },
+    );
+    await expect(
+      createFailingProxy("unsafe\ncode").fail(),
+    ).rejects.not.toHaveProperty("code");
+    await expect(
+      createFailingProxy("A".repeat(65)).fail(),
+    ).rejects.not.toHaveProperty("code");
+  });
+
   it("passes callback API methods through without wrapping them in RPC", () => {
     const rpc = createRPC<DemoAPI>();
     const unsubscribe = (): void => undefined;

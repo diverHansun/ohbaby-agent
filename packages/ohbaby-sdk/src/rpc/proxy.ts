@@ -1,4 +1,7 @@
+import { isStableErrorCode } from "../error-code.js";
+
 interface SerializedError {
+  readonly code?: string;
   readonly message: string;
   readonly name: string;
   readonly stack?: string;
@@ -31,7 +34,9 @@ function isAbortSignal(value: unknown): value is AbortSignal {
 
 function serializeError(error: unknown): SerializedError {
   if (error instanceof Error) {
+    const code = stableErrorCode(error);
     return {
+      ...(code === undefined ? {} : { code }),
       message: error.message,
       name: error.name,
       ...(error.stack === undefined ? {} : { stack: error.stack }),
@@ -46,10 +51,22 @@ function serializeError(error: unknown): SerializedError {
 function deserializeError(payload: SerializedError): Error {
   const error = new Error(payload.message);
   error.name = payload.name;
+  if (isStableErrorCode(payload.code)) {
+    (error as Error & { code?: string }).code = payload.code;
+  }
   if (payload.stack !== undefined) {
     error.stack = payload.stack;
   }
   return error;
+}
+
+function stableErrorCode(error: Error): string | undefined {
+  try {
+    const code = (error as Error & { readonly code?: unknown }).code;
+    return isStableErrorCode(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function abortError(): Error {

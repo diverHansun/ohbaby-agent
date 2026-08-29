@@ -1,3 +1,5 @@
+import { isStableErrorCode } from "ohbaby-sdk";
+
 function hasMessage(value: unknown): value is { readonly message: string } {
   return (
     typeof value === "object" &&
@@ -5,6 +7,20 @@ function hasMessage(value: unknown): value is { readonly message: string } {
     "message" in value &&
     typeof value.message === "string"
   );
+}
+
+function hasStableErrorCode(
+  value: unknown,
+): value is { readonly code: string; readonly message: string } {
+  try {
+    return (
+      hasMessage(value) &&
+      "code" in value &&
+      isStableErrorCode(value.code)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export class IrisError extends Error {
@@ -43,7 +59,7 @@ export function getErrorMessage(error: unknown): string {
 }
 
 export function formatError(error: unknown): string {
-  if (IrisError.isInstance(error)) {
+  if (hasStableErrorCode(error)) {
     return `[${error.code}] ${error.message}`;
   }
   return getErrorMessage(error);
