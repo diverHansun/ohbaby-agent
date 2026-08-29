@@ -4,7 +4,6 @@ import { createServer as createNetServer } from "node:net";
 import {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,
-  emitDiagnostic,
   getAgentPackageVersion,
   listKnownSessionProjectRoots,
   McpManager,
@@ -19,6 +18,7 @@ import {
   type PersistentUiBackendOptions,
 } from "ohbaby-agent";
 import * as AgentRuntime from "ohbaby-agent";
+import { emitDiagnosticSafely } from "../../observability/emit.js";
 import { createDaemonAuthToken } from "../../auth/token.js";
 import {
   createDaemonHttpServer,
@@ -546,7 +546,9 @@ async function startFreshDaemon(input: {
     throw new Error("daemon server failed to initialize");
   }
   if (input.diagnosticsHandle !== undefined) {
-    emitDiagnostic(logger, serverStarted, { endpoint: startedServer.url });
+    emitDiagnosticSafely(logger, serverStarted, {
+      endpoint: startedServer.url,
+    });
   }
 
   return {
@@ -688,7 +690,7 @@ export async function startDaemonServer(
     }
   } catch (error) {
     if (diagnosticsHandle !== undefined) {
-      emitDiagnostic(logger, serverStartFailed, { error });
+      emitDiagnosticSafely(logger, serverStartFailed, { error });
     }
     await diagnosticsHandle?.dispose();
     throw error;

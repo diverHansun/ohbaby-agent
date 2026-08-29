@@ -1,12 +1,12 @@
 import process from "node:process";
 import { resolve } from "node:path";
 import {
-  emitDiagnostic,
   NOOP_LOGGER,
   serverStopFailed,
   serverStopped,
   type Logger,
 } from "ohbaby-agent";
+import { emitDiagnosticSafely } from "../../observability/emit.js";
 import { FilePidFile } from "./pid-file.js";
 import { JsonDaemonStateFile } from "./state-file.js";
 import type {
@@ -222,13 +222,17 @@ export class Supervisor {
       this.startedAt = undefined;
     }
 
-    if (pendingError === undefined) {
-      emitDiagnostic(this.logger, serverStopped, { reason: this.stopReason });
-    } else {
-      emitDiagnostic(this.logger, serverStopFailed, {
-        error: pendingError,
-        reason: this.stopReason,
-      });
+    if (this.logger !== NOOP_LOGGER) {
+      if (pendingError === undefined) {
+        emitDiagnosticSafely(this.logger, serverStopped, {
+          reason: this.stopReason,
+        });
+      } else {
+        emitDiagnosticSafely(this.logger, serverStopFailed, {
+          error: pendingError,
+          reason: this.stopReason,
+        });
+      }
     }
 
     try {

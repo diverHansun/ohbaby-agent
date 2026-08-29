@@ -23,12 +23,12 @@ import {
 } from "ohbaby-sdk";
 import {
   createUiCommandGateway,
-  emitDiagnostic,
   interactionCleanupFailure,
   NOOP_LOGGER,
   type Logger,
   type UiPromptQueueExecutionPort,
 } from "ohbaby-agent";
+import { emitDiagnosticSafely } from "../observability/emit.js";
 import { isAuthorizedDaemonRequest } from "../auth/token.js";
 import {
   DaemonClientViewCoordinator,
@@ -102,7 +102,7 @@ const NOOP_COMMAND_RECORDER: UiCommandRecorder = {
 };
 
 function reportInteractionCleanupFailure(logger: Logger, error: unknown): void {
-  emitDiagnostic(logger, interactionCleanupFailure, {
+  emitDiagnosticSafely(logger, interactionCleanupFailure, {
     error,
     operation: "disconnect",
   });
