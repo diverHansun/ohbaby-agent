@@ -54,7 +54,7 @@
 - `level`：第 3 节五种值之一；
 - `event`：稳定的点分语义名，不使用自然语言句子；
 - `component`：稳定、低基数的内置组件名；
-- `event`、`component`、level 与允许的字段 key **MUST** 由模块级静态 event definition 同时声明，调用时不能传入自由字符串；
+- `event`、`component`、level 与允许的字段 key **MUST** 由具字面量约束的 event definition 同时声明，调用时不能传入自由字符串；definition **SHOULD** 由模块级 `const` 复用；
 - 每个 definition **MUST** 为每个字段指定 encoder（数值/布尔、受限 enum、ohbaby ID、hash 后的外部 ID、规范化路径/URL、伪名化名称或安全错误）；
 - 普通业务调用面 **MUST NOT** 暴露开放的 `Record<string, string>`、自由 `message` 或 `child(userInput)`；
 - error 字段由 definition 内的 error encoder 调用统一 `safeError()` 产生，调用者不能构造最终 `SafeLogError`；
@@ -187,6 +187,7 @@ path encoder 只接受调用点语义上已经是“路径”的值，并负责 
 - `flush()` 是不关闭 logger 的 2 秒 barrier，只供组合/测试在进程仍继续时使用；
 - `dispose()` 停止接收新事件，执行一次最长 2 秒的 drain 并关闭 writer，且必须幂等；正常退出只调用 `dispose()`；
 - process logger handle 的拥有者必须显式 dispose；业务模块只接收 `Logger`，不能靠 duck typing 猜测或重复关闭 handle。
+- process logger handle **MUST** 暴露准确、只读的 `logFilePath` 给 composition root；该路径不是 JSONL 事件字段。TUI 只在显式状态查询中呈现，fresh serve 可在 ready 产品输出中呈现；logger 自身仍不得写终端。
 
 ## 10. 配置与失败退化
 
@@ -211,7 +212,7 @@ path encoder 只接受调用点语义上已经是“路径”的值，并负责 
 
 - `packages/ohbaby-agent/src/**` 与 `packages/ohbaby-server/src/**` 默认禁止直接使用 `process.stdout`、`process.stderr`、`console.*`，仅对经过审查、确实拥有输出协议的极窄入口做 allowlist；
 - logger 只接受模块级静态 event definition 及其经过 schema 推导的 input；不公开开放 fields record，也不接受 `unknown`、`any` 或任意嵌套 record；
-- 本地 ESLint/AST 规则 **MUST** 限制 `defineDiagnosticEvent()` 只能出现在顶层 `const` initializer，且 level/event/component 为字面量；
+- TypeScript definition builder **MUST** 拒绝 widened string event/component；opaque brand、运行时 identity registry 和运行时格式校验 **MUST** 阻止结构伪造。顶层 `const` 复用是 **SHOULD**，首版不要求自定义 AST lint；
 - writer 只接收已经过策略层编码的 JSONL 字符串，不接收原始对象；
 - 测试必须证明 `trace` 仍拒绝正文，而不只检查默认 `info`；
 - 测试必须扫描凭据、prompt、tool/MCP/HTTP body 和真实绝对路径不会出现在日志文件中。
@@ -219,3 +220,5 @@ path encoder 只接受调用点语义上已经是“路径”的值，并负责 
 ## 12. 变更规则
 
 任何希望放宽第 5 节禁区、增加远程上传、改变默认终端行为或新增正文捕获能力的改动，都必须先修改本文并进行独立安全审查；不能通过新增环境变量、debug flag 或临时 `console.*` 绕过。
+
+一次性调试也受本规则约束：优先使用 debugger/聚焦测试；确需运行时轨迹时使用临时类型化事件和既有 encoder，修复后删除或正式纳入事件目录。不得提供任意对象 probe、自由 context 或开发环境终端 escape hatch。

@@ -63,7 +63,7 @@ ohbaby 采用：
 - writer 失败不能破坏交互进程；
 - JSONL 一行一个事件，便于流式 tail 和局部分享。
 
-ohbaby 的 KISS 适配是：进程 factory 在 backend 启动前完成，首版不建设通用“所有早期事件队列”；只有 writer 自己使用小型有界队列。独占文件名已经足够定位，先不增加 `latest` symlink 的跨平台与竞态处理。
+ohbaby 的 KISS 适配是：进程 factory 在 backend 启动前完成，首版不建设通用“所有早期事件队列”；只有 writer 自己使用小型有界队列。独占文件名负责避免争用，发现性由 process handle 的精确路径解决：TUI `/status` 和 fresh serve ready 输出按需呈现。先不增加 `latest` symlink 的跨平台与竞态处理。
 
 ### 3.3 不照搬
 
@@ -119,7 +119,7 @@ ohbaby 采用：
 
 ### 5.3 适配与不照搬
 
-Kimi formatter 接受较宽的 context，再递归 redact 和 serialize。ohbaby 选择更严格的前置 API：普通调用者根本不能传嵌套任意对象，redaction 是第二道防线而不是第一道门。
+Kimi formatter 接受较宽的 context，再递归 redact 和 serialize。ohbaby 选择更严格的前置 API：普通调用者根本不能传嵌套任意对象，redaction 是第二道防线而不是第一道门。但严格性只落实到类型、builder、运行时 identity/格式检查和受限 encoder；首版不额外自研 AST lint 来约束 definition 必须写在顶层。
 
 Kimi file logger 写失败时会自行向 stderr 报告（带节流）。这在普通 CLI 可接受，但对 Ink TUI 仍会破坏画面；ohbaby 改为一次性 `onUnavailable` 信号，由组合根决定 UI/serve 呈现。
 

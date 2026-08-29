@@ -89,7 +89,15 @@ TUI 与 serve 默认都为 `info`。`debug`/`trace` 只改变安全事件的详�
 
 ### D11：事件定义代替开放字段
 
-普通调用者不能使用 `logger.info(string, Record<string, string>)`。level/event/component/字段 key 由静态 event definition 声明，每个字段通过受限 encoder 转换；这样 `trace` 的正文禁区不只依赖调用者自觉。definition 必须同时经过 package-private nominal brand、运行时 identity registry 和 ESLint/AST 静态声明规则三道门，logger 调用点永远不能传动态字符串或伪造对象。Migration helper 保留显式 `onWarning` 作为用户文案 seam，同时返回结构化 report；缺省不再 `process.emitWarning`。CLI presenter 只消费 warning 文案，diagnostics projector 只消费 report 计数，二者不能串线。
+普通调用者不能使用 `logger.info(string, Record<string, string>)`。level/event/component/字段 key 由 event definition 声明，每个字段通过受限 encoder 转换；这样 `trace` 的正文禁区不只依赖调用者自觉。definition 必须经过 package-private nominal brand、运行时 identity registry、TypeScript 字面量约束和运行时格式校验；模块级 `const` 复用是 SHOULD，但首版不为这一风格要求自研 ESLint/AST 规则。Migration helper 保留显式 `onWarning` 作为用户文案 seam，同时返回结构化 report；缺省不再 `process.emitWarning`。CLI presenter 只消费 warning 文案，diagnostics projector 只消费 report 计数，二者不能串线。
+
+### D12：一次性调试不开放万能逃生口
+
+首版不增加 `console.error` 开发 allowlist、`devProbe(unknown)` 或任意 context encoder。局部值优先使用 debugger/聚焦测试；必须观察真实时序时，开发者增加一个临时的类型化 debug/trace event，复用既有 encoder，并在修复后删除，或在证明具有长期诊断价值后进入正式事件目录与契约测试。开发模式也可能使用真实 prompt 和凭据，因此不能放宽正文边界。
+
+### D13：当前日志路径必须可发现
+
+唯一文件名解决并发冲突，不等于用户能找到当前运行日志。process handle 暴露只读 `logFilePath` 给组合根；TUI 仅在用户主动执行 `/status` 时显示，fresh `ohbaby serve` 在既有 ready 产品输出旁显示。首版不增加 `latest` symlink 或 `ohbaby logs` 命令，reused serve 客户端也不伪造日志路径。
 
 ## 5. 方案边界
 

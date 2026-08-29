@@ -87,11 +87,11 @@ const providerRequestFailed = defineDiagnosticEvent({
 logger.emit(providerRequestFailed, { operationId, attempt, error });
 ```
 
-brand 负责 TypeScript nominality；builder 同时把创建出的对象登记到 package-internal `WeakSet`/identity registry，`emit()` 在运行时拒绝手写对象、spread clone 和其他伪造 definition。brand symbol、registry 和最终 record sink 都不导出。
+brand 负责 TypeScript nominality；builder 同时把创建出的对象登记到 package-internal `WeakSet`/identity registry，`emit()` 在运行时拒绝手写对象、spread clone 和其他伪造 definition。builder 的泛型签名拒绝 widened `string` event/component，运行时再检查静态格式。brand symbol、registry 和最终 record sink 都不导出。
 
 约束：
 
-- definition 必须是模块级 `const`，event/component 使用字面量和受限静态格式，不能在请求路径中动态构造；Phase A 增加本地 ESLint/AST 规则，限制 `defineDiagnosticEvent()` 只能作为顶层 `const` initializer 且 level/event/component 必须是字面量，并用规则合同测试防止别名/函数内创建绕过；
+- definition 应当由模块级 `const` 复用，event/component 使用字面量和受限静态格式，不能来自请求数据；首版通过 TypeScript 字面量约束、opaque brand、运行时 identity/格式校验实现安全边界，不为“顶层声明”这一风格要求自研 AST lint；
 - component 使用封闭的内置集合；用户定义实体只能作为 provenance-aware hashed field，不能成为 component/event/key；
 - 字段 encoder 首版只提供 integer/number、boolean、受限 enum、ohbaby ID、hashed external ID、normalized path/URL、provenance-aware entity name 和 safe error；不提供任意 text/object encoder；
 - error encoder 接收原始 unknown 只是为了立即转换，不把 raw Error 放入最终 event，也不公开可构造的 `SafeLogError`；external encoder 不接受自由 summary 字符串，使用内部稳定类别/通用摘要；
@@ -104,6 +104,8 @@ brand 负责 TypeScript nominality；builder 同时把创建出的对象登记�
 ```ts
 interface ProcessLoggerHandle {
   readonly logger: Logger;
+  /** Exact active JSONL path; composition roots may expose it as product UI. */
+  readonly logFilePath: string;
   /** Non-closing, bounded barrier for exceptional composition needs/tests. */
   flush(): Promise<void>;
   /** Idempotent: stop intake, bounded drain, close writer. */
@@ -112,6 +114,34 @@ interface ProcessLoggerHandle {
 ```
 
 factory 接收 `role`、level、目录、运行时 roots 和一次性的 `onUnavailable` 回调。具体 FileWriter/Rotator/Queue 保持 internal。
+
+### 3.1 首批事件目录
+
+Phase A 先固定能形成真实垂直切片的最小目录，只实现这些事件与 policy 必需的 encoder，不为假想事件提前建设字段体系：
+
+| Event | Level | Component | 安全字段 |
+| --- | --- | --- | --- |
+| `diagnostics.started` | info | diagnostics | `role` |
+| `logger.events_dropped` | warn | diagnostics | 各 level 丢弃计数 |
+| `session.title_generation.failed` | warn | session | 安全错误类别 |
+| `llm.usage.normalization` | debug | llm | code、protocol、token 数值 |
+| `migration.config.completed` | info/warn | migration | copied/conflicts/merged/skipped 计数 |
+| `migration.data.completed` | info/warn | migration | copied/conflicts/merged/skipped 计数 |
+| `server.started` | info | server | 规范化 endpoint、reused=false |
+| `server.start.failed` | error | server | safe error |
+| `server.stopped` | info | server | reason enum |
+| `ui.interaction.cleanup.failure` | warn | server | operation kind、安全错误 |
+
+首批事件不包含 agent/MCP/skill 名称，因此 Phase A 只实现 provenance-aware name encoder 及其合成输入测试，不改 registry。未来第一个确需实体名称的事件必须在同一阶段增加 provenance 传播；缺少 provenance 时只能 hash 或省略，不能按名称猜测。
+
+### 3.2 开发者一次性调试流程
+
+1. 单个局部值优先使用 debugger 或聚焦测试；
+2. 偶发时序/竞态增加临时的模块级类型化 debug/trace definition，只使用已有 encoder；
+3. 通过 `OHBABY_LOG_LEVEL=debug|trace` 复现并读取本次精确日志路径；
+4. 修复后删除临时事件；若证明有持续价值，则加入首批/后续事件目录与测试。
+
+不得以调试为由增加任意 context、raw object、正文 encoder 或临时终端输出。
 
 `ohbaby-agent` 是已发布包。跨包唯一公开面明确为：`Logger`、`DiagnosticEventDefinition`、`defineDiagnosticEvent()`、受限 `field` encoders、process logger factory 及其 options/handle 类型。`SafeLogError`、encoded record、FileWriter、Rotator、Queue 和测试 capture 均不公开。这样 server 能定义自己的静态事件并安全转换 Error，又不依赖内部文件实现。
 
@@ -200,11 +230,11 @@ TUI 的实际 composition root 横跨 `runOhbabyCli()`、terminal handler 与默
 3. TUI 本地 composition 调用 `migrateOhbabyData()` 并保留返回的 data report；config warning buffer 由 CLI presenter 呈现，config/data 两份 report 由 diagnostics projector 只记录四类计数。data migration 当前没有 warning 文案；若它抛错，命令层显示受控失败，logger 只接收 `safeError` 投影；
 4. 将 logger 注入 in-process backend 的顶层 options；直接调用 agent public factory 而不注入时仍为 no-op；
 5. 由 agent runtime composition 向 title、provider、MCP/skill 等确有需要的服务继续传递；
-6. TUI 新增一个 CLI 本地的 diagnostics notice source：render 前接收 migration warning startup buffer，render 后可订阅一次性 unavailable；它不进入 SDK/domain event bus；
+6. TUI 新增一个 CLI 本地的 diagnostics notice source：render 前接收 migration warning startup buffer，render 后可订阅一次性 unavailable；它不进入 SDK/domain event bus；`/status` 在本地追加当前 `logFilePath`，正常输入区不自动打印路径；
 7. `onUnavailable` 最多触发一次，其回调异常必须被 logger 吞掉，不能形成第二故障；
 8. TUI handler 是 process handle 的唯一拥有者：先等待/停止 Ink 并 dispose backend，再调用一次幂等且内含 2 秒 drain 的 logger `dispose()`；顶层异常还要确保 Ink 先恢复终端再做最终错误呈现。`onUnavailable` presenter 显式跟踪 `buffering | tui-active | terminal-restored` 三个 phase：活跃期走 UI notice；Ink 恢复后才在 drain 中出现的首次失败，由 CLI 命令层向 stderr 写一条固定、安全、非 JSON 的警告，仍保持全生命周期最多一次。
 
-现有 migration helpers 的 `onWarning` 保留，但默认 `process.emitWarning` 删除：没有显式回调时只返回 report，不产生终端副作用。CLI 的启动装配在 env 加载前传入 buffer callback；yargs 完成解析后，TUI、fresh/reused serve、serve status/ps/stop 和现有 one-shot 命令都必须由各自命令层消费该 buffer，恰好一次，不能因没有创建 logger 而静默丢失。直接调用 helper 的 library 调用者读取 report，或显式传 `onWarning` 自行呈现；调用 `startDaemonServer()` 的 library 调用者如需 fresh data report，显式传 `onDataMigrationReport`，否则安静忽略。warning 文案不得作为 logger message/field。
+现有 migration helpers 的 `onWarning` 保留，但默认 `process.emitWarning` 删除：没有显式回调时只返回 report，不产生终端副作用。CLI 的启动装配在 env 加载前传入统一 `StartupNoticeBuffer.push()`；第一次 `takeAll()` 原子清空，重复调用返回空。TUI 在 Ink render 前消费，普通命令在 handler 入口消费；`runOhbabyCli()` 的 `finally` 对仍未消费的内容执行一次固定、安全的 stderr 兜底，覆盖 parse/usage/早期失败以及未来命令遗漏。直接调用 helper 的 library 调用者读取 report，或显式传 `onWarning` 自行呈现；调用 `startDaemonServer()` 的 library 调用者如需 fresh data report，显式传 `onDataMigrationReport`，否则安静忽略。warning 文案不得作为 logger message/field。
 
 不采用全局 stdout patch，也不要求所有模块从全局 singleton 取 logger。若某个深层服务的注入成本过高，应优先在其已有 factory/options 边界加可选 `logger`，默认 no-op；不能用临时 console 绕过。
 
@@ -217,6 +247,7 @@ CLI serve 调用公开 `startDaemonServer()` 时传入 lazy diagnostics capabili
 - 以 adapter 或统一 port 替换 supervisor 的 `CONSOLE_LOGGER` 默认行为；
 - 将 `reportInteractionCleanupFailure()` 改为安全事件；
 - serve 命令仍拥有 `web ready` 等产品输出；
+- fresh serve 在同一产品输出中显示 `diagnostics: <exact logFilePath>`；reused serve 不创建也不显示伪路径；
 - 日志初始化/运行失败只由 serve 命令层提示一次；
 - `SupervisorOptions` 增加明确的 `disposeDiagnostics` 生命周期回调。`stopInternal()` 先完成 runtime/state/pid 清理并记录最终 success/failure event，再 dispose，最后才 return/throw；signal/idle 调用方不得在 dispose 后再次用 logger 记录 catch；signal `exit()` 位于其后。2 秒 drain 由 handle 内部保证；start 失败时同一 handle 穿过 EADDRINUSE retry，只有最终失败才由外层 dispose；
 - 业务 backend/supervisor 只接收 `Logger`，process handle 由实际 server composition 持有，不在多层重复 dispose。
@@ -254,11 +285,10 @@ CLI serve 调用公开 `startDaemonServer()` 时传入 lazy diagnostics capabili
 - 进程独占文件、有界队列、轮转、权限、保留、flush/dispose；
 - config parser 与无 I/O/no-op；
 - lint 防回归规则：默认禁止 agent/server 生产源码新增 stdout/stderr/console/emitWarning，现有旁路使用逐文件临时 allowlist；`services/database/connection.ts` 对 Node SQLite warning 的窄拦截保留为永久说明性 allowlist；测试文件单独 override；
-- definition 静态性规则：本地 ESLint/AST 规则只允许顶层 `const x = defineDiagnosticEvent({ ... })`，关键标识必须是字面量；
-- 用 ESLint Node API/临时文本做“规则会拦截”的 contract test，不把永久失败 fixture 放入正常 lint glob；
+- `diagnostics.started` 真实写入，证明 Phase A 已形成可读取的垂直切片；
 - 完整 unit/contract tests。
 
-完成门：不接 TUI/serve 也能证明安全合同、writer 生命周期和失败退化。单独 commit。
+完成门：不接 TUI/serve 也能证明安全合同、writer 生命周期、失败退化，并能从真实文件读取 `diagnostics.started`。单独 commit。
 
 ### Phase B - TUI in-process 接入
 
@@ -304,9 +334,9 @@ CLI serve 调用公开 `startDaemonServer()` 时传入 lazy diagnostics capabili
 - TUI/serve 按交互上下文显示；
 - 重试性由运行时策略决定，不写进静态 error registry。
 
-当前文档只确定边界，尚未列出首批错误与用户文案，因此 Phase E **不是直接编码准入**。A–D 完成后先补一个小型错误清单（建议 2–3 个真实高频错误）、代码入口、UI action、动态 retry 条件和验收场景，经用户确认后才编码。它以真实问题为驱动，不为“完整”穷举所有错误码；设计补充与实现分别独立 commit。
+当前直接编码范围只包括已经确认的两处一致性修复：stdout renderer 的 runtime failure 保留 `IrisError.code`，TUI 两个本地 `formatError()` 复用共享格式。其余错误产品化仍需先补一个小型错误清单（建议 2–3 个真实高频错误）、代码入口、UI action、动态 retry 条件和验收场景，经用户确认后再编码。
 
-设计检查点至少要审计三类现有 surface：daemon state 的 `error` 字段、server HTTP/RPC error response、TUI 的最终失败提示；还要把 supervisor `retire(reason)` 等自由 reason 改成内部 enum code 或经过批准的安全字段，不能通过另一种状态文件/response 重新引入 raw message。
+后续设计检查点至少要审计三类现有 surface：daemon state 的 `error` 字段、server HTTP/RPC error response、TUI 的最终失败提示；还要把 supervisor `retire(reason)` 等自由 reason 改成内部 enum code 或经过批准的安全字段，不能通过另一种状态文件/response 重新引入 raw message。
 
 ### Phase F - 全量验收与文档收尾
 

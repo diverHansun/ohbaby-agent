@@ -132,7 +132,7 @@
 通过 TypeScript compile fixture / `@ts-expect-error` 和 runtime schema 负向测试证明以下行为不合法：
 
 - logger 直接接受 event/component/string fields，绕过静态 definition；
-- definition 使用动态 event/component、自由 text/object encoder 或用户输入作为字段 key；
+- definition 使用 widened string event/component、自由 text/object encoder 或用户输入作为字段 key；
 - `{}`、手写带相似字段的对象、spread clone 均不能作为 definition 传入 `emit()`，runtime identity check 也必须拒绝伪造对象；
 - 非 error encoder 传递数组、嵌套对象、原始 Error、unknown config；
 - 把 tool/MCP response 直接作为字段；
@@ -161,7 +161,15 @@
 
 ESLint 对 agent/server **生产源码**设置 `no-restricted-properties`/等价规则，默认禁止 `process.stdout`、`process.stderr`、`process.emitWarning`、`console.*`。Phase A 对 title/token/migration/supervisor/create-app 现存旁路设置逐文件临时 allowlist，B/C 每迁移一处即删除一项；`services/database/connection.ts` 对 Node SQLite warning 的窄拦截是注明原因的永久 allowlist；测试文件使用单独 override。用 ESLint Node API 对内存/临时违规文本做 contract test，证明规则会拦，不能把永久失败 fixture 放进正常 lint glob。
 
-同一套本地规则还要验证 diagnostic definition 的静态性：只允许顶层 `const` 直接调用 `defineDiagnosticEvent()`，level/event/component 必须为字面量；函数内创建、别名调用、动态模板和先构造 config 再传入都要由 ESLint/AST contract fixture 证明会被拦。
+definition 的安全合同由 TypeScript compile fixture 与 runtime contract test 验证：widened string、动态字段和结构伪造不能通过；模块级 `const` 复用作为 review 层面的 SHOULD，不建设自定义 AST fixture。
+
+### T-C5：启动 warning consume-once
+
+- `takeAll()` 首次返回全部 warning，第二次为空；
+- TUI 在 render 前消费，普通命令在 handler 入口消费；
+- parse/usage/handler 早期失败以及故意遗漏消费时，顶层 `finally` 恰好兜底一次；
+- 长运行 handler 在入口消费，signal/退出不会把 warning 留在内存；
+- warning 文案不进入 JSONL，重复消费不会重复展示。
 
 ## 5. 文件与真实进程集成测试
 
@@ -203,7 +211,8 @@ ESLint 对 agent/server **生产源码**设置 `no-restricted-properties`/等价
 4. 捕获子进程 stdout/stderr；
 5. 断言不存在 `ui.command.`、日志 JSON、prompt sentinel、credential；
 6. 断言独占 JSONL 存在且含预期安全 lifecycle/operation 事件；
-7. 断言 dispose 后尾记录已经落盘。
+7. 断言 dispose 后尾记录已经落盘；
+8. `/status` 显示该 child 实际 `logFilePath`，普通输入区不自动插入路径。
 
 这是“否定终端污染 + 肯定日志落盘 + 真实退出时序”的同一个测试，不能只 spy `process.stdout.write`。
 
@@ -214,7 +223,7 @@ ESLint 对 agent/server **生产源码**设置 `no-restricted-properties`/等价
 1. 用真实 `packages/ohbaby-cli/dist/bin.js serve --port 0 --no-open` 启动；
 2. 通过 scripted local provider 和 RPC/HTTP 执行 slash command/prompt；
 3. 调用 shutdown 并等待真实进程关闭；
-4. stdout 只允许 ready/明确产品输出，stderr 默认无内部 JSON；
+4. stdout 只允许 ready/明确产品输出，并在 fresh 启动显示准确 diagnostics 路径；stderr 默认无内部 JSON；
 5. JSONL 包含 serve start、请求结果元数据、shutdown；
 6. 不包含 auth token、request body、prompt/tool result；
 7. 退出码不因 dispose drain 改变。
@@ -233,6 +242,14 @@ ESLint 对 agent/server **生产源码**设置 `no-restricted-properties`/等价
 - serve 复用已有进程时，发起复用的客户端进程不产生新的伪 serve 文件；
 - 早期 config migration、data migration 的 CLI 路径都不走 `process.emitWarning`；config `onWarning` 文案只进入当前启动过程的内存 buffer，config report 从 `LoadRuntimeEnvResult` 返回，data helper 直接返回 report；direct `startDaemonServer()` 只有显式传 `onDataMigrationReport` 才观察 fresh data report，默认保持安静；
 - 分别运行 TUI、fresh/reused serve、serve status/ps/stop 和现有 one-shot 命令，证明每条 config migration warning 恰好由对应命令层呈现一次，且 JSONL 只含 report 计数、不含 warning 文案。
+- fresh serve 的 diagnostics 路径对应真实文件；reused serve 不打印一个属于客户端的伪日志路径。
+
+### T-I8：已确认的错误格式一致性
+
+- stdout renderer 的 command failure 与 runtime failure 都保留稳定 error code；
+- TUI prompt/app 的最终 `IrisError` 使用共享 `[code] message` 格式；
+- 普通 Error 仍使用安全 message，不凭空制造 code；
+- 错误格式修复不把 stack、provider body 或 secret 带入用户界面。
 
 ## 6. TUI 实际交互 E2E
 

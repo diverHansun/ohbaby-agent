@@ -70,7 +70,7 @@
 
 ### 3.5 Server cleanup stderr
 
-`packages/ohbaby-server/src/app/create-app.ts` 的 `reportInteractionCleanupFailure()` 直接把 `ui.interaction.cleanup.failed` JSON 写 stderr。这是当前 serve 路径中独立于 supervisor 的第二个硬编码输出点，也说明只替换 supervisor logger 并不能完成收口。
+`packages/ohbaby-server/src/app/create-app.ts` 的 `reportInteractionCleanupFailure()` 直接把 `ui.interaction.cleanup.failure` JSON 写 stderr。这是当前 serve 路径中独立于 supervisor 的第二个硬编码输出点，也说明只替换 supervisor logger 并不能完成收口。
 
 ### 3.6 CLI 合法产品输出
 
@@ -134,6 +134,20 @@ agent ← server
 ### P8 - 日志之外的错误投影也可能携带原始 message（中）
 
 `Supervisor` 会把 `errorToMessage()` 写入 daemon state，HTTP server 也有多处把 Error message 投影为 response。它们不是 JSONL logger，因此不能靠“接入 logger”自动变安全；但它们会被 status/Web/CLI 读取，属于 Phase E 必须单独盘点的用户错误 surface。首批日志地基不顺手重写所有 HTTP 错误，但也不能宣称完成 logger 后整个项目的错误展示就已经统一。
+
+当前还确认了两处具体的用户面不一致，不能只留给未来重新发现：`cli/stdout-renderer.ts` 的 command failure 会显示 `CODE: message`，runtime failure 却显示 `error: message`；TUI 的两个本地 `formatError()` 只返回 message，丢失共享 `IrisError` 已有的 code。这两处纳入 Phase E 的确定范围。
+
+### P9 - 当前运行日志缺少发现入口（中）
+
+每进程唯一文件可以避免争用，却不能回答“我刚才这次运行的日志在哪里”。若要求用户到 role 目录里按时间和 pid 猜文件，日志对普通用户和支持排查仍不够可用。路径必须由拥有 handle 的组合根在明确的产品入口呈现，而不是 logger 自己写终端。
+
+### P10 - 启动 warning 的消费责任过于分散（高）
+
+config migration 发生在 yargs 解析前；若把 warning buffer 的消费责任分散到每个现有与未来命令，新增命令很容易忘记处理，最终导致用户告警静默丢失。需要单一 consume-once buffer 与顶层未消费兜底，而不是只写一条“每个 handler 记得消费”的约定。
+
+### P11 - 调试安全与开发效率缺少共同路径（中）
+
+禁止所有任意输出是正确边界，但如果不说明偶发时序问题怎么调查，开发者可能重新添加临时 `console.*`。项目需要一条短、可删除、仍遵守 encoder 的临时类型化事件路径；不需要永久的任意对象 escape hatch。
 
 ## 6. 根因
 
