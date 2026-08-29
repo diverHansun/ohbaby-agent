@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 export type LogLevel = "error" | "warn" | "info" | "debug" | "trace";
 
@@ -43,6 +42,7 @@ interface InternalFieldEncoder<Input> extends DiagnosticFieldEncoder<Input> {
     value: Input,
     context: EncodingContext,
   ) => EncodedValue | undefined;
+  readonly optional: boolean;
 }
 
 type FieldMap = Readonly<Record<string, DiagnosticFieldEncoder<unknown>>>;
@@ -103,10 +103,12 @@ function shortHash(kind: string, value: string): string {
 
 function createEncoder<Input>(
   encode: InternalFieldEncoder<Input>["encode"],
+  optional = false,
 ): DiagnosticFieldEncoder<Input> {
   const encoder: InternalFieldEncoder<Input> = Object.freeze({
     [fieldEncoderBrand]: undefined as unknown as Input,
     encode,
+    optional,
   });
   encoders.add(encoder);
   return encoder;
@@ -162,7 +164,13 @@ export function normalizeDiagnosticPath(
   for (const [label, root] of candidates) {
     if (pathHasPrefix(absolute, root)) {
       const suffix = path.relative(root, absolute).replaceAll("\\", "/");
-      return suffix.length === 0 ? label : `${label}/${suffix}`;
+      if (suffix.length === 0) {
+        return label;
+      }
+      return truncateUtf8(
+        `${label}/${cleanCredentialShapes(suffix)}`,
+        MAX_SAFE_STRING_BYTES,
+      );
     }
   }
   return `<external>/${shortHash("path", absolute)}`;
@@ -171,83 +179,65 @@ export function normalizeDiagnosticPath(
 export function normalizeDiagnosticUrl(value: string): string {
   try {
     const parsed = new URL(value);
-    parsed.username = "";
-    parsed.password = "";
-    parsed.search = "";
-    parsed.hash = "";
-    return truncateUtf8(parsed.toString(), MAX_SAFE_STRING_BYTES);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return `<invalid-url>/${shortHash("url", value)}`;
+    }
+    return `<origin>/${shortHash("url-origin", parsed.origin)}`;
   } catch {
     return `<invalid-url>/${shortHash("url", value)}`;
   }
 }
+
+const SAFE_ERROR_CODES = new Set([
+  "ABORT_ERR",
+  "EACCES",
+  "EADDRINUSE",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EEXIST",
+  "EHOSTUNREACH",
+  "EISDIR",
+  "EMFILE",
+  "ENOENT",
+  "ENOTDIR",
+  "ENOTFOUND",
+  "ENOSPC",
+  "EPERM",
+  "ETIMEDOUT",
+]);
+const SAFE_ERROR_NAMES = new Set([
+  "AbortError",
+  "AggregateError",
+  "Error",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "TypeError",
+  "URIError",
+]);
 
 function safeErrorCode(error: Error): string | undefined {
   if (!("code" in error)) {
     return undefined;
   }
   const code = (error as Error & { readonly code?: unknown }).code;
-  return typeof code === "string" && /^[A-Z0-9_:-]{1,64}$/.test(code)
+  return typeof code === "string" && SAFE_ERROR_CODES.has(code)
     ? code
     : undefined;
 }
 
-function sanitizedStack(
-  error: Error,
-  roots: DiagnosticRoots,
-): string | undefined {
-  if (typeof error.stack !== "string") {
-    return undefined;
-  }
-  const frames = error.stack
-    .split("\n")
-    .slice(1)
-    .map((frame) => {
-      const filePattern =
-        /(file:\/\/[^\s)]+|\/[^\s):]+(?:\/[^\s):]+)+|[A-Za-z]:\\[^\s):]+)/g;
-      return frame.replace(filePattern, (match) => {
-        const candidate = match.startsWith("file://")
-          ? fileURLToPath(match)
-          : match;
-        return normalizeDiagnosticPath(candidate, roots);
-      });
-    })
-    .join("\n");
-  if (frames.length === 0) {
-    return undefined;
-  }
-  return truncateUtf8(cleanCredentialShapes(frames), 8 * 1024);
-}
-
-export function safeError(
-  value: unknown,
-  options: {
-    readonly roots?: DiagnosticRoots;
-    readonly trustedMessage?: boolean;
-  } = {},
-): SafeLogError {
+export function safeError(value: unknown): SafeLogError {
   try {
     if (!(value instanceof Error)) {
       return { message: "An unknown error occurred", name: "UnknownError" };
     }
-    const trustedMessage = options.trustedMessage === true;
-    const message = trustedMessage
-      ? truncateUtf8(
-          cleanCredentialShapes(value.message),
-          MAX_SAFE_STRING_BYTES,
-        )
-      : "An external operation failed";
     return {
       ...(safeErrorCode(value) === undefined
         ? {}
         : { code: safeErrorCode(value) }),
-      message,
-      name: /^[A-Za-z][A-Za-z0-9]*$/.test(value.name) ? value.name : "Error",
-      ...(trustedMessage
-        ? ((): { readonly stack?: string } => {
-            const stack = sanitizedStack(value, options.roots ?? {});
-            return stack === undefined ? {} : { stack };
-          })()
-        : {}),
+      message: "An external operation failed",
+      name: SAFE_ERROR_NAMES.has(value.name) ? value.name : "Error",
     };
   } catch {
     return { message: "An error could not be inspected", name: "UnknownError" };
@@ -263,20 +253,13 @@ export const diagnosticField = Object.freeze({
       return value;
     });
   },
-  entityName(kind: "agent" | "mcp" | "skill"): DiagnosticFieldEncoder<{
-    readonly name: string;
-    readonly provenance: "builtin" | "unknown" | "user";
-  }> {
-    return createEncoder((value) =>
-      value.provenance === "builtin"
-        ? truncateUtf8(value.name, MAX_SAFE_STRING_BYTES)
-        : `${kind}_${shortHash(kind, value.name)}`,
-    );
+  userEntityName(
+    kind: "agent" | "mcp" | "skill",
+  ): DiagnosticFieldEncoder<string> {
+    return createEncoder((value) => `${kind}_${shortHash(kind, value)}`);
   },
   externalError(): DiagnosticFieldEncoder<unknown> {
-    return createEncoder((value, context) =>
-      safeError(value, { roots: context.roots }),
-    );
+    return createEncoder((value) => safeError(value));
   },
   externalId(kind: string): DiagnosticFieldEncoder<string> {
     return createEncoder((value) => `${kind}_${shortHash(kind, value)}`);
@@ -288,11 +271,6 @@ export const diagnosticField = Object.freeze({
       }
       return value;
     });
-  },
-  internalError(): DiagnosticFieldEncoder<unknown> {
-    return createEncoder((value, context) =>
-      safeError(value, { roots: context.roots, trustedMessage: true }),
-    );
   },
   number(): DiagnosticFieldEncoder<number> {
     return createEncoder((value) =>
@@ -306,8 +284,10 @@ export const diagnosticField = Object.freeze({
       throw new TypeError("unknown diagnostic field encoder");
     }
     const internal = encoder as InternalFieldEncoder<Input>;
-    return createEncoder((value, context) =>
-      value === undefined ? undefined : internal.encode(value, context),
+    return createEncoder(
+      (value, context) =>
+        value === undefined ? undefined : internal.encode(value, context),
+      true,
     );
   },
   path(): DiagnosticFieldEncoder<string> {
@@ -323,7 +303,7 @@ export const diagnosticField = Object.freeze({
       if (!allowed.has(value)) {
         throw new TypeError("diagnostic enum field contains an unknown value");
       }
-      return value;
+      return truncateUtf8(value, MAX_SAFE_STRING_BYTES);
     });
   },
   url(): DiagnosticFieldEncoder<string> {
@@ -393,6 +373,7 @@ export const NOOP_LOGGER: Logger = Object.freeze({
 
 export interface EncodedDiagnosticEvent {
   readonly level: LogLevel;
+  readonly optionalFieldNames: readonly string[];
   readonly record: Readonly<Record<string, unknown>>;
 }
 
@@ -429,7 +410,25 @@ export function encodeDiagnosticEvent<Input>(
       record[fieldName] = encoded;
     }
   }
-  return { level: internal.level, record };
+  return {
+    level: internal.level,
+    optionalFieldNames: fieldNames.filter(
+      (fieldName) => internal.fields[fieldName].optional,
+    ),
+    record,
+  };
+}
+
+export function emitDiagnostic<Input>(
+  logger: Logger,
+  definition: DiagnosticEventDefinition<Input>,
+  input: NoInfer<Input>,
+): void {
+  try {
+    logger.emit(definition, input);
+  } catch {
+    // Injected diagnostics must never change the product operation.
+  }
 }
 
 export const LOG_LEVEL_PRIORITY: Readonly<Record<LogLevel, number>> = {

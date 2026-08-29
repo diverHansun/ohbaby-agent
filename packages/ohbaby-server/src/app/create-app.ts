@@ -23,6 +23,7 @@ import {
 } from "ohbaby-sdk";
 import {
   createUiCommandGateway,
+  emitDiagnostic,
   interactionCleanupFailure,
   NOOP_LOGGER,
   type Logger,
@@ -101,7 +102,7 @@ const NOOP_COMMAND_RECORDER: UiCommandRecorder = {
 };
 
 function reportInteractionCleanupFailure(logger: Logger, error: unknown): void {
-  logger.emit(interactionCleanupFailure, {
+  emitDiagnostic(logger, interactionCleanupFailure, {
     error,
     operation: "disconnect",
   });
@@ -1873,7 +1874,10 @@ class DaemonServerAppRuntime {
         );
       }
       if (!isRecord(parsed.value)) {
-        return context.json(webErrorBody("request body must be an object"), 400);
+        return context.json(
+          webErrorBody("request body must be an object"),
+          400,
+        );
       }
       const body = parsed.value;
       const hasRunId = Object.hasOwn(body, "runId");

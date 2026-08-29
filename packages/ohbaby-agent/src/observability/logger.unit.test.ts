@@ -14,7 +14,7 @@ const safeEvent = defineDiagnosticEvent({
   event: "diagnostics.tested",
   fields: {
     count: diagnosticField.integer(),
-    entity: diagnosticField.entityName("agent"),
+    entity: diagnosticField.userEntityName("agent"),
     optionalCount: diagnosticField.optional(diagnosticField.integer()),
     path: diagnosticField.path(),
     url: diagnosticField.url(),
@@ -28,7 +28,7 @@ describe("diagnostic event contract", () => {
       safeEvent,
       {
         count: 2,
-        entity: { name: "private-agent", provenance: "user" },
+        entity: "private-agent",
         optionalCount: undefined,
         path: "/workspace/project/file.ts",
         url: "https://user:secret@example.com/v1?q=secret#fragment",
@@ -48,8 +48,8 @@ describe("diagnostic event contract", () => {
       level: "trace",
       path: "<workspace>/file.ts",
       ts: "2026-08-29T00:00:00.000Z",
-      url: "https://example.com/v1",
     });
+    expect(encoded.record.url).toMatch(/^<origin>\/[a-f0-9]{12}$/);
     expect(encoded.record.entity).toMatch(/^agent_[a-f0-9]{12}$/);
     expect(JSON.stringify(encoded.record)).not.toContain("private-agent");
     expect(JSON.stringify(encoded.record)).not.toContain("secret");
@@ -58,7 +58,7 @@ describe("diagnostic event contract", () => {
   it("rejects undeclared fields and forged definitions at runtime", () => {
     const inputWithExtraField = {
       count: 1,
-      entity: { name: "builtin", provenance: "builtin" },
+      entity: "private-agent",
       optionalCount: undefined,
       path: "file.ts",
       prompt: "must-not-pass",
@@ -109,7 +109,7 @@ describe("diagnostic event contract", () => {
         safeEvent,
         {
           count: 1.5,
-          entity: { name: "builtin", provenance: "builtin" },
+          entity: "private-agent",
           optionalCount: undefined,
           path: "file.ts",
           url: "https://example.com",
@@ -135,6 +135,13 @@ describe("diagnostic normalization", () => {
     expect(
       normalizeDiagnosticPath("/Users/example/.ohbaby/model.json", roots),
     ).toBe("<ohbaby-home>/model.json");
+    const credentialPath = normalizeDiagnosticPath(
+      `/Users/example/work/project/api_key=topsecret/${"x".repeat(700)}.json`,
+      roots,
+    );
+    expect(credentialPath).toContain("api_key=<redacted>");
+    expect(credentialPath).not.toContain("topsecret");
+    expect(Buffer.byteLength(credentialPath, "utf8")).toBeLessThanOrEqual(512);
     expect(normalizeDiagnosticPath("/opt/private/customer.txt", roots)).toMatch(
       /^<external>\/[a-f0-9]{12}$/,
     );
@@ -143,12 +150,15 @@ describe("diagnostic normalization", () => {
     );
   });
 
-  it("removes URL userinfo, query, and fragment", () => {
-    expect(
-      normalizeDiagnosticUrl(
-        "https://tenant:password@internal.example/v1/messages?key=secret#body",
-      ),
-    ).toBe("https://internal.example/v1/messages");
+  it("hashes URL origins without retaining userinfo, host, path, or query", () => {
+    const normalized = normalizeDiagnosticUrl(
+      "https://tenant:password@internal.example/v1/messages?key=secret#body",
+    );
+    expect(normalized).toMatch(/^<origin>\/[a-f0-9]{12}$/);
+    expect(normalized).not.toContain("tenant");
+    expect(normalized).not.toContain("internal.example");
+    expect(normalized).not.toContain("messages");
+    expect(normalized).not.toContain("secret");
     expect(normalizeDiagnosticUrl("not a url")).toMatch(
       /^<invalid-url>\/[a-f0-9]{12}$/,
     );
@@ -168,18 +178,15 @@ describe("safeError", () => {
     });
   });
 
-  it("sanitizes trusted internal messages and stack paths", () => {
-    const error = new Error("api_key=secret operation failed");
-    error.stack =
-      "Error: duplicate message\n    at run (/workspace/app.ts:1:1)";
-    const encoded = safeError(error, {
-      roots: { workspace: "/workspace" },
-      trustedMessage: true,
+  it("uses allowlists instead of trusting arbitrary error names or codes", () => {
+    const error = Object.assign(new Error("provider body"), {
+      code: "SECRET_TOKEN",
+      name: "PRIVATECUSTOMERNAME",
     });
-    expect(encoded.message).toBe("api_key=<redacted> operation failed");
-    expect(encoded.stack).toContain("<workspace>/app.ts");
-    expect(JSON.stringify(encoded)).not.toContain("secret");
-    expect(encoded.stack).not.toContain("duplicate message");
+    expect(safeError(error)).toEqual({
+      message: "An external operation failed",
+      name: "Error",
+    });
   });
 
   it("never throws for non-errors", () => {

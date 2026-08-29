@@ -17,6 +17,7 @@ import { getLLMConfig } from "../../config/index.js";
 import { createInterfaceProvider } from "../../services/interface-providers/index.js";
 import type { LLMClientInstance } from "./types.js";
 import {
+  emitDiagnostic,
   NOOP_LOGGER,
   tokenUsageNormalization,
   type Logger,
@@ -64,7 +65,7 @@ export async function createLLMClient(
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
     tokenUsageReporter(diagnostic): void {
-      (options.logger ?? NOOP_LOGGER).emit(tokenUsageNormalization, {
+      emitDiagnostic(options.logger ?? NOOP_LOGGER, tokenUsageNormalization, {
         code: diagnostic.code,
         field: diagnostic.field,
         normalizedTotal: diagnostic.normalizedTotal,

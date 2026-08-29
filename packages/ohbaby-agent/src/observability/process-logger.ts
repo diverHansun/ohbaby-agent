@@ -211,8 +211,14 @@ class RotatingFileWriter {
       fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
       0o600,
     );
-    if (process.platform !== "win32") {
-      await file.chmod(0o600);
+    try {
+      if (process.platform !== "win32") {
+        await file.chmod(0o600);
+      }
+    } catch (error) {
+      await file.close().catch(() => undefined);
+      await rm(activePath, { force: true }).catch(() => undefined);
+      throw error;
     }
     return new RotatingFileWriter(directory, instance, file, limits);
   }
@@ -287,6 +293,29 @@ function withoutKey(
   );
 }
 
+function withoutErrorStacks(
+  record: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => {
+      if (
+        typeof value !== "object" ||
+        value === null ||
+        Array.isArray(value) ||
+        !("stack" in value)
+      ) {
+        return [key, value];
+      }
+      return [
+        key,
+        Object.fromEntries(
+          Object.entries(value).filter(([nestedKey]) => nestedKey !== "stack"),
+        ),
+      ];
+    }),
+  );
+}
+
 function encodeLine(
   event: EncodedDiagnosticEvent,
   maxLineBytes: number,
@@ -296,35 +325,27 @@ function encodeLine(
   if (Buffer.byteLength(line, "utf8") <= maxLineBytes) {
     return line;
   }
-  for (const key of Object.keys(record).reverse()) {
-    if (
-      key === "ts" ||
-      key === "level" ||
-      key === "event" ||
-      key === "component"
-    ) {
-      continue;
-    }
+  record = withoutErrorStacks(record);
+  record.truncated = true;
+  line = `${JSON.stringify(record)}\n`;
+  if (Buffer.byteLength(line, "utf8") <= maxLineBytes) {
+    return line;
+  }
+  for (const key of [...event.optionalFieldNames].reverse()) {
     record = withoutKey(record, key);
-    record.truncated = true;
     line = `${JSON.stringify(record)}\n`;
     if (Buffer.byteLength(line, "utf8") <= maxLineBytes) {
       return line;
     }
   }
-  return `${JSON.stringify({
-    component: record.component,
-    event: record.event,
-    level: record.level,
-    truncated: true,
-    ts: record.ts,
-  })}\n`;
+  throw new Error("diagnostic event exceeds the line limit");
 }
 
 class ProcessFileLogger implements Logger {
   private accepting = true;
   private disabled = false;
   private drainPromise: Promise<void> | undefined;
+  private disposePromise: Promise<void> | undefined;
   private readonly dropped: Record<LogLevel, number> = {
     debug: 0,
     error: 0,
@@ -371,19 +392,22 @@ class ProcessFileLogger implements Logger {
     }
   }
 
-  async dispose(): Promise<void> {
-    if (!this.accepting) {
-      return;
-    }
-    this.enqueueDropSummaryIfNeeded();
+  dispose(): Promise<void> {
+    this.disposePromise ??= this.disposeInternal();
+    return this.disposePromise;
+  }
+
+  private async disposeInternal(): Promise<void> {
     this.accepting = false;
     await this.waitForDrain();
     if (!this.disabled) {
-      try {
-        await this.writer.close();
-      } catch {
-        this.disable("flush");
-      }
+      this.enqueueDropSummaryIfNeeded();
+      await this.waitForDrain();
+    }
+    try {
+      await this.writer.close();
+    } catch {
+      this.disable("flush");
     }
   }
 
@@ -392,6 +416,9 @@ class ProcessFileLogger implements Logger {
   }
 
   private disable(reason: "write" | "flush"): void {
+    if (this.disabled) {
+      return;
+    }
     this.disabled = true;
     this.queue = [];
     this.unavailable(reason);

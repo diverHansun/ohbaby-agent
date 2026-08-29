@@ -8,6 +8,7 @@ import {
   sanitizePromptForSessionTitle,
 } from "./prompt-sanitizer.js";
 import {
+  emitDiagnostic,
   NOOP_LOGGER,
   sessionTitleGenerationFailed,
   type Logger,
@@ -65,7 +66,7 @@ export async function generateSessionTitle({
     abortController.signal,
     sessionId,
   ).catch((caught: unknown) => {
-    logger.emit(sessionTitleGenerationFailed, { error: caught });
+    emitDiagnostic(logger, sessionTitleGenerationFailed, { error: caught });
     return null;
   });
   const timeout = new Promise<null>((resolve) => {

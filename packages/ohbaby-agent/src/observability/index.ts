@@ -1,20 +1,15 @@
 export {
-  LOG_LEVEL_PRIORITY,
   NOOP_LOGGER,
   defineDiagnosticEvent,
   diagnosticField,
-  normalizeDiagnosticPath,
-  normalizeDiagnosticUrl,
-  safeError,
+  emitDiagnostic,
 } from "./logger.js";
 export type {
   DiagnosticEventDefinition,
   DiagnosticFieldEncoder,
-  DiagnosticRoots,
   DiagnosticsComponent,
   LogLevel,
   Logger,
-  SafeLogError,
 } from "./logger.js";
 export {
   configMigrationCompleted,
@@ -24,6 +19,7 @@ export {
   loggerEventsDropped,
   serverStartFailed,
   serverStarted,
+  serverStopFailed,
   serverStopped,
   sessionTitleGenerationFailed,
   tokenUsageNormalization,

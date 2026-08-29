@@ -109,6 +109,21 @@ export const serverStopped = defineDiagnosticEvent({
   level: "info",
 });
 
+export const serverStopFailed = defineDiagnosticEvent({
+  component: "server",
+  event: "server.stop.failed",
+  fields: {
+    error: diagnosticField.externalError(),
+    reason: diagnosticField.stringEnum([
+      "idle",
+      "requested",
+      "signal",
+      "startup-failed",
+    ]),
+  },
+  level: "error",
+});
+
 export const interactionCleanupFailure = defineDiagnosticEvent({
   component: "server",
   event: "ui.interaction.cleanup.failure",

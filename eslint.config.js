@@ -70,7 +70,35 @@ export default tseslint.config(
     ],
     rules: {
       "no-console": "error",
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              importNames: ["emitWarning", "stderr", "stdout"],
+              message:
+                "Backend production code must not import process output channels directly.",
+              name: "node:process",
+            },
+            {
+              importNames: ["emitWarning", "stderr", "stdout"],
+              message:
+                "Backend production code must not import process output channels directly.",
+              name: "process",
+            },
+          ],
+        },
+      ],
       "no-restricted-properties": ["error", ...processOutputRestrictions],
+      "no-restricted-syntax": [
+        "error",
+        {
+          message:
+            "Backend production code must not destructure process output channels.",
+          selector:
+            "VariableDeclarator[init.name='process'] > ObjectPattern > Property[key.name=/^(emitWarning|stderr|stdout)$/]",
+        },
+      ],
     },
   },
   {

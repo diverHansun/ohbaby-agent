@@ -114,6 +114,22 @@ describe("session title generator", () => {
     });
   });
 
+  it("does not let an injected logger failure replace the product result", async () => {
+    const client = createRejectingLLMClient(new Error("provider offline"));
+
+    await expect(
+      generateSessionTitle({
+        firstUserMessage: "Please name this session",
+        llmClient: client,
+        logger: {
+          emit(): never {
+            throw new Error("diagnostics adapter failed");
+          },
+        },
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("stays silent on process stderr when no logger is injected", async () => {
     const write = vi
       .spyOn(process.stderr, "write")
