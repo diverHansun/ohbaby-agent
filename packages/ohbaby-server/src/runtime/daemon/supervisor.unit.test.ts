@@ -403,4 +403,42 @@ describe("Supervisor", () => {
       "pid.release",
     ]);
   });
+
+  it("keeps concurrent stops joined until diagnostics disposal finishes", async () => {
+    const calls: string[] = [];
+    let finishDiagnostics: (() => void) | undefined;
+    const disposeDiagnostics = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          calls.push("diagnostics.dispose");
+          finishDiagnostics = resolve;
+        }),
+    );
+    const supervisor = new Supervisor({
+      bootstrap: (): Promise<DaemonRuntimeHandle> =>
+        Promise.resolve(new RecordingRuntime(calls)),
+      disposeDiagnostics,
+      logger: silentLogger,
+      pidFile: new RecordingPidFile(calls),
+      signalTarget: null,
+      stateFile: new RecordingStateFile(calls),
+    });
+
+    await supervisor.start();
+    const firstStop = supervisor.stop();
+    await vi.waitFor(() => {
+      expect(disposeDiagnostics).toHaveBeenCalledTimes(1);
+    });
+    let secondSettled = false;
+    const secondStop = supervisor.stop().finally(() => {
+      secondSettled = true;
+    });
+    await Promise.resolve();
+
+    expect(secondSettled).toBe(false);
+    finishDiagnostics?.();
+    await Promise.all([firstStop, secondStop]);
+    expect(disposeDiagnostics).toHaveBeenCalledTimes(1);
+    expect(calls.at(-1)).toBe("diagnostics.dispose");
+  });
 });

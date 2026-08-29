@@ -234,13 +234,14 @@ export class Supervisor {
     } finally {
       this.runtime = undefined;
       this.startedAt = undefined;
-      this.stopPromise = undefined;
     }
 
     try {
       await this.options.disposeDiagnostics?.(this.stopReason);
     } catch (error) {
       pendingError ??= error;
+    } finally {
+      this.stopPromise = undefined;
     }
 
     if (pendingError !== undefined) {
