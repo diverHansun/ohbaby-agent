@@ -196,6 +196,49 @@ describe("runOhbabyCli", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a late diagnostics failure after the terminal UI exits", async () => {
+    vi.resetModules();
+    const core = createCore();
+    const stderr: string[] = [];
+    let diagnosticsUnavailable = false;
+    const dispose = vi.fn((): Promise<void> => {
+      diagnosticsUnavailable = true;
+      return Promise.resolve();
+    });
+    const subscribeEvents = vi.fn((): (() => void) => () => undefined);
+    const createCoreHost = vi.fn(() => ({
+      callbacks: { subscribeEvents },
+      core,
+      diagnosticsUnavailable: (): boolean => diagnosticsUnavailable,
+      dispose,
+    }));
+    const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
+    const waitUntilExit = vi.fn(() => Promise.resolve());
+    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
+    vi.doMock("ohbaby-agent", () => {
+      throw new Error("agent should be loaded only by the default loader");
+    });
+    vi.doMock("./tui/index.js", () => ({ renderTerminalUi }));
+
+    const { runOhbabyCli } = await import("./bin.js");
+
+    await expect(
+      runOhbabyCli(
+        ["node", "ohbaby"],
+        {
+          stderr: { write: (chunk: string) => stderr.push(chunk) },
+          stdout: { write: vi.fn() },
+        },
+        { createCoreHost, loadRuntimeEnvIntoProcessEnv },
+      ),
+    ).resolves.toBe(0);
+    expect(waitUntilExit).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(stderr.join("")).toBe(
+      "Diagnostics file logging became unavailable; the session continued without it.\n",
+    );
+  });
+
   it("presents config migration warnings inside the terminal UI once", async () => {
     vi.resetModules();
     const stderr: string[] = [];

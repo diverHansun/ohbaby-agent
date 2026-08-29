@@ -372,7 +372,10 @@ function waitForReady(child, timeoutMs = 30_000) {
       );
       if (match?.[1]) {
         clearTimeout(timeout);
-        resolveReady(match[1]);
+        resolveReady({
+          readOutput: () => ({ stderr, stdout }),
+          url: match[1],
+        });
       }
     });
     child.stderr.on("data", (chunk) => {
@@ -479,6 +482,52 @@ function assertBrowserEvidence(value) {
     }
   }
   return UI_EVIDENCE_EXPECTED;
+}
+
+async function verifyDiagnostics(logFilePath, output) {
+  if (output.stderr !== "") {
+    throw new Error("compiled serve wrote unexpected stderr output");
+  }
+  if (
+    output.stdout.includes("ui.command.") ||
+    output.stdout.includes('{"record"')
+  ) {
+    throw new Error("compiled serve leaked internal diagnostics to stdout");
+  }
+  const log = await readFile(logFilePath, "utf8");
+  const records = log
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const events = records.map((record) => record.event);
+  for (const expected of [
+    "diagnostics.started",
+    "migration.config.completed",
+    "migration.data.completed",
+    "server.started",
+    "server.stopped",
+  ]) {
+    if (!events.includes(expected)) {
+      throw new Error(`compiled serve diagnostics omitted ${expected}`);
+    }
+  }
+  for (const forbidden of [
+    "compiled-web-e2e-key",
+    FIXTURE_SENTINEL,
+    TOOL_FINAL,
+    FOLLOWUP_FINAL,
+    "OHBABY_COMPILED_WEB_FOLLOWUP",
+    "Read fixture.txt and report the result.",
+  ]) {
+    if (log.includes(forbidden)) {
+      throw new Error("compiled serve diagnostics leaked user content");
+    }
+  }
+  return {
+    eventCount: records.length,
+    events,
+    file: basename(logFilePath),
+  };
 }
 
 async function waitForBrowserEvidence() {
@@ -635,6 +684,7 @@ const profile = join(root, "profile");
 const workspace = join(root, "workspace");
 const osHome = join(root, "os-home");
 const dbPath = join(profile, "ohbaby-e2e.db");
+const logRoot = join(root, "logs");
 const statePath = join(profile, "server", "daemon-state.json");
 const pidPath = join(profile, "server", "daemon.pid");
 let provider;
@@ -644,6 +694,9 @@ let capturedPort;
 let isolatedEnv;
 let failure;
 let cleanupEvidence;
+let diagnosticsEvidence;
+let diagnosticsPath;
+let readServeOutput;
 
 try {
   await Promise.all([
@@ -699,6 +752,7 @@ try {
     NO_COLOR: "1",
     OHBABY_DB_PATH: dbPath,
     OHBABY_HOME: profile,
+    OHBABY_LOG_DIR: logRoot,
     OHBABY_STORAGE_ROOT: join(root, "storage"),
     USERPROFILE: osHome,
     XDG_CONFIG_HOME: join(root, "xdg-config"),
@@ -715,7 +769,9 @@ try {
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  const url = await waitForReady(serveChild);
+  const readiness = await waitForReady(serveChild);
+  const { url } = readiness;
+  readServeOutput = readiness.readOutput;
   const state = await readJsonWithRetry(statePath);
   capturedPid = state.pid;
   capturedPort = state.port;
@@ -740,6 +796,11 @@ try {
 
   const backendEvidence = provider.assertEvidence();
   console.log(`E2E_BACKEND_PASS ${JSON.stringify(backendEvidence)}`);
+  await delay(50);
+  diagnosticsPath = /^diagnostics: (.+)$/mu.exec(readServeOutput().stdout)?.[1];
+  if (!diagnosticsPath) {
+    throw new Error("compiled serve did not publish its diagnostics path");
+  }
 } catch (error) {
   failure = error instanceof Error ? error : new Error(String(error));
 } finally {
@@ -755,6 +816,12 @@ try {
       statePath,
       workspace,
     });
+    if (diagnosticsPath && readServeOutput) {
+      diagnosticsEvidence = await verifyDiagnostics(
+        diagnosticsPath,
+        readServeOutput(),
+      );
+    }
   } catch (error) {
     const cleanupFailure =
       error instanceof Error ? error : new Error(String(error));
@@ -770,6 +837,9 @@ try {
 
 if (cleanupEvidence) {
   console.log(`E2E_CLEANUP_PASS ${JSON.stringify(cleanupEvidence)}`);
+}
+if (diagnosticsEvidence) {
+  console.log(`E2E_DIAGNOSTICS_PASS ${JSON.stringify(diagnosticsEvidence)}`);
 }
 if (failure) {
   console.error(
