@@ -1,5 +1,12 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -26,6 +33,9 @@ let releasePackageBuildLock: (() => Promise<void>) | undefined;
 beforeAll(async () => {
   const lock = await acquireCliPackageBuildLock();
   releasePackageBuildLock = lock.release;
+  if (process.env.OHBABY_TEST_SKIP_PACKAGE_BUILD === "1") {
+    return;
+  }
   const result = spawnSync(
     process.platform === "win32" ? "pnpm.cmd" : "pnpm",
     [
@@ -66,6 +76,8 @@ describe("default command record terminal behavior", () => {
     const home = join(root, "home");
     const profile = join(root, "profile");
     const workspace = join(root, "workspace");
+    const logRoot = join(root, "logs");
+    const resultPath = join(root, "result.json");
     const childScript = join(root, "exercise-command.mjs");
     await mkdir(profile, { recursive: true });
     await mkdir(workspace, { recursive: true });
@@ -84,9 +96,21 @@ describe("default command record terminal behavior", () => {
     );
     await writeFile(
       childScript,
-      `import { buildCoreAPIImpl } from ${JSON.stringify(pathToFileURL(agentEntry).href)};
+      `import { writeFile } from "node:fs/promises";
+import { buildCoreAPIImpl, createProcessLogger } from ${JSON.stringify(pathToFileURL(agentEntry).href)};
 
-const host = await buildCoreAPIImpl({ inProcess: true });
+const diagnostics = await createProcessLogger({
+  logDirectory: process.env.OHBABY_LOG_DIR,
+  role: "tui",
+  workspaceRoot: process.cwd(),
+});
+const events = [];
+const host = await buildCoreAPIImpl({
+  diagnosticsFilePath: diagnostics.logFilePath,
+  inProcess: true,
+  logger: diagnostics.logger,
+});
+const unsubscribe = host.callbacks.subscribeEvents((event) => events.push(event));
 try {
   await host.core.executeCommand({
     argv: [],
@@ -97,15 +121,20 @@ try {
     rawArgs: "",
     surface: "tui",
   });
+  await writeFile(process.env.OHBABY_TEST_RESULT_PATH, JSON.stringify(events));
 } finally {
+  unsubscribe();
   await host.dispose();
+  await diagnostics.dispose();
 }
 `,
       "utf8",
     );
 
     const environment = createIsolatedEnvironment(root, home, profile, {
+      OHBABY_LOG_DIR: logRoot,
       OHBABY_PROCESS_TEST_API_KEY: "test-only-key",
+      OHBABY_TEST_RESULT_PATH: resultPath,
     });
 
     try {
@@ -116,6 +145,14 @@ try {
       ).toBe(0);
       expect(result.stdout).not.toContain("ui.command.");
       expect(result.stderr).not.toContain("ui.command.");
+      const files = await readdir(join(logRoot, "tui"));
+      expect(files).toHaveLength(1);
+      const logFilePath = join(logRoot, "tui", files[0] ?? "missing");
+      const log = await readFile(logFilePath, "utf8");
+      expect(log).toContain('"event":"diagnostics.started"');
+      expect(log).not.toContain("test-only-key");
+      const events = await readFile(resultPath, "utf8");
+      expect(events).toContain(logFilePath);
     } finally {
       await rm(root, { force: true, recursive: true });
     }
@@ -126,6 +163,7 @@ try {
     const home = join(root, "home");
     const profile = join(root, "profile");
     const workspace = join(root, "workspace");
+    const logRoot = join(root, "logs");
     const authToken = "command-record-process-token";
     await Promise.all([
       mkdir(profile, { recursive: true }),
@@ -146,6 +184,7 @@ try {
     );
 
     const environment = createIsolatedEnvironment(root, home, profile, {
+      OHBABY_LOG_DIR: logRoot,
       OHBABY_PROCESS_TEST_API_KEY: "test-only-key",
     });
     const child = spawn(
@@ -223,6 +262,26 @@ try {
       ).toBe(0);
       expect(result.stdout).not.toContain("ui.command.");
       expect(result.stderr).not.toContain("ui.command.");
+      expect(result.stderr).toBe("");
+      const diagnosticsPath = /diagnostics: ([^\n]+)/u.exec(result.stdout)?.[1];
+      expect(diagnosticsPath).toBeTypeOf("string");
+      expect(diagnosticsPath).toContain(join(logRoot, "serve"));
+      const log = await readFile(diagnosticsPath ?? "missing", "utf8");
+      const records = log
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { readonly event?: string });
+      expect(records.map((record) => record.event)).toEqual(
+        expect.arrayContaining([
+          "diagnostics.started",
+          "migration.config.completed",
+          "migration.data.completed",
+          "server.started",
+          "server.stopped",
+        ]),
+      );
+      expect(log).not.toContain("test-only-key");
+      expect(log).not.toContain(authToken);
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGKILL");
