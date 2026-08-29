@@ -43,7 +43,7 @@
 {
   "ts": "2026-08-29T08:00:00.000Z",
   "level": "info",
-  "event": "serve.started",
+  "event": "server.started",
   "component": "server"
 }
 ```
@@ -75,7 +75,7 @@
 - 普通安全字符串编码后最多 512 UTF-8 bytes；
 - safe error message 最多 512 UTF-8 bytes；
 - 清洗后的 stack frames 合计最多 8 KiB；
-- 单行 JSONL 最多 16 KiB；超过时先移除 stack，再按 definition 声明的可选字段逆序移除，并写 `truncated: true`；必填字段仍必须保留。`truncated` 是 JSONL encoder 保留的协议字段，不计入业务 definition 的 16 个扩展字段，业务代码不得自行声明或写入。
+- 单行 JSONL 最多 16 KiB；超过时先移除 stack，再按 definition 声明的可选字段逆序移除，并写 `truncated: true`；必填字段仍必须保留。若静态 definition 的必填字段在编码上限内仍无法满足单行限制，则拒绝该事件并按 writer failure 退化，不能删除必填字段。`truncated` 是 JSONL encoder 保留的协议字段，不计入业务 definition 的 16 个扩展字段，业务代码不得自行声明或写入。
 
 ## 5. 数据边界
 
@@ -133,6 +133,7 @@ path encoder 只接受调用点语义上已经是“路径”的值，并负责 
 - 由配置来源/provenance 判定的 ohbaby 内置 MCP、agent 和 skill 名称可以原样记录；
 - 用户定义的 MCP、agent 和 skill 名称 **MUST** 使用稳定短 hash，即使它与某个内置名称同名也不能按内置处理；
 - provenance 缺失、未知或在用户配置覆盖内置项时，必须按用户定义名称 hash 或直接省略；**MUST NOT** 仅凭名称等于内置名称就推断为 builtin；
+- API 必须提供两个单向入口：内置名称只能通过 definition 中的静态 enum allowlist，用户名称只能通过始终 hash 的 encoder；不得让普通调用者传 `{name, provenance}` 自行声明来源；
 - 首版使用 `SHA-256(kind + "\\0" + name)` 的前 12 个十六进制字符，不新增 salt/key 状态文件；
 - 日志中不同时写原名和 hash；
 - 文档与 UI 必须把它称为“伪名化”，不能宣称匿名或加密；无 salt 的短 hash 仍可能被字典猜测，因此不能升级为公开标识。
@@ -141,7 +142,7 @@ path encoder 只接受调用点语义上已经是“路径”的值，并负责 
 
 所有错误入日志前 **MUST** 经过单一 `safeError()` 边界：
 
-- 只输出允许的静态/分类后 `name`、稳定 `code`、规范化且限长的 `message`，必要时输出清洗后的限长 `stack`；
+- 只输出允许的静态/分类后 `name`、稳定 `code`、规范化且限长的 `message`，必要时输出清洗后的限长 `stack`；外部 Error 的 name/code 必须来自静态 allowlist，不能只靠字符正则判断“看起来稳定”；
 - 默认不复制任意 `Error.message`；provider/MCP/HTTP/第三方 SDK 等外部来源必须使用 event definition 提供的静态通用摘要；
 - 只有已审计的内部错误类别可以通过专用 encoder 保留清洗后的 message；
 - 移除已知 credential 形态、URL query/userinfo，并应用路径规范化；

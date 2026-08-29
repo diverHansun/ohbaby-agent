@@ -92,8 +92,8 @@ brand 负责 TypeScript nominality；builder 同时把创建出的对象登记�
 约束：
 
 - definition 应当由模块级 `const` 复用，event/component 使用字面量和受限静态格式，不能来自请求数据；首版通过 TypeScript 字面量约束、opaque brand、运行时 identity/格式校验实现安全边界，不为“顶层声明”这一风格要求自研 AST lint；
-- component 使用封闭的内置集合；用户定义实体只能作为 provenance-aware hashed field，不能成为 component/event/key；
-- 字段 encoder 首版只提供 integer/number、boolean、受限 enum、ohbaby ID、hashed external ID、normalized path/URL、provenance-aware entity name 和 safe error；不提供任意 text/object encoder；
+- component 使用封闭的内置集合；用户定义实体只能进入始终 hash 的专用 field encoder，不能成为 component/event/key；
+- 字段 encoder 首版只提供 integer/number、boolean、受限 enum、ohbaby ID、hashed external ID、normalized path/URL、始终 hash 的 user entity name 和 safe error；内置名称必须由静态 enum allowlist 表达，不提供可由调用者伪造 provenance 的联合输入，也不提供任意 text/object encoder；
 - error encoder 接收原始 unknown 只是为了立即转换，不把 raw Error 放入最终 event，也不公开可构造的 `SafeLogError`；external encoder 不接受自由 summary 字符串，使用内部稳定类别/通用摘要；
 - runtime encoder 仍检查字段、secret 形态和大小；类型系统用于防误用，不被宣称为安全沙箱；
 - 生产 logger 不暴露 `sink.write(record)` 给普通业务代码；
@@ -130,9 +130,10 @@ Phase A 先固定能形成真实垂直切片的最小目录，只实现这些事
 | `server.started` | info | server | 规范化 endpoint |
 | `server.start.failed` | error | server | safe error |
 | `server.stopped` | info | server | reason enum |
+| `server.stop.failed` | error | server | reason enum、safe error |
 | `ui.interaction.cleanup.failure` | warn | server | operation kind、安全错误 |
 
-首批事件不包含 agent/MCP/skill 名称，因此 Phase A 只实现 provenance-aware name encoder 及其合成输入测试，不改 registry。未来第一个确需实体名称的事件必须在同一阶段增加 provenance 传播；缺少 provenance 时只能 hash 或省略，不能按名称猜测。
+首批事件不包含 agent/MCP/skill 名称，因此 Phase A 只实现“用户名称始终 hash、内置名称静态 enum allowlist”的两个单向入口及合成输入测试，不改 registry。未来第一个确需实体名称的事件必须在同一阶段由配置来源选择正确入口；来源缺失时只能按用户名称 hash 或省略，不能按名称猜测。
 
 ### 3.2 开发者一次性调试流程
 

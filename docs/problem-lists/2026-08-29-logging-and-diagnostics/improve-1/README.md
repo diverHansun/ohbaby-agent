@@ -1,6 +1,6 @@
 # Logging 与 Diagnostics 改造文档集
 
-> 状态：实现与本地验收完成；等待独立子代理审查收尾。
+> 状态：实现、文档对齐与本地验收完成；等待修订后的独立子代理复审收尾。
 >
 > 分支：`codex/logging-diagnostics-docs`
 >

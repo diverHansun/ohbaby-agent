@@ -336,9 +336,14 @@ pnpm test:e2e:compiled-web
 最终 Phase F 执行：
 
 ```bash
-pnpm preflight
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
 pnpm test:e2e:compiled-web
 ```
+
+`pnpm format:check` / `pnpm preflight` 仍应执行并记录，但若它只命中实施前已存在、且本轮没有触及的 format baseline，则不得为了本功能机械改写无关文件。此时必须同时满足：本轮触及文件单独通过 Prettier、`git diff --check` 通过、验收文档记录 baseline 数量；这属于仓库级 release gate 的显式例外，不得写成“preflight 已通过”。
 
 真实 TUI PTY 流程和真实 serve 进程测试另外记录运行命令、隔离目录、退出码、用户可见输出摘要和脱敏后的 JSONL 样例。
 
@@ -357,6 +362,6 @@ pnpm test:e2e:compiled-web
 - [ ] 真实构建产物的 TUI backend/serve 子进程测试通过；
 - [ ] 真实 TUI PTY 交互无画面/输入污染；
 - [ ] compiled Web E2E 行为与日志安全同时通过；
-- [ ] lint、typecheck、全量 test、build、preflight 通过；
+- [ ] lint、typecheck、全量 test、build 通过；本轮触及文件通过 format check；repo-wide preflight 若仅受已记录历史 format baseline 阻断，按上节显式例外处理；
 - [ ] `05-implementation-acceptance.md` 记录实际证据、已知限制和与方案的偏差；
 - [ ] 用户审查后再决定 merge/push。
