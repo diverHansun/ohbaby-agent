@@ -146,6 +146,18 @@ function migrationCounts(report: OhbabyMigrationReport): MigrationCounts {
   };
 }
 
+function emitWithoutAffectingProduct<Input>(
+  logger: Logger,
+  definition: DiagnosticEventDefinition<Input>,
+  input: NoInfer<Input>,
+): void {
+  try {
+    logger.emit(definition, input);
+  } catch {
+    // Injected diagnostics cannot change CLI startup or migration semantics.
+  }
+}
+
 interface ServerRuntimeModule {
   readonly createRemoteCoreApiHost?: unknown;
   readonly listDaemonConnections?: unknown;
@@ -350,6 +362,7 @@ async function loadDefaultDependencies(
         return buildCoreAPIImpl(agentOptions);
       }
       let diagnosticsUnavailable = false;
+      let diagnosticsUnavailablePresented = false;
       const diagnosticsUnavailableListeners = new Set<() => void>();
       const handle = await createProcessLogger({
         onUnavailable(): void {
@@ -357,6 +370,9 @@ async function loadDefaultDependencies(
             return;
           }
           diagnosticsUnavailable = true;
+          if (diagnosticsUnavailableListeners.size > 0) {
+            diagnosticsUnavailablePresented = true;
+          }
           for (const listener of diagnosticsUnavailableListeners) {
             listener();
           }
@@ -368,14 +384,16 @@ async function loadDefaultDependencies(
       try {
         const configReport = runtimeEnvResult?.configMigrationReport;
         if (configReport) {
-          handle.logger.emit(
+          emitWithoutAffectingProduct(
+            handle.logger,
             runtimeModule.configMigrationCompleted as DiagnosticEventDefinition<MigrationCounts>,
             migrationCounts(configReport),
           );
         }
         if (migrateOhbabyData !== undefined) {
           const dataReport = await migrateOhbabyData();
-          handle.logger.emit(
+          emitWithoutAffectingProduct(
+            handle.logger,
             runtimeModule.dataMigrationCompleted as DiagnosticEventDefinition<MigrationCounts>,
             migrationCounts(dataReport),
           );
@@ -388,9 +406,11 @@ async function loadDefaultDependencies(
         return {
           ...host,
           ...(diagnosticsFilePath === undefined ? {} : { diagnosticsFilePath }),
-          diagnosticsUnavailable: () => diagnosticsUnavailable,
+          diagnosticsUnavailable: () =>
+            diagnosticsUnavailable && !diagnosticsUnavailablePresented,
           subscribeDiagnosticsUnavailable(listener): () => void {
             if (diagnosticsUnavailable) {
+              diagnosticsUnavailablePresented = true;
               listener();
               return () => undefined;
             }
@@ -458,7 +478,8 @@ async function loadDefaultDependencies(
           diagnosticsHandle = handle;
           const configReport = runtimeEnvResult?.configMigrationReport;
           if (configReport) {
-            handle.logger.emit(
+            emitWithoutAffectingProduct(
+              handle.logger,
               runtimeModule.configMigrationCompleted as DiagnosticEventDefinition<MigrationCounts>,
               migrationCounts(configReport),
             );
@@ -466,10 +487,13 @@ async function loadDefaultDependencies(
           return handle;
         },
         onDataMigrationReport(report: OhbabyMigrationReport): void {
-          diagnosticsHandle?.logger.emit(
-            runtimeModule.dataMigrationCompleted as DiagnosticEventDefinition<MigrationCounts>,
-            migrationCounts(report),
-          );
+          if (diagnosticsHandle !== undefined) {
+            emitWithoutAffectingProduct(
+              diagnosticsHandle.logger,
+              runtimeModule.dataMigrationCompleted as DiagnosticEventDefinition<MigrationCounts>,
+              migrationCounts(report),
+            );
+          }
         },
       });
     },

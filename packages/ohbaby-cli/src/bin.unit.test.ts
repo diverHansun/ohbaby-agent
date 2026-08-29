@@ -77,22 +77,32 @@ describe("runOhbabyCli", () => {
     );
     const logger = { emit: vi.fn() };
     const disposeDiagnostics = vi.fn(() => Promise.resolve());
-    const createProcessLogger = vi.fn(() =>
-      Promise.resolve({
-        dispose: disposeDiagnostics,
-        flush: vi.fn(() => Promise.resolve()),
-        logFilePath: "/logs/tui.jsonl",
-        logger,
-      }),
+    let diagnosticsUnavailable: (() => void) | undefined;
+    const createProcessLogger = vi.fn(
+      (options: { readonly onUnavailable?: () => void }) => {
+        diagnosticsUnavailable = options.onUnavailable;
+        return Promise.resolve({
+          dispose: disposeDiagnostics,
+          flush: vi.fn(() => Promise.resolve()),
+          logFilePath: "/logs/tui.jsonl",
+          logger,
+        });
+      },
     );
     const waitUntilExit = vi.fn(() => Promise.resolve());
+    const activeNotice = vi.fn();
     const renderTerminalUi = vi.fn(
-      (_options: {
+      (options: {
         readonly subscribeDiagnosticsUnavailable?: (
           listener: () => void,
         ) => () => void;
-      }) => ({ waitUntilExit }),
+      }) => {
+        options.subscribeDiagnosticsUnavailable?.(activeNotice);
+        diagnosticsUnavailable?.();
+        return { waitUntilExit };
+      },
     );
+    const stderr: string[] = [];
     vi.doMock("ohbaby-agent", () => ({
       buildCoreAPIImpl,
       createProcessLogger,
@@ -111,7 +121,11 @@ describe("runOhbabyCli", () => {
 
     const { runOhbabyCli } = await import("./bin.js");
 
-    await expect(runOhbabyCli(["node", "ohbaby"])).resolves.toBe(0);
+    await expect(
+      runOhbabyCli(["node", "ohbaby"], {
+        stderr: { write: (chunk: string) => stderr.push(chunk) },
+      }),
+    ).resolves.toBe(0);
     expect(loadRuntimeEnvIntoProcessEnv).toHaveBeenCalledTimes(1);
     expect(migrateOhbabyData).toHaveBeenCalledTimes(1);
     expect(
@@ -130,6 +144,8 @@ describe("runOhbabyCli", () => {
     ).toBeTypeOf("function");
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(disposeDiagnostics).toHaveBeenCalledTimes(1);
+    expect(activeNotice).toHaveBeenCalledOnce();
+    expect(stderr).toEqual([]);
   });
 
   it("starts the terminal UI through injected host dependencies", async () => {
