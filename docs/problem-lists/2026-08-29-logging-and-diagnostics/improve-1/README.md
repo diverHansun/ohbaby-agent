@@ -1,6 +1,6 @@
 # Logging 与 Diagnostics 改造文档集
 
-> 状态：设计经审查后进入实施；按阶段提交与验收。
+> 状态：实现与本地验收完成；等待独立子代理审查收尾。
 >
 > 分支：`codex/logging-diagnostics-docs`
 >
@@ -43,6 +43,7 @@ ohbaby 目前已经有用户提示、异常、调试输出、迁移告警、daem
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 目标架构、分阶段实施方案、变更面和回滚边界 |
 | [03-reference-projects.md](./03-reference-projects.md) | 六个优秀项目分别借鉴什么、不照搬什么 |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 单元、契约、集成、真实进程、TUI 与 Web E2E 验收 |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实际落地范围、测试结果、用户可见证据与剩余边界 |
 | [logging-policy.md](./logging-policy.md) | 日志等级、字段、敏感信息、终端所有权、文件生命周期的规范合同 |
 
 ## 4. 实施顺序
@@ -79,4 +80,4 @@ ohbaby 目前已经有用户提示、异常、调试输出、迁移告警、daem
 
 本套文档经确认后，Phase A–D/F 具备实施依据；Phase E 只直接修复已确认的错误码丢失/格式不一致。其余错误产品化必须先补 2–3 个真实高频错误的清单与验收并再次确认。
 
-实现完成后的事实验收应单独新增 `05-implementation-acceptance.md`；在真正实现前不预写“已通过”。
+实现事实与本地验收结果已记录在 `05-implementation-acceptance.md`；独立子代理审查结论也在该文档继续收口。

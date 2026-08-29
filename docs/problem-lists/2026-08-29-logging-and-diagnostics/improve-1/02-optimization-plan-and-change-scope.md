@@ -125,9 +125,9 @@ Phase A 先固定能形成真实垂直切片的最小目录，只实现这些事
 | `logger.events_dropped` | warn | diagnostics | 各 level 丢弃计数 |
 | `session.title_generation.failed` | warn | session | 安全错误类别 |
 | `llm.usage.normalization` | debug | llm | code、protocol、token 数值 |
-| `migration.config.completed` | info/warn | migration | copied/conflicts/merged/skipped 计数 |
-| `migration.data.completed` | info/warn | migration | copied/conflicts/merged/skipped 计数 |
-| `server.started` | info | server | 规范化 endpoint、reused=false |
+| `migration.config.completed` | info | migration | copied/conflicts/merged/skipped 计数 |
+| `migration.data.completed` | info | migration | copied/conflicts/merged/skipped 计数 |
+| `server.started` | info | server | 规范化 endpoint |
 | `server.start.failed` | error | server | safe error |
 | `server.stopped` | info | server | reason enum |
 | `ui.interaction.cleanup.failure` | warn | server | operation kind、安全错误 |
