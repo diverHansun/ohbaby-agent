@@ -124,6 +124,7 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 | `pnpm lint` | 通过 |
 | `pnpm typecheck` | 通过 |
 | `pnpm build` | 通过，含 SDK/agent/server/CLI/Web production build |
+| `pnpm test` | 307 files passed、5 skipped；2,817 tests passed、16 skipped |
 | `pnpm test:unit` | 229 files；2,139 passed；2 skipped |
 | `pnpm test:contract` | 16 files；257 passed |
 | `OHBABY_TEST_SKIP_PACKAGE_BUILD=1 pnpm test:integration` | 51 files；328 passed；真实 packaging smoke 也在该轮通过 |
