@@ -985,6 +985,7 @@ describe("TUI store event reducer", () => {
       "result",
       "error",
     ]);
+    expect(state.commandNotices.at(-1)?.text).toBe("[BAD] Unknown command");
 
     state = applyTuiEvent(state, {
       requestId: "permission_1",

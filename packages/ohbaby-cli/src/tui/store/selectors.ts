@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { formatError } from "ohbaby-agent";
 import type {
   UiContextWindowUsage,
   UiGoal,
@@ -81,7 +82,7 @@ export function selectRuntimeLabel(state: TuiStoreState): string {
     case "waiting-for-permission":
       return formatPermissionWaitLabel(state);
     case "error":
-      return `error: ${runtime.message}`;
+      return `error: ${formatError(runtime)}`;
   }
 }
 

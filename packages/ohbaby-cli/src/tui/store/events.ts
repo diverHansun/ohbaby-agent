@@ -15,6 +15,7 @@ import type {
   UiSessionTodoList,
   UiSnapshot,
 } from "ohbaby-sdk";
+import { formatError } from "ohbaby-agent";
 import type {
   TuiCommandCatalog,
   TuiCommandNotice,
@@ -337,7 +338,7 @@ export function applyTuiEvent(
         commandId: event.commandRunId,
         kind: "error",
         sessionId: commandSessionId(next, event.commandRunId) ?? undefined,
-        text: event.error.message,
+        text: formatError(event.error),
       });
     }
 

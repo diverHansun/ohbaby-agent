@@ -1004,7 +1004,7 @@ function formatRuntimeLabel(
     case "waiting-for-permission":
       return formatPermissionWaitLabel(permissions);
     case "error":
-      return `error: ${effectiveRuntime.message}`;
+      return `error: ${formatError(effectiveRuntime)}`;
   }
 }
 

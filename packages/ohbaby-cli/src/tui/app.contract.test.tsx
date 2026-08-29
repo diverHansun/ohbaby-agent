@@ -1270,6 +1270,29 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("  Reject [deny]");
   });
 
+  it("preserves a stable runtime error code in the user-facing label", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      status: {
+        code: "MODEL_CONNECT_FAILED",
+        kind: "error",
+        message: "Model connection failed",
+        recoverable: true,
+      },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await flush();
+    expect(app.lastFrame()).toContain(
+      "error: [MODEL_CONNECT_FAILED] Model connection failed",
+    );
+  });
+
   it("submits normal prompts with the active session id", async () => {
     const client = createFakeClient(snapshot());
     const app = render(
