@@ -39,8 +39,8 @@
 - 必填字段仅 `ts`、`level`、`event`、`component`；
 - 字符串中的换行被 JSON 转义，不打断 JSONL；
 - undefined 字段被省略；
-- 96-char event、48-char component、16 个扩展字段、512-byte 普通字符串/error message、8-KiB stack、16-KiB 整行上限分别生效；
-- 超过整行上限时按 stack→definition 可选字段逆序移除并标记 `truncated: true`；`truncated` 只能由 encoder 写入、不计入业务字段上限，业务 definition 声明同名字段会被拒绝；
+- 96-char event、48-char component、16 个扩展字段、512-byte 普通字符串/error summary、16-KiB 整行上限分别生效；
+- 超过整行上限时按 definition 可选字段逆序移除并标记 `truncated: true`；`truncated` 只能由 encoder 写入、不计入业务字段上限，业务 definition 声明同名字段会被拒绝；首版不生成 stack，未来若开放内部 stack encoder，必须另加 8-KiB 上限并优先裁剪 stack；
 - 序列化异常不能逃出 logger。
 
 另外验证 event/component 只接受静态格式，不能把用户定义名称、路径或正文拼进命名空间；外部可控 correlation ID 必须先 hash 或被拒绝。
@@ -205,14 +205,14 @@ definition 的安全合同由 TypeScript compile fixture 与 runtime contract te
 
 1. 构建 sdk/agent/server/cli；
 2. 子进程加载真实 `dist`；
-3. 由于 direct library factory 默认 no-op，该 child 显式创建并注入 role=`tui` 的 process logger，再创建 in-process backend、执行 slash command和一次 fake prompt，最后由唯一拥有者 dispose；
+3. 由于 direct library factory 默认 no-op，该 child 显式创建并注入 role=`tui` 的 process logger，再创建 in-process backend、执行 slash command，最后由唯一拥有者 dispose；fake prompt、光标恢复和 Ink 画面节奏由下文真实 PTY 见证覆盖；
 4. 捕获子进程 stdout/stderr；
 5. 断言不存在 `ui.command.`、日志 JSON、prompt sentinel、credential；
 6. 断言独占 JSONL 存在且含预期安全 lifecycle/operation 事件；
 7. 断言 dispose 后尾记录已经落盘；
 8. `/status` 显示该 child 实际 `logFilePath`，普通输入区不自动插入路径。
 
-这是“否定终端污染 + 肯定日志落盘 + 真实退出时序”的同一个测试，不能只 spy `process.stdout.write`。
+自动子进程测试把“否定终端污染 + 肯定日志落盘 + 真实退出时序”放在同一条路径，不能只 spy `process.stdout.write`；fake prompt 与完整画面节奏属于 operator-assisted PTY 证据，不冒充无人值守 child assertion。
 
 ### T-I5：真实 `ohbaby serve`
 
@@ -230,7 +230,7 @@ definition 的安全合同由 TypeScript compile fixture 与 runtime contract te
 
 子进程内创建真实 process logger，紧接着记录尾事件并触发正常 dispose/退出。父进程只在子进程关闭后读取文件并断言尾事件存在。另设受控 writer hang/failure fixture，证明 2 秒 dispose timeout 不挂死且原退出码保持；非关闭 `flush()` 另由 unit/contract 测试验证。
 
-再增加 TUI phase-aware 子进程场景：先让 Ink/测试终端 adapter 完成恢复并把 presenter 标记为 `terminal-restored`，再让 dispose 内的尾写失败。父进程断言 stderr 只有一条固定、安全、非 JSON 的 unavailable 警告，stdout 无日志，原退出码不变；若 active phase 已提示过，则 teardown 不重复输出。
+TUI phase-aware 行为采用分层证据：Ink/app contract 验证 active phase 只提示一次，CLI unit 验证 `terminal-restored` 后的固定 late notice，真实 logger child 验证 hanging close 不改变原退出码；operator-assisted PTY 再见证终端恢复、光标与画面未受污染。首版不把这四层证据误写成单个无人值守 TUI 子进程；若未来发生这一边界的回归，再升级为专用 PTY/terminal-adapter child 测试。
 
 ### T-I7：CLI 默认与 library no-op
 
@@ -349,17 +349,17 @@ pnpm test:e2e:compiled-web
 
 只有同时满足以下条件才能判定通过：
 
-- [ ] `logging-policy.md` 的 MUST/MUST NOT 均有实现或自动门；
-- [ ] TUI 与 serve 默认 level=`info`、本地 JSONL、无终端 logger 输出；
-- [ ] `trace` 负向正文/凭据测试通过；
-- [ ] 每进程独占文件、权限、轮转、保留和 bounded queue 通过；
-- [ ] CLI TUI/fresh serve 默认启用、公开 library factory 缺省 no-op、serve reuse 不创建伪文件；
-- [ ] config/data migration 的 CLI 路径无 `process.emitWarning` 旁路，config 用户提示只来自显式 `onWarning` startup buffer，JSONL 只含 report 四类计数而不含 warning/report 字符串；
-- [ ] logger 初始化/运行/flush/dispose 失败按合同退化且只提示一次；
-- [ ] command recorder 独立合同未回归；
-- [ ] 真实构建产物的 TUI backend/serve 子进程测试通过；
-- [ ] 真实 TUI PTY 交互无画面/输入污染；
-- [ ] compiled Web E2E 行为与日志安全同时通过；
-- [ ] lint、typecheck、全量 test、build 通过；本轮触及文件通过 format check；repo-wide preflight 若仅受已记录历史 format baseline 阻断，按上节显式例外处理；
-- [ ] `05-implementation-acceptance.md` 记录实际证据、已知限制和与方案的偏差；
+- [x] `logging-policy.md` 的 MUST/MUST NOT 均有实现或自动门；
+- [x] TUI 与 serve 默认 level=`info`、本地 JSONL、无终端 logger 输出；
+- [x] `trace` 负向正文/凭据测试通过；
+- [x] 每进程独占文件、权限、轮转、保留和 bounded queue 通过；
+- [x] CLI TUI/fresh serve 默认启用、公开 library factory 缺省 no-op、serve reuse 不创建伪文件；
+- [x] config/data migration 的 CLI 路径无 `process.emitWarning` 旁路，config 用户提示只来自显式 `onWarning` startup buffer，JSONL 只含 report 四类计数而不含 warning/report 字符串；
+- [x] logger 初始化/运行/flush/dispose 失败按合同退化且只提示一次；
+- [x] command recorder 独立合同未回归；
+- [x] 真实构建产物的 TUI backend/serve 子进程测试通过；
+- [x] 真实 TUI PTY 交互无画面/输入污染；
+- [x] compiled Web E2E 行为与日志安全同时通过；
+- [x] lint、typecheck、全量 test、build 通过；本轮触及文件通过 format check；repo-wide preflight 若仅受已记录历史 format baseline 阻断，按上节显式例外处理；
+- [x] `05-implementation-acceptance.md` 记录实际证据、已知限制和与方案的偏差；
 - [ ] 用户审查后再决定 merge/push。
