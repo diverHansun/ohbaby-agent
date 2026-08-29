@@ -4,6 +4,7 @@ import { createServer as createNetServer } from "node:net";
 import {
   closePersistentUiBackendDatabase,
   createPersistentUiBackendClient,
+  emitDiagnostic,
   getAgentPackageVersion,
   listKnownSessionProjectRoots,
   McpManager,
@@ -11,7 +12,6 @@ import {
   resolveOhbabyHome,
   serverStartFailed,
   serverStarted,
-  serverStopped,
   type Logger,
   type OhbabyMigrationReport,
   type ProcessLoggerHandle,
@@ -533,8 +533,8 @@ async function startFreshDaemon(input: {
     ...(input.diagnosticsHandle === undefined
       ? {}
       : {
-          async disposeDiagnostics(reason): Promise<void> {
-            logger.emit(serverStopped, { reason });
+          logger,
+          async disposeDiagnostics(): Promise<void> {
             await input.diagnosticsHandle?.dispose();
           },
         }),
@@ -546,7 +546,7 @@ async function startFreshDaemon(input: {
     throw new Error("daemon server failed to initialize");
   }
   if (input.diagnosticsHandle !== undefined) {
-    logger.emit(serverStarted, { endpoint: startedServer.url });
+    emitDiagnostic(logger, serverStarted, { endpoint: startedServer.url });
   }
 
   return {
@@ -688,7 +688,7 @@ export async function startDaemonServer(
     }
   } catch (error) {
     if (diagnosticsHandle !== undefined) {
-      logger.emit(serverStartFailed, { error });
+      emitDiagnostic(logger, serverStartFailed, { error });
     }
     await diagnosticsHandle?.dispose();
     throw error;

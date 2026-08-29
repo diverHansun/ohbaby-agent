@@ -1,9 +1,15 @@
 import process from "node:process";
 import { resolve } from "node:path";
+import {
+  emitDiagnostic,
+  NOOP_LOGGER,
+  serverStopFailed,
+  serverStopped,
+  type Logger,
+} from "ohbaby-agent";
 import { FilePidFile } from "./pid-file.js";
 import { JsonDaemonStateFile } from "./state-file.js";
 import type {
-  DaemonLogger,
   DaemonPidFile,
   DaemonPidLock,
   DaemonRuntimeHandle,
@@ -15,15 +21,6 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 const DEFAULT_STATE_DIR = ".ohbaby";
 
 export type DaemonStopReason = "idle" | "requested" | "signal";
-
-const NOOP_LOGGER: DaemonLogger = {
-  info(_message: string, _metadata?: Record<string, unknown>): void {
-    return;
-  },
-  error(_message: string, _metadata?: Record<string, unknown>): void {
-    return;
-  },
-};
 
 function errorToMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -50,8 +47,8 @@ export interface SupervisorOptions {
   readonly shutdownTimeoutMs?: number;
   readonly idleTimeoutMs?: number;
   readonly exit?: (code: number) => void;
-  readonly logger?: DaemonLogger;
-  readonly disposeDiagnostics?: (reason: DaemonStopReason) => Promise<void>;
+  readonly logger?: Logger;
+  readonly disposeDiagnostics?: () => Promise<void>;
   readonly now?: () => number;
 }
 
@@ -61,7 +58,7 @@ export class Supervisor {
   private readonly signalTarget: DaemonSignalTarget | null;
   private readonly shutdownTimeoutMs: number;
   private readonly exit: (code: number) => void;
-  private readonly logger: DaemonLogger;
+  private readonly logger: Logger;
   private readonly now: () => number;
   private pidLock: DaemonPidLock | undefined;
   private runtime: DaemonRuntimeHandle | undefined;
@@ -77,10 +74,7 @@ export class Supervisor {
       .then(() => {
         this.exit(0);
       })
-      .catch((error: unknown) => {
-        this.logger.error("daemon graceful shutdown failed", {
-          error: errorToMessage(error),
-        });
+      .catch(() => {
         this.exit(1);
       });
   };
@@ -123,30 +117,23 @@ export class Supervisor {
       await this.runtime.start();
       await this.writeState("running");
       this.registerSignals();
-      this.logger.info("daemon started");
     } catch (error) {
       if (this.pidLock) {
         try {
           await this.writeState("crashed", errorToMessage(error));
-        } catch (stateError) {
-          this.logger.error("daemon crash state write failed", {
-            error: errorToMessage(stateError),
-          });
+        } catch {
+          // The original startup failure remains authoritative.
         }
       }
       try {
         await this.runtime?.stop();
-      } catch (cleanupError) {
-        this.logger.error("daemon start cleanup failed", {
-          error: errorToMessage(cleanupError),
-        });
+      } catch {
+        // The original startup failure remains authoritative.
       }
       try {
         await this.releasePidLock();
-      } catch (cleanupError) {
-        this.logger.error("daemon pid release failed", {
-          error: errorToMessage(cleanupError),
-        });
+      } catch {
+        // The original startup failure remains authoritative.
       } finally {
         this.unregisterSignals();
         this.runtime = undefined;
@@ -179,7 +166,7 @@ export class Supervisor {
   }
 
   async retire(reason: string): Promise<void> {
-    this.logger.info("daemon retiring", { reason });
+    void reason;
     await this.stop();
   }
 
@@ -212,7 +199,6 @@ export class Supervisor {
     if (runtimeStopped) {
       try {
         await this.writeState("stopped");
-        this.logger.info("daemon stopped");
       } catch (error) {
         pendingError ??= error;
       }
@@ -236,8 +222,17 @@ export class Supervisor {
       this.startedAt = undefined;
     }
 
+    if (pendingError === undefined) {
+      emitDiagnostic(this.logger, serverStopped, { reason: this.stopReason });
+    } else {
+      emitDiagnostic(this.logger, serverStopFailed, {
+        error: pendingError,
+        reason: this.stopReason,
+      });
+    }
+
     try {
-      await this.options.disposeDiagnostics?.(this.stopReason);
+      await this.options.disposeDiagnostics?.();
     } catch (error) {
       pendingError ??= error;
     } finally {
@@ -279,11 +274,7 @@ export class Supervisor {
 
     this.idleTimer = setTimeout(() => {
       this.idleTimer = undefined;
-      void this.stop("idle").catch((error: unknown) => {
-        this.logger.error("daemon idle shutdown failed", {
-          error: errorToMessage(error),
-        });
-      });
+      void this.stop("idle").catch(() => undefined);
     }, this.options.idleTimeoutMs);
   }
 

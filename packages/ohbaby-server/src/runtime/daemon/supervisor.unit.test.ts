@@ -1,8 +1,8 @@
 import process from "node:process";
 import { describe, expect, it, vi } from "vitest";
+import { serverStopFailed, serverStopped, type Logger } from "ohbaby-agent";
 import { Supervisor } from "./supervisor.js";
 import type {
-  DaemonLogger,
   DaemonPidFile,
   DaemonPidLock,
   DaemonState,
@@ -10,11 +10,8 @@ import type {
   DaemonStateFile,
 } from "./types.js";
 
-const silentLogger: DaemonLogger = {
-  info(): void {
-    return undefined;
-  },
-  error(): void {
+const silentLogger: Logger = {
+  emit(): void {
     return undefined;
   },
 };
@@ -208,12 +205,13 @@ describe("Supervisor", () => {
 
   it("acquires process ownership, starts runtime, and releases ownership on stop", async () => {
     const calls: string[] = [];
+    const emit = vi.fn();
     const supervisor = new Supervisor({
       pidFile: new RecordingPidFile(calls),
       stateFile: new RecordingStateFile(calls),
       bootstrap: (): Promise<DaemonRuntimeHandle> =>
         Promise.resolve(new RecordingRuntime(calls)),
-      logger: silentLogger,
+      logger: { emit },
       signalTarget: null,
       now: (): number => 1_000,
     });
@@ -230,6 +228,8 @@ describe("Supervisor", () => {
       "state.stopped",
       "pid.release",
     ]);
+    expect(emit).toHaveBeenCalledOnce();
+    expect(emit).toHaveBeenCalledWith(serverStopped, { reason: "requested" });
   });
 
   it("marks the daemon crashed and cleans ownership when runtime start fails", async () => {
@@ -371,20 +371,28 @@ describe("Supervisor", () => {
 
   it("resets runtime state even when pid release fails during stop", async () => {
     const calls: string[] = [];
+    const emit = vi.fn();
     const supervisor = new Supervisor({
       pidFile: new FirstReleaseFailsPidFile(calls),
       stateFile: new RecordingStateFile(calls),
       bootstrap: (): Promise<DaemonRuntimeHandle> =>
         Promise.resolve(new RecordingRuntime(calls)),
-      logger: silentLogger,
+      logger: { emit },
       signalTarget: null,
       now: (): number => 1_000,
     });
 
     await supervisor.start();
     await expect(supervisor.stop()).rejects.toThrow("pid release failed");
+    expect(emit).toHaveBeenCalledWith(serverStopFailed, {
+      error: new Error("pid release failed"),
+      reason: "requested",
+    });
     await supervisor.start();
     await supervisor.stop();
+    expect(emit).toHaveBeenLastCalledWith(serverStopped, {
+      reason: "requested",
+    });
 
     expect(calls).toEqual([
       "pid.acquire",

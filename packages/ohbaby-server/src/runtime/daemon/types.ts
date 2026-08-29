@@ -52,8 +52,3 @@ export interface DaemonSignalTarget {
   on(signal: NodeJS.Signals, listener: () => void): unknown;
   off(signal: NodeJS.Signals, listener: () => void): unknown;
 }
-
-export interface DaemonLogger {
-  info(message: string, metadata?: Record<string, unknown>): void;
-  error(message: string, metadata?: Record<string, unknown>): void;
-}
