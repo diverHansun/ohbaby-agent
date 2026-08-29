@@ -75,6 +75,32 @@ const definitions = new WeakSet<object>();
 const encoders = new WeakSet<object>();
 const EVENT_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9_]*)+$/;
 const COMPONENT_PATTERN = /^[a-z][a-z0-9-]{0,47}$/;
+const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
+  "arguments",
+  "authorization",
+  "body",
+  "command",
+  "completion",
+  "config",
+  "context",
+  "cookie",
+  "environment",
+  "headers",
+  "input",
+  "message",
+  "output",
+  "password",
+  "prompt",
+  "reasoning",
+  "request",
+  "response",
+  "secret",
+  "stderr",
+  "stdin",
+  "stdout",
+  "text",
+  "token",
+]);
 const CREDENTIAL_PATTERN =
   /(authorization|api[_-]?key|access[_-]?token|bearer|cookie|password|private[_-]?key)\s*[:=]\s*[^\s,;]+/gi;
 const MAX_SAFE_STRING_BYTES = 512;
@@ -335,7 +361,11 @@ export function defineDiagnosticEvent<
     throw new TypeError("diagnostic event has invalid fields");
   }
   for (const [key, encoder] of entries) {
-    if (!/^[a-z][A-Za-z0-9]{0,63}$/.test(key) || !encoders.has(encoder)) {
+    if (
+      !/^[a-z][A-Za-z0-9]{0,63}$/.test(key) ||
+      FORBIDDEN_CONTENT_FIELD_NAMES.has(key) ||
+      !encoders.has(encoder)
+    ) {
       throw new TypeError("diagnostic event contains an invalid field encoder");
     }
   }

@@ -119,6 +119,35 @@ describe("diagnostic event contract", () => {
       ),
     ).toThrow("must be an integer");
   });
+
+  it.each([
+    "prompt",
+    "completion",
+    "reasoning",
+    "body",
+    "command",
+    "input",
+    "output",
+    "request",
+    "response",
+    "config",
+    "context",
+    "authorization",
+    "token",
+  ])("rejects the reserved content field %s at every log level", (field) => {
+    for (const level of ["error", "warn", "info", "debug", "trace"] as const) {
+      expect(() =>
+        defineDiagnosticEvent({
+          component: "diagnostics",
+          event: `diagnostics.reserved_${level}`,
+          fields: {
+            [field]: diagnosticField.path(),
+          },
+          level,
+        }),
+      ).toThrow("invalid field encoder");
+    }
+  });
 });
 
 describe("diagnostic normalization", () => {
