@@ -4,7 +4,7 @@
 >
 > 分支：`codex/logging-diagnostics-docs`
 >
-> 状态：实现、问题修订与本地验收完成；两路独立审查已判定可交付，等待最后一轮修订点复核；未 merge、未 push。
+> 状态：实现、问题修订、本地验收与两路独立审查均已完成，等待用户审查；未 merge、未 push。
 
 ## 1. 结论
 
@@ -182,7 +182,9 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 
 首轮问题修订后，两位代理的第二轮复审仍一致指出两个 P1：完整 dispose deadline 未覆盖 writer close，以及注入的 diagnostics dispose rejection 会覆盖 daemon 原业务结果；另指出 process alias 与 TUI error code 两个低成本 P2。`3dff0e5`、`7adf368`、`2a05833`、`7737c12` 已逐项修复并增加回归测试；在该时点，最终 verdict 仍待两位原审查代理基于最新 HEAD 再次复核。
 
-两位代理随后基于 `0f10e29` 独立给出 **PASS、无 P0/P1、功能可交付**。它们又分别找到 `globalThis.process` 解构/computed 门、display 型 slash command error code，以及测试证据分层表述等非阻断 P2/P3；`11ed193` 与同步文档已全部收口。当前只等待原审查代理对这些最后修订点做只读 spot check，不再存在已知功能阻断项。
+两位代理随后基于 `0f10e29` 独立给出 **PASS、无 P0/P1、功能可交付**。它们又分别找到 `globalThis.process` 解构/computed 门、display 型 slash command error code，以及测试证据分层表述等非阻断 P2/P3；`11ed193` 与同步文档已全部收口。
+
+最后，两位原审查代理对 `486f6f1` 做只读 spot check，均再次给出 **PASS、无剩余 P0/P1/P2/P3、可交付**。其中一方复跑 3 files、118/118，另一方独立核对代码、测试与文档证据；两者均确认工作树干净，且没有执行 merge/push。
 
 ## 10. 当前交付边界
 

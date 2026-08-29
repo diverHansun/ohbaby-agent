@@ -1,6 +1,6 @@
 # Logging 与 Diagnostics 改造文档集
 
-> 状态：实现、文档对齐与本地验收完成；两路独立审查已判定可交付，等待最终修订点复核；未 merge、未 push。
+> 状态：实现、文档对齐、本地验收与两路独立审查均已完成，等待用户审查；未 merge、未 push。
 >
 > 分支：`codex/logging-diagnostics-docs`
 >
