@@ -7,6 +7,7 @@ import type {
   DaemonPidLock,
   DaemonState,
   DaemonRuntimeHandle,
+  DaemonSignalTarget,
   DaemonStateFile,
 } from "./types.js";
 
@@ -145,6 +146,24 @@ class StartFailingAndStopRejectingRuntime implements DaemonRuntimeHandle {
   stop(): Promise<void> {
     this.calls.push("runtime.stop");
     return Promise.reject(new Error("runtime cleanup failed"));
+  }
+}
+
+class RecordingSignalTarget implements DaemonSignalTarget {
+  private readonly listeners = new Map<NodeJS.Signals, () => void>();
+
+  emit(signal: NodeJS.Signals): void {
+    this.listeners.get(signal)?.();
+  }
+
+  off(signal: NodeJS.Signals, listener: () => void): void {
+    if (this.listeners.get(signal) === listener) {
+      this.listeners.delete(signal);
+    }
+  }
+
+  on(signal: NodeJS.Signals, listener: () => void): void {
+    this.listeners.set(signal, listener);
   }
 }
 
@@ -372,7 +391,11 @@ describe("Supervisor", () => {
   it("resets runtime state even when pid release fails during stop", async () => {
     const calls: string[] = [];
     const emit = vi.fn();
+    const disposeDiagnostics = vi.fn(() =>
+      Promise.reject(new Error("diagnostics dispose failed")),
+    );
     const supervisor = new Supervisor({
+      disposeDiagnostics,
       pidFile: new FirstReleaseFailsPidFile(calls),
       stateFile: new RecordingStateFile(calls),
       bootstrap: (): Promise<DaemonRuntimeHandle> =>
@@ -410,6 +433,36 @@ describe("Supervisor", () => {
       "state.stopped",
       "pid.release",
     ]);
+    expect(disposeDiagnostics).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps successful stop and signal exit authoritative when diagnostics disposal fails", async () => {
+    const calls: string[] = [];
+    const disposeDiagnostics = vi.fn(() =>
+      Promise.reject(new Error("diagnostics dispose failed")),
+    );
+    const emit = vi.fn();
+    const exit = vi.fn();
+    const signalTarget = new RecordingSignalTarget();
+    const supervisor = new Supervisor({
+      bootstrap: (): Promise<DaemonRuntimeHandle> =>
+        Promise.resolve(new RecordingRuntime(calls)),
+      disposeDiagnostics,
+      exit,
+      logger: { emit },
+      pidFile: new RecordingPidFile(calls),
+      signalTarget,
+      stateFile: new RecordingStateFile(calls),
+    });
+
+    await supervisor.start();
+    signalTarget.emit("SIGTERM");
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+
+    expect(disposeDiagnostics).toHaveBeenCalledOnce();
+    expect(emit).toHaveBeenCalledWith(serverStopped, { reason: "signal" });
   });
 
   it("keeps concurrent stops joined until diagnostics disposal finishes", async () => {

@@ -236,8 +236,8 @@ export class Supervisor {
 
     try {
       await this.options.disposeDiagnostics?.();
-    } catch (error) {
-      pendingError ??= error;
+    } catch {
+      // Diagnostics teardown is observational and cannot change daemon outcome.
     } finally {
       this.stopPromise = undefined;
     }

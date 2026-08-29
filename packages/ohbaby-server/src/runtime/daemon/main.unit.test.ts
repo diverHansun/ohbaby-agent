@@ -199,6 +199,59 @@ function createFakeLLMClient(
 }
 
 describe("startDaemonServer", () => {
+  it("preserves the startup failure when diagnostics disposal also rejects", async () => {
+    vi.resetModules();
+    const startupError = new Error("primary server startup failed");
+    const disposeDiagnostics = vi.fn(() =>
+      Promise.reject(new Error("diagnostics dispose failed")),
+    );
+    vi.doMock("ohbaby-agent", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("ohbaby-agent")>();
+      return {
+        ...actual,
+        closePersistentUiBackendDatabase: vi.fn(),
+        createPersistentUiBackendClient: vi.fn(() =>
+          createFakeBackend(vi.fn(() => Promise.resolve())),
+        ),
+        migrateOhbabyData: vi.fn(() => Promise.resolve(undefined)),
+        McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+      };
+    });
+    vi.doMock("./server.js", () => ({
+      createDaemonHttpServer: vi.fn(() => ({
+        host: "127.0.0.1",
+        port: 4096,
+        start: vi.fn(() => Promise.reject(startupError)),
+        stop: vi.fn(() => Promise.resolve()),
+        url: "http://127.0.0.1:4096",
+      })),
+    }));
+
+    const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-main-"));
+    try {
+      const { startDaemonServer } = await import("./main.js");
+      await expect(
+        startDaemonServer({
+          diagnosticsFactory: () =>
+            Promise.resolve({
+              dispose: disposeDiagnostics,
+              flush: () => Promise.resolve(),
+              logger: noopLogger,
+            }),
+          pidFilePath: join(tempDir, "daemon.pid"),
+          port: 0,
+          scopeRoot: tempDir,
+          stateFilePath: join(tempDir, "daemon-state.json"),
+        }),
+      ).rejects.toBe(startupError);
+      expect(disposeDiagnostics).toHaveBeenCalledOnce();
+    } finally {
+      vi.doUnmock("ohbaby-agent");
+      vi.doUnmock("./server.js");
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
   it("uses the agent package version for daemon discovery metadata by default", async () => {
     vi.resetModules();
     let capturedPackageVersion: string | undefined;

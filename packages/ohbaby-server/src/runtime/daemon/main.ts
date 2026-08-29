@@ -691,7 +691,11 @@ export async function startDaemonServer(
     if (diagnosticsHandle !== undefined) {
       emitDiagnosticSafely(logger, serverStartFailed, { error });
     }
-    await diagnosticsHandle?.dispose();
+    try {
+      await diagnosticsHandle?.dispose();
+    } catch {
+      // Diagnostics teardown cannot replace the authoritative startup error.
+    }
     throw error;
   }
 }
