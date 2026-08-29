@@ -75,15 +75,13 @@ export default tseslint.config(
         {
           paths: [
             {
-              importNames: ["emitWarning", "stderr", "stdout"],
               message:
-                "Backend production code must not import process output channels directly.",
+                "Backend production code must use the global process object so output ownership checks cannot be aliased.",
               name: "node:process",
             },
             {
-              importNames: ["emitWarning", "stderr", "stdout"],
               message:
-                "Backend production code must not import process output channels directly.",
+                "Backend production code must use the global process object so output ownership checks cannot be aliased.",
               name: "process",
             },
           ],

@@ -39,6 +39,29 @@ describe("backend output ownership lint", () => {
     ]);
   });
 
+  it.each([
+    [
+      "named process import",
+      'import { stdout as output } from "node:process"; output.write("leak");',
+    ],
+    [
+      "default process alias",
+      'import processAlias from "node:process"; processAlias.stderr.write("leak");',
+    ],
+    [
+      "process destructuring",
+      'const { stderr: output } = process; output.write("leak");',
+    ],
+  ])("rejects %s bypasses", async (_label, source) => {
+    await expect(lintProbe(source)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /^(?:no-restricted-imports|no-restricted-syntax):/u,
+        ),
+      ]),
+    );
+  });
+
   it("keeps the audited SQLite warning interceptor narrow", async () => {
     await expect(
       lintProbe(
