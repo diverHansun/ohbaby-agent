@@ -10,6 +10,7 @@ export type UiRunStatus =
     }
   | { readonly kind: "waiting-for-permission"; readonly requestId: string }
   | {
+      readonly code?: string;
       readonly kind: "error";
       readonly message: string;
       readonly recoverable: boolean;

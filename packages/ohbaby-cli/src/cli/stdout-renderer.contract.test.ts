@@ -32,6 +32,15 @@ describe("createStdoutRenderer", () => {
         timestamp: 2,
       },
       {
+        status: {
+          code: "PROVIDER_OFFLINE",
+          kind: "error",
+          message: "Provider is unavailable",
+          recoverable: true,
+        },
+        type: "runtime.updated",
+      },
+      {
         type: "notice.emitted",
         notice: {
           createdAt: "2026-05-19T00:00:00.000Z",
@@ -53,7 +62,8 @@ describe("createStdoutRenderer", () => {
 
     expect(stdout).toEqual(["Hello", "OK\n"]);
     expect(stderr).toEqual([
-      "INVALID_ARGS: Bad args\n",
+      "[INVALID_ARGS] Bad args\n",
+      "[PROVIDER_OFFLINE] Provider is unavailable\n",
       "warning: Custom instructions skipped: OHBABY.md was skipped because it tried to override instructions. (/repo/OHBABY.md)\n",
     ]);
   });

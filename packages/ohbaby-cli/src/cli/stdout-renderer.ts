@@ -35,11 +35,11 @@ function formatModelConnectedOutput(data: Record<string, unknown>): string {
       ? ""
       : ` (${formatTokenCount(contextWindowTokens)} context tokens)`;
   const connected =
-    label === ""
-    ? "model connected"
-    : `model connected: ${label}${context}`;
+    label === "" ? "model connected" : `model connected: ${label}${context}`;
   const warning = result ? getString(result, "warning") : undefined;
-  return warning === undefined ? connected : `${connected}\nwarning: ${warning}`;
+  return warning === undefined
+    ? connected
+    : `${connected}\nwarning: ${warning}`;
 }
 
 function getRecord(
@@ -101,12 +101,16 @@ export function createStdoutRenderer(
       }
 
       if (event.type === "command.failed") {
-        writeError(`${event.error.code}: ${event.error.message}\n`);
+        writeError(`[${event.error.code}] ${event.error.message}\n`);
         return;
       }
 
       if (event.type === "runtime.updated" && event.status.kind === "error") {
-        writeError(`error: ${event.status.message}\n`);
+        writeError(
+          event.status.code === undefined
+            ? `error: ${event.status.message}\n`
+            : `[${event.status.code}] ${event.status.message}\n`,
+        );
         return;
       }
 
