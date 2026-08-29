@@ -32,7 +32,10 @@
 | `404410c` | 安全与终结合同 | URL/path/error 收紧，dispose/drop/truncation/retention/并行实例回归测试 |
 | `fe7ecff` | TUI 单次提示 | active UI 已呈现后不在退出时重复写 stderr |
 | `37c77f6` / `e3c1910` | daemon outcome | success/failure 事件真实反映 stop 结果，注入 logger fail-open |
-| `9311813` / `0003e54` / `6efb451` | 防回归门与 API 收口 | 拦截 process output alias、拒绝正文型日志字段，并把 sanitizer 留在包内 |
+| `9311813` / `0003e54` / `6efb451` | 防回归门与 API 收口 | 建立 process output import/destructure 门、拒绝正文型日志字段，并把 sanitizer 留在包内 |
+| `3dff0e5` | bounded dispose | 同一绝对 deadline 覆盖 drain、drop summary 与 close；增加 writer hang、原退出码和双子进程测试 |
+| `7adf368` | teardown fail-open | diagnostics dispose rejection 不覆盖 daemon 启停结果或 signal 退出码 |
+| `2a05833` / `7737c12` | 一致性收口 | 补常见 process/globalThis alias 门，并让 TUI command/runtime label 保留稳定 error code |
 
 最终文档提交与审查修订会追加在本表之后，不改写上述阶段历史。
 
@@ -119,8 +122,8 @@
 其中 backend/cleanup/diagnostics 是脚本自动断言；UI 输入、工具卡与刷新恢复由 in-app Browser 操作后向 harness 回传固定 schema，属于 **operator-assisted E2E 见证**，不是无人值守浏览器自动化。最终证据：
 
 ```text
-E2E_UI_EVIDENCE_PASS
-E2E_BACKEND_PASS requestCount=3 titleRequests=1 toolResultConsumed=true
+E2E_UI_EVIDENCE_PASS activeSessionStable=true toolPanelCompleted=true runtimeMarkersVisible=false
+E2E_BACKEND_PASS requestCount=3 runtimePartCounts=[1,1,2] titleRequests=1 toolResultConsumed=true
 E2E_CLEANUP_PASS finalStatus=stopped pidReleased=true portReleased=true
 E2E_DIAGNOSTICS_PASS eventCount=5
 ```
@@ -132,11 +135,13 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 | `pnpm lint` | 通过 |
 | `pnpm typecheck` | 通过 |
 | `pnpm build` | 通过，含 SDK/agent/server/CLI/Web production build |
-| `pnpm test` | 最终 HEAD 全量：307 files passed、5 skipped；2,843 tests passed、16 skipped |
+| `pnpm test` | 最终 HEAD 全量：307 files passed、5 skipped；2,852 tests passed、16 skipped |
 | `logger.unit.test.ts` | 最终正文字段/名称补强后 23/23 |
-| `process-logger.integration.test.ts` | 10/10；真实文件、轮转、drop summary、并发 dispose、截断、runtime failure、retention、并行实例 |
-| `main.unit.test.ts` + `supervisor.unit.test.ts` | 31/31；真实 stop outcome、并发 stop 与 mock boundary |
+| `output-ownership.contract.test.ts` | 11/11；覆盖 import/destructure 与常见 `process`/`globalThis.process` alias |
+| `process-logger.integration.test.ts` | 13/13；真实文件、轮转、drop summary、并发 dispose、截断、runtime failure、retention、双真实子进程与 close hang |
+| `main.unit.test.ts` + `supervisor.unit.test.ts` | 33/33；真实 stop outcome、并发 stop、teardown fail-open 与 mock boundary |
 | `command-record-terminal.integration.test.ts` | 2/2；真实 in-process host 与真实 serve process |
+| 最终相关测试集 | 9 files、245/245；覆盖 logger、输出所有权、process logger、CLI、RPC、server 与真实子进程 |
 | compiled Web harness + in-app Browser | operator-assisted UI 与自动 backend/cleanup/diagnostics 全通过 |
 | 需要真实云凭据的测试 | 按设计 skipped；未向外部发送测试数据 |
 
@@ -152,7 +157,7 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 - 默认 writer 初始化/运行失败均 fail-open、once notify；显式坏配置 fail-fast；并发 dispose 加入同一个 drain，满队列退出仍写一次 drop summary。
 - TUI active phase 在 Ink 内提示 unavailable；若首次失败发生在 UI 退出后的 dispose，只输出一条固定、非 JSON 警告，且不改变原退出码。
 - 16 KiB 路径只先删 stack/可选字段，必填字段不删除；无法满足上限时拒绝事件并 fail-open。
-- process logger 的真实文件 integration 验证权限、轮转、保留、并行实例、runtime write failure、drop summary 和尾记录 drain。
+- process logger 的真实文件 integration 验证权限、轮转、保留、双真实子进程并行实例、runtime write failure、drop summary、尾记录 drain 与受控 writer close hang；hang 子进程在 deadline 后按原 exit code `23` 退出。
 
 ## 7. 与计划相比的收敛
 
@@ -165,7 +170,7 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 
 - `pnpm format:check` 仍会报告 38 个历史文件；本轮触及文件单独通过 Prettier，`git diff --check` 通过。没有为本功能机械改写无关文件，因此不能宣称 `pnpm preflight` 通过；`04` 已把它明确归为仓库级历史 baseline 例外。
 - 需要真实云凭据的 smoke/snapshot 测试保持 skipped；本轮安全与 E2E 使用本地 scripted provider，不向外部发送用户数据。
-- TUI PTY 是本机 agent 实跑证据；CI 自动门由 Ink contract、真实 child-process integration 与 compiled Web harness 共同承担，首版未为 PTY 新增重量依赖。
+- TUI PTY 与 Web 页面操作是本机 agent 的 operator-assisted 见证；无人值守自动门由 Ink contract、真实 child-process integration，以及 compiled Web harness 的 backend/cleanup/diagnostics 部分承担。首版未为 PTY 或浏览器控制新增重量依赖。
 
 这些项目不改变本轮功能结论，但在未来把 `pnpm preflight` 提升为无条件合并门之前，需要单独清理 format baseline，并在有受控凭据的发布环境补跑真实 provider smoke。
 
@@ -173,7 +178,7 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 
 首轮两路子代理均给出“不通过、无 P0、有 P1”的结论，主要发现：URL/path/error 边界可泄露、process logger 并发 dispose/drop summary/截断合同不完整、TUI unavailable 重复提示、RPC error code 丢失、daemon stop 成功事件失真，以及本文把 operator-assisted Web UI 与若干未存在的测试写成自动化闭环。
 
-这些问题已逐项修订并补测试；全量测试与真实 Web/serve E2E 已在修订后重跑。最终复审状态：待两位原审查代理基于最新 HEAD 复核后填写 verdict。
+首轮问题修订后，两位代理的第二轮复审仍一致指出两个 P1：完整 dispose deadline 未覆盖 writer close，以及注入的 diagnostics dispose rejection 会覆盖 daemon 原业务结果；另指出 process alias 与 TUI error code 两个低成本 P2。`3dff0e5`、`7adf368`、`2a05833`、`7737c12` 已逐项修复并增加回归测试。最终 verdict 仍待两位原审查代理基于最新 HEAD 再次复核后填写。
 
 ## 10. 当前交付边界
 

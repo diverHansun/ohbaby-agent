@@ -88,23 +88,21 @@
 
 ### T-U6：名称伪名化
 
-- 内置 MCP/agent/skill 名称保持原名；
-- 用户定义名称不出现原文；
-- 用户定义实体即使与内置实体同名，仍根据 provenance 使用 hash；
-- provenance 缺失、未知或用户覆盖内置项时一律 hash/省略，不能按名称猜 builtin；
+- 内置 MCP/agent/skill 名称只有通过 definition 的静态 enum allowlist 才能保持原名；
+- 用户定义名称只能进入始终 hash 的专用 encoder，不能由调用者传 provenance 改变行为；
+- 用户定义实体即使与内置实体同名，仍使用 hash；
+- 来源缺失、未知或用户覆盖内置项时一律走用户名称 encoder 或省略，不能按名称猜 builtin；
 - 同一 kind/name 得到稳定短 hash；不同 kind 的同名实体不会得到相同 hash；
 - 不同名称通常不同；
 - 结果明确是 hash 标识，不做可逆编码。
 
 ### T-U7：`safeError`
 
-- 内部安全 Error 得到限长 name/code/message；
-- stack 中绝对路径被替换；
+- 首版只开放保守的 external error encoder，不开放“内部安全 message”、stack 或 cause encoder；未来若新增这些能力，必须在同一批次补齐路径替换、限长和 cause 限深测试后才能开放；
 - provider/HTTP/MCP 原始 error body/message 不被信任；
-- 未知 Error 默认不复制 message，stack 首行被删除，只保留规范化 frame；
-- token、URL query、authorization 形态被移除；
-- cause 链限深；
-- circular/throwing getter/非 Error 值得到最小占位；
+- Error name/code 只来自静态 allowlist，任意自定义 name/code 不进入结果；
+- 未知 Error、throwing getter 与非 Error 值得到最小占位；
+- token、URL query、authorization 形态不会因错误 message/stack 被复制；
 - `safeError()` 自身永不抛出。
 
 ### T-U8：Writer 生命周期
