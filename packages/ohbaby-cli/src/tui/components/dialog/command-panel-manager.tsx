@@ -224,6 +224,7 @@ function StatusPanel({
   const tools = getRecord(data, "tools");
   const mcps = getRecord(data, "mcps");
   const contextWindow = toContextWindowUsage(getRecord(data, "contextWindow"));
+  const diagnosticsFilePath = getString(data, "diagnosticsFilePath");
   const promptCacheUsage = toPromptCacheUsage(
     getRecord(data, "promptCacheUsage"),
   );
@@ -250,6 +251,9 @@ function StatusPanel({
       <PanelRow label="Tools" value={formatTools(tools)} />
       <PanelRow label="MCP" value={formatMcpSummary(mcps)} />
       <PanelRow label="Project" value={getString(data, "projectRoot")} />
+      {diagnosticsFilePath ? (
+        <PanelRow label="Log" value={diagnosticsFilePath} />
+      ) : null}
     </Box>
   );
 }

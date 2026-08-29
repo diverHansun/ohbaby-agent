@@ -86,7 +86,13 @@ describe("runOhbabyCli", () => {
       }),
     );
     const waitUntilExit = vi.fn(() => Promise.resolve());
-    const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
+    const renderTerminalUi = vi.fn(
+      (_options: {
+        readonly subscribeDiagnosticsUnavailable?: (
+          listener: () => void,
+        ) => () => void;
+      }) => ({ waitUntilExit }),
+    );
     vi.doMock("ohbaby-agent", () => ({
       buildCoreAPIImpl,
       createProcessLogger,
@@ -119,6 +125,9 @@ describe("runOhbabyCli", () => {
       logger,
     });
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
+    expect(
+      renderTerminalUi.mock.calls[0]?.[0].subscribeDiagnosticsUnavailable,
+    ).toBeTypeOf("function");
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(disposeDiagnostics).toHaveBeenCalledTimes(1);
   });

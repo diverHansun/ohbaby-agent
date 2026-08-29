@@ -2687,6 +2687,7 @@ describe("OhbabyTerminalApp", () => {
       output: {
         data: {
           contextWindow: contextWindowUsage(),
+          diagnosticsFilePath: "/tmp/ohbaby/logs/tui/session.jsonl",
           mcps: {
             connected: 2,
             disabled: 0,
@@ -2732,6 +2733,8 @@ describe("OhbabyTerminalApp", () => {
     );
     expect(frame).toContain("38.4K / 1M (4%)");
     expect(frame).toContain("Cache      hit 61%");
+    expect(frame).toContain("Log");
+    expect(frame).toContain("/tmp/ohbaby/logs/tui/session.jsonl");
     expect(frame.indexOf("Context")).toBeLessThan(frame.indexOf("Cache"));
     expect(frame.indexOf("Cache")).toBeLessThan(frame.indexOf("Tools"));
 

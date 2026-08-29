@@ -897,6 +897,7 @@ function sanitizeStatusPanelData(
   for (const key of [
     "context",
     "contextWindow",
+    "diagnosticsFilePath",
     "mcps",
     "permission",
     "promptCacheUsage",

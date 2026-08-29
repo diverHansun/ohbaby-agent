@@ -167,6 +167,12 @@ function createRpcCoreHost(host: CliCoreHost): CliCoreHost {
     ...(host.diagnosticsUnavailable === undefined
       ? {}
       : { diagnosticsUnavailable: host.diagnosticsUnavailable }),
+    ...(host.subscribeDiagnosticsUnavailable === undefined
+      ? {}
+      : {
+          subscribeDiagnosticsUnavailable:
+            host.subscribeDiagnosticsUnavailable,
+        }),
   };
 }
 
