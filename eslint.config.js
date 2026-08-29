@@ -98,6 +98,18 @@ export default tseslint.config(
         },
         {
           message:
+            "Backend production code must not destructure globalThis.process output channels.",
+          selector:
+            "VariableDeclarator[init.type='MemberExpression'][init.object.name='globalThis'][init.property.name='process'] > ObjectPattern > Property[key.name=/^(emitWarning|stderr|stdout)$/]",
+        },
+        {
+          message:
+            "Backend production code must not destructure globalThis process output channels.",
+          selector:
+            "VariableDeclarator[init.type='MemberExpression'][init.computed=true][init.object.name='globalThis'][init.property.value='process'] > ObjectPattern > Property[key.name=/^(emitWarning|stderr|stdout)$/]",
+        },
+        {
+          message:
             "Backend production code must not alias the global process object.",
           selector:
             "VariableDeclarator[id.type='Identifier'][init.name='process']",
@@ -108,10 +120,21 @@ export default tseslint.config(
             "VariableDeclarator[id.type='Identifier'][init.object.name='globalThis'][init.property.name='process']",
         },
         {
+          message: "Backend production code must not alias globalThis process.",
+          selector:
+            "VariableDeclarator[id.type='Identifier'][init.computed=true][init.object.name='globalThis'][init.property.value='process']",
+        },
+        {
           message:
             "Backend production code must not access output channels through globalThis.process.",
           selector:
             "MemberExpression[object.object.name='globalThis'][object.property.name='process'][property.name=/^(emitWarning|stderr|stdout)$/]",
+        },
+        {
+          message:
+            "Backend production code must not access output channels through globalThis process.",
+          selector:
+            "MemberExpression[object.type='MemberExpression'][object.computed=true][object.object.name='globalThis'][object.property.value='process'][property.name=/^(emitWarning|stderr|stdout)$/]",
         },
       ],
     },

@@ -198,6 +198,37 @@ describe("process logger", () => {
     expect(onUnavailable).toHaveBeenCalledWith("flush");
   });
 
+  it("bounds a non-closing flush when a writer never settles", async () => {
+    const logRoot = await temporaryDirectory();
+    const onUnavailable = vi.fn();
+    const writer = {
+      close: vi.fn(() => Promise.resolve()),
+      path: path.join(logRoot, "hanging-write.jsonl"),
+      write: vi.fn(() => new Promise<void>(() => undefined)),
+    };
+    const handle = await createProcessLoggerWithLimits(
+      { logDirectory: logRoot, onUnavailable, role: "tui" },
+      {
+        disposeTimeoutMs: 40,
+        maxBytes: 8 * 1024 * 1024,
+        maxFiles: 3,
+        maxLineBytes: 16 * 1024,
+        maxQueue: 64,
+        retentionMs: 1_000,
+      },
+      { createWriter: () => Promise.resolve(writer) },
+    );
+
+    const startedAt = Date.now();
+    await handle.flush();
+
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(onUnavailable).toHaveBeenCalledOnce();
+    expect(onUnavailable).toHaveBeenCalledWith("flush");
+    await handle.dispose();
+    expect(writer.close).toHaveBeenCalledOnce();
+  });
+
   it("writes one dropped-event summary even when the queue was full at exit", async () => {
     const logRoot = await temporaryDirectory();
     const handle = await createProcessLoggerWithLimits(
@@ -410,31 +441,55 @@ describe("process logger", () => {
   it("keeps same-role files independent across two real child processes", async () => {
     const logRoot = await temporaryDirectory();
     const script = `
-      import { createProcessLogger } from ${JSON.stringify(processLoggerModuleUrl)};
+      import { createProcessLoggerWithLimits } from ${JSON.stringify(processLoggerModuleUrl)};
       import { defineDiagnosticEvent, diagnosticField } from ${JSON.stringify(
         new URL("./logger.ts", processLoggerModuleUrl).href,
       )};
       const event = defineDiagnosticEvent({
         component: "diagnostics",
         event: "diagnostics.child_process",
-        fields: { pid: diagnosticField.integer() },
+        fields: {
+          pid: diagnosticField.integer(),
+          sequence: diagnosticField.integer(),
+        },
         level: "info",
       });
-      const handle = await createProcessLogger({
-        logDirectory: process.env.OHBABY_LOG_TEST_ROOT,
-        role: "serve",
-      });
-      handle.logger.emit(event, { pid: process.pid });
+      const handle = await createProcessLoggerWithLimits(
+        {
+          logDirectory: process.env.OHBABY_LOG_TEST_ROOT,
+          role: "serve",
+        },
+        {
+          disposeTimeoutMs: 2000,
+          maxBytes: 400,
+          maxFiles: 3,
+          maxLineBytes: 16384,
+          maxQueue: 64,
+          retentionMs: 1000,
+        },
+      );
+      for (let sequence = 0; sequence <= 20; sequence += 1) {
+        handle.logger.emit(event, { pid: process.pid, sequence });
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, Number(process.env.OHBABY_LOG_TEST_DELAY_MS ?? 0)),
+      );
       await handle.dispose();
     `;
 
     const results = await Promise.all([
       runLoggerChild({
-        environment: { OHBABY_LOG_TEST_ROOT: logRoot },
+        environment: {
+          OHBABY_LOG_TEST_DELAY_MS: "0",
+          OHBABY_LOG_TEST_ROOT: logRoot,
+        },
         script,
       }),
       runLoggerChild({
-        environment: { OHBABY_LOG_TEST_ROOT: logRoot },
+        environment: {
+          OHBABY_LOG_TEST_DELAY_MS: "100",
+          OHBABY_LOG_TEST_ROOT: logRoot,
+        },
         script,
       }),
     ]);
@@ -446,15 +501,43 @@ describe("process logger", () => {
     const files = (await readdir(path.join(logRoot, "serve"))).filter((file) =>
       file.endsWith(".jsonl"),
     );
-    expect(files).toHaveLength(2);
-    expect(new Set(files.map((file) => file.split("-").at(-2))).size).toBe(2);
+    const filesByInstance = new Map<string, string[]>();
+    for (const file of files) {
+      const instance = file.replace(/(?:\.[12])?\.jsonl$/u, "");
+      filesByInstance.set(instance, [
+        ...(filesByInstance.get(instance) ?? []),
+        file,
+      ]);
+    }
+    expect(filesByInstance.size).toBe(2);
+    expect(
+      [...filesByInstance.values()].every(
+        (instanceFiles) => instanceFiles.length >= 2,
+      ),
+    ).toBe(true);
+    const finalSequences = new Map<number, number>();
     for (const file of files) {
       const contents = await readFile(
         path.join(logRoot, "serve", file),
         "utf8",
       );
       expect(contents).toContain('"event":"diagnostics.child_process"');
+      for (const line of contents.trim().split("\n")) {
+        const record = JSON.parse(line) as {
+          readonly pid?: number;
+          readonly sequence?: number;
+        };
+        if (record.pid !== undefined && record.sequence !== undefined) {
+          finalSequences.set(
+            record.pid,
+            Math.max(finalSequences.get(record.pid) ?? -1, record.sequence),
+          );
+        }
+      }
     }
+    expect(
+      [...finalSequences.values()].sort((left, right) => left - right),
+    ).toEqual([20, 20]);
   });
 
   it("preserves a real child exit code when writer close hangs", async () => {

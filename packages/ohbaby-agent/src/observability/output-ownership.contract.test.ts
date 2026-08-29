@@ -60,7 +60,23 @@ describe("backend output ownership lint", () => {
       "globalThis process alias",
       'const processAlias = globalThis.process; processAlias.stdout.write("leak");',
     ],
+    [
+      "globalThis process destructuring",
+      'const { stderr: output } = globalThis.process; output.write("leak");',
+    ],
+    [
+      "computed globalThis process alias",
+      'const processAlias = globalThis["process"]; processAlias.stdout.write("leak");',
+    ],
+    [
+      "computed globalThis process destructuring",
+      'const { stdout: output } = globalThis["process"]; output.write("leak");',
+    ],
     ["globalThis process output", 'globalThis.process.stderr.write("leak");'],
+    [
+      "computed globalThis process output",
+      'globalThis["process"].stderr.write("leak");',
+    ],
   ])("rejects %s bypasses", async (_label, source) => {
     await expect(lintProbe(source)).resolves.toEqual(
       expect.arrayContaining([

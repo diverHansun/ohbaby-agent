@@ -366,7 +366,7 @@ export function OhbabyTerminalApp({
 
       setActiveCommandPanel({
         ...panel,
-        error: sanitizeCommandPanelError(tuiEvent.error.message),
+        error: sanitizeCommandPanelError(formatError(tuiEvent.error)),
         status: "error",
       });
       return true;

@@ -2842,8 +2842,10 @@ describe("OhbabyTerminalApp", () => {
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("Models") && nextFrame.includes("Failed"),
+        nextFrame.includes("Models") &&
+        nextFrame.includes("[MODEL_CONFIG_FAILED] Failed"),
     );
+    expect(frame).toContain("[MODEL_CONFIG_FAILED] Failed");
     expect(frame).not.toContain("proxy.example");
     expect(frame).not.toContain("do-not-print");
     expect(frame).not.toContain("secret-token");
