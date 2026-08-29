@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -11,6 +12,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineDiagnosticEvent, diagnosticField } from "./logger.js";
 import {
@@ -34,6 +36,48 @@ async function temporaryDirectory(): Promise<string> {
   temporaryDirectories.push(directory);
   return directory;
 }
+
+async function runLoggerChild(input: {
+  readonly environment: Readonly<Record<string, string>>;
+  readonly script: string;
+  readonly timeoutMs?: number;
+}): Promise<{ readonly code: number | null; readonly stderr: string }> {
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", "--eval", input.script],
+    {
+      env: { ...process.env, ...input.environment },
+      stdio: ["ignore", "ignore", "pipe"],
+    },
+  );
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+
+  return await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("logger child did not exit before the test timeout"));
+    }, input.timeoutMs ?? 5_000);
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timeout);
+      resolve({ code, stderr });
+    });
+  });
+}
+
+const processLoggerModuleUrl = pathToFileURL(
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "process-logger.ts",
+  ),
+).href;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -121,6 +165,37 @@ describe("process logger", () => {
     await Promise.all([first, second]);
     const contents = await readFile(requireLogFilePath(handle), "utf8");
     expect(contents).toContain('"event":"diagnostics.integration"');
+  });
+
+  it("bounds the complete dispose lifecycle when writer close hangs", async () => {
+    const logRoot = await temporaryDirectory();
+    const onUnavailable = vi.fn();
+    const writer = {
+      close: vi.fn(() => new Promise<void>(() => undefined)),
+      path: path.join(logRoot, "hanging.jsonl"),
+      write: vi.fn(() => Promise.resolve()),
+    };
+    const handle = await createProcessLoggerWithLimits(
+      { logDirectory: logRoot, onUnavailable, role: "tui" },
+      {
+        disposeTimeoutMs: 40,
+        maxBytes: 8 * 1024 * 1024,
+        maxFiles: 3,
+        maxLineBytes: 16 * 1024,
+        maxQueue: 64,
+        retentionMs: 1_000,
+      },
+      { createWriter: () => Promise.resolve(writer) },
+    );
+    await handle.flush();
+
+    const startedAt = Date.now();
+    await handle.dispose();
+
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(writer.close).toHaveBeenCalledOnce();
+    expect(onUnavailable).toHaveBeenCalledOnce();
+    expect(onUnavailable).toHaveBeenCalledWith("flush");
   });
 
   it("writes one dropped-event summary even when the queue was full at exit", async () => {
@@ -330,5 +405,92 @@ describe("process logger", () => {
     await expect(
       readFile(requireLogFilePath(second), "utf8"),
     ).resolves.toContain('"count":2');
+  });
+
+  it("keeps same-role files independent across two real child processes", async () => {
+    const logRoot = await temporaryDirectory();
+    const script = `
+      import { createProcessLogger } from ${JSON.stringify(processLoggerModuleUrl)};
+      import { defineDiagnosticEvent, diagnosticField } from ${JSON.stringify(
+        new URL("./logger.ts", processLoggerModuleUrl).href,
+      )};
+      const event = defineDiagnosticEvent({
+        component: "diagnostics",
+        event: "diagnostics.child_process",
+        fields: { pid: diagnosticField.integer() },
+        level: "info",
+      });
+      const handle = await createProcessLogger({
+        logDirectory: process.env.OHBABY_LOG_TEST_ROOT,
+        role: "serve",
+      });
+      handle.logger.emit(event, { pid: process.pid });
+      await handle.dispose();
+    `;
+
+    const results = await Promise.all([
+      runLoggerChild({
+        environment: { OHBABY_LOG_TEST_ROOT: logRoot },
+        script,
+      }),
+      runLoggerChild({
+        environment: { OHBABY_LOG_TEST_ROOT: logRoot },
+        script,
+      }),
+    ]);
+    expect(results).toEqual([
+      { code: 0, stderr: "" },
+      { code: 0, stderr: "" },
+    ]);
+
+    const files = (await readdir(path.join(logRoot, "serve"))).filter((file) =>
+      file.endsWith(".jsonl"),
+    );
+    expect(files).toHaveLength(2);
+    expect(new Set(files.map((file) => file.split("-").at(-2))).size).toBe(2);
+    for (const file of files) {
+      const contents = await readFile(
+        path.join(logRoot, "serve", file),
+        "utf8",
+      );
+      expect(contents).toContain('"event":"diagnostics.child_process"');
+    }
+  });
+
+  it("preserves a real child exit code when writer close hangs", async () => {
+    const logRoot = await temporaryDirectory();
+    const script = `
+      import { createProcessLoggerWithLimits } from ${JSON.stringify(
+        processLoggerModuleUrl,
+      )};
+      const handle = await createProcessLoggerWithLimits(
+        { logDirectory: process.env.OHBABY_LOG_TEST_ROOT, role: "tui" },
+        {
+          disposeTimeoutMs: 50,
+          maxBytes: 1024,
+          maxFiles: 3,
+          maxLineBytes: 16384,
+          maxQueue: 64,
+          retentionMs: 1000,
+        },
+        {
+          createWriter: () => Promise.resolve({
+            close: () => new Promise(() => undefined),
+            path: "/virtual/hanging.jsonl",
+            write: () => Promise.resolve(),
+          }),
+        },
+      );
+      process.exitCode = 23;
+      await handle.dispose();
+    `;
+
+    const result = await runLoggerChild({
+      environment: { OHBABY_LOG_TEST_ROOT: logRoot },
+      script,
+      timeoutMs: 2_000,
+    });
+
+    expect(result).toEqual({ code: 23, stderr: "" });
   });
 });

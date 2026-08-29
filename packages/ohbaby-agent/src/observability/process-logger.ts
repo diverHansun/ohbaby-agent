@@ -54,6 +54,20 @@ interface ProcessLoggerLimits {
   readonly retentionMs: number;
 }
 
+interface ProcessLogWriter {
+  readonly path: string;
+  close(): Promise<void>;
+  write(line: string): Promise<void>;
+}
+
+interface ProcessLoggerDependencies {
+  createWriter(
+    directory: string,
+    instance: string,
+    limits: ProcessLoggerLimits,
+  ): Promise<ProcessLogWriter>;
+}
+
 const DEFAULT_LIMITS: ProcessLoggerLimits = {
   disposeTimeoutMs: 2_000,
   maxBytes: 8 * 1024 * 1024,
@@ -181,7 +195,7 @@ async function cleanExpiredLogs(
   );
 }
 
-class RotatingFileWriter {
+class RotatingFileWriter implements ProcessLogWriter {
   private activePath: string;
   private bytes = 0;
   private file: FileHandle;
@@ -356,7 +370,7 @@ class ProcessFileLogger implements Logger {
   private queue: QueueEntry[] = [];
 
   constructor(
-    private readonly writer: RotatingFileWriter,
+    private readonly writer: ProcessLogWriter,
     private readonly level: LogLevel,
     private readonly roots: DiagnosticRoots,
     private readonly limits: ProcessLoggerLimits,
@@ -399,20 +413,23 @@ class ProcessFileLogger implements Logger {
 
   private async disposeInternal(): Promise<void> {
     this.accepting = false;
-    await this.waitForDrain();
+    const deadline = Date.now() + this.limits.disposeTimeoutMs;
+    await this.waitForDrain(deadline);
     if (!this.disabled) {
       this.enqueueDropSummaryIfNeeded();
-      await this.waitForDrain();
+      await this.waitForDrain(deadline);
     }
-    try {
-      await this.writer.close();
-    } catch {
+    const closeResult = await settleBeforeDeadline(
+      Promise.resolve().then(() => this.writer.close()),
+      deadline,
+    );
+    if (closeResult !== "completed") {
       this.disable("flush");
     }
   }
 
   async flush(): Promise<void> {
-    await this.waitForDrain();
+    await this.waitForDrain(Date.now() + this.limits.disposeTimeoutMs);
   }
 
   private disable(reason: "write" | "flush"): void {
@@ -492,26 +509,45 @@ class ProcessFileLogger implements Logger {
     }
   }
 
-  private async waitForDrain(): Promise<void> {
+  private async waitForDrain(deadline: number): Promise<void> {
     this.startDrain();
     const drain = this.drainPromise ?? Promise.resolve();
-    let timer: NodeJS.Timeout | undefined;
-    try {
-      await Promise.race([
-        drain,
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => {
-            reject(new Error("diagnostics drain timed out"));
-          }, this.limits.disposeTimeoutMs);
-          timer.unref();
-        }),
-      ]);
-    } catch {
+    const result = await settleBeforeDeadline(drain, deadline);
+    if (result !== "completed") {
       this.disable("flush");
-    } finally {
-      if (timer !== undefined) {
-        clearTimeout(timer);
-      }
+    }
+  }
+}
+
+type TimedSettlement = "completed" | "failed" | "timed-out";
+
+async function settleBeforeDeadline(
+  operation: Promise<void>,
+  deadline: number,
+): Promise<TimedSettlement> {
+  const guarded = operation.then<TimedSettlement, TimedSettlement>(
+    () => "completed",
+    () => "failed",
+  );
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    void guarded;
+    return "timed-out";
+  }
+
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      guarded,
+      new Promise<TimedSettlement>((resolve) => {
+        timer = setTimeout(() => {
+          resolve("timed-out");
+        }, remaining);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
     }
   }
 }
@@ -537,15 +573,19 @@ export async function createProcessLogger(
 export async function createProcessLoggerWithLimits(
   options: CreateProcessLoggerOptions,
   limits: ProcessLoggerLimits,
+  dependencies: ProcessLoggerDependencies = {
+    createWriter: (directory, instance, writerLimits) =>
+      RotatingFileWriter.create(directory, instance, writerLimits),
+  },
 ): Promise<ProcessLoggerHandle> {
   const level = resolveLevel(options);
   const logRoot = resolveLogRoot(options);
   const directory = path.join(logRoot.root, options.role);
   const instance = `${timestampForFilename(new Date())}-${String(process.pid)}-${randomUUID().slice(0, 8)}`;
   const unavailable = notifyOnce(options.onUnavailable);
-  let writer: RotatingFileWriter;
+  let writer: ProcessLogWriter;
   try {
-    writer = await RotatingFileWriter.create(directory, instance, limits);
+    writer = await dependencies.createWriter(directory, instance, limits);
   } catch (error) {
     if (logRoot.explicit) {
       throw new DiagnosticsConfigurationError(
