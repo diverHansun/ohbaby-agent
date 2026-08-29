@@ -96,6 +96,23 @@ export default tseslint.config(
           selector:
             "VariableDeclarator[init.name='process'] > ObjectPattern > Property[key.name=/^(emitWarning|stderr|stdout)$/]",
         },
+        {
+          message:
+            "Backend production code must not alias the global process object.",
+          selector:
+            "VariableDeclarator[id.type='Identifier'][init.name='process']",
+        },
+        {
+          message: "Backend production code must not alias globalThis.process.",
+          selector:
+            "VariableDeclarator[id.type='Identifier'][init.object.name='globalThis'][init.property.name='process']",
+        },
+        {
+          message:
+            "Backend production code must not access output channels through globalThis.process.",
+          selector:
+            "MemberExpression[object.object.name='globalThis'][object.property.name='process'][property.name=/^(emitWarning|stderr|stdout)$/]",
+        },
       ],
     },
   },
