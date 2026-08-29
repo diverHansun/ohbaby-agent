@@ -23,6 +23,9 @@ import {
 } from "ohbaby-sdk";
 import {
   createUiCommandGateway,
+  interactionCleanupFailure,
+  NOOP_LOGGER,
+  type Logger,
   type UiPromptQueueExecutionPort,
 } from "ohbaby-agent";
 import { isAuthorizedDaemonRequest } from "../auth/token.js";
@@ -82,6 +85,7 @@ export interface DaemonServerAppOptions {
   readonly commandRecorder?: UiCommandRecorder | false;
   readonly createSessionId?: () => string;
   readonly eventBufferCapacity?: number;
+  readonly logger?: Logger;
   readonly onClientConnected?: (clientId: string) => void;
   readonly onClientDisconnected?: (clientId: string) => void;
   readonly onShutdown?: () => Promise<void> | void;
@@ -96,10 +100,11 @@ const NOOP_COMMAND_RECORDER: UiCommandRecorder = {
   },
 };
 
-function reportInteractionCleanupFailure(): void {
-  process.stderr.write(
-    `${JSON.stringify({ type: "ui.interaction.cleanup.failure" })}\n`,
-  );
+function reportInteractionCleanupFailure(logger: Logger, error: unknown): void {
+  logger.emit(interactionCleanupFailure, {
+    error,
+    operation: "disconnect",
+  });
 }
 
 function activeSnapshotRunForSession(
@@ -2173,11 +2178,11 @@ class DaemonServerAppRuntime {
           reason: "client-disconnected",
         })
         .catch((error: unknown) => {
-          if (
-            !isRecord(error) ||
-            error.code !== "INTERACTION_NOT_FOUND"
-          ) {
-            reportInteractionCleanupFailure();
+          if (!isRecord(error) || error.code !== "INTERACTION_NOT_FOUND") {
+            reportInteractionCleanupFailure(
+              this.options.logger ?? NOOP_LOGGER,
+              error,
+            );
           }
         });
     }

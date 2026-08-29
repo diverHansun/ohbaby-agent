@@ -14,12 +14,14 @@ import type {
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 const DEFAULT_STATE_DIR = ".ohbaby";
 
-const CONSOLE_LOGGER: DaemonLogger = {
-  info(message: string, metadata?: Record<string, unknown>): void {
-    process.stdout.write(`${message} ${JSON.stringify(metadata ?? {})}\n`);
+export type DaemonStopReason = "idle" | "requested" | "signal";
+
+const NOOP_LOGGER: DaemonLogger = {
+  info(_message: string, _metadata?: Record<string, unknown>): void {
+    return;
   },
-  error(message: string, metadata?: Record<string, unknown>): void {
-    process.stderr.write(`${message} ${JSON.stringify(metadata ?? {})}\n`);
+  error(_message: string, _metadata?: Record<string, unknown>): void {
+    return;
   },
 };
 
@@ -49,6 +51,7 @@ export interface SupervisorOptions {
   readonly idleTimeoutMs?: number;
   readonly exit?: (code: number) => void;
   readonly logger?: DaemonLogger;
+  readonly disposeDiagnostics?: (reason: DaemonStopReason) => Promise<void>;
   readonly now?: () => number;
 }
 
@@ -64,12 +67,13 @@ export class Supervisor {
   private runtime: DaemonRuntimeHandle | undefined;
   private startedAt: number | undefined;
   private stopPromise: Promise<void> | undefined;
+  private stopReason: DaemonStopReason = "requested";
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private signalsRegistered = false;
   private readonly activeClients = new Set<string>();
 
   private readonly signalHandler = (): void => {
-    void this.stopWithTimeout()
+    void this.stopWithTimeout("signal")
       .then(() => {
         this.exit(0);
       })
@@ -103,7 +107,7 @@ export class Supervisor {
       ((code: number): never => {
         process.exit(code);
       });
-    this.logger = options.logger ?? CONSOLE_LOGGER;
+    this.logger = options.logger ?? NOOP_LOGGER;
     this.now = options.now ?? Date.now;
   }
 
@@ -152,11 +156,12 @@ export class Supervisor {
     }
   }
 
-  async stop(): Promise<void> {
+  async stop(reason: DaemonStopReason = "requested"): Promise<void> {
     if (this.stopPromise) {
       return this.stopPromise;
     }
 
+    this.stopReason = reason;
     this.stopPromise = this.stopInternal();
     return this.stopPromise;
   }
@@ -232,17 +237,23 @@ export class Supervisor {
       this.stopPromise = undefined;
     }
 
+    try {
+      await this.options.disposeDiagnostics?.(this.stopReason);
+    } catch (error) {
+      pendingError ??= error;
+    }
+
     if (pendingError !== undefined) {
       throw toError(pendingError, "daemon stop failed");
     }
   }
 
-  private async stopWithTimeout(): Promise<void> {
+  private async stopWithTimeout(reason: DaemonStopReason): Promise<void> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
 
     try {
       await Promise.race([
-        this.stop(),
+        this.stop(reason),
         new Promise<never>((_resolve, reject) => {
           timeout = setTimeout(() => {
             reject(new Error("daemon shutdown timed out"));
@@ -267,7 +278,7 @@ export class Supervisor {
 
     this.idleTimer = setTimeout(() => {
       this.idleTimer = undefined;
-      void this.stop().catch((error: unknown) => {
+      void this.stop("idle").catch((error: unknown) => {
         this.logger.error("daemon idle shutdown failed", {
           error: errorToMessage(error),
         });

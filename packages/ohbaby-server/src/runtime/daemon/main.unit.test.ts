@@ -13,6 +13,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { UiBackendClient } from "ohbaby-sdk";
 import type { PersistentUiBackendOptions } from "ohbaby-agent";
 
+const noopLogger = { emit: (): void => undefined };
+
 function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
   dispose(): Promise<void>;
 } {
@@ -208,6 +210,7 @@ describe("startDaemonServer", () => {
       ),
       getAgentPackageVersion: (): string => "9.9.9",
       McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+      NOOP_LOGGER: noopLogger,
     }));
     vi.doMock("./server.js", () => ({
       createDaemonHttpServer: vi.fn(
@@ -259,6 +262,7 @@ describe("startDaemonServer", () => {
       createPersistentUiBackendClient,
       getAgentPackageVersion: (): string => "0.1.0",
       McpManager: { disposeAll: vi.fn(() => Promise.resolve()) },
+      NOOP_LOGGER: noopLogger,
     }));
     vi.doMock("./server.js", () => ({
       createDaemonHttpServer: vi.fn(() => ({
@@ -329,6 +333,7 @@ describe("startDaemonServer", () => {
       createPersistentUiBackendClient,
       getAgentPackageVersion: (): string => "0.1.0",
       McpManager: { disposeAll },
+      NOOP_LOGGER: noopLogger,
     }));
 
     try {
@@ -557,6 +562,7 @@ describe("startDaemonServer", () => {
       createPersistentUiBackendClient,
       getAgentPackageVersion: (): string => "0.1.0",
       McpManager: { disposeAll },
+      NOOP_LOGGER: noopLogger,
     }));
 
     try {
@@ -603,6 +609,7 @@ describe("startDaemonServer", () => {
       createPersistentUiBackendClient,
       getAgentPackageVersion: (): string => "0.1.0",
       McpManager: { disposeAll },
+      NOOP_LOGGER: noopLogger,
     }));
 
     try {
@@ -861,6 +868,7 @@ describe("startDaemonServer", () => {
       createPersistentUiBackendClient,
       getAgentPackageVersion: (): string => "0.1.0",
       McpManager: { disposeAll },
+      NOOP_LOGGER: noopLogger,
     }));
 
     try {
@@ -902,6 +910,7 @@ describe("startDaemonServer", () => {
       createPersistentUiBackendClient,
       getAgentPackageVersion: (): string => "0.1.0",
       McpManager: { disposeAll },
+      NOOP_LOGGER: noopLogger,
     }));
 
     try {
@@ -1235,6 +1244,7 @@ describe("startDaemonServer", () => {
       createPersistentUiBackendClient,
       getAgentPackageVersion: (): string => "0.1.0",
       McpManager: { disposeAll },
+      NOOP_LOGGER: noopLogger,
     }));
 
     try {

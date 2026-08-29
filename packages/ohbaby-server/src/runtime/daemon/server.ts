@@ -7,6 +7,7 @@ import {
 } from "ohbaby-sdk";
 import {
   createSessionIdGenerator,
+  type Logger,
   type UiPromptQueueExecutionPort,
   type WorkspaceRegistryStore,
 } from "ohbaby-agent";
@@ -49,6 +50,7 @@ export interface DaemonHttpServerOptions {
   readonly listKnownWorkspaceScopes?: () =>
     | Promise<readonly string[]>
     | readonly string[];
+  readonly logger?: Logger;
   readonly now?: () => number;
   readonly workspaceRegistry?: WorkspaceRegistryStore;
   readonly onClientConnected?: (clientId: string) => void;
@@ -132,6 +134,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       clientDisconnectRetentionMs: this.options.clientDisconnectRetentionMs,
       createSessionId: this.options.createSessionId,
       eventBufferCapacity: this.options.eventBufferCapacity,
+      logger: this.options.logger,
       onClientConnected: (clientId): void => {
         this.clientConnected(scopeKey, clientId);
       },
@@ -629,6 +632,7 @@ export function createDaemonHttpServer(
     eventBufferCapacity: options.eventBufferCapacity,
     host: options.host ?? DEFAULT_HOST,
     listKnownWorkspaceScopes: options.listKnownWorkspaceScopes,
+    logger: options.logger,
     workspaceRegistry: options.workspaceRegistry,
     now: options.now ?? Date.now,
     onClientConnected: options.onClientConnected,

@@ -169,6 +169,9 @@ export function createServeCommand(
         ...(port === undefined ? {} : { port }),
       });
       runtime.stdout.write(`ohbaby web ready: ${server.url}\n`);
+      if (!server.reused && server.diagnosticsFilePath) {
+        runtime.stdout.write(`diagnostics: ${server.diagnosticsFilePath}\n`);
+      }
       if (args.open === false) {
         return;
       }

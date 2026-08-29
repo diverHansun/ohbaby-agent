@@ -7,6 +7,14 @@ import {
   getAgentPackageVersion,
   listKnownSessionProjectRoots,
   McpManager,
+  NOOP_LOGGER,
+  resolveOhbabyHome,
+  serverStartFailed,
+  serverStarted,
+  serverStopped,
+  type Logger,
+  type OhbabyMigrationReport,
+  type ProcessLoggerHandle,
   type PersistentUiBackendClient,
   type PersistentUiBackendOptions,
 } from "ohbaby-agent";
@@ -74,9 +82,13 @@ export interface StartDaemonServerOptions {
   readonly defaultPort?: number;
   readonly packageVersion?: string;
   readonly dbPath?: string;
+  readonly diagnosticsFactory?: (
+    context: ServeDiagnosticsContext,
+  ) => Promise<ProcessLoggerHandle | undefined>;
   readonly healthCheck?: DaemonHealthCheck;
   readonly homeDirectory?: string;
   readonly llmClient?: PersistentUiBackendOptions["llmClient"];
+  readonly onDataMigrationReport?: (report: OhbabyMigrationReport) => void;
   readonly pidFilePath?: string;
   readonly stateFilePath?: string;
   readonly scopeRoot?: string;
@@ -84,7 +96,13 @@ export interface StartDaemonServerOptions {
   readonly workdir?: string;
 }
 
+export interface ServeDiagnosticsContext {
+  readonly ohbabyHome: string;
+  readonly workspaceRoot: string;
+}
+
 export interface RunningDaemonServer {
+  readonly diagnosticsFilePath?: string;
   readonly url: string;
   readonly host: string;
   readonly port: number;
@@ -460,8 +478,10 @@ async function startFreshDaemon(input: {
   readonly port: number;
   readonly scopeRoot: string;
   readonly stateFilePath: string;
+  readonly diagnosticsHandle?: ProcessLoggerHandle;
 }): Promise<RunningDaemonServer> {
   let server: DaemonHttpServerHandle | undefined;
+  const logger = input.diagnosticsHandle?.logger ?? NOOP_LOGGER;
   const supervisor = new Supervisor({
     bootstrap(): DaemonRuntimeHandle {
       const createBackend = (workdir: string): PersistentUiBackendClient =>
@@ -473,6 +493,7 @@ async function startFreshDaemon(input: {
             ? {}
             : { llmClient: input.options.llmClient }),
           workdir,
+          logger,
         });
       const backend = createBackend(input.scopeRoot);
       const releaseDatabase = retainLocalDaemonDatabase();
@@ -484,6 +505,7 @@ async function startFreshDaemon(input: {
         createWorkspaceBackend: createBackend,
         host: input.options.host ?? DEFAULT_HOST,
         listKnownWorkspaceScopes: () => listKnownSessionProjectRoots(),
+        logger,
         workspaceRegistry,
         onClientConnected: (clientId) => {
           supervisor.clientConnected(clientId);
@@ -508,12 +530,23 @@ async function startFreshDaemon(input: {
     },
     pidFilePath: input.pidFilePath,
     stateFilePath: input.stateFilePath,
+    ...(input.diagnosticsHandle === undefined
+      ? {}
+      : {
+          async disposeDiagnostics(reason): Promise<void> {
+            logger.emit(serverStopped, { reason });
+            await input.diagnosticsHandle?.dispose();
+          },
+        }),
   });
 
   await supervisor.start();
   const startedServer = server;
   if (!startedServer) {
     throw new Error("daemon server failed to initialize");
+  }
+  if (input.diagnosticsHandle !== undefined) {
+    logger.emit(serverStarted, { endpoint: startedServer.url });
   }
 
   return {
@@ -524,6 +557,9 @@ async function startFreshDaemon(input: {
       return startedServer.port;
     },
     reused: false,
+    ...(input.diagnosticsHandle?.logFilePath === undefined
+      ? {}
+      : { diagnosticsFilePath: input.diagnosticsHandle.logFilePath }),
     scopeRoot: input.scopeRoot,
     stop(): Promise<void> {
       return supervisor.stop();
@@ -592,49 +628,70 @@ export async function startDaemonServer(
     return running;
   }
 
-  if ("migrateOhbabyData" in AgentRuntime) {
-    await AgentRuntime.migrateOhbabyData({
-      ...(options.homeDirectory === undefined
-        ? {}
-        : { homeDirectory: options.homeDirectory }),
-      projectDirectory: scope.scopeRoot,
-    });
-  }
-
-  const firstPort =
-    explicitPort || (await isPortAvailable(requestedHost, requestedPort))
-      ? requestedPort
-      : 0;
+  const diagnosticsHandle = await options.diagnosticsFactory?.({
+    ohbabyHome: resolveOhbabyHome({ homeDirectory: options.homeDirectory }),
+    workspaceRoot: scope.scopeRoot,
+  });
+  const logger: Logger = diagnosticsHandle?.logger ?? NOOP_LOGGER;
 
   try {
-    return await startFreshDaemon({
-      authToken,
-      options,
-      packageVersion,
-      pidFilePath: scope.pidFilePath,
-      port: firstPort,
-      scopeRoot: scope.scopeRoot,
-      stateFilePath: scope.stateFilePath,
-    });
+    if ("migrateOhbabyData" in AgentRuntime) {
+      const report = await AgentRuntime.migrateOhbabyData({
+        ...(options.homeDirectory === undefined
+          ? {}
+          : { homeDirectory: options.homeDirectory }),
+        projectDirectory: scope.scopeRoot,
+      });
+      try {
+        options.onDataMigrationReport?.(report);
+      } catch {
+        // Optional observation cannot change migration semantics.
+      }
+    }
+
+    const firstPort =
+      explicitPort || (await isPortAvailable(requestedHost, requestedPort))
+        ? requestedPort
+        : 0;
+
+    try {
+      return await startFreshDaemon({
+        authToken,
+        diagnosticsHandle,
+        options,
+        packageVersion,
+        pidFilePath: scope.pidFilePath,
+        port: firstPort,
+        scopeRoot: scope.scopeRoot,
+        stateFilePath: scope.stateFilePath,
+      });
+    } catch (error) {
+      if (!isAddressInUseError(error)) {
+        throw error;
+      }
+      if (explicitPort) {
+        throw new Error(
+          `Port ${String(requestedPort)} is already in use for ${requestedHost}. Choose another port with --port, or stop the process currently using it.`,
+          { cause: error },
+        );
+      }
+      return await startFreshDaemon({
+        authToken,
+        diagnosticsHandle,
+        options,
+        packageVersion,
+        pidFilePath: scope.pidFilePath,
+        port: 0,
+        scopeRoot: scope.scopeRoot,
+        stateFilePath: scope.stateFilePath,
+      });
+    }
   } catch (error) {
-    if (!isAddressInUseError(error)) {
-      throw error;
+    if (diagnosticsHandle !== undefined) {
+      logger.emit(serverStartFailed, { error });
     }
-    if (explicitPort) {
-      throw new Error(
-        `Port ${String(requestedPort)} is already in use for ${requestedHost}. Choose another port with --port, or stop the process currently using it.`,
-        { cause: error },
-      );
-    }
-    return startFreshDaemon({
-      authToken,
-      options,
-      packageVersion,
-      pidFilePath: scope.pidFilePath,
-      port: 0,
-      scopeRoot: scope.scopeRoot,
-      stateFilePath: scope.stateFilePath,
-    });
+    await diagnosticsHandle?.dispose();
+    throw error;
   }
 }
 
