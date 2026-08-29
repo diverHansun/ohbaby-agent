@@ -94,6 +94,7 @@ export * from "./core/system-prompt/index.js";
 export * from "./core/llm-client/index.js";
 export * from "./mcp/index.js";
 export * from "./migration/index.js";
+export * from "./observability/index.js";
 export * from "./project/index.js";
 export * from "./paths/index.js";
 export * from "./runtime/interaction-broker/index.js";
