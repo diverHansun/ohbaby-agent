@@ -132,9 +132,9 @@ describe("diagnostic normalization", () => {
     expect(
       normalizeDiagnosticPath("/Users/example/work/project/src/app.ts", roots),
     ).toBe("<workspace>/src/app.ts");
-    expect(normalizeDiagnosticPath("/Users/example/.ohbaby/model.json", roots)).toBe(
-      "<ohbaby-home>/model.json",
-    );
+    expect(
+      normalizeDiagnosticPath("/Users/example/.ohbaby/model.json", roots),
+    ).toBe("<ohbaby-home>/model.json");
     expect(normalizeDiagnosticPath("/opt/private/customer.txt", roots)).toMatch(
       /^<external>\/[a-f0-9]{12}$/,
     );
@@ -170,7 +170,8 @@ describe("safeError", () => {
 
   it("sanitizes trusted internal messages and stack paths", () => {
     const error = new Error("api_key=secret operation failed");
-    error.stack = "Error: duplicate message\n    at run (/workspace/app.ts:1:1)";
+    error.stack =
+      "Error: duplicate message\n    at run (/workspace/app.ts:1:1)";
     const encoded = safeError(error, {
       roots: { workspace: "/workspace" },
       trustedMessage: true,
@@ -182,7 +183,13 @@ describe("safeError", () => {
   });
 
   it("never throws for non-errors", () => {
-    expect(safeError({ get message(): never { throw new Error("boom"); } })).toEqual({
+    expect(
+      safeError({
+        get message(): never {
+          throw new Error("boom");
+        },
+      }),
+    ).toEqual({
       message: "An unknown error occurred",
       name: "UnknownError",
     });

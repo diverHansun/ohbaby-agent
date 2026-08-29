@@ -220,11 +220,11 @@ describe("runOhbabyCli", () => {
             core,
             dispose: vi.fn(() => Promise.resolve()),
           })),
-          loadRuntimeEnvIntoProcessEnv: vi.fn((options?: {
-            readonly onWarning?: (message: string) => void;
-          }) => {
-            options?.onWarning?.("Legacy configuration conflict.");
-          }),
+          loadRuntimeEnvIntoProcessEnv: vi.fn(
+            (options?: { readonly onWarning?: (message: string) => void }) => {
+              options?.onWarning?.("Legacy configuration conflict.");
+            },
+          ),
         },
       ),
     ).resolves.toBe(0);
