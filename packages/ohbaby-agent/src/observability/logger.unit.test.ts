@@ -411,6 +411,7 @@ describe("diagnostic normalization", () => {
       "logs/private.key=DYNAMIC_PRIVATE_KEY",
       "logs/authorization.header=Basic DYNAMIC_AUTH",
       "logs/secret[key]=DYNAMIC_SECRET",
+      `logs/secret${"x".repeat(129)}=DYNAMIC_PADDED_SECRET`,
     ]) {
       const normalized = normalizeDiagnosticPath(credentialPath, {});
       expect(normalized).not.toContain("DYNAMIC_");

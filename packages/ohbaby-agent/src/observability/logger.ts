@@ -123,7 +123,7 @@ const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
   "text",
   "token",
 ]);
-const CREDENTIAL_ASSIGNMENT_PATTERN = /([^/\\,;:=]{1,128})\s*[:=]/gu;
+const CREDENTIAL_ASSIGNMENT_PATTERN = /([^/\\,;:=]+)\s*[:=]/gu;
 const BEARER_MARKER_PATTERN = /\bbearer\s+/iu;
 const MAX_SAFE_STRING_BYTES = 512;
 const EXTERNAL_ID_KINDS = new Set(["operation", "provider", "session"]);
