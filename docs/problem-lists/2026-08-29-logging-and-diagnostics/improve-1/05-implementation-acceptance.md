@@ -4,7 +4,7 @@
 >
 > 分支：`codex/logging-diagnostics-docs`
 >
-> 状态：第二轮独立审查的代码修订与本地复验已完成，等待最终子代理复审；未 merge、未 push。
+> 状态：代码、全量测试、真实 TUI/Web E2E 与三路独立终审均已完成；无剩余 P0/P1/P2/P3；未 merge、未 push。
 
 ## 1. 结论
 
@@ -48,6 +48,14 @@
 | `7539915` | schema 与 mixed-path 收口 | 约束 external-ID kind、安全数值字段，并在 root 匹配后再次规范化路径 suffix |
 | `09660c8` | CLI 运行时边界 | agent/server package、subpath 与 src/dist 静态导入门由 25 条 contract tests 固化 |
 | `745e820` | Web 凭据回归 | compiled Web E2E 分别扫描 provider API key 与 daemon auth token |
+| `7e7d40e` | dynamic runtime 边界 | 禁止非 composition-root dynamic import 绕过，只保留显式 runtime loader shape |
+| `15986fe` | schema/filter 边界 | enum/ID 闭合集合、通用 auth 字段门、线性 UTF-8 截断与 encode 前 level filter |
+| `e972de9` | runtime schema 加固 | caller-owned enum 快照、多词 credential、closed component/level 与 CommonJS loader 门 |
+| `10742cf` | 反射与 TOCTOU 收口 | definition 元数据单次快照，补 OAuth marker 与常见反射/eval loader 门 |
+| `1ecbd9e` | 通用 credential 清洗 | assignment key 统一 canonicalize，命中敏感片段后保守清除剩余内容 |
+| `cff01d6` | structured key 清洗 | dotted/bracket assignment key 按完整路径段 canonicalize，不从安全末段重启匹配 |
+| `f25374a` | 完整 lhs 清洗 | 取消 assignment key 截断，超长敏感前缀不能被 padding 挤出扫描范围 |
+| `84872f3` | 线性 path 清洗 | 用单次 segment 扫描替代未锚定 regex，长无 delimiter 路径不再回溯阻塞 |
 
 本表记录功能与证据提交，不要求文档提交自引用自身 hash；上述阶段历史不改写。
 
@@ -146,7 +154,7 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 
 补充修订后再次用 Codex in-app Browser 操作同一 compiled harness，页面 title=`ohbaby`、首屏非空、console warning/error 列表为空；工具卡、follow-up、刷新恢复、backend、cleanup 与 diagnostics 再次得到上述同构证据。
 
-本轮最终修订后又执行一次完整 production build + Browser 流程，结果仍为 UI/backend/cleanup/diagnostics 四项 PASS。脱敏后的可复核输出见 `evidence/2026-08-30-compiled-web.txt`。
+本轮最终修订后又在 revision `84872f3b38ee6356ebf27b21bc792d95f791e8d7` 执行一次完整 production build + Browser 流程，结果仍为 UI/backend/cleanup/diagnostics 四项 PASS。脱敏后的可复核输出见 `evidence/2026-08-30-compiled-web.txt`，文件首部同时记录被测 revision。
 
 ## 5. 自动化测试结果
 
@@ -155,14 +163,14 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 | `pnpm lint` | 通过 |
 | `pnpm typecheck` | 通过 |
 | `pnpm build` | 通过，含 SDK/agent/server/CLI/Web production build |
-| `pnpm test` | 最终修订后全量：308 files passed、5 skipped；2,885 tests passed、16 skipped |
-| `logger.unit.test.ts` | 36/36；含 external-ID kind、复合凭据字段、跨平台绝对/相对路径、数值元数据与单次 accessor 快照 |
-| `output-ownership.contract.test.ts` | 25/25；除 output alias 外，自动拒绝 CLI agent/server package、subpath、src/dist 静态导入并允许 type-only import |
-| `process-logger.integration.test.ts` | 17/17；含非法事件故障域、真实 writer failure、UTF-8 short write 与 zero-progress |
+| `pnpm test` | 最终修订后全量：308 files passed、5 skipped；2,924 tests passed、16 skipped |
+| `logger.unit.test.ts` | 49/49；含 closed enum/ID kind、credential assignment/线性长路径、定义/错误单次 accessor、跨平台路径与数值元数据 |
+| `output-ownership.contract.test.ts` | 50/50；除 output alias 外，覆盖 CLI agent/server 静态/dynamic/CommonJS/常见反射 loader，并允许 type-only import |
+| `process-logger.integration.test.ts` | 18/18；含 encode 前 level filter、非法事件故障域、真实 writer failure、UTF-8 short write 与 zero-progress |
 | `main.unit.test.ts` + `supervisor.unit.test.ts` | 33/33；真实 stop outcome、并发 stop、teardown fail-open 与 mock boundary |
 | `command-record-terminal.integration.test.ts` | 2/2；真实 in-process host 与真实 serve process |
 | `format-error.unit.test.ts` | 2/2；CLI-local helper 保留稳定 code，且 hostile getter/Proxy fail-safe |
-| 最终定向测试 | logger/process logger/output ownership/CLI formatter 4 files、80/80；真实 in-process/serve 2/2 |
+| 最终定向测试 | logger/process logger/output ownership/CLI formatter 4 files、119/119；真实 in-process/serve 2/2 |
 | compiled Web harness + in-app Browser | operator-assisted UI 与自动 backend/cleanup/diagnostics 全通过 |
 | 需要真实云凭据的测试 | 按设计 skipped；未向外部发送测试数据 |
 
@@ -170,13 +178,14 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 
 ## 6. 敏感信息与失败退化证据
 
-- definition builder 在 error 到 trace 的每个 level 都拒绝 prompt/completion/reasoning/body/command/input/output/request/response/config/context/authorization/token 等正文槽位；`requestBody`、`apiToken`、`apiKey`、`privateKey`、`credentialPath`、`passphraseFile` 等组合字段名也不能绕过。
-- path encoder 按运行时 roots 选择最长边界，输出 `<home>`、`<workspace>`、`<ohbaby-home>`、`<tmp>` 或 external hash；POSIX 上收到 Windows drive/UNC、drive-relative 或反斜杠 traversal 时同样保守 hash。
+- definition builder 在 error 到 trace 的每个 level 都拒绝 prompt/completion/reasoning/body/command/input/output/request/response/config/context/authorization/token 等正文槽位；字段 key 先 canonicalize，camel/snake/kebab 组合也不能绕过。event/component/level/fields 在构造入口各读取一次，enum value、component、level 与 external-ID kind 都来自闭合集合。
+- path encoder 按运行时 roots 选择最长边界，输出 `<home>`、`<workspace>`、`<ohbaby-home>`、`<tmp>` 或 external hash；POSIX 上收到 Windows drive/UNC、drive-relative 或反斜杠 traversal 时同样保守 hash。相对路径的 assignment key canonicalize 后只要命中 auth/secret/token/credential/passphrase/cookie/password 等敏感片段，或出现 Bearer marker，就从该处起保守 redaction。
 - 内置实体名称只能来自静态 enum allowlist；用户定义实体走始终 hash 的单向 encoder，即使同名也不会被调用点伪装成内置。
 - URL 不保留 userinfo、hostname/IP、path、query 或 fragment，只记录 origin hash；绝对路径 root 替换后的 suffix 仍执行 credential 清洗和 512-byte 上限。
 - `safeError` 对外部错误使用静态 message 和 name/code allowlist，每个 accessor 只读取一次；不复制 provider body，也不公开最终 `SafeLogError` 或 normalization helper。
 - 默认 writer 初始化/运行失败均 fail-open、once notify；显式坏配置 fail-fast；并发 dispose 加入同一个 drain，满队列退出仍写一次 drop summary。
 - 调用点的 definition/input 编码错误只丢弃当前事件，不消耗 unavailable 或永久关闭 logger；其后真实 writer failure 仍按合同退化。
+- 被 level 抑制的事件在读取输入字段和运行 encoder 前返回；50,000 字符 trace path 的 getter 在默认 info logger 下读取次数为 0。
 - TUI active phase 在 Ink 内提示 unavailable；若首次失败发生在 UI 退出后的 dispose，只输出一条固定、非 JSON 警告，且不改变原退出码。
 - 16 KiB 路径只先删 stack/可选字段，必填字段不删除；无法满足上限时拒绝事件并 fail-open。
 - process logger 的真实文件 integration 验证权限、轮转、保留、双真实子进程并发轮转、runtime write failure、short-write 写满、zero-progress、drop summary、非关闭 flush timeout、尾记录 drain 与受控 writer close hang；hang 子进程在 deadline 后按原 exit code `23` 退出。
@@ -222,6 +231,12 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 
 基于 `1fde165` 的下一次开放式终审又找到两类门禁边界：CLI 可通过 `ohbaby-server`、包 subpath 或 `src/dist` 路径重新静态加载 agent；logger 还存在 external-ID kind 自由前缀、root 匹配后的 mixed-separator traversal，以及安全数值元数据与敏感词门相冲突的问题。最终补丁同时扩大 agent/server import contract、约束 external-ID kind、让 `textLength/tokenCount` 只对数值 encoder 开放，并在 root 匹配后再次规范化 suffix。compiled Web harness 也开始把独立 daemon auth token 传入最终文件扫描，不再把 provider API key 与 daemon authorization 视为两份证据。
 
+后续开放式复核继续发现：level filter 位于编码后、enum/component/level 的运行时闭合与 stateful metadata 快照不足、credential cleaner 逐项枚举会漏常见 marker，以及 CLI import lint 可从 dynamic/CommonJS/Node 24 builtin loader 等常见路径旁路。`15986fe` 至 `1ecbd9e` 逐层改为 encode 前过滤、闭合集合、单次快照和基于 canonical forbidden fragment 的通用 assignment redaction；CLI contract 也覆盖静态/dynamic/CommonJS 与常见反射 loader。这里同时明确边界：lint 是普通开发的自动防回归门，不是恶意源码安全沙箱；刻意使用 inline disable、任意 `Reflect`/descriptor/dataflow 的贡献仍由 code review 与 production bundle/模块解析验收负责，不能靠无限追加 selector 获得虚假的完备性。
+
+credential cleaner 的最后收口没有继续扩充正则：dotted/bracket/超长 assignment key 先按完整路径段 canonicalize，再以单次字符扫描识别 delimiter，避免敏感前缀被 padding 挤出，也避免无 delimiter 长字符串触发正则回溯。运行时/安全终审在 `84872f3` 上给出 **PASS、无 P0/P1/P2**，CLI/性能终审基于相同合同边界给出 **PASS、无 P0/P1/P2**；最终 production Web E2E 也在该代码之后重新 build 并得到 UI/backend/cleanup/diagnostics 四项 PASS。
+
+测试/文档终审先拒绝了不准确的 policy error 示例、落后的状态和未绑定 revision 的 Web evidence（1 个 P2、2 个 P3）。三处按实现与真实复跑事实修正后，同一代理重新核对安全合同、完整 revision、测试数字、格式基线与证据边界，最终给出 **PASS、无 P0/P1/P2/P3**。因此三路终审均已闭环；历史 PASS/FAIL 仍按发生顺序保留，避免把审查过程改写成一次性全绿。
+
 这轮结果也修正了“多轮 AI 复审最终 PASS 就等于不会再发现问题”的错误预期。本文保留每轮 verdict 的历史事实，但最终结论必须以最新代码、独立证据与重新开放式审查为准，不能要求后续审查者只核对既有 checklist。
 
 ## 10. 当前交付边界
@@ -229,4 +244,4 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 - 当前分支包含分阶段 commits；
 - 尚未 merge 到 `main`；
 - 尚未 push 远程；
-- 最终子代理复审和必要修订完成前，不进行 merge/push。
+- 三路最终子代理复审与必要修订均已完成，后续仍由用户决定是否 merge/push。

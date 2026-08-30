@@ -54,10 +54,10 @@
 - `level`：第 3 节五种值之一；
 - `event`：稳定的点分语义名，不使用自然语言句子；
 - `component`：稳定、低基数的内置组件名；
-- `event`、`component`、level 与允许的字段 key **MUST** 由具字面量约束的 event definition 同时声明，调用时不能传入自由字符串；definition **SHOULD** 由模块级 `const` 复用；
+- `event`、`component`、level 与允许的字段 key **MUST** 由具字面量约束的 event definition 同时声明，调用时不能传入自由字符串；builder 必须在入口把 event/component/level/fields 各读取一次，并对同一快照完成校验和保存；definition **SHOULD** 由模块级 `const` 复用；
 - 字段 key 必须对大小写和组合命名保守检查正文/凭据词片段；`requestBody`、`apiToken`、`apiKey`、`privateKey`、`credentialPath`、`passphraseFile` 等不能借 camelCase 绕过禁区；
 - 每个 definition **MUST** 为每个字段指定 encoder（数值/布尔、受限 enum、ohbaby ID、hash 后的外部 ID、规范化路径/URL、伪名化名称或安全错误）；
-- external ID encoder 的 `kind` 是 schema 元数据，必须是受限长度、低基数、无敏感词的稳定 label，不能把调用点自由字符串拼到 hash 前缀；
+- enum value 与 external ID encoder 的 `kind` 是 schema 元数据，必须来自实现内闭合集合；不能把调用点自由字符串注册成 enum，或拼到 hash 前缀；
 - `textLength`、`tokenCount` 只允许绑定数值 encoder；同名 path/string/ID 等 encoder 仍按正文槽位拒绝；
 - 普通业务调用面 **MUST NOT** 暴露开放的 `Record<string, string>`、自由 `message` 或 `child(userInput)`；
 - error 字段由 definition 内的 error encoder 调用统一 `safeError()` 产生，调用者不能构造最终 `SafeLogError`；
@@ -68,8 +68,10 @@
 一个合理的错误事件示例：
 
 ```json
-{"ts":"2026-08-29T08:01:02.003Z","level":"error","event":"provider.request.failed","component":"llm","operationId":"op_ab12","attempt":3,"error":{"name":"TimeoutError","code":"ETIMEDOUT","message":"Provider request timed out"}}
+{"ts":"2026-08-29T08:01:02.003Z","level":"error","event":"provider.request.failed","component":"llm","operationId":"op_ab12","attempt":3,"error":{"name":"Error","code":"ETIMEDOUT","message":"An external operation failed"}}
 ```
+
+其中 error 的 name/code 只能来自实现内 allowlist，message 是统一静态摘要；外部 provider 的原始 name/message、response body 或 cause 不进入该事件。
 
 首版固定编码上限：
 
@@ -121,7 +123,7 @@
 
 无法匹配任何允许根的绝对路径应保守写成 `<external>/<short-hash>`，不保留原始父目录或文件名。绝对路径识别必须与当前宿主平台无关：POSIX 上收到 Windows drive/UNC 路径、Windows 上收到 POSIX 路径时，也不能把它误当成可原样保留的相对路径。root 匹配后的 suffix 仍必须按其分隔符语义重新消解；foreign-platform 的 `..`、Windows drive-relative（如 `C:..\\x`）或绝对/相对混合分隔符不能绕过越界检查。
 
-path encoder 只接受调用点语义上已经是“路径”的值，并负责 root 替换、路径边界、长度和已知 credential 形态清洗；它不是能判断任意自然语言是否来自 prompt 的通用 DLP。正文不进入路径字段，靠第 4 节的封闭 event definition 和代码审查保证。相对路径可以在消解 `.`/`..`、清除越界前缀并通过 credential 清洗后保留；因此“所有自然语言片段都必须从合法文件名消失”不是本合同。
+path encoder 只接受调用点语义上已经是“路径”的值，并负责 root 替换、路径边界、长度和 credential assignment 清洗；assignment key 从当前路径段完整提取（包括 dotted/bracket 形式），canonicalize 后只要含 auth/secret/token/credential/passphrase/cookie/password 及已列 key 类禁区片段，或值出现 Bearer marker，就从该 marker 起保守替换为 `<redacted>`。它不是能判断任意自然语言是否来自 prompt 的通用 DLP。正文不进入路径字段，靠第 4 节的封闭 event definition 和代码审查保证。相对路径可以在消解 `.`/`..`、清除越界前缀并通过 credential 清洗后保留；因此“所有自然语言片段都必须从合法文件名消失”不是本合同。
 
 ### 6.2 URL
 
@@ -218,7 +220,8 @@ path encoder 只接受调用点语义上已经是“路径”的值，并负责 
 实现阶段应以 lint/类型/API 共同约束：
 
 - `packages/ohbaby-agent/src/**` 与 `packages/ohbaby-server/src/**` 默认禁止直接使用 `process.stdout`、`process.stderr`、`console.*`，仅对经过审查、确实拥有输出协议的极窄入口做 allowlist；
-- `packages/ohbaby-cli/src/**` 禁止静态运行时导入完整 `ohbaby-agent`、会传递加载 agent 的 `ohbaby-server`，以及两者的 `src/dist` 内部路径；组合根通过显式 lazy loader 加载 runtime，类型导入与轻量 SDK 合同不受此限制；
+- `packages/ohbaby-cli/src/**` 禁止静态运行时导入完整 `ohbaby-agent`、会传递加载 agent 的 `ohbaby-server`，以及两者的 package subpath、`src/dist` 内部路径；非组合根也禁止用变量 dynamic import 绕过，组合根只允许显式 `importRuntimeModule(specifier)` loader shape；类型导入与轻量 SDK 合同不受此限制；
+- CLI 门禁还拒绝 `node:module`/`module`、`process.getBuiltinModule`、`eval`/`new Function` 等常见 eager loader。该 lint 是普通开发防回归合同，不是对恶意源码或任意反射/dataflow 的安全沙箱；inline disable 与刻意绕过仍必须由 code review 和 production bundle/模块解析验收发现；
 - logger 只接受模块级静态 event definition 及其经过 schema 推导的 input；不公开开放 fields record，也不接受 `unknown`、`any` 或任意嵌套 record；
 - TypeScript definition builder **MUST** 拒绝 widened string event/component；opaque brand、运行时 identity registry 和运行时格式校验 **MUST** 阻止结构伪造。顶层 `const` 复用是 **SHOULD**，首版不要求自定义 AST lint；
 - writer 只接收已经过策略层编码的 JSONL 字符串，不接收原始对象；

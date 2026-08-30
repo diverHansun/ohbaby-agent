@@ -93,7 +93,7 @@ brand 负责 TypeScript nominality；builder 同时把创建出的对象登记�
 
 - definition 应当由模块级 `const` 复用，event/component 使用字面量和受限静态格式，不能来自请求数据；首版通过 TypeScript 字面量约束、opaque brand、运行时 identity/格式校验实现安全边界，不为“顶层声明”这一风格要求自研 AST lint；
 - component 使用封闭的内置集合；用户定义实体只能进入始终 hash 的专用 field encoder，不能成为 component/event/key；
-- 字段 encoder 首版只提供 integer/number、boolean、受限 enum、ohbaby ID、hashed external ID、normalized path/URL、始终 hash 的 user entity name 和 safe error；内置名称必须由静态 enum allowlist 表达，不提供可由调用者伪造 provenance 的联合输入，也不提供任意 text/object encoder；
+- 字段 encoder 首版只提供 integer/number、boolean、受限 enum、ohbaby ID、hashed external ID、normalized path/URL、始终 hash 的 user entity name 和 safe error；enum value 与 external-ID kind 都来自实现内的闭合集合，definition 元数据在构造入口单次快照；内置名称必须由静态 enum allowlist 表达，不提供可由调用者伪造 provenance 的联合输入，也不提供任意 text/object encoder；
 - error encoder 接收原始 unknown 只是为了立即转换，不把 raw Error 放入最终 event，也不公开可构造的 `SafeLogError`；external encoder 不接受自由 summary 字符串，使用内部稳定类别/通用摘要；
 - runtime encoder 仍检查字段、secret 形态和大小；类型系统用于防误用，不被宣称为安全沙箱；
 - process logger 将单事件 definition/input 编码错误与 JSONL framing/writer 故障分开：前者只丢当前事件，后者才进入全局不可用退化；
@@ -336,7 +336,7 @@ CLI serve 调用公开 `startDaemonServer()` 时传入 lazy diagnostics capabili
 - TUI/serve 按交互上下文显示；
 - 重试性由运行时策略决定，不写进静态 error registry。
 
-当前直接编码范围只包括已经确认的两处一致性修复：stdout renderer 的 runtime failure 保留 `IrisError.code`，TUI 使用 CLI-local helper 和 SDK 的 `isStableErrorCode()` 保持同一格式规则，并对 hostile getter/Proxy fail-safe。ESLint 在整个 CLI 源码范围拒绝完整 agent runtime、传递加载它的 server runtime，以及两者 `src/dist` 内部路径的静态运行时导入，允许 composition root 的显式 lazy loader 与 type-only 合同。它关闭新静态耦合，不宣称解决既有 `--help` 提前初始化。其余错误产品化仍需先补一个小型错误清单（建议 2–3 个真实高频错误）、代码入口、UI action、动态 retry 条件和验收场景，经用户确认后再编码。
+当前直接编码范围只包括已经确认的两处一致性修复：stdout renderer 的 runtime failure 保留 `IrisError.code`，TUI 使用 CLI-local helper 和 SDK 的 `isStableErrorCode()` 保持同一格式规则，并对 hostile getter/Proxy fail-safe。ESLint 在整个 CLI 源码范围拒绝完整 agent runtime、传递加载它的 server runtime，以及两者 package subpath、`src/dist` 内部路径的静态运行时导入；非 composition-root 文件也不能以变量 dynamic import、CommonJS loader、`process.getBuiltinModule` 或字符串求值等常见方式绕过，composition root 只允许带单行审计说明的 `importRuntimeModule(specifier)`。这是一道防止正常开发回归的静态门，不是对恶意源码、inline disable 或任意反射/dataflow 的安全沙箱；类型合同、production build 与代码审查仍共同负责边界。它关闭新 eager 耦合，不宣称解决既有 `--help` 提前初始化。其余错误产品化仍需先补一个小型错误清单（建议 2–3 个真实高频错误）、代码入口、UI action、动态 retry 条件和验收场景，经用户确认后再编码。
 
 后续设计检查点至少要审计三类现有 surface：daemon state 的 `error` 字段、server HTTP/RPC error response、TUI 的最终失败提示；还要把 supervisor `retire(reason)` 等自由 reason 改成内部 enum code 或经过批准的安全字段，不能通过另一种状态文件/response 重新引入 raw message。
 
@@ -363,9 +363,9 @@ CLI serve 调用公开 `startDaemonServer()` 时传入 lazy diagnostics capabili
 - `packages/ohbaby-server/src/runtime/daemon/{main,supervisor,types}.ts`：serve 生命周期组合；
 - `packages/ohbaby-server/src/app/create-app.ts`：logger option 与 cleanup 事件；
 - `packages/ohbaby-cli/src/cli/commands/{terminal,serve}.ts`、`src/bin.ts`、CLI runtime types/TUI options：lazy capability、root 生命周期、本地 notice source；
-- `packages/ohbaby-cli/tsconfig.json`、`tsup.config.ts`：若采用 agent 静态导入，增加直接 reference/external；
+- `packages/ohbaby-cli/tsconfig.json`、`tsup.config.ts`：保持 runtime 由 composition-root loader 延迟加载，不新增 agent/server 静态耦合；
 - `.env.example`：真实配置名；
-- `eslint.config.js`：禁止内部层直接终端写入，并禁止 CLI 新增 agent runtime 静态耦合；
+- `eslint.config.js`：禁止内部层直接终端写入，并拦截 CLI 中静态、未批准 dynamic、CommonJS 与常见反射加载造成的 agent/server runtime eager 耦合；
 - 各模块共置测试和 `tests/integration/cli/**`：合同与真实进程覆盖；
 - Web compiled e2e 测试：用户行为与 serve 日志联合验收。
 

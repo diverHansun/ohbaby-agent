@@ -30,7 +30,7 @@
 - `info` 允许 error/warn/info，抑制 debug/trace；
 - `trace` 允许全部 level；
 - 非法值由配置解析直接拒绝；
-- level 只控制事件是否出现，不改变字段策略。
+- level 只控制事件是否出现，不改变字段策略；被过滤事件在读取/编码字段前返回，不能让超长 path 或 hostile getter 阻塞主循环。
 
 ### T-U2：最小 JSONL 合同
 
@@ -62,7 +62,7 @@
 
 这里不把 encoder 冒充成“理解任意字符串语义”的 DLP：路径 encoder 合法保留相对路径或受控后缀，因此任意 prompt sentinel 若被调用者错误地当成路径传入，编码器无法凭空识别它。真正的硬边界由两层测试组成：
 
-- event definition 不能声明 prompt/body/command/output 等正文槽位，大小写或 camelCase 组合（如 `requestBody`、`apiToken`、`apiKey`、`privateKey`、`credentialPath`、`passphraseFile`）也不能绕过；调用点不能传动态字段或自由 message；
+- event definition 不能声明 prompt/body/command/output 等正文槽位，大小写、camelCase、snake/kebab 组合（如 `requestBody`、`apiToken`、`apiKey`、`privateKey`、`credentialPath`、`passphraseFile`、`auth_token`、`secret_key`）也不能绕过；调用点不能传动态字段或自由 message；
 - ID、URL、entity name、Error 等 encoder 按各自合法输入测试拒绝、hash、规范化或静态摘要；path encoder 使用真实路径样本验证 root 替换、外部 hash 和凭据模式清洗，而不要求删除所有可能恰好出现在文件名中的自然语言。
 
 最终 E2E 仍以真实 prompt/tool/HTTP body/credential sentinel 扫描日志；一旦它们从真实正文流进入 JSONL 就判失败。MCP 首版没有对应日志事件或正文 encoder，其边界由 definition 负向门、调用面检查和既有 MCP 集成测试共同证明，不把塞入 command observation 字段的字符串冒充成真实 MCP 调用链。这个测试验证架构没有正文通路，不声称用正则识别所有可能的人类文本。
@@ -176,10 +176,11 @@ definition 的安全合同由 TypeScript compile fixture 与 runtime contract te
 
 ### T-C6：CLI 轻量依赖边界
 
-- ESLint 对整个 `packages/ohbaby-cli/src/**` 拒绝 `ohbaby-agent` 与传递加载它的 `ohbaby-server` 运行时静态导入，包 subpath 也不得绕过；
-- type-only package import 允许；agent/server 的 `src/dist` 内部相对导入拒绝；
-- contract test 用 ESLint Node API 对三种 probe 自动验证，不能只靠人工观察 bundle；
-- composition root 的显式 dynamic loader 保持唯一运行时入口；本门只防止新静态耦合，不把既有 `--help` 初始化延迟冒充成本批性能优化。
+- ESLint 对整个 `packages/ohbaby-cli/src/**` 拒绝 `ohbaby-agent` 与传递加载它的 `ohbaby-server` 运行时静态导入，包 subpath 也不得绕过；非 composition-root 文件还拒绝变量 dynamic import；
+- type-only package import 允许；agent/server 的 `src/dist` 内部相对导入拒绝；`node:module`/`module`、`process.getBuiltinModule`、`eval`/`new Function` 等常见同步或反射 loader 也拒绝；
+- contract test 用 ESLint Node API 对 package/subpath/src/dist 的静态与动态 probe、变量 dynamic import、CommonJS/常见反射 loader、type-only 合同自动验证，不能只靠人工观察 bundle；
+- composition root 只允许显式 `importRuntimeModule(specifier)` loader shape；本门只防止新 eager 耦合，不把既有 `--help` 初始化延迟冒充成本批性能优化。
+- lint 是普通开发防回归门，不宣称能对抗故意写下 inline disable、任意 `Reflect`/descriptor/dataflow 的源码贡献者；此类变更由 code review 与 production bundle/模块解析验收阻止，不继续堆叠伪安全的 AST 黑名单。
 
 ## 5. 文件与真实进程集成测试
 

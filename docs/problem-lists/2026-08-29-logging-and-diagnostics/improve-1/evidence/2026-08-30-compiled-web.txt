@@ -1,5 +1,6 @@
 Real compiled Web / serve acceptance (sanitized harness output)
 Date: 2026-08-30
+Revision under test: 84872f3b38ee6356ebf27b21bc792d95f791e8d7
 Command: pnpm test:e2e:compiled-web
 Browser: Codex in-app Browser, local compiled production assets
 

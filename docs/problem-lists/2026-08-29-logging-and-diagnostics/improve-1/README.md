@@ -1,6 +1,6 @@
 # Logging 与 Diagnostics 改造文档集
 
-> 状态：补充独立审查指出的问题已完成代码修复，正在复跑全量与独立终审；未 merge、未 push。
+> 状态：代码、全量测试、真实 TUI/Web E2E 与三路独立终审均已完成；无剩余 P0/P1/P2/P3；未 merge、未 push。
 >
 > 分支：`codex/logging-diagnostics-docs`
 >
