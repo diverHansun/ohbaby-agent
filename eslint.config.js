@@ -169,6 +169,16 @@ export default tseslint.config(
               name: "ohbaby-server",
               allowTypeImports: true,
             },
+            {
+              message:
+                "CLI production code must not create CommonJS loaders that bypass the runtime import boundary.",
+              name: "node:module",
+            },
+            {
+              message:
+                "CLI production code must not create CommonJS loaders that bypass the runtime import boundary.",
+              name: "module",
+            },
           ],
           patterns: [
             {
@@ -197,7 +207,7 @@ export default tseslint.config(
           message:
             "CLI production code must not dynamically load agent/server runtimes outside the composition-root loader.",
           selector:
-            "ImportExpression[source.type='Literal'][source.value=/ohbaby-(?:agent|server)/]",
+            "ImportExpression[source.type='Literal'][source.value=/(?:ohbaby-(?:agent|server)|^(?:node:)?module$)/]",
         },
       ],
     },

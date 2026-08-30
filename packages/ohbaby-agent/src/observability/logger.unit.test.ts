@@ -246,6 +246,33 @@ describe("diagnostic event contract", () => {
       diagnosticField.stringEnum([dynamicValue]);
     }).toThrow("static labels");
   });
+
+  it("does not trust caller-owned array methods when validating enum labels", () => {
+    const values = ["RUNTIME_ENUM_SECRET_SENTINEL"] as unknown as ["tui"] & {
+      some: () => boolean;
+    };
+    values.some = (): boolean => false;
+    expect(() => diagnosticField.stringEnum(values)).toThrow("static labels");
+  });
+
+  it("rejects components and levels outside the closed runtime sets", () => {
+    expect(() =>
+      defineDiagnosticEvent({
+        component: "tenantsecret",
+        event: "diagnostics.invalid_component",
+        fields: {},
+        level: "info",
+      } as never),
+    ).toThrow("component must be a stable identifier");
+    expect(() =>
+      defineDiagnosticEvent({
+        component: "diagnostics",
+        event: "diagnostics.invalid_level",
+        fields: {},
+        level: "off",
+      } as never),
+    ).toThrow("level must be a stable identifier");
+  });
 });
 
 describe("diagnostic normalization", () => {
@@ -321,6 +348,10 @@ describe("diagnostic normalization", () => {
       "logs/Bearer DYNAMIC_BEARER_SECRET/file.json",
       "logs/access-key=DYNAMIC_ACCESS_KEY/file.json",
       "logs/signing_key=DYNAMIC_SIGNING_KEY/file.json",
+      "logs/authorization=Basic DYNAMIC_BASIC_SECRET",
+      "logs/authorization: Digest DYNAMIC_DIGEST_SECRET",
+      "logs/cookie=session=DYNAMIC_SESSION; csrf=DYNAMIC_CSRF",
+      "logs/private_key=-----BEGIN PRIVATE KEY----- DYNAMIC_PRIVATE",
     ]) {
       const normalized = normalizeDiagnosticPath(credentialPath, {});
       expect(normalized).not.toContain("DYNAMIC_");

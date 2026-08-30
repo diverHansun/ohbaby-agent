@@ -139,6 +139,28 @@ describe("CLI runtime import boundary lint", () => {
     },
   );
 
+  it.each(["node:module", "module"])(
+    "rejects CommonJS loader access through %s",
+    async (specifier) => {
+      await expect(
+        lintProbe(
+          `import { createRequire } from ${JSON.stringify(specifier)}; const load = createRequire(import.meta.url); void load;`,
+          cliCompositionProbePath,
+        ),
+      ).resolves.toEqual([expect.stringMatching(/^no-restricted-imports:/u)]);
+      await expect(
+        lintProbe(
+          `const moduleApi = await import(${JSON.stringify(specifier)}); void moduleApi;`,
+          cliRuntimeProbePath,
+        ),
+      ).resolves.toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/^no-restricted-syntax:/u),
+        ]),
+      );
+    },
+  );
+
   it.each([
     "ohbaby-agent",
     "ohbaby-agent/subpath",

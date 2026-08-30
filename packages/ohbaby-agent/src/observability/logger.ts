@@ -75,7 +75,20 @@ const definitions = new WeakSet<object>();
 const encoders = new WeakSet<object>();
 const numericEncoders = new WeakSet<object>();
 const EVENT_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9_]*)+$/;
-const COMPONENT_PATTERN = /^[a-z][a-z0-9-]{0,47}$/;
+const DIAGNOSTIC_COMPONENTS = new Set<DiagnosticsComponent>([
+  "diagnostics",
+  "llm",
+  "migration",
+  "server",
+  "session",
+]);
+const LOG_LEVELS = new Set<LogLevel>([
+  "error",
+  "warn",
+  "info",
+  "debug",
+  "trace",
+]);
 const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
   "accesskey",
   "apikey",
@@ -111,8 +124,8 @@ const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
   "token",
 ]);
 const KEY_VALUE_CREDENTIAL_PATTERN =
-  /(authorization|api[_-]?key|access[_-]?(?:key|token)|cookie|password|private[_-]?key|signing[_-]?key)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/gi;
-const BEARER_CREDENTIAL_PATTERN = /\bbearer\s+[^\s,;]+/gi;
+  /(authorization|api[_-]?key|access[_-]?(?:key|token)|cookie|password|private[_-]?key|signing[_-]?key)\s*[:=][\s\S]*/gi;
+const BEARER_CREDENTIAL_PATTERN = /\bbearer\s+[\s\S]*/gi;
 const MAX_SAFE_STRING_BYTES = 512;
 const EXTERNAL_ID_KINDS = new Set(["operation", "provider", "session"]);
 const SAFE_NUMERIC_CONTENT_FIELD_NAMES = new Set(["textLength", "tokenCount"]);
@@ -406,10 +419,23 @@ export const diagnosticField = Object.freeze({
       ...DiagnosticEnumValue[],
     ],
   >(values: Values): DiagnosticFieldEncoder<Values[number]> {
-    if (values.some((value) => !DIAGNOSTIC_ENUM_VALUES.has(value))) {
+    if (!Array.isArray(values) || values.length === 0) {
       throw new TypeError("diagnostic enum values must be static labels");
     }
-    const allowed = new Set<string>(values);
+    const snapshot: DiagnosticEnumValue[] = [];
+    const candidateValues = values as readonly unknown[];
+    const valueCount = candidateValues.length;
+    for (let index = 0; index < valueCount; index += 1) {
+      const value = candidateValues[index];
+      if (
+        typeof value !== "string" ||
+        !DIAGNOSTIC_ENUM_VALUES.has(value as DiagnosticEnumValue)
+      ) {
+        throw new TypeError("diagnostic enum values must be static labels");
+      }
+      snapshot.push(value as DiagnosticEnumValue);
+    }
+    const allowed = new Set<string>(snapshot);
     return createEncoder((value) => {
       if (!allowed.has(value)) {
         throw new TypeError("diagnostic enum field contains an unknown value");
@@ -438,8 +464,11 @@ export function defineDiagnosticEvent<
   ) {
     throw new TypeError("diagnostic event must be a stable dotted identifier");
   }
-  if (!COMPONENT_PATTERN.test(specification.component)) {
+  if (!DIAGNOSTIC_COMPONENTS.has(specification.component)) {
     throw new TypeError("diagnostic component must be a stable identifier");
+  }
+  if (!LOG_LEVELS.has(specification.level)) {
+    throw new TypeError("diagnostic level must be a stable identifier");
   }
   const entries = Object.entries(specification.fields);
   if (entries.length > 16 || entries.some(([key]) => key === "truncated")) {
