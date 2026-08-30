@@ -45,6 +45,7 @@ ohbaby 目前已经有用户提示、异常、调试输出、迁移告警、daem
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 单元、契约、集成、真实进程、TUI 与 Web E2E 验收 |
 | [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实际落地范围、测试结果、用户可见证据与剩余边界 |
 | [logging-policy.md](./logging-policy.md) | 日志等级、字段、敏感信息、终端所有权、文件生命周期的规范合同 |
+| [`evidence/`](./evidence/) | 最终真实 TUI PTY 与 compiled Web/serve 的脱敏 transcript/harness 输出 |
 
 ## 4. 实施顺序
 

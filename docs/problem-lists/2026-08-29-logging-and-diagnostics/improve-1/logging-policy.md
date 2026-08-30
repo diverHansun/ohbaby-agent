@@ -55,7 +55,7 @@
 - `event`：稳定的点分语义名，不使用自然语言句子；
 - `component`：稳定、低基数的内置组件名；
 - `event`、`component`、level 与允许的字段 key **MUST** 由具字面量约束的 event definition 同时声明，调用时不能传入自由字符串；definition **SHOULD** 由模块级 `const` 复用；
-- 字段 key 必须对大小写和组合命名保守检查正文/凭据词片段；`requestBody`、`apiToken` 等不能借 camelCase 绕过 `request`、`body`、`token` 禁区；
+- 字段 key 必须对大小写和组合命名保守检查正文/凭据词片段；`requestBody`、`apiToken`、`apiKey`、`privateKey`、`credentialPath`、`passphraseFile` 等不能借 camelCase 绕过禁区；
 - 每个 definition **MUST** 为每个字段指定 encoder（数值/布尔、受限 enum、ohbaby ID、hash 后的外部 ID、规范化路径/URL、伪名化名称或安全错误）；
 - 普通业务调用面 **MUST NOT** 暴露开放的 `Record<string, string>`、自由 `message` 或 `child(userInput)`；
 - error 字段由 definition 内的 error encoder 调用统一 `safeError()` 产生，调用者不能构造最终 `SafeLogError`；
@@ -117,7 +117,7 @@
 
 规范化时按最长、最具体的前缀优先，将匹配部分替换为 `<workspace>`、`<ohbaby-home>`、`<home>` 或 `<tmp>`。这些只是输出语义，不是固定目录，也不要求用户单独配置。
 
-无法匹配任何允许根的绝对路径应保守写成 `<external>/<short-hash>`，不保留原始父目录或文件名。绝对路径识别必须与当前宿主平台无关：POSIX 上收到 Windows drive/UNC 路径、Windows 上收到 POSIX 路径时，也不能把它误当成可原样保留的相对路径。
+无法匹配任何允许根的绝对路径应保守写成 `<external>/<short-hash>`，不保留原始父目录或文件名。绝对路径识别必须与当前宿主平台无关：POSIX 上收到 Windows drive/UNC 路径、Windows 上收到 POSIX 路径时，也不能把它误当成可原样保留的相对路径。相对路径也必须按其分隔符语义消解：foreign-platform 的 `..`、Windows drive-relative（如 `C:..\\x`）或混合分隔符不能绕过越界检查。
 
 path encoder 只接受调用点语义上已经是“路径”的值，并负责 root 替换、路径边界、长度和已知 credential 形态清洗；它不是能判断任意自然语言是否来自 prompt 的通用 DLP。正文不进入路径字段，靠第 4 节的封闭 event definition 和代码审查保证。相对路径可以在消解 `.`/`..`、清除越界前缀并通过 credential 清洗后保留；因此“所有自然语言片段都必须从合法文件名消失”不是本合同。
 
@@ -145,6 +145,7 @@ path encoder 只接受调用点语义上已经是“路径”的值，并负责 
 
 - 只输出允许的静态/分类后 `name`、稳定 `code`、规范化且限长的 `message`，必要时输出清洗后的限长 `stack`；外部 Error 的 name/code 必须来自静态 allowlist，不能只靠字符正则判断“看起来稳定”；
 - 默认不复制任意 `Error.message`；provider/MCP/HTTP/第三方 SDK 等外部来源必须使用 event definition 提供的静态通用摘要；
+- `name`、`code` 等允许字段必须各自只读取一次，并对同一快照完成校验和输出；throwing/stateful getter 或 Proxy 不得利用二次读取绕过 allowlist；
 - 只有已审计的内部错误类别可以通过专用 encoder 保留清洗后的 message；
 - 移除已知 credential 形态、URL query/userinfo，并应用路径规范化；
 - stack 只在确有排障价值且经过清洗时出现；必须删除会重复原始 message 的首行，只保留规范化后的 frame；
@@ -184,6 +185,7 @@ path encoder 只接受调用点语义上已经是“路径”的值，并负责 
 ### 9.4 队列与 flush
 
 - 写入使用最多 1,024 个已编码事件的异步串行队列；
+- 每条已编码 JSONL frame 必须按 UTF-8 bytes 写满；底层合法 short write 要循环补写，零进展、越界返回或异常按 writer failure 处理，不能留下半行却把计数推进到完整长度；
 - 队列满时，对新事件查找队列中最早且严重度更低的事件并淘汰；若不存在更低级事件，则丢弃新事件。因而 error 可淘汰 trace/debug/info/warn，但全 error 队列会丢弃新 error；
 - 丢弃计数按 level 累计；队列随后首次降到容量以下时，在下一普通事件前最多插入一条 `logger.events_dropped` 安全汇总，dispose 时也尝试写一次；该汇总走内部编码路径，不递归调用 logger；
 - `flush()` 是不关闭 logger 的 2 秒 barrier，只供组合/测试在进程仍继续时使用；
@@ -214,6 +216,7 @@ path encoder 只接受调用点语义上已经是“路径”的值，并负责 
 实现阶段应以 lint/类型/API 共同约束：
 
 - `packages/ohbaby-agent/src/**` 与 `packages/ohbaby-server/src/**` 默认禁止直接使用 `process.stdout`、`process.stderr`、`console.*`，仅对经过审查、确实拥有输出协议的极窄入口做 allowlist；
+- `packages/ohbaby-cli/src/**` 禁止静态运行时导入完整 `ohbaby-agent` 或其源码内部路径；组合根通过显式 lazy loader 加载 runtime，类型导入与轻量 SDK 合同不受此限制；
 - logger 只接受模块级静态 event definition 及其经过 schema 推导的 input；不公开开放 fields record，也不接受 `unknown`、`any` 或任意嵌套 record；
 - TypeScript definition builder **MUST** 拒绝 widened string event/component；opaque brand、运行时 identity registry 和运行时格式校验 **MUST** 阻止结构伪造。顶层 `const` 复用是 **SHOULD**，首版不要求自定义 AST lint；
 - writer 只接收已经过策略层编码的 JSONL 字符串，不接收原始对象；

@@ -62,10 +62,10 @@
 
 这里不把 encoder 冒充成“理解任意字符串语义”的 DLP：路径 encoder 合法保留相对路径或受控后缀，因此任意 prompt sentinel 若被调用者错误地当成路径传入，编码器无法凭空识别它。真正的硬边界由两层测试组成：
 
-- event definition 不能声明 prompt/body/command/output 等正文槽位，大小写或 camelCase 组合（如 `requestBody`、`apiToken`）也不能绕过；调用点不能传动态字段或自由 message；
+- event definition 不能声明 prompt/body/command/output 等正文槽位，大小写或 camelCase 组合（如 `requestBody`、`apiToken`、`apiKey`、`privateKey`、`credentialPath`、`passphraseFile`）也不能绕过；调用点不能传动态字段或自由 message；
 - ID、URL、entity name、Error 等 encoder 按各自合法输入测试拒绝、hash、规范化或静态摘要；path encoder 使用真实路径样本验证 root 替换、外部 hash 和凭据模式清洗，而不要求删除所有可能恰好出现在文件名中的自然语言。
 
-最终 E2E 仍以真实 prompt/tool/body sentinel 扫描日志；一旦它们从真实正文流进入 JSONL 就判失败。这个测试验证架构没有正文通路，不声称用正则识别所有可能的人类文本。
+最终 E2E 仍以真实 prompt/tool/HTTP body/credential sentinel 扫描日志；一旦它们从真实正文流进入 JSONL 就判失败。MCP 首版没有对应日志事件或正文 encoder，其边界由 definition 负向门、调用面检查和既有 MCP 集成测试共同证明，不把塞入 command observation 字段的字符串冒充成真实 MCP 调用链。这个测试验证架构没有正文通路，不声称用正则识别所有可能的人类文本。
 
 ### T-U4：路径标准化
 
@@ -75,6 +75,7 @@
 - ohbaby home 由 `OHBABY_HOME` 指向自定义绝对路径；
 - tmp/home/workspace 重叠或包含相似前缀时按路径边界匹配；
 - Windows drive/UNC 与 POSIX 路径；外来平台的绝对路径在当前宿主上也不能被当成普通相对路径保留；
+- Windows drive-relative、反斜杠相对路径与混合分隔符必须先按来源语义消解，不能通过 `..` 越界；
 - 未匹配绝对路径变成 `<external>/<short-hash>`；
 - 相对路径保持相对且不能通过 `..` 重新暴露外部绝对路径。
 
@@ -101,7 +102,7 @@
 
 - 首版只开放保守的 external error encoder，不开放“内部安全 message”、stack 或 cause encoder；未来若新增这些能力，必须在同一批次补齐路径替换、限长和 cause 限深测试后才能开放；
 - provider/HTTP/MCP 原始 error body/message 不被信任；
-- Error name/code 只来自静态 allowlist，任意自定义 name/code 不进入结果；
+- Error name/code 只来自静态 allowlist，任意自定义 name/code 不进入结果；name/code 各读取一次，stateful getter 不能让校验值与输出值不同；
 - 未知 Error、throwing getter 与非 Error 值得到最小占位；
 - token、URL query、authorization 形态不会因错误 message/stack 被复制；
 - `safeError()` 自身永不抛出。
@@ -111,6 +112,7 @@
 使用注入的 clock/id/文件 adapter 或 internal test seam 覆盖：
 
 - 串行顺序；
+- 底层 `FileHandle.write()` 合法 short write 会循环写满 UTF-8 frame；零进展或异常进入 writer failure，日志不得留下被当作成功的半行；
 - 单事件编码错误与 writer 生命周期隔离；
 - 1,024 个事件队列上限；满时新事件只淘汰“最早且更低级”的已排队事件，否则丢弃新事件；
 - capacity 恢复/dispose 时至多一条按 level 计数的 `logger.events_dropped` 汇总；
@@ -170,6 +172,13 @@ definition 的安全合同由 TypeScript compile fixture 与 runtime contract te
 - parse/usage/handler 早期失败以及故意遗漏消费时，顶层 `finally` 恰好兜底一次；
 - 长运行 handler 在入口消费，signal/退出不会把 warning 留在内存；
 - warning 文案不进入 JSONL，重复消费不会重复展示。
+
+### T-C6：CLI 轻量依赖边界
+
+- ESLint 对整个 `packages/ohbaby-cli/src/**` 拒绝 `ohbaby-agent` 运行时静态导入；
+- type-only package import 允许；agent 源码内部相对导入拒绝；
+- contract test 用 ESLint Node API 对三种 probe 自动验证，不能只靠人工观察 bundle；
+- composition root 的显式 dynamic loader 保持唯一运行时入口；本门只防止新静态耦合，不把既有 `--help` 初始化延迟冒充成本批性能优化。
 
 ## 5. 文件与真实进程集成测试
 
@@ -249,23 +258,24 @@ TUI phase-aware 行为采用分层证据：Ink/app contract 验证 active phase 
 - stdout renderer 的 command failure 与 runtime failure 都保留稳定 error code；
 - TUI prompt/app 的最终 `IrisError` 使用共享 `[code] message` 格式；
 - 普通 Error 仍使用安全 message，不凭空制造 code；
+- throwing getter/Proxy 不能让 CLI-local formatter 再次抛错；读取失败时退回已取得的 message 或固定占位；
 - 错误格式修复不把 stack、provider body 或 secret 带入用户界面。
 
 ## 6. TUI 实际交互 E2E
 
-单纯 pipe stdout 无法验证光标、raw mode 和 Ink 重绘，因此实施完成后必须在真实 PTY/本机终端执行一次可复现流程：
+单纯 pipe stdout 无法验证光标、raw mode 和 Ink 重绘，因此实施完成后必须在真实 PTY/本机终端执行一次与本问题直接相关的可复现核心流程：
 
 1. 使用隔离 HOME/OHBABY_HOME/LOG_DIR 和本地 scripted provider 启动真实构建后的 `ohbaby`；
 2. 输入 `/status`、`/skills` 等 slash command；
-3. 连续输入两条 prompt，确认输入节奏、光标和重绘正常；
-4. 触发一个可恢复降级和一个最终失败；
-5. 正常退出，再执行一次中断/崩溃恢复路径；
+3. 连续输入两条 prompt（或一条 prompt + 一次工具调用），确认最终成功或受控失败后输入节奏、光标和重绘正常；
+4. 至少触发一个受控最终失败，确认用户错误可读、底层 stack/JSON 不越权显示；
+5. 用 Ctrl-C 正常结束 TUI，确认终端与光标恢复、原退出码不被 diagnostics 改写；
 6. 保存 PTY transcript 或屏幕截图作为验收证据；
 7. 检查终端没有 `{\"record\":...}`、JSONL、stack 或 logger warning 插入；
 8. prompt/model/tool sentinel 只允许出现在对应消息/工具 UI 区域且次数符合流程，不得作为额外 JSON/logger/stack 行出现；
 9. 检查日志文件有对应安全事件，并扫描正文 sentinel/secret/path 不存在。
 
-自动化优先复用系统可用 PTY harness；若跨平台 harness 需要新依赖，先用现有 child-process integration + Ink contract tests 作为 CI 门，再把本机真实 PTY 作为发布前必跑验收，不为一次测试盲目引入重量依赖。最终验收文档必须写清“自动化”还是“人工/agent 实跑”，不能混称。
+自动化优先复用系统可用 PTY harness；若跨平台 harness 需要新依赖，先用现有 child-process integration + Ink contract tests 作为 CI 门，再把本机真实 PTY 作为发布前必跑验收，不为一次测试盲目引入重量依赖。可恢复降级、运行中强杀与下一次启动恢复属于扩展 release 场景：有对应 fixture 时执行，但不冒充本次“终端不再被日志污染”的核心完成门。最终验收文档必须写清“自动化”还是“人工/agent 实跑”，不能混称。
 
 ## 7. Web/serve E2E
 
@@ -345,7 +355,7 @@ pnpm test:e2e:compiled-web
 
 `pnpm format:check` / `pnpm preflight` 仍应执行并记录，但若它只命中实施前已存在、且本轮没有触及的 format baseline，则不得为了本功能机械改写无关文件。此时必须同时满足：本轮触及文件单独通过 Prettier、`git diff --check` 通过、验收文档记录 baseline 数量；这属于仓库级 release gate 的显式例外，不得写成“preflight 已通过”。
 
-真实 TUI PTY 流程和真实 serve 进程测试另外记录运行命令、隔离目录、退出码、用户可见输出摘要和脱敏后的 JSONL 样例。
+真实 TUI PTY 流程和 compiled Web/serve 测试另外保存脱敏证据文件，记录运行命令、隔离范围、退出码/cleanup、用户可见输出摘要和 JSONL 样例/事件清单；浏览器 UI 证据与 harness 自动断言必须分开标注。
 
 ## 11. 完成定义
 

@@ -1,0 +1,51 @@
+Real compiled TUI / PTY acceptance (sanitized excerpt)
+Date: 2026-08-30
+Working directory: /tmp/ohbaby-tui-final-acceptance/workspace
+Isolation: HOME, USERPROFILE, OHBABY_HOME, OHBABY_LOG_DIR,
+OHBABY_DB_PATH and OHBABY_STORAGE_ROOT all pointed below
+/tmp/ohbaby-tui-final-acceptance.
+Command: node <repo>/packages/ohbaby-cli/dist/bin.js
+
+Visible interaction:
+
+> /skills
+Skills
+No skills
+
+> /status
+Status
+Runtime    idle
+Session    Unavailable
+Permission auto / default
+Model      fake-model
+Context    Unavailable
+Tools      21 builtin, 0 module, 2 skill, 2 mcp
+MCP        none
+Project    <tmp>/workspace
+Log        <tmp>/logs/tui/<process>.jsonl
+
+| HELLO_TUI_FINAL_SENTINEL
+<input box returned after the local provider connection failure>
+
+| SECOND_TUI_FINAL_SENTINEL
+<input box returned again after the local provider connection failure>
+
+Ctrl-C restored the cursor and exited with code 0.
+
+Negative terminal scan:
+- no {"record":...}
+- no ui.command.*
+- no JSONL frame
+- no stack or logger warning inserted into the input/transcript
+
+Persisted JSONL (4 complete lines):
+{"component":"diagnostics","event":"diagnostics.started","level":"info","role":"tui"}
+{"component":"migration","event":"migration.config.completed","level":"info","conflicts":0,"copied":0,"merged":0,"skipped":0}
+{"component":"migration","event":"migration.data.completed","level":"info","conflicts":0,"copied":0,"merged":0,"skipped":0}
+{"component":"session","event":"session.title_generation.failed","level":"warn","error":{"message":"An external operation failed","name":"Error"}}
+
+Negative file scan:
+- neither prompt sentinel was present
+- tui-e2e-secret-key was absent
+- the provider endpoint was absent
+- no ui.command.*, {"record":...}, raw provider error or stack was present

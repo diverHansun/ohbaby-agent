@@ -1,0 +1,24 @@
+Real compiled Web / serve acceptance (sanitized harness output)
+Date: 2026-08-30
+Command: pnpm test:e2e:compiled-web
+Browser: Codex in-app Browser, local compiled production assets
+
+Observed UI flow:
+- page title: ohbaby
+- first prompt: Read fixture.txt and report the result.
+- tool card: read fixture.txt completed
+- first final: OHBABY_COMPILED_WEB_TOOL_OK (once)
+- follow-up user message: OHBABY_COMPILED_WEB_FOLLOWUP (once)
+- follow-up final: OHBABY_COMPILED_WEB_FOLLOWUP_OK (once)
+- after refresh, the same session URL, both finals and the tool card remained
+- runtime markers were not visible in the product UI or title
+
+Harness evidence:
+E2E_UI_EVIDENCE_PASS {"activeSessionStable":true,"followupFinalAfterRefresh":1,"followupFinalBeforeRefresh":1,"followupUserAfterRefresh":1,"runtimeMarkersVisible":false,"titleContainsRuntimeMarker":false,"toolFinalAfterRefresh":1,"toolFinalBeforeRefresh":1,"toolPanelCompleted":true}
+E2E_BACKEND_PASS {"keyPresent":true,"keyStable":true,"requestCount":3,"runtimePartCounts":[1,1,2],"titleRequests":1,"toolResultConsumed":true}
+E2E_CLEANUP_PASS {"finalStatus":"stopped","pidReleased":true,"portReleased":true}
+E2E_DIAGNOSTICS_PASS {"eventCount":5,"events":["diagnostics.started","migration.config.completed","migration.data.completed","server.started","server.stopped"]}
+
+The harness also scanned the final serve JSONL and rejected prompt, model reply,
+tool result, API-key/auth and fixture sentinels. The serve process exited, its
+PID/lock were released, and its TCP port could be rebound.
