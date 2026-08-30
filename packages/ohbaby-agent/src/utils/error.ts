@@ -14,9 +14,7 @@ function hasStableErrorCode(
 ): value is { readonly code: string; readonly message: string } {
   try {
     return (
-      hasMessage(value) &&
-      "code" in value &&
-      isStableErrorCode(value.code)
+      hasMessage(value) && "code" in value && isStableErrorCode(value.code)
     );
   } catch {
     return false;

@@ -124,12 +124,12 @@ describe("createRPC", () => {
       return rpc.createProxy({});
     };
 
-    await expect(createFailingProxy("STABLE_CODE").fail()).rejects.toMatchObject(
-      {
-        code: "STABLE_CODE",
-        message: "backend exploded",
-      },
-    );
+    await expect(
+      createFailingProxy("STABLE_CODE").fail(),
+    ).rejects.toMatchObject({
+      code: "STABLE_CODE",
+      message: "backend exploded",
+    });
     await expect(
       createFailingProxy("unsafe\ncode").fail(),
     ).rejects.not.toHaveProperty("code");
