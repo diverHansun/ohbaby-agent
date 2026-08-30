@@ -12,4 +12,34 @@ describe("TUI error formatting", () => {
     expect(formatError(new Error("Native problem"))).toBe("Native problem");
     expect(formatError("plain")).toBe("plain");
   });
+
+  it("never throws while inspecting hostile error-like objects", () => {
+    expect(
+      formatError({
+        get code(): never {
+          throw new Error("code getter exploded");
+        },
+        message: "Recoverable display",
+      }),
+    ).toBe("Recoverable display");
+    expect(
+      formatError({
+        get message(): never {
+          throw new Error("message getter exploded");
+        },
+      }),
+    ).toBe("Unknown error");
+    expect(
+      formatError(
+        new Proxy(
+          {},
+          {
+            has(): never {
+              throw new Error("proxy inspection exploded");
+            },
+          },
+        ),
+      ),
+    ).toBe("Unknown error");
+  });
 });

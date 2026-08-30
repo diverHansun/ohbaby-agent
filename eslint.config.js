@@ -151,7 +151,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["packages/ohbaby-cli/src/tui/**/*.{ts,tsx}"],
+    files: ["packages/ohbaby-cli/src/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -159,8 +159,16 @@ export default tseslint.config(
           paths: [
             {
               message:
-                "The eager TUI graph must stay independent of the heavyweight agent runtime.",
+                "CLI production code must not statically load the heavyweight agent runtime; use type-only imports or the composition-root loader.",
               name: "ohbaby-agent",
+              allowTypeImports: true,
+            },
+          ],
+          patterns: [
+            {
+              group: ["**/ohbaby-agent/src/**"],
+              message:
+                "CLI production code must not import agent source internals.",
             },
           ],
         },

@@ -15,6 +15,14 @@ const sqliteWarningAllowlistPath = path.join(
   repositoryRoot,
   "packages/ohbaby-agent/src/services/database/connection.ts",
 );
+const cliRuntimeProbePath = path.join(
+  repositoryRoot,
+  "packages/ohbaby-cli/src/tui/format-error.ts",
+);
+const cliCompositionProbePath = path.join(
+  repositoryRoot,
+  "packages/ohbaby-cli/src/bin.ts",
+);
 
 async function lintProbe(
   source: string,
@@ -97,5 +105,31 @@ describe("backend output ownership lint", () => {
     await expect(
       lintProbe('process.stderr.write("leak");', sqliteWarningAllowlistPath),
     ).resolves.toEqual([expect.stringMatching(/^no-restricted-properties:/u)]);
+  });
+});
+
+describe("CLI runtime import boundary lint", () => {
+  it("rejects package and source-internal runtime imports outside the composition loader", async () => {
+    await expect(
+      lintProbe(
+        'import { createCoreAPI } from "ohbaby-agent"; void createCoreAPI;',
+        cliRuntimeProbePath,
+      ),
+    ).resolves.toEqual([expect.stringMatching(/^no-restricted-imports:/u)]);
+    await expect(
+      lintProbe(
+        'import { createCoreAPI } from "../../../ohbaby-agent/src/index.js"; void createCoreAPI;',
+        cliRuntimeProbePath,
+      ),
+    ).resolves.toEqual([expect.stringMatching(/^no-restricted-imports:/u)]);
+  });
+
+  it("allows type-only package imports at the CLI composition root", async () => {
+    await expect(
+      lintProbe(
+        'export type { Logger } from "ohbaby-agent";',
+        cliCompositionProbePath,
+      ),
+    ).resolves.toEqual([]);
   });
 });
