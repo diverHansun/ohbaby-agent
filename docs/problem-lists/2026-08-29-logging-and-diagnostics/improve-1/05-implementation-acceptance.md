@@ -45,6 +45,9 @@
 | `65e3d45` | 补充验收记录 | 写入外部审查后的性能归因、真实 TUI/Web 复验与安全边界 |
 | `cc0ab97` | sanitizer 与写入完整性 | 单次快照 allowlist、复合凭据字段、foreign-relative traversal 与 short-write 循环 |
 | `6cf40ca` | CLI fail-safe 与依赖门 | hostile getter/Proxy 不再使 formatter 抛错；整个 CLI 的 agent 静态导入门由 contract test 固化 |
+| `7539915` | schema 与 mixed-path 收口 | 约束 external-ID kind、安全数值字段，并在 root 匹配后再次规范化路径 suffix |
+| `09660c8` | CLI 运行时边界 | agent/server package、subpath 与 src/dist 静态导入门由 25 条 contract tests 固化 |
+| `745e820` | Web 凭据回归 | compiled Web E2E 分别扫描 provider API key 与 daemon auth token |
 
 本表记录功能与证据提交，不要求文档提交自引用自身 hash；上述阶段历史不改写。
 
@@ -130,7 +133,7 @@
 4. 刷新后 URL/session identity 不变，消息与 tool panel 恢复；
 5. `<environment_context>` 与 fixture runtime marker 不进入产品 UI/title；
 6. stop 后 pid、pid lock 和端口全部释放；
-7. 同一次 E2E 读取 serve JSONL，得到 5 个预期 lifecycle 事件，且不含 prompt、模型回复、tool result、API key 或 auth sentinel。
+7. 同一次 E2E 读取 serve JSONL，得到 5 个预期 lifecycle 事件，且不含 prompt、模型回复、tool result、provider API key 或独立的 daemon auth-token sentinel。
 
 其中 backend/cleanup/diagnostics 是脚本自动断言；UI 输入、工具卡与刷新恢复由 in-app Browser 操作后向 harness 回传固定 schema，属于 **operator-assisted E2E 见证**，不是无人值守浏览器自动化。最终证据：
 
@@ -152,14 +155,14 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 | `pnpm lint` | 通过 |
 | `pnpm typecheck` | 通过 |
 | `pnpm build` | 通过，含 SDK/agent/server/CLI/Web production build |
-| `pnpm test` | 最终修订后全量：308 files passed、5 skipped；2,873 tests passed、16 skipped |
-| `logger.unit.test.ts` | 32/32；含复合凭据字段、跨平台绝对/相对路径与单次 accessor 快照 |
-| `output-ownership.contract.test.ts` | 17/17；除 output alias 外，自动拒绝 CLI package/runtime source 静态导入并允许 type-only import |
+| `pnpm test` | 最终修订后全量：308 files passed、5 skipped；2,885 tests passed、16 skipped |
+| `logger.unit.test.ts` | 36/36；含 external-ID kind、复合凭据字段、跨平台绝对/相对路径、数值元数据与单次 accessor 快照 |
+| `output-ownership.contract.test.ts` | 25/25；除 output alias 外，自动拒绝 CLI agent/server package、subpath、src/dist 静态导入并允许 type-only import |
 | `process-logger.integration.test.ts` | 17/17；含非法事件故障域、真实 writer failure、UTF-8 short write 与 zero-progress |
 | `main.unit.test.ts` + `supervisor.unit.test.ts` | 33/33；真实 stop outcome、并发 stop、teardown fail-open 与 mock boundary |
 | `command-record-terminal.integration.test.ts` | 2/2；真实 in-process host 与真实 serve process |
 | `format-error.unit.test.ts` | 2/2；CLI-local helper 保留稳定 code，且 hostile getter/Proxy fail-safe |
-| 最终定向测试 | logger/process logger/output ownership/CLI formatter 4 files、68/68；真实 in-process/serve 2/2 |
+| 最终定向测试 | logger/process logger/output ownership/CLI formatter 4 files、80/80；真实 in-process/serve 2/2 |
 | compiled Web harness + in-app Browser | operator-assisted UI 与自动 backend/cleanup/diagnostics 全通过 |
 | 需要真实云凭据的测试 | 按设计 skipped；未向外部发送测试数据 |
 
@@ -216,6 +219,8 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 在 `65e3d45` 之后，三路全新子代理再次从开放问题出发审查，找到 2 个 P1、4 个 P2 和 1 个 P3：`safeError` 对 stateful accessor 二次读取、`apiKey/privateKey` 复合字段缺口、foreign-relative traversal、合法 short write、CLI-local formatter hostile getter、CLI lint 作用域，以及验收证据过度表述/commit 表遗漏。`cc0ab97`、`6cf40ca` 与本轮文档逐项修复：name/code 单次快照、四类复合凭据片段、平台语义路径消解、UTF-8 write-all/zero-progress、formatter fail-safe、整个 CLI 静态导入 contract，以及 TUI/Web 脱敏证据文件。
 
 其中性能审查独立复测仍确认：SDK import 约 2ms、agent import 约 300ms，但当前 `--help` 约 530ms 的主要原因是 composition root 在 yargs 解析前已有 dynamic runtime 初始化；本批不把静态依赖门写成启动优化。测试/文档审查也确认真实 MCP body 未被当前 E2E 单独走通，因此最终结论只写“没有 MCP 日志正文入口 + 结构门和既有集成测试成立”，不伪造运行证据。
+
+基于 `1fde165` 的下一次开放式终审又找到两类门禁边界：CLI 可通过 `ohbaby-server`、包 subpath 或 `src/dist` 路径重新静态加载 agent；logger 还存在 external-ID kind 自由前缀、root 匹配后的 mixed-separator traversal，以及安全数值元数据与敏感词门相冲突的问题。最终补丁同时扩大 agent/server import contract、约束 external-ID kind、让 `textLength/tokenCount` 只对数值 encoder 开放，并在 root 匹配后再次规范化 suffix。compiled Web harness 也开始把独立 daemon auth token 传入最终文件扫描，不再把 provider API key 与 daemon authorization 视为两份证据。
 
 这轮结果也修正了“多轮 AI 复审最终 PASS 就等于不会再发现问题”的错误预期。本文保留每轮 verdict 的历史事实，但最终结论必须以最新代码、独立证据与重新开放式审查为准，不能要求后续审查者只核对既有 checklist。
 

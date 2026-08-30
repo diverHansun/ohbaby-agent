@@ -20,5 +20,5 @@ E2E_CLEANUP_PASS {"finalStatus":"stopped","pidReleased":true,"portReleased":true
 E2E_DIAGNOSTICS_PASS {"eventCount":5,"events":["diagnostics.started","migration.config.completed","migration.data.completed","server.started","server.stopped"]}
 
 The harness also scanned the final serve JSONL and rejected prompt, model reply,
-tool result, API-key/auth and fixture sentinels. The serve process exited, its
+tool result, provider API-key, daemon auth-token and fixture sentinels. The serve process exited, its
 PID/lock were released, and its TCP port could be rebound.

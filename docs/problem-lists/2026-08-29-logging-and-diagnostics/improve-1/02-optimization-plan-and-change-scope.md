@@ -336,7 +336,7 @@ CLI serve 调用公开 `startDaemonServer()` 时传入 lazy diagnostics capabili
 - TUI/serve 按交互上下文显示；
 - 重试性由运行时策略决定，不写进静态 error registry。
 
-当前直接编码范围只包括已经确认的两处一致性修复：stdout renderer 的 runtime failure 保留 `IrisError.code`，TUI 使用 CLI-local helper 和 SDK 的 `isStableErrorCode()` 保持同一格式规则，并对 hostile getter/Proxy fail-safe。ESLint 在整个 CLI 源码范围拒绝完整 agent runtime 的静态运行时导入和 agent 源码内部路径，允许 composition root 的显式 lazy loader 与 type-only 合同。它关闭新静态耦合，不宣称解决既有 `--help` 提前初始化。其余错误产品化仍需先补一个小型错误清单（建议 2–3 个真实高频错误）、代码入口、UI action、动态 retry 条件和验收场景，经用户确认后再编码。
+当前直接编码范围只包括已经确认的两处一致性修复：stdout renderer 的 runtime failure 保留 `IrisError.code`，TUI 使用 CLI-local helper 和 SDK 的 `isStableErrorCode()` 保持同一格式规则，并对 hostile getter/Proxy fail-safe。ESLint 在整个 CLI 源码范围拒绝完整 agent runtime、传递加载它的 server runtime，以及两者 `src/dist` 内部路径的静态运行时导入，允许 composition root 的显式 lazy loader 与 type-only 合同。它关闭新静态耦合，不宣称解决既有 `--help` 提前初始化。其余错误产品化仍需先补一个小型错误清单（建议 2–3 个真实高频错误）、代码入口、UI action、动态 retry 条件和验收场景，经用户确认后再编码。
 
 后续设计检查点至少要审计三类现有 surface：daemon state 的 `error` 字段、server HTTP/RPC error response、TUI 的最终失败提示；还要把 supervisor `retire(reason)` 等自由 reason 改成内部 enum code 或经过批准的安全字段，不能通过另一种状态文件/response 重新引入 raw message。
 

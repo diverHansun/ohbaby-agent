@@ -76,6 +76,7 @@
 - tmp/home/workspace 重叠或包含相似前缀时按路径边界匹配；
 - Windows drive/UNC 与 POSIX 路径；外来平台的绝对路径在当前宿主上也不能被当成普通相对路径保留；
 - Windows drive-relative、反斜杠相对路径与混合分隔符必须先按来源语义消解，不能通过 `..` 越界；
+- native absolute path 在 root 匹配后仍要重新规范化 suffix；`/root/safe\\..\\..\\private` 不能输出带 `..` 的 `<workspace>/...`；
 - 未匹配绝对路径变成 `<external>/<short-hash>`；
 - 相对路径保持相对且不能通过 `..` 重新暴露外部绝对路径。
 
@@ -175,8 +176,8 @@ definition 的安全合同由 TypeScript compile fixture 与 runtime contract te
 
 ### T-C6：CLI 轻量依赖边界
 
-- ESLint 对整个 `packages/ohbaby-cli/src/**` 拒绝 `ohbaby-agent` 运行时静态导入；
-- type-only package import 允许；agent 源码内部相对导入拒绝；
+- ESLint 对整个 `packages/ohbaby-cli/src/**` 拒绝 `ohbaby-agent` 与传递加载它的 `ohbaby-server` 运行时静态导入，包 subpath 也不得绕过；
+- type-only package import 允许；agent/server 的 `src/dist` 内部相对导入拒绝；
 - contract test 用 ESLint Node API 对三种 probe 自动验证，不能只靠人工观察 bundle；
 - composition root 的显式 dynamic loader 保持唯一运行时入口；本门只防止新静态耦合，不把既有 `--help` 初始化延迟冒充成本批性能优化。
 
@@ -284,7 +285,7 @@ TUI phase-aware 行为采用分层证据：Ink/app contract 验证 active phase 
 - 设置隔离 `OHBABY_LOG_DIR`；
 - 启动真实 compiled `ohbaby serve`；
 - 保留当前 scripted provider、tool call、follow-up、刷新/会话恢复行为；
-- 在 prompt、tool result、API key、authorization 中分别放唯一 sentinel；
+- 在 prompt、tool result、provider API key 与 daemon authorization token 中分别放唯一 sentinel；
 - 流程结束后读取 serve JSONL，断言只出现长度、token、duration、outcome 等安全元数据；
 - UI 仍能看到正常 user/assistant/tool panel；prompt/model/tool sentinel 只能出现在对应产品节点中，不能以日志行、错误 stack 或额外副本出现；
 - server 启动终端没有诊断 JSON；
