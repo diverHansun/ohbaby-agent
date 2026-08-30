@@ -4,7 +4,7 @@
 >
 > 分支：`codex/logging-diagnostics-docs`
 >
-> 状态：实现、问题修订、本地验收与两路独立审查均已完成，等待用户审查；未 merge、未 push。
+> 状态：补充独立审查的代码修订与本地复验已完成，等待最终子代理复审；未 merge、未 push。
 
 ## 1. 结论
 
@@ -38,6 +38,10 @@
 | `2a05833` / `7737c12` | 一致性收口 | 补常见 process/globalThis alias 门，并让 TUI command/runtime label 保留稳定 error code |
 | `0f10e29` | 最终证据对齐 | 写入最新全量、构建、真实 TUI/serve 与 compiled Web 证据 |
 | `11ed193` | 终审 P2 收口 | 补 globalThis/computed 输出门、display command error code、flush hang 与双子进程轮转测试 |
+| `ca18421` | 编码故障隔离 | 单事件 definition/input 编码错误只丢当前事件；writer 故障仍执行 once unavailable |
+| `f4df5cd` | CLI 依赖边界 | TUI formatter 改为 CLI-local + SDK 稳定 code 判定，并以 ESLint 禁止 eager TUI 图静态导入 agent runtime |
+| `39e98fd` | 文件级安全回归 | 真实 in-process/serve JSONL 增加 prompt、tool/MCP/HTTP body 与绝对路径 sentinel 扫描 |
+| `6e17d9a` / `eb740a0` | 格式与合同对齐 | 格式化本分支触及的两处遗漏，并同步字段、路径、故障域与测试合同 |
 
 最终文档提交与审查修订会追加在本表之后，不改写上述阶段历史。
 
@@ -100,6 +104,8 @@
 
 该次日志共 4 行：diagnostics start、两类 migration count、一次安全 title failure。日志不含 prompt sentinel、`test-only-key` 或 `ui.command.`。
 
+补充独立审查修订后，使用最新 production build 在隔离 HOME 下再次运行真实 Ink PTY：依次执行 `/skills`、`/status`，前者显示 `No skills`，后者显示 Runtime/Model/Project/Log，整个 PTY 无 `{ "record": ... }` 或 `ui.command.*`，Ctrl-C 退出码为 0。该次 JSONL 只有 diagnostics start 与两类 migration count，共 3 行；凭据和 internal-record 扫描未命中。
+
 ### 4.2 fresh serve 与真实子进程
 
 真实 child process 验证：
@@ -130,6 +136,8 @@ E2E_CLEANUP_PASS finalStatus=stopped pidReleased=true portReleased=true
 E2E_DIAGNOSTICS_PASS eventCount=5
 ```
 
+补充修订后再次用 Codex in-app Browser 操作同一 compiled harness，页面 title=`ohbaby`、首屏非空、console warning/error 列表为空；工具卡、follow-up、刷新恢复、backend、cleanup 与 diagnostics 再次得到上述同构证据。
+
 ## 5. 自动化测试结果
 
 | 门 | 结果 |
@@ -137,13 +145,14 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 | `pnpm lint` | 通过 |
 | `pnpm typecheck` | 通过 |
 | `pnpm build` | 通过，含 SDK/agent/server/CLI/Web production build |
-| `pnpm test` | 最终 HEAD 全量：307 files passed、5 skipped；2,857 tests passed、16 skipped |
-| `logger.unit.test.ts` | 最终正文字段/名称补强后 23/23 |
+| `pnpm test` | 补充修订后全量：308 files passed、5 skipped；2,862 tests passed、16 skipped |
+| `logger.unit.test.ts` | 字段名/跨平台路径补强后 26/26 |
 | `output-ownership.contract.test.ts` | 15/15；覆盖 import/destructure 与常见 `process`/`globalThis.process` 点访问、alias、destructure、computed 形式 |
-| `process-logger.integration.test.ts` | 14/14；真实文件、轮转、drop summary、并发 dispose、截断、runtime failure、retention、flush/close hang 与双真实子进程并发轮转 |
+| `process-logger.integration.test.ts` | 15/15；额外证明非法事件不 disable logger，且后续真实 writer failure 仍可观测 |
 | `main.unit.test.ts` + `supervisor.unit.test.ts` | 33/33；真实 stop outcome、并发 stop、teardown fail-open 与 mock boundary |
 | `command-record-terminal.integration.test.ts` | 2/2；真实 in-process host 与真实 serve process |
-| 最终相关测试集 | 9 files、250/250；由定向运行与最终全量门共同覆盖 logger、输出所有权、process logger、CLI、RPC、server 与真实子进程 |
+| `format-error.unit.test.ts` | 1/1；CLI-local helper 保留稳定 code 且不依赖 agent runtime |
+| 补充定向测试 | logger/process logger/CLI formatter 3 files、42/42；真实 in-process/serve 2/2 |
 | compiled Web harness + in-app Browser | operator-assisted UI 与自动 backend/cleanup/diagnostics 全通过 |
 | 需要真实云凭据的测试 | 按设计 skipped；未向外部发送测试数据 |
 
@@ -151,15 +160,17 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 
 ## 6. 敏感信息与失败退化证据
 
-- definition builder 在 error 到 trace 的每个 level 都拒绝 prompt/completion/reasoning/body/command/input/output/request/response/config/context/authorization/token 等正文槽位；E2E 另扫描真实 prompt/tool/body/credential sentinel。
-- path encoder 按运行时 roots 选择最长边界，输出 `<home>`、`<workspace>`、`<ohbaby-home>`、`<tmp>` 或 external hash。
+- definition builder 在 error 到 trace 的每个 level 都拒绝 prompt/completion/reasoning/body/command/input/output/request/response/config/context/authorization/token 等正文槽位；大小写与组合字段名也不能通过 `requestBody`、`apiToken` 绕过。
+- path encoder 按运行时 roots 选择最长边界，输出 `<home>`、`<workspace>`、`<ohbaby-home>`、`<tmp>` 或 external hash；POSIX 上收到 Windows drive/UNC 路径时同样保守 hash。
 - 内置实体名称只能来自静态 enum allowlist；用户定义实体走始终 hash 的单向 encoder，即使同名也不会被调用点伪装成内置。
 - URL 不保留 userinfo、hostname/IP、path、query 或 fragment，只记录 origin hash；绝对路径 root 替换后的 suffix 仍执行 credential 清洗和 512-byte 上限。
 - `safeError` 对外部错误使用静态 message 和 name/code allowlist，不复制 provider body，也不公开最终 `SafeLogError` 或 normalization helper。
 - 默认 writer 初始化/运行失败均 fail-open、once notify；显式坏配置 fail-fast；并发 dispose 加入同一个 drain，满队列退出仍写一次 drop summary。
+- 调用点的 definition/input 编码错误只丢弃当前事件，不消耗 unavailable 或永久关闭 logger；其后真实 writer failure 仍按合同退化。
 - TUI active phase 在 Ink 内提示 unavailable；若首次失败发生在 UI 退出后的 dispose，只输出一条固定、非 JSON 警告，且不改变原退出码。
 - 16 KiB 路径只先删 stack/可选字段，必填字段不删除；无法满足上限时拒绝事件并 fail-open。
 - process logger 的真实文件 integration 验证权限、轮转、保留、双真实子进程并发轮转、runtime write failure、drop summary、非关闭 flush timeout、尾记录 drain 与受控 writer close hang；hang 子进程在 deadline 后按原 exit code `23` 退出。
+- 真实 in-process 与 serve 文件级测试把 prompt、tool/MCP body、HTTP body、API key、auth token 和实际 home/profile/workspace 绝对路径作为输入 sentinel，再扫描最终 JSONL；不是只在内存 record 层做等价推断。
 
 ## 7. 与计划相比的收敛
 
@@ -170,7 +181,7 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 
 ## 8. 已知仓库基线与非阻断项
 
-- `pnpm format:check` 仍会报告 38 个历史文件；本轮触及文件单独通过 Prettier，`git diff --check` 通过。没有为本功能机械改写无关文件，因此不能宣称 `pnpm preflight` 通过；`04` 已把它明确归为仓库级历史 baseline 例外。
+- `pnpm format:check` 在补充修订前实际报告 39 个文件，其中 2 个属于本分支触及文件；格式化这两处后剩余 37 个未触及的历史文件。本轮触及文件单独通过 Prettier，`git diff --check` 通过。没有为本功能机械改写无关文件，因此不能宣称 `pnpm preflight` 通过；`04` 已把它明确归为仓库级历史 baseline 例外。
 - 需要真实云凭据的 smoke/snapshot 测试保持 skipped；本轮安全与 E2E 使用本地 scripted provider，不向外部发送用户数据。
 - TUI PTY 与 Web 页面操作是本机 agent 的 operator-assisted 见证；无人值守自动门由 Ink contract、真实 child-process integration，以及 compiled Web harness 的 backend/cleanup/diagnostics 部分承担。首版未为 PTY 或浏览器控制新增重量依赖。
 
@@ -186,9 +197,20 @@ E2E_DIAGNOSTICS_PASS eventCount=5
 
 最后，两位原审查代理对 `486f6f1` 做只读 spot check，均再次给出 **PASS、无剩余 P0/P1/P2/P3、可交付**。其中一方复跑 3 files、118/118，另一方独立核对代码、测试与文档证据；两者均确认工作树干净，且没有执行 merge/push。
 
+此后，一轮与原代理结论隔离的外部审查又提出 2 个 P1、4 个 P2。重新逐项核实后的处理如下：
+
+1. `emit()` 把字段编码错误升级成永久 writer disable 成立，已按故障域拆分并增加“非法事件后仍能报告真实 writer failure”的测试；
+2. TUI 静态导入完整 `ohbaby-agent` 的依赖事实成立，已改为 CLI-local formatter 并增加 lint 门禁；但“由此造成所有 CLI 命令新增约 390ms”不成立：修订前后同机 `--help` 9 次中位数分别为 529ms 与 534ms，而 `main` 原本就在 yargs 解析前通过 `loadDefaultDependencies()` 动态加载 agent runtime。直接 import 的中位数约为 SDK 2ms、agent 291ms，因此本次关闭的是不必要的 eager 耦合，不冒充总启动性能优化；真正优化 `--help` 需要另行把既有 composition-root 初始化延后，超出本批日志修复范围；
+3. format 数量与本分支两处遗漏成立，但审查中的 40/38 是旧快照；当前实测为 39，修复后历史 baseline 为 37；
+4. 字段名大小写缺口成立，但只调用 `toLowerCase()` 仍拦不住 `requestBody → requestbody`；实现改为大小写无关的敏感词片段检查；
+5. foreign-platform absolute path 泄漏成立，已加入 Windows drive/UNC 回归；
+6. 文件级扫描覆盖不足成立，真实 TUI/serve process tests 已补正文、body 与绝对路径 sentinel。
+
+这轮结果也修正了“多轮 AI 复审最终 PASS 就等于不会再发现问题”的错误预期。本文保留每轮 verdict 的历史事实，但最终结论必须以最新代码、独立证据与重新开放式审查为准，不能要求后续审查者只核对既有 checklist。
+
 ## 10. 当前交付边界
 
 - 当前分支包含分阶段 commits；
 - 尚未 merge 到 `main`；
 - 尚未 push 远程；
-- 子代理审查和必要修订完成前，不进行 merge/push。
+- 最终子代理复审和必要修订完成前，不进行 merge/push。
