@@ -73,6 +73,7 @@ interface InternalDiagnosticEventDefinition<
 
 const definitions = new WeakSet<object>();
 const encoders = new WeakSet<object>();
+const numericEncoders = new WeakSet<object>();
 const EVENT_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9_]*)+$/;
 const COMPONENT_PATTERN = /^[a-z][a-z0-9-]{0,47}$/;
 const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
@@ -108,6 +109,8 @@ const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
 const CREDENTIAL_PATTERN =
   /(authorization|api[_-]?key|access[_-]?token|bearer|cookie|password|private[_-]?key)\s*[:=]\s*[^\s,;]+/gi;
 const MAX_SAFE_STRING_BYTES = 512;
+const EXTERNAL_ID_KIND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+const SAFE_NUMERIC_CONTENT_FIELD_NAMES = new Set(["textLength", "tokenCount"]);
 
 function truncateUtf8(value: string, maxBytes: number): string {
   if (Buffer.byteLength(value, "utf8") <= maxBytes) {
@@ -186,6 +189,14 @@ function normalizeRelativePath(value: string): string {
   return truncateUtf8(cleanCredentialShapes(normalized), MAX_SAFE_STRING_BYTES);
 }
 
+function createNumericEncoder(
+  encode: InternalFieldEncoder<number>["encode"],
+): DiagnosticFieldEncoder<number> {
+  const encoder = createEncoder(encode);
+  numericEncoders.add(encoder);
+  return encoder;
+}
+
 export function normalizeDiagnosticPath(
   value: string,
   roots: DiagnosticRoots,
@@ -211,14 +222,15 @@ export function normalizeDiagnosticPath(
   candidates.sort((left, right) => right[1].length - left[1].length);
   for (const [label, root] of candidates) {
     if (pathHasPrefix(absolute, root)) {
-      const suffix = path.relative(root, absolute).replaceAll("\\", "/");
-      if (suffix.length === 0) {
+      const rawSuffix = path.relative(root, absolute);
+      if (rawSuffix.length === 0) {
         return label;
       }
-      return truncateUtf8(
-        `${label}/${cleanCredentialShapes(suffix)}`,
-        MAX_SAFE_STRING_BYTES,
-      );
+      const suffix = normalizeRelativePath(rawSuffix);
+      if (suffix.startsWith("<external>/")) {
+        return suffix;
+      }
+      return truncateUtf8(`${label}/${suffix}`, MAX_SAFE_STRING_BYTES);
     }
   }
   return `<external>/${shortHash("path", absolute)}`;
@@ -314,10 +326,16 @@ export const diagnosticField = Object.freeze({
     return createEncoder((value) => safeError(value));
   },
   externalId(kind: string): DiagnosticFieldEncoder<string> {
+    if (
+      !EXTERNAL_ID_KIND_PATTERN.test(kind) ||
+      hasForbiddenContentFieldName(kind)
+    ) {
+      throw new TypeError("diagnostic external ID kind must be a stable label");
+    }
     return createEncoder((value) => `${kind}_${shortHash(kind, value)}`);
   },
   integer(): DiagnosticFieldEncoder<number> {
-    return createEncoder((value) => {
+    return createNumericEncoder((value) => {
       if (!Number.isInteger(value)) {
         throw new TypeError("diagnostic integer field must be an integer");
       }
@@ -325,7 +343,7 @@ export const diagnosticField = Object.freeze({
     });
   },
   number(): DiagnosticFieldEncoder<number> {
-    return createEncoder((value) =>
+    return createNumericEncoder((value) =>
       assertFinite(value, "diagnostic number field"),
     );
   },
@@ -336,11 +354,17 @@ export const diagnosticField = Object.freeze({
       throw new TypeError("unknown diagnostic field encoder");
     }
     const internal = encoder as InternalFieldEncoder<Input>;
-    return createEncoder(
+    const optionalEncoder = createEncoder<Input | undefined>(
       (value, context) =>
-        value === undefined ? undefined : internal.encode(value, context),
+        value === undefined
+          ? undefined
+          : internal.encode(value, context),
       true,
     );
+    if (numericEncoders.has(encoder)) {
+      numericEncoders.add(optionalEncoder);
+    }
+    return optionalEncoder;
   },
   path(): DiagnosticFieldEncoder<string> {
     return createEncoder((value, context) =>
@@ -389,7 +413,11 @@ export function defineDiagnosticEvent<
   for (const [key, encoder] of entries) {
     if (
       !/^[a-z][A-Za-z0-9]{0,63}$/.test(key) ||
-      hasForbiddenContentFieldName(key) ||
+      (hasForbiddenContentFieldName(key) &&
+        !(
+          SAFE_NUMERIC_CONTENT_FIELD_NAMES.has(key) &&
+          numericEncoders.has(encoder)
+        )) ||
       !encoders.has(encoder)
     ) {
       throw new TypeError("diagnostic event contains an invalid field encoder");

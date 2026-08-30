@@ -187,6 +187,42 @@ describe("diagnostic event contract", () => {
       ).toThrow("invalid field encoder");
     }
   });
+
+  it.each(["textLength", "tokenCount"])(
+    "allows the safe numeric metadata field %s but no content encoder",
+    (field) => {
+      expect(() =>
+        defineDiagnosticEvent({
+          component: "diagnostics",
+          event: `diagnostics.safe_${field.toLowerCase()}`,
+          fields: { [field]: diagnosticField.integer() },
+          level: "trace",
+        }),
+      ).not.toThrow();
+      expect(() =>
+        defineDiagnosticEvent({
+          component: "diagnostics",
+          event: `diagnostics.unsafe_${field.toLowerCase()}`,
+          fields: { [field]: diagnosticField.path() },
+          level: "trace",
+        }),
+      ).toThrow("invalid field encoder");
+    },
+  );
+
+  it("requires external ID kinds to be stable, bounded, and non-sensitive", () => {
+    expect(() => diagnosticField.externalId("request")).toThrow("stable label");
+    expect(() => diagnosticField.externalId("schema-api-key-secret")).toThrow(
+      "stable label",
+    );
+    expect(() => diagnosticField.externalId("UPPERCASE")).toThrow(
+      "stable label",
+    );
+    expect(() => diagnosticField.externalId("x".repeat(33))).toThrow(
+      "stable label",
+    );
+    expect(() => diagnosticField.externalId("operation")).not.toThrow();
+  });
 });
 
 describe("diagnostic normalization", () => {
@@ -229,6 +265,16 @@ describe("diagnostic normalization", () => {
       expect(normalized).not.toContain("server");
       expect(normalized).not.toContain("customer");
     }
+  });
+
+  it("hashes mixed-separator absolute traversal before matching a root", () => {
+    const normalized = normalizeDiagnosticPath(
+      String.raw`/workspace/safe\..\..\private-customer.txt`,
+      { workspace: "/workspace" },
+    );
+    expect(normalized).toMatch(/^<external>\/[a-f0-9]{12}$/);
+    expect(normalized).not.toContain("private-customer");
+    expect(normalized).not.toContain("..");
   });
 
   it("resolves foreign-platform relative traversal before retaining paths", () => {
