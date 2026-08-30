@@ -96,6 +96,7 @@ brand 负责 TypeScript nominality；builder 同时把创建出的对象登记�
 - 字段 encoder 首版只提供 integer/number、boolean、受限 enum、ohbaby ID、hashed external ID、normalized path/URL、始终 hash 的 user entity name 和 safe error；内置名称必须由静态 enum allowlist 表达，不提供可由调用者伪造 provenance 的联合输入，也不提供任意 text/object encoder；
 - error encoder 接收原始 unknown 只是为了立即转换，不把 raw Error 放入最终 event，也不公开可构造的 `SafeLogError`；external encoder 不接受自由 summary 字符串，使用内部稳定类别/通用摘要；
 - runtime encoder 仍检查字段、secret 形态和大小；类型系统用于防误用，不被宣称为安全沙箱；
+- process logger 将单事件 definition/input 编码错误与 JSONL framing/writer 故障分开：前者只丢当前事件，后者才进入全局不可用退化；
 - 生产 logger 不暴露 `sink.write(record)` 给普通业务代码；
 - 测试 capture logger 留在测试辅助目录，不成为生产/public API。
 
@@ -335,7 +336,7 @@ CLI serve 调用公开 `startDaemonServer()` 时传入 lazy diagnostics capabili
 - TUI/serve 按交互上下文显示；
 - 重试性由运行时策略决定，不写进静态 error registry。
 
-当前直接编码范围只包括已经确认的两处一致性修复：stdout renderer 的 runtime failure 保留 `IrisError.code`，TUI 两个本地 `formatError()` 复用共享格式。其余错误产品化仍需先补一个小型错误清单（建议 2–3 个真实高频错误）、代码入口、UI action、动态 retry 条件和验收场景，经用户确认后再编码。
+当前直接编码范围只包括已经确认的两处一致性修复：stdout renderer 的 runtime failure 保留 `IrisError.code`，TUI 使用 CLI-local helper 和 SDK 的 `isStableErrorCode()` 保持同一格式规则，避免仅为格式化错误而把完整 agent runtime 接进 eager TUI 图。其余错误产品化仍需先补一个小型错误清单（建议 2–3 个真实高频错误）、代码入口、UI action、动态 retry 条件和验收场景，经用户确认后再编码。
 
 后续设计检查点至少要审计三类现有 surface：daemon state 的 `error` 字段、server HTTP/RPC error response、TUI 的最终失败提示；还要把 supervisor `retire(reason)` 等自由 reason 改成内部 enum code 或经过批准的安全字段，不能通过另一种状态文件/response 重新引入 raw message。
 

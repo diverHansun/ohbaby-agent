@@ -55,6 +55,7 @@
 - `event`：稳定的点分语义名，不使用自然语言句子；
 - `component`：稳定、低基数的内置组件名；
 - `event`、`component`、level 与允许的字段 key **MUST** 由具字面量约束的 event definition 同时声明，调用时不能传入自由字符串；definition **SHOULD** 由模块级 `const` 复用；
+- 字段 key 必须对大小写和组合命名保守检查正文/凭据词片段；`requestBody`、`apiToken` 等不能借 camelCase 绕过 `request`、`body`、`token` 禁区；
 - 每个 definition **MUST** 为每个字段指定 encoder（数值/布尔、受限 enum、ohbaby ID、hash 后的外部 ID、规范化路径/URL、伪名化名称或安全错误）；
 - 普通业务调用面 **MUST NOT** 暴露开放的 `Record<string, string>`、自由 `message` 或 `child(userInput)`；
 - error 字段由 definition 内的 error encoder 调用统一 `safeError()` 产生，调用者不能构造最终 `SafeLogError`；
@@ -116,7 +117,7 @@
 
 规范化时按最长、最具体的前缀优先，将匹配部分替换为 `<workspace>`、`<ohbaby-home>`、`<home>` 或 `<tmp>`。这些只是输出语义，不是固定目录，也不要求用户单独配置。
 
-无法匹配任何允许根的绝对路径应保守写成 `<external>/<short-hash>`，不保留原始父目录或文件名。
+无法匹配任何允许根的绝对路径应保守写成 `<external>/<short-hash>`，不保留原始父目录或文件名。绝对路径识别必须与当前宿主平台无关：POSIX 上收到 Windows drive/UNC 路径、Windows 上收到 POSIX 路径时，也不能把它误当成可原样保留的相对路径。
 
 path encoder 只接受调用点语义上已经是“路径”的值，并负责 root 替换、路径边界、长度和已知 credential 形态清洗；它不是能判断任意自然语言是否来自 prompt 的通用 DLP。正文不进入路径字段，靠第 4 节的封闭 event definition 和代码审查保证。相对路径可以在消解 `.`/`..`、清除越界前缀并通过 credential 清洗后保留；因此“所有自然语言片段都必须从合法文件名消失”不是本合同。
 
@@ -201,11 +202,12 @@ path encoder 只接受调用点语义上已经是“路径”的值，并负责 
 
 1. 只有将要创建 process logger 的 TUI、fresh serve 或显式 opt-in CLI 才验证配置；这些路径上用户显式提供非法 level 或非法目录配置时启动阶段受控报错，避免用户以为日志正在工作。direct library no-op、reused serve 和未 opt-in 的 one-shot CLI 不消费该配置，也不因它失败；
 2. 未配置自定义目录、默认目录不可写：业务继续，禁用文件日志，并由组合根提示一次；
-3. 运行中写入失败：logger 原子地转为 disabled，通知组合根一次，不递归记录该失败；
-4. TUI 活跃时通过 UI 状态/通知呈现；Ink 已恢复终端后才发生的首次 dispose/drain 失败由 CLI 命令层向 stderr 写一条固定、安全、非 JSON 警告；serve 由命令启动层输出一次警告；
-5. `onUnavailable` 回调最多调用一次；回调自身抛错必须被吞掉；
-6. CLI TUI/serve 显式启用默认 `info` 文件日志；公开 agent/server library factory 未注入 diagnostics capability 时默认 no-op；
-7. flush/dispose 失败不覆盖原业务退出码；shutdown-only failure 仍遵守同一个 once gate，不能在 UI notice 后重复打印。
+3. 单个调用点传入不符合 definition 的值、伪造 definition 或其他字段编码错误时，只丢弃该事件；它不是 writer 不可用，不能永久 disable logger，也不能消耗 `onUnavailable`；
+4. JSONL framing/行上限处理或运行中 writer 写入失败时，logger 原子地转为 disabled，通知组合根一次，不递归记录该失败；
+5. TUI 活跃时通过 UI 状态/通知呈现；Ink 已恢复终端后才发生的首次 dispose/drain 失败由 CLI 命令层向 stderr 写一条固定、安全、非 JSON 警告；serve 由命令启动层输出一次警告；
+6. `onUnavailable` 回调最多调用一次；回调自身抛错必须被吞掉；
+7. CLI TUI/serve 显式启用默认 `info` 文件日志；公开 agent/server library factory 未注入 diagnostics capability 时默认 no-op；
+8. flush/dispose 失败不覆盖原业务退出码；shutdown-only failure 仍遵守同一个 once gate，不能在 UI notice 后重复打印。
 
 ## 11. 反误用约束
 

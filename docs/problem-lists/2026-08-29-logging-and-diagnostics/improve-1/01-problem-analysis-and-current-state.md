@@ -135,7 +135,7 @@ agent ← server
 
 `Supervisor` 会把 `errorToMessage()` 写入 daemon state，HTTP server 也有多处把 Error message 投影为 response。它们不是 JSONL logger，因此不能靠“接入 logger”自动变安全；但它们会被 status/Web/CLI 读取，属于 Phase E 必须单独盘点的用户错误 surface。首批日志地基不顺手重写所有 HTTP 错误，但也不能宣称完成 logger 后整个项目的错误展示就已经统一。
 
-当前还确认了两处具体的用户面不一致，不能只留给未来重新发现：`cli/stdout-renderer.ts` 的 command failure 会显示 `CODE: message`，runtime failure 却显示 `error: message`；TUI 的两个本地 `formatError()` 只返回 message，丢失共享 `IrisError` 已有的 code。这两处纳入 Phase E 的确定范围。
+当前还确认了两处具体的用户面不一致，不能只留给未来重新发现：`cli/stdout-renderer.ts` 的 command failure 会显示 `CODE: message`，runtime failure 却显示 `error: message`；TUI 的本地格式化只返回 message，丢失共享 `IrisError` 已有的 code。这两处纳入 Phase E 的确定范围。实现时应复用 SDK 的稳定 code 判定规则，但不能为了一个显示 helper 把完整 agent runtime 静态接入 CLI/TUI eager graph。
 
 ### P9 - 当前运行日志缺少发现入口（中）
 

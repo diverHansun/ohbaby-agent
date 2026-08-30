@@ -42,6 +42,7 @@
 - 96-char event、48-char component、16 个扩展字段、512-byte 普通字符串/error summary、16-KiB 整行上限分别生效；
 - 超过整行上限时按 definition 可选字段逆序移除并标记 `truncated: true`；`truncated` 只能由 encoder 写入、不计入业务字段上限，业务 definition 声明同名字段会被拒绝；首版不生成 stack，未来若开放内部 stack encoder，必须另加 8-KiB 上限并优先裁剪 stack；
 - 序列化异常不能逃出 logger。
+- 非法 definition/input/字段值只丢弃当前事件，不触发全局 unavailable；随后合法事件仍可写入，之后真实 writer failure 仍必须触发一次不可用退化。
 
 另外验证 event/component 只接受静态格式，不能把用户定义名称、路径或正文拼进命名空间；外部可控 correlation ID 必须先 hash 或被拒绝。
 
@@ -61,7 +62,7 @@
 
 这里不把 encoder 冒充成“理解任意字符串语义”的 DLP：路径 encoder 合法保留相对路径或受控后缀，因此任意 prompt sentinel 若被调用者错误地当成路径传入，编码器无法凭空识别它。真正的硬边界由两层测试组成：
 
-- event definition 不能声明 prompt/body/command/output 等正文槽位，调用点也不能传动态字段或自由 message；
+- event definition 不能声明 prompt/body/command/output 等正文槽位，大小写或 camelCase 组合（如 `requestBody`、`apiToken`）也不能绕过；调用点不能传动态字段或自由 message；
 - ID、URL、entity name、Error 等 encoder 按各自合法输入测试拒绝、hash、规范化或静态摘要；path encoder 使用真实路径样本验证 root 替换、外部 hash 和凭据模式清洗，而不要求删除所有可能恰好出现在文件名中的自然语言。
 
 最终 E2E 仍以真实 prompt/tool/body sentinel 扫描日志；一旦它们从真实正文流进入 JSONL 就判失败。这个测试验证架构没有正文通路，不声称用正则识别所有可能的人类文本。
@@ -73,7 +74,7 @@
 - workspace 位于 home 内时，最长匹配得到 `<workspace>/...` 而不是 `<home>/...`；
 - ohbaby home 由 `OHBABY_HOME` 指向自定义绝对路径；
 - tmp/home/workspace 重叠或包含相似前缀时按路径边界匹配；
-- Windows drive/分隔符与 POSIX 路径；
+- Windows drive/UNC 与 POSIX 路径；外来平台的绝对路径在当前宿主上也不能被当成普通相对路径保留；
 - 未匹配绝对路径变成 `<external>/<short-hash>`；
 - 相对路径保持相对且不能通过 `..` 重新暴露外部绝对路径。
 
@@ -110,6 +111,7 @@
 使用注入的 clock/id/文件 adapter 或 internal test seam 覆盖：
 
 - 串行顺序；
+- 单事件编码错误与 writer 生命周期隔离；
 - 1,024 个事件队列上限；满时新事件只淘汰“最早且更低级”的已排队事件，否则丢弃新事件；
 - capacity 恢复/dispose 时至多一条按 level 计数的 `logger.events_dropped` 汇总；
 - 单段达到阈值后轮转；
