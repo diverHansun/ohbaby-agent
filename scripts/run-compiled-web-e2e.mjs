@@ -484,7 +484,7 @@ function assertBrowserEvidence(value) {
   return UI_EVIDENCE_EXPECTED;
 }
 
-async function verifyDiagnostics(logFilePath, output) {
+async function verifyDiagnostics(logFilePath, output, forbiddenValues = []) {
   if (output.stderr !== "") {
     throw new Error("compiled serve wrote unexpected stderr output");
   }
@@ -518,6 +518,7 @@ async function verifyDiagnostics(logFilePath, output) {
     FOLLOWUP_FINAL,
     "OHBABY_COMPILED_WEB_FOLLOWUP",
     "Read fixture.txt and report the result.",
+    ...forbiddenValues,
   ]) {
     if (log.includes(forbidden)) {
       throw new Error("compiled serve diagnostics leaked user content");
@@ -691,6 +692,7 @@ let provider;
 let serveChild;
 let capturedPid;
 let capturedPort;
+let capturedAuthToken;
 let isolatedEnv;
 let failure;
 let cleanupEvidence;
@@ -775,9 +777,12 @@ try {
   const state = await readJsonWithRetry(statePath);
   capturedPid = state.pid;
   capturedPort = state.port;
+  capturedAuthToken = state.authToken;
   if (
     !Number.isInteger(capturedPid) ||
     !Number.isInteger(capturedPort) ||
+    typeof capturedAuthToken !== "string" ||
+    capturedAuthToken.length === 0 ||
     capturedPort <= 0 ||
     capturedPid !== serveChild.pid
   ) {
@@ -820,6 +825,7 @@ try {
       diagnosticsEvidence = await verifyDiagnostics(
         diagnosticsPath,
         readServeOutput(),
+        [capturedAuthToken],
       );
     }
   } catch (error) {
