@@ -15,7 +15,7 @@ import type {
   UiSessionTodoList,
   UiSnapshot,
 } from "ohbaby-sdk";
-import { formatError } from "ohbaby-agent";
+import { formatError } from "../format-error.js";
 import type {
   TuiCommandCatalog,
   TuiCommandNotice,

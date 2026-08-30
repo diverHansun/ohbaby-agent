@@ -151,6 +151,23 @@ export default tseslint.config(
     },
   },
   {
+    files: ["packages/ohbaby-cli/src/tui/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              message:
+                "The eager TUI graph must stay independent of the heavyweight agent runtime.",
+              name: "ohbaby-agent",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     ignores: [
       "**/dist/**",
       "**/node_modules/**",

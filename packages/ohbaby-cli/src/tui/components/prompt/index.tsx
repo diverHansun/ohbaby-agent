@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Box, Text, useInput } from "ink";
-import { formatError } from "ohbaby-agent";
+import { formatError } from "../../format-error.js";
 import type {
   CoreAPI,
   UiCommandInvocation,

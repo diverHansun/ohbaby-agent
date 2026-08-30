@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { formatError } from "ohbaby-agent";
+import { formatError } from "../format-error.js";
 import type {
   UiContextWindowUsage,
   UiGoal,

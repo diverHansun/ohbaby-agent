@@ -10,7 +10,7 @@ import type {
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
-import { formatError } from "ohbaby-agent";
+import { formatError } from "./format-error.js";
 import { DialogManager } from "./dialogs/manager.js";
 import { CommandPanelManager } from "./components/dialog/command-panel-manager.js";
 import {
