@@ -123,9 +123,8 @@ const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
   "text",
   "token",
 ]);
-const KEY_VALUE_CREDENTIAL_PATTERN =
-  /(authorization|api[_-]?key|access[_-]?(?:key|token)|client[_-]?secret|cookie|credential|id[_-]?token|passphrase|password|private[_-]?key|refresh[_-]?token|signing[_-]?key)\s*[:=][\s\S]*/gi;
-const BEARER_CREDENTIAL_PATTERN = /\bbearer\s+[\s\S]*/gi;
+const CREDENTIAL_ASSIGNMENT_PATTERN = /([A-Za-z][A-Za-z0-9_-]{0,63})\s*[:=]/gu;
+const BEARER_MARKER_PATTERN = /\bbearer\s+/iu;
 const MAX_SAFE_STRING_BYTES = 512;
 const EXTERNAL_ID_KINDS = new Set(["operation", "provider", "session"]);
 const SAFE_NUMERIC_CONTENT_FIELD_NAMES = new Set(["textLength", "tokenCount"]);
@@ -169,9 +168,26 @@ function truncateUtf8(value: string, maxBytes: number): string {
 }
 
 function cleanCredentialShapes(value: string): string {
-  return value
-    .replace(KEY_VALUE_CREDENTIAL_PATTERN, "$1=<redacted>")
-    .replace(BEARER_CREDENTIAL_PATTERN, "bearer=<redacted>");
+  let assignment: RegExpMatchArray | undefined;
+  for (const candidate of value.matchAll(CREDENTIAL_ASSIGNMENT_PATTERN)) {
+    const key = candidate[1];
+    if (hasForbiddenContentFieldName(key)) {
+      assignment = candidate;
+      break;
+    }
+  }
+  const bearerIndex = value.search(BEARER_MARKER_PATTERN);
+  const assignmentIndex = assignment?.index ?? -1;
+  if (
+    bearerIndex >= 0 &&
+    (assignmentIndex < 0 || bearerIndex < assignmentIndex)
+  ) {
+    return `${value.slice(0, bearerIndex)}bearer=<redacted>`;
+  }
+  if (assignment !== undefined && assignmentIndex >= 0) {
+    return `${value.slice(0, assignmentIndex)}${assignment[1]}=<redacted>`;
+  }
+  return value;
 }
 
 function shortHash(kind: string, value: string): string {

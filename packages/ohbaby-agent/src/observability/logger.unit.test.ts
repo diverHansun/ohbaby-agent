@@ -402,6 +402,11 @@ describe("diagnostic normalization", () => {
       "logs/id_token=DYNAMIC_ID_TOKEN",
       "logs/passphrase=DYNAMIC_PASSPHRASE",
       "logs/credential=DYNAMIC_CREDENTIAL",
+      "logs/auth_token=DYNAMIC_AUTH_TOKEN",
+      "logs/session_token=DYNAMIC_SESSION_TOKEN",
+      "logs/secret_key=DYNAMIC_SECRET_KEY",
+      "logs/token=DYNAMIC_TOKEN",
+      "logs/secret=DYNAMIC_SECRET",
     ]) {
       const normalized = normalizeDiagnosticPath(credentialPath, {});
       expect(normalized).not.toContain("DYNAMIC_");
