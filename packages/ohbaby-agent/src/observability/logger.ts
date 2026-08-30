@@ -76,6 +76,7 @@ const encoders = new WeakSet<object>();
 const EVENT_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9_]*)+$/;
 const COMPONENT_PATTERN = /^[a-z][a-z0-9-]{0,47}$/;
 const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
+  "apikey",
   "arguments",
   "authorization",
   "body",
@@ -84,12 +85,15 @@ const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
   "config",
   "context",
   "cookie",
+  "credential",
   "environment",
   "headers",
   "input",
   "message",
   "output",
   "password",
+  "passphrase",
+  "privatekey",
   "prompt",
   "reasoning",
   "request",
@@ -167,11 +171,15 @@ function hasForbiddenContentFieldName(value: string): boolean {
 }
 
 function normalizeRelativePath(value: string): string {
-  const normalized = path.normalize(value).replaceAll("\\", "/");
+  if (/^[A-Za-z]:/u.test(value)) {
+    return `<external>/${shortHash("path", value)}`;
+  }
+  const normalizer = value.includes("\\") ? path.win32 : path.posix;
+  const normalized = normalizer.normalize(value).replaceAll("\\", "/");
   if (
     normalized === ".." ||
     normalized.startsWith("../") ||
-    path.isAbsolute(normalized)
+    isAbsolutePathOnAnyPlatform(normalized)
   ) {
     return `<external>/${shortHash("path", value)}`;
   }
@@ -272,12 +280,16 @@ export function safeError(value: unknown): SafeLogError {
     if (!(value instanceof Error)) {
       return { message: "An unknown error occurred", name: "UnknownError" };
     }
+    const code = safeErrorCode(value);
+    const candidateName = value.name;
+    const name =
+      typeof candidateName === "string" && SAFE_ERROR_NAMES.has(candidateName)
+        ? candidateName
+        : "Error";
     return {
-      ...(safeErrorCode(value) === undefined
-        ? {}
-        : { code: safeErrorCode(value) }),
+      ...(code === undefined ? {} : { code }),
       message: "An external operation failed",
-      name: SAFE_ERROR_NAMES.has(value.name) ? value.name : "Error",
+      name,
     };
   } catch {
     return { message: "An error could not be inspected", name: "UnknownError" };

@@ -169,6 +169,10 @@ describe("diagnostic event contract", () => {
     "token",
     "requestBody",
     "apiToken",
+    "apiKey",
+    "privateKey",
+    "credentialPath",
+    "passphraseFile",
   ])("rejects the reserved content field %s at every log level", (field) => {
     for (const level of ["error", "warn", "info", "debug", "trace"] as const) {
       expect(() =>
@@ -227,6 +231,21 @@ describe("diagnostic normalization", () => {
     }
   });
 
+  it("resolves foreign-platform relative traversal before retaining paths", () => {
+    for (const foreignPath of [
+      String.raw`safe\..\..\private-customer.txt`,
+      String.raw`C:..\private-customer.txt`,
+    ]) {
+      const normalized = normalizeDiagnosticPath(foreignPath, {});
+      expect(normalized).toMatch(/^<external>\/[a-f0-9]{12}$/);
+      expect(normalized).not.toContain("private-customer");
+      expect(normalized).not.toContain("..");
+    }
+    expect(normalizeDiagnosticPath(String.raw`safe\child.txt`, {})).toBe(
+      "safe/child.txt",
+    );
+  });
+
   it("hashes URL origins without retaining userinfo, host, path, or query", () => {
     const normalized = normalizeDiagnosticUrl(
       "https://tenant:password@internal.example/v1/messages?key=secret#body",
@@ -264,6 +283,30 @@ describe("safeError", () => {
       message: "An external operation failed",
       name: "Error",
     });
+  });
+
+  it("reads allowlisted error metadata only once", () => {
+    const error = new Error("provider body") as Error & { code?: unknown };
+    let codeReads = 0;
+    let nameReads = 0;
+    Object.defineProperties(error, {
+      code: {
+        configurable: true,
+        get: () => (codeReads++ === 0 ? "ETIMEDOUT" : "SECRET_TOKEN"),
+      },
+      name: {
+        configurable: true,
+        get: () => (nameReads++ === 0 ? "TypeError" : "PRIVATECUSTOMERNAME"),
+      },
+    });
+
+    expect(safeError(error)).toEqual({
+      code: "ETIMEDOUT",
+      message: "An external operation failed",
+      name: "TypeError",
+    });
+    expect(codeReads).toBe(1);
+    expect(nameReads).toBe(1);
   });
 
   it("never throws for non-errors", () => {

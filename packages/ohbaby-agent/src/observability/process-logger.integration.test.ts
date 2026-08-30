@@ -20,6 +20,7 @@ import {
   createProcessLoggerWithLimits,
   DiagnosticsConfigurationError,
   type ProcessLoggerHandle,
+  writeFileHandleFully,
 } from "./process-logger.js";
 
 const temporaryDirectories: string[] = [];
@@ -115,6 +116,39 @@ const truncationEvent = defineDiagnosticEvent({
 });
 
 describe("process logger", () => {
+  it("retries short file writes until the complete UTF-8 JSONL frame is persisted", async () => {
+    const chunks: Buffer[] = [];
+    const writer = {
+      write(
+        buffer: Uint8Array,
+        offset: number,
+        length: number,
+      ): Promise<{ readonly bytesWritten: number }> {
+        const bytesWritten = Math.min(length, 3);
+        chunks.push(
+          Buffer.from(buffer.subarray(offset, offset + bytesWritten)),
+        );
+        return Promise.resolve({ bytesWritten });
+      },
+    };
+
+    await writeFileHandleFully(writer, '{"event":"诊断"}\n');
+
+    expect(Buffer.concat(chunks).toString("utf8")).toBe('{"event":"诊断"}\n');
+    expect(chunks.length).toBeGreaterThan(1);
+  });
+
+  it("treats zero-progress file writes as writer failures", async () => {
+    await expect(
+      writeFileHandleFully(
+        {
+          write: () => Promise.resolve({ bytesWritten: 0 }),
+        },
+        '{"event":"diagnostics.test"}\n',
+      ),
+    ).rejects.toThrow("made no progress");
+  });
+
   it("creates a private per-process JSONL file and flushes tail records", async () => {
     const logRoot = await temporaryDirectory();
     const stdout = vi.spyOn(process.stdout, "write");

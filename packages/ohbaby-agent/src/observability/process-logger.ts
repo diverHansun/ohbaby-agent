@@ -60,6 +60,40 @@ interface ProcessLogWriter {
   write(line: string): Promise<void>;
 }
 
+interface SequentialByteWriter {
+  write(
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: null,
+  ): Promise<{ readonly bytesWritten: number }>;
+}
+
+export async function writeFileHandleFully(
+  writer: SequentialByteWriter,
+  value: string,
+): Promise<void> {
+  const buffer = Buffer.from(value, "utf8");
+  let offset = 0;
+  while (offset < buffer.length) {
+    const remaining = buffer.length - offset;
+    const { bytesWritten } = await writer.write(
+      buffer,
+      offset,
+      remaining,
+      null,
+    );
+    if (
+      !Number.isInteger(bytesWritten) ||
+      bytesWritten <= 0 ||
+      bytesWritten > remaining
+    ) {
+      throw new Error("diagnostic file write made no progress");
+    }
+    offset += bytesWritten;
+  }
+}
+
 interface ProcessLoggerDependencies {
   createWriter(
     directory: string,
@@ -250,7 +284,7 @@ class RotatingFileWriter implements ProcessLogWriter {
     if (this.bytes > 0 && this.bytes + lineBytes > this.limits.maxBytes) {
       await this.rotate();
     }
-    await this.file.write(line);
+    await writeFileHandleFully(this.file, line);
     this.bytes += lineBytes;
   }
 
