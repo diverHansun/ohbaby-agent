@@ -188,6 +188,7 @@ function createRpcCoreHost(host: CliCoreHost): CliCoreHost {
 }
 
 async function importRuntimeModule(specifier: string): Promise<unknown> {
+  // eslint-disable-next-line no-restricted-syntax -- Audited composition-root runtime loader; all other CLI variable imports are forbidden.
   return import(specifier);
 }
 

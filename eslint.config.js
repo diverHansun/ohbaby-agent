@@ -203,25 +203,6 @@ export default tseslint.config(
     },
   },
   {
-    files: ["packages/ohbaby-cli/src/bin.ts"],
-    rules: {
-      "no-restricted-syntax": [
-        "error",
-        {
-          message:
-            "The CLI composition root must route dynamic imports through importRuntimeModule(specifier).",
-          selector: "ImportExpression[source.type!='Identifier']",
-        },
-        {
-          message:
-            "The CLI composition root must route dynamic imports through importRuntimeModule(specifier).",
-          selector:
-            "ImportExpression[source.type='Identifier'][source.name!='specifier']",
-        },
-      ],
-    },
-  },
-  {
     ignores: [
       "**/dist/**",
       "**/node_modules/**",

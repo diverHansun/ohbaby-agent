@@ -104,6 +104,13 @@ const debugEvent = defineDiagnosticEvent({
   level: "debug",
 });
 
+const tracePathEvent = defineDiagnosticEvent({
+  component: "diagnostics",
+  event: "diagnostics.integration_trace_path",
+  fields: { path: diagnosticField.path() },
+  level: "trace",
+});
+
 const truncationEvent = defineDiagnosticEvent({
   component: "diagnostics",
   event: "diagnostics.truncation",
@@ -219,6 +226,31 @@ describe("process logger", () => {
     expect(onUnavailable).toHaveBeenCalledOnce();
     expect(onUnavailable).toHaveBeenCalledWith("write");
     await handle.dispose();
+  });
+
+  it("filters disabled levels before reading or encoding event fields", async () => {
+    const logRoot = await temporaryDirectory();
+    const handle = await createProcessLogger({
+      level: "info",
+      logDirectory: logRoot,
+      role: "tui",
+    });
+    let fieldReads = 0;
+    const input = Object.defineProperty({}, "path", {
+      enumerable: true,
+      get: () => {
+        fieldReads += 1;
+        return "a".repeat(50_000);
+      },
+    }) as { readonly path: string };
+
+    handle.logger.emit(tracePathEvent, input);
+    await handle.dispose();
+
+    expect(fieldReads).toBe(0);
+    expect(await readFile(requireLogFilePath(handle), "utf8")).not.toContain(
+      "diagnostics.integration_trace_path",
+    );
   });
 
   it("joins concurrent dispose calls through the same bounded drain", async () => {

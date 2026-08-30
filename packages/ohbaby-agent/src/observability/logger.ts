@@ -77,9 +77,12 @@ const numericEncoders = new WeakSet<object>();
 const EVENT_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9_]*)+$/;
 const COMPONENT_PATTERN = /^[a-z][a-z0-9-]{0,47}$/;
 const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
+  "accesskey",
   "apikey",
   "arguments",
+  "auth",
   "authorization",
+  "bearer",
   "body",
   "command",
   "completion",
@@ -100,31 +103,62 @@ const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
   "request",
   "response",
   "secret",
+  "signingkey",
   "stderr",
   "stdin",
   "stdout",
   "text",
   "token",
 ]);
-const CREDENTIAL_PATTERN =
-  /(authorization|api[_-]?key|access[_-]?token|bearer|cookie|password|private[_-]?key)\s*[:=]\s*[^\s,;]+/gi;
+const KEY_VALUE_CREDENTIAL_PATTERN =
+  /(authorization|api[_-]?key|access[_-]?(?:key|token)|cookie|password|private[_-]?key|signing[_-]?key)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/gi;
+const BEARER_CREDENTIAL_PATTERN = /\bbearer\s+[^\s,;]+/gi;
 const MAX_SAFE_STRING_BYTES = 512;
-const EXTERNAL_ID_KIND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+const EXTERNAL_ID_KINDS = new Set(["operation", "provider", "session"]);
 const SAFE_NUMERIC_CONTENT_FIELD_NAMES = new Set(["textLength", "tokenCount"]);
+const DIAGNOSTIC_ENUM_VALUES = new Set([
+  "anthropic",
+  "cache_creation_input_tokens",
+  "cache_read_input_tokens",
+  "cli",
+  "disconnect",
+  "idle",
+  "input-breakdown-conflict",
+  "input_tokens",
+  "non-monotonic-cumulative-field",
+  "openai-compatible",
+  "output_tokens",
+  "raw-total-mismatch",
+  "read",
+  "requested",
+  "serve",
+  "shutdown",
+  "signal",
+  "startup-failed",
+  "tui",
+] as const);
+type DiagnosticEnumValue =
+  typeof DIAGNOSTIC_ENUM_VALUES extends ReadonlySet<infer Value>
+    ? Value
+    : never;
+type ExternalIdKind = "operation" | "provider" | "session";
 
 function truncateUtf8(value: string, maxBytes: number): string {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) {
+  const buffer = Buffer.from(value, "utf8");
+  if (buffer.length <= maxBytes) {
     return value;
   }
-  let end = value.length;
-  while (end > 0 && Buffer.byteLength(value.slice(0, end), "utf8") > maxBytes) {
+  let end = maxBytes;
+  while (end > 0 && (buffer[end] & 0xc0) === 0x80) {
     end -= 1;
   }
-  return value.slice(0, end);
+  return buffer.subarray(0, end).toString("utf8");
 }
 
 function cleanCredentialShapes(value: string): string {
-  return value.replace(CREDENTIAL_PATTERN, "$1=<redacted>");
+  return value
+    .replace(KEY_VALUE_CREDENTIAL_PATTERN, "$1=<redacted>")
+    .replace(BEARER_CREDENTIAL_PATTERN, "bearer=<redacted>");
 }
 
 function shortHash(kind: string, value: string): string {
@@ -167,7 +201,7 @@ function isAbsolutePathOnAnyPlatform(value: string): boolean {
 }
 
 function hasForbiddenContentFieldName(value: string): boolean {
-  const normalized = value.toLowerCase();
+  const normalized = value.toLowerCase().replaceAll(/[^a-z0-9]/gu, "");
   return [...FORBIDDEN_CONTENT_FIELD_NAMES].some((forbidden) =>
     normalized.includes(forbidden),
   );
@@ -325,11 +359,8 @@ export const diagnosticField = Object.freeze({
   externalError(): DiagnosticFieldEncoder<unknown> {
     return createEncoder((value) => safeError(value));
   },
-  externalId(kind: string): DiagnosticFieldEncoder<string> {
-    if (
-      !EXTERNAL_ID_KIND_PATTERN.test(kind) ||
-      hasForbiddenContentFieldName(kind)
-    ) {
+  externalId(kind: ExternalIdKind): DiagnosticFieldEncoder<string> {
+    if (!EXTERNAL_ID_KINDS.has(kind)) {
       throw new TypeError("diagnostic external ID kind must be a stable label");
     }
     return createEncoder((value) => `${kind}_${shortHash(kind, value)}`);
@@ -356,9 +387,7 @@ export const diagnosticField = Object.freeze({
     const internal = encoder as InternalFieldEncoder<Input>;
     const optionalEncoder = createEncoder<Input | undefined>(
       (value, context) =>
-        value === undefined
-          ? undefined
-          : internal.encode(value, context),
+        value === undefined ? undefined : internal.encode(value, context),
       true,
     );
     if (numericEncoders.has(encoder)) {
@@ -371,9 +400,15 @@ export const diagnosticField = Object.freeze({
       normalizeDiagnosticPath(value, context.roots),
     );
   },
-  stringEnum<const Values extends readonly [string, ...string[]]>(
-    values: Values,
-  ): DiagnosticFieldEncoder<Values[number]> {
+  stringEnum<
+    const Values extends readonly [
+      DiagnosticEnumValue,
+      ...DiagnosticEnumValue[],
+    ],
+  >(values: Values): DiagnosticFieldEncoder<Values[number]> {
+    if (values.some((value) => !DIAGNOSTIC_ENUM_VALUES.has(value))) {
+      throw new TypeError("diagnostic enum values must be static labels");
+    }
     const allowed = new Set<string>(values);
     return createEncoder((value) => {
       if (!allowed.has(value)) {
@@ -501,6 +536,15 @@ export function encodeDiagnosticEvent<Input>(
     ),
     record,
   };
+}
+
+export function diagnosticEventLevel<Input>(
+  definition: DiagnosticEventDefinition<Input>,
+): LogLevel {
+  if (!definitions.has(definition)) {
+    throw new TypeError("unrecognized diagnostic event definition");
+  }
+  return (definition as InternalDiagnosticEventDefinition<Input>).level;
 }
 
 export function emitDiagnostic<Input>(

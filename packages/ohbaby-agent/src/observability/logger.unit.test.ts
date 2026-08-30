@@ -173,6 +173,12 @@ describe("diagnostic event contract", () => {
     "privateKey",
     "credentialPath",
     "passphraseFile",
+    "bearer",
+    "auth",
+    "authHeader",
+    "authentication",
+    "accessKey",
+    "signingKey",
   ])("rejects the reserved content field %s at every log level", (field) => {
     for (const level of ["error", "warn", "info", "debug", "trace"] as const) {
       expect(() =>
@@ -211,17 +217,34 @@ describe("diagnostic event contract", () => {
   );
 
   it("requires external ID kinds to be stable, bounded, and non-sensitive", () => {
+    const dynamicKind = ["tenant", "alice"].join("-");
+    // @ts-expect-error Dynamic external-ID kinds are outside the closed schema.
+    expect(() => diagnosticField.externalId(dynamicKind)).toThrow(
+      "stable label",
+    );
+    // @ts-expect-error Unknown external-ID kinds are outside the closed schema.
     expect(() => diagnosticField.externalId("request")).toThrow("stable label");
+    // @ts-expect-error Sensitive external-ID kinds are outside the closed schema.
     expect(() => diagnosticField.externalId("schema-api-key-secret")).toThrow(
       "stable label",
     );
+    // @ts-expect-error Uppercase external-ID kinds are outside the closed schema.
     expect(() => diagnosticField.externalId("UPPERCASE")).toThrow(
       "stable label",
     );
+    // @ts-expect-error Oversized external-ID kinds are outside the closed schema.
     expect(() => diagnosticField.externalId("x".repeat(33))).toThrow(
       "stable label",
     );
     expect(() => diagnosticField.externalId("operation")).not.toThrow();
+  });
+
+  it("rejects dynamically assembled enum labels at compile time and runtime", () => {
+    const dynamicValue = ["DYNAMIC", "ENUM", "SECRET", "SENTINEL"].join("_");
+    expect(() => {
+      // @ts-expect-error Dynamic enum values are outside the closed schema.
+      diagnosticField.stringEnum([dynamicValue]);
+    }).toThrow("static labels");
   });
 });
 
@@ -290,6 +313,25 @@ describe("diagnostic normalization", () => {
     expect(normalizeDiagnosticPath(String.raw`safe\child.txt`, {})).toBe(
       "safe/child.txt",
     );
+  });
+
+  it("redacts auth-header and bearer credential shapes in retained paths", () => {
+    for (const credentialPath of [
+      "logs/authorization=Bearer DYNAMIC_AUTH_SECRET/file.json",
+      "logs/Bearer DYNAMIC_BEARER_SECRET/file.json",
+      "logs/access-key=DYNAMIC_ACCESS_KEY/file.json",
+      "logs/signing_key=DYNAMIC_SIGNING_KEY/file.json",
+    ]) {
+      const normalized = normalizeDiagnosticPath(credentialPath, {});
+      expect(normalized).not.toContain("DYNAMIC_");
+      expect(normalized).toContain("<redacted>");
+    }
+  });
+
+  it("truncates long UTF-8 paths without replacement characters", () => {
+    const normalized = normalizeDiagnosticPath(`${"a".repeat(511)}诊`, {});
+    expect(Buffer.byteLength(normalized, "utf8")).toBeLessThanOrEqual(512);
+    expect(normalized).not.toContain("�");
   });
 
   it("hashes URL origins without retaining userinfo, host, path, or query", () => {

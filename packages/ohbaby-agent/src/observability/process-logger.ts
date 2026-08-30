@@ -15,6 +15,7 @@ import path from "node:path";
 import { resolveOhbabyHome } from "../paths/index.js";
 import { diagnosticsStarted, loggerEventsDropped } from "./events.js";
 import {
+  diagnosticEventLevel,
   encodeDiagnosticEvent,
   LOG_LEVEL_PRIORITY,
   NOOP_LOGGER,
@@ -420,6 +421,15 @@ class ProcessFileLogger implements Logger {
     if (!this.accepting || this.disabled) {
       return;
     }
+    let level: LogLevel;
+    try {
+      level = diagnosticEventLevel(definition);
+    } catch {
+      return;
+    }
+    if (LOG_LEVEL_PRIORITY[level] > LOG_LEVEL_PRIORITY[this.level]) {
+      return;
+    }
     let encoded: EncodedDiagnosticEvent;
     try {
       encoded = encodeDiagnosticEvent(
@@ -430,9 +440,6 @@ class ProcessFileLogger implements Logger {
       );
     } catch {
       // A malformed event belongs to that call site, not to the writer lifecycle.
-      return;
-    }
-    if (LOG_LEVEL_PRIORITY[encoded.level] > LOG_LEVEL_PRIORITY[this.level]) {
       return;
     }
     try {

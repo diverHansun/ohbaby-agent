@@ -174,16 +174,29 @@ describe("CLI runtime import boundary lint", () => {
     );
   });
 
-  it("allows only the explicit composition-root runtime loader shape", async () => {
+  it("requires the explicit composition-root loader to use a narrow inline allowlist", async () => {
     await expect(
       lintProbe(
-        "export async function importRuntimeModule(specifier: string): Promise<unknown> { return import(specifier); }",
+        `export async function importRuntimeModule(specifier: string): Promise<unknown> {
+  // eslint-disable-next-line no-restricted-syntax -- audited composition-root loader
+  return import(specifier);
+}`,
         cliCompositionProbePath,
       ),
     ).resolves.toEqual([]);
     await expect(
       lintProbe(
         'const moduleName = "ohbaby-agent"; const runtime = await import(moduleName); void runtime;',
+        cliCompositionProbePath,
+      ),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^no-restricted-syntax:/u),
+      ]),
+    );
+    await expect(
+      lintProbe(
+        'async function eagerLoad(): Promise<unknown> { const specifier = "ohbaby-agent"; return import(specifier); } void eagerLoad;',
         cliCompositionProbePath,
       ),
     ).resolves.toEqual(
