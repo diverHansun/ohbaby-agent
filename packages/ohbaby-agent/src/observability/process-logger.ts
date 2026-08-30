@@ -386,16 +386,22 @@ class ProcessFileLogger implements Logger {
     if (!this.accepting || this.disabled) {
       return;
     }
+    let encoded: EncodedDiagnosticEvent;
     try {
-      const encoded = encodeDiagnosticEvent(
+      encoded = encodeDiagnosticEvent(
         definition,
         input,
         { roots: this.roots },
         new Date().toISOString(),
       );
-      if (LOG_LEVEL_PRIORITY[encoded.level] > LOG_LEVEL_PRIORITY[this.level]) {
-        return;
-      }
+    } catch {
+      // A malformed event belongs to that call site, not to the writer lifecycle.
+      return;
+    }
+    if (LOG_LEVEL_PRIORITY[encoded.level] > LOG_LEVEL_PRIORITY[this.level]) {
+      return;
+    }
+    try {
       this.enqueueDropSummaryIfNeeded();
       this.enqueue({
         level: encoded.level,

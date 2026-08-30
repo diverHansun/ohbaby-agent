@@ -155,6 +155,17 @@ function pathHasPrefix(value: string, root: string): boolean {
   );
 }
 
+function isAbsolutePathOnAnyPlatform(value: string): boolean {
+  return path.posix.isAbsolute(value) || path.win32.isAbsolute(value);
+}
+
+function hasForbiddenContentFieldName(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return [...FORBIDDEN_CONTENT_FIELD_NAMES].some((forbidden) =>
+    normalized.includes(forbidden),
+  );
+}
+
 function normalizeRelativePath(value: string): string {
   const normalized = path.normalize(value).replaceAll("\\", "/");
   if (
@@ -171,8 +182,11 @@ export function normalizeDiagnosticPath(
   value: string,
   roots: DiagnosticRoots,
 ): string {
-  if (!path.isAbsolute(value)) {
+  if (!isAbsolutePathOnAnyPlatform(value)) {
     return normalizeRelativePath(value);
+  }
+  if (!path.isAbsolute(value)) {
+    return `<external>/${shortHash("path", value)}`;
   }
   const absolute = path.resolve(value);
   const candidates: (readonly [string, string])[] = [];
@@ -363,7 +377,7 @@ export function defineDiagnosticEvent<
   for (const [key, encoder] of entries) {
     if (
       !/^[a-z][A-Za-z0-9]{0,63}$/.test(key) ||
-      FORBIDDEN_CONTENT_FIELD_NAMES.has(key) ||
+      hasForbiddenContentFieldName(key) ||
       !encoders.has(encoder)
     ) {
       throw new TypeError("diagnostic event contains an invalid field encoder");

@@ -148,6 +148,45 @@ describe("process logger", () => {
     }
   });
 
+  it("drops malformed events without disabling later writer diagnostics", async () => {
+    const logRoot = await temporaryDirectory();
+    const onUnavailable = vi.fn();
+    const writer = {
+      close: vi.fn(() => Promise.resolve()),
+      path: path.join(logRoot, "encoder-boundary.jsonl"),
+      write: vi.fn(() => Promise.resolve()),
+    };
+    const handle = await createProcessLoggerWithLimits(
+      { level: "info", logDirectory: logRoot, onUnavailable, role: "tui" },
+      {
+        disposeTimeoutMs: 1_000,
+        maxBytes: 8 * 1024 * 1024,
+        maxFiles: 3,
+        maxLineBytes: 16 * 1024,
+        maxQueue: 64,
+        retentionMs: 1_000,
+      },
+      { createWriter: () => Promise.resolve(writer) },
+    );
+    await handle.flush();
+    const writesBeforeMalformedEvents = writer.write.mock.calls.length;
+
+    handle.logger.emit(debugEvent, { count: 1.5 });
+    handle.logger.emit(infoEvent, { count: 1.5 });
+    await handle.flush();
+
+    expect(writer.write).toHaveBeenCalledTimes(writesBeforeMalformedEvents);
+    expect(onUnavailable).not.toHaveBeenCalled();
+
+    writer.write.mockRejectedValueOnce(new Error("simulated writer failure"));
+    handle.logger.emit(infoEvent, { count: 2 });
+    await handle.flush();
+
+    expect(onUnavailable).toHaveBeenCalledOnce();
+    expect(onUnavailable).toHaveBeenCalledWith("write");
+    await handle.dispose();
+  });
+
   it("joins concurrent dispose calls through the same bounded drain", async () => {
     const logRoot = await temporaryDirectory();
     const handle = await createProcessLogger({

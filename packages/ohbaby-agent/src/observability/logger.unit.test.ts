@@ -167,6 +167,8 @@ describe("diagnostic event contract", () => {
     "context",
     "authorization",
     "token",
+    "requestBody",
+    "apiToken",
   ])("rejects the reserved content field %s at every log level", (field) => {
     for (const level of ["error", "warn", "info", "debug", "trace"] as const) {
       expect(() =>
@@ -210,6 +212,19 @@ describe("diagnostic normalization", () => {
     expect(normalizeDiagnosticPath("../../private", roots)).toMatch(
       /^<external>\/[a-f0-9]{12}$/,
     );
+  });
+
+  it("hashes foreign-platform absolute paths instead of treating them as relative", () => {
+    for (const foreignPath of [
+      String.raw`C:\Users\alice\secret.txt`,
+      String.raw`\\server\private\customer.txt`,
+    ]) {
+      const normalized = normalizeDiagnosticPath(foreignPath, {});
+      expect(normalized).toMatch(/^<external>\/[a-f0-9]{12}$/);
+      expect(normalized).not.toContain("alice");
+      expect(normalized).not.toContain("server");
+      expect(normalized).not.toContain("customer");
+    }
   });
 
   it("hashes URL origins without retaining userinfo, host, path, or query", () => {
