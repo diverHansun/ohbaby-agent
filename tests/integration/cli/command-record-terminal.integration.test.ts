@@ -28,6 +28,9 @@ const agentEntry = join(
   "index.js",
 );
 const cliEntry = join(repoRoot, "packages", "ohbaby-cli", "dist", "bin.js");
+const promptSentinel = "private-prompt-sentinel";
+const toolBodySentinel = "private-tool-mcp-body-sentinel";
+const httpBodySentinel = "private-http-body-sentinel";
 let releasePackageBuildLock: (() => Promise<void>) | undefined;
 
 beforeAll(async () => {
@@ -117,8 +120,8 @@ try {
     clientInvocationId: "process_regression_1",
     commandId: "status",
     path: ["status"],
-    raw: "/status",
-    rawArgs: "",
+    raw: ${JSON.stringify(`/status ${promptSentinel}`)},
+    rawArgs: ${JSON.stringify(toolBodySentinel)},
     surface: "tui",
   });
   await writeFile(process.env.OHBABY_TEST_RESULT_PATH, JSON.stringify(events));
@@ -150,7 +153,14 @@ try {
       const logFilePath = join(logRoot, "tui", files[0] ?? "missing");
       const log = await readFile(logFilePath, "utf8");
       expect(log).toContain('"event":"diagnostics.started"');
-      expect(log).not.toContain("test-only-key");
+      expectSensitiveValuesAbsent(log, [
+        "test-only-key",
+        promptSentinel,
+        toolBodySentinel,
+        workspace,
+        home,
+        profile,
+      ]);
       const events = await readFile(resultPath, "utf8");
       expect(events).toContain(logFilePath);
     } finally {
@@ -229,11 +239,11 @@ try {
           params: [
             {
               argv: [],
-              clientInvocationId: "serve_process_regression_1",
+              clientInvocationId: httpBodySentinel,
               commandId: "status",
               path: ["status"],
-              raw: "/status",
-              rawArgs: "",
+              raw: `/status ${promptSentinel}`,
+              rawArgs: toolBodySentinel,
               surface: "web",
             },
           ],
@@ -280,8 +290,16 @@ try {
           "server.stopped",
         ]),
       );
-      expect(log).not.toContain("test-only-key");
-      expect(log).not.toContain(authToken);
+      expectSensitiveValuesAbsent(log, [
+        "test-only-key",
+        authToken,
+        promptSentinel,
+        toolBodySentinel,
+        httpBodySentinel,
+        workspace,
+        home,
+        profile,
+      ]);
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGKILL");
@@ -291,6 +309,15 @@ try {
     }
   }, 60_000);
 });
+
+function expectSensitiveValuesAbsent(
+  log: string,
+  sensitiveValues: readonly string[],
+): void {
+  for (const sensitiveValue of sensitiveValues) {
+    expect(log).not.toContain(sensitiveValue);
+  }
+}
 
 function createIsolatedEnvironment(
   root: string,
