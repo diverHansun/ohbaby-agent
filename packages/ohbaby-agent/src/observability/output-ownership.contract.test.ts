@@ -138,4 +138,68 @@ describe("CLI runtime import boundary lint", () => {
       ).resolves.toEqual([]);
     },
   );
+
+  it.each([
+    "ohbaby-agent",
+    "ohbaby-agent/subpath",
+    "ohbaby-server",
+    "ohbaby-server/subpath",
+    "../../../ohbaby-agent/src/index.js",
+    "../../../ohbaby-agent/dist/index.js",
+    "../../../ohbaby-server/src/index.js",
+    "../../../ohbaby-server/dist/index.js",
+  ])("rejects the dynamic runtime import %s", async (specifier) => {
+    await expect(
+      lintProbe(
+        `const runtime = await import(${JSON.stringify(specifier)}); void runtime;`,
+        cliRuntimeProbePath,
+      ),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^no-restricted-syntax:/u),
+      ]),
+    );
+  });
+
+  it("rejects a variable dynamic import outside the CLI composition root", async () => {
+    await expect(
+      lintProbe(
+        'const specifier = "ohbaby-agent"; const runtime = await import(specifier); void runtime;',
+        cliRuntimeProbePath,
+      ),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^no-restricted-syntax:/u),
+      ]),
+    );
+  });
+
+  it("allows only the explicit composition-root runtime loader shape", async () => {
+    await expect(
+      lintProbe(
+        "export async function importRuntimeModule(specifier: string): Promise<unknown> { return import(specifier); }",
+        cliCompositionProbePath,
+      ),
+    ).resolves.toEqual([]);
+    await expect(
+      lintProbe(
+        'const moduleName = "ohbaby-agent"; const runtime = await import(moduleName); void runtime;',
+        cliCompositionProbePath,
+      ),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^no-restricted-syntax:/u),
+      ]),
+    );
+    await expect(
+      lintProbe(
+        'const runtime = await import("ohbaby-agent"); void runtime;',
+        cliCompositionProbePath,
+      ),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^no-restricted-syntax:/u),
+      ]),
+    );
+  });
 });

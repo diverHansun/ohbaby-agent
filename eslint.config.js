@@ -186,6 +186,39 @@ export default tseslint.config(
           ],
         },
       ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          message:
+            "CLI production code must not dynamically load agent/server runtimes outside the composition-root loader.",
+          selector: "ImportExpression:not([source.type='Literal'])",
+        },
+        {
+          message:
+            "CLI production code must not dynamically load agent/server runtimes outside the composition-root loader.",
+          selector:
+            "ImportExpression[source.type='Literal'][source.value=/ohbaby-(?:agent|server)/]",
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/ohbaby-cli/src/bin.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          message:
+            "The CLI composition root must route dynamic imports through importRuntimeModule(specifier).",
+          selector: "ImportExpression[source.type!='Identifier']",
+        },
+        {
+          message:
+            "The CLI composition root must route dynamic imports through importRuntimeModule(specifier).",
+          selector:
+            "ImportExpression[source.type='Identifier'][source.name!='specifier']",
+        },
+      ],
     },
   },
   {
