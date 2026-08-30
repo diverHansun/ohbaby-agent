@@ -159,16 +159,29 @@ export default tseslint.config(
           paths: [
             {
               message:
-                "CLI production code must not statically load the heavyweight agent runtime; use type-only imports or the composition-root loader.",
+                "CLI production code must not statically load heavyweight agent/server runtimes; use type-only imports or the composition-root loader.",
               name: "ohbaby-agent",
+              allowTypeImports: true,
+            },
+            {
+              message:
+                "CLI production code must not statically load heavyweight agent/server runtimes; use type-only imports or the composition-root loader.",
+              name: "ohbaby-server",
               allowTypeImports: true,
             },
           ],
           patterns: [
             {
-              group: ["**/ohbaby-agent/src/**"],
+              group: [
+                "ohbaby-agent/*",
+                "ohbaby-server/*",
+                "**/ohbaby-agent/src/**",
+                "**/ohbaby-agent/dist/**",
+                "**/ohbaby-server/src/**",
+                "**/ohbaby-server/dist/**",
+              ],
               message:
-                "CLI production code must not import agent source internals.",
+                "CLI production code must not import agent/server runtime internals.",
             },
           ],
         },

@@ -109,27 +109,33 @@ describe("backend output ownership lint", () => {
 });
 
 describe("CLI runtime import boundary lint", () => {
-  it("rejects package and source-internal runtime imports outside the composition loader", async () => {
+  it.each([
+    "ohbaby-agent",
+    "ohbaby-agent/subpath",
+    "ohbaby-server",
+    "ohbaby-server/subpath",
+    "../../../ohbaby-agent/src/index.js",
+    "../../../ohbaby-agent/dist/index.js",
+    "../../../ohbaby-server/src/index.js",
+    "../../../ohbaby-server/dist/index.js",
+  ])("rejects the static runtime import %s", async (specifier) => {
     await expect(
       lintProbe(
-        'import { createCoreAPI } from "ohbaby-agent"; void createCoreAPI;',
-        cliRuntimeProbePath,
-      ),
-    ).resolves.toEqual([expect.stringMatching(/^no-restricted-imports:/u)]);
-    await expect(
-      lintProbe(
-        'import { createCoreAPI } from "../../../ohbaby-agent/src/index.js"; void createCoreAPI;',
+        `import { runtime } from ${JSON.stringify(specifier)}; void runtime;`,
         cliRuntimeProbePath,
       ),
     ).resolves.toEqual([expect.stringMatching(/^no-restricted-imports:/u)]);
   });
 
-  it("allows type-only package imports at the CLI composition root", async () => {
-    await expect(
-      lintProbe(
-        'export type { Logger } from "ohbaby-agent";',
-        cliCompositionProbePath,
-      ),
-    ).resolves.toEqual([]);
-  });
+  it.each(["ohbaby-agent", "ohbaby-server"])(
+    "allows type-only imports from %s at the CLI composition root",
+    async (specifier) => {
+      await expect(
+        lintProbe(
+          `export type { RuntimeType } from ${JSON.stringify(specifier)};`,
+          cliCompositionProbePath,
+        ),
+      ).resolves.toEqual([]);
+    },
+  );
 });
