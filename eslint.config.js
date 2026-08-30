@@ -153,6 +153,8 @@ export default tseslint.config(
   {
     files: ["packages/ohbaby-cli/src/**/*.{ts,tsx}"],
     rules: {
+      "no-eval": "error",
+      "no-new-func": "error",
       "no-restricted-imports": [
         "error",
         {
@@ -208,6 +210,78 @@ export default tseslint.config(
             "CLI production code must not dynamically load agent/server runtimes outside the composition-root loader.",
           selector:
             "ImportExpression[source.type='Literal'][source.value=/(?:ohbaby-(?:agent|server)|^(?:node:)?module$)/]",
+        },
+        {
+          message:
+            "CLI production code must not access process.getBuiltinModule because it bypasses the runtime import boundary.",
+          selector:
+            "MemberExpression[object.name='process'][property.name='getBuiltinModule']",
+        },
+        {
+          message:
+            "CLI production code must not access computed process.getBuiltinModule.",
+          selector:
+            "MemberExpression[computed=true][object.name='process'][property.value='getBuiltinModule']",
+        },
+        {
+          message:
+            "CLI production code must not access globalThis.process.getBuiltinModule.",
+          selector:
+            "MemberExpression[object.object.name='globalThis'][object.property.name='process'][property.name='getBuiltinModule']",
+        },
+        {
+          message:
+            "CLI production code must not access computed globalThis.process.getBuiltinModule.",
+          selector:
+            "MemberExpression[computed=true][object.object.name='globalThis'][object.property.name='process'][property.value='getBuiltinModule']",
+        },
+        {
+          message:
+            "CLI production code must not access computed globalThis process.getBuiltinModule.",
+          selector:
+            "MemberExpression[object.type='MemberExpression'][object.computed=true][object.object.name='globalThis'][object.property.value='process'][property.name='getBuiltinModule']",
+        },
+        {
+          message:
+            "CLI production code must not access doubly computed globalThis process.getBuiltinModule.",
+          selector:
+            "MemberExpression[computed=true][object.type='MemberExpression'][object.computed=true][object.object.name='globalThis'][object.property.value='process'][property.value='getBuiltinModule']",
+        },
+        {
+          message:
+            "CLI production code must not alias process to reach builtin module loaders.",
+          selector:
+            "VariableDeclarator[id.type='Identifier'][init.name='process']",
+        },
+        {
+          message:
+            "CLI production code must not alias globalThis.process to reach builtin module loaders.",
+          selector:
+            "VariableDeclarator[id.type='Identifier'][init.object.name='globalThis'][init.property.name='process']",
+        },
+        {
+          message:
+            "CLI production code must not alias computed globalThis process to reach builtin module loaders.",
+          selector:
+            "VariableDeclarator[id.type='Identifier'][init.computed=true][init.object.name='globalThis'][init.property.value='process']",
+        },
+        {
+          message:
+            "CLI production code must not destructure process.getBuiltinModule.",
+          selector:
+            "VariableDeclarator[init.name='process'] > ObjectPattern > Property[key.name='getBuiltinModule']",
+        },
+        {
+          message:
+            "CLI production code must not destructure globalThis.process.getBuiltinModule.",
+          selector:
+            "VariableDeclarator[init.object.name='globalThis'][init.property.name='process'] > ObjectPattern > Property[key.name='getBuiltinModule']",
+        },
+        {
+          message:
+            "CLI production code must not destructure computed globalThis process.getBuiltinModule.",
+          selector:
+            "VariableDeclarator[init.type='MemberExpression'][init.computed=true][init.object.name='globalThis'][init.property.value='process'] > ObjectPattern > Property[key.name='getBuiltinModule']",
         },
       ],
     },

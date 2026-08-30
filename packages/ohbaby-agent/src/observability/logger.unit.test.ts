@@ -273,6 +273,51 @@ describe("diagnostic event contract", () => {
       } as never),
     ).toThrow("level must be a stable identifier");
   });
+
+  it("snapshots definition metadata exactly once before validation", () => {
+    let componentReads = 0;
+    let eventReads = 0;
+    let fieldsReads = 0;
+    let levelReads = 0;
+    const definition = defineDiagnosticEvent({
+      get component() {
+        componentReads += 1;
+        return componentReads === 1 ? "diagnostics" : "tenantsecret";
+      },
+      get event() {
+        eventReads += 1;
+        return eventReads === 1
+          ? "diagnostics.snapshot"
+          : "diagnostics.secret_leak";
+      },
+      get fields() {
+        fieldsReads += 1;
+        return {};
+      },
+      get level() {
+        levelReads += 1;
+        return levelReads === 1 ? "info" : "off";
+      },
+    } as never);
+
+    const encoded = encodeDiagnosticEvent(
+      definition,
+      {},
+      { roots: {} },
+      "2026-08-29T00:00:00.000Z",
+    );
+    expect(encoded.record).toMatchObject({
+      component: "diagnostics",
+      event: "diagnostics.snapshot",
+      level: "info",
+    });
+    expect({ componentReads, eventReads, fieldsReads, levelReads }).toEqual({
+      componentReads: 1,
+      eventReads: 1,
+      fieldsReads: 1,
+      levelReads: 1,
+    });
+  });
 });
 
 describe("diagnostic normalization", () => {
@@ -352,6 +397,11 @@ describe("diagnostic normalization", () => {
       "logs/authorization: Digest DYNAMIC_DIGEST_SECRET",
       "logs/cookie=session=DYNAMIC_SESSION; csrf=DYNAMIC_CSRF",
       "logs/private_key=-----BEGIN PRIVATE KEY----- DYNAMIC_PRIVATE",
+      "logs/client_secret=DYNAMIC_CLIENT_SECRET",
+      "logs/refresh_token=DYNAMIC_REFRESH_TOKEN",
+      "logs/id_token=DYNAMIC_ID_TOKEN",
+      "logs/passphrase=DYNAMIC_PASSPHRASE",
+      "logs/credential=DYNAMIC_CREDENTIAL",
     ]) {
       const normalized = normalizeDiagnosticPath(credentialPath, {});
       expect(normalized).not.toContain("DYNAMIC_");

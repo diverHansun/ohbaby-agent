@@ -162,6 +162,57 @@ describe("CLI runtime import boundary lint", () => {
   );
 
   it.each([
+    'process.getBuiltinModule("node:module")',
+    'process["getBuiltinModule"]("module")',
+    'globalThis.process.getBuiltinModule("node:module")',
+    'globalThis.process["getBuiltinModule"]("module")',
+    'globalThis["process"].getBuiltinModule("node:module")',
+    'globalThis["process"]["getBuiltinModule"]("module")',
+  ])("rejects builtin-module loader access through %s", async (expression) => {
+    await expect(
+      lintProbe(
+        `const moduleApi = ${expression}; void moduleApi;`,
+        cliRuntimeProbePath,
+      ),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^no-restricted-syntax:/u),
+      ]),
+    );
+  });
+
+  it.each([
+    "const processAlias = process; void processAlias;",
+    "const processAlias = globalThis.process; void processAlias;",
+    'const processAlias = globalThis["process"]; void processAlias;',
+    "const { getBuiltinModule } = process; void getBuiltinModule;",
+    "const { getBuiltinModule } = globalThis.process; void getBuiltinModule;",
+    'const { getBuiltinModule } = globalThis["process"]; void getBuiltinModule;',
+  ])("rejects builtin-module alias bypasses", async (source) => {
+    await expect(lintProbe(source, cliRuntimeProbePath)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^no-restricted-syntax:/u),
+      ]),
+    );
+  });
+
+  it("rejects string-evaluated runtime loaders", async () => {
+    await expect(
+      lintProbe("eval('import(\"ohbaby-agent\")');", cliRuntimeProbePath),
+    ).resolves.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^no-eval:/u)]),
+    );
+    await expect(
+      lintProbe(
+        "const load = new Function('return import(\"ohbaby-agent\")'); void load;",
+        cliRuntimeProbePath,
+      ),
+    ).resolves.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^no-new-func:/u)]),
+    );
+  });
+
+  it.each([
     "ohbaby-agent",
     "ohbaby-agent/subpath",
     "ohbaby-server",

@@ -124,7 +124,7 @@ const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
   "token",
 ]);
 const KEY_VALUE_CREDENTIAL_PATTERN =
-  /(authorization|api[_-]?key|access[_-]?(?:key|token)|cookie|password|private[_-]?key|signing[_-]?key)\s*[:=][\s\S]*/gi;
+  /(authorization|api[_-]?key|access[_-]?(?:key|token)|client[_-]?secret|cookie|credential|id[_-]?token|passphrase|password|private[_-]?key|refresh[_-]?token|signing[_-]?key)\s*[:=][\s\S]*/gi;
 const BEARER_CREDENTIAL_PATTERN = /\bbearer\s+[\s\S]*/gi;
 const MAX_SAFE_STRING_BYTES = 512;
 const EXTERNAL_ID_KINDS = new Set(["operation", "provider", "session"]);
@@ -458,19 +458,20 @@ export function defineDiagnosticEvent<
   readonly fields: Fields;
   readonly level: LogLevel;
 }): DiagnosticEventDefinition<InputForFields<Fields>> {
-  if (
-    !EVENT_PATTERN.test(specification.event) ||
-    specification.event.length > 96
-  ) {
+  const event = specification.event;
+  const component = specification.component;
+  const level = specification.level;
+  const fields = specification.fields;
+  if (!EVENT_PATTERN.test(event) || event.length > 96) {
     throw new TypeError("diagnostic event must be a stable dotted identifier");
   }
-  if (!DIAGNOSTIC_COMPONENTS.has(specification.component)) {
+  if (!DIAGNOSTIC_COMPONENTS.has(component)) {
     throw new TypeError("diagnostic component must be a stable identifier");
   }
-  if (!LOG_LEVELS.has(specification.level)) {
+  if (!LOG_LEVELS.has(level)) {
     throw new TypeError("diagnostic level must be a stable identifier");
   }
-  const entries = Object.entries(specification.fields);
+  const entries = Object.entries(fields);
   if (entries.length > 16 || entries.some(([key]) => key === "truncated")) {
     throw new TypeError("diagnostic event has invalid fields");
   }
@@ -497,10 +498,10 @@ export function defineDiagnosticEvent<
     [diagnosticEventDefinitionBrand]: (
       input: InputForFields<Fields>,
     ): InputForFields<Fields> => input,
-    component: specification.component,
-    event: specification.event,
+    component,
+    event,
     fields: internalFields,
-    level: specification.level,
+    level,
   }) as unknown as InternalDiagnosticEventDefinition<InputForFields<Fields>>;
   definitions.add(definition);
   return definition;
