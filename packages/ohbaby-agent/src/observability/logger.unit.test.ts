@@ -425,6 +425,15 @@ describe("diagnostic normalization", () => {
     expect(normalized).not.toContain("�");
   });
 
+  it("scans long delimiter-free path segments in bounded time", () => {
+    const startedAt = performance.now();
+    const normalized = normalizeDiagnosticPath("x".repeat(25_000), {});
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(Buffer.byteLength(normalized, "utf8")).toBeLessThanOrEqual(512);
+    expect(elapsedMs).toBeLessThan(100);
+  });
+
   it("hashes URL origins without retaining userinfo, host, path, or query", () => {
     const normalized = normalizeDiagnosticUrl(
       "https://tenant:password@internal.example/v1/messages?key=secret#body",

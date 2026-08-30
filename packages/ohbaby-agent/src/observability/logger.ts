@@ -123,7 +123,6 @@ const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
   "text",
   "token",
 ]);
-const CREDENTIAL_ASSIGNMENT_PATTERN = /([^/\\,;:=]+)\s*[:=]/gu;
 const BEARER_MARKER_PATTERN = /\bbearer\s+/iu;
 const MAX_SAFE_STRING_BYTES = 512;
 const EXTERNAL_ID_KINDS = new Set(["operation", "provider", "session"]);
@@ -168,13 +167,28 @@ function truncateUtf8(value: string, maxBytes: number): string {
 }
 
 function cleanCredentialShapes(value: string): string {
-  let assignment: RegExpMatchArray | undefined;
-  for (const candidate of value.matchAll(CREDENTIAL_ASSIGNMENT_PATTERN)) {
-    const key = candidate[1];
-    if (hasForbiddenContentFieldName(key)) {
-      assignment = candidate;
+  let assignment: { readonly index: number; readonly key: string } | undefined;
+  let segmentStart = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (
+      character === "/" ||
+      character === "\\" ||
+      character === "," ||
+      character === ";"
+    ) {
+      segmentStart = index + 1;
+      continue;
+    }
+    if (character !== ":" && character !== "=") {
+      continue;
+    }
+    const key = value.slice(segmentStart, index).trim();
+    if (key.length > 0 && hasForbiddenContentFieldName(key)) {
+      assignment = { index: segmentStart, key };
       break;
     }
+    segmentStart = index + 1;
   }
   const bearerIndex = value.search(BEARER_MARKER_PATTERN);
   const assignmentIndex = assignment?.index ?? -1;
@@ -185,7 +199,7 @@ function cleanCredentialShapes(value: string): string {
     return `${value.slice(0, bearerIndex)}bearer=<redacted>`;
   }
   if (assignment !== undefined && assignmentIndex >= 0) {
-    return `${value.slice(0, assignmentIndex)}${assignment[1]}=<redacted>`;
+    return `${value.slice(0, assignmentIndex)}${assignment.key}=<redacted>`;
   }
   return value;
 }
