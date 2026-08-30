@@ -179,7 +179,10 @@ function appEventProjector<
 
 export const appEventProjectors = [
   appEventProjector(CommandsEvent.Started, projectCommandStarted),
-  appEventProjector(CommandsEvent.ResultDelivered, projectCommandResultDelivered),
+  appEventProjector(
+    CommandsEvent.ResultDelivered,
+    projectCommandResultDelivered,
+  ),
   appEventProjector(CommandsEvent.Failed, projectCommandFailed),
   appEventProjector(CommandsEvent.CatalogUpdated, projectCommandCatalogUpdated),
   appEventProjector(InteractionEvent.Requested, projectInteractionRequested),

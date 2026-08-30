@@ -22,9 +22,9 @@ describe("transcript selectors", () => {
       }),
     );
 
-    expect(
-      selectCommittedItems(state).map((item) => item.message),
-    ).toEqual([committed]);
+    expect(selectCommittedItems(state).map((item) => item.message)).toEqual([
+      committed,
+    ]);
     expect(selectLiveMessage(state)).toEqual(live);
     expect(selectTranscriptSplit(state)).toEqual({
       committedItems: [

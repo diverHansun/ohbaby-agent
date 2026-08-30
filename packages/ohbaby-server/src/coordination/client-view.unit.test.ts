@@ -659,9 +659,7 @@ describe("DaemonClientViewCoordinator", () => {
       throw new Error("expected interaction claim");
     }
 
-    expect(coordinator.disconnectClient("client_a")).toEqual([
-      "interaction_1",
-    ]);
+    expect(coordinator.disconnectClient("client_a")).toEqual(["interaction_1"]);
 
     expect(
       coordinator.releaseInteractionClaim("interaction_1", claim.claimToken),

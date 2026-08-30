@@ -58,15 +58,13 @@ describe("GitSnapshotEngine Windows process launching", () => {
     const workdir = await tempDir("ohbaby-snapshot-workdir-");
     const engine = new GitSnapshotEngine({ snapshotRoot });
 
-    await expect(
-      engine.recordBaseline("checkpoint_1", workdir),
-    ).resolves.toBe("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    await expect(engine.recordBaseline("checkpoint_1", workdir)).resolves.toBe(
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
 
     expect(optionsSeen.length).toBeGreaterThan(0);
     expect(optionsSeen).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ windowsHide: true }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ windowsHide: true })]),
     );
     expect(
       optionsSeen.every(

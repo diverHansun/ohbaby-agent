@@ -60,7 +60,9 @@ export class SearchConfigManager {
     const config: SearchConfig = {
       apiKey,
       apiKeyEnvName: searchJson.apiKeyEnv,
-      ...(searchJson.baseUrl === undefined ? {} : { baseUrl: searchJson.baseUrl }),
+      ...(searchJson.baseUrl === undefined
+        ? {}
+        : { baseUrl: searchJson.baseUrl }),
       defaults: searchJson.defaults,
       provider: searchJson.provider,
     };

@@ -245,9 +245,7 @@ function stringField(
   field: string,
 ): string | undefined {
   const value = record[field];
-  return typeof value === "string" && value.trim() !== ""
-    ? value
-    : undefined;
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
 function parsePositiveInteger(value: unknown): number | undefined {

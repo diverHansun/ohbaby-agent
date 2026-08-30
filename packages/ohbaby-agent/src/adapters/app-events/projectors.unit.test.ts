@@ -5,14 +5,16 @@ import { appEventProjectors, toAppStreamEvent } from "./projectors.js";
 
 describe("app event projectors", () => {
   it("exposes app event projector entries in bus subscription order", () => {
-    expect(appEventProjectors.map((projector) => projector.event.type)).toEqual([
-      "commands.started",
-      "commands.result.delivered",
-      "commands.failed",
-      "commands.catalog.updated",
-      "interaction.requested",
-      "interaction.resolved",
-    ]);
+    expect(appEventProjectors.map((projector) => projector.event.type)).toEqual(
+      [
+        "commands.started",
+        "commands.result.delivered",
+        "commands.failed",
+        "commands.catalog.updated",
+        "interaction.requested",
+        "interaction.resolved",
+      ],
+    );
 
     expect(appEventProjectors.map((projector) => projector.event)).toEqual([
       CommandsEvent.Started,
@@ -162,8 +164,14 @@ describe("app event projectors", () => {
   });
 
   it("converts projected UI events to stream events without type or undefined fields", () => {
-    const [, commandResultDelivered, , commandCatalogUpdated, , interactionResolved] =
-      appEventProjectors;
+    const [
+      ,
+      commandResultDelivered,
+      ,
+      commandCatalogUpdated,
+      ,
+      interactionResolved,
+    ] = appEventProjectors;
 
     expect(
       toAppStreamEvent(

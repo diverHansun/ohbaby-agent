@@ -12,7 +12,10 @@ const DEFAULT_BASE_URL = "https://zenmux.ai/api/anthropic";
 const DEFAULT_MODEL = "moonshotai/kimi-k2.6";
 
 interface AnthropicMessageResponse {
-  readonly content?: readonly { readonly text?: string; readonly type?: string }[];
+  readonly content?: readonly {
+    readonly text?: string;
+    readonly type?: string;
+  }[];
 }
 
 runRealE2E("compact real ZenMux/Kimi e2e", () => {
@@ -20,48 +23,44 @@ runRealE2E("compact real ZenMux/Kimi e2e", () => {
     loadDotenv({ path: path.join(process.cwd(), ".env") });
   });
 
-  it(
-    "detects Kimi K2.6 context window from Anthropic-compatible model metadata",
-    async () => {
-      const apiKey = requireZenMuxApiKey();
-      const result = await probeContextWindow({
-        apiKey,
-        baseUrl: process.env.OHBABY_COMPACT_REAL_BASE_URL ?? DEFAULT_BASE_URL,
-        interfaceProvider: "anthropic",
-        model: process.env.OHBABY_COMPACT_REAL_MODEL ?? DEFAULT_MODEL,
-      });
+  it("detects Kimi K2.6 context window from Anthropic-compatible model metadata", async () => {
+    const apiKey = requireZenMuxApiKey();
+    const result = await probeContextWindow({
+      apiKey,
+      baseUrl: process.env.OHBABY_COMPACT_REAL_BASE_URL ?? DEFAULT_BASE_URL,
+      interfaceProvider: "anthropic",
+      model: process.env.OHBABY_COMPACT_REAL_MODEL ?? DEFAULT_MODEL,
+    });
 
-      expect(result).toEqual({ contextWindowTokens: 262_144 });
-    },
-    180_000,
-  );
+    expect(result).toEqual({ contextWindowTokens: 262_144 });
+  }, 180_000);
 
-  it(
-    "accepts a serialized user-wrapped context summary request",
-    async () => {
-      const apiKey = requireZenMuxApiKey();
-      const baseUrl =
-        process.env.OHBABY_COMPACT_REAL_BASE_URL ?? DEFAULT_BASE_URL;
-      const model = process.env.OHBABY_COMPACT_REAL_MODEL ?? DEFAULT_MODEL;
-      const marker = `OHBABY_COMPACT_${String(Date.now())}`;
-      const messages = serializeForLlm({
-        history: [
-          contextSummaryMessage(
-            `## Goal\n- Preserve the marker ${marker} for the next turn.`,
-          ),
-          userMessage(`Reply with exactly: ${marker}`),
-        ],
-        isSubagent: false,
-        memory: { global: "", project: "", merged: "" },
-        systemPrompt: "",
-      });
+  it("accepts a serialized user-wrapped context summary request", async () => {
+    const apiKey = requireZenMuxApiKey();
+    const baseUrl =
+      process.env.OHBABY_COMPACT_REAL_BASE_URL ?? DEFAULT_BASE_URL;
+    const model = process.env.OHBABY_COMPACT_REAL_MODEL ?? DEFAULT_MODEL;
+    const marker = `OHBABY_COMPACT_${String(Date.now())}`;
+    const messages = serializeForLlm({
+      history: [
+        contextSummaryMessage(
+          `## Goal\n- Preserve the marker ${marker} for the next turn.`,
+        ),
+        userMessage(`Reply with exactly: ${marker}`),
+      ],
+      isSubagent: false,
+      memory: { global: "", project: "", merged: "" },
+      systemPrompt: "",
+    });
 
-      expect(messages[0]).toMatchObject({
-        role: "user",
-        content: expect.stringContaining("<context_summary>") as string,
-      });
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("<context_summary>") as string,
+    });
 
-      const response = await fetch(`${baseUrl.replace(/\/+$/u, "")}/v1/messages`, {
+    const response = await fetch(
+      `${baseUrl.replace(/\/+$/u, "")}/v1/messages`,
+      {
         body: JSON.stringify({
           max_tokens: 32,
           messages: messages.map((message) => ({
@@ -77,18 +76,17 @@ runRealE2E("compact real ZenMux/Kimi e2e", () => {
           "x-api-key": apiKey,
         },
         method: "POST",
-      });
+      },
+    );
 
-      const payload = (await response.json()) as AnthropicMessageResponse;
-      if (!response.ok) {
-        throw new Error(
-          `ZenMux compact e2e failed with HTTP ${String(response.status)}`,
-        );
-      }
-      expect(normalize(responseText(payload))).toContain(normalize(marker));
-    },
-    180_000,
-  );
+    const payload = (await response.json()) as AnthropicMessageResponse;
+    if (!response.ok) {
+      throw new Error(
+        `ZenMux compact e2e failed with HTTP ${String(response.status)}`,
+      );
+    }
+    expect(normalize(responseText(payload))).toContain(normalize(marker));
+  }, 180_000);
 });
 
 function requireZenMuxApiKey(): string {
@@ -155,7 +153,11 @@ function responseText(payload: unknown): string {
   if (!Array.isArray(content)) {
     return "";
   }
-  return content.map((part) => (isRecord(part) && typeof part.text === "string" ? part.text : "")).join("");
+  return content
+    .map((part) =>
+      isRecord(part) && typeof part.text === "string" ? part.text : "",
+    )
+    .join("");
 }
 
 function normalize(value: string): string {

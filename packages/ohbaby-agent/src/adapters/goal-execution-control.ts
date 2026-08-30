@@ -5,10 +5,7 @@ export interface GoalExecutionInterruptDeps {
   readonly promptOwner: () => "goal" | "user" | undefined;
   readonly promptSessionId: () => string | undefined;
   abortPromptRun(runId: string): Promise<boolean>;
-  interruptSubagentsByParent(
-    sessionId: string,
-    reason: string,
-  ): Promise<void>;
+  interruptSubagentsByParent(sessionId: string, reason: string): Promise<void>;
   waitForPromptRunReadyOrIdle(): Promise<void>;
 }
 

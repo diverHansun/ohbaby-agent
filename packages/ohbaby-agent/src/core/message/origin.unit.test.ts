@@ -73,9 +73,9 @@ describe("message origin", () => {
   });
 
   it("falls back to existing message roles", () => {
-    expect(getMessageOrigin(message({ id: "message_user", role: "user" }))).toBe(
-      "user",
-    );
+    expect(
+      getMessageOrigin(message({ id: "message_user", role: "user" })),
+    ).toBe("user");
     expect(
       getMessageOrigin(message({ id: "message_assistant", role: "assistant" })),
     ).toBe("assistant");

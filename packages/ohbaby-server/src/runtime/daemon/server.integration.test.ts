@@ -1389,7 +1389,8 @@ describe("createDaemonHttpServer", () => {
             ],
           });
           await vi.waitUntil(
-            () => events.some((event) => event.type === "interaction.requested"),
+            () =>
+              events.some((event) => event.type === "interaction.requested"),
             { timeout: 1_000 },
           );
 

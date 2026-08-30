@@ -110,24 +110,24 @@ describe("goal tools", () => {
     expect(snapshot?.budget.turnBudget).toBe(10);
     expect(snapshot?.budget.tokenBudget).toBe(1000);
     expect(snapshot?.budget.wallClockBudgetMs).toBe(300_000);
-    expect(
-      getTool(byName, "SetGoalBudget").parametersJsonSchema,
-    ).toMatchObject({
-      properties: {
-        unit: {
-          enum: [
-            "turns",
-            "tokens",
-            "milliseconds",
-            "seconds",
-            "minutes",
-            "hours",
-          ],
+    expect(getTool(byName, "SetGoalBudget").parametersJsonSchema).toMatchObject(
+      {
+        properties: {
+          unit: {
+            enum: [
+              "turns",
+              "tokens",
+              "milliseconds",
+              "seconds",
+              "minutes",
+              "hours",
+            ],
+          },
+          value: { type: "number" },
         },
-        value: { type: "number" },
+        required: ["value", "unit"],
       },
-      required: ["value", "unit"],
-    });
+    );
   });
 
   it("SetGoalBudget rejects limits outside system boundaries", async () => {
@@ -155,7 +155,9 @@ describe("goal tools", () => {
   it("SetGoalBudget description forbids invented budgets", () => {
     const { byName } = makeTools();
     const description = getTool(byName, "SetGoalBudget").description;
-    expect(description).toContain("Never estimate, infer, recommend, or invent");
+    expect(description).toContain(
+      "Never estimate, infer, recommend, or invent",
+    );
     expect(description).toContain("user, system, or developer");
   });
 });

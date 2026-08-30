@@ -47,7 +47,7 @@ async function runLoggerChild(input: {
     process.execPath,
     ["--import", "tsx", "--eval", input.script],
     {
-      env: { ...process.env, ...input.environment },
+      env: { ...process.env, ...input.environment, NODE_NO_WARNINGS: "1" },
       stdio: ["ignore", "ignore", "pipe"],
     },
   );

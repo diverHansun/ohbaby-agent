@@ -11,7 +11,11 @@ export interface SpinnerProps {
   readonly color?: string;
 }
 
-export function Spinner({ children, label, color }: SpinnerProps): ReactElement {
+export function Spinner({
+  children,
+  label,
+  color,
+}: SpinnerProps): ReactElement {
   const theme = useTheme();
   const animate = process.env.OHBABY_TUI_NO_ANIM !== "1";
   const [frameIndex, setFrameIndex] = useState(0);

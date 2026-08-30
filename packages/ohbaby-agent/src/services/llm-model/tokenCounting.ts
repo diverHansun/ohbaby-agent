@@ -57,7 +57,10 @@ export function createHeuristicTokenCounter(
   });
   return {
     estimateTokens: estimateTokensForText,
-    getBudget(modelId: string, budgetOptions?: TokenBudgetOptions): TokenBudget {
+    getBudget(
+      modelId: string,
+      budgetOptions?: TokenBudgetOptions,
+    ): TokenBudget {
       return registry.calculateBudget(modelId, budgetOptions);
     },
     getLimit(modelId: string): number {

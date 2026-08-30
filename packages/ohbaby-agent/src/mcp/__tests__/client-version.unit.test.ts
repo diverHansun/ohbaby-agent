@@ -45,6 +45,8 @@ describe("McpClient default SDK metadata", () => {
 
     await client.connect();
 
-    expect(createdClients).toEqual([{ name: "ohbaby-agent", version: "9.9.9" }]);
+    expect(createdClients).toEqual([
+      { name: "ohbaby-agent", version: "9.9.9" },
+    ]);
   });
 });

@@ -13,9 +13,8 @@ export function normalizeSessionProjectRoot(
   options: SessionProjectRootCompareOptions = {},
 ): string {
   const normalized = (root ?? "").replace(/\\/gu, "/").replace(/\/+$/u, "");
-  return (
-    options.caseInsensitive ?? isSessionProjectRootCaseInsensitivePlatform()
-  )
+  return (options.caseInsensitive ??
+    isSessionProjectRootCaseInsensitivePlatform())
     ? normalized.toLowerCase()
     : normalized;
 }

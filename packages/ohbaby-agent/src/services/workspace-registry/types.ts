@@ -13,7 +13,9 @@ export interface WorkspaceRegistryEntry {
 
 export interface WorkspaceRegistryStore {
   list(): readonly WorkspaceRegistryEntry[];
-  ensureDiscovered(scopeKeys: readonly string[]): readonly WorkspaceRegistryEntry[];
+  ensureDiscovered(
+    scopeKeys: readonly string[],
+  ): readonly WorkspaceRegistryEntry[];
   open(scopeKey: string): WorkspaceRegistryEntry;
   hide(scopeKey: string): boolean;
 }

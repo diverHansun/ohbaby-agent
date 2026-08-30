@@ -71,7 +71,9 @@ export function createWorkspaceRegistryStore(
 
   function nextPosition(db: DatabaseConnection): number {
     const row = db
-      .prepare<{ readonly next_position: number }>(
+      .prepare<{
+        readonly next_position: number;
+      }>(
         `SELECT COALESCE(MAX(position), -1) + 1 AS next_position FROM ${tableName}`,
       )
       .get();
@@ -140,13 +142,7 @@ export function createWorkspaceRegistryStore(
             `INSERT INTO ${tableName}
               (scope_key, visibility, position, created_at, updated_at, last_opened_at)
              VALUES (?, 'visible', ?, ?, ?, ?)`,
-          ).run(
-            scopeKey,
-            nextPosition(db),
-            openedAt,
-            openedAt,
-            openedAt,
-          );
+          ).run(scopeKey, nextPosition(db), openedAt, openedAt, openedAt);
         }
         const entry = getFrom(db, scopeKey);
         if (!entry) {

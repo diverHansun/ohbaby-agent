@@ -72,7 +72,9 @@ describe("extractFinalOutput", () => {
       message({
         id: "assistant_1",
         role: "assistant",
-        parts: [part({ messageId: "assistant_1", orderIndex: 0, text: "done" })],
+        parts: [
+          part({ messageId: "assistant_1", orderIndex: 0, text: "done" }),
+        ],
       }),
       message({
         id: "assistant_2",

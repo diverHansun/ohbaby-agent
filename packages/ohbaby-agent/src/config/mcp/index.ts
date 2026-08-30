@@ -22,9 +22,7 @@ export {
   McpStdioConfigSchema,
 } from "./types.js";
 
-export type {
-  LoadMcpConfigOptions,
-} from "./loaders.js";
+export type { LoadMcpConfigOptions } from "./loaders.js";
 
 export type {
   McpConfigErrorCode,

@@ -19,8 +19,9 @@ function ask(
   reason?: string,
   input: { readonly rememberable?: boolean } = {},
 ): PermissionDecision {
-  const decision: Extract<PermissionDecision, { readonly type: "ask" }> =
-    reason ? { reason, type: "ask" } : { type: "ask" };
+  const decision: Extract<PermissionDecision, { readonly type: "ask" }> = reason
+    ? { reason, type: "ask" }
+    : { type: "ask" };
   return input.rememberable === undefined
     ? decision
     : { ...decision, rememberable: input.rememberable };

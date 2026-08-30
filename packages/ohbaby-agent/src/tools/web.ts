@@ -25,7 +25,9 @@ const WEB_OUTPUT_TOKEN_LIMIT = 8_000;
 
 export interface WebToolsOptions {
   readonly createProvider?: SearchProviderFactory;
-  readonly loadConfig?: () => Promise<SearchProviderConfig> | SearchProviderConfig;
+  readonly loadConfig?: () =>
+    | Promise<SearchProviderConfig>
+    | SearchProviderConfig;
 }
 
 export function createWebTools(options: WebToolsOptions = {}): Tool[] {
@@ -163,7 +165,9 @@ function createWebFetchTool(options: WebToolsOptions): Tool {
   };
 }
 
-async function createProvider(options: WebToolsOptions): Promise<SearchProvider> {
+async function createProvider(
+  options: WebToolsOptions,
+): Promise<SearchProvider> {
   if (!options.loadConfig) {
     throw new InvalidProviderConfigError(
       "Search provider config loader is required.",

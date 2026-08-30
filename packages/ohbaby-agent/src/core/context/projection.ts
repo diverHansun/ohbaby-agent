@@ -54,11 +54,9 @@ export function createMaskConfig(
 ): MaskConfig {
   return {
     enabled: input.enabled ?? false,
-    exemptToolPrefixes:
-      input.exemptToolPrefixes ?? MASK_EXEMPT_TOOL_PREFIXES,
+    exemptToolPrefixes: input.exemptToolPrefixes ?? MASK_EXEMPT_TOOL_PREFIXES,
     minPartTokens: input.minPartTokens ?? MASK_MIN_PART_TOKENS,
-    minPrunableTokens:
-      input.minPrunableTokens ?? MASK_MIN_PRUNABLE_TOKENS,
+    minPrunableTokens: input.minPrunableTokens ?? MASK_MIN_PRUNABLE_TOKENS,
     minUsageRatio: input.minUsageRatio ?? MASK_MIN_USAGE_RATIO,
     placeholderPrefix: input.placeholderPrefix ?? MASK_PLACEHOLDER_PREFIX,
     protectionTokens: input.protectionTokens ?? MASK_PROTECTION_TOKENS,
@@ -196,7 +194,11 @@ function protectedMessageIndexes(input: {
   const protectedIndexes = new Set<number>();
   const latestUserIndex = findLatestUserIndex(input.history);
   if (latestUserIndex >= 0) {
-    for (let index = latestUserIndex; index < input.history.length; index += 1) {
+    for (
+      let index = latestUserIndex;
+      index < input.history.length;
+      index += 1
+    ) {
       protectedIndexes.add(index);
     }
   }

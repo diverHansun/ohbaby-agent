@@ -63,9 +63,11 @@ function formatBlock(label: string, paths: readonly string[]): string {
     return "";
   }
 
-  return [`<${label}>`, ...paths.map((path) => `- ${path}`), `</${label}>`].join(
-    "\n",
-  );
+  return [
+    `<${label}>`,
+    ...paths.map((path) => `- ${path}`),
+    `</${label}>`,
+  ].join("\n");
 }
 
 function pathFromInput(input: Record<string, unknown>): string | undefined {

@@ -45,7 +45,9 @@ export function SessionDialog({
 
   const selectIndex = (index: number): void => {
     const clampedIndex =
-      options.length === 0 ? 0 : Math.max(0, Math.min(options.length - 1, index));
+      options.length === 0
+        ? 0
+        : Math.max(0, Math.min(options.length - 1, index));
     selectedIndexRef.current = clampedIndex;
     setSelectedIndex(clampedIndex);
   };

@@ -1,7 +1,4 @@
-export {
-  createSearchProvider,
-  registerSearchProvider,
-} from "./registry.js";
+export { createSearchProvider, registerSearchProvider } from "./registry.js";
 export { createTavilyProvider } from "./tavily.js";
 export {
   InvalidProviderConfigError,

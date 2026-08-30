@@ -1,9 +1,4 @@
-import type {
-  UiEvent,
-  UiEventHandler,
-  UiNotice,
-  UiSnapshot,
-} from "ohbaby-sdk";
+import type { UiEvent, UiEventHandler, UiNotice, UiSnapshot } from "ohbaby-sdk";
 import type { BusUnsubscribe } from "../../bus/index.js";
 import type { NoticeDraft } from "./types.js";
 

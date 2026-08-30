@@ -371,12 +371,14 @@ describe("reduceForModel", () => {
     });
 
     expect(result.event.maskedPartIds).toEqual(["part_old_read"]);
-    expect(serializeForLlm({
-      history: result.history,
-      isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
-      systemPrompt: "",
-    })[1]).toMatchObject({
+    expect(
+      serializeForLlm({
+        history: result.history,
+        isSubagent: false,
+        memory: { global: "", project: "", merged: "" },
+        systemPrompt: "",
+      })[1],
+    ).toMatchObject({
       content: "[Old tool result cleared (was ~80 tokens)]",
       role: "tool",
       tool_call_id: "call_old_read",
@@ -414,12 +416,14 @@ describe("reduceForModel", () => {
     });
 
     expect(result.event.maskedPartIds).toEqual(["part_old_error"]);
-    expect(serializeForLlm({
-      history: result.history,
-      isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
-      systemPrompt: "",
-    })).toEqual([
+    expect(
+      serializeForLlm({
+        history: result.history,
+        isSubagent: false,
+        memory: { global: "", project: "", merged: "" },
+        systemPrompt: "",
+      }),
+    ).toEqual([
       {
         content: null,
         role: "assistant",

@@ -17,10 +17,9 @@ function runUpdated(runId: string, sessionId = "session_1"): UiEvent {
   };
 }
 
-function permissionRequested(runId: string): Extract<
-  UiEvent,
-  { type: "permission.requested" }
-> {
+function permissionRequested(
+  runId: string,
+): Extract<UiEvent, { type: "permission.requested" }> {
   return {
     request: {
       choices: [{ id: "allow", intent: "allow", label: "Allow" }],
@@ -33,10 +32,9 @@ function permissionRequested(runId: string): Extract<
   };
 }
 
-function permissionResolved(requestId: string): Extract<
-  UiEvent,
-  { type: "permission.resolved" }
-> {
+function permissionResolved(
+  requestId: string,
+): Extract<UiEvent, { type: "permission.resolved" }> {
   return {
     requestId,
     type: "permission.resolved",
@@ -57,7 +55,10 @@ function snapshotWithPermission(runId: string): UiSnapshot {
         id: runId,
         sessionId: "session_1",
         startedAt: timestamp,
-        status: { kind: "waiting-for-permission", requestId: `permission_${runId}` },
+        status: {
+          kind: "waiting-for-permission",
+          requestId: `permission_${runId}`,
+        },
         updatedAt: timestamp,
       },
     ],
@@ -70,7 +71,10 @@ function snapshotWithPermission(runId: string): UiSnapshot {
         updatedAt: timestamp,
       },
     ],
-    status: { kind: "waiting-for-permission", requestId: `permission_${runId}` },
+    status: {
+      kind: "waiting-for-permission",
+      requestId: `permission_${runId}`,
+    },
   };
 }
 
@@ -171,7 +175,10 @@ describe("PermissionRouter", () => {
     const snapshot = snapshotWithPermission("run_1");
 
     const ownerSnapshot = router.filterSnapshotForClient(snapshot, "client_a");
-    const observerSnapshot = router.filterSnapshotForClient(snapshot, "client_b");
+    const observerSnapshot = router.filterSnapshotForClient(
+      snapshot,
+      "client_b",
+    );
 
     expect(ownerSnapshot.permissions).toHaveLength(1);
     expect(observerSnapshot.permissions).toEqual([]);

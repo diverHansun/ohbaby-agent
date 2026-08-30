@@ -159,7 +159,10 @@ export function createModelProfileRegistry(
   for (const registration of options.userProfiles ?? []) {
     const profile = normalizeUserProfile(registration, defaultProvider);
     userProfiles.set(profileIdKey(profile.id), profile);
-    userProfiles.set(profileProviderModelKey(profile.provider, profile.model), profile);
+    userProfiles.set(
+      profileProviderModelKey(profile.provider, profile.model),
+      profile,
+    );
     registerBareUserProfile(bareUserProfiles, profile);
   }
 

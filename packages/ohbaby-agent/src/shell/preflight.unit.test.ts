@@ -59,9 +59,8 @@ describe("shell preflight", () => {
     });
 
     try {
-      const { detectShellKind: detectWithPosixPath } = await import(
-        "./preflight.js"
-      );
+      const { detectShellKind: detectWithPosixPath } =
+        await import("./preflight.js");
 
       expect(detectWithPosixPath("C:\\Windows\\System32\\cmd.exe")).toBe("cmd");
       expect(

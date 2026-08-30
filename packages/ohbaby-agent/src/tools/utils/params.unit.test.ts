@@ -12,7 +12,10 @@ describe("tool parameter helpers", () => {
       getRequiredNonEmptyStringParam({ prompt: "Find files" }, "prompt"),
     ).toBe("Find files");
     expect(
-      getOptionalNonEmptyStringParam({ description: "Explore files" }, "description"),
+      getOptionalNonEmptyStringParam(
+        { description: "Explore files" },
+        "description",
+      ),
     ).toBe("Explore files");
     expect(getOptionalNonEmptyStringParam({}, "description")).toBeUndefined();
   });

@@ -61,7 +61,11 @@ export class PermissionRouter {
         entry.released = true;
       }
     }
-    for (let index = this.activePromptClients.length - 1; index >= 0; index -= 1) {
+    for (
+      let index = this.activePromptClients.length - 1;
+      index >= 0;
+      index -= 1
+    ) {
       if (this.activePromptClients[index]?.clientId === clientId) {
         this.activePromptClients.splice(index, 1);
       }

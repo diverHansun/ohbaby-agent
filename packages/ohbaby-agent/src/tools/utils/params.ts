@@ -93,7 +93,9 @@ export function optionalEnum<const T extends readonly string[]>(
   ) {
     return value;
   }
-  throw new ToolParameterError(options.invalidMessage(parameterValueLabel(value)));
+  throw new ToolParameterError(
+    options.invalidMessage(parameterValueLabel(value)),
+  );
 }
 
 export function getNumberParam(

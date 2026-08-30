@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { BusEvent, createBus, type BusSubscriberError } from "../../bus/index.js";
+import {
+  BusEvent,
+  createBus,
+  type BusSubscriberError,
+} from "../../bus/index.js";
 import { CommandsEvent } from "../../commands/index.js";
 import type { ProjectedAppEvent } from "./projectors.js";
 import { subscribeAppEventProjectors } from "./subscriptions.js";
@@ -75,8 +79,10 @@ describe("subscribeAppEventProjectors", () => {
       },
     });
     const targetError = new Error("target failed");
-    const localErrors: { readonly eventType: string; readonly error: unknown }[] =
-      [];
+    const localErrors: {
+      readonly eventType: string;
+      readonly error: unknown;
+    }[] = [];
     subscribeAppEventProjectors({
       bus,
       target: () => {
