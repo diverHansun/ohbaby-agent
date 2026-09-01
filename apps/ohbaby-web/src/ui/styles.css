@@ -1915,6 +1915,24 @@ button.ohb-list-row:hover,
   font-size: 13px;
 }
 
+.ohb-list-skill {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.ohb-list-skill strong,
+.ohb-list-skill > span,
+.ohb-list-skill small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-list-skill strong {
+  width: auto;
+}
+
 .ohb-list-skill > span {
   color: #6b6d73;
   flex: 1;
@@ -1934,18 +1952,16 @@ button.ohb-list-row:hover,
   padding: 2px 7px;
 }
 
+.ohb-list-skill small {
+  display: block;
+}
+
 .ohb-list-row em {
   color: #aeb2ba;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 11px;
   font-style: normal;
   margin-left: auto;
-}
-
-.ohb-list-skill span {
-  color: #6b6d73;
-  flex: 1;
-  font-size: 12.5px;
 }
 
 .ohb-thinking {
@@ -2374,6 +2390,18 @@ button.ohb-list-row:hover,
   min-height: 31px;
   padding: 9px 11px;
   width: 100%;
+}
+
+.ohb-slash-row-no-args {
+  grid-template-columns: 7px minmax(128px, 144px) minmax(0, 1fr);
+}
+
+.ohb-slash-row-no-args .ohb-slash-args {
+  display: none;
+}
+
+.ohb-slash-row-no-args .ohb-slash-description {
+  grid-column: 3;
 }
 
 .ohb-slash-selected,

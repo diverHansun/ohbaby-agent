@@ -1633,6 +1633,7 @@ function CommandResultBody(props: {
       return (
         <SkillsCommandResult
           data={data}
+          key={props.notice.id}
           notice={props.notice}
           onInsertSkill={props.onInsertSkill}
         />
@@ -1740,14 +1741,16 @@ function SkillsCommandResult(props: {
   readonly notice: CommandNotice;
   readonly onInsertSkill: (text: string) => void;
 }): ReactElement {
-  const skills = commandDataArray(props.data, "skills").filter(
-    (skill): skill is Record<string, unknown> =>
-      isRecord(skill) && stringField(skill, "name") !== undefined,
+  const skills = useMemo(
+    () =>
+      commandDataArray(props.data, "skills").filter(
+        (skill): skill is Record<string, unknown> =>
+          isRecord(skill) && stringField(skill, "name") !== undefined,
+      ),
+    [props.data],
   );
   const [selectedIndex, setSelectedIndex] = useState(0);
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [props.notice.id]);
+  const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const insertSkill = (skill: Record<string, unknown>): void => {
     const name = stringField(skill, "name");
     if (!name) {
@@ -1790,10 +1793,17 @@ function SkillsCommandResult(props: {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [props.onInsertSkill, selectedIndex, skills]);
+  const clampedIndex =
+    skills.length === 0 ? 0 : clampIndex(selectedIndex, skills.length - 1);
+  const selectedRowKey = `${stringField(skills[clampedIndex] ?? {}, "name") ?? "skill"}-${String(clampedIndex)}`;
+  useLayoutEffect(() => {
+    if (skills.length > 0) {
+      rowRefs.current[clampedIndex]?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [clampedIndex, selectedRowKey, skills.length]);
   if (skills.length === 0) {
     return <FallbackCommandResult notice={props.notice} />;
   }
-  const clampedIndex = clampIndex(selectedIndex, skills.length - 1);
   return (
     <div className="ohb-command-modal-body">
       <div className="ohb-list-result">
@@ -1809,14 +1819,20 @@ function SkillsCommandResult(props: {
               onClick={() => {
                 insertSkill(skill);
               }}
+              onMouseEnter={() => {
+                setSelectedIndex(index);
+              }}
+              ref={(row) => {
+                rowRefs.current[index] = row;
+              }}
               type="button"
             >
               <strong>/{stringField(skill, "name") ?? "skill"}</strong>
               <span>{stringField(skill, "description") ?? ""}</span>
               <small>
-                {stringField(skill, "source") ??
-                  stringField(skill, "scope") ??
-                  "skill"}
+                {[stringField(skill, "scope"), stringField(skill, "source")]
+                  .filter((value): value is string => value !== undefined)
+                  .join(" · ") || "skill"}
               </small>
             </button>
           );
@@ -3931,11 +3947,13 @@ function SlashPalette(props: {
               <div className="ohb-slash-category">{item.categoryLabel}</div>
             ) : null}
             <button
-              className={
-                index === props.selectedIndex
-                  ? "ohb-slash-row ohb-slash-selected"
-                  : "ohb-slash-row"
-              }
+              className={[
+                "ohb-slash-row",
+                item.argsHint.trim() === "" ? "ohb-slash-row-no-args" : "",
+                index === props.selectedIndex ? "ohb-slash-selected" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               onClick={() => {
                 props.onRun(item);
               }}

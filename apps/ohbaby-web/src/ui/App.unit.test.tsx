@@ -1724,6 +1724,208 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
+  it("uses the hovered skill as the real selection before Tab insertion", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    await showSkillsModal(fake, ["review", "hansun-db"]);
+    const rows = Array.from(
+      app.container.querySelectorAll<HTMLButtonElement>(".ohb-list-skill"),
+    );
+    expect(rows[0]?.getAttribute("aria-selected")).toBe("true");
+    expect(rows[1]?.getAttribute("aria-selected")).toBe("false");
+
+    await act(async () => {
+      rows[1]?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(rows[0]?.getAttribute("aria-selected")).toBe("false");
+    expect(rows[1]?.getAttribute("aria-selected")).toBe("true");
+
+    await pressWindowKey("Tab");
+    expect(textareaValue(app.container)).toBe("/hansun-db ");
+    expect(app.container.querySelector(".ohb-command-modal")).toBeNull();
+    expect(document.activeElement).toBe(
+      app.container.querySelector("textarea"),
+    );
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("scrolls only the newly selected skill row into view", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    await showSkillsModal(fake, [
+      "skill-1",
+      "skill-2",
+      "skill-3",
+      "skill-4",
+      "skill-5",
+      "hansun-db",
+    ]);
+    const rows = Array.from(
+      app.container.querySelectorAll<HTMLButtonElement>(".ohb-list-skill"),
+    );
+    const scrollMocks = rows.map(() => vi.fn());
+    rows.forEach((row, index) => {
+      row.scrollIntoView = scrollMocks[index] ?? vi.fn();
+    });
+
+    await pressWindowKey("PageDown");
+
+    expect(scrollMocks[5]).toHaveBeenCalledWith({ block: "nearest" });
+    for (const mock of scrollMocks.slice(0, 5)) {
+      expect(mock).not.toHaveBeenCalled();
+    }
+
+    scrollMocks.forEach((mock) => mock.mockClear());
+    await act(async () => {
+      fake.store.applyEvent(
+        {
+          reason: "unrelated rerender",
+          timestamp: Date.parse(timestamp),
+          type: "command.catalog.updated",
+          version: "commands-v2",
+        },
+        4,
+      );
+      await Promise.resolve();
+    });
+    for (const mock of scrollMocks) {
+      expect(mock).not.toHaveBeenCalled();
+    }
+  });
+
+  it("resets a same-length replacement skills notice before scrolling", async () => {
+    const originalScrollIntoView = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    const scrolledRows: string[] = [];
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(function (this: HTMLElement) {
+        scrolledRows.push(this.textContent);
+      }),
+    });
+    try {
+      const fake = createFakeRuntime({
+        snapshot: snapshotWithStatus({ kind: "idle" }),
+      });
+      mountApp(fake.runtime);
+
+      await showSkillsModal(fake, ["first", "second"]);
+      await pressWindowKey("ArrowDown");
+      scrolledRows.length = 0;
+
+      await showSkillsModal(fake, ["next-first", "next-second"], {
+        sequence: 4,
+        suffix: "next",
+      });
+
+      expect(scrolledRows).toHaveLength(1);
+      expect(scrolledRows[0]).toContain("/next-first");
+    } finally {
+      if (originalScrollIntoView) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          originalScrollIntoView,
+        );
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+      }
+    }
+  });
+
+  it("clamps every skills navigation key and inserts with Enter", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    await showSkillsModal(fake, [
+      "skill-1",
+      "skill-2",
+      "skill-3",
+      "skill-4",
+      "skill-5",
+      "skill-6",
+    ]);
+    const selectedText = (): string =>
+      app.container.querySelector('[aria-selected="true"]')?.textContent ?? "";
+
+    await pressWindowKey("ArrowUp");
+    expect(selectedText()).toContain("/skill-1");
+    await pressWindowKey("ArrowDown");
+    expect(selectedText()).toContain("/skill-2");
+    await pressWindowKey("PageDown");
+    expect(selectedText()).toContain("/skill-6");
+    await pressWindowKey("PageDown");
+    expect(selectedText()).toContain("/skill-6");
+    await pressWindowKey("PageUp");
+    expect(selectedText()).toContain("/skill-1");
+    await pressWindowKey("PageUp");
+    expect(selectedText()).toContain("/skill-1");
+    await pressWindowKey("ArrowDown");
+    await pressWindowKey("Enter");
+
+    expect(textareaValue(app.container)).toBe("/skill-2 ");
+    expect(app.container.querySelector(".ohb-command-modal")).toBeNull();
+    expect(document.activeElement).toBe(
+      app.container.querySelector("textarea"),
+    );
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("closes the skills modal with Escape without changing the draft", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "keep this draft");
+
+    await showSkillsModal(fake, ["review", "hansun-db"]);
+    await pressWindowKey("Escape");
+
+    expect(app.container.querySelector(".ohb-command-modal")).toBeNull();
+    expect(textareaValue(app.container)).toBe("keep this draft");
+    expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("renders complete scope and source metadata for skill rows", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    await showSkillsModal(fake, [
+      {
+        description: "Review code",
+        name: "review",
+        scope: "project",
+        source: "project-native",
+      },
+      {
+        description: "Brainstorm ideas",
+        name: "brainstorming",
+        scope: "user",
+      },
+    ]);
+    const rows = Array.from(
+      app.container.querySelectorAll<HTMLButtonElement>(".ohb-list-skill"),
+    );
+
+    expect(rows[0]?.querySelector("small")?.textContent).toBe(
+      "project · project-native",
+    );
+    expect(rows[1]?.querySelector("small")?.textContent).toBe("user");
+  });
+
   it("inserts a clicked skill from the skills modal", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -1748,6 +1950,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     }
     expect(textarea.value).toBe("/hansun-db ");
     expect(app.container.querySelector(".ohb-command-modal")).toBeNull();
+    expect(document.activeElement).toBe(textarea);
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
@@ -1785,20 +1988,29 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toEqual(["cache", "hit 61%"]);
   });
 
-  it("keeps slash rows on the same grid when argsHint is absent", async () => {
+  it("marks no-args slash rows without changing rows that have args", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
-    fake.listCommands.mockResolvedValue(catalog(["status"]));
+    fake.listCommands.mockResolvedValue(catalog(["status", "connect"]));
     const app = mountApp(fake.runtime);
 
     await setTextareaValue(app.container, "/");
     await waitFor(() => slashPaletteText(app.container).includes("/status"));
 
-    const row = app.container.querySelector(".ohb-slash-row");
-    expect(row?.querySelector(".ohb-slash-args")).not.toBeNull();
-    expect(row?.querySelector(".ohb-slash-description")?.textContent).toBe(
-      "Show backend status",
+    const rows = Array.from(
+      app.container.querySelectorAll<HTMLButtonElement>(".ohb-slash-row"),
+    );
+    const statusRow = rows.find((row) => row.textContent.includes("/status"));
+    const connectRow = rows.find((row) => row.textContent.includes("/connect"));
+    expect(statusRow?.classList.contains("ohb-slash-row-no-args")).toBe(true);
+    expect(statusRow?.querySelector(".ohb-slash-args")).not.toBeNull();
+    expect(
+      statusRow?.querySelector(".ohb-slash-description")?.textContent,
+    ).toBe("Show backend status");
+    expect(connectRow?.classList.contains("ohb-slash-row-no-args")).toBe(false);
+    expect(connectRow?.querySelector(".ohb-slash-args")?.textContent).toBe(
+      "[--provider <name>] [--model <name>]",
     );
   });
 
@@ -2930,7 +3142,14 @@ function permissionAction(
 function catalog(ids: readonly CatalogId[]): UiWebCommandCatalog {
   return {
     commands: ids.map((id) => ({
-      ...(id === "goal" ? { acceptsArguments: true } : {}),
+      ...(id === "goal"
+        ? { acceptsArguments: true, argsHint: "[<objective> | status]" }
+        : id === "connect"
+          ? {
+              acceptsArguments: true,
+              argsHint: "[--provider <name>] [--model <name>]",
+            }
+          : {}),
       action: catalogAction(id),
       argumentMode: catalogArgumentMode(id),
       category: catalogCategory(id),
@@ -3017,37 +3236,56 @@ function catalogCategory(id: CatalogId): string {
   }
 }
 
+interface SkillModalFixture {
+  readonly description: string;
+  readonly name: string;
+  readonly scope: "project" | "user";
+  readonly source?: string;
+}
+
 async function showSkillsModal(
   fake: FakeRuntime,
-  names: readonly string[],
+  fixtures: readonly (string | SkillModalFixture)[],
+  options: {
+    readonly sequence?: number;
+    readonly suffix?: string;
+  } = {},
 ): Promise<void> {
+  const suffix = options.suffix ? `_${options.suffix}` : "";
+  const sequence = options.sequence ?? 2;
+  const clientInvocationId = `invoke_skills${suffix}`;
+  const commandRunId = `command_skills${suffix}`;
   await act(async () => {
     fake.store.applyEvent(
       {
         command: {
-          clientInvocationId: "invoke_skills",
+          clientInvocationId,
           commandId: "skills",
-          commandRunId: "command_skills",
+          commandRunId,
           path: ["skills"],
           surface: "tui",
         },
         timestamp: Date.parse(timestamp),
         type: "command.started",
       },
-      2,
+      sequence,
     );
     fake.store.applyEvent(
       {
-        clientInvocationId: "invoke_skills",
-        commandRunId: "command_skills",
+        clientInvocationId,
+        commandRunId,
         output: {
           data: {
-            skills: names.map((name) => ({
-              description: `Use ${name}`,
-              name,
-              scope: "user",
-              source: "test",
-            })),
+            skills: fixtures.map((fixture) =>
+              typeof fixture === "string"
+                ? {
+                    description: `Use ${fixture}`,
+                    name: fixture,
+                    scope: "user",
+                    source: "test",
+                  }
+                : fixture,
+            ),
           },
           kind: "data",
           subject: "skills",
@@ -3055,7 +3293,7 @@ async function showSkillsModal(
         timestamp: Date.parse(timestamp),
         type: "command.result.delivered",
       },
-      3,
+      sequence + 1,
     );
     await Promise.resolve();
   });

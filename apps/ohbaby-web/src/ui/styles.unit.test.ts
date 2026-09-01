@@ -27,6 +27,29 @@ describe("web app layout styles", () => {
       "grid-template-columns: 7px minmax(128px, 144px) minmax(136px, 1fr) minmax(148px, 1fr)",
     ]);
     expectCssRule(".ohb-slash-row em", ["text-align: left"]);
+    expectCssRule(".ohb-slash-row-no-args", [
+      "grid-template-columns: 7px minmax(128px, 144px) minmax(0, 1fr)",
+    ]);
+    expectCssRule(".ohb-slash-row-no-args .ohb-slash-args", ["display: none"]);
+    expectCssRule(".ohb-slash-row-no-args .ohb-slash-description", [
+      "grid-column: 3",
+    ]);
+  });
+
+  it("keeps every skill card track bounded and truncatable", () => {
+    expectCssRule(".ohb-list-skill", [
+      "display: grid",
+      "grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr)",
+    ]);
+    expectCssRule(
+      ".ohb-list-skill strong,\n.ohb-list-skill > span,\n.ohb-list-skill small",
+      [
+        "min-width: 0",
+        "overflow: hidden",
+        "text-overflow: ellipsis",
+        "white-space: nowrap",
+      ],
+    );
   });
 
   it("keeps the animated placeholder behind and transparent to pointer input", () => {

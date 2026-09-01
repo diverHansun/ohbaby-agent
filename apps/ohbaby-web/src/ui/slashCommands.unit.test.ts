@@ -40,6 +40,7 @@ function commandCatalog(): UiWebCommandCatalog {
       },
       {
         action: "executeCommand",
+        aliases: [["skill"]],
         argumentMode: "argv",
         category: "skill",
         description: "List available skills",
@@ -176,6 +177,13 @@ describe("ohbaby-web slash commands UI helpers", () => {
     expect(slashCompletionSuffix(selected, "/sta")).toBe("tus");
   });
 
+  it("keeps the /skill input alias canonical in palette labels", () => {
+    const items = createSlashPaletteItems(commandCatalog(), "/skill");
+
+    expect(items.map((item) => item.label)).toEqual(["/skills"]);
+    expect(slashCompletionSuffix(items[0], "/skill")).toBe("s");
+  });
+
   it("creates result modal models only for read-only command outputs", () => {
     const statusNotice: CommandNotice = {
       commandId: "status",
@@ -202,6 +210,23 @@ describe("ohbaby-web slash commands UI helpers", () => {
       variant: "status",
     });
     expect(createCommandResultModel(newNotice)).toBeNull();
+  });
+
+  it("uses the canonical notice path for the /skills result header", () => {
+    const notice: CommandNotice = {
+      commandId: "skills",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      id: "command_skills_alias",
+      kind: "success",
+      output: { data: { skills: [] }, kind: "data", subject: "skills" },
+      path: ["skills"],
+      text: "skills",
+    };
+
+    expect(createCommandResultModel(notice)).toMatchObject({
+      commandLabel: "/skills",
+      variant: "skills",
+    });
   });
 
   it("filters help output down to web-safe commands", () => {
