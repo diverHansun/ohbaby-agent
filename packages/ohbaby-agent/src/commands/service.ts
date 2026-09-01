@@ -23,6 +23,59 @@ const RESERVED_EXTERNAL_COMMAND_PATHS = new Set([
   "permission/full-access",
 ]);
 
+function commandPathKey(path: readonly string[]): string {
+  return path.join("/").toLowerCase();
+}
+
+function commandPathKeys(command: UiCommandSpec): readonly string[] {
+  return [command.path, ...(command.aliases ?? [])].map(commandPathKey);
+}
+
+function collectCommandPathKeys(
+  commands: readonly UiCommandSpec[],
+): Set<string> {
+  return new Set(commands.flatMap(commandPathKeys));
+}
+
+function isExternalCommandEligible(
+  command: UiCommandSpec,
+  occupiedPathKeys: ReadonlySet<string>,
+): boolean {
+  return [command.path, ...(command.aliases ?? [])].every((path) => {
+    const pathKey = commandPathKey(path);
+    const root = path[0]?.toLowerCase();
+    return (
+      !RESERVED_EXTERNAL_COMMAND_ROOTS.has(root) &&
+      !RESERVED_EXTERNAL_COMMAND_PATHS.has(pathKey) &&
+      !occupiedPathKeys.has(pathKey)
+    );
+  });
+}
+
+function selectAcceptedExtraCommands(
+  extraCommands: readonly UiCommandSpec[],
+): readonly UiCommandSpec[] {
+  const builtinCatalog = buildCommandCatalog();
+  const builtinIds = new Set(
+    builtinCatalog.commands.map((command) => command.id),
+  );
+  const builtinPathKeys = collectCommandPathKeys(builtinCatalog.commands);
+  const accepted = extraCommands.filter(
+    (command) =>
+      !builtinIds.has(command.id) &&
+      isExternalCommandEligible(command, builtinPathKeys),
+  );
+  validateUniqueAliases([...builtinCatalog.commands, ...accepted]);
+  const acceptedIds = new Set<string>();
+  for (const command of accepted) {
+    if (acceptedIds.has(command.id)) {
+      throw new Error(`Duplicate command id: ${command.id}`);
+    }
+    acceptedIds.add(command.id);
+  }
+  return accepted;
+}
+
 function createDefaultCommandRunId(): () => string {
   let next = 1;
   return () => {
@@ -64,39 +117,67 @@ function skillToCommand(skill: CommandSkillSummary): UiCommandSpec {
   } as const;
 }
 
-function commandPathKey(path: readonly string[]): string {
-  return path.join("/").toLowerCase();
+interface CommandProjection {
+  readonly catalog: UiCommandCatalog;
+  readonly slashInvocableSkills: readonly CommandSkillSummary[];
 }
 
-function isReservedExternalPath(path: readonly string[]): boolean {
-  const root = path[0]?.toLowerCase();
-  if (root && RESERVED_EXTERNAL_COMMAND_ROOTS.has(root)) {
-    return true;
-  }
-  return RESERVED_EXTERNAL_COMMAND_PATHS.has(commandPathKey(path));
-}
-
-function isAllowedExternalCommand(command: UiCommandSpec): boolean {
-  return [command.path, ...(command.aliases ?? [])].every(
-    (path) => !isReservedExternalPath(path),
+async function buildCommandProjection(
+  options: CommandServiceOptions,
+  acceptedExtraCommands: readonly UiCommandSpec[],
+): Promise<CommandProjection> {
+  const builtinCatalog = buildCommandCatalog();
+  const occupiedPathKeys = collectCommandPathKeys([
+    ...builtinCatalog.commands,
+    ...acceptedExtraCommands,
+  ]);
+  const occupiedCommandIds = new Set(
+    [...builtinCatalog.commands, ...acceptedExtraCommands].map(
+      (command) => command.id,
+    ),
   );
+  const rawSkills = await (options.skills?.listUserInvocable() ?? []);
+  const sanitizedSkills = rawSkills
+    .map(sanitizeCommandSkillSummary)
+    .filter((skill): skill is CommandSkillSummary => skill !== null);
+  const slashInvocableSkills: CommandSkillSummary[] = [];
+  const skillCommands: UiCommandSpec[] = [];
+  for (const skill of sanitizedSkills) {
+    const command = skillToCommand(skill);
+    if (
+      occupiedCommandIds.has(command.id) ||
+      !isExternalCommandEligible(command, occupiedPathKeys)
+    ) {
+      continue;
+    }
+    slashInvocableSkills.push(skill);
+    skillCommands.push(command);
+    for (const pathKey of commandPathKeys(command)) {
+      occupiedPathKeys.add(pathKey);
+    }
+    occupiedCommandIds.add(command.id);
+  }
+  return {
+    catalog: buildCommandCatalog({
+      extraCommands: [...acceptedExtraCommands, ...skillCommands],
+    }),
+    slashInvocableSkills,
+  };
 }
 
 async function buildCatalog(
   options: CommandServiceOptions,
+  acceptedExtraCommands: readonly UiCommandSpec[],
 ): Promise<UiCommandCatalog> {
-  const rawSkills = await (options.skills?.listUserInvocable() ?? []);
-  const skillCommands = rawSkills
-    .map(sanitizeCommandSkillSummary)
-    .filter((skill): skill is CommandSkillSummary => skill !== null)
-    .map(skillToCommand);
-  const catalog = buildCommandCatalog({
-    extraCommands: [...(options.extraCommands ?? []), ...skillCommands].filter(
-      isAllowedExternalCommand,
-    ),
-  });
-  validateUniqueAliases(catalog.commands);
-  return catalog;
+  return (await buildCommandProjection(options, acceptedExtraCommands)).catalog;
+}
+
+async function listSlashInvocableSkills(
+  options: CommandServiceOptions,
+  acceptedExtraCommands: readonly UiCommandSpec[],
+): Promise<readonly CommandSkillSummary[]> {
+  return (await buildCommandProjection(options, acceptedExtraCommands))
+    .slashInvocableSkills;
 }
 
 function formatSkillPrompt(skillPrompt: string, rawArgs: string): string {
@@ -153,16 +234,27 @@ async function executeSkillCommand(
 export function createCommandService(
   options: CommandServiceOptions,
 ): CommandService {
+  const acceptedExtraCommands = selectAcceptedExtraCommands(
+    options.extraCommands ?? [],
+  );
+  const acceptedExtraCommandIds = new Set(
+    acceptedExtraCommands.map((command) => command.id),
+  );
   const handlers = createBuiltinHandlers(options, {
     async listCommands(surface): Promise<UiCommandCatalog> {
       return filterCommandCatalogBySurface(
-        await buildCatalog(options),
+        await buildCatalog(options, acceptedExtraCommands),
         surface,
       );
     },
+    listSlashInvocableSkills(): Promise<readonly CommandSkillSummary[]> {
+      return listSlashInvocableSkills(options, acceptedExtraCommands);
+    },
   });
   for (const handler of options.extraHandlers ?? []) {
-    handlers.set(handler.id, handler);
+    if (acceptedExtraCommandIds.has(handler.id)) {
+      handlers.set(handler.id, handler);
+    }
   }
   const createCommandRunId =
     options.createCommandRunId ?? createDefaultCommandRunId();
@@ -171,7 +263,7 @@ export function createCommandService(
   return {
     async listCommands(query): Promise<UiCommandCatalog> {
       return filterCommandCatalogBySurface(
-        await buildCatalog(options),
+        await buildCatalog(options, acceptedExtraCommands),
         query.surface,
       );
     },
@@ -198,7 +290,10 @@ export function createCommandService(
 
       const handler = handlers.get(invocation.commandId);
       if (!handler) {
-        if (isSkillCommandId(invocation.commandId)) {
+        if (
+          isSkillCommandId(invocation.commandId) &&
+          !acceptedExtraCommandIds.has(invocation.commandId)
+        ) {
           try {
             await executeSkillCommand(options, invocation, context);
           } catch (error) {

@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
   UiCommandInvocation,
+  UiCommandSpec,
   UiInteractionResponse,
   UiSnapshot,
 } from "ohbaby-sdk";
 import type { CommandMcpProvider, CommandSkillProvider } from "./types.js";
 import { createBus } from "../bus/index.js";
-import { CommandsEvent, createCommandService } from "./index.js";
+import {
+  buildCommandCatalog,
+  CommandsEvent,
+  createCommandService,
+} from "./index.js";
 import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
 
 type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
@@ -605,6 +610,302 @@ describe("CommandService", () => {
     expect(
       catalog.commands.map((command) => command.path.join("/")),
     ).not.toEqual(expect.arrayContaining(["model"]));
+  });
+
+  it("projects builtin path and alias collisions out of dynamic skills", async () => {
+    const builtinNames = [
+      ...new Set(
+        buildCommandCatalog()
+          .commands.flatMap((command) => [
+            command.path,
+            ...(command.aliases ?? []),
+          ])
+          .filter((path) => path.length === 1)
+          .map((path) => path[0])
+          .filter((name) => /^[a-z0-9][a-z0-9-]*$/.test(name)),
+      ),
+    ];
+    const { events, service } = createServiceHarness({
+      skills: {
+        listUserInvocable() {
+          return [
+            ...builtinNames.map((name) => ({
+              description: `Conflicts with ${name}`,
+              name: name.toUpperCase(),
+              scope: "project" as const,
+            })),
+            {
+              description: "Review code",
+              name: "review",
+              scope: "project",
+            },
+          ];
+        },
+        loadPrompt() {
+          return "";
+        },
+      },
+    });
+
+    const catalog = await service.listCommands({ surface: "tui" });
+    expect(
+      catalog.commands
+        .filter((command) => command.source === "skill")
+        .map((command) => command.path.join("/")),
+    ).toEqual(["review"]);
+
+    await service.executeCommand(makeInvocation("skills", ["skills"]));
+    const output = dataOutputFrom(events.at(-1));
+    expect(
+      getArray(output?.data ?? {}, "skills").map((skill) =>
+        isRecord(skill) ? getString(skill, "name") : undefined,
+      ),
+    ).toEqual(["review"]);
+  });
+
+  it("keeps legacy reservations and gives accepted extras priority over skills", async () => {
+    const { events, service } = createServiceHarness({
+      extraCommands: [
+        {
+          argumentMode: "argv",
+          category: "plugin",
+          description: "Conflicts with builtin status",
+          id: "plugin.status",
+          path: ["status"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+        {
+          aliases: [["mcp"]],
+          argumentMode: "argv",
+          category: "plugin",
+          description: "Conflicts with a builtin alias",
+          id: "plugin.mcp-alias",
+          path: ["mcp-alias"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "plugin",
+          description: "Reserved permission path",
+          id: "plugin.permission-default",
+          path: ["Permission", "Default"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+        {
+          argumentMode: "argv",
+          category: "plugin",
+          description: "Allowed permission path",
+          id: "plugin.permission-custom",
+          path: ["permission", "custom"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+        {
+          aliases: [["review"]],
+          argumentMode: "argv",
+          category: "plugin",
+          description: "Accepted plugin command",
+          id: "plugin.inspect",
+          path: ["inspect"],
+          source: "plugin",
+          surfaces: ["tui"],
+        },
+      ],
+      skills: {
+        listUserInvocable() {
+          return [
+            {
+              description: "Reserved root",
+              name: "MODEL",
+              scope: "project",
+            },
+            {
+              description: "Conflicts with accepted extra alias",
+              name: "Review",
+              scope: "project",
+            },
+            {
+              description: "Accepted skill",
+              name: "diagnostics",
+              scope: "project",
+            },
+            {
+              description: "Case duplicate",
+              name: "DIAGNOSTICS",
+              scope: "user",
+            },
+          ];
+        },
+        loadPrompt() {
+          return "";
+        },
+      },
+    });
+
+    const catalog = await service.listCommands({ surface: "tui" });
+    const ids = catalog.commands.map((command) => command.id);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "plugin.permission-custom",
+        "plugin.inspect",
+        "skill.diagnostics",
+      ]),
+    );
+    expect(ids).not.toEqual(
+      expect.arrayContaining([
+        "plugin.status",
+        "plugin.mcp-alias",
+        "plugin.permission-default",
+        "skill.MODEL",
+        "skill.Review",
+        "skill.DIAGNOSTICS",
+      ]),
+    );
+
+    await service.executeCommand(makeInvocation("skills", ["skills"]));
+    const output = dataOutputFrom(events.at(-1));
+    expect(
+      getArray(output?.data ?? {}, "skills").map((skill) =>
+        isRecord(skill) ? getString(skill, "name") : undefined,
+      ),
+    ).toEqual(["diagnostics"]);
+  });
+
+  it("keeps accepted extra command conflicts fail-fast", () => {
+    expect(() =>
+      createServiceHarness({
+        extraCommands: [
+          {
+            argumentMode: "argv",
+            category: "plugin",
+            description: "First",
+            id: "plugin.first",
+            path: ["duplicate"],
+            source: "plugin",
+            surfaces: ["tui"],
+          },
+          {
+            aliases: [["duplicate"]],
+            argumentMode: "argv",
+            category: "plugin",
+            description: "Second",
+            id: "plugin.second",
+            path: ["second"],
+            source: "plugin",
+            surfaces: ["tui"],
+          },
+        ],
+      }),
+    ).toThrow("Duplicate command path or alias: duplicate");
+  });
+
+  it("covers every legacy reserved root and exact permission path", async () => {
+    const { service } = createServiceHarness({
+      extraCommands: [
+        pluginCommand("plugin.cancel", ["CANCEL"]),
+        pluginCommand("plugin.cancel-child", ["cancel", "child"]),
+        pluginCommand("plugin.mode", ["mode"]),
+        pluginCommand("plugin.mode-child", ["MODE", "child"]),
+        pluginCommand("plugin.model-child", ["model", "child"]),
+        pluginCommand("plugin.permission-default", ["permission", "default"]),
+        pluginCommand("plugin.permission-full", ["Permission", "Full-Access"]),
+        pluginCommand("plugin.permission-custom", ["permission", "custom"]),
+      ],
+    });
+
+    const ids = (await service.listCommands({ surface: "tui" })).commands.map(
+      (command) => command.id,
+    );
+
+    expect(ids).toContain("plugin.permission-custom");
+    expect(ids).not.toEqual(
+      expect.arrayContaining([
+        "plugin.cancel",
+        "plugin.cancel-child",
+        "plugin.mode",
+        "plugin.mode-child",
+        "plugin.model-child",
+        "plugin.permission-default",
+        "plugin.permission-full",
+      ]),
+    );
+  });
+
+  it("does not let an extra command id or handler replace a builtin", async () => {
+    const extraHandler = vi.fn();
+    const { events, service } = createServiceHarness({
+      extraCommands: [pluginCommand("status", ["inspect"])],
+      extraHandlers: [
+        {
+          id: "status",
+          execute: extraHandler,
+        },
+      ],
+    });
+
+    const catalog = await service.listCommands({ surface: "tui" });
+    expect(catalog.commands).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: ["inspect"] })]),
+    );
+
+    await service.executeCommand(makeInvocation("status", ["status"]));
+    expect(extraHandler).not.toHaveBeenCalled();
+    expect(dataOutputFrom(events.at(-1))?.subject).toBe("status");
+  });
+
+  it("keeps accepted extra command id conflicts fail-fast", () => {
+    expect(() =>
+      createServiceHarness({
+        extraCommands: [
+          pluginCommand("plugin.duplicate", ["first"]),
+          pluginCommand("plugin.duplicate", ["second"]),
+        ],
+      }),
+    ).toThrow("Duplicate command id: plugin.duplicate");
+  });
+
+  it("gives an accepted extra command id priority over a generated skill id", async () => {
+    const loadPrompt = vi.fn(() => "Review prompt");
+    const { events, service } = createServiceHarness({
+      extraCommands: [pluginCommand("skill.review", ["inspect"])],
+      skills: {
+        listUserInvocable() {
+          return [
+            {
+              description: "Review code",
+              name: "review",
+              scope: "project",
+            },
+          ];
+        },
+        loadPrompt,
+      },
+    });
+
+    const matchingCommands = (
+      await service.listCommands({ surface: "tui" })
+    ).commands.filter((command) => command.id === "skill.review");
+    expect(matchingCommands).toEqual([
+      expect.objectContaining({ path: ["inspect"], source: "plugin" }),
+    ]);
+
+    await service.executeCommand(makeInvocation("skills", ["skills"]));
+    expect(
+      getArray(dataOutputFrom(events.at(-1))?.data ?? {}, "skills"),
+    ).toEqual([]);
+
+    await service.executeCommand(makeInvocation("skill.review", ["inspect"]));
+    expect(loadPrompt).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({
+      error: {
+        code: "COMMAND_NOT_FOUND",
+        message: "Command not found: skill.review",
+      },
+      type: "failed",
+    });
   });
 
   it("emits MCP server summaries from the /mcps command", async () => {
@@ -1912,6 +2213,18 @@ function dataOutputBySubject(
   return events
     .map(dataOutputFrom)
     .find((output) => output?.subject === subject);
+}
+
+function pluginCommand(id: string, path: readonly string[]): UiCommandSpec {
+  return {
+    argumentMode: "argv",
+    category: "plugin",
+    description: `Test command ${id}`,
+    id,
+    path,
+    source: "plugin",
+    surfaces: ["tui"],
+  };
 }
 
 function makeInvocation(

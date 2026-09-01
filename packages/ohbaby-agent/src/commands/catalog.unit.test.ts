@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseSlashCommandInput, resolveSlashCommand } from "ohbaby-sdk";
 import {
   buildCommandCatalog,
   filterCommandCatalogBySurface,
@@ -121,12 +122,42 @@ describe("command catalog", () => {
           path: ["mcps"],
         }),
         expect.objectContaining({
-          aliases: [],
+          aliases: [["skill"]],
           id: "skills",
           path: ["skills"],
         }),
       ]),
     );
+  });
+
+  it("resolves the input-only /skill alias to canonical /skills", () => {
+    const resolved = resolveSlashCommand(
+      buildCommandCatalog(),
+      parseSlashCommandInput("/skill"),
+      { surface: "tui" },
+    );
+
+    expect(resolved).toMatchObject({
+      command: { id: "skills", path: ["skills"] },
+      ok: true,
+      path: ["skills"],
+      usedAlias: ["skill"],
+    });
+  });
+
+  it("keeps the /mcp alias resolving to canonical /mcps", () => {
+    const resolved = resolveSlashCommand(
+      buildCommandCatalog(),
+      parseSlashCommandInput("/mcp"),
+      { surface: "tui" },
+    );
+
+    expect(resolved).toMatchObject({
+      command: { id: "mcps", path: ["mcps"] },
+      ok: true,
+      path: ["mcps"],
+      usedAlias: ["mcp"],
+    });
   });
 
   it("rejects duplicate command paths and aliases", () => {

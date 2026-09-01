@@ -173,7 +173,7 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
   {
     id: "skills",
     path: ["skills"],
-    aliases: [],
+    aliases: [["skill"]],
     argumentMode: "argv",
     category: "skill",
     description: "List available skills",

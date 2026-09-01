@@ -30,6 +30,9 @@ interface BuiltinHandlerHelpers {
   listCommands?(
     surface?: UiCommandSurface,
   ): Promise<UiCommandCatalog> | UiCommandCatalog;
+  listSlashInvocableSkills?():
+    | Promise<readonly CommandSkillSummary[]>
+    | readonly CommandSkillSummary[];
 }
 
 const HELP_COMMAND_ORDER = [
@@ -317,10 +320,10 @@ async function handleMcps(
 }
 
 async function handleSkills(
-  options: CommandServiceOptions,
+  helpers: BuiltinHandlerHelpers,
   context: CommandRunContext,
 ): Promise<void> {
-  const skills = await listSkills(options);
+  const skills = await (helpers.listSlashInvocableSkills?.() ?? []);
   context.emitOutput(
     dataOutput("skills", {
       skills: skills.map((skill) => ({
@@ -691,7 +694,7 @@ export function createBuiltinHandlers(
     {
       id: "skills",
       execute(_invocation, context): Promise<void> {
-        return handleSkills(options, context);
+        return handleSkills(helpers, context);
       },
     },
     {

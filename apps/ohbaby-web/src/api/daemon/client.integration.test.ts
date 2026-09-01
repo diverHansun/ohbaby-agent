@@ -195,6 +195,7 @@ describe("ohbaby-web daemon client", () => {
                 },
                 {
                   action: "executeCommand",
+                  aliases: [["skill"]],
                   argumentMode: "argv",
                   category: "system",
                   description: "List skills",
@@ -547,6 +548,20 @@ describe("ohbaby-web daemon client", () => {
       commandId: "skills",
       path: ["skills"],
       raw: "/skills",
+      sessionId: "session_1",
+    });
+    await runtime.executeSlashCommand({
+      sessionId: "session_1",
+      text: "/skill",
+    });
+    const skillAliasBody = JSON.parse(requests.at(-1)?.body ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(skillAliasBody).toMatchObject({
+      commandId: "skills",
+      path: ["skills"],
+      raw: "/skill",
       sessionId: "session_1",
     });
     await runtime.executeSlashCommand({
