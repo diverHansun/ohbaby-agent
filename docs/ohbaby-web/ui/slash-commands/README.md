@@ -28,7 +28,7 @@
 - UI 不硬编码可执行命令集合。
 - `OhbabyWebRuntime.listWebCommands()` 通过当前 `UiBackendClient.listCommands({surface:"web"})` 返回 `UiWebCommandCatalog`，其中每个命令带 `executionKind` 与 `action`。
 - 浏览器执行前仍调用 `resolveSlashCommand(catalog, parseSlashCommandInput(text), { surface: "tui" })`。
-- server 仍在 `POST /v1/commands` 再次用同一 SDK helper 校验 passthrough invocation。
+- server 在 `POST /v1/commands` 再次用 SDK helper 校验 passthrough 或 skill invocation；overlay 仍不能走该 route。
 - overlay 命令不进入 passthrough allowlist，手写 `POST /v1/commands` 必须被拒绝。
 - 收到 `command.catalog.updated` 后，浏览器清空 catalog 缓存；下一次打开 slash 面板或执行 slash 命令重新 GET。
 
@@ -45,7 +45,7 @@
 
 - 白底，1px 中性描边，12px radius，轻阴影。
 - 行高稳定，选中行浅蓝灰底。
-- 候选行使用固定列宽；描述和参数提示过长时 ellipsis，不反向撑大 composer。
+- 同类候选行使用稳定列宽；有 `argsHint` 的命令为点 / 命令 / 参数 / 描述四列，无 `argsHint` 的命令使用显式点 / 命令 / 描述三列。描述和参数提示过长时 ellipsis，不反向撑大 composer。
 - 输入区宽度固定在页面布局给定宽度内；completion chip 固定宽度，选择 `/new`、`/skills` 等不同长度命令时不能造成输入框或 Send 按钮位移。
 - category label 小号大写，低对比中性灰。
 - footer 显示：`↑↓ select`、`↵ run`、`⇥ complete`、`esc dismiss`。
@@ -79,7 +79,7 @@
 - `/status`：键值行，显示 session、model/context（若可从 snapshot 派生）、connection、permission、working dir/server/version（若 output 存在）。
 - `/help`：双栏，左侧 shortcuts，右侧 web-safe commands；必须过滤未开放命令。
 - `/mcps`：服务器列表，ok/error 状态点，transport/tool count/error 文案由 output data 派生；缺字段时回退 JSON 文本。
-- `/skills`：技能列表，名称、描述、source chip；缺字段时回退 JSON 文本。
+- `/skills`：名称、描述和 `scope · source`（缺 source 时只显示 scope）的三段有界可导航技能列表；hover/键盘共享真实选中态，点击或 Tab/Enter 只落入 composer；缺关键字段仍回退 JSON 文本。字面量 `/skill` 仅作为 input alias，所有 UI 标签仍显示 canonical `/skills`。
 
 ---
 
