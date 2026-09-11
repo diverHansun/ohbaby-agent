@@ -269,7 +269,7 @@ function convertTools(
 
   return tools.map((tool) => {
     const parameters = tool.function.parameters;
-    if (parameters?.type !== "object") {
+    if (parameters.type !== "object") {
       throw new Error(
         `Tool '${tool.function.name}' must define an object JSON schema.`,
       );

@@ -1,5 +1,5 @@
-import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
 import type { LifecycleEvent } from "../lifecycle/index.js";
+import type { InterfaceProviderFunctionTool } from "../llm-client/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
 import { extractFinalOutput } from "./output.js";
 import type {
@@ -20,7 +20,7 @@ interface ResolvedRunScope {
 
 export function toOpenAiTools(
   definitions: readonly ToolDefinition[],
-): ChatCompletionCreateParams["tools"] {
+): InterfaceProviderFunctionTool[] {
   return definitions.map((definition) => ({
     type: "function",
     function: {

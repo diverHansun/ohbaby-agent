@@ -5,7 +5,6 @@
  * with mocked config module and OpenAI API responses.
  */
 
-import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
 import * as path from "node:path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type {
@@ -390,6 +389,9 @@ describe("LLM Client Integration Tests", () => {
 
       // Verify raw tool call accumulation
       const toolCall = assistantMessage.tool_calls[0];
+      if (toolCall.type !== "function") {
+        throw new Error("Expected a function tool call.");
+      }
       expect(toolCall.id).toBe("call_123");
       expect(toolCall.function.name).toBe("get_weather");
       expect(toolCall.function.arguments).toBe('{"location":"NYC"}');
@@ -499,7 +501,7 @@ describe("LLM Client Integration Tests", () => {
       );
 
       const messages = [{ role: "user" as const, content: "use tool" }];
-      const tools: ChatCompletionCreateParams["tools"] = [
+      const tools: InterfaceProviderRequest["tools"] = [
         {
           type: "function" as const,
           function: {

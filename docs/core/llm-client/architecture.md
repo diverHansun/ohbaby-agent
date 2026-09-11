@@ -2,22 +2,22 @@
 
 ## 当前状态
 
-`core/llm-client` 是配置绑定的 provider-aware 流式执行层。它位于 `config/llm`、`services/providers` 与上层 lifecycle/message/runtime 之间。
+`core/llm-client` 是配置绑定的 provider-aware 流式执行层。它位于 `config/llm`、`services/interface-providers` 与上层 lifecycle/message/runtime 之间。
 
 公开职责：
 
-- `createLLMClient()`：读取 `config/llm`，调用 `services/providers.createProvider()` 创建 provider 实例，并保留当前模型配置。
-- `streamChatCompletion()`：构造 `ProviderRequest`，调用 provider，消费归一化的 `ProviderStreamEvent`，累积流式文本与 tool call 参数，生成 `StreamingResponse`。
+- `createLLMClient()`：读取 `config/llm`，调用 `services/interface-providers.createInterfaceProvider()` 创建 provider 实例，并保留当前模型配置。
+- `streamChatCompletion()`：构造 `InterfaceProviderRequest`，调用 provider，消费归一化的 `InterfaceProviderStreamEvent`，累积流式文本与 tool call 参数，生成 `StreamingResponse`。
 
 ```text
 config/llm
   -> core/llm-client.createLLMClient()
-  -> services/providers.createProvider()
+  -> services/interface-providers.createInterfaceProvider()
 
 upper runtime/lifecycle
   -> core/llm-client.streamChatCompletion()
   -> provider.streamChatCompletion()
-  -> normalized ProviderStreamEvent
+  -> normalized InterfaceProviderStreamEvent
   -> accumulated StreamingResponse
 ```
 
@@ -45,13 +45,13 @@ upper runtime/lifecycle
 provider 层只暴露稳定的小接口：
 
 ```typescript
-interface ProviderInstance<TClient = unknown> {
+interface InterfaceProviderInstance<TClient = unknown> {
   id: string;
   kind: "openai-compatible" | "anthropic";
   client: TClient;
   streamChatCompletion(
-    request: ProviderRequest,
-  ): Promise<AsyncIterable<ProviderStreamEvent>>;
+    request: InterfaceProviderRequest,
+  ): Promise<AsyncIterable<InterfaceProviderStreamEvent>>;
   isAbortError(error: unknown): boolean;
 }
 ```

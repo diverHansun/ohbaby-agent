@@ -1,7 +1,7 @@
-import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
 import type {
   ChatCompletionMessage,
   ChatFinishReason,
+  InterfaceProviderFunctionTools,
   LLMClientInstance,
   ParsedToolCall,
   ProviderRetryEvent,
@@ -35,7 +35,7 @@ export interface LifecycleDeps {
 
 export interface ResolvedStepTools {
   readonly definitions: readonly ToolDefinition[] | undefined;
-  readonly requestTools: ChatCompletionCreateParams["tools"];
+  readonly requestTools: InterfaceProviderFunctionTools;
 }
 
 export interface LifecycleToolResolutionInput {
@@ -56,7 +56,7 @@ export interface LifecycleSessionParams {
   readonly initiatingUserMessageId?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
-  readonly tools?: ChatCompletionCreateParams["tools"];
+  readonly tools?: InterfaceProviderFunctionTools;
   readonly environment?: ToolExecutionEnvironment;
   readonly isSubagent?: boolean;
   readonly maxSteps?: number;

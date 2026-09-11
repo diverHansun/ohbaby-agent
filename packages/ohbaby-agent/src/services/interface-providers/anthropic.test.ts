@@ -1,4 +1,7 @@
-import type { RawMessageStreamEvent } from "@anthropic-ai/sdk/resources/messages";
+import type {
+  MessageCreateParams,
+  RawMessageStreamEvent,
+} from "@anthropic-ai/sdk/resources/messages";
 import { describe, expect, it, vi } from "vitest";
 import { createAnthropicProvider } from "./anthropic.js";
 import type {
@@ -18,6 +21,15 @@ function createRawStream(
       yield await Promise.resolve(event);
     }
   })();
+}
+
+function customToolNames(tools: MessageCreateParams["tools"]): string[] {
+  return (tools ?? []).map((tool) => {
+    if (!("name" in tool) || !("input_schema" in tool)) {
+      throw new Error("Expected an Anthropic custom tool.");
+    }
+    return tool.name;
+  });
 }
 
 describe("anthropic provider", () => {
@@ -42,6 +54,7 @@ describe("anthropic provider", () => {
             output_tokens: 4,
             cache_creation_input_tokens: null,
             cache_read_input_tokens: null,
+            output_tokens_details: null,
             server_tool_use: null,
           },
         },
@@ -230,6 +243,7 @@ describe("anthropic provider", () => {
             output_tokens: 8,
             cache_creation_input_tokens: null,
             cache_read_input_tokens: null,
+            output_tokens_details: null,
             server_tool_use: null,
           },
         },
@@ -311,6 +325,7 @@ describe("anthropic provider", () => {
             output_tokens: 1,
             cache_creation_input_tokens: null,
             cache_read_input_tokens: null,
+            output_tokens_details: null,
             server_tool_use: null,
           },
         },
@@ -375,6 +390,7 @@ describe("anthropic provider", () => {
             output_tokens: 25,
             cache_creation_input_tokens: 0,
             cache_read_input_tokens: 0,
+            output_tokens_details: null,
             server_tool_use: null,
           },
         },
@@ -435,6 +451,7 @@ describe("anthropic provider", () => {
               output_tokens: 1,
               cache_creation_input_tokens: null,
               cache_read_input_tokens: null,
+              output_tokens_details: null,
               server_tool_use: null,
             },
           },
@@ -475,10 +492,10 @@ describe("anthropic provider", () => {
     }
 
     expect(stream).toHaveBeenCalledTimes(2);
-    expect(stream.mock.calls[0]?.[0].tools?.map((tool) => tool.name)).toEqual([
+    expect(customToolNames(stream.mock.calls[0]?.[0].tools)).toEqual([
       "select_tools",
     ]);
-    expect(stream.mock.calls[1]?.[0].tools?.map((tool) => tool.name)).toEqual([
+    expect(customToolNames(stream.mock.calls[1]?.[0].tools)).toEqual([
       "select_tools",
       "mcp_s7_example_t6_search",
     ]);

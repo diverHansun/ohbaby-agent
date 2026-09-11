@@ -44,6 +44,8 @@ export type {
 } from "./types.js";
 export type { ProviderRetryEvent, ProviderRetryPolicy } from "./retry.js";
 export type {
+  InterfaceProviderFunctionTool,
+  InterfaceProviderFunctionTools,
   LLMRequestPurpose,
   PromptCacheRequestStrategy,
 } from "../../services/interface-providers/index.js";

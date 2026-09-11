@@ -10,6 +10,8 @@ export type {
   CreateInterfaceProviderOptions,
   InputTokenBreakdown,
   InterfaceProviderFinishReason,
+  InterfaceProviderFunctionTool,
+  InterfaceProviderFunctionTools,
   InterfaceProviderInstance,
   InterfaceProviderKind,
   InterfaceProviderPromptCache,

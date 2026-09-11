@@ -1,6 +1,8 @@
 import type { BusInstance } from "../../bus/index.js";
-import type { ChatCompletionCreateParams } from "openai/resources/chat/completions/completions";
-import type { ChatCompletionMessage } from "../llm-client/index.js";
+import type {
+  ChatCompletionMessage,
+  InterfaceProviderFunctionTools,
+} from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
@@ -89,7 +91,7 @@ export interface CreateRunPromptSnapshotInput extends SystemPromptProviderInput 
 
 export interface PreparedModelRequest {
   readonly messages: readonly ChatCompletionMessage[];
-  readonly tools: ChatCompletionCreateParams["tools"];
+  readonly tools: InterfaceProviderFunctionTools;
 }
 
 export interface ContextUsage {
@@ -168,7 +170,7 @@ export interface CompactOptions {
   readonly isSubagent?: boolean;
   readonly modelId: string;
   readonly toolNames: readonly string[];
-  readonly tools: ChatCompletionCreateParams["tools"];
+  readonly tools: InterfaceProviderFunctionTools;
 }
 
 export interface CompactResult {
@@ -196,7 +198,7 @@ export interface PrepareTurnInput {
   readonly tailDirectives?: readonly ChatCompletionMessage[];
   readonly toolNames: readonly string[];
   readonly toolDefinitions?: readonly ToolDefinition[];
-  readonly tools: ChatCompletionCreateParams["tools"];
+  readonly tools: InterfaceProviderFunctionTools;
   readonly isSubagent?: boolean;
   readonly force?: boolean;
 }
@@ -221,7 +223,7 @@ export interface ContextManager {
   getUsage(input: {
     readonly context: AssembledContext;
     readonly modelId: string;
-    readonly tools: ChatCompletionCreateParams["tools"];
+    readonly tools: InterfaceProviderFunctionTools;
   }): ContextUsage;
   createRunPromptSnapshot(
     input: CreateRunPromptSnapshotInput,

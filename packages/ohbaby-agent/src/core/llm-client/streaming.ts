@@ -11,10 +11,7 @@
  * - KISS: Simple interface, transparent behavior
  */
 
-import type {
-  ChatCompletionCreateParams,
-  ChatCompletionMessageParam,
-} from "openai/resources";
+import type { ChatCompletionMessageParam } from "openai/resources";
 import type {
   LLMClientInstance,
   StreamingResponse,
@@ -34,7 +31,10 @@ import {
 } from "./retry.js";
 import { ToolCallParseError } from "./errors.js";
 import { resolvePromptCacheRequest } from "./prompt-cache.js";
-import type { LLMRequestPurpose } from "../../services/interface-providers/index.js";
+import type {
+  InterfaceProviderFunctionTool,
+  LLMRequestPurpose,
+} from "../../services/interface-providers/index.js";
 
 interface AccumulatedToolCall {
   id: string;
@@ -221,7 +221,7 @@ function validateRequestMaxTokens(
  * @param {ChatCompletionMessage[]} messages - Message history for context
  * @param {Object} [options] - Optional parameters
  * @param {AbortSignal} [options.signal] - Signal to interrupt streaming
- * @param {ChatCompletionCreateParams['tools']} [options.tools] - Tool definitions
+ * @param {InterfaceProviderFunctionTool[]} [options.tools] - Tool definitions
  * @param {number} [options.maxTokens] - Per-request output cap; overrides
  *   config.maxTokens for this call only. Never mutate (or copy-and-replace)
  *   the shared client config to express a per-call limit.
@@ -255,7 +255,7 @@ export async function* streamChatCompletion(
   options?: {
     retry?: Partial<ProviderRetryPolicy>;
     signal?: AbortSignal;
-    tools?: ChatCompletionCreateParams["tools"];
+    tools?: InterfaceProviderFunctionTool[];
     maxTokens?: number;
     purpose?: LLMRequestPurpose;
     sessionId?: string;

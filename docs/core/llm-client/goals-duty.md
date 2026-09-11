@@ -3,7 +3,7 @@
 ## 当前状态
 
 - 当前实现围绕 `createLLMClient()` 与 `streamChatCompletion()` 两个入口展开
-- provider 抽象已落地，厂商协议差异由 `services/providers` 负责
+- provider 抽象已落地，厂商协议差异由 `services/interface-providers` 负责
 - llm-client 当前定位为“provider-aware 的流式执行与累积层”
 
 ## 设计目标
@@ -29,14 +29,14 @@
 ### 1. 创建 provider 绑定的 client 实例
 
 - 调用 `getLLMConfig()` 获取配置
-- 调用 `createProvider({ provider, apiKey, baseUrl })`
+- 调用 `createInterfaceProvider({ id, interfaceProvider, apiKey, baseUrl })`
 - 返回 `LLMClientInstance { provider, config }`
 
 ### 2. 构造单次流式请求参数
 
 - 从 `llmClient.config` 读取 `model`、`temperature`、`maxTokens`
 - 组合 `messages`、可选 `tools` 和 `signal`
-- 构造 `ProviderRequest`
+- 构造 `InterfaceProviderRequest`
 
 ### 3. 累积 provider 归一化事件
 
@@ -61,7 +61,7 @@
    - 仍由 `config/llm` 负责
 
 2. **不负责厂商原生协议转换**
-   - 原生请求构造和流事件归一化由 `services/providers` 负责
+   - 原生请求构造和流事件归一化由 `services/interface-providers` 负责
 
 3. **不执行工具调用**
    - 只返回解析后的 tool call 数据
@@ -77,6 +77,6 @@
 | 模块 | 关系 | 说明 |
 |------|------|------|
 | `config/llm` | 依赖 | 提供连接级与默认调用参数 |
-| `services/providers` | 依赖 | 创建 provider，并产出归一化流事件 |
+| `services/interface-providers` | 依赖 | 创建 provider，并产出归一化流事件 |
 | `tokenCounting` | 协作 | 上层可消费 `StreamingResponse.tokenUsage` |
 | `agents` / `conversation` | 被依赖 | 通过 llm-client 与模型交互 |

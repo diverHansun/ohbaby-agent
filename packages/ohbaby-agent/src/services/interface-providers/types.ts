@@ -1,7 +1,4 @@
-import type {
-  ChatCompletionCreateParams,
-  ChatCompletionMessageParam,
-} from "openai/resources/chat/completions/completions";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
 import type { TokenUsageDiagnosticReporter } from "./token-usage.js";
 
 export type InterfaceProviderKind = "openai-compatible" | "anthropic";
@@ -62,6 +59,20 @@ export interface InterfaceProviderToolCallDelta {
   argumentsDelta?: string;
 }
 
+/** Function tools supported by the agent's provider-neutral request boundary. */
+export interface InterfaceProviderFunctionTool {
+  readonly type: "function";
+  readonly function: {
+    readonly name: string;
+    readonly description?: string;
+    readonly parameters: Record<string, unknown>;
+  };
+}
+
+export type InterfaceProviderFunctionTools =
+  | InterfaceProviderFunctionTool[]
+  | undefined;
+
 export interface InterfaceProviderStreamEvent {
   textDelta?: string;
   reasoningDelta?: string;
@@ -76,7 +87,7 @@ export interface InterfaceProviderRequest {
   messages: ChatCompletionMessageParam[];
   temperature: number;
   maxTokens: number;
-  tools?: ChatCompletionCreateParams["tools"];
+  tools?: InterfaceProviderFunctionTool[];
   signal?: AbortSignal;
   purpose?: LLMRequestPurpose;
   sessionId?: string;

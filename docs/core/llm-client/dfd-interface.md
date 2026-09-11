@@ -5,7 +5,7 @@
 当前 llm-client 位于配置层、provider 层和上层业务之间：
 
 - `config/llm` 提供 `LLMConfig`
-- `services/providers` 提供 `ProviderInstance`
+- `services/interface-providers` 提供 `InterfaceProviderInstance`
 - `streamChatCompletion()` 向上游输出 `StreamingResponse`
 
 本文档描述当前已实现的数据流。
@@ -19,7 +19,7 @@ getLLMConfig()
     ↓
 读取 provider / model / apiKey / baseUrl / temperature / maxTokens
     ↓
-createProvider({ provider, apiKey, baseUrl })
+createInterfaceProvider({ id, interfaceProvider, apiKey, baseUrl })
     ↓
 返回 LLMClientInstance {
   provider,
@@ -32,7 +32,7 @@ createProvider({ provider, apiKey, baseUrl })
 ```text
 streamChatCompletion(llmClient, messages, options)
     ↓
-构造 ProviderRequest {
+构造 InterfaceProviderRequest {
   model,
   messages,
   temperature,
@@ -43,13 +43,13 @@ streamChatCompletion(llmClient, messages, options)
     ↓
 provider.streamChatCompletion(request)
     ↓
-获得 AsyncIterable<ProviderStreamEvent>
+获得 AsyncIterable<InterfaceProviderStreamEvent>
 ```
 
 ### 流程 3：累积归一化事件
 
 ```text
-逐个处理 ProviderStreamEvent
+逐个处理 InterfaceProviderStreamEvent
     ├─ textDelta            → accumulatedContent
     ├─ toolCallDeltas       → accumulatedToolCalls
     ├─ finishReason         → 完成态判断
@@ -72,7 +72,8 @@ provider.isAbortError(error) === true
     ↓
 llm-client 捕获并构造最后一条部分结果
     ├─ isComplete = true
-    ├─ finishReason = 'length'
+    ├─ streamStopReason = 'user_aborted'
+    ├─ 不伪造 provider finishReason
     └─ completeMessage = 当前已累积内容
     ↓
 yield 最后一条 StreamingResponse
@@ -98,7 +99,7 @@ async function* streamChatCompletion(
   messages: ChatCompletionMessageParam[],
   options?: {
     signal?: AbortSignal;
-    tools?: ChatCompletionCreateParams['tools'];
+    tools?: InterfaceProviderFunctionTool[];
   }
 ): AsyncGenerator<StreamingResponse, void, unknown>
 ```
@@ -115,7 +116,7 @@ async function* streamChatCompletion(
 | 数据 | 创建者 | 消费者 | 责任边界 |
 |------|--------|--------|---------|
 | `LLMConfig` | config/llm | llm-client | llm-client 仅读取 |
-| `ProviderInstance` | services/providers | llm-client / 上层 | llm-client 持有，不改写 |
-| `ProviderRequest` | llm-client | provider | 单次调用参数 |
-| `ProviderStreamEvent` | provider | llm-client | 唯一流式输入 |
+| `InterfaceProviderInstance` | services/interface-providers | llm-client / 上层 | llm-client 持有，不改写 |
+| `InterfaceProviderRequest` | llm-client | provider | 单次调用参数 |
+| `InterfaceProviderStreamEvent` | provider | llm-client | 唯一流式输入 |
 | `StreamingResponse` | llm-client | 上层消费者 | 完整消息和完成态输出 |

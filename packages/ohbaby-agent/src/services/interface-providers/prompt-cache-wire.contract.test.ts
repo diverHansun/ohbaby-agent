@@ -1,4 +1,7 @@
-import type { RawMessageStreamEvent } from "@anthropic-ai/sdk/resources/messages";
+import type {
+  MessageCreateParams,
+  RawMessageStreamEvent,
+} from "@anthropic-ai/sdk/resources/messages";
 import type {
   ChatCompletionChunk,
   ChatCompletionMessageParam,
@@ -46,6 +49,15 @@ function cacheExtensionKeys(value: unknown): string[] {
   return Object.keys(value)
     .filter((key) => key.includes("cache"))
     .sort();
+}
+
+function customToolNames(tools: MessageCreateParams["tools"]): string[] {
+  return (tools ?? []).map((tool) => {
+    if (!("name" in tool) || !("input_schema" in tool)) {
+      throw new Error("Expected an Anthropic custom tool.");
+    }
+    return tool.name;
+  });
 }
 
 describe("prompt-cache wire contract", () => {
@@ -441,7 +453,7 @@ describe("prompt-cache wire contract", () => {
 
     const params = stream.mock.calls[0][0];
     expect(params.messages).toHaveLength(2);
-    expect(params.tools?.map((tool) => tool.name)).toEqual([
+    expect(customToolNames(params.tools)).toEqual([
       "read_fixture",
       "write_fixture",
     ]);
@@ -506,6 +518,7 @@ describe("prompt-cache wire contract", () => {
             cache_read_input_tokens: 0,
             input_tokens: 0,
             output_tokens: 5,
+            output_tokens_details: null,
             server_tool_use: null,
           },
         };

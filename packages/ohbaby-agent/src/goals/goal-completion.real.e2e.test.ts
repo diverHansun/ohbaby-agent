@@ -1,12 +1,10 @@
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
-import type {
-  ChatCompletionMessageParam,
-  ChatCompletionTool,
-} from "openai/resources/chat/completions/completions";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   streamChatCompletion,
+  type InterfaceProviderFunctionTool,
   type LLMClientInstance,
   type StreamingResponse,
 } from "../core/llm-client/index.js";
@@ -20,7 +18,7 @@ const BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
 const MODEL = "glm-5.1";
 const FINAL_MARKER = "OHBABY_GOAL_COMPLETE_ORDER_OK";
 
-const tools: ChatCompletionTool[] = [
+const tools: InterfaceProviderFunctionTool[] = [
   {
     function: {
       description: "Read the current execution state of delegated subagents.",
@@ -78,7 +76,7 @@ const tools: ChatCompletionTool[] = [
   },
 ];
 
-const todoTools: ChatCompletionTool[] = [
+const todoTools: InterfaceProviderFunctionTool[] = [
   ...tools,
   {
     function: {
@@ -396,7 +394,7 @@ function realClient(): LLMClientInstance {
 async function completeResponse(
   client: LLMClientInstance,
   messages: ChatCompletionMessageParam[],
-  availableTools: ChatCompletionTool[] = tools,
+  availableTools: InterfaceProviderFunctionTool[] = tools,
 ): Promise<StreamingResponse> {
   let completed: StreamingResponse | undefined;
   for await (const response of streamChatCompletion(client, messages, {

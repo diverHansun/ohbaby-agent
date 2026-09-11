@@ -5,8 +5,8 @@
 ### LLMClientInstance
 
 ```typescript
-interface LLMClientInstance<TClient = any> {
-  provider: ProviderInstance<TClient>;
+interface LLMClientInstance<TClient = unknown> {
+  provider: InterfaceProviderInstance<TClient>;
   config: {
     provider: string;
     model: string;
@@ -44,6 +44,21 @@ interface ParsedToolCall {
 }
 ```
 
+### InterfaceProviderFunctionTool
+
+```typescript
+interface InterfaceProviderFunctionTool {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+  };
+}
+```
+
+这是当前 agent 明确支持的工具请求边界。core 不直接依赖 OpenAI SDK 可继续扩展的 `ChatCompletionTool` 联合；各 provider adapter 负责把该结构映射到自己的 SDK 类型。
+
 ### StreamingResponse
 
 ```typescript
@@ -77,7 +92,7 @@ type ChatFinishReason = 'stop' | 'tool_calls' | 'length' | 'content_filter';
 ### TokenUsage
 
 ```typescript
-type TokenUsage = ProviderTokenUsage;
+type TokenUsage = InterfaceProviderTokenUsage;
 ```
 
 说明：
@@ -101,5 +116,6 @@ type TokenUsage = ProviderTokenUsage;
 
 - `completeMessage` 使用当前累积结果
 - `isComplete = true`
-- `finishReason = 'length'`
+- `streamStopReason = 'user_aborted'`
+- 不伪造 provider `finishReason`
 - `rawFinishReason` 保留中断前最后一次 provider 事件携带的原始值（如有）

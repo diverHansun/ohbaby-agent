@@ -2,16 +2,16 @@
 
 ## 当前文档范围
 
-本文件描述的是**当前实现**的测试策略：`createLLMClient()` 依赖 `config/llm` 与 `services/providers`，`streamChatCompletion()` 消费 provider 输出的归一化流事件并构造最终 `StreamingResponse`。
+本文件描述的是**当前实现**的测试策略：`createLLMClient()` 依赖 `config/llm` 与 `services/interface-providers`，`streamChatCompletion()` 消费 provider 输出的归一化流事件并构造最终 `StreamingResponse`。
 
 ## 测试目标
 
 通过单元和集成测试验证：
 
-1. `createLLMClient()` 正确读取配置并创建 `OpenAI` client
+1. `createLLMClient()` 正确读取配置并创建对应的 provider client
 2. `streamChatCompletion()` 正确累积文本内容与工具调用片段
 3. 流结束时 `parsedToolCalls`、`finishReason`、`tokenUsage` 输出正确
-4. 请求参数 `model`、`temperature`、`max_tokens`、`tools`、`stream_options` 透传正确
+4. 请求参数 `model`、`temperature`、`maxTokens`、`tools` 正确交付 provider；wire 参数由 provider contract tests 验证
 5. 配置错误或 API 错误能够按预期传播
 
 ## 当前已有测试范围
@@ -35,9 +35,9 @@
 | 简单文本累积 | 已有测试 | `completeMessage.content` 随 chunk 增长 |
 | 工具调用累积与解析 | 已有测试 | `tool_calls[].function.arguments` 拼接正确，最终 `parsedToolCalls` 正确 |
 | 空响应占位文本 | 已有测试 | 无文本时返回 `(Empty response)` |
-| 配置透传到请求 | 已有测试 | `model`、`temperature`、`max_tokens` 正确传给 SDK |
-| tools 透传 | 已有测试 | `tools` 原样传给 SDK |
-| `stream_options.include_usage` | 已有测试 | 请求里包含 usage 统计开关 |
+| 配置透传到请求 | 已有测试 | `model`、`temperature`、`maxTokens` 正确交付 provider |
+| tools 透传 | 已有测试 | 本地 function tools 原样交付 provider |
+| provider wire 参数 | provider contract tests | OpenAI `stream_options.include_usage`、cache 字段及 Anthropic 参数映射正确 |
 
 ### 3. 模块导出
 
@@ -112,7 +112,7 @@
 ## 维护原则
 
 ### 1. 文档必须描述当前真实边界
-当前测试文档必须与 `src/core/llm-client/` 和 `src/services/providers/` 下的真实代码一致。
+当前测试文档必须与 `src/core/llm-client/` 和 `src/services/interface-providers/` 下的真实代码一致。
 
 ### 2. 中间态与最终态都要验证
 流式接口最容易只验证最终结果，遗漏中间累积逻辑。
