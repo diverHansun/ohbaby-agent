@@ -9,7 +9,7 @@
 | Task 2 | `c5080043` | Responses adapter、事件状态机、usage/observability 与集成覆盖 |
 | Task 3 | 本文件所在的原子文档/契约提交 | Responses cache wire 回归、权威文档同步、验收记录；另含 Task 1 测试的一行 Prettier 机械格式修复 |
 | Task 3 review follow-up | 本次原子契约/验收提交 | 补 Chat nested `cache_control` 出站透传/不变异契约，并将 Responses cache 禁止检查升级为完整 request wire 精确比较；**等待复审** |
-| Task 3 Spec follow-up | 本次原子 UI contract/状态文档提交 | current-model 回显 `openai-responses`；connect/probe 保持既有 `openai-compatible | anthropic` 两值输入边界；**等待 Spec 复审** |
+| Task 3 Spec follow-up | `00024d33` | current-model 回显 `openai-responses`；connect/probe 保持既有 `openai-compatible | anthropic` 两值输入边界；两项 Minor 已修复并经 Spec 复审通过 |
 
 本阶段只修改契约测试和文档，例外是为恢复项目 `format:check` 门而格式化 `apply-active-model-config.unit.test.ts` 的既有断行；该修改不改变测试逻辑。没有改动 production lifecycle、context、SQLite、UI 或能力范围。
 
@@ -36,10 +36,10 @@
 
 ## 5.4 审查与 SWE 边界
 
-Task 1 与 Task 2 ledger 均记录为 task review clean；**Task 3 review 已通过**。终审的 **Standards 轴已通过**。Spec 轴初审只剩 current-model 回显与 connect/probe kind 边界两项 follow-up；本次已补其契约，但 **Spec 复审仍 pending**，final whole-branch review 也仍 **pending**，本文件不提前宣称最终通过。此次改动遵守最小边界：以 provider contract 固化外部 wire，未将 Responses 原生状态泄漏进共享 Chat-shaped 模型，也没有为未来 canonical/cache/continuation 增加抽象或状态。这避免把本轮协议接入的复杂度扩散到 lifecycle、context 或持久化层。
+Task 1 与 Task 2 ledger 均记录为 task review clean；**Task 3 review 已通过**。终审的 **Standards 轴已通过**。Spec 轴初审的两项 Minor（current-model 回显与 connect/probe kind 边界）已由 `00024d33` 修复并经复审通过，故 **Spec 轴已通过**。final whole-branch 双轴审查结论为 **PASS**。此次改动遵守最小边界：以 provider contract 固化外部 wire，未将 Responses 原生状态泄漏进共享 Chat-shaped 模型，也没有为未来 canonical/cache/continuation 增加抽象或状态。这避免把本轮协议接入的复杂度扩散到 lifecycle、context 或持久化层。
 
 ## 5.5 Live 与合入状态
 
 没有读取或打印真实密钥，也没有运行任何真实外部 API。官方 Responses 文本和 function-tool smoke（T12）为 **live 未验证**，因此本地测试不能证明显式 Responses 已真实可用。
 
-完整 preflight 已通过；但在 T12 与独立审查完成前，仍**禁止合入 `openai-responses-migration`**。
+完整 preflight 与双轴审查均已通过；但官方 Responses live smoke（T12）仍**未验证**，它是本阶段**唯一**阻止合入 `openai-responses-migration` 的门禁。不得据此宣称 live 可用。
