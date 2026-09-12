@@ -36,7 +36,7 @@
 
 ## 5.4 审查与 SWE 边界
 
-Task 1 与 Task 2 ledger 均记录为 task review clean；**Task 3 review 已通过**。终审的 **Standards 轴已通过**。Spec 轴初审的两项 Minor（current-model 回显与 connect/probe kind 边界）已由 `00024d33` 修复并经复审通过，故 **Spec 轴已通过**。final whole-branch 双轴审查结论为 **PASS**。此次改动遵守最小边界：以 provider contract 固化外部 wire，未将 Responses 原生状态泄漏进共享 Chat-shaped 模型，也没有为未来 canonical/cache/continuation 增加抽象或状态。这避免把本轮协议接入的复杂度扩散到 lifecycle、context 或持久化层。
+Task 1 与 Task 2 ledger 均记录为 task review clean；**Task 3 review 已通过**。终审的 **Standards 轴已通过**。Spec 轴初审的两项 Minor 是：（a）UI 边界验收证据缺失——Responses current-model 回显以及 connect/probe 的两值输入边界；（b）迁移根 README 的状态过期。`00024d33` 已补齐这两项证据与状态更新，并经 scoped Spec re-review 通过，故 **Spec 轴已通过**。final whole-branch 双轴审查结论为 **PASS**。此次改动遵守最小边界：以 provider contract 固化外部 wire，未将 Responses 原生状态泄漏进共享 Chat-shaped 模型，也没有为未来 canonical/cache/continuation 增加抽象或状态。这避免把本轮协议接入的复杂度扩散到 lifecycle、context 或持久化层。
 
 ## 5.5 Live 与合入状态
 

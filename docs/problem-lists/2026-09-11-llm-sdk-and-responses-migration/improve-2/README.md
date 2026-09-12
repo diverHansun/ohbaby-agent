@@ -14,7 +14,7 @@
 
 ## 当前状态
 
-Task 1（kind / factory / cache 守卫，`19844686`）与 Task 2（Responses adapter，`c5080043`）已完成并在 task review 中关闭。Task 3 已补齐契约回归与权威文档；验收证据记录在 05。最终整分支审查仍 pending，且真实官方 smoke 未执行，因此不得宣称 Responses 已 live 验证，也不得合入 `openai-responses-migration`。
+Task 1（kind / factory / cache 守卫，`19844686`）与 Task 2（Responses adapter，`c5080043`）已完成并在 task review 中关闭。Task 3 已补齐契约回归与权威文档；验收证据记录在 05。Task reviews 与 Standards / Spec 双轴终审均为 PASS。真实官方 live T12 尚未验证，它是唯一阻止合入 `openai-responses-migration` 的门禁；不得宣称 Responses 已 live 验证。
 
 分支链为 `main` → 本地长期集成分支 `openai-responses-migration` → 本轮临时分支 `codex/improve-2-responses-migration`。只有 04/05 的本地门禁、官方 live 证据与独立审查均齐备后，才可合回集成分支；不直接落到 `main`。
 
