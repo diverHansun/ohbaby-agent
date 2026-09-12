@@ -9,6 +9,7 @@
 | Task 2 | `c5080043` | Responses adapter、事件状态机、usage/observability 与集成覆盖 |
 | Task 3 | 本文件所在的原子文档/契约提交 | Responses cache wire 回归、权威文档同步、验收记录；另含 Task 1 测试的一行 Prettier 机械格式修复 |
 | Task 3 review follow-up | 本次原子契约/验收提交 | 补 Chat nested `cache_control` 出站透传/不变异契约，并将 Responses cache 禁止检查升级为完整 request wire 精确比较；**等待复审** |
+| Task 3 Spec follow-up | 本次原子 UI contract/状态文档提交 | current-model 回显 `openai-responses`；connect/probe 保持既有 `openai-compatible | anthropic` 两值输入边界；**等待 Spec 复审** |
 
 本阶段只修改契约测试和文档，例外是为恢复项目 `format:check` 门而格式化 `apply-active-model-config.unit.test.ts` 的既有断行；该修改不改变测试逻辑。没有改动 production lifecycle、context、SQLite、UI 或能力范围。
 
@@ -26,6 +27,7 @@
 | TDD / characterization | 新增 Responses prompt-cache contract 后运行该文件 | 直接 GREEN，17 tests / 1 file；这是 Task 2 已实现行为的 acceptance/characterization，不伪造 RED |
 | Review follow-up characterization | Chat nested extension 透传和完整 Responses request wire 的回归后运行该文件 | 直接 GREEN，18 tests / 1 file；同样是已有正确行为的 characterization，不伪造 RED |
 | Review follow-up focused | cache contract、Responses adapter unit/integration、factory | 237 tests / 4 files passed，exit 0；按本次 review 指令未重跑全量 preflight |
+| Spec follow-up characterization | current-model Responses 回显与 connect/probe kind 类型边界 | 113 tests / 2 files passed，exit 0；按本次 review 指令未重跑全量 preflight |
 | 定向 | Responses adapter、integration、factory、cache resolver、config validation/apply 与 cache contract | 311 tests / 7 files passed，exit 0 |
 | 全量门禁 | 清理遗留的本地 CLI package-install 进程/空锁目录后，单进程运行 `pnpm preflight` | **exit 0**；format、lint、typecheck、Vitest 与 build 均通过。Vitest 为 312 passed / 5 skipped files（317），3193 passed / 16 skipped tests（3209）；build 链执行各包 `tsc -b --force`。 |
 | 失败诊断（已解除） | 更早的一次 `pnpm preflight` | exit 1：三项 CLI integration hook 在 420000ms 超时（309 passed / 3 failed / 5 skipped files；3188 passed / 21 skipped tests），根因为先前重复门禁遗留的本地 CLI package-install 进程与空锁目录；清理后以上单进程重跑通过。 |
@@ -34,7 +36,7 @@
 
 ## 5.4 审查与 SWE 边界
 
-Task 1 与 Task 2 ledger 均记录为 task review clean。Task 3 首轮审查提出两项契约缺口；本次已补测试，但 **Task 3 的复审仍 pending**，final whole-branch review 也仍 **pending**，本文件不提前宣称通过。此次改动遵守最小边界：以 provider contract 固化外部 wire，未将 Responses 原生状态泄漏进共享 Chat-shaped 模型，也没有为未来 canonical/cache/continuation 增加抽象或状态。这避免把本轮协议接入的复杂度扩散到 lifecycle、context 或持久化层。
+Task 1 与 Task 2 ledger 均记录为 task review clean；**Task 3 review 已通过**。终审的 **Standards 轴已通过**。Spec 轴初审只剩 current-model 回显与 connect/probe kind 边界两项 follow-up；本次已补其契约，但 **Spec 复审仍 pending**，final whole-branch review 也仍 **pending**，本文件不提前宣称最终通过。此次改动遵守最小边界：以 provider contract 固化外部 wire，未将 Responses 原生状态泄漏进共享 Chat-shaped 模型，也没有为未来 canonical/cache/continuation 增加抽象或状态。这避免把本轮协议接入的复杂度扩散到 lifecycle、context 或持久化层。
 
 ## 5.5 Live 与合入状态
 

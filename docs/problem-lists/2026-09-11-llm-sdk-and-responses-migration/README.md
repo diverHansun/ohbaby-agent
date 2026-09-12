@@ -2,8 +2,9 @@
 
 ## 状态
 
-- 文档状态：Improve 1 已实施并通过本地验收；Improve 2 已完成修订与子代理复审，待用户确认
-- 代码状态：Improve 1 完成；Responses provider 尚未落地
+- 文档状态：Improve 1 已实施并通过本地验收；Improve 2 已实施、完成本地 preflight，并有 05 实施验收记录
+- 代码状态：Improve 1 完成；独立 `openai-responses` provider 已落地，仍为显式 kind，默认路径仍是 Chat Completions
+- Improve 2 审查状态：Task review 通过；终审 Standards 轴通过。Spec 轴初审仅余两项 follow-up，复审 pending；官方 live T12 未验证，故禁止合入 `openai-responses-migration`
 - Improve 1 实施基线：同步远端后的 `main@e095c7fa`
 - 调查日期：2026-09-11
 - Improve 2 规划开启日期：2026-09-12
@@ -26,7 +27,7 @@
 | --- | --- | --- | --- |
 | investigation | 2026-09-11 | 议题启动调查 | 完成 |
 | improve-1 | 2026-09-11 | 第一轮：SDK 升级，主动切割 Responses | 05 已闭环 |
-| improve-2 | 2026-09-12 | improve-1 主动切割后的独立规划 | 00–04 已修订并复审，待用户确认后实施 |
+| improve-2 | 2026-09-12 | improve-1 主动切割后的独立实施 | 本地实现与 `pnpm preflight` 已通过；Task review / Standards 终审通过。Spec 复审与 live T12 pending，禁止合入集成分支 |
 
 ## 已冻结的阶段边界
 
@@ -34,13 +35,13 @@
 
 不引入 `/v1/responses`，不新建 `openai-responses.ts`，不改变当时的 Chat Completions 与 Anthropic Messages 路径。
 
-### Improve 2（本轮规划）
+### Improve 2（本轮实施，未完成 live 门）
 
 引入独立 Responses provider 与 `"openai-responses"` kind。**不**改变缺省 `openai-compatible` 路径，**不**对用户露出协议开关，**不**按 base URL 在 Chat / Responses 之间分流，**不**做内部 canonical IR，**不**做 cache 完全对齐，**不**使用 `previous_response_id`。
 
 由于当前 Chat-shaped 历史无法保存并重放 Responses 的 `reasoning` item / `phase`，本轮只支持不产生这些续接要求的 Responses 文本与 function-tool 路径；一旦出现原生 reasoning item、assistant `phase`、refusal、annotation 或 hosted/custom tool，必须明确失败，不得降级后继续。
 
-以下内容仍登记为后续候选（须本轮 05 闭环后再立轮）：
+以下内容仍登记为后续候选（须 live T12 与最终 Spec 复审完成、05 更新后再立轮）：
 
 - provider-neutral message/tool/output IR 与命名规范；
 - Chat / Responses cache 完全对齐、显式缓存；
@@ -74,11 +75,11 @@ Improve 1 结果：
 6. [`improve-1/05-implementation-acceptance.md`](./improve-1/05-implementation-acceptance.md)
 7. [`planning-review.md`](./planning-review.md)
 
-Improve 2 规划：
+Improve 2 实施与验收：
 
 1. [`improve-2/00-discussion.md`](./improve-2/00-discussion.md)
 2. [`improve-2/01-problem-analysis-and-current-state.md`](./improve-2/01-problem-analysis-and-current-state.md)
 3. [`improve-2/02-optimization-plan-and-change-scope.md`](./improve-2/02-optimization-plan-and-change-scope.md)
 4. [`improve-2/03-reference-projects.md`](./improve-2/03-reference-projects.md)
 5. [`improve-2/04-test-and-acceptance.md`](./improve-2/04-test-and-acceptance.md)
-6. `improve-2/05-implementation-acceptance.md`（实施完成后写入）
+6. [`improve-2/05-implementation-acceptance.md`](./improve-2/05-implementation-acceptance.md)

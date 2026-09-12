@@ -2423,6 +2423,72 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("echoes an explicitly saved Responses kind without widening connect capability", async () => {
+    const projectRoot = await mkdtemp(
+      join(tmpdir(), "ohbaby-current-responses-model-"),
+    );
+    const homeDir = await mkdtemp(
+      join(tmpdir(), "ohbaby-current-responses-model-home-"),
+    );
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const modelJsonPath = join(homeDir, ".ohbaby", "model.json");
+
+    try {
+      process.env.HOME = homeDir;
+      process.env.USERPROFILE = homeDir;
+      await mkdir(join(homeDir, ".ohbaby"), { recursive: true });
+      await writeFile(
+        modelJsonPath,
+        JSON.stringify({
+          apiConfig: {
+            apiKeyEnv: "OPENAI_API_KEY",
+            baseUrl: "https://api.openai.com/v1",
+            interfaceProvider: "openai-responses",
+          },
+          defaultModel: "gpt-5.6",
+          llmParams: {
+            contextWindowTokens: 128_000,
+            maxTokens: 8192,
+            temperature: 0.7,
+          },
+          provider: "openai",
+        }),
+        "utf-8",
+      );
+
+      const client = createInProcessUiBackendClient({
+        createLLMClient: () => {
+          throw new Error("runtime client should not be loaded");
+        },
+        projectDirectory: projectRoot,
+      });
+
+      await expect(client.getCurrentModel()).resolves.toEqual({
+        apiKeyEnv: "OPENAI_API_KEY",
+        baseUrl: "https://api.openai.com/v1",
+        contextWindowTokens: 128_000,
+        interfaceProvider: "openai-responses",
+        maxOutputTokens: 8192,
+        model: "gpt-5.6",
+        provider: "openai",
+      });
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = previousUserProfile;
+      }
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects connectModel while a prompt is running", async () => {
     const release = createDeferred<undefined>();
     const client = createInProcessUiBackendClient({
