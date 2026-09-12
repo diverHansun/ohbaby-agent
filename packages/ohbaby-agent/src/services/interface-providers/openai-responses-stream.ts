@@ -216,6 +216,13 @@ class ResponsesStreamState {
       type,
       "response status does not match event",
     );
+    if (expectedStatus !== "incomplete") {
+      check(
+        isNullish(response.incomplete_details),
+        type,
+        "incomplete_details conflicts with non-incomplete response status",
+      );
+    }
     check(
       response.previous_response_id === null ||
         response.previous_response_id === undefined,

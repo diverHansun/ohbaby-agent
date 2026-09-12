@@ -270,6 +270,48 @@ async function setup(
 }
 
 describe("Responses adapter through llm-client and Lifecycle", () => {
+  it.each(["max_output_tokens", "future_reason"])(
+    "blocks tools when completed function output carries incomplete_details: %s",
+    async (reason) => {
+      const stream = calls();
+      const completed = stream.at(-1);
+      if (
+        !completed ||
+        typeof completed.response !== "object" ||
+        completed.response === null
+      )
+        throw new Error("Expected completed response fixture");
+      stream[stream.length - 1] = {
+        ...completed,
+        response: { ...completed.response, incomplete_details: { reason } },
+      };
+      const harness = await setup([stream, text()]);
+      expect(await harness.run()).toMatchObject({
+        success: false,
+        finishReason: "error",
+        terminalReason: "provider_stream_interrupted",
+      });
+      expect(harness.beforeToolCall).not.toHaveBeenCalled();
+      expect(harness.executeBatch).not.toHaveBeenCalled();
+      expect(harness.execute).not.toHaveBeenCalled();
+      expect(
+        harness.events.some((event) => event.type === "llm:complete"),
+      ).toBe(false);
+      expect(
+        harness.events.some(
+          (event) =>
+            event.type === "turn:end" && event.finishReason !== "error",
+        ),
+      ).toBe(false);
+      const messages = await harness.messageManager.listBySession("session");
+      const assistants = messages.flatMap((message) =>
+        message.info.role === "assistant" ? [message.info] : [],
+      );
+      expect(assistants).toMatchObject([{ finish: "error" }]);
+      expect(assistants[0]?.error).toBeDefined();
+      expect(harness.create).toHaveBeenCalledTimes(1);
+    },
+  );
   it.each(["before", "after"])(
     "never schedules function calls when reasoning arrives %s their deltas",
     async (position) => {

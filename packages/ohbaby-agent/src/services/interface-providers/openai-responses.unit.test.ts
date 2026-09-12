@@ -944,6 +944,78 @@ const rejectedItems = [
   "custom_tool_call_output",
 ] as const satisfies readonly ResponseOutputItem["type"][];
 
+describe("Responses response status consistency", () => {
+  it.each([
+    ["text", "max_output_tokens"],
+    ["text", "content_filter"],
+    ["text", "future_reason"],
+    ["function", "max_output_tokens"],
+    ["function", "content_filter"],
+    ["function", "future_reason"],
+  ])(
+    "rejects completed %s with incomplete reason %s without releasing terminal",
+    async (kind, reason) => {
+      const { provider } = setup([
+        ...(kind === "text" ? textEvents() : functionEvents()),
+        terminal([kind === "text" ? message() : call()], "completed", {
+          incomplete_details: { reason },
+        }),
+      ]);
+      const output: InterfaceProviderStreamEvent[] = [];
+      await expect(
+        (async (): Promise<void> => {
+          for await (const event of await provider.streamChatCompletion(
+            request,
+          ))
+            output.push(event);
+        })(),
+      ).rejects.toThrow(/incomplete_details/u);
+      expect(
+        output.filter((event) => event.finishReason !== undefined),
+      ).toEqual([]);
+    },
+  );
+  it.each([
+    ["response.created", "max_output_tokens"],
+    ["response.created", "future_reason"],
+    ["response.in_progress", "max_output_tokens"],
+    ["response.in_progress", "future_reason"],
+    ["response.queued", "max_output_tokens"],
+    ["response.queued", "future_reason"],
+  ])(
+    "rejects lifecycle %s with contradictory incomplete reason %s",
+    async (type, reason) => {
+      await expect(
+        collect([
+          {
+            type,
+            response: response(
+              [],
+              type === "response.queued" ? "queued" : "in_progress",
+              { incomplete_details: { reason } },
+            ),
+          },
+          ...textEvents(),
+          terminal([message()]),
+        ]),
+      ).rejects.toThrow(/incomplete_details/u);
+    },
+  );
+  it.each([null, undefined])(
+    "accepts nullish incomplete_details on completed snapshots: %s",
+    async (details) => {
+      expect(
+        (
+          await collect([
+            ...functionEvents(),
+            terminal([call()], "completed", { incomplete_details: details }),
+          ])
+        ).at(-1)?.finishReason,
+      ).toBe("tool_calls");
+    },
+  );
+});
+
 describe("Responses rejected and unknown capabilities", () => {
   it.each(["response.created", "response.in_progress", "response.queued"])(
     "rejects hidden output items in lifecycle snapshots: %s",
