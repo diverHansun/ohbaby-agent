@@ -10,6 +10,8 @@
 
 本文档描述当前已实现的数据流。
 
+`interfaceProvider` 未写时仍选择 `openai-compatible`（Chat Completions）。`openai-responses` 是第三个、仅显式配置的 provider kind；它在 provider 边界将下方的 Chat-shaped request 投影到 Responses wire，不改变 llm-client 的共享数据流。
+
 ## 数据流描述
 
 ### 流程 1：创建 LLMClientInstance
@@ -45,6 +47,8 @@ provider.streamChatCompletion(request)
     ↓
 获得 AsyncIterable<InterfaceProviderStreamEvent>
 ```
+
+Responses 的限定投影为无状态完整 replay（`store: false`、不传 `previous_response_id`）。cache 仅 observe usage，不发送 Responses cache 控制字段；reasoning/output-item continuation、assistant `phase`、refusal、annotation 和非本地 function tools 不能由该流表达，adapter 会 fail-closed。这里不是 canonical message/continuation 协议，也没有改变 lifecycle、context 或持久化。
 
 ### 流程 3：累积归一化事件
 

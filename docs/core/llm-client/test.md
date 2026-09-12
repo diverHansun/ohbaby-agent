@@ -26,7 +26,7 @@
 | 不暴露 apiKey | 已有测试 | `client.config` 中不含 `apiKey` |
 | 不同 provider/baseUrl 配置 | 已有测试 | `zhipu` 这类 OpenAI-compatible 配置可被绑定 |
 | 配置错误传播 | 已有测试 | `getLLMConfig()` 抛错时直接向上抛 |
-| SDK 能力存在 | 已有测试 | `client.chat.completions.create` 可用 |
+| SDK 能力存在 | provider 单测 | 默认 Chat 使用 `client.chat.completions.create`；显式 `openai-responses` 使用 `client.responses.create` |
 
 ### 2. streamChatCompletion() 基本流
 
@@ -37,7 +37,7 @@
 | 空响应占位文本 | 已有测试 | 无文本时返回 `(Empty response)` |
 | 配置透传到请求 | 已有测试 | `model`、`temperature`、`maxTokens` 正确交付 provider |
 | tools 透传 | 已有测试 | 本地 function tools 原样交付 provider |
-| provider wire 参数 | provider contract tests | OpenAI `stream_options.include_usage`、cache 字段及 Anthropic 参数映射正确 |
+| provider wire 参数 | provider contract tests | 默认 Chat 的 `stream_options.include_usage`/cache、Anthropic 参数映射不变；Responses 不发 cache 或 continuation 控制字段 |
 
 ### 3. 模块导出
 
@@ -85,9 +85,10 @@
 
 ### 2. streamChatCompletion()
 
-- Mock `client.chat.completions.create()` 返回异步迭代器
+- 在 provider 边界 mock 对应 SDK stream（默认 Chat 为 `client.chat.completions.create`，显式 Responses 为 `client.responses.create`）返回异步迭代器
 - 收集所有 `StreamingResponse`
 - 分别校验中间态和最终态，而不只看最后一个响应
+- Responses fixture 的 message added 必须是 `in_progress` + `content=[]`；唯一 output_text 由唯一 content-part added 建立，并在 part done/item done/terminal 保持有序一致。
 
 ### 3. 参数构造
 

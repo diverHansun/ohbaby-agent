@@ -47,7 +47,7 @@ provider 层只暴露稳定的小接口：
 ```typescript
 interface InterfaceProviderInstance<TClient = unknown> {
   id: string;
-  kind: "openai-compatible" | "anthropic";
+  kind: "openai-compatible" | "openai-responses" | "anthropic";
   client: TClient;
   streamChatCompletion(
     request: InterfaceProviderRequest,
@@ -57,6 +57,14 @@ interface InterfaceProviderInstance<TClient = unknown> {
 ```
 
 llm-client 不知道 provider 内部如何调用 SDK，只消费归一化事件。
+
+当前的 kind 选择与能力边界：
+
+- `openai-compatible` 仍是缺省，使用 Chat Completions；`anthropic` 仍须显式选择。
+- `openai-responses` 是第三个、仅手工配置后才会启用的 kind；factory 必须显式分支，未知 kind 不得回落到 Chat。
+- core 输入消息仍是 Chat-shaped `ChatCompletionMessageParam`。Responses adapter 在 provider 边界投影它；这不是内部 canonical message 协议。
+- Responses 本轮为无状态完整 replay（`store: false`，不传 `previous_response_id`），并且 prompt cache 只 observe usage，不发送 Responses cache 控制字段；它尚未与 Chat cache 对齐。
+- 原生 reasoning/output-item continuation、assistant `phase`、refusal、annotation、hosted/custom tools 不在这个共享接口中表达，adapter 必须 fail-closed。lifecycle、context 和持久化没有因该 kind 改造。
 
 ## 与 llm-model 的关系
 
@@ -71,7 +79,7 @@ llm-client 不知道 provider 内部如何调用 SDK，只消费归一化事件�
 
 ## 设计取舍
 
-1. 当前消息输入继续沿用 OpenAI-compatible 的 `ChatCompletionMessageParam` 形状，降低 provider 适配成本。
+1. 当前消息输入继续沿用 Chat-shaped `ChatCompletionMessageParam`，降低共享层改动；Responses adapter 将其投影为 wire 请求，但本轮不将它 canonical 化。
 2. provider 创建只绑定连接级配置，model/temperature/maxTokens 在请求时传入。
 3. tool call 参数只在完成态解析，避免流式片段中间态误解析。
 4. abort 判断委托给 provider，partial response 构造保留在 llm-client。

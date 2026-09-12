@@ -11,6 +11,7 @@ import { resolvePromptCacheRequest } from "../../core/llm-client/prompt-cache.js
 import type { PromptCachePolicy } from "../../config/index.js";
 import { createAnthropicProvider } from "./anthropic.js";
 import { createOpenAICompatibleProvider } from "./openai-compatible.js";
+import { createOpenAIResponsesProvider } from "./openai-responses.js";
 import type {
   InterfaceProviderPromptCache,
   InterfaceProviderStreamEvent,
@@ -29,7 +30,10 @@ function observeOnly(): InterfaceProviderPromptCache {
 
 function wirePromptCache(input: {
   readonly baseUrl: string;
-  readonly interfaceProvider: "openai-compatible" | "anthropic";
+  readonly interfaceProvider:
+    | "openai-compatible"
+    | "openai-responses"
+    | "anthropic";
   readonly messages: readonly ChatCompletionMessageParam[];
   readonly policy?: PromptCachePolicy;
   readonly provider: string;
@@ -160,6 +164,44 @@ describe("prompt-cache wire contract", () => {
       totalTokens: 12,
     });
   });
+
+  it.each(["auto", "enabled", "disabled"] as const)(
+    "keeps Responses cache and continuation controls absent for %s policy",
+    async (policy) => {
+      const provider = createOpenAIResponsesProvider({
+        id: "openai",
+        apiKey: "test-key",
+        baseUrl: "https://api.openai.com/v1",
+      });
+      const create = vi
+        .spyOn(provider.client.responses, "create")
+        .mockResolvedValue(
+          emptyStream() as unknown as Awaited<
+            ReturnType<typeof provider.client.responses.create>
+          >,
+        );
+
+      await provider.streamChatCompletion({
+        maxTokens: 128,
+        messages: [{ role: "user", content: "Hello" }],
+        model: "gpt-5.6",
+        promptCache: wirePromptCache({
+          baseUrl: "https://api.openai.com/v1",
+          interfaceProvider: "openai-responses",
+          messages: [{ role: "user", content: "Hello" }],
+          policy,
+          provider: "openai",
+        }),
+        temperature: 0,
+      });
+
+      const params = create.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params).toMatchObject({ store: false, stream: true });
+      expect(cacheExtensionKeys(params)).toEqual([]);
+      expect(params).not.toHaveProperty("previous_response_id");
+      expect(params).not.toHaveProperty("prompt_cache_key");
+    },
+  );
 
   it.each([
     ["DeepSeek", "https://api.deepseek.com/v1"],

@@ -78,7 +78,7 @@ SDK `7.13.0` 精确事件登记如下。四类描述的是处理结果；`output
 
 `response.output_item.added/done` 还要对 `ResponseOutputItem["type"]` 做第二层穷尽并维护状态机：
 
-- message：整条响应最多一个 message item；added 只接受 `in_progress`；done 可记录 `completed` 或 `incomplete`，最终必须与 completed/incomplete 终态一致。`phase` 只允许 `null` / `undefined`，content 必须恰好一个无 annotation、无非空 logprobs 的 `output_text`。若与 function call 共存，message 的 `output_index` 必须位于所有 function call 之前；反序或交错一律拒绝，因为共享 Chat assistant message 无法无损保留该拓扑。
+- message：整条响应最多一个 message item；`output_item.added` 只接受 `status: in_progress` 且 `content: []`，不得预填 content。唯一的 `output_text` 必须由唯一一次 `content_part.added` 建立；随后 `content_part.done`、`output_item.done` 与 terminal 都必须包含同一个已支持 part，并按 content index 与全文保持有序相等。missing/duplicate part、窗口外 delta 或终态不一致一律拒绝。done 可记录 `completed` 或 `incomplete`，最终必须与 completed/incomplete 终态一致。`phase` 只允许 `null` / `undefined`，该唯一 content 必须无 annotation、无非空 logprobs。若与 function call 共存，message 的 `output_index` 必须位于所有 function call 之前；反序或交错一律拒绝，因为共享 Chat assistant message 无法无损保留该拓扑。
 - function_call：`call_id` 与 `name` 必须为非空字符串；added 只接受 `in_progress`，done 与 completed 终态只接受 `completed`；`async` 只允许 false/undefined、`namespace` 必须缺省、`caller` 只允许 direct/null/undefined，program caller 拒绝。
 - incomplete 终态不得含任何 function_call；`incomplete_details.reason` 缺失或为运行时未知值也拒绝。只有 message-only 的 `max_output_tokens` / `content_filter` 可分别映射为 length / content_filter。
 - 每个 `output_index` / item id 必须唯一且恰好一次 `added → done`；item/content delta 与 done 只能发生在对应 added 之后、done 之前，`call_id` 绑定不可复用或改写。整条流恰好一个 terminal，terminal 必须是最后一个事件；重复 terminal 或 terminal 后事件一律拒绝。

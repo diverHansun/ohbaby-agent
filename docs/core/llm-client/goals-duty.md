@@ -5,6 +5,7 @@
 - 当前实现围绕 `createLLMClient()` 与 `streamChatCompletion()` 两个入口展开
 - provider 抽象已落地，厂商协议差异由 `services/interface-providers` 负责
 - llm-client 当前定位为“provider-aware 的流式执行与累积层”
+- `openai-compatible` 仍是缺省；`openai-responses` 是仅显式配置才会创建的第三 kind，不通过 URL 或 UI 自动推断。
 
 ## 设计目标
 
@@ -62,6 +63,7 @@
 
 2. **不负责厂商原生协议转换**
    - 原生请求构造和流事件归一化由 `services/interface-providers` 负责
+   - Responses adapter 只接收可投影的 Chat-shaped messages/function tools；它不把原生 output item 变成共享 canonical 状态
 
 3. **不执行工具调用**
    - 只返回解析后的 tool call 数据
@@ -71,6 +73,10 @@
 
 5. **不做 retry、fallback、上下文裁剪等策略**
    - 这些属于更上层的 orchestration 逻辑
+
+6. **不承载 Responses 原生 continuation 或 cache 对齐**
+   - 不保存 `previous_response_id`，不改变 lifecycle/context/SQLite；Responses cache 目前只 observe usage，不发送控制字段
+   - reasoning、assistant `phase`、refusal、annotation 与 hosted/custom tools 没有共享表达，必须在 provider 边界 fail-closed
 
 ## 与其他模块的关系
 

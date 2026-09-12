@@ -123,9 +123,7 @@ describe("applyActiveModelConfig", () => {
 
     await expect(
       Reflect.apply(applyActiveModelConfig, undefined, [input]),
-    ).rejects.toThrow(
-      "Invalid interface provider",
-    );
+    ).rejects.toThrow("Invalid interface provider");
     expect(fetchMock).not.toHaveBeenCalled();
     await expect(fs.stat(modelJsonPath)).rejects.toMatchObject({
       code: "ENOENT",
