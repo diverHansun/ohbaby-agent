@@ -8,7 +8,7 @@
 | Task 1 | `19844686` | 第三 kind、factory、cache observe-only 守卫与配置边界 |
 | Task 2 | `c5080043` | Responses adapter、事件状态机、usage/observability 与集成覆盖 |
 | Task 3 | 本文件所在的原子文档/契约提交 | Responses cache wire 回归、权威文档同步、验收记录；另含 Task 1 测试的一行 Prettier 机械格式修复 |
-| Task 3 review follow-up | 本次原子契约/验收提交 | 补 Chat nested `cache_control` 出站透传/不变异契约，并将 Responses cache 禁止检查升级为完整 request wire 精确比较；**等待复审** |
+| Task 3 review follow-up | `7706358b` | Chat nested `cache_control` 出站透传/不变异与完整 Responses request wire 两项契约缺口均已修复，并经 scoped re-review 通过 |
 | Task 3 Spec follow-up | `00024d33` | current-model 回显 `openai-responses`；connect/probe 保持既有 `openai-compatible | anthropic` 两值输入边界；两项 Minor 已修复并经 Spec 复审通过 |
 
 本阶段只修改契约测试和文档，例外是为恢复项目 `format:check` 门而格式化 `apply-active-model-config.unit.test.ts` 的既有断行；该修改不改变测试逻辑。没有改动 production lifecycle、context、SQLite、UI 或能力范围。
