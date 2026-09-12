@@ -193,15 +193,83 @@ describe("prompt-cache wire contract", () => {
           provider: "openai",
         }),
         temperature: 0,
+        tools: [
+          {
+            function: {
+              name: "lookup",
+              parameters: {
+                properties: { query: { type: "string" } },
+                type: "object",
+              },
+            },
+            type: "function",
+          },
+        ],
       });
 
       const params = create.mock.calls[0]?.[0] as Record<string, unknown>;
-      expect(params).toMatchObject({ store: false, stream: true });
-      expect(cacheExtensionKeys(params)).toEqual([]);
+      expect(params).toEqual({
+        input: [{ role: "user", content: "Hello" }],
+        max_output_tokens: 128,
+        model: "gpt-5.6",
+        store: false,
+        stream: true,
+        temperature: 0,
+        tools: [
+          {
+            name: "lookup",
+            parameters: {
+              properties: { query: { type: "string" } },
+              type: "object",
+            },
+            strict: false,
+            type: "function",
+          },
+        ],
+      });
       expect(params).not.toHaveProperty("previous_response_id");
-      expect(params).not.toHaveProperty("prompt_cache_key");
     },
   );
+
+  it("passes Chat nested cache_control through without mutating caller messages", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "compatible-gateway",
+      apiKey: "test-key",
+      baseUrl: "https://gateway.example.test/v1",
+    });
+    const create = vi
+      .spyOn(provider.client.chat.completions, "create")
+      .mockResolvedValue(
+        emptyStream<ChatCompletionChunk>() as unknown as Awaited<
+          ReturnType<typeof provider.client.chat.completions.create>
+        >,
+      );
+    const messages = [
+      {
+        content: [
+          {
+            cache_control: { ttl: "5m", type: "ephemeral" },
+            text: "Keep this exact nested extension.",
+            type: "text",
+          },
+        ],
+        role: "user",
+      },
+    ] as unknown as ChatCompletionMessageParam[];
+    const before = structuredClone(messages);
+
+    await provider.streamChatCompletion({
+      maxTokens: 128,
+      messages,
+      model: "compatible-model",
+      promptCache: observeOnly(),
+      temperature: 0,
+    });
+
+    const params = create.mock.calls[0]?.[0];
+    expect(params.messages).toEqual(before);
+    expect(messages).toEqual(before);
+  });
 
   it.each([
     ["DeepSeek", "https://api.deepseek.com/v1"],
