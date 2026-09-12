@@ -1,5 +1,6 @@
 import { createAnthropicProvider } from "./anthropic.js";
 import { createOpenAICompatibleProvider } from "./openai-compatible.js";
+import { createOpenAIResponsesProvider } from "./openai-responses.js";
 import type {
   CreateInterfaceProviderOptions,
   InterfaceProviderInstance,
@@ -25,6 +26,7 @@ export type {
 
 export { createAnthropicProvider } from "./anthropic.js";
 export { createOpenAICompatibleProvider } from "./openai-compatible.js";
+export { createOpenAIResponsesProvider } from "./openai-responses.js";
 export type {
   TokenUsageDiagnosticReporter,
   TokenUsageNormalizationDiagnostic,
@@ -47,9 +49,7 @@ export function createInterfaceProvider(
     case "anthropic":
       return createAnthropicProvider(options);
     case "openai-responses":
-      throw new Error(
-        "OpenAI Responses interface provider is not implemented.",
-      );
+      return createOpenAIResponsesProvider(options);
     default: {
       const unexpectedKind: never = kind;
       return rejectUnsupportedInterfaceProviderKind(unexpectedKind);

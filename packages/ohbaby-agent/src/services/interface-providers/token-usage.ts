@@ -15,7 +15,7 @@ export interface TokenUsageNormalizationDiagnostic {
     | "input-breakdown-conflict"
     | "non-monotonic-cumulative-field"
     | "raw-total-mismatch";
-  readonly protocol: "anthropic" | "openai-compatible";
+  readonly protocol: "anthropic" | "openai-compatible" | "openai-responses";
   readonly field?:
     | "cache_creation_input_tokens"
     | "cache_read_input_tokens"
@@ -249,6 +249,57 @@ export function normalizeOpenAICompatibleUsage(
     rawTotal,
     report,
   );
+}
+
+export function normalizeOpenAIResponsesUsage(
+  rawUsage: unknown,
+  report: TokenUsageDiagnosticReporter = ignoreTokenUsageDiagnostic,
+): InterfaceProviderTokenUsage | undefined {
+  const usage = record(rawUsage);
+  const inputTokens = field(usage, "input_tokens");
+  const outputTokens = field(usage, "output_tokens");
+  if (inputTokens === undefined || outputTokens === undefined) return undefined;
+
+  const details = record(usage?.input_tokens_details);
+  const readObserved =
+    details !== undefined && Object.hasOwn(details, "cached_tokens");
+  const writeObserved =
+    details !== undefined && Object.hasOwn(details, "cache_write_tokens");
+  let inputBreakdown: InputTokenBreakdown | undefined;
+  if (readObserved || writeObserved) {
+    const cacheRead = readObserved ? field(details, "cached_tokens") : 0;
+    const cacheWrite = writeObserved ? field(details, "cache_write_tokens") : 0;
+    if (cacheRead !== undefined && cacheWrite !== undefined) {
+      inputBreakdown = breakdown({
+        inputTokens,
+        cacheRead,
+        cacheWrite,
+        cacheReadObserved: readObserved,
+        cacheWriteObserved: writeObserved,
+      });
+    }
+    if (inputBreakdown === undefined)
+      report({
+        type: "llm.usage.normalization",
+        protocol: "openai-responses",
+        code: "input-breakdown-conflict",
+      });
+  }
+  const normalized = tokenUsage({
+    inputTokens,
+    outputTokens,
+    ...(inputBreakdown === undefined ? {} : { inputBreakdown }),
+  });
+  const rawTotal = field(usage, "total_tokens");
+  if (rawTotal !== undefined && rawTotal !== normalized.totalTokens)
+    report({
+      type: "llm.usage.normalization",
+      protocol: "openai-responses",
+      code: "raw-total-mismatch",
+      received: rawTotal,
+      normalizedTotal: normalized.totalTokens,
+    });
+  return normalized;
 }
 
 function monotonic(current: number | undefined, incoming: number): number {

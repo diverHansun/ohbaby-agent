@@ -30,14 +30,14 @@ describe("interface provider registry", () => {
   });
 
   it("does not fall through to the Chat Completions adapter for Responses", () => {
-    expect(() => {
+    expect(
       createInterfaceProvider({
         id: "openai",
         interfaceProvider: "openai-responses",
         apiKey: "test-key",
         baseUrl: "https://api.openai.com/v1",
-      });
-    }).toThrow(/Responses.*not implemented/u);
+      }).kind,
+    ).toBe("openai-responses");
   });
 
   it("rejects an unknown runtime provider kind instead of using Chat Completions", () => {

@@ -138,6 +138,7 @@ const DIAGNOSTIC_ENUM_VALUES = new Set([
   "input_tokens",
   "non-monotonic-cumulative-field",
   "openai-compatible",
+  "openai-responses",
   "output_tokens",
   "raw-total-mismatch",
   "read",

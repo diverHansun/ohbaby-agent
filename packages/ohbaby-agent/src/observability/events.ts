@@ -49,7 +49,11 @@ export const tokenUsageNormalization = defineDiagnosticEvent({
       ]),
     ),
     normalizedTotal: diagnosticField.optional(diagnosticField.integer()),
-    protocol: diagnosticField.stringEnum(["anthropic", "openai-compatible"]),
+    protocol: diagnosticField.stringEnum([
+      "anthropic",
+      "openai-compatible",
+      "openai-responses",
+    ]),
     received: diagnosticField.optional(diagnosticField.integer()),
     retained: diagnosticField.optional(diagnosticField.integer()),
   },
