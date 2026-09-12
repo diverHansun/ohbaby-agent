@@ -19,6 +19,7 @@ const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const INTERFACE_PROVIDER_KINDS = new Set<InterfaceProviderKind>([
   "openai-compatible",
+  "openai-responses",
   "anthropic",
 ]);
 

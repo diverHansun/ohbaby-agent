@@ -143,6 +143,20 @@ describe("prompt cache capability resolver", () => {
     ).toBe("observe-only");
   });
 
+  it.each(["auto", "enabled", "disabled"] as const)(
+    "keeps OpenAI Responses cache controls observe-only for %s policy",
+    (policy) => {
+      expect(
+        resolvePromptCacheStrategy({
+          baseUrl: "https://api.openai.com/v1",
+          interfaceProvider: "openai-responses",
+          policy,
+          provider: "openai",
+        }).strategy,
+      ).toBe("observe-only");
+    },
+  );
+
   it("degrades explicit Anthropic caching when no eligible block exists", () => {
     const promptCache = resolvePromptCacheRequest({
       baseUrl: "https://gateway.example.test/anthropic",

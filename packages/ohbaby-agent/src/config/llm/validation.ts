@@ -14,6 +14,7 @@ const ENDPOINT_PATHS = ["/chat/completions", "/messages", "/responses"];
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const INTERFACE_PROVIDER_KINDS = new Set<InterfaceProviderKind>([
   "openai-compatible",
+  "openai-responses",
   "anthropic",
 ]);
 const PROMPT_CACHE_POLICIES = new Set<PromptCachePolicy>([
@@ -72,7 +73,7 @@ function validateInterfaceProviderValue(value: unknown): void {
     throw new ConfigError(
       `Invalid apiConfig.interfaceProvider: ${formatInvalidValue(
         value,
-      )}. Must be 'openai-compatible' or 'anthropic'`,
+      )}. Must be 'openai-compatible', 'openai-responses', or 'anthropic'`,
       "INVALID_FIELD",
       { value },
     );

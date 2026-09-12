@@ -1,7 +1,10 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
 import type { TokenUsageDiagnosticReporter } from "./token-usage.js";
 
-export type InterfaceProviderKind = "openai-compatible" | "anthropic";
+export type InterfaceProviderKind =
+  | "openai-compatible"
+  | "openai-responses"
+  | "anthropic";
 
 export type LLMRequestPurpose =
   | "agent-step"

@@ -122,6 +122,13 @@ function resolved(
 export function resolvePromptCacheStrategy(
   input: PromptCacheCapabilityInput,
 ): PromptCacheCapability {
+  if (input.interfaceProvider === "openai-responses") {
+    return resolved(
+      "observe-only",
+      "OpenAI Responses cache controls are not supported",
+    );
+  }
+
   if (input.policy === "disabled") {
     return resolved("observe-only", "prompt cache controls are disabled");
   }

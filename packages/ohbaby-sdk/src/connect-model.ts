@@ -1,4 +1,7 @@
 export type UiConnectModelInterfaceProvider = "openai-compatible" | "anthropic";
+export type UiCurrentModelInterfaceProvider =
+  | UiConnectModelInterfaceProvider
+  | "openai-responses";
 
 export interface UiConnectModelInput {
   readonly provider: string;
@@ -29,7 +32,7 @@ export interface UiConnectModelResult {
 export interface UiCurrentModelConfig {
   readonly provider: string;
   readonly baseUrl: string;
-  readonly interfaceProvider: UiConnectModelInterfaceProvider;
+  readonly interfaceProvider: UiCurrentModelInterfaceProvider;
   readonly apiKeyEnv?: string;
   readonly model: string;
   readonly contextWindowTokens?: number;

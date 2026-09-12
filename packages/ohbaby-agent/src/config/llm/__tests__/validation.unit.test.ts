@@ -54,6 +54,18 @@ describe("validateModelJson", () => {
     }).not.toThrow();
   });
 
+  it("should accept the explicit OpenAI Responses interface provider", () => {
+    expect(() => {
+      validateModelJson({
+        ...validConfig,
+        apiConfig: {
+          ...validConfig.apiConfig,
+          interfaceProvider: "openai-responses",
+        },
+      });
+    }).not.toThrow();
+  });
+
   it.each(["auto", "enabled", "disabled"])(
     "should accept apiConfig.promptCache=%s",
     (promptCache) => {

@@ -77,6 +77,46 @@ describe("applyActiveModelConfig", () => {
     });
   });
 
+  it("saves an explicit OpenAI Responses interface provider", async () => {
+    const result = await applyActiveModelConfig({
+      apiKey: "sk-test-secret",
+      apiKeyEnv: "OPENAI_API_KEY",
+      baseUrl: "https://api.openai.com/v1",
+      interfaceProvider: "openai-responses",
+      model: "gpt-5",
+      modelJsonPath,
+      projectRoot: tempRoot,
+      provider: "openai",
+    });
+
+    expect(result.interfaceProvider).toBe("openai-responses");
+    await expect(fs.readFile(modelJsonPath, "utf-8")).resolves.toContain(
+      '"interfaceProvider": "openai-responses"',
+    );
+  });
+
+  it("rejects an unknown interface provider before probing or writing", async () => {
+    const input: Record<string, unknown> = {
+      apiKey: "sk-test-secret",
+      baseUrl: "https://api.openai.com/v1",
+      interfaceProvider: "unsupported-provider",
+      model: "gpt-5",
+      modelJsonPath,
+      projectRoot: tempRoot,
+      provider: "openai",
+    };
+
+    await expect(
+      Reflect.apply(applyActiveModelConfig, undefined, [input]),
+    ).rejects.toThrow(
+      "Invalid interface provider",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(fs.stat(modelJsonPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("writes safe active config, env value, and resolved model profile", async () => {
     const result = await applyActiveModelConfig({
       apiKey: "sk-test-secret",

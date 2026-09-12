@@ -2312,7 +2312,10 @@ export function createInProcessUiBackendClient(
       await runtimeController.resetRuntime();
       contextWindowUsage.clear();
       await publishSnapshotReplacement();
-      return result;
+      return {
+        ...result,
+        interfaceProvider: input.interfaceProvider,
+      };
     } finally {
       releaseSave();
     }

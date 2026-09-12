@@ -45,5 +45,9 @@ export function createInterfaceProvider(
     return createAnthropicProvider(options);
   }
 
+  if (kind === "openai-responses") {
+    throw new Error("OpenAI Responses interface provider is not implemented.");
+  }
+
   return createOpenAICompatibleProvider(options);
 }

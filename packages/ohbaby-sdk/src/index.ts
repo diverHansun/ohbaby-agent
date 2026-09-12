@@ -60,6 +60,7 @@ export type {
 export type { UiPromptCacheUsage } from "./prompt-cache-usage.js";
 export type {
   UiCurrentModelConfig,
+  UiCurrentModelInterfaceProvider,
   UiConnectModelInput,
   UiConnectModelInterfaceProvider,
   UiConnectModelResult,

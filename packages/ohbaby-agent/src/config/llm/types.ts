@@ -2,7 +2,10 @@
  * Type definitions for the LLM configuration module.
  */
 
-export type InterfaceProviderKind = "openai-compatible" | "anthropic";
+export type InterfaceProviderKind =
+  | "openai-compatible"
+  | "openai-responses"
+  | "anthropic";
 export type PromptCachePolicy = "auto" | "enabled" | "disabled";
 
 /**

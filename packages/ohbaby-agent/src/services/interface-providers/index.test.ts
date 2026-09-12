@@ -28,4 +28,15 @@ describe("interface provider registry", () => {
       }).kind,
     ).toBe("anthropic");
   });
+
+  it("does not fall through to the Chat Completions adapter for Responses", () => {
+    expect(() => {
+      createInterfaceProvider({
+        id: "openai",
+        interfaceProvider: "openai-responses",
+        apiKey: "test-key",
+        baseUrl: "https://api.openai.com/v1",
+      });
+    }).toThrow(/Responses.*not implemented/u);
+  });
 });
