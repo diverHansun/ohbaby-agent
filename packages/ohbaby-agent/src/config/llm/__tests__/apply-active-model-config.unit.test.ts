@@ -17,6 +17,9 @@ describe("applyActiveModelConfig", () => {
   let originalUserProfile: string | undefined;
   let originalApiKey: string | undefined;
   let originalLmStudioApiKey: string | undefined;
+  let originalOpenAIApiKey: string | undefined;
+  let expectedOpenAIApiKeyAfterTest: string | undefined;
+  let verifyOpenAIApiKeyRestore = false;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -28,10 +31,12 @@ describe("applyActiveModelConfig", () => {
     originalUserProfile = process.env.USERPROFILE;
     originalApiKey = process.env.ZENMUX_API_KEY;
     originalLmStudioApiKey = process.env.LM_STUDIO_API_KEY;
+    originalOpenAIApiKey = process.env.OPENAI_API_KEY;
     process.env.HOME = homeRoot;
     process.env.USERPROFILE = homeRoot;
     delete process.env.ZENMUX_API_KEY;
     delete process.env.LM_STUDIO_API_KEY;
+    delete process.env.OPENAI_API_KEY;
     fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -55,6 +60,13 @@ describe("applyActiveModelConfig", () => {
     restoreEnvValue("USERPROFILE", originalUserProfile);
     restoreEnvValue("ZENMUX_API_KEY", originalApiKey);
     restoreEnvValue("LM_STUDIO_API_KEY", originalLmStudioApiKey);
+    restoreEnvValue("OPENAI_API_KEY", originalOpenAIApiKey);
+    if (verifyOpenAIApiKeyRestore) {
+      verifyOpenAIApiKeyRestore = false;
+      expect(process.env.OPENAI_API_KEY === expectedOpenAIApiKeyAfterTest).toBe(
+        true,
+      );
+    }
     LLMConfigManager.resetInstance();
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
@@ -90,6 +102,9 @@ describe("applyActiveModelConfig", () => {
     });
 
     expect(result.interfaceProvider).toBe("openai-responses");
+    expect(process.env.OPENAI_API_KEY).toBe("sk-test-secret");
+    expectedOpenAIApiKeyAfterTest = originalOpenAIApiKey;
+    verifyOpenAIApiKeyRestore = true;
     await expect(fs.readFile(modelJsonPath, "utf-8")).resolves.toContain(
       '"interfaceProvider": "openai-responses"',
     );

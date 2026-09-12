@@ -39,4 +39,17 @@ describe("interface provider registry", () => {
       });
     }).toThrow(/Responses.*not implemented/u);
   });
+
+  it("rejects an unknown runtime provider kind instead of using Chat Completions", () => {
+    const options: Record<string, unknown> = {
+      apiKey: "test-key",
+      baseUrl: "https://api.openai.com/v1",
+      id: "openai",
+      interfaceProvider: "unsupported-provider",
+    };
+
+    expect(() => {
+      Reflect.apply(createInterfaceProvider, undefined, [options]);
+    }).toThrow("Unsupported interface provider kind: unsupported-provider");
+  });
 });

@@ -41,13 +41,22 @@ export function createInterfaceProvider(
 ): InterfaceProviderInstance {
   const kind = resolveInterfaceProviderKind(options.interfaceProvider);
 
-  if (kind === "anthropic") {
-    return createAnthropicProvider(options);
+  switch (kind) {
+    case "openai-compatible":
+      return createOpenAICompatibleProvider(options);
+    case "anthropic":
+      return createAnthropicProvider(options);
+    case "openai-responses":
+      throw new Error(
+        "OpenAI Responses interface provider is not implemented.",
+      );
+    default: {
+      const unexpectedKind: never = kind;
+      return rejectUnsupportedInterfaceProviderKind(unexpectedKind);
+    }
   }
+}
 
-  if (kind === "openai-responses") {
-    throw new Error("OpenAI Responses interface provider is not implemented.");
-  }
-
-  return createOpenAICompatibleProvider(options);
+function rejectUnsupportedInterfaceProviderKind(kind: unknown): never {
+  throw new Error(`Unsupported interface provider kind: ${String(kind)}`);
 }
