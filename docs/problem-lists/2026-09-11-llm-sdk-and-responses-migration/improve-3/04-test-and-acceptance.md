@@ -1,6 +1,6 @@
 # 4. 本轮测试与验收
 
-> 2026-09-13精确契约已批准；真实E2E模型/协议矩阵见§4.6。尚未实施improve-3，不沿用improve-2数字冒充本轮结果。
+> 2026-09-13精确契约已批准；真实E2E模型/协议矩阵见§4.6。improve-2已收尾并合入本地集成分支；improve-3在codex/improve-3-model-contract开始A批，验收尚未完成，不沿用improve-2数字冒充本轮结果。
 
 ## 4.1 范围与执行
 
@@ -46,7 +46,7 @@
 
 | 模型 | interfaceProvider / 出站路径 | 用途 |
 | --- | --- | --- |
-| x-ai/grok-4.2-fast-non-reasoning | openai-responses / /api/v1/responses | improve-2 T12及本轮T10；文本与llm-client工具往返预检通过，完整lifecycle验收待执行 |
+| x-ai/grok-4.2-fast-non-reasoning | openai-responses / /api/v1/responses | improve-2生产Lifecycle T12已通过；improve-3改造后的T10必须重新执行 |
 | deepseek/deepseek-v4.1-flash | openai-compatible / /api/v1/chat/completions | Chat兼容回归、本轮T10 |
 | [qwen/qwen3.8-flash](https://zenmux.ai/qwen/qwen3.8-flash) | anthropic / /api/anthropic/v1/messages | Anthropic兼容回归、本轮T10 |
 

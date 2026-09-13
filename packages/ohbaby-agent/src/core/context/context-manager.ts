@@ -60,7 +60,7 @@ import type {
 } from "./types.js";
 import {
   isContextOverflowError,
-  type ChatCompletionMessage,
+  type ModelMessage,
 } from "../llm-client/index.js";
 import {
   isModelContextPart,
@@ -110,7 +110,7 @@ type CommittableSummaryCandidate = Extract<
 >;
 
 interface CompactionRequest {
-  readonly tailDirectives?: readonly ChatCompletionMessage[];
+  readonly tailDirectives?: readonly ModelMessage[];
   readonly assembled: AssembledContext;
   readonly bypassThrashLock: boolean;
   readonly countTurnCompaction: boolean;
@@ -430,7 +430,7 @@ export function createContextManager(
   }
 
   function assembleModelRequest(input: {
-    readonly tailDirectives?: readonly ChatCompletionMessage[];
+    readonly tailDirectives?: readonly ModelMessage[];
     readonly context: AssembledContext;
     readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
     readonly isSubagent: boolean;
@@ -480,7 +480,7 @@ export function createContextManager(
   }
 
   function measureContext(input: {
-    readonly tailDirectives?: readonly ChatCompletionMessage[];
+    readonly tailDirectives?: readonly ModelMessage[];
     readonly context: AssembledContext;
     readonly modelId: string;
     readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
@@ -592,7 +592,7 @@ export function createContextManager(
     context: AssembledContext,
     modelId: string,
     tools: PrepareTurnInput["tools"],
-    tailDirectives?: readonly ChatCompletionMessage[],
+    tailDirectives?: readonly ModelMessage[],
   ): AssembledContext {
     return reduceContextForModel({
       allowCutoffAdvance: false,

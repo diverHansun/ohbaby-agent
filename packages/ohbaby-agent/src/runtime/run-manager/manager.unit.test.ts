@@ -316,7 +316,7 @@ class CompletingLifecycle implements RunLifecycle {
       timestamp: 20,
       delta: "Hello",
       content: "Hello",
-      completeMessage: { role: "assistant", content: "Hello" },
+      completeMessage: { content: "Hello" },
     };
     yield {
       type: "llm:complete",
@@ -324,7 +324,7 @@ class CompletingLifecycle implements RunLifecycle {
       step: 1,
       timestamp: 30,
       finishReason: "stop",
-      completeMessage: { role: "assistant", content: "Hello" },
+      completeMessage: { content: "Hello" },
       tokenUsage: {
         inputBreakdown: {
           cacheRead: 5,
@@ -470,7 +470,7 @@ class SessionLifecycle implements RunLifecycle {
       },
     };
     yield {
-      completeMessage: { role: "assistant", content: "Hello" },
+      completeMessage: { content: "Hello" },
       content: "Hello",
       delta: "Hello",
       sessionId: params.sessionId,
@@ -637,7 +637,7 @@ class InterruptThenCompleteLifecycle implements RunLifecycle {
       step: 1,
       timestamp: 20,
       finishReason: "stop",
-      completeMessage: { role: "assistant", content: "replacement" },
+      completeMessage: { content: "replacement" },
     };
 
     return {

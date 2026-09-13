@@ -1,4 +1,4 @@
-import type { ChatCompletionMessage } from "../llm-client/index.js";
+import type { ModelMessage } from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
 import type { MessageWithParts, Part, ToolPart } from "../message/index.js";
 import {
@@ -54,7 +54,7 @@ export function serializeForLlm(input: {
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly isSubagent: boolean;
   readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
-}): ChatCompletionMessage[] {
+}): ModelMessage[] {
   const systemPrompt = input.isSubagent
     ? input.systemPrompt
     : appendMemoryToSystemPrompt(
@@ -76,7 +76,7 @@ export function serializeForLlm(input: {
 export function serializeHistoryMessages(
   history: readonly MessageWithParts[],
   activeReasoningByMessageId?: ReadonlyMap<string, string>,
-): ChatCompletionMessage[] {
+): ModelMessage[] {
   return history.flatMap((message) =>
     serializeMessageForLlm(message, activeReasoningByMessageId),
   );
@@ -85,7 +85,7 @@ export function serializeHistoryMessages(
 function serializeMessageForLlm(
   message: MessageWithParts,
   activeReasoningByMessageId?: ReadonlyMap<string, string>,
-): ChatCompletionMessage[] {
+): ModelMessage[] {
   if (message.info.role === "assistant" && message.info.finish === "error") {
     return [];
   }
@@ -128,7 +128,7 @@ function serializeAssistantMessage(
   message: MessageWithParts,
   parts: readonly Part[],
   activeReasoningByMessageId?: ReadonlyMap<string, string>,
-): ChatCompletionMessage[] {
+): ModelMessage[] {
   const projectedToolParts = parts.filter(isToolPart);
   const content = textContentFromParts(parts);
 
@@ -139,29 +139,26 @@ function serializeAssistantMessage(
   const assistantMessage = {
     role: "assistant",
     content: content === "" ? null : content,
-    tool_calls: projectedToolParts.map((part) => ({
-      id: part.callId,
-      type: "function",
-      function: {
-        name: part.tool,
-        arguments: JSON.stringify(part.state.input),
-      },
+    toolCalls: projectedToolParts.map((part) => ({
+      callId: part.callId,
+      name: part.tool,
+      argumentsJson: JSON.stringify(part.state.input),
     })),
-  } satisfies ChatCompletionMessage;
+  } satisfies ModelMessage;
   const reasoning = activeReasoningByMessageId?.get(message.info.id);
   const assistantWithReasoning =
     reasoning === undefined || reasoning === ""
       ? assistantMessage
       : ({
           ...assistantMessage,
-          reasoning_content: reasoning,
-        } as ChatCompletionMessage);
+          reasoningText: reasoning,
+        } satisfies ModelMessage);
 
   return [
     assistantWithReasoning,
     ...projectedToolParts.map((part) => ({
       role: "tool" as const,
-      tool_call_id: part.callId,
+      callId: part.callId,
       content: toolResultContent(part),
     })),
   ];

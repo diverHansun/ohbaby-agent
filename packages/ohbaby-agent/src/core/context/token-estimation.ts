@@ -1,4 +1,9 @@
 import {
+  legacyMessageForEstimation,
+  legacyToolForEstimation,
+  legacyReasoningForEstimation,
+} from "./legacy-estimation.js";
+import {
   isContextSummaryPart,
   isModelContextPart,
   type MessageWithParts,
@@ -44,9 +49,11 @@ export function estimatePreparedRequestHeuristic(
   request: PreparedModelRequest,
   tokenCounter: Pick<TokenCounter, "estimateTokens">,
 ): number {
-  const payloads = request.messages.map((message) => JSON.stringify(message));
+  const payloads = request.messages.map((message) =>
+    JSON.stringify(legacyMessageForEstimation(message)),
+  );
   if (request.tools !== undefined && request.tools.length > 0) {
-    payloads.push(JSON.stringify(request.tools));
+    payloads.push(JSON.stringify(request.tools.map(legacyToolForEstimation)));
   }
   const text = payloads.join("\n");
   return Math.max(0, tokenCounter.estimateTokens(text));
@@ -67,7 +74,12 @@ export function estimateContextOccupancyComposition(
   if (input.tailDirectives !== undefined) {
     reconstructedMessages.push(...input.tailDirectives);
   }
-  if (!wireValuesMatch(reconstructedMessages, input.request.messages)) {
+  if (
+    !wireValuesMatch(
+      reconstructedMessages.map(legacyMessageForEstimation),
+      input.request.messages.map(legacyMessageForEstimation),
+    )
+  ) {
     return undefined;
   }
   const requestTools = input.request.tools ?? [];
@@ -92,7 +104,7 @@ export function estimateContextOccupancyComposition(
       isSubagent: input.context.isSubagent,
       memory: input.context.memory,
       systemPrompt: input.context.systemPrompt,
-    }),
+    }).map(legacyMessageForEstimation),
   );
 
   for (const message of input.context.history) {
@@ -105,14 +117,14 @@ export function estimateContextOccupancyComposition(
       reasoning !== "" &&
       message.parts.some((part) => part.type === "tool" && isActivePart(part))
     ) {
-      payloads.conversation.push({ reasoning_content: reasoning });
+      payloads.conversation.push(legacyReasoningForEstimation(reasoning));
     }
   }
 
   for (const directive of input.tailDirectives ?? []) {
     payloads[
       directive.role === "system" ? "system-prompt" : "conversation"
-    ].push(directive);
+    ].push(legacyMessageForEstimation(directive));
   }
 
   if (toolDefinitions !== undefined && requestTools.length > 0) {
@@ -124,7 +136,9 @@ export function estimateContextOccupancyComposition(
       };
     requestTools.forEach((tool, index) => {
       const definition = toolDefinitions[index];
-      toolPayloads[toolBucket(definition.source)].push(tool);
+      toolPayloads[toolBucket(definition.source)].push(
+        legacyToolForEstimation(tool),
+      );
     });
     for (const key of ["builtin-tools", "mcp", "skills"] as const) {
       if (toolPayloads[key].length > 0) {
@@ -197,7 +211,9 @@ function addSerializedParts(
     return;
   }
   payloads[key].push(
-    ...serializeHistoryMessages([{ info: message.info, parts }]),
+    ...serializeHistoryMessages([{ info: message.info, parts }]).map(
+      legacyMessageForEstimation,
+    ),
   );
 }
 
@@ -220,8 +236,7 @@ function definitionsMatchRequestTools(
   return (
     definitions.length === requestTools.length &&
     definitions.every(
-      (definition, index) =>
-        definition.name === requestTools[index]?.function.name,
+      (definition, index) => definition.name === requestTools[index]?.name,
     )
   );
 }

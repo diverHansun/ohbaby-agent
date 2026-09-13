@@ -399,34 +399,28 @@ describe("serializeForLlm database metadata projection", () => {
       {
         role: "assistant",
         content: null,
-        tool_calls: [
+        toolCalls: [
           {
-            id: "call_bash",
-            type: "function",
-            function: {
-              name: "bash",
-              arguments: '{"command":"false"}',
-            },
+            callId: "call_bash",
+            name: "bash",
+            argumentsJson: '{"command":"false"}',
           },
           {
-            id: "call_mcp",
-            type: "function",
-            function: {
-              name: "mcp_s6_server_t6_search",
-              arguments: '{"query":"ohbaby"}',
-            },
+            callId: "call_mcp",
+            name: "mcp_s6_server_t6_search",
+            argumentsJson: '{"query":"ohbaby"}',
           },
         ],
       },
       {
         role: "tool",
-        tool_call_id: "call_bash",
+        callId: "call_bash",
         content:
           '<tool_metadata>\n{"exitCode":1,"signal":null}\n</tool_metadata>',
       },
       {
         role: "tool",
-        tool_call_id: "call_mcp",
+        callId: "call_mcp",
         content:
           'structured result\n\n<tool_metadata>\n{"server":"server","tool":"search","contentTypes":["text"],"structuredContent":{"count":1}}\n</tool_metadata>',
       },
@@ -492,34 +486,28 @@ describe("serializeForLlm database metadata projection", () => {
       {
         role: "assistant",
         content: null,
-        tool_calls: [
+        toolCalls: [
           {
-            id: "call_pending_write",
-            type: "function",
-            function: {
-              name: "write_file",
-              arguments: '{"path":"result.txt","content":"value"}',
-            },
+            callId: "call_pending_write",
+            name: "write_file",
+            argumentsJson: '{"path":"result.txt","content":"value"}',
           },
           {
-            id: "call_running_shell",
-            type: "function",
-            function: {
-              name: "bash",
-              arguments: '{"command":"deploy"}',
-            },
+            callId: "call_running_shell",
+            name: "bash",
+            argumentsJson: '{"command":"deploy"}',
           },
         ],
       },
       {
         role: "tool",
-        tool_call_id: "call_pending_write",
+        callId: "call_pending_write",
         content:
           "Tool execution was interrupted before a durable result was recorded. Side effects may have occurred; verify before retrying.",
       },
       {
         role: "tool",
-        tool_call_id: "call_running_shell",
+        callId: "call_running_shell",
         content:
           "Tool execution was interrupted before a durable result was recorded. Side effects may have occurred; verify before retrying.",
       },
@@ -580,15 +568,12 @@ describe("serializeForLlm database metadata projection", () => {
     expect(withReasoning[0]).toEqual({
       role: "assistant",
       content: null,
-      reasoning_content: "deep thought",
-      tool_calls: [
+      reasoningText: "deep thought",
+      toolCalls: [
         {
-          id: "call_read",
-          type: "function",
-          function: {
-            name: "read_file",
-            arguments: '{"path":"README.md"}',
-          },
+          callId: "call_read",
+          name: "read_file",
+          argumentsJson: '{"path":"README.md"}',
         },
       ],
     });
@@ -599,14 +584,11 @@ describe("serializeForLlm database metadata projection", () => {
     expect(withoutReasoning[0]).toEqual({
       role: "assistant",
       content: null,
-      tool_calls: [
+      toolCalls: [
         {
-          id: "call_read",
-          type: "function",
-          function: {
-            name: "read_file",
-            arguments: '{"path":"README.md"}',
-          },
+          callId: "call_read",
+          name: "read_file",
+          argumentsJson: '{"path":"README.md"}',
         },
       ],
     });

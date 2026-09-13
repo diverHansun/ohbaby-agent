@@ -1,7 +1,7 @@
 # improve-3 · LLM 请求与结果契约去 Chat 耦合
 
-> 开启日期：2026-09-13。状态：精确契约已获用户批准，实施授权以improve-2前置验收通过并合入集成分支为条件；尚未开始本轮生产改造。
-> 调研代码：`codex/improve-2-responses-migration@a18290f3`。尚未创建本轮实施分支。
+> 开启日期：2026-09-13。状态：improve-2前置验收与本地合入已完成；A批请求纵切已通过测试与独立审查，继续B批结果接口迁移。
+> 调研代码：`codex/improve-2-responses-migration@a18290f3`。本轮实施分支：`codex/improve-3-model-contract`，起点为集成分支`b43a0921`；main不动。
 
 本轮承接improve-2 §2.8主动切出的内部契约问题。精确设计和分批实施已获用户批准。2026-09-13 improve-2最新全量preflight与生产lifecycle Grok T12通过，详见improve-2/05 §5.12。按用户授权完成收尾并合入openai-responses-migration，再从该集成分支建立本轮临时分支实施。不得合入main；本轮改造后须重新运行全部矩阵。
 
@@ -28,3 +28,11 @@
 2026-09-13用户已批准design/data-model.md §5–6精确契约及公开入口建议，并指定ZenMux真实测试矩阵，见04 §4.6。U表保留为决策索引，不再作为重复询问的理由。真正开工仍须先通过improve-2最新live门并合回集成分支。improve-3验收后停在临时分支，等待用户审查并确认improve-4计划；不自动merge。
 
 2026-09-13子代理复核发现Anthropic空文本工具结果存在JSON fallback，已补旧字段恢复及三类wire回归；复核确认该问题在规划层解决，下一轮候选未发现与context improve-5/6职责的实质冲突。这是文档审查，不是新代码通过测试的证明。
+
+## A批执行记录（2026-09-13）
+
+请求消息/工具已改自有类型，三个adapter直接投影；旧估算总量与七桶维持批准基线，快照最终内层及安全多轮回传已适配。外层completeMessage、reasoning及streamChatCompletion等名称按计划留B，不是最终公开API。
+
+冻结后typecheck、lint通过；定向provider五文件254项通过；完整unit为235文件2457项通过、2项既有跳过，contract为17文件309项通过，integration为52文件349项通过（含CLI打包及进程检查）。独立子代理未发现A批阻断问题。尚未运行本轮最终真实LLM矩阵，不沿用improve-2成功结果。
+
+失败记录保留：编辑中误触发一次CLI构建，读到临时类型断裂；最终冻结后完整integration通过。完整unit曾三次在未改动daemon启动诊断用例达到10秒超时，单独复跑及最后完整复跑通过，根因未确定，未改server源码或测试超时。尝试的VITEST_MAX_THREADS/MIN_THREADS不控制当前默认forks池，不能把最后通过归因于“单worker修复”。最终通过的测试数来自实际退出结果，不把失败运行计入通过。

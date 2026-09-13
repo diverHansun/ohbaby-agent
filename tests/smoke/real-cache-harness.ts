@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createBus } from "../../packages/ohbaby-agent/src/bus/index.js";
-import { toOpenAiTools } from "../../packages/ohbaby-agent/src/core/agents/index.js";
+import { toModelTools } from "../../packages/ohbaby-agent/src/core/agents/index.js";
 import {
   createContextManager,
   type ContextLLMClient,
@@ -379,7 +379,7 @@ export function projectRequest(
       : { sessionId: request.sessionId }),
     toolDigests: (request.tools ?? []).map(digest),
     toolEpoch,
-    toolNames: (request.tools ?? []).map((tool) => tool.function.name),
+    toolNames: (request.tools ?? []).map((tool) => tool.name),
   };
 }
 
@@ -655,7 +655,7 @@ export async function createRealCacheHarness(
       latestEpochs.set(scopeKey(sessionId, contextScopeId), snapshot.epoch);
       return {
         definitions: snapshot.tools,
-        requestTools: toOpenAiTools(snapshot.tools),
+        requestTools: toModelTools(snapshot.tools),
       };
     },
     toolScheduler: scheduler,

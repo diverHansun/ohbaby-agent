@@ -635,12 +635,9 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
     const toolNames = definitions.map((tool) => tool.name);
     const tools = definitions.map((tool) => ({
-      function: {
-        description: tool.description,
-        name: tool.name,
-        parameters: tool.parameters,
-      },
-      type: "function" as const,
+      description: tool.description,
+      name: tool.name,
+      inputSchema: tool.parameters,
     }));
     expect(toolNames.length).toBeGreaterThan(0);
 
@@ -1553,8 +1550,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     )?.content;
     const initialRuntime =
       typeof initialContent === "string" ? initialContent : "";
-    const initialToolNames =
-      requests[0]?.tools?.map((tool) => tool.function.name) ?? [];
+    const initialToolNames = requests[0]?.tools?.map((tool) => tool.name) ?? [];
     const initialRequestJson = JSON.stringify(requests[0]);
     expect(initialRuntime).toContain(`- ${toolName}`);
     expect(initialRuntime).toContain("search available MCP tools by query");
@@ -1594,7 +1590,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     await composition.runManager.waitForCompletion(second.runId);
 
     const selectedTool = requests[1]?.tools?.find(
-      (tool) => tool.function.name === toolName,
+      (tool) => tool.name === toolName,
     );
     const selectedContent = requests[1]?.messages
       .filter((message) => message.role === "user")
@@ -1603,7 +1599,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       typeof selectedContent === "string" ? selectedContent : "";
     expect(selectedRuntime).not.toContain("<mcp_tool_catalog>");
     expect(JSON.stringify(requests[0])).toBe(initialRequestJson);
-    expect(selectedTool?.function.description).toBe(
+    expect(selectedTool?.description).toBe(
       "MCP tool loaded on demand. Use its schema to perform the requested operation.",
     );
   });
@@ -1668,7 +1664,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       sessionId: "session_search_mcp",
     });
     await composition.runManager.waitForCompletion(run.runId);
-    expect(requests.at(-1)?.tools?.map((tool) => tool.function.name)).toContain(
+    expect(requests.at(-1)?.tools?.map((tool) => tool.name)).toContain(
       toolName,
     );
   });
@@ -1708,10 +1704,8 @@ describe("createUiRuntimeComposition skill tools", () => {
       await composition.runManager.waitForCompletion(run.runId);
     }
 
-    const secondNames =
-      requests[1]?.tools?.map((tool) => tool.function.name) ?? [];
-    const thirdNames =
-      requests[2]?.tools?.map((tool) => tool.function.name) ?? [];
+    const secondNames = requests[1]?.tools?.map((tool) => tool.name) ?? [];
+    const thirdNames = requests[2]?.tools?.map((tool) => tool.name) ?? [];
     expect(secondNames.slice(-2)).toEqual([toolD, toolC]);
     expect(thirdNames).toEqual(secondNames);
   });
@@ -1730,8 +1724,7 @@ describe("createUiRuntimeComposition skill tools", () => {
 
     const systemContent = requests[0]?.messages[0]?.content;
     const systemPrompt = typeof systemContent === "string" ? systemContent : "";
-    const toolNames =
-      requests[0]?.tools?.map((tool) => tool.function.name) ?? [];
+    const toolNames = requests[0]?.tools?.map((tool) => tool.name) ?? [];
 
     expect(systemPrompt).not.toContain("<mcp_tools>");
     expect(toolNames).toContain("select_tools");
@@ -1777,8 +1770,6 @@ describe("createUiRuntimeComposition skill tools", () => {
     await composition.runManager.waitForCompletion(second.runId);
 
     const latestRequest = requests.at(-1);
-    expect(latestRequest?.tools?.map((tool) => tool.function.name)).toContain(
-      toolName,
-    );
+    expect(latestRequest?.tools?.map((tool) => tool.name)).toContain(toolName);
   });
 });

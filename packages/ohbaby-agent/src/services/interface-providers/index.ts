@@ -8,11 +8,12 @@ import type {
 } from "./types.js";
 
 export type {
+  ModelMessage,
+  ModelToolCall,
   CreateInterfaceProviderOptions,
   InputTokenBreakdown,
   InterfaceProviderFinishReason,
-  InterfaceProviderFunctionTool,
-  InterfaceProviderFunctionTools,
+  ModelToolDefinition,
   InterfaceProviderInstance,
   InterfaceProviderKind,
   InterfaceProviderPromptCache,

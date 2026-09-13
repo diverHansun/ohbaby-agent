@@ -19,7 +19,7 @@ import type {
   UpdateMessagePatch,
   UpdatePartPatch,
 } from "./types.js";
-import type { ChatCompletionMessage } from "../llm-client/index.js";
+import type { ModelMessage } from "../llm-client/index.js";
 
 export interface MessageManagerOptions {
   readonly bus: BusInstance;
@@ -204,7 +204,7 @@ export function createMessageManager(
     async toModelMessages(
       sessionId: string,
       filter?: MessageScopeFilter,
-    ): Promise<ChatCompletionMessage[]> {
+    ): Promise<ModelMessage[]> {
       return convertToModelMessages(
         await options.store.listBySession(sessionId, filter),
       );

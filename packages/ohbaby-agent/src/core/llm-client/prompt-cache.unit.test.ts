@@ -345,12 +345,9 @@ describe("scoped prompt cache identity", () => {
           ...options,
           tools: [
             {
-              type: "function",
-              function: {
-                name: "mcp_loaded_tool",
-                description: "Loaded in a later tool-menu epoch",
-                parameters: { type: "object", properties: {} },
-              },
+              name: "mcp_loaded_tool",
+              description: "Loaded in a later tool-menu epoch",
+              inputSchema: { type: "object", properties: {} },
             },
           ],
         },

@@ -7,6 +7,7 @@ import { createAnthropicProvider } from "./anthropic.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
+  ModelMessage,
 } from "./types.js";
 
 function createRawStream(
@@ -33,7 +34,123 @@ function customToolNames(tools: MessageCreateParams["tools"]): string[] {
 }
 
 describe("anthropic provider", () => {
-  it("should convert OpenAI-compatible messages and tools to Anthropic params", async () => {
+  it("retains existing text filtering, system order and ignored rare fields", async () => {
+    const provider = createAnthropicProvider({
+      id: "test",
+      apiKey: "test-key",
+      baseUrl: "http://localhost:1",
+    });
+    const stream = vi
+      .spyOn(provider.client.messages, "stream")
+      .mockReturnValue(createRawStream([]));
+    const messages: ModelMessage[] = [
+      {
+        role: "system",
+        name: "not-sent",
+        content: [
+          {
+            type: "text",
+            text: "first",
+            cacheControl: { type: "ephemeral", ttl: "1h" },
+          },
+        ],
+      },
+      { role: "developer", content: "second" },
+      {
+        role: "user",
+        name: "not-sent",
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: "https://example.test/a.png" },
+          },
+          {
+            type: "text",
+            text: "keep",
+            prompt_cache_breakpoint: { mode: "explicit" },
+          },
+          { type: "input_audio", input_audio: { data: "AA==", format: "wav" } },
+          { type: "file", file: {} },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "one" },
+          { type: "refusal", refusal: "not-sent" },
+          { type: "text", text: "two" },
+        ],
+        name: "not-sent",
+        audio: { id: "not-sent" },
+        refusal: "not-sent",
+        reasoningText: "not-sent",
+      },
+      { role: "user", content: "" },
+      { role: "assistant", content: null },
+    ];
+    const before = structuredClone(messages);
+    await provider.streamChatCompletion({
+      model: "test",
+      messages,
+      temperature: 0,
+      maxTokens: 32,
+      promptCache: { strategy: "observe-only", reason: "test" },
+    });
+    expect(stream.mock.calls[0]?.[0]).toEqual({
+      model: "test",
+      system: "first\n\nsecond",
+      messages: [
+        { role: "user", content: "keep" },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "one" },
+            { type: "text", text: "two" },
+          ],
+        },
+        { role: "user", content: "" },
+        { role: "assistant", content: "" },
+      ],
+      max_tokens: 32,
+      temperature: 0,
+    });
+    expect(messages).toEqual(before);
+  });
+
+  it.each<ModelMessage>([
+    { role: "system", content: [] },
+    { role: "developer", content: [] },
+    { role: "user", content: [] },
+    { role: "assistant", content: [] },
+    {
+      role: "user",
+      content: [
+        { type: "image_url", image_url: { url: "https://example.test/a.png" } },
+      ],
+    },
+    { role: "assistant", content: [{ type: "refusal", refusal: "no" }] },
+  ])("still rejects non-tool arrays without a text block: %j", (message) => {
+    const provider = createAnthropicProvider({
+      id: "test",
+      apiKey: "test-key",
+      baseUrl: "http://localhost:1",
+    });
+    const stream = vi
+      .spyOn(provider.client.messages, "stream")
+      .mockReturnValue(createRawStream([]));
+    expect(() =>
+      provider.streamChatCompletion({
+        model: "test",
+        messages: [message],
+        temperature: 0,
+        maxTokens: 32,
+        promptCache: { strategy: "observe-only", reason: "test" },
+      }),
+    ).toThrow(/Unsupported .* content/u);
+    expect(stream).not.toHaveBeenCalled();
+  });
+
+  it("should convert model messages and tools to Anthropic params", async () => {
     const provider = createAnthropicProvider({
       id: "anthropic",
       apiKey: "test-key",
@@ -71,20 +188,17 @@ describe("anthropic provider", () => {
         {
           role: "assistant",
           content: "Let me check.",
-          tool_calls: [
+          toolCalls: [
             {
-              id: "call_1",
-              type: "function",
-              function: {
-                name: "get_weather",
-                arguments: '{"location":"NYC"}',
-              },
+              callId: "call_1",
+              name: "get_weather",
+              argumentsJson: '{"location":"NYC"}',
             },
           ],
         },
         {
           role: "tool",
-          tool_call_id: "call_1",
+          callId: "call_1",
           content: "Sunny",
         },
       ],
@@ -93,17 +207,14 @@ describe("anthropic provider", () => {
       promptCache: { strategy: "observe-only" as const, reason: "test" },
       tools: [
         {
-          type: "function",
-          function: {
-            name: "get_weather",
-            description: "Fetch weather by location",
-            parameters: {
-              type: "object",
-              properties: {
-                location: { type: "string" },
-              },
-              required: ["location"],
+          name: "get_weather",
+          description: "Fetch weather by location",
+          inputSchema: {
+            type: "object",
+            properties: {
+              location: { type: "string" },
             },
+            required: ["location"],
           },
         },
       ],
@@ -458,20 +569,14 @@ describe("anthropic provider", () => {
         ]),
       );
     const selectTools = {
-      type: "function" as const,
-      function: {
-        name: "select_tools",
-        description: "Load an MCP tool.",
-        parameters: { type: "object", properties: {} },
-      },
+      name: "select_tools",
+      description: "Load an MCP tool.",
+      inputSchema: { type: "object", properties: {} },
     };
     const selectedMcpTool = {
-      type: "function" as const,
-      function: {
-        name: "mcp_s7_example_t6_search",
-        description: "MCP tool loaded on demand.",
-        parameters: { type: "object", properties: {} },
-      },
+      name: "mcp_s7_example_t6_search",
+      description: "MCP tool loaded on demand.",
+      inputSchema: { type: "object", properties: {} },
     };
     const baseRequest = {
       maxTokens: 32,

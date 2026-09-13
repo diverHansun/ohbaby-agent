@@ -1,10 +1,13 @@
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
-import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
+import type {
+  ModelMessage,
+  ModelResponseSnapshot,
+} from "../core/llm-client/index.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   streamChatCompletion,
-  type InterfaceProviderFunctionTool,
+  type ModelToolDefinition,
   type LLMClientInstance,
   type StreamingResponse,
 } from "../core/llm-client/index.js";
@@ -18,108 +21,93 @@ const BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
 const MODEL = "glm-5.1";
 const FINAL_MARKER = "OHBABY_GOAL_COMPLETE_ORDER_OK";
 
-const tools: InterfaceProviderFunctionTool[] = [
+const tools: ModelToolDefinition[] = [
   {
-    function: {
-      description: "Read the current execution state of delegated subagents.",
-      name: "subagent_status",
-      parameters: {
-        additionalProperties: false,
-        properties: {},
-        type: "object",
-      },
+    description: "Read the current execution state of delegated subagents.",
+    name: "subagent_status",
+    inputSchema: {
+      additionalProperties: false,
+      properties: {},
+      type: "object",
     },
-    type: "function",
   },
   {
-    function: {
-      description:
-        "Update the active goal. Complete is allowed only after all delegated work is non-running and verification is done.",
-      name: "UpdateGoal",
-      parameters: {
-        additionalProperties: false,
-        properties: {
-          status: { enum: ["paused", "complete"], type: "string" },
-        },
-        required: ["status"],
-        type: "object",
+    description:
+      "Update the active goal. Complete is allowed only after all delegated work is non-running and verification is done.",
+    name: "UpdateGoal",
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        status: { enum: ["paused", "complete"], type: "string" },
       },
+      required: ["status"],
+      type: "object",
     },
-    type: "function",
   },
   {
-    function: {
-      description:
-        "Record one explicit user, system, or developer budget. Never invent a budget.",
-      name: "SetGoalBudget",
-      parameters: {
-        additionalProperties: false,
-        properties: {
-          unit: {
-            enum: [
-              "turns",
-              "tokens",
-              "milliseconds",
-              "seconds",
-              "minutes",
-              "hours",
-            ],
-            type: "string",
-          },
-          value: { exclusiveMinimum: 0, type: "number" },
+    description:
+      "Record one explicit user, system, or developer budget. Never invent a budget.",
+    name: "SetGoalBudget",
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        unit: {
+          enum: [
+            "turns",
+            "tokens",
+            "milliseconds",
+            "seconds",
+            "minutes",
+            "hours",
+          ],
+          type: "string",
         },
-        required: ["value", "unit"],
-        type: "object",
+        value: { exclusiveMinimum: 0, type: "number" },
       },
+      required: ["value", "unit"],
+      type: "object",
     },
-    type: "function",
   },
 ];
 
-const todoTools: InterfaceProviderFunctionTool[] = [
+const todoTools: ModelToolDefinition[] = [
   ...tools,
   {
-    function: {
-      description: "Read the todo list for the current task.",
-      name: "todo_read",
-      parameters: {
-        additionalProperties: false,
-        properties: {},
-        type: "object",
-      },
+    description: "Read the todo list for the current task.",
+    name: "todo_read",
+    inputSchema: {
+      additionalProperties: false,
+      properties: {},
+      type: "object",
     },
-    type: "function",
   },
   {
-    function: {
-      description:
-        "Replace the todo list for the current task with a complete ordered list. Maximum 10 items; an empty list clears it.",
-      name: "todo_write",
-      parameters: {
-        additionalProperties: false,
-        properties: {
-          todos: {
-            items: {
-              additionalProperties: false,
-              properties: {
-                content: { type: "string" },
-                status: {
-                  enum: ["pending", "in_progress", "completed"],
-                  type: "string",
-                },
+    description:
+      "Replace the todo list for the current task with a complete ordered list. Maximum 10 items; an empty list clears it.",
+    name: "todo_write",
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        todos: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              content: { type: "string" },
+              status: {
+                enum: ["pending", "in_progress", "completed"],
+                type: "string",
               },
-              required: ["content", "status"],
-              type: "object",
             },
-            maxItems: 10,
-            type: "array",
+            required: ["content", "status"],
+            type: "object",
           },
+          maxItems: 10,
+          type: "array",
         },
-        required: ["todos"],
-        type: "object",
       },
+      required: ["todos"],
+      type: "object",
     },
-    type: "function",
   },
 ];
 
@@ -130,7 +118,7 @@ runRealEval("goal completion real model eval", () => {
 
   it("waits for delegated execution, completes the goal, then gives the final answer without inventing a budget", async () => {
     const client = realClient();
-    const messages: ChatCompletionMessageParam[] = [
+    const messages: ModelMessage[] = [
       { content: PRIMARY_BASE_PROMPT, role: "system" },
       {
         content: [
@@ -150,7 +138,7 @@ runRealEval("goal completion real model eval", () => {
 
     for (let step = 0; step < 8; step += 1) {
       const response = await completeResponse(client, messages);
-      messages.push(response.completeMessage);
+      messages.push(completedAssistantRequest(response));
       const calls = response.parsedToolCalls ?? [];
 
       if (calls.length === 0) {
@@ -183,7 +171,7 @@ runRealEval("goal completion real model eval", () => {
               ? "sub_1 status=completed; no delegated execution is running"
               : "sub_1 status=running; it may still mutate the workspace; check again before completing",
             role: "tool",
-            tool_call_id: call.id,
+            callId: call.id,
           });
           continue;
         }
@@ -198,7 +186,7 @@ runRealEval("goal completion real model eval", () => {
               content:
                 "Goal completed and cleared. Give the user the final answer now.",
               role: "tool",
-              tool_call_id: call.id,
+              callId: call.id,
             });
             continue;
           }
@@ -225,7 +213,7 @@ runRealEval("goal completion real model eval", () => {
       { content: "Run final verification", status: "in_progress" },
       { content: "Review completion order", status: "pending" },
     ];
-    const messages: ChatCompletionMessageParam[] = [
+    const messages: ModelMessage[] = [
       { content: PRIMARY_BASE_PROMPT, role: "system" },
       {
         content: [
@@ -245,7 +233,7 @@ runRealEval("goal completion real model eval", () => {
 
     for (let step = 0; step < 8; step += 1) {
       const response = await completeResponse(client, messages, todoTools);
-      messages.push(response.completeMessage);
+      messages.push(completedAssistantRequest(response));
       const calls = response.parsedToolCalls ?? [];
       if (calls.length === 0) {
         if (goalCompleted) {
@@ -271,7 +259,7 @@ runRealEval("goal completion real model eval", () => {
           messages.push({
             content: "No delegated subagent execution is running.",
             role: "tool",
-            tool_call_id: call.id,
+            callId: call.id,
           });
           continue;
         }
@@ -282,7 +270,7 @@ runRealEval("goal completion real model eval", () => {
               .map((todo) => `[${todo.status}] ${todo.content}`)
               .join("\n"),
             role: "tool",
-            tool_call_id: call.id,
+            callId: call.id,
           });
           continue;
         }
@@ -312,7 +300,7 @@ runRealEval("goal completion real model eval", () => {
           messages.push({
             content: "Goal Todo reconciled; all milestones are completed.",
             role: "tool",
-            tool_call_id: call.id,
+            callId: call.id,
           });
           continue;
         }
@@ -331,7 +319,7 @@ runRealEval("goal completion real model eval", () => {
           messages.push({
             content: "Goal completed and cleared. Give the final answer now.",
             role: "tool",
-            tool_call_id: call.id,
+            callId: call.id,
           });
           continue;
         }
@@ -393,8 +381,8 @@ function realClient(): LLMClientInstance {
 
 async function completeResponse(
   client: LLMClientInstance,
-  messages: ChatCompletionMessageParam[],
-  availableTools: InterfaceProviderFunctionTool[] = tools,
+  messages: ModelMessage[],
+  availableTools: ModelToolDefinition[] = tools,
 ): Promise<StreamingResponse> {
   let completed: StreamingResponse | undefined;
   for await (const response of streamChatCompletion(client, messages, {
@@ -409,7 +397,49 @@ async function completeResponse(
   return completed;
 }
 
-function messageText(message: ChatCompletionMessageParam): string {
+function completedAssistantRequest(response: StreamingResponse): ModelMessage {
+  if (
+    !response.isComplete ||
+    response.streamStopReason !== "provider_finished" ||
+    !["stop", "tool_calls"].includes(response.finishReason ?? "")
+  ) {
+    throw new Error("Goal eval cannot replay an unsuccessful response.");
+  }
+  const calls = response.completeMessage.toolCalls ?? [];
+  const parsed = response.parsedToolCalls ?? [];
+  if (
+    calls.length !== parsed.length ||
+    (calls.length > 0 && response.finishReason !== "tool_calls")
+  )
+    throw new Error("Goal eval requires validated complete tool calls.");
+  return {
+    role: "assistant",
+    content: response.completeMessage.content,
+    ...(calls.length === 0
+      ? {}
+      : {
+          toolCalls: calls.map((call) => {
+            if (
+              !call.callId ||
+              !call.name ||
+              !parsed.some(
+                (item) => item.id === call.callId && item.name === call.name,
+              )
+            )
+              throw new Error(
+                "Goal eval requires matching complete tool call identity.",
+              );
+            return {
+              callId: call.callId,
+              name: call.name,
+              argumentsJson: call.argumentsJson,
+            };
+          }),
+        }),
+  };
+}
+
+function messageText(message: ModelResponseSnapshot): string {
   if (!("content" in message)) return "";
   return typeof message.content === "string" ? message.content : "";
 }

@@ -63,13 +63,13 @@ describe("real cache harness preflight", () => {
                   delta: {
                     tool_calls: [
                       {
+                        id: "call_cache_fixture",
+                        index: 0,
+                        type: "function",
                         function: {
                           arguments: '{"path":"fixture.txt"}',
                           name: CACHE_FIXTURE_READ_TOOL,
                         },
-                        id: "call_cache_fixture",
-                        index: 0,
-                        type: "function",
                       },
                     ],
                   },

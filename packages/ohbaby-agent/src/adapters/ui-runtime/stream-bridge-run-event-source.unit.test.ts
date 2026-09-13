@@ -174,7 +174,7 @@ describe("createStreamBridgeRunEventSource", () => {
     });
 
     await expect(nextEvent(iterator)).resolves.toEqual({
-      completeMessage: { content: "", role: "assistant" },
+      completeMessage: { content: "" },
       finishReason: "stop",
       sessionId: "session_1",
       step: 4,

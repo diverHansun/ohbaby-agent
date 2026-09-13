@@ -1,5 +1,5 @@
 import type { LifecycleEvent } from "../lifecycle/index.js";
-import type { InterfaceProviderFunctionTool } from "../llm-client/index.js";
+import type { ModelToolDefinition } from "../llm-client/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
 import { extractFinalOutput } from "./output.js";
 import type {
@@ -18,16 +18,13 @@ interface ResolvedRunScope {
   readonly sessionId: string;
 }
 
-export function toOpenAiTools(
+export function toModelTools(
   definitions: readonly ToolDefinition[],
-): InterfaceProviderFunctionTool[] {
+): ModelToolDefinition[] {
   return definitions.map((definition) => ({
-    type: "function",
-    function: {
-      name: definition.name,
-      description: definition.description,
-      parameters: definition.parameters,
-    },
+    name: definition.name,
+    description: definition.description,
+    inputSchema: definition.parameters,
   }));
 }
 
@@ -210,7 +207,7 @@ export async function runAgent(
       parentMessageId: userMessageId ?? input.parentMessageId,
       runId: input.runId,
       sessionId: scope.sessionId,
-      tools: toOpenAiTools(tools),
+      tools: toModelTools(tools),
       triggerSource: "user",
     });
   } catch (error) {

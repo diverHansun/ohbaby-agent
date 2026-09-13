@@ -1,4 +1,3 @@
-import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
 import type { TokenUsageDiagnosticReporter } from "./token-usage.js";
 
 export type InterfaceProviderKind =
@@ -62,19 +61,93 @@ export interface InterfaceProviderToolCallDelta {
   argumentsDelta?: string;
 }
 
-/** Function tools supported by the agent's provider-neutral request boundary. */
-export interface InterfaceProviderFunctionTool {
-  readonly type: "function";
-  readonly function: {
-    readonly name: string;
-    readonly description?: string;
-    readonly parameters: Record<string, unknown>;
+interface ModelCacheBreakpoint {
+  readonly prompt_cache_breakpoint?: { readonly mode: "explicit" };
+}
+export interface ModelTextPart extends ModelCacheBreakpoint {
+  readonly type: "text";
+  readonly text: string;
+  readonly cacheControl?: {
+    readonly type: "ephemeral";
+    readonly ttl?: "5m" | "1h";
   };
 }
-
-export type InterfaceProviderFunctionTools =
-  | InterfaceProviderFunctionTool[]
-  | undefined;
+export interface ModelImagePart extends ModelCacheBreakpoint {
+  readonly type: "image_url";
+  readonly image_url: {
+    readonly url: string;
+    readonly detail?: "auto" | "low" | "high";
+  };
+}
+export interface ModelAudioPart extends ModelCacheBreakpoint {
+  readonly type: "input_audio";
+  readonly input_audio: {
+    readonly data: string;
+    readonly format: "wav" | "mp3";
+  };
+}
+export interface ModelFilePart extends ModelCacheBreakpoint {
+  readonly type: "file";
+  readonly file: {
+    readonly file_data?: string;
+    readonly file_id?: string;
+    readonly filename?: string;
+  };
+}
+export interface ModelRefusalPart {
+  readonly type: "refusal";
+  readonly refusal: string;
+}
+export interface ModelToolDefinition {
+  readonly name: string;
+  readonly description?: string;
+  readonly inputSchema: Record<string, unknown>;
+}
+export interface ModelToolCall {
+  readonly callId: string;
+  readonly name: string;
+  readonly argumentsJson: string;
+}
+export type ModelMessage =
+  | {
+      readonly role: "system";
+      readonly content: string | readonly ModelTextPart[];
+      readonly name?: string;
+    }
+  | {
+      readonly role: "developer";
+      readonly content: string | readonly ModelTextPart[];
+      readonly name?: string;
+    }
+  | {
+      readonly role: "user";
+      readonly content:
+        | string
+        | readonly (
+            | ModelTextPart
+            | ModelImagePart
+            | ModelAudioPart
+            | ModelFilePart
+          )[];
+      readonly name?: string;
+    }
+  | {
+      readonly role: "assistant";
+      readonly content?:
+        | string
+        | readonly (ModelTextPart | ModelRefusalPart)[]
+        | null;
+      readonly name?: string;
+      readonly toolCalls?: readonly ModelToolCall[];
+      readonly reasoningText?: string;
+      readonly refusal?: string | null;
+      readonly audio?: { readonly id: string } | null;
+    }
+  | {
+      readonly role: "tool";
+      readonly callId: string;
+      readonly content: string | readonly ModelTextPart[];
+    };
 
 export interface InterfaceProviderStreamEvent {
   textDelta?: string;
@@ -87,10 +160,10 @@ export interface InterfaceProviderStreamEvent {
 
 export interface InterfaceProviderRequest {
   model: string;
-  messages: ChatCompletionMessageParam[];
+  messages: readonly ModelMessage[];
   temperature: number;
   maxTokens: number;
-  tools?: InterfaceProviderFunctionTool[];
+  tools?: readonly ModelToolDefinition[];
   signal?: AbortSignal;
   purpose?: LLMRequestPurpose;
   sessionId?: string;

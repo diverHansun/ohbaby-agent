@@ -157,12 +157,9 @@ describe("context improve-4.1 integration", () => {
         ],
         requestTools: [
           {
-            function: {
-              description: "Read one file",
-              name: "read_file",
-              parameters: { type: "object" },
-            },
-            type: "function",
+            description: "Read one file",
+            name: "read_file",
+            inputSchema: { type: "object" },
           },
         ],
       }),
@@ -233,9 +230,7 @@ describe("context improve-4.1 integration", () => {
     await projection.done;
 
     expect(completion.status).toBe("succeeded");
-    expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual([
-      "read_file",
-    ]);
+    expect(requests[0]?.tools?.map((tool) => tool.name)).toEqual(["read_file"]);
     expect(
       contextWindowUsage.get("session_roundtrip")?.composition?.[
         "builtin-tools"
@@ -303,12 +298,9 @@ describe("context improve-4.1 integration", () => {
     );
     const resolvedTools = [
       {
-        function: {
-          description: "Read one file",
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
+        description: "Read one file",
+        name: "read_file",
+        inputSchema: { type: "object" },
       },
     ];
     const resolvedToolDefinitions = [

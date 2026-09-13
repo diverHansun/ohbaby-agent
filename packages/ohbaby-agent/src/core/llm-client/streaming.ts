@@ -11,7 +11,11 @@
  * - KISS: Simple interface, transparent behavior
  */
 
-import type { ChatCompletionMessageParam } from "openai/resources";
+import type {
+  ModelMessage,
+  ModelResponseSnapshot,
+  ToolCallSnapshot,
+} from "./types.js";
 import type {
   LLMClientInstance,
   StreamingResponse,
@@ -32,7 +36,7 @@ import {
 import { ToolCallParseError } from "./errors.js";
 import { resolvePromptCacheRequest } from "./prompt-cache.js";
 import type {
-  InterfaceProviderFunctionTool,
+  ModelToolDefinition,
   LLMRequestPurpose,
 } from "../../services/interface-providers/index.js";
 
@@ -72,26 +76,29 @@ class RetrySleepAbortedError extends Error {
 
 function sortedToolCalls(
   accumulatedToolCalls: Map<number, AccumulatedToolCall>,
-): AccumulatedToolCall[] {
+): ToolCallSnapshot[] {
   return Array.from(accumulatedToolCalls.entries())
     .sort((a, b) => a[0] - b[0])
-    .map(([, call]) => call);
+    .map(([index, call]) => ({
+      index,
+      callId: call.id,
+      name: call.function.name,
+      argumentsJson: call.function.arguments,
+    }));
 }
 
 function buildCompleteMessage(
   accumulatedContent: string,
   accumulatedToolCalls: Map<number, AccumulatedToolCall>,
-): ChatCompletionMessageParam {
+): ModelResponseSnapshot {
   if (accumulatedToolCalls.size > 0) {
     return {
-      role: "assistant",
       content: accumulatedContent === "" ? null : accumulatedContent,
-      tool_calls: sortedToolCalls(accumulatedToolCalls),
+      toolCalls: sortedToolCalls(accumulatedToolCalls),
     };
   }
 
   return {
-    role: "assistant",
     content:
       accumulatedContent === "" ? "(Empty response)" : accumulatedContent,
   };
@@ -104,16 +111,14 @@ function buildAbortResponse(input: {
   readonly rawFinishReason: string | undefined;
   readonly tokenUsage: TokenUsage | null;
 }): StreamingResponse {
-  const completeMessage: ChatCompletionMessageParam =
+  const completeMessage: ModelResponseSnapshot =
     input.accumulatedToolCalls.size > 0
       ? {
-          role: "assistant",
           content:
             input.accumulatedContent === "" ? null : input.accumulatedContent,
-          tool_calls: sortedToolCalls(input.accumulatedToolCalls),
+          toolCalls: sortedToolCalls(input.accumulatedToolCalls),
         }
       : {
-          role: "assistant",
           content:
             input.accumulatedContent === ""
               ? "(Interrupted)"
@@ -218,10 +223,10 @@ function validateRequestMaxTokens(
  * "error". Consumers can decide whether to save or retry.
  *
  * @param {LLMClientInstance} llmClient - Client instance with SDK and config
- * @param {ChatCompletionMessage[]} messages - Message history for context
+ * @param {ModelMessage[]} messages - Message history for context
  * @param {Object} [options] - Optional parameters
  * @param {AbortSignal} [options.signal] - Signal to interrupt streaming
- * @param {InterfaceProviderFunctionTool[]} [options.tools] - Tool definitions
+ * @param {ModelToolDefinition[]} [options.tools] - Tool definitions
  * @param {number} [options.maxTokens] - Per-request output cap; overrides
  *   config.maxTokens for this call only. Never mutate (or copy-and-replace)
  *   the shared client config to express a per-call limit.
@@ -251,11 +256,11 @@ function validateRequestMaxTokens(
  */
 export async function* streamChatCompletion(
   llmClient: LLMClientInstance,
-  messages: ChatCompletionMessageParam[],
+  messages: readonly ModelMessage[],
   options?: {
     retry?: Partial<ProviderRetryPolicy>;
     signal?: AbortSignal;
-    tools?: InterfaceProviderFunctionTool[];
+    tools?: readonly ModelToolDefinition[];
     maxTokens?: number;
     purpose?: LLMRequestPurpose;
     sessionId?: string;
@@ -494,7 +499,7 @@ export async function* streamChatCompletion(
       // Notify before the backoff sleep so consumers see the retry while it
       // is happening, not after the next attempt succeeds.
       yield {
-        completeMessage: { role: "assistant", content: "" },
+        completeMessage: { content: "" },
         isComplete: false,
         retry: {
           attempt: failedAttempts,

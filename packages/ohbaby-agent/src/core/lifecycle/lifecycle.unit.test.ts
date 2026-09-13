@@ -349,14 +349,11 @@ describe("Lifecycle.run", () => {
       {
         content: null,
         role: "assistant",
-        tool_calls: [
+        toolCalls: [
           {
-            function: {
-              arguments: '{"path":"README.md"}',
-              name: "read_file",
-            },
-            id: "call_read",
-            type: "function",
+            callId: "call_read",
+            argumentsJson: '{"path":"README.md"}',
+            name: "read_file",
           },
         ],
       },
@@ -364,7 +361,7 @@ describe("Lifecycle.run", () => {
         content:
           'README contents\n\n<tool_metadata>\n{"mtimeMs":1700000000000}\n</tool_metadata>',
         role: "tool",
-        tool_call_id: "call_read",
+        callId: "call_read",
       },
     ];
     const prepareTurn = vi
@@ -401,13 +398,7 @@ describe("Lifecycle.run", () => {
       updateCalibrationFactor,
     };
     const resolvedTools = [
-      {
-        function: {
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
-      },
+      { name: "read_file", inputSchema: { type: "object" } },
     ];
     const resolvedToolDefinitions = [
       {
@@ -597,15 +588,7 @@ describe("Lifecycle.run", () => {
         directory: "D:/repo",
         modelId: "fake-model",
         sessionId: "session_test",
-        tools: [
-          {
-            function: {
-              name: "must_not_leak",
-              parameters: { type: "object" },
-            },
-            type: "function",
-          },
-        ],
+        tools: [{ name: "must_not_leak", inputSchema: { type: "object" } }],
       }),
     );
 
@@ -1020,21 +1003,18 @@ describe("Lifecycle.run", () => {
           {
             content: null,
             role: "assistant",
-            tool_calls: [
+            toolCalls: [
               {
-                function: {
-                  arguments: '{"path":"README.md"}',
-                  name: "read_file",
-                },
-                id: "call_read",
-                type: "function",
+                callId: "call_read",
+                argumentsJson: '{"path":"README.md"}',
+                name: "read_file",
               },
             ],
           },
           {
             content: "README contents",
             role: "tool",
-            tool_call_id: "call_read",
+            callId: "call_read",
           },
         ]),
       );
@@ -1327,21 +1307,18 @@ describe("Lifecycle.run", () => {
           {
             content: null,
             role: "assistant",
-            tool_calls: [
+            toolCalls: [
               {
-                function: {
-                  arguments: '{"path":"README.md"}',
-                  name: "read_file",
-                },
-                id: "call_read",
-                type: "function",
+                callId: "call_read",
+                argumentsJson: '{"path":"README.md"}',
+                name: "read_file",
               },
             ],
           },
           {
             content: "README contents",
             role: "tool",
-            tool_call_id: "call_read",
+            callId: "call_read",
           },
         ]),
       );
@@ -1387,15 +1364,7 @@ describe("Lifecycle.run", () => {
         maxSteps: 2,
         modelId: "fake-model",
         sessionId: "session_test",
-        tools: [
-          {
-            function: {
-              name: "read_file",
-              parameters: { type: "object" },
-            },
-            type: "function",
-          },
-        ],
+        tools: [{ name: "read_file", inputSchema: { type: "object" } }],
       }),
     );
 
@@ -1485,15 +1454,7 @@ describe("Lifecycle.run", () => {
         maxSteps: 1,
         modelId: "fake-model",
         sessionId: "session_test",
-        tools: [
-          {
-            function: {
-              name: "read_file",
-              parameters: { type: "object" },
-            },
-            type: "function",
-          },
-        ],
+        tools: [{ name: "read_file", inputSchema: { type: "object" } }],
       }),
     );
 
@@ -1545,15 +1506,7 @@ describe("Lifecycle.run", () => {
         maxSteps: 0,
         modelId: "fake-model",
         sessionId: "session_test",
-        tools: [
-          {
-            function: {
-              name: "read_file",
-              parameters: { type: "object" },
-            },
-            type: "function",
-          },
-        ],
+        tools: [{ name: "read_file", inputSchema: { type: "object" } }],
       }),
     );
 
@@ -1610,15 +1563,7 @@ describe("Lifecycle.run", () => {
         directory: "D:/repo",
         modelId: "fake-model",
         sessionId: "session_test",
-        tools: [
-          {
-            function: {
-              name: "read_file",
-              parameters: { type: "object" },
-            },
-            type: "function",
-          },
-        ],
+        tools: [{ name: "read_file", inputSchema: { type: "object" } }],
       }),
     );
 
@@ -1812,13 +1757,7 @@ describe("Lifecycle.run", () => {
       { role: "user", content: "Summarize the compacted project state" },
     ];
     const initialSnapshotTools = [
-      {
-        function: {
-          name: "initial_snapshot_tool",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
-      },
+      { name: "initial_snapshot_tool", inputSchema: { type: "object" } },
     ];
     const forcedSnapshotTools: PreparedModelRequest["tools"] = [];
     const prepareTurn = vi
@@ -1847,13 +1786,7 @@ describe("Lifecycle.run", () => {
       { code: "context_length_exceeded" },
     );
     const resolvedTools = [
-      {
-        function: {
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
-      },
+      { name: "read_file", inputSchema: { type: "object" } },
     ];
     const resolvedToolDefinitions = [
       {

@@ -2,10 +2,7 @@ import type {
   MessageCreateParams,
   RawMessageStreamEvent,
 } from "@anthropic-ai/sdk/resources/messages";
-import type {
-  ChatCompletionChunk,
-  ChatCompletionMessageParam,
-} from "openai/resources/chat/completions/completions";
+import type { ChatCompletionChunk } from "openai/resources/chat/completions/completions";
 import { describe, expect, it, vi } from "vitest";
 import { resolvePromptCacheRequest } from "../../core/llm-client/prompt-cache.js";
 import type { PromptCachePolicy } from "../../config/index.js";
@@ -15,6 +12,7 @@ import { createOpenAIResponsesProvider } from "./openai-responses.js";
 import type {
   InterfaceProviderPromptCache,
   InterfaceProviderStreamEvent,
+  ModelMessage,
 } from "./types.js";
 
 function emptyStream<T>(): AsyncGenerator<T, void, unknown> {
@@ -34,7 +32,7 @@ function wirePromptCache(input: {
     | "openai-compatible"
     | "openai-responses"
     | "anthropic";
-  readonly messages: readonly ChatCompletionMessageParam[];
+  readonly messages: readonly ModelMessage[];
   readonly policy?: PromptCachePolicy;
   readonly provider: string;
 }): InterfaceProviderPromptCache {
@@ -195,14 +193,11 @@ describe("prompt-cache wire contract", () => {
         temperature: 0,
         tools: [
           {
-            function: {
-              name: "lookup",
-              parameters: {
-                properties: { query: { type: "string" } },
-                type: "object",
-              },
+            name: "lookup",
+            inputSchema: {
+              properties: { query: { type: "string" } },
+              type: "object",
             },
-            type: "function",
           },
         ],
       });
@@ -231,7 +226,7 @@ describe("prompt-cache wire contract", () => {
     },
   );
 
-  it("passes Chat nested cache_control through without mutating caller messages", async () => {
+  it("maps nested cacheControl to Chat cache_control without mutating caller messages", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "compatible-gateway",
       apiKey: "test-key",
@@ -244,18 +239,18 @@ describe("prompt-cache wire contract", () => {
           ReturnType<typeof provider.client.chat.completions.create>
         >,
       );
-    const messages = [
+    const messages: ModelMessage[] = [
       {
         content: [
           {
-            cache_control: { ttl: "5m", type: "ephemeral" },
+            cacheControl: { ttl: "5m", type: "ephemeral" },
             text: "Keep this exact nested extension.",
             type: "text",
           },
         ],
         role: "user",
       },
-    ] as unknown as ChatCompletionMessageParam[];
+    ];
     const before = structuredClone(messages);
 
     await provider.streamChatCompletion({
@@ -267,7 +262,18 @@ describe("prompt-cache wire contract", () => {
     });
 
     const params = create.mock.calls[0]?.[0];
-    expect(params.messages).toEqual(before);
+    expect(params.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Keep this exact nested extension.",
+            cache_control: { ttl: "5m", type: "ephemeral" },
+          },
+        ],
+      },
+    ]);
     expect(messages).toEqual(before);
   });
 
@@ -328,38 +334,32 @@ describe("prompt-cache wire contract", () => {
       );
     const tools = [
       {
-        function: {
-          name: "read_fixture",
-          parameters: { properties: {}, type: "object" },
-        },
-        type: "function" as const,
+        name: "read_fixture",
+        inputSchema: { properties: {}, type: "object" },
       },
       {
-        function: {
-          name: "write_fixture",
-          parameters: { properties: {}, type: "object" },
-        },
-        type: "function" as const,
+        name: "write_fixture",
+        inputSchema: { properties: {}, type: "object" },
       },
     ];
-    const firstMessages: ChatCompletionMessageParam[] = [
+    const firstMessages: ModelMessage[] = [
       { role: "system", content: "Stable system" },
       { role: "user", content: "Read the fixture" },
     ];
-    const secondMessages: ChatCompletionMessageParam[] = [
+    const secondMessages: ModelMessage[] = [
       ...firstMessages,
       {
         role: "assistant",
         content: null,
-        tool_calls: [
+        toolCalls: [
           {
-            function: { arguments: "{}", name: "read_fixture" },
-            id: "call_read",
-            type: "function",
+            argumentsJson: "{}",
+            name: "read_fixture",
+            callId: "call_read",
           },
         ],
       },
-      { role: "tool", content: "fixture", tool_call_id: "call_read" },
+      { role: "tool", content: "fixture", callId: "call_read" },
     ];
     for (const messages of [firstMessages, secondMessages]) {
       await provider.streamChatCompletion({
@@ -446,38 +446,32 @@ describe("prompt-cache wire contract", () => {
       .mockReturnValue(emptyStream<RawMessageStreamEvent>());
     const tools = [
       {
-        function: {
-          name: "read_fixture",
-          parameters: { properties: {}, type: "object" },
-        },
-        type: "function" as const,
+        name: "read_fixture",
+        inputSchema: { properties: {}, type: "object" },
       },
       {
-        function: {
-          name: "write_fixture",
-          parameters: { properties: {}, type: "object" },
-        },
-        type: "function" as const,
+        name: "write_fixture",
+        inputSchema: { properties: {}, type: "object" },
       },
     ];
-    const firstMessages: ChatCompletionMessageParam[] = [
+    const firstMessages: ModelMessage[] = [
       { role: "system", content: "Stable system" },
       { role: "user", content: "Read the fixture" },
     ];
-    const secondMessages: ChatCompletionMessageParam[] = [
+    const secondMessages: ModelMessage[] = [
       ...firstMessages,
       {
         role: "assistant",
         content: null,
-        tool_calls: [
+        toolCalls: [
           {
-            function: { arguments: "{}", name: "read_fixture" },
-            id: "call_read",
-            type: "function",
+            argumentsJson: "{}",
+            name: "read_fixture",
+            callId: "call_read",
           },
         ],
       },
-      { role: "tool", content: "fixture", tool_call_id: "call_read" },
+      { role: "tool", content: "fixture", callId: "call_read" },
     ];
     for (const messages of [firstMessages, secondMessages]) {
       await provider.streamChatCompletion({
@@ -514,20 +508,17 @@ describe("prompt-cache wire contract", () => {
       .spyOn(provider.client.messages, "stream")
       .mockReturnValue(emptyStream<RawMessageStreamEvent>());
     const toolCalls = Array.from({ length: 21 }, (_, index) => ({
-      function: {
-        arguments: JSON.stringify({ index }),
-        name: "read_fixture",
-      },
-      id: `call_${String(index)}`,
-      type: "function" as const,
+      argumentsJson: JSON.stringify({ index }),
+      name: "read_fixture",
+      callId: `call_${String(index)}`,
     }));
-    const messages: ChatCompletionMessageParam[] = [
+    const messages: ModelMessage[] = [
       { role: "system", content: "Stable system" },
-      { role: "assistant", content: null, tool_calls: toolCalls },
+      { role: "assistant", content: null, toolCalls },
       ...toolCalls.map((toolCall) => ({
         role: "tool" as const,
-        content: `result-${toolCall.id}`,
-        tool_call_id: toolCall.id,
+        content: `result-${toolCall.callId}`,
+        callId: toolCall.callId,
       })),
     ];
 
@@ -545,18 +536,12 @@ describe("prompt-cache wire contract", () => {
       temperature: 0,
       tools: [
         {
-          function: {
-            name: "read_fixture",
-            parameters: { properties: {}, type: "object" },
-          },
-          type: "function",
+          name: "read_fixture",
+          inputSchema: { properties: {}, type: "object" },
         },
         {
-          function: {
-            name: "write_fixture",
-            parameters: { properties: {}, type: "object" },
-          },
-          type: "function",
+          name: "write_fixture",
+          inputSchema: { properties: {}, type: "object" },
         },
       ],
     });

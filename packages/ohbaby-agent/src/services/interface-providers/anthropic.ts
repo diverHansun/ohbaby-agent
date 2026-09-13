@@ -10,7 +10,7 @@ import type {
   ToolResultBlockParam,
   ToolUseBlockParam,
 } from "@anthropic-ai/sdk/resources/messages";
-import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
+import type { ModelMessage } from "./types.js";
 import type {
   CreateInterfaceProviderOptions,
   InterfaceProviderFinishReason,
@@ -19,20 +19,6 @@ import type {
   InterfaceProviderStreamEvent,
 } from "./types.js";
 import { createAnthropicUsageAccumulator } from "./token-usage.js";
-
-type OpenAIMessageWithExtras = ChatCompletionMessageParam & {
-  role: string;
-  content?: unknown;
-  tool_calls?: {
-    id?: string;
-    type?: string;
-    function?: {
-      name?: string;
-      arguments?: string;
-    };
-  }[];
-  tool_call_id?: string;
-};
 
 interface ConvertedAnthropicMessages {
   messages: MessageParam[];
@@ -118,7 +104,19 @@ function normalizeToolResultContent(content: unknown): string {
     }
   }
 
-  return JSON.stringify(content);
+  return JSON.stringify(
+    Array.isArray(content)
+      ? content.map((part: unknown) => {
+          if (typeof part !== "object" || part === null) return part;
+          return Object.fromEntries(
+            Object.entries(part).map(([key, value]) => [
+              key === "cacheControl" ? "cache_control" : key,
+              value,
+            ]),
+          );
+        })
+      : content,
+  );
 }
 
 function parseToolInput(
@@ -138,7 +136,7 @@ function parseToolInput(
 }
 
 function convertAssistantContent(
-  message: OpenAIMessageWithExtras,
+  message: Extract<ModelMessage, { role: "assistant" }>,
 ): string | (TextBlockParam | ToolUseBlockParam)[] {
   const blocks: (TextBlockParam | ToolUseBlockParam)[] = [];
   const textContent = normalizeTextBlocks(message.content, "assistant message");
@@ -154,21 +152,20 @@ function convertAssistantContent(
     blocks.push(...textContent);
   }
 
-  for (const toolCall of message.tool_calls ?? []) {
-    if (toolCall.type && toolCall.type !== "function") {
-      throw new Error("Anthropic provider only supports function tool calls.");
-    }
+  for (const toolCall of message.toolCalls ?? []) {
+    if ("type" in toolCall || "custom" in toolCall || "function" in toolCall)
+      throw new Error("Unsupported legacy tool call for Anthropic provider.");
 
-    const name = toolCall.function?.name;
+    const name = toolCall.name;
     if (!name) {
       throw new Error("Assistant tool call is missing function name.");
     }
 
     blocks.push({
       type: "tool_use",
-      id: toolCall.id ?? "",
+      id: toolCall.callId,
       name,
-      input: parseToolInput(toolCall.function?.arguments, name),
+      input: parseToolInput(toolCall.argumentsJson, name),
     });
   }
 
@@ -182,7 +179,7 @@ function convertAssistantContent(
 }
 
 function convertMessages(
-  messages: ChatCompletionMessageParam[],
+  messages: readonly ModelMessage[],
 ): ConvertedAnthropicMessages {
   const systemParts: string[] = [];
   const anthropicMessages: MessageParam[] = [];
@@ -200,7 +197,15 @@ function convertMessages(
     pendingToolResults = [];
   };
 
-  for (const rawMessage of messages as OpenAIMessageWithExtras[]) {
+  for (const rawMessage of messages) {
+    if (
+      "function_call" in rawMessage ||
+      "tool_calls" in rawMessage ||
+      "tool_call_id" in rawMessage
+    )
+      throw new Error(
+        "Unsupported legacy model message for Anthropic provider.",
+      );
     switch (rawMessage.role) {
       case "system":
       case "developer": {
@@ -240,15 +245,13 @@ function convertMessages(
       case "tool": {
         pendingToolResults.push({
           type: "tool_result",
-          tool_use_id: rawMessage.tool_call_id,
+          tool_use_id: rawMessage.callId,
           content: normalizeToolResultContent(rawMessage.content),
         });
         break;
       }
       default:
-        throw new Error(
-          `Unsupported message role '${rawMessage.role}' for Anthropic provider.`,
-        );
+        throw new Error("Unsupported message role for Anthropic provider.");
     }
   }
 
@@ -268,16 +271,14 @@ function convertTools(
   }
 
   return tools.map((tool) => {
-    const parameters = tool.function.parameters;
+    const parameters = tool.inputSchema;
     if (parameters.type !== "object") {
-      throw new Error(
-        `Tool '${tool.function.name}' must define an object JSON schema.`,
-      );
+      throw new Error(`Tool '${tool.name}' must define an object JSON schema.`);
     }
 
     return {
-      name: tool.function.name,
-      description: tool.function.description,
+      name: tool.name,
+      description: tool.description,
       input_schema: parameters as Tool["input_schema"],
     };
   });

@@ -15,6 +15,107 @@ import {
   estimatePreparedRequestHeuristic,
 } from "./token-estimation.js";
 import { serializeForLlm } from "./serializer.js";
+import { toModelTools } from "../agents/runner.js";
+import { estimateTokensForText } from "../../services/llm-model/tokenCounting.js";
+
+it("preserves the approved pre-migration totals and all seven literal buckets", () => {
+  const baselineTool = (id: string, name: string): Part =>
+    ({
+      ...toolPart(id, name),
+      state: {
+        status: "completed",
+        input: { q: "你好" },
+        output: `${name} result`,
+      },
+    }) as Part;
+  const history = [
+    message("s", "assistant", [
+      textPart("s", "earlier summary", {
+        metadataKind: "context-summary",
+        synthetic: true,
+      }),
+    ]),
+    message("u", "user", [
+      textPart("u", "你好 question"),
+      textPart("u", "runtime context", {
+        metadataKind: MODEL_CONTEXT_RUNTIME_KIND,
+        synthetic: true,
+      }),
+    ]),
+    message("a", "assistant", [
+      textPart("a", "delegating"),
+      baselineTool("a", "subagent_run"),
+    ]),
+    message("b", "assistant", [baselineTool("b", "read")]),
+  ];
+  const definitions = [
+    definition("subagent_run", "builtin"),
+    definition("read", "module"),
+    definition("mcp_search", "mcp"),
+    definition("skill", "skill"),
+  ].map((item) => ({
+    ...item,
+    parameters: {
+      type: "object",
+      properties: { q: { type: "string" } },
+      required: ["q"],
+    },
+  }));
+  const context = {
+    ...assembledContext(history),
+    memory: { global: "", project: "", merged: "memory note" },
+    systemPrompt: "system instruction",
+  };
+  const tailDirectives = [
+    { role: "system" as const, content: "finish carefully" },
+  ];
+  const activeReasoningByMessageId = new Map([["b", "思考 next"]]);
+  const request = matchingRequest(
+    context,
+    toModelTools(definitions),
+    tailDirectives,
+    activeReasoningByMessageId,
+  );
+  const input = {
+    context,
+    request,
+    tailDirectives,
+    activeReasoningByMessageId,
+    toolDefinitions: definitions,
+  };
+  expect(estimatePreparedRequestHeuristic(request, characterCounter())).toBe(
+    1453,
+  );
+  expect(
+    estimateContextOccupancyComposition(input, characterCounter()),
+  ).toEqual({
+    "system-prompt": 175,
+    "builtin-tools": 347,
+    mcp: 178,
+    skills: 168,
+    conversation: 326,
+    "summarized-conversation": 82,
+    "subagent-exchanges": 242,
+  });
+  expect(
+    estimatePreparedRequestHeuristic(request, {
+      estimateTokens: estimateTokensForText,
+    }),
+  ).toBe(372);
+  expect(
+    estimateContextOccupancyComposition(input, {
+      estimateTokens: estimateTokensForText,
+    }),
+  ).toEqual({
+    "system-prompt": 44,
+    "builtin-tools": 87,
+    mcp: 45,
+    skills: 42,
+    conversation: 88,
+    "summarized-conversation": 21,
+    "subagent-exchanges": 63,
+  });
+});
 
 function characterCounter(): Pick<TokenCounter, "estimateTokens"> {
   return {
@@ -134,12 +235,9 @@ function requestTool(
   name: string,
 ): NonNullable<PreparedModelRequest["tools"]>[number] {
   return {
-    function: {
-      description: `${name} description`,
-      name,
-      parameters: { type: "object" },
-    },
-    type: "function" as const,
+    description: `${name} description`,
+    name,
+    inputSchema: { type: "object" },
   };
 }
 
@@ -165,6 +263,66 @@ function matchingRequest(
 }
 
 describe("estimatePreparedRequestHeuristic", () => {
+  it("restores only measurement keys while preserving empty values, raw schema, and argument text", () => {
+    const request = deepFreeze({
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              cacheControl: { type: "ephemeral", ttl: "5m" },
+              text: "",
+              prompt_cache_breakpoint: { mode: "explicit" },
+            },
+          ],
+        },
+        {
+          role: "assistant",
+          content: null,
+          toolCalls: [
+            {
+              callId: "c",
+              name: "read",
+              argumentsJson: '{ "cacheControl": "literal" }',
+            },
+          ],
+          reasoningText: "",
+          name: "speaker",
+          refusal: null,
+          audio: null,
+        },
+        { role: "tool", callId: "c", content: [] },
+      ],
+      tools: [
+        {
+          name: "read",
+          inputSchema: {
+            type: "object",
+            properties: { cacheControl: { type: "string" } },
+            required: [],
+          },
+        },
+      ],
+    } satisfies PreparedModelRequest);
+    const before = structuredClone(request);
+    let material = "";
+    estimatePreparedRequestHeuristic(request, {
+      estimateTokens(text) {
+        material = text;
+        return text.length;
+      },
+    });
+    expect(material).toBe(
+      [
+        '{"role":"user","content":[{"type":"text","cache_control":{"type":"ephemeral","ttl":"5m"},"text":"","prompt_cache_breakpoint":{"mode":"explicit"}}]}',
+        '{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"read","arguments":"{ \\"cacheControl\\": \\"literal\\" }"}}],"reasoning_content":"","name":"speaker","refusal":null,"audio":null}',
+        '{"role":"tool","tool_call_id":"c","content":[]}',
+        '[{"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{"cacheControl":{"type":"string"}},"required":[]}}}]',
+      ].join("\n"),
+    );
+    expect(request).toEqual(before);
+  });
   it("counts the complete message projection without mutating the request", () => {
     const request = deepFreeze({
       messages: [
@@ -187,20 +345,14 @@ describe("estimatePreparedRequestHeuristic", () => {
     const messages = [{ role: "user" as const, content: "hello" }];
     const tools = [
       {
-        function: {
-          description: "Read a file",
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
+        description: "Read a file",
+        name: "read_file",
+        inputSchema: { type: "object" },
       },
       {
-        function: {
-          description: "List files",
-          name: "list_files",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
+        description: "List files",
+        name: "list_files",
+        inputSchema: { type: "object" },
       },
     ];
     const counter = characterCounter();
@@ -213,7 +365,7 @@ describe("estimatePreparedRequestHeuristic", () => {
       estimatePreparedRequestHeuristic({ messages, tools: [] }, counter),
     ).toBe(messagesOnly);
     expect(estimatePreparedRequestHeuristic({ messages, tools }, counter)).toBe(
-      messagesOnly + 1 + JSON.stringify(tools).length,
+      257,
     );
   });
 
@@ -223,14 +375,11 @@ describe("estimatePreparedRequestHeuristic", () => {
         {
           content: null,
           role: "assistant" as const,
-          tool_calls: [
+          toolCalls: [
             {
-              function: {
-                arguments: '{"path":"/a/very/long/path.ts"}',
-                name: "read_file",
-              },
-              id: "call_read",
-              type: "function" as const,
+              callId: "call_read",
+              argumentsJson: '{"path":"/a/very/long/path.ts"}',
+              name: "read_file",
             },
           ],
         },
@@ -239,12 +388,45 @@ describe("estimatePreparedRequestHeuristic", () => {
     } satisfies PreparedModelRequest;
 
     expect(estimatePreparedRequestHeuristic(request, characterCounter())).toBe(
-      JSON.stringify(request.messages[0]).length,
+      169,
     );
   });
 });
 
 describe("estimateContextOccupancyComposition", () => {
+  it("matches canonical measurement fields despite message key insertion order", () => {
+    const context = assembledContext([
+      message("u", "user", [textPart("u", "hello")]),
+    ]);
+    const request = matchingRequest(context);
+    const reordered: PreparedModelRequest = {
+      ...request,
+      messages: request.messages.map((item) => ({
+        content: item.content,
+        role: item.role,
+      })) as PreparedModelRequest["messages"],
+    };
+    expect(
+      estimateContextOccupancyComposition(
+        { context, request: reordered },
+        characterCounter(),
+      ),
+    ).toEqual(
+      estimateContextOccupancyComposition(
+        { context, request },
+        characterCounter(),
+      ),
+    );
+    expect(
+      estimateContextOccupancyComposition(
+        {
+          context,
+          request: { ...request, messages: [...request.messages].reverse() },
+        },
+        characterCounter(),
+      ),
+    ).toBeUndefined();
+  });
   it("reports system, builtin tools, and conversation for a basic request", () => {
     const history = [message("user_1", "user", [textPart("user_1", "hello")])];
     const context = assembledContext(history);

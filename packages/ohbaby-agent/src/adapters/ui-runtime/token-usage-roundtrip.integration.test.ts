@@ -32,7 +32,7 @@ describe("token usage event transport", () => {
       ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
         await Promise.resolve();
         yield {
-          completeMessage: { content: "done", role: "assistant" },
+          completeMessage: { content: "done" },
           contextScopeId: params.contextScopeId,
           finishReason: "stop",
           sessionId: params.sessionId,

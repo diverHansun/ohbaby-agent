@@ -6,7 +6,7 @@ import type {
 } from "../../commands/index.js";
 import {
   createAgentInstanceFactory,
-  toOpenAiTools,
+  toModelTools,
 } from "../../core/agents/index.js";
 import {
   createContextManager,
@@ -396,7 +396,7 @@ export async function createUiRuntimeComposition(
   }): Promise<{
     readonly agentName: string;
     readonly toolNames: readonly string[];
-    readonly tools: ReturnType<typeof toOpenAiTools>;
+    readonly tools: ReturnType<typeof toModelTools>;
   }> {
     const session = await sessionManager.get(input.sessionId);
     if (session?.isSubagent === true) {
@@ -413,7 +413,7 @@ export async function createUiRuntimeComposition(
     return {
       agentName,
       toolNames: definitions.map((tool) => tool.name),
-      tools: toOpenAiTools(definitions),
+      tools: toModelTools(definitions),
     };
   }
 
@@ -520,7 +520,7 @@ export async function createUiRuntimeComposition(
       });
       return {
         definitions,
-        requestTools: toOpenAiTools(definitions),
+        requestTools: toModelTools(definitions),
       };
     },
     toolScheduler,

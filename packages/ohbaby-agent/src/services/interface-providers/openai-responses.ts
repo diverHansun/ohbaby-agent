@@ -63,7 +63,7 @@ function buildRequestParams(
       case "assistant": {
         allowedKeys(
           message,
-          ["role", "content", "tool_calls"],
+          ["role", "content", "toolCalls"],
           "assistant message",
         );
         if (typeof message.content === "string")
@@ -72,41 +72,32 @@ function buildRequestParams(
           rejectRequest(
             "assistant content must be a string or absent with tool calls",
           );
-        if (message.tool_calls !== undefined) {
-          if (!Array.isArray(message.tool_calls))
-            rejectRequest("tool_calls must be an array");
-          for (const rawCall of message.tool_calls) {
+        if (message.toolCalls !== undefined) {
+          if (!Array.isArray(message.toolCalls))
+            rejectRequest("toolCalls must be an array");
+          for (const rawCall of message.toolCalls) {
             const call = object(rawCall, "tool_call");
-            allowedKeys(call, ["id", "type", "function"], "tool_call");
-            if (call.type !== "function")
-              rejectRequest("tool_call type must be function");
-            const fn = object(call.function, "tool_call function");
-            allowedKeys(fn, ["name", "arguments"], "tool_call function");
+            allowedKeys(call, ["callId", "name", "argumentsJson"], "tool_call");
             input.push({
               type: "function_call",
-              call_id: string(call.id, "call id", true),
-              name: string(fn.name, "function name", true),
-              arguments: string(fn.arguments, "function arguments"),
+              call_id: string(call.callId, "call id", true),
+              name: string(call.name, "function name", true),
+              arguments: string(call.argumentsJson, "function arguments"),
             });
           }
         }
         if (
           (message.content === undefined || message.content === null) &&
-          (!Array.isArray(message.tool_calls) ||
-            message.tool_calls.length === 0)
+          (!Array.isArray(message.toolCalls) || message.toolCalls.length === 0)
         )
           rejectRequest("assistant requires text or tool calls");
         break;
       }
       case "tool":
-        allowedKeys(
-          message,
-          ["role", "content", "tool_call_id"],
-          "tool message",
-        );
+        allowedKeys(message, ["role", "content", "callId"], "tool message");
         input.push({
           type: "function_call_output",
-          call_id: string(message.tool_call_id, "tool_call_id", true),
+          call_id: string(message.callId, "callId", true),
           output: string(message.content, "tool content"),
         });
         break;
@@ -116,18 +107,15 @@ function buildRequestParams(
   }
   const tools = request.tools?.map((rawTool): FunctionTool => {
     const tool = object(rawTool, "tool");
-    allowedKeys(tool, ["type", "function"], "tool");
-    if (tool.type !== "function") rejectRequest("tool type must be function");
-    const fn = object(tool.function, "tool function");
-    allowedKeys(fn, ["name", "description", "parameters"], "tool function");
+    allowedKeys(tool, ["name", "description", "inputSchema"], "tool");
     return {
       type: "function",
-      name: string(fn.name, "tool name", true),
-      parameters: object(fn.parameters, "parameters"),
+      name: string(tool.name, "tool name", true),
+      parameters: object(tool.inputSchema, "parameters"),
       strict: false,
-      ...(fn.description === undefined
+      ...(tool.description === undefined
         ? {}
-        : { description: string(fn.description, "description") }),
+        : { description: string(tool.description, "description") }),
     };
   });
   return {

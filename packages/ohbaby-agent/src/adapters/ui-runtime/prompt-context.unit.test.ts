@@ -37,7 +37,7 @@ function streamWithContent(
   return (async function* (): AsyncGenerator<StreamingResponse, void, unknown> {
     await Promise.resolve();
     yield {
-      completeMessage: { content, role: "assistant" },
+      completeMessage: { content },
       isComplete: true,
       ...(tokenUsage === undefined
         ? {}
@@ -50,7 +50,7 @@ function abortedStream(): AsyncIterable<StreamingResponse> {
   return (async function* (): AsyncGenerator<StreamingResponse, void, unknown> {
     await Promise.resolve();
     yield {
-      completeMessage: { content: "", role: "assistant" },
+      completeMessage: { content: "" },
       isComplete: true,
       streamStopReason: "user_aborted",
     };

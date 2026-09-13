@@ -1,5 +1,5 @@
 export { extractFinalOutput } from "./output.js";
-export { runAgent, toOpenAiTools } from "./runner.js";
+export { runAgent, toModelTools } from "./runner.js";
 export { createAgentContextScope } from "./context-scope.js";
 export { createAgentInstanceFactory } from "./instance.js";
 export type {

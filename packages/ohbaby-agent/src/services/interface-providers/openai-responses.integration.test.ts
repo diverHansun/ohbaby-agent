@@ -238,13 +238,10 @@ async function setup(
         signal: abort?.signal,
         tools: [
           {
-            type: "function",
-            function: {
-              name: "lookup",
-              parameters: {
-                type: "object",
-                properties: { q: { type: "string" } },
-              },
+            name: "lookup",
+            inputSchema: {
+              type: "object",
+              properties: { q: { type: "string" } },
             },
           },
         ],

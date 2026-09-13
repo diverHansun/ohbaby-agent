@@ -1,4 +1,4 @@
-import type { ChatCompletionMessage, TokenUsage } from "../llm-client/index.js";
+import type { ModelMessage, TokenUsage } from "../llm-client/index.js";
 
 export type MessageRole = "user" | "assistant" | "system";
 
@@ -249,7 +249,7 @@ export interface MessageManager {
   toModelMessages(
     sessionId: string,
     options?: MessageScopeFilter,
-  ): Promise<ChatCompletionMessage[]>;
+  ): Promise<ModelMessage[]>;
 }
 
 export interface MessageStore {

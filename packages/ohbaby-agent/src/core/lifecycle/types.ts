@@ -1,7 +1,7 @@
 import type {
-  ChatCompletionMessage,
+  ModelResponseSnapshot,
   ChatFinishReason,
-  InterfaceProviderFunctionTools,
+  ModelToolDefinition,
   LLMClientInstance,
   ParsedToolCall,
   ProviderRetryEvent,
@@ -35,7 +35,7 @@ export interface LifecycleDeps {
 
 export interface ResolvedStepTools {
   readonly definitions: readonly ToolDefinition[] | undefined;
-  readonly requestTools: InterfaceProviderFunctionTools;
+  readonly requestTools: readonly ModelToolDefinition[] | undefined;
 }
 
 export interface LifecycleToolResolutionInput {
@@ -56,7 +56,7 @@ export interface LifecycleSessionParams {
   readonly initiatingUserMessageId?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
-  readonly tools?: InterfaceProviderFunctionTools;
+  readonly tools?: readonly ModelToolDefinition[] | undefined;
   readonly environment?: ToolExecutionEnvironment;
   readonly isSubagent?: boolean;
   readonly maxSteps?: number;
@@ -171,7 +171,7 @@ export type LifecycleEvent =
       readonly timestamp: number;
       readonly delta: string;
       readonly content: string;
-      readonly completeMessage: ChatCompletionMessage;
+      readonly completeMessage: ModelResponseSnapshot;
     }
   | {
       readonly type: "llm:reasoning-delta";
@@ -199,7 +199,7 @@ export type LifecycleEvent =
       readonly step?: number;
       readonly timestamp: number;
       readonly finishReason?: ChatFinishReason;
-      readonly completeMessage: ChatCompletionMessage;
+      readonly completeMessage: ModelResponseSnapshot;
       readonly parsedToolCalls?: readonly ParsedToolCall[];
       readonly tokenUsage?: TokenUsage;
     }

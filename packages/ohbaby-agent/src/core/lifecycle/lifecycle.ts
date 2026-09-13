@@ -8,7 +8,8 @@ import {
   providerErrorStatus,
 } from "../llm-client/index.js";
 import type {
-  ChatCompletionMessage,
+  ModelMessage,
+  ModelResponseSnapshot,
   ParsedToolCall,
   TokenUsage,
 } from "../llm-client/index.js";
@@ -74,25 +75,8 @@ interface ModelStepParams {
   readonly maxSteps?: number;
 }
 
-function getTextContent(message: ChatCompletionMessage): string {
-  const { content } = message;
-
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if ("text" in part && typeof part.text === "string") {
-          return part.text;
-        }
-        return "";
-      })
-      .join("");
-  }
-
-  return "";
+function getTextContent(message: ModelResponseSnapshot): string {
+  return message.content ?? "";
 }
 
 function getErrorMessage(error: unknown): string {
@@ -140,7 +124,7 @@ function createDefaultToolCallId(): () => string {
   };
 }
 
-function buildMaxStepsFinalizationMessage(): ChatCompletionMessage {
+function buildMaxStepsFinalizationMessage(): ModelMessage {
   return {
     role: "system",
     content: [
@@ -154,7 +138,7 @@ function buildMaxStepsFinalizationMessage(): ChatCompletionMessage {
 function toolNamesFromSchemas(
   tools: LifecycleSessionParams["tools"],
 ): readonly string[] {
-  return (tools ?? []).map((tool) => tool.function.name);
+  return (tools ?? []).map((tool) => tool.name);
 }
 
 function normalizeToolCalls(

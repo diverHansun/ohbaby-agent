@@ -182,23 +182,23 @@ describe("Responses request projection", () => {
         {
           role: "assistant",
           content: "checking",
-          tool_calls: [
+          toolCalls: [
             {
-              id: "call-a",
-              type: "function",
-              function: { name: "lookup", arguments: '{"q":"a"}' },
+              callId: "call-a",
+              name: "lookup",
+              argumentsJson: '{"q":"a"}',
             },
           ],
         },
-        { role: "tool", tool_call_id: "call-a", content: "result" },
+        { role: "tool", callId: "call-a", content: "result" },
         {
           role: "assistant",
           content: null,
-          tool_calls: [
+          toolCalls: [
             {
-              id: "call-b",
-              type: "function",
-              function: { name: "lookup", arguments: "{}" },
+              callId: "call-b",
+              name: "lookup",
+              argumentsJson: "{}",
             },
           ],
         },
@@ -206,12 +206,9 @@ describe("Responses request projection", () => {
       ],
       tools: [
         {
-          type: "function",
-          function: {
-            name: "lookup",
-            description: "Look up a value",
-            parameters: { type: "object" },
-          },
+          name: "lookup",
+          description: "Look up a value",
+          inputSchema: { type: "object" },
         },
       ],
     });
@@ -277,9 +274,9 @@ describe("Responses request projection", () => {
       function_call: { name: "legacy", arguments: "{}" },
     },
     { role: "user", content: "x", name: "named" },
-    { role: "assistant", content: "x", reasoning_content: "secret" },
+    { role: "assistant", content: "x", reasoningText: "secret" },
     { role: "system", content: "x", unknown: undefined },
-    { role: "tool", content: "x", tool_call_id: "" },
+    { role: "tool", content: "x", callId: "" },
     { role: "assistant", content: null },
     {
       role: "assistant",
@@ -288,22 +285,22 @@ describe("Responses request projection", () => {
     },
     {
       role: "assistant",
-      tool_calls: [
+      toolCalls: [
         {
-          type: "function",
-          id: "a",
+          callId: "a",
           extra: true,
-          function: { name: "lookup", arguments: "{}" },
+          name: "lookup",
+          argumentsJson: "{}",
         },
       ],
     },
     {
       role: "assistant",
-      tool_calls: [
+      toolCalls: [
         {
-          type: "function",
-          id: "a",
-          function: { name: "lookup", arguments: "{}", extra: true },
+          callId: "a",
+          name: "lookup",
+          argumentsJson: 1,
         },
       ],
     },
@@ -323,9 +320,10 @@ describe("Responses request projection", () => {
   );
   it.each([
     { type: "custom", custom: { name: "x" } },
-    { type: "function", extra: true, function: { name: "x", parameters: {} } },
-    { type: "function", function: { name: "x", parameters: {}, strict: true } },
-    { type: "function", function: { name: "", parameters: {} } },
+    { name: "x", inputSchema: {}, extra: true },
+    { name: "x", inputSchema: {}, strict: true },
+    { name: "", inputSchema: {} },
+    { type: "function", function: { name: "x", parameters: {} } },
   ])(
     "rejects unsupported tool shape %j before creating a request",
     async (tool) => {

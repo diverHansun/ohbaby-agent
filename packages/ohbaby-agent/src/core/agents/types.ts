@@ -1,5 +1,5 @@
 import type { LifecycleEvent } from "../lifecycle/index.js";
-import type { InterfaceProviderFunctionTool } from "../llm-client/index.js";
+import type { ModelToolDefinition } from "../llm-client/index.js";
 import type { MessageManager } from "../message/index.js";
 import type {
   ToolExecutionEnvironment,
@@ -83,7 +83,7 @@ export interface AgentRunCreateOptions {
   readonly maxSteps?: number;
   readonly directory: string;
   readonly modelId: string;
-  readonly tools?: InterfaceProviderFunctionTool[];
+  readonly tools?: ModelToolDefinition[];
 }
 
 export interface AgentRunHandle {

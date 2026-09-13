@@ -22,12 +22,12 @@ import {
   ToolCallParseError,
 } from "./index.js";
 import type {
-  ChatCompletionMessage,
+  ModelResponseSnapshot,
   LLMClientInstance,
   StreamingResponse,
 } from "./types.js";
 
-type AssistantMessage = Extract<ChatCompletionMessage, { role: "assistant" }>;
+type AssistantMessage = ModelResponseSnapshot;
 type ConfigErrorWithCode = Error & { code: string };
 
 interface MockSdkClient {
@@ -92,8 +92,7 @@ function getInterfaceProviderRequest(): InterfaceProviderRequest {
 }
 
 function getAssistantMessage(response: StreamingResponse): AssistantMessage {
-  expect(response.completeMessage.role).toBe("assistant");
-  return response.completeMessage as AssistantMessage;
+  return response.completeMessage;
 }
 
 // Mock the config module
@@ -383,18 +382,15 @@ describe("LLM Client Integration Tests", () => {
       const lastResponse = responses[responses.length - 1];
       const assistantMessage = getAssistantMessage(lastResponse);
 
-      if (!("tool_calls" in assistantMessage) || !assistantMessage.tool_calls) {
+      if (!("toolCalls" in assistantMessage) || !assistantMessage.toolCalls) {
         throw new Error("Expected tool calls on assistant message.");
       }
 
       // Verify raw tool call accumulation
-      const toolCall = assistantMessage.tool_calls[0];
-      if (toolCall.type !== "function") {
-        throw new Error("Expected a function tool call.");
-      }
-      expect(toolCall.id).toBe("call_123");
-      expect(toolCall.function.name).toBe("get_weather");
-      expect(toolCall.function.arguments).toBe('{"location":"NYC"}');
+      const toolCall = assistantMessage.toolCalls[0];
+      expect(toolCall.callId).toBe("call_123");
+      expect(toolCall.name).toBe("get_weather");
+      expect(toolCall.argumentsJson).toBe('{"location":"NYC"}');
 
       // Verify parsed tool call
       const parsedCall = lastResponse.parsedToolCalls?.[0];
@@ -503,14 +499,11 @@ describe("LLM Client Integration Tests", () => {
       const messages = [{ role: "user" as const, content: "use tool" }];
       const tools: InterfaceProviderRequest["tools"] = [
         {
-          type: "function" as const,
-          function: {
-            name: "test_tool",
-            description: "Test tool",
-            parameters: {
-              type: "object" as const,
-              properties: {},
-            },
+          name: "test_tool",
+          description: "Test tool",
+          inputSchema: {
+            type: "object" as const,
+            properties: {},
           },
         },
       ];
@@ -842,7 +835,7 @@ describe("LLM Client Integration Tests", () => {
 
       expect(responses).toHaveLength(1);
       expect(responses[0]).toMatchObject({
-        completeMessage: { role: "assistant", content: "(Empty response)" },
+        completeMessage: { content: "(Empty response)" },
         isComplete: true,
         streamStopReason: "provider_finished",
       });

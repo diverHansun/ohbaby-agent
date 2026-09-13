@@ -2,6 +2,7 @@ import OpenAI, { APIUserAbortError } from "openai";
 import type {
   ChatCompletionChunk,
   ChatCompletionCreateParamsStreaming,
+  ChatCompletionMessageParam,
 } from "openai/resources/chat/completions/completions";
 import type {
   CreateInterfaceProviderOptions,
@@ -9,6 +10,7 @@ import type {
   InterfaceProviderInstance,
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
+  ModelMessage,
 } from "./types.js";
 import { normalizeOpenAICompatibleUsage } from "./token-usage.js";
 
@@ -53,7 +55,7 @@ function buildRequestParams(
   };
   const params: PromptCacheWireParams = {
     model: request.model,
-    messages: request.messages,
+    messages: request.messages.map(projectMessage),
     temperature: request.temperature,
     max_tokens: request.maxTokens,
     stream: true,
@@ -61,7 +63,14 @@ function buildRequestParams(
   };
 
   if ((request.tools?.length ?? 0) > 0) {
-    params.tools = request.tools;
+    params.tools = request.tools?.map((tool) => ({
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.inputSchema,
+      },
+    }));
   }
 
   if (request.promptCache.strategy === "openai-keyed-implicit") {
@@ -69,6 +78,62 @@ function buildRequestParams(
   }
 
   return params;
+}
+
+function projectMessage(message: ModelMessage): ChatCompletionMessageParam {
+  if (
+    !["system", "developer", "user", "assistant", "tool"].includes(
+      message.role,
+    ) ||
+    "function_call" in message ||
+    "tool_calls" in message ||
+    "tool_call_id" in message
+  ) {
+    throw new Error("Unsupported legacy model message for Chat provider.");
+  }
+  const content = Array.isArray(message.content)
+    ? message.content.map((part: object) =>
+        Object.fromEntries(
+          Object.entries(part).map(([key, value]) => [
+            key === "cacheControl" ? "cache_control" : key,
+            value,
+          ]),
+        ),
+      )
+    : message.content;
+  if (message.role === "tool")
+    return {
+      role: "tool",
+      tool_call_id: message.callId,
+      content,
+    } as ChatCompletionMessageParam;
+  const common = {
+    role: message.role,
+    ...(content === undefined ? {} : { content }),
+    ...(message.name === undefined ? {} : { name: message.name }),
+  };
+  if (message.role !== "assistant") return common as ChatCompletionMessageParam;
+  for (const call of message.toolCalls ?? []) {
+    if ("type" in call || "custom" in call || "function" in call)
+      throw new Error("Unsupported legacy tool call for Chat provider.");
+  }
+  return {
+    ...common,
+    ...(message.toolCalls === undefined
+      ? {}
+      : {
+          tool_calls: message.toolCalls.map((call) => ({
+            id: call.callId,
+            type: "function",
+            function: { name: call.name, arguments: call.argumentsJson },
+          })),
+        }),
+    ...(message.reasoningText === undefined
+      ? {}
+      : { reasoning_content: message.reasoningText }),
+    ...(message.refusal === undefined ? {} : { refusal: message.refusal }),
+    ...(message.audio === undefined ? {} : { audio: message.audio }),
+  } as ChatCompletionMessageParam;
 }
 
 function buildStreamEvent(

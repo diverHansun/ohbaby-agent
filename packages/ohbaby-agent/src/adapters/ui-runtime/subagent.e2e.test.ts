@@ -463,9 +463,9 @@ describe("subagent runtime e2e", () => {
       JSON.stringify(request.messages).includes("Task: explore"),
     );
     const firstToolNames =
-      exploreRequests[0]?.tools?.map((tool) => tool.function.name) ?? [];
+      exploreRequests[0]?.tools?.map((tool) => tool.name) ?? [];
     const selectedToolNames =
-      exploreRequests[1]?.tools?.map((tool) => tool.function.name) ?? [];
+      exploreRequests[1]?.tools?.map((tool) => tool.name) ?? [];
 
     expect(firstToolNames).toContain("select_tools");
     expect(firstToolNames).not.toContain(toolName);

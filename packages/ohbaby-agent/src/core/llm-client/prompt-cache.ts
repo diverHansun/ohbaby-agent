@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { PromptCachePolicy } from "../../config/index.js";
-import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
+import type { ModelMessage } from "../../services/interface-providers/types.js";
 import type {
   InterfaceProviderKind,
   InterfaceProviderPromptCache,
@@ -23,7 +23,7 @@ interface PromptCacheCapability {
 
 export interface PromptCacheRequestInput extends PromptCacheCapabilityInput {
   readonly contextScopeId?: string;
-  readonly messages?: readonly ChatCompletionMessageParam[];
+  readonly messages?: readonly ModelMessage[];
   readonly purpose?: LLMRequestPurpose;
   readonly sessionId?: string;
 }
@@ -271,21 +271,15 @@ function nonEmptyTextContent(content: unknown): boolean {
 }
 
 function hasAnthropicExplicitCacheTarget(
-  messages: readonly ChatCompletionMessageParam[],
+  messages: readonly ModelMessage[],
 ): boolean {
   return messages.some((message) => {
-    const wireMessage = message as ChatCompletionMessageParam & {
-      readonly content?: unknown;
-      readonly role: string;
-      readonly tool_calls?: readonly unknown[];
-    };
-    if (wireMessage.role === "tool") {
+    if (message.role === "tool") {
       return true;
     }
     return (
-      nonEmptyTextContent(wireMessage.content) ||
-      (wireMessage.role === "assistant" &&
-        (wireMessage.tool_calls?.length ?? 0) > 0)
+      nonEmptyTextContent(message.content) ||
+      (message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0)
     );
   });
 }

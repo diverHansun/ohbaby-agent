@@ -16,7 +16,7 @@ import type {
   InterfaceProviderStreamEvent,
 } from "../services/interface-providers/index.js";
 import type {
-  ChatCompletionMessage,
+  ModelMessage,
   LLMClientInstance,
 } from "../core/llm-client/index.js";
 import { createBus, type BusInstance } from "../bus/index.js";
@@ -489,9 +489,9 @@ function lastRequestToolCallId(
   request: InterfaceProviderRequest,
 ): string | undefined {
   const message = request.messages.at(-1) as
-    | { readonly tool_call_id?: string }
+    | { readonly callId?: string }
     | undefined;
-  return message?.tool_call_id;
+  return message?.callId;
 }
 
 function toolMetadataFromContent(
@@ -518,7 +518,7 @@ function toolMetadataFromContent(
 }
 
 function subagentSessionIdFromMessages(
-  messages: readonly ChatCompletionMessage[],
+  messages: readonly ModelMessage[],
 ): string | undefined {
   for (const message of messages) {
     if (message.role !== "tool" || typeof message.content !== "string") {
@@ -548,7 +548,7 @@ function subagentSessionIdFromMessages(
 }
 
 function subagentIdFromMessages(
-  messages: readonly ChatCompletionMessage[],
+  messages: readonly ModelMessage[],
 ): string | undefined {
   for (const message of messages) {
     if (message.role !== "tool" || typeof message.content !== "string") {
@@ -3259,13 +3259,11 @@ describe("createInProcessUiBackendClient", () => {
 
     await client.submitPromptAndWait("List the tools folder");
 
-    expect(
-      requests[0]?.tools?.some((tool) => tool.function.name === "list"),
-    ).toBe(true);
+    expect(requests[0]?.tools?.some((tool) => tool.name === "list")).toBe(true);
     const toolResultMessage = requests[1]?.messages.at(-1);
     expect(toolResultMessage).toMatchObject({
       role: "tool",
-      tool_call_id: "call_list",
+      callId: "call_list",
     });
     expect(
       typeof toolResultMessage?.content === "string"
@@ -3774,13 +3772,13 @@ describe("createInProcessUiBackendClient", () => {
       await run;
 
       const skillTool = requests[0]?.tools?.find(
-        (tool) => tool.function.name === "skill",
+        (tool) => tool.name === "skill",
       );
-      expect(skillTool?.function.description).toContain("code-review");
+      expect(skillTool?.description).toContain("code-review");
       const toolResultMessage = requests[1]?.messages.at(-1);
       expect(toolResultMessage).toMatchObject({
         role: "tool",
-        tool_call_id: "call_skill",
+        callId: "call_skill",
       });
       expect(
         typeof toolResultMessage?.content === "string"
@@ -3897,7 +3895,7 @@ describe("createInProcessUiBackendClient", () => {
     const toolResultMessage = requests[1]?.messages.at(-1);
     expect(toolResultMessage).toMatchObject({
       role: "tool",
-      tool_call_id: "call_subagent_missing",
+      callId: "call_subagent_missing",
     });
     expect(
       typeof toolResultMessage?.content === "string"
@@ -4020,7 +4018,7 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(childRequests).toHaveLength(2);
     for (const request of childRequests) {
-      const toolNames = request.tools?.map((tool) => tool.function.name) ?? [];
+      const toolNames = request.tools?.map((tool) => tool.name) ?? [];
       expect(toolNames).toContain("bash");
       expect(toolNames).toContain("edit");
       expect(toolNames).toContain("todo_read");
@@ -4318,7 +4316,7 @@ describe("createInProcessUiBackendClient", () => {
       const toolResultMessage = requests[1]?.messages.at(-1);
       expect(toolResultMessage).toMatchObject({
         role: "tool",
-        tool_call_id: "call_write_once",
+        callId: "call_write_once",
       });
       expect(
         typeof toolResultMessage?.content === "string"
@@ -4398,7 +4396,7 @@ describe("createInProcessUiBackendClient", () => {
       const rejectedToolMessage = requests[1]?.messages.at(-1);
       expect(rejectedToolMessage).toMatchObject({
         role: "tool",
-        tool_call_id: "call_write_reject",
+        callId: "call_write_reject",
       });
       expect(
         typeof rejectedToolMessage?.content === "string"
@@ -4845,13 +4843,11 @@ describe("createInProcessUiBackendClient", () => {
 
     await client.submitPromptAndWait("Which tools are available?");
 
-    expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual([
-      "read",
-    ]);
+    expect(requests[0]?.tools?.map((tool) => tool.name)).toEqual(["read"]);
     const rejectedToolMessage = requests[1]?.messages.at(-1);
     expect(rejectedToolMessage).toMatchObject({
       role: "tool",
-      tool_call_id: "call_bash",
+      callId: "call_bash",
     });
     expect(
       typeof rejectedToolMessage?.content === "string"
@@ -6020,7 +6016,7 @@ describe("createInProcessUiBackendClient", () => {
     });
     await completed;
 
-    expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual(
+    expect(requests[0]?.tools?.map((tool) => tool.name)).toEqual(
       expect.arrayContaining(["GetGoal", "UpdateGoal"]),
     );
     expect(lastRequestMessageText(requests[0])).toContain(

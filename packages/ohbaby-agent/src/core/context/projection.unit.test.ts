@@ -250,21 +250,18 @@ describe("reduceForModel", () => {
       {
         content: null,
         role: "assistant",
-        tool_calls: [
+        toolCalls: [
           {
-            function: {
-              arguments: '{"path":"old_read.txt"}',
-              name: "read_file",
-            },
-            id: "call_old_read",
-            type: "function",
+            callId: "call_old_read",
+            argumentsJson: '{"path":"old_read.txt"}',
+            name: "read_file",
           },
         ],
       },
       {
         content: "[Old tool result cleared (was ~80 tokens)]",
         role: "tool",
-        tool_call_id: "call_old_read",
+        callId: "call_old_read",
       },
       { content: "new request", role: "user" },
     ]);
@@ -381,7 +378,7 @@ describe("reduceForModel", () => {
     ).toMatchObject({
       content: "[Old tool result cleared (was ~80 tokens)]",
       role: "tool",
-      tool_call_id: "call_old_read",
+      callId: "call_old_read",
     });
   });
 
@@ -427,40 +424,34 @@ describe("reduceForModel", () => {
       {
         content: null,
         role: "assistant",
-        tool_calls: [
+        toolCalls: [
           {
-            function: {
-              arguments: '{"path":"old_error.txt"}',
-              name: "read_file",
-            },
-            id: "call_old_error",
-            type: "function",
+            callId: "call_old_error",
+            argumentsJson: '{"path":"old_error.txt"}',
+            name: "read_file",
           },
         ],
       },
       {
         content: "[Old tool result cleared (was ~80 tokens)]",
         role: "tool",
-        tool_call_id: "call_old_error",
+        callId: "call_old_error",
       },
       {
         content: null,
         role: "assistant",
-        tool_calls: [
+        toolCalls: [
           {
-            function: {
-              arguments: '{"path":"old_abort.txt"}',
-              name: "read_file",
-            },
-            id: "call_old_abort",
-            type: "function",
+            callId: "call_old_abort",
+            argumentsJson: '{"path":"old_abort.txt"}',
+            name: "read_file",
           },
         ],
       },
       {
         content: "Tool execution aborted by user",
         role: "tool",
-        tool_call_id: "call_old_abort",
+        callId: "call_old_abort",
       },
       { content: "new request", role: "user" },
     ]);

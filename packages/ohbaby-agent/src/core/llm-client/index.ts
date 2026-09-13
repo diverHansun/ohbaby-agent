@@ -29,11 +29,13 @@ export { streamChatCompletion } from "./streaming.js";
 
 // Export type definitions for consumers
 export type {
+  ModelResponseSnapshot,
+  ToolCallSnapshot,
   // Main interfaces
   LLMClientInstance,
   StreamingResponse,
   // Message and token types
-  ChatCompletionMessage,
+  ModelMessage,
   StreamingTokenUsage,
   TokenUsage,
   // Tool-related types
@@ -44,8 +46,8 @@ export type {
 } from "./types.js";
 export type { ProviderRetryEvent, ProviderRetryPolicy } from "./retry.js";
 export type {
-  InterfaceProviderFunctionTool,
-  InterfaceProviderFunctionTools,
+  ModelToolDefinition,
+  ModelToolCall,
   LLMRequestPurpose,
   PromptCacheRequestStrategy,
 } from "../../services/interface-providers/index.js";

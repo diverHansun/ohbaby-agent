@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import type { ChatCompletionChunk } from "openai/resources/chat/completions/completions";
 import { describe, expect, it, vi } from "vitest";
 import { createOpenAICompatibleProvider } from "./openai-compatible.js";
-import type { InterfaceProviderStreamEvent } from "./types.js";
+import type { InterfaceProviderStreamEvent, ModelMessage } from "./types.js";
 
 function createChunk(
   chunk: Omit<ChatCompletionChunk, "id" | "created" | "model" | "object">,
@@ -46,6 +46,160 @@ async function drainRequest(request: IncomingMessage): Promise<void> {
 }
 
 describe("openai-compatible provider", () => {
+  it("preserves role-specific empty, absent, null and multimodal input without normalizing values", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "test",
+      apiKey: "test-key",
+      baseUrl: "http://localhost:1",
+    });
+    const create = vi
+      .spyOn(provider.client.chat.completions, "create")
+      .mockResolvedValue(createChunkStream([]) as never);
+    const messages: ModelMessage[] = [
+      { role: "system", content: "", name: "policy" },
+      {
+        role: "developer",
+        content: [{ type: "text", text: "" }],
+        name: "developer",
+      },
+      { role: "user", content: [], name: "reader" },
+      {
+        role: "assistant",
+        content: [],
+        name: "writer",
+        audio: null,
+        refusal: "no",
+      },
+      { role: "assistant", content: "" },
+      {
+        role: "assistant",
+        content: null,
+        toolCalls: [{ callId: "c1", name: "read", argumentsJson: "{}" }],
+      },
+      {
+        role: "assistant",
+        toolCalls: [{ callId: "c2", name: "read", argumentsJson: "{ }" }],
+      },
+      { role: "tool", callId: "c1", content: [] },
+      {
+        role: "tool",
+        callId: "c2",
+        content: [
+          {
+            type: "text",
+            text: "",
+            cacheControl: { type: "ephemeral", ttl: "1h" },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: {
+              url: "https://example.test/image.png",
+              detail: "high",
+            },
+            prompt_cache_breakpoint: { mode: "explicit" },
+          },
+          { type: "input_audio", input_audio: { data: "AA==", format: "mp3" } },
+          {
+            type: "file",
+            file: {
+              file_data: "data:text/plain;base64,AA==",
+              file_id: "file-1",
+              filename: "a.txt",
+            },
+          },
+        ],
+      },
+    ];
+    const before = structuredClone(messages);
+    await provider.streamChatCompletion({
+      model: "test",
+      messages,
+      tools: [],
+      temperature: 0,
+      maxTokens: 32,
+      promptCache: { strategy: "observe-only", reason: "test" },
+    });
+    expect(create.mock.calls[0]?.[0].messages).toEqual([
+      { role: "system", content: "", name: "policy" },
+      {
+        role: "developer",
+        content: [{ type: "text", text: "" }],
+        name: "developer",
+      },
+      { role: "user", content: [], name: "reader" },
+      {
+        role: "assistant",
+        content: [],
+        name: "writer",
+        audio: null,
+        refusal: "no",
+      },
+      { role: "assistant", content: "" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "read", arguments: "{}" },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        tool_calls: [
+          {
+            id: "c2",
+            type: "function",
+            function: { name: "read", arguments: "{ }" },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: "c1", content: [] },
+      {
+        role: "tool",
+        tool_call_id: "c2",
+        content: [
+          {
+            type: "text",
+            text: "",
+            cache_control: { type: "ephemeral", ttl: "1h" },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: {
+              url: "https://example.test/image.png",
+              detail: "high",
+            },
+            prompt_cache_breakpoint: { mode: "explicit" },
+          },
+          { type: "input_audio", input_audio: { data: "AA==", format: "mp3" } },
+          {
+            type: "file",
+            file: {
+              file_data: "data:text/plain;base64,AA==",
+              file_id: "file-1",
+              filename: "a.txt",
+            },
+          },
+        ],
+      },
+    ]);
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("tools");
+    expect(messages).toEqual(before);
+  });
+
   it("should build streaming request parameters for OpenAI-compatible APIs", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "openai",
@@ -78,14 +232,11 @@ describe("openai-compatible provider", () => {
     const controller = new AbortController();
     const tools = [
       {
-        type: "function" as const,
-        function: {
-          name: "test_tool",
-          description: "Test tool",
-          parameters: {
-            type: "object" as const,
-            properties: {},
-          },
+        name: "test_tool",
+        description: "Test tool",
+        inputSchema: {
+          type: "object" as const,
+          properties: {},
         },
       },
     ];
@@ -112,7 +263,16 @@ describe("openai-compatible provider", () => {
         max_tokens: 128,
         stream: true,
         stream_options: { include_usage: true },
-        tools,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "test_tool",
+              description: "Test tool",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+        ],
       },
       { signal: controller.signal },
     );

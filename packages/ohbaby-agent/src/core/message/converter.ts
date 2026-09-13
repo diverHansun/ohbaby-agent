@@ -1,4 +1,4 @@
-import type { ChatCompletionMessage } from "../llm-client/index.js";
+import type { ModelMessage } from "../llm-client/index.js";
 import type { MessageWithParts, Part } from "./types.js";
 import { getMessageOrigin } from "./origin.js";
 
@@ -47,7 +47,7 @@ function orderMessagesForModel(
 
 export function toModelMessages(
   messages: readonly MessageWithParts[],
-): ChatCompletionMessage[] {
+): ModelMessage[] {
   return orderMessagesForModel(messages).flatMap((message) => {
     const content = message.parts.map(partToContent).join("");
 

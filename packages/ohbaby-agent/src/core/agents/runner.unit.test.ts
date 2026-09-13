@@ -292,12 +292,9 @@ describe("runAgent", () => {
       sessionId: "session_child",
       tools: [
         {
-          function: {
-            description: "Run a shell command",
-            name: "bash",
-            parameters: { type: "object" },
-          },
-          type: "function",
+          description: "Run a shell command",
+          name: "bash",
+          inputSchema: { type: "object" },
         },
       ],
       triggerSource: "user",
@@ -542,7 +539,7 @@ describe("runAgent", () => {
     );
     const event = {
       content: "hello",
-      completeMessage: { content: "hello", role: "assistant" },
+      completeMessage: { content: "hello" },
       delta: "hello",
       sessionId: "session_child",
       timestamp: 1,

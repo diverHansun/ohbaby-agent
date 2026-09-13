@@ -15,7 +15,7 @@ import {
   type TokenCounter,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
-import { toOpenAiTools } from "../../../packages/ohbaby-agent/src/core/agents/index.js";
+import { toModelTools } from "../../../packages/ohbaby-agent/src/core/agents/index.js";
 import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
 import {
   createDatabaseMessageStore,
@@ -283,14 +283,11 @@ describe("lifecycle tool scheduler integration", () => {
           {
             role: "assistant",
             content: null,
-            tool_calls: [
+            toolCalls: [
               {
-                id: "call_read",
-                function: {
-                  arguments: '{"path":"README.md"}',
-                  name: "read_fake",
-                },
-                type: "function",
+                callId: "call_read",
+                argumentsJson: '{"path":"README.md"}',
+                name: "read_fake",
               },
             ],
           },
@@ -298,7 +295,7 @@ describe("lifecycle tool scheduler integration", () => {
             role: "tool",
             content:
               '{"params":{"path":"README.md"},"workdir":"D:/workspace/session_1","commandCwd":"D:/workspace/session_1"}',
-            tool_call_id: "call_read",
+            callId: "call_read",
           },
         ]),
       );
@@ -358,14 +355,11 @@ describe("lifecycle tool scheduler integration", () => {
       {
         role: "assistant",
         content: null,
-        tool_calls: [
+        toolCalls: [
           {
-            id: "call_read",
-            function: {
-              arguments: '{"path":"README.md"}',
-              name: "read_fake",
-            },
-            type: "function",
+            callId: "call_read",
+            argumentsJson: '{"path":"README.md"}',
+            name: "read_fake",
           },
         ],
       },
@@ -373,7 +367,7 @@ describe("lifecycle tool scheduler integration", () => {
         role: "tool",
         content:
           '{"params":{"path":"README.md"},"workdir":"D:/workspace/session_1","commandCwd":"D:/workspace/session_1"}',
-        tool_call_id: "call_read",
+        callId: "call_read",
       },
     ]);
     expect(result).toMatchObject({
@@ -498,7 +492,7 @@ describe("lifecycle tool scheduler integration", () => {
       });
 
       const definitions = await scheduler.getAvailableTools();
-      const tools = toOpenAiTools(definitions);
+      const tools = toModelTools(definitions);
 
       const lifecycle = new Lifecycle({
         contextManager,
@@ -562,21 +556,18 @@ describe("lifecycle tool scheduler integration", () => {
         messages: requests[1]?.messages,
         tools: requests[1]?.tools,
       });
-      expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual(
+      expect(requests[0]?.tools?.map((tool) => tool.name)).toEqual(
         definitions.map((tool) => tool.name),
       );
       const secondMessages = requests[1]?.messages ?? [];
       const readResult = secondMessages.find(
-        (message) =>
-          message.role === "tool" && message.tool_call_id === "call_read",
+        (message) => message.role === "tool" && message.callId === "call_read",
       );
       const bashResult = secondMessages.find(
-        (message) =>
-          message.role === "tool" && message.tool_call_id === "call_bash",
+        (message) => message.role === "tool" && message.callId === "call_bash",
       );
       const mcpResult = secondMessages.find(
-        (message) =>
-          message.role === "tool" && message.tool_call_id === "call_mcp",
+        (message) => message.role === "tool" && message.callId === "call_mcp",
       );
       expect(readResult?.content).toContain('"mtimeMs":1700000000000');
       expect(bashResult?.content).toContain('"exitCode":1');
@@ -737,7 +728,7 @@ describe("lifecycle tool scheduler integration", () => {
         epochs.push(snapshot.epoch);
         return {
           definitions: snapshot.tools,
-          requestTools: toOpenAiTools(snapshot.tools),
+          requestTools: toModelTools(snapshot.tools),
         };
       },
       toolScheduler: scheduler,
@@ -762,10 +753,8 @@ describe("lifecycle tool scheduler integration", () => {
       next = await loop.next();
     }
 
-    const firstNames =
-      requests[0]?.tools?.map((tool) => tool.function.name) ?? [];
-    const secondNames =
-      requests[1]?.tools?.map((tool) => tool.function.name) ?? [];
+    const firstNames = requests[0]?.tools?.map((tool) => tool.name) ?? [];
+    const secondNames = requests[1]?.tools?.map((tool) => tool.name) ?? [];
     expect(firstNames).toEqual(["read"]);
     expect(secondNames).toEqual(["read", "mcp_s6_server_t6_search"]);
     expect(epochs).toEqual([0, 1]);

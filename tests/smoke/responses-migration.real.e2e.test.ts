@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createBus } from "../../packages/ohbaby-agent/src/bus/index.js";
-import { toOpenAiTools } from "../../packages/ohbaby-agent/src/core/agents/index.js";
+import { toModelTools } from "../../packages/ohbaby-agent/src/core/agents/index.js";
 import {
   createContextManager,
   type ContextLLMClient,
@@ -470,7 +470,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
             modelId: profile.model,
             sessionId: toolSession,
             signal: AbortSignal.timeout(profile.timeoutMs),
-            tools: toOpenAiTools(await scheduler.getAvailableTools()),
+            tools: toModelTools(await scheduler.getAvailableTools()),
           });
 
           assertCompleted(tool.result, {

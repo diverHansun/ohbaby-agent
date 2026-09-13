@@ -403,15 +403,7 @@ describe("ContextManager", () => {
         getLimit: () => 10_000,
       },
     });
-    const tools = [
-      {
-        function: {
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
-      },
-    ];
+    const tools = [{ name: "read_file", inputSchema: { type: "object" } }];
     const toolDefinitions = [
       {
         category: "readonly" as const,
@@ -450,12 +442,13 @@ describe("ContextManager", () => {
     expect(Object.isFrozen(withTools.request)).toBe(true);
     expect(Object.isFrozen(withTools.request.messages)).toBe(true);
     expect(Object.isFrozen(withTools.request.tools)).toBe(true);
-    expect(Object.isFrozen(withTools.request.tools?.[0]?.function)).toBe(true);
-    expect(Object.isFrozen(tools[0]?.function)).toBe(false);
+    expect(Object.isFrozen(withTools.request.tools?.[0]?.inputSchema)).toBe(
+      true,
+    );
+    expect(Object.isFrozen(tools[0]?.inputSchema)).toBe(false);
     expect(() => {
-      (
-        withTools.request.tools?.[0]?.function.parameters as { type?: string }
-      ).type = "array";
+      (withTools.request.tools?.[0].inputSchema as { type?: string }).type =
+        "array";
     }).toThrow();
     expect(withTools.sentHeuristic).toBeGreaterThan(messagesOnly.sentHeuristic);
     expect(withTools.usage.currentTokens).toBeGreaterThan(
@@ -1449,18 +1442,15 @@ describe("ContextManager", () => {
       {
         role: "assistant",
         content: null,
-        tool_calls: [
+        toolCalls: [
           {
-            id: "call_read",
-            type: "function",
-            function: {
-              name: "read_file",
-              arguments: '{"path":"README.md"}',
-            },
+            callId: "call_read",
+            name: "read_file",
+            argumentsJson: '{"path":"README.md"}',
           },
         ],
       },
-      { role: "tool", tool_call_id: "call_read", content: "content" },
+      { role: "tool", callId: "call_read", content: "content" },
     ]);
   });
 
@@ -1502,20 +1492,17 @@ describe("ContextManager", () => {
       {
         role: "assistant",
         content: null,
-        tool_calls: [
+        toolCalls: [
           {
-            id: "call_read",
-            type: "function",
-            function: {
-              name: "read",
-              arguments: '{"file_path":"README.md"}',
-            },
+            callId: "call_read",
+            name: "read",
+            argumentsJson: '{"file_path":"README.md"}',
           },
         ],
       },
       {
         role: "tool",
-        tool_call_id: "call_read",
+        callId: "call_read",
         content:
           'content\n\n<tool_metadata>\n{"path":"D:/repo/README.md","mtimeMs":1234567890,"hasMore":false}\n</tool_metadata>',
       },
@@ -1563,7 +1550,7 @@ describe("ContextManager", () => {
 
     expect(messages.at(-1)).toEqual({
       role: "tool",
-      tool_call_id: "call_bash",
+      callId: "call_bash",
       content:
         '<tool_metadata>\n{"exitCode":1,"signal":null}\n</tool_metadata>',
     });
@@ -1614,7 +1601,7 @@ describe("ContextManager", () => {
 
     expect(messages.at(-1)).toEqual({
       role: "tool",
-      tool_call_id: "call_mcp",
+      callId: "call_mcp",
       content:
         'search result\n\n<tool_metadata>\n{"server":"search-server","tool":"search","isError":false,"contentTypes":["text"],"structuredContent":{"total":1}}\n</tool_metadata>',
     });
@@ -1657,7 +1644,7 @@ describe("ContextManager", () => {
 
     expect(messages.at(-1)).toEqual({
       role: "tool",
-      tool_call_id: "call_bash",
+      callId: "call_bash",
       content: "partial stdout before abort\n\nTool execution aborted by user",
     });
   });
@@ -1877,7 +1864,7 @@ describe("ContextManager", () => {
     expect(prepared.request.messages).toContainEqual({
       content: "x".repeat(500),
       role: "tool",
-      tool_call_id: "message_1_call",
+      callId: "message_1_call",
     });
     expect(masked[0]).toMatchObject({
       enabled: false,
@@ -1922,21 +1909,14 @@ describe("ContextManager", () => {
     expect(prepared.request.messages).toContainEqual({
       content: null,
       role: "assistant",
-      tool_calls: [
-        {
-          function: {
-            arguments: "{}",
-            name: "read_file",
-          },
-          id: "message_1_call",
-          type: "function",
-        },
+      toolCalls: [
+        { callId: "message_1_call", argumentsJson: "{}", name: "read_file" },
       ],
     });
     expect(prepared.request.messages).toContainEqual({
       content: "[Old tool result cleared (was ~500 tokens)]",
       role: "tool",
-      tool_call_id: "message_1_call",
+      callId: "message_1_call",
     });
     expect(prepared.usage.currentTokens).toBeLessThan(700);
     expect(masked[0]).toMatchObject({
@@ -2047,15 +2027,7 @@ describe("ContextManager", () => {
       },
       getLimit: (): number => 24_000,
     } satisfies TokenCounter;
-    const tools = [
-      {
-        function: {
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
-      },
-    ];
+    const tools = [{ name: "read_file", inputSchema: { type: "object" } }];
     const { manager } = createManager({
       compressionThreshold: 0.8,
       llmClient: { generateSummary },
@@ -2264,15 +2236,7 @@ describe("ContextManager", () => {
 
     const onCompactionStarted = vi.fn();
     const tailDirective = { content: "tail-r02", role: "system" as const };
-    const tools = [
-      {
-        function: {
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
-      },
-    ];
+    const tools = [{ name: "read_file", inputSchema: { type: "object" } }];
     const prepared = await manager.prepareTurn({
       directory: "D:/repo",
       force: true,
@@ -2721,15 +2685,7 @@ describe("ContextManager", () => {
         getLimit: () => 100_000,
       },
     });
-    const tools = [
-      {
-        function: {
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
-      },
-    ];
+    const tools = [{ name: "read_file", inputSchema: { type: "object" } }];
     const result = await manager.compact("session_1", {
       directory: "D:/repo",
       force: true,
@@ -2748,7 +2704,9 @@ describe("ContextManager", () => {
     expect(schemaMeasurements).toHaveLength(4);
     expect(
       schemaMeasurements.every(([content]) =>
-        content.endsWith(JSON.stringify(tools)),
+        content.endsWith(
+          '[{"type":"function","function":{"name":"read_file","parameters":{"type":"object"}}}]',
+        ),
       ),
     ).toBe(true);
   });
@@ -2774,15 +2732,7 @@ describe("ContextManager", () => {
       });
     }
 
-    const tools = [
-      {
-        function: {
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
-      },
-    ];
+    const tools = [{ name: "read_file", inputSchema: { type: "object" } }];
     const manual = await createSeededFixture();
     const automatic = await createSeededFixture();
     const compacted = await manual.manager.compact("session_1", {
@@ -3466,10 +3416,8 @@ describe("ContextManager", () => {
         const previous = messages[index - 1];
         expect(previous.role).toBe("assistant");
         expect(
-          "tool_calls" in previous
-            ? previous.tool_calls?.some(
-                (call) => call.id === message.tool_call_id,
-              )
+          "toolCalls" in previous
+            ? previous.toolCalls?.some((call) => call.callId === message.callId)
             : false,
         ).toBe(true);
       }

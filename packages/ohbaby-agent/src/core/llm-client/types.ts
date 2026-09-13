@@ -4,12 +4,11 @@
  * This module provides the public types for the ohbaby-agent LLM client system.
  *
  * Design Principles:
- * - DRY: Re-export OpenAI types instead of duplicating them
+ * - DRY: Re-export the provider-neutral request types
  * - KISS: Keep interface definitions simple and focused
  * - SRP: Each type has a single, well-defined purpose
  */
 
-import type { ChatCompletionMessageParam } from "openai/resources/chat/completions/completions";
 import type {
   InterfaceProviderInstance,
   InterfaceProviderTokenUsage,
@@ -18,7 +17,7 @@ import type { LLMConfig } from "../../config/index.js";
 import type { ProviderRetryEvent } from "./retry.js";
 
 /**
- * Re-export OpenAI message type for convenience.
+ * Re-export the owned model request type for convenience.
  *
  * Represents a message in the chat completion API, including:
  * - system: System instruction message
@@ -26,7 +25,18 @@ import type { ProviderRetryEvent } from "./retry.js";
  * - assistant: Assistant response message
  * - tool: Tool execution result message
  */
-export type ChatCompletionMessage = ChatCompletionMessageParam;
+export type { ModelMessage } from "../../services/interface-providers/types.js";
+
+export interface ToolCallSnapshot {
+  readonly index: number;
+  readonly callId?: string;
+  readonly name?: string;
+  readonly argumentsJson: string;
+}
+export interface ModelResponseSnapshot {
+  readonly content: string | null;
+  readonly toolCalls?: readonly ToolCallSnapshot[];
+}
 
 /**
  * Re-export normalized token usage statistics from the provider layer.
@@ -156,13 +166,13 @@ export interface StreamingResponse {
   /**
    * Complete message accumulated so far.
    *
-   * Always contains the full content/tool_calls up to this point.
-   * Consumers can use this directly for storage or display.
+   * Contains the accumulated text and tool-call fragments for display.
+   * A partial snapshot is not a request message or a persisted message.
    *
    * Content: Text accumulated from all chunks
    * Tool calls: Tool calls with arguments accumulated so far
    */
-  completeMessage: ChatCompletionMessage;
+  completeMessage: ModelResponseSnapshot;
 
   /**
    * Parsed tool calls with resolved arguments.
@@ -242,10 +252,3 @@ export interface StreamingResponse {
    */
   tokenUsage?: StreamingTokenUsage;
 }
-
-/**
- * OpenAI tool definition for function calling.
- *
- * Re-export for convenience when passing tools to streamChatCompletion.
- * Consumers can import from openai or use the types from this module.
- */

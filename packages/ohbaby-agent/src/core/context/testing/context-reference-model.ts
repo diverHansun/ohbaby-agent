@@ -1,4 +1,4 @@
-import type { ChatCompletionMessage } from "../../llm-client/index.js";
+import type { ModelMessage } from "../../llm-client/index.js";
 
 export type ReferenceToolTerminalStatus = "aborted" | "completed" | "error";
 
@@ -189,7 +189,7 @@ export function applyReferenceCompactionCommit(
 
 export function projectReferenceHistory(
   state: ReferenceContextState,
-): readonly ChatCompletionMessage[] {
+): readonly ModelMessage[] {
   const activeSummaries = state.messages.filter((message) =>
     message.parts.some(
       (part) => part.kind === "text" && part.summary && !part.compacted,
@@ -200,7 +200,7 @@ export function projectReferenceHistory(
   );
 
   return [...activeSummaries, ...nonSummaries].flatMap(
-    (message): ChatCompletionMessage[] => {
+    (message): ModelMessage[] => {
       const active = message.parts.filter((part) => !part.compacted);
       const summaryText = active
         .filter(
@@ -241,13 +241,10 @@ export function projectReferenceHistory(
         {
           content: content === "" ? null : content,
           role: "assistant" as const,
-          tool_calls: tools.map((part) => ({
-            function: {
-              arguments: JSON.stringify(part.input),
-              name: part.tool,
-            },
-            id: part.callId,
-            type: "function" as const,
+          toolCalls: tools.map((part) => ({
+            callId: part.callId,
+            argumentsJson: JSON.stringify(part.input),
+            name: part.tool,
           })),
         },
         ...tools.map((part) => ({
@@ -256,7 +253,7 @@ export function projectReferenceHistory(
               ? "Tool execution was interrupted before a durable result was recorded. Side effects may have occurred; verify before retrying."
               : (part.result ?? ""),
           role: "tool" as const,
-          tool_call_id: part.callId,
+          callId: part.callId,
         })),
       ];
     },

@@ -88,24 +88,8 @@ describe("subagent scoped context integration", () => {
         toolNames: [toolName],
         tools:
           contextScopeId === "scope_b"
-            ? [
-                {
-                  function: {
-                    name: "write_file",
-                    parameters: { type: "object" },
-                  },
-                  type: "function" as const,
-                },
-              ]
-            : [
-                {
-                  function: {
-                    name: "read_file",
-                    parameters: { type: "object" },
-                  },
-                  type: "function" as const,
-                },
-              ],
+            ? [{ name: "write_file", inputSchema: { type: "object" } }]
+            : [{ name: "read_file", inputSchema: { type: "object" } }],
       });
     };
 
@@ -127,7 +111,7 @@ describe("subagent scoped context integration", () => {
     expect(scopeBWire).toContain("scope-b-sentinel");
     expect(scopeBWire).not.toContain("primary-sentinel");
     expect(scopeBWire).not.toContain("scope-a-sentinel");
-    expect(scopeB.request.tools?.[0]?.function.name).toBe("write_file");
+    expect(scopeB.request.tools?.[0].name).toBe("write_file");
 
     expect(primary.composition).toBeDefined();
     await append("scope-a-later-child-transcript", "scope_a");
@@ -217,15 +201,7 @@ describe("subagent scoped context integration", () => {
       systemPromptProvider,
       tokenCounter,
     });
-    const tools = [
-      {
-        function: {
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
-      },
-    ];
+    const tools = [{ name: "read_file", inputSchema: { type: "object" } }];
 
     const preparedA = await manager.prepareTurn({
       agentName: "explore",
@@ -349,15 +325,7 @@ describe("subagent scoped context integration", () => {
       },
       tokenCounter,
     });
-    const tools = [
-      {
-        function: {
-          name: "read_file",
-          parameters: { type: "object" },
-        },
-        type: "function" as const,
-      },
-    ];
+    const tools = [{ name: "read_file", inputSchema: { type: "object" } }];
 
     const primary = await manager.prepareTurn({
       agentName: "build",

@@ -33,7 +33,7 @@ import type {
   ReferenceToolTerminalStatus,
 } from "./testing/context-reference-model.js";
 import type { ContextManager, PreparedModelRequest } from "./types.js";
-import type { ChatCompletionMessage } from "../llm-client/index.js";
+import type { ModelMessage } from "../llm-client/index.js";
 
 const SESSION_ID = "reference-session";
 const DIRECTORY = "/reference-workspace";
@@ -163,11 +163,8 @@ function createHarness(isSubagent: boolean): ReferenceHarness {
 
 function toolsFor(names: readonly ToolName[]): PreparedModelRequest["tools"] {
   return names.map((name) => ({
-    function: {
-      name,
-      parameters: { additionalProperties: true, type: "object" },
-    },
-    type: "function" as const,
+    name,
+    inputSchema: { additionalProperties: true, type: "object" },
   }));
 }
 
@@ -487,12 +484,12 @@ async function assertReferenceInvariants(
   }
 
   const activeToolCallIds = actual.flatMap((message) =>
-    message.role === "assistant" && "tool_calls" in message
-      ? (message.tool_calls?.map((call) => call.id) ?? [])
+    message.role === "assistant" && "toolCalls" in message
+      ? (message.toolCalls?.map((call) => call.callId) ?? [])
       : [],
   );
   const resultIds = actual.flatMap((message) =>
-    message.role === "tool" ? [message.tool_call_id] : [],
+    message.role === "tool" ? [message.callId] : [],
   );
   expect(resultIds).toEqual(activeToolCallIds);
 
@@ -511,7 +508,7 @@ async function assertReferenceInvariants(
 
 async function materializeModelView(
   harness: ReferenceHarness,
-): Promise<readonly ChatCompletionMessage[]> {
+): Promise<readonly ModelMessage[]> {
   const assembled = await harness.contextManager.assemble(
     SESSION_ID,
     DIRECTORY,
@@ -526,9 +523,7 @@ async function materializeModelView(
   return serializeForLlm(assembled);
 }
 
-function expectedModelView(
-  harness: ReferenceHarness,
-): readonly ChatCompletionMessage[] {
+function expectedModelView(harness: ReferenceHarness): readonly ModelMessage[] {
   const system =
     harness.contextScopeId === undefined
       ? `${SYSTEM_PROMPT}\n\n<memory>\n${MEMORY}\n</memory>`

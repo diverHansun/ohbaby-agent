@@ -1,5 +1,5 @@
 import type {
-  ChatCompletionMessage,
+  ModelMessage,
   LLMClientInstance,
 } from "../../core/llm-client/index.js";
 import { streamChatCompletion } from "../../core/llm-client/index.js";
@@ -47,7 +47,7 @@ export async function generateSessionTitle({
 }: GenerateSessionTitleInput): Promise<string | null> {
   const abortController = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const messages: ChatCompletionMessage[] = [
+  const messages: ModelMessage[] = [
     {
       content: TITLE_GENERATION_SYSTEM_PROMPT,
       role: "system",
@@ -109,7 +109,7 @@ export function cleanGeneratedSessionTitle(rawTitle: string): string {
 
 async function collectGeneratedTitle(
   llmClient: LLMClientInstance,
-  messages: readonly ChatCompletionMessage[],
+  messages: readonly ModelMessage[],
   signal: AbortSignal,
   sessionId: string | undefined,
 ): Promise<string | null> {

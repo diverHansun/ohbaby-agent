@@ -1,8 +1,5 @@
 import type { BusInstance } from "../../bus/index.js";
-import type {
-  ChatCompletionMessage,
-  InterfaceProviderFunctionTools,
-} from "../llm-client/index.js";
+import type { ModelMessage, ModelToolDefinition } from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
@@ -90,8 +87,8 @@ export interface CreateRunPromptSnapshotInput extends SystemPromptProviderInput 
 }
 
 export interface PreparedModelRequest {
-  readonly messages: readonly ChatCompletionMessage[];
-  readonly tools: InterfaceProviderFunctionTools;
+  readonly messages: readonly ModelMessage[];
+  readonly tools: readonly ModelToolDefinition[] | undefined;
 }
 
 export interface ContextUsage {
@@ -170,7 +167,7 @@ export interface CompactOptions {
   readonly isSubagent?: boolean;
   readonly modelId: string;
   readonly toolNames: readonly string[];
-  readonly tools: InterfaceProviderFunctionTools;
+  readonly tools: readonly ModelToolDefinition[] | undefined;
 }
 
 export interface CompactResult {
@@ -195,10 +192,10 @@ export interface PrepareTurnInput {
   /** Fires once after an actual automatic compaction rung is selected, before history mutation. */
   readonly onCompactionStarted?: () => void;
   /** Ephemeral model-only directives measured and sent exactly once, but never persisted. */
-  readonly tailDirectives?: readonly ChatCompletionMessage[];
+  readonly tailDirectives?: readonly ModelMessage[];
   readonly toolNames: readonly string[];
   readonly toolDefinitions?: readonly ToolDefinition[];
-  readonly tools: InterfaceProviderFunctionTools;
+  readonly tools: readonly ModelToolDefinition[] | undefined;
   readonly isSubagent?: boolean;
   readonly force?: boolean;
 }
@@ -223,7 +220,7 @@ export interface ContextManager {
   getUsage(input: {
     readonly context: AssembledContext;
     readonly modelId: string;
-    readonly tools: InterfaceProviderFunctionTools;
+    readonly tools: readonly ModelToolDefinition[] | undefined;
   }): ContextUsage;
   createRunPromptSnapshot(
     input: CreateRunPromptSnapshotInput,
