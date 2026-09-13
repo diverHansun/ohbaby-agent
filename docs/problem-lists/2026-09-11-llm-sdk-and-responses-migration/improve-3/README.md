@@ -1,6 +1,6 @@
 # improve-3 · LLM 请求与结果契约去 Chat 耦合
 
-> 开启日期：2026-09-13。状态：improve-2前置验收与本地合入已完成；A/B批已通过各批测试与独立审查，继续C批跨模块与构建产物验收。
+> 开启日期：2026-09-13。状态：**技术验收通过，等待用户审核，不自动合并**。A/B/C测试已提交，完整preflight及独立审查通过；本记录随文档收尾提交。三协议各有真实成功证据，Qwen原偶发失败未定因、历史保留。详见[05实施验收](./05-implementation-acceptance.md)及§5.8。
 > 调研代码：`codex/improve-2-responses-migration@a18290f3`。本轮实施分支：`codex/improve-3-model-contract`，起点为集成分支`b43a0921`；main不动。
 
 本轮承接improve-2 §2.8主动切出的内部契约问题。精确设计和分批实施已获用户批准。2026-09-13 improve-2最新全量preflight与生产lifecycle Grok T12通过，详见improve-2/05 §5.12。按用户授权完成收尾并合入openai-responses-migration，再从该集成分支建立本轮临时分支实施。不得合入main；本轮改造后须重新运行全部矩阵。
@@ -20,8 +20,9 @@
 7. [事件与公开接口调查](./01a-event-and-public-api-exposure.md)
 8. [跨模块旧接口与批次依赖清单](./02a-cross-module-interface-migration.md)
 9. [improve-4 候选范围与后续顺序](./next-stage-candidates.md)
+10. [公开API迁移说明](./public-api-migration.md)与[05实施验收](./05-implementation-acceptance.md)
 
-`05-implementation-acceptance.md` 仅在实施后创建。design 定义目标契约；02 引用字段 ID，不复制另一份命名表。用例及非功能要求已收进接口、目标与测试，不新增空壳文件。`docs/core/llm-client/` 暂保留当前实现描述，实施时再同步权威文档。
+05记录实际范围、通过证据及失败历史。design定义目标契约；02引用字段ID，不复制另一份命名表。按用户最新要求，上级llm-client五份旧文档保持不变，本轮说明位于[独立模块目录](../../../core/llm-client/openai-response-miagration-improve-3/README.md)。
 
 ## 批准与开工门
 
@@ -43,4 +44,10 @@
 
 TDD先复现旧快照名、伪造空正文和隐藏usage别名三项失败，再修改实现。冻结后定向41文件801项、完整unit、contract 17文件309项、integration 53文件352项均exit 0；lint/typecheck/格式检查通过。完整integration包含CLI打包安装与实际Lifecycle→worker→bridge新增三例。独立子代理未发现实质阻塞。新测试证实不完整工具参数及完成信号后EOF前取消都不执行工具；观察事件不提供parsed调用授权。
 
-C批的SQLite两次reopen、公开构建消费者、本地三协议HTTP/SSE和最终ZenMux矩阵尚待本轮执行，不能用A/B回归替代。
+## C批与当前停止点（2026-09-13）
+
+SQLite两次真实reopen/UI恢复、公开构建消费者及本地三协议HTTP/SSE已通过；C独立审查未发现实质问题。最终preflight复验exit 0，317文件3229项通过、5文件16项既有跳过，所有build通过。此前一次全量及一次隔离CLI包装安装超时保留在05；未改测试或超时，不能声称稳定性问题已修复。
+
+真实ZenMux前两轮均在连接阶段失败。TUN下17:54复跑Responses/Chat通过，Qwen工具执行次数为0；随后21:59 Qwen定向诊断与清理后的原runner均完整通过。各次失败、诊断干扰、请求数和成功证据保留在05；不将分次补证写成同次矩阵全绿，也不声称原偶发问题已修复。
+
+当前A为bd98d0ba、B为7fd55e04；C测试及文档仍未提交。main和集成分支不动，improve-4仅保留候选与待确认问题，不在本轮验收未关闭时提前开工。
