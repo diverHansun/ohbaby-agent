@@ -151,7 +151,7 @@ export type ModelMessage =
 
 export interface InterfaceProviderStreamEvent {
   textDelta?: string;
-  reasoningDelta?: string;
+  reasoningTextDelta?: string;
   toolCallDeltas?: InterfaceProviderToolCallDelta[];
   finishReason?: InterfaceProviderFinishReason;
   rawFinishReason?: string;
@@ -183,7 +183,7 @@ export interface InterfaceProviderInstance<TClient = unknown> {
   id: string;
   kind: InterfaceProviderKind;
   client: TClient;
-  streamChatCompletion(
+  streamResponse(
     request: InterfaceProviderRequest,
   ): Promise<AsyncIterable<InterfaceProviderStreamEvent>>;
   isAbortError(error: unknown): boolean;

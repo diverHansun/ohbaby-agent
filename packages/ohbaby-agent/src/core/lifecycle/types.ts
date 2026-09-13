@@ -1,6 +1,6 @@
 import type {
   ModelResponseSnapshot,
-  ChatFinishReason,
+  ModelFinishReason,
   ModelToolDefinition,
   LLMClientInstance,
   ParsedToolCall,
@@ -67,7 +67,7 @@ export interface TurnContext {
   readonly contextScopeId?: string;
   readonly step: number;
   readonly prepared: PreparedTurn;
-  readonly finishReason?: ChatFinishReason | "error";
+  readonly finishReason?: ModelFinishReason | "error";
   readonly finalResponse: string;
   readonly toolResults?: readonly ToolCallResult[];
 }
@@ -146,7 +146,7 @@ export type LifecycleEvent =
       readonly step: number;
       readonly timestamp: number;
       readonly usage: ContextUsage;
-      readonly finishReason?: ChatFinishReason | "error";
+      readonly finishReason?: ModelFinishReason | "error";
       readonly toolResults?: readonly ToolCallResult[];
     }
   | {
@@ -171,7 +171,8 @@ export type LifecycleEvent =
       readonly timestamp: number;
       readonly delta: string;
       readonly content: string;
-      readonly completeMessage: ModelResponseSnapshot;
+      /** May be absent on observation-only projections. */
+      readonly messageSnapshot?: ModelResponseSnapshot;
     }
   | {
       readonly type: "llm:reasoning-delta";
@@ -198,8 +199,9 @@ export type LifecycleEvent =
       readonly contextScopeId?: string;
       readonly step?: number;
       readonly timestamp: number;
-      readonly finishReason?: ChatFinishReason;
-      readonly completeMessage: ModelResponseSnapshot;
+      readonly finishReason?: ModelFinishReason;
+      /** May be absent when the observation transport has no response body. */
+      readonly messageSnapshot?: ModelResponseSnapshot;
       readonly parsedToolCalls?: readonly ParsedToolCall[];
       readonly tokenUsage?: TokenUsage;
     }
@@ -230,13 +232,13 @@ export type LifecycleEvent =
       readonly contextScopeId?: string;
       readonly step: number;
       readonly timestamp: number;
-      readonly finishReason?: ChatFinishReason;
+      readonly finishReason?: ModelFinishReason;
       readonly toolResults?: readonly ToolCallResult[];
     };
 
 export interface LifecycleResult {
   readonly success: boolean;
-  readonly finishReason: ChatFinishReason | "error";
+  readonly finishReason: ModelFinishReason | "error";
   readonly finalResponse: string;
   readonly terminalReason?: AgentTerminalReason;
   /** In-memory only; consumers must normalize and redact before persistence. */

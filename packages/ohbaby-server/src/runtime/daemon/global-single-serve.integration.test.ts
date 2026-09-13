@@ -71,7 +71,7 @@ function spawnServe(input: {
           id: "fake",
           isAbortError: (error) => error instanceof Error && error.name === "AbortError",
           kind: "openai-compatible",
-          async streamChatCompletion(request) {
+          async streamResponse(request) {
             if (JSON.stringify(request.messages).includes("Generate a concise title")) {
               return (async function* () {
                 yield { textDelta: "Process E2E", finishReason: "stop" };
@@ -108,7 +108,7 @@ function spawnServe(input: {
           id: "fake",
           isAbortError: () => false,
           kind: "openai-compatible",
-          async streamChatCompletion(request) {
+          async streamResponse(request) {
             if (JSON.stringify(request.messages).includes("Generate a concise title")) {
               return (async function* () {
                 yield { textDelta: "Process failure", finishReason: "stop" };

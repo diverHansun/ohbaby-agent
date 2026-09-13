@@ -143,7 +143,7 @@ export function createOpenAIResponsesProvider(
     id: options.id,
     kind: "openai-responses",
     client,
-    async streamChatCompletion(
+    async streamResponse(
       request,
     ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
       if (request.signal?.aborted) throw new APIUserAbortError();

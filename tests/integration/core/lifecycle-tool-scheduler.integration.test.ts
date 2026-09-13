@@ -180,7 +180,7 @@ function createSequentialFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: ProviderRequest,
       ): Promise<AsyncIterable<ProviderStreamEvent>> {
         if (nextBatch >= eventBatches.length) {
@@ -377,7 +377,7 @@ describe("lifecycle tool scheduler integration", () => {
       toolCalls: [
         {
           arguments: { path: "README.md" },
-          id: "call_read",
+          callId: "call_read",
           name: "read_fake",
         },
       ],

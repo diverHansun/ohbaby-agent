@@ -186,7 +186,7 @@ function createFakeLLMClient(
         return false;
       },
       kind: "openai-compatible",
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);
@@ -205,9 +205,7 @@ function createRejectingLLMClient(
     ...client,
     provider: {
       ...client.provider,
-      streamChatCompletion(): Promise<
-        AsyncIterable<InterfaceProviderStreamEvent>
-      > {
+      streamResponse(): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         return Promise.reject(error);
       },
     },
@@ -222,7 +220,7 @@ function createNeverResolvingLLMClient(
     ...client,
     provider: {
       ...client.provider,
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);

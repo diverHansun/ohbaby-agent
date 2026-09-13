@@ -37,7 +37,7 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function reasoningDeltaFromChoiceDelta(
+function reasoningTextDeltaFromChoiceDelta(
   delta: ChatCompletionChunk.Choice["delta"],
 ): string | undefined {
   const extendedDelta = delta as Record<string, unknown>;
@@ -157,12 +157,12 @@ function buildStreamEvent(
       ? mappedToolCallDeltas
       : undefined;
   const textDelta = nonEmptyString(choice.delta.content);
-  const reasoningDelta = reasoningDeltaFromChoiceDelta(choice.delta);
+  const reasoningTextDelta = reasoningTextDeltaFromChoiceDelta(choice.delta);
   const finishReason = mapFinishReason(choice.finish_reason);
   const tokenUsage = normalizeOpenAICompatibleUsage(chunk.usage, report);
   const event: InterfaceProviderStreamEvent = {
     ...(textDelta === undefined ? {} : { textDelta }),
-    ...(reasoningDelta === undefined ? {} : { reasoningDelta }),
+    ...(reasoningTextDelta === undefined ? {} : { reasoningTextDelta }),
     ...(toolCallDeltas === undefined ? {} : { toolCallDeltas }),
     ...(finishReason === undefined ? {} : { finishReason }),
     ...(choice.finish_reason === null
@@ -173,7 +173,7 @@ function buildStreamEvent(
 
   if (
     !event.textDelta &&
-    !event.reasoningDelta &&
+    !event.reasoningTextDelta &&
     (!event.toolCallDeltas || event.toolCallDeltas.length === 0) &&
     !event.finishReason &&
     !event.rawFinishReason &&
@@ -189,7 +189,7 @@ function isUsageOnlyEvent(event: InterfaceProviderStreamEvent): boolean {
   return (
     event.tokenUsage !== undefined &&
     event.textDelta === undefined &&
-    event.reasoningDelta === undefined &&
+    event.reasoningTextDelta === undefined &&
     event.finishReason === undefined &&
     event.rawFinishReason === undefined &&
     (event.toolCallDeltas === undefined || event.toolCallDeltas.length === 0)
@@ -210,7 +210,7 @@ export function createOpenAICompatibleProvider(
     id: options.id,
     kind: "openai-compatible",
     client,
-    async streamChatCompletion(
+    async streamResponse(
       request: InterfaceProviderRequest,
     ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
       const stream = await client.chat.completions.create(

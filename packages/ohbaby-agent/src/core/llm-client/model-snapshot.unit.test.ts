@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { streamChatCompletion } from "./streaming.js";
+import { streamResponse } from "./streaming.js";
 import type {
   LLMClientInstance,
   ModelMessage,
@@ -25,12 +25,12 @@ it("keeps partial call index and raw arguments in a text-only snapshot without r
       kind: "openai-compatible",
       client: {},
       isAbortError: () => false,
-      async streamChatCompletion() {
+      async streamResponse() {
         await Promise.resolve();
         return (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
           await Promise.resolve();
           yield {
-            reasoningDelta: "thought",
+            reasoningTextDelta: "thought",
             toolCallDeltas: [{ index: 3, name: "read", argumentsDelta: "{ " }],
           };
           yield {
@@ -42,16 +42,16 @@ it("keeps partial call index and raw arguments in a text-only snapshot without r
     },
   };
   const frames = [];
-  for await (const frame of streamChatCompletion(client, [
+  for await (const frame of streamResponse(client, [
     { role: "user", content: "read" },
   ]))
     frames.push(frame);
-  expect(frames[0]?.completeMessage).toEqual({
+  expect(frames[0]?.messageSnapshot).toEqual({
     content: null,
     toolCalls: [{ index: 3, callId: "", name: "read", argumentsJson: "{ " }],
   });
-  expect(frames[0]?.reasoning).toBe("thought");
-  expect(frames[1]?.completeMessage).toEqual({
+  expect(frames[0]?.reasoningText).toBe("thought");
+  expect(frames[1]?.messageSnapshot).toEqual({
     content: null,
     toolCalls: [{ index: 3, callId: "c", name: "read", argumentsJson: "{ }" }],
   });
@@ -73,7 +73,7 @@ it("replays a successful direct tool roundtrip with the original argument text a
       kind: "openai-compatible",
       client: {},
       isAbortError: () => false,
-      async streamChatCompletion(request) {
+      async streamResponse(request) {
         await Promise.resolve();
         requests.push(structuredClone(request));
         return (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
@@ -97,7 +97,7 @@ it("replays a successful direct tool roundtrip with the original argument text a
   };
   const messages: ModelMessage[] = [{ role: "user", content: "read" }];
   let completed: StreamingResponse | undefined;
-  for await (const frame of streamChatCompletion(client, messages))
+  for await (const frame of streamResponse(client, messages))
     if (frame.isComplete) completed = frame;
   if (
     completed?.streamStopReason !== "provider_finished" ||
@@ -105,14 +105,14 @@ it("replays a successful direct tool roundtrip with the original argument text a
     !completed.parsedToolCalls?.length
   )
     throw new Error("Expected successful parsed tool completion");
-  const snapshot = completed.completeMessage;
+  const snapshot = completed.messageSnapshot;
   const toolCalls = completed.parsedToolCalls.map((parsed) => {
     const raw = snapshot.toolCalls?.find(
-      (call) => call.callId === parsed.id && call.name === parsed.name,
+      (call) => call.callId === parsed.callId && call.name === parsed.name,
     );
     if (!raw) throw new Error("Missing complete call");
     return {
-      callId: parsed.id,
+      callId: parsed.callId,
       name: parsed.name,
       argumentsJson: raw.argumentsJson,
     };
@@ -120,13 +120,12 @@ it("replays a successful direct tool roundtrip with the original argument text a
   messages.push(
     {
       role: "assistant",
-      content: completed.completeMessage.content,
+      content: completed.messageSnapshot.content,
       toolCalls,
     },
     { role: "tool", callId: "c", content: "result" },
   );
-  for await (const frame of streamChatCompletion(client, messages))
-    completed = frame;
+  for await (const frame of streamResponse(client, messages)) completed = frame;
   expect(requests[1]?.messages).toEqual([
     { role: "user", content: "read" },
     {
@@ -136,5 +135,5 @@ it("replays a successful direct tool roundtrip with the original argument text a
     },
     { role: "tool", callId: "c", content: "result" },
   ]);
-  expect(completed.completeMessage).toEqual({ content: "done" });
+  expect(completed.messageSnapshot).toEqual({ content: "done" });
 });

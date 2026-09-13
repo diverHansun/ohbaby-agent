@@ -462,7 +462,7 @@ export function createAnthropicProvider(
     id: options.id,
     kind: "anthropic",
     client,
-    streamChatCompletion(
+    streamResponse(
       request: InterfaceProviderRequest,
     ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
       const stream = client.messages.stream(buildRequestParams(request), {

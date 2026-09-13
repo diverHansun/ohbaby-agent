@@ -117,7 +117,7 @@ function createBlockingFifoLlmClient(input: {
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {

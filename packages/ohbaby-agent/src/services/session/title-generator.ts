@@ -2,7 +2,7 @@ import type {
   ModelMessage,
   LLMClientInstance,
 } from "../../core/llm-client/index.js";
-import { streamChatCompletion } from "../../core/llm-client/index.js";
+import { streamResponse } from "../../core/llm-client/index.js";
 import {
   isDefaultSessionTitle,
   sanitizePromptForSessionTitle,
@@ -114,13 +114,13 @@ async function collectGeneratedTitle(
   sessionId: string | undefined,
 ): Promise<string | null> {
   let rawTitle = "";
-  for await (const response of streamChatCompletion(llmClient, [...messages], {
+  for await (const response of streamResponse(llmClient, [...messages], {
     maxTokens: TITLE_GENERATION_MAX_TOKENS,
     purpose: "session-title",
     ...(sessionId === undefined ? {} : { sessionId }),
     signal,
   })) {
-    const content = response.completeMessage.content;
+    const content = response.messageSnapshot.content;
     if (typeof content === "string") {
       rawTitle = content;
     }

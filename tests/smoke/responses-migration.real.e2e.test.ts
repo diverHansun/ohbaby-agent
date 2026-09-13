@@ -371,7 +371,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
           interfaceProvider: profile.interfaceProvider,
         });
         Reflect.set(provider.client as object, "maxRetries", 0);
-        const stream = provider.streamChatCompletion.bind(provider);
+        const stream = provider.streamResponse.bind(provider);
         const llmClient: LLMClientInstance = {
           config: {
             baseUrl:
@@ -387,7 +387,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
           },
           provider: {
             ...provider,
-            async streamChatCompletion(request) {
+            async streamResponse(request) {
               requests.push(request);
               try {
                 const source = await stream(request);
@@ -483,7 +483,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
           expect(tool.result.finalResponse.trim()).toBe(verification);
           expect(hasPositiveUsage(tool.result)).toBe(true);
           expect(tool.result.toolCalls).toHaveLength(1);
-          const callId = tool.result.toolCalls?.[0]?.id;
+          const callId = tool.result.toolCalls?.[0]?.callId;
           expect(Boolean(callId)).toBe(true);
           expect(
             tool.events.some(

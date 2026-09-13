@@ -70,7 +70,7 @@ function fakeLlmClient(input: {
       id: "fake",
       isAbortError: () => false,
       kind: "openai-compatible",
-      streamChatCompletion(request) {
+      streamResponse(request) {
         input.requests.push(request);
         const events = input.batches[nextBatch++];
         if (!events) {

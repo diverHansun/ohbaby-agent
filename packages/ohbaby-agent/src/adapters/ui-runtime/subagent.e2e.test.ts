@@ -192,7 +192,7 @@ function fakeLlmClient(
       isAbortError(): boolean {
         return false;
       },
-      streamChatCompletion(
+      streamResponse(
         request,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);

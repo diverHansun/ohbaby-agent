@@ -117,7 +117,7 @@ function fakeLlmClient(
         return false;
       },
       kind: "openai-compatible",
-      streamChatCompletion(): Promise<AsyncIterable<never>> {
+      streamResponse(): Promise<AsyncIterable<never>> {
         return Promise.reject(new Error("No fake response configured"));
       },
     },
@@ -160,7 +160,7 @@ function recordingFakeLlmClient(input: {
       isAbortError(): boolean {
         return false;
       },
-      streamChatCompletion(
+      streamResponse(
         request,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         input.requests.push(request);

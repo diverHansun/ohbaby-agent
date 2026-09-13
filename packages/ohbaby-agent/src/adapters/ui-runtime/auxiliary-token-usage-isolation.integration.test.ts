@@ -7,7 +7,7 @@ import type {
   LifecycleResult,
 } from "../../core/lifecycle/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
-import { streamChatCompletion } from "../../core/llm-client/index.js";
+import { streamResponse } from "../../core/llm-client/index.js";
 import {
   createInMemoryMessageStore,
   createMessageManager,
@@ -102,7 +102,7 @@ describe("auxiliary token usage isolation", () => {
         id: "fake",
         isAbortError: () => false,
         kind: "openai-compatible",
-        streamChatCompletion(
+        streamResponse(
           request,
         ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
           requests.push(request);
@@ -254,7 +254,7 @@ describe("auxiliary token usage isolation", () => {
     expect(requests[3]).not.toHaveProperty("contextScopeId");
 
     batches.push([{ finishReason: "stop", textDelta: "legacy" }]);
-    for await (const _ of streamChatCompletion(llmClient, [
+    for await (const _ of streamResponse(llmClient, [
       { role: "user", content: "Legacy external call" },
     ])) {
       // Drain the shared-client legacy compatibility path.

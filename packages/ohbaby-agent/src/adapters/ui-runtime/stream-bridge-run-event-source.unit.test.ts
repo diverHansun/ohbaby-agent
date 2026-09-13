@@ -150,7 +150,32 @@ describe("createStreamBridgeRunEventSource", () => {
     await expect(iterator.next()).resolves.toMatchObject({ done: true });
   });
 
-  it("preserves canonical cache-aware usage on llm completion events", async () => {
+  it("reconstructs delta snapshots from the existing wire content", async () => {
+    const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const source = createStreamBridgeRunEventSource(streamBridge);
+    const iterator = source.subscribeRunEvents("run_1")[Symbol.asyncIterator]();
+
+    streamBridge.publish("run/run_1", "message.part.delta", {
+      content: "Hello world",
+      delta: " world",
+      sessionId: "session_1",
+      timestamp: 123,
+    });
+
+    await expect(nextEvent(iterator)).resolves.toEqual({
+      content: "Hello world",
+      delta: " world",
+      messageSnapshot: { content: "Hello world" },
+      sessionId: "session_1",
+      timestamp: 123,
+      type: "llm:delta",
+    });
+
+    streamBridge.end("run/run_1");
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+  });
+
+  it("preserves canonical usage while omitting an unknown completion snapshot", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const source = createStreamBridgeRunEventSource(streamBridge);
     const iterator = source.subscribeRunEvents("run_1")[Symbol.asyncIterator]();
@@ -174,7 +199,6 @@ describe("createStreamBridgeRunEventSource", () => {
     });
 
     await expect(nextEvent(iterator)).resolves.toEqual({
-      completeMessage: { content: "" },
       finishReason: "stop",
       sessionId: "session_1",
       step: 4,

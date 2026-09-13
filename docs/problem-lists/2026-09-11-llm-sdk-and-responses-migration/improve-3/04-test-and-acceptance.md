@@ -1,6 +1,6 @@
 # 4. 本轮测试与验收
 
-> 2026-09-13精确契约已批准；真实E2E模型/协议矩阵见§4.6。improve-2已收尾并合入本地集成分支；improve-3在codex/improve-3-model-contract开始A批，验收尚未完成，不沿用improve-2数字冒充本轮结果。
+> 2026-09-13精确契约已批准；真实E2E模型/协议矩阵见§4.6。improve-2已收尾并合入本地集成分支；improve-3在codex/improve-3-model-contract完成A/B测试审查，继续C批，整体验收尚未完成，不沿用improve-2数字冒充本轮结果。
 
 ## 4.1 范围与执行
 

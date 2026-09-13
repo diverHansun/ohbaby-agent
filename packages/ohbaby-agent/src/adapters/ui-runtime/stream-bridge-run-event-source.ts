@@ -149,7 +149,7 @@ function lifecycleEventFromStream(
     const delta = stringData(data, "delta") ?? "";
     return {
       ...scopeData(data),
-      completeMessage: { content },
+      messageSnapshot: { content },
       content,
       delta,
       sessionId,
@@ -205,7 +205,6 @@ function lifecycleEventFromStream(
     const tokenUsage = tokenUsageData(data.tokenUsage);
     return {
       ...scopeData(data),
-      completeMessage: { content: "" },
       finishReason: stringData(data, "finishReason") as
         | LlmCompleteEvent["finishReason"]
         | undefined,

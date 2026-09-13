@@ -126,7 +126,7 @@ function createFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -175,7 +175,7 @@ function createControlledTitleLLMClient(title: string): {
       ...client,
       provider: {
         ...client.provider,
-        streamChatCompletion(
+        streamResponse(
           request: InterfaceProviderRequest,
         ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
           requests.push(request);
@@ -253,7 +253,7 @@ function createBlockingLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         _request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         return Promise.resolve(
@@ -293,7 +293,7 @@ function createControlledCacheUsageLLMClient(
     ...client,
     provider: {
       ...client.provider,
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -372,7 +372,7 @@ function createSequentialFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -419,7 +419,7 @@ function createInterruptibleGoalLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -596,7 +596,7 @@ function createResumableTaskFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -690,7 +690,7 @@ function createBackgroundSubagentFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -823,7 +823,7 @@ function createAbortableSubagentLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -873,7 +873,7 @@ function createAbortableBackgroundSubagentLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -953,7 +953,7 @@ function createAbortableBackgroundRunTreeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -1024,7 +1024,7 @@ function createCrossContinuationBackgroundLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -1263,7 +1263,7 @@ function createBlockingAfterTodoWritesLLMClient(input: {
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -1325,7 +1325,7 @@ function createControlledSequentialFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -1387,7 +1387,7 @@ function createPauseResumeTodoLLMClient(input: {
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isTitleGenerationRequest(request)) {
@@ -1613,9 +1613,7 @@ function createRejectingLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(): Promise<
-        AsyncIterable<InterfaceProviderStreamEvent>
-      > {
+      streamResponse(): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         return Promise.reject(error);
       },
       isAbortError(): boolean {
@@ -2045,8 +2043,8 @@ describe("createInProcessUiBackendClient", () => {
         bus,
         llmClient: createFakeLLMClient(
           [
-            { reasoningDelta: "Checking" },
-            { reasoningDelta: " context" },
+            { reasoningTextDelta: "Checking" },
+            { reasoningTextDelta: " context" },
             { textDelta: "Visible answer", finishReason: "stop" },
           ],
           { contextWindowTokens: 1_000_000 },
@@ -2069,14 +2067,14 @@ describe("createInProcessUiBackendClient", () => {
 
       await client.submitPromptAndWait("Show reasoning transiently");
 
-      const reasoningDeltas = events.filter(
+      const reasoningTextDeltas = events.filter(
         (
           event,
         ): event is Extract<UiEvent, { type: "message.reasoning.delta" }> =>
           event.type === "message.reasoning.delta",
       );
       expect(
-        reasoningDeltas.map((event) => ({
+        reasoningTextDeltas.map((event) => ({
           content: event.content,
           delta: event.delta,
         })),
@@ -5808,7 +5806,7 @@ describe("createInProcessUiBackendClient", () => {
           ...baseClient.provider,
           isAbortError: (error: unknown): boolean =>
             error instanceof Error && error.name === "AbortError",
-          streamChatCompletion(
+          streamResponse(
             request: InterfaceProviderRequest,
           ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
             if (isTitleGenerationRequest(request)) {
@@ -5870,7 +5868,7 @@ describe("createInProcessUiBackendClient", () => {
         ...baseClient,
         provider: {
           ...baseClient.provider,
-          streamChatCompletion(
+          streamResponse(
             request: InterfaceProviderRequest,
           ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
             if (isTitleGenerationRequest(request)) {

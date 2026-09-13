@@ -166,7 +166,7 @@ async function collect(
 ): Promise<InterfaceProviderStreamEvent[]> {
   const { provider } = setup(events);
   const output: InterfaceProviderStreamEvent[] = [];
-  for await (const event of await provider.streamChatCompletion(request))
+  for await (const event of await provider.streamResponse(request))
     output.push(event);
   return output;
 }
@@ -174,7 +174,7 @@ async function collect(
 describe("Responses request projection", () => {
   it("moves all system strings into ordered instructions and projects conversation/function roundtrips", async () => {
     const { provider, create } = setup();
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       ...request,
       messages: [
         { role: "system", content: "base" },
@@ -251,7 +251,7 @@ describe("Responses request projection", () => {
 
   it("omits absent instructions and tools and projects no cache or continuation controls", async () => {
     const { provider, create } = setup();
-    await provider.streamChatCompletion(request);
+    await provider.streamResponse(request);
     expect(create.mock.calls[0]?.[0]).toEqual({
       model: "responses-model",
       input: [{ role: "user", content: "hello" }],
@@ -310,7 +310,7 @@ describe("Responses request projection", () => {
     async (message) => {
       const { provider, create } = setup();
       await expect(
-        provider.streamChatCompletion({
+        provider.streamResponse({
           ...request,
           messages: [message as never],
         }),
@@ -329,7 +329,7 @@ describe("Responses request projection", () => {
     async (tool) => {
       const { provider, create } = setup();
       await expect(
-        provider.streamChatCompletion({ ...request, tools: [tool as never] }),
+        provider.streamResponse({ ...request, tools: [tool as never] }),
       ).rejects.toThrow(/Responses request/u);
       expect(create).not.toHaveBeenCalled();
     },
@@ -764,9 +764,7 @@ describe("Responses state machine and terminal equality", () => {
       const output: InterfaceProviderStreamEvent[] = [];
       await expect(
         (async (): Promise<void> => {
-          for await (const event of await provider.streamChatCompletion(
-            request,
-          ))
+          for await (const event of await provider.streamResponse(request))
             output.push(event);
         })(),
       ).rejects.toThrow(/Responses/u);
@@ -962,9 +960,7 @@ describe("Responses response status consistency", () => {
       const output: InterfaceProviderStreamEvent[] = [];
       await expect(
         (async (): Promise<void> => {
-          for await (const event of await provider.streamChatCompletion(
-            request,
-          ))
+          for await (const event of await provider.streamResponse(request))
             output.push(event);
         })(),
       ).rejects.toThrow(/incomplete_details/u);
@@ -1242,7 +1238,7 @@ describe("Responses cancellation", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(
-      provider.streamChatCompletion({ ...request, signal: controller.signal }),
+      provider.streamResponse({ ...request, signal: controller.signal }),
     ).rejects.toSatisfy((error: unknown) => provider.isAbortError(error));
     expect(create).not.toHaveBeenCalled();
   });
@@ -1264,7 +1260,7 @@ describe("Responses cancellation", () => {
     const output: InterfaceProviderStreamEvent[] = [];
     await expect(
       (async (): Promise<void> => {
-        for await (const event of await provider.streamChatCompletion(request))
+        for await (const event of await provider.streamResponse(request))
           output.push(event);
       })(),
     ).rejects.toBe(abort);
@@ -1285,7 +1281,7 @@ describe("Responses cancellation", () => {
     );
     await expect(
       (async (): Promise<void> => {
-        for await (const _event of await provider.streamChatCompletion({
+        for await (const _event of await provider.streamResponse({
           ...request,
           signal: controller.signal,
         })) {

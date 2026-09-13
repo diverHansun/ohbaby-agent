@@ -54,7 +54,7 @@ function createSequentialFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (nextBatch >= eventBatches.length) {
@@ -93,7 +93,7 @@ function createFailThenSucceedLLMClient(input: {
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         input.requests.push(request);
@@ -130,7 +130,7 @@ function createRejectingSequenceLLMClient(input: {
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         input.requests.push(request);
@@ -171,7 +171,7 @@ function createScriptedFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (nextStep >= steps.length) {
@@ -1024,8 +1024,8 @@ describe("Lifecycle.run", () => {
       llmClient: createSequentialFakeLLMClient(
         [
           [
-            { reasoningDelta: "think " },
-            { reasoningDelta: "about README" },
+            { reasoningTextDelta: "think " },
+            { reasoningTextDelta: "about README" },
             {
               toolCallDeltas: [
                 {
@@ -1147,7 +1147,7 @@ describe("Lifecycle.run", () => {
       llmClient: createSequentialFakeLLMClient(
         [
           [
-            { reasoningDelta: "thinking" },
+            { reasoningTextDelta: "thinking" },
             {
               finishReason: "stop",
               tokenUsage: {

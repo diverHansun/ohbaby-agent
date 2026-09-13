@@ -38,7 +38,7 @@ export function createFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: ProviderRequest,
       ): Promise<AsyncIterable<ProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {
@@ -78,7 +78,7 @@ export function createSequentialFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: ProviderRequest,
       ): Promise<AsyncIterable<ProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {
@@ -114,7 +114,9 @@ export function createSequentialFakeLLMClient(
 }
 
 function isSessionTitleGenerationRequest(request: ProviderRequest): boolean {
-  return JSON.stringify(request.messages).includes(TITLE_GENERATION_PROMPT_MARKER);
+  return JSON.stringify(request.messages).includes(
+    TITLE_GENERATION_PROMPT_MARKER,
+  );
 }
 
 function titleTextForSessionTitleRequest(request: ProviderRequest): string {
@@ -125,8 +127,11 @@ function titleTextForSessionTitleRequest(request: ProviderRequest): string {
 function firstUserMessageForSessionTitleRequest(
   request: ProviderRequest,
 ): string {
-  const userMessage = request.messages.find((message) => message.role === "user");
-  const content = typeof userMessage?.content === "string" ? userMessage.content : "";
+  const userMessage = request.messages.find(
+    (message) => message.role === "user",
+  );
+  const content =
+    typeof userMessage?.content === "string" ? userMessage.content : "";
   const marker = "First user message:\n";
   const markerIndex = content.indexOf(marker);
   if (markerIndex < 0) {

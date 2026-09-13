@@ -9,7 +9,7 @@ import {
 } from "../../core/context/index.js";
 import { serializeHistory } from "../../core/context/serialization.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
-import { streamChatCompletion } from "../../core/llm-client/index.js";
+import { streamResponse } from "../../core/llm-client/index.js";
 import type { PromptSecurityFinding } from "../../core/system-prompt/security/index.js";
 import { redactPromptSecrets } from "../../services/session/prompt-sanitizer.js";
 
@@ -85,7 +85,7 @@ export function createContextSummaryClient(
       for (let attempt = 0; attempt < 2; attempt += 1) {
         throwIfSummaryAborted(input.signal);
         let summary = "";
-        for await (const response of streamChatCompletion(
+        for await (const response of streamResponse(
           llmClient,
           [
             { role: "system", content: input.systemPrompt ?? input.prompt },
@@ -112,7 +112,7 @@ export function createContextSummaryClient(
             throw summaryAbortError();
           }
           if (response.isComplete) {
-            summary = messageContentToText(response.completeMessage.content);
+            summary = messageContentToText(response.messageSnapshot.content);
           }
         }
 

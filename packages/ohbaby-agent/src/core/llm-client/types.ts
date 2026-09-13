@@ -19,8 +19,8 @@ import type { ProviderRetryEvent } from "./retry.js";
 /**
  * Re-export the owned model request type for convenience.
  *
- * Represents a message in the chat completion API, including:
- * - system: System instruction message
+ * Represents a message in a model request, including:
+ * - system/developer: Instruction message
  * - user: User message
  * - assistant: Assistant response message
  * - tool: Tool execution result message
@@ -49,17 +49,10 @@ export interface ModelResponseSnapshot {
  */
 export type TokenUsage = InterfaceProviderTokenUsage;
 
-export type StreamingTokenUsage = TokenUsage & {
-  /** @deprecated Use inputTokens. */
-  readonly prompt_tokens: number;
-  /** @deprecated Use outputTokens. */
-  readonly completion_tokens: number;
-  /** @deprecated Use totalTokens. */
-  readonly total_tokens: number;
-};
+export type StreamingTokenUsage = TokenUsage;
 
 /**
- * Finish reason for chat completion.
+ * Normalized finish reason reported by the model provider.
  *
  * Indicates why the model stopped generating tokens:
  * - 'stop': Model hit a stop sequence or natural stopping point
@@ -67,7 +60,7 @@ export type StreamingTokenUsage = TokenUsage & {
  * - 'length': Max tokens reached
  * - 'content_filter': Output was filtered by content policy
  */
-export type ChatFinishReason =
+export type ModelFinishReason =
   | "stop"
   | "tool_calls"
   | "length"
@@ -81,12 +74,13 @@ export type StreamStopReason = "provider_finished" | "user_aborted";
  * Single Responsibility: Represents a successfully parsed tool call.
  * The arguments are already JSON-parsed into objects.
  *
- * Constraint: Only populated when stream is complete (finishReason is not null)
- * to ensure arguments are fully accumulated before parsing.
+ * Populated after a provider finish reason is reported. Parsed arguments do
+ * not authorize execution: consumers must wait for successful stream
+ * exhaustion and apply the existing tool and permission checks.
  */
 export interface ParsedToolCall {
   /** Unique identifier for this tool call */
-  id: string;
+  callId: string;
 
   /** Name of the tool/function to invoke */
   name: string;
@@ -147,24 +141,25 @@ export interface LLMClientInstance<TClient = unknown> {
 }
 
 /**
- * Response from streaming chat completion.
+ * One frame from a streaming model response.
  *
  * Single Responsibility: Represents one chunk of a streaming response.
  * Consumers receive this object on each iteration of the async generator.
  *
  * Design decision: Include both partial and complete information in each yield.
- * - completeMessage: Always available, updated with each chunk
- * - parsedToolCalls: Only when stream is complete
- * - isComplete, finishReason, tokenUsage: Only when stream is complete
+ * - messageSnapshot: Always available, updated with each chunk
+ * - parsedToolCalls: Available after a provider finish signal and parsing
+ * - isComplete: May also signal interruption, without a finish reason
+ * - tokenUsage: Available once reported; may be absent even on completion
  *
  * This allows consumers to:
  * 1. Display streaming content in real-time
  * 2. Know when streaming is complete
- * 3. Access parsed tool calls only when they're valid
+ * 3. Inspect parsed tool calls before the execution boundary validates them
  */
 export interface StreamingResponse {
   /**
-   * Complete message accumulated so far.
+   * Response snapshot accumulated so far.
    *
    * Contains the accumulated text and tool-call fragments for display.
    * A partial snapshot is not a request message or a persisted message.
@@ -172,37 +167,34 @@ export interface StreamingResponse {
    * Content: Text accumulated from all chunks
    * Tool calls: Tool calls with arguments accumulated so far
    */
-  completeMessage: ModelResponseSnapshot;
+  messageSnapshot: ModelResponseSnapshot;
 
   /**
    * Parsed tool calls with resolved arguments.
    *
-   * Only populated when:
-   * 1. The stream is complete (isComplete === true)
-   * 2. The model called tools (finish_reason === 'tool_calls')
-   *
-   * Arguments are guaranteed to be valid JSON objects.
-   *
-   * Rationale: Avoid partial JSON parsing which could throw errors.
-   * Only parse when arguments are guaranteed to be complete.
+   * Produced after a provider finish reason when accumulated calls can be
+   * parsed. A later stream error may still invalidate completion. Neither
+   * this field nor the snapshot authorizes tool execution. Abort responses
+   * omit parsed calls; successful stream exhaustion and execution checks
+   * remain necessary.
    */
   parsedToolCalls?: ParsedToolCall[];
 
   /**
-   * Whether the stream has completed.
-   *
-   * When true, finishReason and tokenUsage are populated.
-   * This is the final response for this request.
+   * Whether this frame signals provider completion or local interruption.
+   * Aborts may have no finishReason or tokenUsage. A later stream error can
+   * still invalidate a provider completion signal.
    */
   isComplete: boolean;
 
   /**
    * Reason the stream completed.
    *
-   * Only populated when isComplete === true.
+   * Present when a provider finish reason has been received; local aborts
+   * need not have one.
    * Guides consumer logic for what to do with the response.
    */
-  finishReason?: ChatFinishReason;
+  finishReason?: ModelFinishReason;
 
   /**
    * Local runtime reason for why streaming stopped.
@@ -232,20 +224,20 @@ export interface StreamingResponse {
    * Reasoning delta emitted by providers that expose a separate thinking
    * channel. This is intentionally separate from assistant text content.
    */
-  reasoningDelta?: string;
+  reasoningTextDelta?: string;
 
   /**
    * Reasoning accumulated for the current model step. Consumers may use this
    * for live display or same-turn passback, but it must not be treated as
    * assistant message content.
    */
-  reasoning?: string;
+  reasoningText?: string;
 
   /**
-   * Token usage statistics for the complete request.
+   * Token usage statistics reported so far for this request attempt.
    *
-   * Only populated when isComplete === true.
-   * Contains canonical inclusive input/output/total token counts and, when the
+   * May be present on partial frames or absent at completion. Contains
+   * canonical inclusive input/output/total token counts and, when the
    * provider reports enough evidence, a cache-aware input breakdown.
    *
    * Note: May not be present if stream was interrupted by user.

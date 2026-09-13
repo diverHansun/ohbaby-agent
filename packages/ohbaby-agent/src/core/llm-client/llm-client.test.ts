@@ -1,7 +1,7 @@
 /**
  * Integration tests for the LLM Client module.
  *
- * Tests the createLLMClient and streamChatCompletion functions
+ * Tests the createLLMClient and streamResponse functions
  * with mocked config module and OpenAI API responses.
  */
 
@@ -18,7 +18,7 @@ import {
   parseRetryAfterMs,
   ProviderStreamInterruptedError,
   retryReason,
-  streamChatCompletion,
+  streamResponse,
   ToolCallParseError,
 } from "./index.js";
 import type {
@@ -77,7 +77,7 @@ function createAbortingProviderStream(
   })();
 }
 
-let streamChatCompletionMock: ReturnType<
+let streamResponseMock: ReturnType<
   typeof vi.fn<
     (
       request: InterfaceProviderRequest,
@@ -87,12 +87,12 @@ let streamChatCompletionMock: ReturnType<
 let isAbortErrorMock: ReturnType<typeof vi.fn<(error: unknown) => boolean>>;
 
 function getInterfaceProviderRequest(): InterfaceProviderRequest {
-  const request = streamChatCompletionMock.mock.calls[0][0];
+  const request = streamResponseMock.mock.calls[0][0];
   return request;
 }
 
 function getAssistantMessage(response: StreamingResponse): AssistantMessage {
-  return response.completeMessage;
+  return response.messageSnapshot;
 }
 
 // Mock the config module
@@ -209,7 +209,7 @@ describe("LLM Client Integration Tests", () => {
     });
   });
 
-  describe("streamChatCompletion", () => {
+  describe("streamResponse", () => {
     let mockClient: LLMClientInstance<MockSdkClient>;
 
     beforeEach(() => {
@@ -220,7 +220,7 @@ describe("LLM Client Integration Tests", () => {
           },
         },
       };
-      streamChatCompletionMock =
+      streamResponseMock =
         vi.fn<
           (
             request: InterfaceProviderRequest,
@@ -235,7 +235,7 @@ describe("LLM Client Integration Tests", () => {
           id: "openai",
           kind: "openai-compatible",
           client: sdkClient,
-          streamChatCompletion: streamChatCompletionMock,
+          streamResponse: streamResponseMock,
           isAbortError: isAbortErrorMock,
         },
         config: {
@@ -251,33 +251,33 @@ describe("LLM Client Integration Tests", () => {
     });
 
     it("sends the configured maxTokens when no per-request override is given", async () => {
-      streamChatCompletionMock.mockResolvedValue(
+      streamResponseMock.mockResolvedValue(
         createProviderStream([{ textDelta: "ok", finishReason: "stop" }]),
       );
 
       const messages = [{ role: "user" as const, content: "Say hello" }];
-      for await (const response of streamChatCompletion(mockClient, messages)) {
+      for await (const response of streamResponse(mockClient, messages)) {
         void response;
       }
 
-      expect(streamChatCompletionMock).toHaveBeenCalledWith(
+      expect(streamResponseMock).toHaveBeenCalledWith(
         expect.objectContaining({ maxTokens: 4096 }),
       );
     });
 
     it("sends a per-request maxTokens override without touching client config", async () => {
-      streamChatCompletionMock.mockResolvedValue(
+      streamResponseMock.mockResolvedValue(
         createProviderStream([{ textDelta: "ok", finishReason: "stop" }]),
       );
 
       const messages = [{ role: "user" as const, content: "Say hello" }];
-      for await (const response of streamChatCompletion(mockClient, messages, {
+      for await (const response of streamResponse(mockClient, messages, {
         maxTokens: 128,
       })) {
         void response;
       }
 
-      expect(streamChatCompletionMock).toHaveBeenCalledWith(
+      expect(streamResponseMock).toHaveBeenCalledWith(
         expect.objectContaining({ maxTokens: 128 }),
       );
       expect(mockClient.config.maxTokens).toBe(4096);
@@ -288,17 +288,15 @@ describe("LLM Client Integration Tests", () => {
 
       await expect(
         (async (): Promise<void> => {
-          for await (const response of streamChatCompletion(
-            mockClient,
-            messages,
-            { maxTokens: 0 },
-          )) {
+          for await (const response of streamResponse(mockClient, messages, {
+            maxTokens: 0,
+          })) {
             void response;
           }
         })(),
       ).rejects.toThrow(/maxTokens.*positive integer/u);
 
-      expect(streamChatCompletionMock).not.toHaveBeenCalled();
+      expect(streamResponseMock).not.toHaveBeenCalled();
     });
 
     it("should accumulate text content from streaming chunks", async () => {
@@ -317,23 +315,23 @@ describe("LLM Client Integration Tests", () => {
         },
       ];
 
-      streamChatCompletionMock.mockResolvedValue(createProviderStream(events));
+      streamResponseMock.mockResolvedValue(createProviderStream(events));
 
       const messages = [{ role: "user" as const, content: "Say hello" }];
       const responses: StreamingResponse[] = [];
 
-      for await (const response of streamChatCompletion(mockClient, messages)) {
+      for await (const response of streamResponse(mockClient, messages)) {
         responses.push(response);
       }
 
       expect(responses.length).toBe(2);
 
       // First chunk should have accumulated content
-      expect(responses[0].completeMessage.content).toBe("Hello");
+      expect(responses[0].messageSnapshot.content).toBe("Hello");
       expect(responses[0].isComplete).toBe(false);
 
       // Last chunk should have complete content
-      expect(responses[1].completeMessage.content).toBe("Hello world");
+      expect(responses[1].messageSnapshot.content).toBe("Hello world");
       expect(responses[1].isComplete).toBe(true);
       expect(responses[1].finishReason).toBe("stop");
       expect(responses[1].rawFinishReason).toBeUndefined();
@@ -368,14 +366,14 @@ describe("LLM Client Integration Tests", () => {
         },
       ];
 
-      streamChatCompletionMock.mockResolvedValue(createProviderStream(events));
+      streamResponseMock.mockResolvedValue(createProviderStream(events));
 
       const messages = [
         { role: "user" as const, content: "Get weather for NYC" },
       ];
       const responses: StreamingResponse[] = [];
 
-      for await (const response of streamChatCompletion(mockClient, messages)) {
+      for await (const response of streamResponse(mockClient, messages)) {
         responses.push(response);
       }
 
@@ -394,8 +392,11 @@ describe("LLM Client Integration Tests", () => {
 
       // Verify parsed tool call
       const parsedCall = lastResponse.parsedToolCalls?.[0];
-      expect(parsedCall?.name).toBe("get_weather");
-      expect(parsedCall?.arguments).toEqual({ location: "NYC" });
+      expect(parsedCall).toEqual({
+        callId: "call_123",
+        name: "get_weather",
+        arguments: { location: "NYC" },
+      });
     });
 
     it("should handle empty responses with default content", async () => {
@@ -410,62 +411,62 @@ describe("LLM Client Integration Tests", () => {
         },
       ];
 
-      streamChatCompletionMock.mockResolvedValue(createProviderStream(events));
+      streamResponseMock.mockResolvedValue(createProviderStream(events));
 
       const messages = [{ role: "user" as const, content: "test" }];
       const responses: StreamingResponse[] = [];
 
-      for await (const response of streamChatCompletion(mockClient, messages)) {
+      for await (const response of streamResponse(mockClient, messages)) {
         responses.push(response);
       }
 
       const lastResponse = responses[responses.length - 1];
-      expect(lastResponse.completeMessage.content).toBe("(Empty response)");
+      expect(lastResponse.messageSnapshot.content).toBe("(Empty response)");
     });
 
     it("should yield provider reasoning deltas without exposing them as assistant text", async () => {
       const events: InterfaceProviderStreamEvent[] = [
-        { reasoningDelta: "think " },
-        { reasoningDelta: "more" },
+        { reasoningTextDelta: "think " },
+        { reasoningTextDelta: "more" },
         { textDelta: "Visible answer" },
         { finishReason: "stop" },
       ];
 
-      streamChatCompletionMock.mockResolvedValue(createProviderStream(events));
+      streamResponseMock.mockResolvedValue(createProviderStream(events));
 
       const messages = [{ role: "user" as const, content: "test" }];
       const responses: StreamingResponse[] = [];
 
-      for await (const response of streamChatCompletion(mockClient, messages)) {
+      for await (const response of streamResponse(mockClient, messages)) {
         responses.push(response);
       }
 
       expect(
         responses.map((response) => ({
-          content: response.completeMessage.content,
-          reasoning: response.reasoning,
-          reasoningDelta: response.reasoningDelta,
+          content: response.messageSnapshot.content,
+          reasoningText: response.reasoningText,
+          reasoningTextDelta: response.reasoningTextDelta,
         })),
       ).toEqual([
         {
           content: "(Empty response)",
-          reasoning: "think ",
-          reasoningDelta: "think ",
+          reasoningText: "think ",
+          reasoningTextDelta: "think ",
         },
         {
           content: "(Empty response)",
-          reasoning: "think more",
-          reasoningDelta: "more",
+          reasoningText: "think more",
+          reasoningTextDelta: "more",
         },
         {
           content: "Visible answer",
-          reasoning: "think more",
-          reasoningDelta: undefined,
+          reasoningText: "think more",
+          reasoningTextDelta: undefined,
         },
         {
           content: "Visible answer",
-          reasoning: "think more",
-          reasoningDelta: undefined,
+          reasoningText: "think more",
+          reasoningTextDelta: undefined,
         },
       ]);
     });
@@ -475,13 +476,13 @@ describe("LLM Client Integration Tests", () => {
       mockClient.config.temperature = 1.0;
       mockClient.config.maxTokens = 128000;
 
-      streamChatCompletionMock.mockResolvedValue(
+      streamResponseMock.mockResolvedValue(
         createProviderStream([{ textDelta: "test", finishReason: "stop" }]),
       );
 
       const messages = [{ role: "user" as const, content: "test" }];
 
-      const iterator = streamChatCompletion(mockClient, messages);
+      const iterator = streamResponse(mockClient, messages);
       await iterator.next();
 
       const callArgs = getInterfaceProviderRequest();
@@ -492,7 +493,7 @@ describe("LLM Client Integration Tests", () => {
     });
 
     it("should pass tools parameter to API", async () => {
-      streamChatCompletionMock.mockResolvedValue(
+      streamResponseMock.mockResolvedValue(
         createProviderStream([{ textDelta: "test", finishReason: "stop" }]),
       );
 
@@ -508,7 +509,7 @@ describe("LLM Client Integration Tests", () => {
         },
       ];
 
-      const iterator = streamChatCompletion(mockClient, messages, { tools });
+      const iterator = streamResponse(mockClient, messages, { tools });
       await iterator.next();
 
       const callArgs = getInterfaceProviderRequest();
@@ -517,13 +518,13 @@ describe("LLM Client Integration Tests", () => {
     });
 
     it("should pass abort signal to provider request", async () => {
-      streamChatCompletionMock.mockResolvedValue(
+      streamResponseMock.mockResolvedValue(
         createProviderStream([{ textDelta: "test", finishReason: "stop" }]),
       );
 
       const messages = [{ role: "user" as const, content: "test" }];
       const controller = new AbortController();
-      const iterator = streamChatCompletion(mockClient, messages, {
+      const iterator = streamResponse(mockClient, messages, {
         signal: controller.signal,
       });
       await iterator.next();
@@ -538,12 +539,12 @@ describe("LLM Client Integration Tests", () => {
       isAbortErrorMock.mockImplementation(
         (error: unknown) => error === abortError,
       );
-      streamChatCompletionMock.mockResolvedValue(
+      streamResponseMock.mockResolvedValue(
         createAbortingProviderStream([{ textDelta: "Partial" }], abortError),
       );
 
       const responses: StreamingResponse[] = [];
-      for await (const response of streamChatCompletion(mockClient, [
+      for await (const response of streamResponse(mockClient, [
         { role: "user" as const, content: "test" },
       ])) {
         responses.push(response);
@@ -556,14 +557,14 @@ describe("LLM Client Integration Tests", () => {
         streamStopReason: "user_aborted",
       });
       expect(responses[1].finishReason).toBeUndefined();
-      expect(responses[1].completeMessage.content).toBe("Partial");
+      expect(responses[1].messageSnapshot.content).toBe("Partial");
     });
 
     it("retries retryable provider errors before any stream delta is emitted", async () => {
       const unavailable = Object.assign(new Error("temporarily unavailable"), {
         status: 503,
       });
-      streamChatCompletionMock
+      streamResponseMock
         .mockRejectedValueOnce(unavailable)
         .mockResolvedValueOnce(
           createProviderStream([
@@ -572,7 +573,7 @@ describe("LLM Client Integration Tests", () => {
         );
 
       const responses: StreamingResponse[] = [];
-      for await (const response of streamChatCompletion(
+      for await (const response of streamResponse(
         mockClient,
         [{ role: "user" as const, content: "test" }],
         {
@@ -587,7 +588,7 @@ describe("LLM Client Integration Tests", () => {
         responses.push(response);
       }
 
-      expect(streamChatCompletionMock).toHaveBeenCalledTimes(2);
+      expect(streamResponseMock).toHaveBeenCalledTimes(2);
       expect(responses[0]).toMatchObject({
         isComplete: false,
         retry: { attempt: 1, maxRetries: 5, reason: "server_error" },
@@ -597,14 +598,14 @@ describe("LLM Client Integration Tests", () => {
         isComplete: true,
         streamStopReason: "provider_finished",
       });
-      expect(responses.at(-1)?.completeMessage.content).toBe("Recovered");
+      expect(responses.at(-1)?.messageSnapshot.content).toBe("Recovered");
     });
 
     it("discards usage from a failed attempt before retrying", async () => {
       const unavailable = Object.assign(new Error("stream failed"), {
         status: 503,
       });
-      streamChatCompletionMock
+      streamResponseMock
         .mockResolvedValueOnce(
           createAbortingProviderStream(
             [
@@ -640,7 +641,7 @@ describe("LLM Client Integration Tests", () => {
         );
 
       const responses: StreamingResponse[] = [];
-      for await (const response of streamChatCompletion(
+      for await (const response of streamResponse(
         mockClient,
         [{ role: "user" as const, content: "test" }],
         {
@@ -668,43 +669,29 @@ describe("LLM Client Integration Tests", () => {
       if (!publicUsage) {
         throw new Error("expected public token usage");
       }
-      // These assignments are a source-compatibility assertion: after usage
-      // is narrowed, legacy consumers must still receive numbers, not
-      // `number | undefined`.
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
-      const promptTokens: number = publicUsage.prompt_tokens;
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
-      const completionTokens: number = publicUsage.completion_tokens;
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
-      const totalTokens: number = publicUsage.total_tokens;
-      expect({ promptTokens, completionTokens, totalTokens }).toEqual({
-        promptTokens: 12,
-        completionTokens: 3,
-        totalTokens: 15,
-      });
-      expect(Object.keys(publicUsage)).not.toEqual(
-        expect.arrayContaining([
-          "prompt_tokens",
-          "completion_tokens",
-          "total_tokens",
-        ]),
-      );
+      // Reflect also includes the old non-enumerable aliases: canonical
+      // usage must be the entire public result, including after a retry.
+      expect(Reflect.ownKeys(publicUsage).sort()).toEqual([
+        "inputTokens",
+        "outputTokens",
+        "totalTokens",
+      ]);
     });
 
     it("does not retry after a reasoning delta has been emitted", async () => {
       const streamError = Object.assign(new Error("socket closed"), {
         status: 503,
       });
-      streamChatCompletionMock.mockResolvedValueOnce(
+      streamResponseMock.mockResolvedValueOnce(
         createAbortingProviderStream(
-          [{ reasoningDelta: "private thought" }],
+          [{ reasoningTextDelta: "private thought" }],
           streamError,
         ),
       );
 
       await expect(
         (async (): Promise<void> => {
-          for await (const response of streamChatCompletion(
+          for await (const response of streamResponse(
             mockClient,
             [{ role: "user" as const, content: "test" }],
             {
@@ -720,14 +707,14 @@ describe("LLM Client Integration Tests", () => {
           }
         })(),
       ).rejects.toBeInstanceOf(ProviderStreamInterruptedError);
-      expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
+      expect(streamResponseMock).toHaveBeenCalledTimes(1);
     });
 
     it("does not retry after a tool-call delta has been emitted", async () => {
       const streamError = Object.assign(new Error("socket closed"), {
         status: 503,
       });
-      streamChatCompletionMock.mockResolvedValueOnce(
+      streamResponseMock.mockResolvedValueOnce(
         createAbortingProviderStream(
           [
             {
@@ -748,7 +735,7 @@ describe("LLM Client Integration Tests", () => {
       const responses: StreamingResponse[] = [];
       await expect(
         (async (): Promise<void> => {
-          for await (const response of streamChatCompletion(
+          for await (const response of streamResponse(
             mockClient,
             [{ role: "user" as const, content: "test" }],
             {
@@ -764,7 +751,7 @@ describe("LLM Client Integration Tests", () => {
           }
         })(),
       ).rejects.toBeInstanceOf(ProviderStreamInterruptedError);
-      expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
+      expect(streamResponseMock).toHaveBeenCalledTimes(1);
       expect(responses).toHaveLength(1);
       expect(responses.some((response) => response.retry !== undefined)).toBe(
         false,
@@ -781,11 +768,11 @@ describe("LLM Client Integration Tests", () => {
           },
         );
         const controller = new AbortController();
-        streamChatCompletionMock.mockRejectedValueOnce(unavailable);
+        streamResponseMock.mockRejectedValueOnce(unavailable);
 
         const responses: StreamingResponse[] = [];
         const consume = (async (): Promise<void> => {
-          for await (const response of streamChatCompletion(
+          for await (const response of streamResponse(
             mockClient,
             [{ role: "user" as const, content: "test" }],
             {
@@ -808,7 +795,7 @@ describe("LLM Client Integration Tests", () => {
         controller.abort("user cancelled");
 
         await expect(consume).resolves.toBeUndefined();
-        expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
+        expect(streamResponseMock).toHaveBeenCalledTimes(1);
         expect(responses).toHaveLength(2);
         expect(responses[0]).toMatchObject({
           isComplete: false,
@@ -824,10 +811,10 @@ describe("LLM Client Integration Tests", () => {
     });
 
     it("yields a complete empty assistant response when the provider stream has no events", async () => {
-      streamChatCompletionMock.mockResolvedValue(createProviderStream([]));
+      streamResponseMock.mockResolvedValue(createProviderStream([]));
 
       const responses: StreamingResponse[] = [];
-      for await (const response of streamChatCompletion(mockClient, [
+      for await (const response of streamResponse(mockClient, [
         { role: "user" as const, content: "test" },
       ])) {
         responses.push(response);
@@ -835,7 +822,7 @@ describe("LLM Client Integration Tests", () => {
 
       expect(responses).toHaveLength(1);
       expect(responses[0]).toMatchObject({
-        completeMessage: { content: "(Empty response)" },
+        messageSnapshot: { content: "(Empty response)" },
         isComplete: true,
         streamStopReason: "provider_finished",
       });
@@ -843,13 +830,13 @@ describe("LLM Client Integration Tests", () => {
 
     it("does not replay a provider stream after a non-abort error follows emitted delta", async () => {
       const streamError = new Error("socket closed");
-      streamChatCompletionMock.mockResolvedValueOnce(
+      streamResponseMock.mockResolvedValueOnce(
         createAbortingProviderStream([{ textDelta: "Partial" }], streamError),
       );
 
       await expect(
         (async (): Promise<void> => {
-          for await (const response of streamChatCompletion(
+          for await (const response of streamResponse(
             mockClient,
             [{ role: "user" as const, content: "test" }],
             {
@@ -865,11 +852,11 @@ describe("LLM Client Integration Tests", () => {
           }
         })(),
       ).rejects.toBeInstanceOf(ProviderStreamInterruptedError);
-      expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
+      expect(streamResponseMock).toHaveBeenCalledTimes(1);
     });
 
     it("classifies malformed tool call arguments as a parse error, not a stream interruption", async () => {
-      streamChatCompletionMock.mockResolvedValue(
+      streamResponseMock.mockResolvedValue(
         createProviderStream([
           {
             toolCallDeltas: [
@@ -887,7 +874,7 @@ describe("LLM Client Integration Tests", () => {
 
       await expect(
         (async (): Promise<void> => {
-          for await (const response of streamChatCompletion(mockClient, [
+          for await (const response of streamResponse(mockClient, [
             { role: "user" as const, content: "test" },
           ])) {
             void response;
@@ -895,11 +882,11 @@ describe("LLM Client Integration Tests", () => {
         })(),
       ).rejects.toBeInstanceOf(ToolCallParseError);
       // A model output defect must not be retried.
-      expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
+      expect(streamResponseMock).toHaveBeenCalledTimes(1);
     });
 
     it("should surface raw finish reason from provider events", async () => {
-      streamChatCompletionMock.mockResolvedValue(
+      streamResponseMock.mockResolvedValue(
         createProviderStream([
           {
             textDelta: "Paused",
@@ -910,7 +897,7 @@ describe("LLM Client Integration Tests", () => {
       );
 
       const responses: StreamingResponse[] = [];
-      for await (const response of streamChatCompletion(mockClient, [
+      for await (const response of streamResponse(mockClient, [
         { role: "user" as const, content: "test" },
       ])) {
         responses.push(response);
@@ -922,9 +909,9 @@ describe("LLM Client Integration Tests", () => {
   });
 
   describe("Module exports", () => {
-    it("should export createLLMClient and streamChatCompletion", () => {
+    it("should export createLLMClient and streamResponse", () => {
       expect(typeof createLLMClient).toBe("function");
-      expect(typeof streamChatCompletion).toBe("function");
+      expect(typeof streamResponse).toBe("function");
     });
 
     it("should work with ES module imports", async () => {
@@ -933,7 +920,7 @@ describe("LLM Client Integration Tests", () => {
       const client = await createLLMClient();
 
       expect(client).toBeDefined();
-      const gen = streamChatCompletion(client, []);
+      const gen = streamResponse(client, []);
       expect(typeof gen[Symbol.asyncIterator]).toBe("function");
     });
   });

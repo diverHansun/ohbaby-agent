@@ -3,7 +3,7 @@ import { config as loadDotenv } from "dotenv";
 import { describe, expect, it, beforeEach } from "vitest";
 import {
   createLLMClient,
-  streamChatCompletion,
+  streamResponse,
 } from "../../../core/llm-client/index.js";
 import { _LLMConfigManager as LLMConfigManager } from "../index.js";
 
@@ -20,11 +20,11 @@ runE2E("LLM config real API e2e", () => {
     const client = await createLLMClient({ projectDirectory: process.cwd() });
     let fullText = "";
 
-    for await (const response of streamChatCompletion(client, [
+    for await (const response of streamResponse(client, [
       { role: "user", content: `Reply with exactly: ${MARKER}` },
     ])) {
-      if (typeof response.completeMessage.content === "string") {
-        fullText = response.completeMessage.content;
+      if (typeof response.messageSnapshot.content === "string") {
+        fullText = response.messageSnapshot.content;
       }
       if (normalize(fullText).includes(normalize(MARKER))) {
         break;

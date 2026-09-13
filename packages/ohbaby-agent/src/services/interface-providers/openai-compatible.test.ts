@@ -116,7 +116,7 @@ describe("openai-compatible provider", () => {
       },
     ];
     const before = structuredClone(messages);
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       model: "test",
       messages,
       tools: [],
@@ -240,7 +240,7 @@ describe("openai-compatible provider", () => {
         },
       },
     ];
-    const stream = await provider.streamChatCompletion({
+    const stream = await provider.streamResponse({
       model: "gpt-4",
       messages: [{ role: "user", content: "Hello" }],
       temperature: 0.7,
@@ -341,7 +341,7 @@ describe("openai-compatible provider", () => {
       >,
     );
 
-    const stream = await provider.streamChatCompletion({
+    const stream = await provider.streamResponse({
       model: "glm-4-plus",
       messages: [{ role: "user", content: "weather" }],
       temperature: 0.2,
@@ -421,7 +421,7 @@ describe("openai-compatible provider", () => {
       >,
     );
 
-    const stream = await provider.streamChatCompletion({
+    const stream = await provider.streamResponse({
       model: "glm-4.7",
       messages: [{ role: "user", content: "Reply with exactly: pong" }],
       temperature: 0,
@@ -435,7 +435,7 @@ describe("openai-compatible provider", () => {
     }
 
     expect(events).toEqual([
-      { reasoningDelta: "hidden reasoning" },
+      { reasoningTextDelta: "hidden reasoning" },
       { textDelta: "pong" },
       {
         finishReason: "stop",
@@ -474,7 +474,7 @@ describe("openai-compatible provider", () => {
       >,
     );
 
-    const stream = await provider.streamChatCompletion({
+    const stream = await provider.streamResponse({
       model: "gpt-4",
       messages: [{ role: "user", content: "Hello" }],
       temperature: 0.7,
@@ -536,7 +536,7 @@ describe("openai-compatible provider", () => {
       >,
     );
 
-    const stream = await provider.streamChatCompletion({
+    const stream = await provider.streamResponse({
       model: "gpt-4",
       messages: [{ role: "user", content: "Hello" }],
       temperature: 0,
@@ -584,7 +584,7 @@ describe("openai-compatible provider", () => {
       >,
     );
 
-    const stream = await provider.streamChatCompletion({
+    const stream = await provider.streamResponse({
       model: "gpt-4",
       messages: [{ role: "user", content: "Hello" }],
       temperature: 0,
@@ -667,7 +667,7 @@ describe("openai-compatible provider", () => {
         apiKey: "test-key",
         baseUrl: `http://127.0.0.1:${String(address.port)}/v1`,
       });
-      const stream = await provider.streamChatCompletion({
+      const stream = await provider.streamResponse({
         model: "fake-model",
         messages: [{ role: "user", content: "Hello" }],
         temperature: 0,

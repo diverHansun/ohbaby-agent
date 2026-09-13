@@ -20,7 +20,7 @@ import type {
   LLMClientInstance,
   StreamingResponse,
   ParsedToolCall,
-  ChatFinishReason,
+  ModelFinishReason,
   StreamingTokenUsage,
   TokenUsage,
 } from "./types.js";
@@ -49,22 +49,15 @@ interface AccumulatedToolCall {
   };
 }
 
-function withLegacyTokenUsageAliases(usage: TokenUsage): StreamingTokenUsage {
-  const publicUsage = {
+function toStreamingTokenUsage(usage: TokenUsage): StreamingTokenUsage {
+  return {
     ...(usage.inputBreakdown === undefined
       ? {}
       : { inputBreakdown: usage.inputBreakdown }),
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     totalTokens: usage.totalTokens,
-  } as StreamingTokenUsage;
-
-  Object.defineProperties(publicUsage, {
-    completion_tokens: { enumerable: false, value: usage.outputTokens },
-    prompt_tokens: { enumerable: false, value: usage.inputTokens },
-    total_tokens: { enumerable: false, value: usage.totalTokens },
-  });
-  return publicUsage;
+  };
 }
 
 class RetrySleepAbortedError extends Error {
@@ -111,7 +104,7 @@ function buildAbortResponse(input: {
   readonly rawFinishReason: string | undefined;
   readonly tokenUsage: TokenUsage | null;
 }): StreamingResponse {
-  const completeMessage: ModelResponseSnapshot =
+  const messageSnapshot: ModelResponseSnapshot =
     input.accumulatedToolCalls.size > 0
       ? {
           content:
@@ -126,10 +119,10 @@ function buildAbortResponse(input: {
         };
 
   return {
-    completeMessage,
+    messageSnapshot,
     isComplete: true,
     rawFinishReason: input.rawFinishReason,
-    reasoning:
+    reasoningText:
       input.accumulatedReasoning === ""
         ? undefined
         : input.accumulatedReasoning,
@@ -137,14 +130,14 @@ function buildAbortResponse(input: {
     tokenUsage:
       input.tokenUsage === null
         ? undefined
-        : withLegacyTokenUsageAliases(input.tokenUsage),
+        : toStreamingTokenUsage(input.tokenUsage),
   };
 }
 
 function isUsageOnlyEvent(event: {
-  readonly finishReason?: ChatFinishReason;
+  readonly finishReason?: ModelFinishReason;
   readonly rawFinishReason?: string;
-  readonly reasoningDelta?: string;
+  readonly reasoningTextDelta?: string;
   readonly textDelta?: string;
   readonly tokenUsage?: TokenUsage;
   readonly toolCallDeltas?: readonly unknown[];
@@ -152,7 +145,7 @@ function isUsageOnlyEvent(event: {
   return (
     event.tokenUsage !== undefined &&
     event.textDelta === undefined &&
-    event.reasoningDelta === undefined &&
+    event.reasoningTextDelta === undefined &&
     event.finishReason === undefined &&
     event.rawFinishReason === undefined &&
     (event.toolCallDeltas === undefined || event.toolCallDeltas.length === 0)
@@ -165,7 +158,7 @@ function parseToolCalls(
   return Array.from(accumulatedToolCalls.values()).map((call) => {
     try {
       return {
-        id: call.id,
+        callId: call.id,
         name: call.function.name,
         arguments: JSON.parse(call.function.arguments) as Record<
           string,
@@ -242,8 +235,8 @@ function validateRequestMaxTokens(
  * const llmClient = createLLMClient();
  * const messages = [{ role: 'user', content: 'Hello' }];
  *
- * for await (const response of streamChatCompletion(llmClient, messages)) {
- *   console.log(response.completeMessage.content); // Real-time display
+ * for await (const response of streamResponse(llmClient, messages)) {
+ *   console.log(response.messageSnapshot.content); // Real-time display
  *
  *   if (response.isComplete) {
  *     console.log('Tokens:', response.tokenUsage?.totalTokens);
@@ -254,7 +247,7 @@ function validateRequestMaxTokens(
  * }
  * ```
  */
-export async function* streamChatCompletion(
+export async function* streamResponse(
   llmClient: LLMClientInstance,
   messages: readonly ModelMessage[],
   options?: {
@@ -300,12 +293,12 @@ export async function* streamChatCompletion(
     let accumulatedContent = "";
     let accumulatedReasoning = "";
     const accumulatedToolCalls = new Map<number, AccumulatedToolCall>();
-    let finishReason: ChatFinishReason | null = null;
+    let finishReason: ModelFinishReason | null = null;
     let rawFinishReason: string | undefined;
     let tokenUsage: TokenUsage | null = null;
 
     try {
-      const stream = await provider.streamChatCompletion({
+      const stream = await provider.streamResponse({
         model: config.model,
         messages,
         temperature: config.temperature,
@@ -348,8 +341,8 @@ export async function* streamChatCompletion(
           accumulatedContent += event.textDelta;
         }
 
-        if (event.reasoningDelta) {
-          accumulatedReasoning += event.reasoningDelta;
+        if (event.reasoningTextDelta) {
+          accumulatedReasoning += event.reasoningTextDelta;
         }
 
         // Accumulate tool call fragments
@@ -388,7 +381,7 @@ export async function* streamChatCompletion(
         }
 
         // Build complete message from accumulated state
-        const completeMessage = buildCompleteMessage(
+        const messageSnapshot = buildCompleteMessage(
           accumulatedContent,
           accumulatedToolCalls,
         );
@@ -402,37 +395,33 @@ export async function* streamChatCompletion(
         // Yield response with accumulated data
         emittedAnyResponse = true;
         yield {
-          completeMessage,
+          messageSnapshot,
           parsedToolCalls,
           isComplete: finishReason !== null,
           finishReason: finishReason ?? undefined,
-          reasoning:
+          reasoningText:
             accumulatedReasoning === "" ? undefined : accumulatedReasoning,
-          reasoningDelta: event.reasoningDelta,
+          reasoningTextDelta: event.reasoningTextDelta,
           rawFinishReason,
           streamStopReason:
             finishReason === null ? undefined : "provider_finished",
           tokenUsage:
-            tokenUsage === null
-              ? undefined
-              : withLegacyTokenUsageAliases(tokenUsage),
+            tokenUsage === null ? undefined : toStreamingTokenUsage(tokenUsage),
         };
       }
       if (!emittedAnyResponse) {
         yield {
-          completeMessage: buildCompleteMessage(
+          messageSnapshot: buildCompleteMessage(
             accumulatedContent,
             accumulatedToolCalls,
           ),
           isComplete: true,
-          reasoning:
+          reasoningText:
             accumulatedReasoning === "" ? undefined : accumulatedReasoning,
           rawFinishReason,
           streamStopReason: "provider_finished",
           tokenUsage:
-            tokenUsage === null
-              ? undefined
-              : withLegacyTokenUsageAliases(tokenUsage),
+            tokenUsage === null ? undefined : toStreamingTokenUsage(tokenUsage),
         };
       }
       return;
@@ -499,7 +488,7 @@ export async function* streamChatCompletion(
       // Notify before the backoff sleep so consumers see the retry while it
       // is happening, not after the next attempt succeeds.
       yield {
-        completeMessage: { content: "" },
+        messageSnapshot: { content: "" },
         isComplete: false,
         retry: {
           attempt: failedAttempts,

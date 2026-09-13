@@ -6,7 +6,7 @@ import type {
   InterfaceProviderStreamEvent,
 } from "../../services/interface-providers/index.js";
 import type { LLMClientInstance } from "./types.js";
-import { streamChatCompletion } from "./streaming.js";
+import { streamResponse } from "./streaming.js";
 import {
   createScopedPromptCacheKey,
   resolvePromptCacheRequest,
@@ -213,7 +213,7 @@ describe("scoped prompt cache identity", () => {
 
     const runtimeMarker =
       "<environment_context>retry-runtime</environment_context>";
-    for await (const _ of streamChatCompletion(
+    for await (const _ of streamResponse(
       client,
       [{ role: "user", content: `Hello\n\n${runtimeMarker}` }],
       {
@@ -241,7 +241,7 @@ describe("scoped prompt cache identity", () => {
   it("keeps the selected explicit strategy in provider refusal errors", async () => {
     const client = fakeClient(() => Promise.reject(new Error("unsupported")));
     const consume = async (): Promise<void> => {
-      for await (const _ of streamChatCompletion(
+      for await (const _ of streamResponse(
         client,
         [{ role: "user", content: "Hello" }],
         { purpose: "agent-step", sessionId: "session-a" },
@@ -261,7 +261,7 @@ describe("scoped prompt cache identity", () => {
     let caught: unknown;
     try {
       await drain(
-        streamChatCompletion(client, [{ role: "user", content: "Hello" }], {
+        streamResponse(client, [{ role: "user", content: "Hello" }], {
           purpose: "agent-step",
           sessionId: "session-a",
         }),
@@ -314,14 +314,10 @@ describe("scoped prompt cache identity", () => {
     };
 
     await drain(
-      streamChatCompletion(
-        client,
-        [{ role: "user", content: "First" }],
-        options,
-      ),
+      streamResponse(client, [{ role: "user", content: "First" }], options),
     );
     await drain(
-      streamChatCompletion(
+      streamResponse(
         client,
         [
           { role: "user", content: "First" },
@@ -332,7 +328,7 @@ describe("scoped prompt cache identity", () => {
       ),
     );
     await drain(
-      streamChatCompletion(
+      streamResponse(
         client,
         [
           {
@@ -408,7 +404,7 @@ function fakeClient(
       id: "custom",
       isAbortError: () => false,
       kind: "openai-compatible",
-      streamChatCompletion: send,
+      streamResponse: send,
     },
   };
 }

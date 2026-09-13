@@ -67,7 +67,7 @@ function createFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {
@@ -108,7 +108,7 @@ function createBlockingLLMClient(input: {
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {
@@ -158,7 +158,7 @@ function createConcurrentBlockingLLMClient(input: {
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {
@@ -207,7 +207,7 @@ function createFailingLLMClient(
     ...client,
     provider: {
       ...client.provider,
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {
@@ -232,7 +232,7 @@ function createConcurrentMixedOutcomeLLMClient(input: {
     ...client,
     provider: {
       ...client.provider,
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {
@@ -281,7 +281,7 @@ function createAbortableBlockingLLMClient(input: {
       isAbortError(error: unknown): boolean {
         return error === abortError;
       },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {
@@ -337,7 +337,7 @@ function createDelayedAbortSettlementLLMClient(input: {
       isAbortError(error: unknown): boolean {
         return error === abortError;
       },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {
@@ -396,7 +396,7 @@ function createPermissionSlotLLMClient(input: {
     ...client,
     provider: {
       ...client.provider,
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {
@@ -551,7 +551,7 @@ function createPersistentBackgroundSubagentLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         requests.push(request);
@@ -618,7 +618,7 @@ function createSequentialFakeLLMClient(
       id: "fake",
       kind: "openai-compatible",
       client: { kind: "fake" },
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         if (isSessionTitleGenerationRequest(request)) {

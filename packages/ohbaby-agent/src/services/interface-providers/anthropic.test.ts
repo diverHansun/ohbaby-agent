@@ -89,7 +89,7 @@ describe("anthropic provider", () => {
       { role: "assistant", content: null },
     ];
     const before = structuredClone(messages);
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       model: "test",
       messages,
       temperature: 0,
@@ -139,7 +139,7 @@ describe("anthropic provider", () => {
       .spyOn(provider.client.messages, "stream")
       .mockReturnValue(createRawStream([]));
     expect(() =>
-      provider.streamChatCompletion({
+      provider.streamResponse({
         model: "test",
         messages: [message],
         temperature: 0,
@@ -220,7 +220,7 @@ describe("anthropic provider", () => {
       ],
       signal: controller.signal,
     };
-    const result = await provider.streamChatCompletion(request);
+    const result = await provider.streamResponse(request);
 
     for await (const event of result) {
       events.push(event);
@@ -361,7 +361,7 @@ describe("anthropic provider", () => {
       ]),
     );
 
-    const result = await provider.streamChatCompletion({
+    const result = await provider.streamResponse({
       model: "claude-3-5-haiku-latest",
       messages: [{ role: "user", content: "Hello" }],
       temperature: 0.2,
@@ -443,7 +443,7 @@ describe("anthropic provider", () => {
       ]),
     );
 
-    const result = await provider.streamChatCompletion({
+    const result = await provider.streamResponse({
       model: "claude-3-5-sonnet-latest",
       messages: [{ role: "user", content: "pause" }],
       temperature: 0.2,
@@ -508,7 +508,7 @@ describe("anthropic provider", () => {
       ]),
     );
 
-    const stream = await provider.streamChatCompletion({
+    const stream = await provider.streamResponse({
       model: "claude-3-5-sonnet-latest",
       messages: [{ role: "user", content: "cached" }],
       temperature: 0,
@@ -587,7 +587,7 @@ describe("anthropic provider", () => {
     };
 
     for (const tools of [[selectTools], [selectTools, selectedMcpTool]]) {
-      const result = await provider.streamChatCompletion({
+      const result = await provider.streamResponse({
         ...baseRequest,
         tools,
       });

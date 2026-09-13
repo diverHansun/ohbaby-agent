@@ -6,7 +6,7 @@
  *
  * Design Principle: Interface Segregation
  * Consumers import only what they need. The module provides three categories:
- * 1. Functions: createLLMClient, streamChatCompletion
+ * 1. Functions: createLLMClient, streamResponse
  * 2. Types: LLMClientInstance, StreamingResponse, etc.
  * 3. Error Classes: APIUserAbortError (for convenience)
  */
@@ -25,7 +25,7 @@ export {
   retryReason,
 } from "./retry.js";
 export type { CreateLLMClientOptions } from "./client.js";
-export { streamChatCompletion } from "./streaming.js";
+export { streamResponse } from "./streaming.js";
 
 // Export type definitions for consumers
 export type {
@@ -41,7 +41,7 @@ export type {
   // Tool-related types
   ParsedToolCall,
   // Metadata types
-  ChatFinishReason,
+  ModelFinishReason,
   StreamStopReason,
 } from "./types.js";
 export type { ProviderRetryEvent, ProviderRetryPolicy } from "./retry.js";

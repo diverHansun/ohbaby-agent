@@ -6,7 +6,7 @@ import type {
   TokenUsage,
 } from "../../core/llm-client/index.js";
 
-type StreamChatCompletion = (
+type StreamResponseFn = (
   llmClient: LLMClientInstance,
   messages: readonly { readonly content: string; readonly role: string }[],
   options?: {
@@ -17,12 +17,10 @@ type StreamChatCompletion = (
   },
 ) => AsyncIterable<StreamingResponse>;
 
-const streamChatCompletionMock = vi.hoisted(() =>
-  vi.fn<StreamChatCompletion>(),
-);
+const streamResponseMock = vi.hoisted(() => vi.fn<StreamResponseFn>());
 
 vi.mock("../../core/llm-client/index.js", () => ({
-  streamChatCompletion: streamChatCompletionMock,
+  streamResponse: streamResponseMock,
 }));
 
 import {
@@ -37,11 +35,9 @@ function streamWithContent(
   return (async function* (): AsyncGenerator<StreamingResponse, void, unknown> {
     await Promise.resolve();
     yield {
-      completeMessage: { content },
+      messageSnapshot: { content },
       isComplete: true,
-      ...(tokenUsage === undefined
-        ? {}
-        : { tokenUsage: tokenUsage as StreamingResponse["tokenUsage"] }),
+      ...(tokenUsage === undefined ? {} : { tokenUsage }),
     };
   })();
 }
@@ -50,7 +46,7 @@ function abortedStream(): AsyncIterable<StreamingResponse> {
   return (async function* (): AsyncGenerator<StreamingResponse, void, unknown> {
     await Promise.resolve();
     yield {
-      completeMessage: { content: "" },
+      messageSnapshot: { content: "" },
       isComplete: true,
       streamStopReason: "user_aborted",
     };
@@ -81,11 +77,11 @@ function compactResult(
 
 describe("createContextSummaryClient", () => {
   beforeEach(() => {
-    streamChatCompletionMock.mockReset();
+    streamResponseMock.mockReset();
   });
 
   it("retries once when summary generation returns empty content", async () => {
-    streamChatCompletionMock
+    streamResponseMock
       .mockReturnValueOnce(streamWithContent("  "))
       .mockReturnValueOnce(streamWithContent("valid summary"));
     const client = createContextSummaryClient({} as LLMClientInstance);
@@ -98,11 +94,11 @@ describe("createContextSummaryClient", () => {
         systemPrompt: "system",
       }),
     ).resolves.toBe("valid summary");
-    expect(streamChatCompletionMock).toHaveBeenCalledTimes(2);
+    expect(streamResponseMock).toHaveBeenCalledTimes(2);
   });
 
   it("accepts canonical auxiliary usage without coupling it to context accounting", async () => {
-    streamChatCompletionMock.mockReturnValueOnce(
+    streamResponseMock.mockReturnValueOnce(
       streamWithContent("summary", {
         inputBreakdown: {
           cacheRead: 80,
@@ -128,7 +124,7 @@ describe("createContextSummaryClient", () => {
   });
 
   it("throws a clear error after repeated empty summaries", async () => {
-    streamChatCompletionMock
+    streamResponseMock
       .mockReturnValueOnce(streamWithContent(""))
       .mockReturnValueOnce(streamWithContent("  "));
     const client = createContextSummaryClient({} as LLMClientInstance);
@@ -141,11 +137,11 @@ describe("createContextSummaryClient", () => {
         systemPrompt: "system",
       }),
     ).rejects.toThrow("empty after retries");
-    expect(streamChatCompletionMock).toHaveBeenCalledTimes(2);
+    expect(streamResponseMock).toHaveBeenCalledTimes(2);
   });
 
   it("forwards cancellation and does not retry an aborted summary stream", async () => {
-    streamChatCompletionMock.mockReturnValueOnce(abortedStream());
+    streamResponseMock.mockReturnValueOnce(abortedStream());
     const client = createContextSummaryClient({} as LLMClientInstance);
     const controller = new AbortController();
 
@@ -157,8 +153,8 @@ describe("createContextSummaryClient", () => {
         signal: controller.signal,
       }),
     ).rejects.toMatchObject({ name: "AbortError" });
-    expect(streamChatCompletionMock).toHaveBeenCalledTimes(1);
-    expect(streamChatCompletionMock.mock.calls[0]?.[2]).toMatchObject({
+    expect(streamResponseMock).toHaveBeenCalledTimes(1);
+    expect(streamResponseMock.mock.calls[0]?.[2]).toMatchObject({
       signal: controller.signal,
     });
   });
@@ -176,11 +172,11 @@ describe("createContextSummaryClient", () => {
         signal: controller.signal,
       }),
     ).rejects.toMatchObject({ name: "AbortError" });
-    expect(streamChatCompletionMock).not.toHaveBeenCalled();
+    expect(streamResponseMock).not.toHaveBeenCalled();
   });
 
   it("sends both serialized history and the compression prompt to the model", async () => {
-    streamChatCompletionMock.mockReturnValueOnce(streamWithContent("summary"));
+    streamResponseMock.mockReturnValueOnce(streamWithContent("summary"));
     const client = createContextSummaryClient({} as LLMClientInstance);
 
     await client.generateSummary({
@@ -221,7 +217,7 @@ describe("createContextSummaryClient", () => {
       systemPrompt: "system",
     });
 
-    const messages = streamChatCompletionMock.mock.calls[0][1] as {
+    const messages = streamResponseMock.mock.calls[0][1] as {
       readonly content: string;
       readonly role: string;
     }[];
@@ -237,7 +233,7 @@ describe("createContextSummaryClient", () => {
       },
     ]);
     expect(JSON.stringify(messages)).not.toContain("private cwd");
-    expect(streamChatCompletionMock.mock.calls[0][2]).toEqual({
+    expect(streamResponseMock.mock.calls[0][2]).toEqual({
       contextScopeId: "subagent_1",
       purpose: "context-summary",
       sessionId: "session_1",
@@ -246,7 +242,7 @@ describe("createContextSummaryClient", () => {
 
   it("redacts credential canaries before and after summary generation", async () => {
     const canary = "json-summary-secret-canary";
-    streamChatCompletionMock.mockReturnValueOnce(
+    streamResponseMock.mockReturnValueOnce(
       streamWithContent(
         `## Goal\n- keep ${JSON.stringify({ password: canary })}`,
       ),
@@ -280,9 +276,9 @@ describe("createContextSummaryClient", () => {
       systemPrompt: "system",
     });
 
-    expect(
-      JSON.stringify(streamChatCompletionMock.mock.calls[0]?.[1]),
-    ).not.toContain(canary);
+    expect(JSON.stringify(streamResponseMock.mock.calls[0]?.[1])).not.toContain(
+      canary,
+    );
     expect(summary).not.toContain(canary);
     expect(summary).toContain("[redacted]");
   });

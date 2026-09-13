@@ -143,7 +143,7 @@ function createOneShotLlmClient(
         return false;
       },
       kind: "openai-compatible",
-      streamChatCompletion(): Promise<
+      streamResponse(): Promise<
         AsyncIterable<{
           readonly finishReason: "stop";
           readonly textDelta: string;

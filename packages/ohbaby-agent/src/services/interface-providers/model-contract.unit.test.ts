@@ -44,7 +44,7 @@ describe("model request contract", () => {
       ])
         await expect(
           Promise.resolve().then(() =>
-            provider.streamChatCompletion({
+            provider.streamResponse({
               ...base,
               messages: [message],
             } as never),
@@ -57,7 +57,7 @@ describe("model request contract", () => {
     const create = vi
       .spyOn(provider.client.chat.completions, "create")
       .mockResolvedValue({} as never);
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       ...base,
       messages: [
         {
@@ -178,7 +178,7 @@ describe("model request contract", () => {
       const create = vi
         .spyOn(provider.client.messages, "stream")
         .mockReturnValue({});
-      await provider.streamChatCompletion({
+      await provider.streamResponse({
         ...base,
         messages: [{ role: "tool", callId: "c", content }],
       } as InterfaceProviderRequest);
@@ -198,7 +198,7 @@ describe("model request contract", () => {
     const create = vi
       .spyOn(provider.client.responses, "create")
       .mockResolvedValue({} as never);
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       ...base,
       messages: [
         {

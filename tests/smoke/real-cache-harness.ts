@@ -388,12 +388,12 @@ function wrapClientWithProjectionRecorder(
   projections: SanitizedRequestProjection[],
   currentEpoch: (request: InterfaceProviderRequest) => number,
 ): LLMClientInstance {
-  const stream = client.provider.streamChatCompletion.bind(client.provider);
+  const stream = client.provider.streamResponse.bind(client.provider);
   return {
     ...client,
     provider: {
       ...client.provider,
-      streamChatCompletion(
+      streamResponse(
         request: InterfaceProviderRequest,
       ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
         projections.push(projectRequest(request, currentEpoch(request)));

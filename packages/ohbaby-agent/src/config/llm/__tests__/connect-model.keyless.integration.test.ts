@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createLLMClient,
-  streamChatCompletion,
+  streamResponse,
 } from "../../../core/llm-client/index.js";
 import { applyActiveModelConfig } from "../apply-active-model-config.js";
 import { _LLMConfigManager as LLMConfigManager } from "../index.js";
@@ -233,13 +233,13 @@ describe("connectModel keyless local endpoint integration", () => {
       expect(client.config).not.toHaveProperty("apiKeyEnv");
 
       let fullText = "";
-      for await (const response of streamChatCompletion(
+      for await (const response of streamResponse(
         client,
         [{ role: "user", content: `Reply with exactly: ${MARKER}` }],
         { retry: { maxRetriesPerStep: 0 } },
       )) {
-        if (typeof response.completeMessage.content === "string") {
-          fullText = response.completeMessage.content;
+        if (typeof response.messageSnapshot.content === "string") {
+          fullText = response.messageSnapshot.content;
         }
       }
 

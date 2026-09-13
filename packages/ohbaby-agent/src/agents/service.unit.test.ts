@@ -209,7 +209,7 @@ describe("AgentService", () => {
     const sessionManager = createSessionManager();
     const event = {
       content: "hello",
-      completeMessage: { content: "hello" },
+      messageSnapshot: { content: "hello" },
       delta: "hello",
       sessionId: "primary_1",
       timestamp: 1,

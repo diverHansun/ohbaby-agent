@@ -539,7 +539,7 @@ describe("runAgent", () => {
     );
     const event = {
       content: "hello",
-      completeMessage: { content: "hello" },
+      messageSnapshot: { content: "hello" },
       delta: "hello",
       sessionId: "session_child",
       timestamp: 1,

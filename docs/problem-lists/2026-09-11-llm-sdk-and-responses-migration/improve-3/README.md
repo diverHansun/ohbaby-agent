@@ -1,6 +1,6 @@
 # improve-3 · LLM 请求与结果契约去 Chat 耦合
 
-> 开启日期：2026-09-13。状态：improve-2前置验收与本地合入已完成；A批请求纵切已通过测试与独立审查，继续B批结果接口迁移。
+> 开启日期：2026-09-13。状态：improve-2前置验收与本地合入已完成；A/B批已通过各批测试与独立审查，继续C批跨模块与构建产物验收。
 > 调研代码：`codex/improve-2-responses-migration@a18290f3`。本轮实施分支：`codex/improve-3-model-contract`，起点为集成分支`b43a0921`；main不动。
 
 本轮承接improve-2 §2.8主动切出的内部契约问题。精确设计和分批实施已获用户批准。2026-09-13 improve-2最新全量preflight与生产lifecycle Grok T12通过，详见improve-2/05 §5.12。按用户授权完成收尾并合入openai-responses-migration，再从该集成分支建立本轮临时分支实施。不得合入main；本轮改造后须重新运行全部矩阵。
@@ -36,3 +36,11 @@
 冻结后typecheck、lint通过；定向provider五文件254项通过；完整unit为235文件2457项通过、2项既有跳过，contract为17文件309项通过，integration为52文件349项通过（含CLI打包及进程检查）。独立子代理未发现A批阻断问题。尚未运行本轮最终真实LLM矩阵，不沿用improve-2成功结果。
 
 失败记录保留：编辑中误触发一次CLI构建，读到临时类型断裂；最终冻结后完整integration通过。完整unit曾三次在未改动daemon启动诊断用例达到10秒超时，单独复跑及最后完整复跑通过，根因未确定，未改server源码或测试超时。尝试的VITEST_MAX_THREADS/MIN_THREADS不控制当前默认forks池，不能把最后通过归因于“单worker修复”。最终通过的测试数来自实际退出结果，不把失败运行计入通过。
+
+## B批执行记录（2026-09-13）
+
+外层结果已使用messageSnapshot、reasoningText/reasoningTextDelta及ParsedToolCall.callId；公开及provider入口统一为streamResponse，不留旧别名。观察complete没有正文时省略snapshot，delta仍由既有wire content重建；没有新增UI传输字段。canonical usage保留，三个公开蛇形别名删除，旧数据库metadata读取不动。
+
+TDD先复现旧快照名、伪造空正文和隐藏usage别名三项失败，再修改实现。冻结后定向41文件801项、完整unit、contract 17文件309项、integration 53文件352项均exit 0；lint/typecheck/格式检查通过。完整integration包含CLI打包安装与实际Lifecycle→worker→bridge新增三例。独立子代理未发现实质阻塞。新测试证实不完整工具参数及完成信号后EOF前取消都不执行工具；观察事件不提供parsed调用授权。
+
+C批的SQLite两次reopen、公开构建消费者、本地三协议HTTP/SSE和最终ZenMux矩阵尚待本轮执行，不能用A/B回归替代。

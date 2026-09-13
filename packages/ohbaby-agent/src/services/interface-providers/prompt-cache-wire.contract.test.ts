@@ -77,7 +77,7 @@ describe("prompt-cache wire contract", () => {
         >,
       );
 
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       maxTokens: 128,
       messages: [{ role: "user", content: "Hello" }],
       model: "gpt-5.6",
@@ -130,7 +130,7 @@ describe("prompt-cache wire contract", () => {
           ReturnType<typeof provider.client.chat.completions.create>
         >,
       );
-    const result = await provider.streamChatCompletion({
+    const result = await provider.streamResponse({
       maxTokens: 128,
       messages: [{ role: "user", content: "Hello" }],
       model: "gpt-5.6",
@@ -179,7 +179,7 @@ describe("prompt-cache wire contract", () => {
           >,
         );
 
-      await provider.streamChatCompletion({
+      await provider.streamResponse({
         maxTokens: 128,
         messages: [{ role: "user", content: "Hello" }],
         model: "gpt-5.6",
@@ -253,7 +253,7 @@ describe("prompt-cache wire contract", () => {
     ];
     const before = structuredClone(messages);
 
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       maxTokens: 128,
       messages,
       model: "compatible-model",
@@ -296,7 +296,7 @@ describe("prompt-cache wire contract", () => {
         >,
       );
 
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       maxTokens: 128,
       messages: [{ role: "user", content: "Hello" }],
       model: "model",
@@ -362,7 +362,7 @@ describe("prompt-cache wire contract", () => {
       { role: "tool", content: "fixture", callId: "call_read" },
     ];
     for (const messages of [firstMessages, secondMessages]) {
-      await provider.streamChatCompletion({
+      await provider.streamResponse({
         maxTokens: 128,
         messages,
         model: "gpt-5.6",
@@ -401,7 +401,7 @@ describe("prompt-cache wire contract", () => {
       .spyOn(provider.client.messages, "stream")
       .mockReturnValue(emptyStream<RawMessageStreamEvent>());
 
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       maxTokens: 128,
       messages: [
         { role: "system", content: "Stable system" },
@@ -474,7 +474,7 @@ describe("prompt-cache wire contract", () => {
       { role: "tool", content: "fixture", callId: "call_read" },
     ];
     for (const messages of [firstMessages, secondMessages]) {
-      await provider.streamChatCompletion({
+      await provider.streamResponse({
         maxTokens: 128,
         messages,
         model: "claude-sonnet-4-6",
@@ -522,7 +522,7 @@ describe("prompt-cache wire contract", () => {
       })),
     ];
 
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       maxTokens: 128,
       messages,
       model: "claude-sonnet-4-6",
@@ -620,7 +620,7 @@ describe("prompt-cache wire contract", () => {
       })(),
     );
     const messages = [{ role: "user" as const, content: "Hello" }];
-    const result = await provider.streamChatCompletion({
+    const result = await provider.streamResponse({
       maxTokens: 128,
       messages,
       model: "claude-sonnet-4-6",
@@ -671,7 +671,7 @@ describe("prompt-cache wire contract", () => {
     ];
     const before = structuredClone(messages);
 
-    await provider.streamChatCompletion({
+    await provider.streamResponse({
       maxTokens: 128,
       messages,
       model: "anthropic/claude-sonnet-4-6",
@@ -712,7 +712,7 @@ describe("prompt-cache wire contract", () => {
     const stream = vi.spyOn(provider.client.messages, "stream");
 
     expect(() =>
-      provider.streamChatCompletion({
+      provider.streamResponse({
         maxTokens: 128,
         messages: [],
         model: "claude-compatible",
@@ -746,7 +746,7 @@ describe("prompt-cache wire contract", () => {
         provider: "deepseek",
       }),
     ]) {
-      await provider.streamChatCompletion({
+      await provider.streamResponse({
         maxTokens: 128,
         messages: [{ role: "user", content: "Hello" }],
         model: "deepseek-chat",

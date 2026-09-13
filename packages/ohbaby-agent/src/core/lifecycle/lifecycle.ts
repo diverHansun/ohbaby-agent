@@ -4,7 +4,7 @@ import {
   ProviderStreamInterruptedError,
   ToolCallParseError,
   isRetryableProviderError,
-  streamChatCompletion,
+  streamResponse,
   providerErrorStatus,
 } from "../llm-client/index.js";
 import type {
@@ -150,7 +150,8 @@ function normalizeToolCalls(
 
     return {
       arguments: toolCall.arguments,
-      id: toolCall.id.trim() === "" ? generateToolCallId() : toolCall.id,
+      id:
+        toolCall.callId.trim() === "" ? generateToolCallId() : toolCall.callId,
       name: toolCall.name,
       rawArguments,
     };
@@ -160,7 +161,7 @@ function normalizeToolCalls(
 function toParsedToolCall(toolCall: ResolvedToolCall): ParsedToolCall {
   return {
     arguments: toolCall.arguments,
-    id: toolCall.id,
+    callId: toolCall.id,
     name: toolCall.name,
   };
 }
@@ -869,8 +870,12 @@ export class Lifecycle {
     readonly step: number;
   }): AsyncGenerator<LifecycleEvent, StepResult, void> {
     const { params, step } = input;
+    // Model-produced completions always carry a snapshot; only the public
+    // observation projection may lack the response body.
     let finalEvent:
-      | Extract<LifecycleEvent, { readonly type: "llm:complete" }>
+      | (Extract<LifecycleEvent, { readonly type: "llm:complete" }> & {
+          readonly messageSnapshot: ModelResponseSnapshot;
+        })
       | undefined;
     let previousContent = "";
     let previousReasoning = "";
@@ -896,7 +901,7 @@ export class Lifecycle {
     });
 
     try {
-      for await (const response of streamChatCompletion(
+      for await (const response of streamResponse(
         this.deps.llmClient,
         [...input.request.messages],
         {
@@ -923,23 +928,23 @@ export class Lifecycle {
           };
           continue;
         }
-        if (response.reasoningDelta !== undefined) {
+        if (response.reasoningTextDelta !== undefined) {
           const content =
-            response.reasoning ??
-            `${previousReasoning}${response.reasoningDelta}`;
+            response.reasoningText ??
+            `${previousReasoning}${response.reasoningTextDelta}`;
           previousReasoning = content;
           yield {
             type: "llm:reasoning-delta",
             contextScopeId: params.contextScopeId,
             content,
-            delta: response.reasoningDelta,
+            delta: response.reasoningTextDelta,
             messageId: assistantMessage.id,
             sessionId: params.sessionId,
             step,
             timestamp: Date.now(),
           };
         }
-        const responseContent = getTextContent(response.completeMessage);
+        const responseContent = getTextContent(response.messageSnapshot);
         const content =
           previousReasoning !== "" &&
           previousContent === "" &&
@@ -985,7 +990,7 @@ export class Lifecycle {
 
           yield {
             type: "llm:delta",
-            completeMessage: response.completeMessage,
+            messageSnapshot: response.messageSnapshot,
             contextScopeId: params.contextScopeId,
             content,
             delta,
@@ -1009,7 +1014,7 @@ export class Lifecycle {
           }
           finalEvent = {
             type: "llm:complete",
-            completeMessage: response.completeMessage,
+            messageSnapshot: response.messageSnapshot,
             contextScopeId: params.contextScopeId,
             finishReason: response.finishReason,
             parsedToolCalls: response.parsedToolCalls,
@@ -1068,7 +1073,7 @@ export class Lifecycle {
       finalResponse: finalEvent
         ? previousReasoning !== "" && previousContent === ""
           ? ""
-          : getTextContent(finalEvent.completeMessage)
+          : getTextContent(finalEvent.messageSnapshot)
         : "",
       reasoning: previousReasoning === "" ? undefined : previousReasoning,
     };

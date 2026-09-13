@@ -6,7 +6,7 @@ import type {
 } from "../core/llm-client/index.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
-  streamChatCompletion,
+  streamResponse,
   type ModelToolDefinition,
   type LLMClientInstance,
   type StreamingResponse,
@@ -143,7 +143,7 @@ runRealEval("goal completion real model eval", () => {
 
       if (calls.length === 0) {
         if (goalCompleted) {
-          finalText = messageText(response.completeMessage);
+          finalText = messageText(response.messageSnapshot);
           break;
         }
         messages.push({
@@ -171,7 +171,7 @@ runRealEval("goal completion real model eval", () => {
               ? "sub_1 status=completed; no delegated execution is running"
               : "sub_1 status=running; it may still mutate the workspace; check again before completing",
             role: "tool",
-            callId: call.id,
+            callId: call.callId,
           });
           continue;
         }
@@ -186,7 +186,7 @@ runRealEval("goal completion real model eval", () => {
               content:
                 "Goal completed and cleared. Give the user the final answer now.",
               role: "tool",
-              callId: call.id,
+              callId: call.callId,
             });
             continue;
           }
@@ -237,7 +237,7 @@ runRealEval("goal completion real model eval", () => {
       const calls = response.parsedToolCalls ?? [];
       if (calls.length === 0) {
         if (goalCompleted) {
-          finalText = messageText(response.completeMessage);
+          finalText = messageText(response.messageSnapshot);
           break;
         }
         messages.push({
@@ -259,7 +259,7 @@ runRealEval("goal completion real model eval", () => {
           messages.push({
             content: "No delegated subagent execution is running.",
             role: "tool",
-            callId: call.id,
+            callId: call.callId,
           });
           continue;
         }
@@ -270,7 +270,7 @@ runRealEval("goal completion real model eval", () => {
               .map((todo) => `[${todo.status}] ${todo.content}`)
               .join("\n"),
             role: "tool",
-            callId: call.id,
+            callId: call.callId,
           });
           continue;
         }
@@ -300,7 +300,7 @@ runRealEval("goal completion real model eval", () => {
           messages.push({
             content: "Goal Todo reconciled; all milestones are completed.",
             role: "tool",
-            callId: call.id,
+            callId: call.callId,
           });
           continue;
         }
@@ -319,7 +319,7 @@ runRealEval("goal completion real model eval", () => {
           messages.push({
             content: "Goal completed and cleared. Give the final answer now.",
             role: "tool",
-            callId: call.id,
+            callId: call.callId,
           });
           continue;
         }
@@ -385,7 +385,7 @@ async function completeResponse(
   availableTools: ModelToolDefinition[] = tools,
 ): Promise<StreamingResponse> {
   let completed: StreamingResponse | undefined;
-  for await (const response of streamChatCompletion(client, messages, {
+  for await (const response of streamResponse(client, messages, {
     maxTokens: 2_048,
     tools: availableTools,
   })) {
@@ -405,7 +405,7 @@ function completedAssistantRequest(response: StreamingResponse): ModelMessage {
   ) {
     throw new Error("Goal eval cannot replay an unsuccessful response.");
   }
-  const calls = response.completeMessage.toolCalls ?? [];
+  const calls = response.messageSnapshot.toolCalls ?? [];
   const parsed = response.parsedToolCalls ?? [];
   if (
     calls.length !== parsed.length ||
@@ -414,7 +414,7 @@ function completedAssistantRequest(response: StreamingResponse): ModelMessage {
     throw new Error("Goal eval requires validated complete tool calls.");
   return {
     role: "assistant",
-    content: response.completeMessage.content,
+    content: response.messageSnapshot.content,
     ...(calls.length === 0
       ? {}
       : {
@@ -423,7 +423,8 @@ function completedAssistantRequest(response: StreamingResponse): ModelMessage {
               !call.callId ||
               !call.name ||
               !parsed.some(
-                (item) => item.id === call.callId && item.name === call.name,
+                (item) =>
+                  item.callId === call.callId && item.name === call.name,
               )
             )
               throw new Error(
