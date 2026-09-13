@@ -13,6 +13,7 @@ import {
   type StatementRunResult,
 } from "../../services/database/index.js";
 import { createDatabaseMessageStore } from "./database-store.js";
+import { serializeHistoryMessages } from "../context/serializer.js";
 import { readTokenUsageMetadata } from "./token-usage-metadata.js";
 import type { Message, MessageStore } from "./types.js";
 
@@ -275,6 +276,106 @@ describe("createDatabaseMessageStore", () => {
       outputTokens: 3,
       totalTokens: 13,
     });
+  });
+
+  it("projects raw legacy message and part JSON after a physical reopen", async () => {
+    const messageJson =
+      '{"id":"legacy_assistant","sessionId":"session_1","role":"assistant","agent":"default","time":{"created":1000,"completed":2000},"finish":"tool_calls"}';
+    const toolJson =
+      '{"id":"legacy_tool","messageId":"legacy_assistant","sessionId":"session_1","orderIndex":1,"type":"tool","callId":"legacy_call","tool":"read","state":{"status":"completed","input":{"path":"README.md","offset":0},"output":"legacy contents","metadata":{"mtimeMs":123,"internalSecret":"keep-only-in-storage"}},"metadata":{"tokenUsage":{"promptTokens":10,"completionTokens":3,"totalTokens":999}}}';
+    const reasoningJson =
+      '{"id":"legacy_reasoning","messageId":"legacy_assistant","sessionId":"session_1","orderIndex":0,"type":"reasoning","text":"old reasoning must not replay"}';
+    getDatabase()
+      .prepare(
+        `INSERT INTO ${schema.message.tableName}
+         (id, session_id, context_scope_id, role, agent, created_at, updated_at, data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "legacy_assistant",
+        "session_1",
+        null,
+        "assistant",
+        "default",
+        1000,
+        2000,
+        messageJson,
+      );
+    for (const [id, type, order, json] of [
+      ["legacy_reasoning", "reasoning", 0, reasoningJson],
+      ["legacy_tool", "tool", 1, toolJson],
+    ] as const) {
+      getDatabase()
+        .prepare(
+          `INSERT INTO ${schema.part.tableName}
+           (id, message_id, session_id, type, order_index, created_at, updated_at, data)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          "legacy_assistant",
+          "session_1",
+          type,
+          order,
+          1000,
+          2000,
+          json,
+        );
+    }
+
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const history =
+      await createDatabaseMessageStore().listBySession("session_1");
+    expect(history[0]?.parts.map((part) => part.id)).toEqual([
+      "legacy_reasoning",
+      "legacy_tool",
+    ]);
+    expect(readTokenUsageMetadata(history[0]?.parts[1]?.metadata)).toEqual({
+      inputTokens: 10,
+      outputTokens: 3,
+      totalTokens: 13,
+    });
+    expect(serializeHistoryMessages(history)).toEqual([
+      {
+        role: "assistant",
+        content: null,
+        toolCalls: [
+          {
+            callId: "legacy_call",
+            name: "read",
+            argumentsJson: '{"path":"README.md","offset":0}',
+          },
+        ],
+      },
+      {
+        role: "tool",
+        callId: "legacy_call",
+        content:
+          'legacy contents\n\n<tool_metadata>\n{"mtimeMs":123}\n</tool_metadata>',
+      },
+    ]);
+    expect(
+      getDatabase()
+        .prepare<{
+          data: string;
+        }>(`SELECT data FROM ${schema.message.tableName} WHERE id = ?`)
+        .get("legacy_assistant")?.data,
+    ).toBe(messageJson);
+    expect(
+      getDatabase()
+        .prepare<{
+          data: string;
+        }>(`SELECT data FROM ${schema.part.tableName} WHERE id = ?`)
+        .get("legacy_tool")?.data,
+    ).toBe(toolJson);
+    expect(
+      getDatabase()
+        .prepare<{
+          data: string;
+        }>(`SELECT data FROM ${schema.part.tableName} WHERE id = ?`)
+        .get("legacy_reasoning")?.data,
+    ).toBe(reasoningJson);
   });
 
   it("allocates distinct order indexes during concurrent appends", async () => {

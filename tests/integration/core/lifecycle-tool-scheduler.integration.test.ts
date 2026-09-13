@@ -15,14 +15,19 @@ import {
   type TokenCounter,
 } from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import { Lifecycle } from "../../../packages/ohbaby-agent/src/core/lifecycle/index.js";
+import { serializeHistoryMessages } from "../../../packages/ohbaby-agent/src/core/context/serializer.js";
 import { toModelTools } from "../../../packages/ohbaby-agent/src/core/agents/index.js";
 import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
 import {
   createDatabaseMessageStore,
   createInMemoryMessageStore,
   createMessageManager,
+  readTokenUsageMetadata,
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
-import type { MessageIdGenerator } from "../../../packages/ohbaby-agent/src/core/message/index.js";
+import type {
+  MessageIdGenerator,
+  Part,
+} from "../../../packages/ohbaby-agent/src/core/message/index.js";
 import { createToolScheduler } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
 import type {
   Tool,
@@ -37,9 +42,9 @@ import {
 } from "../../../packages/ohbaby-agent/src/services/database/index.js";
 import { ScopeToolSequence } from "../../../packages/ohbaby-agent/src/mcp/integration/tool-sequence.js";
 import type {
-  ProviderRequest,
-  ProviderStreamEvent,
-} from "../../../packages/ohbaby-agent/src/services/providers/index.js";
+  InterfaceProviderRequest as ProviderRequest,
+  InterfaceProviderStreamEvent as ProviderStreamEvent,
+} from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
 
 interface FakeSdkClient {
   readonly kind: "fake";
@@ -621,6 +626,512 @@ describe("lifecycle tool scheduler integration", () => {
         finishReason: "stop",
         success: true,
       });
+    } finally {
+      closeDatabase();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("resumes raw legacy SQLite history and persists new model steps in the existing schema across two reopens", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "ohbaby-lifecycle-migration-"),
+    );
+    const dbPath = join(directory, "agent.db");
+    const sessionId = "session_migration";
+    try {
+      initDatabase({ dbPath });
+      insertSession(sessionId);
+      const legacyMessages = [
+        {
+          id: "legacy_user",
+          role: "user",
+          data: '{"id":"legacy_user","sessionId":"session_migration","role":"user","agent":"default","time":{"created":1000}}',
+        },
+        {
+          id: "legacy_assistant",
+          role: "assistant",
+          data: '{"id":"legacy_assistant","sessionId":"session_migration","role":"assistant","agent":"default","finish":"tool_calls","time":{"created":2000,"completed":3000}}',
+        },
+      ] as const;
+      const legacyParts = [
+        {
+          id: "legacy_text",
+          messageId: "legacy_user",
+          type: "text",
+          order: 0,
+          data: '{"id":"legacy_text","messageId":"legacy_user","sessionId":"session_migration","orderIndex":0,"type":"text","text":"Earlier request"}',
+        },
+        {
+          id: "legacy_reasoning",
+          messageId: "legacy_assistant",
+          type: "reasoning",
+          order: 0,
+          data: '{"id":"legacy_reasoning","messageId":"legacy_assistant","sessionId":"session_migration","orderIndex":0,"type":"reasoning","text":"old reasoning must not replay"}',
+        },
+        {
+          id: "legacy_tool",
+          messageId: "legacy_assistant",
+          type: "tool",
+          order: 1,
+          data: '{"id":"legacy_tool","messageId":"legacy_assistant","sessionId":"session_migration","orderIndex":1,"type":"tool","callId":"legacy_call","tool":"read","state":{"status":"completed","input":{"path":"README.md","offset":0},"output":"legacy contents","metadata":{"mtimeMs":123,"internalSecret":"keep-only-in-storage"}},"metadata":{"tokenUsage":{"promptTokens":10,"completionTokens":3,"totalTokens":999}}}',
+        },
+      ] as const;
+      for (const [position, row] of legacyMessages.entries()) {
+        getDatabase()
+          .prepare(
+            `INSERT INTO ${schema.message.tableName}
+             (id, session_id, context_scope_id, role, agent, created_at, updated_at, data)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            row.id,
+            sessionId,
+            null,
+            row.role,
+            "default",
+            (position + 1) * 1000,
+            3000,
+            row.data,
+          );
+      }
+      for (const row of legacyParts) {
+        getDatabase()
+          .prepare(
+            `INSERT INTO ${schema.part.tableName}
+             (id, message_id, session_id, type, order_index, created_at, updated_at, data)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            row.id,
+            row.messageId,
+            sessionId,
+            row.type,
+            row.order,
+            2000,
+            3000,
+            row.data,
+          );
+      }
+      const readRows = (table: string): { id: string; data: string }[] =>
+        getDatabase()
+          .prepare<{
+            id: string;
+            data: string;
+          }>(`SELECT id, data FROM ${table} WHERE session_id = ? ORDER BY id`)
+          .all(sessionId);
+      const expectLegacyBytes = (): void => {
+        for (const [table, expected] of [
+          [schema.message.tableName, legacyMessages],
+          [schema.part.tableName, legacyParts],
+        ] as const) {
+          const actual = readRows(table);
+          for (const row of expected) {
+            expect(
+              actual.find((candidate) => candidate.id === row.id)?.data,
+            ).toBe(row.data);
+          }
+        }
+      };
+
+      closeDatabase();
+      initDatabase({ dbPath });
+      expectLegacyBytes();
+      const store = createDatabaseMessageStore();
+      const oldHistory = await store.listBySession(sessionId);
+      const oldProjection = [
+        { role: "user", content: "Earlier request" },
+        {
+          role: "assistant",
+          content: null,
+          toolCalls: [
+            {
+              callId: "legacy_call",
+              name: "read",
+              argumentsJson: '{"path":"README.md","offset":0}',
+            },
+          ],
+        },
+        {
+          role: "tool",
+          callId: "legacy_call",
+          content:
+            'legacy contents\n\n<tool_metadata>\n{"mtimeMs":123}\n</tool_metadata>',
+        },
+      ];
+      expect(serializeHistoryMessages(oldHistory)).toEqual(oldProjection);
+      expect(readTokenUsageMetadata(oldHistory[1]?.parts[1]?.metadata)).toEqual(
+        {
+          inputTokens: 10,
+          outputTokens: 3,
+          totalTokens: 13,
+        },
+      );
+
+      const bus = createBus();
+      const messageManager = createMessageManager({
+        bus,
+        store,
+        idGenerator: createDeterministicIds(),
+        now: () => 1_700_000_000_000,
+      });
+      const user = await messageManager.createMessage({
+        agent: "default",
+        sessionId,
+        role: "user",
+      });
+      await messageManager.appendPart(user.id, {
+        type: "text",
+        text: "Continue with two pairs of reads",
+      });
+      const execute = vi.fn<Tool["execute"]>(() => ({
+        output: "new contents",
+        metadata: { mtimeMs: 456, internalSecret: "new-storage-only" },
+      }));
+      const scheduler = createToolScheduler({
+        bus,
+        permission: { ask: () => "once" },
+        permissionState: createPermissionState({
+          bus,
+          initialLevel: "full-access",
+        }),
+      });
+      scheduler.register({
+        category: "readonly",
+        description: "Synthetic read",
+        execute,
+        name: "read",
+        parametersJsonSchema: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        },
+        source: "builtin",
+      });
+      const contextManager = createContextManager({
+        bus,
+        llmClient: createContextLLMClient(),
+        memory: createEmptyMemory(),
+        messageManager,
+        systemPromptProvider: createEmptySystemPromptProvider(),
+        tokenCounter: createTokenCounter(),
+        now: () => 1_700_000_000_000,
+      });
+      const toolUsage = {
+        inputTokens: 50,
+        outputTokens: 2,
+        totalTokens: 52,
+      } as const;
+      const hybridUsage = {
+        inputTokens: 100,
+        outputTokens: 5,
+        totalTokens: 105,
+        inputBreakdown: {
+          uncached: 20,
+          cacheRead: 80,
+          cacheWrite: 0,
+          observed: { cacheRead: true, cacheWrite: false },
+        },
+      } as const;
+      const finalUsage = {
+        inputTokens: 120,
+        outputTokens: 4,
+        totalTokens: 124,
+      } as const;
+      const requests: ProviderRequest[] = [];
+      const lifecycle = new Lifecycle({
+        contextManager,
+        messageManager,
+        toolScheduler: scheduler,
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              {
+                finishReason: "tool_calls",
+                tokenUsage: toolUsage,
+                toolCallDeltas: [
+                  {
+                    index: 0,
+                    id: "call_first",
+                    name: "read",
+                    argumentsDelta: '{"path":"one"}',
+                  },
+                  {
+                    index: 1,
+                    id: "call_second",
+                    name: "read",
+                    argumentsDelta: '{"path":"two"}',
+                  },
+                ],
+              },
+            ],
+            [
+              {
+                finishReason: "tool_calls",
+                textDelta: "Read the next pair.",
+                tokenUsage: hybridUsage,
+                toolCallDeltas: [
+                  {
+                    index: 0,
+                    id: "call_third",
+                    name: "read",
+                    argumentsDelta: '{"path":"three"}',
+                  },
+                  {
+                    index: 1,
+                    id: "call_fourth",
+                    name: "read",
+                    argumentsDelta: '{"path":"four"}',
+                  },
+                ],
+              },
+            ],
+            [
+              {
+                finishReason: "stop",
+                textDelta: "Migration roundtrip done.",
+                tokenUsage: finalUsage,
+              },
+            ],
+          ],
+          requests,
+        ),
+      });
+      const result = await consumeLifecycle(
+        lifecycle.run({
+          directory: "D:/repo",
+          environment: createEnvironment("D:/workspace/session_migration"),
+          modelId: "fake-model",
+          sessionId,
+          tools: toModelTools(await scheduler.getAvailableTools()),
+        }),
+      );
+      expect(result).toMatchObject({
+        success: true,
+        finishReason: "stop",
+        finalResponse: "Migration roundtrip done.",
+      });
+      expect(execute).toHaveBeenCalledTimes(4);
+      expect(execute.mock.calls.map(([params]) => params)).toEqual([
+        { path: "one" },
+        { path: "two" },
+        { path: "three" },
+        { path: "four" },
+      ]);
+      expect(requests).toHaveLength(3);
+      expect(requests[0]?.messages).toEqual(
+        expect.arrayContaining(oldProjection),
+      );
+      expect(JSON.stringify(requests[0]?.messages)).not.toContain(
+        "old reasoning must not replay",
+      );
+      expect(requests[1]?.messages).toEqual(
+        expect.arrayContaining([
+          {
+            role: "assistant",
+            content: null,
+            toolCalls: [
+              {
+                callId: "call_first",
+                name: "read",
+                argumentsJson: '{"path":"one"}',
+              },
+              {
+                callId: "call_second",
+                name: "read",
+                argumentsJson: '{"path":"two"}',
+              },
+            ],
+          },
+          {
+            role: "tool",
+            callId: "call_first",
+            content:
+              'new contents\n\n<tool_metadata>\n{"mtimeMs":456}\n</tool_metadata>',
+          },
+          {
+            role: "tool",
+            callId: "call_second",
+            content:
+              'new contents\n\n<tool_metadata>\n{"mtimeMs":456}\n</tool_metadata>',
+          },
+        ]),
+      );
+      expect(requests[2]?.messages).toEqual(
+        expect.arrayContaining([
+          {
+            role: "assistant",
+            content: "Read the next pair.",
+            toolCalls: [
+              {
+                callId: "call_third",
+                name: "read",
+                argumentsJson: '{"path":"three"}',
+              },
+              {
+                callId: "call_fourth",
+                name: "read",
+                argumentsJson: '{"path":"four"}',
+              },
+            ],
+          },
+        ]),
+      );
+
+      const assertStoredSteps = async (): Promise<void> => {
+        const history =
+          await createDatabaseMessageStore().listBySession(sessionId);
+        expect(
+          readTokenUsageMetadata(
+            history
+              .flatMap((message) => message.parts)
+              .find((part) => part.id === "legacy_tool")?.metadata,
+          ),
+        ).toEqual({
+          inputTokens: 10,
+          outputTokens: 3,
+          totalTokens: 13,
+        });
+        const replies = history.filter(
+          (message) =>
+            message.info.role === "assistant" &&
+            !message.info.id.startsWith("legacy_"),
+        );
+        expect(replies).toHaveLength(3);
+        const usageParts = replies.map((message) =>
+          message.parts.filter(
+            (part) => readTokenUsageMetadata(part.metadata) !== undefined,
+          ),
+        );
+        expect(usageParts.map((parts) => parts.length)).toEqual([1, 1, 1]);
+        expect(usageParts[0]?.[0]).toMatchObject({
+          type: "tool",
+          callId: "call_first",
+        });
+        expect(usageParts[1]?.[0]).toMatchObject({
+          type: "text",
+          text: "Read the next pair.",
+        });
+        expect(usageParts[2]?.[0]).toMatchObject({
+          type: "text",
+          text: "Migration roundtrip done.",
+        });
+        expect(
+          usageParts.map((parts) => parts[0]?.metadata?.tokenUsage),
+        ).toEqual([toolUsage, hybridUsage, finalUsage]);
+        for (const parts of usageParts) {
+          expect(parts[0]?.metadata?.tokenUsage).not.toHaveProperty(
+            "promptTokens",
+          );
+          expect(parts[0]?.metadata?.tokenUsage).not.toHaveProperty(
+            "completionTokens",
+          );
+          expect(parts[0]?.metadata?.tokenUsage).not.toHaveProperty(
+            "prompt_tokens",
+          );
+        }
+        expect(
+          replies
+            .flatMap((message) => message.parts)
+            .filter((part) => part.type === "reasoning"),
+        ).toHaveLength(0);
+        const tools = replies
+          .flatMap((message) => message.parts)
+          .filter((part) => part.type === "tool");
+        expect(
+          tools.map((part) => ({
+            callId: part.callId,
+            tool: part.tool,
+            state: part.state,
+          })),
+        ).toEqual(
+          ["one", "two", "three", "four"].map((path, index) => ({
+            callId: ["call_first", "call_second", "call_third", "call_fourth"][
+              index
+            ],
+            tool: "read",
+            state: {
+              status: "completed",
+              input: { path },
+              output: "new contents",
+              metadata: { mtimeMs: 456, internalSecret: "new-storage-only" },
+            },
+          })),
+        );
+        const serialized = serializeHistoryMessages(history);
+        expect(serialized).toEqual(
+          expect.arrayContaining(oldProjection.slice(1)),
+        );
+        expect(serialized.at(-1)).toEqual({
+          role: "assistant",
+          content: "Migration roundtrip done.",
+        });
+      };
+      await assertStoredSteps();
+      expectLegacyBytes();
+      const messagesBefore = readRows(schema.message.tableName);
+      const partsBefore = readRows(schema.part.tableName);
+      for (const row of messagesBefore) {
+        const data = JSON.parse(row.data) as Record<string, unknown>;
+        expect(
+          Object.keys(data).filter(
+            (key) =>
+              ![
+                "id",
+                "sessionId",
+                "contextScopeId",
+                "role",
+                "agent",
+                "time",
+                "model",
+                "system",
+                "tools",
+                "parentId",
+                "providerId",
+                "modelId",
+                "finish",
+                "error",
+                "kind",
+              ].includes(key),
+          ),
+        ).toEqual([]);
+      }
+      for (const row of partsBefore) {
+        const data = JSON.parse(row.data) as Part;
+        expect(
+          Object.keys(data).filter(
+            (key) =>
+              ![
+                "id",
+                "messageId",
+                "sessionId",
+                "contextScopeId",
+                "orderIndex",
+                "time",
+                "type",
+                "text",
+                "synthetic",
+                "ignored",
+                "metadata",
+                "callId",
+                "tool",
+                "state",
+              ].includes(key),
+          ),
+        ).toEqual([]);
+        if (data.type === "tool") {
+          expect(
+            Object.keys(data.state).filter(
+              (key) => !["status", "input", "output", "metadata"].includes(key),
+            ),
+          ).toEqual([]);
+        }
+      }
+      closeDatabase();
+      initDatabase({ dbPath });
+      expectLegacyBytes();
+      expect(readRows(schema.message.tableName)).toEqual(messagesBefore);
+      expect(readRows(schema.part.tableName)).toEqual(partsBefore);
+      await assertStoredSteps();
     } finally {
       closeDatabase();
       await rm(directory, { recursive: true, force: true });

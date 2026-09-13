@@ -564,6 +564,16 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
           );
         } finally {
           fetchGuard.restore();
+          console.info(
+            JSON.stringify({
+              kind: "request-budget-summary",
+              model: profile.model,
+              protocol: profile.protocol,
+              actualHttpRequests: captured.length,
+              providerCalls: requests.length,
+              toolExecutions: fixtureExecutions,
+            }),
+          );
         }
       },
       150_000,

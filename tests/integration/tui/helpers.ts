@@ -1,8 +1,8 @@
 import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
 import type {
-  ProviderRequest,
-  ProviderStreamEvent,
-} from "../../../packages/ohbaby-agent/src/services/providers/index.js";
+  InterfaceProviderRequest as ProviderRequest,
+  InterfaceProviderStreamEvent as ProviderStreamEvent,
+} from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
 import { createTemporarySessionTitle } from "../../../packages/ohbaby-agent/src/services/session/index.js";
 
 interface FakeSdkClient {
@@ -59,6 +59,7 @@ export function createFakeLLMClient(
     },
     config: {
       provider: "fake",
+      interfaceProvider: "openai-compatible",
       model: "fake-model",
       baseUrl: "https://example.invalid/v1",
       temperature: 0,
@@ -105,6 +106,7 @@ export function createSequentialFakeLLMClient(
     },
     config: {
       provider: "fake",
+      interfaceProvider: "openai-compatible",
       model: "fake-model",
       baseUrl: "https://example.invalid/v1",
       temperature: 0,

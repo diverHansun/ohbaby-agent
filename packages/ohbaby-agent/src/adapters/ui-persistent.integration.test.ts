@@ -1226,6 +1226,105 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
+  it("resumes after dispose and database close, then restores the continued reply after another reopen", async () => {
+    const directory = await tempDir("ohbaby-persistent-migration-reopen-");
+    const dbPath = join(directory, "agent.db");
+    const workdir = join(directory, "workspace");
+    let client: PersistentUiBackendClient | undefined;
+    try {
+      client = createPersistentUiBackendClient({
+        dbPath,
+        workdir,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Persisted first reply", finishReason: "stop" },
+        ]),
+      });
+      await client.submitPromptAndWait("Remember this history");
+      const sessionId = (await client.getSnapshot()).activeSessionId;
+      if (!sessionId) throw new Error("Expected persisted session ID");
+      await client.dispose();
+      client = undefined;
+      closeDatabase();
+
+      const requests: InterfaceProviderRequest[] = [];
+      client = createPersistentUiBackendClient({
+        dbPath,
+        workdir,
+        resumeSessionId: sessionId,
+        llmClient: createSequentialFakeLLMClient(
+          [[{ textDelta: "Persisted continued reply", finishReason: "stop" }]],
+          requests,
+        ),
+      });
+      const resumed = await client.getSnapshot();
+      expect(resumed.activeSessionId).toBe(sessionId);
+      expect(
+        resumed.sessions
+          .find((session) => session.id === sessionId)
+          ?.messages.map((message) => message.role),
+      ).toEqual(["user", "assistant"]);
+      await client.submitPromptAndWait("Continue this history", { sessionId });
+      expect(requests).toHaveLength(1);
+      const userMessages = requests[0]?.messages.filter(
+        (message) => message.role === "user",
+      );
+      expect(userMessages).toHaveLength(2);
+      expect(userMessages[0].content).toContain("Remember this history");
+      expect(userMessages[1].content).toContain("Continue this history");
+      expect(requests[0]?.messages).toEqual(
+        expect.arrayContaining([
+          { role: "assistant", content: "Persisted first reply" },
+        ]),
+      );
+      const readParts = (): { data: string }[] =>
+        getDatabase()
+          .prepare<{
+            data: string;
+          }>(
+            `SELECT data FROM ${schema.part.tableName} WHERE session_id = ? ORDER BY id`,
+          )
+          .all(sessionId);
+      const storedBeforeClose = readParts();
+      expect(
+        storedBeforeClose.some((row) => {
+          const part = JSON.parse(row.data) as { type?: string; text?: string };
+          return (
+            part.type === "text" && part.text === "Persisted continued reply"
+          );
+        }),
+      ).toBe(true);
+      await client.dispose();
+      client = undefined;
+      closeDatabase();
+
+      client = createPersistentUiBackendClient({
+        dbPath,
+        workdir,
+        resumeSessionId: sessionId,
+        llmClient: createFakeLLMClient([]),
+      });
+      const reopened = await client.getSnapshot();
+      expect(reopened.activeSessionId).toBe(sessionId);
+      const transcript = reopened.sessions.find(
+        (session) => session.id === sessionId,
+      )?.messages;
+      expect(transcript?.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+      ]);
+      expect(transcript?.at(-1)?.parts).toEqual([
+        { type: "text", text: "Persisted continued reply" },
+      ]);
+      expect(readParts()).toEqual(storedBeforeClose);
+    } finally {
+      await client?.dispose();
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("selects the requested startup resume session before the first snapshot", async () => {
     const directory = await tempDir("ohbaby-persistent-resume-");
     try {
