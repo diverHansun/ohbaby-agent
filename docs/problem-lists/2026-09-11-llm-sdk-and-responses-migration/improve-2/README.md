@@ -14,9 +14,9 @@
 
 ## 当前状态
 
-Task 1（kind / factory / cache 守卫，`19844686`）与 Task 2（Responses adapter，`c5080043`）已完成并在 task review 中关闭。Task 3 已补齐契约回归与权威文档；验收证据记录在 05。Task reviews 与 Standards / Spec 双轴终审均为 PASS。真实官方 live T12 尚未验证，它是唯一阻止合入 `openai-responses-migration` 的门禁；不得宣称 Responses 已 live 验证。
+独立验收见[`05-implementation-acceptance.md`](./05-implementation-acceptance.md)，最新技术验收通过修订后的受限ZenMux门（§5.12）。2026-09-13全量preflight通过（3196 tests passed，build通过），生产lifecycle Grok文本与工具往返通过，测试脚本审查补强后再次真实复验通过。原Luna/DeepSeek Responses失败记录保留，不宣称它们兼容。按用户授权完成收尾提交后合入本地openai-responses-migration，main不动。
 
-分支链为 `main` → 本地长期集成分支 `openai-responses-migration` → 本轮临时分支 `codex/improve-2-responses-migration`。只有 04/05 的本地门禁、官方 live 证据与独立审查均齐备后，才可合回集成分支；不直接落到 `main`。
+分支链为 `main` → 本地长期集成分支 `openai-responses-migration` → 本轮临时分支 `codex/improve-2-responses-migration`。只有 04/05 的本地门禁、按04 §4.8修订的ZenMux live证据与独立审查均齐备后，才可合回集成分支；不直接落到 `main`。
 
 ## 本轮文档
 
@@ -27,7 +27,7 @@ Task 1（kind / factory / cache 守卫，`19844686`）与 Task 2（Responses ada
 | [`02-optimization-plan-and-change-scope.md`](./02-optimization-plan-and-change-scope.md) | 实施契约 |
 | [`03-reference-projects.md`](./03-reference-projects.md) | pi / OpenCode / Kimi / Reasonix 借鉴 |
 | [`04-test-and-acceptance.md`](./04-test-and-acceptance.md) | 测试与验收 |
-| `05-implementation-acceptance.md` | 本轮实施完成后由验收模式写入（规划期不存在） |
+| [`05-implementation-acceptance.md`](./05-implementation-acceptance.md) | 独立验收及收尾复验，最新§5.12 |
 
 ## 触发事件
 

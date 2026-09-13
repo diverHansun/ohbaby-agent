@@ -1,5 +1,7 @@
 # 4. 测试与验收标准
 
+> 2026-09-13用户修订：live供应商改为指定ZenMux路径，见§4.8。下文原T12“官方endpoint”的证据来源要求由§4.8替代；受限能力、失败必须停、真实工具往返与本地门禁不变。ZenMux通过不记为直连OpenAI官方通过。
+
 项目级 `docs/test-blueprint.md` 不存在；本轮沿用 improve-1 的分层：契约 / 定向单测 / `pnpm preflight` / 官方真实 smoke。不对覆盖率数字负责，对准 01 的高风险项。
 
 本轮只验收“不需要原生 reasoning/output-item 续接”的 Responses 文本与 function-tool 路径。reasoning item、非空 assistant `phase`、refusal、annotation、hosted/custom tool 以及当前请求投影无法无损表达的 Chat 消息形状，都必须在执行工具前 fail-closed。
@@ -110,3 +112,11 @@ main
 - improve-2 通过本文件门禁并完成 05 后，才合并到 `openai-responses-migration`；不直接合并 `main`。
 - 后续每一波从 `openai-responses-migration` 新建独立临时分支，完成该波验收后再回合到集成分支。
 - 只有 Responses 后端兼容、token estimation/counting、cache 命中统计、context 占用统计与 lifecycle 全部通过各自验收，集成分支才具备合并 `main` 的资格。
+
+## 4.8 用户指定ZenMux的live门修订（2026-09-13）
+
+用户授权使用仓库根.env中的ZENMUX_API_KEY，最初指定openai/gpt-5.6-luna和deepseek/deepseek-v4.1-flash走Responses；两者预检失败后，用户明确批准另选ZenMux模型，先预检再调整矩阵。x-ai/grok-4.2-fast-non-reasoning已通过文本及llm-client工具往返预检，现替代原两条Responses必过行；完整lifecycle验收尚未执行。DeepSeek Chat及qwen/qwen3.8-flash的Anthropic路径仍用于兼容回归和improve-3完整矩阵。端点与详细用例见[improve-3/04 §4.6](../improve-3/04-test-and-acceptance.md#46-zenmux真实请求矩阵2026-09-13用户指定)，预检证据见05 §5.11。
+
+T12现验收Grok这条Responses路径的普通文本和无原生续接需求的function-tool往返，仍须经过生产LLM/lifecycle链；不得将认证成功、Chat通过或adapter/llm-client预检代替完整T12。失败结果保留，模型/协议不静默替换。这是受限Responses协议的证据，不是原两款模型或OpenAI原生模型的兼容性证明。通过最新本地门、T12及独立审查后才合入既有openai-responses-migration；不是新建拼写相近的另一条集成分支。
+
+如果指定模型不接受当前必传temperature，或返回reasoning/phase等受限输出，T12仍失败；需要用户批准兼容修正或调整模型/阶段，不能通过测试时过滤输出、删请求参数、改用Chat来关闭此门。官方直连接口未验证作为残余记录，不冒充本次证据。

@@ -2,12 +2,13 @@
 
 ## 状态
 
-- 文档状态：Improve 1 已实施并通过本地验收；Improve 2 已实施、完成本地 preflight，并有 05 实施验收记录
+- 文档状态：Improve 1 已实施并通过本地验收；Improve 2 最新技术验收通过修订后的受限ZenMux门（2026-09-13全量preflight及生产lifecycle T12通过，见05 §5.12）
 - 代码状态：Improve 1 完成；独立 `openai-responses` provider 已落地，仍为显式 kind，默认路径仍是 Chat Completions
-- Improve 2 审查状态：Task review 与终审 Standards / Spec 双轴均通过；官方 live T12 未验证，故仍禁止合入 `openai-responses-migration`
+- Improve 2 审查状态：独立代码审查无新阻断，真实测试脚本补强后复验通过；按用户授权收尾提交并合入本地openai-responses-migration，main不动
 - Improve 1 实施基线：同步远端后的 `main@e095c7fa`
 - 调查日期：2026-09-11
 - Improve 2 规划开启日期：2026-09-12
+- Improve 3 规划开启日期：2026-09-13；用户已批准精确契约及分批实施，仍须先通过improve-2前置门并合入集成分支。improve-3验收后等待用户审核与improve-4计划确认，不自动merge，见[improve-3](./improve-3/README.md)。
 
 本目录把协议调查、SDK 升级与 Responses 接入分成独立轮次：
 
@@ -27,7 +28,8 @@
 | --- | --- | --- | --- |
 | investigation | 2026-09-11 | 议题启动调查 | 完成 |
 | improve-1 | 2026-09-11 | 第一轮：SDK 升级，主动切割 Responses | 05 已闭环 |
-| improve-2 | 2026-09-12 | improve-1 主动切割后的独立实施 | 本地实现、`pnpm preflight`、Task review 与终审双轴均通过；live T12 pending，是唯一阻止合入集成分支的门禁 |
+| improve-2 | 2026-09-12 | improve-1 主动切割后的独立实施 | 最新preflight与修订后的生产lifecycle T12通过，按用户授权收尾合入集成分支 |
+| improve-3 | 2026-09-13 | improve-2 §2.8主动切割的内部契约；用户授权提前规划 | 精确契约已批准；等待前置门解除，A/B/C实施验收后还须等用户审核，不自动合回集成分支 |
 
 ## 已冻结的阶段边界
 
@@ -35,13 +37,13 @@
 
 不引入 `/v1/responses`，不新建 `openai-responses.ts`，不改变当时的 Chat Completions 与 Anthropic Messages 路径。
 
-### Improve 2（本轮实施，未完成 live 门）
+### Improve 2（受限live门已完成）
 
 引入独立 Responses provider 与 `"openai-responses"` kind。**不**改变缺省 `openai-compatible` 路径，**不**对用户露出协议开关，**不**按 base URL 在 Chat / Responses 之间分流，**不**做内部 canonical IR，**不**做 cache 完全对齐，**不**使用 `previous_response_id`。
 
 由于当前 Chat-shaped 历史无法保存并重放 Responses 的 `reasoning` item / `phase`，本轮只支持不产生这些续接要求的 Responses 文本与 function-tool 路径；一旦出现原生 reasoning item、assistant `phase`、refusal、annotation 或 hosted/custom tool，必须明确失败，不得降级后继续。
 
-以下内容仍登记为后续候选（须 live T12 完成并更新 05 后再立轮）：
+以下内容仍登记为后续候选（improve-2 的 05 已写出；合入集成分支仍要 T12。是否在 T12 前开 improve-3 规划，由用户确认）：
 
 - provider-neutral message/tool/output IR 与命名规范；
 - Chat / Responses cache 完全对齐、显式缓存；
@@ -53,7 +55,11 @@ Chat Completions 作为显式兼容入口长期保留；移除它不属于本议
 
 ## Improve 2 之后的候选迁移顺序
 
-这是提前登记的依赖路线，不代表后续轮次已经立项；正式 00–04 只在 improve-2 的 05 闭环并合入 `openai-responses-migration` 后创建。
+> 2026-09-13 更新：下列顺序保留为先前候选记录，已不作为 improve-3 的实施范围。用户已确认本轮只整理 LLM 请求/结果契约与必要类型适配，旧估算和存储保持；原生 continuation、统计对齐留后续。当前依据为 [improve-3/00](./improve-3/00-discussion.md) 与 [02](./improve-3/02-optimization-plan-and-change-scope.md)。
+
+最新下一轮建议见[improve-4候选范围](./improve-3/next-stage-candidates.md)：先对齐当前受限协议的实际请求计量依据与context，原生续接另排。此建议待批准，不代表原先候选中的全部目标进入improve-4。
+
+这是提前登记的依赖路线，不代表后续轮次已经立项。improve-2 的 05 已写出（部分通过）。根目录原先把正式 00–04 放在「合入 `openai-responses-migration` 之后」；若要在 T12 前开 improve-3 规划，需要用户确认。
 
 1. 建立 provider-neutral canonical item 与 provider-continuation envelope，先定义 reasoning item、assistant phase、原生 call ID 和 opaque continuation 数据的所有权、持久化与回放边界。
 2. 让 context serializer / persistence 能无损保存并重放这些 continuation 数据，同时保持项目消息仍是会话真相源，不依赖 `previous_response_id` 才能正确运行。
