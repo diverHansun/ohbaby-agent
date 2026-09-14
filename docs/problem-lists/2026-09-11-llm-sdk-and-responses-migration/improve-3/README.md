@@ -1,6 +1,6 @@
 # improve-3 · LLM 请求与结果契约去 Chat 耦合
 
-> 开启日期：2026-09-13。状态：**技术验收通过，等待用户审核，不自动合并**。A/B/C测试已提交，完整preflight及独立审查通过；本记录随文档收尾提交。三协议各有真实成功证据，Qwen原偶发失败未定因、历史保留。详见[05实施验收](./05-implementation-acceptance.md)及§5.8。
+> 开启日期：2026-09-13。状态：**独立验收通过，等待用户审核后合入集成分支，不自动合并**。2026-09-14 对照 02/04 重写 [05](./05-implementation-acceptance.md)；定向 19 文件 / 415 tests 复跑绿。未在验收会话重跑全量 preflight 或真实 API。T10 用实施会话分次证据。Qwen 偶发未定因。
 > 调研代码：`codex/improve-2-responses-migration@a18290f3`。本轮实施分支：`codex/improve-3-model-contract`，起点为集成分支`b43a0921`；main不动。
 
 本轮承接improve-2 §2.8主动切出的内部契约问题。精确设计和分批实施已获用户批准。2026-09-13 improve-2最新全量preflight与生产lifecycle Grok T12通过，详见improve-2/05 §5.12。按用户授权完成收尾并合入openai-responses-migration，再从该集成分支建立本轮临时分支实施。不得合入main；本轮改造后须重新运行全部矩阵。
@@ -50,4 +50,4 @@ SQLite两次真实reopen/UI恢复、公开构建消费者及本地三协议HTTP/
 
 真实ZenMux前两轮均在连接阶段失败。TUN下17:54复跑Responses/Chat通过，Qwen工具执行次数为0；随后21:59 Qwen定向诊断与清理后的原runner均完整通过。各次失败、诊断干扰、请求数和成功证据保留在05；不将分次补证写成同次矩阵全绿，也不声称原偶发问题已修复。
 
-当前A为bd98d0ba、B为7fd55e04；C测试及文档仍未提交。main和集成分支不动，improve-4仅保留候选与待确认问题，不在本轮验收未关闭时提前开工。
+当前 HEAD 为 `734f2ef6`。main 与集成分支不动。improve-4 仍只是候选，须用户确认范围后再写正式 00–04。

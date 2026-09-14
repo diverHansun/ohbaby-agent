@@ -8,7 +8,7 @@
 - Improve 1 实施基线：同步远端后的 `main@e095c7fa`
 - 调查日期：2026-09-11
 - Improve 2 规划开启日期：2026-09-12
-- Improve 3 规划开启日期：2026-09-13；用户已批准精确契约及分批实施，仍须先通过improve-2前置门并合入集成分支。improve-3验收后等待用户审核与improve-4计划确认，不自动merge，见[improve-3](./improve-3/README.md)。
+- Improve 3 规划开启日期：2026-09-13。2026-09-14 独立验收通过（见 [improve-3/05](./improve-3/05-implementation-acceptance.md)），等待用户审核及 improve-4 计划确认后才合回集成分支；不自动 merge。
 
 本目录把协议调查、SDK 升级与 Responses 接入分成独立轮次：
 
@@ -29,7 +29,7 @@
 | investigation | 2026-09-11 | 议题启动调查 | 完成 |
 | improve-1 | 2026-09-11 | 第一轮：SDK 升级，主动切割 Responses | 05 已闭环 |
 | improve-2 | 2026-09-12 | improve-1 主动切割后的独立实施 | 最新preflight与修订后的生产lifecycle T12通过，按用户授权收尾合入集成分支 |
-| improve-3 | 2026-09-13 | improve-2 §2.8主动切割的内部契约；用户授权提前规划 | 精确契约已批准；等待前置门解除，A/B/C实施验收后还须等用户审核，不自动合回集成分支 |
+| improve-3 | 2026-09-13 | improve-2 §2.8主动切割的内部契约；用户授权提前规划 | 05 独立验收通过（2026-09-14）；等待用户审核后合入集成分支。improve-4 仅有候选，未立项 |
 
 ## 已冻结的阶段边界
 
