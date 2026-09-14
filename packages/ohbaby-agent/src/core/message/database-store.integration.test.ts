@@ -14,7 +14,10 @@ import {
 } from "../../services/database/index.js";
 import { createDatabaseMessageStore } from "./database-store.js";
 import { serializeHistoryMessages } from "../context/serializer.js";
-import { readTokenUsageMetadata } from "./token-usage-metadata.js";
+import {
+  createTokenUsageMetadata,
+  readTokenUsageMetadata,
+} from "./token-usage-metadata.js";
 import type { Message, MessageStore } from "./types.js";
 
 const cleanupPaths: string[] = [];
@@ -275,6 +278,59 @@ describe("createDatabaseMessageStore", () => {
       inputTokens: 10,
       outputTokens: 3,
       totalTokens: 13,
+    });
+  });
+
+  it("round-trips canonical token usage metadata through a physical reopen", async () => {
+    const store = createDatabaseMessageStore();
+    const message: Message = {
+      id: "message_canonical_usage",
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+      time: { created: 1_000 },
+    };
+    await store.insertMessage(message);
+    await store.appendPart({
+      message,
+      partId: "part_canonical_usage",
+      data: {
+        type: "text",
+        text: "canonical response",
+        metadata: createTokenUsageMetadata({
+          inputBreakdown: {
+            cacheRead: 40,
+            cacheWrite: 10,
+            observed: { cacheRead: true, cacheWrite: true },
+            uncached: 70,
+          },
+          inputTokens: 120,
+          outputTokens: 7,
+          totalTokens: 127,
+        }),
+      },
+      updatedAt: 2_000,
+    });
+
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const reopened =
+      await createDatabaseMessageStore().listBySession("session_1");
+    const usage = reopened
+      .flatMap((entry) => entry.parts)
+      .map((part) => readTokenUsageMetadata(part.metadata))
+      .find((candidate) => candidate !== undefined);
+
+    expect(usage).toEqual({
+      inputBreakdown: {
+        cacheRead: 40,
+        cacheWrite: 10,
+        observed: { cacheRead: true, cacheWrite: true },
+        uncached: 70,
+      },
+      inputTokens: 120,
+      outputTokens: 7,
+      totalTokens: 127,
     });
   });
 

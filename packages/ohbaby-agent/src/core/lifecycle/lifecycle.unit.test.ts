@@ -11,7 +11,10 @@ import {
 } from "../message/index.js";
 import type { MessageIdGenerator } from "../message/index.js";
 import { DEFAULT_MAX_STEPS, Lifecycle } from "./index.js";
-import type { LLMClientInstance } from "../llm-client/index.js";
+import {
+  ProviderStreamInterruptedError,
+  type LLMClientInstance,
+} from "../llm-client/index.js";
 import type { ToolSchedulerInstance } from "../tool-scheduler/index.js";
 import type {
   ContextManager,
@@ -710,6 +713,424 @@ describe("Lifecycle.run", () => {
     });
   });
 
+  it("pairs each successful step usage with that step's raw prepared heuristic", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const prepareTurn = vi
+      .fn<ContextManager["prepareTurn"]>()
+      .mockResolvedValueOnce(
+        preparedTurn(
+          [{ role: "user", content: "First" }],
+          {
+            ...SESSION_USAGE,
+            currentTokens: 9_999,
+          },
+          111,
+        ),
+      )
+      .mockResolvedValueOnce(
+        preparedTurn(
+          [{ role: "user", content: "Second" }],
+          {
+            ...SESSION_USAGE,
+            currentTokens: 8_888,
+          },
+          222,
+        ),
+      );
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
+    const lifecycle = new Lifecycle({
+      contextManager: {
+        ...createContextManagerMock(prepareTurn),
+        updateCalibrationFactor,
+      },
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "tool_calls",
+              tokenUsage: {
+                inputTokens: 400,
+                outputTokens: 10,
+                totalTokens: 410,
+              },
+              toolCallDeltas: [
+                {
+                  argumentsDelta: "{}",
+                  id: "call_1",
+                  index: 0,
+                  name: "continue",
+                },
+              ],
+            },
+          ],
+          [
+            {
+              finishReason: "stop",
+              textDelta: "Done.",
+              tokenUsage: {
+                inputTokens: 700,
+                outputTokens: 20,
+                totalTokens: 720,
+              },
+            },
+          ],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi
+          .fn()
+          .mockResolvedValue([
+            { callId: "call_1", output: "ok", status: "success" },
+          ]),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_pairing",
+      }),
+    );
+
+    expect(updateCalibrationFactor.mock.calls).toEqual([
+      ["session_pairing", 400, 111],
+      ["session_pairing", 700, 222],
+    ]);
+    expect(result.usage).toEqual({
+      inputTokens: 1_100,
+      outputTokens: 30,
+      totalTokens: 1_130,
+      usageComplete: true,
+    });
+  });
+
+  it("keeps a missing-usage step incomplete when a later step reports usage", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
+    const lifecycle = new Lifecycle({
+      contextManager: {
+        ...createContextManagerMock(
+          vi
+            .fn()
+            .mockResolvedValue(
+              preparedTurn(
+                [{ role: "user", content: "Continue" }],
+                SESSION_USAGE,
+                55,
+              ),
+            ),
+        ),
+        updateCalibrationFactor,
+      },
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "tool_calls",
+              toolCallDeltas: [
+                {
+                  argumentsDelta: "{}",
+                  id: "call_1",
+                  index: 0,
+                  name: "continue",
+                },
+              ],
+            },
+          ],
+          [
+            {
+              finishReason: "stop",
+              textDelta: "Done.",
+              tokenUsage: { inputTokens: 90, outputTokens: 9, totalTokens: 99 },
+            },
+          ],
+        ],
+        [],
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi
+          .fn()
+          .mockResolvedValue([
+            { callId: "call_1", output: "ok", status: "success" },
+          ]),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_missing",
+      }),
+    );
+    const usageParts = (await messageManager.listBySession("session_missing"))
+      .flatMap((message) => message.parts)
+      .filter((part) => readTokenUsageMetadata(part.metadata) !== undefined);
+
+    expect(result.usage).toEqual({
+      inputTokens: 90,
+      outputTokens: 9,
+      totalTokens: 99,
+      usageComplete: false,
+    });
+    expect(updateCalibrationFactor.mock.calls).toEqual([
+      ["session_missing", 90, 55],
+    ]);
+    expect(usageParts).toHaveLength(1);
+  });
+
+  it("marks an earlier known subtotal incomplete when the next completion omits usage", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
+    const lifecycle = new Lifecycle({
+      contextManager: {
+        ...createContextManagerMock(
+          vi
+            .fn<ContextManager["prepareTurn"]>()
+            .mockResolvedValueOnce(
+              preparedTurn(
+                [{ role: "user", content: "First" }],
+                SESSION_USAGE,
+                30,
+              ),
+            )
+            .mockResolvedValueOnce(
+              preparedTurn(
+                [{ role: "user", content: "Second" }],
+                SESSION_USAGE,
+                60,
+              ),
+            ),
+        ),
+        updateCalibrationFactor,
+      },
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "tool_calls",
+              tokenUsage: { inputTokens: 40, outputTokens: 4, totalTokens: 44 },
+              toolCallDeltas: [
+                {
+                  argumentsDelta: "{}",
+                  id: "call_1",
+                  index: 0,
+                  name: "continue",
+                },
+              ],
+            },
+          ],
+          [],
+        ],
+        [],
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi
+          .fn()
+          .mockResolvedValue([
+            { callId: "call_1", output: "ok", status: "success" },
+          ]),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_interrupted",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      terminalReason: "completed",
+      usage: {
+        inputTokens: 40,
+        outputTokens: 4,
+        totalTokens: 44,
+        usageComplete: false,
+      },
+    });
+    expect(updateCalibrationFactor.mock.calls).toEqual([
+      ["session_interrupted", 40, 30],
+    ]);
+  });
+
+  it("retains an earlier known subtotal when the next step has a controlled provider failure", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
+    const lifecycle = new Lifecycle({
+      contextManager: {
+        ...createContextManagerMock(
+          vi
+            .fn()
+            .mockResolvedValue(
+              preparedTurn(
+                [{ role: "user", content: "Continue" }],
+                SESSION_USAGE,
+                30,
+              ),
+            ),
+        ),
+        updateCalibrationFactor,
+      },
+      llmClient: createScriptedFakeLLMClient(
+        [
+          {
+            events: [
+              {
+                finishReason: "tool_calls",
+                tokenUsage: {
+                  inputTokens: 40,
+                  outputTokens: 4,
+                  totalTokens: 44,
+                },
+                toolCallDeltas: [
+                  {
+                    argumentsDelta: "{}",
+                    id: "call_1",
+                    index: 0,
+                    name: "continue",
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            error: new ProviderStreamInterruptedError(
+              new Error("socket closed"),
+            ),
+          },
+        ],
+        [],
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi
+          .fn()
+          .mockResolvedValue([
+            { callId: "call_1", output: "ok", status: "success" },
+          ]),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_failure",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      terminalReason: "provider_stream_interrupted",
+      usage: {
+        inputTokens: 40,
+        outputTokens: 4,
+        totalTokens: 44,
+        usageComplete: true,
+      },
+    });
+    expect(updateCalibrationFactor).toHaveBeenCalledTimes(1);
+  });
+
+  it("still rejects an unclassified error after retaining earlier usage", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(
+        vi
+          .fn()
+          .mockResolvedValue(
+            preparedTurn(
+              [{ role: "user", content: "Continue" }],
+              SESSION_USAGE,
+              30,
+            ),
+          ),
+      ),
+      llmClient: createScriptedFakeLLMClient(
+        [
+          {
+            events: [
+              {
+                finishReason: "tool_calls",
+                tokenUsage: {
+                  inputTokens: 40,
+                  outputTokens: 4,
+                  totalTokens: 44,
+                },
+                toolCallDeltas: [
+                  {
+                    argumentsDelta: "{}",
+                    id: "call_1",
+                    index: 0,
+                    name: "continue",
+                  },
+                ],
+              },
+            ],
+          },
+          { error: new Error("unclassified failure") },
+        ],
+        [],
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi
+          .fn()
+          .mockResolvedValue([
+            { callId: "call_1", output: "ok", status: "success" },
+          ]),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    await expect(
+      consumeLifecycle(
+        lifecycle.run({
+          directory: "D:/repo",
+          modelId: "fake-model",
+          sessionId: "session_throw",
+        }),
+      ),
+    ).rejects.toThrow("unclassified failure");
+  });
+
   it("persists tool-only and hybrid usage on exactly one part per step", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const messageManager = createMessageManager({
@@ -844,16 +1265,37 @@ describe("Lifecycle.run", () => {
       idGenerator: createDeterministicIds(),
       now: () => 1_700_000_000_000,
     });
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
     const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(
-        vi
-          .fn<ContextManager["prepareTurn"]>()
-          .mockResolvedValue(
-            preparedTurn([{ role: "user", content: "Answer fully" }]),
-          ),
-      ),
+      contextManager: {
+        ...createContextManagerMock(
+          vi
+            .fn<ContextManager["prepareTurn"]>()
+            .mockResolvedValue(
+              preparedTurn(
+                [{ role: "user", content: "Answer fully" }],
+                SESSION_USAGE,
+                75,
+              ),
+            ),
+        ),
+        updateCalibrationFactor,
+      },
       llmClient: createSequentialFakeLLMClient(
-        [[{ textDelta: "partial answer", finishReason: "length" }]],
+        [
+          [
+            {
+              textDelta: "partial answer",
+              finishReason: "length",
+              tokenUsage: {
+                inputTokens: 150,
+                outputTokens: 12,
+                totalTokens: 162,
+              },
+            },
+          ],
+        ],
         [],
       ),
       messageManager,
@@ -876,7 +1318,108 @@ describe("Lifecycle.run", () => {
       finishReason: "error",
       success: false,
       terminalReason: "output_length",
+      usage: {
+        inputTokens: 150,
+        outputTokens: 12,
+        totalTokens: 162,
+        usageComplete: true,
+      },
     });
+    expect(updateCalibrationFactor.mock.calls).toEqual([
+      ["session_output_length", 150, 75],
+    ]);
+  });
+
+  it("retains usage and calibration processed immediately before an abort", async () => {
+    const abortController = new AbortController();
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
+    const llmClient: LLMClientInstance<FakeSdkClient> = {
+      provider: {
+        id: "fake",
+        kind: "openai-compatible",
+        client: { kind: "fake" },
+        streamResponse: () =>
+          Promise.resolve(
+            (async function* (): AsyncGenerator<
+              InterfaceProviderStreamEvent,
+              void,
+              unknown
+            > {
+              yield await Promise.resolve({
+                finishReason: "stop",
+                textDelta: "partial",
+                tokenUsage: {
+                  inputTokens: 80,
+                  outputTokens: 6,
+                  totalTokens: 86,
+                },
+              });
+              abortController.abort();
+            })(),
+          ),
+        isAbortError: () => false,
+      },
+      config: {
+        provider: "fake",
+        model: "fake-model",
+        apiKeyEnv: "FAKE_API_KEY",
+        baseUrl: "https://example.invalid/v1",
+        interfaceProvider: "openai-compatible",
+        temperature: 0,
+        maxTokens: 128,
+      },
+    };
+    const lifecycle = new Lifecycle({
+      contextManager: {
+        ...createContextManagerMock(
+          vi
+            .fn()
+            .mockResolvedValue(
+              preparedTurn(
+                [{ role: "user", content: "Abort" }],
+                SESSION_USAGE,
+                50,
+              ),
+            ),
+        ),
+        updateCalibrationFactor,
+      },
+      llmClient,
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_abort_usage",
+        signal: abortController.signal,
+      }),
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      terminalReason: "cancelled",
+      usage: {
+        inputTokens: 80,
+        outputTokens: 6,
+        totalTokens: 86,
+        usageComplete: true,
+      },
+    });
+    expect(updateCalibrationFactor.mock.calls).toEqual([
+      ["session_abort_usage", 80, 50],
+    ]);
   });
 
   it("passes context scope through prepare, calibration, and assistant messages", async () => {
@@ -1763,22 +2306,12 @@ describe("Lifecycle.run", () => {
     const prepareTurn = vi
       .fn<ContextManager["prepareTurn"]>()
       .mockResolvedValueOnce(
-        preparedTurn(
-          initialMessages,
-          SESSION_USAGE,
-          undefined,
-          initialSnapshotTools,
-        ),
+        preparedTurn(initialMessages, SESSION_USAGE, 111, initialSnapshotTools),
       )
       .mockImplementationOnce((input) => {
         input.onCompactionStarted?.();
         return Promise.resolve(
-          preparedTurn(
-            forcedMessages,
-            SESSION_USAGE,
-            undefined,
-            forcedSnapshotTools,
-          ),
+          preparedTurn(forcedMessages, SESSION_USAGE, 222, forcedSnapshotTools),
         );
       });
     const overflowError = Object.assign(
@@ -1801,13 +2334,24 @@ describe("Lifecycle.run", () => {
       definitions: resolvedToolDefinitions,
       requestTools: resolvedTools,
     });
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
     const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(prepareTurn, {
-        assembleRequestFromInput: false,
-      }),
+      contextManager: {
+        ...createContextManagerMock(prepareTurn, {
+          assembleRequestFromInput: false,
+        }),
+        updateCalibrationFactor,
+      },
       llmClient: createFailThenSucceedLLMClient({
         error: overflowError,
-        events: [{ textDelta: "Recovered.", finishReason: "stop" }],
+        events: [
+          {
+            textDelta: "Recovered.",
+            finishReason: "stop",
+            tokenUsage: { inputTokens: 500, outputTokens: 8, totalTokens: 508 },
+          },
+        ],
         requests,
       }),
       messageManager,
@@ -1856,6 +2400,9 @@ describe("Lifecycle.run", () => {
     expect(requests[1]?.tools).toBe(forcedSnapshotTools);
     expect(requests[0]?.messages).toEqual(initialMessages);
     expect(requests[1]?.messages).toEqual(forcedMessages);
+    expect(updateCalibrationFactor.mock.calls).toEqual([
+      ["session_test", 500, 222],
+    ]);
     expect(events).toEqual([
       "turn:start",
       "context:prepared",
@@ -1879,6 +2426,12 @@ describe("Lifecycle.run", () => {
       finalResponse: "Recovered.",
       finishReason: "stop",
       success: true,
+      usage: {
+        inputTokens: 500,
+        outputTokens: 8,
+        totalTokens: 508,
+        usageComplete: true,
+      },
     });
   });
 

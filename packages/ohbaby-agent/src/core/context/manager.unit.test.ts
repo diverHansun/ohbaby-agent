@@ -1343,7 +1343,13 @@ describe("ContextManager", () => {
       baselineA.sentHeuristic,
       "subagent_a",
     );
-    const [calibratedA, unchangedB] = await Promise.all([
+    manager.updateCalibrationFactor(
+      "child_1",
+      baselineB.sentHeuristic * 3,
+      baselineB.sentHeuristic,
+      "subagent_b",
+    );
+    const [calibratedA, calibratedB] = await Promise.all([
       prepareScope("subagent_a"),
       prepareScope("subagent_b"),
     ]);
@@ -1351,17 +1357,19 @@ describe("ContextManager", () => {
     expect(calibratedA.usage.currentTokens).toBe(
       Math.round(calibratedA.sentHeuristic * 1.5),
     );
-    expect(unchangedB.usage.currentTokens).toBe(unchangedB.sentHeuristic);
+    expect(calibratedB.usage.currentTokens).toBe(
+      Math.round(calibratedB.sentHeuristic * 2),
+    );
     expect(baselineA.sentHeuristic).toBe(baselineB.sentHeuristic);
 
     manager.disposeScope("child_1", "subagent_a");
-    const [resetA, stillUnchangedB] = await Promise.all([
+    const [resetA, retainedB] = await Promise.all([
       prepareScope("subagent_a"),
       prepareScope("subagent_b"),
     ]);
     expect(resetA.usage.currentTokens).toBe(resetA.sentHeuristic);
-    expect(stillUnchangedB.usage.currentTokens).toBe(
-      stillUnchangedB.sentHeuristic,
+    expect(retainedB.usage.currentTokens).toBe(
+      Math.round(retainedB.sentHeuristic * 2),
     );
   });
 
@@ -1828,6 +1836,45 @@ describe("ContextManager", () => {
       Math.round(lowClamped.sentHeuristic * 1.25),
     );
   });
+
+  it.each([
+    { actual: 100, sent: 0 },
+    { actual: 100, sent: -1 },
+    { actual: 100, sent: Number.NaN },
+    { actual: 100, sent: Number.POSITIVE_INFINITY },
+    { actual: Number.NaN, sent: 10 },
+    { actual: Number.POSITIVE_INFINITY, sent: 10 },
+  ])(
+    "ignores invalid calibration sample actual=$actual sent=$sent",
+    async ({ actual, sent }) => {
+      const messageManager = createMessageManagerFixture();
+      await addTextMessage(messageManager, {
+        sessionId: "session_invalid_calibration",
+        role: "user",
+        text: "hello",
+      });
+      const { manager } = createManager({ messageManager });
+      const baseline = await manager.prepareTurn({
+        directory: "D:/repo",
+        modelId: "model-a",
+        sessionId: "session_invalid_calibration",
+      });
+
+      manager.updateCalibrationFactor(
+        "session_invalid_calibration",
+        actual,
+        sent,
+      );
+      const unchanged = await manager.prepareTurn({
+        directory: "D:/repo",
+        modelId: "model-a",
+        sessionId: "session_invalid_calibration",
+      });
+
+      expect(unchanged.sentHeuristic).toBe(baseline.sentHeuristic);
+      expect(unchanged.usage.currentTokens).toBe(baseline.sentHeuristic);
+    },
+  );
 
   it("dark ships mask statistics without changing prepared messages by default", async () => {
     const messageManager = createMessageManagerFixture();
