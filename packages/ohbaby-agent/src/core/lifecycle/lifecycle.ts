@@ -592,6 +592,7 @@ export class Lifecycle {
 
       usage = aggregateTokenUsage(usage, finalEvent.tokenUsage);
       if (finalEvent.tokenUsage !== undefined) {
+        // Pair actual input with the request sent, including an overflow re-prepare.
         if (params.contextScopeId === undefined) {
           contextManager.updateCalibrationFactor(
             params.sessionId,

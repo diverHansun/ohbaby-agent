@@ -201,13 +201,14 @@ export interface PrepareTurnInput {
 }
 
 export interface PreparedTurn {
-  /** The single measured request snapshot consumed by the provider call. */
+  /** The immutable prepared request actually consumed by the provider call. */
   readonly request: PreparedModelRequest;
   readonly usage: ContextUsage;
   readonly composition?: ContextOccupancyComposition;
   readonly compaction?: CompactResult;
   readonly assembledAt: number;
   readonly hasSummary: boolean;
+  /** Raw legacy estimate for this exact request, not provider wire-token usage. */
   readonly sentHeuristic: number;
 }
 
@@ -227,7 +228,7 @@ export interface ContextManager {
   ): Promise<AgentRunPromptSnapshot>;
   updateCalibrationFactor(
     sessionId: string,
-    realPromptTokens: number,
+    actualInputTokens: number,
     sentHeuristic: number,
     contextScopeId?: string,
   ): void;

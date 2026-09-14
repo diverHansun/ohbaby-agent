@@ -41,6 +41,7 @@ export interface InputTokenBreakdown {
   readonly uncached: number;
   readonly cacheRead: number;
   readonly cacheWrite: number;
+  /** Availability of each cache field in the provider source, not request success. */
   readonly observed: {
     readonly cacheRead: boolean;
     readonly cacheWrite: boolean;
@@ -48,9 +49,12 @@ export interface InputTokenBreakdown {
 }
 
 export interface InterfaceProviderTokenUsage {
+  /** All input tokens, inclusive of cache usage even without optional details. */
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /** Always inputTokens + outputTokens. */
   readonly totalTokens: number;
+  /** Optional because providers do not always expose cache source fields. */
   readonly inputBreakdown?: InputTokenBreakdown;
 }
 

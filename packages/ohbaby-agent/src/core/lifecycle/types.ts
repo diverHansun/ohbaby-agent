@@ -244,13 +244,19 @@ export interface LifecycleResult {
   /** In-memory only; consumers must normalize and redact before persistence. */
   readonly failureCause?: unknown;
   readonly toolCalls?: readonly ParsedToolCall[];
+  /** Aggregate token usage collected during this Lifecycle.run invocation. */
   readonly usage?: LifecycleTokenUsage;
 }
 
+/** Aggregate usage for one Lifecycle.run, not an individual provider call or session. */
 export interface LifecycleTokenUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
   readonly inputBreakdown?: TokenUsage["inputBreakdown"];
+  /**
+   * True when every aggregated result included usage; excludes unaggregated HTTP attempts.
+   * Independent of lifecycle completion and cache-field observation.
+   */
   readonly usageComplete: boolean;
 }

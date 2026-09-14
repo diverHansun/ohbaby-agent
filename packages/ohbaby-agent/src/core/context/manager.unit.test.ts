@@ -1762,6 +1762,62 @@ describe("ContextManager", () => {
     );
   });
 
+  it("isolates calibration and disposal across sessions", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (const sessionId of ["session_a", "session_b"]) {
+      await addTextMessage(messageManager, {
+        sessionId,
+        role: "user",
+        text: "identical content",
+      });
+    }
+    const { manager } = createManager({ messageManager });
+    const prepareSession = (
+      sessionId: string,
+    ): ReturnType<ContextManager["prepareTurn"]> =>
+      manager.prepareTurn({
+        directory: "D:/repo",
+        modelId: "model-a",
+        sessionId,
+      });
+    const [baselineA, baselineB] = await Promise.all([
+      prepareSession("session_a"),
+      prepareSession("session_b"),
+    ]);
+
+    manager.updateCalibrationFactor(
+      "session_a",
+      baselineA.sentHeuristic * 2,
+      baselineA.sentHeuristic,
+    );
+    manager.updateCalibrationFactor(
+      "session_b",
+      baselineB.sentHeuristic * 3,
+      baselineB.sentHeuristic,
+    );
+    const [calibratedA, calibratedB] = await Promise.all([
+      prepareSession("session_a"),
+      prepareSession("session_b"),
+    ]);
+    expect(calibratedA.sentHeuristic).toBe(calibratedB.sentHeuristic);
+    expect(calibratedA.usage.currentTokens).toBe(
+      Math.round(calibratedA.sentHeuristic * 1.5),
+    );
+    expect(calibratedB.usage.currentTokens).toBe(
+      Math.round(calibratedB.sentHeuristic * 2),
+    );
+
+    manager.disposeSession("session_a");
+    const [resetA, retainedB] = await Promise.all([
+      prepareSession("session_a"),
+      prepareSession("session_b"),
+    ]);
+    expect(resetA.usage.currentTokens).toBe(resetA.sentHeuristic);
+    expect(retainedB.usage.currentTokens).toBe(
+      Math.round(retainedB.sentHeuristic * 2),
+    );
+  });
+
   it("moves calibration toward repeated observations without jumping directly to them", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {

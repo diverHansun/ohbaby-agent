@@ -298,18 +298,18 @@ export function createContextManager(
 
   function updateCalibrationFactor(
     sessionId: string,
-    realPromptTokens: number,
+    actualInputTokens: number,
     sentHeuristic: number,
     contextScopeId?: string,
   ): void {
     if (
       sentHeuristic <= 0 ||
       !Number.isFinite(sentHeuristic) ||
-      !Number.isFinite(realPromptTokens)
+      !Number.isFinite(actualInputTokens)
     ) {
       return;
     }
-    const observed = realPromptTokens / sentHeuristic;
+    const observed = actualInputTokens / sentHeuristic;
     const clamped = Math.min(
       CALIBRATION_FACTOR_MAX,
       Math.max(CALIBRATION_FACTOR_MIN, observed),
