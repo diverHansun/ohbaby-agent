@@ -1,6 +1,6 @@
 # improve-3 · LLM 请求与结果契约去 Chat 耦合
 
-> 开启日期：2026-09-13。状态：**独立验收通过，等待用户审核后合入集成分支，不自动合并**。2026-09-14 对照 02/04 重写 [05](./05-implementation-acceptance.md)；定向 19 文件 / 415 tests 复跑绿。未在验收会话重跑全量 preflight 或真实 API。T10 用实施会话分次证据。Qwen 偶发未定因。
+> 开启日期：2026-09-13。状态：**技术验收闭环，用户已授权本地合入集成分支**。独立验收及最新补验见 [05 §5.9](./05-implementation-acceptance.md#59-用户授权与合入前补验2026-09-14)：完整 preflight 复跑通过，317 文件 / 3229 tests 通过及全部构建成功。本次未重打真实 API，T10 仍为实施会话分次证据；Qwen 偶发及 packaging 超时历史保留。
 > 调研代码：`codex/improve-2-responses-migration@a18290f3`。本轮实施分支：`codex/improve-3-model-contract`，起点为集成分支`b43a0921`；main不动。
 
 本轮承接improve-2 §2.8主动切出的内部契约问题。精确设计和分批实施已获用户批准。2026-09-13 improve-2最新全量preflight与生产lifecycle Grok T12通过，详见improve-2/05 §5.12。按用户授权完成收尾并合入openai-responses-migration，再从该集成分支建立本轮临时分支实施。不得合入main；本轮改造后须重新运行全部矩阵。
@@ -44,10 +44,10 @@
 
 TDD先复现旧快照名、伪造空正文和隐藏usage别名三项失败，再修改实现。冻结后定向41文件801项、完整unit、contract 17文件309项、integration 53文件352项均exit 0；lint/typecheck/格式检查通过。完整integration包含CLI打包安装与实际Lifecycle→worker→bridge新增三例。独立子代理未发现实质阻塞。新测试证实不完整工具参数及完成信号后EOF前取消都不执行工具；观察事件不提供parsed调用授权。
 
-## C批与当前停止点（2026-09-13）
+## C批与当时停止点（2026-09-13）
 
 SQLite两次真实reopen/UI恢复、公开构建消费者及本地三协议HTTP/SSE已通过；C独立审查未发现实质问题。最终preflight复验exit 0，317文件3229项通过、5文件16项既有跳过，所有build通过。此前一次全量及一次隔离CLI包装安装超时保留在05；未改测试或超时，不能声称稳定性问题已修复。
 
 真实ZenMux前两轮均在连接阶段失败。TUN下17:54复跑Responses/Chat通过，Qwen工具执行次数为0；随后21:59 Qwen定向诊断与清理后的原runner均完整通过。各次失败、诊断干扰、请求数和成功证据保留在05；不将分次补证写成同次矩阵全绿，也不声称原偶发问题已修复。
 
-当前 HEAD 为 `734f2ef6`。main 与集成分支不动。improve-4 仍只是候选，须用户确认范围后再写正式 00–04。
+当时 HEAD 为 `734f2ef6`，尚未获准合入。2026-09-14 用户已授权 improve-3 本地合入；本次完整补验通过，见 05 §5.9。improve-4 的“用量与校准链路对齐”范围和规划撰写已获批准，实施仍等待其独立文档审核；不合 main、不 push。

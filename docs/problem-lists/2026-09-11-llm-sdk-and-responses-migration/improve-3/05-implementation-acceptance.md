@@ -2,6 +2,8 @@
 
 > 撰写时机：2026-09-14，由 plan-code-improvement 验收模式对照 `b43a0921...HEAD` 独立检查后撰写。实施会话原稿（`734f2ef6`）的分批数字与 T10 过程作为旁证保留，不把实施自证直接当成当场复现。
 
+> 最新合入前补验见 §5.9：用户已授权本地合入，第二次完整 preflight 通过。§5.1–5.8 保留独立验收时的证据范围和当时停止点，不将历史记录改写为本次执行。
+
 ## 5.1 元信息
 
 | 项 | 值 |
@@ -158,3 +160,21 @@ main @ dfb6d932
 - 合入 `openai-responses-migration`：仍须用户明确同意；建议合入前再跑一次干净 `pnpm preflight`。
 - 不合 `main`、不 push、不改版本号。
 - improve-4 候选见 [next-stage-candidates.md](./next-stage-candidates.md)。本 05 不批准 improve-4 实施合同。
+
+## 5.9 用户授权与合入前补验（2026-09-14）
+
+用户明确批准提交 improve-3 文档，并在确认验收结束后合入本地 `openai-responses-migration`。独立验收文档已提交为 `3a66b173`；该提交仅修改本 05 和两份索引，lint/typecheck 提交钩子通过。
+
+本次对同一生产代码树补验，未修改生产代码、测试、超时、依赖或代理配置，未调用真实 LLM API：
+
+| 执行 | 结果 | 证据与限制 |
+| --- | --- | --- |
+| 第一次 `pnpm preflight`，测试开始 14:37:34 | exit 1；316 files / 3228 tests 通过，1 失败，5 files / 16 tests 跳过 | CLI packaging 的本地 registry 全局安装 180s 超时；format/lint/typecheck 已过，build 未执行；不能称该次通过 |
+| 单独 packaging 复跑，14:44:07 | exit 0；1 file / 1 test 通过，199.19s | 未调整代码/超时；不由此推断根因已解决 |
+| 第二次 `pnpm preflight`，测试开始 14:49:28 | exit 0；317 files / 3229 tests 通过，5 files / 16 tests 跳过；测试 206.14s | format、lint、typecheck、全部测试及 SDK/agent/server/CLI/Web 构建通过；packaging 本次通过 |
+
+本机原始日志位于 `/tmp/ohbaby-improve-3-close.lgUVg8/`：`preflight.log`、`packaging-recheck.log`、`preflight-recheck.log`。临时日志不是永久工件；上表保存执行摘要，未将其加入仓库。
+
+结论：improve-3 技术验收及本次合入前门已满足，可按用户授权合入本地集成分支，不合 main、不 push。保留 §5.5/5.7 的请求闭集覆盖限制、Qwen 原偶发根因未定，以及 packaging 超时历史；本次没有新的 live 结果。
+
+用户同时批准 improve-4 建临时分支撰写规划并审查，未批准 improve-4 生产实施。此前“仅候选/等待讨论”的停止点已更新；本轮 05 不承载下一轮实施方案。
