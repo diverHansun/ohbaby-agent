@@ -1,15 +1,15 @@
 # improve-4 · 用量与校准链路对齐
 
-> 开启日期：2026-09-14。状态：规划草案，等待用户审核；未实施。
+> 开启日期：2026-09-14。状态：已实施并通过本轮技术验收，等待用户审核；未合入、未 push。结果见 [05](./05-implementation-acceptance.md)。
 > 触发事件：improve-3 主动切出的用量与校准议题，承接其 05 独立技术验收及用户收窄后的范围。不是把实施批次另算一轮。
 
 目标：核对并对齐供应商用量、单步估算和校准之间的数据合同；保留现有估算、统计、占用和压缩算法，以及现有更新时机、作用范围与缺失规则。不以提高估算精度、改变占用数字或精确计费为成果。
 
 ## 分支与基线
 
-- 文档分支：`codex/improve-4-usage-calibration`，当前集成基线 `c7572a38`；生产代码与 `734f2ef6` 相同，随后两个提交仅补充 improve-3 验收文档。
-- 创建时先从 improve-3 HEAD 建分支。用户随后授权收尾合入，2026-09-14 完整 preflight 复跑通过后，`openai-responses-migration` 已从 `b43a0921` 快进至 `c7572a38`；本分支也已快进对齐。没有重复实现、cherry-pick 或重写历史。实施前仍须核对当时分支和工作区差异。
-- 集成目标仅为 `openai-responses-migration`。不合 main、不 push；本轮文档通过审查不等于实施授权。
+- 实施分支：`codex/improve-4-usage-calibration`，集成基线 `c7572a38`；该基线生产代码与 `734f2ef6` 相同，随后两个提交仅补充 improve-3 验收文档。本轮实施提交与测试结果见 05。
+- 创建时先从 improve-3 HEAD 建分支。用户随后授权收尾合入，2026-09-14 完整 preflight 复跑通过后，`openai-responses-migration` 已从 `b43a0921` 快进至 `c7572a38`；本分支也已快进对齐。没有重复实现、cherry-pick 或重写历史；本轮实施前已核对分支与工作区差异。
+- 集成目标仅为 `openai-responses-migration`。用户已另行授权本轮实施和分批提交，但要求暂不 merge/push；目前集成分支及 main 保持原位。
 
 ## 阅读顺序与职责
 
@@ -20,7 +20,7 @@
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 目标合同、三个实施批次、兼容与关键改动清单 |
 | [03-reference-projects.md](./03-reference-projects.md)                                 | 六个本地参考项目的事实、取舍与适用限制     |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md)                               | 测试场景、命令和验收门                     |
-| `05-implementation-acceptance.md`                                                      | 实施完成后由独立验收生成；规划期不创建     |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md)                   | 实施结果、测试证据、独立审查和保留限制     |
 
 按 plan-module-design 的模块视角分析，但不新造跨模块 TokenManager。01 按职责分析现状；02 描述本轮必要的接口合同；用例及工程约束内嵌，避免重复维护七套文件或字段定义。00 的已确认边界约束 02；04 不得自行增加产品需求。子代理只提供审查意见，正式文档由主代理修改。
 
