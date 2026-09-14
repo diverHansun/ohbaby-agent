@@ -5,7 +5,9 @@ import { toModelTools } from "../../packages/ohbaby-agent/src/core/agents/index.
 import {
   createContextManager,
   type ContextLLMClient,
+  type ContextManager,
   type MemoryReader,
+  type PreparedTurn,
   type SystemPromptProvider,
   type TokenCounter,
 } from "../../packages/ohbaby-agent/src/core/context/index.js";
@@ -18,6 +20,7 @@ import type { LLMClientInstance } from "../../packages/ohbaby-agent/src/core/llm
 import {
   createInMemoryMessageStore,
   createMessageManager,
+  readTokenUsageMetadata,
 } from "../../packages/ohbaby-agent/src/core/message/index.js";
 import {
   createToolScheduler,
@@ -28,6 +31,7 @@ import {
   createInterfaceProvider,
   type InterfaceProviderKind,
   type InterfaceProviderRequest,
+  type InterfaceProviderTokenUsage,
 } from "../../packages/ohbaby-agent/src/services/interface-providers/index.js";
 
 const ENABLE_ENV = "OHBABY_RUN_REAL_RESPONSES_MIGRATION";
@@ -74,6 +78,17 @@ const PROFILES: readonly Profile[] = [
 interface CapturedRequest {
   readonly body: Record<string, unknown>;
   readonly path: string;
+}
+
+interface PreparedObservation {
+  readonly prepared: PreparedTurn;
+  readonly sessionId: string;
+}
+
+interface CalibrationObservation {
+  readonly actualInputTokens: number;
+  readonly sentHeuristic: number;
+  readonly sessionId: string;
 }
 
 function selectedProfiles(): readonly Profile[] {
@@ -125,7 +140,10 @@ function createSummaryClient(): ContextLLMClient {
   };
 }
 
-async function requestBody(input: RequestInfo | URL, init?: RequestInit) {
+async function requestBody(
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+) {
   if (typeof init?.body === "string") return init.body;
   return input instanceof Request ? input.clone().text() : "";
 }
@@ -249,6 +267,72 @@ function hasPositiveUsage(result: LifecycleResult): boolean {
   );
 }
 
+function assertValidUsage(usage: InterfaceProviderTokenUsage): void {
+  expect(usage.inputTokens).toBeGreaterThan(0);
+  expect(usage.outputTokens).toBeGreaterThan(0);
+  expect(usage.totalTokens).toBe(usage.inputTokens + usage.outputTokens);
+  if (usage.inputBreakdown !== undefined) {
+    expect(usage.inputBreakdown.uncached).toBeGreaterThanOrEqual(0);
+    expect(usage.inputBreakdown.cacheRead).toBeGreaterThanOrEqual(0);
+    expect(usage.inputBreakdown.cacheWrite).toBeGreaterThanOrEqual(0);
+    expect(
+      usage.inputBreakdown.uncached +
+        usage.inputBreakdown.cacheRead +
+        usage.inputBreakdown.cacheWrite,
+    ).toBe(usage.inputTokens);
+  }
+}
+
+function sumUsage(
+  usages: readonly InterfaceProviderTokenUsage[],
+): InterfaceProviderTokenUsage {
+  return usages.reduce<InterfaceProviderTokenUsage>(
+    (total, usage) => ({
+      inputTokens: total.inputTokens + usage.inputTokens,
+      outputTokens: total.outputTokens + usage.outputTokens,
+      totalTokens: total.totalTokens + usage.totalTokens,
+    }),
+    { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+  );
+}
+
+function usageNumbers(usage: InterfaceProviderTokenUsage | undefined) {
+  if (usage === undefined) return undefined;
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+    ...(usage.inputBreakdown === undefined
+      ? {}
+      : {
+          inputBreakdown: {
+            cacheRead: usage.inputBreakdown.cacheRead,
+            cacheWrite: usage.inputBreakdown.cacheWrite,
+            uncached: usage.inputBreakdown.uncached,
+          },
+        }),
+  };
+}
+
+async function assertPersistedStepUsage(
+  messageManager: ReturnType<typeof createMessageManager>,
+  sessionId: string,
+  nativeUsages: readonly InterfaceProviderTokenUsage[],
+): Promise<number[]> {
+  const assistantMessages = (
+    await messageManager.listBySession(sessionId)
+  ).filter((message) => message.info.role === "assistant");
+  expect(assistantMessages).toHaveLength(nativeUsages.length);
+  return assistantMessages.map((message, index) => {
+    const carrying = message.parts
+      .map((part) => readTokenUsageMetadata(part.metadata))
+      .filter((usage) => usage !== undefined);
+    expect(carrying).toHaveLength(1);
+    expect(carrying[0]).toEqual(nativeUsages[index]);
+    return carrying.length;
+  });
+}
+
 function records(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value)
     ? value.filter(
@@ -359,6 +443,9 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
         });
 
         const requests: InterfaceProviderRequest[] = [];
+        const nativeUsages: InterfaceProviderTokenUsage[] = [];
+        const preparations: PreparedObservation[] = [];
+        const calibrations: CalibrationObservation[] = [];
         const captured: CapturedRequest[] = [];
         const fetchGuard = installPassiveRequestCapture(captured);
         const provider = createInterfaceProvider({
@@ -392,8 +479,15 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
               try {
                 const source = await stream(request);
                 return (async function* () {
+                  let finalUsage: InterfaceProviderTokenUsage | undefined;
                   try {
-                    yield* source;
+                    for await (const event of source) {
+                      if (event.tokenUsage !== undefined) {
+                        finalUsage = event.tokenUsage;
+                      }
+                      yield event;
+                    }
+                    if (finalUsage !== undefined) nativeUsages.push(finalUsage);
                   } catch (error) {
                     fetchGuard.fail();
                     throw error;
@@ -406,7 +500,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
             },
           },
         };
-        const contextManager = createContextManager({
+        const baseContextManager = createContextManager({
           bus,
           llmClient: createSummaryClient(),
           memory: createMemory(),
@@ -414,6 +508,36 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
           systemPromptProvider: createSystemPrompt(),
           tokenCounter: createTokenCounter(),
         });
+        const prepareTurn =
+          baseContextManager.prepareTurn.bind(baseContextManager);
+        const updateCalibrationFactor =
+          baseContextManager.updateCalibrationFactor.bind(baseContextManager);
+        const contextManager: ContextManager = {
+          ...baseContextManager,
+          async prepareTurn(input) {
+            const prepared = await prepareTurn(input);
+            preparations.push({ prepared, sessionId: input.sessionId });
+            return prepared;
+          },
+          updateCalibrationFactor(
+            sessionId,
+            actualInputTokens,
+            sentHeuristic,
+            contextScopeId,
+          ) {
+            calibrations.push({
+              actualInputTokens,
+              sentHeuristic,
+              sessionId,
+            });
+            updateCalibrationFactor(
+              sessionId,
+              actualInputTokens,
+              sentHeuristic,
+              contextScopeId,
+            );
+          },
+        };
         const lifecycle = new Lifecycle({
           contextManager,
           llmClient,
@@ -522,6 +646,75 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
           expect(
             captured.every((request) => request.body.model === profile.model),
           ).toBe(true);
+          expect(preparations).toHaveLength(3);
+          expect(nativeUsages).toHaveLength(3);
+          expect(calibrations).toHaveLength(3);
+          for (const [index, request] of requests.entries()) {
+            const observation = preparations[index];
+            const usage = nativeUsages[index];
+            const calibration = calibrations[index];
+            if (
+              observation === undefined ||
+              usage === undefined ||
+              calibration === undefined
+            ) {
+              throw new Error("Per-step usage evidence is incomplete.");
+            }
+            assertValidUsage(usage);
+            expect(request.messages).toEqual(
+              observation.prepared.request.messages,
+            );
+            expect(request.tools).toEqual(observation.prepared.request.tools);
+            expect(calibration).toEqual({
+              actualInputTokens: usage.inputTokens,
+              sentHeuristic: observation.prepared.sentHeuristic,
+              sessionId: observation.sessionId,
+            });
+            expect(calibration.sentHeuristic).toBeGreaterThan(0);
+          }
+
+          const textUsage = sumUsage(nativeUsages.slice(0, 1));
+          const toolUsage = sumUsage(nativeUsages.slice(1));
+          expect(text.result.usage).toMatchObject(textUsage);
+          expect(tool.result.usage).toMatchObject(toolUsage);
+
+          const textCarryingCounts = await assertPersistedStepUsage(
+            messageManager,
+            textSession,
+            nativeUsages.slice(0, 1),
+          );
+          const toolCarryingCounts = await assertPersistedStepUsage(
+            messageManager,
+            toolSession,
+            nativeUsages.slice(1),
+          );
+
+          const firstToolPreparation = preparations[1]?.prepared;
+          const nextToolPreparation = preparations[2]?.prepared;
+          const firstToolCalibration = calibrations[1];
+          if (
+            firstToolPreparation === undefined ||
+            nextToolPreparation === undefined ||
+            firstToolCalibration === undefined
+          ) {
+            throw new Error("Tool calibration evidence is incomplete.");
+          }
+          expect(firstToolPreparation.usage.currentTokens).toBe(
+            firstToolPreparation.sentHeuristic,
+          );
+          const observedToolFactor =
+            firstToolCalibration.actualInputTokens /
+            firstToolCalibration.sentHeuristic;
+          const clampedToolFactor = Math.min(
+            3,
+            Math.max(0.5, observedToolFactor),
+          );
+          const expectedNextToolFactor = 0.5 * clampedToolFactor + 0.5 * 1;
+          expect(nextToolPreparation.usage.currentTokens).toBe(
+            Math.round(
+              nextToolPreparation.sentHeuristic * expectedNextToolFactor,
+            ),
+          );
           if (verification === undefined || callId === undefined) {
             throw new Error("Tool execution evidence is incomplete.");
           }
@@ -552,13 +745,28 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
               text: {
                 finishReason: text.result.finishReason,
                 terminalReason: text.result.terminalReason,
-                usage: text.result.usage,
+                usage: usageNumbers(text.result.usage),
               },
               tool: {
                 executions: fixtureExecutions,
                 finishReason: tool.result.finishReason,
                 terminalReason: tool.result.terminalReason,
-                usage: tool.result.usage,
+                usage: usageNumbers(tool.result.usage),
+              },
+              usageContract: {
+                aggregate: {
+                  text: usageNumbers(textUsage),
+                  tool: usageNumbers(toolUsage),
+                },
+                calibrationInputs: calibrations.map((calibration) => ({
+                  actualInputTokens: calibration.actualInputTokens,
+                  sentHeuristic: calibration.sentHeuristic,
+                })),
+                carryingCounts: [...textCarryingCounts, ...toolCarryingCounts],
+                finalUsage: nativeUsages.map(usageNumbers),
+                rawEstimates: preparations.map(
+                  (observation) => observation.prepared.sentHeuristic,
+                ),
               },
             }),
           );
