@@ -980,6 +980,118 @@ describe("Lifecycle.run", () => {
     ]);
   });
 
+  it("treats a partial provider event followed by EOF as an interrupted stream", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      now: () => 1_700_000_000_000,
+    });
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
+    const lifecycle = new Lifecycle({
+      contextManager: {
+        ...createContextManagerMock(
+          vi
+            .fn<ContextManager["prepareTurn"]>()
+            .mockResolvedValueOnce(
+              preparedTurn(
+                [{ role: "user", content: "First" }],
+                SESSION_USAGE,
+                30,
+              ),
+            )
+            .mockResolvedValueOnce(
+              preparedTurn(
+                [{ role: "user", content: "Second" }],
+                SESSION_USAGE,
+                60,
+              ),
+            ),
+        ),
+        updateCalibrationFactor,
+      },
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "tool_calls",
+              tokenUsage: { inputTokens: 40, outputTokens: 4, totalTokens: 44 },
+              toolCallDeltas: [
+                {
+                  argumentsDelta: "{}",
+                  id: "call_1",
+                  index: 0,
+                  name: "continue",
+                },
+              ],
+            },
+          ],
+          [{ textDelta: "partial" }],
+        ],
+        [],
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi
+          .fn()
+          .mockResolvedValue([
+            { callId: "call_1", output: "ok", status: "success" },
+          ]),
+      } as unknown as ToolSchedulerInstance,
+    });
+
+    const emitted: LifecycleEvent[] = [];
+    const loop = lifecycle.run({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_partial_eof",
+    });
+    let next = await loop.next();
+    while (!next.done) {
+      emitted.push(next.value);
+      next = await loop.next();
+    }
+    const messages = await messageManager.listBySession("session_partial_eof");
+    const assistantMessages = messages.filter(
+      (message) => message.info.role === "assistant",
+    );
+
+    expect(
+      emitted.some(
+        (event) =>
+          event.type === "llm:delta" &&
+          event.step === 2 &&
+          event.delta === "partial",
+      ),
+    ).toBe(true);
+    expect(
+      emitted.filter(
+        (event) => event.type === "llm:complete" && event.step === 2,
+      ),
+    ).toEqual([]);
+    expect(next.value).toMatchObject({
+      finishReason: "error",
+      success: false,
+      terminalReason: "provider_stream_interrupted",
+      usage: {
+        inputTokens: 40,
+        outputTokens: 4,
+        totalTokens: 44,
+        usageComplete: true,
+      },
+    });
+    expect(updateCalibrationFactor.mock.calls).toEqual([
+      ["session_partial_eof", 40, 30],
+    ]);
+    expect(assistantMessages).toHaveLength(2);
+    expect(
+      assistantMessages[1]?.parts.some(
+        (part) => readTokenUsageMetadata(part.metadata) !== undefined,
+      ),
+    ).toBe(false);
+  });
+
   it("retains an earlier known subtotal when the next step has a controlled provider failure", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),
