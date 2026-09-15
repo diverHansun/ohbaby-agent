@@ -1,5 +1,7 @@
 # session prompt-cache hit · `/status` 观测通道
 
+> **后继实现（2026-09-15）**：用户已在 [Responses migration improve-5](../2026-09-11-llm-sdk-and-responses-migration/improve-5/README.md) 确认用“可信 Step 累计”替代本目录的“整 Run 筛选”。新规则已在本地 improve-5 分支实施，结果及限制见其 05；本目录 00–05 保留当时方案与验收记录。session 累计、极简展示、主子隔离、未知与零分开及生命周期合同继续沿用。后续开发应以 improve-5 的 00/02/04 为本次改造合同。
+
 > 状态：**已实施并完成审查与端到端验收，等待用户最终审核；尚未 push / merge。**
 > 日期：2026-08-27
 > 规划基线：`5774fe4`（`main`）

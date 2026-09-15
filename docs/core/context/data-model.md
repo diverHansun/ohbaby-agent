@@ -129,6 +129,10 @@ interface ContextUsage {
 
 Provider `TokenUsage.inputTokens` 是 inclusive input；可选 breakdown 满足 `uncached + cacheRead + cacheWrite = inputTokens`。Context 只消费归一化后的口径，不把 hit 当作空闲窗口。
 
+### Anthropic 输入快照的更新
+
+Anthropic 的 uncached/read/write 是整条消息的输入分项；合法字段存在时采用最新值，避免早期未拆分输入与晚到缓存重复相加。只有三个输入分项均明确为零且此前有正输入时，才保留旧输入组以兼容全零占位；输出沿用原单调合并。详见 [Responses migration improve-5 §2.9](../../problem-lists/2026-09-11-llm-sdk-and-responses-migration/improve-5/02-optimization-plan-and-change-scope.md#29-实施中经真实证据确认的最小归一化修复)。
+
 ## 四、Compaction 数据模型
 
 ### 4.1 结果类型
@@ -195,7 +199,7 @@ interface UiPromptCacheUsage {
 }
 ```
 
-它累计同一主代理 session 历次可信 run 的输入分桶，`cacheReadShare = cacheReadTokens / accountedInputTokens`；无可信样本时分母、read 均为 0 且 share 为 `null`。它不描述当前窗口库存，不进入 occupancy composition 或 snapshot，compact 与换模型也不回减/清空。完整可信规则和生命周期见 [session-cache-hit](../../problem-lists/2026-08-27-session-cache-hit/README.md)。
+它累计同一主代理 session 历次可信 Step 的输入分桶，`cacheReadShare = cacheReadTokens / accountedInputTokens`；无可信样本时分母、read 均为 0 且 share 为 `null`。它不描述当前窗口库存，不进入 occupancy composition 或 snapshot，compact 与换模型也不回减/清空。可信表示该 Step 已结算并实际提供有效缓存读取明细；某一步未知只排除它自己的分子和分母，保留其他 Step 及历史累计。该比例是已观察样本的加权结果，不能还原缺失明细的全部 session 实际比例。纳入规则见 [Responses migration improve-5](../../problem-lists/2026-09-11-llm-sdk-and-responses-migration/improve-5/02-optimization-plan-and-change-scope.md)，既有生命周期沿用 [session-cache-hit](../../problem-lists/2026-08-27-session-cache-hit/README.md)。
 
 ## 六、Tool exchange 与 deterministic repair
 

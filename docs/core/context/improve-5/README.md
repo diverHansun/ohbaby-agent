@@ -1,5 +1,7 @@
 # context improve-5 · LLM 请求契约、prompt cache 观测与稳定前缀
 
+> 后继修正（2026-09-15）：本目录的 Anthropic 输入逐桶单调合并规则由 [Responses migration improve-5 §2.9](../../../problem-lists/2026-09-11-llm-sdk-and-responses-migration/improve-5/02-optimization-plan-and-change-scope.md#29-实施中经真实证据确认的最小归一化修复) 替代为最新输入快照与整组零占位例外。本目录规划及验收保留历史，不追溯改写。
+
 > 状态：**improve-5 已于 2026-08-24 在 `codex/improve-5` 分七批实施，随后合入 `main`；同日晚独立复测确认本地 targeted + unit/contract/integration（排除 packaging）全绿，Batch G 关闭反馈中的可复现覆盖/投影缺口。G7 compiled Web 与 G8 真实 cache 未在独立复测会话重跑，完整仓库门仍是条件验收**。
 > 代码基线：improve-4 / improve-4.1 已实施；分批 commits、门禁例外、ZenMux 证据与独立复测见 [05](./05-implementation-acceptance.md)（含 §5.10）。
 > 后续状态：improve-4～5 联合回归已实施并条件通过，详见 [联合回归验收](../improve-4-to-5-regression/05-implementation-acceptance.md)。

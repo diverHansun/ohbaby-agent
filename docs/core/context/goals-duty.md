@@ -116,7 +116,7 @@ calibration factor、mask cutoff、thrash lock 与 per-turn compaction count 按
 - 不负责 SystemPrompt 模板内容，只消费 `SystemPromptProvider`。
 - 不拥有 Message 实体；持久化、事务与查询由 Message port/adapter 提供。
 - 不把 UI tracker 当 child scope 的精确状态源。
-- 不解析 Provider cache 命中字段，也不把 cache 塞进 occupancy composition；session 聚合与 `/status` 显示由 [session-cache-hit](../../problem-lists/2026-08-27-session-cache-hit/README.md) 定义的独立 adapter 通道负责。
+- 不解析 Provider cache 命中字段，也不把 cache 塞进 occupancy composition；session 聚合与 `/status` 显示由独立 adapter 通道负责；原 [session-cache-hit](../../problem-lists/2026-08-27-session-cache-hit/README.md) 通道现按 [Responses migration improve-5](../../problem-lists/2026-09-11-llm-sdk-and-responses-migration/improve-5/02-optimization-plan-and-change-scope.md) 的可信 Step 规则纳入，不依赖整个 Run 的缓存明细完整性。
 - 不持久化 Provider observed-window adaptive ceiling；该能力另行设计。
 
 ## 五、依赖与方向

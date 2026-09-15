@@ -11,6 +11,7 @@
 - Improve 3 规划开启日期：2026-09-13。2026-09-14 独立验收及合入前完整补验通过（见 [improve-3/05 §5.9](./improve-3/05-implementation-acceptance.md#59-用户授权与合入前补验2026-09-14)），用户已明确授权本地合入集成分支；不合 main、不 push。
 - Improve 3 合入结果：2026-09-14 已快进合入本地 `openai-responses-migration@c7572a38`；main 保持 `dfb6d932`，未 push。
 - Improve 4 开启日期：2026-09-14；“用量与校准链路对齐”已按用户授权实施，最终 preflight 及同一次 ZenMux 三协议矩阵通过，独立审查缺口补测后关闭。见 [improve-4/05](./improve-4/05-implementation-acceptance.md)；等待用户审核，未 merge/push。
+- Improve 5：2026-09-14 开始研究，2026-09-15 用户确认统计新规则并授权撰写规划。承接 improve-4 主动切出的 cache 统计议题；按可信 Step 累计替代整 Run 筛选。见 [improve-5](./improve-5/README.md)，已在本地 `codex/improve-5-cache-accounting` 实施；基本三协议实网通过，扩展八组通过、一组未通过，详见其 05；暂不 merge/push。
 
 本目录把协议调查、SDK 升级与 Responses 接入分成独立轮次：
 
@@ -19,6 +20,7 @@
 - [`improve-2/`](./improve-2/)：新增独立 `openai-responses.ts`，三者共享现有 provider 接口；默认仍走 Chat Completions。首个过渡切片只承诺不需要原生 reasoning/output-item 续接的能力。
 - [`improve-3/`](./improve-3/)：请求与结果去 Chat 类型耦合，保留旧估算和存储合同；已通过技术验收并合入本地集成分支。
 - [`improve-4/`](./improve-4/)：用量与校准数据合同、最小参数命名和证据补齐；算法不变，技术验收通过，等待用户审核合入。
+- [`improve-5/`](./improve-5/)：三协议 cache 观测与可信 Step 累计、主子代理隔离和最小展示；不改变缓存请求控制、上下文组装或压缩算法。
 
 ## 分支策略
 
@@ -35,6 +37,7 @@
 | improve-2     | 2026-09-12 | improve-1 主动切割后的独立实施                                    | 最新preflight与修订后的生产lifecycle T12通过，按用户授权收尾合入集成分支            |
 | improve-3     | 2026-09-13 | improve-2 §2.8主动切割的内部契约；用户授权提前规划                | 05 独立验收和完整补验通过，已合入本地集成分支（2026-09-14）                         |
 | improve-4     | 2026-09-14 | improve-3 主动切出的用量/校准议题，承接其 05 与用户确认的收窄范围 | 已实施；最终 preflight、同一次三协议 live 及独立审查通过，待用户审核；未 merge/push |
+| improve-5     | 2026-09-14 研究；2026-09-15 规划与实施 | improve-4 主动切出的 cache 议题；用户确认开启并替代旧整 Run 筛选规则 | 00–05 已完成；本地实施/基本三协议验收通过，扩展限制见 05 |
 
 ## 已冻结的阶段边界
 
@@ -75,6 +78,8 @@ Chat Completions 作为显式兼容入口长期保留；移除它不属于本议
 7. 做跨模块契约、重启恢复、live smoke 与回归 eval；全部门禁通过后，才讨论产品默认翻转到 Responses，Chat 继续保留为显式兼容入口。
 
 ## 审核入口
+
+当前 Improve 5 文档：[README](./improve-5/README.md) → [已确认决策](./improve-5/00-discussion.md) → [现状](./improve-5/01-problem-analysis-and-current-state.md) → [方案](./improve-5/02-optimization-plan-and-change-scope.md) → [七个参考项目](./improve-5/03-reference-projects.md) → [验收标准](./improve-5/04-test-and-acceptance.md)。实际结果见 [05 实施验收](./improve-5/05-implementation-acceptance.md)。Improve 5 新规则只替代旧缓存统计的纳入门槛，不追溯改写 improve-4 的验收结论。
 
 Improve 1 结果：
 
