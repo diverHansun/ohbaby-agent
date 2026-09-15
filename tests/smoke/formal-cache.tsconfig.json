@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "composite": false, "rootDir": "../.." },
+  "include": ["formal-cache-*.ts", "../integration/formal-cache-session.integration.test.ts"]
+}
