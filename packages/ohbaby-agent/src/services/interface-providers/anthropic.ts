@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import Anthropic from "@anthropic-ai/sdk";
 import { APIUserAbortError } from "@anthropic-ai/sdk/error";
 import type {
@@ -10,6 +11,11 @@ import type {
   ToolResultBlockParam,
   ToolUseBlockParam,
 } from "@anthropic-ai/sdk/resources/messages";
+import {
+  nativeOutputForMessage,
+  type NativeAnthropicBlock,
+  type ModelOrigin,
+} from "./native-state.js";
 import type { ModelMessage } from "./types.js";
 import type {
   CreateInterfaceProviderOptions,
@@ -18,6 +24,7 @@ import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
 } from "./types.js";
+import { toAnthropicReasoningWire } from "./reasoning.js";
 import { createAnthropicUsageAccumulator } from "./token-usage.js";
 
 interface ConvertedAnthropicMessages {
@@ -137,7 +144,10 @@ function parseToolInput(
 
 function convertAssistantContent(
   message: Extract<ModelMessage, { role: "assistant" }>,
-): string | (TextBlockParam | ToolUseBlockParam)[] {
+  origin: ModelOrigin,
+): string | ContentBlockParam[] {
+  const output = nativeOutputForMessage(message, origin);
+  if (output?.protocol === "anthropic") return structuredClone(output.items);
   const blocks: (TextBlockParam | ToolUseBlockParam)[] = [];
   const textContent = normalizeTextBlocks(message.content, "assistant message");
 
@@ -180,6 +190,7 @@ function convertAssistantContent(
 
 function convertMessages(
   messages: readonly ModelMessage[],
+  origin: ModelOrigin,
 ): ConvertedAnthropicMessages {
   const systemParts: string[] = [];
   const anthropicMessages: MessageParam[] = [];
@@ -238,7 +249,7 @@ function convertMessages(
         flushToolResults();
         anthropicMessages.push({
           role: "assistant",
-          content: convertAssistantContent(rawMessage),
+          content: convertAssistantContent(rawMessage, origin),
         });
         break;
       }
@@ -317,6 +328,8 @@ function applyLastBlockCacheControl(
       blockIndex -= 1
     ) {
       const block = message.content[blockIndex];
+      if (block.type === "thinking" || block.type === "redacted_thinking")
+        continue;
       const markedBlock = {
         ...block,
         cache_control: { type: "ephemeral" as const },
@@ -359,8 +372,14 @@ function applyStableSystemCacheControl(
 
 function buildRequestParams(
   request: InterfaceProviderRequest,
+  options: CreateInterfaceProviderOptions,
 ): MessageCreateParams {
-  const convertedMessages = convertMessages(request.messages);
+  const convertedMessages = convertMessages(request.messages, {
+    provider: options.id,
+    model: request.model,
+    protocol: "anthropic",
+    endpoint: options.baseUrl,
+  });
   if (
     request.promptCache.strategy === "anthropic-explicit-last-block" &&
     !applyLastBlockCacheControl(convertedMessages)
@@ -376,8 +395,26 @@ function buildRequestParams(
     model: request.model,
     messages: convertedMessages.messages,
     max_tokens: request.maxTokens,
-    temperature: request.temperature,
+    ...(request.temperature !== undefined
+      ? { temperature: request.temperature }
+      : {}),
   };
+
+  const reasoningWire = toAnthropicReasoningWire(request.reasoning);
+  if (reasoningWire.thinking) params.thinking = reasoningWire.thinking;
+  if (reasoningWire.output_config) {
+    const effort = reasoningWire.output_config.effort;
+    if (
+      effort !== "low" &&
+      effort !== "medium" &&
+      effort !== "high" &&
+      effort !== "xhigh" &&
+      effort !== "max"
+    ) {
+      throw new Error("Unsupported Anthropic output effort.");
+    }
+    params.output_config = { effort };
+  }
 
   if (convertedMessages.system?.length) {
     params.system = convertedMessages.system;
@@ -393,6 +430,195 @@ function buildRequestParams(
   }
 
   return params;
+}
+
+interface PendingNativeBlock {
+  block: NativeAnthropicBlock;
+  stopped: boolean;
+  json: string;
+}
+
+/** Attempt-local raw assembly keeps initial input separate from JSON deltas. */
+class AnthropicNativeAccumulator {
+  private readonly blocks = new Map<number, PendingNativeBlock>();
+  private stopped = false;
+  private finishReason: InterfaceProviderFinishReason | undefined;
+
+  update(
+    event: RawMessageStreamEvent,
+  ): InterfaceProviderStreamEvent | undefined {
+    if (this.stopped) throw new Error("Anthropic event after message_stop.");
+    if (this.finishReason !== undefined) {
+      const allowed =
+        event.type === "message_stop" ||
+        event.type === "content_block_stop" ||
+        (event.type === "message_delta" &&
+          (event.delta.stop_reason ?? null) === null) ||
+        (event.type === "content_block_delta" &&
+          event.delta.type === "signature_delta");
+      if (!allowed) throw new Error("Anthropic output after finish reason.");
+    }
+    if (event.type === "message_delta") {
+      this.finishReason =
+        mapStopReason(event.delta.stop_reason) ?? this.finishReason;
+      return;
+    }
+    if (event.type === "message_stop") {
+      this.stopped = true;
+      return;
+    }
+    if (event.type === "content_block_start") {
+      if (event.index !== this.blocks.size || this.blocks.has(event.index)) {
+        throw new Error("Conflicting Anthropic content block order.");
+      }
+      const raw = event.content_block;
+      let block: NativeAnthropicBlock;
+      switch (raw.type) {
+        case "text":
+          block = { type: "text", text: raw.text };
+          break;
+        case "thinking":
+          block = {
+            type: "thinking",
+            thinking: raw.thinking,
+            signature: raw.signature,
+          };
+          break;
+        case "redacted_thinking":
+          block = { type: "redacted_thinking", data: raw.data };
+          break;
+        case "tool_use":
+          if (
+            !raw.id ||
+            !raw.name ||
+            !raw.input ||
+            typeof raw.input !== "object" ||
+            Array.isArray(raw.input)
+          ) {
+            throw new Error("Invalid Anthropic tool_use block.");
+          }
+          if (
+            [...this.blocks.values()].some(
+              (entry) =>
+                entry.block.type === "tool_use" && entry.block.id === raw.id,
+            )
+          ) {
+            throw new Error("Duplicate Anthropic tool call id.");
+          }
+          block = {
+            type: "tool_use",
+            id: raw.id,
+            name: raw.name,
+            input: structuredClone(raw.input) as Record<string, unknown>,
+          };
+          break;
+        default:
+          throw new Error("Unsupported Anthropic native content block.");
+      }
+      this.blocks.set(event.index, { block, stopped: false, json: "" });
+      if (block.type === "text" && block.text) return { textDelta: block.text };
+      return;
+    }
+    if (
+      event.type !== "content_block_delta" &&
+      event.type !== "content_block_stop"
+    )
+      return;
+    const entry = this.blocks.get(event.index);
+    if (!entry) throw new Error("Anthropic delta references an unknown block.");
+    if (event.type === "content_block_stop") {
+      entry.stopped = true;
+      return;
+    }
+    const delta = event.delta;
+    if (entry.stopped && delta.type !== "signature_delta")
+      throw new Error("Anthropic delta after content block stop.");
+    switch (delta.type) {
+      case "text_delta":
+        if (entry.block.type !== "text")
+          throw new Error("Conflicting Anthropic text delta.");
+        entry.block.text += delta.text;
+        break;
+      case "thinking_delta":
+        if (entry.block.type !== "thinking")
+          throw new Error("Conflicting Anthropic thinking delta.");
+        entry.block.thinking += delta.thinking;
+        break;
+      case "signature_delta":
+        if (entry.block.type !== "thinking")
+          throw new Error("Conflicting Anthropic signature delta.");
+        if (entry.block.signature && entry.block.signature !== delta.signature)
+          throw new Error("Conflicting Anthropic signature.");
+        entry.block.signature = delta.signature;
+        break;
+      case "input_json_delta":
+        if (entry.block.type !== "tool_use")
+          throw new Error("Conflicting Anthropic tool input delta.");
+        entry.json += delta.partial_json;
+        break;
+      case "citations_delta":
+        if (entry.block.type !== "text")
+          throw new Error("Conflicting Anthropic citations delta.");
+        break;
+      default:
+        throw new Error("Unsupported Anthropic native delta.");
+    }
+    return undefined;
+  }
+
+  finalize(): InterfaceProviderStreamEvent | undefined {
+    if (this.blocks.size === 0) return;
+    if (!this.stopped || !this.finishReason)
+      throw new Error("Incomplete Anthropic message stream.");
+    // Truncated output can retain trusted usage, but cannot become replayable state.
+    if (
+      this.finishReason === "length" ||
+      this.finishReason === "content_filter"
+    )
+      return;
+    const items: NativeAnthropicBlock[] = [];
+    const toolCallDeltas: NonNullable<
+      InterfaceProviderStreamEvent["toolCallDeltas"]
+    > = [];
+    for (const [index, entry] of this.blocks) {
+      if (!entry.stopped)
+        throw new Error("Incomplete Anthropic content block.");
+      const block = entry.block;
+      if (block.type === "thinking" && !block.signature)
+        throw new Error("Anthropic thinking signature is missing.");
+      if (block.type === "redacted_thinking" && !block.data)
+        throw new Error("Anthropic redacted thinking data is missing.");
+      if (block.type === "tool_use") {
+        if (entry.json.length > 0) {
+          const parsed = parseToolInput(entry.json, block.name);
+          if (
+            Object.keys(block.input).length > 0 &&
+            !isDeepStrictEqual(block.input, parsed)
+          ) {
+            throw new Error(
+              "Conflicting Anthropic initial tool input and JSON deltas.",
+            );
+          }
+          block.input = parsed;
+        } else {
+          toolCallDeltas.push({
+            index,
+            argumentsDelta: JSON.stringify(block.input),
+          });
+        }
+      }
+      items.push(block);
+    }
+    const needsNative =
+      items.length > 1 || items.some((block) => block.type !== "text");
+    if (!needsNative && toolCallDeltas.length === 0) return;
+    return {
+      ...(needsNative
+        ? { nativeOutput: { protocol: "anthropic" as const, items } }
+        : {}),
+      ...(toolCallDeltas.length > 0 ? { toolCallDeltas } : {}),
+    };
+  }
 }
 
 function buildStreamEvent(
@@ -465,9 +691,12 @@ export function createAnthropicProvider(
     streamResponse(
       request: InterfaceProviderRequest,
     ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
-      const stream = client.messages.stream(buildRequestParams(request), {
-        signal: request.signal,
-      });
+      const stream = client.messages.stream(
+        buildRequestParams(request, options),
+        {
+          signal: request.signal,
+        },
+      );
 
       return Promise.resolve(
         (async function* (): AsyncGenerator<
@@ -476,13 +705,27 @@ export function createAnthropicProvider(
           unknown
         > {
           const usage = createAnthropicUsageAccumulator(reportTokenUsage);
+          const native = new AnthropicNativeAccumulator();
+          let reasoningTokens: number | undefined;
           for await (const rawEvent of stream) {
-            const tokenUsage =
+            const initial = native.update(rawEvent);
+            if (initial) yield initial;
+            const rawUsage =
               rawEvent.type === "message_start"
-                ? usage.update(rawEvent.message.usage)
+                ? rawEvent.message.usage
                 : rawEvent.type === "message_delta"
-                  ? usage.update(rawEvent.usage)
+                  ? rawEvent.usage
                   : undefined;
+            const tokenUsage = rawUsage ? usage.update(rawUsage) : undefined;
+            const thinkingTokens =
+              rawUsage?.output_tokens_details?.thinking_tokens;
+            if (
+              thinkingTokens !== undefined &&
+              Number.isInteger(thinkingTokens) &&
+              thinkingTokens >= 0
+            ) {
+              reasoningTokens = thinkingTokens;
+            }
             if (rawEvent.type === "message_start") {
               // message_start usage initializes attempt-local accounting. It
               // is deliberately not exposed as a half-complete provider frame;
@@ -491,9 +734,17 @@ export function createAnthropicProvider(
             }
             const event = buildStreamEvent(rawEvent, tokenUsage);
             if (event) {
-              yield event;
+              yield {
+                ...event,
+                ...(rawEvent.type === "message_delta" &&
+                reasoningTokens !== undefined
+                  ? { reasoningTokens }
+                  : {}),
+              };
             }
           }
+          const final = native.finalize();
+          if (final) yield final;
         })(),
       );
     },

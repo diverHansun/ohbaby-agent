@@ -314,6 +314,7 @@ describe("anthropic provider", () => {
             text: "Hello",
           },
         },
+        { type: "content_block_stop", index: 0 },
         {
           type: "content_block_start",
           index: 1,
@@ -341,6 +342,7 @@ describe("anthropic provider", () => {
             partial_json: 'NYC"}',
           },
         },
+        { type: "content_block_stop", index: 1 },
         {
           type: "message_delta",
           delta: {
@@ -358,6 +360,7 @@ describe("anthropic provider", () => {
             server_tool_use: null,
           },
         },
+        { type: "message_stop" },
       ]),
     );
 
@@ -410,6 +413,20 @@ describe("anthropic provider", () => {
           inputTokens: 20,
           outputTokens: 8,
           totalTokens: 28,
+        },
+      },
+      {
+        nativeOutput: {
+          protocol: "anthropic",
+          items: [
+            { type: "text", text: "Hello" },
+            {
+              type: "tool_use",
+              id: "toolu_1",
+              name: "get_weather",
+              input: { location: "NYC" },
+            },
+          ],
         },
       },
     ]);

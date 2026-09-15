@@ -193,7 +193,12 @@ class LLMConfigManager {
         interfaceProvider:
           modelJson.apiConfig.interfaceProvider ?? "openai-compatible",
         promptCache: modelJson.apiConfig.promptCache ?? "auto",
-        temperature: modelJson.llmParams.temperature,
+        ...(modelJson.llmParams.temperature === undefined
+          ? {}
+          : { temperature: modelJson.llmParams.temperature }),
+        ...(modelJson.llmParams.reasoning === undefined
+          ? {}
+          : { reasoning: { ...modelJson.llmParams.reasoning } }),
         maxTokens: modelJson.llmParams.maxTokens,
         ...(modelJson.llmParams.contextWindowTokens === undefined
           ? {}

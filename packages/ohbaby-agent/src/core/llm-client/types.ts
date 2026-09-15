@@ -14,6 +14,8 @@ import type {
   InterfaceProviderTokenUsage,
 } from "../../services/interface-providers/index.js";
 import type { LLMConfig } from "../../config/index.js";
+import type { ModelState } from "../../services/interface-providers/native-state.js";
+import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type { ProviderRetryEvent } from "./retry.js";
 
 /**
@@ -127,7 +129,8 @@ export interface LLMClientInstance<TClient = unknown> {
     promptCache?: LLMConfig["promptCache"];
 
     /** Sampling temperature (0-2). Higher = more random */
-    temperature: number;
+    temperature?: number;
+    reasoning?: LLMConfig["reasoning"] | ReasoningIntent;
 
     /** Maximum tokens to generate */
     maxTokens: number;
@@ -158,6 +161,8 @@ export interface LLMClientInstance<TClient = unknown> {
  * 3. Inspect parsed tool calls before the execution boundary validates them
  */
 export interface StreamingResponse {
+  /** Private replay state, available only after normal stream exhaustion. */
+  modelState?: ModelState;
   /**
    * Response snapshot accumulated so far.
    *

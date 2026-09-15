@@ -8,6 +8,31 @@ export type InterfaceProviderKind =
   | "anthropic";
 export type PromptCachePolicy = "auto" | "enabled" | "disabled";
 
+/** User intent; omitted fields receive product defaults at request time. */
+export interface ReasoningConfig {
+  readonly enabled?: boolean;
+  readonly effort?: string;
+}
+
+/** Explicit, local capability evidence for a provider/model route. */
+export interface ReasoningCapabilities {
+  readonly mode: "none" | "binary" | "effort";
+  readonly wire:
+    | "none"
+    | "openai"
+    | "anthropic-adaptive"
+    | "anthropic-budget"
+    | "thinking"
+    | "enable-thinking"
+    | "reasoning";
+  readonly supportsDisabled: boolean;
+  readonly efforts?: readonly string[];
+  readonly effortMap?: Readonly<Record<string, string>>;
+  readonly budgets?: Readonly<Record<string, number>>;
+  readonly minBudgetTokens?: number;
+  readonly temperature?: "allowed" | "unsupported" | "disabled-only";
+}
+
 /**
  * Raw configuration structure from model.json file.
  * This represents the user-editable configuration format.
@@ -37,7 +62,9 @@ export interface ModelJsonConfig {
   /** LLM generation parameters */
   llmParams: {
     /** Sampling temperature (0-2) */
-    temperature: number;
+    temperature?: number;
+
+    reasoning?: ReasoningConfig;
 
     /** Maximum tokens to generate */
     maxTokens: number;
@@ -59,6 +86,11 @@ export interface ModelJsonModelProfile {
 
   /** Provider model identifier */
   model: string;
+
+  /** Optional route constraints for reasoning capability overrides. */
+  interfaceProvider?: InterfaceProviderKind;
+  baseUrl?: string;
+  reasoningCapabilities?: ReasoningCapabilities;
 
   /** Display label for UI model lists */
   label?: string;
@@ -97,7 +129,9 @@ export interface LLMConfig {
   promptCache: PromptCachePolicy;
 
   /** Sampling temperature */
-  temperature: number;
+  temperature?: number;
+
+  reasoning?: ReasoningConfig;
 
   /** Maximum tokens to generate */
   maxTokens: number;

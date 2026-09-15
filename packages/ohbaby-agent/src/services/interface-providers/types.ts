@@ -1,3 +1,5 @@
+import type { ResolvedReasoning } from "./reasoning.js";
+import type { NativeOutput, ModelState } from "./native-state.js";
 import type { TokenUsageDiagnosticReporter } from "./token-usage.js";
 
 export type InterfaceProviderKind =
@@ -144,6 +146,7 @@ export type ModelMessage =
       readonly name?: string;
       readonly toolCalls?: readonly ModelToolCall[];
       readonly reasoningText?: string;
+      readonly modelState?: ModelState;
       readonly refusal?: string | null;
       readonly audio?: { readonly id: string } | null;
     }
@@ -154,6 +157,8 @@ export type ModelMessage =
     };
 
 export interface InterfaceProviderStreamEvent {
+  nativeOutput?: NativeOutput;
+  reasoningTokens?: number;
   textDelta?: string;
   reasoningTextDelta?: string;
   toolCallDeltas?: InterfaceProviderToolCallDelta[];
@@ -165,7 +170,8 @@ export interface InterfaceProviderStreamEvent {
 export interface InterfaceProviderRequest {
   model: string;
   messages: readonly ModelMessage[];
-  temperature: number;
+  temperature?: number;
+  reasoning?: ResolvedReasoning;
   maxTokens: number;
   tools?: readonly ModelToolDefinition[];
   signal?: AbortSignal;

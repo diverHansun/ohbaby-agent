@@ -740,22 +740,6 @@ describe("Responses state machine and terminal equality", () => {
         terminal([message()]),
       ],
     ],
-    [
-      "message after function in output order",
-      (): unknown[] => [
-        ...fn(),
-        ...textEvents("hello", "completed", 8),
-        terminal([call(), message()]),
-      ],
-    ],
-    [
-      "function before message in output order",
-      (): unknown[] => [
-        ...textEvents("hello", "completed", 8),
-        ...fn(),
-        terminal([call(), message()]),
-      ],
-    ],
   ];
   it.each(cases)(
     "rejects %s without yielding a success terminal",
@@ -1069,12 +1053,7 @@ describe("Responses rejected and unknown capabilities", () => {
       ).rejects.toThrow(type);
     },
   );
-  it.each([
-    { phase: "commentary" },
-    { phase: "final_answer" },
-    { phase: "" },
-    { role: "user" },
-  ])(
+  it.each([{ phase: "" }, { role: "user" }])(
     "rejects unsupported message fields at every item stage: %j",
     async (fields) => {
       for (const location of ["added", "done", "terminal"]) {
@@ -1202,14 +1181,21 @@ describe("Responses rejected and unknown capabilities", () => {
     ).rejects.toThrow(/incomplete/u);
   });
   it.each(["max_output_tokens", "content_filter"])(
-    "rejects any incomplete function call for reason %s",
+    "retains usage without native execution state for incomplete function output: %s",
     async (reason) => {
-      await expect(
-        collect([
-          ...functionEvents(),
-          terminal([call()], "incomplete", { incomplete_details: { reason } }),
-        ]),
-      ).rejects.toThrow(/incomplete/u);
+      const events = await collect([
+        ...functionEvents(),
+        terminal([call()], "incomplete", {
+          incomplete_details: { reason },
+          usage: { input_tokens: 10, output_tokens: 8, total_tokens: 18 },
+        }),
+      ]);
+      expect(events.at(-1)).toMatchObject({
+        finishReason:
+          reason === "max_output_tokens" ? "length" : "content_filter",
+        tokenUsage: { inputTokens: 10, outputTokens: 8 },
+      });
+      expect(events.at(-1)).not.toHaveProperty("nativeOutput");
     },
   );
   it("accepts a queued lifecycle and null message phase without emitting lifecycle events", async () => {
@@ -1290,5 +1276,508 @@ describe("Responses cancellation", () => {
       })(),
     ).rejects.toSatisfy((error: unknown) => provider.isAbortError(error));
     expect(create.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+  });
+});
+
+// Real SDK SSE parsing stays in the path; only HTTP transport is replaced.
+async function sdkFixture(
+  batches: unknown[][],
+  run: (
+    provider: ReturnType<typeof createInterfaceProvider>,
+    bodies: Record<string, unknown>[],
+  ) => Promise<void>,
+): Promise<void> {
+  const bodies: Record<string, unknown>[] = [];
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (_url, init) => {
+      if (typeof init?.body !== "string")
+        throw new Error("Expected SDK JSON request body");
+      bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+      const batch = batches.shift();
+      if (!batch) throw new Error("Unexpected SDK request");
+      return await Promise.resolve(
+        new Response(
+          batch.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+          {
+            headers: { "content-type": "text/event-stream" },
+          },
+        ),
+      );
+    });
+  try {
+    await run(
+      createInterfaceProvider({
+        id: "responses",
+        interfaceProvider: "openai-responses",
+        apiKey: "fixture",
+        baseUrl: "https://fixture.invalid/v1",
+      }),
+      bodies,
+    );
+  } finally {
+    fetch.mockRestore();
+  }
+}
+
+async function sdkCollect(
+  provider: ReturnType<typeof createInterfaceProvider>,
+  input = request,
+): Promise<InterfaceProviderStreamEvent[]> {
+  const events: InterfaceProviderStreamEvent[] = [];
+  for await (const event of await provider.streamResponse(input))
+    events.push(event);
+  return events;
+}
+
+function nativeFixture(): { events: unknown[]; output: unknown[] } {
+  const reasoning = {
+    type: "reasoning",
+    id: "rs-1",
+    status: "completed",
+    summary: [],
+  };
+  const phased = textEvents("checking").map((event) =>
+    event.item
+      ? { ...event, item: { ...event.item, phase: "commentary" } }
+      : event,
+  );
+  const output = [
+    { ...reasoning, encrypted_content: "terminal-only-ciphertext" },
+    { ...message("checking"), phase: "commentary" },
+    call(),
+  ];
+  return {
+    output,
+    events: [
+      {
+        type: "response.output_item.added",
+        output_index: 0,
+        item: { ...reasoning, status: "in_progress" },
+      },
+      { type: "response.output_item.done", output_index: 0, item: reasoning },
+      ...phased.map((event) => ({ ...event, output_index: 1 })),
+      ...functionEvents(),
+      terminal(output),
+    ],
+  };
+}
+
+describe("Responses native continuation through installed SDK SSE", () => {
+  it("accepts created queued progressing to completed", async () => {
+    await sdkFixture(
+      [
+        [
+          { type: "response.created", response: response([], "queued") },
+          {
+            type: "response.in_progress",
+            response: response([], "in_progress"),
+          },
+          ...textEvents(),
+          terminal([message()]),
+        ],
+      ],
+      async (provider) => {
+        const events = await sdkCollect(provider);
+        expect(events.at(-1)).toMatchObject({ finishReason: "stop" });
+      },
+    );
+  });
+  it("retains message phase in the final native output", async () => {
+    const events = textEvents().map((event) =>
+      event.item
+        ? {
+            ...event,
+            item: { ...event.item, phase: "final_answer" },
+          }
+        : event,
+    );
+    await sdkFixture(
+      [[...events, terminal([{ ...message(), phase: "final_answer" }])]],
+      async (provider) => {
+        expect((await sdkCollect(provider)).at(-1)).toMatchObject({
+          nativeOutput: {
+            protocol: "openai-responses",
+            items: [{ type: "message", phase: "final_answer" }],
+          },
+        });
+      },
+    );
+  });
+  it("retains terminal-only encrypted reasoning and replays the ordered assistant exactly once", async () => {
+    const fixture = nativeFixture();
+    await sdkFixture(
+      [fixture.events, [...textEvents(), terminal([message()])]],
+      async (provider, bodies) => {
+        const events = await sdkCollect(provider);
+        expect(
+          events.slice(0, -1).every((event) => !("nativeOutput" in event)),
+        ).toBe(true);
+        const last = events.at(-1) as InterfaceProviderStreamEvent & {
+          nativeOutput?: unknown;
+        };
+        expect(last).toMatchObject({
+          nativeOutput: {
+            protocol: "openai-responses",
+            items: fixture.output,
+          },
+        });
+        await sdkCollect(provider, {
+          ...request,
+          messages: [
+            { role: "user", content: "hello" },
+            {
+              role: "assistant",
+              content: "checking",
+              toolCalls: [
+                {
+                  callId: "call-1",
+                  name: "lookup",
+                  argumentsJson: '{"q":"a"}',
+                },
+              ],
+              modelState: {
+                version: 1,
+                origin: {
+                  provider: "responses",
+                  model: "responses-model",
+                  protocol: "openai-responses",
+                  endpoint: "https://fixture.invalid/v1",
+                },
+                output: last.nativeOutput,
+                estimate: { tokens: 256, source: "limit" },
+              },
+            },
+            { role: "tool", callId: "call-1", content: "found" },
+          ],
+        } as unknown as InterfaceProviderRequest);
+        const second = bodies[1]?.input as unknown[];
+        expect(second).toHaveLength(5);
+        expect(second).toEqual([
+          { role: "user", content: "hello" },
+          ...fixture.output,
+          { type: "function_call_output", call_id: "call-1", output: "found" },
+        ]);
+      },
+    );
+  });
+});
+
+describe("Responses native continuation guards through SDK SSE", () => {
+  it("rejects lifecycle regression from in_progress to queued", async () => {
+    await sdkFixture(
+      [
+        [
+          {
+            type: "response.in_progress",
+            response: response([], "in_progress"),
+          },
+          { type: "response.queued", response: response([], "queued") },
+          ...textEvents(),
+          terminal([message()]),
+        ],
+      ],
+      async (provider) => {
+        await expect(sdkCollect(provider)).rejects.toThrow(/regress|queued/u);
+      },
+    );
+  });
+  it("preserves multiple phase messages in output order while merging their visible text", async () => {
+    const first = textEvents("checking").map((event) =>
+      event.item
+        ? { ...event, item: { ...event.item, phase: "commentary" } }
+        : event,
+    );
+    const second = textEvents("done", "completed", 2).map((event) => ({
+      ...event,
+      ...(event.item_id ? { item_id: "msg-2" } : {}),
+      ...(event.item
+        ? {
+            item: {
+              ...event.item,
+              id: "msg-2",
+              phase: "final_answer",
+            },
+          }
+        : {}),
+    }));
+    const output = [
+      { ...message("checking"), phase: "commentary" },
+      call(),
+      { ...message("done"), id: "msg-2", phase: "final_answer" },
+    ];
+    await sdkFixture(
+      [
+        [
+          ...first,
+          ...functionEvents("fn-1", "call-1", 1),
+          ...second,
+          terminal(output),
+        ],
+      ],
+      async (provider) => {
+        const events = await sdkCollect(provider);
+        expect(events.map((event) => event.textDelta ?? "").join("")).toBe(
+          "checkingdone",
+        );
+        expect(events.at(-1)).toMatchObject({
+          nativeOutput: {
+            protocol: "openai-responses",
+            items: output,
+          },
+        });
+      },
+    );
+  });
+  it("uses completed item encryption when terminal re-envelopes the same reasoning", async () => {
+    const fixture = nativeFixture();
+    const events = fixture.events as Record<string, unknown>[];
+    events[1] = {
+      ...events[1],
+      item: {
+        ...(events[1]?.item as object),
+        encrypted_content: "different-completed-ciphertext",
+      },
+    };
+    await sdkFixture([events], async (provider) => {
+      const result = await sdkCollect(provider);
+      expect(result.at(-1)?.nativeOutput).toMatchObject({
+        protocol: "openai-responses",
+        items: [
+          expect.objectContaining({
+            type: "reasoning",
+            encrypted_content: "different-completed-ciphertext",
+          }),
+          ...fixture.output.slice(1),
+        ],
+      });
+    });
+  });
+  it("releases no final native output when an event follows terminal", async () => {
+    const fixture = nativeFixture();
+    await sdkFixture(
+      [
+        [
+          ...fixture.events,
+          {
+            type: "response.in_progress",
+            response: response([], "in_progress"),
+          },
+        ],
+      ],
+      async (provider) => {
+        const events: InterfaceProviderStreamEvent[] = [];
+        await expect(
+          (async (): Promise<void> => {
+            for await (const event of await provider.streamResponse(request))
+              events.push(event);
+          })(),
+        ).rejects.toThrow(/follows terminal/u);
+        expect(
+          events.every(
+            (event) => !("nativeOutput" in event) && !event.finishReason,
+          ),
+        ).toBe(true);
+      },
+    );
+  });
+});
+
+describe("Responses streamed reasoning parts", () => {
+  it("validates and retains summary and private text parts before terminal completion", async () => {
+    const ref = { item_id: "rs-1", output_index: 0 };
+    const reasoning = {
+      id: "rs-1",
+      type: "reasoning",
+      status: "completed",
+      summary: [{ type: "summary_text", text: "summary" }],
+      content: [{ type: "reasoning_text", text: "private" }],
+      encrypted_content: "cipher",
+    };
+    const events = [
+      {
+        type: "response.output_item.added",
+        output_index: 0,
+        item: {
+          id: "rs-1",
+          type: "reasoning",
+          summary: [],
+          status: "in_progress",
+        },
+      },
+      {
+        type: "response.reasoning_summary_part.added",
+        ...ref,
+        summary_index: 0,
+        part: { type: "summary_text", text: "" },
+      },
+      {
+        type: "response.reasoning_summary_text.delta",
+        ...ref,
+        summary_index: 0,
+        delta: "summary",
+      },
+      {
+        type: "response.reasoning_summary_text.done",
+        ...ref,
+        summary_index: 0,
+        text: "summary",
+      },
+      {
+        type: "response.reasoning_summary_part.done",
+        ...ref,
+        summary_index: 0,
+        part: { type: "summary_text", text: "summary" },
+      },
+      {
+        type: "response.reasoning_text.delta",
+        ...ref,
+        content_index: 0,
+        delta: "private",
+      },
+      {
+        type: "response.reasoning_text.done",
+        ...ref,
+        content_index: 0,
+        text: "private",
+      },
+      { type: "response.output_item.done", output_index: 0, item: reasoning },
+      terminal([reasoning]),
+    ];
+    await sdkFixture([events], async (provider) => {
+      const output = await sdkCollect(provider);
+      expect(output.at(-1)).toMatchObject({
+        nativeOutput: { protocol: "openai-responses", items: [reasoning] },
+      });
+      expect(output.every((event) => !event.textDelta)).toBe(true);
+    });
+  });
+  it("retains usage but no replayable partial state for reasoning-only output limit", async () => {
+    const item = {
+      type: "reasoning",
+      id: "rs-1",
+      summary: [],
+      status: "incomplete",
+      encrypted_content: "partial",
+    };
+    await sdkFixture(
+      [
+        [
+          {
+            type: "response.output_item.added",
+            output_index: 0,
+            item: { ...item, status: "in_progress" },
+          },
+          { type: "response.output_item.done", output_index: 0, item },
+          terminal([item], "incomplete", {
+            incomplete_details: { reason: "max_output_tokens" },
+            usage: {
+              input_tokens: 10,
+              output_tokens: 8,
+              total_tokens: 18,
+              output_tokens_details: { reasoning_tokens: 8 },
+            },
+          }),
+        ],
+      ],
+      async (provider) => {
+        const output = await sdkCollect(provider);
+        expect(output.at(-1)).toMatchObject({
+          finishReason: "length",
+          tokenUsage: { inputTokens: 10, outputTokens: 8 },
+          reasoningTokens: 8,
+        });
+        expect(output.at(-1)).not.toHaveProperty("nativeOutput");
+      },
+    );
+  });
+});
+
+describe("Responses reasoning request wire", () => {
+  it.each(["medium", "high", "disabled"])(
+    "serializes resolved %s reasoning through the SDK without default temperature",
+    async (mode) => {
+      await sdkFixture(
+        [[...textEvents(), terminal([message()])]],
+        async (provider, bodies) => {
+          await sdkCollect(provider, {
+            ...request,
+            temperature: undefined,
+            reasoning: {
+              intent: {
+                enabled: mode !== "disabled",
+                effort: mode === "disabled" ? "medium" : mode,
+                explicit: { enabled: true, effort: true },
+              },
+              mode: mode === "disabled" ? "disabled" : "effort",
+              effort: mode === "disabled" ? undefined : mode,
+              wire: "openai",
+              capabilitySource: "fixture",
+            },
+          } as unknown as InterfaceProviderRequest);
+          expect(bodies[0]).toMatchObject({
+            reasoning: { effort: mode === "disabled" ? "none" : mode },
+            store: false,
+          });
+          expect(bodies[0]).not.toHaveProperty("temperature");
+          if (mode !== "disabled")
+            expect(bodies[0]?.include).toEqual(["reasoning.encrypted_content"]);
+          else expect(bodies[0]).not.toHaveProperty("include");
+        },
+      );
+    },
+  );
+});
+
+describe("Responses truncated function terminal", () => {
+  it("accepts trusted usage for incomplete arguments without exposing native replay state", async () => {
+    const partial = call("fn-1", "call-1", '{"q":', "incomplete");
+    await sdkFixture(
+      [
+        [
+          functionEvents()[0],
+          {
+            type: "response.function_call_arguments.delta",
+            item_id: "fn-1",
+            output_index: 3,
+            delta: '{"q":',
+          },
+          {
+            type: "response.function_call_arguments.done",
+            item_id: "fn-1",
+            output_index: 3,
+            arguments: '{"q":',
+          },
+          { type: "response.output_item.done", output_index: 3, item: partial },
+          terminal([partial], "incomplete", {
+            incomplete_details: { reason: "max_output_tokens" },
+            usage: { input_tokens: 10, output_tokens: 8, total_tokens: 18 },
+          }),
+        ],
+      ],
+      async (provider) => {
+        const output = await sdkCollect(provider);
+        expect(output.at(-1)).toEqual({
+          finishReason: "length",
+          rawFinishReason: "max_output_tokens",
+          tokenUsage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
+        });
+      },
+    );
+  });
+});
+
+describe("Responses duplicate native snapshots", () => {
+  it("accepts an identical reasoning done snapshot without duplicating native replay items", async () => {
+    const fixture = nativeFixture();
+    fixture.events.splice(2, 0, structuredClone(fixture.events[1]));
+    await sdkFixture([fixture.events], async (provider) => {
+      const output = await sdkCollect(provider);
+      expect(output.filter((event) => event.nativeOutput)).toHaveLength(1);
+      expect(output.at(-1)?.nativeOutput).toMatchObject({
+        protocol: "openai-responses",
+        items: fixture.output,
+      });
+    });
   });
 });

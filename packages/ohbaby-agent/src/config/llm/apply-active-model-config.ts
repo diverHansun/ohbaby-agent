@@ -1,7 +1,8 @@
 import { createModelProfileRegistry } from "../../services/llm-model/modelProfiles.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
-import type { InterfaceProviderKind } from "./types.js";
+import type { InterfaceProviderKind, ReasoningConfig } from "./types.js";
 import { ConfigError } from "./types.js";
+import { validateReasoningConfig } from "./validation.js";
 import {
   probeContextWindow,
   type ContextWindowSource,
@@ -29,6 +30,8 @@ interface ResolvedApiKey {
 }
 
 export interface ApplyActiveModelConfigInput {
+  readonly reasoning?: ReasoningConfig;
+  readonly temperature?: number;
   readonly provider?: string;
   readonly baseUrl: string;
   readonly interfaceProvider: InterfaceProviderKind;
@@ -140,6 +143,7 @@ function missingApiKeyEnvWarning(apiKeyEnv: string): string {
 export async function applyActiveModelConfig(
   input: ApplyActiveModelConfigInput,
 ): Promise<ApplyActiveModelConfigResult> {
+  validateReasoningConfig(input.reasoning);
   const provider = requireNonEmpty(input.provider, "Provider required");
   const model = requireNonEmpty(input.model, "Model name required");
   const baseUrl = validateBaseUrl(input.baseUrl);
@@ -203,6 +207,10 @@ export async function applyActiveModelConfig(
           maxTokens: resolvedMaxOutputTokens,
         }),
     updateActiveModelProfile: true,
+    ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
+    ...(input.temperature === undefined
+      ? {}
+      : { temperature: input.temperature }),
     ...(input.modelJsonPath === undefined
       ? {}
       : { modelJsonPath: input.modelJsonPath }),

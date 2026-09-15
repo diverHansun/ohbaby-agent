@@ -241,17 +241,15 @@ describe("validateModelJson", () => {
     }).toThrow(/llmParams/);
   });
 
-  it("should throw for missing llmParams.temperature", () => {
+  it("accepts missing temperature without modifying the configuration", () => {
     const config = {
       ...validConfig,
-      llmParams: { ...validConfig.llmParams, temperature: undefined },
+      llmParams: { maxTokens: 4096 },
     };
     expect(() => {
       validateModelJson(config);
-    }).toThrow(ConfigError);
-    expect(() => {
-      validateModelJson(config);
-    }).toThrow(/temperature/);
+    }).not.toThrow();
+    expect(config.llmParams).not.toHaveProperty("temperature");
   });
 
   it("should throw for temperature below 0", () => {

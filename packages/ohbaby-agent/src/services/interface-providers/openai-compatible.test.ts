@@ -440,6 +440,11 @@ describe("openai-compatible provider", () => {
       {
         finishReason: "stop",
         rawFinishReason: "stop",
+        nativeOutput: {
+          protocol: "openai-compatible",
+          reasoningField: "reasoning_content",
+          reasoningText: "hidden reasoning",
+        },
       },
     ]);
   });

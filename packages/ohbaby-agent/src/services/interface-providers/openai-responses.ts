@@ -10,6 +10,8 @@ import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
 } from "./types.js";
+import { nativeOutputForMessage, type ModelOrigin } from "./native-state.js";
+import { toResponsesReasoningWire } from "./reasoning.js";
 import { mapResponsesStream } from "./openai-responses-stream.js";
 
 function rejectRequest(reason: string): never {
@@ -43,6 +45,7 @@ function string(value: unknown, label: string, nonempty = false): string {
 
 function buildRequestParams(
   request: InterfaceProviderRequest,
+  origin: ModelOrigin,
 ): ResponseCreateParamsStreaming {
   const instructions: string[] = [];
   const input: ResponseInput = [];
@@ -63,9 +66,18 @@ function buildRequestParams(
       case "assistant": {
         allowedKeys(
           message,
-          ["role", "content", "toolCalls"],
+          ["role", "content", "toolCalls", "modelState"],
           "assistant message",
         );
+        if (rawMessage.role !== "assistant")
+          rejectRequest("invalid assistant role");
+        const native = nativeOutputForMessage(rawMessage, origin);
+        if (native !== undefined) {
+          if (native.protocol !== "openai-responses")
+            rejectRequest("native output protocol mismatch");
+          input.push(...native.items);
+          break;
+        }
         if (typeof message.content === "string")
           input.push({ role: "assistant", content: message.content });
         else if (message.content !== undefined && message.content !== null)
@@ -118,10 +130,28 @@ function buildRequestParams(
         : { description: string(tool.description, "description") }),
     };
   });
+  const reasoningWire = toResponsesReasoningWire(request.reasoning);
+  const effort = reasoningWire.reasoning?.effort;
+  if (
+    effort !== undefined &&
+    effort !== "none" &&
+    effort !== "minimal" &&
+    effort !== "low" &&
+    effort !== "medium" &&
+    effort !== "high" &&
+    effort !== "xhigh"
+  )
+    rejectRequest(`unsupported Responses reasoning effort ${effort}`);
   return {
     model: request.model,
+    ...(effort === undefined ? {} : { reasoning: { effort } }),
+    ...(reasoningWire.include === undefined
+      ? {}
+      : { include: reasoningWire.include }),
     input,
-    temperature: request.temperature,
+    ...(request.temperature === undefined
+      ? {}
+      : { temperature: request.temperature }),
     max_output_tokens: request.maxTokens,
     store: false,
     stream: true,
@@ -148,7 +178,12 @@ export function createOpenAIResponsesProvider(
     ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
       if (request.signal?.aborted) throw new APIUserAbortError();
       const stream = await client.responses.create(
-        buildRequestParams(request),
+        buildRequestParams(request, {
+          provider: options.id,
+          model: request.model,
+          protocol: "openai-responses",
+          endpoint: options.baseUrl,
+        }),
         { signal: request.signal },
       );
       return mapResponsesStream(

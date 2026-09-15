@@ -4,7 +4,14 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+  mkdir,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -182,6 +189,32 @@ describe("connectModel keyless local endpoint integration", () => {
     const envPath = join(projectRoot, "home", ".ohbaby", ".env");
 
     try {
+      // This local fixture advertises no reasoning protocol; register that capability explicitly.
+      await mkdir(join(projectRoot, "home", ".ohbaby"), { recursive: true });
+      await writeFile(
+        modelJsonPath,
+        JSON.stringify({
+          provider: "lmstudio",
+          defaultModel: MODEL,
+          apiConfig: {
+            baseUrl: server.baseUrl,
+            interfaceProvider: "openai-compatible",
+          },
+          llmParams: { maxTokens: 4096 },
+          models: [
+            {
+              provider: "lmstudio",
+              model: MODEL,
+              contextWindowTokens: 65536,
+              reasoningCapabilities: {
+                mode: "none",
+                wire: "none",
+                supportsDisabled: true,
+              },
+            },
+          ],
+        }),
+      );
       const result = await applyActiveModelConfig({
         baseUrl: server.baseUrl,
         interfaceProvider: "openai-compatible",

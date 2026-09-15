@@ -220,6 +220,17 @@ async function setup(
       provider,
       config: {
         model: "responses-test",
+        modelProfiles: [
+          {
+            model: "responses-test",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "none",
+              wire: "none",
+              supportsDisabled: true,
+            },
+          },
+        ],
         provider: "openai",
         baseUrl: "https://api.openai.com/v1",
         interfaceProvider: "openai-responses",

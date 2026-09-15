@@ -8,6 +8,8 @@ import type {
   InterfaceProviderKind,
   ModelJsonConfig,
   PromptCachePolicy,
+  ReasoningConfig,
+  ReasoningCapabilities,
 } from "./types.js";
 
 const ENDPOINT_PATHS = ["/chat/completions", "/messages", "/responses"];
@@ -125,6 +127,15 @@ function validateModelProfile(profile: unknown, index: number): void {
   }
 
   const record = profile as Record<string, unknown>;
+  validateReasoningCapabilities(record.reasoningCapabilities);
+  validateInterfaceProviderValue(record.interfaceProvider);
+  if (
+    record.baseUrl !== undefined &&
+    (typeof record.baseUrl !== "string" ||
+      !/^https?:\/\//u.test(record.baseUrl))
+  ) {
+    throw new ConfigError("Invalid model profile baseUrl", "INVALID_FIELD");
+  }
   if (record.id !== undefined && typeof record.id !== "string") {
     throw new ConfigError(
       `Invalid models[${String(index)}].id: expected a string`,
@@ -240,11 +251,16 @@ export function validateModelJson(
   } else {
     const llmParams = obj.llmParams as Record<string, unknown>;
 
-    if (typeof llmParams.temperature !== "number") {
-      errors.push("llmParams.temperature (number) is required");
-    } else if (llmParams.temperature < 0 || llmParams.temperature > 2) {
+    validateReasoningConfig(llmParams.reasoning);
+    if (
+      llmParams.temperature !== undefined &&
+      (typeof llmParams.temperature !== "number" ||
+        !Number.isFinite(llmParams.temperature) ||
+        llmParams.temperature < 0 ||
+        llmParams.temperature > 2)
+    ) {
       throw new ConfigError(
-        `Invalid temperature: ${String(llmParams.temperature)}. Must be between 0 and 2`,
+        `Invalid temperature: ${formatInvalidValue(llmParams.temperature)}. Must be between 0 and 2`,
         "INVALID_TEMPERATURE",
         { value: llmParams.temperature },
       );
@@ -297,4 +313,123 @@ export function validateModelJson(
       { missingFields: errors },
     );
   }
+}
+
+const DISABLED_EFFORTS = new Set(["none", "off", "disabled"]);
+function validEffort(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    !DISABLED_EFFORTS.has(value.toLowerCase())
+  );
+}
+export function validateReasoningConfig(
+  value: unknown,
+): asserts value is ReasoningConfig | undefined {
+  if (value === undefined) return;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ConfigError(
+      "Invalid reasoning: expected an object",
+      "INVALID_FIELD",
+    );
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    (record.enabled !== undefined && typeof record.enabled !== "boolean") ||
+    (record.effort !== undefined && !validEffort(record.effort))
+  ) {
+    throw new ConfigError(
+      "Invalid reasoning: enabled must be boolean; effort must be a nonempty strength (use enabled=false to disable)",
+      "INVALID_FIELD",
+    );
+  }
+}
+export function validateReasoningCapabilities(
+  value: unknown,
+): asserts value is ReasoningCapabilities | undefined {
+  if (value === undefined) return;
+  const invalid = (): never => {
+    throw new ConfigError(
+      "Invalid reasoning capabilities: check mode, wire, supported efforts and mappings",
+      "INVALID_FIELD",
+    );
+  };
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return invalid();
+  const record = value as Record<string, unknown>;
+  if (
+    !["none", "binary", "effort"].includes(String(record.mode)) ||
+    ![
+      "none",
+      "openai",
+      "anthropic-adaptive",
+      "anthropic-budget",
+      "thinking",
+      "enable-thinking",
+      "reasoning",
+    ].includes(String(record.wire)) ||
+    typeof record.supportsDisabled !== "boolean"
+  )
+    return invalid();
+  if (
+    record.temperature !== undefined &&
+    !["allowed", "unsupported", "disabled-only"].includes(
+      formatInvalidValue(record.temperature),
+    )
+  )
+    return invalid();
+  if (
+    record.mode === "none" &&
+    (record.wire !== "none" || !record.supportsDisabled)
+  )
+    return invalid();
+  if (record.mode !== "none" && record.wire === "none") return invalid();
+  if (
+    record.mode === "binary" &&
+    !["thinking", "enable-thinking", "reasoning"].includes(String(record.wire))
+  )
+    return invalid();
+  if (
+    record.efforts !== undefined &&
+    (!Array.isArray(record.efforts) ||
+      record.efforts.length === 0 ||
+      !record.efforts.every(validEffort))
+  )
+    return invalid();
+  if (
+    record.mode === "effort" &&
+    (!Array.isArray(record.efforts) ||
+      ["thinking", "enable-thinking"].includes(String(record.wire)))
+  )
+    return invalid();
+  if (
+    record.mode !== "effort" &&
+    (record.efforts !== undefined ||
+      record.effortMap !== undefined ||
+      record.budgets !== undefined)
+  )
+    return invalid();
+  for (const field of ["effortMap", "budgets"] as const) {
+    const mapping = record[field];
+    if (mapping === undefined) continue;
+    if (!mapping || typeof mapping !== "object" || Array.isArray(mapping))
+      return invalid();
+    for (const [key, mapped] of Object.entries(mapping)) {
+      if (!validEffort(key)) return invalid();
+      if (
+        field === "effortMap"
+          ? !validEffort(mapped) ||
+            !(Array.isArray(record.efforts) && record.efforts.includes(mapped))
+          : !isPositiveInteger(mapped)
+      )
+        return invalid();
+    }
+  }
+  if (
+    record.minBudgetTokens !== undefined &&
+    !isPositiveInteger(record.minBudgetTokens)
+  )
+    return invalid();
+  if (record.wire === "anthropic-budget" && record.budgets === undefined)
+    return invalid();
 }

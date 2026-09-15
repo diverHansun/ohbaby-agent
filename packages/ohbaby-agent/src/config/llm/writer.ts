@@ -4,15 +4,15 @@ import type {
   InterfaceProviderKind,
   ModelJsonConfig,
   PromptCachePolicy,
+  ReasoningConfig,
 } from "./types.js";
 import { ConfigError } from "./types.js";
-import { validateModelJson } from "./validation.js";
+import { validateModelJson, validateReasoningConfig } from "./validation.js";
 import { writeFileAtomically } from "../secrets/atomic-file.js";
 import { writeEnvSecret } from "../secrets/env-secrets.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
 import { defaultApiKeyEnvForProvider, nonEmptyApiKey } from "./api-key.js";
 
-const DEFAULT_TEMPERATURE = 0.7;
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_INTERFACE_PROVIDER: InterfaceProviderKind = "openai-compatible";
 
@@ -25,6 +25,7 @@ export interface SetActiveLLMConfigInput {
   readonly interfaceProvider?: InterfaceProviderKind;
   readonly promptCache?: PromptCachePolicy;
   readonly temperature?: number;
+  readonly reasoning?: ReasoningConfig;
   readonly maxTokens?: number;
   readonly contextWindowTokens?: number;
   readonly clearContextWindowTokens?: boolean;
@@ -87,9 +88,21 @@ function buildLLMParams(
   const contextWindowTokens = input.clearContextWindowTokens
     ? undefined
     : (input.contextWindowTokens ?? existingParams?.contextWindowTokens);
+  const temperature = input.temperature ?? existingParams?.temperature;
+  const reasoning =
+    existingParams?.reasoning === undefined && input.reasoning === undefined
+      ? undefined
+      : {
+          ...existingParams?.reasoning,
+          ...Object.fromEntries(
+            Object.entries(input.reasoning ?? {}).filter(
+              ([, value]) => value !== undefined,
+            ),
+          ),
+        };
   return {
-    temperature:
-      input.temperature ?? existingParams?.temperature ?? DEFAULT_TEMPERATURE,
+    ...(temperature === undefined ? {} : { temperature }),
+    ...(reasoning === undefined ? {} : { reasoning }),
     maxTokens:
       input.maxTokens ?? existingParams?.maxTokens ?? DEFAULT_MAX_TOKENS,
     ...(contextWindowTokens === undefined
@@ -129,6 +142,9 @@ function buildModelProfiles(
   }
 
   const activeProfile = {
+    ...existingModels?.find(
+      (profile) => modelProfileKey(profile) === modelProfileKey(input),
+    ),
     provider: input.provider,
     model: input.model,
     contextWindowTokens: input.contextWindowTokens,
@@ -167,6 +183,7 @@ function buildModelJson(
 export async function setActiveLLMConfig(
   input: SetActiveLLMConfigInput,
 ): Promise<SetActiveLLMConfigResult> {
+  validateReasoningConfig(input.reasoning);
   const modelJsonPath = input.modelJsonPath ?? getModelJsonPath();
   const explicitApiKey = nonEmptyApiKey(input.apiKey);
   const apiKeyEnv =
