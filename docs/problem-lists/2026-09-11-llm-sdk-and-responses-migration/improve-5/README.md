@@ -3,6 +3,8 @@
 > 2026-09-14 开始研究；2026-09-15 用户确认关键取舍并授权撰写文档。状态：实施完成，最终 preflight 与基本三协议实网通过；扩展八组通过、百炼 Responses 一组未通过，详见 05。
 > 基线：`codex/improve-4-usage-calibration@114f1e512fb77a3ffef144a9886414fc37a0bd80`。实施分支：`codex/improve-5-cache-accounting`，承接全部规划文档；完成分批实施与独立审查，仅本地分批提交，暂不 merge/push。
 
+> 第二轮实网复验（2026-09-15）：加入 DeepSeek V4 Flash、Claude Sonnet 5、GPT-5.6 Luna 后共14组，11组完整通过、3组未通过；参数省略诊断也未使两组原生模型完整通过。逐项命中率及兼容缺口见 [06 复验报告](./06-real-cache-revalidation.md)。
+
 让 Chat Completions、Responses 和 Anthropic Messages 的可信单步缓存用量进入同一主代理 session 累计。某一步没有缓存读取明细，只跳过这一步；保留其他步骤及历史累计。Web/TUI 继续仅在 `/status` 显示 `hit N%` 或 `hit —`。
 
 ## 阅读顺序
@@ -15,6 +17,7 @@
 | [03-reference-projects](./03-reference-projects.md)                                 | 七个本地项目的事实与取舍             |
 | [04-test-and-acceptance](./04-test-and-acceptance.md)                               | 固定样本、集成边界、真实观测与验收门 |
 | [05-implementation-acceptance](./05-implementation-acceptance.md)                   | 本轮实施后记录实际结果与验收证据     |
+| [06-real-cache-revalidation](./06-real-cache-revalidation.md)                       | 第二轮模型替换、命中率对比与兼容缺口 |
 
 00 约束产品语义，02 定义实施目标，04 定义验收。01 是基线事实，不能用它的旧行为覆盖 02。实际实现、测试数字、失败与适配限制以 05 为准。
 
