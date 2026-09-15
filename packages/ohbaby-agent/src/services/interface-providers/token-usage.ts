@@ -327,6 +327,14 @@ export function createAnthropicUsageAccumulator(
       const nextCacheRead = field(usage, "cache_read_input_tokens");
       const nextCacheWrite = field(usage, "cache_creation_input_tokens");
       const nextOutput = field(usage, "output_tokens");
+      // Some compatible endpoints send a complete zero placeholder after
+      // reporting input. Otherwise input buckets are replaceable snapshots:
+      // a later cache breakdown can reclassify previously uncached input.
+      const inputPlaceholder =
+        nextUncached === 0 &&
+        nextCacheRead === 0 &&
+        nextCacheWrite === 0 &&
+        (uncached ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0) > 0;
 
       for (const [name, current, incoming] of [
         ["input_tokens", uncached, nextUncached],
@@ -337,7 +345,8 @@ export function createAnthropicUsageAccumulator(
         if (
           current !== undefined &&
           incoming !== undefined &&
-          incoming < current
+          incoming < current &&
+          (name === "output_tokens" || inputPlaceholder)
         ) {
           report({
             code: "non-monotonic-cumulative-field",
@@ -350,16 +359,16 @@ export function createAnthropicUsageAccumulator(
         }
       }
 
-      if (nextUncached !== undefined) {
-        uncached = monotonic(uncached, nextUncached);
+      if (nextUncached !== undefined && !inputPlaceholder) {
+        uncached = nextUncached;
       }
       if (nextCacheRead !== undefined) {
         cacheReadObserved = true;
-        cacheRead = monotonic(cacheRead, nextCacheRead);
+        if (!inputPlaceholder) cacheRead = nextCacheRead;
       }
       if (nextCacheWrite !== undefined) {
         cacheWriteObserved = true;
-        cacheWrite = monotonic(cacheWrite, nextCacheWrite);
+        if (!inputPlaceholder) cacheWrite = nextCacheWrite;
       }
       if (nextOutput !== undefined) {
         outputTokens = monotonic(outputTokens, nextOutput);

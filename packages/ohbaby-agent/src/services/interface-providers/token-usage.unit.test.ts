@@ -421,7 +421,82 @@ describe("createAnthropicUsageAccumulator", () => {
     );
   });
 
-  it("monotonically merges start and final usage without letting placeholders erase data", () => {
+  it.each([
+    {
+      start: { input_tokens: 5341, output_tokens: 0 },
+      end: {
+        input_tokens: 6,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 5388,
+        output_tokens: 100,
+      },
+      input: 5394,
+      read: 0,
+      write: 5388,
+    },
+    {
+      start: { input_tokens: 5341, output_tokens: 0 },
+      end: {
+        input_tokens: 402,
+        cache_read_input_tokens: 4992,
+        cache_creation_input_tokens: 0,
+        output_tokens: 121,
+      },
+      input: 5394,
+      read: 4992,
+      write: 0,
+    },
+    {
+      start: {
+        input_tokens: 100,
+        cache_read_input_tokens: 20,
+        cache_creation_input_tokens: 30,
+        output_tokens: 0,
+      },
+      end: {
+        input_tokens: 0,
+        cache_read_input_tokens: 150,
+        cache_creation_input_tokens: 0,
+        output_tokens: 5,
+      },
+      input: 150,
+      read: 150,
+      write: 0,
+    },
+    {
+      start: {
+        input_tokens: 100,
+        cache_read_input_tokens: 20,
+        cache_creation_input_tokens: 30,
+        output_tokens: 0,
+      },
+      end: { input_tokens: 120, cache_read_input_tokens: 0, output_tokens: 5 },
+      input: 150,
+      read: 0,
+      write: 30,
+    },
+  ])(
+    "accepts revised Anthropic input buckets as one latest snapshot ($input / $read / $write)",
+    ({ start, end, input, read, write }) => {
+      const report = vi.fn();
+      const usage = createAnthropicUsageAccumulator(report);
+      usage.update(start);
+      expectUsage(usage.update(end), {
+        inputTokens: input,
+        outputTokens: end.output_tokens,
+        totalTokens: input + end.output_tokens,
+        inputBreakdown: {
+          cacheRead: read,
+          cacheWrite: write,
+          uncached: end.input_tokens,
+          observed: { cacheRead: true, cacheWrite: true },
+        },
+      });
+      expect(report).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a complete all-zero input placeholder from erasing accepted input", () => {
     const report = vi.fn();
     const usage = createAnthropicUsageAccumulator(report);
 
