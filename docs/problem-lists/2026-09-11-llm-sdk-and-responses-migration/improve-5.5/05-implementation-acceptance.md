@@ -133,3 +133,49 @@ SQLite 故障测试使用真实事务与注入失败，包含关闭重开后的�
 - 本轮没有新增或调整缓存策略、system prompt、TTL 或 key 策略；Anthropic 原生 thinking 块不能承载缓存标记，adapter 沿既有策略选择合法块。实网零 cache read 是观测结果，不能据此宣称缓存机制失效，也不能声称已经验证了生产环境中的非零命中。
 - 未实现模型通过子代理工具自行覆盖推理强度；该后续能力需要单独明确允许的参数和覆盖优先级。
 - 新模型、网关协议变化仍需要能力表与固定样本支持；本轮没有承诺完整 Responses、hosted tools、后台任务或服务端历史托管。
+
+## 7. 独立验收（规划复查会话，2026-09-15）
+
+对照 00/02/04 与基线 `8b546e3` → HEAD `ddcaea72`。不重跑全仓 `pnpm test`，不重跑付费实网。数字用仓库内 8 份 `evidence/real-native/*.json` 重算。
+
+### 7.1 结论
+
+**部分通过。** improve-5.5 的主体（默认推理意图、三协议原生状态续接、原子保存、标题关闭、子代理/压缩继承、improve-5 cache 口径保持）可以按本文和第 6 节的限制验收。不能写成全矩阵通过、全部网关关闭语义通过、或已验证非零 cache。
+
+实网 cache read 全 0 不构成 T28/发布门失败：04 §4.7 第 5 条写明非零 cache 不是本轮承诺。用户计划另开一轮 cache 命中复测，与本轮原生续接验收分开。
+
+### 7.2 独立核对
+
+| 项 | 结果 |
+| --- | --- |
+| 06 数字 | 23 HTTP、20 accepted Step、输入 6692、输出 876、总量 7568、cache read 0、工具 10，与 8 份 JSON 一致 |
+| A–F 改动面 | 落地。A 的样本落在同目录测试/smoke，未新建 `tests/fixtures/`（调整，可接受） |
+| 承重契约 | 默认 on/medium 在请求 merge，不写回配置；`commitModelStep` 已接线；`onStepUsage` 仍在 aggregate 之后；UI 不投影 `model-state` |
+| T28 | Responses medium/none、Anthropic adaptive medium/disabled、Chat native medium/none 有真实 reasoning/thinking 回放。Luna Chat generic `enabled=false` 仍返回推理，不标关闭通过 |
+| T27 | 仅有实施会话声称的 333 文件 / 3450 项；本独立验收未复跑 |
+| T29 | 仅 ZenMux 五组合；百炼/智谱未复验 |
+| 越界 | 未见前端推理 UI、`previous_response_id`、hosted tools、cache key/TTL、system prompt、子代理并入主 cache |
+
+### 7.3 规划偏差（不阻断主体）
+
+- Part 写入顺序实际为 text → model-state → tools；02 曾写 text → 首个 tool → model-state。usage 仍只落一个 carrier，语义可接受。
+- Core 依赖 `interface-providers/native-state` 的自有 Zod 合同，不是 SDK `Response` 类型泄漏；依赖方向比「协议止于 adapter」更紧，属可维护代价。
+- 默认开启迫使大量无关测试补 `reasoningCapabilities` stub。
+
+### 7.4 SWE / 架构清单（改动面）
+
+| 发现 | 严重性 | 依据 | 建议 |
+| --- | --- | --- | --- |
+| 保存失败不执行工具、overflow 只留成功尝试 | 已处理 | 事务边界 / 幂等 | 保持；不要用 Set 去重第一次 complete |
+| 实网 90s 超时、SDK retries=0 | 已处理 | 超时与重试纪律 | 保持 opt-in E2E |
+| 未知能力请求前失败；网关忽略 OFF 已单列 | 已处理 | 降级不假装成功 | Luna Chat 生产 profile 用已验证的 `wire: openai` |
+| `model-state` 不进 UI/summary | 已处理 | 私有数据不投影 | 新增 Part 分支必须继续穷举 |
+| 新 Part 写入 SQLite 后旧二进制不可读 | 残余 | 单向门 | 试用独立库/备份；回退代码 ≠ 回退数据 |
+| 非零 cache、同会话切档、实网压缩、百炼/智谱 | 未覆盖 | 04 已登记 | cache 另轮复测；其余保持未覆盖，不补标通过 |
+
+
+## 8. 正式 Agent cache 收尾（2026-09-15，晚于第 7 节独立验收）
+
+新增 [07 正式 Agent 缓存验证](./07-formal-agent-cache-validation.md)：生产 persistent backend / prompt / 内置工具 / SQLite / 压缩 / `/status` 全链路实网复验。Responses、Anthropic、Chat 的最终 session 累计 hit 分别为 78.25%、59.33%、55.99%；三次真实压缩成功，Chat 同会话 medium → high 及压缩继承 high 已观察。累计在压缩、切档时保持，后续零命中只增加分母。
+
+第 6～7 节的零 cache 与未覆盖记录对应此前短续接矩阵，保留为历史，不能再用于描述 07 的新证据。供应商扩展仍有未覆盖项，Luna Chat generic OFF 限制不变，不把收尾写成全平台通过。原型控制器的入口诊断、所有新增 HTTP 和用量均在 07 单列，未合并或推送。

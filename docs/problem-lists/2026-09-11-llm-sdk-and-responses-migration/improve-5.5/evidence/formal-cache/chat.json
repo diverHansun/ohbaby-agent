@@ -1,0 +1,2109 @@
+{
+  "profile": "zenmux-gpt56-luna-chat-native",
+  "recordedAt": "2026-09-15T10:20:53.762Z",
+  "entry": "createPersistentUiBackendClient.submitPromptAndWait",
+  "productionPrompt": true,
+  "contextWindowTokens": 128000,
+  "maxOutputTokens": 4096,
+  "providerRequests": [
+    {
+      "id": 1,
+      "purpose": "session-title",
+      "sessionId": "session_1789467339849_e2ix5y1",
+      "messageCount": 2,
+      "replayStateCount": 0,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 132
+        },
+        "inputTokens": 132,
+        "outputTokens": 10,
+        "totalTokens": 142
+      }
+    },
+    {
+      "id": 2,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467339849_e2ix5y1",
+      "messageCount": 2,
+      "replayStateCount": 0,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 8045
+        },
+        "inputTokens": 8045,
+        "outputTokens": 111,
+        "totalTokens": 8156
+      }
+    },
+    {
+      "id": 3,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467339849_e2ix5y1",
+      "messageCount": 4,
+      "replayStateCount": 1,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 8042,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 943
+        },
+        "inputTokens": 8985,
+        "outputTokens": 51,
+        "totalTokens": 9036
+      }
+    },
+    {
+      "id": 4,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467339849_e2ix5y1",
+      "messageCount": 6,
+      "replayStateCount": 2,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 8982,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 174
+        },
+        "inputTokens": 9156,
+        "outputTokens": 17,
+        "totalTokens": 9173
+      }
+    },
+    {
+      "id": 5,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467339849_e2ix5y1",
+      "messageCount": 8,
+      "replayStateCount": 2,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 9153,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 172
+        },
+        "inputTokens": 9325,
+        "outputTokens": 10,
+        "totalTokens": 9335
+      }
+    },
+    {
+      "id": 6,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467339849_e2ix5y1",
+      "messageCount": 10,
+      "replayStateCount": 2,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 9322,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 165
+        },
+        "inputTokens": 9487,
+        "outputTokens": 17,
+        "totalTokens": 9504
+      }
+    },
+    {
+      "id": 7,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467339849_e2ix5y1",
+      "messageCount": 12,
+      "replayStateCount": 2,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 9657
+        },
+        "inputTokens": 9657,
+        "outputTokens": 31,
+        "totalTokens": 9688
+      }
+    },
+    {
+      "id": 8,
+      "purpose": "context-summary",
+      "sessionId": "session_1789467339849_e2ix5y1",
+      "messageCount": 3,
+      "replayStateCount": 0,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 1248
+        },
+        "inputTokens": 1248,
+        "outputTokens": 305,
+        "totalTokens": 1553
+      }
+    },
+    {
+      "id": 9,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467339849_e2ix5y1",
+      "messageCount": 10,
+      "replayStateCount": 1,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 8750
+        },
+        "inputTokens": 8750,
+        "outputTokens": 17,
+        "totalTokens": 8767
+      }
+    }
+  ],
+  "wire": [
+    {
+      "sequence": 1,
+      "context": {
+        "purpose": "session-title",
+        "id": 1
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "reasoning": {
+        "effort": "none",
+        "config": {
+          "sha256": "9b54272c2ee8a2c3479c0feb20e18c8a8546e474766c131f4b6abe61962cc18b",
+          "bytes": 81
+        }
+      },
+      "system": {
+        "sha256": "834ca6546b741ac56e465d67d1a81f7519d91268edb1f409dc00787dfc4c9fd2",
+        "bytes": 419
+      },
+      "tools": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "input": {
+        "sha256": "2740b794ff96e5f4804a55a938c40f0ded4a3749ef71841987500270b396280f",
+        "bytes": 619
+      },
+      "inputCount": 2,
+      "inputPrefixes": [
+        {
+          "sha256": "b3eabadba1c68721119814d29f0c735bf25da483bf52816d5f46150be01393e6",
+          "bytes": 372
+        },
+        {
+          "sha256": "2740b794ff96e5f4804a55a938c40f0ded4a3749ef71841987500270b396280f",
+          "bytes": 619
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 142,
+          "prompt_tokens": 132,
+          "completion_tokens": 10,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 142,
+        "prompt_tokens": 132,
+        "completion_tokens": 10,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "b3eabadba1c68721119814d29f0c735bf25da483bf52816d5f46150be01393e6",
+        "bytes": 372
+      },
+      "status": 200
+    },
+    {
+      "sequence": 2,
+      "context": {
+        "purpose": "agent-step",
+        "id": 2
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "162ae8535b1e89b4de14f6992e7c02b7477907879da671a02ed2361fd89f1122",
+          "bytes": 83
+        }
+      },
+      "system": {
+        "sha256": "bfb927ff271cc80eeeda6056c5f03f28f2ca081110d2594af23cabb1e5da8ee3",
+        "bytes": 14406
+      },
+      "tools": {
+        "sha256": "d6be69f12e5837ae07c4e087329d0ed52848f5bd7ed163ece464234943d167ed",
+        "bytes": 25258
+      },
+      "input": {
+        "sha256": "22ff81e4df2f954d30e1c18b87e2a5033acc1edded1567a18692ec8957d43a40",
+        "bytes": 14924
+      },
+      "inputCount": 2,
+      "inputPrefixes": [
+        {
+          "sha256": "7a2ed6305549c2f8b3c7ebe216f5925be2c8027f999c5fb2e4064e6e169dd6d6",
+          "bytes": 14359
+        },
+        {
+          "sha256": "22ff81e4df2f954d30e1c18b87e2a5033acc1edded1567a18692ec8957d43a40",
+          "bytes": 14924
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 8156,
+          "prompt_tokens": 8045,
+          "completion_tokens": 111,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 8156,
+        "prompt_tokens": 8045,
+        "completion_tokens": 111,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "7a2ed6305549c2f8b3c7ebe216f5925be2c8027f999c5fb2e4064e6e169dd6d6",
+        "bytes": 14359
+      },
+      "status": 200
+    },
+    {
+      "sequence": 3,
+      "context": {
+        "purpose": "agent-step",
+        "id": 3
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "162ae8535b1e89b4de14f6992e7c02b7477907879da671a02ed2361fd89f1122",
+          "bytes": 83
+        }
+      },
+      "system": {
+        "sha256": "bfb927ff271cc80eeeda6056c5f03f28f2ca081110d2594af23cabb1e5da8ee3",
+        "bytes": 14406
+      },
+      "tools": {
+        "sha256": "d6be69f12e5837ae07c4e087329d0ed52848f5bd7ed163ece464234943d167ed",
+        "bytes": 25258
+      },
+      "input": {
+        "sha256": "12349218a7d2deea40a1b7fba381cd21f8854b42bf706fe26409e9ee3d0647cd",
+        "bytes": 20738
+      },
+      "inputCount": 4,
+      "inputPrefixes": [
+        {
+          "sha256": "7a2ed6305549c2f8b3c7ebe216f5925be2c8027f999c5fb2e4064e6e169dd6d6",
+          "bytes": 14359
+        },
+        {
+          "sha256": "22ff81e4df2f954d30e1c18b87e2a5033acc1edded1567a18692ec8957d43a40",
+          "bytes": 14924
+        },
+        {
+          "sha256": "178910028ecaeceadfb0e5911bb6bdb74801084b4d60bb08c5f9bb04d4cf16b8",
+          "bytes": 17014
+        },
+        {
+          "sha256": "12349218a7d2deea40a1b7fba381cd21f8854b42bf706fe26409e9ee3d0647cd",
+          "bytes": 20738
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 9036,
+          "prompt_tokens": 8985,
+          "completion_tokens": 51,
+          "prompt_tokens_details": {
+            "cached_tokens": 8042
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 9036,
+        "prompt_tokens": 8985,
+        "completion_tokens": 51,
+        "prompt_tokens_details": {
+          "cached_tokens": 8042
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "7a2ed6305549c2f8b3c7ebe216f5925be2c8027f999c5fb2e4064e6e169dd6d6",
+        "bytes": 14359
+      },
+      "status": 200
+    },
+    {
+      "sequence": 4,
+      "context": {
+        "purpose": "agent-step",
+        "id": 4
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "162ae8535b1e89b4de14f6992e7c02b7477907879da671a02ed2361fd89f1122",
+          "bytes": 83
+        }
+      },
+      "system": {
+        "sha256": "bfb927ff271cc80eeeda6056c5f03f28f2ca081110d2594af23cabb1e5da8ee3",
+        "bytes": 14406
+      },
+      "tools": {
+        "sha256": "d6be69f12e5837ae07c4e087329d0ed52848f5bd7ed163ece464234943d167ed",
+        "bytes": 25258
+      },
+      "input": {
+        "sha256": "15076fe93521cface451c91d201d8be02fd92da2e268080ae6804ff618870316",
+        "bytes": 23584
+      },
+      "inputCount": 6,
+      "inputPrefixes": [
+        {
+          "sha256": "7a2ed6305549c2f8b3c7ebe216f5925be2c8027f999c5fb2e4064e6e169dd6d6",
+          "bytes": 14359
+        },
+        {
+          "sha256": "22ff81e4df2f954d30e1c18b87e2a5033acc1edded1567a18692ec8957d43a40",
+          "bytes": 14924
+        },
+        {
+          "sha256": "178910028ecaeceadfb0e5911bb6bdb74801084b4d60bb08c5f9bb04d4cf16b8",
+          "bytes": 17014
+        },
+        {
+          "sha256": "12349218a7d2deea40a1b7fba381cd21f8854b42bf706fe26409e9ee3d0647cd",
+          "bytes": 20738
+        },
+        {
+          "sha256": "efeac87ced4ffc8c38a8d12297c2d1e70fe64eb6843bc3b9e25d2077d09ee62e",
+          "bytes": 23182
+        },
+        {
+          "sha256": "15076fe93521cface451c91d201d8be02fd92da2e268080ae6804ff618870316",
+          "bytes": 23584
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 9173,
+          "prompt_tokens": 9156,
+          "completion_tokens": 17,
+          "prompt_tokens_details": {
+            "cached_tokens": 8982
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 9173,
+        "prompt_tokens": 9156,
+        "completion_tokens": 17,
+        "prompt_tokens_details": {
+          "cached_tokens": 8982
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "7a2ed6305549c2f8b3c7ebe216f5925be2c8027f999c5fb2e4064e6e169dd6d6",
+        "bytes": 14359
+      },
+      "status": 200
+    },
+    {
+      "sequence": 5,
+      "context": {
+        "purpose": "agent-step",
+        "id": 5
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "162ae8535b1e89b4de14f6992e7c02b7477907879da671a02ed2361fd89f1122",
+          "bytes": 83
+        }
+      },
+      "system": {
+        "sha256": "bfb927ff271cc80eeeda6056c5f03f28f2ca081110d2594af23cabb1e5da8ee3",
+        "bytes": 14406
+      },
+      "tools": {
+        "sha256": "d6be69f12e5837ae07c4e087329d0ed52848f5bd7ed163ece464234943d167ed",
+        "bytes": 25258
+      },
+      "input": {
+        "sha256": "c0b3b6a3c2e1f36ce28b07aa6f63b86eaa301aec0f0cacebab3fddd08d41b709",
+        "bytes": 24139
+      },
+      "inputCount": 8,
+      "inputPrefixes": [
+        {
+          "sha256": "7a2ed6305549c2f8b3c7ebe216f5925be2c8027f999c5fb2e4064e6e169dd6d6",
+          "bytes": 14359
+        },
+        {
+          "sha256": "22ff81e4df2f954d30e1c18b87e2a5033acc1edded1567a18692ec8957d43a40",
+          "bytes": 14924
+        },
+        {
+          "sha256": "178910028ecaeceadfb0e5911bb6bdb74801084b4d60bb08c5f9bb04d4cf16b8",
+          "bytes": 17014
+        },
+        {
+          "sha256": "12349218a7d2deea40a1b7fba381cd21f8854b42bf706fe26409e9ee3d0647cd",
+          "bytes": 20738
+        },
+        {
+          "sha256": "efeac87ced4ffc8c38a8d12297c2d1e70fe64eb6843bc3b9e25d2077d09ee62e",
+          "bytes": 23182
+        },
+        {
+          "sha256": "15076fe93521cface451c91d201d8be02fd92da2e268080ae6804ff618870316",
+          "bytes": 23584
+        },
+        {
+          "sha256": "566e77b061adabd014ee123cc2e85689fff71e1b6770af219459f29b8432a231",
+          "bytes": 23665
+        },
+        {
+          "sha256": "c0b3b6a3c2e1f36ce28b07aa6f63b86eaa301aec0f0cacebab3fddd08d41b709",
+          "bytes": 24139
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 9335,
+          "prompt_tokens": 9325,
+          "completion_tokens": 10,
+          "prompt_tokens_details": {
+            "cached_tokens": 9153
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 9335,
+        "prompt_tokens": 9325,
+        "completion_tokens": 10,
+        "prompt_tokens_details": {
+          "cached_tokens": 9153
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "566e77b061adabd014ee123cc2e85689fff71e1b6770af219459f29b8432a231",
+        "bytes": 23665
+      },
+      "status": 200
+    },
+    {
+      "sequence": 6,
+      "context": {
+        "purpose": "agent-step",
+        "id": 6
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "162ae8535b1e89b4de14f6992e7c02b7477907879da671a02ed2361fd89f1122",
+          "bytes": 83
+        }
+      },
+      "system": {
+        "sha256": "bfb927ff271cc80eeeda6056c5f03f28f2ca081110d2594af23cabb1e5da8ee3",
+        "bytes": 14406
+      },
+      "tools": {
+        "sha256": "d6be69f12e5837ae07c4e087329d0ed52848f5bd7ed163ece464234943d167ed",
+        "bytes": 25258
+      },
+      "input": {
+        "sha256": "496110cc767273f914bcc40239cb78d9e46df1723eaf3e0800698729c760fe4a",
+        "bytes": 24676
+      },
+      "inputCount": 10,
+      "inputPrefixes": [
+        {
+          "sha256": "7a2ed6305549c2f8b3c7ebe216f5925be2c8027f999c5fb2e4064e6e169dd6d6",
+          "bytes": 14359
+        },
+        {
+          "sha256": "22ff81e4df2f954d30e1c18b87e2a5033acc1edded1567a18692ec8957d43a40",
+          "bytes": 14924
+        },
+        {
+          "sha256": "178910028ecaeceadfb0e5911bb6bdb74801084b4d60bb08c5f9bb04d4cf16b8",
+          "bytes": 17014
+        },
+        {
+          "sha256": "12349218a7d2deea40a1b7fba381cd21f8854b42bf706fe26409e9ee3d0647cd",
+          "bytes": 20738
+        },
+        {
+          "sha256": "efeac87ced4ffc8c38a8d12297c2d1e70fe64eb6843bc3b9e25d2077d09ee62e",
+          "bytes": 23182
+        },
+        {
+          "sha256": "15076fe93521cface451c91d201d8be02fd92da2e268080ae6804ff618870316",
+          "bytes": 23584
+        },
+        {
+          "sha256": "566e77b061adabd014ee123cc2e85689fff71e1b6770af219459f29b8432a231",
+          "bytes": 23665
+        },
+        {
+          "sha256": "c0b3b6a3c2e1f36ce28b07aa6f63b86eaa301aec0f0cacebab3fddd08d41b709",
+          "bytes": 24139
+        },
+        {
+          "sha256": "297c51684d76cafc0452e5f1d5e44143299c47344dae254f1d8ffa92467206be",
+          "bytes": 24193
+        },
+        {
+          "sha256": "496110cc767273f914bcc40239cb78d9e46df1723eaf3e0800698729c760fe4a",
+          "bytes": 24676
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 9504,
+          "prompt_tokens": 9487,
+          "completion_tokens": 17,
+          "prompt_tokens_details": {
+            "cached_tokens": 9322
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 9504,
+        "prompt_tokens": 9487,
+        "completion_tokens": 17,
+        "prompt_tokens_details": {
+          "cached_tokens": 9322
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "297c51684d76cafc0452e5f1d5e44143299c47344dae254f1d8ffa92467206be",
+        "bytes": 24193
+      },
+      "status": 200
+    },
+    {
+      "sequence": 7,
+      "path": "/api/v1/models",
+      "kind": "metadata",
+      "status": 200
+    },
+    {
+      "sequence": 8,
+      "context": {
+        "purpose": "agent-step",
+        "id": 7
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "reasoning": {
+        "effort": "high",
+        "config": {
+          "sha256": "9998a353a0785314d225747563b5a90bb7462b351e7289fb20126389b8e967a6",
+          "bytes": 81
+        }
+      },
+      "system": {
+        "sha256": "bfb927ff271cc80eeeda6056c5f03f28f2ca081110d2594af23cabb1e5da8ee3",
+        "bytes": 14406
+      },
+      "tools": {
+        "sha256": "d6be69f12e5837ae07c4e087329d0ed52848f5bd7ed163ece464234943d167ed",
+        "bytes": 25258
+      },
+      "input": {
+        "sha256": "412ad96da64db9fa27a43b1564fcee4465e09e511e6818c52b0f719de1166ce2",
+        "bytes": 25252
+      },
+      "inputCount": 12,
+      "inputPrefixes": [
+        {
+          "sha256": "7a2ed6305549c2f8b3c7ebe216f5925be2c8027f999c5fb2e4064e6e169dd6d6",
+          "bytes": 14359
+        },
+        {
+          "sha256": "22ff81e4df2f954d30e1c18b87e2a5033acc1edded1567a18692ec8957d43a40",
+          "bytes": 14924
+        },
+        {
+          "sha256": "178910028ecaeceadfb0e5911bb6bdb74801084b4d60bb08c5f9bb04d4cf16b8",
+          "bytes": 17014
+        },
+        {
+          "sha256": "12349218a7d2deea40a1b7fba381cd21f8854b42bf706fe26409e9ee3d0647cd",
+          "bytes": 20738
+        },
+        {
+          "sha256": "efeac87ced4ffc8c38a8d12297c2d1e70fe64eb6843bc3b9e25d2077d09ee62e",
+          "bytes": 23182
+        },
+        {
+          "sha256": "15076fe93521cface451c91d201d8be02fd92da2e268080ae6804ff618870316",
+          "bytes": 23584
+        },
+        {
+          "sha256": "566e77b061adabd014ee123cc2e85689fff71e1b6770af219459f29b8432a231",
+          "bytes": 23665
+        },
+        {
+          "sha256": "c0b3b6a3c2e1f36ce28b07aa6f63b86eaa301aec0f0cacebab3fddd08d41b709",
+          "bytes": 24139
+        },
+        {
+          "sha256": "297c51684d76cafc0452e5f1d5e44143299c47344dae254f1d8ffa92467206be",
+          "bytes": 24193
+        },
+        {
+          "sha256": "496110cc767273f914bcc40239cb78d9e46df1723eaf3e0800698729c760fe4a",
+          "bytes": 24676
+        },
+        {
+          "sha256": "b6761231bcb70446b35cd905c1ff0304e2336052c5f0b0047bf383db797b9f9d",
+          "bytes": 24750
+        },
+        {
+          "sha256": "412ad96da64db9fa27a43b1564fcee4465e09e511e6818c52b0f719de1166ce2",
+          "bytes": 25252
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 9688,
+          "prompt_tokens": 9657,
+          "completion_tokens": 31,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 9688,
+        "prompt_tokens": 9657,
+        "completion_tokens": 31,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "b6761231bcb70446b35cd905c1ff0304e2336052c5f0b0047bf383db797b9f9d",
+        "bytes": 24750
+      },
+      "status": 200
+    },
+    {
+      "sequence": 9,
+      "context": {
+        "purpose": "context-summary",
+        "id": 8
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "reasoning": {
+        "effort": "high",
+        "config": {
+          "sha256": "9998a353a0785314d225747563b5a90bb7462b351e7289fb20126389b8e967a6",
+          "bytes": 81
+        }
+      },
+      "system": {
+        "sha256": "40d1bec3f6fce9eeb8a873fad5d1db0dc57f30db6b7e5dcdd3ba42f6d56c432c",
+        "bytes": 378
+      },
+      "tools": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "input": {
+        "sha256": "e59e2095c14ad778e5099bb66bc84fb3d5334f47e41821d161ba7fc3f93b4395",
+        "bytes": 5651
+      },
+      "inputCount": 3,
+      "inputPrefixes": [
+        {
+          "sha256": "24b8d877b18b556ed457924099b5fabf9005d7d79fde3f60beeb926f7b825d46",
+          "bytes": 331
+        },
+        {
+          "sha256": "4808e346f5d76194f87d815de458e4f48996dae364430cbfcd53bc2f48246781",
+          "bytes": 4341
+        },
+        {
+          "sha256": "e59e2095c14ad778e5099bb66bc84fb3d5334f47e41821d161ba7fc3f93b4395",
+          "bytes": 5651
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 1553,
+          "prompt_tokens": 1248,
+          "completion_tokens": 305,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 1553,
+        "prompt_tokens": 1248,
+        "completion_tokens": 305,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "4808e346f5d76194f87d815de458e4f48996dae364430cbfcd53bc2f48246781",
+        "bytes": 4341
+      },
+      "status": 200
+    },
+    {
+      "sequence": 10,
+      "context": {
+        "purpose": "agent-step",
+        "id": 9
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "reasoning": {
+        "effort": "high",
+        "config": {
+          "sha256": "9998a353a0785314d225747563b5a90bb7462b351e7289fb20126389b8e967a6",
+          "bytes": 81
+        }
+      },
+      "system": {
+        "sha256": "bfb927ff271cc80eeeda6056c5f03f28f2ca081110d2594af23cabb1e5da8ee3",
+        "bytes": 14406
+      },
+      "tools": {
+        "sha256": "d6be69f12e5837ae07c4e087329d0ed52848f5bd7ed163ece464234943d167ed",
+        "bytes": 25258
+      },
+      "input": {
+        "sha256": "2a003addc50bb35ad46ee7174476bb31a189953a88866d7c02391239d7d0f114",
+        "bytes": 18820
+      },
+      "inputCount": 10,
+      "inputPrefixes": [
+        {
+          "sha256": "7a2ed6305549c2f8b3c7ebe216f5925be2c8027f999c5fb2e4064e6e169dd6d6",
+          "bytes": 14359
+        },
+        {
+          "sha256": "a9fe837dc02b7519bdae89bab4e1861d3470c7a69ddf37e38e19d5a26adcdc55",
+          "bytes": 15227
+        },
+        {
+          "sha256": "2ba154a69055a26046f7a7016c664d6c82f3f14d5735e4aa06c1f57d0b3d9fb9",
+          "bytes": 15308
+        },
+        {
+          "sha256": "299bec1ba4dc67a9ac7b9ef22c6a82c57748043c2bee4045e1e5d678e7ba2063",
+          "bytes": 15782
+        },
+        {
+          "sha256": "ea865660dfae466fe434fc5d0eabf9706e0e30632e819355c9e0d554dd305c67",
+          "bytes": 15836
+        },
+        {
+          "sha256": "aedae25c584e4c9160b9cacc9bb7c84bcf21ddf239eb8ca0222a9743dd51c25b",
+          "bytes": 16319
+        },
+        {
+          "sha256": "7faca7e998997fb1ce49294ac0223654b87687024970f941a7270231682280ad",
+          "bytes": 16393
+        },
+        {
+          "sha256": "d72cfa4aa56a10be8df35fbbc6db00856fcbfe7fbf88635c35ce4ff9ac1dc1fd",
+          "bytes": 16895
+        },
+        {
+          "sha256": "54124572ded3a2aa280094cecdb6ba94751a5716399583b5e2ef29e79f46641c",
+          "bytes": 18344
+        },
+        {
+          "sha256": "2a003addc50bb35ad46ee7174476bb31a189953a88866d7c02391239d7d0f114",
+          "bytes": 18820
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 8767,
+          "prompt_tokens": 8750,
+          "completion_tokens": 17,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 8767,
+        "prompt_tokens": 8750,
+        "completion_tokens": 17,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "54124572ded3a2aa280094cecdb6ba94751a5716399583b5e2ef29e79f46641c",
+        "bytes": 18344
+      },
+      "status": 200
+    }
+  ],
+  "checkpoints": [
+    {
+      "label": "run-1",
+      "cache": {
+        "accountedInputTokens": 26186,
+        "cacheReadShare": 0.6501183838692431,
+        "cacheReadTokens": 17024,
+        "sessionId": "session_1789467339849_e2ix5y1"
+      },
+      "persisted": {
+        "runs": [
+          {
+            "status": "succeeded"
+          }
+        ],
+        "usageParts": [
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 8045
+              },
+              "inputTokens": 8045,
+              "outputTokens": 111,
+              "totalTokens": 8156
+            }
+          },
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8042,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 943
+              },
+              "inputTokens": 8985,
+              "outputTokens": 51,
+              "totalTokens": 9036
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8982,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 174
+              },
+              "inputTokens": 9156,
+              "outputTokens": 17,
+              "totalTokens": 9173
+            }
+          }
+        ]
+      },
+      "messageCount": 4,
+      "answer": {
+        "sha256": "9c9130fb6a4e29896032cb367473353d41fc012726f46ded7f19c54139bbc3b8",
+        "characters": 47,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "skill",
+          "status": "completed"
+        },
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 4,
+      "httpRequests": 4
+    },
+    {
+      "label": "run-2",
+      "cache": {
+        "accountedInputTokens": 35511,
+        "cacheReadShare": 0.7371518684351328,
+        "cacheReadTokens": 26177,
+        "sessionId": "session_1789467339849_e2ix5y1"
+      },
+      "persisted": {
+        "runs": [
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          }
+        ],
+        "usageParts": [
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 8045
+              },
+              "inputTokens": 8045,
+              "outputTokens": 111,
+              "totalTokens": 8156
+            }
+          },
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8042,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 943
+              },
+              "inputTokens": 8985,
+              "outputTokens": 51,
+              "totalTokens": 9036
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8982,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 174
+              },
+              "inputTokens": 9156,
+              "outputTokens": 17,
+              "totalTokens": 9173
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9153,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 172
+              },
+              "inputTokens": 9325,
+              "outputTokens": 10,
+              "totalTokens": 9335
+            }
+          }
+        ]
+      },
+      "messageCount": 6,
+      "answer": {
+        "sha256": "888140d128c96d343256cc4d86d50e52ac08526d6344a8af9b467f9d196131ce",
+        "characters": 20,
+        "project": false,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "skill",
+          "status": "completed"
+        },
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 5,
+      "httpRequests": 5
+    },
+    {
+      "label": "run-3",
+      "cache": {
+        "accountedInputTokens": 44998,
+        "cacheReadShare": 0.7889017289657319,
+        "cacheReadTokens": 35499,
+        "sessionId": "session_1789467339849_e2ix5y1"
+      },
+      "persisted": {
+        "runs": [
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          }
+        ],
+        "usageParts": [
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 8045
+              },
+              "inputTokens": 8045,
+              "outputTokens": 111,
+              "totalTokens": 8156
+            }
+          },
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8042,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 943
+              },
+              "inputTokens": 8985,
+              "outputTokens": 51,
+              "totalTokens": 9036
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8982,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 174
+              },
+              "inputTokens": 9156,
+              "outputTokens": 17,
+              "totalTokens": 9173
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9153,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 172
+              },
+              "inputTokens": 9325,
+              "outputTokens": 10,
+              "totalTokens": 9335
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9322,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 165
+              },
+              "inputTokens": 9487,
+              "outputTokens": 17,
+              "totalTokens": 9504
+            }
+          }
+        ]
+      },
+      "messageCount": 8,
+      "answer": {
+        "sha256": "819bee2a975789659f70c4af40bb750908ce566cf49b87f30be1c4f78b1f68b6",
+        "characters": 40,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "skill",
+          "status": "completed"
+        },
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 6,
+      "httpRequests": 6
+    },
+    {
+      "label": "effort-high",
+      "cache": {
+        "accountedInputTokens": 44998,
+        "cacheReadShare": 0.7889017289657319,
+        "cacheReadTokens": 35499,
+        "sessionId": "session_1789467339849_e2ix5y1"
+      },
+      "persisted": {
+        "runs": [
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          }
+        ],
+        "usageParts": [
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 8045
+              },
+              "inputTokens": 8045,
+              "outputTokens": 111,
+              "totalTokens": 8156
+            }
+          },
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8042,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 943
+              },
+              "inputTokens": 8985,
+              "outputTokens": 51,
+              "totalTokens": 9036
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8982,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 174
+              },
+              "inputTokens": 9156,
+              "outputTokens": 17,
+              "totalTokens": 9173
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9153,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 172
+              },
+              "inputTokens": 9325,
+              "outputTokens": 10,
+              "totalTokens": 9335
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9322,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 165
+              },
+              "inputTokens": 9487,
+              "outputTokens": 17,
+              "totalTokens": 9504
+            }
+          }
+        ]
+      },
+      "messageCount": 8,
+      "answer": {
+        "sha256": "819bee2a975789659f70c4af40bb750908ce566cf49b87f30be1c4f78b1f68b6",
+        "characters": 40,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "skill",
+          "status": "completed"
+        },
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 6,
+      "httpRequests": 7
+    },
+    {
+      "label": "effort-config",
+      "enabled": true,
+      "effort": "high",
+      "contextWindowTokens": 1050000
+    },
+    {
+      "label": "run-4",
+      "cache": {
+        "accountedInputTokens": 54655,
+        "cacheReadShare": 0.6495105662793889,
+        "cacheReadTokens": 35499,
+        "sessionId": "session_1789467339849_e2ix5y1"
+      },
+      "persisted": {
+        "runs": [
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          }
+        ],
+        "usageParts": [
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 8045
+              },
+              "inputTokens": 8045,
+              "outputTokens": 111,
+              "totalTokens": 8156
+            }
+          },
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8042,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 943
+              },
+              "inputTokens": 8985,
+              "outputTokens": 51,
+              "totalTokens": 9036
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8982,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 174
+              },
+              "inputTokens": 9156,
+              "outputTokens": 17,
+              "totalTokens": 9173
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9153,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 172
+              },
+              "inputTokens": 9325,
+              "outputTokens": 10,
+              "totalTokens": 9335
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9322,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 165
+              },
+              "inputTokens": 9487,
+              "outputTokens": 17,
+              "totalTokens": 9504
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 9657
+              },
+              "inputTokens": 9657,
+              "outputTokens": 31,
+              "totalTokens": 9688
+            }
+          }
+        ]
+      },
+      "messageCount": 10,
+      "answer": {
+        "sha256": "819bee2a975789659f70c4af40bb750908ce566cf49b87f30be1c4f78b1f68b6",
+        "characters": 40,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "skill",
+          "status": "completed"
+        },
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 7,
+      "httpRequests": 8
+    },
+    {
+      "label": "compaction-result",
+      "result": {
+        "status": "compacted",
+        "usageBefore": {
+          "contextLimit": 1050000,
+          "currentTokens": 11394,
+          "inputBudgetTokens": 1044880,
+          "modelId": "openai/gpt-5.6-luna",
+          "remainingTokens": 1033486,
+          "reservedOutputTokens": 4096,
+          "safetyMarginTokens": 1024,
+          "usageRatio": 0.01090460148533803
+        },
+        "usageAfter": {
+          "contextLimit": 1050000,
+          "currentTokens": 10303,
+          "inputBudgetTokens": 1044880,
+          "modelId": "openai/gpt-5.6-luna",
+          "remainingTokens": 1034577,
+          "reservedOutputTokens": 4096,
+          "safetyMarginTokens": 1024,
+          "usageRatio": 0.009860462445448281
+        },
+        "prune": {
+          "prunedCount": 0,
+          "freedTokens": 0,
+          "protectedCount": 0,
+          "totalScanned": 0
+        },
+        "compression": {
+          "status": "compressed",
+          "originalTokens": 1472,
+          "newTokens": 194,
+          "savedTokens": 1278,
+          "summaryMessageId": "message_1789467549551_vwdbbx"
+        },
+        "sessionId": "session_1789467339849_e2ix5y1"
+      }
+    },
+    {
+      "label": "after-compaction",
+      "cache": {
+        "accountedInputTokens": 54655,
+        "cacheReadShare": 0.6495105662793889,
+        "cacheReadTokens": 35499,
+        "sessionId": "session_1789467339849_e2ix5y1"
+      },
+      "persisted": {
+        "runs": [
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          }
+        ],
+        "usageParts": [
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 8045
+              },
+              "inputTokens": 8045,
+              "outputTokens": 111,
+              "totalTokens": 8156
+            }
+          },
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8042,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 943
+              },
+              "inputTokens": 8985,
+              "outputTokens": 51,
+              "totalTokens": 9036
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8982,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 174
+              },
+              "inputTokens": 9156,
+              "outputTokens": 17,
+              "totalTokens": 9173
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9153,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 172
+              },
+              "inputTokens": 9325,
+              "outputTokens": 10,
+              "totalTokens": 9335
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9322,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 165
+              },
+              "inputTokens": 9487,
+              "outputTokens": 17,
+              "totalTokens": 9504
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 9657
+              },
+              "inputTokens": 9657,
+              "outputTokens": 31,
+              "totalTokens": 9688
+            }
+          }
+        ]
+      },
+      "messageCount": 8,
+      "answer": {
+        "sha256": "99ca2ce25713751b9d8bea6e190ee6e868199aa114b7668dec26f2a9051b599f",
+        "characters": 17,
+        "project": false,
+        "release": false,
+        "owner": false
+      },
+      "toolCalls": [],
+      "privateStateVisible": false,
+      "requests": 8,
+      "httpRequests": 9
+    },
+    {
+      "label": "run-5",
+      "cache": {
+        "accountedInputTokens": 63405,
+        "cacheReadShare": 0.5598769813106222,
+        "cacheReadTokens": 35499,
+        "sessionId": "session_1789467339849_e2ix5y1"
+      },
+      "persisted": {
+        "runs": [
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          }
+        ],
+        "usageParts": [
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 8045
+              },
+              "inputTokens": 8045,
+              "outputTokens": 111,
+              "totalTokens": 8156
+            }
+          },
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8042,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 943
+              },
+              "inputTokens": 8985,
+              "outputTokens": 51,
+              "totalTokens": 9036
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 8982,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 174
+              },
+              "inputTokens": 9156,
+              "outputTokens": 17,
+              "totalTokens": 9173
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9153,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 172
+              },
+              "inputTokens": 9325,
+              "outputTokens": 10,
+              "totalTokens": 9335
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9322,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 165
+              },
+              "inputTokens": 9487,
+              "outputTokens": 17,
+              "totalTokens": 9504
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 9657
+              },
+              "inputTokens": 9657,
+              "outputTokens": 31,
+              "totalTokens": 9688
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 8750
+              },
+              "inputTokens": 8750,
+              "outputTokens": 17,
+              "totalTokens": 8767
+            }
+          }
+        ]
+      },
+      "messageCount": 10,
+      "answer": {
+        "sha256": "819bee2a975789659f70c4af40bb750908ce566cf49b87f30be1c4f78b1f68b6",
+        "characters": 40,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [],
+      "privateStateVisible": false,
+      "requests": 9,
+      "httpRequests": 10
+    }
+  ],
+  "completions": [
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    }
+  ],
+  "events": {
+    "session.updated": 2,
+    "prompt.submitted": 5,
+    "prompt.updated": 15,
+    "message.appended": 10,
+    "runtime.updated": 12,
+    "run.updated": 12,
+    "context.window.updated": 8,
+    "message.updated": 9,
+    "permission.requested": 1,
+    "permission.resolved": 1,
+    "message.reasoning.delta": 66,
+    "message.reasoning.end": 1,
+    "message.part.delta": 64,
+    "command.started": 9,
+    "command.result.delivered": 9,
+    "snapshot.replaced": 1
+  },
+  "persistence": {
+    "runStatuses": [
+      {
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "status": "succeeded"
+      },
+      {
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "status": "succeeded"
+      },
+      {
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "status": "succeeded"
+      },
+      {
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "status": "succeeded"
+      },
+      {
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "status": "succeeded"
+      }
+    ],
+    "usageCarriers": [
+      {
+        "carrier": "tool",
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 8045
+          },
+          "inputTokens": 8045,
+          "outputTokens": 111,
+          "totalTokens": 8156
+        }
+      },
+      {
+        "carrier": "tool",
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 8042,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 943
+          },
+          "inputTokens": 8985,
+          "outputTokens": 51,
+          "totalTokens": 9036
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 8982,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 174
+          },
+          "inputTokens": 9156,
+          "outputTokens": 17,
+          "totalTokens": 9173
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 9153,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 172
+          },
+          "inputTokens": 9325,
+          "outputTokens": 10,
+          "totalTokens": 9335
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 9322,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 165
+          },
+          "inputTokens": 9487,
+          "outputTokens": 17,
+          "totalTokens": 9504
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 9657
+          },
+          "inputTokens": 9657,
+          "outputTokens": 31,
+          "totalTokens": 9688
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789467339849_e2ix5y1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 8750
+          },
+          "inputTokens": 8750,
+          "outputTokens": 17,
+          "totalTokens": 8767
+        }
+      }
+    ],
+    "partCounts": {
+      "model-state": 3,
+      "text": 16,
+      "tool": 2
+    }
+  }
+}

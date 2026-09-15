@@ -1,0 +1,957 @@
+{
+  "profile": "zenmux-gpt56-luna-responses",
+  "recordedAt": "2026-09-15T10:11:47.696Z",
+  "entry": "createPersistentUiBackendClient.submitPromptAndWait",
+  "productionPrompt": true,
+  "contextWindowTokens": 128000,
+  "maxOutputTokens": 4096,
+  "providerRequests": [
+    {
+      "id": 1,
+      "purpose": "session-title",
+      "sessionId": "session_1789466971522_9wh3xh1",
+      "messageCount": 2,
+      "replayStateCount": 0,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 132
+        },
+        "inputTokens": 132,
+        "outputTokens": 10,
+        "totalTokens": 142
+      }
+    },
+    {
+      "id": 2,
+      "purpose": "agent-step",
+      "sessionId": "session_1789466971522_9wh3xh1",
+      "messageCount": 2,
+      "replayStateCount": 0,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 8042,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 3
+        },
+        "inputTokens": 8045,
+        "outputTokens": 68,
+        "totalTokens": 8113
+      }
+    },
+    {
+      "id": 3,
+      "purpose": "agent-step",
+      "sessionId": "session_1789466971522_9wh3xh1",
+      "messageCount": 4,
+      "replayStateCount": 1,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 8042,
+          "cacheWrite": 188,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 3
+        },
+        "inputTokens": 8233,
+        "outputTokens": 17,
+        "totalTokens": 8250
+      }
+    },
+    {
+      "id": 4,
+      "purpose": "agent-step",
+      "sessionId": "session_1789466971522_9wh3xh1",
+      "messageCount": 6,
+      "replayStateCount": 2,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 8230,
+          "cacheWrite": 169,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 3
+        },
+        "inputTokens": 8402,
+        "outputTokens": 10,
+        "totalTokens": 8412
+      }
+    },
+    {
+      "id": 5,
+      "purpose": "agent-step",
+      "sessionId": "session_1789466971522_9wh3xh1",
+      "messageCount": 8,
+      "replayStateCount": 3,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 8399,
+          "cacheWrite": 162,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 3
+        },
+        "inputTokens": 8564,
+        "outputTokens": 17,
+        "totalTokens": 8581
+      }
+    },
+    {
+      "id": 6,
+      "purpose": "context-summary",
+      "sessionId": "session_1789466971522_9wh3xh1",
+      "messageCount": 3,
+      "replayStateCount": 0,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 469
+        },
+        "inputTokens": 469,
+        "outputTokens": 187,
+        "totalTokens": 656
+      }
+    },
+    {
+      "id": 7,
+      "purpose": "agent-step",
+      "sessionId": "session_1789466971522_9wh3xh1",
+      "messageCount": 6,
+      "replayStateCount": 2,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 7874,
+          "cacheWrite": 472,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 3
+        },
+        "inputTokens": 8349,
+        "outputTokens": 42,
+        "totalTokens": 8391
+      }
+    }
+  ],
+  "wire": [
+    {
+      "sequence": 1,
+      "context": {
+        "purpose": "session-title",
+        "id": 1
+      },
+      "path": "/api/v1/responses",
+      "protocol": "openai-responses",
+      "reasoning": {
+        "effort": "none",
+        "config": {
+          "sha256": "0222ffd9e1bee163dd0c8f51d320ad20161d6fe3f9772f2a9ea3e286ae0ae2ad",
+          "bytes": 92
+        }
+      },
+      "system": {
+        "sha256": "b9b8d55a47d38890efd1e31af5443d854a494115f1d9a4d194b86b3bb87ec5a7",
+        "bytes": 387
+      },
+      "tools": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "input": {
+        "sha256": "a3f7608ad094fcd8e9e716fdc052b54ef0b73b6e64c7d85652d5defa2a408128",
+        "bytes": 248
+      },
+      "inputCount": 1,
+      "inputPrefixes": [
+        {
+          "sha256": "a3f7608ad094fcd8e9e716fdc052b54ef0b73b6e64c7d85652d5defa2a408128",
+          "bytes": 248
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 132,
+          "output_tokens": 10,
+          "total_tokens": 142,
+          "input_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 132,
+        "output_tokens": 10,
+        "total_tokens": 142,
+        "input_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "status": 200
+    },
+    {
+      "sequence": 2,
+      "context": {
+        "purpose": "agent-step",
+        "id": 2
+      },
+      "path": "/api/v1/responses",
+      "protocol": "openai-responses",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "8601950dd946f242bc34e27f8ead29f042cdf85378927862fd5b2e81bd12d2e0",
+          "bytes": 94
+        }
+      },
+      "system": {
+        "sha256": "266fe2a94b01a5c20cb24239444c18bb41f44fa354f6630c6f2c276e3b7555c9",
+        "bytes": 14374
+      },
+      "tools": {
+        "sha256": "24e7d130863d6a407293b476d183284e40d5ff8dec7badcc28cabac1dc64c67b",
+        "bytes": 25308
+      },
+      "input": {
+        "sha256": "963ab3e6148efd6359ca0286f1c275352e1bb17b14df50101b49a4f35e232b37",
+        "bytes": 566
+      },
+      "inputCount": 1,
+      "inputPrefixes": [
+        {
+          "sha256": "963ab3e6148efd6359ca0286f1c275352e1bb17b14df50101b49a4f35e232b37",
+          "bytes": 566
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 8045,
+          "output_tokens": 68,
+          "total_tokens": 8113,
+          "input_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 8042
+          }
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 8045,
+        "output_tokens": 68,
+        "total_tokens": 8113,
+        "input_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 8042
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "status": 200
+    },
+    {
+      "sequence": 3,
+      "context": {
+        "purpose": "agent-step",
+        "id": 3
+      },
+      "path": "/api/v1/responses",
+      "protocol": "openai-responses",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "8601950dd946f242bc34e27f8ead29f042cdf85378927862fd5b2e81bd12d2e0",
+          "bytes": 94
+        }
+      },
+      "system": {
+        "sha256": "266fe2a94b01a5c20cb24239444c18bb41f44fa354f6630c6f2c276e3b7555c9",
+        "bytes": 14374
+      },
+      "tools": {
+        "sha256": "24e7d130863d6a407293b476d183284e40d5ff8dec7badcc28cabac1dc64c67b",
+        "bytes": 25308
+      },
+      "input": {
+        "sha256": "cb7566b277150150355f0cd621c0c4fca94ed04ce0e509628acbc7c92490497d",
+        "bytes": 2764
+      },
+      "inputCount": 4,
+      "inputPrefixes": [
+        {
+          "sha256": "963ab3e6148efd6359ca0286f1c275352e1bb17b14df50101b49a4f35e232b37",
+          "bytes": 566
+        },
+        {
+          "sha256": "082ddfe06c4c7ba63e2db5a679184535765fe28e53ab47179eaa98b7641bbb6e",
+          "bytes": 2141
+        },
+        {
+          "sha256": "e81b8e23318431763314aab6284c6364230ac5917f8802e6ea65a11da75f9963",
+          "bytes": 2352
+        },
+        {
+          "sha256": "cb7566b277150150355f0cd621c0c4fca94ed04ce0e509628acbc7c92490497d",
+          "bytes": 2764
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 8233,
+          "output_tokens": 17,
+          "total_tokens": 8250,
+          "input_tokens_details": {
+            "cached_tokens": 8042,
+            "cache_write_tokens": 188
+          }
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 8233,
+        "output_tokens": 17,
+        "total_tokens": 8250,
+        "input_tokens_details": {
+          "cached_tokens": 8042,
+          "cache_write_tokens": 188
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "status": 200
+    },
+    {
+      "sequence": 4,
+      "context": {
+        "purpose": "agent-step",
+        "id": 4
+      },
+      "path": "/api/v1/responses",
+      "protocol": "openai-responses",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "8601950dd946f242bc34e27f8ead29f042cdf85378927862fd5b2e81bd12d2e0",
+          "bytes": 94
+        }
+      },
+      "system": {
+        "sha256": "266fe2a94b01a5c20cb24239444c18bb41f44fa354f6630c6f2c276e3b7555c9",
+        "bytes": 14374
+      },
+      "tools": {
+        "sha256": "24e7d130863d6a407293b476d183284e40d5ff8dec7badcc28cabac1dc64c67b",
+        "bytes": 25308
+      },
+      "input": {
+        "sha256": "bb70cdf0fcf2148dccb65878d02c38508bc5e230fc737cb5a267d64caa86e8e5",
+        "bytes": 3505
+      },
+      "inputCount": 6,
+      "inputPrefixes": [
+        {
+          "sha256": "963ab3e6148efd6359ca0286f1c275352e1bb17b14df50101b49a4f35e232b37",
+          "bytes": 566
+        },
+        {
+          "sha256": "082ddfe06c4c7ba63e2db5a679184535765fe28e53ab47179eaa98b7641bbb6e",
+          "bytes": 2141
+        },
+        {
+          "sha256": "e81b8e23318431763314aab6284c6364230ac5917f8802e6ea65a11da75f9963",
+          "bytes": 2352
+        },
+        {
+          "sha256": "cb7566b277150150355f0cd621c0c4fca94ed04ce0e509628acbc7c92490497d",
+          "bytes": 2764
+        },
+        {
+          "sha256": "7299511bbd04570eeb677593c21bbdbf8d2af9d9aac5f7dca9acc414a1ad40f5",
+          "bytes": 3031
+        },
+        {
+          "sha256": "bb70cdf0fcf2148dccb65878d02c38508bc5e230fc737cb5a267d64caa86e8e5",
+          "bytes": 3505
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 8402,
+          "output_tokens": 10,
+          "total_tokens": 8412,
+          "input_tokens_details": {
+            "cached_tokens": 8230,
+            "cache_write_tokens": 169
+          }
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 8402,
+        "output_tokens": 10,
+        "total_tokens": 8412,
+        "input_tokens_details": {
+          "cached_tokens": 8230,
+          "cache_write_tokens": 169
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "7299511bbd04570eeb677593c21bbdbf8d2af9d9aac5f7dca9acc414a1ad40f5",
+        "bytes": 3031
+      },
+      "status": 200
+    },
+    {
+      "sequence": 5,
+      "context": {
+        "purpose": "agent-step",
+        "id": 5
+      },
+      "path": "/api/v1/responses",
+      "protocol": "openai-responses",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "8601950dd946f242bc34e27f8ead29f042cdf85378927862fd5b2e81bd12d2e0",
+          "bytes": 94
+        }
+      },
+      "system": {
+        "sha256": "266fe2a94b01a5c20cb24239444c18bb41f44fa354f6630c6f2c276e3b7555c9",
+        "bytes": 14374
+      },
+      "tools": {
+        "sha256": "24e7d130863d6a407293b476d183284e40d5ff8dec7badcc28cabac1dc64c67b",
+        "bytes": 25308
+      },
+      "input": {
+        "sha256": "43aae71317d78def30abc41fb2fc088d353401800027b7127a0fc98f8900fb69",
+        "bytes": 4228
+      },
+      "inputCount": 8,
+      "inputPrefixes": [
+        {
+          "sha256": "963ab3e6148efd6359ca0286f1c275352e1bb17b14df50101b49a4f35e232b37",
+          "bytes": 566
+        },
+        {
+          "sha256": "082ddfe06c4c7ba63e2db5a679184535765fe28e53ab47179eaa98b7641bbb6e",
+          "bytes": 2141
+        },
+        {
+          "sha256": "e81b8e23318431763314aab6284c6364230ac5917f8802e6ea65a11da75f9963",
+          "bytes": 2352
+        },
+        {
+          "sha256": "cb7566b277150150355f0cd621c0c4fca94ed04ce0e509628acbc7c92490497d",
+          "bytes": 2764
+        },
+        {
+          "sha256": "7299511bbd04570eeb677593c21bbdbf8d2af9d9aac5f7dca9acc414a1ad40f5",
+          "bytes": 3031
+        },
+        {
+          "sha256": "bb70cdf0fcf2148dccb65878d02c38508bc5e230fc737cb5a267d64caa86e8e5",
+          "bytes": 3505
+        },
+        {
+          "sha256": "197caff9269328873c860d8d450591ab39f1825059fd91809a1419d8535f54b4",
+          "bytes": 3745
+        },
+        {
+          "sha256": "43aae71317d78def30abc41fb2fc088d353401800027b7127a0fc98f8900fb69",
+          "bytes": 4228
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 8564,
+          "output_tokens": 17,
+          "total_tokens": 8581,
+          "input_tokens_details": {
+            "cached_tokens": 8399,
+            "cache_write_tokens": 162
+          }
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 8564,
+        "output_tokens": 17,
+        "total_tokens": 8581,
+        "input_tokens_details": {
+          "cached_tokens": 8399,
+          "cache_write_tokens": 162
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "197caff9269328873c860d8d450591ab39f1825059fd91809a1419d8535f54b4",
+        "bytes": 3745
+      },
+      "status": 200
+    },
+    {
+      "sequence": 6,
+      "context": {
+        "purpose": "context-summary",
+        "id": 6
+      },
+      "path": "/api/v1/responses",
+      "protocol": "openai-responses",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "8601950dd946f242bc34e27f8ead29f042cdf85378927862fd5b2e81bd12d2e0",
+          "bytes": 94
+        }
+      },
+      "system": {
+        "sha256": "90e06488957df75200fe47114c6782fc1fc51dd98cf125f20994f09c7bbeff13",
+        "bytes": 346
+      },
+      "tools": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "input": {
+        "sha256": "b380863ffab3c42a4cb4f3e4c2c52ed77c709c72f32d2a54f0258db6c05d9b14",
+        "bytes": 1836
+      },
+      "inputCount": 2,
+      "inputPrefixes": [
+        {
+          "sha256": "8601ce831673f8678ea6312eddca57a790c82ec724f63beb1369ea370c36964f",
+          "bytes": 526
+        },
+        {
+          "sha256": "b380863ffab3c42a4cb4f3e4c2c52ed77c709c72f32d2a54f0258db6c05d9b14",
+          "bytes": 1836
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 469,
+          "output_tokens": 187,
+          "total_tokens": 656,
+          "input_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 469,
+        "output_tokens": 187,
+        "total_tokens": 656,
+        "input_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "8601ce831673f8678ea6312eddca57a790c82ec724f63beb1369ea370c36964f",
+        "bytes": 526
+      },
+      "status": 200
+    },
+    {
+      "sequence": 7,
+      "context": {
+        "purpose": "agent-step",
+        "id": 7
+      },
+      "path": "/api/v1/responses",
+      "protocol": "openai-responses",
+      "reasoning": {
+        "effort": "medium",
+        "config": {
+          "sha256": "8601950dd946f242bc34e27f8ead29f042cdf85378927862fd5b2e81bd12d2e0",
+          "bytes": 94
+        }
+      },
+      "system": {
+        "sha256": "266fe2a94b01a5c20cb24239444c18bb41f44fa354f6630c6f2c276e3b7555c9",
+        "bytes": 14374
+      },
+      "tools": {
+        "sha256": "24e7d130863d6a407293b476d183284e40d5ff8dec7badcc28cabac1dc64c67b",
+        "bytes": 25308
+      },
+      "input": {
+        "sha256": "a38cdd9519565872ed7d8f86c3f78337a7493c82c7dc12b4c696601728541358",
+        "bytes": 2073
+      },
+      "inputCount": 5,
+      "inputPrefixes": [
+        {
+          "sha256": "06a090da040aaf91bc068cea0a759fb63857648c70030b20b842477a12bab8bb",
+          "bytes": 614
+        },
+        {
+          "sha256": "4e76880753a269143a8dcc6dcc10d276231d85d7ba65bb0a29d1c4862446512b",
+          "bytes": 854
+        },
+        {
+          "sha256": "beddff919dd77a75ac39f6fa74a8aa6e22bd8bffae369254ad73e1e402c5c87f",
+          "bytes": 1337
+        },
+        {
+          "sha256": "c6e88bbb09a3545c81cbec8b3ce29ecde6e103c571a0cc36726869f01fb59a8b",
+          "bytes": 1597
+        },
+        {
+          "sha256": "a38cdd9519565872ed7d8f86c3f78337a7493c82c7dc12b4c696601728541358",
+          "bytes": 2073
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 8349,
+          "output_tokens": 42,
+          "total_tokens": 8391,
+          "input_tokens_details": {
+            "cached_tokens": 7874,
+            "cache_write_tokens": 472
+          }
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 8349,
+        "output_tokens": 42,
+        "total_tokens": 8391,
+        "input_tokens_details": {
+          "cached_tokens": 7874,
+          "cache_write_tokens": 472
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "prefixBeforeLatestUser": {
+        "sha256": "c6e88bbb09a3545c81cbec8b3ce29ecde6e103c571a0cc36726869f01fb59a8b",
+        "bytes": 1597
+      },
+      "status": 200
+    }
+  ],
+  "checkpoints": [
+    {
+      "label": "run-1",
+      "cache": {
+        "accountedInputTokens": 16278,
+        "cacheReadShare": 0.4940410369824303,
+        "cacheReadTokens": 8042,
+        "sessionId": "session_1789466971522_9wh3xh1"
+      },
+      "messageCount": 3,
+      "toolCalls": [
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 3,
+      "httpRequests": 3
+    },
+    {
+      "label": "run-2",
+      "cache": {
+        "accountedInputTokens": 24680,
+        "cacheReadShare": 0.6593192868719611,
+        "cacheReadTokens": 16272,
+        "sessionId": "session_1789466971522_9wh3xh1"
+      },
+      "messageCount": 5,
+      "toolCalls": [
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 4,
+      "httpRequests": 4
+    },
+    {
+      "label": "run-3",
+      "cache": {
+        "accountedInputTokens": 33244,
+        "cacheReadShare": 0.7421188785946337,
+        "cacheReadTokens": 24671,
+        "sessionId": "session_1789466971522_9wh3xh1"
+      },
+      "messageCount": 7,
+      "toolCalls": [
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 5,
+      "httpRequests": 5
+    },
+    {
+      "label": "after-compaction",
+      "cache": {
+        "accountedInputTokens": 33244,
+        "cacheReadShare": 0.7421188785946337,
+        "cacheReadTokens": 24671,
+        "sessionId": "session_1789466971522_9wh3xh1"
+      },
+      "messageCount": 4,
+      "toolCalls": [],
+      "privateStateVisible": false,
+      "requests": 6,
+      "httpRequests": 6
+    },
+    {
+      "label": "compaction-result",
+      "result": {
+        "status": "compacted",
+        "usageBefore": {
+          "contextLimit": 128000,
+          "currentTokens": 8735,
+          "inputBudgetTokens": 122880,
+          "modelId": "openai/gpt-5.6-luna",
+          "remainingTokens": 114145,
+          "reservedOutputTokens": 4096,
+          "safetyMarginTokens": 1024,
+          "usageRatio": 0.07108561197916667
+        },
+        "usageAfter": {
+          "contextLimit": 128000,
+          "currentTokens": 8500,
+          "inputBudgetTokens": 122880,
+          "modelId": "openai/gpt-5.6-luna",
+          "remainingTokens": 114380,
+          "reservedOutputTokens": 4096,
+          "safetyMarginTokens": 1024,
+          "usageRatio": 0.06917317708333333
+        },
+        "prune": {
+          "prunedCount": 0,
+          "freedTokens": 0,
+          "protectedCount": 0,
+          "totalScanned": 0
+        },
+        "compression": {
+          "status": "compressed",
+          "originalTokens": 472,
+          "newTokens": 131,
+          "savedTokens": 341,
+          "summaryMessageId": "message_1789467050400_sepez9"
+        },
+        "sessionId": "session_1789466971522_9wh3xh1"
+      }
+    },
+    {
+      "label": "run-4",
+      "cache": {
+        "accountedInputTokens": 41593,
+        "cacheReadShare": 0.7824633952828601,
+        "cacheReadTokens": 32545,
+        "sessionId": "session_1789466971522_9wh3xh1"
+      },
+      "messageCount": 6,
+      "toolCalls": [],
+      "privateStateVisible": false,
+      "requests": 7,
+      "httpRequests": 7
+    },
+    {
+      "label": "post-compaction-answer",
+      "project": true,
+      "release": true,
+      "owner": true
+    }
+  ],
+  "completions": [
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    }
+  ],
+  "events": {
+    "session.updated": 2,
+    "prompt.submitted": 4,
+    "prompt.updated": 12,
+    "message.appended": 8,
+    "runtime.updated": 8,
+    "run.updated": 8,
+    "context.window.updated": 6,
+    "message.updated": 6,
+    "message.part.delta": 53,
+    "command.started": 6,
+    "command.result.delivered": 6
+  },
+  "persistence": {
+    "runStatuses": [
+      {
+        "sessionId": "session_1789466971522_9wh3xh1",
+        "status": "succeeded"
+      },
+      {
+        "sessionId": "session_1789466971522_9wh3xh1",
+        "status": "succeeded"
+      },
+      {
+        "sessionId": "session_1789466971522_9wh3xh1",
+        "status": "succeeded"
+      },
+      {
+        "sessionId": "session_1789466971522_9wh3xh1",
+        "status": "succeeded"
+      }
+    ],
+    "usageCarriers": [
+      {
+        "carrier": "tool",
+        "sessionId": "session_1789466971522_9wh3xh1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 8042,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 8045,
+          "outputTokens": 68,
+          "totalTokens": 8113
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789466971522_9wh3xh1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 8042,
+            "cacheWrite": 188,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 8233,
+          "outputTokens": 17,
+          "totalTokens": 8250
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789466971522_9wh3xh1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 8230,
+            "cacheWrite": 169,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 8402,
+          "outputTokens": 10,
+          "totalTokens": 8412
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789466971522_9wh3xh1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 8399,
+            "cacheWrite": 162,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 8564,
+          "outputTokens": 17,
+          "totalTokens": 8581
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789466971522_9wh3xh1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 7874,
+            "cacheWrite": 472,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 8349,
+          "outputTokens": 42,
+          "totalTokens": 8391
+        }
+      }
+    ],
+    "partCounts": {
+      "model-state": 5,
+      "text": 13,
+      "tool": 1
+    }
+  }
+}

@@ -1,0 +1,980 @@
+{
+  "profile": "zenmux-claude-sonnet5-anthropic",
+  "recordedAt": "2026-09-15T10:14:32.163Z",
+  "entry": "createPersistentUiBackendClient.submitPromptAndWait",
+  "productionPrompt": true,
+  "contextWindowTokens": 128000,
+  "maxOutputTokens": 4096,
+  "providerRequests": [
+    {
+      "id": 1,
+      "purpose": "session-title",
+      "sessionId": "session_1789467144822_u2vg4p1",
+      "messageCount": 2,
+      "replayStateCount": 0,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 178
+        },
+        "inputTokens": 178,
+        "outputTokens": 13,
+        "totalTokens": 191
+      }
+    },
+    {
+      "id": 2,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467144822_u2vg4p1",
+      "messageCount": 2,
+      "replayStateCount": 0,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 14624,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 2
+        },
+        "inputTokens": 14626,
+        "outputTokens": 52,
+        "totalTokens": 14678
+      }
+    },
+    {
+      "id": 3,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467144822_u2vg4p1",
+      "messageCount": 4,
+      "replayStateCount": 1,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 14624,
+          "cacheWrite": 228,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 2
+        },
+        "inputTokens": 14854,
+        "outputTokens": 21,
+        "totalTokens": 14875
+      }
+    },
+    {
+      "id": 4,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467144822_u2vg4p1",
+      "messageCount": 6,
+      "replayStateCount": 1,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 14852,
+          "cacheWrite": 235,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 2
+        },
+        "inputTokens": 15089,
+        "outputTokens": 11,
+        "totalTokens": 15100
+      }
+    },
+    {
+      "id": 5,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467144822_u2vg4p1",
+      "messageCount": 8,
+      "replayStateCount": 1,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 15087,
+          "cacheWrite": 224,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 2
+        },
+        "inputTokens": 15313,
+        "outputTokens": 24,
+        "totalTokens": 15337
+      }
+    },
+    {
+      "id": 6,
+      "purpose": "context-summary",
+      "sessionId": "session_1789467144822_u2vg4p1",
+      "messageCount": 3,
+      "replayStateCount": 0,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 690
+        },
+        "inputTokens": 690,
+        "outputTokens": 350,
+        "totalTokens": 1040
+      }
+    },
+    {
+      "id": 7,
+      "purpose": "agent-step",
+      "sessionId": "session_1789467144822_u2vg4p1",
+      "messageCount": 6,
+      "replayStateCount": 0,
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 15230,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 2
+        },
+        "inputTokens": 15232,
+        "outputTokens": 24,
+        "totalTokens": 15256
+      }
+    }
+  ],
+  "wire": [
+    {
+      "sequence": 1,
+      "context": {
+        "purpose": "session-title",
+        "id": 1
+      },
+      "path": "/api/anthropic/v1/messages",
+      "protocol": "anthropic",
+      "reasoning": {
+        "thinkingType": "disabled",
+        "config": {
+          "sha256": "e6393490abd9ee565830bdd60609bda60aee0a95acc87a8c97baedf371c1560a",
+          "bytes": 94
+        }
+      },
+      "system": {
+        "sha256": "e360179ccd794fdbb22c5eafb66606dcc433adf4a1f279fc8e44cc23df51711b",
+        "bytes": 387
+      },
+      "tools": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "input": {
+        "sha256": "a3f7608ad094fcd8e9e716fdc052b54ef0b73b6e64c7d85652d5defa2a408128",
+        "bytes": 248
+      },
+      "inputCount": 1,
+      "inputPrefixes": [
+        {
+          "sha256": "a3f7608ad094fcd8e9e716fdc052b54ef0b73b6e64c7d85652d5defa2a408128",
+          "bytes": 248
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 178,
+          "output_tokens": 3,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        {
+          "input_tokens": 178,
+          "output_tokens": 13,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 178,
+        "output_tokens": 13,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "prefixBeforeLatestUser": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "status": 200
+    },
+    {
+      "sequence": 2,
+      "context": {
+        "purpose": "agent-step",
+        "id": 2
+      },
+      "path": "/api/anthropic/v1/messages",
+      "protocol": "anthropic",
+      "reasoning": {
+        "effort": "medium",
+        "thinkingType": "adaptive",
+        "config": {
+          "sha256": "4e7144170711ef54dac7cc43220a11a03a13f71c24331895ee15b5f0cf5452e5",
+          "bytes": 109
+        }
+      },
+      "system": {
+        "sha256": "d45df7940e09a968af564fb181f4505ec7c3cf8b00117c56d9b4b3b5df2d387c",
+        "bytes": 14374
+      },
+      "tools": {
+        "sha256": "fb5b8fd08c6c892897c98d55ef74cc0c4cf3b3face7fb1d0eea22fd50b7ef469",
+        "bytes": 24533
+      },
+      "input": {
+        "sha256": "af207dd063c08df53cc73b352d76156bc73017eb900a633d4f5a007ac4ec60f5",
+        "bytes": 628
+      },
+      "inputCount": 1,
+      "inputPrefixes": [
+        {
+          "sha256": "af207dd063c08df53cc73b352d76156bc73017eb900a633d4f5a007ac4ec60f5",
+          "bytes": 628
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 17,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 14624
+        },
+        {
+          "input_tokens": 2,
+          "output_tokens": 52,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 14624
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 2,
+        "output_tokens": 52,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 14624
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "prefixBeforeLatestUser": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "status": 200
+    },
+    {
+      "sequence": 3,
+      "context": {
+        "purpose": "agent-step",
+        "id": 3
+      },
+      "path": "/api/anthropic/v1/messages",
+      "protocol": "anthropic",
+      "reasoning": {
+        "effort": "medium",
+        "thinkingType": "adaptive",
+        "config": {
+          "sha256": "4e7144170711ef54dac7cc43220a11a03a13f71c24331895ee15b5f0cf5452e5",
+          "bytes": 109
+        }
+      },
+      "system": {
+        "sha256": "d45df7940e09a968af564fb181f4505ec7c3cf8b00117c56d9b4b3b5df2d387c",
+        "bytes": 14374
+      },
+      "tools": {
+        "sha256": "fb5b8fd08c6c892897c98d55ef74cc0c4cf3b3face7fb1d0eea22fd50b7ef469",
+        "bytes": 24533
+      },
+      "input": {
+        "sha256": "a91c71c12693c53630718ff67e5429983b93df7618a07cca2a9fc3c16b02fde7",
+        "bytes": 1193
+      },
+      "inputCount": 3,
+      "inputPrefixes": [
+        {
+          "sha256": "6ea81cb1d65499d37ae3d894af1f6c9583d1238c239d949064e68c92c44821de",
+          "bytes": 566
+        },
+        {
+          "sha256": "f072dcfc9b55bad10360b3e86782dcedf67290bc6fb47af874e29346733bf594",
+          "bytes": 714
+        },
+        {
+          "sha256": "a91c71c12693c53630718ff67e5429983b93df7618a07cca2a9fc3c16b02fde7",
+          "bytes": 1193
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1,
+          "cache_read_input_tokens": 14624,
+          "cache_creation_input_tokens": 228
+        },
+        {
+          "input_tokens": 2,
+          "output_tokens": 21,
+          "cache_read_input_tokens": 14624,
+          "cache_creation_input_tokens": 228
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 2,
+        "output_tokens": 21,
+        "cache_read_input_tokens": 14624,
+        "cache_creation_input_tokens": 228
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "prefixBeforeLatestUser": {
+        "sha256": "f072dcfc9b55bad10360b3e86782dcedf67290bc6fb47af874e29346733bf594",
+        "bytes": 714
+      },
+      "status": 200
+    },
+    {
+      "sequence": 4,
+      "context": {
+        "purpose": "agent-step",
+        "id": 4
+      },
+      "path": "/api/anthropic/v1/messages",
+      "protocol": "anthropic",
+      "reasoning": {
+        "effort": "medium",
+        "thinkingType": "adaptive",
+        "config": {
+          "sha256": "4e7144170711ef54dac7cc43220a11a03a13f71c24331895ee15b5f0cf5452e5",
+          "bytes": 109
+        }
+      },
+      "system": {
+        "sha256": "d45df7940e09a968af564fb181f4505ec7c3cf8b00117c56d9b4b3b5df2d387c",
+        "bytes": 14374
+      },
+      "tools": {
+        "sha256": "fb5b8fd08c6c892897c98d55ef74cc0c4cf3b3face7fb1d0eea22fd50b7ef469",
+        "bytes": 24533
+      },
+      "input": {
+        "sha256": "8c06cbe15680f7f9dd9cfae2445a881f099b3715522d0455e3ec19dc0043db77",
+        "bytes": 1773
+      },
+      "inputCount": 5,
+      "inputPrefixes": [
+        {
+          "sha256": "6ea81cb1d65499d37ae3d894af1f6c9583d1238c239d949064e68c92c44821de",
+          "bytes": 566
+        },
+        {
+          "sha256": "f072dcfc9b55bad10360b3e86782dcedf67290bc6fb47af874e29346733bf594",
+          "bytes": 714
+        },
+        {
+          "sha256": "44f0a3960f799db81ee8d6dc6dade55eed65bce96b33b7a4ee53ae2e220eca35",
+          "bytes": 1156
+        },
+        {
+          "sha256": "d85021854038c9cf2c17508e77da2e9eac87c83362cff57d90c2294e71a4029b",
+          "bytes": 1237
+        },
+        {
+          "sha256": "8c06cbe15680f7f9dd9cfae2445a881f099b3715522d0455e3ec19dc0043db77",
+          "bytes": 1773
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2,
+          "cache_read_input_tokens": 14852,
+          "cache_creation_input_tokens": 235
+        },
+        {
+          "input_tokens": 2,
+          "output_tokens": 11,
+          "cache_read_input_tokens": 14852,
+          "cache_creation_input_tokens": 235
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 2,
+        "output_tokens": 11,
+        "cache_read_input_tokens": 14852,
+        "cache_creation_input_tokens": 235
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "prefixBeforeLatestUser": {
+        "sha256": "d85021854038c9cf2c17508e77da2e9eac87c83362cff57d90c2294e71a4029b",
+        "bytes": 1237
+      },
+      "status": 200
+    },
+    {
+      "sequence": 5,
+      "context": {
+        "purpose": "agent-step",
+        "id": 5
+      },
+      "path": "/api/anthropic/v1/messages",
+      "protocol": "anthropic",
+      "reasoning": {
+        "effort": "medium",
+        "thinkingType": "adaptive",
+        "config": {
+          "sha256": "4e7144170711ef54dac7cc43220a11a03a13f71c24331895ee15b5f0cf5452e5",
+          "bytes": 109
+        }
+      },
+      "system": {
+        "sha256": "d45df7940e09a968af564fb181f4505ec7c3cf8b00117c56d9b4b3b5df2d387c",
+        "bytes": 14374
+      },
+      "tools": {
+        "sha256": "fb5b8fd08c6c892897c98d55ef74cc0c4cf3b3face7fb1d0eea22fd50b7ef469",
+        "bytes": 24533
+      },
+      "input": {
+        "sha256": "e9f00042a936c36be4f2b00ba8767ef20d12efc7fb302fe9051b54d76f14c0ad",
+        "bytes": 2310
+      },
+      "inputCount": 7,
+      "inputPrefixes": [
+        {
+          "sha256": "6ea81cb1d65499d37ae3d894af1f6c9583d1238c239d949064e68c92c44821de",
+          "bytes": 566
+        },
+        {
+          "sha256": "f072dcfc9b55bad10360b3e86782dcedf67290bc6fb47af874e29346733bf594",
+          "bytes": 714
+        },
+        {
+          "sha256": "44f0a3960f799db81ee8d6dc6dade55eed65bce96b33b7a4ee53ae2e220eca35",
+          "bytes": 1156
+        },
+        {
+          "sha256": "d85021854038c9cf2c17508e77da2e9eac87c83362cff57d90c2294e71a4029b",
+          "bytes": 1237
+        },
+        {
+          "sha256": "29dbe8ea3df795e16fcec59190c6245835e02c8073c2e7b5cc48b0caa9e6cffe",
+          "bytes": 1711
+        },
+        {
+          "sha256": "9d0b0d17da92319c1823a387007450ff8ecd7bbbe4f784f495ea3748e673821e",
+          "bytes": 1765
+        },
+        {
+          "sha256": "e9f00042a936c36be4f2b00ba8767ef20d12efc7fb302fe9051b54d76f14c0ad",
+          "bytes": 2310
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2,
+          "cache_read_input_tokens": 15087,
+          "cache_creation_input_tokens": 224
+        },
+        {
+          "input_tokens": 2,
+          "output_tokens": 24,
+          "cache_read_input_tokens": 15087,
+          "cache_creation_input_tokens": 224
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 2,
+        "output_tokens": 24,
+        "cache_read_input_tokens": 15087,
+        "cache_creation_input_tokens": 224
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "prefixBeforeLatestUser": {
+        "sha256": "9d0b0d17da92319c1823a387007450ff8ecd7bbbe4f784f495ea3748e673821e",
+        "bytes": 1765
+      },
+      "status": 200
+    },
+    {
+      "sequence": 6,
+      "context": {
+        "purpose": "context-summary",
+        "id": 6
+      },
+      "path": "/api/anthropic/v1/messages",
+      "protocol": "anthropic",
+      "reasoning": {
+        "effort": "medium",
+        "thinkingType": "adaptive",
+        "config": {
+          "sha256": "4e7144170711ef54dac7cc43220a11a03a13f71c24331895ee15b5f0cf5452e5",
+          "bytes": 109
+        }
+      },
+      "system": {
+        "sha256": "87a837114c51e8f1302e041bb8f1abae88e358fd1cc6c08ca9a2cd63dbd959c7",
+        "bytes": 346
+      },
+      "tools": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "input": {
+        "sha256": "b380863ffab3c42a4cb4f3e4c2c52ed77c709c72f32d2a54f0258db6c05d9b14",
+        "bytes": 1836
+      },
+      "inputCount": 2,
+      "inputPrefixes": [
+        {
+          "sha256": "8601ce831673f8678ea6312eddca57a790c82ec724f63beb1369ea370c36964f",
+          "bytes": 526
+        },
+        {
+          "sha256": "b380863ffab3c42a4cb4f3e4c2c52ed77c709c72f32d2a54f0258db6c05d9b14",
+          "bytes": 1836
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 690,
+          "output_tokens": 1,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        {
+          "input_tokens": 690,
+          "output_tokens": 350,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 690,
+        "output_tokens": 350,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "prefixBeforeLatestUser": {
+        "sha256": "8601ce831673f8678ea6312eddca57a790c82ec724f63beb1369ea370c36964f",
+        "bytes": 526
+      },
+      "status": 200
+    },
+    {
+      "sequence": 7,
+      "context": {
+        "purpose": "agent-step",
+        "id": 7
+      },
+      "path": "/api/anthropic/v1/messages",
+      "protocol": "anthropic",
+      "reasoning": {
+        "effort": "medium",
+        "thinkingType": "adaptive",
+        "config": {
+          "sha256": "4e7144170711ef54dac7cc43220a11a03a13f71c24331895ee15b5f0cf5452e5",
+          "bytes": 109
+        }
+      },
+      "system": {
+        "sha256": "d45df7940e09a968af564fb181f4505ec7c3cf8b00117c56d9b4b3b5df2d387c",
+        "bytes": 14374
+      },
+      "tools": {
+        "sha256": "fb5b8fd08c6c892897c98d55ef74cc0c4cf3b3face7fb1d0eea22fd50b7ef469",
+        "bytes": 24533
+      },
+      "input": {
+        "sha256": "8645087df56bb7f1792857bc8a8489267cc959134cbc3a4be4084c1b1241ec87",
+        "bytes": 2295
+      },
+      "inputCount": 5,
+      "inputPrefixes": [
+        {
+          "sha256": "f171183ab04b7915d492c31b00c9be9717f3d94b1f3a07f6f0353dced422ad58",
+          "bytes": 1146
+        },
+        {
+          "sha256": "09f9d32f0c7ec1df24836216d1f191628b2aad723d484fa8b9e106866ff87a9a",
+          "bytes": 1200
+        },
+        {
+          "sha256": "5df7dcc74ed9eddc04bfa6a863558f88a2e5add0650ab1499388cd674e9a1f23",
+          "bytes": 1683
+        },
+        {
+          "sha256": "37fd8ea28a44904fa1c007b3b1bbb2edab99509595615f163157b0e28e03b88f",
+          "bytes": 1757
+        },
+        {
+          "sha256": "8645087df56bb7f1792857bc8a8489267cc959134cbc3a4be4084c1b1241ec87",
+          "bytes": 2295
+        }
+      ],
+      "rawUsage": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 15230
+        },
+        {
+          "input_tokens": 2,
+          "output_tokens": 24,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 15230
+        }
+      ],
+      "finalUsage": {
+        "input_tokens": 2,
+        "output_tokens": 24,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 15230
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "prefixBeforeLatestUser": {
+        "sha256": "37fd8ea28a44904fa1c007b3b1bbb2edab99509595615f163157b0e28e03b88f",
+        "bytes": 1757
+      },
+      "status": 200
+    }
+  ],
+  "checkpoints": [
+    {
+      "label": "run-1",
+      "cache": {
+        "accountedInputTokens": 29480,
+        "cacheReadShare": 0.4960651289009498,
+        "cacheReadTokens": 14624,
+        "sessionId": "session_1789467144822_u2vg4p1"
+      },
+      "messageCount": 3,
+      "answer": {
+        "sha256": "9c9130fb6a4e29896032cb367473353d41fc012726f46ded7f19c54139bbc3b8",
+        "characters": 47,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 3,
+      "httpRequests": 3
+    },
+    {
+      "label": "run-2",
+      "cache": {
+        "accountedInputTokens": 44569,
+        "cacheReadShare": 0.6613565482734636,
+        "cacheReadTokens": 29476,
+        "sessionId": "session_1789467144822_u2vg4p1"
+      },
+      "messageCount": 5,
+      "answer": {
+        "sha256": "888140d128c96d343256cc4d86d50e52ac08526d6344a8af9b467f9d196131ce",
+        "characters": 20,
+        "project": false,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 4,
+      "httpRequests": 4
+    },
+    {
+      "label": "run-3",
+      "cache": {
+        "accountedInputTokens": 59882,
+        "cacheReadShare": 0.7441802211014996,
+        "cacheReadTokens": 44563,
+        "sessionId": "session_1789467144822_u2vg4p1"
+      },
+      "messageCount": 7,
+      "answer": {
+        "sha256": "7193e2f36a01d9093c97d358d1bde4c7eac86d8e4fbf1e74cef9cf6884a35033",
+        "characters": 40,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 5,
+      "httpRequests": 5
+    },
+    {
+      "label": "compaction-result",
+      "result": {
+        "status": "compacted",
+        "usageBefore": {
+          "contextLimit": 128000,
+          "currentTokens": 15080,
+          "inputBudgetTokens": 122880,
+          "modelId": "anthropic/claude-sonnet-5",
+          "remainingTokens": 107800,
+          "reservedOutputTokens": 4096,
+          "safetyMarginTokens": 1024,
+          "usageRatio": 0.12272135416666667
+        },
+        "usageAfter": {
+          "contextLimit": 128000,
+          "currentTokens": 14897,
+          "inputBudgetTokens": 122880,
+          "modelId": "anthropic/claude-sonnet-5",
+          "remainingTokens": 107983,
+          "reservedOutputTokens": 4096,
+          "safetyMarginTokens": 1024,
+          "usageRatio": 0.12123209635416667
+        },
+        "prune": {
+          "prunedCount": 0,
+          "freedTokens": 0,
+          "protectedCount": 0,
+          "totalScanned": 0
+        },
+        "compression": {
+          "status": "compressed",
+          "originalTokens": 429,
+          "newTokens": 262,
+          "savedTokens": 167,
+          "summaryMessageId": "message_1789467242641_eke3ch"
+        },
+        "sessionId": "session_1789467144822_u2vg4p1"
+      }
+    },
+    {
+      "label": "after-compaction",
+      "cache": {
+        "accountedInputTokens": 59882,
+        "cacheReadShare": 0.7441802211014996,
+        "cacheReadTokens": 44563,
+        "sessionId": "session_1789467144822_u2vg4p1"
+      },
+      "messageCount": 4,
+      "answer": {
+        "sha256": "99ca2ce25713751b9d8bea6e190ee6e868199aa114b7668dec26f2a9051b599f",
+        "characters": 17,
+        "project": false,
+        "release": false,
+        "owner": false
+      },
+      "toolCalls": [],
+      "privateStateVisible": false,
+      "requests": 6,
+      "httpRequests": 6
+    },
+    {
+      "label": "run-4",
+      "cache": {
+        "accountedInputTokens": 75114,
+        "cacheReadShare": 0.5932715605612802,
+        "cacheReadTokens": 44563,
+        "sessionId": "session_1789467144822_u2vg4p1"
+      },
+      "messageCount": 6,
+      "answer": {
+        "sha256": "7193e2f36a01d9093c97d358d1bde4c7eac86d8e4fbf1e74cef9cf6884a35033",
+        "characters": 40,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [],
+      "privateStateVisible": false,
+      "requests": 7,
+      "httpRequests": 7
+    }
+  ],
+  "completions": [
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    }
+  ],
+  "events": {
+    "session.updated": 2,
+    "prompt.submitted": 4,
+    "prompt.updated": 12,
+    "message.appended": 8,
+    "runtime.updated": 8,
+    "run.updated": 8,
+    "context.window.updated": 6,
+    "message.updated": 6,
+    "message.part.delta": 19,
+    "command.started": 6,
+    "command.result.delivered": 6
+  },
+  "persistence": {
+    "runStatuses": [
+      {
+        "sessionId": "session_1789467144822_u2vg4p1",
+        "status": "succeeded"
+      },
+      {
+        "sessionId": "session_1789467144822_u2vg4p1",
+        "status": "succeeded"
+      },
+      {
+        "sessionId": "session_1789467144822_u2vg4p1",
+        "status": "succeeded"
+      },
+      {
+        "sessionId": "session_1789467144822_u2vg4p1",
+        "status": "succeeded"
+      }
+    ],
+    "usageCarriers": [
+      {
+        "carrier": "tool",
+        "sessionId": "session_1789467144822_u2vg4p1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 14624,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 14626,
+          "outputTokens": 52,
+          "totalTokens": 14678
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789467144822_u2vg4p1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 14624,
+            "cacheWrite": 228,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 14854,
+          "outputTokens": 21,
+          "totalTokens": 14875
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789467144822_u2vg4p1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 14852,
+            "cacheWrite": 235,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 15089,
+          "outputTokens": 11,
+          "totalTokens": 15100
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789467144822_u2vg4p1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 15087,
+            "cacheWrite": 224,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 15313,
+          "outputTokens": 24,
+          "totalTokens": 15337
+        }
+      },
+      {
+        "carrier": "text",
+        "sessionId": "session_1789467144822_u2vg4p1",
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 15230,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 15232,
+          "outputTokens": 24,
+          "totalTokens": 15256
+        }
+      }
+    ],
+    "partCounts": {
+      "model-state": 1,
+      "text": 13,
+      "tool": 1
+    }
+  }
+}
