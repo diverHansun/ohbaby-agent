@@ -22,6 +22,8 @@
 - [`improve-4/`](./improve-4/)：用量与校准数据合同、最小参数命名和证据补齐；算法不变，技术验收通过，等待用户审核合入。
 - [`improve-5/`](./improve-5/)：三协议 cache 观测与可信 Step 累计、主子代理隔离和最小展示；不改变缓存请求控制、上下文组装或压缩算法。
 
+- [`improve-5.5/`](./improve-5.5/)：2026-09-15 用户确认补齐 reasoning 请求配置与三协议原生续接；默认开启/medium、子代理默认继承开关与强度。本轮仅规划，A–F 尚未实施，不包含前端或主代理显式覆盖子强度工具参数。
+
 ## 分支策略
 
 - `main` 保持稳定；本迁移建立本地长期集成分支 `openai-responses-migration`。
@@ -38,6 +40,7 @@
 | improve-3     | 2026-09-13 | improve-2 §2.8主动切割的内部契约；用户授权提前规划                | 05 独立验收和完整补验通过，已合入本地集成分支（2026-09-14）                         |
 | improve-4     | 2026-09-14 | improve-3 主动切出的用量/校准议题，承接其 05 与用户确认的收窄范围 | 已实施；最终 preflight、同一次三协议 live 及独立审查通过，待用户审核；未 merge/push |
 | improve-5     | 2026-09-14 研究；2026-09-15 规划与实施 | improve-4 主动切出的 cache 议题；用户确认开启并替代旧整 Run 筛选规则 | 00–05 已完成；本地实施/基本三协议验收通过，扩展限制见 05 |
+| improve-5.5 | 2026-09-15 | improve-5 新模型实网暴露上游协议缺口，用户明确指定返修/能力扩展轮次 | 00–04 规划与文档审查；尚未实施 |
 
 ## 已冻结的阶段边界
 
@@ -78,6 +81,9 @@ Chat Completions 作为显式兼容入口长期保留；移除它不属于本议
 7. 做跨模块契约、重启恢复、live smoke 与回归 eval；全部门禁通过后，才讨论产品默认翻转到 Responses，Chat 继续保留为显式兼容入口。
 
 ## 审核入口
+
+最新规划：[improve-5.5 README](./improve-5.5/README.md) → [请求/状态与 A–F 合同](./improve-5.5/02-optimization-plan-and-change-scope.md) → [验收标准](./improve-5.5/04-test-and-acceptance.md)。本轮计划扩展 improve-2/3 原生续接限制及 improve-4 的估算材料，保留 improve-5 cache 合同；前序限制仍描述历史阶段，不与未来目标混写。
+
 
 当前 Improve 5 文档：[README](./improve-5/README.md) → [已确认决策](./improve-5/00-discussion.md) → [现状](./improve-5/01-problem-analysis-and-current-state.md) → [方案](./improve-5/02-optimization-plan-and-change-scope.md) → [七个参考项目](./improve-5/03-reference-projects.md) → [验收标准](./improve-5/04-test-and-acceptance.md)。实际结果见 [05 实施验收](./improve-5/05-implementation-acceptance.md)。Improve 5 新规则只替代旧缓存统计的纳入门槛，不追溯改写 improve-4 的验收结论。
 
