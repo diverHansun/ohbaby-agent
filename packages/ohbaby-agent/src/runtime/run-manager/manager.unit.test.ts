@@ -28,7 +28,7 @@ import {
   type RunDefaultsPolicy,
   type RunHookContext,
   type RunLifecycle,
-  type RunCompletionObserver,
+  type RunStepUsageObserver,
   type SandboxLease,
   type SandboxManager,
 } from "./index.js";
@@ -362,6 +362,10 @@ class UsageLifecycle implements RunLifecycle {
       timestamp: 10,
     };
 
+    params.onStepUsage?.({
+      step: 1,
+      tokenUsage: { inputTokens: 7, outputTokens: 5, totalTokens: 12 },
+    });
     return {
       success: true,
       finishReason: "stop",
@@ -769,7 +773,7 @@ function createManagerWithOverrides(input: {
   readonly lifecycle: RunLifecycle;
   readonly bridge?: StreamBridge;
   readonly hookExecutor?: HookExecutor;
-  readonly onRunCompleted?: RunCompletionObserver;
+  readonly onStepUsage?: RunStepUsageObserver;
   readonly sandboxManager?: SandboxManager;
 }): ManagerFixture {
   const fixture = createManager(input.lifecycle);
@@ -778,9 +782,9 @@ function createManagerWithOverrides(input: {
     runLedger: fixture.ledger,
     streamBridge: input.bridge ?? fixture.bridge,
     hookExecutor: input.hookExecutor ?? fixture.hooks,
-    ...(input.onRunCompleted === undefined
+    ...(input.onStepUsage === undefined
       ? {}
-      : { onRunCompleted: input.onRunCompleted }),
+      : { onStepUsage: input.onStepUsage }),
     sandboxManager: input.sandboxManager ?? fixture.sandboxManager,
     policy,
     now: createClock(10_000),
@@ -1164,69 +1168,46 @@ describe("RunManager", () => {
     });
   });
 
-  it("observes completed usage exactly once across repeated waits", async () => {
-    const observations: Parameters<RunCompletionObserver>[0][] = [];
-    const { manager } = createManagerWithOverrides({
-      lifecycle: new UsageLifecycle(),
-      onRunCompleted(observation): void {
-        observations.push(observation);
-      },
-    });
-    const record = await manager.create({
-      directory: "D:/repo",
-      isSubagent: false,
-      modelId: "fake-model",
-      sessionId: "session_1",
-      triggerSource: "user",
-    });
-
-    await Promise.all([
-      manager.waitForCompletion(record.runId),
-      manager.waitForCompletion(record.runId),
-    ]);
-
-    expect(observations).toEqual([
-      {
-        isSubagent: false,
-        sessionId: "session_1",
-        usage: {
-          inputTokens: 7,
-          outputTokens: 5,
-          totalTokens: 12,
-          usageComplete: true,
+  it.each([false, true])(
+    "observes scoped step usage exactly once across repeated waits (subagent=%s)",
+    async (isSubagent) => {
+      const observations: Parameters<RunStepUsageObserver>[0][] = [];
+      const { manager } = createManagerWithOverrides({
+        lifecycle: new UsageLifecycle(),
+        onStepUsage(observation): void {
+          observations.push(observation);
         },
-      },
-    ]);
-  });
+      });
+      const record = await manager.create({
+        directory: "D:/repo",
+        isSubagent,
+        contextScopeId: "scope_1",
+        modelId: "fake-model",
+        sessionId: "session_1",
+        triggerSource: "user",
+      });
 
-  it("does not let a completion observer failure reject the run", async () => {
-    const { manager } = createManagerWithOverrides({
-      lifecycle: new UsageLifecycle(),
-      onRunCompleted(): void {
-        throw new Error("projection failed");
-      },
-    });
-    const record = await manager.create({
-      directory: "D:/repo",
-      modelId: "fake-model",
-      sessionId: "session_1",
-      triggerSource: "user",
-    });
+      await Promise.all([
+        manager.waitForCompletion(record.runId),
+        manager.waitForCompletion(record.runId),
+      ]);
 
-    await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
-      status: "succeeded",
-      usage: {
-        inputTokens: 7,
-        outputTokens: 5,
-        totalTokens: 12,
-        usageComplete: true,
-      },
-    });
-  });
+      expect(observations).toEqual([
+        {
+          isSubagent,
+          contextScopeId: "scope_1",
+          runId: record.runId,
+          step: 1,
+          sessionId: "session_1",
+          tokenUsage: { inputTokens: 7, outputTokens: 5, totalTokens: 12 },
+        },
+      ]);
+    },
+  );
 
   it("preserves returned usage when cancellation lands in the post-run hook", async () => {
     const managerRef: { current?: RunManager } = {};
-    const observations: Parameters<RunCompletionObserver>[0][] = [];
+    const observations: Parameters<RunStepUsageObserver>[0][] = [];
     const hookExecutor: HookExecutor = {
       execute(point, context): Promise<void> {
         if (point === "post-run") {
@@ -1238,7 +1219,7 @@ describe("RunManager", () => {
     const fixture = createManagerWithOverrides({
       hookExecutor,
       lifecycle: new UsageLifecycle("completed"),
-      onRunCompleted(observation): void {
+      onStepUsage(observation): void {
         observations.push(observation);
       },
     });
@@ -1265,13 +1246,10 @@ describe("RunManager", () => {
     });
     expect(observations).toEqual([
       {
+        runId: record.runId,
+        step: 1,
         sessionId: "session_1",
-        usage: {
-          inputTokens: 7,
-          outputTokens: 5,
-          totalTokens: 12,
-          usageComplete: true,
-        },
+        tokenUsage: { inputTokens: 7, outputTokens: 5, totalTokens: 12 },
       },
     ]);
   });
@@ -1437,10 +1415,10 @@ describe("RunManager", () => {
 
   it("propagates cancel through AbortSignal and marks the run cancelled", async () => {
     const lifecycle = new AbortAwareLifecycle();
-    const observations: Parameters<RunCompletionObserver>[0][] = [];
+    const observations: Parameters<RunStepUsageObserver>[0][] = [];
     const { manager, ledger, bridge } = createManagerWithOverrides({
       lifecycle,
-      onRunCompleted(observation): void {
+      onStepUsage(observation): void {
         observations.push(observation);
       },
     });
@@ -1465,7 +1443,7 @@ describe("RunManager", () => {
       error: "user requested stop",
     });
     expect(bridge.endedScopes).toEqual(["run/run_override"]);
-    expect(observations).toEqual([{ sessionId: "session_1" }]);
+    expect(observations).toEqual([]);
   });
 
   it("resolves completion and closes the stream when sandbox release fails", async () => {

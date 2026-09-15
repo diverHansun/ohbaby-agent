@@ -46,7 +46,14 @@ export interface LifecycleToolResolutionInput {
   readonly step: number;
 }
 
+export interface StepUsageObservation {
+  readonly step: number;
+  readonly tokenUsage: TokenUsage | undefined;
+}
+
 export interface LifecycleSessionParams {
+  /** Final accepted model result, observed synchronously once before calibration. */
+  readonly onStepUsage?: (observation: StepUsageObservation) => void;
   readonly sessionId: string;
   readonly contextScopeId?: string;
   readonly directory: string;

@@ -6,6 +6,7 @@ export type {
   LifecycleEvent,
   LifecycleResult,
   LifecycleSessionParams,
+  StepUsageObservation,
   LifecycleTokenUsage,
   ResolvedStepTools,
   TurnContext,

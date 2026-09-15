@@ -2,6 +2,7 @@ import type {
   LifecycleEvent,
   LifecycleResult,
   LifecycleSessionParams,
+  StepUsageObservation,
 } from "../../core/lifecycle/index.js";
 import type { SandboxLease, SandboxManagerPort } from "../../sandbox/index.js";
 import type {
@@ -67,14 +68,15 @@ export interface RunCompletion {
   readonly usage?: LifecycleResult["usage"];
 }
 
-export interface RunCompletionObservation {
+export interface RunStepUsageObservation extends StepUsageObservation {
+  readonly runId: string;
   readonly sessionId: string;
+  readonly contextScopeId?: string;
   readonly isSubagent?: boolean;
-  readonly usage?: LifecycleResult["usage"];
 }
 
-export type RunCompletionObserver = (
-  observation: RunCompletionObservation,
+export type RunStepUsageObserver = (
+  observation: RunStepUsageObservation,
 ) => void;
 
 export type { SandboxLease };
@@ -133,7 +135,7 @@ export interface RunManagerDeps {
   readonly policy: RunDefaultsPolicy;
   readonly now?: () => number;
   readonly createRunId?: () => string;
-  readonly onRunCompleted?: RunCompletionObserver;
+  readonly onStepUsage?: RunStepUsageObserver;
 }
 
 export interface RunWorkerResult {
@@ -145,6 +147,7 @@ export interface RunWorkerResult {
 }
 
 export interface RunWorkerDeps {
+  readonly onStepUsage?: RunStepUsageObserver;
   readonly lifecycle: RunLifecycle;
   readonly streamBridge: StreamBridge;
   readonly hookExecutor?: HookExecutor;

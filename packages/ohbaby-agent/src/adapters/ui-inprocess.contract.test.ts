@@ -1962,23 +1962,45 @@ describe("createInProcessUiBackendClient", () => {
     const client = createInProcessUiBackendClient({
       bus,
       initialSnapshot: createInitialSnapshotWithTwoSessions(),
-      llmClient: createFakeLLMClient([
-        {
-          finishReason: "stop",
-          textDelta: "Done",
-          tokenUsage: {
-            inputBreakdown: {
-              cacheRead: 60,
-              cacheWrite: 0,
-              observed: { cacheRead: true, cacheWrite: false },
-              uncached: 40,
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "stop",
+              textDelta: "Done",
+              tokenUsage: {
+                inputBreakdown: {
+                  cacheRead: 60,
+                  cacheWrite: 0,
+                  observed: { cacheRead: true, cacheWrite: false },
+                  uncached: 40,
+                },
+                inputTokens: 100,
+                outputTokens: 10,
+                totalTokens: 110,
+              },
             },
-            inputTokens: 100,
-            outputTokens: 10,
-            totalTokens: 110,
-          },
-        },
-      ]),
+          ],
+          [
+            {
+              finishReason: "stop",
+              textDelta: "Other session",
+              tokenUsage: {
+                inputTokens: 300,
+                outputTokens: 10,
+                totalTokens: 310,
+                inputBreakdown: {
+                  cacheRead: 30,
+                  cacheWrite: 0,
+                  observed: { cacheRead: true, cacheWrite: false },
+                  uncached: 270,
+                },
+              },
+            },
+          ],
+        ],
+        [],
+      ),
     });
 
     try {
@@ -1987,6 +2009,35 @@ describe("createInProcessUiBackendClient", () => {
       });
       await client.submitPromptAndWait("Cache session two", {
         sessionId: "session_2",
+      });
+
+      await expect(
+        executeStatusData(
+          client,
+          "session_1",
+          "inv_first_session_before_remove",
+        ),
+      ).resolves.toMatchObject({
+        promptCacheUsage: {
+          sessionId: "session_1",
+          accountedInputTokens: 100,
+          cacheReadTokens: 60,
+          cacheReadShare: 0.6,
+        },
+      });
+      await expect(
+        executeStatusData(
+          client,
+          "session_2",
+          "inv_second_session_before_remove",
+        ),
+      ).resolves.toMatchObject({
+        promptCacheUsage: {
+          sessionId: "session_2",
+          accountedInputTokens: 300,
+          cacheReadTokens: 30,
+          cacheReadShare: 0.1,
+        },
       });
 
       bus.publish(SessionEvent.Removed, { sessionId: "session_1" });
@@ -2004,9 +2055,9 @@ describe("createInProcessUiBackendClient", () => {
         executeStatusData(client, "session_2", "inv_retained_cache"),
       ).resolves.toMatchObject({
         promptCacheUsage: {
-          accountedInputTokens: 100,
-          cacheReadShare: 0.6,
-          cacheReadTokens: 60,
+          accountedInputTokens: 300,
+          cacheReadShare: 0.1,
+          cacheReadTokens: 30,
         },
       });
     } finally {

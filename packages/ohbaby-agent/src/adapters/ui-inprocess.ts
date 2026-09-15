@@ -502,7 +502,7 @@ export function createInProcessUiBackendClient(
         messageManager,
         hookExecutor: options.hookExecutor,
         now: () => now().getTime(),
-        onRunCompleted({ isSubagent, sessionId, usage }): void {
+        onStepUsage({ isSubagent, sessionId, tokenUsage }): void {
           if (
             !acceptsPromptCacheUsage ||
             isSubagent === true ||
@@ -510,7 +510,7 @@ export function createInProcessUiBackendClient(
           ) {
             return;
           }
-          promptCacheUsage.record(sessionId, usage);
+          promptCacheUsage.record(sessionId, tokenUsage);
         },
         onGoalChange: (event) => {
           publishGoalUpdated(event.sessionId, event.snapshot);

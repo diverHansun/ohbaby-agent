@@ -233,6 +233,7 @@ export class RunManager {
         lifecycle: this.deps.lifecycle,
         streamBridge: this.deps.streamBridge,
         hookExecutor: this.deps.hookExecutor,
+        onStepUsage: this.deps.onStepUsage,
       });
 
       outcome = await worker.start({
@@ -298,18 +299,6 @@ export class RunManager {
       }
       this.publishRunUpdated(record);
       this.endStream(record);
-    }
-
-    try {
-      this.deps.onRunCompleted?.({
-        sessionId: record.sessionId,
-        ...(record.options.isSubagent === undefined
-          ? {}
-          : { isSubagent: record.options.isSubagent }),
-        ...(completion.usage === undefined ? {} : { usage: completion.usage }),
-      });
-    } catch {
-      // Completion observers are diagnostic projections and cannot change run completion.
     }
 
     return completion;

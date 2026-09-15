@@ -256,6 +256,23 @@ export class RunWorker {
       ...(this.context.contextScopeId === undefined
         ? {}
         : { contextScopeId: this.context.contextScopeId }),
+      ...(this.deps.onStepUsage === undefined
+        ? {}
+        : {
+            onStepUsage: (observation): void => {
+              this.deps.onStepUsage?.({
+                ...observation,
+                runId: this.context.runId,
+                sessionId: this.context.sessionId,
+                ...(this.context.contextScopeId === undefined
+                  ? {}
+                  : { contextScopeId: this.context.contextScopeId }),
+                ...(this.context.isSubagent === undefined
+                  ? {}
+                  : { isSubagent: this.context.isSubagent }),
+              });
+            },
+          }),
       signal: this.context.abortSignal,
       ...(this.context.agent === undefined
         ? {}

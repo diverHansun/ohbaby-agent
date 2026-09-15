@@ -1,5 +1,5 @@
 import type { UiPromptCacheUsage } from "ohbaby-sdk";
-import type { LifecycleTokenUsage } from "../../core/lifecycle/index.js";
+import type { TokenUsage } from "../../core/llm-client/index.js";
 
 interface PromptCacheUsageTotals {
   readonly accountedInputTokens: number;
@@ -14,14 +14,11 @@ export interface PromptCacheUsageTracker {
   clear(): void;
   clearSession(sessionId: string): void;
   get(sessionId: string): UiPromptCacheUsage;
-  record(
-    sessionId: string,
-    usage: LifecycleTokenUsage | undefined,
-  ): UiPromptCacheUsage;
+  record(sessionId: string, usage: TokenUsage | undefined): UiPromptCacheUsage;
 }
 
 export function cacheReadShareFromUsage(
-  usage: LifecycleTokenUsage | undefined,
+  usage: TokenUsage | undefined,
 ): number | null {
   return promptCacheUsageSample(usage)?.cacheReadShare ?? null;
 }
@@ -50,7 +47,7 @@ export function createPromptCacheUsageTracker(): PromptCacheUsageTracker {
 
     record(
       sessionId: string,
-      usage: LifecycleTokenUsage | undefined,
+      usage: TokenUsage | undefined,
     ): UiPromptCacheUsage {
       const sample = promptCacheUsageSample(usage);
       if (!sample) {
@@ -71,21 +68,25 @@ export function createPromptCacheUsageTracker(): PromptCacheUsageTracker {
 }
 
 function promptCacheUsageSample(
-  usage: LifecycleTokenUsage | undefined,
+  usage: TokenUsage | undefined,
 ): PromptCacheUsageSample | null {
   const breakdown = usage?.inputBreakdown;
-  if (usage?.usageComplete !== true || breakdown?.observed.cacheRead !== true) {
+  if (usage === undefined || breakdown?.observed.cacheRead !== true) {
     return null;
   }
 
-  const accountedInputTokens =
-    breakdown.uncached + breakdown.cacheRead + breakdown.cacheWrite;
+  const accountedInputTokens = usage.inputTokens;
   if (
+    !isNonNegativeInteger(usage.outputTokens) ||
+    !isNonNegativeInteger(usage.totalTokens) ||
+    usage.totalTokens !== usage.inputTokens + usage.outputTokens ||
     !isNonNegativeInteger(breakdown.uncached) ||
     !isNonNegativeInteger(breakdown.cacheRead) ||
     !isNonNegativeInteger(breakdown.cacheWrite) ||
     !isNonNegativeInteger(accountedInputTokens) ||
     accountedInputTokens === 0 ||
+    breakdown.uncached + breakdown.cacheRead + breakdown.cacheWrite !==
+      accountedInputTokens ||
     breakdown.cacheRead > accountedInputTokens
   ) {
     return null;

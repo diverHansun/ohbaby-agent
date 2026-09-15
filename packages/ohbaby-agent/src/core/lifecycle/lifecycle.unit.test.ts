@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
+import * as llmStreaming from "../llm-client/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -1243,132 +1244,155 @@ describe("Lifecycle.run", () => {
     ).rejects.toThrow("unclassified failure");
   });
 
-  it("persists tool-only and hybrid usage on exactly one part per step", async () => {
-    const requests: InterfaceProviderRequest[] = [];
-    const messageManager = createMessageManager({
-      bus: createBus(),
-      store: createInMemoryMessageStore(),
-      idGenerator: createDeterministicIds(),
-      now: () => 1_700_000_000_000,
-    });
-    const toolOnlyUsage = {
-      inputTokens: 50,
-      outputTokens: 2,
-      totalTokens: 52,
-    } as const;
-    const hybridUsage = {
-      inputBreakdown: {
-        cacheRead: 80,
-        cacheWrite: 0,
-        observed: { cacheRead: true, cacheWrite: false },
-        uncached: 20,
-      },
-      inputTokens: 100,
-      outputTokens: 5,
-      totalTokens: 105,
-    } as const;
-    const prepareTurn = vi
-      .fn<ContextManager["prepareTurn"]>()
-      .mockResolvedValue(
-        preparedTurn([{ role: "user", content: "Run both tools" }]),
-      );
-    const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(prepareTurn),
-      llmClient: createSequentialFakeLLMClient(
-        [
+  it.each([false, true])(
+    "persists tool-only and hybrid usage once per step (child=%s)",
+    async (isSubagent) => {
+      const scope = isSubagent
+        ? { contextScopeId: "child_scope", isSubagent: true }
+        : {};
+      const requests: InterfaceProviderRequest[] = [];
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+        idGenerator: createDeterministicIds(),
+        now: () => 1_700_000_000_000,
+      });
+      const toolOnlyUsage = {
+        inputBreakdown: {
+          cacheRead: 20,
+          cacheWrite: 10,
+          observed: { cacheRead: true, cacheWrite: true },
+          uncached: 20,
+        },
+        inputTokens: 50,
+        outputTokens: 2,
+        totalTokens: 52,
+      } as const;
+      const hybridUsage = {
+        inputBreakdown: {
+          cacheRead: 80,
+          cacheWrite: 5,
+          observed: { cacheRead: true, cacheWrite: true },
+          uncached: 15,
+        },
+        inputTokens: 100,
+        outputTokens: 5,
+        totalTokens: 105,
+      } as const;
+      const prepareTurn = vi
+        .fn<ContextManager["prepareTurn"]>()
+        .mockResolvedValue(
+          preparedTurn([{ role: "user", content: "Run both tools" }]),
+        );
+      const lifecycle = new Lifecycle({
+        contextManager: createContextManagerMock(prepareTurn),
+        llmClient: createSequentialFakeLLMClient(
           [
-            {
-              finishReason: "tool_calls",
-              tokenUsage: toolOnlyUsage,
-              toolCallDeltas: [
-                {
-                  argumentsDelta: '{"path":"README.md"}',
-                  id: "call_read",
-                  index: 0,
-                  name: "read_file",
-                },
-                {
-                  argumentsDelta: '{"path":"."}',
-                  id: "call_list",
-                  index: 1,
-                  name: "list_files",
-                },
-              ],
-            },
+            [
+              {
+                finishReason: "tool_calls",
+                tokenUsage: toolOnlyUsage,
+                toolCallDeltas: [
+                  {
+                    argumentsDelta: '{"path":"README.md"}',
+                    id: "call_read",
+                    index: 0,
+                    name: "read_file",
+                  },
+                  {
+                    argumentsDelta: '{"path":"."}',
+                    id: "call_list",
+                    index: 1,
+                    name: "list_files",
+                  },
+                ],
+              },
+            ],
+            [
+              {
+                finishReason: "tool_calls",
+                textDelta: "I will run both tools again.",
+                tokenUsage: hybridUsage,
+                toolCallDeltas: [
+                  {
+                    argumentsDelta: '{"path":"README.md"}',
+                    id: "call_read_again",
+                    index: 0,
+                    name: "read_file",
+                  },
+                  {
+                    argumentsDelta: '{"path":"."}',
+                    id: "call_list_again",
+                    index: 1,
+                    name: "list_files",
+                  },
+                ],
+              },
+            ],
+            [{ finishReason: "stop", textDelta: "Done." }],
           ],
-          [
-            {
-              finishReason: "tool_calls",
-              textDelta: "I will run both tools again.",
-              tokenUsage: hybridUsage,
-              toolCallDeltas: [
-                {
-                  argumentsDelta: '{"path":"README.md"}',
-                  id: "call_read_again",
-                  index: 0,
-                  name: "read_file",
-                },
-                {
-                  argumentsDelta: '{"path":"."}',
-                  id: "call_list_again",
-                  index: 1,
-                  name: "list_files",
-                },
-              ],
-            },
-          ],
-          [{ finishReason: "stop", textDelta: "Done." }],
-        ],
-        requests,
-      ),
-      messageManager,
-      toolScheduler: {
-        executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(
-          ({ calls }) =>
-            Promise.resolve(
-              calls.map((call) => ({
-                callId: call.callId,
-                output: "ok",
-                status: "success" as const,
-              })),
-            ),
+          requests,
         ),
-      } as unknown as ToolSchedulerInstance,
-    });
+        messageManager,
+        toolScheduler: {
+          executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(
+            ({ calls }) =>
+              Promise.resolve(
+                calls.map((call) => ({
+                  callId: call.callId,
+                  output: "ok",
+                  status: "success" as const,
+                })),
+              ),
+          ),
+        } as unknown as ToolSchedulerInstance,
+      });
 
-    await consumeLifecycleEvents(
-      lifecycle.run({
-        directory: "D:/repo",
-        modelId: "fake-model",
-        sessionId: "session_hybrid",
-      }),
-    );
+      await consumeLifecycleEvents(
+        lifecycle.run({
+          directory: "D:/repo",
+          modelId: "fake-model",
+          sessionId: "session_hybrid",
+          ...scope,
+        }),
+      );
 
-    const parts = (
-      await messageManager.listBySession("session_hybrid")
-    ).flatMap((message) => message.parts);
-    const usageParts = parts
-      .map((part) => ({
-        part,
-        usage: readTokenUsageMetadata(part.metadata),
-      }))
-      .filter((entry) => entry.usage !== undefined);
+      const parts = (
+        await messageManager.listBySession("session_hybrid", {
+          contextScopeId: scope.contextScopeId,
+        })
+      ).flatMap((message) => message.parts);
+      const usageParts = parts
+        .map((part) => ({
+          part,
+          usage: readTokenUsageMetadata(part.metadata),
+        }))
+        .filter((entry) => entry.usage !== undefined);
 
-    expect(usageParts).toHaveLength(2);
-    const toolOnlyUsagePart = usageParts.find(
-      (entry) => entry.usage?.inputTokens === toolOnlyUsage.inputTokens,
-    );
-    expect(toolOnlyUsagePart?.part).toMatchObject({
-      callId: "call_read",
-      type: "tool",
-    });
-    expect(toolOnlyUsagePart?.usage).toEqual(toolOnlyUsage);
-    const hybridUsagePart = usageParts.find(
-      (entry) => entry.usage?.inputTokens === hybridUsage.inputTokens,
-    );
-    expect(hybridUsagePart?.part.type).toBe("text");
-    expect(hybridUsagePart?.usage).toEqual(hybridUsage);
-  });
+      expect(usageParts).toHaveLength(2);
+      expect(
+        parts.every((part) => part.contextScopeId === scope.contextScopeId),
+      ).toBe(true);
+      const missingUsagePart = parts.find(
+        (part) => part.type === "text" && part.text === "Done.",
+      );
+      expect(missingUsagePart).toBeDefined();
+      expect(missingUsagePart?.metadata?.tokenUsage).toBeUndefined();
+      const toolOnlyUsagePart = usageParts.find(
+        (entry) => entry.usage?.inputTokens === toolOnlyUsage.inputTokens,
+      );
+      expect(toolOnlyUsagePart?.part).toMatchObject({
+        callId: "call_read",
+        type: "tool",
+      });
+      expect(toolOnlyUsagePart?.usage).toEqual(toolOnlyUsage);
+      const hybridUsagePart = usageParts.find(
+        (entry) => entry.usage?.inputTokens === hybridUsage.inputTokens,
+      );
+      expect(hybridUsagePart?.part.type).toBe("text");
+      expect(hybridUsagePart?.usage).toEqual(hybridUsage);
+    },
+  );
 
   it("treats provider output length truncation as a structured terminal failure", async () => {
     const messageManager = createMessageManager({
@@ -2878,3 +2902,228 @@ function createDeterministicIds(): MessageIdGenerator {
     },
   };
 }
+
+describe("Lifecycle final step usage observer", () => {
+  const firstUsage = {
+    inputTokens: 100,
+    outputTokens: 10,
+    totalTokens: 110,
+    inputBreakdown: {
+      uncached: 20,
+      cacheRead: 80,
+      cacheWrite: 0,
+      observed: { cacheRead: true, cacheWrite: false },
+    },
+  };
+  const finalUsage = {
+    inputTokens: 1_000,
+    outputTokens: 20,
+    totalTokens: 1_020,
+    inputBreakdown: {
+      uncached: 400,
+      cacheRead: 600,
+      cacheWrite: 0,
+      observed: { cacheRead: true, cacheWrite: false },
+    },
+  };
+
+  function fixture(llmClient: LLMClientInstance): {
+    lifecycle: Lifecycle;
+    updateCalibrationFactor: Mock<ContextManager["updateCalibrationFactor"]>;
+  } {
+    const contextManager = createContextManagerMock(() =>
+      Promise.resolve(
+        preparedTurn(
+          [{ role: "user", content: "Observe usage" }],
+          SESSION_USAGE,
+          50,
+        ),
+      ),
+    );
+    const updateCalibrationFactor =
+      vi.fn<ContextManager["updateCalibrationFactor"]>();
+    const lifecycle = new Lifecycle({
+      contextManager: { ...contextManager, updateCalibrationFactor },
+      llmClient,
+      messageManager: createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+        idGenerator: createDeterministicIds(),
+      }),
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    return { lifecycle, updateCalibrationFactor };
+  }
+
+  const params = {
+    directory: "D:/repo",
+    modelId: "fake-model",
+    sessionId: "session_observer",
+  };
+
+  it("observes only the last accepted result when raw complete events disagree", async () => {
+    const { lifecycle, updateCalibrationFactor } = fixture(
+      createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "stop",
+              textDelta: "first",
+              tokenUsage: firstUsage,
+            },
+            {
+              finishReason: "stop",
+              textDelta: " final",
+              tokenUsage: finalUsage,
+            },
+          ],
+        ],
+        [],
+      ),
+    );
+    const observations: unknown[] = [];
+    const { result, events } = await consumeLifecycleEvents(
+      lifecycle.run({
+        ...params,
+        onStepUsage: (observation) => {
+          observations.push(observation);
+        },
+      }),
+    );
+    expect(events.filter((event) => event === "llm:complete")).toHaveLength(2);
+    expect(observations).toEqual([{ step: 1, tokenUsage: finalUsage }]);
+    expect(result.usage).toEqual({ ...finalUsage, usageComplete: true });
+    expect(updateCalibrationFactor).toHaveBeenCalledWith(
+      "session_observer",
+      1_000,
+      50,
+    );
+  });
+
+  it("isolates mutation and exceptions before calibration and output-length handling", async () => {
+    const { lifecycle, updateCalibrationFactor } = fixture(
+      createSequentialFakeLLMClient(
+        [
+          [
+            {
+              finishReason: "length",
+              textDelta: "partial",
+              tokenUsage: finalUsage,
+            },
+          ],
+        ],
+        [],
+      ),
+    );
+    const observations: unknown[] = [];
+    const calibrationCallsAtObservation: number[] = [];
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        ...params,
+        onStepUsage(observation) {
+          observations.push(structuredClone(observation));
+          calibrationCallsAtObservation.push(
+            vi.mocked(updateCalibrationFactor).mock.calls.length,
+          );
+          if (observation.tokenUsage?.inputBreakdown === undefined)
+            throw new Error("Missing usage snapshot");
+          Object.assign(observation.tokenUsage, { inputTokens: 999_999 });
+          Object.assign(observation.tokenUsage.inputBreakdown, {
+            cacheRead: 999_999,
+          });
+          Object.assign(observation.tokenUsage.inputBreakdown.observed, {
+            cacheRead: false,
+          });
+          throw new Error("observer failed");
+        },
+      }),
+    );
+    expect(observations).toEqual([{ step: 1, tokenUsage: finalUsage }]);
+    expect(calibrationCallsAtObservation).toEqual([0]);
+    expect(result).toMatchObject({
+      terminalReason: "output_length",
+      usage: { ...finalUsage, usageComplete: true },
+    });
+    expect(updateCalibrationFactor).toHaveBeenCalledWith(
+      "session_observer",
+      1_000,
+      50,
+    );
+  });
+
+  it("observes absent usage for a final result but nothing for EOF", async () => {
+    const observations: unknown[] = [];
+    const { lifecycle } = fixture(
+      createSequentialFakeLLMClient(
+        [
+          [{ textDelta: "done", finishReason: "stop" }],
+          [{ textDelta: "unfinished" }],
+        ],
+        [],
+      ),
+    );
+    const onStepUsage: NonNullable<LifecycleSessionParams["onStepUsage"]> = (
+      observation,
+    ) => {
+      observations.push(observation);
+    };
+    const first = await consumeLifecycleEvents(
+      lifecycle.run({ ...params, onStepUsage }),
+    );
+    const second = await consumeLifecycleEvents(
+      lifecycle.run({ ...params, onStepUsage }),
+    );
+    expect(observations).toEqual([{ step: 1, tokenUsage: undefined }]);
+    expect(first.result.usage?.usageComplete).toBe(false);
+    expect(second.result.terminalReason).toBe("provider_stream_interrupted");
+  });
+
+  it("discards completed usage from an overflowing attempt and observes only retry usage", async () => {
+    let attempts = 0;
+    // The direct dependency deliberately throws raw overflow. Real provider
+    // partial-output errors are wrapped by llm-client before reaching Lifecycle.
+    const stream = vi
+      .spyOn(llmStreaming, "streamResponse")
+      .mockImplementation(async function* () {
+        attempts += 1;
+        yield await Promise.resolve({
+          isComplete: true,
+          finishReason: "stop",
+          messageSnapshot: {
+            content: attempts === 1 ? "discard" : "recovered",
+          },
+          tokenUsage: attempts === 1 ? firstUsage : finalUsage,
+        });
+        if (attempts === 1) {
+          throw Object.assign(new Error("maximum context length exceeded"), {
+            code: "context_length_exceeded",
+          });
+        }
+      });
+    const { lifecycle, updateCalibrationFactor } = fixture(
+      createSequentialFakeLLMClient([], []),
+    );
+    const observations: unknown[] = [];
+    const { result, events } = await consumeLifecycleEvents(
+      lifecycle.run({
+        ...params,
+        onStepUsage: (observation) => {
+          observations.push(observation);
+        },
+      }),
+    );
+    stream.mockRestore();
+    expect(attempts).toBe(2);
+    expect(events.filter((event) => event === "llm:complete")).toHaveLength(2);
+    expect(observations).toEqual([{ step: 1, tokenUsage: finalUsage }]);
+    expect(result.usage).toEqual({ ...finalUsage, usageComplete: true });
+    expect(updateCalibrationFactor).toHaveBeenCalledTimes(1);
+    expect(updateCalibrationFactor).toHaveBeenCalledWith(
+      "session_observer",
+      1_000,
+      50,
+    );
+  });
+});

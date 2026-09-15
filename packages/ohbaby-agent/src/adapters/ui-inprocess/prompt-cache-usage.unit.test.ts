@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateTokenUsage } from "../../core/lifecycle/token-usage.js";
-import type { LifecycleTokenUsage } from "../../core/lifecycle/types.js";
+import type { TokenUsage } from "../../core/llm-client/index.js";
 import {
   cacheReadShareFromUsage,
   createPromptCacheUsageTracker,
@@ -17,10 +16,8 @@ describe("prompt cache usage", () => {
         inputTokens: 10,
         outputTokens: 1,
         totalTokens: 11,
-        usageComplete: true,
       }),
     ).toBeNull();
-    expect(cacheReadShareFromUsage(usage({ usageComplete: false }))).toBeNull();
   });
 
   it("counts observed zero cache reads and does not require cache-write observation", () => {
@@ -55,7 +52,7 @@ describe("prompt cache usage", () => {
     });
   });
 
-  it("derives the share from cumulative tokens instead of averaging runs", () => {
+  it("derives the share from cumulative tokens instead of averaging steps", () => {
     const tracker = createPromptCacheUsageTracker();
     tracker.record("session_1", usage({ cacheRead: 200, uncached: 800 }));
 
@@ -69,42 +66,39 @@ describe("prompt cache usage", () => {
     });
   });
 
-  it("skips an incomplete run without changing the previous totals", () => {
+  it("keeps trusted steps around a missing-usage or missing-breakdown step", () => {
     const tracker = createPromptCacheUsageTracker();
-    tracker.record("session_1", usage({ cacheRead: 200, uncached: 800 }));
-
+    tracker.record("session_1", usage({ cacheRead: 800, uncached: 200 }));
+    tracker.record("session_1", undefined);
+    tracker.record("session_1", {
+      inputTokens: 2_000,
+      outputTokens: 10,
+      totalTokens: 2_010,
+    });
     expect(
-      tracker.record("session_1", usage({ usageComplete: false })),
+      tracker.record("session_1", usage({ cacheRead: 600, uncached: 400 })),
     ).toEqual({
-      accountedInputTokens: 1_000,
-      cacheReadShare: 0.2,
-      cacheReadTokens: 200,
+      accountedInputTokens: 2_000,
+      cacheReadShare: 0.7,
+      cacheReadTokens: 1_400,
       sessionId: "session_1",
     });
   });
 
-  it("skips a multi-step run when any non-zero step omits its breakdown", () => {
-    const first = aggregateTokenUsage(undefined, {
-      inputBreakdown: breakdown({ cacheRead: 200, uncached: 800 }),
-      inputTokens: 1_000,
-      outputTokens: 10,
-      totalTokens: 1_010,
-    });
-    const second = aggregateTokenUsage(first, {
-      inputTokens: 500,
-      outputTokens: 10,
-      totalTokens: 510,
-    });
-    const third = aggregateTokenUsage(second, {
-      inputBreakdown: breakdown({ cacheRead: 600, uncached: 400 }),
-      inputTokens: 1_000,
-      outputTokens: 10,
-      totalTokens: 1_010,
-    });
+  it.each([
+    { inputTokens: 999 },
+    { inputTokens: -1 },
+    { inputTokens: 1.5 },
+    { outputTokens: -1 },
+    { totalTokens: Number.NaN },
+    { totalTokens: 1_011 },
+    { inputBreakdown: breakdown({ cacheRead: -1, uncached: 1_001 }) },
+    { inputBreakdown: breakdown({ cacheRead: 200.5, uncached: 799.5 }) },
+    { inputBreakdown: breakdown({ cacheRead: Number.POSITIVE_INFINITY }) },
+    { inputBreakdown: breakdown({ observedCacheRead: false }) },
+  ])("rejects malformed or unreadable canonical usage %j", (overrides) => {
     const tracker = createPromptCacheUsageTracker();
-
-    expect(third.inputBreakdown).toBeUndefined();
-    expect(tracker.record("session_1", third)).toEqual({
+    expect(tracker.record("session_1", { ...usage(), ...overrides })).toEqual({
       accountedInputTokens: 0,
       cacheReadShare: null,
       cacheReadTokens: 0,
@@ -132,9 +126,8 @@ function usage(
     readonly cacheWrite?: number;
     readonly observedCacheRead?: boolean;
     readonly uncached?: number;
-    readonly usageComplete?: boolean;
   } = {},
-): LifecycleTokenUsage {
+): TokenUsage {
   const inputBreakdown = breakdown(overrides);
   const inputTokens =
     inputBreakdown.uncached +
@@ -145,7 +138,6 @@ function usage(
     inputTokens,
     outputTokens: 10,
     totalTokens: inputTokens + 10,
-    usageComplete: overrides.usageComplete ?? true,
   };
 }
 
@@ -156,7 +148,7 @@ function breakdown(
     readonly observedCacheRead?: boolean;
     readonly uncached?: number;
   } = {},
-): NonNullable<LifecycleTokenUsage["inputBreakdown"]> {
+): NonNullable<TokenUsage["inputBreakdown"]> {
   return {
     cacheRead: overrides.cacheRead ?? 200,
     cacheWrite: overrides.cacheWrite ?? 0,
