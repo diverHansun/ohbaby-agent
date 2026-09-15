@@ -15,6 +15,17 @@ it("keeps partial call index and raw arguments in a text-only snapshot without r
     config: {
       provider: "test",
       model: "test",
+      modelProfiles: [
+        {
+          model: "test",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       baseUrl: "http://localhost:1",
       interfaceProvider: "openai-compatible",
       temperature: 0,
@@ -63,6 +74,17 @@ it("replays a successful direct tool roundtrip with the original argument text a
     config: {
       provider: "test",
       model: "test",
+      modelProfiles: [
+        {
+          model: "test",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       baseUrl: "http://localhost:1",
       interfaceProvider: "openai-compatible",
       temperature: 0,

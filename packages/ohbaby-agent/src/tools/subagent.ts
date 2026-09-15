@@ -162,6 +162,9 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
         mode: runMode(params),
         name: getOptionalNonEmptyStringParam(params, "name"),
         parentSessionId: context.sessionId,
+        ...(context.contextScopeId === undefined
+          ? {}
+          : { parentContextScopeId: context.contextScopeId }),
         prompt: getRequiredNonEmptyStringParam(params, "prompt"),
         role: subagentId === undefined ? subagentRoleParam(params) : undefined,
         signal: context.signal,

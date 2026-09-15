@@ -105,14 +105,18 @@ function createMessageManager(): {
         messageId,
         orderIndex: 0,
         sessionId: "primary_1",
-        text: input.type === "tool" ? "" : input.text,
-        type: input.type === "tool" ? "text" : input.type,
+        text:
+          input.type === "text" || input.type === "reasoning" ? input.text : "",
+        type: input.type === "reasoning" ? "reasoning" : "text",
       }),
   );
   return {
     appendPart,
     createMessage,
     manager: {
+      commitModelStep: vi.fn<MessageManager["commitModelStep"]>(() =>
+        Promise.reject(new Error("Native steps are not used by this fixture")),
+      ),
       appendPart,
       appendModelContextPart: vi.fn<MessageManager["appendModelContextPart"]>(
         (messageId, text) =>
@@ -203,6 +207,55 @@ function createToolScheduler(): Pick<
 }
 
 describe("AgentService", () => {
+  it("freezes field-wise backend overrides before startup awaits and reads fresh defaults next run", async () => {
+    const runs = createRunCoordinator();
+    const modelReasoning = { enabled: false, effort: "high" };
+    const service = new AgentService({
+      agentManager: await createAgentManager(),
+      getReasoning: (): typeof modelReasoning => modelReasoning,
+      instanceFactory: createAgentInstanceFactory({
+        deps: {
+          messageManager: createMessageManager().manager,
+          runCoordinator: runs.coordinator,
+          runEventSource: {
+            subscribeRunEvents: async function* () {
+              await Promise.resolve();
+              yield* [];
+            },
+          },
+          toolScheduler: createToolScheduler(),
+        },
+      }),
+      modelId: "fake-model",
+      sessionManager: createSessionManager(),
+    });
+    const first = service.startSession({
+      agentName: "build",
+      prompt: "first",
+      projectRoot: "D:/repo",
+      sessionId: "primary_1",
+      reasoning: { effort: "low" },
+    });
+    modelReasoning.enabled = true;
+    modelReasoning.effort = "medium";
+    await first;
+    expect(runs.create.mock.calls[0][0]).toMatchObject({
+      reasoning: {
+        enabled: false,
+        effort: "low",
+        explicit: { enabled: true, effort: true },
+      },
+    });
+    await service.startSession({
+      agentName: "build",
+      prompt: "next",
+      projectRoot: "D:/repo",
+      sessionId: "primary_1",
+    });
+    expect(runs.create.mock.calls[1][0]).toMatchObject({
+      reasoning: { enabled: true, effort: "medium" },
+    });
+  });
   it("starts a primary session through core runAgent stream mode", async () => {
     const messages = createMessageManager();
     const runs = createRunCoordinator();

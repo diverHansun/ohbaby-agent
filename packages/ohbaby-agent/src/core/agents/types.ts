@@ -1,3 +1,5 @@
+import type { ReasoningConfig } from "../../config/llm/types.js";
+import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type { LifecycleEvent } from "../lifecycle/index.js";
 import type { ModelToolDefinition } from "../llm-client/index.js";
 import type { MessageManager } from "../message/index.js";
@@ -21,6 +23,7 @@ export interface AgentToolCallSummary {
 }
 
 export interface AgentRunInput {
+  readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly sessionId: string;
   readonly contextScope?: AgentContextScope;
   readonly agentInstanceId?: string;
@@ -71,6 +74,7 @@ export interface AgentRunEventSource {
 }
 
 export interface AgentRunCreateOptions {
+  readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly runId?: string;
   readonly sessionId: string;
   readonly agentInstanceId?: string;
@@ -154,6 +158,7 @@ export interface AgentContextScope {
 }
 
 export interface AgentTurnInput {
+  readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly initialUserMessageId?: string;
   readonly prompt: string;
   readonly waitMode: AgentWaitMode;

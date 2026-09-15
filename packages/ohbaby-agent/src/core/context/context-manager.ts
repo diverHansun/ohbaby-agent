@@ -1,3 +1,5 @@
+import { hasNativeDependencies } from "./native-context.js";
+import { estimateHistoryForCompaction } from "./compaction-policy.js";
 import { randomUUID } from "node:crypto";
 import {
   COMPRESSION_PRESERVE_RATIO,
@@ -110,6 +112,7 @@ type CommittableSummaryCandidate = Extract<
 >;
 
 interface CompactionRequest {
+  readonly reasoning?: PrepareTurnInput["reasoning"];
   readonly tailDirectives?: readonly ModelMessage[];
   readonly assembled: AssembledContext;
   readonly bypassThrashLock: boolean;
@@ -439,6 +442,7 @@ export function createContextManager(
     const messages = serializeForLlm({
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       history: input.context.history,
+      modelOrigin: input.context.modelOrigin,
       isSubagent: input.isSubagent,
       memory: input.context.memory,
       systemPrompt: input.context.systemPrompt,
@@ -518,6 +522,7 @@ export function createContextManager(
 
   function assembleFromRawHistory(input: {
     readonly assembledAt: number;
+    readonly modelOrigin?: AssembledContext["modelOrigin"];
     readonly isSubagent: boolean;
     readonly memory: MergedMemory;
     readonly rawHistory: readonly MessageWithParts[];
@@ -529,6 +534,7 @@ export function createContextManager(
 
     return {
       systemPrompt: input.systemPrompt,
+      modelOrigin: input.modelOrigin,
       memory: input.memory,
       history,
       hasSummary: input.rawHistory.some(isSummaryMessage),
@@ -637,6 +643,7 @@ export function createContextManager(
       }),
     ]);
     return assembleFromRawHistory({
+      modelOrigin: input.modelOrigin,
       assembledAt: now(),
       contextScopeId: input.contextScopeId,
       memory,
@@ -720,6 +727,7 @@ export function createContextManager(
     const candidates: { readonly part: Part; readonly tokens: number }[] = [];
 
     for (const message of history) {
+      if (hasNativeDependencies(message)) continue;
       for (const part of message.parts) {
         const output = getCompletedToolOutput(part);
         if (output !== undefined) {
@@ -794,13 +802,17 @@ export function createContextManager(
     },
     rawHistory: readonly MessageWithParts[],
     signal?: AbortSignal,
+    modelOrigin?: AssembledContext["modelOrigin"],
+    reasoning?: PrepareTurnInput["reasoning"],
+    modelId?: string,
   ): Promise<SummaryCandidate> {
     const activeHistory = getActiveHistory(rawHistory).filter(
       (message) => !isSummaryMessage(message),
     );
-    const activeTokens = tokenCount(
+    const activeTokens = estimateHistoryForCompaction(
+      activeHistory,
       options.tokenCounter,
-      serializeHistory(activeHistory),
+      modelOrigin,
     );
     if (activeHistory.length <= 2) {
       return {
@@ -815,11 +827,13 @@ export function createContextManager(
     const historyToCompress = getHistoryToCompress({
       history: activeHistory,
       preserveRatio: compressionPreserveRatio,
+      modelOrigin,
       tokenCounter: options.tokenCounter,
     });
-    const originalTokens = tokenCount(
+    const originalTokens = estimateHistoryForCompaction(
+      historyToCompress,
       options.tokenCounter,
-      serializeHistory(historyToCompress),
+      modelOrigin,
     );
     if (historyToCompress.length === 0 || originalTokens === 0) {
       return {
@@ -852,12 +866,23 @@ export function createContextManager(
         });
         try {
           snapshot = await options.llmClient.generateSummary({
+            modelId,
             ...scopedEventIdentity(identity.sessionId, identity.contextScopeId),
             prompt,
             systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
             history: summaryHistory,
+            ...(reasoning === undefined ? {} : { reasoning }),
             ...(signal === undefined ? {} : { signal }),
           });
+          if (snapshot.trim() === "")
+            return {
+              status: "failed",
+              originalTokens,
+              newTokens: originalTokens,
+              savedTokens: 0,
+              error:
+                "Summary response was empty; original history remains active",
+            };
           generatedForPrompt = true;
           break;
         } catch (error) {
@@ -1018,6 +1043,7 @@ export function createContextManager(
     ];
 
     return assembleFromRawHistory({
+      modelOrigin: input.assembled.modelOrigin,
       assembledAt: input.assembled.assembledAt,
       isSubagent: input.assembled.isSubagent,
       memory: input.assembled.memory,
@@ -1118,6 +1144,7 @@ export function createContextManager(
       { contextScopeId: req.contextScopeId },
     );
     const context = assembleFromRawHistory({
+      modelOrigin: req.assembled.modelOrigin,
       assembledAt: now(),
       contextScopeId: req.contextScopeId,
       isSubagent: req.isSubagent,
@@ -1218,6 +1245,7 @@ export function createContextManager(
       pruneOutcome.compactedAt,
     );
     const afterPrune = assembleFromRawHistory({
+      modelOrigin: req.assembled.modelOrigin,
       assembledAt: now(),
       isSubagent: req.isSubagent,
       memory: req.assembled.memory,
@@ -1258,6 +1286,9 @@ export function createContextManager(
       },
       afterPrune.history,
       req.signal,
+      afterPrune.modelOrigin,
+      req.reasoning,
+      req.modelId,
     );
     req.signal?.throwIfAborted();
     if (candidate.status !== "candidate") {
@@ -1386,6 +1417,7 @@ export function createContextManager(
       { contextScopeId: req.contextScopeId },
     );
     const committedContext = assembleFromRawHistory({
+      modelOrigin: req.assembled.modelOrigin,
       assembledAt: now(),
       isSubagent: req.isSubagent,
       memory: req.assembled.memory,
@@ -1478,6 +1510,7 @@ export function createContextManager(
     const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(sessionId, input.directory, {
       agentName: input.agentName,
+      modelOrigin: input.modelOrigin,
       contextScopeId: input.contextScopeId,
       isSubagent,
       toolNames: input.toolNames,
@@ -1489,6 +1522,7 @@ export function createContextManager(
       tools: input.tools,
     }).usage;
     const outcome = await runCompaction({
+      reasoning: input.reasoning,
       assembled,
       bypassThrashLock: true,
       countTurnCompaction: false,
@@ -1511,6 +1545,7 @@ export function createContextManager(
     const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(input.sessionId, input.directory, {
       agentName: input.agentName,
+      modelOrigin: input.modelOrigin,
       contextScopeId: input.contextScopeId,
       isSubagent,
       promptSnapshot: input.promptSnapshot,
@@ -1543,6 +1578,7 @@ export function createContextManager(
             tools: input.tools,
           }).usage;
     const outcome = await runCompaction({
+      reasoning: input.reasoning,
       tailDirectives: input.tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       assembled,
@@ -1632,22 +1668,36 @@ export function createContextManager(
     sessionId: string,
     input: CompactOptions,
   ): Promise<CompactResult> {
+    const snapshot = {
+      ...input,
+      reasoning:
+        input.reasoning === undefined
+          ? undefined
+          : deepFreeze(structuredClone(input.reasoning)),
+    };
     return mutationLane.run(
       scopedSessionKey({
         contextScopeId: input.contextScopeId,
         sessionId,
       }),
-      () => compactUnlocked(sessionId, input),
+      () => compactUnlocked(sessionId, snapshot),
     );
   }
 
   function prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn> {
+    const snapshot = {
+      ...input,
+      reasoning:
+        input.reasoning === undefined
+          ? undefined
+          : deepFreeze(structuredClone(input.reasoning)),
+    };
     return mutationLane.run(
       scopedSessionKey({
         contextScopeId: input.contextScopeId,
         sessionId: input.sessionId,
       }),
-      () => prepareTurnUnlocked(input),
+      () => prepareTurnUnlocked(snapshot),
     );
   }
 

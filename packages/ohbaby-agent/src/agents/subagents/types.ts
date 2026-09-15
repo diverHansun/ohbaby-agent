@@ -51,6 +51,8 @@ export interface SubagentLookupInput {
 export type SubagentRunMode = "foreground" | "background";
 
 export interface SubagentRunInput {
+  /** Internal invoking scope, supplied by tool execution context. */
+  readonly parentContextScopeId?: string;
   readonly parentSessionId: string;
   readonly prompt: string;
   readonly mode: SubagentRunMode;

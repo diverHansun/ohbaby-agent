@@ -201,6 +201,17 @@ function createSequentialFakeLLMClient(
       },
     },
     config: {
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       provider: "fake",
       model: "fake-model",
       baseUrl: "https://example.invalid/v1",

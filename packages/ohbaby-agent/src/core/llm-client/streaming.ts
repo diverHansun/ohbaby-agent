@@ -33,7 +33,18 @@ import {
   retryReason,
   type ProviderRetryPolicy,
 } from "./retry.js";
-import { ToolCallParseError } from "./errors.js";
+import { ToolCallParseError, isContextOverflowError } from "./errors.js";
+import {
+  ModelStateSchema,
+  NativeOutputSchema,
+  validateNativeProjection,
+  type NativeOutput,
+} from "../../services/interface-providers/native-state.js";
+import {
+  resolveRequestReasoning,
+  type ReasoningIntent,
+} from "../../services/interface-providers/reasoning.js";
+import type { ReasoningConfig } from "../../config/llm/types.js";
 import { resolvePromptCacheRequest } from "./prompt-cache.js";
 import type {
   ModelToolDefinition,
@@ -92,8 +103,7 @@ function buildCompleteMessage(
   }
 
   return {
-    content:
-      accumulatedContent === "" ? "(Empty response)" : accumulatedContent,
+    content: accumulatedContent === "" ? null : accumulatedContent,
   };
 }
 
@@ -258,6 +268,7 @@ export async function* streamResponse(
     purpose?: LLMRequestPurpose;
     sessionId?: string;
     contextScopeId?: string;
+    reasoning?: ReasoningConfig | ReasoningIntent;
   },
 ): AsyncGenerator<StreamingResponse, void, unknown> {
   const { provider, config } = llmClient;
@@ -273,6 +284,15 @@ export async function* streamResponse(
   const retryPolicy = resolveProviderRetryPolicy(retry);
   const requestMaxTokens =
     validateRequestMaxTokens(maxTokens) ?? config.maxTokens;
+  const snapshot = options?.reasoning;
+  const reasoning = resolveRequestReasoning({
+    ...config,
+    maxTokens: requestMaxTokens,
+    ...(snapshot && "explicit" in snapshot
+      ? { reasoning: snapshot }
+      : { override: snapshot }),
+    purpose,
+  });
   const promptCache = resolvePromptCacheRequest({
     baseUrl: config.baseUrl,
     interfaceProvider: config.interfaceProvider,
@@ -296,12 +316,15 @@ export async function* streamResponse(
     let finishReason: ModelFinishReason | null = null;
     let rawFinishReason: string | undefined;
     let tokenUsage: TokenUsage | null = null;
+    let nativeOutput: NativeOutput | undefined;
+    let reasoningTokens: number | undefined;
 
     try {
       const stream = await provider.streamResponse({
         model: config.model,
         messages,
         temperature: config.temperature,
+        reasoning,
         maxTokens: requestMaxTokens,
         tools,
         signal,
@@ -312,9 +335,14 @@ export async function* streamResponse(
       });
 
       let emittedAnyResponse = false;
+      let lastYieldedUsage: TokenUsage | null = null;
       // Stream each normalized event from the provider
       for await (const event of stream) {
         const finish = event.finishReason;
+        if (event.nativeOutput !== undefined)
+          nativeOutput = NativeOutputSchema.parse(event.nativeOutput);
+        if (event.reasoningTokens !== undefined)
+          reasoningTokens = event.reasoningTokens;
 
         // Update finish reason when stream ends
         if (finish) {
@@ -386,17 +414,11 @@ export async function* streamResponse(
           accumulatedToolCalls,
         );
 
-        // Parse tool calls only when stream is complete
-        let parsedToolCalls: ParsedToolCall[] | undefined;
-        if (finishReason && accumulatedToolCalls.size > 0) {
-          parsedToolCalls = parseToolCalls(accumulatedToolCalls);
-        }
-
-        // Yield response with accumulated data
         emittedAnyResponse = true;
+        lastYieldedUsage = tokenUsage;
+        // Parsing and replay publication require successful stream exhaustion.
         yield {
           messageSnapshot,
-          parsedToolCalls,
           isComplete: finishReason !== null,
           finishReason: finishReason ?? undefined,
           reasoningText:
@@ -409,21 +431,83 @@ export async function* streamResponse(
             tokenUsage === null ? undefined : toStreamingTokenUsage(tokenUsage),
         };
       }
-      if (!emittedAnyResponse) {
-        yield {
-          messageSnapshot: buildCompleteMessage(
-            accumulatedContent,
-            accumulatedToolCalls,
-          ),
-          isComplete: true,
-          reasoningText:
-            accumulatedReasoning === "" ? undefined : accumulatedReasoning,
+      if (emittedAnyResponse && finishReason === null) return;
+      if (signal?.aborted) {
+        yield buildAbortResponse({
+          accumulatedContent,
+          accumulatedReasoning,
+          accumulatedToolCalls,
           rawFinishReason,
-          streamStopReason: "provider_finished",
-          tokenUsage:
-            tokenUsage === null ? undefined : toStreamingTokenUsage(tokenUsage),
-        };
+          tokenUsage,
+        });
+        return;
       }
+      if (
+        emittedAnyResponse &&
+        (finishReason === null ||
+          (!nativeOutput &&
+            accumulatedToolCalls.size === 0 &&
+            lastYieldedUsage === tokenUsage))
+      )
+        return;
+      const parsedToolCalls =
+        finishReason !== "length" &&
+        finishReason !== "content_filter" &&
+        accumulatedToolCalls.size > 0
+          ? parseToolCalls(accumulatedToolCalls)
+          : undefined;
+      const messageSnapshot = buildCompleteMessage(
+        accumulatedContent,
+        accumulatedToolCalls,
+      );
+      const modelState =
+        nativeOutput &&
+        finishReason &&
+        finishReason !== "length" &&
+        finishReason !== "content_filter"
+          ? ModelStateSchema.parse({
+              version: 1,
+              origin: {
+                provider: config.provider,
+                model: config.model,
+                protocol: config.interfaceProvider,
+                endpoint: config.baseUrl,
+              },
+              output: nativeOutput,
+              estimate:
+                reasoningTokens !== undefined
+                  ? { tokens: reasoningTokens, source: "reasoning" }
+                  : tokenUsage !== null
+                    ? { tokens: tokenUsage.outputTokens, source: "output" }
+                    : { tokens: requestMaxTokens, source: "limit" },
+            })
+          : undefined;
+      if (modelState) {
+        validateNativeProjection(
+          {
+            role: "assistant",
+            content: accumulatedContent || null,
+            toolCalls: parsedToolCalls?.map((call) => ({
+              callId: call.callId,
+              name: call.name,
+              argumentsJson: JSON.stringify(call.arguments),
+            })),
+          },
+          modelState.output,
+        );
+      }
+      yield {
+        messageSnapshot,
+        parsedToolCalls,
+        modelState,
+        isComplete: true,
+        finishReason: finishReason ?? undefined,
+        reasoningText: accumulatedReasoning || undefined,
+        rawFinishReason,
+        streamStopReason: "provider_finished",
+        tokenUsage:
+          tokenUsage === null ? undefined : toStreamingTokenUsage(tokenUsage),
+      };
       return;
     } catch (error) {
       // Malformed tool arguments are a model output defect; surface them
@@ -449,6 +533,11 @@ export async function* streamResponse(
 
         return;
       }
+
+      // Lifecycle owns the single forced-compaction retry, including an
+      // overflowing attempt that emitted a provisional completion already.
+      // Do not turn that explicit provider error into a transport failure.
+      if (isContextOverflowError(error)) throw error;
 
       if (
         accumulatedContent !== "" ||

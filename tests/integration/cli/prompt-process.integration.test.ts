@@ -95,6 +95,17 @@ async function writeModelConfig(input: {
           baseUrl: input.baseUrl,
         },
         defaultModel: "fake-model",
+        models: [
+          {
+            model: "fake-model",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "none",
+              wire: "none",
+              supportsDisabled: true,
+            },
+          },
+        ],
         llmParams: {
           maxTokens: 128,
           temperature: 0,

@@ -1,3 +1,4 @@
+import { mergeReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type { UiNotice } from "ohbaby-sdk";
 import type {
   CompactResult,
@@ -82,11 +83,22 @@ export function createContextSummaryClient(
 ): ContextLLMClient {
   return {
     async generateSummary(input): Promise<string> {
+      const requestClient =
+        input.modelId === undefined
+          ? llmClient
+          : {
+              ...llmClient,
+              config: { ...llmClient.config, model: input.modelId },
+            };
+      const reasoning =
+        input.reasoning === undefined
+          ? undefined
+          : mergeReasoningIntent(input.reasoning);
       for (let attempt = 0; attempt < 2; attempt += 1) {
         throwIfSummaryAborted(input.signal);
         let summary = "";
         for await (const response of streamResponse(
-          llmClient,
+          requestClient,
           [
             { role: "system", content: input.systemPrompt ?? input.prompt },
             {
@@ -101,6 +113,7 @@ export function createContextSummaryClient(
           ],
           {
             purpose: "context-summary",
+            ...(reasoning === undefined ? {} : { reasoning }),
             sessionId: input.sessionId,
             ...(input.contextScopeId === undefined
               ? {}

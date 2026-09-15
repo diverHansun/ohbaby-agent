@@ -421,7 +421,7 @@ describe("LLM Client Integration Tests", () => {
       }
 
       const lastResponse = responses[responses.length - 1];
-      expect(lastResponse.messageSnapshot.content).toBe("(Empty response)");
+      expect(lastResponse.messageSnapshot.content).toBeNull();
     });
 
     it("should yield provider reasoning deltas without exposing them as assistant text", async () => {
@@ -449,12 +449,12 @@ describe("LLM Client Integration Tests", () => {
         })),
       ).toEqual([
         {
-          content: "(Empty response)",
+          content: null,
           reasoningText: "think ",
           reasoningTextDelta: "think ",
         },
         {
-          content: "(Empty response)",
+          content: null,
           reasoningText: "think more",
           reasoningTextDelta: "more",
         },
@@ -473,6 +473,17 @@ describe("LLM Client Integration Tests", () => {
 
     it("should use configuration from client instance", async () => {
       mockClient.config.model = "gpt-4-turbo";
+      mockClient.config.modelProfiles = [
+        {
+          model: "gpt-4-turbo",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ];
       mockClient.config.temperature = 1.0;
       mockClient.config.maxTokens = 128000;
 
@@ -822,7 +833,7 @@ describe("LLM Client Integration Tests", () => {
 
       expect(responses).toHaveLength(1);
       expect(responses[0]).toMatchObject({
-        messageSnapshot: { content: "(Empty response)" },
+        messageSnapshot: { content: null },
         isComplete: true,
         streamStopReason: "provider_finished",
       });

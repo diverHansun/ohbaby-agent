@@ -130,6 +130,7 @@ function partToUiParts(part: Part): UiMessagePart[] {
   if (isModelContextPart(part)) {
     return [];
   }
+  if (part.type === "model-state") return [];
   if (part.type === "text") {
     return [{ text: part.text, type: "text" }];
   }

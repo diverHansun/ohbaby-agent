@@ -1,3 +1,10 @@
+import type { ModelOrigin } from "../../services/interface-providers/native-state.js";
+import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
+import { serializeHistoryMessages } from "./serializer.js";
+import {
+  hasNativeDependencies,
+  hasUnfinishedNativeDependencies,
+} from "./native-context.js";
 import {
   DEFAULT_COMPACTION_THRESHOLDS,
   KEEP_RECENT_TOKENS,
@@ -12,6 +19,23 @@ function tokenCount(
   content: string,
 ): number {
   return Math.max(0, tokenCounter.estimateTokens(content));
+}
+
+/** Keep legacy estimates unchanged unless this history carries native replay data. */
+export function estimateHistoryForCompaction(
+  history: readonly MessageWithParts[],
+  tokenCounter: Pick<TokenCounter, "estimateTokens">,
+  modelOrigin?: ModelOrigin,
+): number {
+  if (!history.some(hasNativeDependencies))
+    return tokenCount(tokenCounter, serializeHistory(history));
+  return estimatePreparedRequestHeuristic(
+    {
+      messages: serializeHistoryMessages(history, undefined, modelOrigin),
+      tools: undefined,
+    },
+    tokenCounter,
+  );
 }
 
 export function getContextUsage(
@@ -100,6 +124,7 @@ export interface ContextCutPoint {
 export function findCutPoint(input: {
   readonly history: readonly MessageWithParts[];
   readonly keepRecentTokens: number;
+  readonly modelOrigin?: ModelOrigin;
   readonly tokenCounter: Pick<TokenCounter, "estimateTokens">;
 }): ContextCutPoint {
   const { history } = input;
@@ -112,7 +137,11 @@ export function findCutPoint(input: {
     };
   }
 
-  const fullTokens = tokenCount(input.tokenCounter, serializeHistory(history));
+  const fullTokens = estimateHistoryForCompaction(
+    history,
+    input.tokenCounter,
+    input.modelOrigin,
+  );
   if (fullTokens <= input.keepRecentTokens) {
     return {
       firstKeptIndex: 0,
@@ -125,10 +154,13 @@ export function findCutPoint(input: {
   let firstKeptIndex = history.length;
   let keptTokens = 0;
   for (let index = history.length - 1; index >= 0; index -= 1) {
-    const messageTokens = tokenCount(
-      input.tokenCounter,
-      serializeMessage(history[index]),
-    );
+    const messageTokens = hasNativeDependencies(history[index])
+      ? estimateHistoryForCompaction(
+          [history[index]],
+          input.tokenCounter,
+          input.modelOrigin,
+        )
+      : tokenCount(input.tokenCounter, serializeMessage(history[index]));
     if (
       firstKeptIndex !== history.length &&
       keptTokens + messageTokens > input.keepRecentTokens
@@ -154,6 +186,10 @@ export function findCutPoint(input: {
     firstKeptIndex += 1;
   }
 
+  const unfinishedIndex = history.findIndex(hasUnfinishedNativeDependencies);
+  if (unfinishedIndex >= 0)
+    firstKeptIndex = Math.min(firstKeptIndex, unfinishedIndex);
+
   const turnPrefixMessages =
     firstKeptIndex > 0 &&
     history[firstKeptIndex]?.info.role === "assistant" &&
@@ -173,11 +209,13 @@ export function findCutPoint(input: {
 export function getHistoryToCompress(input: {
   readonly history: readonly MessageWithParts[];
   readonly preserveRatio: number;
+  readonly modelOrigin?: ModelOrigin;
   readonly tokenCounter: TokenCounter;
 }): readonly MessageWithParts[] {
-  const fullTokens = tokenCount(
+  const fullTokens = estimateHistoryForCompaction(
+    input.history,
     input.tokenCounter,
-    serializeHistory(input.history),
+    input.modelOrigin,
   );
   const preserveTarget = Math.max(
     1,
@@ -185,6 +223,7 @@ export function getHistoryToCompress(input: {
   );
   const cut = findCutPoint({
     history: input.history,
+    modelOrigin: input.modelOrigin,
     keepRecentTokens:
       fullTokens <= KEEP_RECENT_TOKENS ? preserveTarget : KEEP_RECENT_TOKENS,
     tokenCounter: input.tokenCounter,

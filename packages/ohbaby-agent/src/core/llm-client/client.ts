@@ -89,6 +89,7 @@ export async function createLLMClient(
       baseUrl: config.baseUrl,
       interfaceProvider: config.interfaceProvider,
       promptCache: config.promptCache,
+      reasoning: config.reasoning,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
       ...(config.contextWindowTokens === undefined

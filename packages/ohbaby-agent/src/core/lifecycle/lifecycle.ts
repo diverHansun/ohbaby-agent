@@ -39,6 +39,8 @@ import type {
   LifecycleSessionParams,
   TurnContext,
 } from "./types.js";
+import { mergeReasoningIntent } from "../../services/interface-providers/reasoning.js";
+import type { ModelState } from "../../services/interface-providers/native-state.js";
 import { aggregateTokenUsage } from "./token-usage.js";
 
 export const DEFAULT_MAX_STEPS = 1000;
@@ -55,6 +57,8 @@ interface ResolvedToolCall {
 }
 
 interface StepResult {
+  readonly modelState?: ModelState;
+  readonly textPartId?: string;
   readonly assistantMessage?: CoreMessage;
   readonly finalEvent?: Extract<
     LifecycleEvent,
@@ -65,6 +69,8 @@ interface StepResult {
 }
 
 interface ModelStepParams {
+  readonly modelId: string;
+  readonly reasoning?: LifecycleSessionParams["reasoning"];
   readonly sessionId: string;
   readonly contextScopeId?: string;
   readonly agent?: string;
@@ -296,6 +302,16 @@ export class Lifecycle {
     params: LifecycleSessionParams,
     config: LifecycleConfig = {},
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    params = {
+      ...params,
+      reasoning:
+        params.reasoning && "explicit" in params.reasoning
+          ? mergeReasoningIntent(params.reasoning)
+          : mergeReasoningIntent(
+              this.deps.llmClient.config.reasoning,
+              params.reasoning,
+            ),
+    };
     const contextManager = this.deps.contextManager;
     if (params.contextScopeId === undefined) {
       contextManager.resetTurnCompactionCount(params.sessionId);
@@ -368,6 +384,7 @@ export class Lifecycle {
         ? [buildMaxStepsFinalizationMessage()]
         : undefined;
       let prepared = yield* this.prepareTurnWithProgress({
+        reasoning: mergeReasoningIntent(params.reasoning),
         ...(tailDirectives === undefined ? {} : { tailDirectives }),
         ...(activeReasoningByMessageId.size === 0
           ? {}
@@ -418,6 +435,8 @@ export class Lifecycle {
       });
 
       const runParams: ModelStepParams = {
+        modelId: params.modelId,
+        reasoning: params.reasoning,
         agent: params.agent,
         contextScopeId: params.contextScopeId,
         environment: params.environment,
@@ -462,6 +481,7 @@ export class Lifecycle {
         }
 
         prepared = yield* this.prepareTurnWithProgress({
+          reasoning: mergeReasoningIntent(params.reasoning),
           ...(tailDirectives === undefined ? {} : { tailDirectives }),
           ...(activeReasoningByMessageId.size === 0
             ? {}
@@ -694,6 +714,51 @@ export class Lifecycle {
         };
       }
 
+      let committedToolParts: Map<string, ToolPart> | undefined;
+      if (stepResult.modelState && assistantMessage?.role === "assistant") {
+        try {
+          const committed = await this.deps.messageManager.commitModelStep({
+            assistantMessageId: assistantMessage.id,
+            textPartId: stepResult.textPartId,
+            text: finalResponse,
+            modelState: stepResult.modelState,
+            tools: parsedToolCalls.map((call) => ({
+              ...call,
+              argumentsJson: JSON.stringify(call.arguments),
+            })),
+            tokenUsage: finalEvent.tokenUsage,
+            finishReason: finalEvent.finishReason ?? "stop",
+            completedAt: Date.now(),
+          });
+          committedToolParts = new Map(
+            committed.toolParts.map((part) => [part.callId, part]),
+          );
+        } catch (error) {
+          await markAssistantMessageError(
+            this.deps.messageManager,
+            assistantMessage,
+            error,
+          );
+          yield this.createTurnEndEvent({
+            contextScopeId: params.contextScopeId,
+            finalResponse: "Model response could not be saved",
+            finishReason: "error",
+            prepared,
+            sessionId: params.sessionId,
+            step,
+          });
+          return {
+            success: false,
+            finishReason: "error",
+            finalResponse: "Model response could not be saved",
+            terminalReason: "model_state_persistence_failure",
+            failureCause: error,
+            usage,
+            toolCalls: allToolCalls.length ? allToolCalls : undefined,
+          };
+        }
+      }
+
       if (!shouldExecuteTools || parsedToolCalls.length === 0) {
         if (shouldExecuteTools && parsedToolCalls.length === 0) {
           await markAssistantMessageError(
@@ -747,11 +812,13 @@ export class Lifecycle {
       // metadata is the fallback for tool-only completions.
       const tokenUsageForToolPart =
         finalResponse === "" ? finalEvent.tokenUsage : undefined;
-      const toolParts = await this.appendToolParts(
-        assistantMessage,
-        toolCalls,
-        tokenUsageForToolPart,
-      );
+      const toolParts =
+        committedToolParts ??
+        (await this.appendToolParts(
+          assistantMessage,
+          toolCalls,
+          tokenUsageForToolPart,
+        ));
 
       for (const toolCall of toolCalls) {
         await config.beforeToolCall?.({
@@ -881,6 +948,10 @@ export class Lifecycle {
     readonly step: number;
   }): AsyncGenerator<LifecycleEvent, StepResult, void> {
     const { params, step } = input;
+    const requestClient = {
+      ...this.deps.llmClient,
+      config: { ...this.deps.llmClient.config, model: params.modelId },
+    };
     // Model-produced completions always carry a snapshot; only the public
     // observation projection may lack the response body.
     let finalEvent:
@@ -892,6 +963,7 @@ export class Lifecycle {
     let previousReasoning = "";
     let reasoningEnded = false;
     let assistantTextPart: Part | undefined;
+    let modelState: ModelState | undefined;
 
     yield {
       type: "llm:start",
@@ -909,14 +981,17 @@ export class Lifecycle {
       role: "assistant",
       agent: params.agent ?? "default",
       parentId: input.parentMessageId,
+      providerId: this.deps.llmClient.config.provider,
+      modelId: params.modelId,
     });
 
     try {
       for await (const response of streamResponse(
-        this.deps.llmClient,
+        requestClient,
         [...input.request.messages],
         {
           purpose: "agent-step",
+          reasoning: mergeReasoningIntent(params.reasoning),
           sessionId: params.sessionId,
           ...(params.contextScopeId === undefined
             ? {}
@@ -925,6 +1000,7 @@ export class Lifecycle {
           tools: input.request.tools,
         },
       )) {
+        if (response.modelState) modelState = response.modelState;
         if (response.retry) {
           yield {
             type: "llm:retrying",
@@ -955,13 +1031,7 @@ export class Lifecycle {
             timestamp: Date.now(),
           };
         }
-        const responseContent = getTextContent(response.messageSnapshot);
-        const content =
-          previousReasoning !== "" &&
-          previousContent === "" &&
-          responseContent === "(Empty response)"
-            ? ""
-            : responseContent;
+        const content = getTextContent(response.messageSnapshot);
 
         if (content !== "") {
           if (previousReasoning !== "" && !reasoningEnded) {
@@ -1057,7 +1127,7 @@ export class Lifecycle {
       throw error;
     }
 
-    if (finalEvent) {
+    if (finalEvent && modelState === undefined) {
       await this.deps.messageManager.updateMessage(assistantMessage.id, {
         finish: finalEvent.finishReason,
         time: {
@@ -1080,9 +1150,12 @@ export class Lifecycle {
 
     return {
       assistantMessage,
+      modelState,
+      textPartId: assistantTextPart?.id,
       finalEvent,
       finalResponse: finalEvent
-        ? previousReasoning !== "" && previousContent === ""
+        ? (previousReasoning !== "" || modelState !== undefined) &&
+          previousContent === ""
           ? ""
           : getTextContent(finalEvent.messageSnapshot)
         : "",
@@ -1154,6 +1227,12 @@ export class Lifecycle {
     });
     const prepared = this.deps.contextManager.prepareTurn({
       ...prepareInput,
+      modelOrigin: {
+        provider: this.deps.llmClient.config.provider,
+        model: input.modelId,
+        protocol: this.deps.llmClient.config.interfaceProvider,
+        endpoint: this.deps.llmClient.config.baseUrl,
+      },
       onCompactionStarted: notifyCompactionStarted,
     });
     const first = await Promise.race([

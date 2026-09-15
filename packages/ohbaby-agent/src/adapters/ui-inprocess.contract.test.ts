@@ -148,6 +148,17 @@ function createFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: config.model ?? "fake-model",
+          contextWindowTokens: config.contextWindowTokens ?? 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -274,6 +285,17 @@ function createBlockingLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: config.model ?? "fake-model",
+          contextWindowTokens: config.contextWindowTokens ?? 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -400,6 +422,17 @@ function createSequentialFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: config.model ?? "fake-model",
+          contextWindowTokens: config.contextWindowTokens ?? 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -444,6 +477,17 @@ function createInterruptibleGoalLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -669,6 +713,17 @@ function createResumableTaskFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -769,6 +824,17 @@ function createBackgroundSubagentFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -855,6 +921,17 @@ function createAbortableSubagentLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -930,6 +1007,17 @@ function createAbortableBackgroundSubagentLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -1004,6 +1092,17 @@ function createAbortableBackgroundRunTreeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -1071,6 +1170,17 @@ function createCrossContinuationBackgroundLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -1300,6 +1410,17 @@ function createBlockingAfterTodoWritesLLMClient(input: {
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -1358,6 +1479,17 @@ function createControlledSequentialFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -1459,6 +1591,17 @@ function createPauseResumeTodoLLMClient(input: {
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -1623,6 +1766,17 @@ function createRejectingLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -5132,7 +5286,14 @@ describe("createInProcessUiBackendClient", () => {
     const baseClient = createInterruptibleGoalLLMClient([], backgroundStarted);
     const llmClient: LLMClientInstance<FakeSdkClient> = {
       ...baseClient,
-      config: { ...baseClient.config, contextWindowTokens: 1_000 },
+      config: {
+        ...baseClient.config,
+        contextWindowTokens: 1_000,
+        modelProfiles: baseClient.config.modelProfiles?.map((profile) => ({
+          ...profile,
+          contextWindowTokens: 1000,
+        })),
+      },
     };
     const client = createInProcessUiBackendClient({
       bus,

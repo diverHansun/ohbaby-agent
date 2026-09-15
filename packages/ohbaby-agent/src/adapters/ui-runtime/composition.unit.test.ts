@@ -107,6 +107,17 @@ function fakeLlmClient(
       provider: "fake",
       temperature: 0,
       ...config,
+      modelProfiles: config.modelProfiles ?? [
+        {
+          model: config.model ?? "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: config.apiKeyEnv ?? "FAKE_API_KEY",
       interfaceProvider: config.interfaceProvider ?? "openai-compatible",
     },
@@ -151,6 +162,17 @@ function recordingFakeLlmClient(input: {
       provider: "fake",
       temperature: 0,
       ...input.config,
+      modelProfiles: input.config?.modelProfiles ?? [
+        {
+          model: input.config?.model ?? "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: input.config?.apiKeyEnv ?? "FAKE_API_KEY",
       interfaceProvider: input.config?.interfaceProvider ?? "openai-compatible",
     },
@@ -642,6 +664,12 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(toolNames.length).toBeGreaterThan(0);
 
     expect(assemble).toHaveBeenCalledWith("session_1", "D:/repo", {
+      modelOrigin: {
+        provider: "fake",
+        model: "fake-model",
+        protocol: "openai-compatible",
+        endpoint: "https://example.invalid/v1",
+      },
       agentName: "plan",
       isSubagent: false,
       toolNames,
@@ -652,6 +680,17 @@ describe("createUiRuntimeComposition skill tools", () => {
       tools,
     });
     expect(compact).toHaveBeenCalledWith("session_1", {
+      modelOrigin: {
+        provider: "fake",
+        model: "fake-model",
+        protocol: "openai-compatible",
+        endpoint: "https://example.invalid/v1",
+      },
+      reasoning: {
+        enabled: true,
+        effort: "medium",
+        explicit: { enabled: false, effort: false },
+      },
       agentName: "plan",
       directory: "D:/repo",
       force: true,

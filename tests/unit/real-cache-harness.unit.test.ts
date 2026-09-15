@@ -100,6 +100,11 @@ describe("real cache harness preflight", () => {
       }),
     );
     const harness = await createRealCacheHarness({
+      reasoningCapabilities: {
+        mode: "none",
+        wire: "none",
+        supportsDisabled: true,
+      },
       apiKeyEnv: "OHBABY_CACHE_HARNESS_TEST_KEY",
       baseUrl: "https://cache-harness.invalid/v1",
       interfaceProvider: "openai-compatible",

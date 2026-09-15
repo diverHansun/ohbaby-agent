@@ -1,3 +1,7 @@
+import {
+  mergeReasoningIntent,
+  type ReasoningIntent,
+} from "../services/interface-providers/reasoning.js";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AgentInstance,
@@ -39,6 +43,10 @@ const child: Session = {
 
 function createHostFixture(
   options: {
+    readonly getParentReasoning?: (
+      sessionId: string,
+      contextScopeId?: string,
+    ) => ReasoningIntent | undefined;
     readonly existingChild?: Session;
     readonly store?: InMemorySubagentInstanceStore;
   } = {},
@@ -91,6 +99,7 @@ function createHostFixture(
       } satisfies RuntimeAgent),
   );
   const host = new SessionSubagentHost({
+    getParentReasoning: options.getParentReasoning,
     agentManager: { getRuntimeAgent },
     createRunId: (() => {
       let next = 1;
@@ -156,6 +165,100 @@ function flushMicrotasks(): Promise<void> {
 }
 
 describe("SessionSubagentHost", () => {
+  it("uses the configured child model while retaining the parent reasoning intent", async () => {
+    const { host, turn, createInstance, getRuntimeAgent } = createHostFixture({
+      getParentReasoning: () => mergeReasoningIntent({ effort: "high" }),
+    });
+    getRuntimeAgent.mockResolvedValue({
+      config: { name: "explore", mode: "subagent", model: "child-model" },
+      isSubagent: true,
+      tools: {},
+    });
+    await host.run({
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      role: "explore",
+      prompt: "inspect",
+    });
+    expect(createInstance.mock.calls[0][0].modelId).toBe("child-model");
+    expect(turn.mock.calls[0][0].reasoning?.effort).toBe("high");
+    await host.dispose();
+  });
+  it("inherits the invoking parent context instead of another sibling scope", async () => {
+    const getParentReasoning = vi.fn((_sessionId: string, scope?: string) =>
+      mergeReasoningIntent(
+        scope === "sibling-off" ? { enabled: false } : { effort: "high" },
+      ),
+    );
+    const { host, turn } = createHostFixture({ getParentReasoning });
+    await host.run({
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      parentContextScopeId: "sibling-off",
+      role: "explore",
+      prompt: "inspect",
+    });
+    expect(turn.mock.calls[0][0].reasoning?.enabled).toBe(false);
+    expect(getParentReasoning).toHaveBeenCalledWith("parent_1", "sibling-off");
+    await host.dispose();
+  });
+  it("captures parent intent at enqueue and renews it for a reused child task", async () => {
+    let parentReasoning = mergeReasoningIntent({ effort: "high" });
+    const { host, turn } = createHostFixture({
+      getParentReasoning: () => parentReasoning,
+    });
+    let finishFirst: ((result: AgentRunResult) => void) | undefined;
+    turn.mockImplementationOnce(
+      () =>
+        new Promise<AgentRunResult>((resolve) => {
+          finishFirst = resolve;
+        }),
+    );
+    const first = await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      role: "explore",
+      prompt: "first",
+    });
+    await flushMicrotasks();
+    parentReasoning = mergeReasoningIntent({ enabled: false, effort: "high" });
+    await host.run({
+      mode: "background",
+      parentSessionId: "parent_1",
+      subagentId: first.item.subagentId,
+      prompt: "second",
+    });
+    parentReasoning = mergeReasoningIntent({ effort: "low" });
+    finishFirst?.({
+      mode: "waitForCompletion",
+      sessionId: "child_1",
+      success: true,
+      finalOutput: "done",
+    });
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(turn.mock.calls.map(([request]) => request.reasoning)).toEqual([
+      {
+        enabled: true,
+        effort: "high",
+        explicit: { enabled: false, effort: true },
+      },
+      {
+        enabled: false,
+        effort: "high",
+        explicit: { enabled: true, effort: true },
+      },
+    ]);
+    await host.run({
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      subagentId: first.item.subagentId,
+      prompt: "third",
+    });
+    expect(turn.mock.calls[2][0].reasoning?.effort).toBe("low");
+    await host.dispose();
+  });
+
   it("rejects the foreground caller when durable claim persistence fails", async () => {
     const { host, turn } = createHostFixture({
       store: new ClaimFailingStore(),

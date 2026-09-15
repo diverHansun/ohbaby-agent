@@ -805,6 +805,57 @@ function createManagerWithOverrides(input: {
   };
 }
 
+it("freezes accepted run reasoning and isolates sibling context scopes", async () => {
+  const gate = createDeferred();
+  const calls: LifecycleSessionParams[] = [];
+  const lifecycle: RunLifecycle = {
+    async *run(params) {
+      calls.push(params);
+      await gate.promise;
+      yield {
+        type: "llm:start",
+        sessionId: params.sessionId,
+        step: 1,
+        timestamp: 1,
+      };
+      return { success: true, finishReason: "stop", finalResponse: "" };
+    },
+  };
+  const { manager } = createManager(lifecycle);
+  const reasoning = { effort: "high" };
+  const first = await manager.create({
+    directory: "/repo",
+    modelId: "model",
+    sessionId: "siblings",
+    contextScopeId: "one",
+    triggerSource: "user",
+    reasoning,
+  });
+  reasoning.effort = "low";
+  const second = await manager.create({
+    directory: "/repo",
+    modelId: "model",
+    sessionId: "siblings",
+    contextScopeId: "two",
+    triggerSource: "user",
+    reasoning: { enabled: false, effort: "high" },
+  });
+  expect(manager.getActiveReasoning("siblings", "one")).toEqual({
+    enabled: true,
+    effort: "high",
+    explicit: { enabled: false, effort: true },
+  });
+  expect(manager.getActiveReasoning("siblings", "two")?.enabled).toBe(false);
+  expect(manager.getActiveReasoning("siblings")).toBeUndefined();
+  gate.resolve();
+  await Promise.all([
+    manager.waitForCompletion(first.runId),
+    manager.waitForCompletion(second.runId),
+  ]);
+  expect(calls.map((call) => call.reasoning?.effort)).toEqual(["high", "high"]);
+  expect(manager.getActiveReasoning("siblings", "one")).toBeUndefined();
+});
+
 describe("RunManager", () => {
   it("starts a session run without preassembled messages", async () => {
     const lifecycle = new SessionLifecycle();

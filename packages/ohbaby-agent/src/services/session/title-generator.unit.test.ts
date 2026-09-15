@@ -171,6 +171,17 @@ function createFakeLLMClient(
 ): LLMClientInstance<{ readonly kind: "fake" }> {
   return {
     config: {
+      modelProfiles: [
+        {
+          model: "active-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "ACTIVE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",

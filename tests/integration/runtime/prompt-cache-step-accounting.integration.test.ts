@@ -73,6 +73,17 @@ async function fixture(scripts: readonly ProviderScript[]) {
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",

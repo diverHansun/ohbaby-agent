@@ -1,3 +1,4 @@
+import type { ModelState } from "../../services/interface-providers/native-state.js";
 import type { ModelMessage, TokenUsage } from "../llm-client/index.js";
 
 export type MessageRole = "user" | "assistant" | "system";
@@ -132,7 +133,13 @@ export type ToolState =
       readonly metadata?: Record<string, unknown>;
     };
 
-export type Part = TextPart | ReasoningPart | ToolPart;
+export interface ModelStatePart extends PartBase {
+  readonly type: "model-state";
+  readonly modelState: ModelState;
+  readonly metadata?: PartMetadata;
+}
+
+export type Part = TextPart | ReasoningPart | ToolPart | ModelStatePart;
 
 export interface MessageWithParts {
   readonly info: Message;
@@ -176,7 +183,8 @@ export type UpdateMessagePatch = Partial<
 export type CreatePartInput =
   | Omit<TextPart, keyof PartBase>
   | Omit<ReasoningPart, keyof PartBase>
-  | Omit<ToolPart, keyof PartBase>;
+  | Omit<ToolPart, keyof PartBase>
+  | Omit<ModelStatePart, keyof PartBase>;
 
 export interface UpdatePartPatch {
   readonly text?: string;
@@ -231,7 +239,37 @@ export interface StoreCompactionInput {
   readonly updatedAt: number;
 }
 
+export interface CommitModelStepInput {
+  readonly assistantMessageId: string;
+  readonly textPartId?: string;
+  readonly text?: string;
+  readonly modelState: ModelState;
+  readonly tools: readonly {
+    readonly callId: string;
+    readonly name: string;
+    readonly arguments: Record<string, unknown>;
+    readonly argumentsJson: string;
+  }[];
+  readonly tokenUsage?: TokenUsage;
+  readonly finishReason: string;
+  readonly completedAt: number;
+}
+
+export interface CommitModelStepResult {
+  readonly message: AssistantMessage;
+  readonly modelStatePart: ModelStatePart;
+  readonly textPart?: TextPart;
+  readonly toolParts: readonly ToolPart[];
+}
+
+export interface StoreModelStepInput extends CommitModelStepInput {
+  readonly statePartId: string;
+  readonly newTextPartId: string;
+  readonly toolPartIds: readonly string[];
+}
+
 export interface MessageManager {
+  commitModelStep(input: CommitModelStepInput): Promise<CommitModelStepResult>;
   createMessage(input: CreateMessageInput): Promise<Message>;
   updateMessage(messageId: string, patch: UpdateMessagePatch): Promise<Message>;
   appendPart(messageId: string, input: CreatePartInput): Promise<Part>;
@@ -253,6 +291,7 @@ export interface MessageManager {
 }
 
 export interface MessageStore {
+  commitModelStep(input: StoreModelStepInput): Promise<CommitModelStepResult>;
   insertMessage(message: Message): Promise<void>;
   getMessage(messageId: string): Promise<Message | undefined>;
   updateMessage(messageId: string, patch: UpdateMessagePatch): Promise<Message>;

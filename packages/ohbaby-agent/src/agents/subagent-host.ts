@@ -1,3 +1,7 @@
+import {
+  mergeReasoningIntent,
+  type ReasoningIntent,
+} from "../services/interface-providers/reasoning.js";
 import type {
   AgentInstanceFactory,
   AgentRunResult,
@@ -37,6 +41,7 @@ interface ActiveSubagentState {
 }
 
 interface ActiveQueuedSubagentInput extends QueuedSubagentInput {
+  readonly reasoning?: ReasoningIntent;
   readonly completion?: DeferredCompletion;
   readonly environment?: ToolExecutionEnvironment;
   readonly signal?: AbortSignal;
@@ -56,6 +61,10 @@ interface DeferredClaim {
 }
 
 export interface SessionSubagentHostOptions {
+  readonly getParentReasoning?: (
+    sessionId: string,
+    contextScopeId?: string,
+  ) => ReasoningIntent | undefined;
   readonly agentManager: Pick<AgentManager, "getRuntimeAgent">;
   readonly instanceFactory: AgentInstanceFactory;
   readonly modelId: string;
@@ -193,6 +202,14 @@ export class SessionSubagentHost {
     if (this.disposed) {
       throw new Error("Subagent host is disposed");
     }
+    const inheritedReasoning = this.options.getParentReasoning?.(
+      input.parentSessionId,
+      input.parentContextScopeId,
+    );
+    const reasoning =
+      inheritedReasoning === undefined
+        ? undefined
+        : mergeReasoningIntent(inheritedReasoning);
     const timeoutMs = normalizeTimeoutMs(input.timeoutMs);
     const isNew = input.subagentId === undefined;
     const record = isNew
@@ -210,6 +227,7 @@ export class SessionSubagentHost {
         false,
         undefined,
         isNew,
+        reasoning,
       );
       return {
         item: await this.mustGet(record.parentSessionId, record.subagentId),
@@ -225,6 +243,7 @@ export class SessionSubagentHost {
       true,
       input.signal,
       isNew,
+      reasoning,
     );
     return {
       item,
@@ -522,6 +541,7 @@ export class SessionSubagentHost {
     waitForEntry = false,
     signal?: AbortSignal,
     entryAlreadyQueued = false,
+    reasoning?: ReasoningIntent,
   ): Promise<SubagentInstanceRecord> {
     if (this.disposed) {
       await this.markOwnedInterrupted(record.parentSessionId);
@@ -531,6 +551,7 @@ export class SessionSubagentHost {
       ? this.createDeferredCompletion()
       : undefined;
     const entry: ActiveQueuedSubagentInput = {
+      ...(reasoning === undefined ? {} : { reasoning }),
       completion,
       environment,
       prompt,
@@ -908,7 +929,7 @@ export class SessionSubagentHost {
         contextScopeId: record.contextScopeId,
         instanceId: record.subagentId,
         maxSteps: runtimeAgent.config.maxSteps,
-        modelId: this.options.modelId,
+        modelId: runtimeAgent.config.model ?? this.options.modelId,
         parentSessionId: record.parentSessionId,
         projectRoot: session.projectRoot,
         sessionId: record.sessionId,
@@ -918,6 +939,9 @@ export class SessionSubagentHost {
       let turnPromise: Promise<AgentRunResult>;
       try {
         turnPromise = instance.turn({
+          ...(input.reasoning === undefined
+            ? {}
+            : { reasoning: input.reasoning }),
           environment: input.environment,
           prompt: input.prompt,
           runId,
@@ -1141,6 +1165,7 @@ export class SessionSubagentHost {
     input: ActiveQueuedSubagentInput,
   ): QueuedSubagentInput {
     const {
+      reasoning: _reasoning,
       completion: _completion,
       environment,
       signal: _signal,

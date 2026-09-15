@@ -65,6 +65,9 @@ function createMessageManager(
 ): MessageManagerFixture {
   const appendPart = vi.fn<MessageManager["appendPart"]>(
     (messageId, input): Promise<Part> => {
+      if (input.type === "model-state") {
+        throw new Error("Native state is not appended by this runner fixture");
+      }
       if (input.type === "tool") {
         return Promise.resolve({
           callId: input.callId,
@@ -96,6 +99,9 @@ function createMessageManager(
   );
   const removeMessage = vi.fn((): Promise<void> => Promise.resolve());
   const manager: MessageManager = {
+    commitModelStep: vi.fn<MessageManager["commitModelStep"]>(() =>
+      Promise.reject(new Error("Native steps are not used by this fixture")),
+    ),
     appendPart,
     appendModelContextPart: vi.fn<MessageManager["appendModelContextPart"]>(
       (messageId, text) =>

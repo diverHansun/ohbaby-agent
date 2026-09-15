@@ -1,3 +1,4 @@
+import { createPromptCacheUsageTracker } from "../../adapters/ui-inprocess/prompt-cache-usage.js";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import * as llmStreaming from "../llm-client/index.js";
 import type {
@@ -15,6 +16,7 @@ import { DEFAULT_MAX_STEPS, Lifecycle } from "./index.js";
 import {
   ProviderStreamInterruptedError,
   type LLMClientInstance,
+  type TokenUsage,
 } from "../llm-client/index.js";
 import type { ToolSchedulerInstance } from "../tool-scheduler/index.js";
 import type {
@@ -76,6 +78,17 @@ function createSequentialFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -114,6 +127,17 @@ function createFailThenSucceedLLMClient(input: {
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -152,6 +176,17 @@ function createRejectingSequenceLLMClient(input: {
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -196,6 +231,17 @@ function createScriptedFakeLLMClient(
     config: {
       provider: "fake",
       model: "fake-model",
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       interfaceProvider: "openai-compatible",
@@ -527,6 +573,7 @@ describe("Lifecycle.run", () => {
       "context:prepared",
       "llm:start",
       "llm:complete",
+      "llm:complete", // Final parsed tool snapshot after normal stream exhaustion.
       "tool:start",
       "tool:result",
       "step:complete",
@@ -1505,6 +1552,17 @@ describe("Lifecycle.run", () => {
       config: {
         provider: "fake",
         model: "fake-model",
+        modelProfiles: [
+          {
+            model: "fake-model",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "none",
+              wire: "none",
+              supportsDisabled: true,
+            },
+          },
+        ],
         apiKeyEnv: "FAKE_API_KEY",
         baseUrl: "https://example.invalid/v1",
         interfaceProvider: "openai-compatible",
@@ -3126,4 +3184,370 @@ describe("Lifecycle final step usage observer", () => {
       50,
     );
   });
+});
+
+describe("native model acceptance boundary", () => {
+  it.each([false, true])(
+    "commits before tools and preserves accepted usage on store failure=%s",
+    async (failStore) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const manager = createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+        idGenerator: createDeterministicIds(),
+      });
+      const llm = createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                { index: 0, id: "c1", name: "read_file", argumentsDelta: "{}" },
+              ],
+              finishReason: "tool_calls",
+              tokenUsage: {
+                inputTokens: 1000,
+                outputTokens: 20,
+                totalTokens: 1020,
+                inputBreakdown: {
+                  uncached: 400,
+                  cacheRead: 600,
+                  cacheWrite: 0,
+                  observed: { cacheRead: true, cacheWrite: false },
+                },
+              },
+              nativeOutput: {
+                protocol: "anthropic",
+                items: [
+                  { type: "thinking", thinking: "plan", signature: "sig" },
+                  { type: "tool_use", id: "c1", name: "read_file", input: {} },
+                ],
+              },
+            },
+          ],
+        ],
+        requests,
+      );
+      llm.config.interfaceProvider = "anthropic";
+      const tracker = createPromptCacheUsageTracker();
+      const observed = vi.fn(
+        (observation: { tokenUsage: TokenUsage | undefined }) => {
+          tracker.record("session_test", observation.tokenUsage);
+        },
+      );
+      let savedBeforeTools = false;
+      const executeBatch = vi
+        .fn<ToolSchedulerInstance["executeBatch"]>()
+        .mockImplementation(async () => {
+          const messages = await manager.listBySession("session_test");
+          const assistant = messages.find((m) => m.info.role === "assistant");
+          savedBeforeTools =
+            assistant?.info.time.completed !== undefined &&
+            assistant.parts.filter((p) => p.type === "model-state").length ===
+              1 &&
+            assistant.parts.filter((p) => p.type === "tool").length === 1 &&
+            observed.mock.calls.length === 1;
+          expect(assistant?.info.time.completed).toBeDefined();
+          expect(
+            assistant?.parts.filter((p) => p.type === "model-state"),
+          ).toHaveLength(1);
+          expect(
+            assistant?.parts.filter((p) => p.type === "tool"),
+          ).toHaveLength(1);
+          expect(observed).toHaveBeenCalledTimes(1);
+          return [{ callId: "c1", status: "success", output: "ok" }];
+        });
+      if (failStore)
+        vi.spyOn(manager, "commitModelStep").mockRejectedValue(
+          new Error("disk failure"),
+        );
+      const lifecycle = new Lifecycle({
+        llmClient: llm,
+        messageManager: manager,
+        contextManager: createContextManagerMock(
+          vi
+            .fn()
+            .mockResolvedValue(
+              preparedTurn([{ role: "user", content: "read" }]),
+            ),
+        ),
+        toolScheduler: { executeBatch } as unknown as ToolSchedulerInstance,
+      });
+      const { result } = await consumeLifecycleEvents(
+        lifecycle.run(
+          {
+            sessionId: "session_test",
+            directory: "/test",
+            modelId: "fake-model",
+            onStepUsage: observed,
+          },
+          { shouldStopAfterTurn: () => true },
+        ),
+      );
+      expect(tracker.get("session_test")).toMatchObject({
+        accountedInputTokens: 1000,
+        cacheReadTokens: 600,
+        cacheReadShare: 0.6,
+      });
+      expect(savedBeforeTools).toBe(!failStore);
+      expect(result.success).toBe(!failStore);
+      expect(result.usage).toMatchObject({
+        inputTokens: 1000,
+        outputTokens: 20,
+        totalTokens: 1020,
+      });
+      expect(executeBatch).toHaveBeenCalledTimes(failStore ? 0 : 1);
+      if (failStore)
+        expect(
+          (await manager.listBySession("session_test"))
+            .flatMap((m) => m.parts)
+            .some((p) => p.type === "model-state" || p.type === "tool"),
+        ).toBe(false);
+    },
+  );
+});
+
+it.each(["(Empty response)", "ordinary answer"])(
+  "preserves native literal text %s through atomic acceptance",
+  async (text) => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    const llm = createSequentialFakeLLMClient(
+      [
+        [
+          {
+            textDelta: text,
+            finishReason: "stop",
+            nativeOutput: {
+              protocol: "anthropic",
+              items: [
+                { type: "thinking", thinking: "plan", signature: "sig" },
+                { type: "text", text },
+              ],
+            },
+          },
+        ],
+      ],
+      [],
+    );
+    llm.config.interfaceProvider = "anthropic";
+    const lifecycle = new Lifecycle({
+      llmClient: llm,
+      messageManager: manager,
+      contextManager: createContextManagerMock(
+        vi.fn().mockResolvedValue(preparedTurn([])),
+      ),
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        sessionId: "session_test",
+        directory: "/test",
+        modelId: "fake-model",
+      }),
+    );
+    expect(result).toMatchObject({ success: true, finalResponse: text });
+    expect(
+      (await manager.listBySession("session_test"))
+        .flatMap((m) => m.parts)
+        .filter((p) => p.type === "text")
+        .map((p) => p.text),
+    ).toEqual([text]);
+  },
+);
+
+it("does not execute a complete tool call from filtered output, retaining usage", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const llm = createSequentialFakeLLMClient(
+    [
+      [
+        {
+          toolCallDeltas: [
+            {
+              index: 0,
+              id: "filter-call",
+              name: "read_file",
+              argumentsDelta: "{}",
+            },
+          ],
+          finishReason: "content_filter",
+          tokenUsage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+        },
+      ],
+    ],
+    requests,
+  );
+  const manager = createMessageManager({
+    bus: createBus(),
+    store: createInMemoryMessageStore(),
+    idGenerator: createDeterministicIds(),
+  });
+  const executeBatch = vi.fn();
+  const lifecycle = new Lifecycle({
+    llmClient: llm,
+    messageManager: manager,
+    contextManager: createContextManagerMock(
+      vi.fn().mockResolvedValue(preparedTurn([])),
+    ),
+    toolScheduler: { executeBatch } as unknown as ToolSchedulerInstance,
+  });
+  const { result } = await consumeLifecycleEvents(
+    lifecycle.run({
+      sessionId: "session_test",
+      directory: "/test",
+      modelId: "fake-model",
+    }),
+  );
+  expect(executeBatch).not.toHaveBeenCalled();
+  expect(result.usage).toMatchObject({
+    inputTokens: 10,
+    outputTokens: 20,
+    totalTokens: 30,
+  });
+});
+
+it("uses the selected child model for the request, native origin and context source", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const llm = createSequentialFakeLLMClient(
+    [
+      [
+        {
+          textDelta: "child",
+          finishReason: "stop",
+          nativeOutput: {
+            protocol: "anthropic",
+            items: [{ type: "text", text: "child" }],
+          },
+        },
+      ],
+    ],
+    requests,
+  );
+  llm.config.interfaceProvider = "anthropic";
+  llm.config.modelProfiles = [
+    {
+      model: "child-model",
+      contextWindowTokens: 128000,
+      reasoningCapabilities: {
+        mode: "none",
+        wire: "none",
+        supportsDisabled: true,
+      },
+    },
+  ];
+  const manager = createMessageManager({
+    bus: createBus(),
+    store: createInMemoryMessageStore(),
+    idGenerator: createDeterministicIds(),
+  });
+  const prepare = vi.fn().mockResolvedValue(preparedTurn([]));
+  const lifecycle = new Lifecycle({
+    llmClient: llm,
+    messageManager: manager,
+    contextManager: createContextManagerMock(prepare),
+    toolScheduler: {
+      executeBatch: vi.fn(),
+    } as unknown as ToolSchedulerInstance,
+  });
+  const { result } = await consumeLifecycleEvents(
+    lifecycle.run({
+      sessionId: "session_test",
+      directory: "/test",
+      modelId: "child-model",
+      isSubagent: true,
+    }),
+  );
+  expect(result.success).toBe(true);
+  expect(requests[0].model).toBe("child-model");
+  expect(llm.config.model).toBe("fake-model");
+  expect(prepare.mock.calls[0][0]).toMatchObject({
+    modelOrigin: { model: "child-model" },
+  });
+  const state = (await manager.listBySession("session_test"))
+    .flatMap((m) => m.parts)
+    .find((p) => p.type === "model-state");
+  expect(state).toMatchObject({
+    modelState: { origin: { model: "child-model" } },
+  });
+});
+
+it("discards native state and usage from an overflowing attempt before accepting its replacement", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const llm = createSequentialFakeLLMClient([], requests);
+  llm.config.interfaceProvider = "anthropic";
+  let attempt = 0;
+  llm.provider.streamResponse = (
+    request,
+  ): Promise<AsyncGenerator<InterfaceProviderStreamEvent>> => {
+    requests.push(request);
+    const current = ++attempt;
+    return Promise.resolve(
+      (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+        const text = current === 1 ? "discard" : "accepted";
+        yield await Promise.resolve({
+          textDelta: text,
+          finishReason: "stop" as const,
+          tokenUsage: {
+            inputTokens: current * 100,
+            outputTokens: 20,
+            totalTokens: current * 100 + 20,
+          },
+          nativeOutput: {
+            protocol: "anthropic" as const,
+            items: [
+              {
+                type: "thinking" as const,
+                thinking: text,
+                signature: `sig-${String(current)}`,
+              },
+              { type: "text" as const, text },
+            ],
+          },
+        });
+        if (current === 1)
+          throw Object.assign(new Error("maximum context length exceeded"), {
+            code: "context_length_exceeded",
+          });
+      })(),
+    );
+  };
+  const manager = createMessageManager({
+    bus: createBus(),
+    store: createInMemoryMessageStore(),
+    idGenerator: createDeterministicIds(),
+  });
+  const observed = vi.fn();
+  const prepare = vi.fn().mockResolvedValue(preparedTurn([]));
+  const lifecycle = new Lifecycle({
+    llmClient: llm,
+    messageManager: manager,
+    contextManager: createContextManagerMock(prepare),
+    toolScheduler: {
+      executeBatch: vi.fn(),
+    } as unknown as ToolSchedulerInstance,
+  });
+  const { result } = await consumeLifecycleEvents(
+    lifecycle.run({
+      sessionId: "session_test",
+      directory: "/test",
+      modelId: "fake-model",
+      onStepUsage: observed,
+    }),
+  );
+  expect(result).toMatchObject({
+    success: true,
+    finalResponse: "accepted",
+    usage: { inputTokens: 200, outputTokens: 20, totalTokens: 220 },
+  });
+  expect(observed).toHaveBeenCalledTimes(1);
+  const states = (await manager.listBySession("session_test"))
+    .flatMap((m) => m.parts)
+    .filter((p) => p.type === "model-state");
+  expect(states).toHaveLength(1);
+  expect(JSON.stringify(states)).toContain("sig-2");
+  expect(JSON.stringify(states)).not.toContain("sig-1");
 });

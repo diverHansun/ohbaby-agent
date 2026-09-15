@@ -92,6 +92,17 @@ describe("default command record terminal behavior", () => {
           baseUrl: "http://127.0.0.1:9/v1",
         },
         defaultModel: "fake-model",
+        models: [
+          {
+            model: "fake-model",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "none",
+              wire: "none",
+              supportsDisabled: true,
+            },
+          },
+        ],
         llmParams: { maxTokens: 128, temperature: 0 },
         provider: "fake-openai",
       }),
@@ -187,6 +198,17 @@ try {
           baseUrl: "http://127.0.0.1:9/v1",
         },
         defaultModel: "fake-model",
+        models: [
+          {
+            model: "fake-model",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "none",
+              wire: "none",
+              supportsDisabled: true,
+            },
+          },
+        ],
         llmParams: { maxTokens: 128, temperature: 0 },
         provider: "fake-openai",
       }),

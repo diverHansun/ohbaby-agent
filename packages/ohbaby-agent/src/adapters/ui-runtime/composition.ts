@@ -1,3 +1,7 @@
+import {
+  mergeReasoningIntent,
+  type ReasoningIntent,
+} from "../../services/interface-providers/reasoning.js";
 import type { UiNotice } from "ohbaby-sdk";
 import type { BusInstance } from "../../bus/index.js";
 import type {
@@ -553,6 +557,8 @@ export async function createUiRuntimeComposition(
     },
   });
   const agentService = new AgentService({
+    getReasoning: (): LLMClientInstance["config"]["reasoning"] =>
+      options.llmClient.config.reasoning,
     agentManager,
     instanceFactory: agentInstanceFactory,
     modelId: options.llmClient.config.model,
@@ -613,6 +619,9 @@ export async function createUiRuntimeComposition(
   const subagentInstanceStore =
     options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
   const subagentHost = new SessionSubagentHost({
+    getParentReasoning: (sessionId, contextScopeId): ReasoningIntent =>
+      runManager.getActiveReasoning(sessionId, contextScopeId) ??
+      mergeReasoningIntent(options.llmClient.config.reasoning),
     agentManager,
     createSubagentId: options.createSubagentId,
     createRunId: options.createRunId,
@@ -913,11 +922,21 @@ export async function createUiRuntimeComposition(
     },
 
     async compactSession(input): Promise<CompactResult> {
+      const reasoning =
+        runManager.getActiveReasoning(input.sessionId) ??
+        mergeReasoningIntent(options.llmClient.config.reasoning);
       const resolved = await resolvePrimaryContextTools({
         operation: "manually compact context",
         sessionId: input.sessionId,
       });
       const result = await contextManager.compact(input.sessionId, {
+        modelOrigin: {
+          provider: options.llmClient.config.provider,
+          model: options.llmClient.config.model,
+          protocol: options.llmClient.config.interfaceProvider,
+          endpoint: options.llmClient.config.baseUrl,
+        },
+        reasoning,
         agentName: resolved.agentName,
         directory: input.projectRoot,
         force: input.force ?? true,
@@ -942,6 +961,12 @@ export async function createUiRuntimeComposition(
         input.sessionId,
         input.projectRoot,
         {
+          modelOrigin: {
+            provider: options.llmClient.config.provider,
+            model: options.llmClient.config.model,
+            protocol: options.llmClient.config.interfaceProvider,
+            endpoint: options.llmClient.config.baseUrl,
+          },
           agentName: resolved.agentName,
           isSubagent: false,
           toolNames: resolved.toolNames,

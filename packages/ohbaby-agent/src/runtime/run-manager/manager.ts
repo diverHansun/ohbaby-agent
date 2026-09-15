@@ -1,3 +1,7 @@
+import {
+  mergeReasoningIntent,
+  type ReasoningIntent,
+} from "../../services/interface-providers/reasoning.js";
 import type { RunLedgerRecord } from "../run-ledger/index.js";
 import { scopedSessionKey } from "../../utils/scoped-session.js";
 import { ConcurrencyRejectedError, RunManagerNotFoundError } from "./errors.js";
@@ -100,6 +104,12 @@ export class RunManager {
   }
 
   async create(options: CreateRunOptions): Promise<RunRecord> {
+    options = {
+      ...options,
+      ...(options.reasoning === undefined
+        ? {}
+        : { reasoning: mergeReasoningIntent(options.reasoning) }),
+    };
     const lockKey = scopedSessionKey({
       contextScopeId: options.contextScopeId,
       sessionId: options.sessionId,
@@ -180,6 +190,20 @@ export class RunManager {
     await Promise.all(completions);
   }
 
+  getActiveReasoning(
+    sessionId: string,
+    contextScopeId?: string,
+  ): ReasoningIntent | undefined {
+    const runId = this.activeRunIds({ sessionId, contextScopeId }).at(0);
+    const reasoning =
+      runId === undefined
+        ? undefined
+        : this.recordsById.get(runId)?.options.reasoning;
+    return reasoning === undefined
+      ? undefined
+      : mergeReasoningIntent(reasoning);
+  }
+
   get(runId: string): RunRecord | undefined {
     const record = this.recordsById.get(runId);
     return record ? cloneRunRecord(record) : undefined;
@@ -226,6 +250,9 @@ export class RunManager {
         initiatingUserMessageId: record.options.initiatingUserMessageId,
         maxSteps: record.options.maxSteps,
         modelId: record.options.modelId,
+        ...(record.options.reasoning === undefined
+          ? {}
+          : { reasoning: mergeReasoningIntent(record.options.reasoning) }),
         parentMessageId: record.options.parentMessageId,
         tools: record.options.tools,
       };

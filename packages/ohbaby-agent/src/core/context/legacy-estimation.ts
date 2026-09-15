@@ -29,7 +29,9 @@ export function legacyMessageForEstimation(message: ModelMessage): object {
           })),
         }
       : {}),
-    ...(message.role === "assistant" && message.reasoningText !== undefined
+    ...(message.role === "assistant" &&
+    message.modelState === undefined &&
+    message.reasoningText !== undefined
       ? legacyReasoningForEstimation(message.reasoningText)
       : {}),
     ...(message.name === undefined ? {} : { name: message.name }),

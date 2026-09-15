@@ -1,3 +1,5 @@
+import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
+import type { ModelOrigin } from "../../services/interface-providers/native-state.js";
 import type { BusInstance } from "../../bus/index.js";
 import type { ModelMessage, ModelToolDefinition } from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
@@ -48,6 +50,8 @@ export interface TokenCounter {
 
 export interface ContextLLMClient {
   generateSummary(input: {
+    readonly modelId?: string;
+    readonly reasoning?: ReasoningIntent;
     readonly sessionId: string;
     readonly contextScopeId?: string;
     readonly prompt: string;
@@ -58,6 +62,7 @@ export interface ContextLLMClient {
 }
 
 export interface AssembledContext {
+  readonly modelOrigin?: ModelOrigin;
   readonly systemPrompt: string;
   readonly memory: MergedMemory;
   readonly history: readonly MessageWithParts[];
@@ -69,6 +74,7 @@ export interface AssembledContext {
 }
 
 export interface ContextAssemblyOptions {
+  readonly modelOrigin?: ModelOrigin;
   readonly agentName?: string;
   readonly contextScopeId?: string;
   readonly isSubagent: boolean;
@@ -160,6 +166,8 @@ export type CompactStatus =
   | "inflated";
 
 export interface CompactOptions {
+  readonly reasoning?: ReasoningIntent;
+  readonly modelOrigin?: ModelOrigin;
   readonly agentName?: string;
   readonly directory: string;
   readonly contextScopeId?: string;
@@ -180,6 +188,8 @@ export interface CompactResult {
 }
 
 export interface PrepareTurnInput {
+  readonly reasoning?: ReasoningIntent;
+  readonly modelOrigin?: ModelOrigin;
   readonly sessionId: string;
   readonly contextScopeId?: string;
   readonly directory: string;

@@ -8,6 +8,41 @@ import type {
 import { messageToUiMessage } from "./persistent-store.js";
 
 describe("messageToUiMessage", () => {
+  it("never exposes persisted native state in the UI projection", () => {
+    const base = assistantMessage({ time: { created: 1, completed: 2 } });
+    const message: MessageWithParts = {
+      ...base,
+      parts: [
+        ...base.parts,
+        {
+          id: "private",
+          messageId: "message_1",
+          sessionId: "session_1",
+          orderIndex: 9,
+          type: "model-state",
+          modelState: {
+            version: 1,
+            origin: {
+              provider: "test",
+              model: "test",
+              protocol: "anthropic",
+              endpoint: "https://test",
+            },
+            output: {
+              protocol: "anthropic",
+              items: [{ type: "redacted_thinking", data: "private-opaque" }],
+            },
+            estimate: { tokens: 40, source: "output" },
+          },
+        },
+      ],
+    };
+    expect(JSON.stringify(messageToUiMessage(message))).not.toContain(
+      "private-opaque",
+    );
+    expect(messageToUiMessage(message)).toEqual(messageToUiMessage(base));
+  });
+
   it("maps assistant finish and completion onto the UI message", () => {
     const message = assistantMessage({
       finish: "length",

@@ -1,3 +1,4 @@
+import type { ReasoningConfig } from "../config/llm/types.js";
 import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
 import type { AgentRunResult } from "../core/agents/index.js";
 
@@ -53,6 +54,7 @@ export interface RuntimeAgent {
 }
 
 export interface StartSessionParams {
+  readonly reasoning?: ReasoningConfig;
   readonly agentName: string;
   readonly initialUserMessageId?: string;
   readonly sessionId: string;

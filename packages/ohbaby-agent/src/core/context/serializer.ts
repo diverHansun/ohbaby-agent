@@ -1,3 +1,9 @@
+import {
+  ModelStateSchema,
+  validateNativeProjection,
+  sameModelOrigin,
+  type ModelOrigin,
+} from "../../services/interface-providers/native-state.js";
 import type { ModelMessage } from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
 import type { MessageWithParts, Part, ToolPart } from "../message/index.js";
@@ -48,6 +54,7 @@ export function loadMemoryForPrompt(
 }
 
 export function serializeForLlm(input: {
+  readonly modelOrigin?: ModelOrigin;
   readonly systemPrompt: string;
   readonly memory: MergedMemory;
   readonly history: readonly MessageWithParts[];
@@ -64,6 +71,7 @@ export function serializeForLlm(input: {
   const messages = serializeHistoryMessages(
     input.history,
     input.activeReasoningByMessageId,
+    input.modelOrigin,
   );
 
   if (systemPrompt.trim() === "") {
@@ -76,15 +84,17 @@ export function serializeForLlm(input: {
 export function serializeHistoryMessages(
   history: readonly MessageWithParts[],
   activeReasoningByMessageId?: ReadonlyMap<string, string>,
+  modelOrigin?: ModelOrigin,
 ): ModelMessage[] {
   return history.flatMap((message) =>
-    serializeMessageForLlm(message, activeReasoningByMessageId),
+    serializeMessageForLlm(message, activeReasoningByMessageId, modelOrigin),
   );
 }
 
 function serializeMessageForLlm(
   message: MessageWithParts,
   activeReasoningByMessageId?: ReadonlyMap<string, string>,
+  modelOrigin?: ModelOrigin,
 ): ModelMessage[] {
   if (message.info.role === "assistant" && message.info.finish === "error") {
     return [];
@@ -113,6 +123,7 @@ function serializeMessageForLlm(
       message,
       parts,
       activeReasoningByMessageId,
+      modelOrigin,
     );
   }
 
@@ -128,16 +139,51 @@ function serializeAssistantMessage(
   message: MessageWithParts,
   parts: readonly Part[],
   activeReasoningByMessageId?: ReadonlyMap<string, string>,
+  modelOrigin?: ModelOrigin,
 ): ModelMessage[] {
   const projectedToolParts = parts.filter(isToolPart);
   const content = textContentFromParts(parts);
 
+  const nativePart = parts.find((part) => part.type === "model-state");
+  let modelState =
+    nativePart?.type === "model-state"
+      ? ModelStateSchema.parse(nativePart.modelState)
+      : undefined;
+  if (modelState !== undefined && message.info.time.completed === undefined)
+    return [];
+  if (
+    modelState !== undefined &&
+    modelOrigin !== undefined &&
+    !sameModelOrigin(modelState.origin, modelOrigin)
+  ) {
+    if (
+      projectedToolParts.some(
+        (part) =>
+          part.state.status === "pending" || part.state.status === "running",
+      )
+    )
+      throw new Error(
+        "Cannot change model source during an unfinished native tool roundtrip",
+      );
+    modelState = undefined;
+  }
+
   if (projectedToolParts.length === 0) {
+    if (modelState !== undefined) {
+      const assistant = {
+        role: "assistant" as const,
+        content: content === "" ? null : content,
+        modelState,
+      };
+      validateNativeProjection(assistant, modelState.output);
+      return [assistant];
+    }
     return content === "" ? [] : [{ role: "assistant", content }];
   }
 
   const assistantMessage = {
     role: "assistant",
+    ...(modelState === undefined ? {} : { modelState }),
     content: content === "" ? null : content,
     toolCalls: projectedToolParts.map((part) => ({
       callId: part.callId,
@@ -145,7 +191,12 @@ function serializeAssistantMessage(
       argumentsJson: JSON.stringify(part.state.input),
     })),
   } satisfies ModelMessage;
-  const reasoning = activeReasoningByMessageId?.get(message.info.id);
+  if (modelState !== undefined)
+    validateNativeProjection(assistantMessage, modelState.output);
+  const reasoning =
+    nativePart === undefined
+      ? activeReasoningByMessageId?.get(message.info.id)
+      : undefined;
   const assistantWithReasoning =
     reasoning === undefined || reasoning === ""
       ? assistantMessage

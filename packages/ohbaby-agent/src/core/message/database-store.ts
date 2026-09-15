@@ -1,3 +1,4 @@
+import { prepareModelStep } from "./store.js";
 import {
   getDatabase,
   runWithBusyRetry,
@@ -6,6 +7,8 @@ import {
 } from "../../services/database/index.js";
 import type {
   CreatePartInput,
+  StoreModelStepInput,
+  CommitModelStepResult,
   CommitCompactionResult,
   Message,
   MessageStore,
@@ -164,6 +167,47 @@ export function createDatabaseMessageStore(
   }
 
   return {
+    commitModelStep(
+      input: StoreModelStepInput,
+    ): Promise<CommitModelStepResult> {
+      return withAsyncBoundary(() =>
+        withImmediateTransaction(() => {
+          const row = getMessageRow(input.assistantMessageId);
+          const existingParts = db
+            .prepare<PartRow>(
+              `SELECT * FROM ${schema.part.tableName} WHERE message_id = ? ORDER BY order_index ASC`,
+            )
+            .all(input.assistantMessageId)
+            .map(rowToPart);
+          const prepared = prepareModelStep(
+            row === undefined ? undefined : rowToMessage(row),
+            existingParts,
+            input,
+          );
+          for (const part of prepared.updatedParts) {
+            db.prepare(
+              `UPDATE ${schema.part.tableName} SET data = ?, updated_at = ? WHERE id = ?`,
+            ).run(partToRowData(part), input.completedAt, part.id);
+          }
+          for (const part of prepared.insertedParts) {
+            db.prepare(
+              `INSERT INTO ${schema.part.tableName} (id,message_id,session_id,type,order_index,created_at,updated_at,data) VALUES (?,?,?,?,?,?,?,?)`,
+            ).run(
+              part.id,
+              part.messageId,
+              part.sessionId,
+              part.type,
+              part.orderIndex,
+              input.completedAt,
+              input.completedAt,
+              partToRowData(part),
+            );
+          }
+          updateMessageRow(prepared.result.message);
+          return clone(prepared.result);
+        }),
+      );
+    },
     insertMessage(message: Message): Promise<void> {
       return withAsyncBoundary(() => {
         const timestamps = messageTimestamps(message);

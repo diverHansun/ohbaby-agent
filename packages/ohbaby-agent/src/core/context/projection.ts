@@ -1,3 +1,4 @@
+import { hasNativeDependencies } from "./native-context.js";
 import {
   MASK_EXEMPT_TOOL_PREFIXES,
   MASK_MIN_PART_TOKENS,
@@ -156,7 +157,7 @@ function collectMaskCandidates(input: {
   const candidates: MaskCandidate[] = [];
 
   input.history.forEach((message, messageIndex) => {
-    if (protectedIndexes.has(messageIndex)) {
+    if (protectedIndexes.has(messageIndex) || hasNativeDependencies(message)) {
       return;
     }
     for (const part of message.parts) {

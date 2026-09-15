@@ -1,9 +1,15 @@
+import {
+  mergeReasoningIntent,
+  type ReasoningIntent,
+} from "../services/interface-providers/reasoning.js";
+import type { ReasoningConfig } from "../config/llm/types.js";
 import type { AgentInstanceFactory } from "../core/agents/index.js";
 import type { Session, SessionManager } from "../services/session/index.js";
 import { AgentManager } from "./manager.js";
 import type { AgentSessionStartResult, StartSessionParams } from "./types.js";
 
 export interface AgentServiceOptions {
+  readonly getReasoning?: () => ReasoningConfig | ReasoningIntent | undefined;
   readonly agentManager: AgentManager;
   readonly instanceFactory: AgentInstanceFactory;
   readonly modelId: string;
@@ -16,6 +22,10 @@ export class AgentService {
   async startSession(
     params: StartSessionParams,
   ): Promise<AgentSessionStartResult> {
+    const reasoning = mergeReasoningIntent(
+      this.options.getReasoning?.(),
+      params.reasoning,
+    );
     const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
       params.agentName,
       { isSubagent: false },
@@ -36,6 +46,7 @@ export class AgentService {
       type: "primary",
     });
     const result = await instance.turn({
+      reasoning,
       environment: params.environment,
       initialUserMessageId: params.initialUserMessageId,
       prompt: params.prompt,

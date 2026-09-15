@@ -58,6 +58,7 @@ function spawnServe(input: {
       const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       llmClient = {
         config: {
+          modelProfiles:[{model:"fake-model",contextWindowTokens:128000,reasoningCapabilities:{mode:"none",wire:"none",supportsDisabled:true}}],
           apiKeyEnv: "FAKE_API_KEY",
           baseUrl: "https://example.invalid/v1",
           interfaceProvider: "openai-compatible",
@@ -95,6 +96,7 @@ function spawnServe(input: {
     } else if (failingProvider) {
       llmClient = {
         config: {
+          modelProfiles:[{model:"fake-model",contextWindowTokens:128000,reasoningCapabilities:{mode:"none",wire:"none",supportsDisabled:true}}],
           apiKeyEnv: "FAKE_API_KEY",
           baseUrl: "https://example.invalid/v1",
           interfaceProvider: "openai-compatible",

@@ -1,3 +1,4 @@
+import type { ReasoningCapabilities } from "../../packages/ohbaby-agent/src/config/llm/types.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -73,6 +74,7 @@ export function assertCacheableStablePrefix(minimumTokens: number): number {
 }
 
 export interface RealCacheProviderProfile {
+  readonly reasoningCapabilities?: ReasoningCapabilities;
   readonly allowsUnreportedImplicitCacheWrite?: boolean;
   readonly apiKeyEnv: string;
   readonly baseUrl: string;
@@ -489,6 +491,18 @@ export async function createRealCacheHarness(
         promptCache: "auto",
       },
       defaultModel: profile.model,
+      ...(profile.reasoningCapabilities
+        ? {
+            models: [
+              {
+                model: profile.model,
+                provider: profile.provider,
+                contextWindowTokens: 200000,
+                reasoningCapabilities: profile.reasoningCapabilities,
+              },
+            ],
+          }
+        : {}),
       llmParams: {
         contextWindowTokens: 200_000,
         maxTokens: 256,

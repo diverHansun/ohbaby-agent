@@ -56,6 +56,17 @@ function fakeLlmClient(input: {
   let nextBatch = 0;
   return {
     config: {
+      modelProfiles: [
+        {
+          model: "fake-model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       apiKeyEnv: "FAKE_API_KEY",
       baseUrl: "https://example.invalid/v1",
       contextWindowTokens: input.contextWindowTokens ?? 100_000,

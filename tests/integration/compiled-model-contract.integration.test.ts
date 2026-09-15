@@ -287,6 +287,17 @@ describe("compiled model package contracts", () => {
           JSON.stringify({
             provider: "compiled-fixture",
             defaultModel: "synthetic-model",
+            models: [
+              {
+                model: "synthetic-model",
+                contextWindowTokens: 128000,
+                reasoningCapabilities: {
+                  mode: "none",
+                  wire: "none",
+                  supportsDisabled: true,
+                },
+              },
+            ],
             apiConfig: {
               baseUrl: protocol === "anthropic" ? origin : `${origin}/v1`,
               apiKeyEnv: "COMPILED_FIXTURE_KEY",
@@ -782,6 +793,8 @@ function fixtureEcho(args: Record<string, unknown>): string {
 async function complete(messages: readonly ModelMessage[], tools?: ModelToolDefinition[]): Promise<StreamingResponse> {
   let final: StreamingResponse | undefined;
   let completeCount = 0;
+  let parsedSnapshots = 0;
+  let nativeSnapshots = 0;
   let partialCount = 0;
   const countBeforeRequest = executions;
   for await (const response of streamResponse(client, messages, {
@@ -794,11 +807,16 @@ async function complete(messages: readonly ModelMessage[], tools?: ModelToolDefi
       partialCount += 1;
       assert.equal(response.parsedToolCalls, undefined);
     }
+    if (response.parsedToolCalls?.length) parsedSnapshots += 1;
+    if (response.modelState) nativeSnapshots += 1;
     final = response;
   }
   // Drain the provider stream fully before checking the execution gate.
   assert(final && final.isComplete);
-  assert.equal(completeCount, 1);
+  // Completion notifications may precede final usage/native enrichment; consume to EOF.
+  assert(completeCount >= 1);
+  assert.equal(parsedSnapshots, final.parsedToolCalls?.length ? 1 : 0);
+  assert.equal(nativeSnapshots, final.modelState ? 1 : 0);
   assert(partialCount > 0);
   assert.equal(final.streamStopReason, "provider_finished");
   assert(final.tokenUsage);

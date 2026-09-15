@@ -1,3 +1,4 @@
+import { mergeReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type { LifecycleEvent } from "../lifecycle/index.js";
 import type { ModelToolDefinition } from "../llm-client/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
@@ -161,6 +162,10 @@ export async function runAgent(
   deps: AgentRunDeps,
   input: AgentRunInput,
 ): Promise<AgentRunResult> {
+  const reasoning =
+    input.reasoning === undefined
+      ? undefined
+      : mergeReasoningIntent(input.reasoning);
   const runEventSource = deps.runEventSource;
   if (input.waitMode === "stream" && !runEventSource) {
     throw new Error("Agent run event source is required for stream mode");
@@ -186,6 +191,7 @@ export async function runAgent(
   let record: Awaited<ReturnType<AgentRunDeps["runCoordinator"]["create"]>>;
   try {
     record = await deps.runCoordinator.create({
+      ...(reasoning === undefined ? {} : { reasoning }),
       ...(scope.agentInstanceId === undefined
         ? {}
         : { agentInstanceId: scope.agentInstanceId }),

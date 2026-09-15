@@ -1,3 +1,5 @@
+import type { ReasoningConfig } from "../../config/llm/types.js";
+import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type {
   LifecycleEvent,
   LifecycleResult,
@@ -28,6 +30,7 @@ export interface RunDefaultsPolicy {
 }
 
 export interface CreateRunOptions {
+  readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly runId?: string;
   readonly sessionId: string;
   readonly agentInstanceId?: string;
@@ -83,6 +86,7 @@ export type { SandboxLease };
 export type SandboxManager = SandboxManagerPort;
 
 export interface RunContext {
+  readonly reasoning?: ReasoningIntent;
   readonly runId: string;
   readonly sessionId: string;
   readonly agentInstanceId?: string;

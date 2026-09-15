@@ -394,6 +394,17 @@ function fakeClient(
       interfaceProvider: "openai-compatible",
       maxTokens: 128,
       model: "model",
+      modelProfiles: [
+        {
+          model: "model",
+          contextWindowTokens: 128000,
+          reasoningCapabilities: {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          },
+        },
+      ],
       promptCache: "enabled",
       provider: "custom",
       temperature: 0,

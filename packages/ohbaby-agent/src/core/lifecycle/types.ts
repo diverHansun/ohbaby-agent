@@ -1,3 +1,5 @@
+import type { ReasoningConfig } from "../../config/llm/types.js";
+import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type {
   ModelResponseSnapshot,
   ModelFinishReason,
@@ -52,6 +54,7 @@ export interface StepUsageObservation {
 }
 
 export interface LifecycleSessionParams {
+  readonly reasoning?: ReasoningConfig | ReasoningIntent;
   /** Final accepted model result, observed synchronously once before calibration. */
   readonly onStepUsage?: (observation: StepUsageObservation) => void;
   readonly sessionId: string;
@@ -115,7 +118,8 @@ export type AgentTerminalReason =
   | "provider_stream_interrupted"
   | "tool_parse_failure"
   | "context_overflow"
-  | "output_length";
+  | "output_length"
+  | "model_state_persistence_failure";
 
 export type LifecycleEvent =
   | {

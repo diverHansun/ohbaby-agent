@@ -1,5 +1,15 @@
+import { isDeepStrictEqual } from "node:util";
+import {
+  ModelStateSchema,
+  validateNativeProjection,
+} from "../../services/interface-providers/native-state.js";
+import { createTokenUsageMetadata } from "./token-usage-metadata.js";
 import type {
   Message,
+  ModelStatePart,
+  ToolPart,
+  StoreModelStepInput,
+  CommitModelStepResult,
   MessageStore,
   MessageWithParts,
   MessageScopeFilter,
@@ -62,6 +72,26 @@ export function createInMemoryMessageStore(): MessageStore {
   }
 
   return {
+    commitModelStep(
+      input: StoreModelStepInput,
+    ): Promise<CommitModelStepResult> {
+      const message = messages.get(input.assistantMessageId);
+      const prepared = prepareModelStep(
+        message,
+        listPartsForMessage(input.assistantMessageId),
+        input,
+      );
+      for (const part of prepared.insertedParts) {
+        if (parts.has(part.id))
+          throw new Error(`Part already exists: ${part.id}`);
+      }
+      // All validation and cloning happen before touching either map.
+      const result = clone(prepared.result);
+      for (const part of prepared.updatedParts) parts.set(part.id, part);
+      for (const part of prepared.insertedParts) parts.set(part.id, part);
+      messages.set(prepared.result.message.id, prepared.result.message);
+      return Promise.resolve(result);
+    },
     insertMessage(message: Message): Promise<void> {
       if (messages.has(message.id)) {
         return Promise.reject(
@@ -290,4 +320,190 @@ export function createInMemoryMessageStore(): MessageStore {
       return Promise.resolve();
     },
   };
+}
+
+/** Shared preparation keeps both stores' validation and usage ownership identical. */
+export function prepareModelStep(
+  message: Message | undefined,
+  existingParts: readonly Part[],
+  input: StoreModelStepInput,
+): {
+  readonly result: CommitModelStepResult;
+  readonly insertedParts: readonly Part[];
+  readonly updatedParts: readonly Part[];
+} {
+  if (message?.role !== "assistant")
+    throw new Error("Model step requires an existing assistant message");
+  if (
+    message.time.completed !== undefined ||
+    existingParts.some(
+      (part) => part.type === "model-state" || part.type === "tool",
+    )
+  )
+    throw new Error("Assistant model step is already committed or completed");
+  if (
+    !Number.isFinite(input.completedAt) ||
+    !["stop", "tool_calls", "content_filter"].includes(input.finishReason)
+  )
+    throw new Error("Cannot commit an incomplete model step");
+  const modelState = ModelStateSchema.parse(input.modelState);
+  if (
+    modelState.origin.protocol !== modelState.output.protocol ||
+    (message.providerId !== undefined &&
+      message.providerId !== modelState.origin.provider) ||
+    (message.modelId !== undefined &&
+      message.modelId !== modelState.origin.model)
+  )
+    throw new Error("Model step source does not match its assistant message");
+  if (
+    modelState.output.protocol === "openai-responses" &&
+    modelState.output.items.some(
+      (item) => item.status !== undefined && item.status !== "completed",
+    )
+  )
+    throw new Error("Cannot commit incomplete native items");
+  const callIds = new Set(input.tools.map((tool) => tool.callId));
+  if (callIds.size !== input.tools.length)
+    throw new Error("Model step contains duplicate tool call ids");
+  for (const tool of input.tools) {
+    if (
+      tool.callId.trim() === "" ||
+      tool.name.trim() === "" ||
+      !isDeepStrictEqual(JSON.parse(tool.argumentsJson), tool.arguments)
+    )
+      throw new Error(
+        "Model step tool arguments do not match their raw projection",
+      );
+  }
+  const selectedText =
+    input.textPartId === undefined
+      ? existingParts.find(
+          (part) => part.type === "text" && !part.synthetic && !part.ignored,
+        )
+      : existingParts.find((part) => part.id === input.textPartId);
+  if (selectedText !== undefined && selectedText.type !== "text")
+    throw new Error("Model step text part is not text");
+  if (input.textPartId !== undefined && selectedText === undefined)
+    throw new Error("Model step text part does not belong to this assistant");
+  if (
+    existingParts.some(
+      (part) =>
+        part.type === "text" &&
+        part.id !== selectedText?.id &&
+        !part.synthetic &&
+        !part.ignored &&
+        part.text !== "",
+    )
+  )
+    throw new Error("Model step has multiple visible text projections");
+  const text = input.text ?? selectedText?.text ?? "";
+  validateNativeProjection(
+    {
+      role: "assistant",
+      content: text,
+      toolCalls: input.tools.map((tool) => ({
+        callId: tool.callId,
+        name: tool.name,
+        argumentsJson: tool.argumentsJson,
+      })),
+    },
+    modelState.output,
+  );
+  if (input.toolPartIds.length !== input.tools.length)
+    throw new Error("Model step tool part ids do not match tool calls");
+  const ids = [
+    input.statePartId,
+    ...(selectedText === undefined && text !== "" ? [input.newTextPartId] : []),
+    ...input.toolPartIds,
+  ];
+  if (
+    new Set(ids).size !== ids.length ||
+    ids.some((id) => existingParts.some((part) => part.id === id))
+  )
+    throw new Error("Model step contains duplicate part ids");
+  let nextOrder = existingParts.reduce(
+    (next, part) => Math.max(next, part.orderIndex + 1),
+    0,
+  );
+  const base = {
+    messageId: message.id,
+    sessionId: message.sessionId,
+    ...(message.contextScopeId === undefined
+      ? {}
+      : { contextScopeId: message.contextScopeId }),
+  };
+  const textPart: TextPart | undefined =
+    selectedText === undefined
+      ? text === ""
+        ? undefined
+        : {
+            ...base,
+            id: input.newTextPartId,
+            orderIndex: nextOrder++,
+            type: "text",
+            text,
+          }
+      : { ...selectedText, text };
+  const modelStatePart: ModelStatePart = {
+    ...base,
+    id: input.statePartId,
+    orderIndex: nextOrder++,
+    type: "model-state",
+    modelState,
+  };
+  const toolParts: ToolPart[] = input.tools.map((tool, index) => ({
+    ...base,
+    id: input.toolPartIds[index],
+    orderIndex: nextOrder++,
+    type: "tool",
+    callId: tool.callId,
+    tool: tool.name,
+    state: {
+      status: "pending",
+      input: tool.arguments,
+      raw: tool.argumentsJson,
+    },
+  }));
+  const carrier = textPart ?? toolParts.at(0) ?? modelStatePart;
+  const metadata = createTokenUsageMetadata(input.tokenUsage);
+  const updatedParts: Part[] = existingParts.flatMap((part) => {
+    if (part.id === selectedText?.id) return [];
+    if (part.metadata?.tokenUsage === undefined) return [];
+    const { tokenUsage: _usage, ...rest } = part.metadata;
+    return [{ ...part, metadata: rest }];
+  });
+  const withUsage = <T extends Part>(part: T): T => {
+    const { tokenUsage: _usage, ...rest } = part.metadata ?? {};
+    return {
+      ...part,
+      ...(Object.keys(rest).length > 0 ||
+      (part.id === carrier.id && metadata !== undefined)
+        ? { metadata: { ...rest, ...(part.id === carrier.id ? metadata : {}) } }
+        : { metadata: undefined }),
+    };
+  };
+  const result: CommitModelStepResult = {
+    message: {
+      ...message,
+      finish: input.finishReason,
+      time: {
+        ...message.time,
+        updated: input.completedAt,
+        completed: input.completedAt,
+      },
+    },
+    modelStatePart: withUsage(modelStatePart),
+    ...(textPart === undefined ? {} : { textPart: withUsage(textPart) }),
+    toolParts: toolParts.map(withUsage),
+  };
+  if (result.textPart !== undefined && selectedText !== undefined)
+    updatedParts.push(result.textPart);
+  const insertedParts = [
+    ...(result.textPart !== undefined && selectedText === undefined
+      ? [result.textPart]
+      : []),
+    result.modelStatePart,
+    ...result.toolParts,
+  ];
+  return structuredClone({ result, insertedParts, updatedParts });
 }

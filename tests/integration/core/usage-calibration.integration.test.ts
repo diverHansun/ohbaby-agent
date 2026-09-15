@@ -329,6 +329,17 @@ async function runProtocol(
     const llmClient: LLMClientInstance = {
       provider,
       config: {
+        modelProfiles: [
+          {
+            model: "fixture-model",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "none",
+              wire: "none",
+              supportsDisabled: true,
+            },
+          },
+        ],
         provider: "fixture",
         model: "fixture-model",
         baseUrl: origin,
@@ -793,6 +804,17 @@ describe("usage calibration across native provider streams", () => {
         llmClient: {
           provider,
           config: {
+            modelProfiles: [
+              {
+                model: "fixture-model",
+                contextWindowTokens: 128000,
+                reasoningCapabilities: {
+                  mode: "none",
+                  wire: "none",
+                  supportsDisabled: true,
+                },
+              },
+            ],
             provider: "fixture",
             model: "fixture-model",
             baseUrl: "loopback",

@@ -5,6 +5,8 @@ import { MessageEvent } from "./events.js";
 import { toModelMessages as convertToModelMessages } from "./converter.js";
 import type {
   CreateMessageInput,
+  CommitModelStepInput,
+  CommitModelStepResult,
   CreatePartInput,
   CommitCompactionInput,
   CommitCompactionResult,
@@ -64,7 +66,8 @@ export function createMessageManager(
       data: input,
       updatedAt: now(),
     });
-    options.bus.publish(MessageEvent.PartUpdated, { part });
+    if (part.type !== "model-state")
+      options.bus.publish(MessageEvent.PartUpdated, { part });
     return part;
   }
 
@@ -75,7 +78,8 @@ export function createMessageManager(
     const { delta, ...storePatch } = patch;
     const part = await options.store.updatePart(partId, storePatch, now());
     const payload = delta === undefined ? { part } : { part, delta };
-    options.bus.publish(MessageEvent.PartUpdated, payload);
+    if (part.type !== "model-state")
+      options.bus.publish(MessageEvent.PartUpdated, payload);
     return part;
   }
 
@@ -88,6 +92,24 @@ export function createMessageManager(
   }
 
   return {
+    async commitModelStep(
+      input: CommitModelStepInput,
+    ): Promise<CommitModelStepResult> {
+      const result = await options.store.commitModelStep({
+        ...input,
+        statePartId: idGenerator.partId(),
+        newTextPartId: idGenerator.partId(),
+        toolPartIds: input.tools.map(() => idGenerator.partId()),
+      });
+      if (result.textPart !== undefined)
+        options.bus.publish(MessageEvent.PartUpdated, {
+          part: result.textPart,
+        });
+      for (const part of result.toolParts)
+        options.bus.publish(MessageEvent.PartUpdated, { part });
+      options.bus.publish(MessageEvent.Updated, { info: result.message });
+      return result;
+    },
     createMessage: createMessageRecord,
 
     async updateMessage(
@@ -169,7 +191,8 @@ export function createMessageManager(
         });
       }
       for (const part of result.updatedParts) {
-        options.bus.publish(MessageEvent.PartUpdated, { part });
+        if (part.type !== "model-state")
+          options.bus.publish(MessageEvent.PartUpdated, { part });
       }
       return result;
     },

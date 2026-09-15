@@ -9,7 +9,7 @@ function partToContent(part: Part): string {
   if (part.type === "text") {
     return part.ignored ? "" : part.text;
   }
-  if (part.type === "reasoning") {
+  if (part.type === "reasoning" || part.type === "model-state") {
     return "";
   }
   if (part.state.status === "completed") {

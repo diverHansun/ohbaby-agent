@@ -1,4 +1,8 @@
 import {
+  estimateNativeStateTokens,
+  hasNativeDependencies,
+} from "./native-context.js";
+import {
   legacyMessageForEstimation,
   legacyToolForEstimation,
   legacyReasoningForEstimation,
@@ -56,7 +60,17 @@ export function estimatePreparedRequestHeuristic(
     payloads.push(JSON.stringify(request.tools.map(legacyToolForEstimation)));
   }
   const text = payloads.join("\n");
-  return Math.max(0, tokenCounter.estimateTokens(text));
+  return (
+    Math.max(0, tokenCounter.estimateTokens(text)) +
+    request.messages.reduce(
+      (sum, message) =>
+        sum +
+        (message.role === "assistant" && message.modelState !== undefined
+          ? estimateNativeStateTokens(message.modelState, tokenCounter)
+          : 0),
+      0,
+    )
+  );
 }
 
 export function estimateContextOccupancyComposition(
@@ -67,6 +81,7 @@ export function estimateContextOccupancyComposition(
   const reconstructedMessages = serializeForLlm({
     activeReasoningByMessageId: input.activeReasoningByMessageId,
     history: input.context.history,
+    modelOrigin: input.context.modelOrigin,
     isSubagent: input.context.isSubagent,
     memory: input.context.memory,
     systemPrompt: input.context.systemPrompt,
@@ -108,11 +123,12 @@ export function estimateContextOccupancyComposition(
   );
 
   for (const message of input.context.history) {
-    addHistoryMessagePayloads(payloads, message);
+    addHistoryMessagePayloads(payloads, message, input.context.modelOrigin);
     const reasoning = input.activeReasoningByMessageId?.get(message.info.id);
     if (
       message.info.role === "assistant" &&
       message.info.finish !== "error" &&
+      !hasNativeDependencies(message) &&
       reasoning !== undefined &&
       reasoning !== "" &&
       message.parts.some((part) => part.type === "tool" && isActivePart(part))
@@ -152,7 +168,16 @@ export function estimateContextOccupancyComposition(
     "builtin-tools": estimatePayloads(payloads["builtin-tools"], tokenCounter),
     mcp: estimatePayloads(payloads.mcp, tokenCounter),
     skills: estimatePayloads(payloads.skills, tokenCounter),
-    conversation: estimatePayloads(payloads.conversation, tokenCounter),
+    conversation:
+      estimatePayloads(payloads.conversation, tokenCounter) +
+      input.request.messages.reduce(
+        (sum, message) =>
+          sum +
+          (message.role === "assistant" && message.modelState !== undefined
+            ? estimateNativeStateTokens(message.modelState, tokenCounter)
+            : 0),
+        0,
+      ),
     "summarized-conversation": estimatePayloads(
       payloads["summarized-conversation"],
       tokenCounter,
@@ -167,7 +192,16 @@ export function estimateContextOccupancyComposition(
 function addHistoryMessagePayloads(
   payloads: CompositionPayloads,
   message: MessageWithParts,
+  modelOrigin?: AssembledContext["modelOrigin"],
 ): void {
+  if (hasNativeDependencies(message)) {
+    payloads.conversation.push(
+      ...serializeHistoryMessages([message], undefined, modelOrigin).map(
+        legacyMessageForEstimation,
+      ),
+    );
+    return;
+  }
   const summarizedParts: Part[] = [];
   const runtimeParts: Part[] = [];
   const subagentParts: Part[] = [];
