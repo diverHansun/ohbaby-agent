@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "rootDir": "../.."
+  },
+  "include": [
+    "reasoning-native-harness.ts",
+    "reasoning-native-fixture.ts",
+    "reasoning-native.real.e2e.test.ts",
+    "../integration/reasoning-native-harness.integration.test.ts",
+    "../integration/core/native-multistep.integration.test.ts"
+  ]
+}

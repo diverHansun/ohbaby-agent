@@ -1,0 +1,2688 @@
+{
+  "profile": "zenmux-gpt56-luna-chat",
+  "model": "openai/gpt-5.6-luna",
+  "protocol": "openai-compatible",
+  "transport": "real",
+  "limits": {
+    "maxRequests": 4,
+    "diagnosticAllowance": 2,
+    "sdkRetries": 0,
+    "requestTimeoutMs": 90000,
+    "maxTokens": 4096
+  },
+  "runKind": "matrix",
+  "capabilitySources": [
+    "https://zenmux.ai/docs/guide/advanced/reasoning.html",
+    "https://zenmux.ai/openai/gpt-5.6-luna",
+    "https://developers.openai.com/api/docs/models/gpt-5.6-luna"
+  ],
+  "observedAt": "2026-09-15T08:46:36.934Z",
+  "modes": [
+    {
+      "mode": "on",
+      "requestedEffort": "medium",
+      "acceptedSteps": [
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 135
+          },
+          "inputTokens": 135,
+          "outputTokens": 51,
+          "totalTokens": 186
+        },
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 236
+          },
+          "inputTokens": 236,
+          "outputTokens": 20,
+          "totalTokens": 256
+        }
+      ],
+      "toolExecutions": 1,
+      "persistedNative": [
+        {
+          "type": "reasoning.encrypted",
+          "sha256": "790b71993b2d605cf474ebd792eee8c3803ab1c1005c4a770bf0fb42d3b0076e"
+        }
+      ],
+      "nativeReplayed": true,
+      "databaseReopened": true,
+      "restoredTrackerEmpty": true,
+      "passed": true,
+      "stateEstimate": {
+        "tokens": 32,
+        "source": "reasoning"
+      },
+      "cacheBeforeReopen": {
+        "accountedInputTokens": 135,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-0991317d-b3a0-4e28-b38b-d863d452a99b"
+      },
+      "cacheAfterReopen": {
+        "accountedInputTokens": 236,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-0991317d-b3a0-4e28-b38b-d863d452a99b"
+      }
+    },
+    {
+      "mode": "off",
+      "requestedEffort": "medium",
+      "acceptedSteps": [
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 135
+          },
+          "inputTokens": 135,
+          "outputTokens": 75,
+          "totalTokens": 210
+        },
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 260
+          },
+          "inputTokens": 260,
+          "outputTokens": 28,
+          "totalTokens": 288
+        }
+      ],
+      "toolExecutions": 1,
+      "persistedNative": [
+        {
+          "type": "reasoning",
+          "sha256": "291437787a267003b2bc5a816ea4d9fd450c1c9f11355bb2ce5ab5676c9a480d"
+        },
+        {
+          "type": "reasoning.summary",
+          "sha256": "f30800f7e8f63f1945ca355f1497e049e1abab8e02cfa53f6b6b3c4a61325bbc"
+        },
+        {
+          "type": "reasoning.encrypted",
+          "sha256": "05411ea0605b4f14cc100d2f31405eff045e542b96ded1a87c5cf655eeff3fbb"
+        }
+      ],
+      "nativeReplayed": true,
+      "databaseReopened": true,
+      "restoredTrackerEmpty": true,
+      "passed": true,
+      "stateEstimate": {
+        "tokens": 56,
+        "source": "reasoning"
+      },
+      "cacheBeforeReopen": {
+        "accountedInputTokens": 135,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-bf7ac203-e722-4392-a321-aa0a2fec7a26"
+      },
+      "cacheAfterReopen": {
+        "accountedInputTokens": 260,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-bf7ac203-e722-4392-a321-aa0a2fec7a26"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "mode": "on",
+      "path": "/api/v1/chat/completions",
+      "status": 200,
+      "controls": {
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": {
+          "enabled": true,
+          "effort": "medium"
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "total_tokens": 186,
+          "prompt_tokens": 135,
+          "completion_tokens": 51,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 32
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "chatDetails": [
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.encrypted",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "idHash": "ee8631c03ecc3e0ba7ef8c48b5ffe5cfae790f6077df071db16fbfe6b39308e1",
+          "fields": [
+            "data",
+            "format",
+            "id",
+            "index",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "data": {
+              "kind": "string",
+              "length": 1272,
+              "hash": "19ab707300a632f41d26b11f10beb7ef89c49a7359e76fd784e4fb76c6fb1838"
+            }
+          }
+        }
+      ],
+      "nativeReplay": []
+    },
+    {
+      "mode": "on",
+      "path": "/api/v1/chat/completions",
+      "status": 200,
+      "controls": {
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": {
+          "enabled": true,
+          "effort": "medium"
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "total_tokens": 256,
+          "prompt_tokens": 236,
+          "completion_tokens": 20,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 9
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "chatDetails": [
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.encrypted",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "idHash": "d7b242d16fa1117d7efbc2183ff950320815accbacb082b6add43a2e87555712",
+          "fields": [
+            "data",
+            "format",
+            "id",
+            "index",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "data": {
+              "kind": "string",
+              "length": 1188,
+              "hash": "302867f3b6bfeb2b9e0d5b37698ba673e67d7d8aa792d15561cc1a23e1c60b14"
+            }
+          }
+        }
+      ],
+      "nativeReplay": [
+        {
+          "type": "reasoning.encrypted",
+          "sha256": "790b71993b2d605cf474ebd792eee8c3803ab1c1005c4a770bf0fb42d3b0076e"
+        }
+      ]
+    },
+    {
+      "mode": "off",
+      "path": "/api/v1/chat/completions",
+      "status": 200,
+      "controls": {
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": {
+          "enabled": false
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "total_tokens": 210,
+          "prompt_tokens": 135,
+          "completion_tokens": 75,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 56
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "chatDetails": [
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 39,
+              "hash": "b70b6b10463f499f9cb4722273214b10c76f516660a5f074e8341cbce6582cde"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "99036d06116853fa81ced3a50a76bcb3199effcab19ac68bb541b69124948484"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 3,
+              "hash": "29a36cc523c2285b739491d72515875534cdd9acbc3f11bd71562bf2090375a8"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 7,
+              "hash": "a99068340dd7529a73d7c97231159a06771f32eab831f68b939eae22f4e39bd3"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 4,
+              "hash": "ee2dd27770b9bb48a3ef7325be6ae9687c264536fad5baa7bdf54b72749dc6c3"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 12,
+              "hash": "b14c52ad80914d4cf47667d4d41adf5b8200f0a3395504604d7e46aa298dfd87"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 3,
+              "hash": "7a0f6e85c886c98d31fa10764627e3f2adf7465376bb274a958094d477c22ee0"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 4,
+              "hash": "ee2dd27770b9bb48a3ef7325be6ae9687c264536fad5baa7bdf54b72749dc6c3"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 12,
+              "hash": "ca9b155205ffc88e00a3defa52a21938d6f0943fde6d580d4eb11083a7943a36"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "35b32d4f22b9c0bbcb27219e9ad1021f8c1114f9154a4b97d8055338f1c54060"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 1,
+              "hash": "7299b59de0b5dad3b622afc3bdf57544e505249c77a6d4254bd14b1fc9a4ade8"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 3,
+              "hash": "5322e76c89025fc8b9b06ac31e9306a7aa869a9915c93c0c365bca849b2be207"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "888b8086276b1cfd1ca9c782f63c67e82dc67965666ed1eb87f2dd4d06e3f16d"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "2cb7a961f7f104b8b9c6aa642df43fb411766b875fbfa38f599848b798d6e4e4"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 8,
+              "hash": "9630306b6802aba548b13026aa0f4cba0caf62d586b4238870a36e9ddde4195b"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 3,
+              "hash": "29a36cc523c2285b739491d72515875534cdd9acbc3f11bd71562bf2090375a8"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "5a60ff31b1797334729730b5489abf16b0176ddf898bda65d4a0a8004e42b535"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 7,
+              "hash": "7b6bcba8af374a13bd76feea151fa4e7477e3f6b8ab110491d31eb8bede0b536"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "f4956c42edff35b04cdc6d8a4d95ac720281607fb44041adbcdd3329c81e3b8a"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 1,
+              "hash": "08b53b7d666cf717c2136d704d53b965a6557080d27d1ba4c884dee6b2fb8a0a"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "d8b90ee6d3c5224e6a0e0109e38d31869a3a3395bc66949af4c509c8bb21babd"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 6,
+              "hash": "0557af6dc4c83b61f260db5f4456ef9b7ec36b8d3fdaa16f24cd8ddb6ef873c5"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "2cb7a961f7f104b8b9c6aa642df43fb411766b875fbfa38f599848b798d6e4e4"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 1,
+              "hash": "08b53b7d666cf717c2136d704d53b965a6557080d27d1ba4c884dee6b2fb8a0a"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 4,
+              "hash": "1d83cacc03479f62685ac426cd5d3be38b9856ef1e0a0dd05e7283fc4d9bd51f"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "8726df3afc72b3284be2a942a2e08c5275b2c1b20bdfc9bc7268e8006514d543"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 7,
+              "hash": "7b6bcba8af374a13bd76feea151fa4e7477e3f6b8ab110491d31eb8bede0b536"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "d8b90ee6d3c5224e6a0e0109e38d31869a3a3395bc66949af4c509c8bb21babd"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 1,
+              "hash": "08b53b7d666cf717c2136d704d53b965a6557080d27d1ba4c884dee6b2fb8a0a"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 6,
+              "hash": "ee3492a559a5b1b5dccb9b2d0cc4a3c7b167da7684f048a654b5c1f4b9342924"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "f4956c42edff35b04cdc6d8a4d95ac720281607fb44041adbcdd3329c81e3b8a"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 7,
+              "hash": "acefdefdeedc88e434aec17804c1cc0e4e6959230bd41617ebdb3c9ce0c8d8b7"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 6,
+              "hash": "0557af6dc4c83b61f260db5f4456ef9b7ec36b8d3fdaa16f24cd8ddb6ef873c5"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "8726df3afc72b3284be2a942a2e08c5275b2c1b20bdfc9bc7268e8006514d543"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 1,
+              "hash": "7299b59de0b5dad3b622afc3bdf57544e505249c77a6d4254bd14b1fc9a4ade8"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 3,
+              "hash": "71806a8cce6b4de9d00a646d116e2e0841e5cb8a96d16c0089e5d63aba138f9e"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 6,
+              "hash": "8f5e39e08de75381e3c4cedda48b5c61a7a4b3205c20c9a448af6993ed78dbf7"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 6,
+              "hash": "f7aed7cb9aa82cb49862709edb902c9b8913f58d346201ec38f765ed3e29969a"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 11,
+              "hash": "d3e9037209fcd6c368b981bc3f0d6fbf7e2c9f30f1bc5fb92db99c246110c516"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 4,
+              "hash": "16a51ef15ac9ce18a3056abfa67d2beb0160ee1e7be77650cd4375a01fad230f"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 11,
+              "hash": "05ba5358fa07dad13d5fc4276488aa3ef568b5c902069191cf0d8c25970df60d"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 6,
+              "hash": "4bcf77bfd2408febb0828cd0960fac502d5365e33ee1176c73e853c748defd81"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 3,
+              "hash": "6ae197cc7c8e8e4ddb1a7b9e14783cca19c6768365817bff7fec232cd309e286"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "1390858810fbca2686b1f32745ccf7891f47e332b9f2de27da120fa5f9f198c1"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 6,
+              "hash": "dd00f1f1ab0068bc302d1eac118dc8ce5a7feda71600934da01c322493480ab2"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 1,
+              "hash": "a68c9074d3cb1f819d9cb792c72d0c402d7e1032ed10ae23f86676c014dc6a23"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 1,
+              "hash": "798640599597df7a8daa32b1132f07850a68b5e71bd295650399a38074f52804"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 4,
+              "hash": "1d83cacc03479f62685ac426cd5d3be38b9856ef1e0a0dd05e7283fc4d9bd51f"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "8726df3afc72b3284be2a942a2e08c5275b2c1b20bdfc9bc7268e8006514d543"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "35eb0468f6fb2b0009e39950334cb48124b48b764d442b073d185e7b9115d4a8"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "5a60ff31b1797334729730b5489abf16b0176ddf898bda65d4a0a8004e42b535"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 7,
+              "hash": "7b6bcba8af374a13bd76feea151fa4e7477e3f6b8ab110491d31eb8bede0b536"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "d8b90ee6d3c5224e6a0e0109e38d31869a3a3395bc66949af4c509c8bb21babd"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 4,
+              "hash": "1d83cacc03479f62685ac426cd5d3be38b9856ef1e0a0dd05e7283fc4d9bd51f"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "f4956c42edff35b04cdc6d8a4d95ac720281607fb44041adbcdd3329c81e3b8a"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 1,
+              "hash": "7299b59de0b5dad3b622afc3bdf57544e505249c77a6d4254bd14b1fc9a4ade8"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "147090ae57413d245863296935076b299338cd4426b6b74c2f881f6999866c82"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 2,
+              "hash": "8d52d733b2aed82e28779149a24cf480403bfaddb168eb6171d01e4b5d0d8326"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 7,
+              "hash": "21990e93148700ac432648b175aaeec9578a43b75ca2dc71ade4c0c06e82b8f8"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 3,
+              "hash": "7a0f6e85c886c98d31fa10764627e3f2adf7465376bb274a958094d477c22ee0"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 8,
+              "hash": "73c9213c95682465739431be62e619dfabd6db5b8495fbc4b67eed7837e4f69f"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "7a3e86658e4a44a748ca59b2d37126ed6fdf0effbde1cb90500def87f9fefb9e"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "7ce00ffd7dc8087adc1070202a39c3a5cf960800918f65c10b4a8f14a4e8acce"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "4878a822ac968cbf9c33d02e8362cce0c8859961f607cee87aa6d452a8f2cd93"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 4,
+              "hash": "1d83cacc03479f62685ac426cd5d3be38b9856ef1e0a0dd05e7283fc4d9bd51f"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 12,
+              "hash": "74af095b06fbe37a819eb3e0defb63ace4521cab504a72062238ea1d3022d16a"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "1390858810fbca2686b1f32745ccf7891f47e332b9f2de27da120fa5f9f198c1"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 6,
+              "hash": "dd00f1f1ab0068bc302d1eac118dc8ce5a7feda71600934da01c322493480ab2"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 1,
+              "hash": "19d9457176393d4f09549620a78e1ec8a62aa469a0b538648af36c8b4483dde0"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "56c827ce369fd131058b7a21c30e4a9df0cb8a1c3626feee929251fe4d9efcb6"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 5,
+              "hash": "4afff6040cd8c2017ea2668f4696fb9f1a37afd43e10315d063b3b61ad9facf3"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 8,
+              "hash": "80d00ca33fb8bccb5830dab12c9ef4193f76cebfe616a39a02522ddbc72338b7"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 6,
+              "hash": "f7aed7cb9aa82cb49862709edb902c9b8913f58d346201ec38f765ed3e29969a"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 14,
+              "hash": "272f42758bb4a06cca70d83d9f7c7fce8af19a487a7748ecee1ccf5f9836141f"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 4,
+              "hash": "16a51ef15ac9ce18a3056abfa67d2beb0160ee1e7be77650cd4375a01fad230f"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 10,
+              "hash": "aa60bdb5acb780adfa0e1ac3256a4339a8fa59a54d12af05d557c9ccff162994"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 9,
+              "hash": "b1447a7689588be92dbec4fb2b8462a76a793c0411532903dfdb0c2f20b1bd0d"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.summary",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "fields": [
+            "format",
+            "index",
+            "summary",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "summary": {
+              "kind": "string",
+              "length": 1,
+              "hash": "7299b59de0b5dad3b622afc3bdf57544e505249c77a6d4254bd14b1fc9a4ade8"
+            }
+          }
+        },
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.encrypted",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "idHash": "3136950fdea7df12819470218eb20252005dcc93595c7e66b41eda70bbad4399",
+          "fields": [
+            "data",
+            "format",
+            "id",
+            "index",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "data": {
+              "kind": "string",
+              "length": 1400,
+              "hash": "540fb6b9201ac1930186ed1740202ffcc971ea87ed2821369c9e949d9752c7b9"
+            }
+          }
+        }
+      ],
+      "nativeReplay": []
+    },
+    {
+      "mode": "off",
+      "path": "/api/v1/chat/completions",
+      "status": 200,
+      "controls": {
+        "model": "openai/gpt-5.6-luna",
+        "reasoning": {
+          "enabled": false
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "total_tokens": 288,
+          "prompt_tokens": 260,
+          "completion_tokens": 28,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 17
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "chatDetails": [
+        {
+          "choiceIndex": 0,
+          "type": "reasoning.encrypted",
+          "index": {
+            "kind": "string",
+            "length": 1,
+            "canonicalDecimal": true,
+            "value": 0
+          },
+          "idHash": "d31bd6cdbbf4586738d27e06d45f3252d479becfbf21bc29510e82fbf934eb63",
+          "fields": [
+            "data",
+            "format",
+            "id",
+            "index",
+            "type"
+          ],
+          "unknownFieldCount": 0,
+          "payloads": {
+            "format": {
+              "kind": "string",
+              "length": 19,
+              "hash": "df3c8515ffe6e8c6a954de60fe16b64a02ae97a12af1c15e45f2c0f470e93551"
+            },
+            "data": {
+              "kind": "string",
+              "length": 1228,
+              "hash": "6565621e061ea23393c784b641b8edebe3dc97725e949e9597bce452c2cc6965"
+            }
+          }
+        }
+      ],
+      "nativeReplay": [
+        {
+          "type": "reasoning",
+          "sha256": "291437787a267003b2bc5a816ea4d9fd450c1c9f11355bb2ce5ab5676c9a480d"
+        },
+        {
+          "type": "reasoning.summary",
+          "sha256": "f30800f7e8f63f1945ca355f1497e049e1abab8e02cfa53f6b6b3c4a61325bbc"
+        },
+        {
+          "type": "reasoning.encrypted",
+          "sha256": "05411ea0605b4f14cc100d2f31405eff045e542b96ded1a87c5cf655eeff3fbb"
+        }
+      ]
+    }
+  ],
+  "actualHttpRequests": 4,
+  "passed": true,
+  "testAcceptedUsage": {
+    "inputTokens": 766,
+    "outputTokens": 174,
+    "totalTokens": 940
+  },
+  "testKnownCache": {
+    "accountedInputTokens": 766,
+    "cacheReadTokens": 0,
+    "cacheReadShare": 0
+  }
+}

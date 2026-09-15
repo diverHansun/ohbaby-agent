@@ -1,0 +1,262 @@
+{
+  "profile": "zenmux-deepseek-v4-chat",
+  "model": "deepseek/deepseek-v4-flash",
+  "protocol": "openai-compatible",
+  "transport": "real",
+  "limits": {
+    "maxRequests": 4,
+    "diagnosticAllowance": 2,
+    "sdkRetries": 0,
+    "requestTimeoutMs": 90000,
+    "maxTokens": 4096
+  },
+  "capabilitySources": [
+    "https://zenmux.ai/docs/guide/advanced/reasoning.html",
+    "https://zenmux.ai/deepseek/deepseek-v4-flash"
+  ],
+  "observedAt": "2026-09-15T08:37:32.350Z",
+  "modes": [
+    {
+      "mode": "on",
+      "requestedEffort": "high",
+      "acceptedSteps": [
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 438
+          },
+          "inputTokens": 438,
+          "outputTokens": 131,
+          "totalTokens": 569
+        },
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 616
+          },
+          "inputTokens": 616,
+          "outputTokens": 51,
+          "totalTokens": 667
+        }
+      ],
+      "toolExecutions": 1,
+      "persistedNative": [
+        {
+          "type": "reasoning",
+          "sha256": "59b3de47c4205dc3cc991fe6a9c5e077fbc385e0096ac9a143fbc45e8e83481c"
+        }
+      ],
+      "nativeReplayed": true,
+      "databaseReopened": true,
+      "restoredTrackerEmpty": true,
+      "passed": true,
+      "stateEstimate": {
+        "tokens": 99,
+        "source": "reasoning"
+      },
+      "cacheBeforeReopen": {
+        "accountedInputTokens": 438,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-144af93b-51ae-4777-b6f5-5d91b5545961"
+      },
+      "cacheAfterReopen": {
+        "accountedInputTokens": 616,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-144af93b-51ae-4777-b6f5-5d91b5545961"
+      }
+    },
+    {
+      "mode": "off",
+      "requestedEffort": "high",
+      "acceptedSteps": [
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 359
+          },
+          "inputTokens": 359,
+          "outputTokens": 31,
+          "totalTokens": 390
+        },
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 436
+          },
+          "inputTokens": 436,
+          "outputTokens": 7,
+          "totalTokens": 443
+        }
+      ],
+      "toolExecutions": 1,
+      "persistedNative": [],
+      "nativeReplayed": false,
+      "databaseReopened": true,
+      "restoredTrackerEmpty": true,
+      "passed": true,
+      "cacheBeforeReopen": {
+        "accountedInputTokens": 359,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-afc2ceba-4a50-4ad3-93dd-6aa5890ac3d2"
+      },
+      "cacheAfterReopen": {
+        "accountedInputTokens": 436,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-afc2ceba-4a50-4ad3-93dd-6aa5890ac3d2"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "mode": "on",
+      "path": "/api/v1/chat/completions",
+      "status": 200,
+      "controls": {
+        "model": "deepseek/deepseek-v4-flash",
+        "reasoning": {
+          "enabled": true,
+          "effort": "high"
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "total_tokens": 569,
+          "prompt_tokens": 438,
+          "completion_tokens": 131,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 99
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "nativeReplay": []
+    },
+    {
+      "mode": "on",
+      "path": "/api/v1/chat/completions",
+      "status": 200,
+      "controls": {
+        "model": "deepseek/deepseek-v4-flash",
+        "reasoning": {
+          "enabled": true,
+          "effort": "high"
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "total_tokens": 667,
+          "prompt_tokens": 616,
+          "completion_tokens": 51,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 43
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "nativeReplay": [
+        {
+          "type": "reasoning",
+          "sha256": "59b3de47c4205dc3cc991fe6a9c5e077fbc385e0096ac9a143fbc45e8e83481c"
+        }
+      ]
+    },
+    {
+      "mode": "off",
+      "path": "/api/v1/chat/completions",
+      "status": 200,
+      "controls": {
+        "model": "deepseek/deepseek-v4-flash",
+        "reasoning": {
+          "enabled": false
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "total_tokens": 390,
+          "prompt_tokens": 359,
+          "completion_tokens": 31,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "nativeReplay": []
+    },
+    {
+      "mode": "off",
+      "path": "/api/v1/chat/completions",
+      "status": 200,
+      "controls": {
+        "model": "deepseek/deepseek-v4-flash",
+        "reasoning": {
+          "enabled": false
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "total_tokens": 443,
+          "prompt_tokens": 436,
+          "completion_tokens": 7,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "nativeReplay": []
+    }
+  ],
+  "actualHttpRequests": 4,
+  "passed": true,
+  "testAcceptedUsage": {
+    "inputTokens": 1849,
+    "outputTokens": 220,
+    "totalTokens": 2069
+  },
+  "testKnownCache": {
+    "accountedInputTokens": 1849,
+    "cacheReadTokens": 0,
+    "cacheReadShare": 0
+  }
+}

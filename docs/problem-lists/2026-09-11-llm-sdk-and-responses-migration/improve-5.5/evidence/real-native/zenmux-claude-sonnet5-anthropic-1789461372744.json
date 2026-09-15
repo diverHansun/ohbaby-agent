@@ -1,0 +1,288 @@
+{
+  "profile": "zenmux-claude-sonnet5-anthropic",
+  "model": "anthropic/claude-sonnet-5",
+  "protocol": "anthropic",
+  "transport": "real",
+  "limits": {
+    "maxRequests": 4,
+    "diagnosticAllowance": 2,
+    "sdkRetries": 0,
+    "requestTimeoutMs": 90000,
+    "maxTokens": 4096
+  },
+  "capabilitySources": [
+    "https://zenmux.ai/docs/guide/advanced/reasoning.html",
+    "https://zenmux.ai/anthropic/claude-sonnet-5",
+    "https://platform.claude.com/docs/en/docs/about-claude/models/whats-new-sonnet-5",
+    "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5"
+  ],
+  "observedAt": "2026-09-15T08:35:53.165Z",
+  "modes": [
+    {
+      "mode": "on",
+      "requestedEffort": "medium",
+      "acceptedSteps": [
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 569
+          },
+          "inputTokens": 569,
+          "outputTokens": 173,
+          "totalTokens": 742
+        },
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 811
+          },
+          "inputTokens": 811,
+          "outputTokens": 20,
+          "totalTokens": 831
+        }
+      ],
+      "toolExecutions": 1,
+      "persistedNative": [
+        {
+          "type": "thinking",
+          "sha256": "c5b42cc329386cc0d2f7bc99a5bf93720b3806c996c2f1d159c7c41a80d064a1"
+        }
+      ],
+      "nativeReplayed": true,
+      "databaseReopened": true,
+      "restoredTrackerEmpty": true,
+      "passed": true,
+      "stateEstimate": {
+        "tokens": 141,
+        "source": "reasoning"
+      },
+      "cacheBeforeReopen": {
+        "accountedInputTokens": 569,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-428cddae-9a1c-42d4-95a2-9233888e8b00"
+      },
+      "cacheAfterReopen": {
+        "accountedInputTokens": 811,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-428cddae-9a1c-42d4-95a2-9233888e8b00"
+      }
+    },
+    {
+      "mode": "off",
+      "requestedEffort": "medium",
+      "acceptedSteps": [
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 569
+          },
+          "inputTokens": 569,
+          "outputTokens": 31,
+          "totalTokens": 600
+        },
+        {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 669
+          },
+          "inputTokens": 669,
+          "outputTokens": 20,
+          "totalTokens": 689
+        }
+      ],
+      "toolExecutions": 1,
+      "persistedNative": [],
+      "nativeReplayed": false,
+      "databaseReopened": true,
+      "restoredTrackerEmpty": true,
+      "passed": true,
+      "stateEstimate": {
+        "tokens": 0,
+        "source": "reasoning"
+      },
+      "cacheBeforeReopen": {
+        "accountedInputTokens": 569,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-3ea04dd6-eee3-45f9-ab31-89302f2fe780"
+      },
+      "cacheAfterReopen": {
+        "accountedInputTokens": 669,
+        "cacheReadShare": 0,
+        "cacheReadTokens": 0,
+        "sessionId": "native-3ea04dd6-eee3-45f9-ab31-89302f2fe780"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "mode": "on",
+      "path": "/api/anthropic/v1/messages",
+      "status": 200,
+      "controls": {
+        "model": "anthropic/claude-sonnet-5",
+        "thinking": {
+          "type": "adaptive"
+        },
+        "output_config": {
+          "effort": "medium"
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "input_tokens": 569,
+          "output_tokens": 2,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        {
+          "input_tokens": 569,
+          "output_tokens": 173,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "output_tokens_details": {
+            "thinking_tokens": 141
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "nativeReplay": []
+    },
+    {
+      "mode": "on",
+      "path": "/api/anthropic/v1/messages",
+      "status": 200,
+      "controls": {
+        "model": "anthropic/claude-sonnet-5",
+        "thinking": {
+          "type": "adaptive"
+        },
+        "output_config": {
+          "effort": "medium"
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "input_tokens": 811,
+          "output_tokens": 1,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        {
+          "input_tokens": 811,
+          "output_tokens": 20,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "nativeReplay": [
+        {
+          "type": "thinking",
+          "sha256": "c5b42cc329386cc0d2f7bc99a5bf93720b3806c996c2f1d159c7c41a80d064a1"
+        }
+      ]
+    },
+    {
+      "mode": "off",
+      "path": "/api/anthropic/v1/messages",
+      "status": 200,
+      "controls": {
+        "model": "anthropic/claude-sonnet-5",
+        "thinking": {
+          "type": "disabled"
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "input_tokens": 569,
+          "output_tokens": 25,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        {
+          "input_tokens": 569,
+          "output_tokens": 31,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "nativeReplay": []
+    },
+    {
+      "mode": "off",
+      "path": "/api/anthropic/v1/messages",
+      "status": 200,
+      "controls": {
+        "model": "anthropic/claude-sonnet-5",
+        "thinking": {
+          "type": "disabled"
+        },
+        "max_tokens": 4096
+      },
+      "rawUsage": [
+        {
+          "input_tokens": 669,
+          "output_tokens": 1,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        {
+          "input_tokens": 669,
+          "output_tokens": 20,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          }
+        }
+      ],
+      "nativeSnapshots": [],
+      "nativeReplay": []
+    }
+  ],
+  "actualHttpRequests": 4,
+  "passed": true,
+  "testAcceptedUsage": {
+    "inputTokens": 2618,
+    "outputTokens": 244,
+    "totalTokens": 2862
+  },
+  "testKnownCache": {
+    "accountedInputTokens": 2618,
+    "cacheReadTokens": 0,
+    "cacheReadShare": 0
+  }
+}
