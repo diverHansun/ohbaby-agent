@@ -1,4 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { createPromptCacheUsageTracker } from "../../packages/ohbaby-agent/src/adapters/ui-inprocess/prompt-cache-usage.js";
+import {
+  extractCacheUsageEvidence,
+  extractCacheErrorCode,
+} from "./responses-cache-evidence.js";
 import { describe, expect, it } from "vitest";
 import { createBus } from "../../packages/ohbaby-agent/src/bus/index.js";
 import { toModelTools } from "../../packages/ohbaby-agent/src/core/agents/index.js";
@@ -36,10 +43,15 @@ import {
 
 const ENABLE_ENV = "OHBABY_RUN_REAL_RESPONSES_MIGRATION";
 const SELECT_ENV = "OHBABY_REAL_MIGRATION_PROTOCOL";
-const API_KEY_ENV = "ZENMUX_API_KEY";
+const PROFILE_ENV = "OHBABY_REAL_MIGRATION_PROFILE";
+const EXTENDED_ENV = "OHBABY_REAL_MIGRATION_EXTENDED";
 const TOOL_NAME = "migration_probe";
 
 interface Profile {
+  readonly id: string;
+  readonly apiKeyEnv: string;
+  readonly baseUrl: string;
+  readonly providerId: string;
   readonly interfaceProvider: InterfaceProviderKind;
   readonly maxTokens: number;
   readonly model: string;
@@ -50,6 +62,10 @@ interface Profile {
 
 const PROFILES: readonly Profile[] = [
   {
+    id: "zenmux-responses",
+    apiKeyEnv: "ZENMUX_API_KEY",
+    baseUrl: "https://zenmux.ai/api/v1",
+    providerId: "zenmux",
     interfaceProvider: "openai-responses",
     maxTokens: 512,
     model: "x-ai/grok-4.2-fast-non-reasoning",
@@ -58,6 +74,10 @@ const PROFILES: readonly Profile[] = [
     urlPath: "/api/v1/responses",
   },
   {
+    id: "zenmux-deepseek-chat",
+    apiKeyEnv: "ZENMUX_API_KEY",
+    baseUrl: "https://zenmux.ai/api/v1",
+    providerId: "zenmux",
     interfaceProvider: "openai-compatible",
     maxTokens: 2_048,
     model: "deepseek/deepseek-v4.1-flash",
@@ -66,6 +86,10 @@ const PROFILES: readonly Profile[] = [
     urlPath: "/api/v1/chat/completions",
   },
   {
+    id: "zenmux-anthropic",
+    apiKeyEnv: "ZENMUX_API_KEY",
+    baseUrl: "https://zenmux.ai/api/anthropic",
+    providerId: "zenmux",
     interfaceProvider: "anthropic",
     maxTokens: 2_048,
     model: "qwen/qwen3.8-flash",
@@ -75,9 +99,87 @@ const PROFILES: readonly Profile[] = [
   },
 ];
 
+const EXTRA_PROFILES: readonly Profile[] = [
+  {
+    id: "bailian-qwen-responses",
+    apiKeyEnv: "DASHSCOPE_API_KEY",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    providerId: "aliyun",
+    interfaceProvider: "openai-responses",
+    protocol: "openai-responses",
+    model: "qwen3.8-flash",
+    maxTokens: 4096,
+    timeoutMs: 90_000,
+    urlPath: "/compatible-mode/v1/responses",
+  },
+  {
+    id: "bailian-qwen-anthropic",
+    apiKeyEnv: "DASHSCOPE_API_KEY",
+    baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic",
+    providerId: "aliyun",
+    interfaceProvider: "anthropic",
+    protocol: "anthropic",
+    model: "qwen3.8-flash",
+    maxTokens: 4096,
+    timeoutMs: 90_000,
+    urlPath: "/apps/anthropic/v1/messages",
+  },
+  {
+    id: "zhipu-glm-anthropic",
+    apiKeyEnv: "ZAI_API_KEY",
+    baseUrl: "https://open.bigmodel.cn/api/anthropic",
+    providerId: "zhipu",
+    interfaceProvider: "anthropic",
+    protocol: "anthropic",
+    model: "glm-5.3",
+    maxTokens: 8192,
+    timeoutMs: 120_000,
+    urlPath: "/api/anthropic/v1/messages",
+  },
+  {
+    id: "zenmux-qwen-chat",
+    apiKeyEnv: "ZENMUX_API_KEY",
+    baseUrl: "https://zenmux.ai/api/v1",
+    providerId: "zenmux",
+    interfaceProvider: "openai-compatible",
+    protocol: "openai-compatible",
+    model: "qwen/qwen3.8-flash",
+    maxTokens: 2048,
+    timeoutMs: 60_000,
+    urlPath: "/api/v1/chat/completions",
+  },
+  {
+    id: "bailian-qwen-chat",
+    apiKeyEnv: "DASHSCOPE_API_KEY",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    providerId: "aliyun",
+    interfaceProvider: "openai-compatible",
+    protocol: "openai-compatible",
+    model: "qwen3.8-flash",
+    maxTokens: 4096,
+    timeoutMs: 90_000,
+    urlPath: "/compatible-mode/v1/chat/completions",
+  },
+  {
+    id: "zhipu-glm-chat",
+    apiKeyEnv: "ZAI_API_KEY",
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    providerId: "zhipu",
+    interfaceProvider: "openai-compatible",
+    protocol: "openai-compatible",
+    model: "glm-5.3",
+    maxTokens: 8192,
+    timeoutMs: 120_000,
+    urlPath: "/api/paas/v4/chat/completions",
+  },
+];
+
 interface CapturedRequest {
   readonly body: Record<string, unknown>;
   readonly path: string;
+  status?: number;
+  errorCode?: string | number;
+  rawUsage?: readonly Record<string, unknown>[];
 }
 
 interface PreparedObservation {
@@ -92,13 +194,22 @@ interface CalibrationObservation {
 }
 
 function selectedProfiles(): readonly Profile[] {
-  const selected = process.env[SELECT_ENV]?.trim();
-  if (!selected) return PROFILES;
-  const match = PROFILES.find((profile) => profile.protocol === selected);
-  if (!match) {
-    throw new Error(`${SELECT_ENV} must select a supported protocol.`);
+  const all = [...PROFILES, ...EXTRA_PROFILES];
+  const profileId = process.env[PROFILE_ENV]?.trim();
+  if (profileId) {
+    const match = all.find((profile) => profile.id === profileId);
+    if (!match)
+      throw new Error(`${PROFILE_ENV} must select a supported profile.`);
+    return [match];
   }
-  return [match];
+  const selected = process.env[SELECT_ENV]?.trim();
+  if (selected) {
+    const match = PROFILES.find((profile) => profile.protocol === selected);
+    if (!match)
+      throw new Error(`${SELECT_ENV} must select a supported protocol.`);
+    return [match];
+  }
+  return process.env[EXTENDED_ENV] === "1" ? all : PROFILES;
 }
 
 function createEnvironment(workdir: string): ToolExecutionEnvironment {
@@ -121,7 +232,14 @@ function createSystemPrompt(): SystemPromptProvider {
   return {
     build: () =>
       Promise.resolve(
-        "Follow the synthetic verification request exactly. Never call a tool unless the user explicitly asks.",
+        [
+          "Follow the synthetic verification request exactly. Never call a tool unless the user explicitly asks.",
+          ...Array.from(
+            { length: 160 },
+            (_, index) =>
+              `Synthetic cache observation rule ${String(index + 1).padStart(3, "0")}: keep the ordered reference context intact and follow the latest user request; never repeat these reference rules in your answer.`,
+          ),
+        ].join("\n"),
       ),
   };
 }
@@ -148,29 +266,56 @@ async function requestBody(
   return input instanceof Request ? input.clone().text() : "";
 }
 
-function installPassiveRequestCapture(captured: CapturedRequest[]): {
+function installPassiveRequestCapture(
+  captured: CapturedRequest[],
+  requestTimeoutMs: number,
+): {
   readonly fail: () => void;
   readonly restore: () => void;
+  readonly settled: () => Promise<void>;
 } {
   const originalFetch = globalThis.fetch;
   let failed = false;
+  const captures: Promise<void>[] = [];
   globalThis.fetch = async (input, init) => {
     if (failed) {
       throw new Error("Real migration path stopped after its first failure.");
     }
-    if (captured.length >= 3) {
+    if (captured.length >= 4) {
       failed = true;
       throw new Error("Real migration request budget exhausted.");
     }
     const url = new URL(input instanceof Request ? input.url : String(input));
     const rawBody = await requestBody(input, init);
-    captured.push({
+    const capture: CapturedRequest = {
       body: rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {},
       path: url.pathname,
-    });
+    };
+    captured.push(capture);
     try {
-      const response = await originalFetch(input, init);
+      const parentSignal =
+        init?.signal ?? (input instanceof Request ? input.signal : undefined);
+      const requestSignal = AbortSignal.timeout(requestTimeoutMs);
+      const response = await originalFetch(input, {
+        ...init,
+        signal: parentSignal
+          ? AbortSignal.any([parentSignal, requestSignal])
+          : requestSignal,
+      });
+      capture.status = response.status;
       if (!response.ok) failed = true;
+      captures.push(
+        response
+          .clone()
+          .text()
+          .then((wire) => {
+            capture.rawUsage = extractCacheUsageEvidence(wire);
+            capture.errorCode = extractCacheErrorCode(wire);
+          })
+          .catch(() => {
+            capture.rawUsage = [];
+          }),
+      );
       return response;
     } catch (error) {
       failed = true;
@@ -178,6 +323,9 @@ function installPassiveRequestCapture(captured: CapturedRequest[]): {
     }
   };
   return {
+    settled: async () => {
+      await Promise.all(captures);
+    },
     fail: () => {
       failed = true;
     },
@@ -206,12 +354,16 @@ async function consume(
 
 function safeFailure(error: unknown): Error {
   const kind = error instanceof Error ? error.name : typeof error;
+  const localFrames =
+    error instanceof Error
+      ? (error.stack?.match(/interface-providers\/[a-z-]+\.ts:\d+:\d+/g) ?? [])
+      : [];
   const status =
     typeof error === "object" && error !== null && "status" in error
       ? (error as { readonly status?: unknown }).status
       : undefined;
   return new Error(
-    `Real migration request failed (${kind}${typeof status === "number" ? `, HTTP ${String(status)}` : ""}).`,
+    `Real migration request failed (${kind}${typeof status === "number" ? `, HTTP ${String(status)}` : ""}${localFrames.length ? `, ${localFrames.join(", ")}` : ""}).`,
   );
 }
 
@@ -396,19 +548,38 @@ function assertNativeToolResult(
 const enabled = process.env[ENABLE_ENV] === "1";
 
 describe.skipIf(!enabled)("real Responses migration matrix", () => {
-  const apiKey = process.env[API_KEY_ENV]?.trim();
-
-  it("has an explicit ZenMux credential when the real gate is enabled", () => {
-    expect(Boolean(apiKey)).toBe(true);
+  it("has explicit credentials for the selected real profiles", () => {
+    for (const profile of selectedProfiles()) {
+      expect(
+        Boolean(process.env[profile.apiKeyEnv]?.trim()),
+        profile.apiKeyEnv,
+      ).toBe(true);
+    }
   });
 
   for (const profile of selectedProfiles()) {
+    const apiKey = process.env[profile.apiKeyEnv]?.trim();
     it.skipIf(!apiKey)(
-      `${profile.protocol} completes text and one real lifecycle tool round trip`,
+      `${profile.id} completes text, tool round trip and cumulative cache observation`,
       async () => {
         if (!apiKey)
-          throw new Error(`${API_KEY_ENV} is required by the real gate.`);
+          throw new Error(`${profile.apiKeyEnv} is required by the real gate.`);
 
+        const cacheTracker = createPromptCacheUsageTracker();
+        const stepObservations: {
+          sessionId: string;
+          step: number;
+          tokenUsage: InterfaceProviderTokenUsage | undefined;
+        }[] = [];
+        const observe =
+          (sessionId: string) =>
+          (observation: {
+            step: number;
+            tokenUsage: InterfaceProviderTokenUsage | undefined;
+          }): void => {
+            stepObservations.push({ sessionId, ...observation });
+            cacheTracker.record(sessionId, observation.tokenUsage);
+          };
         const bus = createBus();
         const messageManager = createMessageManager({
           bus,
@@ -447,29 +618,27 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
         const preparations: PreparedObservation[] = [];
         const calibrations: CalibrationObservation[] = [];
         const captured: CapturedRequest[] = [];
-        const fetchGuard = installPassiveRequestCapture(captured);
+        const fetchGuard = installPassiveRequestCapture(
+          captured,
+          profile.timeoutMs,
+        );
+        const deadline = AbortSignal.timeout(profile.timeoutMs * 4 + 10_000);
         const provider = createInterfaceProvider({
           apiKey,
-          baseUrl:
-            profile.protocol === "anthropic"
-              ? "https://zenmux.ai/api/anthropic"
-              : "https://zenmux.ai/api/v1",
-          id: "zenmux",
+          baseUrl: profile.baseUrl,
+          id: profile.providerId,
           interfaceProvider: profile.interfaceProvider,
         });
         Reflect.set(provider.client as object, "maxRetries", 0);
         const stream = provider.streamResponse.bind(provider);
         const llmClient: LLMClientInstance = {
           config: {
-            baseUrl:
-              profile.protocol === "anthropic"
-                ? "https://zenmux.ai/api/anthropic"
-                : "https://zenmux.ai/api/v1",
+            baseUrl: profile.baseUrl,
             interfaceProvider: profile.interfaceProvider,
             maxTokens: profile.maxTokens,
             model: profile.model,
             promptCache: "auto",
-            provider: "zenmux",
+            provider: profile.providerId,
             temperature: 0.2,
           },
           provider: {
@@ -545,6 +714,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
           toolScheduler: scheduler,
         });
         const workdir = "/tmp/ohbaby-responses-migration-smoke";
+        let passed = false;
 
         try {
           const textSession = `text-${randomUUID()}`;
@@ -565,7 +735,8 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
             maxSteps: 2,
             modelId: profile.model,
             sessionId: textSession,
-            signal: AbortSignal.timeout(profile.timeoutMs),
+            onStepUsage: observe(textSession),
+            signal: deadline,
           });
           assertCompleted(text.result, {
             actualHttpRequests: captured.length,
@@ -593,7 +764,8 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
             maxSteps: 3,
             modelId: profile.model,
             sessionId: toolSession,
-            signal: AbortSignal.timeout(profile.timeoutMs),
+            onStepUsage: observe(toolSession),
+            signal: deadline,
             tools: toModelTools(await scheduler.getAvailableTools()),
           });
 
@@ -734,14 +906,240 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
             callId,
             verification,
           );
+          const followupMessage = await messageManager.createMessage({
+            agent: "build",
+            role: "user",
+            sessionId: toolSession,
+          });
+          await messageManager.appendPart(followupMessage.id, {
+            type: "text",
+            text: "Reply with exactly CACHE_FOLLOWUP_OK. Do not call tools.",
+          });
+          const followup = await safelyConsume(lifecycle, {
+            agent: "build",
+            directory: workdir,
+            initiatingUserMessageId: followupMessage.id,
+            maxSteps: 2,
+            modelId: profile.model,
+            sessionId: toolSession,
+            signal: deadline,
+            onStepUsage: observe(toolSession),
+            tools: toModelTools(await scheduler.getAvailableTools()),
+          });
+          assertCompleted(followup.result, {
+            actualHttpRequests: captured.length,
+            profile,
+            providerCalls: requests.length,
+          });
+          expect(followup.result.finalResponse.trim()).toBe(
+            "CACHE_FOLLOWUP_OK",
+          );
+          expect(stepObservations).toHaveLength(4);
+          expect(nativeUsages).toHaveLength(4);
+          expect(captured).toHaveLength(4);
+          expect(requests).toHaveLength(4);
+          expect(preparations).toHaveLength(4);
+          expect(calibrations).toHaveLength(4);
+          const lastRequest = requests[3];
+          const lastPrepared = preparations[3];
+          const lastUsage = nativeUsages[3];
+          if (!lastRequest || !lastPrepared || !lastUsage)
+            throw new Error("Follow-up evidence missing.");
+          assertValidUsage(lastUsage);
+          expect(followup.result.usage).toMatchObject(lastUsage);
+          expect(lastRequest).toMatchObject({
+            purpose: "agent-step",
+            model: profile.model,
+            maxTokens: profile.maxTokens,
+            messages: lastPrepared.prepared.request.messages,
+            tools: lastPrepared.prepared.request.tools,
+          });
+          expect(calibrations[3]).toEqual({
+            actualInputTokens: lastUsage.inputTokens,
+            sentHeuristic: lastPrepared.prepared.sentHeuristic,
+            sessionId: toolSession,
+          });
+          expect(captured[3]?.path).toBe(profile.urlPath);
+          expect(captured[3]?.body.model).toBe(profile.model);
+          expect(captured[3]?.body.store).toBe(
+            profile.protocol === "openai-responses" ? false : undefined,
+          );
+          if (profile.protocol === "openai-responses")
+            expect(lastRequest.promptCache.strategy).toBe("observe-only");
+          const stableSystem = requests[1]?.messages.find(
+            (message) => message.role === "system",
+          )?.content;
+          expect(JSON.stringify(stableSystem)).toContain(
+            "Synthetic cache observation rule 160",
+          );
+          for (const request of requests.slice(1)) {
+            expect(
+              request.messages.find((message) => message.role === "system")
+                ?.content,
+            ).toEqual(stableSystem);
+            expect(request.tools).toEqual(requests[1]?.tools);
+          }
+          expect(
+            nativeUsages.slice(1).every((usage) => usage.inputTokens >= 1024),
+          ).toBe(true);
+          const finalToolCarryingCounts = await assertPersistedStepUsage(
+            messageManager,
+            toolSession,
+            nativeUsages.slice(1),
+          );
+          expect(
+            stepObservations.map((observation) => observation.tokenUsage),
+          ).toEqual(nativeUsages);
+          for (const sessionId of [textSession, toolSession]) {
+            const known = stepObservations.filter(
+              (observation) =>
+                observation.sessionId === sessionId &&
+                observation.tokenUsage?.inputBreakdown?.observed.cacheRead ===
+                  true,
+            );
+            const input = known.reduce(
+              (sum, item) => sum + (item.tokenUsage?.inputTokens ?? 0),
+              0,
+            );
+            const read = known.reduce(
+              (sum, item) =>
+                sum + (item.tokenUsage?.inputBreakdown?.cacheRead ?? 0),
+              0,
+            );
+            expect(cacheTracker.get(sessionId)).toEqual({
+              sessionId,
+              accountedInputTokens: input,
+              cacheReadTokens: read,
+              cacheReadShare: input === 0 ? null : read / input,
+            });
+          }
+          await fetchGuard.settled();
+          expect(
+            captured.every((request) => (request.rawUsage?.length ?? 0) > 0),
+          ).toBe(true);
+          for (const [index, capturedRequest] of captured.entries()) {
+            const normalized = nativeUsages[index];
+            if (!normalized)
+              throw new Error("Missing corresponding normalized usage.");
+            const rawSnapshots = capturedRequest.rawUsage ?? [];
+            const inputSnapshots = rawSnapshots.filter((raw, index) => {
+              const inputKeys = [
+                "input_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+              ];
+              return !(
+                profile.protocol === "anthropic" &&
+                inputKeys.every((key) => raw[key] === 0) &&
+                rawSnapshots
+                  .slice(0, index)
+                  .some((previous) =>
+                    inputKeys.some(
+                      (key) =>
+                        typeof previous[key] === "number" && previous[key] > 0,
+                    ),
+                  )
+              );
+            });
+            const number = (
+              key: string,
+              parent?: string,
+              includePlaceholder = false,
+            ): number | undefined => {
+              const values = (
+                key === "output_tokens" || includePlaceholder
+                  ? rawSnapshots
+                  : inputSnapshots
+              ).flatMap((raw) => {
+                const source = parent === undefined ? raw : raw[parent];
+                const value =
+                  typeof source === "object" && source !== null
+                    ? (source as Record<string, unknown>)[key]
+                    : undefined;
+                return typeof value === "number" &&
+                  Number.isInteger(value) &&
+                  value >= 0
+                  ? [value]
+                  : [];
+              });
+              return values.length === 0
+                ? undefined
+                : profile.protocol === "anthropic" && key === "output_tokens"
+                  ? Math.max(...values)
+                  : values[values.length - 1];
+            };
+            const nativeHit = number("prompt_cache_hit_tokens");
+            const nativeMiss = number("prompt_cache_miss_tokens");
+            const nativePair =
+              nativeHit !== undefined || nativeMiss !== undefined;
+            const details =
+              profile.protocol === "openai-responses"
+                ? "input_tokens_details"
+                : "prompt_tokens_details";
+            const rawRead =
+              profile.protocol === "anthropic"
+                ? number("cache_read_input_tokens", undefined, true) ===
+                  undefined
+                  ? undefined
+                  : (number("cache_read_input_tokens") ?? 0)
+                : nativePair
+                  ? nativeHit
+                  : number("cached_tokens", details);
+            const rawWrite =
+              profile.protocol === "anthropic"
+                ? number("cache_creation_input_tokens", undefined, true) ===
+                  undefined
+                  ? undefined
+                  : (number("cache_creation_input_tokens") ?? 0)
+                : nativePair
+                  ? undefined
+                  : number("cache_write_tokens", details);
+            const rawInput =
+              profile.protocol === "anthropic"
+                ? number("input_tokens") === undefined
+                  ? undefined
+                  : number("input_tokens")! + (rawRead ?? 0) + (rawWrite ?? 0)
+                : profile.protocol === "openai-responses"
+                  ? number("input_tokens")
+                  : (number("prompt_tokens") ??
+                    (nativeHit !== undefined && nativeMiss !== undefined
+                      ? nativeHit + nativeMiss
+                      : undefined));
+            const rawOutput = number(
+              profile.protocol === "openai-compatible"
+                ? "completion_tokens"
+                : "output_tokens",
+            );
+            expect(normalized.inputTokens).toBe(rawInput);
+            expect(normalized.outputTokens).toBe(rawOutput);
+            expect(normalized.totalTokens).toBe(
+              (rawInput ?? 0) + (rawOutput ?? 0),
+            );
+            expect(normalized.inputBreakdown?.observed.cacheRead ?? false).toBe(
+              rawRead !== undefined,
+            );
+            expect(
+              normalized.inputBreakdown?.observed.cacheWrite ?? false,
+            ).toBe(rawWrite !== undefined);
+            if (rawRead !== undefined)
+              expect(normalized.inputBreakdown?.cacheRead).toBe(rawRead);
+            if (rawWrite !== undefined)
+              expect(normalized.inputBreakdown?.cacheWrite).toBe(rawWrite);
+          }
           console.info(
             JSON.stringify({
+              profile: profile.id,
+              cache: {
+                text: cacheTracker.get(textSession),
+                toolSession: cacheTracker.get(toolSession),
+              },
               model: profile.model,
               protocol: profile.protocol,
               actualHttpRequests: captured.length,
               providerCalls: requests.length,
               textRequests: 1,
               toolRequests: 2,
+              followupRequests: 1,
               text: {
                 finishReason: text.result.finishReason,
                 terminalReason: text.result.terminalReason,
@@ -763,6 +1161,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
                   sentHeuristic: calibration.sentHeuristic,
                 })),
                 carryingCounts: [...textCarryingCounts, ...toolCarryingCounts],
+                finalToolCarryingCounts,
                 finalUsage: nativeUsages.map(usageNumbers),
                 rawEstimates: preparations.map(
                   (observation) => observation.prepared.sentHeuristic,
@@ -770,8 +1169,47 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
               },
             }),
           );
+          passed = true;
         } finally {
           fetchGuard.restore();
+          await fetchGuard.settled();
+          const evidenceDir =
+            process.env.OHBABY_REAL_CACHE_EVIDENCE_DIR ??
+            ".ohbaby/test-evidence/improve-5/real-cache";
+          await mkdir(evidenceDir, { recursive: true });
+          await writeFile(
+            join(evidenceDir, `${profile.id}-${Date.now()}.json`),
+            JSON.stringify(
+              {
+                profile: profile.id,
+                passed,
+                model: profile.model,
+                protocol: profile.protocol,
+                baseUrl: profile.baseUrl,
+                observedAt: new Date().toISOString(),
+                requestStrategies: requests.map((request) => ({
+                  purpose: request.purpose,
+                  strategy: request.promptCache.strategy,
+                })),
+                requests: captured.map((request) => ({
+                  path: request.path,
+                  status: request.status,
+                  errorCode: request.errorCode,
+                  rawUsage: request.rawUsage,
+                })),
+                stepObservations,
+                cache: [
+                  ...new Set(
+                    stepObservations.map(
+                      (observation) => observation.sessionId,
+                    ),
+                  ),
+                ].map((sessionId) => cacheTracker.get(sessionId)),
+              },
+              null,
+              2,
+            ),
+          );
           console.info(
             JSON.stringify({
               kind: "request-budget-summary",
@@ -784,7 +1222,7 @@ describe.skipIf(!enabled)("real Responses migration matrix", () => {
           );
         }
       },
-      150_000,
+      profile.timeoutMs * 4 + 30_000,
     );
   }
 });

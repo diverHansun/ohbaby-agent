@@ -35,7 +35,8 @@
     "format:check": "prettier --check \"packages/**/*.{ts,tsx,json,md}\" \"apps/**/*.{ts,tsx,json,md,html}\" \"*.{json,js,ts,md,yaml}\"",
     "preflight": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
     "clean": "pnpm -r --filter \"./packages/**\" --filter \"./apps/**\" --if-present clean && rimraf coverage dist",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:cache:real:accounting": "node scripts/run-real-cache-accounting.mjs"
   },
   "keywords": [
     "ai",
