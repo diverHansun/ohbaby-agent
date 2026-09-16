@@ -61,3 +61,12 @@ OHBABY_REAL_CONTEXT_EVIDENCE_DIR=.ohbaby/test-evidence/improve-6/reacceptance no
 实网证明读取、续接、真实摘要、退休、重开和再次续接；摘要文本通过关键事实问答验证，没有另做逐句人工审读。持久化原生 hash 与 provider 入参精确比较；HTTP 编码层字段保真由三协议 contract 测试承担。实网报告使用校准后上下文估算和实际 usage，没有逐项输出原始估算与不透明状态代理来源。
 
 真实百万窗口达到 95% 和真实上游 overflow 未实测；自动触发边界由确定性测试覆盖。实网使用 force 启动现有压缩流程，不据此宣称已验证真实自动越阈值。
+
+
+## 5. 本地合入记录
+
+用户于 2026-09-16 授权合入。Cursor 的独立验收原文保存在 05 第 7 节，并单独提交为 `f72b416a`。本地 `openai-responses-migration` 从 `5a76738a` 快进到 `f72b416a`，无冲突；保留“部分通过”的容量验收边界。没有推送远端，也没有纳入未跟踪的 `tests/models-4-tests.md`。
+
+合入前重新执行 `pnpm test`：3500 项通过、16 项默认跳过。合入后再次全量运行：3499 项通过，CLI 打包安装用例在 `npm install` 阶段超过原有 180 秒上限；没有出现 Context 测试失败。保持代码和超时不变，单独重跑 `tests/integration/cli/packaging-smoke.integration.test.ts`，该项通过（约 170 秒）。超时具体根因未确认，不能把合入后的首次全量运行写成全通过。
+
+本机日志位于 `.ohbaby/test-evidence/improve-6/local-merge/`：`before-merge-tests.log`、`after-merge-tests.log`、`packaging-recheck.log`。
