@@ -572,7 +572,6 @@ describe("Lifecycle.run", () => {
       "turn:start",
       "context:prepared",
       "llm:start",
-      "llm:complete",
       "llm:complete", // Final parsed tool snapshot after normal stream exhaustion.
       "tool:start",
       "tool:result",
@@ -991,7 +990,7 @@ describe("Lifecycle.run", () => {
               ],
             },
           ],
-          [],
+          [{ finishReason: "stop" }],
         ],
         [],
       ),
@@ -1513,7 +1512,7 @@ describe("Lifecycle.run", () => {
     ]);
   });
 
-  it("retains usage and calibration processed immediately before an abort", async () => {
+  it("retains only partial Run usage when cancellation precedes stream exhaustion", async () => {
     const abortController = new AbortController();
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -1608,12 +1607,10 @@ describe("Lifecycle.run", () => {
         inputTokens: 80,
         outputTokens: 6,
         totalTokens: 86,
-        usageComplete: true,
+        usageComplete: false,
       },
     });
-    expect(updateCalibrationFactor.mock.calls).toEqual([
-      ["session_abort_usage", 80, 50],
-    ]);
+    expect(updateCalibrationFactor.mock.calls).toEqual([]);
   });
 
   it("passes context scope through prepare, calibration, and assistant messages", async () => {
@@ -3050,7 +3047,7 @@ describe("Lifecycle final step usage observer", () => {
         },
       }),
     );
-    expect(events.filter((event) => event === "llm:complete")).toHaveLength(2);
+    expect(events.filter((event) => event === "llm:complete")).toHaveLength(1);
     expect(observations).toEqual([{ step: 1, tokenUsage: finalUsage }]);
     expect(result.usage).toEqual({ ...finalUsage, usageComplete: true });
     expect(updateCalibrationFactor).toHaveBeenCalledWith(
@@ -3174,7 +3171,7 @@ describe("Lifecycle final step usage observer", () => {
     );
     stream.mockRestore();
     expect(attempts).toBe(2);
-    expect(events.filter((event) => event === "llm:complete")).toHaveLength(2);
+    expect(events.filter((event) => event === "llm:complete")).toHaveLength(1);
     expect(observations).toEqual([{ step: 1, tokenUsage: finalUsage }]);
     expect(result.usage).toEqual({ ...finalUsage, usageComplete: true });
     expect(updateCalibrationFactor).toHaveBeenCalledTimes(1);
@@ -3402,6 +3399,10 @@ it("does not execute a complete tool call from filtered output, retaining usage"
       modelId: "fake-model",
     }),
   );
+  expect(result).toMatchObject({
+    success: false,
+    terminalReason: "content_filter",
+  });
   expect(executeBatch).not.toHaveBeenCalled();
   expect(result.usage).toMatchObject({
     inputTokens: 10,
@@ -3551,3 +3552,350 @@ it("discards native state and usage from an overflowing attempt before accepting
   expect(JSON.stringify(states)).toContain("sig-2");
   expect(JSON.stringify(states)).not.toContain("sig-1");
 });
+
+it.each(["message", "usage", "tools", "permanent"] as const)(
+  "keeps accepted completion and usage when ordinary %s persistence fails",
+  async (failure) => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    const llm = createSequentialFakeLLMClient(
+      [
+        [
+          {
+            textDelta: "saved text",
+            toolCallDeltas: [
+              { index: 0, id: "c1", name: "read_file", argumentsDelta: "{}" },
+            ],
+            finishReason: "tool_calls",
+            tokenUsage: { inputTokens: 10, outputTokens: 3, totalTokens: 13 },
+          },
+        ],
+      ],
+      [],
+    );
+    const observed = vi.fn();
+    const executeBatch = vi.fn();
+    const originalUpdate = manager.updateMessage.bind(manager);
+    vi.spyOn(manager, "updateMessage").mockImplementation(async (id, patch) => {
+      if (
+        failure === "permanent" ||
+        (failure === "message" && patch.finish === "tool_calls")
+      )
+        throw new Error("disk failure");
+      return originalUpdate(id, patch);
+    });
+    const originalPartUpdate = manager.updatePart.bind(manager);
+    vi.spyOn(manager, "updatePart").mockImplementation(async (id, patch) => {
+      if (failure === "usage" && patch.metadata !== undefined)
+        throw new Error("disk failure");
+      return originalPartUpdate(id, patch);
+    });
+    const originalAppend = manager.appendPart.bind(manager);
+    vi.spyOn(manager, "appendPart").mockImplementation(async (id, part) => {
+      if (failure === "tools" && part.type === "tool")
+        throw new Error("disk failure");
+      return originalAppend(id, part);
+    });
+    const lifecycle = new Lifecycle({
+      llmClient: llm,
+      messageManager: manager,
+      contextManager: createContextManagerMock(
+        vi.fn().mockResolvedValue(preparedTurn([])),
+      ),
+      toolScheduler: { executeBatch } as unknown as ToolSchedulerInstance,
+    });
+    const { result, events } = await consumeLifecycleEvents(
+      lifecycle.run({
+        sessionId: "session_test",
+        directory: "/test",
+        modelId: "fake-model",
+        onStepUsage: observed,
+      }),
+    );
+    expect(events.filter((e) => e === "llm:complete")).toHaveLength(1);
+    expect(observed).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      success: false,
+      terminalReason: "model_state_persistence_failure",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 3,
+        totalTokens: 13,
+        usageComplete: true,
+      },
+    });
+    expect(executeBatch).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["before", "after"] as const)(
+  "accepts usage only when cancellation is %s completion publication",
+  async (boundary) => {
+    const controller = new AbortController();
+    const finalUsage = {
+      inputTokens: 10,
+      outputTokens: 3,
+      totalTokens: 13,
+      inputBreakdown: {
+        uncached: 2,
+        cacheRead: 8,
+        cacheWrite: 0,
+        observed: { cacheRead: true, cacheWrite: false },
+      },
+    };
+    const stream = vi
+      .spyOn(llmStreaming, "streamResponse")
+      .mockImplementation(async function* () {
+        yield await Promise.resolve({
+          isComplete: true,
+          finishReason: "stop",
+          messageSnapshot: { content: "done" },
+          tokenUsage: finalUsage,
+        });
+        if (boundary === "before") controller.abort();
+      });
+    const observer = vi.fn();
+    const calibration = vi.fn();
+    const lifecycle = new Lifecycle({
+      llmClient: createSequentialFakeLLMClient([], []),
+      messageManager: createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+        idGenerator: createDeterministicIds(),
+      }),
+      contextManager: {
+        ...createContextManagerMock(
+          vi.fn().mockResolvedValue(preparedTurn([])),
+        ),
+        updateCalibrationFactor: calibration,
+      },
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const iterator = lifecycle.run({
+      sessionId: "session_test",
+      directory: "/test",
+      modelId: "fake-model",
+      onStepUsage: observer,
+      signal: controller.signal,
+    });
+    let completeCount = 0;
+    let next = await iterator.next();
+    while (!next.done) {
+      if (next.value.type === "llm:complete") {
+        completeCount += 1;
+        if (boundary === "after") controller.abort();
+      }
+      next = await iterator.next();
+    }
+    stream.mockRestore();
+    expect(next.value.terminalReason).toBe("cancelled");
+    expect(completeCount).toBe(boundary === "after" ? 1 : 0);
+    expect(observer).toHaveBeenCalledTimes(boundary === "after" ? 1 : 0);
+    expect(calibration).toHaveBeenCalledTimes(boundary === "after" ? 1 : 0);
+    expect(next.value.usage).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 3,
+      totalTokens: 13,
+      usageComplete: boundary === "after",
+    });
+    expect(next.value.usage?.inputBreakdown).toEqual(
+      boundary === "after" ? finalUsage.inputBreakdown : undefined,
+    );
+  },
+);
+
+it("retains earlier trusted step usage when cancellation interrupts a later candidate", async () => {
+  const controller = new AbortController();
+  const earlier = {
+    inputTokens: 20,
+    outputTokens: 2,
+    totalTokens: 22,
+    inputBreakdown: {
+      uncached: 5,
+      cacheRead: 15,
+      cacheWrite: 0,
+      observed: { cacheRead: true, cacheWrite: false },
+    },
+  };
+  const later = {
+    inputTokens: 30,
+    outputTokens: 3,
+    totalTokens: 33,
+    inputBreakdown: {
+      uncached: 10,
+      cacheRead: 20,
+      cacheWrite: 0,
+      observed: { cacheRead: true, cacheWrite: false },
+    },
+  };
+  const llm = createSequentialFakeLLMClient([], []);
+  let attempt = 0;
+  llm.provider.streamResponse = (): Promise<
+    AsyncIterable<InterfaceProviderStreamEvent>
+  > =>
+    Promise.resolve(
+      (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+        attempt += 1;
+        if (attempt === 1) {
+          yield await Promise.resolve({
+            finishReason: "tool_calls",
+            tokenUsage: earlier,
+            toolCallDeltas: [
+              { index: 0, id: "c1", name: "read_file", argumentsDelta: "{}" },
+            ],
+          });
+        } else {
+          yield await Promise.resolve({
+            textDelta: "later partial",
+            finishReason: "stop",
+            tokenUsage: later,
+          });
+          controller.abort();
+        }
+      })(),
+    );
+  const observer = vi.fn();
+  const calibration = vi.fn();
+  const lifecycle = new Lifecycle({
+    llmClient: llm,
+    messageManager: createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+    }),
+    contextManager: {
+      ...createContextManagerMock(vi.fn().mockResolvedValue(preparedTurn([]))),
+      updateCalibrationFactor: calibration,
+    },
+    toolScheduler: {
+      executeBatch: vi
+        .fn()
+        .mockResolvedValue([{ callId: "c1", status: "success", output: "ok" }]),
+    } as unknown as ToolSchedulerInstance,
+  });
+  const { result, events } = await consumeLifecycleEvents(
+    lifecycle.run({
+      sessionId: "session_test",
+      directory: "/test",
+      modelId: "fake-model",
+      onStepUsage: observer,
+      signal: controller.signal,
+    }),
+  );
+  expect(result).toMatchObject({
+    terminalReason: "cancelled",
+    usage: {
+      inputTokens: 50,
+      outputTokens: 5,
+      totalTokens: 55,
+      usageComplete: false,
+    },
+  });
+  expect(result.usage?.inputBreakdown).toBeUndefined();
+  expect(events.filter((e) => e === "llm:complete")).toHaveLength(1);
+  expect(observer).toHaveBeenCalledTimes(1);
+  expect(observer).toHaveBeenCalledWith({
+    step: 1,
+    tokenUsage: earlier,
+  });
+  expect(calibration).toHaveBeenCalledTimes(1);
+});
+
+it.each(["length", "content_filter", "accepted_cancel"] as const)(
+  "retains trusted usage when the %s error marker cannot be saved",
+  async (boundary) => {
+    const controller = new AbortController();
+    const tokenUsage = {
+      inputTokens: 20,
+      outputTokens: 4,
+      totalTokens: 24,
+      inputBreakdown: {
+        uncached: 5,
+        cacheRead: 15,
+        cacheWrite: 0,
+        observed: { cacheRead: true, cacheWrite: false },
+      },
+    };
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    const markerFailure = new Error("error marker storage unavailable");
+    const update = manager.updateMessage.bind(manager);
+    const updates = vi
+      .spyOn(manager, "updateMessage")
+      .mockImplementation(async (id, patch) => {
+        if (patch.error !== undefined) throw markerFailure;
+        return update(id, patch);
+      });
+    const observer = vi.fn();
+    const calibration = vi.fn();
+    const executeBatch = vi.fn();
+    const lifecycle = new Lifecycle({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              textDelta: "saved provider text",
+              finishReason:
+                boundary === "accepted_cancel" ? "tool_calls" : boundary,
+              toolCallDeltas: [
+                { index: 0, id: "c1", name: "read_file", argumentsDelta: "{}" },
+              ],
+              tokenUsage,
+            },
+          ],
+        ],
+        [],
+      ),
+      messageManager: manager,
+      contextManager: {
+        ...createContextManagerMock(
+          vi.fn().mockResolvedValue(preparedTurn([])),
+        ),
+        updateCalibrationFactor: calibration,
+      },
+      toolScheduler: { executeBatch } as unknown as ToolSchedulerInstance,
+    });
+    const iterator = lifecycle.run({
+      sessionId: "session_test",
+      directory: "/test",
+      modelId: "fake-model",
+      signal: controller.signal,
+      onStepUsage: observer,
+    });
+    const events: LifecycleEvent["type"][] = [];
+    let next = await iterator.next();
+    while (!next.done) {
+      events.push(next.value.type);
+      if (next.value.type === "llm:complete" && boundary === "accepted_cancel")
+        controller.abort();
+      next = await iterator.next();
+    }
+    expect(
+      updates.mock.calls.some(([, patch]) => patch.error !== undefined),
+    ).toBe(true);
+    expect(events.filter((event) => event === "llm:complete")).toHaveLength(1);
+    expect(events.filter((event) => event === "turn:end")).toHaveLength(1);
+    expect(observer).toHaveBeenCalledTimes(1);
+    expect(calibration).toHaveBeenCalledTimes(1);
+    expect(executeBatch).not.toHaveBeenCalled();
+    expect(next.value).toMatchObject({
+      success: false,
+      terminalReason: "model_state_persistence_failure",
+      failureCause: markerFailure,
+      usage: { ...tokenUsage, usageComplete: true },
+    });
+    expect(
+      (await manager.listBySession("session_test"))
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "tool"),
+    ).toHaveLength(0);
+  },
+);

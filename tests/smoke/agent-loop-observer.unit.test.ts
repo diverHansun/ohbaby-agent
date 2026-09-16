@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   publicWire,
   summarizeWire,
+  safeLoopError,
   toolHandoffChecks,
   type LoopRequest,
 } from "./agent-loop-observer.js";
@@ -85,6 +86,39 @@ describe("real-loop observation integrity", () => {
         events: events.map((event) => ({ ...event, callId: "other-call" })),
       }).allReplayed,
     ).toBe(false);
+  });
+  it("retains diagnostic classes without leaking upstream text or nested payloads", () => {
+    const error = Object.assign(new Error("private provider payload"), {
+      code: "ECONNRESET",
+      status: 502,
+      cause: new TypeError("secret nested body"),
+    });
+    const safe = safeLoopError(error);
+    expect(safe.name).toBe("Error");
+    expect(safe.code).toBe("ECONNRESET");
+    expect(safe.status).toBe(502);
+    expect(safe.cause?.name).toBe("TypeError");
+    class APIError extends Error {
+      readonly error = { type: "overloaded_error", message: "do not retain" };
+    }
+    const sdkError = new APIError("private provider body");
+    sdkError.stack =
+      "Error\n at iterator (/node_modules/@anthropic-ai/sdk/core/streaming.mjs:113:31)";
+    const sdkSafe = safeLoopError(sdkError);
+    expect(sdkSafe.constructorName).toBe("APIError");
+    expect(sdkSafe.origin).toBe("anthropic-sdk-stream");
+    expect(sdkSafe.providerErrorType).toBe("overloaded_error");
+    expect(JSON.stringify(sdkSafe)).not.toMatch(
+      /private provider body|do not retain|node_modules/,
+    );
+
+    expect(JSON.stringify(safe)).not.toMatch(
+      /private provider payload|secret nested body/,
+    );
+    expect(
+      safeLoopError(new Error("Incomplete Anthropic message stream."))
+        .knownProtocolError,
+    ).toBe("Incomplete Anthropic message stream.");
   });
   it("rejects vacuous observations and never exports native content", () => {
     expect(toolHandoffChecks({ requests: [], events: [] })).toEqual({

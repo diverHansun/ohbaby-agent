@@ -186,9 +186,11 @@ export interface StreamingResponse {
   parsedToolCalls?: ParsedToolCall[];
 
   /**
-   * Whether this frame signals provider completion or local interruption.
-   * Aborts may have no finishReason or tokenUsage. A later stream error can
-   * still invalidate a provider completion signal.
+   * Whether this is the final snapshot for this attempt. Intermediate frames
+   * are false even after a provider terminal event. Normal final snapshots
+   * require exhaustion and validation; local abort snapshots may omit usage
+   * and finishReason. Consumers must still exhaust this generator before
+   * accepting a final snapshot.
    */
   isComplete: boolean;
 

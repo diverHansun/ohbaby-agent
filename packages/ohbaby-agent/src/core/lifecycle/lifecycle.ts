@@ -58,7 +58,9 @@ interface ResolvedToolCall {
 
 interface StepResult {
   readonly modelState?: ModelState;
-  readonly textPartId?: string;
+  readonly textPart?: Part;
+  readonly streamStopReason?: "provider_finished" | "user_aborted";
+  readonly observedUsage?: TokenUsage;
   readonly assistantMessage?: CoreMessage;
   readonly finalEvent?: Extract<
     LifecycleEvent,
@@ -584,6 +586,34 @@ export class Lifecycle {
         );
       }
 
+      if (stepResult.streamStopReason === "user_aborted") {
+        usage = aggregateTokenUsage(
+          aggregateTokenUsage(usage, stepResult.observedUsage),
+          undefined,
+        );
+        await markAssistantMessageError(
+          this.deps.messageManager,
+          assistantMessage,
+          new Error("Lifecycle aborted"),
+        );
+        yield this.createTurnEndEvent({
+          contextScopeId: params.contextScopeId,
+          finalResponse,
+          finishReason: "error",
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse,
+          terminalReason: "cancelled",
+          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+          usage,
+        };
+      }
+
       if (!finalEvent) {
         await markAssistantMessageError(
           this.deps.messageManager,
@@ -638,39 +668,87 @@ export class Lifecycle {
           );
         }
       }
-      if (params.signal?.aborted) {
-        await markAssistantMessageError(
-          this.deps.messageManager,
-          assistantMessage,
-          new Error("Lifecycle aborted"),
-        );
-        yield this.createTurnEndEvent({
-          contextScopeId: params.contextScopeId,
-          finalResponse,
-          finishReason: "error",
-          prepared,
-          sessionId: params.sessionId,
-          step,
-        });
-        return {
-          success: false,
-          finishReason: "error",
-          finalResponse,
-          terminalReason: "cancelled",
-          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-          usage,
-        };
+      if (
+        stepResult.modelState === undefined &&
+        assistantMessage?.role === "assistant"
+      ) {
+        try {
+          await this.deps.messageManager.updateMessage(assistantMessage.id, {
+            finish: finalEvent.finishReason,
+            time: { ...assistantMessage.time, completed: Date.now() },
+          });
+          if (
+            stepResult.textPart?.type === "text" &&
+            finalEvent.tokenUsage !== undefined
+          ) {
+            await this.deps.messageManager.updatePart(stepResult.textPart.id, {
+              metadata: {
+                ...stepResult.textPart.metadata,
+                ...createTokenUsageMetadata(finalEvent.tokenUsage),
+              },
+            });
+          }
+        } catch (error) {
+          await markAssistantMessageError(
+            this.deps.messageManager,
+            assistantMessage,
+            error,
+          ).catch(() => {
+            // The store may also reject the error marker; preserve accepted usage
+            // and report the original persistence failure to the run owner.
+          });
+          yield this.createTurnEndEvent({
+            contextScopeId: params.contextScopeId,
+            finalResponse: "Model response could not be saved",
+            finishReason: "error",
+            prepared,
+            sessionId: params.sessionId,
+            step,
+          });
+          return {
+            success: false,
+            finishReason: "error",
+            finalResponse: "Model response could not be saved",
+            terminalReason: "model_state_persistence_failure",
+            failureCause: error,
+            usage,
+            toolCalls: allToolCalls.length ? allToolCalls : undefined,
+          };
+        }
       }
-
-      if (finalEvent.finishReason === "length") {
-        await markAssistantMessageError(
-          this.deps.messageManager,
-          assistantMessage,
-          new Error(OUTPUT_LENGTH_MESSAGE),
-        );
+      if (
+        params.signal?.aborted ||
+        finalEvent.finishReason === "length" ||
+        finalEvent.finishReason === "content_filter"
+      ) {
+        const cancelled = params.signal?.aborted === true;
+        let terminalReason: LifecycleResult["terminalReason"] = cancelled
+          ? "cancelled"
+          : finalEvent.finishReason === "length"
+            ? "output_length"
+            : "content_filter";
+        let failureMessage = cancelled
+          ? finalResponse
+          : finalEvent.finishReason === "length"
+            ? OUTPUT_LENGTH_MESSAGE
+            : "Model output was filtered by the provider.";
+        let failureCause: unknown;
+        try {
+          await markAssistantMessageError(
+            this.deps.messageManager,
+            assistantMessage,
+            new Error(cancelled ? "Lifecycle aborted" : failureMessage),
+          );
+        } catch (error) {
+          // This result was already accepted. Failure to persist its terminal
+          // marker must not discard the trusted usage or permit tool execution.
+          terminalReason = "model_state_persistence_failure";
+          failureMessage = "Model response could not be saved";
+          failureCause = error;
+        }
         yield this.createTurnEndEvent({
           contextScopeId: params.contextScopeId,
-          finalResponse: OUTPUT_LENGTH_MESSAGE,
+          finalResponse: failureMessage,
           finishReason: "error",
           prepared,
           sessionId: params.sessionId,
@@ -679,8 +757,9 @@ export class Lifecycle {
         return {
           success: false,
           finishReason: "error",
-          finalResponse: OUTPUT_LENGTH_MESSAGE,
-          terminalReason: "output_length",
+          finalResponse: failureMessage,
+          terminalReason,
+          failureCause,
           toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
           usage,
         };
@@ -719,7 +798,7 @@ export class Lifecycle {
         try {
           const committed = await this.deps.messageManager.commitModelStep({
             assistantMessageId: assistantMessage.id,
-            textPartId: stepResult.textPartId,
+            textPartId: stepResult.textPart?.id,
             text: finalResponse,
             modelState: stepResult.modelState,
             tools: parsedToolCalls.map((call) => ({
@@ -738,7 +817,10 @@ export class Lifecycle {
             this.deps.messageManager,
             assistantMessage,
             error,
-          );
+          ).catch(() => {
+            // The store may also reject the error marker; preserve accepted usage
+            // and report the original persistence failure to the run owner.
+          });
           yield this.createTurnEndEvent({
             contextScopeId: params.contextScopeId,
             finalResponse: "Model response could not be saved",
@@ -812,13 +894,41 @@ export class Lifecycle {
       // metadata is the fallback for tool-only completions.
       const tokenUsageForToolPart =
         finalResponse === "" ? finalEvent.tokenUsage : undefined;
-      const toolParts =
-        committedToolParts ??
-        (await this.appendToolParts(
+      let toolParts: Map<string, ToolPart>;
+      try {
+        toolParts =
+          committedToolParts ??
+          (await this.appendToolParts(
+            assistantMessage,
+            toolCalls,
+            tokenUsageForToolPart,
+          ));
+      } catch (error) {
+        await markAssistantMessageError(
+          this.deps.messageManager,
           assistantMessage,
-          toolCalls,
-          tokenUsageForToolPart,
-        ));
+          error,
+        ).catch(() => {
+          // Preserve the accepted result even when the store cannot mark failure.
+        });
+        yield this.createTurnEndEvent({
+          contextScopeId: params.contextScopeId,
+          finalResponse: "Model response could not be saved",
+          finishReason: "error",
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse: "Model response could not be saved",
+          terminalReason: "model_state_persistence_failure",
+          failureCause: error,
+          usage,
+          toolCalls: allToolCalls.length ? allToolCalls : undefined,
+        };
+      }
 
       for (const toolCall of toolCalls) {
         await config.beforeToolCall?.({
@@ -964,6 +1074,8 @@ export class Lifecycle {
     let reasoningEnded = false;
     let assistantTextPart: Part | undefined;
     let modelState: ModelState | undefined;
+    let streamStopReason: StepResult["streamStopReason"];
+    let observedUsage: TokenUsage | undefined;
 
     yield {
       type: "llm:start",
@@ -1001,6 +1113,9 @@ export class Lifecycle {
         },
       )) {
         if (response.modelState) modelState = response.modelState;
+        if (response.streamStopReason)
+          streamStopReason = response.streamStopReason;
+        if (response.tokenUsage) observedUsage = response.tokenUsage;
         if (response.retry) {
           yield {
             type: "llm:retrying",
@@ -1033,7 +1148,7 @@ export class Lifecycle {
         }
         const content = getTextContent(response.messageSnapshot);
 
-        if (content !== "") {
+        if (content !== "" && content !== previousContent) {
           if (previousReasoning !== "" && !reasoningEnded) {
             reasoningEnded = true;
             yield {
@@ -1104,7 +1219,6 @@ export class Lifecycle {
             timestamp: Date.now(),
             tokenUsage: response.tokenUsage,
           };
-          yield finalEvent;
         }
       }
     } catch (error) {
@@ -1127,38 +1241,31 @@ export class Lifecycle {
       throw error;
     }
 
-    if (finalEvent && modelState === undefined) {
-      await this.deps.messageManager.updateMessage(assistantMessage.id, {
-        finish: finalEvent.finishReason,
-        time: {
-          ...assistantMessage.time,
-          completed: Date.now(),
-        },
-      });
-      if (
-        assistantTextPart?.type === "text" &&
-        finalEvent.tokenUsage !== undefined
-      ) {
-        await this.deps.messageManager.updatePart(assistantTextPart.id, {
-          metadata: {
-            ...assistantTextPart.metadata,
-            ...createTokenUsageMetadata(finalEvent.tokenUsage),
-          },
-        });
-      }
+    if (params.signal?.aborted || streamStopReason === "user_aborted") {
+      streamStopReason = "user_aborted";
+      finalEvent = undefined;
+      modelState = undefined;
+    } else if (finalEvent?.finishReason !== undefined) {
+      // A final snapshot is a candidate until its generator exhausts normally.
+      yield finalEvent;
+    } else {
+      finalEvent = undefined;
+      modelState = undefined;
     }
 
     return {
       assistantMessage,
       modelState,
-      textPartId: assistantTextPart?.id,
+      textPart: assistantTextPart,
+      streamStopReason,
+      observedUsage,
       finalEvent,
       finalResponse: finalEvent
         ? (previousReasoning !== "" || modelState !== undefined) &&
           previousContent === ""
           ? ""
           : getTextContent(finalEvent.messageSnapshot)
-        : "",
+        : previousContent,
       reasoning: previousReasoning === "" ? undefined : previousReasoning,
     };
   }

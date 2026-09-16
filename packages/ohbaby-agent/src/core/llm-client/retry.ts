@@ -20,7 +20,10 @@ export const DEFAULT_PROVIDER_RETRY_POLICY: ProviderRetryPolicy = {
 };
 
 export class ProviderStreamInterruptedError extends Error {
-  constructor(override readonly cause: unknown) {
+  constructor(
+    override readonly cause: unknown,
+    readonly source?: "transport" | "eof" | "protocol" | "provider_abort",
+  ) {
     super(errorMessage(cause));
     this.name = "ProviderStreamInterruptedError";
   }

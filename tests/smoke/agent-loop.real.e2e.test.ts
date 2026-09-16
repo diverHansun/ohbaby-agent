@@ -125,13 +125,17 @@ describe.runIf(enabled)("real production agent loop", () => {
         "stage-a",
         "e1",
         "length",
+        "length-terminal",
         "transport",
         "cancel",
         "compaction",
       ].includes(audit.mode)
     )
       throw new Error("SELECT_AGENT_LOOP_MODE");
-    if (audit.mode === "length" && profile.protocol !== "openai-responses")
+    if (
+      (audit.mode === "length" || audit.mode === "length-terminal") &&
+      profile.protocol !== "openai-responses"
+    )
       throw new Error("LENGTH_REQUIRES_RESPONSES");
     const dir =
       process.env.OHBABY_REAL_AGENT_LOOP_EVIDENCE_DIR ??
@@ -151,6 +155,8 @@ describe.runIf(enabled)("real production agent loop", () => {
     let session:
       | Awaited<ReturnType<typeof createFormalCacheSession>>
       | undefined;
+    const isLength =
+      audit.mode === "length" || audit.mode === "length-terminal";
     let phase = "setup";
     let failure: { phase: string; code: string } | undefined;
     let failureHistory:
@@ -207,7 +213,7 @@ describe.runIf(enabled)("real production agent loop", () => {
       const firstPrompt = ["stage-a", "e1", "compaction"].includes(audit.mode)
         ? `Use the read tool on exactly ${session.readFilePath}. ${audit.mode === "stage-a" ? "Read once." : "After the first result, call read again on the same file to verify it. Two sequential reads are required."} Report Project, Release and Owner. Do not use other tools or change files.` +
           (audit.mode === "compaction" ? createCompactionNotes(30) : "")
-        : audit.mode === "length"
+        : isLength
           ? "Do not use tools. Write a numbered list of 300 practical gardening tips with at least 15 words each. Start immediately and do not shorten the list."
           : "Do not use tools. Start your answer with CEDAR_STREAM_7 and explain rainfall formation in ten detailed sentences.";
       phase = "initial-run";
@@ -232,7 +238,7 @@ describe.runIf(enabled)("real production agent loop", () => {
           audit.mode === "cancel" ? "cancelled" : "failed",
         );
         expect(audit.results.at(-1)?.terminalReason).toBe(
-          audit.mode === "length"
+          isLength
             ? "output_length"
             : audit.mode === "cancel"
               ? "cancelled"
@@ -249,48 +255,72 @@ describe.runIf(enabled)("real production agent loop", () => {
         failureHistory = safe;
         expect(saved.text.length).toBeGreaterThan(0);
         expect(saved.nativeCount).toBe(0);
-        const mode = audit.mode as keyof typeof notices;
-        const checkProjection = (): void => {
-          const wire = audit.requests
-            .filter((row) => row.purpose === "agent-step")
-            .at(-1)
-            ?.http.at(-1);
-          expect(Boolean(wire)).toBe(true);
-          if (!wire) return;
-          const markerCount =
-            wire.assistantText.split(notices[mode]).length - 1;
-          const carriesSavedBody = wire.assistantText.includes(saved.text);
-          const hasPlaceholder = wire.text.includes("(Interrupted)");
+        if (isLength) {
+          const initial = audit.requests.find(
+            (row) => row.purpose === "agent-step",
+          );
+          expect(initial?.exhausted).toBe(true);
+          expect(initial?.finishes).toContain("length");
+          expect(initial?.http[0]?.maxOutputTokens).toBe(128);
+          expect(
+            audit.events.filter((event) => event.type === "llm:complete"),
+          ).toHaveLength(1);
+          expect(
+            audit.events.filter((event) => event.type === "tool:start"),
+          ).toHaveLength(0);
+          expect(first.checkpoint.persisted.usageParts.length).toBeGreaterThan(
+            0,
+          );
+        }
+        if (audit.mode !== "length-terminal") {
+          const mode = audit.mode as keyof typeof notices;
+          const checkProjection = (): void => {
+            const wire = audit.requests
+              .filter((row) => row.purpose === "agent-step")
+              .at(-1)
+              ?.http.at(-1);
+            expect(Boolean(wire)).toBe(true);
+            if (!wire) return;
+            const markerCount =
+              wire.assistantText.split(notices[mode]).length - 1;
+            const carriesSavedBody = wire.assistantText.includes(saved.text);
+            const hasPlaceholder = wire.text.includes("(Interrupted)");
+            projectionChecks.push({
+              phase,
+              markerCount,
+              carriesSavedBody,
+              hasPlaceholder,
+              textHash: wire.textHash,
+              roles: wire.roles,
+              nativeTypes: wire.nativeTypes,
+            });
+            expect(markerCount).toBe(1);
+            expect(hasPlaceholder).toBe(false);
+            if (mode !== "cancel") expect(carriesSavedBody).toBe(true);
+            else expect(carriesSavedBody).toBe(false);
+            expect(wire.roles).toContain("assistant");
+            verifyPairing(wire);
+          };
+          phase = "continuation";
+          const next = await session.submit(
+            "Do not use tools. Acknowledge the prior incomplete response in one short sentence.",
+          );
+          expect(next.result.prompt.status).toBe("succeeded");
+          checkProjection();
+          phase = "reopen";
+          await session.reopen();
+          phase = "post-reopen";
+          const reopened = await session.submit(
+            "Do not use tools. Acknowledge the conversation in one short sentence.",
+          );
+          expect(reopened.result.prompt.status).toBe("succeeded");
+          checkProjection();
+        } else
           projectionChecks.push({
-            phase,
-            markerCount,
-            carriesSavedBody,
-            hasPlaceholder,
-            textHash: wire.textHash,
-            roles: wire.roles,
-            nativeTypes: wire.nativeTypes,
+            status: "not-run",
+            reason:
+              "Stage B terminal-only; Stage C history assertions remain in length mode",
           });
-          expect(markerCount).toBe(1);
-          expect(hasPlaceholder).toBe(false);
-          if (mode !== "cancel") expect(carriesSavedBody).toBe(true);
-          else expect(carriesSavedBody).toBe(false);
-          expect(wire.roles).toContain("assistant");
-          verifyPairing(wire);
-        };
-        phase = "continuation";
-        const next = await session.submit(
-          "Do not use tools. Acknowledge the prior incomplete response in one short sentence.",
-        );
-        expect(next.result.prompt.status).toBe("succeeded");
-        checkProjection();
-        phase = "reopen";
-        await session.reopen();
-        phase = "post-reopen";
-        const reopened = await session.submit(
-          "Do not use tools. Acknowledge the conversation in one short sentence.",
-        );
-        expect(reopened.result.prompt.status).toBe("succeeded");
-        checkProjection();
       }
       if (audit.mode === "e1") {
         phase = "business-failure";
@@ -430,7 +460,7 @@ describe.runIf(enabled)("real production agent loop", () => {
               injection:
                 audit.mode === "transport" || audit.mode === "cancel"
                   ? "real upstream stream plus local fault/cancellation"
-                  : audit.mode === "length"
+                  : isLength
                     ? "real provider length terminal; test max output 128"
                     : undefined,
               ...(publicAudit(audit) as object),

@@ -1,3 +1,5 @@
+import { APIConnectionError as OpenAIConnectionError } from "openai";
+import { APIConnectionError as AnthropicConnectionError } from "@anthropic-ai/sdk/error";
 /**
  * Streaming chat completion with automatic message accumulation.
  *
@@ -120,9 +122,7 @@ function buildAbortResponse(input: {
         }
       : {
           content:
-            input.accumulatedContent === ""
-              ? "(Interrupted)"
-              : input.accumulatedContent,
+            input.accumulatedContent === "" ? null : input.accumulatedContent,
         };
 
   return {
@@ -312,6 +312,7 @@ export async function* streamResponse(
     let tokenUsage: TokenUsage | null = null;
     let nativeOutput: NativeOutput | undefined;
     let reasoningTokens: number | undefined;
+    let validatingProtocol = false;
 
     try {
       const stream = await provider.streamResponse({
@@ -328,13 +329,14 @@ export async function* streamResponse(
         promptCache,
       });
 
-      let emittedAnyResponse = false;
-      let lastYieldedUsage: TokenUsage | null = null;
       // Stream each normalized event from the provider
       for await (const event of stream) {
         const finish = event.finishReason;
-        if (event.nativeOutput !== undefined)
+        if (event.nativeOutput !== undefined) {
+          validatingProtocol = true;
           nativeOutput = NativeOutputSchema.parse(event.nativeOutput);
+          validatingProtocol = false;
+        }
         if (event.reasoningTokens !== undefined)
           reasoningTokens = event.reasoningTokens;
 
@@ -405,24 +407,19 @@ export async function* streamResponse(
           accumulatedToolCalls,
         );
 
-        emittedAnyResponse = true;
-        lastYieldedUsage = tokenUsage;
         // Parsing and replay publication require successful stream exhaustion.
         yield {
           messageSnapshot,
-          isComplete: finishReason !== null,
+          isComplete: false,
           finishReason: finishReason ?? undefined,
           reasoningText:
             accumulatedReasoning === "" ? undefined : accumulatedReasoning,
           reasoningTextDelta: event.reasoningTextDelta,
           rawFinishReason,
-          streamStopReason:
-            finishReason === null ? undefined : "provider_finished",
           tokenUsage:
             tokenUsage === null ? undefined : toStreamingTokenUsage(tokenUsage),
         };
       }
-      if (emittedAnyResponse && finishReason === null) return;
       if (signal?.aborted) {
         yield buildAbortResponse({
           accumulatedContent,
@@ -433,14 +430,13 @@ export async function* streamResponse(
         });
         return;
       }
-      if (
-        emittedAnyResponse &&
-        (finishReason === null ||
-          (!nativeOutput &&
-            accumulatedToolCalls.size === 0 &&
-            lastYieldedUsage === tokenUsage))
-      )
-        return;
+      if (finishReason === null) {
+        throw new ProviderStreamInterruptedError(
+          new Error("Provider stream ended without a terminal event"),
+          "eof",
+        );
+      }
+      validatingProtocol = true;
       const parsedToolCalls =
         finishReason !== "length" &&
         finishReason !== "content_filter" &&
@@ -453,7 +449,6 @@ export async function* streamResponse(
       );
       const modelState =
         nativeOutput &&
-        finishReason &&
         finishReason !== "length" &&
         finishReason !== "content_filter"
           ? ModelStateSchema.parse({
@@ -487,12 +482,13 @@ export async function* streamResponse(
           modelState.output,
         );
       }
+      validatingProtocol = false;
       yield {
         messageSnapshot,
         parsedToolCalls,
         modelState,
         isComplete: true,
-        finishReason: finishReason ?? undefined,
+        finishReason,
         reasoningText: accumulatedReasoning || undefined,
         rawFinishReason,
         streamStopReason: "provider_finished",
@@ -507,11 +503,7 @@ export async function* streamResponse(
         throw error;
       }
       // Handle user-initiated interruption
-      if (
-        provider.isAbortError(error) ||
-        error instanceof RetrySleepAbortedError ||
-        signal?.aborted === true
-      ) {
+      if (signal?.aborted === true) {
         // Return partial results instead of throwing
         // This allows consumers to save or reuse the partial response
         yield buildAbortResponse({
@@ -523,6 +515,17 @@ export async function* streamResponse(
         });
 
         return;
+      }
+
+      if (provider.isAbortError(error)) {
+        throw annotatePromptCacheError(
+          new ProviderStreamInterruptedError(error, "provider_abort"),
+          promptCache.strategy,
+        );
+      }
+      if (error instanceof ProviderStreamInterruptedError) throw error;
+      if (validatingProtocol) {
+        throw new ProviderStreamInterruptedError(error, "protocol");
       }
 
       // Lifecycle owns the single forced-compaction retry, including an
@@ -538,7 +541,7 @@ export async function* streamResponse(
         rawFinishReason !== undefined
       ) {
         throw annotatePromptCacheError(
-          new ProviderStreamInterruptedError(error),
+          new ProviderStreamInterruptedError(error, streamFailureSource(error)),
           promptCache.strategy,
         );
       }
@@ -645,4 +648,27 @@ async function sleepForRetry(
     }, delayMs);
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+/** History may retain known transport failures; this does not expand retries. */
+function streamFailureSource(error: unknown): "transport" | undefined {
+  if (
+    error instanceof OpenAIConnectionError ||
+    error instanceof AnthropicConnectionError
+  ) {
+    return "transport";
+  }
+  if (typeof error !== "object" || error === null || !("code" in error))
+    return undefined;
+  return typeof error.code === "string" &&
+    [
+      "ECONNRESET",
+      "EPIPE",
+      "ETIMEDOUT",
+      "ECONNREFUSED",
+      "ENOTFOUND",
+      "EAI_AGAIN",
+    ].includes(error.code.toUpperCase())
+    ? "transport"
+    : undefined;
 }

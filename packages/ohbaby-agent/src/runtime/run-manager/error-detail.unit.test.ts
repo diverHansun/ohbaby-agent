@@ -72,3 +72,13 @@ describe("normalizeRunError", () => {
     });
   });
 });
+
+it("maps content filtering to a non-retryable terminal error", () => {
+  expect(
+    normalizeLifecycleRunError("filtered", "content_filter"),
+  ).toMatchObject({
+    code: "CONTENT_FILTER",
+    retryable: false,
+    terminalReason: "content_filter",
+  });
+});

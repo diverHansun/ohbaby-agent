@@ -119,6 +119,7 @@ export type AgentTerminalReason =
   | "tool_parse_failure"
   | "context_overflow"
   | "output_length"
+  | "content_filter"
   | "model_state_persistence_failure";
 
 export type LifecycleEvent =

@@ -324,18 +324,18 @@ describe("LLM Client Integration Tests", () => {
         responses.push(response);
       }
 
-      expect(responses.length).toBe(2);
+      expect(responses.length).toBe(3);
 
       // First chunk should have accumulated content
       expect(responses[0].messageSnapshot.content).toBe("Hello");
       expect(responses[0].isComplete).toBe(false);
 
       // Last chunk should have complete content
-      expect(responses[1].messageSnapshot.content).toBe("Hello world");
-      expect(responses[1].isComplete).toBe(true);
-      expect(responses[1].finishReason).toBe("stop");
-      expect(responses[1].rawFinishReason).toBeUndefined();
-      expect(responses[1].tokenUsage?.totalTokens).toBe(15);
+      expect(responses[2].messageSnapshot.content).toBe("Hello world");
+      expect(responses[2].isComplete).toBe(true);
+      expect(responses[2].finishReason).toBe("stop");
+      expect(responses[2].rawFinishReason).toBeUndefined();
+      expect(responses[2].tokenUsage?.totalTokens).toBe(15);
     });
 
     it("should accumulate and parse tool calls", async () => {
@@ -612,7 +612,15 @@ describe("LLM Client Integration Tests", () => {
           reasoningText: "think more",
           reasoningTextDelta: undefined,
         },
+        {
+          content: "Visible answer",
+          reasoningText: "think more",
+          reasoningTextDelta: undefined,
+        },
       ]);
+      expect(responses.filter((response) => response.isComplete)).toHaveLength(
+        1,
+      );
     });
 
     it("should use configuration from client instance", async () => {
@@ -689,7 +697,8 @@ describe("LLM Client Integration Tests", () => {
       expect(callArgs.signal).toBe(controller.signal);
     });
 
-    it("should return partial content when provider aborts mid-stream", async () => {
+    it("should return partial content when local cancellation aborts the provider", async () => {
+      const controller = new AbortController();
       const abortError = new Error("aborted");
       isAbortErrorMock.mockImplementation(
         (error: unknown) => error === abortError,
@@ -699,10 +708,13 @@ describe("LLM Client Integration Tests", () => {
       );
 
       const responses: StreamingResponse[] = [];
-      for await (const response of streamResponse(mockClient, [
-        { role: "user" as const, content: "test" },
-      ])) {
+      for await (const response of streamResponse(
+        mockClient,
+        [{ role: "user" as const, content: "test" }],
+        { signal: controller.signal },
+      )) {
         responses.push(response);
+        controller.abort();
       }
 
       expect(responses).toHaveLength(2);
@@ -811,15 +823,15 @@ describe("LLM Client Integration Tests", () => {
         responses.push(response);
       }
 
-      expect(responses).toHaveLength(2);
+      expect(responses).toHaveLength(3);
       expect(responses[0].retry).toBeDefined();
-      expect(responses[1].tokenUsage).toMatchObject({
+      expect(responses[2].tokenUsage).toMatchObject({
         inputTokens: 12,
         outputTokens: 3,
         totalTokens: 15,
       });
-      expect(responses[1].tokenUsage?.inputBreakdown).toBeUndefined();
-      const publicUsage = responses[1].tokenUsage;
+      expect(responses[2].tokenUsage?.inputBreakdown).toBeUndefined();
+      const publicUsage = responses[2].tokenUsage;
       expect(publicUsage).toBeDefined();
       if (!publicUsage) {
         throw new Error("expected public token usage");
@@ -965,22 +977,19 @@ describe("LLM Client Integration Tests", () => {
       }
     });
 
-    it("yields a complete empty assistant response when the provider stream has no events", async () => {
+    it("rejects an empty stream without manufacturing provider completion", async () => {
       streamResponseMock.mockResolvedValue(createProviderStream([]));
-
       const responses: StreamingResponse[] = [];
-      for await (const response of streamResponse(mockClient, [
-        { role: "user" as const, content: "test" },
-      ])) {
-        responses.push(response);
-      }
-
-      expect(responses).toHaveLength(1);
-      expect(responses[0]).toMatchObject({
-        messageSnapshot: { content: null },
-        isComplete: true,
-        streamStopReason: "provider_finished",
+      await expect(async () => {
+        for await (const response of streamResponse(mockClient, [
+          { role: "user", content: "test" },
+        ]))
+          responses.push(response);
+      }).rejects.toMatchObject({
+        name: "ProviderStreamInterruptedError",
+        source: "eof",
       });
+      expect(responses).toHaveLength(0);
     });
 
     it("does not replay a provider stream after a non-abort error follows emitted delta", async () => {

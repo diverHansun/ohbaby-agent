@@ -1,126 +1,42 @@
-# llm-client 模块的数据模型
+# llm-client 数据模型
 
-## 核心类型
+当前实现：improve-7。完整类型定义以 `packages/ohbaby-agent/src/core/llm-client/types.ts` 及 `services/interface-providers/types.ts` 为准。
 
-### LLMClientInstance
+## 请求与工具
 
-```typescript
-interface LLMClientInstance<TClient = unknown> {
-  provider: InterfaceProviderInstance<TClient>;
-  config: {
-    provider: string;
-    model: string;
-    baseUrl: string;
-    temperature: number;
-    maxTokens: number;
-  };
-}
-```
+共享边界使用自有 `ModelMessage`、`ModelToolDefinition`，不以 OpenAI Chat SDK 类型充当内部消息模型。Chat、Responses、Anthropic adapter 各自生成 wire 数据。assistant 可携带经校验的 `modelState`，协议特殊状态仍由对应 adapter 处理。
 
-设计说明：
+- `LLMClientInstance`：provider 实例和不含明文密钥的模型配置；SDK client 位于 provider.client。
+- `ToolCallSnapshot`：index、callId、name、argumentsJson，表示尚在累积的调用。内部 accumulator 也使用 callId/name/argumentsJson。
+- `ParsedToolCall`：callId、name、arguments，表示耗尽后解析完成的调用；不单独授权执行。
+- snapshot 按 index 排序；parsed calls 保持既有首次出现顺序。
 
-- 顶层不再重复暴露 `client`
-- 如需直接访问 SDK，走 `llmClient.provider.client`
-- `config` 只保留非敏感字段
+## StreamingResponse
 
-### ChatCompletionMessage
+| 字段                               | 含义                                                                                     |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- |
+| messageSnapshot                    | 已累积正文和工具片段，供展示；不是可直接持久化/发送的完整协议消息                        |
+| reasoningText / reasoningTextDelta | 已累积推理及本次增量，按现有原生状态策略处理                                             |
+| isComplete                         | 此次尝试的最后一份快照；正常终态和本地取消最终快照均可能为 true，一次尝试至多一次        |
+| finishReason                       | provider 终态：stop、tool_calls、length、content_filter；本地取消/无终态 EOF 不伪造 stop |
+| streamStopReason                   | provider_finished 或 user_aborted；后者必须有真实本地取消依据                            |
+| parsedToolCalls                    | 正常耗尽并解析后的完整调用；length/filter/abort 不发布可执行参数                         |
+| modelState                         | 正常耗尽且原生投影校验后的续接状态；失败/截断/过滤不接受                                 |
+| tokenUsage                         | provider 已报告用量，可缺失；有数值不自动代表步骤可信                                    |
+| retry                              | 项目层重试信息，不代表 SDK 内部所有 HTTP 尝试                                            |
 
-```typescript
-type ChatCompletionMessage = ChatCompletionMessageParam;
-```
+中间帧 isComplete=false。仅有正文、usage 或 reasoning 但没有终态的 EOF 是中断；空流也不能生成完成。显式 stop 且正文为空是合法终态，与空流不同。
 
-说明：
+## 完成与运行结果
 
-- 这仍是当前 llm-client 的输入/输出消息边界
-- provider 层会把它映射到各厂商原生协议
-- 即使选择 `openai-responses`，共享层也仍传递这个 Chat-shaped 边界；Responses adapter 仅接受可无损投影的子集，并拒绝需要原生 continuation 的 item。
-- 这不是 canonical 跨协议消息模型。原生 reasoning/output-item、assistant `phase`、refusal 和 annotation 尚无共享表达。
+Lifecycle 等生成器耗尽之后再发布一次 `llm:complete`。length/filter 可有可靠模型完成，但运行失败；模型完成后数据库保存失败，也不能变成运行成功。
 
-### ParsedToolCall
+接受前取消：不发模型完成、不通知可信 Step 用量、不校准。已观测数字只进入 Run 部分汇总，usageComplete=false，不保留完整 inputBreakdown。接受后取消保留已经接受的用量。
 
-```typescript
-interface ParsedToolCall {
-  id: string;
-  name: string;
-  arguments: Record<string, unknown>;
-}
-```
+## 中断与重试
 
-### InterfaceProviderFunctionTool
+`ProviderStreamInterruptedError.source` 可为 transport、eof、protocol、provider_abort；不明来源保留 undefined。来源用于区分事实，不能据包装类名把所有异常都当网络断流。provider 自报 abort 但本地 signal 没取消属于失败。
 
-```typescript
-interface InterfaceProviderFunctionTool {
-  type: "function";
-  function: {
-    name: string;
-    description?: string;
-    parameters: Record<string, unknown>;
-  };
-}
-```
+SDK 默认额外 2 次与项目默认额外 5 次重试保留。双方都允许的无输出失败，在一个不含 overflow 恢复的步骤通道最多 18 次 HTTP；这不是 Run 总预算。正文、推理或工具片段出现后项目层不重发，不新增自动续写。
 
-这是当前 agent 明确支持的工具请求边界。core 不直接依赖 OpenAI SDK 可继续扩展的 `ChatCompletionTool` 联合；各 provider adapter 负责把该结构映射到自己的 SDK 类型。
-
-`openai-responses` 只投影本地 function tool；hosted/custom tools 以及其他 Responses output item 不在本轮能力范围内，必须 fail-closed。
-
-### StreamingResponse
-
-```typescript
-interface StreamingResponse {
-  completeMessage: ChatCompletionMessage;
-  parsedToolCalls?: ParsedToolCall[];
-  isComplete: boolean;
-  finishReason?: ChatFinishReason;
-  rawFinishReason?: string;
-  tokenUsage?: TokenUsage;
-}
-```
-
-字段说明：
-
-| 字段 | 作用 |
-|---|---|
-| `completeMessage` | 当前已累积的完整消息 |
-| `parsedToolCalls` | 仅在完成态出现的结构化工具调用 |
-| `isComplete` | 是否已完成 |
-| `finishReason` | 共享完成原因 |
-| `rawFinishReason` | provider 原始完成原因 |
-| `tokenUsage` | provider 归一化后的精确 usage |
-
-### ChatFinishReason
-
-```typescript
-type ChatFinishReason = 'stop' | 'tool_calls' | 'length' | 'content_filter';
-```
-
-### TokenUsage
-
-```typescript
-type TokenUsage = InterfaceProviderTokenUsage;
-```
-
-说明：
-
-- `TokenUsage` 现在来自 provider 层的统一类型
-- llm-client 已不再直接依赖 OpenAI 的 `CompletionUsage`
-- prompt cache 策略由 provider 边界决定。Responses 目前仅观察 usage，不发送 cache 控制字段，也不与 Chat keyed cache 语义对齐。
-
-## 累积模型
-
-### 文本流
-
-`textDelta` 持续追加到 `accumulatedContent`，每次 yield 都构造新的 `completeMessage.content`。
-
-### 工具调用流
-
-`toolCallDeltas` 按 `index` 累积到 Map 中，等待完成态后统一解析 JSON arguments。
-
-### 中断流
-
-如果 provider 抛出中断错误：
-
-- `completeMessage` 使用当前累积结果
-- `isComplete = true`
-- `streamStopReason = 'user_aborted'`
-- 不伪造 provider `finishReason`
-- `rawFinishReason` 保留中断前最后一次 provider 事件携带的原始值（如有）
+模型窗口、缓存用量、reasoning/native 状态沿用前序合同；此处不定义新的计量或缓存控制算法。

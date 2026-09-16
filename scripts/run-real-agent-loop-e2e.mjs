@@ -6,7 +6,15 @@ const profiles = [
   "zenmux-gpt56-luna-responses-context",
   "zenmux-claude-sonnet5-anthropic-context",
 ];
-const modes = ["stage-a", "e1", "length", "transport", "cancel", "compaction"];
+const modes = [
+  "stage-a",
+  "e1",
+  "length",
+  "length-terminal",
+  "transport",
+  "cancel",
+  "compaction",
+];
 const arg = (name) =>
   process.argv
     .slice(2)
@@ -17,14 +25,14 @@ const mode = arg("mode") ?? process.env.OHBABY_REAL_AGENT_LOOP_MODE;
 if (
   !profiles.includes(profile) ||
   !modes.includes(mode) ||
-  (mode === "length" && profile !== profiles[1])
+  ((mode === "length" || mode === "length-terminal") && profile !== profiles[1])
 ) {
   console.error(
     "Select --profile=" +
       profiles.join("|") +
       " and --mode=" +
       modes.join("|") +
-      ". length requires Responses.",
+      ". length and length-terminal require Responses.",
   );
   process.exit(2);
 }

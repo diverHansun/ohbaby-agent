@@ -11,6 +11,7 @@ export type LoopMode =
   | "stage-a"
   | "e1"
   | "length"
+  | "length-terminal"
   | "transport"
   | "cancel"
   | "compaction";
@@ -23,6 +24,7 @@ export interface LoopRequest {
   finishes: string[];
   outputCharacters: number;
   http: LoopWire[];
+  failure?: ReturnType<typeof safeLoopError>;
 }
 export interface LoopWire {
   status?: number;
@@ -164,7 +166,7 @@ export function observeClient(
     audit.requests.push(row);
     // A transport boundary fixture deliberately restricts the real Responses output budget.
     const actual =
-      audit.mode === "length" &&
+      (audit.mode === "length" || audit.mode === "length-terminal") &&
       request.purpose === "agent-step" &&
       !audit.injected
         ? {
@@ -184,7 +186,12 @@ export function observeClient(
           }
         : request;
     if (actual !== request) audit.injected = true;
-    const iterable = await context.run(row, () => original(actual));
+    const iterable = await context
+      .run(row, () => original(actual))
+      .catch((error: unknown) => {
+        row.failure = safeLoopError(error);
+        throw error;
+      });
     const iterator = iterable[Symbol.asyncIterator]();
     return (async function* () {
       try {
@@ -219,6 +226,9 @@ export function observeClient(
             }
           }
         }
+      } catch (error) {
+        row.failure = safeLoopError(error);
+        throw error;
       } finally {
         if (!row.exhausted) await iterator.return?.();
       }
@@ -294,4 +304,116 @@ export function toolHandoffChecks(
           typeof event.callId === "string" && ids.includes(event.callId),
       ),
   };
+}
+
+/** Retain diagnostic classes, never arbitrary upstream messages or payloads. */
+export function safeLoopError(error: unknown): {
+  name: string;
+  constructorName?: string;
+  origin?: string;
+  providerErrorType?: string;
+  code?: string;
+  status?: number;
+  knownProtocolError?: string;
+  messageHash?: string;
+  cause?: ReturnType<typeof safeLoopError>;
+} {
+  const value = object(error);
+  const names = new Set([
+    "Error",
+    "TypeError",
+    "AbortError",
+    "APIError",
+    "APIConnectionError",
+    "APIConnectionTimeoutError",
+    "APIUserAbortError",
+    "InternalServerError",
+    "ProviderStreamInterruptedError",
+    "ProviderStreamEOFError",
+    "AnthropicError",
+  ]);
+  const codes = new Set([
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "EPIPE",
+    "ENOTFOUND",
+    "UND_ERR_SOCKET",
+    "UND_ERR_CONNECT_TIMEOUT",
+  ]);
+  const message = string(value.message);
+  const constructorName =
+    error instanceof Error ? error.constructor.name : undefined;
+  const stack = string(value.stack);
+  const origin = stack.includes("AnthropicNativeAccumulator")
+    ? "anthropic-native-validation"
+    : /(?:@anthropic-ai|anthropic).*[/\\]core[/\\]streaming/.test(stack)
+      ? "anthropic-sdk-stream"
+      : stack.includes("@anthropic-ai")
+        ? "anthropic-sdk"
+        : stack.includes("node:internal/deps/undici")
+          ? "node-http-transport"
+          : undefined;
+  const providerErrorType =
+    string(value.type) ||
+    string(object(value.error).type) ||
+    string(object(object(value.error).error).type);
+  const providerTypes = new Set([
+    "overloaded_error",
+    "api_error",
+    "rate_limit_error",
+    "invalid_request_error",
+    "authentication_error",
+    "permission_error",
+    "not_found_error",
+    "request_too_large",
+    "timeout_error",
+    "server_error",
+  ]);
+  const known = [
+    "Anthropic event after message_stop.",
+    "Anthropic output after finish reason.",
+    "Conflicting Anthropic content block order.",
+    "Invalid Anthropic tool_use block.",
+    "Duplicate Anthropic tool call id.",
+    "Unsupported Anthropic native content block.",
+    "Anthropic delta references an unknown block.",
+    "Anthropic delta after content block stop.",
+    "Conflicting Anthropic text delta.",
+    "Conflicting Anthropic thinking delta.",
+    "Conflicting Anthropic signature delta.",
+    "Conflicting Anthropic signature.",
+    "Conflicting Anthropic tool input delta.",
+    "Conflicting Anthropic citations delta.",
+    "Unsupported Anthropic native delta.",
+    "Incomplete Anthropic message stream.",
+    "Incomplete Anthropic content block.",
+    "Anthropic thinking signature is missing.",
+    "Anthropic redacted thinking data is missing.",
+  ];
+  return {
+    name: names.has(string(value.name)) ? string(value.name) : "unclassified",
+    ...(constructorName && names.has(constructorName)
+      ? { constructorName }
+      : {}),
+    ...(origin ? { origin } : {}),
+    ...(providerTypes.has(providerErrorType) ? { providerErrorType } : {}),
+    ...(codes.has(string(value.code)) ? { code: string(value.code) } : {}),
+    ...(typeof value.status === "number" ? { status: value.status } : {}),
+    ...(known.includes(message) ? { knownProtocolError: message } : {}),
+    ...(message ? { messageHash: hash(message) } : {}),
+    ...(value.cause && value.cause !== error
+      ? { cause: safeLoopErrorWithoutCause(value.cause) }
+      : {}),
+  };
+}
+function safeLoopErrorWithoutCause(
+  error: unknown,
+): ReturnType<typeof safeLoopError> {
+  const value = object(error);
+  return safeLoopError({
+    name: value.name,
+    code: value.code,
+    status: value.status,
+    message: value.message,
+  });
 }

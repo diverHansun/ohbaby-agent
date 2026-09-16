@@ -121,9 +121,15 @@ export function normalizeLifecycleRunError(
       terminalReason,
     };
   }
-  if (terminalReason === "output_length") {
+  if (
+    terminalReason === "output_length" ||
+    terminalReason === "content_filter"
+  ) {
     return {
-      code: "OUTPUT_LENGTH",
+      code:
+        terminalReason === "content_filter"
+          ? "CONTENT_FILTER"
+          : "OUTPUT_LENGTH",
       message: error,
       retryable: false,
       source: "runtime",
