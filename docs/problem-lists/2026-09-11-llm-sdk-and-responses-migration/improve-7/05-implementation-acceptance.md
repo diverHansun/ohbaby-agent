@@ -1,6 +1,6 @@
 # 05：实施与验收记录
 
-状态：实施中。分支 `codex/improve-7-agent-loop`，基线 `8409a863`。用户授权分批实施、真实 API 测试、独立审查后本地提交；不 merge/push。
+状态：本轮实现与 T01–T22 / E1–E4 计划验收完成，保留全部失败样本及前序容量缺口。分支 `codex/improve-7-agent-loop`，基线 `8409a863`。用户授权分批实施、真实 API 测试、独立审查后本地提交；不 merge/push。
 
 本文件记录结果；目标合同见 02，验收标准见 04。未完成批次不能计作通过。
 
@@ -10,7 +10,7 @@
 
 - Stage A 以 T01 和定向三协议 fixture 为核心条件；另按用户要求做轻量真实工具循环，不强绑完整 E1。
 - 固定说明写在 02 §2.4。默认在原 assistant 上保存结构化错误，发送时提取允许正文；无正文/取消事实使用同一 assistant 的一个 synthetic TextPart，不新建 abort 消息管线。
-- `(Interrupted)` 合成占位将在 B 移除，不能作为 C 正文材料。
+- `(Interrupted)` 合成占位已在 B 移除，不能作为 C 正文材料。
 - 工具阶段取消说明不能混入 native 正文；作为工具配对之后的普通历史说明。
 - T20 只验证现有 connectModelInternal；不扩大 UI 范围。
 
@@ -91,8 +91,58 @@ Stage B 提交：`0dc39b14`。
 
 harness 独立审查补上 tool-cancel 必须是受控路径 read、恰好一个完成工具的断言；既有三协议证据离线复核全过，额外 HTTP 0。transport/cancel 也补验必须实际注入且发生在至少 64 正文字符之后，避免自然断流冒充注入。记录见 `stage-c/tool-cancel-offline-verification.json` 和 `offline-injection-verification.json`。
 
-Stage D 的管理规则、最终回归与 preflight 另行收口。
+Stage C 提交：`ea43c0fe`。Stage D 的管理规则与最终回归见下一节。
+
+## 5.5 Stage D：管理规则与最终回归
+
+不增加生产机制。新增验证覆盖相邻步骤工具集合改变后的冻结请求/计量一致，同一步工具成功与业务失败混合的 ID、参数、结果、顺序；主/子共享会话下失败、SDK abort、取消的正文、usage、校准、终态与 UI 隔离。T20 通过现有 `connectModelInternal` 检查新窗口/runtime、旧校准失效和 cache 账本保留，不改 UI 产品路径。
+
+SDK 重试测试调用已安装 SDK 与生产适配器，仅 fetch/时钟受控。三协议 503 均得到 18 HTTP、6 provider 调用、5 外层重试。三协议 SDK Retry-After=2 秒时，在 100ms 取消会再等 1900ms，但没有额外 HTTP。SDK 包装 ECONNRESET/ETIMEDOUT 后外层不重试、3/1 分布、部分输出不重试和外层退避及时取消由 Chat 专项覆盖；不把这些专项扩写为所有 SDK 错误形态均已实测。SDK 配置和外层分类未改变。
+
+最终 E4（三协议真实摘要，均首跑通过）：
+
+| 协议 | HTTP 总数 | 真实摘要 | 请求估算：压缩前 → 后 |
+| --- | --- | --- | --- |
+| Chat | 12 | stop、非空 | 13934 → 10624 |
+| Responses | 12 | stop、非空 | 12253 → 9089 |
+| Anthropic | 12 | stop、非空 | 20638 → 15691 |
+
+每例都先真实读取工具、再在真实流中分别注入断流与取消。实际 summary HTTP 含允许的断流正文、两种说明各一次，排除取消正文和失败 native；3 个原载体退休，后续请求及 SQLite 重开不再派生旧说明。force 不代表自然 95% 或真实上游 overflow。证据：`stage-d/compaction-summary.json`。
+
+最终 Responses E1 补跑：初次模型额外调用一个工具并失败，随后两次 read、业务 read 失败后修正、正常续聊均成功；最后重开后的 HTTP 被累计 20 次预算挡住（B 的 10 次 + 本次 10 次）。额外 SDK fetch 尝试都在本地拦截，未发网络。这个补跑记 `partial-budget-limited`，不是生产重开失败，也不被先前 B E1 或最终 C/D 的重开通过覆盖。本次旧 harness 已清理临时数据库，不能用脱敏 hash 重建同一会话；需要补跑时须另留证据。详情：`stage-d/responses-e1-final-diagnosis.json`。
+
+已补失败工作区保留：本地目录 0700、文件 0600、配置仅引用环境变量凭证，清单仅含路径/ID/计数；成功仍清理。因旧库无法续测，按用户已有真实测试授权，在执行前说明此前 20 次消耗与原因，单独追加最多 12 HTTP，同模型完整 E1 一次补跑通过，实际新增 10（该协议 E1 累计 30）。8 agent-step / 8 complete，工具结果 true/true/false/true，4 个 Run completed；SQLite 重开 native 哈希、工具 Part ID 与实际 HTTP 配对一致。旧 partial 样本保留。证据：`stage-d/responses-e1-final-additional-12-summary.json`；新 audit 时间戳 `1789556657957`。
+
+第一次 preflight：format/lint/typecheck 通过；测试 3586 通过、1 失败、16 跳过。唯一失败是旧 cache 用例把已收到 stop、但尚未 EOF 时取消的请求算成可信完成。按 02 的耗尽边界更正该测试（保持第一步 1000 input / 800 cache），14 项定向通过；生产缓存算法未改。修正后完整 `pnpm preflight` 通过：format、lint、typecheck、348 文件 / 3587 测试、全工作区 build 全过；16 项保留原有跳过（14 项 opt-in 实网、2 项平台相关 migration），不将其计为通过。最后新增失败证据保留 helper 不涉及生产，另跑 harness 8 项及独立 TypeScript 检查通过。原失败日志保留为 `stage-d/preflight-before-accounting-update.log`。
+
+### T01–T22 断言对应
+
+下表文件位于 `packages/ohbaby-agent/src/`；详细期望由 04 维护，此处记录验证落点。全部目标断言已有通过证据。最终独立复审覆盖全部 13 个生产文件，另独立运行 12 文件 / 142 项通过，无剩余 P1/P2。没有修改 SDK 默认配置、压缩算法/95% 规则或切模型产品入口。
+
+| ID | 主要测试文件 |
+| --- | --- |
+| T01 | `core/llm-client/llm-client.test.ts`、三协议 adapter/native 测试 |
+| T02–T05 | `core/llm-client/completion.unit.test.ts`、`core/llm-client/native-state.unit.test.ts`、`core/lifecycle/lifecycle.unit.test.ts` |
+| T06 | `adapters/ui-runtime/scoped-failure.integration.test.ts`、`model-response-transport.integration.test.ts`、真实 E3 |
+| T07 | `adapters/ui-runtime/protocol-terminal.integration.test.ts`（三协议 × length/filter 六格）、真实 Responses length |
+| T08 | `core/lifecycle/lifecycle.unit.test.ts`、`core/message/atomic-model-step.integration.test.ts` |
+| T09 | `core/lifecycle/failed-history.integration.test.ts`、`core/message/interruption.unit.test.ts` |
+| T10–T11 | `core/context/serializer.integration.test.ts`、`core/lifecycle/failed-history.integration.test.ts`、真实 E2/E3 |
+| T12 | `adapters/ui-runtime/prompt-context.unit.test.ts`、`summary-completion.integration.test.ts`、真实 E4 |
+| T13–T14 | `core/context/failed-history.unit.test.ts`、`serializer.integration.test.ts`、`core/message/interruption.unit.test.ts` |
+| T15 | `core/lifecycle/lifecycle.unit.test.ts`、三协议终态六格、已有 runtime accounting 集成 |
+| T16 | `core/llm-client/sdk-retry.integration.test.ts` |
+| T17–T18 | `core/lifecycle/dynamic-tools.integration.test.ts`、Context prepared-request/compaction 测试、真实 E1/E4 |
+| T19 | `core/context/manager.unit.test.ts`、`native-policy.integration.test.ts`、SQLite compaction 与真实重开 |
+| T20 | `adapters/ui-inprocess.contract.test.ts` |
+| T21 | `core/context/manager.unit.test.ts`、既有低收益锁/force/每 run 上限与重置测试 |
+| T22 | `adapters/ui-runtime/scoped-failure.integration.test.ts`（子断流、SDK abort、主动取消三格） |
 
 ## 5.6 持续保留的限制
 
-真实百万窗口自然达到 95% 与真实上游 overflow 仍未实测。force 压缩和确定性 fixture 均不能关闭这两项。本轮尚未执行最终 preflight，不声称 improve-7 整体通过。
+- 真实百万窗口自然达到 95% 与真实上游 overflow 仍未实测。force 压缩和确定性 fixture 均不能关闭这两项；迁移整体仍保留这一前序缺口。
+- 三协议过滤终态由真实 SDK + 受控协议 fixture 覆盖，未诱导付费模型生成有害内容触发真实上游过滤。断流/取消实网用例的故障来自本地注入。
+- Anthropic E1 前两次中断的底层来源未能追溯；保留原失败记录，不能以第三次成功宣称不会再断流。
+- SDK 退避取消仍可能等待当前延迟结束，错误包装后的可重试范围保持原样；没有新增自动续写。
+
+结论：improve-7 本轮合同已完成并通过上述验收；这不等于所有上游网络情形、全容量边界或整个迁移均已验证。仅本地分批提交，未 merge/push；用户本地 `tests/models-4-tests.md` 未纳入提交。

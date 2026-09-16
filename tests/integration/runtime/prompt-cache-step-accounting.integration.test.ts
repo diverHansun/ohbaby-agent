@@ -266,13 +266,13 @@ describe("final step cache accounting through the in-process runtime", () => {
   );
 
   it.each([false, true])(
-    "settles before completion and retains accepted usage on abort (final received=%s)",
-    async (acceptFinal) => {
+    "retains only exhausted step cache usage when aborted before EOF (terminal received=%s)",
+    async (hasTerminal) => {
       const started = Promise.withResolvers<void>();
       const f = await fixture([
         [toolStep(usage(1_000, 800))],
         async function* (request) {
-          if (acceptFinal) yield stop(usage(2_000, 600));
+          if (hasTerminal) yield stop(usage(2_000, 600));
           else yield { textDelta: "pending", tokenUsage: usage(2_000, 600) };
           started.resolve();
           await new Promise<void>((resolve) =>
@@ -294,9 +294,11 @@ describe("final step cache accounting through the in-process runtime", () => {
       expect((await completion).prompt.status).toBe("cancelled");
       expect(await f.cache()).toEqual({
         sessionId: "session_1",
-        accountedInputTokens: acceptFinal ? 3_000 : 1_000,
-        cacheReadTokens: acceptFinal ? 1_400 : 800,
-        cacheReadShare: acceptFinal ? 1_400 / 3_000 : 0.8,
+        // A provider terminal is still provisional while its stream waits for EOF.
+        // The cancelled second step cannot settle trusted cache accounting.
+        accountedInputTokens: 1_000,
+        cacheReadTokens: 800,
+        cacheReadShare: 0.8,
       });
     },
   );

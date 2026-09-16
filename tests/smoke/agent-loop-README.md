@@ -34,3 +34,16 @@ Non-paid verification:
 pnpm exec tsc -p tests/smoke/agent-loop.tsconfig.json --pretty false
 pnpm exec vitest run tests/smoke/agent-loop-observer.unit.test.ts
 ```
+
+
+## Failed workspace retention
+
+On a failed run, the harness closes SQLite and retains its original temporary workspace. Directories are restricted to `0700` and regular files to `0600`. A `*-resume.json` manifest identifies the original session/database/config paths, linked audit, code commit, profile, consumed HTTP count and credential environment-variable name. It contains no conversation body or opaque native payload. The audit links the retained workspace and manifest. Successful runs still remove their temporary workspace. Configuration retention rejects inline credential fields; the fixed profile uses only `ZENMUX_API_KEY` by environment-variable name.
+
+The earlier final Responses E1 attempt `1789556080725` predates this mechanism: its SQLite was already deleted and its hashes cannot reconstruct the original native state. It cannot be resumed from the existing audit JSON. A fresh complete same-model E1 run needs a separately authorized allowance. Prepared command, **not executed without that authorization**:
+
+```sh
+OHBABY_REAL_AGENT_LOOP_MAX_HTTP=12 node scripts/run-real-agent-loop-e2e.mjs --profile=zenmux-gpt56-luna-responses-context --mode=e1
+```
+
+The normal path uses 10 HTTP requests (metadata + title + 8 agent steps). The last model run attempted one extra failed `skill` call, so that path would need 11; a 12-request ceiling allows one further variation but does not guarantee upstream/model behavior. This is a new full test, not continuation of the deleted session. A future retained-session follow-up can normally use one generation request, with a conservative separate ceiling of four including optional metadata verification and two SDK retries; no generic resume runner is introduced here.

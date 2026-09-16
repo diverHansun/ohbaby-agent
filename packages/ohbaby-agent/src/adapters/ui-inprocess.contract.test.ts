@@ -62,6 +62,8 @@ import { InMemoryPromptSubmissionStore } from "../runtime/prompt-scheduler/index
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import { createHostLocalSandboxManager } from "./ui-runtime/host-local-environment.js";
 import { reloadLLMConfig } from "../config/index.js";
+import * as contextModule from "../core/context/index.js";
+import type { ContextManager, PreparedTurn } from "../core/context/index.js";
 import {
   createInMemoryUiStateStore,
   createPersistentUiStateStore,
@@ -2451,6 +2453,32 @@ describe("createInProcessUiBackendClient", () => {
     const previousApiKey = process.env.ZENMUX_API_KEY;
     const previousFetch = globalThis.fetch;
     let client: ReturnType<typeof createInProcessUiBackendClient> | undefined;
+    const contexts: ContextManager[] = [];
+    const calibrationCalls = new Map<
+      ContextManager,
+      () => Parameters<ContextManager["updateCalibrationFactor"]>[]
+    >();
+    const preparations: {
+      manager: ContextManager;
+      forced: boolean;
+      result: PreparedTurn;
+    }[] = [];
+    const createContext = contextModule.createContextManager;
+    const contextFactory = vi
+      .spyOn(contextModule, "createContextManager")
+      .mockImplementation((options) => {
+        const manager = createContext(options);
+        contexts.push(manager);
+        const prepare = manager.prepareTurn.bind(manager);
+        vi.spyOn(manager, "prepareTurn").mockImplementation(async (input) => {
+          const result = await prepare(input);
+          preparations.push({ manager, forced: input.force === true, result });
+          return result;
+        });
+        const calibration = vi.spyOn(manager, "updateCalibrationFactor");
+        calibrationCalls.set(manager, () => calibration.mock.calls);
+        return manager;
+      });
 
     try {
       process.env.HOME = homeDir;
@@ -2473,7 +2501,7 @@ describe("createInProcessUiBackendClient", () => {
         }),
         "utf-8",
       );
-      const cacheAwareClient = createFakeLLMClient([
+      const cacheEvents: InterfaceProviderStreamEvent[] = [
         {
           finishReason: "stop",
           textDelta: "Done",
@@ -2489,9 +2517,40 @@ describe("createInProcessUiBackendClient", () => {
             totalTokens: 1_025,
           },
         },
-      ]);
+      ];
+      const oldClient = createFakeLLMClient(cacheEvents, {
+        model: "old-model",
+        contextWindowTokens: 128_000,
+      });
+      const newClient = createFakeLLMClient(cacheEvents, {
+        model: "new-model",
+        contextWindowTokens: 256_000,
+      });
+      let oldOverflow = false;
+      const oldStream = oldClient.provider.streamResponse.bind(
+        oldClient.provider,
+      );
+      vi.spyOn(oldClient.provider, "streamResponse").mockImplementation(
+        (request) => {
+          if (request.purpose === "agent-step" && !oldOverflow) {
+            oldOverflow = true;
+            return Promise.reject(
+              Object.assign(new Error("controlled overflow"), {
+                code: "context_length_exceeded",
+              }),
+            );
+          }
+          return oldStream(request);
+        },
+      );
+      const createClient = vi.fn(async () => {
+        const saved = JSON.parse(
+          await readFile(join(homeDir, ".ohbaby", "model.json"), "utf8"),
+        ) as { defaultModel: string };
+        return saved.defaultModel === "new-model" ? newClient : oldClient;
+      });
       client = createInProcessUiBackendClient({
-        createLLMClient: () => Promise.resolve(cacheAwareClient),
+        createLLMClient: createClient,
         initialSnapshot: {
           activeSessionId: "session_1",
           permissions: [],
@@ -2511,8 +2570,44 @@ describe("createInProcessUiBackendClient", () => {
         projectDirectory: projectRoot,
       });
 
-      await client.submitPromptAndWait("Measure cache", {
+      const first = await client.submitPromptAndWait("Measure cache", {
         sessionId: "session_1",
+      });
+      expect(first.prompt.status).toBe("succeeded");
+      expect(contexts).toHaveLength(1);
+      const oldContext = contexts[0];
+      expect(oldOverflow).toBe(true);
+      expect(preparations.map((item) => item.forced)).toEqual([false, true]);
+      expect(calibrationCalls.get(oldContext)?.()).toContainEqual([
+        "session_1",
+        1_000,
+        preparations.at(-1)?.result.sentHeuristic,
+      ]);
+      // Seed a distinct calibration through the public API so reset checks cannot
+      // accidentally pass because the first provider sample matched the estimate.
+      const oldPrepared = preparations.at(-1)?.result;
+      expect(oldPrepared).toBeDefined();
+      if (!oldPrepared) throw new Error("Missing old model preparation");
+      const oldAssembled = await oldContext.assemble("session_1", projectRoot, {
+        isSubagent: false,
+        toolNames: [],
+      });
+      const measurement = {
+        context: oldAssembled,
+        modelId: "old-model",
+        tools: oldPrepared.request.tools,
+      };
+      const beforeCalibration = oldContext.getUsage(measurement);
+      oldContext.updateCalibrationFactor("session_1", 300, 100);
+      const oldMeasured = oldContext.getUsage(measurement);
+      expect(oldMeasured.currentTokens).toBeGreaterThan(
+        beforeCalibration.currentTokens,
+      );
+      expect(
+        await client.getContextWindowUsage({ sessionId: "session_1" }),
+      ).toMatchObject({
+        modelId: "old-model",
+        contextWindowTokens: 128_000,
       });
       const beforeReset = await executeStatusData(
         client,
@@ -2524,6 +2619,7 @@ describe("createInProcessUiBackendClient", () => {
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://new.example/v1",
         interfaceProvider: "openai-compatible",
+        contextWindowTokens: 256_000,
         maxOutputTokens: 8192,
         model: "new-model",
         provider: "new-provider",
@@ -2541,8 +2637,47 @@ describe("createInProcessUiBackendClient", () => {
         sessionId: "session_1",
       });
       expect(afterReset.promptCacheUsage).toEqual(beforeReset.promptCacheUsage);
+      expect(contexts).toHaveLength(2);
+      const newContext = contexts[1];
+      expect(newContext).not.toBe(oldContext);
+      expect(calibrationCalls.get(newContext)?.()).toEqual([]);
+      expect(
+        await client.getContextWindowUsage({ sessionId: "session_1" }),
+      ).toMatchObject({
+        modelId: "new-model",
+        contextWindowTokens: 256_000,
+      });
+      const resumed = await client.submitPromptAndWait(
+        "Measure after model switch",
+        {
+          sessionId: "session_1",
+        },
+      );
+      expect(resumed.prompt.status).toBe("succeeded");
+      const newPreparations = preparations.filter(
+        (item) => item.manager === newContext,
+      );
+      expect(newPreparations).toHaveLength(1);
+      expect(newPreparations[0].forced).toBe(false);
+      expect(newPreparations[0].result.usage).toMatchObject({
+        contextLimit: 256_000,
+        modelId: "new-model",
+        currentTokens: newPreparations[0].result.sentHeuristic,
+      });
+      const afterResume = await executeStatusData(
+        client,
+        "session_1",
+        "inv_cache_after_new_model_run",
+      );
+      expect(afterResume.promptCacheUsage).toEqual({
+        accountedInputTokens: 2_000,
+        cacheReadShare: 0.5,
+        cacheReadTokens: 1_000,
+        sessionId: "session_1",
+      });
     } finally {
       await client?.dispose();
+      contextFactory.mockRestore();
       if (previousHome === undefined) {
         delete process.env.HOME;
       } else {

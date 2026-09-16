@@ -2,6 +2,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
+import { retainFailedLoopWorkspace } from "./agent-loop-workspace.js";
 import { Lifecycle } from "../../packages/ohbaby-agent/src/core/lifecycle/index.js";
 import { createFormalCacheSession } from "./formal-cache-session.js";
 import {
@@ -638,6 +639,10 @@ describe.runIf(enabled)("real production agent loop", () => {
                   : undefined,
               ...(publicAudit(audit) as object),
               failureHistory,
+              retainedWorkspace:
+                failure && session
+                  ? { root: session.root, manifestPath: `${path}-resume.json` }
+                  : undefined,
               projectionChecks,
               compactionChecks,
               toolCancelProof,
@@ -659,7 +664,22 @@ describe.runIf(enabled)("real production agent loop", () => {
         spy.mockRestore();
         if (session) {
           await session.close();
-          await rm(session.root, { recursive: true, force: true });
+          if (failure) {
+            const lastCheckpoint = session.checkpoints.findLast(
+              (item) => "cache" in item,
+            );
+            await retainFailedLoopWorkspace({
+              root: session.root,
+              manifestPath: `${path}-resume.json`,
+              auditPath: `${path}-audit.json`,
+              profile: profile.id,
+              ...(lastCheckpoint && "cache" in lastCheckpoint
+                ? { sessionId: lastCheckpoint.cache.sessionId }
+                : {}),
+              httpRequests: session.wire.length,
+              commit: version.commit,
+            });
+          } else await rm(session.root, { recursive: true, force: true });
         }
       }
     }
