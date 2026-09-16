@@ -38,3 +38,9 @@ RunWorker 继续使用既有 succeeded/failed/cancelled 状态，不新增并行
 接受前取消：已观测数字只进入部分 Run 汇总，usageComplete=false，不带完整 inputBreakdown，不进入可信 Step/cache 账本。此前已接受步骤保留。无终态、未知用量不能补零冒充完整。
 
 工具结果和模型请求统计是不同层：普通工具失败可以继续 Agent，不应删除模型请求已有的可信用量。
+
+## 失败消息分类
+
+已耗尽的 `length` / `content_filter` 分别保存 `MessageOutputLengthError` / `MessageContentFilterError`。`ProviderStreamInterruptedError.source` 为 `transport` / `eof` 才保存 `MessageStreamInterruptedError`；协议校验、provider 自报 abort 或未知来源仍保守处理。本地取消使用已有 `MessageAbortedError`。
+
+没有可用正文时的事实载体仍是既有 TextPart（`synthetic: true`，`metadata.kind: "lifecycle-interruption"`），不增加 Message 类型、SQL 列或第二套历史日志。正常收完的无正文 length/filter 由此保存可信 tokenUsage。工具阶段取消不修改原 assistant 的成功请求终态。

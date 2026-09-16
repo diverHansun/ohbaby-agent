@@ -57,6 +57,8 @@ export type MessageError =
       readonly message: string;
     }
   | { readonly name: "MessageOutputLengthError" }
+  | { readonly name: "MessageContentFilterError" }
+  | { readonly name: "MessageStreamInterruptedError" }
   | { readonly name: "MessageAbortedError"; readonly message: string }
   | {
       readonly name: "APIError";

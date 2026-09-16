@@ -56,7 +56,8 @@ packages/ohbaby-agent/src/core/context/
 ├── context-manager.ts           # 编排、纯策略入口、scoped ephemeral state
 ├── types.ts                     # ports、请求/usage/结果值对象
 ├── constants.ts                 # 当前阈值与保护预算
-├── serializer.ts                # durable history → Provider messages
+├── serializer.ts                # durable history → ModelMessage
+├── failed-history.ts            # 失败正文/事实选择，普通请求与摘要共用
 ├── serialization.ts             # summary 输入与诊断序列化
 ├── projection.ts                # mask/reduction 纯投影
 ├── token-estimation.ts          # messages + tools wire heuristic
@@ -182,3 +183,11 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队；R3/R4 通过 store
 Context 直接选择 `ModelMessage`／扁平工具定义作为计量材料，不再转换为内部旧 Chat 形状。原生状态中的可读推理仍按文本估算，含不透明推理数据时才额外加一次既有 token 代理值；密文和签名不按字符计数；分类来源核对包含完整原生状态。七类分桶是未校准的解释值。
 
 摘要客户端等待流耗尽并要求正常 `stop` 与非空文本。摘要专用序列化补足工具名称、输入、状态与结果；普通历史评分不变。overflow progress 的 `estimatedHistoryTokens` 仍是可读历史评分，不代表完整摘要请求。
+
+## improve-7：失败历史的请求、摘要与计量
+
+`failed-history.ts` 是纯选择函数，不写持久化、不新增历史系统。普通请求和实际摘要（`includeToolContext: true`）共用它：可靠截断、过滤、已知断流可用 active 可见正文加说明；取消只有持久化事实；未知失败为空。所有失败协议消息的 native、推理和未完成工具均不回放。
+
+合成中断事实由 Lifecycle 在原 assistant 上保存。已接受工具步骤的事实单独置于调用/结果之后，不混入 native 正文。退休以现有 Part compacted 标记为准，不能每次从错误枚举重新产生没有载体的事实。
+
+计量使用同一请求投影；失败回复的派生说明与正文整体计入 conversation 一次。scoped assemble 仍负责主/子隔离。默认 readable scoring、选段、prune、低收益锁和 95% 触发策略保持不变。

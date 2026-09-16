@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   publicWire,
+  historySelectionEvidence,
+  LOOP_NOTICES,
   summarizeWire,
   safeLoopError,
   toolHandoffChecks,
@@ -86,6 +88,66 @@ describe("real-loop observation integrity", () => {
         events: events.map((event) => ({ ...event, callId: "other-call" })),
       }).allReplayed,
     ).toBe(false);
+  });
+  it("distinguishes derived assistant facts from the real summary input and summary output", () => {
+    const body = "CEDAR_VISIBLE_BODY_7: saved rainfall details";
+    const cancelled = "CEDAR_CANCEL_BODY_7: excluded photosynthesis details";
+    const selected = `${LOOP_NOTICES.transport}\n${body}\n${LOOP_NOTICES.cancel}`;
+    const ordinary = summarizeWire({
+      messages: [{ role: "assistant", content: selected }],
+    });
+    expect(
+      historySelectionEvidence(ordinary, {
+        channel: "assistant",
+        allowedBody: body,
+        excludedBody: cancelled,
+      }),
+    ).toMatchObject({
+      transportNotices: 1,
+      cancelNotices: 1,
+      allowedBodyPresent: true,
+      excludedBodyPresent: false,
+      hasPlaceholder: false,
+    });
+    const summary = summarizeWire({
+      messages: [
+        { role: "user", content: `[assistant]\n${selected}\n[read completed]` },
+      ],
+    });
+    expect(
+      historySelectionEvidence(summary, {
+        channel: "summary",
+        allowedBody: body,
+        excludedBody: cancelled,
+      }),
+    ).toMatchObject({
+      transportNotices: 1,
+      cancelNotices: 1,
+      allowedBodyPresent: true,
+      excludedBodyPresent: false,
+    });
+    // Summary can legitimately describe an interruption; retired source facts must not reappear as assistant projections.
+    const after = summarizeWire({
+      messages: [
+        {
+          role: "user",
+          content: `<context_summary>${selected}</context_summary>`,
+        },
+        { role: "assistant", content: "Project Cedar, owner Lin." },
+      ],
+    });
+    expect(
+      historySelectionEvidence(after, { channel: "assistant" }),
+    ).toMatchObject({ transportNotices: 0, cancelNotices: 0 });
+    const regressed = summarizeWire({
+      messages: [{ role: "user", content: `${selected}\n${cancelled}` }],
+    });
+    expect(
+      historySelectionEvidence(regressed, {
+        channel: "summary",
+        excludedBody: cancelled,
+      }).excludedBodyPresent,
+    ).toBe(true);
   });
   it("retains diagnostic classes without leaking upstream text or nested payloads", () => {
     const error = Object.assign(new Error("private provider payload"), {

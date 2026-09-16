@@ -207,17 +207,17 @@ function validateRequestMaxTokens(
  * 2. Complete Phase: When stream ends, tool call arguments are JSON-parsed
  *
  * Rationale: Tool call arguments come as fragments of JSON. Parsing before
- * they're complete would throw errors. Only parse when we have the complete
- * arguments (finishReason is not null).
+ * they're complete would throw errors. Parse only after normal exhaustion
+ * with a reliable provider finish reason.
  *
  * Design Decision - Partial Results on Interruption:
  * When user aborts with AbortSignal, we:
- * 1. Catch APIUserAbortError
- * 2. Return accumulated content as a final response
- * 3. Mark the response as complete but don't throw
+ * 1. Confirm the caller's AbortSignal is aborted
+ * 2. Return accumulated content with streamStopReason=user_aborted
+ * 3. Mark the snapshot final; Lifecycle saves cancellation without llm:complete
  *
- * Rationale: Content is not wasted. Users see "partial response" instead of
- * "error". Consumers can decide whether to save or retry.
+ * An SDK abort without a local cancellation remains a provider failure.
+ * A cancelled snapshot never authorizes tool execution or automatic retry.
  *
  * @param {LLMClientInstance} llmClient - Client instance with SDK and config
  * @param {ModelMessage[]} messages - Message history for context

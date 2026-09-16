@@ -66,8 +66,33 @@ Responses 真实 `length-terminal`：HTTP 3、agent-step/完成事件 1/1、outp
 
 Stage A 提交：`ad9e883`。B 日志见 `stage-b/`；E1 audit 时间戳为 `1789554104122`（Chat/Responses）、`1789554104123` / `1789554494753` / `1789554645679`（Anthropic）。所有本地证据均位于 `.ohbaby/test-evidence/improve-7/`；敏感正文、密钥、不透明 native 数据不提交。
 
-Stage C/D 尚未验收。
+Stage B 提交：`0dc39b14`。
 
-## 5.4 持续保留的限制
+## 5.4 Stage C：失败回复的保存与历史投影
+
+原 assistant 保存结构化错误。可靠 length/filter、明确 transport/无终态 EOF 只投影 active 可见正文并附说明；取消正文仍可查看，但下一请求只带取消事实。Unknown/APIError、协议/native 校验失败保守过滤。无正文失败/取消的事实使用原 assistant 上一个 scoped synthetic TextPart，退休后不重新生成；无正文 length/filter 的已接受 usage 同载体保存。
+
+工具阶段取消保持已接受 assistant 的原 finish、native 和配对工具结果，取消说明置于结果之后。普通请求、实际摘要和失败回复计量共用选择规则；默认 readable scoring、压缩选段/退休/prune 策略不变。
+
+确定性验证：根定向 6 文件 / 99 项通过；独立审查 8 文件 / 74 项通过。补正既有 transport bridge 取消用例中“取消仍发模型完成”的旧断言，现在检查 complete=0、Run 数值为不完整 usage，13 项通过。无正文事实退休后再调用 ensure 也不会生成新载体。
+
+真实 API E2E，固定模型与 Stage A/B 相同，每例 HTTP 5（共 50），10 例全部首跑通过：
+
+| 场景 | Chat | Responses | Anthropic | 实际检查 |
+| --- | --- | --- | --- | --- |
+| 真实流中本地注入 ECONNRESET | 通过 | 通过 | 通过 | 原步 complete=0、failed；下一 HTTP 及重开后正文+说明各一次，无失败 native |
+| 真实流中主动 abortRun | 通过 | 通过 | 通过 | 原步 complete=0、cancelled；正文留库但两次后续 HTTP 均排除，说明一次 |
+| 工具结果落库后 abortRun | 通过 | 通过 | 通过 | 原请求完成保留，工具 completed/output 不变，next/reopen 调用与结果 ID 配对，说明一次 |
+| 真实 length 后继续 | 不适用 | 通过 | 不适用 | output_length、正文保留，next/reopen 允许正文+说明一次，无自动续写 |
+
+断流/取消为真实上游流消费时的本地注入，不是上游自然故障证据。逐例摘要及 artifact/log 路径：`stage-c/summary.json`。API 测试运行于 `0dc39b14` 加本批工作树，之后补充测试/文档未改变生产行为。
+
+补充矩阵：三协议真实 SDK/adapter 经 Lifecycle、RunWorker、RunManager、UI 的 length/filter 六格，以及两个新错误 variant 的 SQLite 写入→重开→退休→再重开均通过。核心回归 34 文件 / 436 项通过，1 文件 / 2 项显式跳过（另行 opt-in 的实网测试，已由本轮 harness 提供实网证据）。
+
+harness 独立审查补上 tool-cancel 必须是受控路径 read、恰好一个完成工具的断言；既有三协议证据离线复核全过，额外 HTTP 0。transport/cancel 也补验必须实际注入且发生在至少 64 正文字符之后，避免自然断流冒充注入。记录见 `stage-c/tool-cancel-offline-verification.json` 和 `offline-injection-verification.json`。
+
+Stage D 的管理规则、最终回归与 preflight 另行收口。
+
+## 5.6 持续保留的限制
 
 真实百万窗口自然达到 95% 与真实上游 overflow 仍未实测。force 压缩和确定性 fixture 均不能关闭这两项。本轮尚未执行最终 preflight，不声称 improve-7 整体通过。

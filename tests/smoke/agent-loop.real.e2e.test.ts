@@ -3,14 +3,14 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import { Lifecycle } from "../../packages/ohbaby-agent/src/core/lifecycle/index.js";
-import { getDatabase } from "../../packages/ohbaby-agent/src/services/database/index.js";
 import { createFormalCacheSession } from "./formal-cache-session.js";
 import {
   LIVE_CONTEXT_PROFILES,
   createCompactionNotes,
 } from "./formal-cache-live-context.js";
 import {
-  hash,
+  historySelectionEvidence,
+  LOOP_NOTICES,
   observeClient,
   observeEvent,
   publicAudit,
@@ -49,11 +49,12 @@ vi.mock(
   },
 );
 
-const notices = {
-  length: "[Response incomplete: output limit reached.]",
-  transport: "[Response interrupted: the saved text below may be incomplete.]",
-  cancel: "[Response cancelled by the user.]",
-} as const;
+import {
+  savedFailure,
+  interruptionCarriers,
+  persistedToolProof,
+} from "./agent-loop-state.js";
+const notices = LOOP_NOTICES;
 
 function verifyPairing(wire: LoopWire): void {
   expect(
@@ -61,56 +62,6 @@ function verifyPairing(wire: LoopWire): void {
   ).toBe(true);
   expect(new Set(wire.calls).size).toBe(wire.calls.length);
   expect(new Set(wire.results).size).toBe(wire.results.length);
-}
-
-function savedFailure(sessionId: string): {
-  text: string;
-  errors: string[];
-  nativeCount: number;
-  textHashes: string[];
-  factCount: number;
-} {
-  const rows = getDatabase()
-    .prepare<{
-      text: string | null;
-      type: string;
-      error: string | null;
-      synthetic: number | null;
-      ignored: number | null;
-      kind: string | null;
-    }>(
-      `SELECT json_extract(p.data, '$.text') AS text, p.type,
-      json_extract(m.data, '$.error.name') AS error,
-      json_extract(p.data, '$.synthetic') AS synthetic,
-      json_extract(p.data, '$.ignored') AS ignored,
-      json_extract(p.data, '$.metadata.kind') AS kind
-     FROM part p JOIN message m ON m.id = p.message_id
-     WHERE p.session_id = ? AND m.context_scope_id IS NULL AND m.role = 'assistant'
-       AND json_extract(m.data, '$.error') IS NOT NULL
-       AND json_extract(p.data, '$.time.compacted') IS NULL
-     ORDER BY p.created_at, p.order_index`,
-    )
-    .all(sessionId);
-  const texts = rows
-    .filter(
-      (row) =>
-        row.type === "text" &&
-        row.text &&
-        !row.synthetic &&
-        !row.ignored &&
-        row.kind !== "lifecycle-interruption" &&
-        row.kind !== "model-context-runtime",
-    )
-    .map((row) => row.text ?? "");
-  return {
-    text: texts.join(""),
-    errors: [...new Set(rows.map((row) => row.error ?? "unknown"))],
-    nativeCount: rows.filter((row) => row.type === "model-state").length,
-    textHashes: texts.map(hash),
-    factCount: rows.filter(
-      (row) => row.type === "text" && row.kind === "lifecycle-interruption",
-    ).length,
-  };
 }
 
 const enabled = process.env.OHBABY_RUN_REAL_AGENT_LOOP === "1";
@@ -128,6 +79,7 @@ describe.runIf(enabled)("real production agent loop", () => {
         "length-terminal",
         "transport",
         "cancel",
+        "tool-cancel",
         "compaction",
       ].includes(audit.mode)
     )
@@ -137,6 +89,15 @@ describe.runIf(enabled)("real production agent loop", () => {
       profile.protocol !== "openai-responses"
     )
       throw new Error("LENGTH_REQUIRES_RESPONSES");
+    const maxRequests = Number(
+      process.env.OHBABY_REAL_AGENT_LOOP_MAX_HTTP ?? "20",
+    );
+    if (
+      !Number.isSafeInteger(maxRequests) ||
+      maxRequests < 1 ||
+      maxRequests > 20
+    )
+      throw new Error("INVALID_AGENT_LOOP_HTTP_BUDGET");
     const dir =
       process.env.OHBABY_REAL_AGENT_LOOP_EVIDENCE_DIR ??
       ".ohbaby/test-evidence/improve-7/live-loop";
@@ -163,6 +124,10 @@ describe.runIf(enabled)("real production agent loop", () => {
       | Omit<ReturnType<typeof savedFailure>, "text">
       | undefined;
     const projectionChecks: unknown[] = [];
+    let cancelAfterTool = audit.mode === "tool-cancel";
+    let toolCancelProof: ReturnType<typeof persistedToolProof>;
+    let compactionCarrierIds: string[] = [];
+    const compactionChecks: unknown[] = [];
     let restoreRead: (() => Promise<void>) | undefined;
     const originalRun = Lifecycle.prototype.run;
     const spy = vi
@@ -193,13 +158,31 @@ describe.runIf(enabled)("real production agent loop", () => {
             await restoreRead();
             restoreRead = undefined;
           }
+          if (
+            cancelAfterTool &&
+            next.value.type === "tool:result" &&
+            next.value.result.status === "success"
+          ) {
+            // Lifecycle yields tool:result only after updateToolPart has completed.
+            // Pause here; inspect SQLite before requesting cancellation, without a timing guess.
+            toolCancelProof = persistedToolProof(
+              next.value.sessionId,
+              next.value.callId,
+            );
+            expect(toolCancelProof?.status).toBe("completed");
+            expect(toolCancelProof?.outputCharacters).toBeGreaterThan(0);
+            expect(toolCancelProof?.assistantError).toBeNull();
+            cancelAfterTool = false;
+            audit.injected = true;
+            await audit.onCancel?.();
+          }
           yield next.value;
         }
       });
     try {
       session = await createFormalCacheSession(profile.id, {
         requireDetectedWindow: true,
-        maxRequests: 20,
+        maxRequests,
       });
       const current = session;
       audit.onCancel = async () => {
@@ -210,7 +193,12 @@ describe.runIf(enabled)("real production agent loop", () => {
         if (!run) throw new Error("NO_ACTIVE_RUN_TO_CANCEL");
         await current.backend.abortRun(run.id);
       };
-      const firstPrompt = ["stage-a", "e1", "compaction"].includes(audit.mode)
+      const firstPrompt = [
+        "stage-a",
+        "e1",
+        "compaction",
+        "tool-cancel",
+      ].includes(audit.mode)
         ? `Use the read tool on exactly ${session.readFilePath}. ${audit.mode === "stage-a" ? "Read once." : "After the first result, call read again on the same file to verify it. Two sequential reads are required."} Report Project, Release and Owner. Do not use other tools or change files.` +
           (audit.mode === "compaction" ? createCompactionNotes(30) : "")
         : isLength
@@ -233,6 +221,32 @@ describe.runIf(enabled)("real production agent loop", () => {
             (tool) => tool.allowed,
           ),
         ).toBe(true);
+      } else if (audit.mode === "tool-cancel") {
+        expect(first.result.prompt.status).toBe("cancelled");
+        expect(audit.results.at(-1)?.terminalReason).toBe("cancelled");
+        expect(
+          audit.requests.filter((row) => row.purpose === "agent-step"),
+        ).toHaveLength(1);
+        expect(
+          audit.events.filter((event) => event.type === "llm:complete"),
+        ).toHaveLength(1);
+        expect(
+          audit.events.filter((event) => event.type === "tool:result"),
+        ).toHaveLength(1);
+        expect(
+          audit.events.find((event) => event.type === "tool:result")?.toolName,
+        ).toBe("read");
+        expect(first.checkpoint.persisted.completedTools).toHaveLength(1);
+        expect(first.checkpoint.persisted.completedTools[0]?.allowed).toBe(
+          true,
+        );
+        expect(cancelAfterTool).toBe(false);
+        expect(toolCancelProof).toBeDefined();
+        expect(
+          interruptionCarriers(first.result.prompt.sessionId).filter(
+            (row) => row.kind === "lifecycle-interruption" && !row.retired,
+          ),
+        ).toHaveLength(1);
       } else {
         expect(first.result.prompt.status).toBe(
           audit.mode === "cancel" ? "cancelled" : "failed",
@@ -250,6 +264,14 @@ describe.runIf(enabled)("real production agent loop", () => {
         expect(
           audit.events.filter((event) => event.type === "llm:retrying"),
         ).toHaveLength(0);
+        if (audit.mode === "transport" || audit.mode === "cancel") {
+          expect(audit.injected).toBe(true);
+          expect(audit.faults).toHaveLength(1);
+          expect(audit.faults?.[0]?.kind).toBe(audit.mode);
+          expect(audit.faults?.[0]?.visibleCharacters).toBeGreaterThanOrEqual(
+            64,
+          );
+        }
         const saved = savedFailure(first.result.prompt.sessionId);
         const { text: _text, ...safe } = saved;
         failureHistory = safe;
@@ -343,6 +365,50 @@ describe.runIf(enabled)("real production agent loop", () => {
         expect(restoreRead).toBeUndefined();
       }
       if (audit.mode === "compaction") {
+        phase = "compaction-stream-fixture";
+        audit.pendingFault = "transport";
+        const interrupted = await session.submit(
+          "Do not use tools. Start with CEDAR_STREAM_7 and explain rainfall formation in ten detailed sentences.",
+        );
+        expect(interrupted.result.prompt.status).toBe("failed");
+        expect(audit.results.at(-1)?.terminalReason).toBe(
+          "provider_stream_interrupted",
+        );
+        const streamBody = savedFailure(
+          interrupted.result.prompt.sessionId,
+          "MessageStreamInterruptedError",
+        );
+        expect(streamBody.text.length).toBeGreaterThanOrEqual(64);
+        expect(streamBody.nativeCount).toBe(0);
+        phase = "compaction-cancel-fixture";
+        audit.pendingFault = "cancel";
+        const cancelled = await session.submit(
+          "Do not use tools. Start with CEDAR_CANCEL_7 and explain photosynthesis in ten detailed sentences.",
+        );
+        expect(cancelled.result.prompt.status).toBe("cancelled");
+        const cancelledBody = savedFailure(
+          cancelled.result.prompt.sessionId,
+          "MessageAbortedError",
+        );
+        expect(cancelledBody.text.length).toBeGreaterThanOrEqual(64);
+        expect(cancelledBody.factCount).toBe(1);
+        expect(cancelledBody.nativeCount).toBe(0);
+        expect(audit.faults?.map((fault) => fault.kind)).toEqual([
+          "transport",
+          "cancel",
+        ]);
+        compactionCarrierIds = [
+          ...streamBody.textPartIds,
+          ...cancelledBody.textPartIds,
+          ...cancelledBody.factPartIds,
+        ];
+        expect(compactionCarrierIds.length).toBeGreaterThanOrEqual(3);
+        compactionChecks.push({
+          phase,
+          streamBodyHash: streamBody.textHashes,
+          cancelledBodyHash: cancelledBody.textHashes,
+          carrierIds: compactionCarrierIds,
+        });
         phase = "pre-compaction";
         await session.submit(
           "Repeat Project Cedar, Release 17, Owner Lin. Do not use tools." +
@@ -352,6 +418,27 @@ describe.runIf(enabled)("real production agent loop", () => {
           "Keep Project Cedar, Release 17, Owner Lin for later. Do not use tools.",
         );
         const before = session.nativeStateHashes("before-compaction");
+        const ordinaryWire = audit.requests
+          .filter((row) => row.purpose === "agent-step")
+          .at(-1)
+          ?.http.at(-1);
+        expect(ordinaryWire).toBeDefined();
+        if (!ordinaryWire) throw new Error("MISSING_PRE_COMPACTION_HTTP");
+        const ordinarySelection = historySelectionEvidence(ordinaryWire, {
+          channel: "assistant",
+          allowedBody: streamBody.text,
+          excludedBody: cancelledBody.text,
+        });
+        compactionChecks.push({ phase, selection: ordinarySelection });
+        expect(ordinarySelection.allowedBodyPresent).toBe(true);
+        expect(ordinarySelection.excludedBodyPresent).toBe(false);
+        expect(ordinarySelection.transportNotices).toBe(1);
+        expect(ordinarySelection.cancelNotices).toBe(1);
+        expect(
+          interruptionCarriers(cancelled.result.prompt.sessionId)
+            .filter((row) => compactionCarrierIds.includes(row.id))
+            .every((row) => !row.retired),
+        ).toBe(true);
         phase = "compaction";
         const compacted = await session.compact();
         expect(compacted.result.status).toBe("compacted");
@@ -362,6 +449,43 @@ describe.runIf(enabled)("real production agent loop", () => {
           compacted.checkpoint.persisted.context.retiredParts,
         ).toBeGreaterThan(0);
         const after = session.nativeStateHashes("after-compaction");
+        const summaryRequests = audit.requests.filter(
+          (row) => row.purpose === "context-summary",
+        );
+        expect(summaryRequests.length).toBeGreaterThan(0);
+        for (const request of summaryRequests) {
+          expect(request.nativeCount).toBe(0);
+          expect(request.http.length).toBeGreaterThan(0);
+          for (const wire of request.http) {
+            const selected = historySelectionEvidence(wire, {
+              channel: "summary",
+              allowedBody: streamBody.text,
+              excludedBody: cancelledBody.text,
+            });
+            compactionChecks.push({
+              phase,
+              requestSequence: request.sequence,
+              selection: selected,
+            });
+            expect(selected.allowedBodyPresent).toBe(true);
+            expect(selected.excludedBodyPresent).toBe(false);
+            expect(selected.transportNotices).toBe(1);
+            expect(selected.cancelNotices).toBe(1);
+            expect(selected.hasPlaceholder).toBe(false);
+            expect(wire.nativeTypes).toEqual([]);
+            expect(wire.text.includes("read")).toBe(true);
+            expect(wire.text.includes("file_path")).toBe(true);
+            expect(
+              wire.text.includes("Cedar") && wire.text.includes("Lin"),
+            ).toBe(true);
+          }
+        }
+        const carriers = interruptionCarriers(
+          cancelled.result.prompt.sessionId,
+        ).filter((row) => compactionCarrierIds.includes(row.id));
+        expect(carriers).toHaveLength(compactionCarrierIds.length);
+        expect(carriers.every((row) => row.retired)).toBe(true);
+        compactionChecks.push({ phase: "after-compaction", carriers });
         expect(
           after.retired.some((value) => before.active.includes(value)),
         ).toBe(true);
@@ -375,13 +499,56 @@ describe.runIf(enabled)("real production agent loop", () => {
           ),
         ).toBe(true);
       }
-      if (audit.mode === "e1" || audit.mode === "compaction") {
+      if (
+        audit.mode === "e1" ||
+        audit.mode === "compaction" ||
+        audit.mode === "tool-cancel"
+      ) {
+        const checkRetainedFacts = async (): Promise<void> => {
+          const wire = audit.requests
+            .filter((row) => row.purpose === "agent-step")
+            .at(-1)
+            ?.http.at(-1);
+          expect(wire).toBeDefined();
+          if (!wire) throw new Error("MISSING_RETAINED_FACTS_HTTP");
+          const selected = historySelectionEvidence(wire, {
+            channel: "assistant",
+          });
+          const sessionId = (await current.status()).sessionId;
+          if (audit.mode === "tool-cancel") {
+            expect(selected.cancelNotices).toBe(1);
+            expect(selected.hasPlaceholder).toBe(false);
+            expect(wire.calls).toContain(toolCancelProof?.callId);
+            expect(wire.results).toContain(toolCancelProof?.callId);
+            expect(
+              persistedToolProof(sessionId, toolCancelProof?.callId ?? ""),
+            ).toEqual(toolCancelProof);
+            projectionChecks.push({
+              phase,
+              selection: selected,
+              tool: toolCancelProof,
+            });
+          }
+          if (audit.mode === "compaction") {
+            expect(selected.cancelNotices).toBe(0);
+            expect(selected.transportNotices).toBe(0);
+            expect(selected.hasPlaceholder).toBe(false);
+            const carriers = interruptionCarriers(sessionId).filter((row) =>
+              compactionCarrierIds.includes(row.id),
+            );
+            expect(carriers).toHaveLength(compactionCarrierIds.length);
+            expect(carriers.every((row) => row.retired)).toBe(true);
+            compactionChecks.push({ phase, selection: selected, carriers });
+          }
+          verifyPairing(wire);
+        };
         const toolIds = session.allToolPartIds();
         phase = "continuation";
         const continued = await session.submit(
           "Without tools, confirm Project Cedar and its Owner from the prior conversation.",
         );
         expect(continued.result.prompt.status).toBe("succeeded");
+        await checkRetainedFacts();
         const before = session.nativeStateHashes("before-reopen");
         phase = "reopen";
         await session.reopen();
@@ -391,6 +558,7 @@ describe.runIf(enabled)("real production agent loop", () => {
           "Without tools, confirm the Project and Owner again.",
         );
         expect(reopened.result.prompt.status).toBe("succeeded");
+        await checkRetainedFacts();
         expect(
           reopened.checkpoint.answer.project &&
             reopened.checkpoint.answer.owner,
@@ -403,7 +571,7 @@ describe.runIf(enabled)("real production agent loop", () => {
           .filter((row) => row.purpose === "agent-step")
           .every((row) => row.http.length > 0),
       ).toBe(true);
-      if (["stage-a", "e1", "compaction"].includes(audit.mode)) {
+      if (["stage-a", "e1", "compaction", "tool-cancel"].includes(audit.mode)) {
         const handoffs = toolHandoffChecks(audit);
         expect(handoffs.agentStepWireCount).toBeGreaterThan(1);
         expect(handoffs.startedCalls).toBeGreaterThan(0);
@@ -432,7 +600,7 @@ describe.runIf(enabled)("real production agent loop", () => {
           audit.events.filter((event) => event.type === "llm:complete"),
         ).toHaveLength(accepted);
       }
-      expect(session.wire.length).toBeLessThanOrEqual(20);
+      expect(session.wire.length).toBeLessThanOrEqual(maxRequests);
       expect(session.permissionErrors).toEqual([]);
       expect(session.providerRequests.every((row) => row.settled)).toBe(true);
       expect(session.contextWindow.source).toBe("detected");
@@ -457,15 +625,22 @@ describe.runIf(enabled)("real production agent loop", () => {
               profile: profile.id,
               version,
               mode: audit.mode,
-              injection:
-                audit.mode === "transport" || audit.mode === "cancel"
-                  ? "real upstream stream plus local fault/cancellation"
-                  : isLength
-                    ? "real provider length terminal; test max output 128"
-                    : undefined,
+              maxRequests,
+              injection: [
+                "transport",
+                "cancel",
+                "tool-cancel",
+                "compaction",
+              ].includes(audit.mode)
+                ? "real upstream stream plus local fault/cancellation"
+                : isLength
+                  ? "real provider length terminal; test max output 128"
+                  : undefined,
               ...(publicAudit(audit) as object),
               failureHistory,
               projectionChecks,
+              compactionChecks,
+              toolCancelProof,
               failure,
             },
             null,

@@ -46,3 +46,9 @@ length/filter 有可靠请求终态，但运行失败，不执行该输出中的
 ## 文件与验证
 
 `lifecycle.ts` 为循环和步骤实现；`types.ts` 定义事件/结果；`token-usage.ts` 管理完整/部分汇总。对外入口通过 `index.ts` 导出。测试覆盖完成竞态、过滤/截断、接受前后取消、持久化失败和工具继续；跨协议与实网限制见 improve-7/05。
+
+## 失败回复的后续历史
+
+Lifecycle 在原 assistant 上保存结构化错误；可靠 length/filter、明确 transport/EOF、主动取消各自分类，不用错误文案猜测。未知错误和协议/native 校验错误不授予正文回放权限。无正文失败与取消使用同一消息上的单个 synthetic 事实 Part；工具阶段取消只追加事实，不破坏已经接受的工具调用/结果。
+
+Context 只从已保存 active 可见正文或事实 Part 派生下次请求与摘要；不新建成功消息，也不自动继续生成。已接受模型步骤后的事实存储失败，Lifecycle 返回 `model_state_persistence_failure` 并保留可信用量，不伪报取消事实已保存。

@@ -130,6 +130,8 @@ interface AssistantMessage {
 type MessageError = 
   | { name: 'ProviderAuthError'; providerID: string; message: string }
   | { name: 'MessageOutputLengthError' }
+  | { name: 'MessageContentFilterError' }
+  | { name: 'MessageStreamInterruptedError' }
   | { name: 'MessageAbortedError'; message: string }
   | { name: 'APIError'; message: string; statusCode?: number; isRetryable: boolean }
   | { name: 'Unknown'; message: string }
@@ -160,7 +162,7 @@ type SystemMessageKind =
 ```
 
 **用途**：
-- `abort`：用户按 Ctrl+C 中断执行时创建，记录中断事件
+- `abort`：类型预留；当前 Lifecycle 不创建这类 SystemMessage。取消保存在既有 assistant 的错误/事实 Part 或运行终态中
 - `error`：系统级错误（非工具执行错误）
 - `info`：系统级信息提示（预留）
 
@@ -636,3 +638,13 @@ AssistantMessage.agent: string  // 响应时使用的 Agent
 - [x] SubtaskPart 与子会话的关联设计清晰
 - [x] SystemMessage 支持记录系统事件（如用户中断）
 - [x] ToolStateAborted 支持区分用户中断和执行错误
+
+## improve-7：失败回复与历史事实
+
+`finish: "error"` 的 assistant 保留在会话中。`MessageOutputLengthError`、`MessageContentFilterError`、明确 transport/无终态 EOF 的 `MessageStreamInterruptedError` 可投影 active、用户可见的 TextPart，附固定未完成说明。推理、native 状态、未完成工具参数、ignored/synthetic/runtime/已 compacted 正文不作为材料。旧 `Unknown`/`APIError` 保守过滤，不按错误文案升级。
+
+主动取消使用 `MessageAbortedError`，取消正文留库但不发送。无正文的可投影失败或取消，在原 assistant 上保存至多一个 `synthetic: true`、`metadata.kind: "lifecycle-interruption"` 的 TextPart。其 scope 跟随原消息，压缩退休后不得因读取 `Message.error` 重新生成。正常收完的无正文 length/filter 由该 Part 保存已接受 usage。
+
+工具阶段取消保留已经接受的 assistant 和工具调用/结果，不能把它改成失败协议回复。只追加同一种事实 Part，投影时放在配对结果之后。进入请求前取消且尚无 assistant 时，只记录 Run cancelled。
+
+新错误 variant 同步进入事件 Zod；持久化使用现有 JSON 字段，无 SQL 列变更。旧版本程序可能拒绝新 variant，回滚运行程序前应保留数据库备份；不能宣称旧程序可无损识别新分类。

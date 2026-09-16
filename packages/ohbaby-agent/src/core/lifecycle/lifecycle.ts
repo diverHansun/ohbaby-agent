@@ -23,6 +23,7 @@ import { createTokenUsageMetadata } from "../message/index.js";
 import type {
   CoreMessage,
   MessageManager,
+  MessageError,
   Part,
   ToolPart,
   ToolState,
@@ -42,6 +43,7 @@ import type {
 import { mergeReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type { ModelState } from "../../services/interface-providers/native-state.js";
 import { aggregateTokenUsage } from "./token-usage.js";
+import { ensureInterruptionFact } from "../message/interruption.js";
 
 export const DEFAULT_MAX_STEPS = 1000;
 const MAX_STEPS_FINALIZATION_TOOL_MESSAGE =
@@ -250,6 +252,8 @@ async function markAssistantMessageError(
   messageManager: MessageManager,
   message: CoreMessage | undefined,
   error: unknown,
+  terminalError?: MessageError,
+  tokenUsage?: TokenUsage,
 ): Promise<void> {
   if (message?.role !== "assistant") {
     return;
@@ -263,26 +267,33 @@ async function markAssistantMessageError(
       : statusCode === 429
         ? "LLM provider rate limit was exceeded (HTTP 429)"
         : undefined);
-  const messageError =
-    statusCode === 401 || statusCode === 403
-      ? {
-          name: "ProviderAuthError" as const,
-          providerId: "unknown",
-          message:
-            providerMessage ?? "LLM provider authentication failed (HTTP 401)",
-        }
-      : providerMessage !== undefined
+  const interrupted =
+    error instanceof ProviderStreamInterruptedError &&
+    (error.source === "transport" || error.source === "eof");
+  const messageError: MessageError =
+    terminalError ??
+    (interrupted
+      ? { name: "MessageStreamInterruptedError" }
+      : statusCode === 401 || statusCode === 403
         ? {
-            name: "APIError" as const,
-            message: providerMessage,
-            ...(statusCode === undefined ? {} : { statusCode }),
-            isRetryable:
-              failure !== undefined || isRetryableProviderError(error),
+            name: "ProviderAuthError" as const,
+            providerId: "unknown",
+            message:
+              providerMessage ??
+              "LLM provider authentication failed (HTTP 401)",
           }
-        : {
-            name: "Unknown" as const,
-            message: getErrorMessage(error),
-          };
+        : providerMessage !== undefined
+          ? {
+              name: "APIError" as const,
+              message: providerMessage,
+              ...(statusCode === undefined ? {} : { statusCode }),
+              isRetryable:
+                failure !== undefined || isRetryableProviderError(error),
+            }
+          : {
+              name: "Unknown" as const,
+              message: getErrorMessage(error),
+            });
   await messageManager.updateMessage(message.id, {
     finish: "error",
     error: messageError,
@@ -291,6 +302,19 @@ async function markAssistantMessageError(
       completed: Date.now(),
     },
   });
+  if (
+    messageError.name === "MessageOutputLengthError" ||
+    messageError.name === "MessageContentFilterError" ||
+    messageError.name === "MessageStreamInterruptedError" ||
+    messageError.name === "MessageAbortedError"
+  ) {
+    await ensureInterruptionFact(
+      messageManager,
+      message,
+      messageError.name,
+      tokenUsage,
+    );
+  }
 }
 
 export class Lifecycle {
@@ -595,6 +619,7 @@ export class Lifecycle {
           this.deps.messageManager,
           assistantMessage,
           new Error("Lifecycle aborted"),
+          { name: "MessageAbortedError", message: "Lifecycle aborted" },
         );
         yield this.createTurnEndEvent({
           contextScopeId: params.contextScopeId,
@@ -738,6 +763,12 @@ export class Lifecycle {
             this.deps.messageManager,
             assistantMessage,
             new Error(cancelled ? "Lifecycle aborted" : failureMessage),
+            cancelled
+              ? { name: "MessageAbortedError", message: "Lifecycle aborted" }
+              : finalEvent.finishReason === "length"
+                ? { name: "MessageOutputLengthError" }
+                : { name: "MessageContentFilterError" },
+            cancelled ? undefined : finalEvent.tokenUsage,
           );
         } catch (error) {
           // This result was already accepted. Failure to persist its terminal
@@ -1018,6 +1049,18 @@ export class Lifecycle {
       });
 
       if (params.signal?.aborted) {
+        let failureCause: unknown;
+        try {
+          if (assistantMessage?.role === "assistant") {
+            await ensureInterruptionFact(
+              this.deps.messageManager,
+              assistantMessage,
+              "MessageAbortedError",
+            );
+          }
+        } catch (error) {
+          failureCause = error;
+        }
         yield this.createTurnEndEvent({
           ...turn,
           finishReason: "error",
@@ -1026,7 +1069,11 @@ export class Lifecycle {
           success: false,
           finishReason: "error",
           finalResponse,
-          terminalReason: "cancelled",
+          terminalReason:
+            failureCause === undefined
+              ? "cancelled"
+              : "model_state_persistence_failure",
+          ...(failureCause === undefined ? {} : { failureCause }),
           toolCalls: allToolCalls,
           usage,
         };

@@ -196,6 +196,14 @@ function addHistoryMessagePayloads(
   message: MessageWithParts,
   modelOrigin?: AssembledContext["modelOrigin"],
 ): void {
+  if (message.info.role === "assistant" && message.info.finish === "error") {
+    // Attribute the complete projection once; splitting its carrier into
+    // runtime/tool buckets could recreate or misattribute the same notice.
+    payloads.conversation.push(
+      ...serializeHistoryMessages([message]).map(messageForEstimation),
+    );
+    return;
+  }
   if (hasNativeDependencies(message)) {
     // Serialize the whole replay unit before attributing its measurement only.
     const messages = serializeHistoryMessages(

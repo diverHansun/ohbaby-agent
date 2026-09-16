@@ -19,7 +19,7 @@ import {
 import { createFallbackSessionTitleFromMessages } from "../../services/session/title-fallback.js";
 import { createContextManager } from "./context-manager.js";
 import { serializeHistory } from "./serialization.js";
-import { serializeForLlm } from "./serializer.js";
+import { serializeForLlm, serializeHistoryMessages } from "./serializer.js";
 
 const cleanupPaths: string[] = [];
 let databasePath = "";
@@ -91,6 +91,218 @@ afterEach(async () => {
 });
 
 describe("serializeForLlm database metadata projection", () => {
+  it.each([
+    {
+      name: "MessageContentFilterError",
+      notice: "[Response incomplete: content was filtered.]",
+    },
+    {
+      name: "MessageStreamInterruptedError",
+      notice: "[Response interrupted: the saved text below may be incomplete.]",
+    },
+  ] as const)(
+    "reopens the new $name variant without upgrading legacy error wording",
+    async ({ name, notice }) => {
+      const manager = createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      });
+      const failed = await manager.createMessage({
+        sessionId: "session_1",
+        role: "assistant",
+        agent: "default",
+        contextScopeId: "child",
+      });
+      const body = await manager.appendPart(failed.id, {
+        type: "text",
+        text: "saved new-variant body",
+      });
+      await manager.updateMessage(failed.id, {
+        finish: "error",
+        error: { name },
+      });
+      const legacy = await manager.createMessage({
+        sessionId: "session_1",
+        role: "assistant",
+        agent: "default",
+        contextScopeId: "child",
+      });
+      await manager.appendPart(legacy.id, {
+        type: "text",
+        text: "legacy body must stay excluded",
+      });
+      await manager.updateMessage(legacy.id, {
+        finish: "error",
+        error: {
+          name: "Unknown",
+          message: "content filtered or stream interrupted",
+        },
+      });
+      const before = await manager.listBySession("session_1", {
+        contextScopeId: "child",
+      });
+      closeDatabase();
+      initDatabase({ dbPath: databasePath });
+      const reopened = createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      });
+      const history = await reopened.listBySession("session_1", {
+        contextScopeId: "child",
+      });
+      expect(history).toEqual(before);
+      expect(history[0].info).toMatchObject({
+        error: { name },
+        contextScopeId: "child",
+      });
+      expect(serializeHistoryMessages(history)).toEqual([
+        { role: "assistant", content: `${notice}\nsaved new-variant body` },
+      ]);
+      expect(
+        serializeHistory(history, {
+          includeModelContext: false,
+          includeToolContext: true,
+        }),
+      ).toBe(`assistant: ${notice}\nsaved new-variant body`);
+      await reopened.updatePart(body.id, { time: { compacted: 50_000 } });
+      closeDatabase();
+      initDatabase({ dbPath: databasePath });
+      expect(
+        serializeHistoryMessages(
+          await createMessageManager({
+            bus: createBus(),
+            store: createDatabaseMessageStore(),
+          }).listBySession("session_1", { contextScopeId: "child" }),
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it("retains failed-history policy and accepted tool pairing across SQLite reopen and retirement", async () => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createMessageIds(),
+      now: createClock(),
+    });
+    const limited = await manager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+    });
+    const body = await manager.appendPart(limited.id, {
+      type: "text",
+      text: "saved partial answer",
+    });
+    await manager.updateMessage(limited.id, {
+      finish: "error",
+      error: { name: "MessageOutputLengthError" },
+    });
+    const cancelled = await manager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+    });
+    await manager.appendPart(cancelled.id, {
+      type: "text",
+      text: "cancelled private answer",
+    });
+    const notice = await manager.appendPart(cancelled.id, {
+      type: "text",
+      text: "[Response cancelled by the user.]",
+      synthetic: true,
+      metadata: { kind: "lifecycle-interruption" },
+    });
+    await manager.updateMessage(cancelled.id, {
+      finish: "error",
+      error: { name: "MessageAbortedError", message: "cancelled" },
+    });
+    const accepted = await manager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+    });
+    await manager.appendPart(accepted.id, {
+      type: "tool",
+      tool: "read",
+      callId: "call_saved",
+      state: {
+        status: "error",
+        input: { path: "missing.txt" },
+        error: "file missing",
+      },
+    });
+    await manager.updateMessage(accepted.id, { finish: "tool_calls" });
+
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const reopened = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+    });
+    const history = await reopened.listBySession("session_1");
+    expect(serializeHistoryMessages(history)).toEqual([
+      {
+        role: "assistant",
+        content:
+          "[Response incomplete: output limit reached.]\nsaved partial answer",
+      },
+      { role: "assistant", content: "[Response cancelled by the user.]" },
+      {
+        role: "assistant",
+        content: null,
+        toolCalls: [
+          {
+            callId: "call_saved",
+            name: "read",
+            argumentsJson: '{"path":"missing.txt"}',
+          },
+        ],
+      },
+      { role: "tool", callId: "call_saved", content: "file missing" },
+    ]);
+    const summary = serializeHistory(history, {
+      includeModelContext: false,
+      includeToolContext: true,
+    });
+    expect(summary).toContain("saved partial answer");
+    expect(summary).toContain("[Response cancelled by the user.]");
+    expect(summary).not.toContain("cancelled private answer");
+    expect(summary).toContain('"status":"error"');
+    expect(summary).toContain("file missing");
+
+    await reopened.updatePart(body.id, { time: { compacted: 50_000 } });
+    await reopened.updatePart(notice.id, { time: { compacted: 50_000 } });
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const afterRetirement = await createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+    }).listBySession("session_1");
+    expect(serializeHistoryMessages(afterRetirement)).toEqual([
+      {
+        role: "assistant",
+        content: null,
+        toolCalls: [
+          {
+            callId: "call_saved",
+            name: "read",
+            argumentsJson: '{"path":"missing.txt"}',
+          },
+        ],
+      },
+      { role: "tool", callId: "call_saved", content: "file missing" },
+    ]);
+    expect(
+      serializeHistory(afterRetirement, {
+        includeModelContext: false,
+        includeToolContext: true,
+      }),
+    ).toBe(
+      'assistant: {"tool":"read","callId":"call_saved","input":{"path":"missing.txt"},"status":"error"}\nfile missing',
+    );
+  });
+
   it("omits hostile memory at the model serialization boundary", () => {
     const findings: string[] = [];
     const messages = serializeForLlm({

@@ -88,9 +88,15 @@ pnpm preflight
 
 现有 `tests/smoke/formal-cache-session.ts` 及真实 cache harness 可复用生产入口、SQLite 和请求观察能力；cache 通过本身不能代替本轮 loop 验收。正式实施需把本次调研的临时复现纳入可维护测试。
 
-### 计划新增的真实 loop 入口（尚未实现）
+### 已实现的真实 loop 入口
 
-建议使用 `tests/smoke/agent-loop.real.e2e.test.ts`、独立 `vitest.agent-loop-real.config.ts` 和 `scripts/run-real-agent-loop-e2e.mjs`。这是文件级建议，不是已经可运行的命令。实现时可按现有 smoke 布局调整，但必须给出单一可重复执行入口及 profile/用例选择方式。
+`tests/smoke/agent-loop.real.e2e.test.ts` 使用独立 `tests/smoke/agent-loop-real.vitest.config.ts`，由 `scripts/run-real-agent-loop-e2e.mjs` 显式启动：
+
+```sh
+node scripts/run-real-agent-loop-e2e.mjs --profile=zenmux-gpt56-luna-responses-context --mode=length
+```
+
+模式、三协议固定 profile、请求预算及注入点见 [harness 使用说明](../../../../tests/smoke/agent-loop-README.md)。`length-terminal` 只验证 Stage B，不能代替完整 `length` 的下一次请求/重开断言；`stage-a` 不代替 E1。
 
 默认 Vitest 配置不应自动触发付费调用；现有 `vitest.e2e.config.ts` 只收集 packages 下的 E2E，不能假设会发现 tests/smoke 新文件。新 runner 必须显式加载相应配置、凭证及限制，并对未执行用例明确报状态，不能因 0 tests 得到“通过”。
 

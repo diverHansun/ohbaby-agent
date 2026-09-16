@@ -1,5 +1,10 @@
 import type { MessageWithParts, Part, ToolPart } from "../message/index.js";
 import { isModelContextPart } from "../message/origin.js";
+import { isInterruptionFactPart } from "../message/interruption.js";
+import {
+  selectActiveInterruptionText,
+  selectFailedHistoryText,
+} from "./failed-history.js";
 import { isActivePart } from "./filters.js";
 import { isSummaryMessage } from "./summary.js";
 import { formatToolResultContentForModel } from "./tool-metadata-projection.js";
@@ -68,7 +73,26 @@ export function serializeMessage(
   message: MessageWithParts,
   options: SerializeHistoryOptions = {},
 ): string {
+  const forSummary = options.includeToolContext === true;
+  if (
+    forSummary &&
+    message.info.role === "assistant" &&
+    message.info.finish === "error"
+  ) {
+    const content = selectFailedHistoryText(message);
+    return content === undefined ? "" : `assistant: ${content}`;
+  }
+  const interruption =
+    forSummary && message.info.role === "assistant"
+      ? selectActiveInterruptionText(message.parts)
+      : undefined;
   const parts = message.parts
+    .filter(
+      (part) =>
+        !forSummary ||
+        message.info.role !== "assistant" ||
+        !isInterruptionFactPart(part),
+    )
     .filter(
       (part) =>
         options.includeModelContext !== false || !isModelContextPart(part),
@@ -82,7 +106,8 @@ export function serializeMessage(
     )
     .filter(Boolean)
     .join("\n");
-  return parts ? `${message.info.role}: ${parts}` : message.info.role;
+  const content = [parts, interruption].filter(Boolean).join("\n");
+  return content ? `${message.info.role}: ${content}` : message.info.role;
 }
 
 export function serializeHistory(
@@ -91,6 +116,7 @@ export function serializeHistory(
 ): string {
   return history
     .map((message) => serializeMessage(message, options))
+    .filter((text) => options.includeToolContext !== true || text !== "")
     .join("\n\n");
 }
 

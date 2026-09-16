@@ -13,6 +13,7 @@ const modes = [
   "length-terminal",
   "transport",
   "cancel",
+  "tool-cancel",
   "compaction",
 ];
 const arg = (name) =>

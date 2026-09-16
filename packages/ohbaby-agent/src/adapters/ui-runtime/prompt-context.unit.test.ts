@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CompactResult, ContextUsage } from "../../core/context/index.js";
+import type { MessageWithParts } from "../../core/message/types.js";
 import type {
   LLMClientInstance,
   StreamingResponse,
@@ -96,6 +97,99 @@ describe("createContextSummaryClient", () => {
       }),
     ).resolves.toBe("valid summary");
     expect(streamResponseMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends permitted failure facts to the actual summary request without cancelled or unknown text", async () => {
+    streamResponseMock.mockReturnValueOnce(streamWithContent("summary"));
+    const client = createContextSummaryClient({} as LLMClientInstance);
+    const history: MessageWithParts[] = [
+      {
+        info: {
+          id: "limited",
+          sessionId: "session_1",
+          agent: "test",
+          role: "assistant",
+          time: { created: 1, completed: 2 },
+          finish: "error",
+          error: { name: "MessageOutputLengthError" },
+        },
+        parts: [
+          {
+            id: "body",
+            messageId: "limited",
+            sessionId: "session_1",
+            orderIndex: 0,
+            type: "text",
+            text: "saved limited answer",
+          },
+        ],
+      },
+      {
+        info: {
+          id: "cancelled",
+          sessionId: "session_1",
+          agent: "test",
+          role: "assistant",
+          time: { created: 3, completed: 4 },
+          finish: "error",
+          error: { name: "MessageAbortedError", message: "cancelled" },
+        },
+        parts: [
+          {
+            id: "cancelled_body",
+            messageId: "cancelled",
+            sessionId: "session_1",
+            orderIndex: 0,
+            type: "text",
+            text: "must not enter summary",
+          },
+          {
+            id: "fact",
+            messageId: "cancelled",
+            sessionId: "session_1",
+            orderIndex: 1,
+            type: "text",
+            text: "[Response cancelled by the user.]",
+            synthetic: true,
+            metadata: { kind: "lifecycle-interruption" },
+          },
+        ],
+      },
+      {
+        info: {
+          id: "unknown",
+          sessionId: "session_1",
+          agent: "test",
+          role: "assistant",
+          time: { created: 5, completed: 6 },
+          finish: "error",
+          error: { name: "Unknown", message: "transport interrupted" },
+        },
+        parts: [
+          {
+            id: "unknown_body",
+            messageId: "unknown",
+            sessionId: "session_1",
+            orderIndex: 0,
+            type: "text",
+            text: "unknown failure body",
+          },
+        ],
+      },
+    ];
+
+    await expect(
+      client.generateSummary({
+        history,
+        prompt: "summarize",
+        sessionId: "session_1",
+      }),
+    ).resolves.toBe("summary");
+    expect(streamResponseMock.mock.calls[0]?.[1][1]).toEqual({
+      role: "user",
+      content:
+        "assistant: [Response incomplete: output limit reached.]\nsaved limited answer\n\nassistant: [Response cancelled by the user.]",
+    });
   });
 
   it("accepts canonical auxiliary usage without coupling it to context accounting", async () => {

@@ -7,12 +7,17 @@ import {
 import type { ModelMessage } from "../llm-client/index.js";
 import type { MergedMemory } from "../memory/index.js";
 import type { MessageWithParts, Part, ToolPart } from "../message/index.js";
+import { isInterruptionFactPart } from "../message/interruption.js";
 import {
   scanPromptLikeContent,
   shouldLoadPromptLikeContent,
   type PromptSecurityFinding,
 } from "../system-prompt/security/index.js";
 import { isActivePart } from "./filters.js";
+import {
+  selectActiveInterruptionText,
+  selectFailedHistoryText,
+} from "./failed-history.js";
 import { isSummaryMessage } from "./summary.js";
 import { formatToolResultContentForModel } from "./tool-metadata-projection.js";
 
@@ -97,7 +102,8 @@ function serializeMessageForLlm(
   modelOrigin?: ModelOrigin,
 ): ModelMessage[] {
   if (message.info.role === "assistant" && message.info.finish === "error") {
-    return [];
+    const content = selectFailedHistoryText(message);
+    return content === undefined ? [] : [{ role: "assistant", content }];
   }
 
   const parts = message.parts.filter(isActivePart);
@@ -119,12 +125,18 @@ function serializeMessageForLlm(
   }
 
   if (message.info.role === "assistant") {
-    return serializeAssistantMessage(
+    const serialized = serializeAssistantMessage(
       message,
-      parts,
+      parts.filter((part) => !isInterruptionFactPart(part)),
       activeReasoningByMessageId,
       modelOrigin,
     );
+    const interruption = selectActiveInterruptionText(parts);
+    // The accepted native body and tool roundtrip remain intact. A later
+    // cancellation is a separate fact following all corresponding results.
+    return interruption === undefined
+      ? serialized
+      : [...serialized, { role: "assistant", content: interruption }];
   }
 
   const content = textContentFromParts(parts);

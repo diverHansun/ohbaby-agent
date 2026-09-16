@@ -331,34 +331,19 @@ describe("model result transport", () => {
       expect(result.result.status).toBe("cancelled");
       expect(result.requests).toHaveLength(1);
       expect(result.executions).toBe(0);
-      const completion = result.producerEvents
-        .filter((event) => event.type === "llm:complete")
-        .at(-1);
-      expect(completion?.messageSnapshot).toEqual({
-        content: null,
-        toolCalls: [
-          {
-            index: 3,
-            callId: "call_1",
-            name: "lookup",
-            argumentsJson: argumentsDelta,
-          },
-        ],
+      expect(
+        result.producerEvents.filter((event) => event.type === "llm:complete"),
+      ).toEqual([]);
+      expect(
+        result.observations.filter((event) => event.type === "llm:complete"),
+      ).toEqual([]);
+      expect(result.result.result?.usage).toEqual({
+        inputTokens: 100,
+        outputTokens: 25,
+        totalTokens: 125,
+        usageComplete: false,
       });
-      expect(completion?.parsedToolCalls).toBeUndefined();
-      expect(completion?.tokenUsage).toEqual(tokenUsage);
-      expect(Reflect.ownKeys(completion?.tokenUsage ?? {}).sort()).toEqual([
-        "inputBreakdown",
-        "inputTokens",
-        "outputTokens",
-        "totalTokens",
-      ]);
-      for (const event of result.observations) {
-        if (event.type !== "llm:complete") continue;
-        expect(event).not.toHaveProperty("messageSnapshot");
-        expect(event).not.toHaveProperty("parsedToolCalls");
-        expect(event.tokenUsage).toEqual(tokenUsage);
-      }
+      expect(result.result.result?.usage).not.toHaveProperty("inputBreakdown");
       expect(
         result.observations.some((event) => event.type === "tool:start"),
       ).toBe(false);

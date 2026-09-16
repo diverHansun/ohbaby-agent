@@ -14,6 +14,7 @@ export type LoopMode =
   | "length-terminal"
   | "transport"
   | "cancel"
+  | "tool-cancel"
   | "compaction";
 export interface LoopRequest {
   sequence: number;
@@ -49,6 +50,12 @@ export interface LoopAudit {
   >[];
   injected: boolean;
   onCancel?: () => Promise<void>;
+  pendingFault?: "transport" | "cancel";
+  faults?: {
+    kind: "transport" | "cancel";
+    requestSequence: number;
+    visibleCharacters: number;
+  }[];
 }
 export const hash = (value: string): string =>
   createHash("sha256").update(value).digest("hex");
@@ -120,6 +127,7 @@ export function publicAudit(audit: LoopAudit): unknown {
   return {
     mode: audit.mode,
     injected: audit.injected,
+    faults: audit.faults,
     requests: audit.requests.map((row) => ({
       ...row,
       http: row.http.map(publicWire),
@@ -208,11 +216,24 @@ export function observeClient(
           if (
             request.purpose === "agent-step" &&
             event.textDelta?.length &&
-            row.outputCharacters >= 64 &&
-            !audit.injected
+            row.outputCharacters >= 64
           ) {
-            if (audit.mode === "transport") {
+            const fault =
+              audit.pendingFault ??
+              (!audit.injected &&
+              (audit.mode === "transport" || audit.mode === "cancel")
+                ? audit.mode
+                : undefined);
+            if (fault) {
+              audit.pendingFault = undefined;
               audit.injected = true;
+              (audit.faults ??= []).push({
+                kind: fault,
+                requestSequence: row.sequence,
+                visibleCharacters: row.outputCharacters,
+              });
+            }
+            if (fault === "transport") {
               throw Object.assign(
                 new Error(
                   "controlled local transport interruption after real upstream text",
@@ -220,8 +241,7 @@ export function observeClient(
                 { code: "ECONNRESET" },
               );
             }
-            if (audit.mode === "cancel") {
-              audit.injected = true;
+            if (fault === "cancel") {
               await audit.onCancel?.();
             }
           }
@@ -416,4 +436,41 @@ function safeLoopErrorWithoutCause(
     status: value.status,
     message: value.message,
   });
+}
+
+export const LOOP_NOTICES = {
+  length: "[Response incomplete: output limit reached.]",
+  transport: "[Response interrupted: the saved text below may be incomplete.]",
+  cancel: "[Response cancelled by the user.]",
+} as const;
+
+/** Scope-sensitive text checks distinguish historical assistant facts from summaries. */
+export function historySelectionEvidence(
+  wire: LoopWire,
+  options: {
+    channel: "assistant" | "summary";
+    allowedBody?: string;
+    excludedBody?: string;
+  },
+): {
+  transportNotices: number;
+  cancelNotices: number;
+  allowedBodyPresent: boolean;
+  excludedBodyPresent: boolean;
+  hasPlaceholder: boolean;
+  textHash: string;
+} {
+  const text = options.channel === "assistant" ? wire.assistantText : wire.text;
+  return {
+    transportNotices: text.split(LOOP_NOTICES.transport).length - 1,
+    cancelNotices: text.split(LOOP_NOTICES.cancel).length - 1,
+    allowedBodyPresent: Boolean(
+      options.allowedBody && text.includes(options.allowedBody),
+    ),
+    excludedBodyPresent: Boolean(
+      options.excludedBody && text.includes(options.excludedBody),
+    ),
+    hasPlaceholder: text.includes("(Interrupted)"),
+    textHash: hash(text),
+  };
 }

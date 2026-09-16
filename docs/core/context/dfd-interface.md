@@ -234,3 +234,16 @@ disposeSession(sessionId: string): void
 | Summary 非 overflow 失败 | Context | terminal failed，原文保持 active |
 | Durable commit 失败 | Message adapter/Context | 不报告 success；重建必须得到唯一合法 view |
 | Event subscriber 失败 | Bus/observer | 记录但不改变 durable truth |
+
+## improve-7：保存失败回复到下一请求
+
+```text
+Lifecycle 保存 assistant 错误 + 已有正文（必要时追加一个合成事实 Part）
+    ↓ scoped active history
+selectFailedHistoryText / selectActiveInterruptionText
+    ├─ serializer → 普通 ModelMessage → 计量 → Provider
+    └─ serialization(includeToolContext=true) → 实际摘要输入
+压缩提交退休原 Part → 两路都不再从旧错误再生正文/说明
+```
+
+失败原始协议状态不下发；可投影文本不会被另存为“成功 assistant”。固定说明和可见性定义由 `message/interruption.ts` 提供。工具阶段取消保留调用/结果，说明跟在结果之后。SQLite 重开沿用同一读取规则。
