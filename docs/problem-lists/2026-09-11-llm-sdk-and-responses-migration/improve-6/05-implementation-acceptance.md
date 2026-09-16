@@ -96,3 +96,45 @@ node scripts/run-real-context-e2e.mjs --run --profile=zenmux-claude-sonnet5-anth
 估算/native 审查、摘要原子性审查、95% 口径审查、独立完整 diff 审查均已执行。审查要求补足混合 native 分桶、proxy 只计一次、真实窗口与持久化 hash 断言、摘要评分语义注释，已落实。
 
 不承诺三协议估算误差一致。单一 estimator 仍是近似值，原生可读推理按文本估算，不透明部分保留既有 token 代理估算；七类分桶为未校准解释值。旧摘要累积及既有有损 overflow 恢复留待后续算法轮次。
+
+## 7. 独立验收（规划复查会话，2026-09-16）
+
+对照 00/02/04 与基线 `5a76738a` → HEAD `d2827c43`（4 个本地提交）。生产代码未再改。本会话未重跑全仓 preflight；定向复跑 8 个文件、78 项通过。实网 JSON 从本机 `.ohbaby/test-evidence/improve-6/` 重读。
+
+### 7.1 结论
+
+**部分通过，可以合入本地 `openai-responses-migration`。** 不要带上未跟踪的 `tests/models-4-tests.md`，不要推送 `main`。improve-6 主体（删内部旧 Chat 估算、自有结构计量、P2–P4/P6、三协议真实压缩续接）已落地。完整窗口 95% 是 00 后来授权的口径，不是偷偷改算法凑旧数字。
+
+不能写成：已验证真实百万窗自动越 95%、已验证真实上游 overflow、或 05 压缩前估算与 JSON 逐字段一致。
+
+### 7.2 提交与改动面
+
+| 提交 | 内容 |
+| --- | --- |
+| `61e890e9` | 删 `legacy-estimation.ts`；自有材料估算；P2/P3；实网入口 |
+| `8d7532b5` | P4 摘要必须 `stop`；P6 摘要专用工具语义 |
+| `ecbb8c05` | 自动摘要改完整窗口 95%；去掉 4096；模块文档与 05 |
+| `d2827c43` | 工具参数证据补强与 06；生产代码未改 |
+
+相对 02 初稿的最大行为差是摘要触发分母：从 input budget 95% 或 remaining&lt;4096，改为 `currentTokens / contextLimit >= 0.95`。mask / thrash 仍用 `usage.usageRatio`（input budget）。`COMPACTION_MIN_REMAINING_INPUT_TOKENS` 已从公开导出删除。
+
+### 7.3 独立核对
+
+| 项 | 结果 |
+| --- | --- |
+| P1 | 生产无 `legacy-estimation`；`messageForEstimation` 去掉 `modelState` 再 stringify |
+| P2/P3 | native 子代理分桶；`isDeepStrictEqual` 全量匹配含 modelState |
+| P4/P6 | `finishReason==="stop"`；`includeToolContext` 仅摘要路径 |
+| T17 05 轮 | Chat/Responses/Anthropic HTTP 9/10/9，窗口 detected 1e6 / 1.05e6 / 1e6；摘要 usage 与 native 退休与 JSON 一致。压缩后估算 10331 / 8925 / 15255 一致；压缩前 05 表 13453 / 11808 / 19758 与 `contextUpdates` 峰值 13462 / 11760 / 19360 有偏差 |
+| T17 06 轮 | 同三协议再次通过；HTTP/窗口一致；估算为新跑（如 Chat 13508→10356） |
+| 全仓门 | 06 的 `preflight.log`：339 文件、3500 项通过。05 写的 3499 无对应日志 |
+| 越界 | 未见 cache 控制、system prompt、previous_response_id、三套 meter、前端推理 UI |
+
+### 7.4 残余（不阻断合入集成分支）
+
+| 发现 | 严重性 | 建议 |
+| --- | --- | --- |
+| overflow / 进度评分仍用可读历史，摘要请求已含工具动作 | 已知双路径，04 已允许 | 合入后若摘要 overflow 变多，再决定是否让 shrink 跟真实请求估 |
+| 真实自动越 95%、真实上游 overflow 未测 | 05/06 已声明 | 不要当生产容量验收 |
+| 4096 删除是对「完整窗口 95%」的实现选择，00 写明未单独收到答复 | 文档已记录 | 合入即接受该行为 |
+| `docs/core/context/improve-6/04` 仍可能写旧 0.95+4096 | 历史目录 | 不要把它当本轮合同 |
