@@ -28,7 +28,7 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
 - measured `{ messages, tools }` 与 adapter 实际输入深等价。
 - `PreparedModelRequest` 创建后不可被 MCP load、permission change、retry 或调用方 mutation 改写。
-- `ContextUsage` 使用 input budget；`ratio >= 0.95` 或 `remaining < 4096` 触发 summary rung，`remaining === 4096` 仅靠 floor 不触发。
+- `ContextUsage.usageRatio` 保留 input budget 口径；summary 独立使用 `currentTokens / contextLimit >= 0.95`，与 UI 完整窗口占用一致，输入预算不足不提前摘要。
 - cache read/write/uncached 是 inclusive input breakdown，不改变窗口占用总量。
 - summary 与被替代原文不同时 active；失败不声称成功。
 - 同 initiating message 的 runtime part 基数不超过 1，包括并发/多 manager/restart。
@@ -50,10 +50,10 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
 | 输入 | 预期 |
 |---|---|
-| ratio `0.94999`、remaining `>=4096` | 不进入 summary |
-| ratio `0.95` | `prune-summary` |
-| ratio `<0.95`、remaining `4096` | 不因 floor 进入 summary |
-| ratio `<0.95`、remaining `4095` | `prune-summary` |
+| 完整窗口占用 `0.94999` | 不进入 summary |
+| 完整窗口占用 `0.95` | `prune-summary` |
+| 完整窗口占用 `<0.95`、remaining `4096` | 不进入 summary |
+| 完整窗口占用 `<0.95`、remaining `0` | 不进入 summary |
 | ratio `>=0.50` 且未进 summary | `mask` |
 | `force=true` | `force`，不受 thrash lock 拦截 |
 

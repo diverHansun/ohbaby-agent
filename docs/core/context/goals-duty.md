@@ -29,16 +29,15 @@ durable MessageStore
 
 ### G2：预算感知的自动保护
 
-自动 summary rung 在以下任一条件成立时触发：
+自动 summary rung 按完整窗口占用率触发：
 
 ```text
-usageRatio >= 0.95
-OR remainingInputTokens < 4096
+currentTokens / contextLimit >= 0.95
 ```
 
-- 分母优先使用模型 input budget，而不是完整 context window。
+- contextLimit 来自模型连接时探测的窗口，失败时沿用配置／默认回退；mask 和 thrash 继续使用 input budget。
 - cached input 仍占用输入窗口；cache hit 不等于释放 token。
-- `0.95 + 4096` 是当前行为基线，不在联合回归中顺带调参。
+- 迁移 improve-6 按用户要求删除 4096 提前摘要条件；超限后 force 恢复保留。
 
 ### G3：合法且唯一的模型视图
 
@@ -91,7 +90,7 @@ durable store 是事实源。Context event 只用于观测，发布或订阅失�
 
 ### D4：选择 compaction rung
 
-`decideCompactionRung()` 根据 `force`、usage ratio、remaining input floor、thrash lock 和 per-turn cap 返回 `none | mask | prune-summary | force`。策略不访问数据库、LLM、UI 或 MCP。
+`decideCompactionRung()` 根据 `force`、完整窗口占用率、mask 的输入预算占用率、thrash lock 和 per-turn cap 返回 `none | mask | prune-summary | force`。策略不访问数据库、LLM、UI 或 MCP。
 
 ### D5：执行 mask、prune 与 summary
 
@@ -134,7 +133,7 @@ calibration factor、mask cutoff、thrash lock 与 per-turn compaction count 按
 
 ## 六、当前约束与假设
 
-1. 当前 summary threshold 为 `0.95`，remaining input floor 为 `4096`，preserve ratio 为 `0.3`。
+1. 当前 summary threshold 为完整窗口的 `0.95`，preserve ratio 为 `0.3`；无独立 remaining input floor。
 2. primary scope 以 `contextScopeId === undefined` 表示；所有 scoped key helper 必须使用同一归一化语义。
 3. 压缩 LLM 会失败、超窗或被 abort；所有循环必须有进展与次数上限。
 4. 部分持久化和同 scope 并发不能靠调用顺序假设；联合回归用 failpoint/barrier 决定是否扩展窄端口。

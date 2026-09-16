@@ -56,8 +56,8 @@ interface AssembledContext {
 
 ```typescript
 interface PreparedModelRequest {
-  readonly messages: readonly ChatCompletionMessage[]
-  readonly tools: ChatCompletionCreateParams["tools"]
+  readonly messages: readonly ModelMessage[]
+  readonly tools: readonly ModelToolDefinition[] | undefined
 }
 ```
 
@@ -262,3 +262,11 @@ type CompactionTerminalOutcome =
 - `stale`：summary Provider await 期间被选中的 Part 已修改、删除或 compacted，候选未提交；无关尾部 append 不使旧 prefix 候选失效。
 
 `CompressionResult` 是按 `status` 判别的 union，而不是一组可任意组合的 optional 字段：`compressed` 必有 `summaryMessageId`，`skipped` 必有 skip `reason`，`failed` 必有 `error`，summary overflow 另以 `summary-overflow-exhausted | summary-overflow-minimum` 表示有界终止原因。
+
+## 迁移 improve-6：自有结构与估算用途
+
+`ModelMessage` 承载通用正文、工具调用和结果；`ModelState` 保存同源续接需要的协议专有状态，已有类型约束继续生效。Responses reasoning item 的 `encrypted_content` 是服务端返回、客户端无法解读的字符串，只原样保存／同源回传；它不是可读推理文本，也不按字符串长度计 token。Anthropic thinking signature 同样不作为摘要正文。
+
+计量直接使用自有消息和扁平工具定义。已有原生状态时，重复的 reasoningText 不再另计；原生状态中的可读推理正文仍按文本估算，只有包含不透明推理数据时才额外加一次既有 usage／输出上限代理值。密文、签名与完整原生 JSON 不进入通用文本计量。三协议转换由 provider 负责，Context 不定义三套请求格式。
+
+`ContextUsage.usageRatio` 仍表示输入预算占用，供 mask／thrash 等已有规则使用。自动 summary 与 UI 则都使用 `currentTokens / contextLimit`，其中 `contextLimit` 是完整窗口。两种比例用途不同。

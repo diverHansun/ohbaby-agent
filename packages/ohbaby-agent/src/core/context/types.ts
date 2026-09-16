@@ -218,7 +218,7 @@ export interface PreparedTurn {
   readonly compaction?: CompactResult;
   readonly assembledAt: number;
   readonly hasSummary: boolean;
-  /** Raw legacy estimate for this exact request, not provider wire-token usage. */
+  /** Raw model-request estimate for this exact request, not provider wire-token usage. */
   readonly sentHeuristic: number;
 }
 

@@ -108,10 +108,11 @@ export function needsSummaryCompaction(
   usage: ContextUsage,
   thresholds: CompactionThresholds,
 ): boolean {
-  return (
-    usage.usageRatio >= thresholds.summary ||
-    usage.remainingTokens < thresholds.minRemainingInputTokens
-  );
+  // Auto summary follows the same full-window occupancy shown in the UI.
+  // Input-budget pressure still drives masking; upstream overflow uses force.
+  const occupancy =
+    usage.contextLimit <= 0 ? 1 : usage.currentTokens / usage.contextLimit;
+  return occupancy >= thresholds.summary;
 }
 
 export interface ContextCutPoint {

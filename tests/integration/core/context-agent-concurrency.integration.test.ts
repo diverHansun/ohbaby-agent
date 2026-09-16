@@ -322,7 +322,11 @@ describe("context scoped mutation coordination", () => {
 
     const [firstResult, secondResult] = await Promise.all([first, second]);
     expect(firstResult.compaction?.status).toBe("compacted");
-    expect(secondResult.compaction?.status).toBe("not-needed");
+    // Once the first summary lowers occupancy below 95%, no second attempt starts.
+    expect(secondResult.compaction).toBeUndefined();
+    expect(
+      secondResult.usage.currentTokens / secondResult.usage.contextLimit,
+    ).toBeLessThan(0.95);
     expect(secondResult.request.messages).toEqual(firstResult.request.messages);
     expect(generateSummary).toHaveBeenCalledOnce();
   });
@@ -360,7 +364,10 @@ describe("context scoped mutation coordination", () => {
 
     await expect(manual).resolves.toMatchObject({ status: "compacted" });
     const prepared = await prompt;
-    expect(prepared.compaction?.status).toBe("not-needed");
+    expect(prepared.compaction).toBeUndefined();
+    expect(
+      prepared.usage.currentTokens / prepared.usage.contextLimit,
+    ).toBeLessThan(0.95);
     expect(JSON.stringify(prepared.request.messages)).toContain(
       "scope-a-summary",
     );

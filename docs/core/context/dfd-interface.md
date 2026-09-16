@@ -71,7 +71,7 @@ PreparedModelRequest N
 measure usage
   │
   ├─ force=true ───────────────────────────────→ force
-  ├─ ratio>=0.95 OR remainingInput<4096 ──────→ prune-summary
+  ├─ currentInput/contextWindow>=0.95 ──────→ prune-summary
   ├─ ratio>=0.50 ─────────────────────────────→ mask
   └─ otherwise ───────────────────────────────→ none
 ```
@@ -168,7 +168,7 @@ assemble(
 getUsage(input: {
   readonly context: AssembledContext
   readonly modelId: string
-  readonly tools: ChatCompletionCreateParams["tools"]
+  readonly tools: readonly ModelToolDefinition[] | undefined
 }): ContextUsage
 ```
 
@@ -230,7 +230,7 @@ disposeSession(sessionId: string): void
 |---|---|---|
 | 普通 Provider transient | Lifecycle/adapter | 按既有 retry/abort 策略 |
 | 原请求 context overflow | Lifecycle + Context | force prepare/compact 后发送新 request |
-| Summary request context overflow | Context + summary client | 最多 4 次 Provider 调用；完整 user round 收缩；最近 user round floor；abort 立即终止 |
+| Summary request context overflow | Context + summary client | 最多 4 次 manager 摘要逻辑尝试（客户端空摘要／通用请求重试另计）；完整 user round 收缩；最近 user round floor；abort 立即终止 |
 | Summary 非 overflow 失败 | Context | terminal failed，原文保持 active |
 | Durable commit 失败 | Message adapter/Context | 不报告 success；重建必须得到唯一合法 view |
 | Event subscriber 失败 | Bus/observer | 记录但不改变 durable truth |

@@ -1,7 +1,6 @@
 export const COMPRESSION_THRESHOLD = 0.95;
 export const COMPRESSION_PRESERVE_RATIO = 0.3;
 export const KEEP_RECENT_TOKENS = 20_000;
-export const COMPACTION_MIN_REMAINING_INPUT_TOKENS = 4_096;
 export const MASK_EXEMPT_TOOL_PREFIXES = [
   "write",
   "edit",
@@ -25,11 +24,9 @@ export const MAX_SUMMARY_PROVIDER_ATTEMPTS = 4;
 export interface CompactionThresholds {
   readonly mask: number;
   readonly summary: number;
-  readonly minRemainingInputTokens: number;
 }
 
 export const DEFAULT_COMPACTION_THRESHOLDS: CompactionThresholds = {
   mask: MASK_MIN_USAGE_RATIO,
-  minRemainingInputTokens: COMPACTION_MIN_REMAINING_INPUT_TOKENS,
   summary: COMPRESSION_THRESHOLD,
 };

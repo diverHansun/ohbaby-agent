@@ -98,8 +98,8 @@ packages/ohbaby-agent/src/core/context/
 
 ```typescript
 interface PreparedModelRequest {
-  readonly messages: readonly ChatCompletionMessage[]
-  readonly tools: ChatCompletionCreateParams["tools"]
+  readonly messages: readonly ModelMessage[]
+  readonly tools: readonly ModelToolDefinition[] | undefined
 }
 ```
 
@@ -125,8 +125,8 @@ remainingInput = inputBudget - currentInput
 ```text
 force=true                         → force
 thrash locked                      → none
-ratio>=0.95 OR remaining<4096      → prune-summary（受 per-turn cap）
-ratio>=0.50                        → mask
+currentInput/contextWindow>=0.95  → prune-summary（受 per-turn cap）
+input-budget ratio>=0.50           → mask
 otherwise                          → none
 ```
 
@@ -150,7 +150,7 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队；R3/R4 通过 store
 2. logical compaction 从 snapshot 到 terminal 持有 scope lease；`prepareTurn()` 内部直接执行 compaction core，不重复进入 lane，因此不会嵌套死锁。
 3. candidate await 后把选中 Part 的原快照交给 `commitCompaction()`；store 在任何写入前原子深比较当前值。被选中 Part 已修改、删除或 compacted 时以 `CompressionResult { status: "skipped", reason: "stale" }` 结束并重读最新 view；安全追加到尾部的消息不误伤旧 prefix summary。
 4. failpoint 已证明旧的 summary/mark 多步写存在部分终态窗口；当前由窄的 `commitCompaction()` 端口修复，SQLite 使用 `BEGIN IMMEDIATE`，in-memory 在写前完整校验，不做 catch-only rollback。子进程在首个 part update 后被 `SIGKILL` 的 reopen 测试确认 SQLite 会回滚整个未提交事务。
-5. summary request 自身 overflow 已使用单一路径恢复：总 Provider 调用最多 4 次，每次从最旧 user round 裁到下一个 user 边界；保留最近 user round，非 overflow 不进入该重试，abort signal 贯通主/子代理共用 Lifecycle 与 summary client。
+5. summary request 自身 overflow 已使用单一路径恢复：manager 最多进行 4 次摘要逻辑尝试，客户端空摘要／通用请求重试另计；发生 overflow 后从最旧 user round 裁到下一个 user 边界；保留最近 user round，非 overflow 不进入该重试，abort signal 贯通主/子代理共用 Lifecycle 与 summary client。
 
 ## 八、事件与 UI projection
 
@@ -176,3 +176,9 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队；R3/R4 通过 store
 | Provider window | 声明 budget + calibration + bounded recovery | 不持久化 observed adaptive ceiling |
 
 这些决策优先正确性、可靠性和隔离性；复杂度必须由可复现失败证据挣得。
+
+## 迁移 improve-6 的计量与摘要边界
+
+Context 直接选择 `ModelMessage`／扁平工具定义作为计量材料，不再转换为内部旧 Chat 形状。原生状态中的可读推理仍按文本估算，含不透明推理数据时才额外加一次既有 token 代理值；密文和签名不按字符计数；分类来源核对包含完整原生状态。七类分桶是未校准的解释值。
+
+摘要客户端等待流耗尽并要求正常 `stop` 与非空文本。摘要专用序列化补足工具名称、输入、状态与结果；普通历史评分不变。overflow progress 的 `estimatedHistoryTokens` 仍是可读历史评分，不代表完整摘要请求。

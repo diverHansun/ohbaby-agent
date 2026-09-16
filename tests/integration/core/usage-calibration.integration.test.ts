@@ -878,11 +878,13 @@ describe("usage calibration across native provider streams", () => {
         ],
       });
       expect(prepared).toHaveLength(2);
-      expect(prepared.map((turn) => turn.sentHeuristic)).toEqual([231, 449]);
+      // Flat tools remove 30 characters; the second request also removes 30
+      // characters of Chat call/result wrappers. This fixture counts characters.
+      expect(prepared.map((turn) => turn.sentHeuristic)).toEqual([201, 389]);
       expect(prepared[0]?.sentHeuristic).not.toBe(prepared[1]?.sentHeuristic);
       expect(update.mock.calls).toEqual([
-        ["session_two_step", 100, 231],
-        ["session_two_step", 200, 449],
+        ["session_two_step", 100, 201],
+        ["session_two_step", 200, 389],
       ]);
       expect(next.value.usage).toEqual({
         inputBreakdown: {
@@ -952,8 +954,9 @@ describe("usage calibration across native provider streams", () => {
           },
         ],
       });
-      expect(repeated.sentHeuristic).toBe(231);
-      expect(repeated.usage.currentTokens).toBe(144);
+      expect(repeated.sentHeuristic).toBe(201);
+      // EMA: first observed ratio clamps to 0.5, then blends 200 / 389.
+      expect(repeated.usage.currentTokens).toBe(127);
     } finally {
       await close(server);
     }

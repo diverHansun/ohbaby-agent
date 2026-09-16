@@ -465,7 +465,6 @@ describe("AgentInstance long task integration", () => {
       bus,
       compactionThresholds: {
         mask: 0.45,
-        minRemainingInputTokens: 1,
         summary: 0.55,
       },
       llmClient: {

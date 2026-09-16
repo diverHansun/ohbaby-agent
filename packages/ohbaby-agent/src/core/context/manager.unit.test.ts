@@ -12,7 +12,6 @@ import type {
   MessageWithParts,
 } from "../message/index.js";
 import {
-  COMPACTION_MIN_REMAINING_INPUT_TOKENS,
   COMPRESSION_THRESHOLD,
   ContextEvent,
   createContextManager,
@@ -2481,7 +2480,7 @@ describe("ContextManager", () => {
     });
   });
 
-  it("uses input token budget rather than the full context window for compression decisions", () => {
+  it("retains input-budget accounting separately from the full context window", () => {
     const usage = getContextUsage(45, "model-a", {
       getBudget(_modelId, options) {
         const usedInputTokens = options?.usedInputTokens ?? 0;
@@ -2511,7 +2510,7 @@ describe("ContextManager", () => {
     });
   });
 
-  it("uses a small remaining-input floor when deciding the compaction rung", () => {
+  it("does not auto summarize before 95 percent of the full window when input budget is almost exhausted", () => {
     const usage = getContextUsage(96_500, "large-model", {
       getBudget(_modelId, options) {
         const usedInputTokens = options?.usedInputTokens ?? 0;
@@ -2538,43 +2537,28 @@ describe("ContextManager", () => {
         force: false,
         usage,
       }),
-    ).toBe("prune-summary");
-  });
-
-  it("uses the 95 percent threshold and a strict 4096-token remaining floor", () => {
-    const usage = (
-      usageRatio: number,
-      remainingTokens: number,
-    ): ReturnType<typeof getContextUsage> => ({
-      contextLimit: 100_000,
-      currentTokens: 100_000 - remainingTokens,
-      inputBudgetTokens: 100_000,
-      modelId: "large-model",
-      remainingTokens,
-      usageRatio,
-    });
-
-    expect(COMPRESSION_THRESHOLD).toBe(0.95);
-    expect(COMPACTION_MIN_REMAINING_INPUT_TOKENS).toBe(4_096);
-    expect(
-      decideCompactionRung({
-        force: false,
-        usage: usage(0.95, 5_000),
-      }),
-    ).toBe("prune-summary");
-    expect(
-      decideCompactionRung({
-        force: false,
-        usage: usage(0.94, 4_096),
-      }),
     ).toBe("mask");
-    expect(
-      decideCompactionRung({
-        force: false,
-        usage: usage(0.94, 4_095),
-      }),
-    ).toBe("prune-summary");
   });
+
+  it.each([94_999, 95_000, 95_001])(
+    "uses full-window occupancy at the 95 percent boundary: %i",
+    (currentTokens) => {
+      expect(COMPRESSION_THRESHOLD).toBe(0.95);
+      expect(
+        decideCompactionRung({
+          force: false,
+          usage: {
+            contextLimit: 100_000,
+            currentTokens,
+            inputBudgetTokens: 90_000,
+            modelId: "large-model",
+            remainingTokens: 0,
+            usageRatio: currentTokens / 90_000,
+          },
+        }),
+      ).toBe(currentTokens < 95_000 ? "mask" : "prune-summary");
+    },
+  );
 
   it("uses the unified compaction ladder thresholds", () => {
     expect(

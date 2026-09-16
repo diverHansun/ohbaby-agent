@@ -4,7 +4,7 @@
 
 当前本地集成分支为 `openai-responses-migration@5a76738a`，已经包含 improve-1～5.5 的实施与收尾证据；各阶段具体限制仍以对应 05／06／07 为准。下方早期状态记录中的“待合入”等文字保留其历史时间口径，不代表当前分支状态。
 
-用户开启的 **[improve-6：Context 计量与压缩链路适配](./improve-6/README.md)** 已形成 00–04 规划草案，待整体审阅。用户确认自有消息结构兼容三协议、可安全删除内部旧 Chat 格式；保留压缩／prune 算法，允许统计和语义传递的最小修复。本轮尚未实施。
+用户开启的 **[improve-6：Context 计量与压缩链路适配](./improve-6/README.md)** 已完成实施、独立审查与三协议真实 API 验收。内部旧 Chat 估算桥已删除；保留压缩／prune 算法，补足摘要语义并按用户要求将自动摘要统一到完整窗口 95%。仅本地提交，结果见 [05 实施验收](./improve-6/05-implementation-acceptance.md)。
 
 ## 状态
 
@@ -48,7 +48,7 @@
 | improve-4     | 2026-09-14                             | improve-3 主动切出的用量/校准议题，承接其 05 与用户确认的收窄范围    | 已实施；最终 preflight、同一次三协议 live 及独立审查通过，待用户审核；未 merge/push |
 | improve-5     | 2026-09-14 研究；2026-09-15 规划与实施 | improve-4 主动切出的 cache 议题；用户确认开启并替代旧整 Run 筛选规则 | 00–05 已完成；本地实施/基本三协议验收通过，扩展限制见 05                            |
 | improve-5.5   | 2026-09-15                             | improve-5 新模型实网暴露上游协议缺口，用户明确指定返修/能力扩展轮次  | 已实施并收尾，结果及限制见 05／06／07                                               |
-| improve-6     | 2026-09-15                             | improve-5.5 实施后，用户开启前序主动延后的 context 议题              | 00–04 规划草案，待整体审阅；尚未实施                                                |
+| improve-6     | 2026-09-15                             | improve-5.5 实施后，用户开启前序主动延后的 context 议题              | 实施与三协议真实续接／压缩验收完成，仅本地提交                                                |
 
 ## 已冻结的阶段边界
 
@@ -90,7 +90,7 @@ Chat Completions 作为显式兼容入口长期保留；移除它不属于本议
 
 ## 审核入口
 
-最新规划：[improve-6 README](./improve-6/README.md) → [Context 方案与改动范围](./improve-6/02-optimization-plan-and-change-scope.md) → [验收标准](./improve-6/04-test-and-acceptance.md)。前序 [improve-5.5](./improve-5.5/README.md) 已扩展原生续接及相关估算材料，实际结果与限制见其 05／06／07；早期限制按历史阶段阅读。
+最新轮次：[improve-6 README](./improve-6/README.md) → [Context 方案与改动范围](./improve-6/02-optimization-plan-and-change-scope.md) → [验收标准](./improve-6/04-test-and-acceptance.md)。前序 [improve-5.5](./improve-5.5/README.md) 已扩展原生续接及相关估算材料，实际结果与限制见其 05／06／07；早期限制按历史阶段阅读。
 
 当前 Improve 5 文档：[README](./improve-5/README.md) → [已确认决策](./improve-5/00-discussion.md) → [现状](./improve-5/01-problem-analysis-and-current-state.md) → [方案](./improve-5/02-optimization-plan-and-change-scope.md) → [七个参考项目](./improve-5/03-reference-projects.md) → [验收标准](./improve-5/04-test-and-acceptance.md)。实际结果见 [05 实施验收](./improve-5/05-implementation-acceptance.md)。Improve 5 新规则只替代旧缓存统计的纳入门槛，不追溯改写 improve-4 的验收结论。
 
