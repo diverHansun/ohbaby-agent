@@ -96,6 +96,7 @@ export const ContextEvent = {
       attemptId: z.string(),
       attempt: z.number().int().positive(),
       droppedRounds: z.number().int().nonnegative(),
+      // Readable-history retry score, not the complete summary request token estimate.
       estimatedHistoryTokens: z.number().nonnegative(),
     }),
   ),

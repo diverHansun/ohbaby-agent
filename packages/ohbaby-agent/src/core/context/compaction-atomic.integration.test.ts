@@ -1,3 +1,6 @@
+import { createContextSummaryClient } from "../../adapters/ui-runtime/prompt-context.js";
+import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
+import type { LLMClientInstance } from "../llm-client/types.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -214,6 +217,76 @@ afterEach(async () => {
 });
 
 describe("atomic context compaction", () => {
+  it.each(["length", "content_filter"] as const)(
+    "keeps prune but never retires summary history after provider %s",
+    async (finishReason) => {
+      const directory = await mkdtemp(join(tmpdir(), "ohbaby-summary-finish-"));
+      cleanupPaths.push(directory);
+      const dbPath = join(directory, "agent.db");
+      initDatabase({ dbPath });
+      insertSession("session_1");
+      const messages = createMessageManager({
+        bus: createBus(),
+        idGenerator: createIds("finish"),
+        store: createDatabaseMessageStore(),
+      });
+      await appendToolHistory(messages, "session_1");
+      await appendTextHistory(messages, "session_1");
+      let requests = 0;
+      const client: LLMClientInstance = {
+        config: {
+          provider: "openai",
+          model: "gpt-5.2",
+          baseUrl: "https://api.openai.com/v1",
+          interfaceProvider: "openai-responses",
+          maxTokens: 128,
+        },
+        provider: {
+          id: "openai",
+          kind: "openai-responses",
+          client: {},
+          isAbortError: () => false,
+          async streamResponse() {
+            requests += 1;
+            await Promise.resolve();
+            return (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              await Promise.resolve();
+              yield { textDelta: "partial summary", finishReason };
+            })();
+          },
+        },
+      };
+      const manager = createManager(
+        messages,
+        createContextSummaryClient(client),
+        createBus(),
+        { pruneMinimumTokens: 1, pruneProtectTokens: 0 },
+      );
+      const result = await manager.compact("session_1", {
+        directory: "/repo",
+        force: true,
+        modelId: "gpt-5.2",
+        toolNames: [],
+        tools: undefined,
+      });
+      expect(requests).toBe(1);
+      expect(result.compression?.status).toBe("failed");
+      const recovered = await reopenHistory(dbPath, "session_1");
+      const parts = recovered.flatMap((message) => message.parts);
+      expect(parts.filter(isContextSummaryPart)).toHaveLength(0);
+      expect(
+        parts.some(
+          (part) => part.type === "tool" && part.time?.compacted !== undefined,
+        ),
+      ).toBe(true);
+      expect(
+        parts
+          .filter((part) => part.type === "text")
+          .every((part) => part.time?.compacted === undefined),
+      ).toBe(true);
+    },
+  );
+
   it.each([
     {
       failAt: 1,

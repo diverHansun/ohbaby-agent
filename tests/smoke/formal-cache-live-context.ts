@@ -148,3 +148,15 @@ export function decideControlledPermission(
   if (!choice) throw new Error("NO_SAFE_PERMISSION_CHOICE");
   return { choiceId: choice.id, decision };
 }
+
+/** Redundant local facts make compaction cut past a native assistant turn. */
+export function createCompactionNotes(count: number): string {
+  return (
+    "\nContext notes (repeated observations of the same facts; summarize them together):\n" +
+    Array.from(
+      { length: count },
+      (_, index) =>
+        `Observation ${String(index + 1)}: Project Cedar, release 17, owner Lin. The task is to preserve these facts; all actions are read-only and no files may be changed.`,
+    ).join("\n")
+  );
+}

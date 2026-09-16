@@ -97,6 +97,7 @@ export function createContextSummaryClient(
       for (let attempt = 0; attempt < 2; attempt += 1) {
         throwIfSummaryAborted(input.signal);
         let summary = "";
+        let completedNormally = false;
         for await (const response of streamResponse(
           requestClient,
           [
@@ -106,6 +107,7 @@ export function createContextSummaryClient(
               content: redactPromptSecrets(
                 serializeHistory(input.history, {
                   includeModelContext: false,
+                  includeToolContext: true,
                 }),
               ),
             },
@@ -125,10 +127,15 @@ export function createContextSummaryClient(
             throw summaryAbortError();
           }
           if (response.isComplete) {
+            completedNormally = response.finishReason === "stop";
             summary = messageContentToText(response.messageSnapshot.content);
           }
         }
 
+        throwIfSummaryAborted(input.signal);
+        if (!completedNormally) {
+          throw new Error("Context compact summary did not finish normally");
+        }
         const trimmed = redactPromptSecrets(summary).trim();
         if (trimmed !== "") {
           return trimmed;

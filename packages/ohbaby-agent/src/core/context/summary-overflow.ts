@@ -5,6 +5,7 @@ import type { TokenCounter } from "./types.js";
 export interface SummaryHistoryShrink {
   readonly droppedRounds: number;
   readonly history: readonly MessageWithParts[];
+  /** Readable-history policy score; excludes summary-only tool details and request overhead. */
   readonly inputTokens: number;
 }
 
@@ -37,8 +38,8 @@ function nextUserBoundary(
 }
 
 /**
- * Drops one or more complete oldest user rounds until the provider-visible
- * summary input strictly shrinks. The returned history always starts at a
+ * Drops one or more complete oldest user rounds until the readable-history
+ * policy score strictly shrinks. This score is not the full summary request estimate. The returned history always starts at a
  * user boundary, so assistant tool calls and their projected results remain
  * paired. At least the most recent user round is retained.
  */

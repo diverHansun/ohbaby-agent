@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createFormalCacheSession } from "./formal-cache-session.js";
 import {
   LIVE_CONTEXT_PROFILES,
+  createCompactionNotes,
   safeLiveContextFailure,
   classifyControlledRead,
   decideControlledPermission,
@@ -270,106 +271,145 @@ it("reopens the same SQLite session and continues without resetting observed req
   }
 }, 30000);
 
-it("records a real summary request and retired persisted parts after forced compaction", async () => {
-  vi.stubEnv("ZENMUX_API_KEY", "fixture-only");
-  let main = 0;
-  let sequence = 0;
-  vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
-    if (init?.method === "GET")
-      return Response.json({
-        data: [{ id: "deepseek/deepseek-v4.1-flash", context_length: 262144 }],
-      });
-    if (typeof init?.body !== "string")
-      throw new Error("Expected fixture JSON body");
-    const body = JSON.parse(init.body) as { tools?: unknown[] };
-    const agent = (body.tools?.length ?? 0) > 0;
-    if (agent) main += 1;
-    sequence += 1;
-    const tool = agent && main === 1;
-    const frame = {
-      id: `fixture-summary-${String(sequence)}`,
-      object: "chat.completion.chunk",
-      created: 1,
-      model: "deepseek/deepseek-v4.1-flash",
-      choices: [
-        {
-          index: 0,
-          delta: tool
-            ? {
-                reasoning_content: `Fixture reasoning ${String(sequence)}`,
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: "fixture-read",
-                    type: "function",
-                    function: {
-                      name: "read",
-                      arguments: JSON.stringify({ file_path: "cache-note.md" }),
+it.each([
+  { label: "retained native states", firstOnly: false },
+  { label: "no active native states", firstOnly: true },
+])(
+  "records summary retirement and reopens with $label",
+  async ({ firstOnly }) => {
+    vi.stubEnv("ZENMUX_API_KEY", "fixture-only");
+    let main = 0;
+    let sequence = 0;
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
+      if (init?.method === "GET")
+        return Response.json({
+          data: [
+            { id: "deepseek/deepseek-v4.1-flash", context_length: 262144 },
+          ],
+        });
+      if (typeof init?.body !== "string")
+        throw new Error("Expected fixture JSON body");
+      const body = JSON.parse(init.body) as { tools?: unknown[] };
+      const agent = (body.tools?.length ?? 0) > 0;
+      if (agent) main += 1;
+      sequence += 1;
+      const tool = agent && main === 1;
+      const frame = {
+        id: `fixture-summary-${String(sequence)}`,
+        object: "chat.completion.chunk",
+        created: 1,
+        model: "deepseek/deepseek-v4.1-flash",
+        choices: [
+          {
+            index: 0,
+            delta: tool
+              ? {
+                  reasoning_content: `Fixture reasoning ${String(sequence)}`,
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "fixture-read",
+                      type: "function",
+                      function: {
+                        name: "read",
+                        arguments: JSON.stringify({
+                          file_path: "cache-note.md",
+                        }),
+                      },
                     },
-                  },
-                ],
-              }
-            : {
-                content: "Cedar release 17 belongs to Lin.",
-                ...(agent
-                  ? {
-                      reasoning_content: `Fixture reasoning ${String(sequence)}`,
-                    }
-                  : {}),
-              },
-          finish_reason: tool ? "tool_calls" : "stop",
+                  ],
+                }
+              : {
+                  content: "Cedar release 17 belongs to Lin.",
+                  ...(agent && !firstOnly
+                    ? {
+                        reasoning_content: `Fixture reasoning ${String(sequence)}`,
+                      }
+                    : {}),
+                },
+            finish_reason: tool ? "tool_calls" : "stop",
+          },
+        ],
+        usage: { prompt_tokens: 40, completion_tokens: 8, total_tokens: 48 },
+      };
+      return new Response(
+        `data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`,
+        {
+          headers: { "content-type": "text/event-stream" },
         },
-      ],
-      usage: { prompt_tokens: 40, completion_tokens: 8, total_tokens: 48 },
-    };
-    return new Response(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`, {
-      headers: { "content-type": "text/event-stream" },
+      );
     });
-  });
-  const session = await createFormalCacheSession("zenmux-deepseek-v41-chat", {
-    requireDetectedWindow: true,
-    maxRequests: 20,
-  });
-  try {
-    await session.submit(
-      "Remember Cedar release 17 and owner Lin. ".repeat(30),
-    );
-    await session.submit("Confirm Cedar release 17 and owner Lin. ".repeat(30));
-    await session.submit("Restate Cedar release 17 and owner Lin. ".repeat(30));
-    const toolsBefore = session.allToolPartIds();
-    expect(toolsBefore.ids.length).toBeGreaterThan(0);
-    const nativeBefore = session.nativeStateHashes("before-compaction");
-    expect(nativeBefore.active.length).toBeGreaterThan(0);
-    const compact = await session.compact();
-    expect(compact.result.status).toBe("compacted");
-    expect(compact.checkpoint.persisted.context.summaryParts).toBeGreaterThan(
-      0,
-    );
-    expect(compact.checkpoint.persisted.context.retiredParts).toBeGreaterThan(
-      0,
-    );
-    expect(
-      compact.checkpoint.persisted.context.retiredNativeParts,
-    ).toBeGreaterThan(0);
-    expect(session.allToolPartIds()).toEqual(toolsBefore);
-    const nativeAfter = session.nativeStateHashes("after-compaction");
-    expect(nativeAfter.retired.length).toBeGreaterThan(0);
-    expect(nativeAfter.active).not.toContain(nativeAfter.retired[0]);
-    await session.submit("Confirm the owner from the summary without tools.");
-    const replay = session.providerRequests
-      .filter((request) => request.purpose === "agent-step")
-      .at(-1);
-    expect(replay?.replayStateHashes).toEqual(nativeAfter.active);
-    expect(session.allToolPartIds()).toEqual(toolsBefore);
-    await session.reopen();
-    expect(session.allToolPartIds()).toEqual(toolsBefore);
-    expect(
-      session.providerRequests.some(
-        (item) => item.purpose === "context-summary",
-      ),
-    ).toBe(true);
-  } finally {
-    await session.close();
-    await rm(session.root, { recursive: true, force: true });
-  }
-}, 30000);
+    const session = await createFormalCacheSession("zenmux-deepseek-v41-chat", {
+      requireDetectedWindow: true,
+      maxRequests: 20,
+    });
+    try {
+      await session.submit(
+        "Remember Cedar release 17 and owner Lin." + createCompactionNotes(30),
+      );
+      await session.submit(
+        "Confirm Cedar release 17 and owner Lin." + createCompactionNotes(60),
+      );
+      await session.submit(
+        "Restate Cedar release 17 and owner Lin. Do not use tools.",
+      );
+      const toolsBefore = session.allToolPartIds();
+      expect(toolsBefore.ids.length).toBeGreaterThan(0);
+      const nativeBefore = session.nativeStateHashes("before-compaction");
+      expect(nativeBefore.active.length).toBeGreaterThan(0);
+      const compact = await session.compact();
+      expect(compact.result.status).toBe("compacted");
+      expect(compact.checkpoint.persisted.context.summaryParts).toBeGreaterThan(
+        0,
+      );
+      expect(compact.checkpoint.persisted.context.retiredParts).toBeGreaterThan(
+        0,
+      );
+      expect(
+        compact.checkpoint.persisted.context.retiredNativeParts,
+      ).toBeGreaterThan(0);
+      expect(session.allToolPartIds()).toEqual(toolsBefore);
+      const nativeAfter = session.nativeStateHashes("after-compaction");
+      expect(nativeAfter.retired.length).toBeGreaterThan(0);
+      expect(nativeAfter.active).not.toContain(nativeAfter.retired[0]);
+      if (firstOnly) expect(nativeAfter.active).toEqual([]);
+      else expect(nativeAfter.active.length).toBeGreaterThan(0);
+      await session.submit("Confirm the owner from the summary without tools.");
+      const replay = session.providerRequests
+        .filter((request) => request.purpose === "agent-step")
+        .at(-1);
+      expect(replay?.replayStateHashes).toEqual(nativeAfter.active);
+      expect(session.allToolPartIds()).toEqual(toolsBefore);
+      const beforeReopen = session.nativeStateHashes("before-reopen");
+      const fingerprint = session.activeNativeFingerprint("before-reopen");
+      if (firstOnly) expect(fingerprint.count).toBe(0);
+      await session.reopen();
+      expect(session.nativeStateHashes("after-reopen")).toEqual(beforeReopen);
+      expect(session.activeNativeFingerprint("after-reopen")).toEqual(
+        fingerprint,
+      );
+      await session.submit(
+        "Confirm Cedar and Lin after reopening. Do not use tools.",
+      );
+      const reopenedReplay = session.providerRequests
+        .filter((request) => request.purpose === "agent-step")
+        .at(-1);
+      expect(reopenedReplay?.replayStateHashes).toEqual(beforeReopen.active);
+      expect(
+        reopenedReplay?.replayStateHashes.some((hash) =>
+          beforeReopen.retired.includes(hash),
+        ),
+      ).toBe(false);
+      expect(session.allToolPartIds()).toEqual(toolsBefore);
+      expect(
+        session.providerRequests.some(
+          (item) => item.purpose === "context-summary",
+        ),
+      ).toBe(true);
+    } finally {
+      await session.close();
+      await rm(session.root, { recursive: true, force: true });
+    }
+  },
+  30000,
+);

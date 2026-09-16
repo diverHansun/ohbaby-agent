@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createFormalCacheSession } from "./formal-cache-session.js";
 import {
   LIVE_CONTEXT_PROFILES,
+  createCompactionNotes,
   safeLiveContextFailure,
   type LiveContextPhase,
 } from "./formal-cache-live-context.js";
@@ -38,14 +39,7 @@ describe.runIf(enabled)("production-backed context migration", () => {
     try {
       // Controlled redundant history gives the unchanged inflation guard useful material.
       const compressibleHistory =
-        mode === "compaction"
-          ? "\nContext notes (repeated observations of the same facts; summarize them together):\n" +
-            Array.from(
-              { length: 30 },
-              (_, index) =>
-                `Observation ${String(index + 1)}: Project Cedar, release 17, owner Lin. The task is to preserve these facts; all actions are read-only and no files may be changed.`,
-            ).join("\n")
-          : "";
+        mode === "compaction" ? createCompactionNotes(30) : "";
       const first = await session.submit(
         `Use the read tool once on the exact file ${session.readFilePath}. Report the Project, Release, and Owner fields exactly. This is a local read-only file; do not use shell commands.${compressibleHistory}`,
       );
@@ -70,7 +64,8 @@ describe.runIf(enabled)("production-backed context migration", () => {
       expect(firstUsage?.currentTokens).toBeGreaterThan(0);
       phase = "continuation";
       const second = await session.submit(
-        "Without reading the file again, state who owns Project Cedar release 17. Use only the earlier conversation.",
+        "Without reading the file again, state who owns Project Cedar release 17. Use only the earlier conversation." +
+          (mode === "compaction" ? createCompactionNotes(60) : ""),
       );
       expect(second.result.prompt.status).toBe("succeeded");
       expect(second.checkpoint.answer.owner).toBe(true);
@@ -134,7 +129,7 @@ describe.runIf(enabled)("production-backed context migration", () => {
       }
       const originalSessionId = (await session.status()).sessionId;
       const nativeBefore = session.activeNativeFingerprint("before-reopen");
-      expect(nativeBefore.count).toBeGreaterThan(0);
+      if (mode === "baseline") expect(nativeBefore.count).toBeGreaterThan(0);
       const nativeStatesBefore = session.nativeStateHashes("before-reopen");
       phase = "reopen";
       await session.reopen();

@@ -1,10 +1,13 @@
-import type { MessageWithParts, Part } from "../message/index.js";
+import type { MessageWithParts, Part, ToolPart } from "../message/index.js";
 import { isModelContextPart } from "../message/origin.js";
 import { isActivePart } from "./filters.js";
 import { isSummaryMessage } from "./summary.js";
+import { formatToolResultContentForModel } from "./tool-metadata-projection.js";
 
 export interface SerializeHistoryOptions {
   readonly includeModelContext?: boolean;
+  /** Summary-only tool facts; leave disabled for existing compaction scoring. */
+  readonly includeToolContext?: boolean;
 }
 
 /**
@@ -36,6 +39,31 @@ export function serializePart(part: Part): string {
   return part.state.raw;
 }
 
+function serializeSummaryTool(part: ToolPart): string {
+  const { state } = part;
+  const action = JSON.stringify({
+    tool: part.tool,
+    callId: part.callId,
+    input: state.input,
+    status: state.status,
+  });
+  if (state.status === "pending" || state.status === "running") {
+    return `${action}\nResult unknown; execution may have had side effects.`;
+  }
+  const content =
+    state.status === "completed"
+      ? state.output
+      : state.status === "aborted"
+        ? [state.output, state.error].filter(Boolean).join("\n\n")
+        : state.error;
+  const result = formatToolResultContentForModel({
+    tool: part.tool,
+    content,
+    metadata: state.metadata,
+  });
+  return result === "" ? action : `${action}\n${result}`;
+}
+
 export function serializeMessage(
   message: MessageWithParts,
   options: SerializeHistoryOptions = {},
@@ -45,7 +73,13 @@ export function serializeMessage(
       (part) =>
         options.includeModelContext !== false || !isModelContextPart(part),
     )
-    .map(serializePart)
+    .map((part) =>
+      options.includeToolContext === true &&
+      part.type === "tool" &&
+      isActivePart(part)
+        ? serializeSummaryTool(part)
+        : serializePart(part),
+    )
     .filter(Boolean)
     .join("\n");
   return parts ? `${message.info.role}: ${parts}` : message.info.role;

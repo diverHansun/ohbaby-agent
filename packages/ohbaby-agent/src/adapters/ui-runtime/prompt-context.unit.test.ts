@@ -37,6 +37,7 @@ function streamWithContent(
     yield {
       messageSnapshot: { content },
       isComplete: true,
+      finishReason: "stop",
       ...(tokenUsage === undefined ? {} : { tokenUsage }),
     };
   })();
@@ -238,6 +239,50 @@ describe("createContextSummaryClient", () => {
       purpose: "context-summary",
       sessionId: "session_1",
     });
+  });
+
+  it("sends summary-only tool facts through the production summary request", async () => {
+    streamResponseMock.mockReturnValueOnce(streamWithContent("summary"));
+    const client = createContextSummaryClient({} as LLMClientInstance);
+    await client.generateSummary({
+      sessionId: "s",
+      prompt: "summarize",
+      history: [
+        {
+          info: {
+            id: "m",
+            role: "assistant",
+            agent: "test",
+            sessionId: "s",
+            time: { created: 1 },
+          },
+          parts: [
+            {
+              id: "p",
+              messageId: "m",
+              sessionId: "s",
+              orderIndex: 0,
+              type: "tool",
+              tool: "bash",
+              callId: "c",
+              state: {
+                status: "completed",
+                input: { command: "pwd", apiKey: "summary-input-canary" },
+                output: "",
+                metadata: { exitCode: 0, internalSecret: "private-metadata" },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const sent = streamResponseMock.mock.calls[0][1][1].content;
+    expect(sent).toContain('"tool":"bash"');
+    expect(sent).toContain('"command":"pwd"');
+    expect(sent).toContain('"status":"completed"');
+    expect(sent).toContain('"exitCode":0');
+    expect(sent).not.toContain("summary-input-canary");
+    expect(sent).not.toContain("private-metadata");
   });
 
   it("redacts credential canaries before and after summary generation", async () => {
