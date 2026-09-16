@@ -52,12 +52,9 @@ import type {
 } from "../../services/interface-providers/index.js";
 
 interface AccumulatedToolCall {
-  id: string;
-  type: "function";
-  function: {
-    name: string;
-    arguments: string;
-  };
+  callId: string;
+  name: string;
+  argumentsJson: string;
 }
 
 function toStreamingTokenUsage(usage: TokenUsage): StreamingTokenUsage {
@@ -85,9 +82,9 @@ function sortedToolCalls(
     .sort((a, b) => a[0] - b[0])
     .map(([index, call]) => ({
       index,
-      callId: call.id,
-      name: call.function.name,
-      argumentsJson: call.function.arguments,
+      callId: call.callId,
+      name: call.name,
+      argumentsJson: call.argumentsJson,
     }));
 }
 
@@ -168,15 +165,12 @@ function parseToolCalls(
   return Array.from(accumulatedToolCalls.values()).map((call) => {
     try {
       return {
-        callId: call.id,
-        name: call.function.name,
-        arguments: JSON.parse(call.function.arguments) as Record<
-          string,
-          unknown
-        >,
+        callId: call.callId,
+        name: call.name,
+        arguments: JSON.parse(call.argumentsJson) as Record<string, unknown>,
       };
     } catch (error) {
-      throw new ToolCallParseError(call.function.name, error);
+      throw new ToolCallParseError(call.name, error);
     }
   });
 }
@@ -381,12 +375,9 @@ export async function* streamResponse(
             // Create new tool call entry if first fragment
             if (!accumulatedToolCalls.has(index)) {
               accumulatedToolCalls.set(index, {
-                id: toolCall.id ?? "",
-                type: "function",
-                function: {
-                  name: toolCall.name ?? "",
-                  arguments: "",
-                },
+                callId: toolCall.id ?? "",
+                name: toolCall.name ?? "",
+                argumentsJson: "",
               });
             }
 
@@ -397,13 +388,13 @@ export async function* streamResponse(
             }
 
             if (toolCall.id) {
-              accumulated.id = toolCall.id;
+              accumulated.callId = toolCall.id;
             }
             if (toolCall.name) {
-              accumulated.function.name = toolCall.name;
+              accumulated.name = toolCall.name;
             }
             if (toolCall.argumentsDelta) {
-              accumulated.function.arguments += toolCall.argumentsDelta;
+              accumulated.argumentsJson += toolCall.argumentsDelta;
             }
           }
         }

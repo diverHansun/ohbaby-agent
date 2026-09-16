@@ -399,6 +399,150 @@ describe("LLM Client Integration Tests", () => {
       });
     });
 
+    it("keeps interleaved tool fragments separate when IDs and names arrive late", async () => {
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([
+          {
+            toolCallDeltas: [{ index: 2, argumentsDelta: '{"path":"se' }],
+          },
+          {
+            toolCallDeltas: [
+              { index: 0, id: "call_first", argumentsDelta: '{"path":"' },
+              { index: 2, name: "read_file", argumentsDelta: 'cond.txt"' },
+            ],
+          },
+          {
+            toolCallDeltas: [
+              { index: 2, id: "call_second", argumentsDelta: "}" },
+              {
+                index: 0,
+                name: "read_file",
+                argumentsDelta: 'first.txt","limit":2}',
+              },
+            ],
+          },
+          {
+            toolCallDeltas: [
+              { index: 2, id: "", name: "", argumentsDelta: "" },
+            ],
+            finishReason: "tool_calls",
+          },
+        ]),
+      );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamResponse(mockClient, [
+        { role: "user", content: "Read both files" },
+      ])) {
+        responses.push(response);
+      }
+
+      // Later fragments must not mutate snapshots already delivered to consumers.
+      expect(responses[0].messageSnapshot.toolCalls).toEqual([
+        { index: 2, callId: "", name: "", argumentsJson: '{"path":"se' },
+      ]);
+      expect(responses[1].messageSnapshot.toolCalls).toEqual([
+        {
+          index: 0,
+          callId: "call_first",
+          name: "",
+          argumentsJson: '{"path":"',
+        },
+        {
+          index: 2,
+          callId: "",
+          name: "read_file",
+          argumentsJson: '{"path":"second.txt"',
+        },
+      ]);
+
+      const final = responses.at(-1);
+      // Snapshots use numeric index order; parsed calls retain first-seen order.
+      expect(final?.messageSnapshot.toolCalls).toEqual([
+        {
+          index: 0,
+          callId: "call_first",
+          name: "read_file",
+          argumentsJson: '{"path":"first.txt","limit":2}',
+        },
+        {
+          index: 2,
+          callId: "call_second",
+          name: "read_file",
+          argumentsJson: '{"path":"second.txt"}',
+        },
+      ]);
+      expect(final?.parsedToolCalls).toEqual([
+        {
+          callId: "call_second",
+          name: "read_file",
+          arguments: { path: "second.txt" },
+        },
+        {
+          callId: "call_first",
+          name: "read_file",
+          arguments: { path: "first.txt", limit: 2 },
+        },
+      ]);
+      expect(
+        responses.slice(0, -1).every((r) => r.parsedToolCalls === undefined),
+      ).toBe(true);
+    });
+
+    it("preserves sorted partial tool arguments without parsing when cancelled", async () => {
+      const controller = new AbortController();
+      streamResponseMock.mockResolvedValue(
+        createAbortingProviderStream(
+          [
+            {
+              toolCallDeltas: [
+                { index: 2, name: "read_file", argumentsDelta: '{"path":"sec' },
+                { index: 0, id: "call_first", argumentsDelta: '{"path":' },
+              ],
+            },
+            {
+              toolCallDeltas: [
+                { index: 2, id: "call_second", argumentsDelta: "ond" },
+                { index: 0, name: "read_file" },
+              ],
+            },
+          ],
+          new Error("stream cancelled"),
+        ),
+      );
+
+      const responses: StreamingResponse[] = [];
+      for await (const response of streamResponse(
+        mockClient,
+        [{ role: "user", content: "Read both files" }],
+        { signal: controller.signal },
+      )) {
+        responses.push(response);
+        if (responses.length === 2) controller.abort();
+      }
+
+      const final = responses.at(-1);
+      expect(final?.streamStopReason).toBe("user_aborted");
+      expect(final?.parsedToolCalls).toBeUndefined();
+      expect(final?.messageSnapshot).toEqual({
+        content: null,
+        toolCalls: [
+          {
+            index: 0,
+            callId: "call_first",
+            name: "read_file",
+            argumentsJson: '{"path":',
+          },
+          {
+            index: 2,
+            callId: "call_second",
+            name: "read_file",
+            argumentsJson: '{"path":"second',
+          },
+        ],
+      });
+    });
+
     it("should handle empty responses with default content", async () => {
       const events: InterfaceProviderStreamEvent[] = [
         {

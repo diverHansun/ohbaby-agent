@@ -1,12 +1,16 @@
 # LLM SDK 升级与 Responses 协议调查
 
-## 当前入口（2026-09-15）
+## 当前入口（2026-09-16）
 
-当前本地集成分支为 `openai-responses-migration@5a76738a`，已经包含 improve-1～5.5 的实施与收尾证据；各阶段具体限制仍以对应 05／06／07 为准。下方早期状态记录中的“待合入”等文字保留其历史时间口径，不代表当前分支状态。
+当前本地集成分支为 `openai-responses-migration@8409a863`，已经包含 improve-1～6 的实施与收尾证据；各阶段具体限制仍以对应 05／06／07 为准。下方早期状态记录中的“待合入”等文字保留其历史时间口径，不代表当前分支状态。
 
 用户开启的 **[improve-6：Context 计量与压缩链路适配](./improve-6/README.md)** 已完成实施与独立审查，按“部分通过”合入本地 `openai-responses-migration`。内部旧 Chat 估算桥已删除；保留压缩／prune 算法，补足摘要语义并按用户要求将自动摘要统一到完整窗口 95%。真实自动越过 95% 与真实上游 overflow 未实测，尚未推送；结果与限制见 [05 实施验收](./improve-6/05-implementation-acceptance.md)。
 
-## 状态
+用户已开启 **[improve-7：Agent loop 三协议执行语义与历史交接](./improve-7/README.md)**。本轮已获授权按批次实施：保留 SDK 重试，整理内部工具累积、完成/失败语义与失败历史交接，验证既有 Context 管理规则；不改变压缩算法。断流正文的两层处理已获用户确认：过滤原始失败协议消息，允许从已保存可见正文派生带中断说明的普通文本历史，见 [00 §3](./improve-7/00-discussion.md#3-已确认的两层处理)。
+
+## 历史阶段状态
+
+以下按各阶段当时记录保留；最新集成状态以上方“当前入口”为准。
 
 - 文档状态：Improve 1 已实施并通过本地验收；Improve 2 最新技术验收通过修订后的受限ZenMux门（2026-09-13全量preflight及生产lifecycle T12通过，见05 §5.12）
 - 代码状态：Improve 1 完成；独立 `openai-responses` provider 已落地，仍为显式 kind，默认路径仍是 Chat Completions
@@ -31,6 +35,8 @@
 - [`improve-5.5/`](./improve-5.5/)：2026-09-15 已实施 reasoning 请求配置与三协议原生续接；默认开启/medium、子代理默认继承开关与强度。实际结果及限制见其 05／06／07，不包含前端或主代理显式覆盖子强度工具参数。
 - [`improve-6/`](./improve-6/)：2026-09-15 用户开启 Context 计量与压缩链路适配规划，承接此前延后的 context 议题；保留算法，完成自有消息计量、旧 Chat 中间格式退出与最小语义修复。
 
+- [`improve-7/`](./improve-7/)：2026-09-16 对齐 Agent loop 规划与验收；00–04 已对齐，实施中。
+
 ## 分支策略
 
 - `main` 保持稳定；本迁移建立本地长期集成分支 `openai-responses-migration`。
@@ -49,6 +55,7 @@
 | improve-5     | 2026-09-14 研究；2026-09-15 规划与实施 | improve-4 主动切出的 cache 议题；用户确认开启并替代旧整 Run 筛选规则 | 00–05 已完成；本地实施/基本三协议验收通过，扩展限制见 05                            |
 | improve-5.5   | 2026-09-15                             | improve-5 新模型实网暴露上游协议缺口，用户明确指定返修/能力扩展轮次  | 已实施并收尾，结果及限制见 05／06／07                                               |
 | improve-6     | 2026-09-15                             | improve-5.5 实施后，用户开启前序主动延后的 context 议题              | 部分通过，已合入本地集成分支；未推送                                                |
+| improve-7 | 2026-09-16 | improve-6 后继续对齐 Agent loop；用户确认保留 SDK 与失败历史边界 | 00–04 已对齐；实施中 |
 
 ## 已冻结的阶段边界
 
@@ -90,9 +97,9 @@ Chat Completions 作为显式兼容入口长期保留；移除它不属于本议
 
 ## 审核入口
 
-最新轮次：[improve-6 README](./improve-6/README.md) → [Context 方案与改动范围](./improve-6/02-optimization-plan-and-change-scope.md) → [验收标准](./improve-6/04-test-and-acceptance.md)。前序 [improve-5.5](./improve-5.5/README.md) 已扩展原生续接及相关估算材料，实际结果与限制见其 05／06／07；早期限制按历史阶段阅读。
+最新轮次：[improve-7 README](./improve-7/README.md) → [Agent loop 方案与改动范围](./improve-7/02-optimization-plan-and-change-scope.md) → [验收标准](./improve-7/04-test-and-acceptance.md)。前序 [improve-6](./improve-6/README.md) 已本地合入，其真实容量测试缺口继续保留；improve-7 的 force 压缩测试不能关闭该缺口。
 
-当前 Improve 5 文档：[README](./improve-5/README.md) → [已确认决策](./improve-5/00-discussion.md) → [现状](./improve-5/01-problem-analysis-and-current-state.md) → [方案](./improve-5/02-optimization-plan-and-change-scope.md) → [七个参考项目](./improve-5/03-reference-projects.md) → [验收标准](./improve-5/04-test-and-acceptance.md)。实际结果见 [05 实施验收](./improve-5/05-implementation-acceptance.md)。Improve 5 新规则只替代旧缓存统计的纳入门槛，不追溯改写 improve-4 的验收结论。
+历史 Improve 5 审核入口：[README](./improve-5/README.md) → [已确认决策](./improve-5/00-discussion.md) → [现状](./improve-5/01-problem-analysis-and-current-state.md) → [方案](./improve-5/02-optimization-plan-and-change-scope.md) → [七个参考项目](./improve-5/03-reference-projects.md) → [验收标准](./improve-5/04-test-and-acceptance.md)。实际结果见 [05 实施验收](./improve-5/05-implementation-acceptance.md)。Improve 5 新规则只替代旧缓存统计的纳入门槛，不追溯改写 improve-4 的验收结论。
 
 Improve 1 结果：
 
