@@ -21,7 +21,7 @@ function tokenCount(
   return Math.max(0, tokenCounter.estimateTokens(content));
 }
 
-/** Keep legacy estimates unchanged unless this history carries native replay data. */
+/** Preserve readable-history scoring; native units use the model request estimator. */
 export function estimateHistoryForCompaction(
   history: readonly MessageWithParts[],
   tokenCounter: Pick<TokenCounter, "estimateTokens">,

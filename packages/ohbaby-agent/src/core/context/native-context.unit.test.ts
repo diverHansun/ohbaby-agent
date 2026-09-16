@@ -1,11 +1,15 @@
+import type { AssembledContext, ContextOccupancyComposition } from "./types.js";
 import { describe, expect, it } from "vitest";
 import type {
   ModelState,
   ModelOrigin,
 } from "../../services/interface-providers/native-state.js";
 import type { MessageWithParts } from "../message/index.js";
-import { serializeHistoryMessages } from "./serializer.js";
-import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
+import { serializeForLlm, serializeHistoryMessages } from "./serializer.js";
+import {
+  estimatePreparedRequestHeuristic,
+  estimateContextOccupancyComposition,
+} from "./token-estimation.js";
 import { createMaskConfig, reduceForModel } from "./projection.js";
 import { findCutPoint } from "./compaction-policy.js";
 
@@ -34,7 +38,7 @@ function state(cipher = "opaque", tokens = 80): ModelState {
     },
   };
 }
-function nativeMessage(pending = false): MessageWithParts {
+function nativeMessage(pending = false, toolName = "lookup"): MessageWithParts {
   const modelState = state();
   if (modelState.output.protocol !== "openai-responses")
     throw new Error("fixture protocol");
@@ -42,7 +46,7 @@ function nativeMessage(pending = false): MessageWithParts {
     type: "function_call",
     id: "fc1",
     call_id: "call1",
-    name: "lookup",
+    name: toolName,
     arguments: "{}",
     status: "completed",
   });
@@ -67,7 +71,7 @@ function nativeMessage(pending = false): MessageWithParts {
       {
         id: "tool",
         type: "tool",
-        tool: "lookup",
+        tool: toolName,
         callId: "call1",
         state: pending
           ? { status: "pending", input: {}, raw: "{}" }
@@ -321,4 +325,161 @@ it("does not count a visible reasoning convenience field twice when native state
       counter,
     ),
   ).toBe(baseline + 7);
+});
+
+describe("native occupancy provenance", () => {
+  function context(
+    toolName: string,
+  ): AssembledContext & { history: MessageWithParts[] } {
+    return {
+      history: [nativeMessage(false, toolName)],
+      modelOrigin: origin,
+      systemPrompt: "",
+      memory: { global: "", project: "", merged: "" },
+      sessionId: "s",
+      isSubagent: false,
+      assembledAt: 1,
+      hasSummary: false,
+    };
+  }
+  it.each(["subagent_run", "subagent_status", "subagent_close"])(
+    "attributes native %s exchanges without changing replay",
+    (toolName) => {
+      const assembled = context(toolName);
+      const messages = serializeForLlm(assembled);
+      const before = JSON.stringify(messages);
+      const composition = estimateContextOccupancyComposition(
+        {
+          context: assembled,
+          request: { messages, tools: undefined },
+        },
+        counter,
+      );
+      expect(composition?.["subagent-exchanges"]).toBeGreaterThan(600);
+      expect(composition?.conversation).toBeGreaterThanOrEqual(87);
+      expect(composition?.conversation).toBeLessThan(300);
+      expect(JSON.stringify(messages)).toBe(before);
+    },
+  );
+  it("separates ordinary content and tools from delegation, adding one proxy", () => {
+    const assembled = context("subagent_run");
+    const message = assembled.history[0];
+    const native = message.parts.find((part) => part.type === "model-state");
+    if (
+      native?.type !== "model-state" ||
+      native.modelState.output.protocol !== "openai-responses"
+    )
+      throw new Error("fixture");
+    native.modelState.output.items.push(
+      {
+        type: "message",
+        id: "text",
+        role: "assistant",
+        status: "completed",
+        content: [
+          {
+            type: "output_text",
+            text: "ordinary explanation",
+            annotations: [],
+          },
+        ],
+      },
+      {
+        type: "function_call",
+        id: "fc2",
+        call_id: "ordinary",
+        name: "read",
+        arguments: "{}",
+        status: "completed",
+      },
+    );
+    assembled.history[0] = {
+      ...message,
+      parts: [
+        ...message.parts,
+        {
+          type: "text",
+          id: "text",
+          text: "ordinary explanation",
+          messageId: "m1",
+          sessionId: "s",
+          orderIndex: 2,
+        },
+        {
+          type: "tool",
+          id: "ordinary",
+          callId: "ordinary",
+          tool: "read",
+          state: { status: "completed", input: {}, output: "ordinary result" },
+          messageId: "m1",
+          sessionId: "s",
+          orderIndex: 3,
+        },
+      ],
+    };
+    const measure = (): ContextOccupancyComposition | undefined =>
+      estimateContextOccupancyComposition(
+        {
+          context: assembled,
+          request: { messages: serializeForLlm(assembled), tools: undefined },
+        },
+        counter,
+      );
+    const withProxy = measure();
+    native.modelState.estimate.tokens = 0;
+    const withoutProxy = measure();
+    expect(withProxy?.conversation).toBe(
+      (withoutProxy?.conversation ?? 0) + 80,
+    );
+    expect(withProxy?.["subagent-exchanges"]).toBe(
+      withoutProxy?.["subagent-exchanges"],
+    );
+    const subagentMaterial = [
+      {
+        role: "assistant",
+        toolCalls: [
+          { callId: "call1", name: "subagent_run", argumentsJson: "{}" },
+        ],
+      },
+      { role: "tool", callId: "call1", content: "result".repeat(100) },
+    ]
+      .map((item) => JSON.stringify(item))
+      .join("\n");
+    expect(withProxy?.["subagent-exchanges"]).toBe(subagentMaterial.length);
+    const ordinaryMaterial = [
+      { role: "assistant", content: "ordinary explanation" },
+      {
+        role: "assistant",
+        toolCalls: [{ callId: "ordinary", name: "read", argumentsJson: "{}" }],
+      },
+      { role: "tool", callId: "ordinary", content: "ordinary result" },
+    ]
+      .map((item) => JSON.stringify(item))
+      .join("\n");
+    expect(withoutProxy?.conversation).toBe(
+      ordinaryMaterial.length + "summary".length,
+    );
+  });
+  it.each(["estimate", "cipher"])(
+    "rejects composition with mismatched native %s",
+    (change) => {
+      const assembled = context("lookup");
+      const messages = structuredClone(serializeForLlm(assembled));
+      for (const message of messages) {
+        if (message.role !== "assistant" || message.modelState === undefined)
+          continue;
+        if (change === "estimate") message.modelState.estimate.tokens += 1;
+        else if (message.modelState.output.protocol === "openai-responses") {
+          const item = message.modelState.output.items[0];
+          if (item.type === "reasoning") item.encrypted_content = "different";
+        }
+      }
+      expect(
+        estimateContextOccupancyComposition(
+          { context: assembled, request: { messages, tools: undefined } },
+          counter,
+        ),
+      ).toBeUndefined();
+    },
+  );
 });

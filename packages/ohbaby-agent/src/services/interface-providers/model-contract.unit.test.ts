@@ -14,18 +14,23 @@ const base = {
 afterEach(() => vi.restoreAllMocks());
 
 describe("model request contract", () => {
-  it.each(["chat", "anthropic"])(
+  it.each(["chat", "responses", "anthropic"])(
     "rejects legacy history and custom calls on %s before sending",
     async (kind) => {
+      const chat = createOpenAICompatibleProvider(options);
+      const responses = createOpenAIResponsesProvider(options);
+      const anthropic = createAnthropicProvider(options);
+      const chatCreate = vi
+        .spyOn(chat.client.chat.completions, "create")
+        .mockResolvedValue({} as never);
+      const responsesCreate = vi
+        .spyOn(responses.client.responses, "create")
+        .mockResolvedValue({} as never);
+      const anthropicStream = vi
+        .spyOn(anthropic.client.messages, "stream")
+        .mockReturnValue({});
       const provider =
-        kind === "chat"
-          ? createOpenAICompatibleProvider(options)
-          : createAnthropicProvider(options);
-      if ("chat" in provider.client)
-        vi.spyOn(provider.client.chat.completions, "create").mockResolvedValue(
-          {} as never,
-        );
-      else vi.spyOn(provider.client.messages, "stream").mockReturnValue({});
+        kind === "chat" ? chat : kind === "responses" ? responses : anthropic;
       for (const message of [
         {
           role: "assistant",
@@ -50,6 +55,9 @@ describe("model request contract", () => {
             } as never),
           ),
         ).rejects.toThrow();
+      expect(chatCreate).not.toHaveBeenCalled();
+      expect(responsesCreate).not.toHaveBeenCalled();
+      expect(anthropicStream).not.toHaveBeenCalled();
     },
   );
   it("projects flat calls and tools to Chat while preserving raw arguments and rare fields", async () => {
@@ -153,6 +161,73 @@ describe("model request contract", () => {
           description: "read",
           parameters: { type: "object", properties: {} },
         },
+      },
+    ]);
+  });
+
+  it("preserves flat parallel calls and their result IDs through Anthropic conversion", async () => {
+    const provider = createAnthropicProvider(options);
+    const create = vi
+      .spyOn(provider.client.messages, "stream")
+      .mockReturnValue({});
+    await provider.streamResponse({
+      ...base,
+      messages: [
+        { role: "system", content: "policy" },
+        { role: "developer", content: "constraint" },
+        { role: "user", content: "look up 你好" },
+        {
+          role: "assistant",
+          content: "checking",
+          toolCalls: [
+            { callId: "one", name: "lookup", argumentsJson: '{ "q": "你好" }' },
+            { callId: "two", name: "lookup", argumentsJson: '{"q":"second"}' },
+          ],
+        },
+        { role: "tool", callId: "two", content: "second result" },
+        { role: "tool", callId: "one", content: "" },
+      ],
+      tools: [
+        {
+          name: "lookup",
+          description: "Find facts",
+          inputSchema: {
+            type: "object",
+            properties: { q: { type: "string" } },
+          },
+        },
+      ],
+    });
+    const sent = create.mock.calls[0][0];
+    expect(sent.system).toBe("policy\n\nconstraint");
+    expect(sent.messages).toEqual([
+      { role: "user", content: "look up 你好" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "checking" },
+          { type: "tool_use", id: "one", name: "lookup", input: { q: "你好" } },
+          {
+            type: "tool_use",
+            id: "two",
+            name: "lookup",
+            input: { q: "second" },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "two", content: "second result" },
+          { type: "tool_result", tool_use_id: "one", content: "" },
+        ],
+      },
+    ]);
+    expect(sent.tools).toEqual([
+      {
+        name: "lookup",
+        description: "Find facts",
+        input_schema: { type: "object", properties: { q: { type: "string" } } },
       },
     ]);
   });

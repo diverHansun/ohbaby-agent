@@ -1,12 +1,9 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   estimateNativeStateTokens,
   hasNativeDependencies,
 } from "./native-context.js";
-import {
-  legacyMessageForEstimation,
-  legacyToolForEstimation,
-  legacyReasoningForEstimation,
-} from "./legacy-estimation.js";
+import type { ModelMessage } from "../../services/interface-providers/types.js";
 import {
   isContextSummaryPart,
   isModelContextPart,
@@ -49,15 +46,27 @@ export interface EstimateContextOccupancyCompositionInput {
   readonly toolDefinitions?: readonly ToolDefinition[];
 }
 
+/** Select the self-owned request material; native reasoning is counted separately. */
+function messageForEstimation(message: ModelMessage): object {
+  if (message.role !== "assistant") return message;
+  const { modelState, reasoningText, ...content } = message;
+  return {
+    ...content,
+    ...(modelState === undefined && reasoningText !== undefined
+      ? { reasoningText }
+      : {}),
+  };
+}
+
 export function estimatePreparedRequestHeuristic(
   request: PreparedModelRequest,
   tokenCounter: Pick<TokenCounter, "estimateTokens">,
 ): number {
   const payloads = request.messages.map((message) =>
-    JSON.stringify(legacyMessageForEstimation(message)),
+    JSON.stringify(messageForEstimation(message)),
   );
   if (request.tools !== undefined && request.tools.length > 0) {
-    payloads.push(JSON.stringify(request.tools.map(legacyToolForEstimation)));
+    payloads.push(JSON.stringify(request.tools));
   }
   const text = payloads.join("\n");
   return (
@@ -89,12 +98,7 @@ export function estimateContextOccupancyComposition(
   if (input.tailDirectives !== undefined) {
     reconstructedMessages.push(...input.tailDirectives);
   }
-  if (
-    !wireValuesMatch(
-      reconstructedMessages.map(legacyMessageForEstimation),
-      input.request.messages.map(legacyMessageForEstimation),
-    )
-  ) {
+  if (!requestValuesMatch(reconstructedMessages, input.request.messages)) {
     return undefined;
   }
   const requestTools = input.request.tools ?? [];
@@ -119,7 +123,7 @@ export function estimateContextOccupancyComposition(
       isSubagent: input.context.isSubagent,
       memory: input.context.memory,
       systemPrompt: input.context.systemPrompt,
-    }).map(legacyMessageForEstimation),
+    }).map(messageForEstimation),
   );
 
   for (const message of input.context.history) {
@@ -133,14 +137,14 @@ export function estimateContextOccupancyComposition(
       reasoning !== "" &&
       message.parts.some((part) => part.type === "tool" && isActivePart(part))
     ) {
-      payloads.conversation.push(legacyReasoningForEstimation(reasoning));
+      payloads.conversation.push({ reasoningText: reasoning });
     }
   }
 
   for (const directive of input.tailDirectives ?? []) {
     payloads[
       directive.role === "system" ? "system-prompt" : "conversation"
-    ].push(legacyMessageForEstimation(directive));
+    ].push(messageForEstimation(directive));
   }
 
   if (toolDefinitions !== undefined && requestTools.length > 0) {
@@ -152,9 +156,7 @@ export function estimateContextOccupancyComposition(
       };
     requestTools.forEach((tool, index) => {
       const definition = toolDefinitions[index];
-      toolPayloads[toolBucket(definition.source)].push(
-        legacyToolForEstimation(tool),
-      );
+      toolPayloads[toolBucket(definition.source)].push(tool);
     });
     for (const key of ["builtin-tools", "mcp", "skills"] as const) {
       if (toolPayloads[key].length > 0) {
@@ -195,11 +197,37 @@ function addHistoryMessagePayloads(
   modelOrigin?: AssembledContext["modelOrigin"],
 ): void {
   if (hasNativeDependencies(message)) {
-    payloads.conversation.push(
-      ...serializeHistoryMessages([message], undefined, modelOrigin).map(
-        legacyMessageForEstimation,
+    // Serialize the whole replay unit before attributing its measurement only.
+    const messages = serializeHistoryMessages(
+      [message],
+      undefined,
+      modelOrigin,
+    );
+    const subagentCallIds = new Set(
+      message.parts.flatMap((part) =>
+        part.type === "tool" && SUBAGENT_TOOL_NAMES.has(part.tool)
+          ? [part.callId]
+          : [],
       ),
     );
+    for (const projected of messages) {
+      if (projected.role === "assistant") {
+        const { toolCalls, ...assistant } = projected;
+        payloads.conversation.push(messageForEstimation(assistant));
+        for (const call of toolCalls ?? []) {
+          const key = SUBAGENT_TOOL_NAMES.has(call.name)
+            ? "subagent-exchanges"
+            : "conversation";
+          payloads[key].push({ role: "assistant", toolCalls: [call] });
+        }
+      } else {
+        const key =
+          projected.role === "tool" && subagentCallIds.has(projected.callId)
+            ? "subagent-exchanges"
+            : "conversation";
+        payloads[key].push(messageForEstimation(projected));
+      }
+    }
     return;
   }
   const summarizedParts: Part[] = [];
@@ -246,7 +274,7 @@ function addSerializedParts(
   }
   payloads[key].push(
     ...serializeHistoryMessages([{ info: message.info, parts }]).map(
-      legacyMessageForEstimation,
+      messageForEstimation,
     ),
   );
 }
@@ -275,8 +303,8 @@ function definitionsMatchRequestTools(
   );
 }
 
-function wireValuesMatch(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+function requestValuesMatch(left: unknown, right: unknown): boolean {
+  return isDeepStrictEqual(left, right);
 }
 
 function toolBucket(source: ToolSource): "builtin-tools" | "mcp" | "skills" {

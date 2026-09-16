@@ -18,7 +18,7 @@ import { serializeForLlm } from "./serializer.js";
 import { toModelTools } from "../agents/runner.js";
 import { estimateTokensForText } from "../../services/llm-model/tokenCounting.js";
 
-it("preserves the approved pre-migration totals and all seven literal buckets", () => {
+it("records canonical totals and all seven buckets after retiring Chat measurement", () => {
   const baselineTool = (id: string, name: string): Part =>
     ({
       ...toolPart(id, name),
@@ -83,38 +83,95 @@ it("preserves the approved pre-migration totals and all seven literal buckets", 
     activeReasoningByMessageId,
     toolDefinitions: definitions,
   };
+  // Removing four nested tool envelopes, two call envelopes/IDs and the old
+  // reasoning key removes 184 ASCII characters: 1453 → 1269, 372 → 326 tokens.
   expect(estimatePreparedRequestHeuristic(request, characterCounter())).toBe(
-    1453,
+    1269,
   );
   expect(
     estimateContextOccupancyComposition(input, characterCounter()),
   ).toEqual({
     "system-prompt": 175,
-    "builtin-tools": 347,
-    mcp: 178,
-    skills: 168,
-    conversation: 326,
+    "builtin-tools": 287,
+    mcp: 148,
+    skills: 138,
+    conversation: 292,
     "summarized-conversation": 82,
-    "subagent-exchanges": 242,
+    "subagent-exchanges": 212,
   });
   expect(
     estimatePreparedRequestHeuristic(request, {
       estimateTokens: estimateTokensForText,
     }),
-  ).toBe(372);
+  ).toBe(326);
   expect(
     estimateContextOccupancyComposition(input, {
       estimateTokens: estimateTokensForText,
     }),
   ).toEqual({
     "system-prompt": 44,
-    "builtin-tools": 87,
-    mcp: 45,
-    skills: 42,
-    conversation: 88,
+    "builtin-tools": 72,
+    mcp: 37,
+    skills: 35,
+    conversation: 80,
     "summarized-conversation": 21,
-    "subagent-exchanges": 63,
+    "subagent-exchanges": 56,
   });
+});
+
+it("measures the project's flat message and tool contract without a Chat conversion", () => {
+  const material: string[] = [];
+  const request: PreparedModelRequest = {
+    messages: [
+      {
+        role: "assistant",
+        content: null,
+        reasoningText: "consider",
+        toolCalls: [
+          {
+            callId: "call-1",
+            name: "lookup",
+            argumentsJson: '{ "q": "你好" }',
+          },
+        ],
+      },
+      { role: "tool", callId: "call-1", content: "found" },
+    ],
+    tools: [
+      {
+        name: "lookup",
+        description: "Find data",
+        inputSchema: { type: "object" },
+      },
+    ],
+  };
+  estimatePreparedRequestHeuristic(request, {
+    estimateTokens: (text) => {
+      material.push(text);
+      return text.length;
+    },
+  });
+  expect(material).toHaveLength(1);
+  expect(
+    material[0]?.split("\n").map((line): unknown => JSON.parse(line)),
+  ).toEqual([
+    {
+      role: "assistant",
+      content: null,
+      toolCalls: [
+        { callId: "call-1", name: "lookup", argumentsJson: '{ "q": "你好" }' },
+      ],
+      reasoningText: "consider",
+    },
+    { role: "tool", callId: "call-1", content: "found" },
+    [
+      {
+        name: "lookup",
+        description: "Find data",
+        inputSchema: { type: "object" },
+      },
+    ],
+  ]);
 });
 
 function characterCounter(): Pick<TokenCounter, "estimateTokens"> {
@@ -263,7 +320,7 @@ function matchingRequest(
 }
 
 describe("estimatePreparedRequestHeuristic", () => {
-  it("restores only measurement keys while preserving empty values, raw schema, and argument text", () => {
+  it("preserves canonical keys, empty values, raw schema, and argument text", () => {
     const request = deepFreeze({
       messages: [
         {
@@ -313,14 +370,9 @@ describe("estimatePreparedRequestHeuristic", () => {
         return text.length;
       },
     });
-    expect(material).toBe(
-      [
-        '{"role":"user","content":[{"type":"text","cache_control":{"type":"ephemeral","ttl":"5m"},"text":"","prompt_cache_breakpoint":{"mode":"explicit"}}]}',
-        '{"role":"assistant","content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"read","arguments":"{ \\"cacheControl\\": \\"literal\\" }"}}],"reasoning_content":"","name":"speaker","refusal":null,"audio":null}',
-        '{"role":"tool","tool_call_id":"c","content":[]}',
-        '[{"type":"function","function":{"name":"read","parameters":{"type":"object","properties":{"cacheControl":{"type":"string"}},"required":[]}}}]',
-      ].join("\n"),
-    );
+    expect(
+      material.split("\n").map((line): unknown => JSON.parse(line)),
+    ).toEqual([...request.messages, request.tools]);
     expect(request).toEqual(before);
   });
   it("counts the complete message projection without mutating the request", () => {
@@ -365,7 +417,7 @@ describe("estimatePreparedRequestHeuristic", () => {
       estimatePreparedRequestHeuristic({ messages, tools: [] }, counter),
     ).toBe(messagesOnly);
     expect(estimatePreparedRequestHeuristic({ messages, tools }, counter)).toBe(
-      257,
+      197,
     );
   });
 
@@ -388,7 +440,7 @@ describe("estimatePreparedRequestHeuristic", () => {
     } satisfies PreparedModelRequest;
 
     expect(estimatePreparedRequestHeuristic(request, characterCounter())).toBe(
-      169,
+      145,
     );
   });
 });

@@ -2808,7 +2808,7 @@ describe("ContextManager", () => {
     expect(
       schemaMeasurements.every(([content]) =>
         content.endsWith(
-          '[{"type":"function","function":{"name":"read_file","parameters":{"type":"object"}}}]',
+          '[{"name":"read_file","inputSchema":{"type":"object"}}]',
         ),
       ),
     ).toBe(true);
