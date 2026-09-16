@@ -1,3 +1,10 @@
+import {
+  matchAssembly,
+  fingerprint,
+  argumentsFingerprint,
+  opaqueFingerprints,
+  type AssemblyRecord,
+} from "./agent-loop-assembly.js";
 /** Test-only observation at the production provider and HTTP boundaries. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
@@ -22,12 +29,18 @@ export interface LoopRequest {
   exhausted: boolean;
   scope?: string;
   nativeCount: number;
+  nativeOutputObserved?: boolean;
   finishes: string[];
   outputCharacters: number;
   http: LoopWire[];
   failure?: ReturnType<typeof safeLoopError>;
+  assembly?: ReturnType<typeof matchAssembly>;
 }
 export interface LoopWire {
+  tools: string[];
+  callPayloads: { callId: string; name: string; argumentsHash: string }[];
+  resultPayloads: { callId: string; contentHash: string }[];
+  opaque: string[];
   status?: number;
   roles: string[];
   calls: string[];
@@ -43,6 +56,7 @@ export interface LoopWire {
 export interface LoopAudit {
   mode: LoopMode;
   requests: LoopRequest[];
+  prepared?: AssemblyRecord[];
   events: Record<string, unknown>[];
   results: Pick<
     LifecycleResult,
@@ -71,6 +85,21 @@ const array = (value: unknown): unknown[] =>
 export function summarizeWire(body: unknown): LoopWire {
   const data = object(body);
   const rows = array(data.input ?? data.messages);
+  const callPayloads: LoopWire["callPayloads"] = [];
+  const resultPayloads: LoopWire["resultPayloads"] = [];
+  const call = (id: unknown, name: unknown, args: unknown): void => {
+    callPayloads.push({
+      callId: string(id),
+      name: string(name),
+      argumentsHash: argumentsFingerprint(args),
+    });
+  };
+  const result = (id: unknown, content: unknown): void => {
+    resultPayloads.push({
+      callId: string(id),
+      contentHash: fingerprint(content),
+    });
+  };
   const calls: string[] = [],
     results: string[] = [],
     roles: string[] = [],
@@ -80,20 +109,39 @@ export function summarizeWire(body: unknown): LoopWire {
   for (const raw of rows) {
     const row = object(raw);
     if (typeof row.role === "string") roles.push(row.role);
-    if (row.type === "function_call") calls.push(string(row.call_id));
-    if (row.type === "function_call_output") results.push(string(row.call_id));
+    if (row.type === "function_call") {
+      calls.push(string(row.call_id));
+      call(row.call_id, row.name, row.arguments);
+    }
+    if (row.type === "function_call_output") {
+      results.push(string(row.call_id));
+      result(row.call_id, row.output);
+    }
     if (row.type === "reasoning") nativeTypes.push("reasoning");
-    if (row.role === "tool") results.push(string(row.tool_call_id));
-    for (const call of array(row.tool_calls))
-      calls.push(string(object(call).id));
+    if (row.role === "tool") {
+      results.push(string(row.tool_call_id));
+      result(row.tool_call_id, row.content);
+    }
+    for (const rawCall of array(row.tool_calls)) {
+      const item = object(rawCall);
+      const fn = object(item.function);
+      calls.push(string(item.id));
+      call(item.id, fn.name, fn.arguments);
+    }
     if (typeof row.content === "string" && row.role !== "tool") {
       texts.push(row.content);
       if (row.role === "assistant") assistantTexts.push(row.content);
     }
     for (const partRaw of array(row.content)) {
       const part = object(partRaw);
-      if (part.type === "tool_use") calls.push(string(part.id));
-      if (part.type === "tool_result") results.push(string(part.tool_use_id));
+      if (part.type === "tool_use") {
+        calls.push(string(part.id));
+        call(part.id, part.name, part.input);
+      }
+      if (part.type === "tool_result") {
+        results.push(string(part.tool_use_id));
+        result(part.tool_use_id, part.content);
+      }
       if (["thinking", "redacted_thinking"].includes(string(part.type)))
         nativeTypes.push(string(part.type));
       if (["text", "input_text", "output_text"].includes(string(part.type))) {
@@ -106,6 +154,12 @@ export function summarizeWire(body: unknown): LoopWire {
   const max =
     data.max_output_tokens ?? data.max_tokens ?? data.max_completion_tokens;
   return {
+    tools: array(data.tools).map((tool) =>
+      string(object(tool).name ?? object(object(tool).function).name),
+    ),
+    callPayloads,
+    resultPayloads,
+    opaque: opaqueFingerprints(rows),
     roles,
     calls,
     results,
@@ -128,6 +182,7 @@ export function publicAudit(audit: LoopAudit): unknown {
     mode: audit.mode,
     injected: audit.injected,
     faults: audit.faults,
+    prepared: audit.prepared,
     requests: audit.requests.map((row) => ({
       ...row,
       http: row.http.map(publicWire),
@@ -161,6 +216,14 @@ export function observeClient(
   client.provider.streamResponse = async (request) => {
     const row: LoopRequest = {
       sequence: audit.requests.length + 1,
+      ...(request.purpose === "agent-step"
+        ? {
+            assembly: matchAssembly(audit.prepared ?? [], {
+              ...request,
+              tools: request.tools,
+            }),
+          }
+        : {}),
       purpose: request.purpose,
       scope: request.contextScopeId,
       exhausted: false,
@@ -210,6 +273,7 @@ export function observeClient(
             return;
           }
           const event = next.value;
+          if (event.nativeOutput !== undefined) row.nativeOutputObserved = true;
           if (event.finishReason) row.finishes.push(event.finishReason);
           row.outputCharacters += event.textDelta?.length ?? 0;
           yield event;

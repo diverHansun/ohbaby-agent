@@ -1,3 +1,4 @@
+import { observeAssembly, fingerprint } from "./agent-loop-assembly.js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -10,6 +11,7 @@ import {
   createCompactionNotes,
 } from "./formal-cache-live-context.js";
 import {
+  hash,
   historySelectionEvidence,
   LOOP_NOTICES,
   observeClient,
@@ -25,6 +27,7 @@ const audit = vi.hoisted(
   (): LoopAudit => ({
     mode: (process.env.OHBABY_REAL_AGENT_LOOP_MODE ?? "stage-a") as LoopMode,
     requests: [],
+    prepared: [],
     events: [],
     results: [],
     injected: false,
@@ -46,6 +49,27 @@ vi.mock(
         observeClient(client, audit);
         return client;
       },
+    };
+  },
+);
+
+vi.mock(
+  "../../packages/ohbaby-agent/src/core/context/index.js",
+  async (importOriginal) => {
+    const original =
+      await importOriginal<
+        typeof import("../../packages/ohbaby-agent/src/core/context/index.js")
+      >();
+    return {
+      ...original,
+      createContextManager: (
+        options: Parameters<typeof original.createContextManager>[0],
+      ) =>
+        observeAssembly(
+          original.createContextManager,
+          options,
+          (audit.prepared ??= []),
+        ),
     };
   },
 );
@@ -103,7 +127,7 @@ describe.runIf(enabled)("real production agent loop", () => {
       process.env.OHBABY_REAL_AGENT_LOOP_EVIDENCE_DIR ??
       ".ohbaby/test-evidence/improve-7/live-loop";
     await mkdir(dir, { recursive: true });
-    const path = join(dir, `${profile.id}-${audit.mode}-${Date.now()}`);
+    const path = join(dir, `${profile.id}-${audit.mode}-${String(Date.now())}`);
     const version = {
       commit: execFileSync("git", ["rev-parse", "HEAD"], {
         encoding: "utf8",
@@ -125,11 +149,14 @@ describe.runIf(enabled)("real production agent loop", () => {
       | Omit<ReturnType<typeof savedFailure>, "text">
       | undefined;
     const projectionChecks: unknown[] = [];
+    const persistenceChecks: unknown[] = [];
     let cancelAfterTool = audit.mode === "tool-cancel";
     let toolCancelProof: ReturnType<typeof persistedToolProof>;
     let compactionCarrierIds: string[] = [];
     const compactionChecks: unknown[] = [];
     let restoreRead: (() => Promise<void>) | undefined;
+    // The wrapper below explicitly restores the original receiver with apply(this).
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     const originalRun = Lifecycle.prototype.run;
     const spy = vi
       .spyOn(Lifecycle.prototype, "run")
@@ -138,10 +165,20 @@ describe.runIf(enabled)("real production agent loop", () => {
         ...args: Parameters<Lifecycle["run"]>
       ) {
         const iterator = originalRun.apply(this, args);
+        const acceptedUsage: { inputTokens: number; outputTokens: number }[] =
+          [];
         for (;;) {
           const next = await iterator.next();
           if (next.done) {
             const result = next.value;
+            if (result.usage?.usageComplete) {
+              expect(result.usage.inputTokens).toBe(
+                acceptedUsage.reduce((sum, item) => sum + item.inputTokens, 0),
+              );
+              expect(result.usage.outputTokens).toBe(
+                acceptedUsage.reduce((sum, item) => sum + item.outputTokens, 0),
+              );
+            }
             audit.results.push({
               success: result.success,
               finishReason: result.finishReason,
@@ -150,7 +187,51 @@ describe.runIf(enabled)("real production agent loop", () => {
             });
             return result;
           }
+          if (next.value.type === "llm:complete" && next.value.tokenUsage)
+            acceptedUsage.push(next.value.tokenUsage);
           audit.events.push(observeEvent(next.value));
+          if (next.value.type === "tool:start") {
+            const saved = persistedToolProof(
+              next.value.sessionId,
+              next.value.callId,
+            );
+            expect(saved?.status).toBe("running");
+            expect(saved?.assistantError).toBeNull();
+            expect(["tool_calls", "stop"]).toContain(saved?.acceptedFinish);
+            const modelRequest = audit.requests.findLast(
+              (row) => row.purpose === "agent-step",
+            );
+            if (modelRequest?.nativeOutputObserved)
+              expect(saved?.nativeCount).toBeGreaterThan(0);
+            expect(saved?.inputHash).toBe(fingerprint(next.value.params));
+            persistenceChecks.push({ event: "tool:start", ...saved });
+          }
+          if (next.value.type === "tool:result") {
+            const saved = persistedToolProof(
+              next.value.sessionId,
+              next.value.callId,
+            );
+            expect(saved?.status).toBe(
+              next.value.result.status === "success"
+                ? "completed"
+                : next.value.result.status === "cancelled"
+                  ? "aborted"
+                  : "error",
+            );
+            if (next.value.result.status === "success") {
+              expect(saved?.outputHash).toBe(
+                hash(next.value.result.output ?? ""),
+              );
+            }
+            persistenceChecks.push({
+              event: "tool:result",
+              outputMatchesEvent:
+                next.value.result.status === "success"
+                  ? saved?.outputHash === hash(next.value.result.output ?? "")
+                  : undefined,
+              ...saved,
+            });
+          }
           if (
             next.value.type === "tool:result" &&
             next.value.result.status !== "success" &&
@@ -567,6 +648,24 @@ describe.runIf(enabled)("real production agent loop", () => {
         expect(session.allToolPartIds()).toEqual(toolIds);
       }
       phase = "final-invariants";
+      const agentRequests = audit.requests.filter(
+        (row) => row.purpose === "agent-step",
+      );
+      expect(agentRequests.length).toBeGreaterThan(0);
+      for (const request of agentRequests) {
+        expect(request.assembly?.matchesPrepared).toBe(true);
+        const prepared = audit.prepared?.find(
+          (item) => item.sequence === request.assembly?.preparedSequence,
+        );
+        expect(prepared?.measuredSamePayload).toBe(true);
+        expect(prepared?.frozen).toBe(true);
+        for (const wire of request.http) {
+          expect(wire.tools).toEqual(request.assembly?.shape.tools);
+          expect(wire.callPayloads).toEqual(request.assembly?.shape.calls);
+          expect(wire.resultPayloads).toEqual(request.assembly?.shape.results);
+          expect(wire.opaque).toEqual(request.assembly?.shape.opaque);
+        }
+      }
       expect(
         audit.requests
           .filter((row) => row.purpose === "agent-step")
@@ -644,6 +743,7 @@ describe.runIf(enabled)("real production agent loop", () => {
                   ? { root: session.root, manifestPath: `${path}-resume.json` }
                   : undefined,
               projectionChecks,
+              persistenceChecks,
               compactionChecks,
               toolCancelProof,
               failure,

@@ -1,3 +1,4 @@
+import { fingerprint } from "./agent-loop-assembly.js";
 /** Read-only SQLite evidence. Never serialize the in-memory visible body. */
 import { getDatabase } from "../../packages/ohbaby-agent/src/services/database/index.js";
 import { hash } from "./agent-loop-observer.js";
@@ -98,6 +99,8 @@ export function persistedToolProof(
       status: string;
       acceptedFinish: string | null;
       assistantError: string | null;
+      inputHash: string;
+      nativeCount: number;
       outputHash: string;
       outputCharacters: number;
     }
@@ -110,8 +113,10 @@ export function persistedToolProof(
       acceptedFinish: string | null;
       assistantError: string | null;
       output: string | null;
+      input: string;
+      nativeCount: number;
     }>(
-      `SELECT p.id AS partId, p.message_id AS messageId, json_extract(p.data, '$.state.status') AS status,
+      `SELECT p.id AS partId, p.message_id AS messageId, json_extract(p.data, '$.state.input') AS input, (SELECT COUNT(*) FROM part n WHERE n.message_id=m.id AND n.type='model-state') AS nativeCount, json_extract(p.data, '$.state.status') AS status,
       json_extract(p.data, '$.state.output') AS output, json_extract(m.data, '$.finish') AS acceptedFinish,
       json_extract(m.data, '$.error.name') AS assistantError
      FROM part p JOIN message m ON m.id = p.message_id
@@ -119,10 +124,11 @@ export function persistedToolProof(
     )
     .get(sessionId, callId);
   if (!row) return undefined;
-  const { output, ...safe } = row;
+  const { output, input, ...safe } = row;
   return {
     ...safe,
     callId,
+    inputHash: fingerprint(JSON.parse(input)),
     outputHash: hash(output ?? ""),
     outputCharacters: output?.length ?? 0,
   };
