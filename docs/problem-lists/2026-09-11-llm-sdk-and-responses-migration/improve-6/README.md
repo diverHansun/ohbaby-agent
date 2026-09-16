@@ -28,3 +28,5 @@
 “旧 Chat 退出”指内部旧格式退出，Chat Completions 适配器继续提供协议支持。历史 [`docs/core/context/improve-6`](../../../core/context/improve-6/README.md) 是七类占用 UI 轮次，与本轮不同。
 
 用户于 2026-09-15～16 授权按本轮方案实施，并校准自动压缩使用完整模型窗口的 95%；最新要求见 00 末节。实施结果与失败记录见 [05 实施验收](./05-implementation-acceptance.md)。
+
+再次独立复验与测试断言补强见 [06 独立复验](./06-reacceptance.md)。

@@ -51,6 +51,7 @@ interface ProviderRequestEvidence {
 }
 
 interface PersistedEvidence {
+  completedTools: ControlledReadDecision[];
   runs: { status: RunStatus }[];
   usageParts: { partType: string; usage: TokenUsage }[];
   context: {
@@ -449,6 +450,28 @@ export async function createFormalCacheSession(
         );
         return usage ? [{ partType: part.partType, usage }] : [];
       });
+    // Include retired tools and calls that never needed a permission prompt.
+    // Only hashes and the controlled-path verdict leave this process.
+    const completedTools = db
+      .prepare<{ name: string; input: string }>(
+        `SELECT json_extract(p.data, '$.tool') AS name,
+          json_extract(p.data, '$.state.input') AS input
+         FROM part p JOIN message m ON m.id = p.message_id
+         WHERE p.session_id = ? AND m.context_scope_id IS NULL
+           AND p.type = 'tool' AND json_extract(p.data, '$.state.status') = 'completed'
+         ORDER BY p.id`,
+      )
+      .all(cache.sessionId)
+      .map((tool) =>
+        classifyControlledRead(
+          {
+            name: tool.name,
+            input: JSON.parse(tool.input) as Record<string, unknown>,
+          },
+          workdir,
+          readFilePath,
+        ),
+      );
     const contextEvidence = db
       .prepare<PersistedEvidence["context"]>(
         `SELECT
@@ -473,7 +496,7 @@ export async function createFormalCacheSession(
     const row = {
       label,
       cache,
-      persisted: { runs, usageParts, context: contextEvidence },
+      persisted: { runs, usageParts, context: contextEvidence, completedTools },
       messageCount: session?.messages.length ?? 0,
       answer: {
         sha256: createHash("sha256").update(answer).digest("hex"),

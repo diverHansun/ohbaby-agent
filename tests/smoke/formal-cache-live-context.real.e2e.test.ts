@@ -51,6 +51,9 @@ describe.runIf(enabled)("production-backed context migration", () => {
       expect(first.checkpoint.answer.project).toBe(true);
       expect(first.checkpoint.answer.release).toBe(true);
       expect(first.checkpoint.answer.owner).toBe(true);
+      const completedTools = first.checkpoint.persisted.completedTools;
+      expect(completedTools.length).toBeGreaterThan(0);
+      expect(completedTools.every((tool) => tool.allowed)).toBe(true);
       const expectedToolCalls = session.allToolPartIds();
       expect(expectedToolCalls.ids.length).toBeGreaterThan(0);
       const firstUsage = (
@@ -144,6 +147,9 @@ describe.runIf(enabled)("production-backed context migration", () => {
         "After reopening this session, confirm the Project and Owner fields. Do not use tools.",
       );
       expect(afterReopen.result.prompt.status).toBe("succeeded");
+      expect(afterReopen.checkpoint.persisted.completedTools).toEqual(
+        completedTools,
+      );
       expect(afterReopen.checkpoint.cache.sessionId).toBe(originalSessionId);
       expect(afterReopen.checkpoint.answer.project).toBe(true);
       expect(afterReopen.checkpoint.answer.owner).toBe(true);

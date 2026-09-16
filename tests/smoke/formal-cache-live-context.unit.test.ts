@@ -353,6 +353,18 @@ it.each([
       await session.submit(
         "Restate Cedar release 17 and owner Lin. Do not use tools.",
       );
+      const toolCheckpoint = await session.checkpoint(
+        "controlled-tool-evidence",
+      );
+      expect(toolCheckpoint.persisted.completedTools).toEqual([
+        expect.objectContaining({
+          allowed: true,
+          toolName: "read",
+          inputKeys: ["file_path"],
+        }),
+      ]);
+      // Readonly execution may bypass permission prompts; durable records must still be checked.
+      expect(session.permissionDecisions).toEqual([]);
       const toolsBefore = session.allToolPartIds();
       expect(toolsBefore.ids.length).toBeGreaterThan(0);
       const nativeBefore = session.nativeStateHashes("before-compaction");
