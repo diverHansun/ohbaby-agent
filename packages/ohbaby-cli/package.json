@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-cli",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "CLI frontend package for ohbaby-agent",
   "type": "module",
   "engines": {
