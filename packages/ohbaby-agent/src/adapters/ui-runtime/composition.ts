@@ -1,3 +1,4 @@
+import { activeModelProfiles } from "../../config/llm/model-profile.js";
 import {
   mergeReasoningIntent,
   type ReasoningIntent,
@@ -507,7 +508,7 @@ export async function createUiRuntimeComposition(
       systemPromptProvider,
       tokenCounter: createHeuristicTokenCounter({
         defaultLimit: options.llmClient.config.contextWindowTokens,
-        profiles: options.llmClient.config.modelProfiles,
+        profiles: activeModelProfiles(options.llmClient.config),
         provider: options.llmClient.config.provider,
       }),
     });

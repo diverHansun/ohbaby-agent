@@ -67,7 +67,10 @@ export type {
   UiProbeModelContextWindowInput,
   UiProbeModelContextWindowResult,
 } from "./connect-model.js";
-export { inferConnectModelInterfaceProvider } from "./connect-model.js";
+export {
+  inferConnectModelInterfaceProvider,
+  isConnectModelInterfaceProvider,
+} from "./connect-model.js";
 export {
   WORKSPACE_DIRECTORY_ENCODING_HEADER,
   WORKSPACE_DIRECTORY_ENCODING_PERCENT_UTF8,

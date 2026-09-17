@@ -17,7 +17,8 @@ type ConnectFieldKey =
   | "apiKey"
   | "model"
   | "contextWindowTokens"
-  | "maxOutputTokens";
+  | "maxOutputTokens"
+  | "interfaceProvider";
 
 interface ConnectField {
   readonly key: ConnectFieldKey;
@@ -27,6 +28,7 @@ interface ConnectField {
 }
 
 interface ConnectDraft {
+  readonly interfaceProvider: UiConnectModelInterfaceProvider | "";
   readonly provider: string;
   readonly baseUrl: string;
   readonly apiKeyEnv: string;
@@ -56,9 +58,17 @@ const CONNECT_FIELDS: readonly ConnectField[] = [
   { key: "model", label: "Model name" },
   { key: "contextWindowTokens", label: "Context window", optional: true },
   { key: "maxOutputTokens", label: "Max output tokens", optional: true },
+  { key: "interfaceProvider", label: "Protocol" },
+];
+
+const PROTOCOLS: readonly UiConnectModelInterfaceProvider[] = [
+  "openai-compatible",
+  "openai-responses",
+  "anthropic",
 ];
 
 const EMPTY_DRAFT: ConnectDraft = {
+  interfaceProvider: "",
   apiKey: "",
   apiKeyEnv: "",
   baseUrl: "",
@@ -242,6 +252,20 @@ export function ConnectPanel({
           maybeSave(nextDraft);
           return;
         }
+        if (activeEditingField === "interfaceProvider") {
+          if (key.upArrow || key.downArrow) {
+            const index = PROTOCOLS.indexOf(
+              editValueRef.current as UiConnectModelInterfaceProvider,
+            );
+            const direction = key.downArrow ? 1 : -1;
+            replaceEditValue(
+              PROTOCOLS[
+                (index + direction + PROTOCOLS.length) % PROTOCOLS.length
+              ],
+            );
+          }
+          return;
+        }
         if (key.backspace || key.delete || isBackspaceInput(value)) {
           hasLocalEditRef.current = true;
           replaceEditValue(editValueRef.current.slice(0, -1));
@@ -271,7 +295,12 @@ export function ConnectPanel({
       }
       if (isReturn) {
         replaceEditingField(selectedField.key);
-        replaceEditValue(draftRef.current[selectedField.key]);
+        replaceEditValue(
+          selectedField.key === "interfaceProvider"
+            ? draftRef.current.interfaceProvider ||
+                inferInterfaceProvider(draftRef.current.baseUrl)
+            : draftRef.current[selectedField.key],
+        );
       }
     },
     { isActive: true },
@@ -291,6 +320,16 @@ export function ConnectPanel({
           />
         ))}
       </Box>
+      {editingField === "interfaceProvider" ? (
+        <Box flexDirection="column" marginLeft={2}>
+          {PROTOCOLS.map((protocol) => (
+            <Text key={protocol} bold={protocol === editValue}>
+              {protocol === editValue ? "> " : "  "}
+              {protocol}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
       <Box marginTop={1}>
         <ConnectStatusLine isRunning={isRunning} saveState={saveState} />
       </Box>
@@ -313,7 +352,11 @@ function ConnectFieldRow({
 }): ReactElement {
   const theme = useTheme();
   const isEditing = editingField === field.key;
-  const rawValue = isEditing ? editValue : draft[field.key];
+  const rawValue = isEditing
+    ? editValue
+    : field.key === "interfaceProvider"
+      ? draft.interfaceProvider || inferInterfaceProvider(draft.baseUrl)
+      : draft[field.key];
   const displayValue = field.secret ? maskSecret(rawValue) : rawValue;
   const prefix = isSelected ? "> " : "  ";
   const label = field.label.padEnd(18, " ");
@@ -324,6 +367,9 @@ function ConnectFieldRow({
       <Text bold>{label}</Text>
       {field.optional ? <Text dimColor>optional </Text> : null}
       {displayValue}
+      {isEditing && field.key === "interfaceProvider" ? (
+        <Text dimColor> ↑/↓ choose · Enter commit · Esc cancel</Text>
+      ) : null}
     </Text>
   );
 }
@@ -377,6 +423,7 @@ type PayloadBuildResult =
 
 function draftFromCurrentModel(current: UiCurrentModelConfig): ConnectDraft {
   return {
+    interfaceProvider: current.interfaceProvider,
     apiKey: "",
     apiKeyEnv: current.apiKeyEnv ?? "",
     baseUrl: current.baseUrl,
@@ -396,7 +443,8 @@ function draftFromCurrentModel(current: UiCurrentModelConfig): ConnectDraft {
 function buildPayload(draft: ConnectDraft): PayloadBuildResult {
   const provider = draft.provider.trim();
   const baseUrl = draft.baseUrl.trim();
-  const interfaceProvider = inferInterfaceProvider(baseUrl);
+  const interfaceProvider =
+    draft.interfaceProvider || inferInterfaceProvider(baseUrl);
   const apiKeyEnv = draft.apiKeyEnv.trim();
   const apiKey = draft.apiKey.trim();
   const model = draft.model.trim();
@@ -464,6 +512,9 @@ function updateDraft(
     return {
       ...draft,
       baseUrl: trimmedValue,
+      interfaceProvider:
+        draft.interfaceProvider ||
+        (trimmedValue ? inferInterfaceProvider(trimmedValue) : ""),
     };
   }
   return {

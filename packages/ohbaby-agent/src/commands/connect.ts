@@ -1,3 +1,7 @@
+import {
+  inferConnectModelInterfaceProvider,
+  isConnectModelInterfaceProvider,
+} from "ohbaby-sdk";
 import type {
   UiCommandAction,
   UiCommandError,
@@ -8,6 +12,7 @@ import type { CommandRunContext, CommandServiceOptions } from "./types.js";
 
 type ConnectArgName =
   | "provider"
+  | "interfaceProvider"
   | "baseUrl"
   | "apiKeyEnv"
   | "model"
@@ -16,6 +21,7 @@ type ConnectArgName =
 
 const FLAG_MAP = new Map<string, ConnectArgName>([
   ["--provider", "provider"],
+  ["--interface-provider", "interfaceProvider"],
   ["--base-url", "baseUrl"],
   ["--api-key-env", "apiKeyEnv"],
   ["--model", "model"],
@@ -115,7 +121,19 @@ export function parseConnectArgs(
     };
   }
 
-  const interfaceProvider = inferInterfaceProvider(baseUrl);
+  if (
+    values.interfaceProvider !== undefined &&
+    !isConnectModelInterfaceProvider(values.interfaceProvider)
+  ) {
+    return {
+      code: "INVALID_ARGS",
+      message:
+        "--interface-provider must be openai-compatible, openai-responses, or anthropic",
+      recoverable: true,
+    };
+  }
+  const interfaceProvider =
+    values.interfaceProvider ?? inferConnectModelInterfaceProvider(baseUrl);
 
   const contextWindowTokens = parsePositiveInteger(
     values.contextWindowTokens,
@@ -191,18 +209,6 @@ function parsePositiveInteger(
     };
   }
   return parsed;
-}
-
-function inferInterfaceProvider(
-  baseUrl: string,
-): UiConnectModelInput["interfaceProvider"] {
-  const lower = baseUrl.toLowerCase();
-  return lower.includes("anthropic") ||
-    lower.includes("/api/anthropic") ||
-    lower.endsWith("/anthropic") ||
-    lower.includes("/v1/messages")
-    ? "anthropic"
-    : "openai-compatible";
 }
 
 function isCommandError(value: unknown): value is UiCommandError {

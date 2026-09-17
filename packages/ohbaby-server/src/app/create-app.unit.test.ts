@@ -2771,6 +2771,63 @@ describe("createDaemonServerApp", () => {
     },
   );
 
+  it.each(["/v1/model", "/v1/model/context-window-probe"])(
+    "preserves explicit protocols and rejects invalid choices at %s",
+    async (path) => {
+      const backend = new FakeBackend();
+      const handle = createApp(backend);
+      await handle.start();
+      try {
+        await handle.app.request("/v1/clients", {
+          body: JSON.stringify({ clientId: "client_web" }),
+          headers: { ...authHeaders(), "content-type": "application/json" },
+          method: "POST",
+        });
+        for (const interfaceProvider of [
+          "openai-compatible",
+          "openai-responses",
+          "anthropic",
+          "",
+          null,
+          "invalid",
+        ]) {
+          const response = await handle.app.request(path, {
+            body: JSON.stringify({
+              provider: "test",
+              baseUrl: "https://example.com/v1",
+              model: "test-model",
+              interfaceProvider,
+              contextWindowTokens: 1000,
+            }),
+            headers: {
+              ...authHeaders(),
+              "content-type": "application/json",
+              "x-ohbaby-client-id": "client_web",
+            },
+            method: "POST",
+          });
+          const valid =
+            typeof interfaceProvider === "string" &&
+            interfaceProvider !== "" &&
+            interfaceProvider !== "invalid";
+          expect(response.status).toBe(valid ? 200 : 400);
+          if (valid) {
+            const received =
+              path === "/v1/model"
+                ? backend.connectedModels
+                : backend.probedModels;
+            expect(received.at(-1)?.interfaceProvider).toBe(interfaceProvider);
+          }
+        }
+        expect(
+          backend.connectedModels.length + backend.probedModels.length,
+        ).toBe(3);
+      } finally {
+        await handle.dispose();
+      }
+    },
+  );
+
   it("accepts structured model connect and probe bodies without apiKeyEnv", async () => {
     const backend = new FakeBackend();
     const handle = createApp(backend);

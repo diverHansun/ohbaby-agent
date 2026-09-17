@@ -123,6 +123,8 @@ describe("reasoning configuration", () => {
           {
             provider: "openai",
             model: "gpt-5.2",
+            baseUrl: "https://api.openai.com/v1",
+            interfaceProvider: "openai-compatible",
             contextWindowTokens: 10000,
             reasoningCapabilities: capabilities,
           },
@@ -143,6 +145,8 @@ describe("reasoning configuration", () => {
       {
         provider: "openai",
         model: "gpt-5.2",
+        baseUrl: "https://api.openai.com/v1",
+        interfaceProvider: "openai-compatible",
         contextWindowTokens: 20000,
         reasoningCapabilities: capabilities,
       },

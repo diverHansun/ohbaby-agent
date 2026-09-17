@@ -2519,6 +2519,159 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.textContent).toContain("warning");
   });
 
+  it("infers the initial missing protocol once and preserves it after URL changes", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["connect"]));
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+    await setInputValue(app.container, "Provider", "fixture");
+    await setInputValue(app.container, "Model", "model");
+    await setInputValue(
+      app.container,
+      "Base URL",
+      "https://fixture.test/anthropic",
+    );
+    const input = Array.from(app.container.querySelectorAll("input")).find(
+      (candidate) => candidate.value === "https://fixture.test/anthropic",
+    );
+    if (!input) throw new Error("Base URL input missing");
+    await act(async () => {
+      input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await setInputValue(app.container, "Base URL", "https://fixture.test/v1");
+    await clickButton(app.container, "Save model");
+    expect(fake.connectModel).toHaveBeenCalledWith(
+      expect.objectContaining({ interfaceProvider: "anthropic" }),
+    );
+  });
+
+  it("prefills the saved Responses protocol and preserves it when changing URL and key", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- This client method is a Vitest mock.
+    vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+      provider: "fixture",
+      model: "model",
+      baseUrl: "https://fixture.test/v1",
+      interfaceProvider: "openai-responses",
+    });
+    fake.listCommands.mockResolvedValue(catalog(["connect"]));
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector('select[aria-label="Protocol"]')),
+    );
+    expect(
+      app.container.querySelector<HTMLSelectElement>(
+        'select[aria-label="Protocol"]',
+      )?.value,
+    ).toBe("openai-responses");
+    await setInputValue(
+      app.container,
+      "Base URL",
+      "https://fixture.test/anthropic",
+    );
+    await setInputValue(app.container, "API key env", "FIXTURE_KEY");
+    await clickButton(app.container, "Save model");
+    expect(fake.connectModel).toHaveBeenCalledWith(
+      expect.objectContaining({ interfaceProvider: "openai-responses" }),
+    );
+  });
+
+  it("keeps dirty protocol and fields when current-model initialization resolves late", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const current =
+      deferred<Awaited<ReturnType<UiBackendClient["getCurrentModel"]>>>();
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- This client method is a Vitest mock.
+    vi.mocked(fake.client.getCurrentModel).mockReturnValue(current.promise);
+    fake.listCommands.mockResolvedValue(catalog(["connect"]));
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+    await setInputValue(app.container, "Provider", "draft");
+    await setInputValue(app.container, "Model", "draft-model");
+    await setInputValue(app.container, "Base URL", "https://draft.test/v1");
+    await act(async () => {
+      current.resolve({
+        provider: "saved",
+        model: "saved-model",
+        baseUrl: "https://saved.test/anthropic",
+        interfaceProvider: "anthropic",
+      });
+      await Promise.resolve();
+    });
+    await clickButton(app.container, "Save model");
+    expect(fake.connectModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "draft",
+        model: "draft-model",
+        interfaceProvider: "openai-compatible",
+      }),
+    );
+  });
+
+  it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
+    "preserves selected %s protocol while editing connection fields",
+    async (protocol) => {
+      const fake = createFakeRuntime({
+        snapshot: snapshotWithStatus({ kind: "idle" }),
+      });
+      fake.listCommands.mockResolvedValue(catalog(["connect"]));
+      const app = mountApp(fake.runtime);
+      await setTextareaValue(app.container, "/");
+      await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+      await pressTextareaKey(app.container, "Enter");
+      await waitFor(() =>
+        Boolean(app.container.querySelector(".ohb-structured-overlay")),
+      );
+      const select = app.container.querySelector<HTMLSelectElement>(
+        'select[aria-label="Protocol"]',
+      );
+      if (!select) throw new Error("Protocol select was not rendered");
+      expect(Array.from(select.options).map((option) => option.value)).toEqual([
+        "openai-compatible",
+        "openai-responses",
+        "anthropic",
+      ]);
+      await act(async () => {
+        select.value = protocol;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        await Promise.resolve();
+      });
+      await setInputValue(app.container, "Provider", "fixture");
+      await setInputValue(app.container, "Model", "fixture-model");
+      await setInputValue(
+        app.container,
+        "Base URL",
+        "https://fixture.test/anthropic",
+      );
+      await setInputValue(app.container, "API key env", "FIXTURE_KEY");
+      await setInputValue(app.container, "Context window", "8192");
+      await setInputValue(app.container, "Max output", "1024");
+      await clickButton(app.container, "Save model");
+      expect(fake.connectModel).toHaveBeenCalledWith(
+        expect.objectContaining({ interfaceProvider: protocol }),
+      );
+    },
+  );
+
   it("submits structured connect overlay without API key env", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),

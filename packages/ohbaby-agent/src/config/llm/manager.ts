@@ -1,3 +1,4 @@
+import { inferConnectModelInterfaceProvider } from "ohbaby-sdk";
 /**
  * LLM Configuration Manager.
  * Coordinates loading, validation, caching, and hot-reload.
@@ -191,7 +192,8 @@ class LLMConfigManager {
         ...(apiKeyEnvName === undefined ? {} : { apiKeyEnv: apiKeyEnvName }),
         baseUrl: modelJson.apiConfig.baseUrl,
         interfaceProvider:
-          modelJson.apiConfig.interfaceProvider ?? "openai-compatible",
+          modelJson.apiConfig.interfaceProvider ??
+          inferConnectModelInterfaceProvider(modelJson.apiConfig.baseUrl),
         promptCache: modelJson.apiConfig.promptCache ?? "auto",
         ...(modelJson.llmParams.temperature === undefined
           ? {}

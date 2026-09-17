@@ -47,6 +47,8 @@
 
 > **非 backend-capability 的端点**另在它处定义：`GET /api/health`（存活探针）、`GET /v1/connections`（连接观测）以及 `GET /doc`。`/doc` 是 `create-app.ts` 手写的信息性 OpenAPI 3.1 文档，不是代码生成链。
 
+`POST /v1/model` 与 `POST /v1/model/context-window-probe` 的 JSON body 共用协议字段 `interfaceProvider`，只接受 `openai-compatible`、`openai-responses`、`anthropic`。显式合法值优先于 `baseUrl` 推断；缺字段时保留 URL 推断，OpenAI 形状地址默认 Chat Completions。空字符串、`null` 或其他非法显式值返回 `400`。更新 key、窗口或输出上限时应继续传递原协议。
+
 ### prompt 的异步语义（对齐 SDK）
 
 - `POST /v1/prompts` **不**同步等 run 完成；持久接单后返回 `202 Accepted` + receipt。调用方可只看 SSE，也可携 `promptId` 调 completion route。

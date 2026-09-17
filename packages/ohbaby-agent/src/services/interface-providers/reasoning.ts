@@ -1,3 +1,4 @@
+import { normalizedEndpoint } from "../../config/llm/model-profile.js";
 import {
   ConfigError,
   type InterfaceProviderKind,
@@ -73,9 +74,6 @@ const NON_REASONING: ReasoningCapabilities = {
   supportsDisabled: true,
   temperature: "allowed",
 };
-function normalizedEndpoint(value: string): string {
-  return value.replace(/\/+$/u, "");
-}
 function capabilitiesFor(options: ResolveRequestReasoningOptions): {
   capability: ReasoningCapabilities;
   source: string;
@@ -90,6 +88,16 @@ function capabilitiesFor(options: ResolveRequestReasoningOptions): {
         normalizedEndpoint(profile.baseUrl) ===
           normalizedEndpoint(options.baseUrl)) &&
       profile.reasoningCapabilities !== undefined,
+  );
+  // Prefer more constrained routes; preserve last-entry precedence for ties.
+  matching?.sort(
+    (a, b) =>
+      Number(a.provider !== undefined) +
+      Number(a.interfaceProvider !== undefined) +
+      Number(a.baseUrl !== undefined) -
+      Number(b.provider !== undefined) -
+      Number(b.interfaceProvider !== undefined) -
+      Number(b.baseUrl !== undefined),
   );
   if (matching && matching.length > 0) {
     const capability = matching[matching.length - 1].reasoningCapabilities;

@@ -169,7 +169,7 @@ describe("CommandService", () => {
     expect(JSON.stringify(events)).not.toContain("tvly-secret");
   });
 
-  it("does not accept interface provider in /connect argv mode", async () => {
+  it("passes explicit Responses protocol through /connect argv mode", async () => {
     const connectModel = vi.fn();
     const { events, service } = createServiceHarness({ connectModel });
 
@@ -187,20 +187,19 @@ describe("CommandService", () => {
           "--model",
           "kimi-k2.6",
           "--interface-provider",
-          "anthropic",
+          "openai-responses",
         ],
       ),
     );
 
-    expect(connectModel).not.toHaveBeenCalled();
-    const failed = events.at(-1);
-    expect(failed).toMatchObject({ type: "failed" });
-    const error = failed ? getRecord(failed, "error") : undefined;
-    expect(getString(error ?? {}, "code")).toBe("INVALID_ARGS");
-    expect(getString(error ?? {}, "message")).toContain(
-      "Unknown /connect argument",
-    );
-    expect(JSON.stringify(error)).not.toContain("--interface-provider");
+    expect(connectModel).toHaveBeenCalledWith({
+      provider: "zenmux",
+      baseUrl: "https://zenmux.ai/api/anthropic",
+      apiKeyEnv: "ZENMUX_API_KEY",
+      model: "kimi-k2.6",
+      interfaceProvider: "openai-responses",
+    });
+    expect(events.at(-1)).toMatchObject({ type: "result" });
   });
 
   it("executes /connect with non-sensitive arguments", async () => {

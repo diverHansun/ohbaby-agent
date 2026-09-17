@@ -6,6 +6,7 @@ import {
   filterWebCommandCatalog,
   filterWebPassthroughCommandCatalog,
   inferConnectModelInterfaceProvider,
+  isConnectModelInterfaceProvider,
   supportsWebOverlayCommandInvocation,
   supportsWebPassthroughCommandInvocation,
   supportsWebSkillCommandInvocation,
@@ -439,6 +440,8 @@ function modelConnectInputFromBody(
     provider === undefined ||
     baseUrl === undefined ||
     model === undefined ||
+    (Object.hasOwn(value, "interfaceProvider") &&
+      !isConnectModelInterfaceProvider(value.interfaceProvider)) ||
     (value.contextWindowTokens !== undefined &&
       contextWindowTokens === undefined) ||
     (value.maxOutputTokens !== undefined && maxOutputTokens === undefined)
@@ -448,7 +451,9 @@ function modelConnectInputFromBody(
   return {
     provider,
     baseUrl,
-    interfaceProvider: inferConnectModelInterfaceProvider(baseUrl),
+    interfaceProvider: isConnectModelInterfaceProvider(value.interfaceProvider)
+      ? value.interfaceProvider
+      : inferConnectModelInterfaceProvider(baseUrl),
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     ...(apiKey === undefined ? {} : { apiKey }),
     model,

@@ -1,0 +1,125 @@
+[
+  {
+    "profile": "zenmux-gpt56-luna-chat",
+    "recordedAt": "2026-09-17T02:29:58.832Z",
+    "stage": "A",
+    "entry": "createDaemonServerApp REST -> persistent backend",
+    "seededVerifiedCapabilities": true,
+    "saved": {
+      "saved": true,
+      "protocol": "openai-compatible",
+      "persistedProtocol": "openai-compatible",
+      "contextWindowTokens": 1050000,
+      "contextWindowSource": "detected"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 1050000,
+        "currentTokens": 9803
+      },
+      {
+        "phase": "post-reopen",
+        "tokens": 1050000,
+        "currentTokens": 11510
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      },
+      {
+        "status": "succeeded"
+      }
+    ],
+    "result": "passed",
+    "httpRequests": 5,
+    "generationPaths": ["/api/v1/chat/completions"],
+    "auxiliaryIssues": []
+  },
+  {
+    "profile": "zenmux-gpt56-luna-responses",
+    "recordedAt": "2026-09-17T02:30:23.212Z",
+    "stage": "A",
+    "entry": "createDaemonServerApp REST -> persistent backend",
+    "seededVerifiedCapabilities": true,
+    "saved": {
+      "saved": true,
+      "protocol": "openai-responses",
+      "persistedProtocol": "openai-responses",
+      "contextWindowTokens": 1050000,
+      "contextWindowSource": "detected"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 1050000,
+        "currentTokens": 9129
+      },
+      {
+        "phase": "post-reopen",
+        "tokens": 1050000,
+        "currentTokens": 11645
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      },
+      {
+        "status": "succeeded"
+      }
+    ],
+    "result": "passed",
+    "httpRequests": 6,
+    "generationPaths": ["/api/v1/responses"],
+    "auxiliaryIssues": []
+  },
+  {
+    "profile": "zenmux-claude-sonnet5-anthropic",
+    "recordedAt": "2026-09-17T02:33:16.297Z",
+    "stage": "A",
+    "entry": "createDaemonServerApp REST -> persistent backend",
+    "seededVerifiedCapabilities": true,
+    "saved": {
+      "saved": true,
+      "protocol": "anthropic",
+      "persistedProtocol": "anthropic",
+      "contextWindowTokens": 1000000,
+      "contextWindowSource": "detected"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 1000000,
+        "currentTokens": 13111
+      },
+      {
+        "phase": "post-reopen",
+        "tokens": 1000000,
+        "currentTokens": 11459
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      },
+      {
+        "status": "succeeded"
+      }
+    ],
+    "result": "passed",
+    "httpRequests": 5,
+    "generationPaths": ["/api/anthropic/v1/messages"],
+    "auxiliaryIssues": [
+      {
+        "context": {
+          "purpose": "session-title",
+          "id": 1
+        },
+        "status": null,
+        "captureError": "transport"
+      }
+    ]
+  }
+]

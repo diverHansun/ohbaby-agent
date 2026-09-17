@@ -64,7 +64,7 @@
 | overlay slash 手写 POST | `/connect`、`/connect-search`、`/compact` 即使出现在 `surface=web` palette，也不能经 `POST /v1/commands` 执行 |
 | 命令目录更新 | `command.catalog.updated` 使 web catalog 缓存失效，后续 slash 重新 GET `/v1/commands` |
 | `/connect` probe | `POST /v1/model/context-window-probe` 不写配置、不 reset runtime；detected 优先，失败按用户值或 128k fallback |
-| `/connect` 保存 | `POST /v1/model` 根据 `baseUrl` 推断 interface provider，保存成功后返回不含真实 key 的 current model |
+| `/connect` 保存 | `POST /v1/model` 保留显式三协议选择；缺字段才根据 `baseUrl` 推断，非法显式值返回 400；保存成功后返回不含真实 key 的 current model |
 | `/connect-search` 保存 | `POST /v1/settings/search-api-key` 支持 `.env`/env 解析，成功后不回显 key |
 | `/compact` | 先读 usage，再执行 compact；结果展示 before/after/saved/pruned，失败不丢 overlay 草稿 |
 | 初始 selected directory | 注入 directory 为默认；合法 fragment 可覆盖一次；fragment 不作为 server query fallback |

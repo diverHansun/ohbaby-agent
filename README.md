@@ -71,6 +71,10 @@ fill in your provider, base URL, and model name, then save. API key fields are
 optional for local or keyless endpoints such as LM Studio; secrets entered here
 are persisted to `~/.ohbaby/.env`.
 
+For argument mode, `/connect --provider openai --base-url https://api.openai.com/v1 --model gpt-5 --interface-provider openai-responses` explicitly selects Responses.
+`--interface-provider` accepts `openai-compatible`, `openai-responses`, or `anthropic`;
+omitting it keeps URL inference, with OpenAI URLs defaulting to Chat Completions.
+
 <p align="center">
   <img src="assets/images/connect-providers.png" alt="ohbaby-agent /connect provider setup" width="760">
 </p>

@@ -3,6 +3,7 @@ import type {
   UiCompactSessionResult,
   UiContextWindowUsage,
   UiConnectModelResult,
+  UiConnectModelInterfaceProvider,
   UiCurrentModelConfig,
   UiPermissionLevel,
   UiPermissionMode,
@@ -168,7 +169,7 @@ export interface CurrentModelResponse {
 export interface ModelConnectRequest {
   readonly provider?: string;
   readonly baseUrl: string;
-  readonly interfaceProvider?: "openai-compatible" | "anthropic";
+  readonly interfaceProvider?: UiConnectModelInterfaceProvider;
   readonly apiKeyEnv?: string;
   readonly apiKey?: string;
   readonly model: string;

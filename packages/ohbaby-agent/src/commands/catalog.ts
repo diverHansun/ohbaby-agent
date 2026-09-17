@@ -49,7 +49,7 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     aliases: [],
     acceptsArguments: true,
     argsHint:
-      "[--provider <name>] [--base-url <url>] [--api-key-env <ENV>] [--model <name>] [--context-window <tokens>] [--max-output-tokens <tokens>]",
+      "[--provider <name>] [--base-url <url>] [--interface-provider <openai-compatible|openai-responses|anthropic>] [--api-key-env <ENV>] [--model <name>] [--context-window <tokens>] [--max-output-tokens <tokens>]",
     argumentMode: "argv",
     category: "model",
     description: "Connect to an LLM provider; API key fields are optional",

@@ -1,12 +1,14 @@
 # LLM SDK 升级与 Responses 协议调查
 
-## 当前入口（2026-09-16）
+## 当前入口（2026-09-17）
 
-当前本地集成分支为 `openai-responses-migration@8409a863`，已经包含 improve-1～6 的实施与收尾证据；各阶段具体限制仍以对应 05／06／07 为准。下方早期状态记录中的“待合入”等文字保留其历史时间口径，不代表当前分支状态。
+当前本地集成分支为 `openai-responses-migration@135a6cda`，已经包含 improve-1～7 的实施与收尾证据；各阶段具体限制仍以对应 05／06／07 为准。下方早期状态记录中的“待合入”等文字保留其历史时间口径，不代表当前分支状态。
 
 用户开启的 **[improve-6：Context 计量与压缩链路适配](./improve-6/README.md)** 已完成实施与独立审查，按“部分通过”合入本地 `openai-responses-migration`。内部旧 Chat 估算桥已删除；保留压缩／prune 算法，补足摘要语义并按用户要求将自动摘要统一到完整窗口 95%。真实自动越过 95% 与真实上游 overflow 未实测，尚未推送；结果与限制见 [05 实施验收](./improve-6/05-implementation-acceptance.md)。
 
-用户已开启 **[improve-7：Agent loop 三协议执行语义与历史交接](./improve-7/README.md)**。本轮已完成实施、三协议真实测试与独立审查，本地分批提交，未合并/推送；结果见 [05 实施验收](./improve-7/05-implementation-acceptance.md)。保留 SDK 重试，整理内部工具累积、完成/失败语义与失败历史交接，验证既有 Context 管理规则；压缩算法不变。断流正文的两层处理已获用户确认：过滤原始失败协议消息，允许从已保存可见正文派生带中断说明的普通文本历史，见 [00 §3](./improve-7/00-discussion.md#3-已确认的两层处理)。
+用户已开启 **[improve-7：Agent loop 三协议执行语义与历史交接](./improve-7/README.md)**。本轮已完成实施、三协议真实测试与独立审查，已快进合入本地集成分支，未推送；结果见 [05 实施验收](./improve-7/05-implementation-acceptance.md)。保留 SDK 重试，整理内部工具累积、完成/失败语义与失败历史交接，验证既有 Context 管理规则；压缩算法不变。断流正文的两层处理已获用户确认：过滤原始失败协议消息，允许从已保存可见正文派生带中断说明的普通文本历史，见 [00 §3](./improve-7/00-discussion.md#3-已确认的两层处理)。
+
+用户于 2026-09-17 开启 **[improve-8-regression：连接入口、推理设置与编辑反馈](./improve-8-regression/README.md)**。当前在 `codex/improve-8-regression` 分批实施，包含三协议产品入口、保存后能力识别、轻量 Web/TUI 交互设计与回归验收。Stage A 已完成验证和审查；运行切换和推理作用域已确认，见其 02 §1；能力未知允许正常发送。本轮未关闭先前 packaging 安装超时和真实容量测试缺口。
 
 ## 历史阶段状态
 
@@ -45,17 +47,18 @@
 
 ## 轮次地图
 
-| 轮次          | 开启日期                               | 触发事件                                                             | 状态                                                                                |
-| ------------- | -------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| investigation | 2026-09-11                             | 议题启动调查                                                         | 完成                                                                                |
-| improve-1     | 2026-09-11                             | 第一轮：SDK 升级，主动切割 Responses                                 | 05 已闭环                                                                           |
-| improve-2     | 2026-09-12                             | improve-1 主动切割后的独立实施                                       | 最新preflight与修订后的生产lifecycle T12通过，按用户授权收尾合入集成分支            |
-| improve-3     | 2026-09-13                             | improve-2 §2.8主动切割的内部契约；用户授权提前规划                   | 05 独立验收和完整补验通过，已合入本地集成分支（2026-09-14）                         |
-| improve-4     | 2026-09-14                             | improve-3 主动切出的用量/校准议题，承接其 05 与用户确认的收窄范围    | 已实施；最终 preflight、同一次三协议 live 及独立审查通过，待用户审核；未 merge/push |
-| improve-5     | 2026-09-14 研究；2026-09-15 规划与实施 | improve-4 主动切出的 cache 议题；用户确认开启并替代旧整 Run 筛选规则 | 00–05 已完成；本地实施/基本三协议验收通过，扩展限制见 05                            |
-| improve-5.5   | 2026-09-15                             | improve-5 新模型实网暴露上游协议缺口，用户明确指定返修/能力扩展轮次  | 已实施并收尾，结果及限制见 05／06／07                                               |
-| improve-6     | 2026-09-15                             | improve-5.5 实施后，用户开启前序主动延后的 context 议题              | 部分通过，已合入本地集成分支；未推送                                                |
-| improve-7 | 2026-09-16 | improve-6 后继续对齐 Agent loop；用户确认保留 SDK 与失败历史边界 | 实现与本轮验收完成；本地提交，未合并/推送 |
+| 轮次                 | 开启日期                               | 触发事件                                                              | 状态                                                                                |
+| -------------------- | -------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| investigation        | 2026-09-11                             | 议题启动调查                                                          | 完成                                                                                |
+| improve-1            | 2026-09-11                             | 第一轮：SDK 升级，主动切割 Responses                                  | 05 已闭环                                                                           |
+| improve-2            | 2026-09-12                             | improve-1 主动切割后的独立实施                                        | 最新preflight与修订后的生产lifecycle T12通过，按用户授权收尾合入集成分支            |
+| improve-3            | 2026-09-13                             | improve-2 §2.8主动切割的内部契约；用户授权提前规划                    | 05 独立验收和完整补验通过，已合入本地集成分支（2026-09-14）                         |
+| improve-4            | 2026-09-14                             | improve-3 主动切出的用量/校准议题，承接其 05 与用户确认的收窄范围     | 已实施；最终 preflight、同一次三协议 live 及独立审查通过，待用户审核；未 merge/push |
+| improve-5            | 2026-09-14 研究；2026-09-15 规划与实施 | improve-4 主动切出的 cache 议题；用户确认开启并替代旧整 Run 筛选规则  | 00–05 已完成；本地实施/基本三协议验收通过，扩展限制见 05                            |
+| improve-5.5          | 2026-09-15                             | improve-5 新模型实网暴露上游协议缺口，用户明确指定返修/能力扩展轮次   | 已实施并收尾，结果及限制见 05／06／07                                               |
+| improve-6            | 2026-09-15                             | improve-5.5 实施后，用户开启前序主动延后的 context 议题               | 部分通过，已合入本地集成分支；未推送                                                |
+| improve-7            | 2026-09-16                             | improve-6 后继续对齐 Agent loop；用户确认保留 SDK 与失败历史边界      | 已本地合入 `135a6cda`，未推送                                                       |
+| improve-8-regression | 2026-09-17                             | improve-7 合入后暴露连接入口回归，承接 improve-5.5 延后的产品推理设置 | 实施中；Stage A 通过，后续阶段见 05                                                 |
 
 ## 已冻结的阶段边界
 
@@ -97,7 +100,7 @@ Chat Completions 作为显式兼容入口长期保留；移除它不属于本议
 
 ## 审核入口
 
-最新轮次：[improve-7 README](./improve-7/README.md) → [Agent loop 方案与改动范围](./improve-7/02-optimization-plan-and-change-scope.md) → [验收标准](./improve-7/04-test-and-acceptance.md)。前序 [improve-6](./improve-6/README.md) 已本地合入，其真实容量测试缺口继续保留；improve-7 的 force 压缩测试不能关闭该缺口。
+最新规划：[improve-8-regression README](./improve-8-regression/README.md) → [方案](./improve-8-regression/02-optimization-plan-and-change-scope.md) → [前端设计](./improve-8-regression/03-frontend-design.md) → [验收标准](./improve-8-regression/04-test-and-acceptance.md)。前轮结果见 [improve-7 验收](./improve-7/05-implementation-acceptance.md)。前序 [improve-6](./improve-6/README.md) 已本地合入，其真实容量测试缺口继续保留；improve-7 的 force 压缩测试不能关闭该缺口。
 
 历史 Improve 5 审核入口：[README](./improve-5/README.md) → [已确认决策](./improve-5/00-discussion.md) → [现状](./improve-5/01-problem-analysis-and-current-state.md) → [方案](./improve-5/02-optimization-plan-and-change-scope.md) → [七个参考项目](./improve-5/03-reference-projects.md) → [验收标准](./improve-5/04-test-and-acceptance.md)。实际结果见 [05 实施验收](./improve-5/05-implementation-acceptance.md)。Improve 5 新规则只替代旧缓存统计的纳入门槛，不追溯改写 improve-4 的验收结论。
 

@@ -290,6 +290,7 @@ describe("setActiveLLMConfig", () => {
       contextWindowTokens: 200_000,
     });
     expect(modelJson.models).toEqual([
+      existingModelJson.models[0],
       {
         provider: "openai",
         model: "gpt-4o",
@@ -298,6 +299,8 @@ describe("setActiveLLMConfig", () => {
       {
         provider: "zenmux",
         model: "anthropic/claude-sonnet-4.6",
+        baseUrl: "https://zenmux.ai/api/anthropic",
+        interfaceProvider: "anthropic",
         contextWindowTokens: 200_000,
         maxOutputTokens: 8192,
       },
@@ -355,6 +358,7 @@ describe("setActiveLLMConfig", () => {
       maxTokens: 32_768,
     });
     expect(modelJson.models).toEqual([
+      existingModelJson.models[0],
       {
         provider: "openai",
         model: "gpt-4o",

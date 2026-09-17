@@ -41,6 +41,7 @@ import type {
   UiCompactSessionResult,
   UiContextWindowUsage,
   UiConnectModelResult,
+  UiConnectModelInterfaceProvider,
   UiCurrentModelConfig,
   UiMessage,
   UiMessagePart,
@@ -3271,6 +3272,7 @@ function GoalOverlayBody(props: {
 }
 
 interface ConnectModelFormState {
+  readonly interfaceProvider?: UiConnectModelInterfaceProvider;
   readonly apiKey: string;
   readonly apiKeyEnv: string;
   readonly baseUrl: string;
@@ -3292,6 +3294,7 @@ function ConnectModelOverlayBody(props: {
     model: "",
     provider: "",
   });
+  const hasLocalEditRef = useRef(false);
   const [currentModel, setCurrentModel] = useState<UiCurrentModelConfig | null>(
     null,
   );
@@ -3313,8 +3316,9 @@ function ConnectModelOverlayBody(props: {
           return;
         }
         setCurrentModel(model);
-        if (model) {
+        if (model && !hasLocalEditRef.current) {
           setForm({
+            interfaceProvider: model.interfaceProvider,
             apiKey: "",
             apiKeyEnv: model.apiKeyEnv ?? "",
             baseUrl: model.baseUrl,
@@ -3346,6 +3350,7 @@ function ConnectModelOverlayBody(props: {
 
   const update = useCallback(
     (key: keyof ConnectModelFormState, value: string) => {
+      hasLocalEditRef.current = true;
       setForm((previous) => ({ ...previous, [key]: value }));
     },
     [],
@@ -3375,7 +3380,12 @@ function ConnectModelOverlayBody(props: {
           connectModelRequest(form),
         );
         setResult(nextResult);
-        setForm((previous) => ({ ...previous, apiKey: "" }));
+        setForm((previous) => ({
+          ...previous,
+          apiKey: "",
+          interfaceProvider:
+            previous.interfaceProvider ?? nextResult.interfaceProvider,
+        }));
         return `saved ${nextResult.provider} · ${nextResult.model}`;
       },
       "Saving model",
@@ -3411,9 +3421,44 @@ function ConnectModelOverlayBody(props: {
           onChange={(value) => {
             update("baseUrl", value);
           }}
+          onBlur={() => {
+            setForm((previous) =>
+              previous.interfaceProvider !== undefined ||
+              !previous.baseUrl.trim()
+                ? previous
+                : {
+                    ...previous,
+                    interfaceProvider: inferConnectModelInterfaceProvider(
+                      previous.baseUrl,
+                    ),
+                  },
+            );
+          }}
           placeholder="Enter provider API base URL"
           value={form.baseUrl}
         />
+        <label className="ohb-structured-field">
+          <span>Protocol</span>
+          <select
+            aria-label="Protocol"
+            value={
+              form.interfaceProvider ??
+              inferConnectModelInterfaceProvider(form.baseUrl)
+            }
+            onChange={(event) => {
+              hasLocalEditRef.current = true;
+              setForm((previous) => ({
+                ...previous,
+                interfaceProvider: event.target
+                  .value as UiConnectModelInterfaceProvider,
+              }));
+            }}
+          >
+            <option value="openai-compatible">OpenAI Chat Completions</option>
+            <option value="openai-responses">OpenAI Responses</option>
+            <option value="anthropic">Anthropic Messages</option>
+          </select>
+        </label>
         <TextField
           label="API key env"
           onChange={(value) => {
@@ -3705,6 +3750,7 @@ function clampIndex(index: number, maxIndex: number): number {
 function TextField(props: {
   readonly label: string;
   readonly onChange: (value: string) => void;
+  readonly onBlur?: () => void;
   readonly placeholder?: string;
   readonly type?: "password" | "text";
   readonly value: string;
@@ -3713,6 +3759,7 @@ function TextField(props: {
     <label className="ohb-structured-field">
       <span>{props.label}</span>
       <input
+        onBlur={props.onBlur}
         onChange={(event) => {
           props.onChange(event.target.value);
         }}
@@ -3795,7 +3842,8 @@ function connectModelRequest(
   return {
     provider,
     baseUrl,
-    interfaceProvider: inferConnectModelInterfaceProvider(baseUrl),
+    interfaceProvider:
+      form.interfaceProvider ?? inferConnectModelInterfaceProvider(baseUrl),
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     model,
     ...(apiKey === undefined ? {} : { apiKey }),

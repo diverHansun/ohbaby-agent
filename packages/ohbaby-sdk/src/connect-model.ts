@@ -1,7 +1,18 @@
-export type UiConnectModelInterfaceProvider = "openai-compatible" | "anthropic";
-export type UiCurrentModelInterfaceProvider =
-  | UiConnectModelInterfaceProvider
-  | "openai-responses";
+export type UiConnectModelInterfaceProvider =
+  | "openai-compatible"
+  | "openai-responses"
+  | "anthropic";
+export type UiCurrentModelInterfaceProvider = UiConnectModelInterfaceProvider;
+
+export function isConnectModelInterfaceProvider(
+  value: unknown,
+): value is UiConnectModelInterfaceProvider {
+  return (
+    value === "openai-compatible" ||
+    value === "openai-responses" ||
+    value === "anthropic"
+  );
+}
 
 export interface UiConnectModelInput {
   readonly provider: string;

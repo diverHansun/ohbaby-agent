@@ -1,0 +1,138 @@
+{
+  "createdAt": "2026-09-16T16:41:14.158Z",
+  "requests": 2,
+  "generationRequests": 0,
+  "results": [
+    {
+      "url": "https://zenmux.ai/api/v1/models",
+      "status": 200,
+      "topLevelKeys": ["data", "object"],
+      "models": [
+        {
+          "id": "deepseek/deepseek-v4.1-flash",
+          "keys": [
+            "id",
+            "object",
+            "display_name",
+            "created",
+            "owned_by",
+            "input_modalities",
+            "output_modalities",
+            "capabilities",
+            "context_length",
+            "pricings",
+            "publish_time"
+          ],
+          "capabilities": {
+            "reasoning": true
+          },
+          "context_length": 1000000
+        },
+        {
+          "id": "openai/gpt-5.6-luna",
+          "keys": [
+            "id",
+            "object",
+            "display_name",
+            "created",
+            "owned_by",
+            "input_modalities",
+            "output_modalities",
+            "capabilities",
+            "context_length",
+            "pricings",
+            "publish_time"
+          ],
+          "capabilities": {
+            "reasoning": true
+          },
+          "context_length": 1050000
+        },
+        {
+          "id": "anthropic/claude-sonnet-5",
+          "keys": [
+            "id",
+            "object",
+            "display_name",
+            "created",
+            "owned_by",
+            "input_modalities",
+            "output_modalities",
+            "capabilities",
+            "context_length",
+            "pricings",
+            "publish_time"
+          ],
+          "capabilities": {
+            "reasoning": true
+          },
+          "context_length": 1000000
+        }
+      ]
+    },
+    {
+      "url": "https://zenmux.ai/api/anthropic/v1/models",
+      "status": 200,
+      "topLevelKeys": ["data", "has_more"],
+      "models": [
+        {
+          "id": "deepseek/deepseek-v4.1-flash",
+          "keys": [
+            "id",
+            "created_at",
+            "display_name",
+            "type",
+            "input_modalities",
+            "output_modalities",
+            "capabilities",
+            "context_length",
+            "pricings",
+            "publish_time"
+          ],
+          "capabilities": {
+            "reasoning": true
+          },
+          "context_length": 1000000
+        },
+        {
+          "id": "openai/gpt-5.6-luna",
+          "keys": [
+            "id",
+            "created_at",
+            "display_name",
+            "type",
+            "input_modalities",
+            "output_modalities",
+            "capabilities",
+            "context_length",
+            "pricings",
+            "publish_time"
+          ],
+          "capabilities": {
+            "reasoning": true
+          },
+          "context_length": 1050000
+        },
+        {
+          "id": "anthropic/claude-sonnet-5",
+          "keys": [
+            "id",
+            "created_at",
+            "display_name",
+            "type",
+            "input_modalities",
+            "output_modalities",
+            "capabilities",
+            "context_length",
+            "pricings",
+            "publish_time"
+          ],
+          "capabilities": {
+            "reasoning": true
+          },
+          "context_length": 1000000
+        }
+      ]
+    }
+  ]
+}

@@ -13,6 +13,8 @@ import { writeEnvSecret } from "../secrets/env-secrets.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
 import { defaultApiKeyEnvForProvider, nonEmptyApiKey } from "./api-key.js";
 
+import { modelProfileRouteKey } from "./model-profile.js";
+
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_INTERFACE_PROVIDER: InterfaceProviderKind = "openai-compatible";
 
@@ -113,24 +115,20 @@ function buildLLMParams(
   };
 }
 
-function modelProfileKey(input: {
-  readonly provider?: string;
-  readonly model: string;
-}): string {
-  return `${input.provider ?? ""}\u0000${input.model}`.toLowerCase();
-}
-
 function buildModelProfiles(
   input: SetActiveLLMConfigInput,
   existing: ModelJsonConfig | undefined,
 ): ModelJsonConfig["models"] {
   const existingModels = existing?.models;
+  const activeRoute = {
+    ...input,
+    interfaceProvider: input.interfaceProvider ?? DEFAULT_INTERFACE_PROVIDER,
+  };
+  const key = (profile: Parameters<typeof modelProfileRouteKey>[0]): string =>
+    modelProfileRouteKey(profile, existing?.provider ?? input.provider);
   const retained =
-    existingModels?.filter(
-      (profile) =>
-        modelProfileKey(profile) !==
-        modelProfileKey({ provider: input.provider, model: input.model }),
-    ) ?? [];
+    existingModels?.filter((profile) => key(profile) !== key(activeRoute)) ??
+    [];
   if (input.clearActiveModelProfile || input.clearContextWindowTokens) {
     return retained.length === 0 ? undefined : retained;
   }
@@ -142,21 +140,22 @@ function buildModelProfiles(
   }
 
   const activeProfile = {
-    ...existingModels?.find(
-      (profile) => modelProfileKey(profile) === modelProfileKey(input),
-    ),
+    ...existingModels
+      ?.slice()
+      .reverse()
+      .find((profile) => key(profile) === key(activeRoute)),
     provider: input.provider,
     model: input.model,
+    baseUrl: input.baseUrl,
+    interfaceProvider: activeRoute.interfaceProvider,
     contextWindowTokens: input.contextWindowTokens,
     ...(input.maxOutputTokens === undefined
       ? {}
       : { maxOutputTokens: input.maxOutputTokens }),
   };
-  const activeKey = modelProfileKey(activeProfile);
+  const activeKey = key(activeProfile);
   const retainedForActive =
-    existingModels?.filter(
-      (profile) => modelProfileKey(profile) !== activeKey,
-    ) ?? [];
+    existingModels?.filter((profile) => key(profile) !== activeKey) ?? [];
   return [...retainedForActive, activeProfile];
 }
 
