@@ -19,6 +19,12 @@ interface CommandResult {
   readonly stdout: string;
 }
 
+interface RegistryDiagnostic {
+  readonly path: string;
+  readonly status: number | "aborted" | "error" | "pending";
+  readonly durationMs: number;
+}
+
 interface NpmPackEntry {
   readonly filename: string;
   readonly files?: readonly { readonly path: string }[];
@@ -115,7 +121,7 @@ async function runCommand(input: {
         new Error(
           `${input.command} ${input.args.join(" ")} timed out after ${String(
             input.timeoutMs,
-          )}ms`,
+          )}ms\nstdout:\n${stdout}\nstderr:\n${stderr}`,
         ),
       );
     }, input.timeoutMs ?? 30_000);
@@ -265,7 +271,11 @@ function createPackageManifest(input: {
 
 async function startLocalNpmRegistry(
   packages: readonly PackedWorkspacePackage[],
-): Promise<{ readonly close: () => Promise<void>; readonly url: string }> {
+): Promise<{
+  readonly close: () => Promise<void>;
+  readonly diagnostics: () => readonly RegistryDiagnostic[];
+  readonly url: string;
+}> {
   const packageMap = new Map<string, LocalRegistryPackage>();
   for (const packedPackage of packages) {
     packageMap.set(packedPackage.packageJson.name, {
@@ -275,8 +285,17 @@ async function startLocalNpmRegistry(
     });
   }
 
+  const activeRequests = new Set<AbortController>();
+  const pendingRequests = new Map<
+    AbortController,
+    { readonly path: string; readonly startedAt: number }
+  >();
+  const completedRequests: RegistryDiagnostic[] = [];
   const server = createServer((request, response) => {
     void handleRegistryRequest({
+      activeRequests,
+      completedRequests,
+      pendingRequests,
       packageMap,
       request,
       response,
@@ -295,8 +314,9 @@ async function startLocalNpmRegistry(
   const address = server.address() as AddressInfo;
   const url = `http://127.0.0.1:${String(address.port)}/`;
   return {
-    close: () =>
-      new Promise<void>((resolveClose, reject) => {
+    close: async () => {
+      for (const controller of activeRequests) controller.abort();
+      await new Promise<void>((resolveClose, reject) => {
         server.close((error) => {
           if (error) {
             reject(error);
@@ -304,12 +324,28 @@ async function startLocalNpmRegistry(
           }
           resolveClose();
         });
-      }),
+        setTimeout(() => server.closeAllConnections(), 5_000).unref();
+      });
+    },
+    diagnostics: () => [
+      ...completedRequests,
+      ...[...pendingRequests.values()].map(({ path, startedAt }) => ({
+        durationMs: Date.now() - startedAt,
+        path,
+        status: "pending" as const,
+      })),
+    ],
     url,
   };
 }
 
 async function handleRegistryRequest(input: {
+  readonly activeRequests: Set<AbortController>;
+  readonly completedRequests: RegistryDiagnostic[];
+  readonly pendingRequests: Map<
+    AbortController,
+    { readonly path: string; readonly startedAt: number }
+  >;
   readonly packageMap: ReadonlyMap<string, LocalRegistryPackage>;
   readonly request: IncomingMessage;
   readonly response: ServerResponse;
@@ -370,11 +406,13 @@ async function handleRegistryRequest(input: {
       }
     }
 
-    await proxyRegistryRequest(input.request, input.response);
+    await proxyRegistryRequest(input);
   } catch (error) {
-    sendJson(input.response, 500, {
-      error: error instanceof Error ? error.message : String(error),
-    });
+    if (!input.response.destroyed && !input.response.headersSent) {
+      sendJson(input.response, 502, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }
 
@@ -413,27 +451,66 @@ function streamFile(response: ServerResponse, path: string): void {
   createReadStream(path).pipe(response);
 }
 
-async function proxyRegistryRequest(
-  request: IncomingMessage,
-  response: ServerResponse,
-): Promise<void> {
-  if (request.method !== "GET") {
-    sendJson(response, 405, { error: "method not allowed" });
+async function proxyRegistryRequest(input: {
+  readonly activeRequests: Set<AbortController>;
+  readonly completedRequests: RegistryDiagnostic[];
+  readonly pendingRequests: Map<
+    AbortController,
+    { readonly path: string; readonly startedAt: number }
+  >;
+  readonly request: IncomingMessage;
+  readonly response: ServerResponse;
+}): Promise<void> {
+  if (input.request.method !== "GET") {
+    sendJson(input.response, 405, { error: "method not allowed" });
     return;
   }
 
-  const upstream = await fetch(
-    new URL(request.url ?? "/", "https://registry.npmjs.org/"),
-    {
-      headers: request.headers.accept
-        ? { accept: String(request.headers.accept) }
-        : undefined,
-    },
+  const upstreamUrl = new URL(
+    input.request.url ?? "/",
+    "https://registry.npmjs.org/",
   );
-  response.writeHead(upstream.status, {
-    "content-type": upstream.headers.get("content-type") ?? "application/json",
-  });
-  response.end(Buffer.from(await upstream.arrayBuffer()));
+  const path = upstreamUrl.pathname;
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  let status: RegistryDiagnostic["status"] = "error";
+  input.activeRequests.add(controller);
+  input.pendingRequests.set(controller, { path, startedAt });
+  const timeout = setTimeout(() => controller.abort(), 120_000);
+  const onClose = (): void => controller.abort();
+  input.response.once("close", onClose);
+  try {
+    const upstream = await fetch(upstreamUrl, {
+      headers: input.request.headers.accept
+        ? { accept: String(input.request.headers.accept) }
+        : undefined,
+      signal: controller.signal,
+    });
+    const body = Buffer.from(await upstream.arrayBuffer());
+    if (!input.response.destroyed) {
+      input.response.writeHead(upstream.status, {
+        "content-type":
+          upstream.headers.get("content-type") ?? "application/json",
+      });
+      input.response.end(body);
+    }
+    status = upstream.status;
+  } catch (error) {
+    status = controller.signal.aborted ? "aborted" : "error";
+    throw new Error(
+      `registry upstream ${path}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    clearTimeout(timeout);
+    input.response.off("close", onClose);
+    input.activeRequests.delete(controller);
+    input.pendingRequests.delete(controller);
+    input.completedRequests.push({
+      durationMs: Date.now() - startedAt,
+      path,
+      status,
+    });
+  }
 }
 
 async function packWorkspacePackage(input: {
@@ -549,161 +626,198 @@ function expectCliPackIncludesWebAssets(entry: NpmPackEntry): void {
 describe("npm packed CLI smoke", () => {
   it("installs the packed ohbaby-cli tarball globally and exposes ohbaby help and version", async () => {
     const tempRoot = await tempDirectory("ohbaby-packaging-smoke-");
-    const packDestination = join(tempRoot, "pack");
-    const npmCache = join(tempRoot, "npm-cache");
-    const npmTmp = join(tempRoot, "npm-tmp");
-    const prefix = join(tempRoot, "prefix");
-    const npm = npmCommand();
-    await mkdir(packDestination, { recursive: true });
-    await mkdir(npmCache, { recursive: true });
-    await mkdir(npmTmp, { recursive: true });
-
-    const buildResult = await runCommand({
-      command: pnpmCommand(),
-      args: [
-        "-r",
-        "--filter",
-        "ohbaby-sdk",
-        "--filter",
-        "ohbaby-cli",
-        "--filter",
-        "ohbaby-agent",
-        "--filter",
-        "ohbaby-server",
-        "--sort",
-        "build",
-      ],
-      timeoutMs: 180_000,
-    });
-    expectSuccess(buildResult, "pnpm package build");
-
-    const sdkPack = await packWorkspacePackage({
-      packDestination,
-      packageDirectory: join(repoRoot, "packages", "ohbaby-sdk"),
-    });
-    const agentPack = await packWorkspacePackage({
-      packDestination,
-      packageDirectory: join(repoRoot, "packages", "ohbaby-agent"),
-    });
-    const serverPack = await packWorkspacePackage({
-      packDestination,
-      packageDirectory: join(repoRoot, "packages", "ohbaby-server"),
-    });
-    const cliPack = await packWorkspacePackage({
-      packDestination,
-      packageDirectory: join(repoRoot, "packages", "ohbaby-cli"),
-    });
-    expectCliPackIncludesWebAssets(cliPack.entry);
-    const cliPackageJson = cliPack.packageJson;
-
-    const registry = await startLocalNpmRegistry([
-      sdkPack,
-      agentPack,
-      serverPack,
-      cliPack,
-    ]);
-
     try {
-      const installResult = await runCommand({
-        command: npm,
-        args: [
-          "install",
-          "-g",
-          "--prefix",
-          prefix,
-          "--registry",
-          registry.url,
-          "--no-audit",
-          "--no-fund",
-          "--ignore-scripts",
-          "--loglevel=error",
-          `${cliPackageJson.name}@${cliPackageJson.version}`,
-        ],
-        env: {
-          ...process.env,
-          npm_config_cache: npmCache,
-          npm_config_tmp: npmTmp,
+      await runPackedCliSmoke(tempRoot);
+    } catch (error) {
+      const index = cleanupDirectories.indexOf(tempRoot);
+      if (index !== -1) cleanupDirectories.splice(index, 1);
+      throw new Error(
+        `Packed CLI smoke failed; diagnostic files retained at ${tempRoot}`,
+        {
+          cause: error,
         },
-        timeoutMs: 180_000,
-      });
-      expectSuccess(installResult, "npm install global packed ohbaby-cli");
-    } finally {
-      await registry.close();
+      );
     }
-
-    const installedCliPackage = installedGlobalPackagePath(
-      prefix,
-      "ohbaby-cli",
-    );
-    await expect(
-      readFile(join(installedCliPackage, "dist", "web", "index.html"), "utf8"),
-    ).resolves.toContain("<!doctype html>");
-    const packageJson = JSON.parse(
-      await readFile(
-        join(repoRoot, "packages", "ohbaby-cli", "package.json"),
-        "utf8",
-      ),
-    ) as {
-      readonly dependencies: Readonly<Record<string, string>>;
-      readonly version: string;
-    };
-    for (const dependencyName of pinnedRuntimeDependencies) {
-      const declaredVersion = packageJson.dependencies[dependencyName];
-      expect(declaredVersion).toMatch(/^\d+\.\d+\.\d+$/u);
-      await expect(
-        readInstalledDependencyVersion(installedCliPackage, dependencyName),
-      ).resolves.toBe(declaredVersion);
-    }
-
-    const cliImportSmokePath = join(
-      installedCliPackage,
-      "import-ohbaby-packages.mjs",
-    );
-    await writeFile(
-      cliImportSmokePath,
-      [
-        'const mod = await import("ohbaby-cli");',
-        'const agent = await import("ohbaby-agent");',
-        'const server = await import("ohbaby-server");',
-        'if (typeof mod.renderTerminalUi !== "function") throw new Error("missing renderTerminalUi export");',
-        'if (typeof mod.OhbabyTerminalApp !== "function") throw new Error("missing OhbabyTerminalApp export");',
-        'if (typeof agent.buildCoreAPIImpl !== "function") throw new Error("missing buildCoreAPIImpl export");',
-        'if (typeof server.createRemoteCoreApiHost !== "function") throw new Error("missing createRemoteCoreApiHost export");',
-        'if (typeof server.startDaemonServer !== "function") throw new Error("missing startDaemonServer export");',
-        'if (typeof mod.TerminalUiOptions !== "undefined") throw new Error("TerminalUiOptions should be type-only");',
-      ].join("\n"),
-      "utf8",
-    );
-
-    const cliImportResult = await runCommand({
-      command: nodeCommand(),
-      args: [cliImportSmokePath],
-      cwd: installedCliPackage,
-      timeoutMs: 30_000,
-    });
-    expectSuccess(cliImportResult, "import installed ohbaby packages");
-    expect(cliImportResult.stdout).toBe("");
-    expect(cliImportResult.stderr).toBe("");
-
-    const ohbaby = installedOhbabyPath(prefix);
-    const helpResult = await runCommand({
-      command: ohbaby,
-      args: ["--help"],
-      timeoutMs: 30_000,
-    });
-    expectSuccess(helpResult, "ohbaby --help");
-    expect(helpResult.stdout).toContain("ohbaby run [prompt..]");
-    expect(helpResult.stdout).toContain("ohbaby serve");
-    expect(helpResult.stdout).not.toContain("-p, --prompt");
-    expect(helpResult.stderr).toBe("");
-
-    const versionResult = await runCommand({
-      command: ohbaby,
-      args: ["--version"],
-      timeoutMs: 30_000,
-    });
-    expectSuccess(versionResult, "ohbaby --version");
-    expect(versionResult.stdout).toBe(`${packageJson.version}\n`);
-    expect(versionResult.stderr).toBe("");
   }, 240_000);
 });
+
+async function runPackedCliSmoke(tempRoot: string): Promise<void> {
+  const packDestination = join(tempRoot, "pack");
+  const npmCache = join(tempRoot, "npm-cache");
+  const npmTmp = join(tempRoot, "npm-tmp");
+  const prefix = join(tempRoot, "prefix");
+  const npm = npmCommand();
+  const ohbabyHome = join(tempRoot, "ohbaby-home");
+  const xdgDataHome = join(tempRoot, "xdg-data");
+  const cliCwd = join(tempRoot, "cli-cwd");
+  const isolatedEnv = {
+    ...process.env,
+    OHBABY_HOME: ohbabyHome,
+    XDG_DATA_HOME: xdgDataHome,
+  };
+  await mkdir(packDestination, { recursive: true });
+  await mkdir(npmCache, { recursive: true });
+  await mkdir(npmTmp, { recursive: true });
+  await mkdir(ohbabyHome, { recursive: true });
+  await mkdir(xdgDataHome, { recursive: true });
+  await mkdir(cliCwd, { recursive: true });
+  await writeFile(join(ohbabyHome, ".skip-auto-migrate"), "", "utf8");
+
+  const buildResult = await runCommand({
+    command: pnpmCommand(),
+    args: [
+      "-r",
+      "--filter",
+      "ohbaby-sdk",
+      "--filter",
+      "ohbaby-cli",
+      "--filter",
+      "ohbaby-agent",
+      "--filter",
+      "ohbaby-server",
+      "--sort",
+      "build",
+    ],
+    timeoutMs: 180_000,
+  });
+  expectSuccess(buildResult, "pnpm package build");
+
+  const sdkPack = await packWorkspacePackage({
+    packDestination,
+    packageDirectory: join(repoRoot, "packages", "ohbaby-sdk"),
+  });
+  const agentPack = await packWorkspacePackage({
+    packDestination,
+    packageDirectory: join(repoRoot, "packages", "ohbaby-agent"),
+  });
+  const serverPack = await packWorkspacePackage({
+    packDestination,
+    packageDirectory: join(repoRoot, "packages", "ohbaby-server"),
+  });
+  const cliPack = await packWorkspacePackage({
+    packDestination,
+    packageDirectory: join(repoRoot, "packages", "ohbaby-cli"),
+  });
+  expectCliPackIncludesWebAssets(cliPack.entry);
+  const cliPackageJson = cliPack.packageJson;
+
+  const registry = await startLocalNpmRegistry([
+    sdkPack,
+    agentPack,
+    serverPack,
+    cliPack,
+  ]);
+
+  try {
+    const installResult = await runCommand({
+      command: npm,
+      args: [
+        "install",
+        "-g",
+        "--prefix",
+        prefix,
+        "--registry",
+        registry.url,
+        "--no-audit",
+        "--no-fund",
+        "--ignore-scripts",
+        "--loglevel=error",
+        `${cliPackageJson.name}@${cliPackageJson.version}`,
+      ],
+      env: {
+        ...isolatedEnv,
+        npm_config_cache: npmCache,
+        npm_config_tmp: npmTmp,
+      },
+      cwd: cliCwd,
+      timeoutMs: 180_000,
+    });
+    expectSuccess(installResult, "npm install global packed ohbaby-cli");
+  } catch (error) {
+    await writeFile(
+      join(tempRoot, "registry-diagnostics.json"),
+      JSON.stringify(registry.diagnostics(), null, 2),
+      "utf8",
+    );
+    throw error;
+  } finally {
+    await registry.close();
+  }
+
+  const installedCliPackage = installedGlobalPackagePath(prefix, "ohbaby-cli");
+  await expect(
+    readFile(join(installedCliPackage, "dist", "web", "index.html"), "utf8"),
+  ).resolves.toContain("<!doctype html>");
+  const packageJson = JSON.parse(
+    await readFile(
+      join(repoRoot, "packages", "ohbaby-cli", "package.json"),
+      "utf8",
+    ),
+  ) as {
+    readonly dependencies: Readonly<Record<string, string>>;
+    readonly version: string;
+  };
+  for (const dependencyName of pinnedRuntimeDependencies) {
+    const declaredVersion = packageJson.dependencies[dependencyName];
+    expect(declaredVersion).toMatch(/^\d+\.\d+\.\d+$/u);
+    await expect(
+      readInstalledDependencyVersion(installedCliPackage, dependencyName),
+    ).resolves.toBe(declaredVersion);
+  }
+
+  const cliImportSmokePath = join(
+    installedCliPackage,
+    "import-ohbaby-packages.mjs",
+  );
+  await writeFile(
+    cliImportSmokePath,
+    [
+      'const mod = await import("ohbaby-cli");',
+      'const agent = await import("ohbaby-agent");',
+      'const server = await import("ohbaby-server");',
+      'if (typeof mod.renderTerminalUi !== "function") throw new Error("missing renderTerminalUi export");',
+      'if (typeof mod.OhbabyTerminalApp !== "function") throw new Error("missing OhbabyTerminalApp export");',
+      'if (typeof agent.buildCoreAPIImpl !== "function") throw new Error("missing buildCoreAPIImpl export");',
+      'if (typeof server.createRemoteCoreApiHost !== "function") throw new Error("missing createRemoteCoreApiHost export");',
+      'if (typeof server.startDaemonServer !== "function") throw new Error("missing startDaemonServer export");',
+      'if (typeof mod.TerminalUiOptions !== "undefined") throw new Error("TerminalUiOptions should be type-only");',
+    ].join("\n"),
+    "utf8",
+  );
+
+  const cliImportResult = await runCommand({
+    command: nodeCommand(),
+    args: [cliImportSmokePath],
+    cwd: installedCliPackage,
+    env: isolatedEnv,
+    timeoutMs: 30_000,
+  });
+  expectSuccess(cliImportResult, "import installed ohbaby packages");
+  expect(cliImportResult.stdout).toBe("");
+  expect(cliImportResult.stderr).toBe("");
+
+  const ohbaby = installedOhbabyPath(prefix);
+  const helpResult = await runCommand({
+    command: ohbaby,
+    args: ["--help"],
+    cwd: cliCwd,
+    env: isolatedEnv,
+    timeoutMs: 30_000,
+  });
+  expectSuccess(helpResult, "ohbaby --help");
+  expect(helpResult.stdout).toContain("ohbaby run [prompt..]");
+  expect(helpResult.stdout).toContain("ohbaby serve");
+  expect(helpResult.stdout).not.toContain("-p, --prompt");
+  expect(helpResult.stderr).toBe("");
+
+  const versionResult = await runCommand({
+    command: ohbaby,
+    args: ["--version"],
+    cwd: cliCwd,
+    env: isolatedEnv,
+    timeoutMs: 30_000,
+  });
+  expectSuccess(versionResult, "ohbaby --version");
+  expect(versionResult.stdout).toBe(`${packageJson.version}\n`);
+  expect(versionResult.stderr).toBe("");
+}

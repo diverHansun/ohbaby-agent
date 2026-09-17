@@ -50,6 +50,44 @@ afterEach(async () => {
 });
 
 describe("createPersistentUiStateStore", () => {
+  it("does not advance a pending ledger run when its UI projection says running", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      messageCleaner: {
+        removeMessages(sessionId: string) {
+          return messageManager.removeMessages(sessionId);
+        },
+      },
+      projectResolver: PROJECT_RESOLVER,
+      store: createDatabaseSessionStore(),
+    });
+    const runLedger = createDatabaseRunLedger();
+    const session = await sessionManager.create("D:/repo");
+    await runLedger.createPending({
+      runId: "run_pending",
+      sessionId: session.id,
+      triggerSource: "user",
+    });
+    const store = createPersistentUiStateStore({
+      initialActiveSessionId: session.id,
+      messageManager,
+      projectRoot: "D:/repo",
+      runLedger,
+      sessionManager,
+    });
+    const projected = (await store.readSnapshot()).runs[0];
+    expect(projected.status).toMatchObject({ kind: "running" });
+    await store.updateRun(projected);
+    expect((await runLedger.get("run_pending"))?.status).toBe("pending");
+    await expect(runLedger.markRunning("run_pending")).resolves.toMatchObject({
+      status: "running",
+    });
+  });
+
   it("does not restore active session id from app_state by default", async () => {
     const messageStore = createDatabaseMessageStore();
     const messageManager = createMessageManager({

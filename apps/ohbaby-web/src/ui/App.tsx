@@ -1,6 +1,7 @@
 import {
   Archive,
   Bot,
+  Brain,
   ChevronDown,
   Folder,
   FolderPlus,
@@ -2262,7 +2263,7 @@ function ReasoningControl(props: {
   if (!view || view.mode === "none") return null;
   if (view.status !== "identified")
     return (
-      <span className="ohb-composer-hint" title={view.reason}>
+      <span className="ohb-reasoning-status" title={view.reason}>
         服务默认{view.status === "detecting" ? " · 检测中" : ""}
       </span>
     );
@@ -2273,11 +2274,16 @@ function ReasoningControl(props: {
       view.efforts.includes(preference.effort));
   const effective = compatible ? preference : view.default;
   if (view.mode === "binary" && !view.supportsDisabled)
-    return <span className="ohb-composer-hint">Reasoning on</span>;
+    return <span className="ohb-reasoning-status">Reasoning on</span>;
   return (
-    <label className="ohb-reasoning-control" title={error}>
+    <label
+      className="ohb-reasoning-control"
+      title={error ?? "Reasoning effort"}
+    >
+      <Brain className="ohb-reasoning-icon" aria-hidden="true" size={14} />
       <select
         aria-label="Reasoning effort"
+        aria-invalid={error ? true : undefined}
         value={
           effective?.enabled === false
             ? "off"
@@ -2306,7 +2312,16 @@ function ReasoningControl(props: {
           ))
         )}
       </select>
-      {error && <span role="alert">{error}</span>}
+      <ChevronDown
+        className="ohb-reasoning-chevron"
+        aria-hidden="true"
+        size={13}
+      />
+      {error && (
+        <span className="ohb-reasoning-error" role="alert">
+          {error}
+        </span>
+      )}
     </label>
   );
 }
@@ -3065,7 +3080,9 @@ function Composer(props: {
           <span>{queuedEdit ? "Save" : "Send"}</span>
         </button>
       </div>
-      <div className="ohb-composer-tools">
+      <div
+        className={`ohb-composer-tools${queuedEdit ? " ohb-composer-tools-queued-edit" : ""}`}
+      >
         {slashError ? (
           <span className="ohb-slash-error">{slashError}</span>
         ) : null}
@@ -3073,7 +3090,7 @@ function Composer(props: {
           <span className="ohb-slash-error">{queueError}</span>
         ) : null}
         {queuedEdit ? (
-          <span className="ohb-composer-hint">
+          <span className="ohb-composer-hint ohb-queued-edit-hint">
             Editing queued prompt · Enter save · Esc keep original
           </span>
         ) : null}

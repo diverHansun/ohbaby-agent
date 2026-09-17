@@ -12,6 +12,54 @@ async function key(
 }
 
 describe("ConnectPanel protocols", () => {
+  it("distinguishes selected and active edit rows without color, and keeps page navigation", async () => {
+    const client = {
+      connectModel: vi.fn(() => Promise.resolve({ saved: true })),
+      getCurrentModel: vi.fn(() => Promise.resolve(null)),
+    } as unknown as CoreAPI;
+    const app = render(
+      <ConnectPanel
+        client={client}
+        onClose={vi.fn()}
+        runtime={{ kind: "idle" }}
+      />,
+    );
+    await key(app, "");
+    expect(app.lastFrame()).toContain("> Provider");
+    expect(app.lastFrame()).not.toContain("[editing]");
+    await key(app, "\r");
+    expect(app.lastFrame()).toContain("[editing]");
+    expect(app.lastFrame()).toContain("▏");
+    await key(app, "fixture");
+    await key(app, "\r");
+    expect(app.lastFrame()).not.toContain("[editing]");
+    await key(app, "\u001b[6~");
+    expect(app.lastFrame()).toContain("> Base URL");
+    await key(app, "\u001b[5~");
+    expect(app.lastFrame()).toContain("> Provider");
+    app.unmount();
+  });
+
+  it("masks an active secret edit while showing the caret", async () => {
+    const client = {
+      connectModel: vi.fn(() => Promise.resolve({ saved: true })),
+      getCurrentModel: vi.fn(() => Promise.resolve(null)),
+    } as unknown as CoreAPI;
+    const app = render(
+      <ConnectPanel
+        client={client}
+        onClose={vi.fn()}
+        runtime={{ kind: "idle" }}
+      />,
+    );
+    await key(app, "");
+    for (let index = 0; index < 3; index += 1) await key(app, "\u001b[6~");
+    await key(app, "\r");
+    await key(app, "secret-fixture");
+    expect(app.lastFrame()).toContain("**************▏");
+    expect(app.lastFrame()).not.toContain("secret-fixture");
+    app.unmount();
+  });
   it("infers a missing protocol once when the initial URL is committed", async () => {
     const connectModel = vi.fn(() => Promise.resolve({ saved: true }));
     const client = {

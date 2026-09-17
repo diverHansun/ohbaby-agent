@@ -36,6 +36,7 @@ describe("createTheme", () => {
     expect(theme.tool.name).not.toBe(darkPalette.goldBright);
     expect(theme.tool.arg).toBe(darkPalette.textDim);
     expect(theme.reasoning).toBe(darkPalette.textMuted);
+    expect(theme.editing).toBe(darkPalette.editing);
     expect(theme.border).toBe(darkPalette.border);
     expect(theme.message.userBlockBg).toBe(darkPalette.userBlockBg);
     expect(theme.message.userGutter).toBe(darkPalette.textMuted);
@@ -53,6 +54,7 @@ describe("createTheme", () => {
       highlight: lightPalette.purpleShimmer,
     });
     expect(theme.text.normal).toBe(lightPalette.text);
+    expect(theme.editing).toBe(lightPalette.editing);
     expect(theme.border).toBe(lightPalette.border);
     expect(theme.message.userBlockBg).toBe(lightPalette.userBlockBg);
     expect(theme.message.userGutter).toBe(lightPalette.textMuted);
@@ -68,6 +70,7 @@ describe("createTheme", () => {
       tertiary: "cyan",
     });
     expect(theme.status.error).toBe("red");
+    expect(theme.editing).toBe("cyan");
     expect(theme.border).toBe("gray");
     expect(theme.message.userBlockBg).toBe("blue");
     expect(theme.message.userGutter).toBe("gray");

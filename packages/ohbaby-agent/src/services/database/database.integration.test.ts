@@ -98,6 +98,7 @@ describe("services/database", () => {
       { version: "013_workspace_registry" },
       { version: "014_prompt_submission" },
       { version: "015_prompt_submission_idempotency_lease" },
+      { version: "016_prompt_submission_reasoning" },
     ]);
   });
 

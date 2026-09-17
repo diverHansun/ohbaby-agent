@@ -1,0 +1,61 @@
+{
+  "stage": "D",
+  "web": {
+    "emptyConfiguration": true,
+    "bootstrap": "production daemon bootstrap with Vite source UI and same-origin authenticated API",
+    "maximumProviderRequestsPerRun": 20,
+    "chat": {
+      "result": "passed",
+      "selectedEffort": "high",
+      "firstRequestAndFollowingRequest": "high",
+      "refreshRestoredEffort": "high"
+    },
+    "responses": {
+      "result": "passed",
+      "selectedEffort": "high",
+      "primaryRequests": 2,
+      "primaryHttpStatuses": [200, 200],
+      "toolCallAndResultIdsMatched": true,
+      "nativeReplayRequests": 1,
+      "refreshRestoredEffort": "high"
+    },
+    "anthropic": {
+      "result": "passed after run-ledger fix",
+      "selectedEffort": "high",
+      "primaryRequests": 2,
+      "toolCallAndResultIdsMatched": true,
+      "nativeReplayRequests": 1,
+      "firstAttempt": "failed before primary generation because a UI projection advanced the run ledger twice; retained in local evidence"
+    },
+    "runningModelSaveAndQueuedPrompt": {
+      "result": "passed after live-session projection fix",
+      "oldTaskProtocol": "openai-compatible",
+      "oldTaskEffort": "high",
+      "newQueuedTaskProtocol": "openai-responses",
+      "queuedTaskEffortAtSubmission": "high",
+      "controlChangedAfterSubmission": "low",
+      "primaryHttpStatuses": [200, 200, 200],
+      "duplicateToolCardAfterBothTasksSettled": false,
+      "sqliteReopenAndShortContinuation": "passed; saved low sent to a real Responses request with HTTP 200"
+    }
+  },
+  "tui": {
+    "emptyConfiguration": true,
+    "chat": { "result": "passed", "primaryRequests": 2, "effort": "medium" },
+    "responses": { "result": "passed", "primaryRequests": 2, "effort": "medium" },
+    "anthropic": { "result": "passed", "primaryRequests": 2, "effort": "medium" },
+    "allPrimaryHttpStatuses": 200,
+    "allToolCallAndResultIdsMatched": true,
+    "allAnswersMatchedFixture": true,
+    "capabilitySource": "production built-in provider rules, not a separately observed remote effort probe"
+  },
+  "pty": {
+    "connectAndConnectSearchEditing": "passed in color, FORCE_COLOR=0/NO_COLOR=1 and 48-column terminal",
+    "queuedEditContract": "one existing Ink contract test passed",
+    "queuedEditRealPty": "not run: no active task and queue in the isolated PTY scenario",
+    "noColorOnly": "existing theme/Chalk path still emits ANSI; FORCE_COLOR=0 also required for a truly colorless test"
+  },
+  "historicalLimits": [
+    "improve-6 natural one-million-token 95% threshold and real upstream overflow were not run in Stage D"
+  ]
+}

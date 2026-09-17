@@ -11,6 +11,7 @@ export interface Theme {
     readonly tertiary: string;
   };
   readonly cursor: string;
+  readonly editing: string;
   readonly diff: {
     readonly add: string;
     readonly remove: string;
@@ -85,6 +86,7 @@ export function createTheme(mode: ColorMode, colorLevel = 3): Theme {
       tertiary: color("skyBlue", "cyan"),
     },
     cursor: color("goldBright", "yellow"),
+    editing: color("editing", "cyan"),
     diff: {
       add: color("green", "green"),
       remove: color("red", "red"),

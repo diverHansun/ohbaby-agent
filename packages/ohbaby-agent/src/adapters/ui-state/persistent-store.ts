@@ -315,47 +315,18 @@ async function withSessionTransactionRetry<T>(
   }
 }
 
-async function applyRunUpdate(runLedger: RunLedger, run: UiRun): Promise<void> {
+async function validateRunProjection(
+  runLedger: RunLedger,
+  run: UiRun,
+): Promise<void> {
   const existing = await runLedger.get(run.id);
-  if (existing && existing.sessionId !== run.sessionId) {
+  if (!existing) {
+    throw new Error(`Run ${run.id} is missing from the run ledger`);
+  }
+  if (existing.sessionId !== run.sessionId) {
     throw new Error(
       `Run id ${run.id} already belongs to session ${existing.sessionId}`,
     );
-  }
-  if (!existing) {
-    await runLedger.createPending({
-      runId: run.id,
-      sessionId: run.sessionId,
-      triggerSource: "user",
-    });
-  }
-  const current = (await runLedger.get(run.id)) ?? existing;
-  if (!current) {
-    return;
-  }
-
-  if (
-    run.status.kind === "running" ||
-    run.status.kind === "waiting-for-permission"
-  ) {
-    if (current.status === "pending") {
-      await runLedger.markRunning(run.id);
-    }
-    return;
-  }
-
-  if (run.status.kind === "idle") {
-    if (current.status === "pending") {
-      await runLedger.markRunning(run.id);
-      await runLedger.markSucceeded(run.id);
-    } else if (current.status === "running") {
-      await runLedger.markSucceeded(run.id);
-    }
-    return;
-  }
-
-  if (current.status === "pending" || current.status === "running") {
-    await runLedger.markFailed(run.id, run.status.message);
   }
 }
 
@@ -462,6 +433,7 @@ export function createPersistentUiStateStore(
 
   return {
     requiresServiceManagersForWrites: true,
+    runLedger: options.runLedger,
 
     async hasRun(runId: string): Promise<boolean> {
       return (await options.runLedger.get(runId)) !== undefined;
@@ -514,11 +486,11 @@ export function createPersistentUiStateStore(
     },
 
     addRun(run: UiRun): Promise<void> {
-      return applyRunUpdate(options.runLedger, run);
+      return validateRunProjection(options.runLedger, run);
     },
 
     updateRun(run: UiRun): Promise<void> {
-      return applyRunUpdate(options.runLedger, run);
+      return validateRunProjection(options.runLedger, run);
     },
 
     upsertPermission(request: UiPermissionRequest): Promise<void> {

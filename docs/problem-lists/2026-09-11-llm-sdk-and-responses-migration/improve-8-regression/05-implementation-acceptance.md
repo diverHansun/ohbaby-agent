@@ -67,11 +67,23 @@ node scripts/run-real-session-reasoning.mjs --run --profile=zenmux-claude-sonnet
 node scripts/run-real-session-reasoning.mjs --run --profile=zenmux-gpt56-luna-responses --unknown
 ```
 
+## Stage D：真实界面与最终回归
+
+Web 推理档位现位于 composer 右侧、发送提示之前，显示后端原名，使用可键盘操作的原生选择器。桌面和 390px 窄屏实际检查了位置、焦点与换行；`/` 命令菜单不会被工具栏遮住。关闭测试服务后，保存失败提示仍能显示在输入框上方。原来仅有未加样式的下拉框，且位于左侧权限按钮旁；这一轮已补齐视觉和交互。独立审查发现的错误提示层级、命令菜单层级问题均已修复并重验。审查还发现排队编辑时长提示会挤压新增按钮；现在提示独占一行，1280px 与 390px 真实浏览器均无横向溢出，截图见 `.ohbaby/test-evidence/improve-8/stage-d/web-control/`。
+
+Web 从空配置经 `/connect` 实际操作 Chat、Responses、Anthropic；各协议都用真实模型读本地 `note.md` 并回答 Cedar / 17 / Lin。Responses 与 Anthropic 后续请求有原生状态，工具调用与结果 ID 配对。Web 选择 `high` 后首次请求与续请求使用 `high`，刷新恢复；旧会话 `high`、新会话默认 `medium`、新会话再选 `low` 后返回旧会话仍为 `high`。第一次 Anthropic 尝试在模型请求前暴露两份 run ledger 的状态竞争，修复后真实重跑通过；失败尝试保留在本地证据，未计为成功。
+
+E3 实际把 Chat 任务停在受控本地文件读取，运行中保存 Responses 并排队一条 `high` 消息，随后把控件改为 `low`。放行后，旧 Chat 两次主请求及排队 Responses 一次主请求均为 HTTP 200；旧任务继续使用 Chat，新请求用 Responses 且保持提交时的 `high`。过程发现保存模型时完整快照与实时流使用不同消息 ID，页面会残留同一工具的 running/completed 两张卡。修复后再实网重跑：任务结束时会话由持久化的最终内容收敛，未刷新页面也只留一张 completed 卡。SQLite 关闭重开后，原会话以已保存的 `low` 继续发出真实 Responses 请求，HTTP 200。运行中的短暂重复仍可能出现，最终完成后会自动消失；统一两套消息 ID 属于后续独立改造。
+
+TUI 从空配置分别经 `/connect` 保存三协议，各有两次真实主请求，均 HTTP 200，生产能力识别得到默认 `medium`，实际 wire 也都是 `medium`；工具 ID 配对与答案均正确。PTY 实测 `/connect`、`/connect-search` 的选字段/Enter 编辑/退格/Enter 提交/Esc 放弃、密钥遮罩、协议选择、主输入恢复，覆盖彩色、无色和 48 列终端。已有 queued-edit Ink 契约测试通过；真实 PTY 未构造运行中队列，故该项不能记作 PTY 通过。单独设置 `NO_COLOR=1` 时旧主题/Chalk 路径仍输出 ANSI；合用 `FORCE_COLOR=0` 后完全无色，`▏ [editing]` 仍可辨认。完整本地帧见 `.ohbaby/test-evidence/improve-8/stage-d/pty/README.md`。
+
+本批单元/集成定向 5 文件 279 项通过，含 Web 93 项、后端持久状态与 ledger 竞态回归。最终完整 `pnpm run preflight` 通过：格式、lint、TypeScript、361 文件 / 3708 项测试、全仓构建，另 6 文件 / 17 项按仓库现有条件跳过；安装后的 CLI 打包测试也通过。独立审查找出并复核了排队编辑底栏溢出修复，其余已审范围无具体回归。脱敏矩阵见 [Stage D 证据](./evidence/stage-d-real-summary.json)；请求级本地证据见 `.ohbaby/test-evidence/improve-8/stage-d/` 和各隔离 Web 临时目录。Web 测试启动器给真实 provider 请求设 20 次上限，不保存 key 或完整推理状态。
+
 ## 后续阶段
 
 - B：保存配置与运行准入协调，已完成。
 - C：能力发现、会话推理偏好与发送快照，验收通过；见本批提交。
-- D：TUI 编辑反馈、真实 Web/TUI 操作与全仓回归，尚未实施。
+- D：TUI 编辑反馈、真实 Web/TUI 操作、全仓检查和独立审查已完成；见本批提交。
 
 ## 保留的验收边界
 

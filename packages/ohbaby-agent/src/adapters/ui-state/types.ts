@@ -5,8 +5,11 @@ import type {
   UiSession,
   UiSnapshot,
 } from "ohbaby-sdk";
+import type { RunLedger } from "../../runtime/run-ledger/index.js";
 
 export interface UiStateStore {
+  /** Ledger backing this projection; the runtime owns its lifecycle writes. */
+  readonly runLedger?: RunLedger;
   readonly requiresServiceManagersForWrites?: boolean;
   hasRun?(runId: string): Promise<boolean>;
   readSnapshot(): Promise<UiSnapshot>;

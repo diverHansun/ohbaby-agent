@@ -1,5 +1,6 @@
 export interface RawPalette {
   readonly border: string;
+  readonly editing: string;
   readonly gold: string;
   readonly goldBright: string;
   readonly green: string;
@@ -19,6 +20,7 @@ export interface RawPalette {
 
 export const darkPalette = {
   border: "#3E3A34",
+  editing: "#59BFA9",
   gold: "#D4A24F",
   goldBright: "#E0B463",
   green: "#8FCB9B",
@@ -38,6 +40,7 @@ export const darkPalette = {
 
 export const lightPalette = {
   border: "#C0B8AC",
+  editing: "#167B69",
   gold: "#B5832A",
   goldBright: "#C79535",
   green: "#3D9A57",

@@ -410,6 +410,15 @@ export function createInProcessUiBackendClient(
   const initialSnapshot = options.initialSnapshot ?? EMPTY_SNAPSHOT;
   const stateStore =
     options.stateStore ?? createInMemoryUiStateStore(initialSnapshot);
+  if (
+    options.runLedger !== undefined &&
+    stateStore.runLedger !== undefined &&
+    options.runLedger !== stateStore.runLedger
+  ) {
+    throw new Error(
+      "Injected runLedger must match the UI state store runLedger",
+    );
+  }
   const bus = options.bus ?? createBus();
   const permissionState = createPermissionState({
     bus,
@@ -546,7 +555,7 @@ export function createInProcessUiBackendClient(
         onNotice: publishNotice,
         permission,
         permissionState,
-        runLedger: options.runLedger,
+        runLedger: options.runLedger ?? stateStore.runLedger,
         sandboxManager: options.sandboxManager,
         sessionManager: options.sessionManager,
         skillRegistry,
@@ -700,13 +709,33 @@ export function createInProcessUiBackendClient(
       sessionManager: options.sessionManager,
       snapshot,
     });
-    if (resolved.isNewSession) {
-      sessionIds.reserve(resolved.session.id);
-      acceptedNewSessionIds.add(resolved.session.id);
-      await upsertSession(resolved.session);
+    const isFirstPrompt =
+      resolved.isNewSession ||
+      (submitOptions?.reasoning !== undefined &&
+        resolved.session.messages.length === 0 &&
+        resolved.session.reasoning === undefined &&
+        resolved.coreSession?.reasoning === undefined &&
+        (resolved.coreSession?.stats.messageCount ?? 0) === 0 &&
+        (await messageManager.listBySession(resolved.session.id)).length === 0);
+    if (resolved.isNewSession || (isFirstPrompt && submitOptions?.reasoning)) {
+      let session = resolved.session;
+      if (submitOptions?.reasoning) {
+        const reasoning = { ...submitOptions.reasoning };
+        const updated = await options.sessionManager?.update(session.id, {
+          reasoning,
+        });
+        session = updated
+          ? sessionMetadataToUiSession(updated)
+          : { ...session, reasoning };
+      }
+      if (resolved.isNewSession) {
+        sessionIds.reserve(session.id);
+        acceptedNewSessionIds.add(session.id);
+      }
+      await upsertSession(session);
       publish({
         type: "session.updated",
-        session: cloneSession(resolved.session),
+        session: cloneSession(session),
       });
     }
     await stateStore.setActiveSessionId(resolved.session.id);
@@ -2278,6 +2307,30 @@ export function createInProcessUiBackendClient(
       }
       if (submittedSessionId) {
         await syncSessionStatsBestEffort(submittedSessionId);
+        if (stateStore.requiresServiceManagersForWrites) {
+          try {
+            const settledSession =
+              await stateStore.getSession(submittedSessionId);
+            if (settledSession) {
+              // A model save can replace the UI snapshot while this run is
+              // active. The live projection and stored transcript have
+              // different message ids; restore the stored transcript once
+              // the projection has finished, before the next prompt starts.
+              publish({
+                type: "session.updated",
+                session: cloneSession(settledSession),
+              });
+            }
+          } catch (error) {
+            publishNotice({
+              key: `session:projection:${submittedSessionId}:${getErrorMessage(error)}`,
+              level: "warning",
+              message: `Session view could not be refreshed: ${getErrorMessage(error)}`,
+              source: "session",
+              title: "Session view warning",
+            });
+          }
+        }
       }
       if (activePromptsBySession.get(promptSessionId) === activePrompt) {
         activePromptsBySession.delete(promptSessionId);

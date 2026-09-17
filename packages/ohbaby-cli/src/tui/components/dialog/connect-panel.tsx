@@ -88,6 +88,7 @@ export function ConnectPanel({
   client,
   onClose,
 }: ConnectPanelProps): ReactElement {
+  const theme = useTheme();
   const [draft, setDraft] = useState<ConnectDraft>(EMPTY_DRAFT);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [editingField, setEditingField] = useState<ConnectFieldKey | null>(
@@ -248,11 +249,11 @@ export function ConnectPanel({
           return;
         }
         if (activeEditingField === "interfaceProvider") {
-          if (key.upArrow || key.downArrow) {
+          if (key.upArrow || key.downArrow || key.pageUp || key.pageDown) {
             const index = PROTOCOLS.indexOf(
               editValueRef.current as UiConnectModelInterfaceProvider,
             );
-            const direction = key.downArrow ? 1 : -1;
+            const direction = key.downArrow || key.pageDown ? 1 : -1;
             replaceEditValue(
               PROTOCOLS[
                 (index + direction + PROTOCOLS.length) % PROTOCOLS.length
@@ -277,11 +278,11 @@ export function ConnectPanel({
         onClose();
         return;
       }
-      if (key.downArrow) {
+      if (key.downArrow || key.pageDown) {
         setSelectedIndex((current) => (current + 1) % CONNECT_FIELDS.length);
         return;
       }
-      if (key.upArrow) {
+      if (key.upArrow || key.pageUp) {
         setSelectedIndex(
           (current) =>
             (current - 1 + CONNECT_FIELDS.length) % CONNECT_FIELDS.length,
@@ -318,7 +319,11 @@ export function ConnectPanel({
       {editingField === "interfaceProvider" ? (
         <Box flexDirection="column" marginLeft={2}>
           {PROTOCOLS.map((protocol) => (
-            <Text key={protocol} bold={protocol === editValue}>
+            <Text
+              key={protocol}
+              bold={protocol === editValue}
+              color={protocol === editValue ? theme.editing : undefined}
+            >
               {protocol === editValue ? "> " : "  "}
               {protocol}
             </Text>
@@ -357,11 +362,16 @@ function ConnectFieldRow({
   const label = field.label.padEnd(18, " ");
 
   return (
-    <Text color={isSelected ? theme.text.strong : undefined}>
+    <Text
+      color={
+        isEditing ? theme.editing : isSelected ? theme.text.strong : undefined
+      }
+    >
       {prefix}
       <Text bold>{label}</Text>
       {field.optional ? <Text dimColor>optional </Text> : null}
       {displayValue}
+      {isEditing ? <Text>▏ [editing]</Text> : null}
       {isEditing && field.key === "interfaceProvider" ? (
         <Text dimColor> ↑/↓ choose · Enter commit · Esc cancel</Text>
       ) : null}

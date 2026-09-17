@@ -231,11 +231,11 @@ export function ConnectSearchPanel({
         onClose();
         return;
       }
-      if (key.downArrow) {
+      if (key.downArrow || key.pageDown) {
         setSelectedIndex((current) => (current + 1) % SEARCH_FIELDS.length);
         return;
       }
-      if (key.upArrow) {
+      if (key.upArrow || key.pageUp) {
         setSelectedIndex(
           (current) =>
             (current - 1 + SEARCH_FIELDS.length) % SEARCH_FIELDS.length,
@@ -292,10 +292,15 @@ function SearchFieldRow({
   const label = field.label.padEnd(18, " ");
 
   return (
-    <Text color={isSelected ? theme.text.strong : undefined}>
+    <Text
+      color={
+        isEditing ? theme.editing : isSelected ? theme.text.strong : undefined
+      }
+    >
       {prefix}
       <Text bold>{label}</Text>
       {displayValue}
+      {isEditing ? <Text>▏ [editing]</Text> : null}
     </Text>
   );
 }

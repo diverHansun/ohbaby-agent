@@ -9084,6 +9084,21 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
+  it("rejects a run ledger that differs from the injected UI store ledger", () => {
+    const stateStore = {
+      ...createInMemoryUiStateStore(createInitialSnapshotWithTwoSessions()),
+      runLedger: createInMemoryRunLedger(),
+    };
+
+    expect(() =>
+      createInProcessUiBackendClient({
+        llmClient: createFakeLLMClient([]),
+        runLedger: createInMemoryRunLedger(),
+        stateStore,
+      }),
+    ).toThrow("Injected runLedger must match the UI state store runLedger");
+  });
+
   it("uses collision-resistant default run ids with an injected persistent state store", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-run-id-db-"));
     const projectRoot = join(directory, "repo");
@@ -9151,6 +9166,8 @@ describe("createInProcessUiBackendClient", () => {
           sessionManager,
         }),
       });
+      const events: UiEvent[] = [];
+      client.subscribeEvents((event) => events.push(event));
 
       await client.submitPromptAndWait("Create another run");
 
@@ -9167,6 +9184,19 @@ describe("createInProcessUiBackendClient", () => {
       await expect(runLedger.get(createdRun?.id ?? "")).resolves.toMatchObject({
         runId: createdRun?.id,
         sessionId: "session_52",
+        status: "succeeded",
+      });
+      const lastMessageIndex = events.findLastIndex(
+        (event) => event.type === "message.updated",
+      );
+      const finalSessionIndex = events.findLastIndex(
+        (event) =>
+          event.type === "session.updated" && event.session.id === "session_52",
+      );
+      expect(finalSessionIndex).toBeGreaterThan(lastMessageIndex);
+      expect(events[finalSessionIndex]).toMatchObject({
+        type: "session.updated",
+        session: snapshot.sessions.find((item) => item.id === "session_52"),
       });
     } finally {
       closeDatabase();
@@ -9416,6 +9446,160 @@ function createNumericClock(startAt: number): () => number {
     return value;
   };
 }
+
+it("persists explicit reasoning when the first prompt creates a session", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: {
+      ...createInitialSnapshotWithTwoSessions(),
+      activeSessionId: null,
+      sessions: [],
+    },
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [{ textDelta: "first", finishReason: "stop" }],
+        [{ textDelta: "second", finishReason: "stop" }],
+      ],
+      requests,
+      {
+        modelProfiles: [
+          {
+            model: "fake-model",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "effort",
+              wire: "openai",
+              supportsDisabled: true,
+              efforts: ["low", "medium", "high"],
+            },
+          },
+        ],
+      },
+    ),
+  });
+  try {
+    const receipt = await client.submitPromptAccepted("first", {
+      reasoning: { enabled: true, effort: "high" },
+    });
+    expect(
+      (await client.getSnapshot()).sessions.find(
+        (session) => session.id === receipt.sessionId,
+      )?.reasoning,
+    ).toEqual({ enabled: true, effort: "high" });
+    await client.waitForPrompt(receipt.promptId);
+    await client.submitPromptAndWait("second", {
+      sessionId: receipt.sessionId,
+    });
+    expect(requests.map((request) => request.reasoning?.effort)).toEqual([
+      "high",
+      "high",
+    ]);
+  } finally {
+    await client.dispose();
+  }
+});
+
+it("persists first-prompt reasoning in an already created empty session", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: createInitialSnapshotWithTwoSessions(),
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [{ textDelta: "first", finishReason: "stop" }],
+        [{ textDelta: "second", finishReason: "stop" }],
+      ],
+      requests,
+      {
+        modelProfiles: [
+          {
+            model: "fake-model",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "effort",
+              wire: "openai",
+              supportsDisabled: true,
+              efforts: ["low", "medium", "high"],
+            },
+          },
+        ],
+      },
+    ),
+  });
+  try {
+    const receipt = await client.submitPromptAccepted("first", {
+      sessionId: "session_1",
+      reasoning: { enabled: true, effort: "high" },
+    });
+    expect(
+      (await client.getSnapshot()).sessions.find(
+        (session) => session.id === receipt.sessionId,
+      )?.reasoning,
+    ).toEqual({ enabled: true, effort: "high" });
+    await client.waitForPrompt(receipt.promptId);
+    await client.submitPromptAndWait("second", {
+      sessionId: receipt.sessionId,
+    });
+    expect(requests.map((request) => request.reasoning?.effort)).toEqual([
+      "high",
+      "high",
+    ]);
+  } finally {
+    await client.dispose();
+  }
+});
+
+it("keeps a saved empty-session preference across a one-off first-prompt override", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: createInitialSnapshotWithTwoSessions(),
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [{ textDelta: "first", finishReason: "stop" }],
+        [{ textDelta: "second", finishReason: "stop" }],
+      ],
+      requests,
+      {
+        modelProfiles: [
+          {
+            model: "fake-model",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "effort",
+              wire: "openai",
+              supportsDisabled: true,
+              efforts: ["low", "medium", "high"],
+            },
+          },
+        ],
+      },
+    ),
+  });
+  try {
+    await client.updateSessionReasoning({
+      sessionId: "session_1",
+      reasoning: { enabled: true, effort: "medium" },
+    });
+    const receipt = await client.submitPromptAccepted("first", {
+      sessionId: "session_1",
+      reasoning: { enabled: true, effort: "high" },
+    });
+    await client.waitForPrompt(receipt.promptId);
+    await client.submitPromptAndWait("second", {
+      sessionId: receipt.sessionId,
+    });
+    expect(requests.map((request) => request.reasoning?.effort)).toEqual([
+      "high",
+      "medium",
+    ]);
+    expect(
+      (await client.getSnapshot()).sessions.find(
+        (session) => session.id === receipt.sessionId,
+      )?.reasoning,
+    ).toEqual({ enabled: true, effort: "medium" });
+  } finally {
+    await client.dispose();
+  }
+});
 
 function createRejectingMessageManager(error: Error): MessageManager {
   const store: MessageStore = {
