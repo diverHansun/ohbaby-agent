@@ -114,3 +114,7 @@ TUI 从空配置分别经 `/connect` 保存三协议，各有两次真实主请�
 - Responses usage/cache：旧迁移 smoke 的 Responses 单项实网通过，4 次 HTTP，正文与工具循环都完成；逐次 input/output 和 cache-read 明细与消息中保存的 usage 对齐。工具会话累计输入 14957、cache-read 14784。该 smoke 的初次三协议合跑中 Chat 也通过，但 Anthropic/Qwen 在一次请求后 `provider_stream_interrupted`；不能把它写成三协议通过。改用 Sonnet 5 复跑该旧 smoke 时，又在请求前遭到旧脚本缺少该模型推理能力资料的 `ConfigError`。现行 improve-8 会话推理 E2E 分别对 Chat/Luna、Responses/Luna、Anthropic/Sonnet 5 各 8 项通过，均经过真实请求、工具往返和 SQLite 恢复。旧 smoke 应单独维护，不用其失败掩盖当前生产路径已通过的证据。
 
 本轮未改压缩/prune 算法、95% 阈值、SDK 重试或工具生命周期。真实百万窗口自然达到 95%、真实上游 overflow 仍是未测边界；本次不声称覆盖。当前分支等待用户审查，尚未 merge/push；`tests/models-4-tests.md` 保持用户本地未跟踪文件。
+
+## 同日后续：已按授权合入 main
+
+用户随后授权合入开发分支并继续合入 main。`openai-responses-migration` 和 main 已依次快进到 `4fb72271`；在最终稳定提交上重新运行的合并前 preflight 和 main 上的全仓测试均为 3722 项通过、17 项跳过，真实三协议会话及 main 上的 TUI Responses、强制压缩续聊均通过。最终计数和限制以 [main 合并验收](../main-merge-acceptance.md) 为准；前文“等待审查、未 merge”保留为当时状态。尚未 push。

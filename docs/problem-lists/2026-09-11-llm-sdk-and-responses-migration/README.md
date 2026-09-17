@@ -2,13 +2,13 @@
 
 ## 当前入口（2026-09-17）
 
-当前本地集成分支为 `openai-responses-migration@135a6cda`，已经包含 improve-1～7 的实施与收尾证据；各阶段具体限制仍以对应 05／06／07 为准。下方早期状态记录中的“待合入”等文字保留其历史时间口径，不代表当前分支状态。
+improve-1～8 已于 2026-09-17 按用户授权合入本地 `main`，本轮 Responses 接入开发阶段完成。`openai-responses-migration` 先快进到 `4fb72271`，main 再从 `dfb6d932` 快进到同一提交；合并前完整 preflight 和合并后全仓测试均为 3722 项通过、17 项跳过，三协议实网、main 上的 TUI Responses 与强制压缩续聊检查通过。合并过程、证据和未测边界见 [main 合并验收](./main-merge-acceptance.md)。尚未 push。下方早期状态记录中的“待合入”等文字保留历史时间口径，不代表当前分支状态。
 
 用户开启的 **[improve-6：Context 计量与压缩链路适配](./improve-6/README.md)** 已完成实施与独立审查，按“部分通过”合入本地 `openai-responses-migration`。内部旧 Chat 估算桥已删除；保留压缩／prune 算法，补足摘要语义并按用户要求将自动摘要统一到完整窗口 95%。真实自动越过 95% 与真实上游 overflow 未实测，尚未推送；结果与限制见 [05 实施验收](./improve-6/05-implementation-acceptance.md)。
 
 用户已开启 **[improve-7：Agent loop 三协议执行语义与历史交接](./improve-7/README.md)**。本轮已完成实施、三协议真实测试与独立审查，已快进合入本地集成分支，未推送；结果见 [05 实施验收](./improve-7/05-implementation-acceptance.md)。保留 SDK 重试，整理内部工具累积、完成/失败语义与失败历史交接，验证既有 Context 管理规则；压缩算法不变。断流正文的两层处理已获用户确认：过滤原始失败协议消息，允许从已保存可见正文派生带中断说明的普通文本历史，见 [00 §3](./improve-7/00-discussion.md#3-已确认的两层处理)。
 
-用户于 2026-09-17 开启 **[improve-8-regression：连接入口、推理设置与编辑反馈](./improve-8-regression/README.md)**。当前在 `codex/improve-8-regression` 分批实施，包含三协议产品入口、保存后能力识别、轻量 Web/TUI 交互设计与回归验收。Stage A 已完成验证和审查；运行切换和推理作用域已确认，见其 02 §1；能力未知允许正常发送。本轮未关闭先前 packaging 安装超时和真实容量测试缺口。
+**[improve-8-regression：连接入口、推理设置与编辑反馈](./improve-8-regression/README.md)** 已完成 A–D、主动推理档位探测和 TUI `/effort` 收尾，包含三协议产品入口、会话推理选择、模型保存与运行切换以及 Web/TUI 验证。CLI packaging 在本次合并前后均通过；真实百万窗口自然达到 95% 和真实上游 overflow 仍未验证。
 
 ## 历史阶段状态
 
@@ -58,7 +58,7 @@
 | improve-5.5          | 2026-09-15                             | improve-5 新模型实网暴露上游协议缺口，用户明确指定返修/能力扩展轮次   | 已实施并收尾，结果及限制见 05／06／07                                               |
 | improve-6            | 2026-09-15                             | improve-5.5 实施后，用户开启前序主动延后的 context 议题               | 部分通过，已合入本地集成分支；未推送                                                |
 | improve-7            | 2026-09-16                             | improve-6 后继续对齐 Agent loop；用户确认保留 SDK 与失败历史边界      | 已本地合入 `135a6cda`，未推送                                                       |
-| improve-8-regression | 2026-09-17                             | improve-7 合入后暴露连接入口回归，承接 improve-5.5 延后的产品推理设置 | 实施中；Stage A 通过，后续阶段见 05                                                 |
+| improve-8-regression | 2026-09-17                             | improve-7 合入后暴露连接入口回归，承接 improve-5.5 延后的产品推理设置 | 已完成并合入本地 main；最终结果见 main 合并验收                                     |
 
 ## 已冻结的阶段边界
 

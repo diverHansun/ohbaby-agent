@@ -2,7 +2,7 @@
 
 开启日期：2026-09-17。基线：`openai-responses-migration@135a6cda`。
 
-本轮承接 improve-7 合入后的连接入口回归，以及 improve-5.5 留下的推理配置产品入口。用户已授权实施；A–D 在本地临时分支 `codex/improve-8-regression` 完成，后续主动探测和 TUI `/effort` 收尾位于 `codex/improve-8-reasoning-probe`。实际结果见 05；本轮不合并、不推送。
+本轮承接 improve-7 合入后的连接入口回归，以及 improve-5.5 留下的推理配置产品入口。A–D 在本地临时分支 `codex/improve-8-regression` 完成，后续主动探测和 TUI `/effort` 收尾位于 `codex/improve-8-reasoning-probe`。用户于 2026-09-17 后续授权本地合并，现已随开发分支合入 main 并通过合并前后检查，未 push。阶段结果见 05，最终状态见 [main 合并验收](../main-merge-acceptance.md)。
 
 ## 阅读顺序与文档职责
 
@@ -29,6 +29,6 @@
 
 ## 状态和历史边界
 
-improve-7 已本地快进合入本分支；`main@dfb6d932` 未动，未 push。合入后的定向回归为 26 文件/811 项通过，不是全仓 preflight。此前完整 preflight 的 packaging 安装超时未解决；improve-6 的真实百万窗口自然达到 95% 和真实上游 overflow 仍未验证。详情见 01 §5 和 04 §6，本轮不得用其他测试代替或抹去这些限制。
+规划时 improve-7 已合入集成分支，main 仍为 `dfb6d932`；当时的 26 文件/811 项定向回归不等于全仓 preflight。现在 main 合并前后的完整检查均通过，packaging 安装也通过；improve-6 的真实百万窗口自然达到 95% 和真实上游 overflow 仍未验证，不能用其他测试代替或抹去。
 
-已从集成分支建立临时分支，分阶段验证、审查与提交；未经另行授权不 merge/push。用户的 `tests/models-4-tests.md` 是本地测试输入，不顺带纳入提交。
+阶段实施使用临时分支，分批验证、审查与提交；本地合并已获用户后续授权并完成。用户的 `tests/models-4-tests.md` 是本地测试输入，未纳入提交。
