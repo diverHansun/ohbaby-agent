@@ -7,4 +7,8 @@ describe("command panel state", () => {
       "connect-search",
     );
   });
+
+  it("maps /effort to an interactive panel", () => {
+    expect(interactivePanelKindForCommandId("effort")).toBe("effort");
+  });
 });

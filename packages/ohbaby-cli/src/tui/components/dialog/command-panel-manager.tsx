@@ -4,6 +4,7 @@ import type {
   UiCommandCatalog,
   UiContextWindowUsage,
   UiRunStatus,
+  UiReasoningConfig,
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useRef, useState } from "react";
@@ -20,6 +21,7 @@ import type {
 } from "./command-panel-state.js";
 import { ConnectPanel } from "./connect-panel.js";
 import { ConnectSearchPanel } from "./connect-search-panel.js";
+import { EffortPanel } from "./effort-panel.js";
 import { OverlayCard } from "./overlay-card.js";
 
 const SKILLS_PANEL_MAX_VISIBLE_LINES = 10;
@@ -50,6 +52,8 @@ export interface CommandPanelManagerProps {
   readonly client: CoreAPI;
   readonly contextWindowUsage: UiContextWindowUsage | null;
   readonly onClose: () => void;
+  readonly onEffortSelect: (reasoning: UiReasoningConfig) => Promise<void>;
+  readonly pendingReasoning: UiReasoningConfig | null;
   readonly panel: CommandPanelState | null;
   readonly runtime: UiRunStatus;
 }
@@ -59,6 +63,8 @@ export function CommandPanelManager({
   client,
   contextWindowUsage,
   onClose,
+  onEffortSelect,
+  pendingReasoning,
   panel,
   runtime,
 }: CommandPanelManagerProps): ReactElement | null {
@@ -139,7 +145,15 @@ export function CommandPanelManager({
 
   if (panel.mode === "interactive") {
     const panelBody =
-      panel.kind === "connect-search" ? (
+      panel.kind === "effort" ? (
+        <EffortPanel
+          client={client}
+          sessionId={panel.sessionId}
+          pendingReasoning={pendingReasoning}
+          onSelect={onEffortSelect}
+          onClose={onClose}
+        />
+      ) : panel.kind === "connect-search" ? (
         <ConnectSearchPanel
           client={client}
           onClose={onClose}
@@ -468,6 +482,8 @@ function panelTitle(kind: CommandPanelState["kind"]): string {
       return "Connect";
     case "connect-search":
       return "Connect Search";
+    case "effort":
+      return "Reasoning Effort";
   }
 }
 

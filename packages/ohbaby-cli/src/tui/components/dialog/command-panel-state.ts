@@ -7,7 +7,10 @@ export type DisplayCommandPanelKind =
   | "models"
   | "skills";
 
-export type InteractiveCommandPanelKind = "connect" | "connect-search";
+export type InteractiveCommandPanelKind =
+  | "connect"
+  | "connect-search"
+  | "effort";
 
 export type CommandPanelKind =
   | DisplayCommandPanelKind
@@ -48,6 +51,7 @@ const DISPLAY_COMMAND_IDS = new Set<DisplayCommandPanelKind>([
 const INTERACTIVE_COMMAND_IDS = new Set<InteractiveCommandPanelKind>([
   "connect",
   "connect-search",
+  "effort",
 ]);
 
 export function displayPanelKindForCommandId(

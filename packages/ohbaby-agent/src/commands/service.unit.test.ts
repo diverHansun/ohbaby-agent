@@ -484,6 +484,7 @@ describe("CommandService", () => {
       "status",
       "models",
       "connect",
+      "effort",
       "connect-search",
       "sessions",
       "new",

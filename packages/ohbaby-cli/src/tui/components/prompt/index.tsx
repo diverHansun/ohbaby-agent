@@ -7,6 +7,7 @@ import type {
   UiGoal,
   UiPermissionState,
   UiPromptSubmission,
+  UiReasoningConfig,
 } from "ohbaby-sdk";
 import { useRef, useState } from "react";
 import type { ReactElement } from "react";
@@ -38,6 +39,7 @@ import {
 
 export interface PromptProps {
   readonly activeSessionId: string | null;
+  readonly pendingReasoning?: UiReasoningConfig | null;
   readonly catalog: TuiCommandCatalog | null;
   readonly client: CoreAPI;
   readonly contextWindowUsage?: string;
@@ -56,6 +58,7 @@ export interface PromptProps {
 
 export function Prompt({
   activeSessionId,
+  pendingReasoning,
   catalog,
   client,
   contextWindowUsage = "",
@@ -247,6 +250,7 @@ export function Prompt({
         void submitInput(
           result.submission,
           activeSessionId,
+          activeSessionId === null ? pendingReasoning : null,
           catalog,
           client,
           loadCatalog,
@@ -521,6 +525,7 @@ function formatDockStatus(input: {
 async function submitInput(
   input: string,
   activeSessionId: string | null,
+  pendingReasoning: UiReasoningConfig | null | undefined,
   catalog: TuiCommandCatalog | null,
   client: CoreAPI,
   loadCatalog: (() => Promise<TuiCommandCatalog>) | undefined,
@@ -546,6 +551,7 @@ async function submitInput(
     void client
       .submitPromptAccepted(text, {
         clientRequestId: randomUUID(),
+        reasoning: pendingReasoning ?? undefined,
         sessionId: activeSessionId ?? undefined,
       })
       .catch((caught: unknown) => {

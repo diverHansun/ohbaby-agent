@@ -39,6 +39,7 @@ const HELP_COMMAND_ORDER = [
   "status",
   "models",
   "connect",
+  "effort",
   "connect-search",
   "sessions",
   "new",
@@ -640,6 +641,17 @@ export function createBuiltinHandlers(
       id: "connect",
       execute(invocation, context): Promise<void> {
         return handleConnect(options, invocation.argv, context);
+      },
+    },
+    {
+      id: "effort",
+      execute(_invocation, context): Promise<void> {
+        context.fail({
+          code: "INTERACTION_REQUIRED",
+          message: "Use /effort in the TUI to select reasoning effort",
+          recoverable: true,
+        });
+        return Promise.resolve();
       },
     },
     {

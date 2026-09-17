@@ -14,6 +14,7 @@ describe("command catalog", () => {
         "exit",
         "help",
         "connect",
+        "effort",
         "goal",
         "connect-search",
         "models",
@@ -221,6 +222,25 @@ describe("command catalog", () => {
 
       expect(ids).toEqual(expect.arrayContaining(["mcps", "skills"]));
     }
+  });
+
+  it("exposes /effort only in the TUI", () => {
+    const catalog = buildCommandCatalog();
+    expect(
+      filterCommandCatalogBySurface(catalog, "tui").commands.map(
+        (command) => command.id,
+      ),
+    ).toContain("effort");
+    expect(
+      filterCommandCatalogBySurface(catalog, "stdout").commands.map(
+        (command) => command.id,
+      ),
+    ).not.toContain("effort");
+    expect(
+      filterCommandCatalogBySurface(catalog, "headless").commands.map(
+        (command) => command.id,
+      ),
+    ).not.toContain("effort");
   });
 
   it("hides resume from the TUI catalog while keeping compatibility surfaces", () => {

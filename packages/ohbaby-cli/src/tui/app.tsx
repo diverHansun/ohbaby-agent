@@ -7,6 +7,7 @@ import type {
   UiCommandOutput,
   UiEvent,
   UiEventHandler,
+  UiReasoningConfig,
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
@@ -81,6 +82,8 @@ export function OhbabyTerminalApp({
   const didClearOnStartRef = useRef(false);
   const disposedRef = useRef(false);
   const [screenGeneration, setScreenGeneration] = useState(0);
+  const [pendingReasoning, setPendingReasoning] =
+    useState<UiReasoningConfig | null>(null);
   const [commandPanel, setCommandPanel] = useState<CommandPanelState | null>(
     null,
   );
@@ -101,6 +104,9 @@ export function OhbabyTerminalApp({
     (state) => state.activeSessionId,
   );
   activeSessionIdRef.current = activeSessionId;
+  useEffect(() => {
+    if (activeSessionId !== null) setPendingReasoning(null);
+  }, [activeSessionId]);
   const activeContextWindowUsage = useTuiStoreSelector(
     store,
     selectActiveContextWindowUsage,
@@ -698,12 +704,24 @@ export function OhbabyTerminalApp({
           client={client}
           contextWindowUsage={activeContextWindowUsage}
           onClose={closeCommandPanel}
+          onEffortSelect={async (reasoning) => {
+            if (activeSessionId === null) {
+              setPendingReasoning(reasoning);
+            } else {
+              await client.updateSessionReasoning({
+                sessionId: activeSessionId,
+                reasoning,
+              });
+            }
+          }}
+          pendingReasoning={pendingReasoning}
           panel={hasBackendDialog ? null : commandPanel}
           runtime={runtime}
         />
         <TodoPanel expanded={todoExpanded} todoList={activeTodoList} />
         <Prompt
           activeSessionId={activeSessionId}
+          pendingReasoning={pendingReasoning}
           catalog={catalog}
           client={client}
           disabled={hasDialog}

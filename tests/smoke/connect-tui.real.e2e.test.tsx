@@ -29,9 +29,10 @@ describe.runIf(enabled)("Stage D: real TUI public connect", () => {
         supported.includes(item.id),
     );
     if (!profile) throw new Error("Select one supported TUI profile");
+    const selectedEffort = process.env.OHBABY_REAL_TUI_EFFORT || "medium";
     const evidencePath = join(
       ".ohbaby/test-evidence/improve-8/stage-d/tui",
-      `${profile.protocol}.json`,
+      `${profile.protocol}${selectedEffort === "medium" ? "" : `-effort-${selectedEffort}`}.json`,
     );
     await mkdir(join(dirname(evidencePath), "previous-runs"), {
       recursive: true,
@@ -148,8 +149,27 @@ describe.runIf(enabled)("Stage D: real TUI public connect", () => {
         default: { enabled: true, effort: "medium" },
       });
       expect(discoveredReasoning?.efforts).toContain("medium");
+      expect(discoveredReasoning?.efforts).toContain(selectedEffort);
       await key("\u001B");
       await waitForFrame(app, promptIsReady, 15_000);
+      if (selectedEffort !== "medium") {
+        phase = "select-effort";
+        await key("/effort");
+        await key("\r");
+        frames.effort = await waitForFrame(
+          app,
+          (frame) =>
+            frame.includes("Reasoning Effort") &&
+            frame.includes(selectedEffort),
+        );
+        const options = discoveredReasoning?.efforts ?? [];
+        const movement =
+          options.indexOf(selectedEffort) - options.indexOf("medium");
+        for (let index = 0; index < Math.abs(movement); index++)
+          await key(movement > 0 ? "\u001B[B" : "\u001B[A");
+        await key("\r");
+        await waitForFrame(app, promptIsReady, 15_000);
+      }
       phase = "real-tool-loop";
       await key(
         `Use the read tool exactly once on ${session.readFilePath}, with only file_path. Report Project, Release and Owner exactly. Do not use shell or change files.`,
@@ -197,8 +217,18 @@ describe.runIf(enabled)("Stage D: real TUI public connect", () => {
           protocol: profile.protocol,
           model: profile.model,
           status: 200,
-          reasoning: { effort: "medium" },
+          reasoning: { effort: selectedEffort },
         });
+      if (selectedEffort !== "medium") {
+        const snapshot = await session.backend.getSnapshot();
+        const active = snapshot.sessions.find(
+          (candidate) => candidate.id === snapshot.activeSessionId,
+        );
+        expect(active?.reasoning).toMatchObject({
+          enabled: true,
+          effort: selectedEffort,
+        });
+      }
       expect(
         auditFormalToolExchange(
           primary.filter((item) => item.kind === "generation"),

@@ -11,6 +11,9 @@ const args = process.argv.slice(2);
 const selected = args
   .find((value) => value.startsWith("--profile="))
   ?.slice("--profile=".length);
+const effort = args
+  .find((value) => value.startsWith("--effort="))
+  ?.slice("--effort=".length);
 if (!args.includes("--run")) {
   console.info(
     JSON.stringify(
@@ -40,6 +43,7 @@ if (!args.includes("--run")) {
         ...loadRootDotenv(),
         OHBABY_RUN_REAL_CONNECT_TUI: "1",
         OHBABY_REAL_TUI_PROFILE: selected,
+        OHBABY_REAL_TUI_EFFORT: effort ?? "",
       },
       stdio: "inherit",
     },

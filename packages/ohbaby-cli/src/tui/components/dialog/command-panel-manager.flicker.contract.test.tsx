@@ -189,6 +189,8 @@ function panelScene(panel: DisplayCommandPanelState | null): ReactElement {
           client={{} as unknown as CoreAPI}
           contextWindowUsage={null}
           onClose={() => undefined}
+          onEffortSelect={() => Promise.resolve()}
+          pendingReasoning={null}
           panel={panel}
           runtime={{ kind: "idle" }}
         />

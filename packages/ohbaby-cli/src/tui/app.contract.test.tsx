@@ -188,6 +188,17 @@ const connectSearchCommandCatalog: TuiCommandCatalog = {
   version: "connect-search",
 };
 
+const effortCommandCatalog: TuiCommandCatalog = {
+  commands: [
+    command({
+      description: "Adjust reasoning",
+      id: "effort",
+      path: ["effort"],
+    }),
+  ],
+  version: "effort",
+};
+
 const previousNoAnimation = process.env.OHBABY_TUI_NO_ANIM;
 const mountedApps = new Set<ReturnType<typeof renderInk>>();
 
@@ -3068,6 +3079,120 @@ describe("OhbabyTerminalApp", () => {
     expect(frame).toContain("API key value");
     expect(client.executeCommand).not.toHaveBeenCalled();
     expect(client.setSearchApiKey).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it("uses shared model capabilities to save /effort for the active session", async () => {
+    const client = createFakeClient(snapshot(), effortCommandCatalog);
+    client.getCurrentModel.mockResolvedValue({
+      provider: "zenmux",
+      baseUrl: "https://example.test",
+      interfaceProvider: "openai-responses",
+      model: "reasoning-model",
+      reasoning: {
+        status: "identified",
+        mode: "effort",
+        supportsDisabled: true,
+        efforts: ["low", "medium", "high"],
+        default: { enabled: true, effort: "medium" },
+      },
+    });
+    client.updateSessionReasoning.mockResolvedValue(snapshot().sessions[0]);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/effort");
+    app.stdin.write("\r");
+    await waitForFrame(
+      app,
+      (frame) => frame.includes("medium") && frame.includes("high"),
+    );
+    await settleConnectInput();
+    app.stdin.write("\u001B[B");
+    await settleConnectInput();
+    app.stdin.write("\r");
+    await flush();
+    expect(client.updateSessionReasoning).toHaveBeenCalledWith({
+      sessionId: "session_1",
+      reasoning: { enabled: true, effort: "high" },
+    });
+    expect(client.executeCommand).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it("carries /effort into the first prompt of a new session", async () => {
+    const initial = { ...snapshot(), activeSessionId: null, sessions: [] };
+    const client = createFakeClient(initial, effortCommandCatalog);
+    client.getCurrentModel.mockResolvedValue({
+      provider: "zenmux",
+      baseUrl: "https://example.test",
+      interfaceProvider: "openai-responses",
+      model: "reasoning-model",
+      reasoning: {
+        status: "identified",
+        mode: "effort",
+        supportsDisabled: false,
+        efforts: ["low", "medium", "high"],
+        default: { enabled: true, effort: "medium" },
+      },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/effort");
+    app.stdin.write("\r");
+    await waitForFrame(
+      app,
+      (frame) => frame.includes("medium") && frame.includes("high"),
+    );
+    await settleConnectInput();
+    app.stdin.write("\u001B[B");
+    await settleConnectInput();
+    app.stdin.write("\r");
+    await settleConnectInput();
+    app.stdin.write("hello");
+    app.stdin.write("\r");
+    await flush();
+    expect(client.updateSessionReasoning).not.toHaveBeenCalled();
+    expect(client.submitPromptAccepted).toHaveBeenCalledWith(
+      "hello",
+      expect.objectContaining({ reasoning: { enabled: true, effort: "high" } }),
+    );
+    app.unmount();
+  });
+
+  it("does not offer invented effort levels when the model has no verified capability", async () => {
+    const client = createFakeClient(snapshot(), effortCommandCatalog);
+    client.getCurrentModel.mockResolvedValue({
+      provider: "example",
+      baseUrl: "https://example.test",
+      interfaceProvider: "openai-compatible",
+      model: "unknown-model",
+      reasoning: { status: "unknown", efforts: [] },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/effort");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) =>
+      frame.includes("No verified reasoning levels"),
+    );
+    app.stdin.write("\r");
+    await flush();
+    expect(client.updateSessionReasoning).not.toHaveBeenCalled();
     app.unmount();
   });
 

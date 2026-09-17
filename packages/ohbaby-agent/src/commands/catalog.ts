@@ -59,6 +59,18 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     title: "Connect Provider",
   },
   {
+    id: "effort",
+    path: ["effort"],
+    aliases: [],
+    argumentMode: "argv",
+    category: "model",
+    description: "Adjust reasoning effort for the current session",
+    parentBehavior: "interaction",
+    source: "builtin",
+    surfaces: ["tui"],
+    title: "Reasoning Effort",
+  },
+  {
     id: "goal",
     path: ["goal"],
     aliases: [],
