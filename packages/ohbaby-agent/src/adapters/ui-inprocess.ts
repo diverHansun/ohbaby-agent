@@ -1,3 +1,8 @@
+import {
+  coordinateModelConfig,
+  modelConfigVersion,
+} from "../config/llm/config-coordination.js";
+import { reloadLLMConfig } from "../config/llm/index.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { submitPromptAndWait as composeSubmitPromptAndWait } from "ohbaby-sdk";
@@ -162,6 +167,7 @@ import {
 import { InProcessEventRouter } from "./ui-inprocess/event-router.js";
 import {
   InProcessRuntimeController,
+  RuntimeSwitchPendingError,
   type RunStreamProjection,
 } from "./ui-inprocess/runtime-controller.js";
 import {
@@ -196,6 +202,7 @@ type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 type PromptOwner = "user" | "goal";
 
 type InternalSubmitPromptOptions = SubmitPromptOptions & {
+  readonly signal?: AbortSignal;
   readonly owner?: PromptOwner;
   readonly goalId?: string;
   readonly suppressGoalContextNote?: boolean;
@@ -479,8 +486,20 @@ export function createInProcessUiBackendClient(
   const pendingPermissionSessions = new Map<string, string>();
   const runtimeController = new InProcessRuntimeController({
     clearPendingPermissionsForRun,
+    ...(!options.llmClient
+      ? {
+          getConfigVersion: modelConfigVersion,
+          coordinateAdmission: <T>(work: () => Promise<T>): Promise<T> =>
+            coordinateModelConfig(undefined, work),
+        }
+      : {}),
+    onRuntimeReplaced: (): void => {
+      contextWindowUsage.clear();
+    },
     createRuntime: async (): Promise<UiRuntimeComposition> => {
       const baseProjectRoot = await resolveProjectRoot();
+      if (!options.llmClient && !options.createLLMClient)
+        await reloadLLMConfig({ projectDirectory: baseProjectRoot });
       const llmClient = await resolveLLMClient(baseProjectRoot);
       const skillRegistry = await getSkillRegistry();
       const runtimeRunIdFactory =
@@ -557,7 +576,9 @@ export function createInProcessUiBackendClient(
       options.projectDirectory ??
       process.cwd(),
     store: options.promptSubmissionStore ?? new InMemoryPromptSubmissionStore(),
-    isBusyError: (error): boolean => error instanceof SessionRunBusyError,
+    isBusyError: (error): boolean =>
+      error instanceof SessionRunBusyError ||
+      error instanceof RuntimeSwitchPendingError,
     onSubmitted(prompt): void {
       publish({
         type: "prompt.submitted",
@@ -575,6 +596,7 @@ export function createInProcessUiBackendClient(
     async execute(prompt, controls): Promise<PromptExecutionResult> {
       const completion = await submitPromptInternal(prompt.text, {
         owner: "user",
+        signal: controls.signal,
         sessionId: prompt.sessionId,
         reservedUserMessageId: prompt.userMessageId,
         onRunStarted: (runId) => controls.markRunning(runId),
@@ -1789,25 +1811,45 @@ export function createInProcessUiBackendClient(
     compactOptions: UiCompactSessionOptions = {},
   ): Promise<UiCompactSessionResult> {
     const target = await resolveCompactTarget(compactOptions);
-    const runtime = await runtimeController.getRuntimeForPrompt();
-    await runtime.setSessionWorkdir(target.sessionId, target.projectRoot);
-    const result = await runtime.compactSession({
-      force: compactOptions.force ?? true,
-      projectRoot: target.projectRoot,
-      sessionId: target.sessionId,
-    });
-    const usage = contextWindowUsage.updateFromContextUsage(
-      target.sessionId,
-      result.usageAfter,
-    );
-    if (usage) {
-      publish({ type: "context.window.updated", usage });
+    let admission:
+      | Awaited<ReturnType<typeof runtimeController.acquireRuntime>>
+      | undefined;
+    {
+      for (;;) {
+        try {
+          admission = await runtimeController.acquireRuntime(
+            Boolean(runtimeController.getActiveRunId(target.sessionId)),
+          );
+          break;
+        } catch (error) {
+          if (!(error instanceof RuntimeSwitchPendingError)) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
     }
+    const runtime = admission.runtime;
+    try {
+      await runtime.setSessionWorkdir(target.sessionId, target.projectRoot);
+      const result = await runtime.compactSession({
+        force: compactOptions.force ?? true,
+        projectRoot: target.projectRoot,
+        sessionId: target.sessionId,
+      });
+      const usage = contextWindowUsage.updateFromContextUsage(
+        target.sessionId,
+        result.usageAfter,
+      );
+      if (usage) {
+        publish({ type: "context.window.updated", usage });
+      }
 
-    return {
-      ...result,
-      sessionId: target.sessionId,
-    };
+      return {
+        ...result,
+        sessionId: target.sessionId,
+      };
+    } finally {
+      admission.release();
+    }
   }
 
   async function getContextWindowUsageInternal(input: {
@@ -1889,6 +1931,8 @@ export function createInProcessUiBackendClient(
       ...(todoWorkScopeId === undefined ? {} : { todoWorkScopeId }),
       runReady: false,
     };
+    submitOptions?.signal?.throwIfAborted();
+    const admission = await runtimeController.acquireRuntime();
     activePromptsBySession.set(promptSessionId, activePrompt);
     const createdAt = timestamp();
     let projection: RunStreamProjection | undefined;
@@ -1898,9 +1942,10 @@ export function createInProcessUiBackendClient(
     let todoWorkScopeLease: TodoWorkScopeLease | undefined;
 
     try {
+      submitOptions?.signal?.throwIfAborted();
       await assertCanUseAsPrimarySession(submitOptions?.sessionId);
       await reserveIdsFromState();
-      const runtime = await runtimeController.getRuntimeForPrompt();
+      const runtime = admission.runtime;
       promptRuntime = runtime;
       const agentName = runtime.agentManager.getDefault();
       const baseProjectRoot = await resolveProjectRoot();
@@ -2017,6 +2062,7 @@ export function createInProcessUiBackendClient(
 
       let startedRuntimeRunId: string | undefined;
       try {
+        submitOptions?.signal?.throwIfAborted();
         const result = await runtime.startSession({
           agentName,
           initialUserMessageId: userMessage.id,
@@ -2143,6 +2189,7 @@ export function createInProcessUiBackendClient(
         await options.afterPromptSubmitSettled?.();
       } finally {
         notifyPromptIdle(promptSessionId);
+        admission.release();
       }
     }
   }
@@ -2276,13 +2323,23 @@ export function createInProcessUiBackendClient(
     return `${note}\n\nCurrent user request:\n${input.text}`;
   }
 
-  async function connectModelInternal(
+  const pendingModelSaves = new Map<string, Promise<UiConnectModelResult>>();
+  function connectModelInternal(
     input: UiConnectModelInput,
   ): Promise<UiConnectModelResult> {
-    const isPromptRunning = (): boolean => activePromptsBySession.size > 0;
-    if (isPromptRunning()) {
-      throw new Error("Cannot save while running");
-    }
+    const key = JSON.stringify(input);
+    const pending = pendingModelSaves.get(key);
+    if (pending) return pending;
+    const save = saveModelConfig(input).finally(() =>
+      pendingModelSaves.delete(key),
+    );
+    pendingModelSaves.set(key, save);
+    return save;
+  }
+
+  async function saveModelConfig(
+    input: UiConnectModelInput,
+  ): Promise<UiConnectModelResult> {
     if (options.llmClient) {
       throw new Error("Connect model is unavailable for injected LLM clients");
     }
@@ -2298,10 +2355,6 @@ export function createInProcessUiBackendClient(
     );
 
     await previousSave.catch(() => undefined);
-    if (isPromptRunning()) {
-      releaseSave();
-      throw new Error("Cannot save while running");
-    }
 
     try {
       const projectRoot = await resolveProjectRoot();
@@ -2309,11 +2362,20 @@ export function createInProcessUiBackendClient(
         ...input,
         projectRoot,
       });
-      await runtimeController.resetRuntime();
-      contextWindowUsage.clear();
-      await publishSnapshotReplacement();
+      let warning = result.warning;
+      try {
+        await publishSnapshotReplacement();
+      } catch {
+        warning = [
+          warning,
+          "Configuration saved, but the current view could not reload; new runs may be temporarily unavailable.",
+        ]
+          .filter(Boolean)
+          .join(" ");
+      }
       return {
         ...result,
+        ...(warning === undefined ? {} : { warning }),
         interfaceProvider: input.interfaceProvider,
       };
     } finally {
@@ -2540,6 +2602,7 @@ export function createInProcessUiBackendClient(
   return {
     async dispose(): Promise<void> {
       acceptsPromptCacheUsage = false;
+      runtimeController.close();
       promptScheduler.close();
       interactionBroker.abortAll("daemon-stopping");
       eventRouter.dispose();

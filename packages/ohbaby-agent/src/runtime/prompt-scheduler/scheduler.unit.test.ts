@@ -44,6 +44,37 @@ async function settleWithin<T>(
 }
 
 describe("WorkspacePromptScheduler", () => {
+  it("cancels a starting admission before it can create a run", async () => {
+    const entered = deferred();
+    const gate = deferred();
+    const ran = vi.fn();
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "/workspace",
+      store: new InMemoryPromptSubmissionStore(),
+      async execute(_prompt, controls): Promise<{ status: "succeeded" }> {
+        entered.resolve();
+        await gate.promise;
+        controls.signal.throwIfAborted();
+        ran();
+        return { status: "succeeded" };
+      },
+    });
+    const prompt = await scheduler.accept({
+      clientRequestId: "cancel-starting",
+      sessionId: "session",
+      text: "hello",
+    });
+    await entered.promise;
+    expect((await scheduler.cancelQueued(prompt.promptId)).status).toBe(
+      "cancelled",
+    );
+    gate.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(ran).not.toHaveBeenCalled();
+    expect((await scheduler.get(prompt.promptId))?.status).toBe("cancelled");
+    scheduler.close();
+  });
+
   it("returns the same accepted prompt for an idempotent retry without republishing", async () => {
     const gate = deferred();
     const onSubmitted = vi.fn();

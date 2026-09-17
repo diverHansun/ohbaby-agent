@@ -174,6 +174,10 @@ export class RunManager {
     record.abortController.abort(reason);
   }
 
+  hasActiveWork(): boolean {
+    return this.activeBySession.size > 0;
+  }
+
   async cancelAll(reason = "run manager shutting down"): Promise<void> {
     const activeRecords = Array.from(this.recordsById.values()).filter(
       isActive,
@@ -316,7 +320,6 @@ export class RunManager {
       record.terminalReason =
         outcome.terminalReason ?? outcome.result?.terminalReason;
     } finally {
-      this.removeActive(record);
       if (record.sandboxLease) {
         try {
           await sandboxManager.release(record.sandboxLease);
@@ -326,6 +329,7 @@ export class RunManager {
       }
       this.publishRunUpdated(record);
       this.endStream(record);
+      this.removeActive(record);
     }
 
     return completion;

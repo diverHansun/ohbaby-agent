@@ -1013,6 +1013,14 @@ export async function createUiRuntimeComposition(
         .then(() => undefined);
     },
 
+    getActivityReasons(): readonly string[] {
+      return [
+        ...(runManager.hasActiveWork() ? ["active runs or run cleanup"] : []),
+        ...(subagentHost.hasActiveWork() ? ["background subagents"] : []),
+        ...(toolScheduler.getPendingCalls().length > 0 ? ["active tools"] : []),
+        ...(shellJobRegistry.hasActiveWork() ? ["background shell jobs"] : []),
+      ];
+    },
     async dispose(): Promise<void> {
       unsubscribeSessionRemoved();
       todoService.dispose();

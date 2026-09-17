@@ -87,7 +87,6 @@ export interface ConnectPanelProps {
 export function ConnectPanel({
   client,
   onClose,
-  runtime,
 }: ConnectPanelProps): ReactElement {
   const [draft, setDraft] = useState<ConnectDraft>(EMPTY_DRAFT);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -108,7 +107,6 @@ export function ConnectPanel({
 
   const selectedField =
     CONNECT_FIELDS[Math.min(selectedIndex, CONNECT_FIELDS.length - 1)];
-  const isRunning = runtime.kind === "running";
 
   const replaceEditValue = (nextValue: string): void => {
     editValueRef.current = nextValue;
@@ -199,9 +197,6 @@ export function ConnectPanel({
       latestSaveKeyRef.current = null;
       pendingSaveRef.current = null;
       setSaveState({ kind: "error", message: payload.message });
-      return;
-    }
-    if (isRunning) {
       return;
     }
 
@@ -331,7 +326,7 @@ export function ConnectPanel({
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <ConnectStatusLine isRunning={isRunning} saveState={saveState} />
+        <ConnectStatusLine saveState={saveState} />
       </Box>
     </Box>
   );
@@ -375,17 +370,12 @@ function ConnectFieldRow({
 }
 
 function ConnectStatusLine({
-  isRunning,
   saveState,
 }: {
-  readonly isRunning: boolean;
   readonly saveState: SaveState;
 }): ReactElement {
   const theme = useTheme();
 
-  if (isRunning) {
-    return <Text color={theme.status.warning}>running - save disabled</Text>;
-  }
   switch (saveState.kind) {
     case "saving":
       return <Text color={theme.status.running}>saving</Text>;

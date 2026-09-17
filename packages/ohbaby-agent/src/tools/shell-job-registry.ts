@@ -241,6 +241,10 @@ export class ShellJobRegistry {
     return this.snapshot(this.getOwnedJob(jobId, sessionId, contextScopeId));
   }
 
+  hasActiveWork(): boolean {
+    return [...this.jobs.values()].some((job) => job.status === "running");
+  }
+
   async waitForTerminal(
     jobId: string,
     sessionId: string,

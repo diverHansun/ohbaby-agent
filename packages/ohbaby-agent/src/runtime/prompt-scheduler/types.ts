@@ -125,6 +125,7 @@ export interface PromptSubmissionStore {
 }
 
 export interface PromptExecutionControls {
+  readonly signal: AbortSignal;
   markRunning(runId: string): Promise<void>;
 }
 

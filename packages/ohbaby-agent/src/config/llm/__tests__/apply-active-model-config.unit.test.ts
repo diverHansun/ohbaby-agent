@@ -71,6 +71,33 @@ describe("applyActiveModelConfig", () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
+  it("reports saved with a warning when persistence succeeds but reload fails", async () => {
+    const reload = vi
+      .spyOn(LLMConfigManager.getInstance(), "reload")
+      .mockRejectedValueOnce(new Error("reload unavailable"));
+    try {
+      const result = await applyActiveModelConfig({
+        provider: "test",
+        model: "saved-model",
+        baseUrl: "https://example.test/v1",
+        interfaceProvider: "openai-compatible",
+        projectRoot: tempRoot,
+        modelJsonPath,
+        envPath,
+      });
+      expect(result.saved).toBe(true);
+      expect(result.warning).toContain(
+        "Configuration saved, but reload failed",
+      );
+      const saved = JSON.parse(await fs.readFile(modelJsonPath, "utf8")) as {
+        defaultModel: string;
+      };
+      expect(saved.defaultModel).toBe("saved-model");
+    } finally {
+      reload.mockRestore();
+    }
+  });
+
   it("rejects a missing provider without writing model.json", async () => {
     await expect(
       applyActiveModelConfig({

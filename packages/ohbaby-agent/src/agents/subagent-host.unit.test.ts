@@ -165,6 +165,37 @@ function flushMicrotasks(): Promise<void> {
 }
 
 describe("SessionSubagentHost", () => {
+  it("counts a background child turn but not its completed record", async () => {
+    const { host, turn } = createHostFixture();
+    let release!: (result: AgentRunResult) => void;
+    turn.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    await host.run({
+      parentSessionId: "parent_1",
+      role: "explore",
+      prompt: "background",
+      mode: "background",
+    });
+    await vi.waitFor(() => {
+      expect(turn).toHaveBeenCalled();
+    });
+    expect(host.hasActiveWork()).toBe(true);
+    release({
+      finalOutput: "done",
+      mode: "waitForCompletion",
+      sessionId: "child_1",
+      success: true,
+    });
+    await vi.waitFor(() => {
+      expect(host.hasActiveWork()).toBe(false);
+    });
+    await host.dispose();
+  });
+
   it("uses the configured child model while retaining the parent reasoning intent", async () => {
     const { host, turn, createInstance, getRuntimeAgent } = createHostFixture({
       getParentReasoning: () => mergeReasoningIntent({ effort: "high" }),

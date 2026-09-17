@@ -11,6 +11,9 @@ export type { RunStreamProjection };
 
 export interface InProcessRuntimeControllerOptions {
   readonly clearPendingPermissionsForRun: (runId: string) => Promise<void>;
+  readonly coordinateAdmission?: <T>(work: () => Promise<T>) => Promise<T>;
+  readonly getConfigVersion?: () => Promise<string>;
+  readonly onRuntimeReplaced?: () => void;
   readonly createRuntime: () => Promise<UiRuntimeComposition>;
   readonly publishNotice: (notice: NoticeDraft) => void;
   readonly updateStatus: (status: UiRunStatus) => Promise<void>;
@@ -23,13 +26,95 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+export class RuntimeSwitchPendingError extends Error {}
+
 export class InProcessRuntimeController {
+  private admissionBarrier: Promise<void> = Promise.resolve();
+  private admittedWork = 0;
+  private closed = false;
+  private waitingMessage: string | undefined;
+
+  close(): void {
+    this.closed = true;
+  }
+  private runtimeVersion: string | undefined;
+
+  /** A rejected admission stays in the durable submission queue, outside runtime activity. */
+  async acquireRuntime(
+    useCurrent = false,
+  ): Promise<{ runtime: UiRuntimeComposition; release: () => void }> {
+    const previous = this.admissionBarrier;
+    let unlock!: () => void;
+    this.admissionBarrier = new Promise<void>((resolve) => {
+      unlock = resolve;
+    });
+    await previous;
+    try {
+      for (;;) {
+        if (this.closed) throw new Error("Runtime is shutting down");
+        // Runtime initialization/disposal may need the configuration lock themselves.
+        // Never await those operations while holding publication coordination.
+        const runtime = await this.getRuntimeForPrompt();
+        const admitted = await this.coordinate(async () => {
+          if (this.closed) throw new Error("Runtime is shutting down");
+          const version = useCurrent
+            ? this.runtimeVersion
+            : await this.options.getConfigVersion?.();
+          if (this.runtimeVersion !== version) {
+            const reasons = [...runtime.getActivityReasons()];
+            if (this.admittedWork > 0)
+              reasons.unshift("current tasks or context summaries");
+            if (reasons.length > 0) {
+              const message = `Waiting to switch model: ${reasons.join(", ")}`;
+              if (this.waitingMessage !== message)
+                this.options.publishNotice({
+                  key: "runtime:model-switch",
+                  level: "info",
+                  title: "Model saved",
+                  message,
+                });
+              this.waitingMessage = message;
+              throw new RuntimeSwitchPendingError(message);
+            }
+            return false;
+          }
+          this.waitingMessage = undefined;
+          this.admittedWork += 1;
+          return true;
+        });
+        if (!admitted) {
+          await this.resetRuntime();
+          this.options.onRuntimeReplaced?.();
+          continue;
+        }
+        let released = false;
+        return {
+          runtime,
+          release: (): void => {
+            if (!released) {
+              released = true;
+              this.admittedWork -= 1;
+            }
+          },
+        };
+      }
+    } finally {
+      unlock();
+    }
+  }
+
   private readonly activeRunSessionById = new Map<string, string>();
   private readonly activeRunBySession = new Map<string, string>();
   private resetBarrier: Promise<void> = Promise.resolve();
   private runtimePromise: Promise<UiRuntimeComposition> | undefined;
 
   constructor(private readonly options: InProcessRuntimeControllerOptions) {}
+
+  private coordinate<T>(work: () => Promise<T>): Promise<T> {
+    return this.options.coordinateAdmission
+      ? this.options.coordinateAdmission(work)
+      : work();
+  }
 
   getActiveRunId(sessionId?: string): string | undefined {
     if (sessionId !== undefined) {
@@ -75,7 +160,12 @@ export class InProcessRuntimeController {
       return this.runtimePromise;
     }
     const creation = this.resetBarrier
-      .then(() => this.options.createRuntime())
+      .then(() =>
+        this.coordinate(async () => {
+          this.runtimeVersion = await this.options.getConfigVersion?.();
+          return this.options.createRuntime();
+        }),
+      )
       .catch((error: unknown) => {
         if (this.runtimePromise === creation) {
           this.runtimePromise = undefined;

@@ -1,3 +1,4 @@
+import { runtimeEnvValue } from "../../utils/managed-runtime-env.js";
 import { createModelProfileRegistry } from "../../services/llm-model/modelProfiles.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
 import type { InterfaceProviderKind, ReasoningConfig } from "./types.js";
@@ -217,16 +218,19 @@ export async function applyActiveModelConfig(
     envPath,
   });
 
-  if (explicitApiKey !== undefined && apiKeyEnv !== undefined) {
-    process.env[apiKeyEnv] = explicitApiKey;
+  let reloadWarning: string | undefined;
+  try {
+    await reloadLLMConfig({
+      envPath,
+      modelJsonPath: writeResult.modelJsonPath,
+      projectDirectory: input.projectRoot,
+    });
+  } catch {
+    reloadWarning =
+      "Configuration saved, but reload failed; it is temporarily unavailable for new runs.";
   }
 
-  await reloadLLMConfig({
-    envPath,
-    modelJsonPath: writeResult.modelJsonPath,
-    projectDirectory: input.projectRoot,
-  });
-
+  const warning = combineWarnings(resolvedContextWindow.warning, reloadWarning);
   return {
     provider,
     baseUrl,
@@ -241,9 +245,7 @@ export async function applyActiveModelConfig(
     modelJsonPath: writeResult.modelJsonPath,
     envPath,
     saved: true,
-    ...(resolvedContextWindow.warning === undefined
-      ? {}
-      : { warning: resolvedContextWindow.warning }),
+    ...(warning === undefined ? {} : { warning }),
   };
 }
 
@@ -362,7 +364,7 @@ async function resolveApiKey(input: {
     input.envPath,
   );
   const existing = firstNonEmptyApiKey(
-    process.env[input.apiKeyEnv],
+    runtimeEnvValue(input.apiKeyEnv, process.env),
     envFile[input.apiKeyEnv],
   );
   if (existing === undefined) {

@@ -1,3 +1,10 @@
+import { setManagedRuntimeEnv } from "../../utils/managed-runtime-env.js";
+import {
+  coordinateModelConfig,
+  markModelConfigConsistent,
+  markModelConfigInconsistent,
+  readOptionalConfigFile,
+} from "./config-coordination.js";
 import * as fs from "node:fs/promises";
 import { getModelJsonPath } from "./loaders.js";
 import type {
@@ -182,6 +189,14 @@ function buildModelJson(
 export async function setActiveLLMConfig(
   input: SetActiveLLMConfigInput,
 ): Promise<SetActiveLLMConfigResult> {
+  return coordinateModelConfig(input.modelJsonPath, () =>
+    writeActiveConfig(input),
+  );
+}
+
+async function writeActiveConfig(
+  input: SetActiveLLMConfigInput,
+): Promise<SetActiveLLMConfigResult> {
   validateReasoningConfig(input.reasoning);
   const modelJsonPath = input.modelJsonPath ?? getModelJsonPath();
   const explicitApiKey = nonEmptyApiKey(input.apiKey);
@@ -199,18 +214,40 @@ export async function setActiveLLMConfig(
   const modelJson = buildModelJson(normalizedInput, existing);
 
   validateModelJson(modelJson);
-  await writeFileAtomically(
-    modelJsonPath,
-    `${JSON.stringify(modelJson, null, 2)}\n`,
-  );
-
-  if (
+  const originalModel = await readOptionalConfigFile(modelJsonPath);
+  const writesSecret =
     explicitApiKey !== undefined &&
     envPath !== undefined &&
-    apiKeyEnv !== undefined
-  ) {
-    await writeEnvSecret(envPath, apiKeyEnv, explicitApiKey);
+    apiKeyEnv !== undefined;
+  const originalEnv = writesSecret
+    ? await readOptionalConfigFile(envPath)
+    : undefined;
+  try {
+    await writeFileAtomically(
+      modelJsonPath,
+      `${JSON.stringify(modelJson, null, 2)}\n`,
+    );
+    if (writesSecret) await writeEnvSecret(envPath, apiKeyEnv, explicitApiKey);
+  } catch (error) {
+    try {
+      if (originalModel === undefined)
+        await fs.rm(modelJsonPath, { force: true });
+      else await writeFileAtomically(modelJsonPath, originalModel);
+      if (writesSecret) {
+        if (originalEnv === undefined) await fs.rm(envPath, { force: true });
+        else await writeFileAtomically(envPath, originalEnv);
+      }
+    } catch (rollbackError) {
+      markModelConfigInconsistent(modelJsonPath);
+      throw new Error(
+        "Model configuration partially saved; rollback failed and new runs are blocked until configuration is repaired.",
+        { cause: rollbackError },
+      );
+    }
+    throw error;
   }
+  markModelConfigConsistent(modelJsonPath);
+  if (writesSecret) setManagedRuntimeEnv(apiKeyEnv, explicitApiKey);
 
   return {
     provider: modelJson.provider,

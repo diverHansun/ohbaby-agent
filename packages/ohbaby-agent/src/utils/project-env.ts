@@ -1,3 +1,4 @@
+import { rememberManagedRuntimeEnv } from "./managed-runtime-env.js";
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
 import {
@@ -51,7 +52,13 @@ export async function loadRuntimeEnvIntoProcessEnv(
       : { onWarning: options.onWarning }),
   });
   const globalEnvPath = getGlobalEnvPath(options.homeDirectory);
-  loadDotenv({ path: globalEnvPath, override: false });
+  const beforeGlobal = { ...process.env };
+  const loadedGlobal = loadDotenv({ path: globalEnvPath, override: false });
+  for (const [name, value] of Object.entries(loadedGlobal.parsed ?? {})) {
+    if (beforeGlobal[name] === undefined && process.env[name] === value) {
+      rememberManagedRuntimeEnv(name, value);
+    }
+  }
 
   return {
     configMigrationReport,

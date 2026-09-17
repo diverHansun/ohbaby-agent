@@ -1,0 +1,152 @@
+[
+  {
+    "stage": "B",
+    "from": "zenmux-gpt56-luna-chat",
+    "to": "zenmux-gpt56-luna-responses",
+    "seededVerifiedCapabilities": true,
+    "timeline": [
+      "old-tool-waiting",
+      "new-model-saved",
+      "new-prompt-accepted",
+      "old-tool-released",
+      "old-completed",
+      "new-completed",
+      "resumed-old-session-completed"
+    ],
+    "completions": [
+      {
+        "session": "old",
+        "status": "succeeded"
+      },
+      {
+        "session": "new",
+        "status": "succeeded"
+      },
+      {
+        "session": "resumed-old-session",
+        "status": "succeeded"
+      }
+    ],
+    "result": "passed",
+    "httpRequests": 8,
+    "resumeChecks": {
+      "targetRouteAllRequests": true,
+      "firstReplayHasNoNative": true,
+      "oldNativeHashesExcluded": true,
+      "facts": {
+        "project": true,
+        "release": true,
+        "owner": true
+      }
+    },
+    "auxiliaryIssues": []
+  },
+  {
+    "stage": "B",
+    "from": "zenmux-gpt56-luna-responses",
+    "to": "zenmux-claude-sonnet5-anthropic",
+    "seededVerifiedCapabilities": true,
+    "timeline": [
+      "old-tool-waiting",
+      "new-model-saved",
+      "new-prompt-accepted",
+      "old-tool-released",
+      "old-completed",
+      "new-completed",
+      "resumed-old-session-completed"
+    ],
+    "completions": [
+      {
+        "session": "old",
+        "status": "succeeded"
+      },
+      {
+        "session": "new",
+        "status": "succeeded"
+      },
+      {
+        "session": "resumed-old-session",
+        "status": "succeeded"
+      }
+    ],
+    "result": "passed",
+    "httpRequests": 7,
+    "resumeChecks": {
+      "targetRouteAllRequests": true,
+      "firstReplayHasNoNative": true,
+      "oldNativeHashesExcluded": true,
+      "facts": {
+        "project": true,
+        "release": true,
+        "owner": true
+      }
+    },
+    "auxiliaryIssues": [
+      {
+        "context": {
+          "purpose": "session-title",
+          "id": 1
+        },
+        "status": 200,
+        "captureError": "response_stream"
+      },
+      {
+        "context": {
+          "purpose": "session-title",
+          "id": 4
+        },
+        "captureError": "transport"
+      }
+    ]
+  },
+  {
+    "stage": "B",
+    "from": "zenmux-claude-sonnet5-anthropic",
+    "to": "zenmux-gpt56-luna-chat",
+    "seededVerifiedCapabilities": true,
+    "timeline": [
+      "old-tool-waiting",
+      "new-model-saved",
+      "new-prompt-accepted",
+      "old-tool-released",
+      "old-completed",
+      "new-completed",
+      "resumed-old-session-completed"
+    ],
+    "completions": [
+      {
+        "session": "old",
+        "status": "succeeded"
+      },
+      {
+        "session": "new",
+        "status": "succeeded"
+      },
+      {
+        "session": "resumed-old-session",
+        "status": "succeeded"
+      }
+    ],
+    "result": "passed",
+    "httpRequests": 7,
+    "resumeChecks": {
+      "targetRouteAllRequests": true,
+      "firstReplayHasNoNative": true,
+      "oldNativeHashesExcluded": true,
+      "facts": {
+        "project": true,
+        "release": true,
+        "owner": true
+      }
+    },
+    "auxiliaryIssues": [
+      {
+        "context": {
+          "purpose": "session-title",
+          "id": 1
+        },
+        "captureError": "transport"
+      }
+    ]
+  }
+]

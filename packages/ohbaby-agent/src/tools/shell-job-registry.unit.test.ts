@@ -62,6 +62,21 @@ function startJob(
 }
 
 describe("ShellJobRegistry", () => {
+  it("counts background work until close drains its pipes, but ignores completed records", () => {
+    const child = new FakeChild();
+    const registry = new ShellJobRegistry({
+      createJobId: (): string => "activity",
+      killTree: vi.fn(),
+    });
+    expect(registry.hasActiveWork()).toBe(false);
+    startJob(registry, child);
+    expect(registry.hasActiveWork()).toBe(true);
+    child.emitExitOnly(0, null);
+    expect(registry.hasActiveWork()).toBe(true);
+    child.emit("close", 0, null);
+    expect(registry.hasActiveWork()).toBe(false);
+  });
+
   it("keeps a bounded tail and marks it truncated", () => {
     const child = new FakeChild();
     const registry = new ShellJobRegistry({

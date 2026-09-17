@@ -54,5 +54,6 @@ export interface UiRuntimeComposition {
     parentSessionId: string,
     reason?: string,
   ): Promise<void>;
+  getActivityReasons(): readonly string[];
   dispose(): Promise<void>;
 }

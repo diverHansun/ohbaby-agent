@@ -23,6 +23,7 @@ function runtime(
   } = {},
 ): UiRuntimeComposition {
   return {
+    getActivityReasons: (): readonly string[] => [],
     dispose: input.dispose ?? ((): Promise<void> => Promise.resolve()),
     interruptRunTree:
       input.interruptRunTree ?? ((): Promise<void> => Promise.resolve()),

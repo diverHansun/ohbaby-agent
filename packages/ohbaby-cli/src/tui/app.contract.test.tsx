@@ -3283,7 +3283,7 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
-  it("does not save /connect while runtime status is running", async () => {
+  it("saves /connect while runtime status is running", async () => {
     const client = createFakeClient(
       {
         ...snapshot(),
@@ -3309,8 +3309,8 @@ describe("OhbabyTerminalApp", () => {
     await submitConnectField(app, "anthropic/claude-sonnet-4.6");
     await flush();
 
-    expect(client.connectModel).not.toHaveBeenCalled();
-    expect(app.lastFrame()).toContain("running");
+    expect(client.connectModel).toHaveBeenCalled();
+    expect(app.lastFrame()).toContain("saved");
     app.unmount();
   });
 

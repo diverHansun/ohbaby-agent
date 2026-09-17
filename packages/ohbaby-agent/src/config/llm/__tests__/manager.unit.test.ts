@@ -39,6 +39,10 @@ describe("LLMConfigManager", () => {
     // Reset singleton instance before each test
     LLMConfigManager.resetInstance();
     vi.resetAllMocks();
+    vi.mocked(loaders.getModelJsonPath).mockReturnValue(
+      "/tmp/ohbaby-manager-test-model.json",
+    );
+    vi.mocked(loaders.loadEnvFile).mockResolvedValue({});
     process.env = { ...originalEnv };
     process.env.OPENAI_API_KEY = "sk-test-key-123";
   });

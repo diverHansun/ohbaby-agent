@@ -1,3 +1,9 @@
+import { runtimeEnvValue } from "../../utils/managed-runtime-env.js";
+import { getGlobalEnvPath } from "../../utils/project-env.js";
+import {
+  coordinateModelConfig,
+  assertModelConfigConsistent,
+} from "./config-coordination.js";
 import { inferConnectModelInterfaceProvider } from "ohbaby-sdk";
 /**
  * LLM Configuration Manager.
@@ -88,6 +94,15 @@ class LLMConfigManager {
    * @throws {ConfigError} If configuration is invalid or missing
    */
   async load(options: LLMConfigLoadOptions = {}): Promise<LLMConfig> {
+    return coordinateModelConfig(options.modelJsonPath, () =>
+      this.loadCoordinated(options),
+    );
+  }
+
+  private async loadCoordinated(
+    options: LLMConfigLoadOptions,
+  ): Promise<LLMConfig> {
+    assertModelConfigConsistent(options.modelJsonPath);
     const resolvedOptions = this.resolveOptions(options);
     if (
       this.cachedConfig?.projectDirectory ===
@@ -109,9 +124,12 @@ class LLMConfigManager {
    * @throws {ConfigError} If configuration is invalid or missing
    */
   async reload(options: LLMConfigLoadOptions = {}): Promise<LLMConfig> {
-    this.cachedConfig = null;
-    this.lastError = null;
-    return this.performLoad(this.resolveOptions(options));
+    return coordinateModelConfig(options.modelJsonPath, async () => {
+      assertModelConfigConsistent(options.modelJsonPath);
+      this.cachedConfig = null;
+      this.lastError = null;
+      return this.performLoad(this.resolveOptions(options));
+    });
   }
 
   async setActive(
@@ -174,9 +192,16 @@ class LLMConfigManager {
       // Load API key from environment when configured.
       const apiKeyEnvName = modelJson.apiConfig.apiKeyEnv;
       const envFileValues =
-        apiKeyEnvName === undefined || options.envPath === undefined
+        apiKeyEnvName === undefined
           ? {}
-          : await loadEnvFile(options.envPath);
+          : {
+              ...(runtimeEnvValue(apiKeyEnvName, options.env) === undefined
+                ? await loadEnvFile(getGlobalEnvPath())
+                : {}),
+              ...(options.envPath === undefined
+                ? {}
+                : await loadEnvFile(options.envPath)),
+            };
       const apiKey =
         apiKeyEnvName === undefined
           ? OPTIONAL_API_KEY_PLACEHOLDER
@@ -244,7 +269,11 @@ function loadConfiguredApiKey(
   env: NodeJS.ProcessEnv,
   envFileValues: Record<string, string>,
 ): string | undefined {
-  const envValue = firstNonEmptyApiKey(loadApiKey(envVarName, env));
+  const effectiveEnv =
+    runtimeEnvValue(envVarName, env) === env[envVarName]
+      ? env
+      : { ...env, [envVarName]: undefined };
+  const envValue = firstNonEmptyApiKey(loadApiKey(envVarName, effectiveEnv));
   if (envValue !== undefined) {
     return envValue;
   }

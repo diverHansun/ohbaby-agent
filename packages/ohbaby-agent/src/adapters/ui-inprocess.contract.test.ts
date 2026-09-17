@@ -2637,22 +2637,26 @@ describe("createInProcessUiBackendClient", () => {
         sessionId: "session_1",
       });
       expect(afterReset.promptCacheUsage).toEqual(beforeReset.promptCacheUsage);
-      expect(contexts).toHaveLength(2);
-      const newContext = contexts[1];
-      expect(newContext).not.toBe(oldContext);
-      expect(calibrationCalls.get(newContext)?.()).toEqual([]);
-      expect(
-        await client.getContextWindowUsage({ sessionId: "session_1" }),
-      ).toMatchObject({
-        modelId: "new-model",
-        contextWindowTokens: 256_000,
-      });
       const resumed = await client.submitPromptAndWait(
         "Measure after model switch",
         {
           sessionId: "session_1",
         },
       );
+      expect(contexts).toHaveLength(2);
+      const newContext = contexts[1];
+      expect(newContext).not.toBe(oldContext);
+      expect(calibrationCalls.get(newContext)?.()).not.toContainEqual([
+        "session_1",
+        300,
+        100,
+      ]);
+      expect(
+        await client.getContextWindowUsage({ sessionId: "session_1" }),
+      ).toMatchObject({
+        modelId: "new-model",
+        contextWindowTokens: 256_000,
+      });
       expect(resumed.prompt.status).toBe("succeeded");
       const newPreparations = preparations.filter(
         (item) => item.manager === newContext,
@@ -2827,7 +2831,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("rejects connectModel while a prompt is running", async () => {
+  it("rejects connectModel for injected clients even while running", async () => {
     const release = createDeferred<undefined>();
     const client = createInProcessUiBackendClient({
       llmClient: createBlockingLLMClient(release.promise),
@@ -2849,7 +2853,7 @@ describe("createInProcessUiBackendClient", () => {
         model: "anthropic/claude-sonnet-4.6",
         provider: "zenmux",
       }),
-    ).rejects.toThrow("Cannot save while running");
+    ).rejects.toThrow("Connect model is unavailable for injected LLM clients");
 
     release.resolve(undefined);
     await prompt;

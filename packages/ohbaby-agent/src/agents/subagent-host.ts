@@ -349,6 +349,18 @@ export class SessionSubagentHost {
     });
   }
 
+  hasActiveWork(): boolean {
+    return (
+      this.settlingTurns.size > 0 ||
+      [...this.active.values()].some(
+        (active) =>
+          active.running ||
+          active.queue.length > 0 ||
+          active.pendingSettlement !== undefined,
+      )
+    );
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) {
       return;

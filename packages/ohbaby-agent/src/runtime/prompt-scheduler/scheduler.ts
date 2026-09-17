@@ -70,6 +70,7 @@ function runtimeError(error: unknown): UiPromptError {
 }
 
 export class WorkspacePromptScheduler {
+  private readonly startingControllers = new Map<string, AbortController>();
   private readonly activeBySession = new Map<string, string>();
   private readonly completionWaiters = new Map<string, Set<CompletionWaiter>>();
   private readonly busySessionsUntil = new Map<string, number>();
@@ -255,6 +256,17 @@ export class WorkspacePromptScheduler {
     ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
     this.assertOpen();
+    const starting = this.startingControllers.get(promptId);
+    if (starting) {
+      // Stop an admission that has not completed the run-start handshake.
+      starting.abort("Queued prompt cancelled");
+      const cancelled = await this.options.store.finish(promptId, {
+        status: "cancelled",
+      });
+      this.options.onUpdated?.(cancelled);
+      this.resolveCompletion(cancelled);
+      return cancelled;
+    }
     const prompt = await this.options.store.cancelQueued(
       promptId,
       editLeaseId,
@@ -347,6 +359,8 @@ export class WorkspacePromptScheduler {
   }
 
   close(): void {
+    for (const controller of this.startingControllers.values())
+      controller.abort("Scheduler closed");
     if (this.closed) {
       return;
     }
@@ -464,13 +478,19 @@ export class WorkspacePromptScheduler {
   }
 
   private async executeClaimed(prompt: PromptSubmissionRecord): Promise<void> {
+    const starting = new AbortController();
+    const isStartingCancelled = (): boolean => starting.signal.aborted;
+    this.startingControllers.set(prompt.promptId, starting);
     let runId: string | undefined;
     let runningPersistenceError: Error | undefined;
     try {
       let result;
       try {
         result = await this.options.execute(prompt, {
+          signal: starting.signal,
           markRunning: async (nextRunId): Promise<void> => {
+            starting.signal.throwIfAborted();
+            this.startingControllers.delete(prompt.promptId);
             try {
               const running = await this.options.store.markRunning(
                 prompt.promptId,
@@ -486,6 +506,7 @@ export class WorkspacePromptScheduler {
           },
         });
       } catch (error) {
+        if (isStartingCancelled()) return;
         if (runningPersistenceError) {
           this.fault(runningPersistenceError);
           return;
@@ -495,13 +516,14 @@ export class WorkspacePromptScheduler {
             const queued = await this.options.store.requeueBusy(
               prompt.promptId,
             );
+            if (isStartingCancelled()) return;
             this.options.onUpdated?.(queued);
             this.busySessionsUntil.set(
               prompt.sessionId,
               Date.now() + (this.options.busyRetryDelayMs ?? 250),
             );
           } catch (storageError) {
-            this.fault(storageError);
+            if (!isStartingCancelled()) this.fault(storageError);
           }
           return;
         }
@@ -520,6 +542,7 @@ export class WorkspacePromptScheduler {
         return;
       }
 
+      if (isStartingCancelled()) return;
       try {
         const finished = await this.options.store.finish(prompt.promptId, {
           ...result,
@@ -531,6 +554,7 @@ export class WorkspacePromptScheduler {
         this.fault(storageError);
       }
     } finally {
+      this.startingControllers.delete(prompt.promptId);
       if (this.activeBySession.get(prompt.sessionId) === prompt.promptId) {
         this.activeBySession.delete(prompt.sessionId);
       }
