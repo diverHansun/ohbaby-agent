@@ -9,7 +9,7 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "dev": "pnpm --filter ohbaby-agent dev",
+    "dev": "pnpm -r --filter \"ohbaby-cli^...\" --sort build && pnpm --filter ohbaby-cli dev",
     "dev:inspect": "pnpm --filter ohbaby-agent dev:inspect",
     "start": "pnpm --filter ohbaby-cli start",
     "build": "pnpm -r --workspace-concurrency=1 --filter \"./packages/**\" --filter \"./apps/**\" --sort build",
