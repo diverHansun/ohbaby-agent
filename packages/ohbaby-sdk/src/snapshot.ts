@@ -1,3 +1,4 @@
+import type { UiReasoningConfig } from "./connect-model.js";
 import type { UiContextWindowUsage } from "./context-window.js";
 import type { UiPromptSubmission } from "./prompt.js";
 
@@ -83,6 +84,7 @@ export interface UiSessionGoal {
 }
 
 export interface UiSession {
+  readonly reasoning?: UiReasoningConfig;
   readonly id: string;
   readonly title: string;
   readonly projectRoot?: string;

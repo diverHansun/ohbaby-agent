@@ -1,0 +1,76 @@
+{
+  "stage": "C",
+  "date": "2026-09-17",
+  "branch": "codex/improve-8-regression",
+  "credential": "ZENMUX_API_KEY from local .env; value omitted",
+  "requestLimitPerRun": 20,
+  "runs": [
+    {
+      "profile": "zenmux-gpt56-luna-chat",
+      "protocol": "openai-compatible",
+      "model": "openai/gpt-5.6-luna",
+      "result": "passed",
+      "metadataHttp": [200],
+      "generationHttp": [200, 200, 200, 200, 200, 200],
+      "agentStepHttp": [200, 200, 200, 200],
+      "toolExchangeValid": true,
+      "nativeReplayExercised": true,
+      "nativeReplayValid": true,
+      "sessionChoiceRestored": true,
+      "cleanupErrors": []
+    },
+    {
+      "profile": "zenmux-gpt56-luna-responses",
+      "protocol": "openai-responses",
+      "model": "openai/gpt-5.6-luna",
+      "result": "passed",
+      "metadataHttp": [200],
+      "generationHttp": [200, 200, 200, 200, 200, 200],
+      "agentStepHttp": [200, 200, 200, 200],
+      "toolExchangeValid": true,
+      "nativeReplayExercised": true,
+      "nativeReplayValid": true,
+      "sessionChoiceRestored": true,
+      "cleanupErrors": []
+    },
+    {
+      "profile": "zenmux-claude-sonnet5-anthropic",
+      "protocol": "anthropic",
+      "model": "anthropic/claude-sonnet-5",
+      "result": "passed with auxiliary title transport failures",
+      "metadataHttp": [200],
+      "generationHttp": [null, 200, 200, null, 200, 200],
+      "generationCaptureErrors": ["transport", "transport"],
+      "agentStepHttp": [200, 200, 200, 200],
+      "toolExchangeValid": true,
+      "nativeReplayExercised": true,
+      "nativeReplayValid": true,
+      "sessionChoiceRestored": true,
+      "cleanupErrors": []
+    },
+    {
+      "profile": "zenmux-gpt56-luna-responses-unknown-capabilities",
+      "protocol": "openai-responses",
+      "model": "openai/gpt-5.6-luna",
+      "result": "passed",
+      "metadata": "controlled exact-model/window fixture with reasoning fields absent",
+      "generation": "real provider",
+      "metadataFixtureCalls": 1,
+      "generationHttp": [200, 200, 200, 200],
+      "agentStepHttp": [200, 200, 200],
+      "reasoningControlFields": [],
+      "encryptedReasoningInclude": true,
+      "toolExchangeValid": true,
+      "nativeReplayExercised": true,
+      "nativeReplayValid": true,
+      "sessionPreferenceRestored": "high",
+      "cleanupErrors": []
+    }
+  ],
+  "scope": "Empty configuration through public REST save; real model/tool turns; independent session preferences and SQLite reopen. Unknown-capability metadata alone was controlled.",
+  "limits": [
+    "Anthropic auxiliary title requests had two transport failures without HTTP status; all main agent-step requests returned HTTP 200.",
+    "Web browser and TUI end-to-end interaction remain Stage D.",
+    "The prior improve-6 natural 95% context occupancy and real upstream overflow cases remain untested."
+  ]
+}

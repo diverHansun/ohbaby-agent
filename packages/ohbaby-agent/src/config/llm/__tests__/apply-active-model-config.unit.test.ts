@@ -304,7 +304,7 @@ describe("applyActiveModelConfig", () => {
       envPath,
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       contextWindowSource: "detected",
       contextWindowTokens: 200_000,
     });
@@ -513,7 +513,7 @@ describe("applyActiveModelConfig", () => {
       model: "anthropic/claude-sonnet-4.6",
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       contextWindowSource: "detected",
       contextWindowTokens: 200_000,
     });

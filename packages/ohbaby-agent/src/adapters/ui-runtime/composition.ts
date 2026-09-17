@@ -925,7 +925,10 @@ export async function createUiRuntimeComposition(
     async compactSession(input): Promise<CompactResult> {
       const reasoning =
         runManager.getActiveReasoning(input.sessionId) ??
-        mergeReasoningIntent(options.llmClient.config.reasoning);
+        mergeReasoningIntent(
+          options.llmClient.config.reasoning,
+          input.reasoning,
+        );
       const resolved = await resolvePrimaryContextTools({
         operation: "manually compact context",
         sessionId: input.sessionId,

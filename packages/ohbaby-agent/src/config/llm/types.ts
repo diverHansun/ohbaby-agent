@@ -27,6 +27,9 @@ export interface ReasoningCapabilities {
     | "reasoning";
   readonly supportsDisabled: boolean;
   readonly efforts?: readonly string[];
+  /** Explicit weak-to-strong order for vendor labels. */
+  readonly effortOrder?: readonly string[];
+  readonly defaultEffort?: string;
   readonly effortMap?: Readonly<Record<string, string>>;
   readonly budgets?: Readonly<Record<string, number>>;
   readonly minBudgetTokens?: number;
@@ -91,6 +94,7 @@ export interface ModelJsonModelProfile {
   interfaceProvider?: InterfaceProviderKind;
   baseUrl?: string;
   reasoningCapabilities?: ReasoningCapabilities;
+  reasoningCapabilitySource?: "model-metadata";
 
   /** Display label for UI model lists */
   label?: string;

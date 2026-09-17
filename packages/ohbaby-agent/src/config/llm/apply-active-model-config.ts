@@ -1,14 +1,28 @@
+import {
+  reasoningCapabilityView,
+  capabilitiesFor,
+} from "../../services/interface-providers/reasoning.js";
+import type { UiReasoningCapabilityView } from "ohbaby-sdk";
+import { normalizedEndpoint } from "./model-profile.js";
+import {
+  coordinateModelConfig,
+  modelConfigVersion,
+  outsideModelConfigCoordination,
+} from "./config-coordination.js";
+import { getModelJsonPath } from "./loaders.js";
+import { resolve } from "node:path";
 import { runtimeEnvValue } from "../../utils/managed-runtime-env.js";
 import { createModelProfileRegistry } from "../../services/llm-model/modelProfiles.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
 import type { InterfaceProviderKind, ReasoningConfig } from "./types.js";
 import { ConfigError } from "./types.js";
-import { validateReasoningConfig } from "./validation.js";
+import { validateReasoningConfig, validateModelJson } from "./validation.js";
 import {
   probeContextWindow,
   type ContextWindowSource,
+  type ProbeContextWindowResult,
 } from "./context-window-probe.js";
-import { loadEnvFile } from "./loaders.js";
+import { loadEnvFile, loadModelJson } from "./loaders.js";
 import { reloadLLMConfig, setActiveLLMConfig } from "./index.js";
 import {
   defaultApiKeyEnvForProvider,
@@ -32,6 +46,8 @@ interface ResolvedApiKey {
 
 export interface ApplyActiveModelConfigInput {
   readonly reasoning?: ReasoningConfig;
+  readonly deferMetadata?: boolean;
+  readonly onDiscovery?: () => void | Promise<void>;
   readonly temperature?: number;
   readonly provider?: string;
   readonly baseUrl: string;
@@ -62,6 +78,9 @@ export interface ApplyActiveModelConfigResult {
 }
 
 export interface ProbeActiveModelContextWindowInput {
+  readonly modelJsonPath?: string;
+  readonly projectRoot?: string;
+  readonly onDiscovery?: () => void | Promise<void>;
   readonly provider?: string;
   readonly baseUrl: string;
   readonly interfaceProvider: InterfaceProviderKind;
@@ -74,6 +93,7 @@ export interface ProbeActiveModelContextWindowInput {
 }
 
 export interface ProbeActiveModelContextWindowResult {
+  readonly reasoning?: UiReasoningCapabilityView;
   readonly contextWindowTokens: number;
   readonly contextWindowSource: ContextWindowSource;
   readonly warning?: string;
@@ -101,21 +121,104 @@ export async function probeActiveModelContextWindow(
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     envPath,
   });
-  const probe = await probeContextWindow({
-    apiKey: apiKey.value,
-    baseUrl,
-    interfaceProvider,
-    model,
-  });
-
-  return withWarning(
-    resolveContextWindow({
-      detectedContextWindowTokens: probe.contextWindowTokens,
-      probeWarning: probe.warning,
-      userContextWindowTokens: contextWindowTokens,
-    }),
-    apiKey.warning,
+  const modelJsonPath = input.modelJsonPath ?? getModelJsonPath();
+  let current;
+  try {
+    const raw = await loadModelJson({ modelJsonPath });
+    validateModelJson(raw);
+    current = raw;
+  } catch {
+    /* A draft can be probed before any model is saved. */
+  }
+  const currentKey = current
+    ? await resolveApiKey({ apiKeyEnv: current.apiConfig.apiKeyEnv, envPath })
+    : undefined;
+  const matches =
+    // eslint-disable-next-line @typescript-eslint/prefer-optional-chain -- Explicit guard preserves narrowing across all route fields.
+    current !== undefined &&
+    (input.provider ?? current.provider) === current.provider &&
+    current.defaultModel === model &&
+    normalizedEndpoint(current.apiConfig.baseUrl) ===
+      normalizedEndpoint(baseUrl) &&
+    (current.apiConfig.interfaceProvider ?? "openai-compatible") ===
+      interfaceProvider &&
+    currentKey?.value === apiKey.value;
+  const probe =
+    matches && current
+      ? await startModelDiscovery({
+          provider: current.provider,
+          model,
+          baseUrl,
+          interfaceProvider,
+          apiKey: apiKey.value,
+          apiKeyEnv: current.apiConfig.apiKeyEnv,
+          modelJsonPath,
+          envPath,
+          projectRoot: input.projectRoot ?? process.cwd(),
+          contextWindowTokens:
+            current.llmParams.contextWindowTokens ??
+            DEFAULT_CONTEXT_WINDOW_TOKENS,
+          maxOutputTokens: current.llmParams.maxTokens,
+          version: await modelConfigVersion(modelJsonPath, envPath),
+          onDiscovery: input.onDiscovery,
+        })
+      : await probeContextWindow({
+          apiKey: apiKey.value,
+          baseUrl,
+          interfaceProvider,
+          model,
+        });
+  const hasExplicitProfile =
+    matches &&
+    current &&
+    capabilitiesFor({
+      provider: current.provider,
+      model,
+      baseUrl,
+      interfaceProvider,
+      maxTokens: current.llmParams.maxTokens,
+      modelProfiles: current.models,
+    }).source === "local-model-profile";
+  const reasoning = reasoningCapabilityView(
+    {
+      provider: input.provider ?? current?.provider ?? "custom",
+      baseUrl,
+      model,
+      interfaceProvider,
+      maxTokens: input.maxOutputTokens ?? current?.llmParams.maxTokens ?? 4096,
+      modelProfiles: hasExplicitProfile
+        ? current?.models
+        : probe.reasoningCapabilities
+          ? [
+              {
+                model,
+                contextWindowTokens:
+                  probe.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
+                reasoningCapabilities: probe.reasoningCapabilities,
+                reasoningCapabilitySource: "model-metadata",
+              },
+            ]
+          : matches && current
+            ? current.models
+            : undefined,
+    },
+    {
+      status: probe.reasoningCapabilities ? "identified" : "unknown",
+      reason: probe.reasoningReason,
+    },
   );
+
+  return {
+    ...withWarning(
+      resolveContextWindow({
+        detectedContextWindowTokens: probe.contextWindowTokens,
+        probeWarning: probe.warning,
+        userContextWindowTokens: contextWindowTokens,
+      }),
+      apiKey.warning,
+    ),
+    reasoning,
+  };
 }
 
 function withWarning<T extends { readonly warning?: string }>(
@@ -171,12 +274,14 @@ export async function applyActiveModelConfig(
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     envPath,
   });
-  const probe = await probeContextWindow({
-    apiKey: apiKey.value,
-    baseUrl,
-    interfaceProvider,
-    model,
-  });
+  const probe = input.deferMetadata
+    ? {}
+    : await probeContextWindow({
+        apiKey: apiKey.value,
+        baseUrl,
+        interfaceProvider,
+        model,
+      });
   const resolvedContextWindow = withWarning(
     resolveContextWindow({
       detectedContextWindowTokens: probe.contextWindowTokens,
@@ -208,6 +313,7 @@ export async function applyActiveModelConfig(
           maxTokens: resolvedMaxOutputTokens,
         }),
     updateActiveModelProfile: true,
+    clearDiscoveredReasoning: input.deferMetadata,
     ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
     ...(input.temperature === undefined
       ? {}
@@ -217,6 +323,28 @@ export async function applyActiveModelConfig(
       : { modelJsonPath: input.modelJsonPath }),
     envPath,
   });
+
+  if (input.deferMetadata) {
+    const version = await modelConfigVersion(
+      writeResult.modelJsonPath,
+      envPath,
+    );
+    void startModelDiscovery({
+      provider,
+      model,
+      baseUrl,
+      interfaceProvider,
+      apiKey: apiKey.value,
+      apiKeyEnv,
+      modelJsonPath: writeResult.modelJsonPath,
+      envPath,
+      projectRoot: input.projectRoot,
+      contextWindowTokens: resolvedContextWindow.contextWindowTokens,
+      maxOutputTokens: resolvedMaxOutputTokens,
+      version,
+      onDiscovery: input.onDiscovery,
+    });
+  }
 
   let reloadWarning: string | undefined;
   try {
@@ -374,4 +502,119 @@ async function resolveApiKey(input: {
     };
   }
   return { value: existing };
+}
+
+interface ActiveDiscovery {
+  readonly controller: AbortController;
+  version: string;
+  status: "detecting" | "identified" | "unknown";
+  reason?: string;
+}
+const activeDiscoveries = new Map<string, ActiveDiscovery>();
+export async function currentDiscoveryState(
+  modelPath = getModelJsonPath(),
+  envPath = getGlobalEnvPath(),
+): Promise<
+  | { status: "detecting" | "identified" | "unknown"; reason?: string }
+  | undefined
+> {
+  const state = activeDiscoveries.get(resolve(modelPath));
+  return state?.version === (await modelConfigVersion(modelPath, envPath))
+    ? {
+        status: state.status,
+        ...(state.reason ? { reason: state.reason } : {}),
+      }
+    : undefined;
+}
+function startModelDiscovery(input: {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  interfaceProvider: InterfaceProviderKind;
+  apiKey: string;
+  apiKeyEnv?: string;
+  modelJsonPath: string;
+  envPath: string;
+  projectRoot: string;
+  contextWindowTokens: number;
+  maxOutputTokens?: number;
+  version: string;
+  onDiscovery?: () => void | Promise<void>;
+}): Promise<ProbeContextWindowResult> {
+  const key = resolve(input.modelJsonPath);
+  activeDiscoveries.get(key)?.controller.abort();
+  const state: ActiveDiscovery = {
+    controller: new AbortController(),
+    version: input.version,
+    status: "detecting",
+  };
+  activeDiscoveries.set(key, state);
+  // Start after the saving turn: never inherit a live publication lock into network work.
+  return new Promise((resolveResult) =>
+    outsideModelConfigCoordination(() =>
+      setTimeout(() => {
+        void (async (): Promise<ProbeContextWindowResult> => {
+          const probe = await probeContextWindow({
+            ...input,
+            signal: state.controller.signal,
+          });
+          await coordinateModelConfig(input.modelJsonPath, async () => {
+            if (
+              activeDiscoveries.get(key) !== state ||
+              state.controller.signal.aborted ||
+              (await modelConfigVersion(input.modelJsonPath, input.envPath)) !==
+                input.version
+            )
+              return;
+            if (probe.reasoningCapabilities || probe.contextWindowTokens) {
+              await setActiveLLMConfig({
+                provider: input.provider,
+                model: input.model,
+                baseUrl: input.baseUrl,
+                interfaceProvider: input.interfaceProvider,
+                apiKeyEnv: input.apiKeyEnv,
+                modelJsonPath: input.modelJsonPath,
+                envPath: input.envPath,
+                contextWindowTokens:
+                  probe.contextWindowTokens ?? input.contextWindowTokens,
+                maxOutputTokens: input.maxOutputTokens,
+                updateActiveModelProfile: true,
+                discoveredReasoningCapabilities: probe.reasoningCapabilities,
+              });
+              state.version = await modelConfigVersion(
+                input.modelJsonPath,
+                input.envPath,
+              );
+              await reloadLLMConfig({
+                modelJsonPath: input.modelJsonPath,
+                envPath: input.envPath,
+                projectDirectory: input.projectRoot,
+              });
+            }
+            state.status = probe.reasoningCapabilities
+              ? "identified"
+              : "unknown";
+            state.reason = probe.reasoningReason;
+          });
+          if (
+            activeDiscoveries.get(key) === state &&
+            !state.controller.signal.aborted
+          )
+            await input.onDiscovery?.();
+          return probe;
+        })().then(resolveResult, async () => {
+          if (activeDiscoveries.get(key) === state) {
+            state.status = "unknown";
+            state.reason = "discovery-failed";
+            try {
+              await input.onDiscovery?.();
+            } catch {
+              /* View refresh failure must not create an unhandled rejection. */
+            }
+          }
+          resolveResult({ reasoningReason: "network-error" });
+        });
+      }, 0),
+    ),
+  );
 }

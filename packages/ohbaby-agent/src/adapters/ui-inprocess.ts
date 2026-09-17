@@ -1,3 +1,11 @@
+import type { ResolveRequestReasoningOptions } from "../services/interface-providers/reasoning.js";
+import { validateReasoningConfig } from "../config/llm/validation.js";
+import type { ReasoningConfig } from "../config/llm/types.js";
+import {
+  reasoningCapabilityView,
+  resolveRequestReasoning,
+} from "../services/interface-providers/reasoning.js";
+import { currentDiscoveryState } from "../config/llm/apply-active-model-config.js";
 import {
   coordinateModelConfig,
   modelConfigVersion,
@@ -599,6 +607,7 @@ export function createInProcessUiBackendClient(
         signal: controls.signal,
         sessionId: prompt.sessionId,
         reservedUserMessageId: prompt.userMessageId,
+        reasoning: prompt.reasoning,
         onRunStarted: (runId) => controls.markRunning(runId),
       });
       return runCompletionToPromptExecutionResult(completion);
@@ -715,7 +724,9 @@ export function createInProcessUiBackendClient(
     ) {
       implicitAdmissionSessionId = undefined;
     }
+    validateReasoningConfig(submitOptions?.reasoning);
     const accepted = await promptScheduler.accept({
+      reasoning: submitOptions?.reasoning ?? sessionReasoningPreference,
       clientRequestId: submitOptions?.clientRequestId,
       expectedSessionId: submitOptions?.sessionId,
       sessionId:
@@ -1355,18 +1366,105 @@ export function createInProcessUiBackendClient(
 
   async function currentConnectModelFromOptions(): Promise<UiCurrentModelConfig | null> {
     if (options.llmClient) {
-      return connectModelConfigFromRuntimeConfig(options.llmClient.config);
+      return {
+        ...connectModelConfigFromRuntimeConfig(options.llmClient.config),
+        reasoning: reasoningCapabilityView(options.llmClient.config),
+      };
     }
     try {
       const rawConfig = await loadModelJson();
       validateModelJson(rawConfig);
-      return connectModelConfigFromModelJson(rawConfig);
+      return {
+        ...connectModelConfigFromModelJson(rawConfig),
+        reasoning: reasoningCapabilityView(
+          {
+            provider: rawConfig.provider,
+            model: rawConfig.defaultModel,
+            baseUrl: rawConfig.apiConfig.baseUrl,
+            interfaceProvider:
+              rawConfig.apiConfig.interfaceProvider ?? "openai-compatible",
+            maxTokens: rawConfig.llmParams.maxTokens,
+            modelProfiles: rawConfig.models,
+          },
+          await currentDiscoveryState(),
+        ),
+      };
     } catch (error) {
       if (error instanceof ConfigError && error.code === "FILE_NOT_FOUND") {
         return null;
       }
       throw error;
     }
+  }
+
+  async function currentReasoningOptions(): Promise<ResolveRequestReasoningOptions> {
+    if (options.llmClient) return options.llmClient.config;
+    const raw = await loadModelJson();
+    validateModelJson(raw);
+    return {
+      provider: raw.provider,
+      model: raw.defaultModel,
+      baseUrl: raw.apiConfig.baseUrl,
+      interfaceProvider:
+        raw.apiConfig.interfaceProvider ?? ("openai-compatible" as const),
+      maxTokens: raw.llmParams.maxTokens,
+      modelProfiles: raw.models,
+    };
+  }
+  async function sessionReasoningPreference(
+    sessionId: string,
+  ): Promise<ReasoningConfig | undefined> {
+    const core = await options.sessionManager?.get(sessionId);
+    const session = core ?? (await stateStore.getSession(sessionId));
+    const preference = session?.reasoning;
+    if (!preference) return undefined;
+    validateReasoningConfig(preference);
+    const view = (await currentConnectModelFromOptions())?.reasoning;
+    if (view?.status !== "identified") return { ...preference };
+    if (
+      view.mode === "none" ||
+      (preference.enabled === false && !view.supportsDisabled) ||
+      (preference.effort !== undefined &&
+        (view.mode === "binary" || !view.efforts.includes(preference.effort)))
+    )
+      return undefined;
+    return { ...preference };
+  }
+
+  async function updateSessionReasoningInternal(
+    input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionReasoning"]> {
+    const preference = input.reasoning ?? undefined;
+    validateReasoningConfig(preference);
+    if (preference)
+      resolveRequestReasoning({
+        ...(await currentReasoningOptions()),
+        reasoning: preference,
+      });
+    const snapshot = await stateStore.readSnapshot();
+    let session = snapshot.sessions.find(
+      (session) => session.id === input.sessionId,
+    );
+    const core = await options.sessionManager?.get(input.sessionId);
+    if (!session && core) session = sessionMetadataToUiSession(core);
+    if (!session) throw new Error(`Session ${input.sessionId} not found`);
+    const projectRoot = await resolveProjectRoot();
+    if (
+      session.projectRoot &&
+      !sameSessionProjectRoot(session.projectRoot, projectRoot)
+    )
+      throw new Error("Session belongs to another workspace");
+    await options.sessionManager?.update(input.sessionId, {
+      reasoning: preference,
+    });
+    const updated = {
+      ...session,
+      reasoning: preference ? { ...preference } : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    await upsertSession(updated);
+    publish({ type: "session.updated", session: cloneSession(updated) });
+    return updated;
   }
 
   async function listModelsFromOptions(): Promise<
@@ -1832,6 +1930,7 @@ export function createInProcessUiBackendClient(
       await runtime.setSessionWorkdir(target.sessionId, target.projectRoot);
       const result = await runtime.compactSession({
         force: compactOptions.force ?? true,
+        reasoning: await sessionReasoningPreference(target.sessionId),
         projectRoot: target.projectRoot,
         sessionId: target.sessionId,
       });
@@ -2065,6 +2164,7 @@ export function createInProcessUiBackendClient(
         submitOptions?.signal?.throwIfAborted();
         const result = await runtime.startSession({
           agentName,
+          reasoning: submitOptions?.reasoning,
           initialUserMessageId: userMessage.id,
           prompt: modelPromptText,
           projectRoot: resolvedProjectRoot,
@@ -2361,6 +2461,8 @@ export function createInProcessUiBackendClient(
       const result = await applyActiveModelConfig({
         ...input,
         projectRoot,
+        deferMetadata: true,
+        onDiscovery: publishSnapshotReplacement,
       });
       let warning = result.warning;
       try {
@@ -2386,7 +2488,11 @@ export function createInProcessUiBackendClient(
   async function probeModelContextWindowInternal(
     input: Parameters<UiBackendClient["probeModelContextWindow"]>[0],
   ): ReturnType<UiBackendClient["probeModelContextWindow"]> {
-    return probeActiveModelContextWindow(input);
+    return probeActiveModelContextWindow({
+      ...input,
+      projectRoot: await resolveProjectRoot(),
+      onDiscovery: publishSnapshotReplacement,
+    });
   }
 
   async function setSearchApiKeyInternal(
@@ -2757,6 +2863,8 @@ export function createInProcessUiBackendClient(
     ): Promise<UiCompactSessionResult> {
       return compactSessionInternal(compactOptions);
     },
+
+    updateSessionReasoning: updateSessionReasoningInternal,
 
     archiveSession(input: UiArchiveSessionInput): Promise<void> {
       return archiveSessionInternal(input);

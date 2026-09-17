@@ -38,6 +38,8 @@ import {
 } from "ohbaby-sdk";
 import type {
   UiBackendClient,
+  UiReasoningConfig,
+  UiReasoningCapabilityView,
   UiCompactSessionResult,
   UiContextWindowUsage,
   UiConnectModelResult,
@@ -573,7 +575,11 @@ function ConnectedOhbabyWebApp({
     [runtime],
   );
   const submitText = useCallback(
-    async (text: string, clientRequestId?: string): Promise<boolean> => {
+    async (
+      text: string,
+      clientRequestId?: string,
+      reasoning?: UiReasoningConfig,
+    ): Promise<boolean> => {
       if (text.startsWith("/") && (await openOverlayForSlashText(text))) {
         return true;
       }
@@ -615,6 +621,7 @@ function ConnectedOhbabyWebApp({
           },
         ]);
         const receipt = await client.submitPromptAccepted(text, {
+          ...(reasoning === undefined ? {} : { reasoning }),
           clientRequestId: requestId,
           ...(submittedSessionId === undefined
             ? {}
@@ -2134,6 +2141,176 @@ function PermissionModal(props: {
   );
 }
 
+function ReasoningControl(props: {
+  readonly client: UiBackendClient;
+  readonly session: UiSession | null;
+  readonly onChange: (reasoning: UiReasoningConfig | undefined) => void;
+}): ReactElement | null {
+  const [modelView, setView] = useState<{
+    client: UiBackendClient;
+    view: UiReasoningCapabilityView | undefined;
+  }>();
+  const view = modelView?.client === props.client ? modelView.view : undefined;
+  const localPreference = useRef<
+    | {
+        client: UiBackendClient;
+        sessionId: string | undefined;
+        reasoning: UiReasoningConfig;
+      }
+    | undefined
+  >(undefined);
+  const [preference, setPreference] = useState<UiReasoningConfig | undefined>(
+    props.session?.reasoning,
+  );
+  const [error, setError] = useState<string>();
+  const viewGeneration = useRef(0);
+  useEffect(() => {
+    viewGeneration.current++;
+    return (): void => {
+      viewGeneration.current++;
+    };
+  }, [props.client, props.session?.id]);
+  useEffect(() => {
+    if (
+      view?.status === "identified" &&
+      preference &&
+      (view.mode === "none" ||
+        (preference.enabled === false && !view.supportsDisabled) ||
+        (preference.enabled !== false &&
+          preference.effort !== undefined &&
+          !view.efforts.includes(preference.effort)))
+    )
+      props.onChange(undefined);
+  }, [view, preference, props.onChange]);
+  const pending = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => {
+    const local = localPreference.current;
+    if (
+      local?.client === props.client &&
+      local.sessionId === props.session?.id &&
+      (local.reasoning.enabled !== props.session?.reasoning?.enabled ||
+        local.reasoning.effort !== props.session?.reasoning?.effort)
+    )
+      return;
+    localPreference.current = undefined;
+    setPreference(props.session?.reasoning);
+  }, [props.client, props.session?.id, props.session?.reasoning]);
+  useEffect(() => {
+    let closed = false;
+    let generation = 0;
+    const refresh = (): void => {
+      const request = ++generation;
+      void props.client
+        .getCurrentModel()
+        .then((model) => {
+          if (!closed && request === generation)
+            setView(
+              model?.reasoning
+                ? { client: props.client, view: model.reasoning }
+                : undefined,
+            );
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const unsubscribe = props.client.subscribeEvents((event) => {
+      if (
+        event.type === "snapshot.replaced" ||
+        event.type === "session.updated"
+      )
+        refresh();
+    });
+    return (): void => {
+      closed = true;
+      generation++;
+      unsubscribe();
+    };
+  }, [props.client]);
+  const update = (reasoning: UiReasoningConfig): void => {
+    const local = {
+      client: props.client,
+      sessionId: props.session?.id,
+      reasoning,
+    };
+    localPreference.current = local;
+    props.onChange(reasoning);
+    setPreference(reasoning);
+    setError(undefined);
+    if (!props.session) return;
+    const sessionId = props.session.id;
+    const generation = viewGeneration.current;
+    pending.current = pending.current
+      .catch(() => undefined)
+      .then(() => props.client.updateSessionReasoning({ sessionId, reasoning }))
+      .then((session) => {
+        if (
+          viewGeneration.current === generation &&
+          localPreference.current === local
+        ) {
+          // PATCH and session events travel independently. Keep the local
+          // selection until the session stream echoes it, even after this ack.
+          setPreference(session.reasoning);
+        }
+      })
+      .catch((failure: unknown) => {
+        if (viewGeneration.current === generation)
+          setError(
+            failure instanceof Error ? failure.message : String(failure),
+          );
+      });
+  };
+  if (!view || view.mode === "none") return null;
+  if (view.status !== "identified")
+    return (
+      <span className="ohb-composer-hint" title={view.reason}>
+        服务默认{view.status === "detecting" ? " · 检测中" : ""}
+      </span>
+    );
+  const compatible =
+    preference &&
+    (preference.enabled !== false || view.supportsDisabled) &&
+    (preference.effort === undefined ||
+      view.efforts.includes(preference.effort));
+  const effective = compatible ? preference : view.default;
+  if (view.mode === "binary" && !view.supportsDisabled)
+    return <span className="ohb-composer-hint">Reasoning on</span>;
+  return (
+    <label className="ohb-reasoning-control" title={error}>
+      <select
+        aria-label="Reasoning effort"
+        value={
+          effective?.enabled === false
+            ? "off"
+            : view.mode === "binary"
+              ? "on"
+              : (effective?.effort ?? view.default?.effort ?? "")
+        }
+        onChange={(event) => {
+          update(
+            event.target.value === "off"
+              ? { enabled: false }
+              : event.target.value === "on"
+                ? { enabled: true }
+                : { enabled: true, effort: event.target.value },
+          );
+        }}
+      >
+        {view.supportsDisabled && <option value="off">Off</option>}
+        {view.mode === "binary" ? (
+          <option value="on">On</option>
+        ) : (
+          view.efforts.map((effort) => (
+            <option key={effort} value={effort}>
+              {effort}
+            </option>
+          ))
+        )}
+      </select>
+      {error && <span role="alert">{error}</span>}
+    </label>
+  );
+}
+
 function Composer(props: {
   readonly client: UiBackendClient;
   readonly compact?: boolean;
@@ -2149,10 +2326,15 @@ function Composer(props: {
   readonly onSubmit: (
     text: string,
     clientRequestId?: string,
+    reasoning?: UiReasoningConfig,
   ) => Promise<boolean>;
   readonly prefill?: ComposerPrefill | null;
   readonly view: ViewModel;
 }): ReactElement {
+  const selectedReasoning = useRef<UiReasoningConfig | undefined>(undefined);
+  useEffect(() => {
+    selectedReasoning.current = undefined;
+  }, [props.view.activeSession?.id, props.client]);
   const [draft, setDraft] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
@@ -2576,22 +2758,25 @@ function Composer(props: {
     draftRef.current = "";
     setDraft("");
     persistDraft("", clientRequestId, text);
-    void props.onSubmit(text, clientRequestId).then((sent) => {
-      setPendingRequestId(null);
-      setPendingText(null);
-      if (sent) {
-        if (draftRef.current.length === 0) {
-          removeSessionValue(composerDraftKey(props.draftScopeKey));
-        } else {
-          persistDraft(draftRef.current);
+    void props
+      .onSubmit(text, clientRequestId, selectedReasoning.current)
+      .then((sent) => {
+        setPendingRequestId(null);
+        setPendingText(null);
+        if (sent) {
+          if (draftRef.current.length === 0) {
+            removeSessionValue(composerDraftKey(props.draftScopeKey));
+          } else {
+            persistDraft(draftRef.current);
+          }
+          return;
         }
-        return;
-      }
-      const restored = draftRef.current.length === 0 ? text : draftRef.current;
-      draftRef.current = restored;
-      setDraft(restored);
-      persistDraft(restored);
-    });
+        const restored =
+          draftRef.current.length === 0 ? text : draftRef.current;
+        draftRef.current = restored;
+        setDraft(restored);
+        persistDraft(restored);
+      });
   }, [
     canSend,
     draft,
@@ -2912,6 +3097,13 @@ function Composer(props: {
           <span className="ohb-policy-glyph" aria-hidden="true" />
           {props.view.composer.permissionLevel}
         </button>
+        <ReasoningControl
+          client={props.client}
+          session={props.view.activeSession}
+          onChange={(reasoning) => {
+            selectedReasoning.current = reasoning;
+          }}
+        />
         <span className="ohb-composer-hint">{props.view.composer.hint}</span>
       </div>
     </section>
@@ -3295,6 +3487,18 @@ function ConnectModelOverlayBody(props: {
     provider: "",
   });
   const hasLocalEditRef = useRef(false);
+  const requestVersion = useRef(0);
+  const connectionGeneration = useRef(0);
+  const savedVersion = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return (): void => {
+      mounted.current = false;
+      requestVersion.current++;
+      connectionGeneration.current++;
+    };
+  }, [props.client]);
   const [currentModel, setCurrentModel] = useState<UiCurrentModelConfig | null>(
     null,
   );
@@ -3309,10 +3513,11 @@ function ConnectModelOverlayBody(props: {
 
   useEffect(() => {
     let cancelled = false;
+    const version = savedVersion.current;
     void props.client
       .getCurrentModel()
       .then((model) => {
-        if (cancelled) {
+        if (cancelled || savedVersion.current !== version) {
           return;
         }
         setCurrentModel(model);
@@ -3336,7 +3541,7 @@ function ConnectModelOverlayBody(props: {
         }
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
+        if (!cancelled && savedVersion.current === version) {
           setStatus({
             kind: "error",
             message: error instanceof Error ? error.message : String(error),
@@ -3351,19 +3556,26 @@ function ConnectModelOverlayBody(props: {
   const update = useCallback(
     (key: keyof ConnectModelFormState, value: string) => {
       hasLocalEditRef.current = true;
+      requestVersion.current++;
+      setProbe(null);
       setForm((previous) => ({ ...previous, [key]: value }));
     },
     [],
   );
 
   const probeContext = useCallback(() => {
+    const version = ++requestVersion.current;
+    const current = (): boolean =>
+      mounted.current && requestVersion.current === version;
     void runOverlayAction(
-      setStatus,
+      (status) => {
+        if (current()) setStatus(status);
+      },
       async () => {
         const nextProbe = await props.client.probeModelContextWindow(
           connectModelRequest(form),
         );
-        setProbe(nextProbe);
+        if (current()) setProbe(nextProbe);
         return `context window ${formatTokenCount(
           nextProbe.contextWindowTokens,
         )} · ${nextProbe.contextWindowSource}`;
@@ -3373,12 +3585,28 @@ function ConnectModelOverlayBody(props: {
   }, [form, props.client]);
 
   const saveModel = useCallback(() => {
+    const version = ++requestVersion.current;
+    const connection = connectionGeneration.current;
+    const current = (): boolean =>
+      mounted.current && requestVersion.current === version;
     void runOverlayAction(
-      setStatus,
+      (status) => {
+        if (current()) setStatus(status);
+      },
       async () => {
         const nextResult = await props.client.connectModel(
           connectModelRequest(form),
         );
+        if (
+          mounted.current &&
+          connectionGeneration.current === connection &&
+          version >= savedVersion.current
+        ) {
+          savedVersion.current = version;
+          setCurrentModel(nextResult);
+        }
+        if (!current())
+          return `saved ${nextResult.provider} · ${nextResult.model}`;
         setResult(nextResult);
         setForm((previous) => ({
           ...previous,
@@ -3447,6 +3675,8 @@ function ConnectModelOverlayBody(props: {
             }
             onChange={(event) => {
               hasLocalEditRef.current = true;
+              requestVersion.current++;
+              setProbe(null);
               setForm((previous) => ({
                 ...previous,
                 interfaceProvider: event.target

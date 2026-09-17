@@ -1,3 +1,4 @@
+import { sameReasoning } from "./types.js";
 /* eslint-disable @typescript-eslint/require-await -- SQLite operations are synchronous behind the shared async store contract. */
 import { randomUUID } from "node:crypto";
 import type { UiPromptError } from "ohbaby-sdk";
@@ -35,6 +36,7 @@ interface PromptSubmissionRow {
   readonly session_id: string;
   readonly user_message_id: string;
   readonly text: string;
+  readonly reasoning_data: string | null;
   readonly status: PromptSubmissionStatus;
   readonly run_id: string | null;
   readonly owner_id: string | null;
@@ -106,6 +108,9 @@ function rowToRecord(row: PromptSubmissionRow): PromptSubmissionRecord {
     sessionId: row.session_id,
     userMessageId: row.user_message_id,
     text: row.text,
+    reasoning: row.reasoning_data
+      ? (JSON.parse(row.reasoning_data) as PromptSubmissionRecord["reasoning"])
+      : undefined,
     status: row.status,
     runId: row.run_id ?? undefined,
     ownerId: row.owner_id ?? undefined,
@@ -170,7 +175,8 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       if (existing) {
         if (
           existing.sessionId !== input.sessionId ||
-          existing.text !== input.text
+          existing.text !== input.text ||
+          !sameReasoning(existing.reasoning, input.reasoning)
         ) {
           throw new PromptIdempotencyConflictError(input.clientRequestId);
         }
@@ -203,9 +209,9 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       db.prepare(
         `INSERT INTO ${this.tableName}
           (prompt_id, client_request_id, scope_key, session_id,
-           user_message_id, text, status,
+           user_message_id, text, reasoning_data, status,
            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
       ).run(
         input.promptId,
         input.clientRequestId,
@@ -213,6 +219,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         input.sessionId,
         input.userMessageId,
         input.text,
+        input.reasoning ? JSON.stringify(input.reasoning) : null,
         at,
         at,
       );

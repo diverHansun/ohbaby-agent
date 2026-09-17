@@ -490,6 +490,19 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
+  updateSessionReasoning(
+    input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionReasoning"]> {
+    return Promise.resolve({
+      id: input.sessionId,
+      reasoning: input.reasoning ?? undefined,
+      title: "Test",
+      messages: [],
+      createdAt: "2026-09-17T00:00:00Z",
+      updatedAt: "2026-09-17T00:00:00Z",
+    });
+  }
+
   archiveSession(input: { readonly sessionId: string }): Promise<void> {
     if (this.archiveError) {
       return Promise.reject(this.archiveError);
@@ -4145,4 +4158,67 @@ describe("createDaemonServerApp", () => {
       await rm(tempDir, { force: true, recursive: true });
     }
   });
+});
+
+it("validates session reasoning and forwards raw choices through REST", async () => {
+  const update = vi.fn(
+    (input: {
+      sessionId: string;
+      reasoning: Parameters<
+        UiBackendClient["updateSessionReasoning"]
+      >[0]["reasoning"];
+    }) =>
+      Promise.resolve({
+        id: input.sessionId,
+        reasoning: input.reasoning ?? undefined,
+        messages: [],
+        title: "test",
+        createdAt: "now",
+        updatedAt: "now",
+      }),
+  );
+  const backend = Object.assign(new FakeBackend(), {
+    updateSessionReasoning: update,
+  });
+  const handle = createApp(backend);
+  await handle.start();
+  try {
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "reasoning-client",
+    };
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ clientId: "reasoning-client" }),
+    });
+    for (const reasoning of [{ effort: "medium" }, null]) {
+      const response = await handle.app.request("/v1/sessions/s/reasoning", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ reasoning }),
+      });
+      expect(response.status).toBe(200);
+    }
+    for (const reasoning of [
+      { effort: "none" },
+      { enabled: "false" },
+      "high",
+      { wire: "openai" },
+    ]) {
+      const response = await handle.app.request("/v1/sessions/s/reasoning", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ reasoning }),
+      });
+      expect(response.status).toBe(400);
+    }
+    expect(update.mock.calls).toEqual([
+      [{ sessionId: "s", reasoning: { effort: "medium" } }],
+      [{ sessionId: "s", reasoning: null }],
+    ]);
+  } finally {
+    await handle.dispose();
+  }
 });

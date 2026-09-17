@@ -1,3 +1,4 @@
+import { sameReasoning } from "./types.js";
 /* eslint-disable @typescript-eslint/require-await -- The in-memory store intentionally implements the same async contract as SQLite. */
 import { randomUUID } from "node:crypto";
 import {
@@ -25,7 +26,11 @@ export interface InMemoryPromptSubmissionStoreOptions {
 }
 
 function clone(record: PromptSubmissionRecord): PromptSubmissionRecord {
-  return { ...record, error: record.error ? { ...record.error } : undefined };
+  return {
+    ...record,
+    reasoning: record.reasoning ? { ...record.reasoning } : undefined,
+    error: record.error ? { ...record.error } : undefined,
+  };
 }
 
 function compareOrder(
@@ -76,7 +81,8 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     if (existing) {
       if (
         existing.sessionId !== input.sessionId ||
-        existing.text !== input.text
+        existing.text !== input.text ||
+        !sameReasoning(existing.reasoning, input.reasoning)
       ) {
         throw new PromptIdempotencyConflictError(input.clientRequestId);
       }
@@ -105,6 +111,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       sessionId: input.sessionId,
       userMessageId: input.userMessageId,
       text: input.text,
+      reasoning: input.reasoning ? { ...input.reasoning } : undefined,
       status: "queued",
       createdAt: at,
       updatedAt: at,

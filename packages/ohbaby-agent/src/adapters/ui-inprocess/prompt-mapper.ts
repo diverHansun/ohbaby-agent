@@ -40,6 +40,7 @@ export function promptRecordToUi(
     sessionId: record.sessionId,
     userMessageId: record.userMessageId,
     text: record.text,
+    reasoning: record.reasoning,
     status: record.status,
     runId: record.runId,
     error: record.error,

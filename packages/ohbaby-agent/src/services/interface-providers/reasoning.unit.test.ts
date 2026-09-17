@@ -101,15 +101,19 @@ describe("request reasoning resolution", () => {
   });
   it("rejects unsupported effort and only accepts an explicit map", () => {
     const target = custom({ ...effort, efforts: ["low", "high"] });
-    expect(() => resolveRequestReasoning(target)).toThrow(/medium.*low.*high/);
+    expect(resolveRequestReasoning(target).effort).toBe("low");
+    expect(() =>
+      resolveRequestReasoning({ ...target, reasoning: { effort: "medium" } }),
+    ).toThrow(/medium.*low.*high/);
     expect(
-      resolveRequestReasoning(
-        custom({
+      resolveRequestReasoning({
+        ...custom({
           ...effort,
           efforts: ["low", "high"],
           effortMap: { medium: "high" },
         }),
-      ).effort,
+        reasoning: { effort: "medium" },
+      }).effort,
     ).toBe("high");
   });
   it("binary default is enabled without claiming medium; explicit effort fails", () => {
@@ -151,8 +155,8 @@ describe("request reasoning resolution", () => {
   ])(
     "does not infer capabilities from similar names or arbitrary endpoints %j",
     (patch) => {
-      expect(() => resolveRequestReasoning({ ...openai, ...patch })).toThrow(
-        /capabilit.*config/i,
+      expect(resolveRequestReasoning({ ...openai, ...patch }).mode).toBe(
+        "service-default",
       );
     },
   );
@@ -226,5 +230,86 @@ describe("request reasoning resolution", () => {
         }),
       ),
     ).toEqual({ thinking: { type: "disabled" } });
+  });
+});
+
+describe("Stage C reliable defaults and service defaults", () => {
+  it.each(["agent-step", "context-summary", "session-title"] as const)(
+    "unknown %s preserves preference and omits controls",
+    (purpose) => {
+      const resolved = resolveRequestReasoning({
+        ...openai,
+        model: "unknown",
+        reasoning: { enabled: false, effort: "high" },
+        purpose,
+      });
+      expect(resolved.mode).toBe("service-default");
+      expect(resolved.intent.effort).toBe("high");
+      expect(toChatReasoningWire(resolved)).toEqual({});
+      expect(toAnthropicReasoningWire(resolved)).toEqual({});
+      expect(toResponsesReasoningWire(resolved)).toEqual({
+        include: ["reasoning.encrypted_content"],
+      });
+    },
+  );
+  it("chooses medium then confirmed default then stable lowest order", () => {
+    expect(
+      resolveRequestReasoning(custom({ ...effort, defaultEffort: "high" }))
+        .effort,
+    ).toBe("medium");
+    expect(
+      resolveRequestReasoning(
+        custom({ ...effort, efforts: ["high", "low"], defaultEffort: "high" }),
+      ).effort,
+    ).toBe("high");
+    expect(
+      resolveRequestReasoning(
+        custom({ ...effort, efforts: ["high", "minimal", "low"] }),
+      ).effort,
+    ).toBe("minimal");
+    expect(
+      resolveRequestReasoning(
+        custom({
+          ...effort,
+          efforts: ["deep", "fast"],
+          effortOrder: ["fast", "deep"],
+        }),
+      ).effort,
+    ).toBe("fast");
+    expect(
+      resolveRequestReasoning(custom({ ...effort, efforts: ["deep", "fast"] }))
+        .mode,
+    ).toBe("service-default");
+  });
+  it("does not bypass malformed config or invalid temperature on unknown", () => {
+    expect(() =>
+      resolveRequestReasoning({
+        ...openai,
+        model: "unknown",
+        temperature: NaN,
+      }),
+    ).toThrow(/temperature/i);
+    expect(() =>
+      resolveRequestReasoning({
+        ...openai,
+        model: "unknown",
+        reasoning: { effort: "" },
+      }),
+    ).toThrow();
+  });
+  it("always-on title stays sendable and invalid explicit effort remains rejected", () => {
+    expect(
+      resolveRequestReasoning({
+        ...custom({ ...effort, supportsDisabled: false }),
+        purpose: "session-title",
+      }).effort,
+    ).toBe("medium");
+    expect(() =>
+      resolveRequestReasoning({
+        ...openai,
+        purpose: "session-title",
+        reasoning: { effort: "wrong" },
+      }),
+    ).toThrow(/Unsupported/);
   });
 });

@@ -409,6 +409,25 @@ export function validateReasoningCapabilities(
       record.budgets !== undefined)
   )
     return invalid();
+  if (
+    record.defaultEffort !== undefined &&
+    (!validEffort(record.defaultEffort) ||
+      !Array.isArray(record.efforts) ||
+      !record.efforts.includes(record.defaultEffort))
+  )
+    return invalid();
+  if (
+    record.effortOrder !== undefined &&
+    (!Array.isArray(record.effortOrder) ||
+      !Array.isArray(record.efforts) ||
+      record.effortOrder.length !== record.efforts.length ||
+      new Set(record.effortOrder).size !== record.effortOrder.length ||
+      !record.effortOrder.every(
+        (value) =>
+          validEffort(value) && (record.efforts as unknown[]).includes(value),
+      ))
+  )
+    return invalid();
   for (const field of ["effortMap", "budgets"] as const) {
     const mapping = record[field];
     if (mapping === undefined) continue;

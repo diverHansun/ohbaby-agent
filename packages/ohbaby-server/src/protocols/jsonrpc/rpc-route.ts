@@ -1,3 +1,4 @@
+import { isUiReasoningConfig } from "ohbaby-sdk";
 import type {
   SubmitPromptOptions,
   UiAcquirePromptEditLeaseInput,
@@ -71,7 +72,15 @@ function submitPromptOptions(value: unknown): SubmitPromptOptions | undefined {
     error.code = "INVALID_CLIENT_REQUEST_ID";
     throw error;
   }
+  if (value.reasoning !== undefined && !isUiReasoningConfig(value.reasoning)) {
+    const error = new Error("Invalid reasoning preference") as Error & {
+      code: string;
+    };
+    error.code = "INVALID_REASONING";
+    throw error;
+  }
   return {
+    ...(value.reasoning !== undefined ? { reasoning: value.reasoning } : {}),
     ...(typeof value.clientRequestId === "string"
       ? { clientRequestId: value.clientRequestId }
       : {}),
@@ -226,6 +235,12 @@ export async function callDaemonBackend(input: {
     case "compactSession":
       return backend.compactSession(
         request.params[0] as Parameters<UiBackendClient["compactSession"]>[0],
+      );
+    case "updateSessionReasoning":
+      return backend.updateSessionReasoning(
+        request.params[0] as Parameters<
+          UiBackendClient["updateSessionReasoning"]
+        >[0],
       );
     case "archiveSession":
       return backend.archiveSession(

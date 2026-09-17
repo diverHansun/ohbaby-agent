@@ -1,3 +1,5 @@
+import type { ReasoningConfig } from "../../config/llm/types.js";
+import { sameReasoning } from "./types.js";
 import { randomUUID } from "node:crypto";
 import type { UiPromptError } from "ohbaby-sdk";
 import {
@@ -29,6 +31,9 @@ export interface WorkspacePromptSchedulerOptions {
 }
 
 export interface AcceptWorkspacePromptInput {
+  readonly reasoning?:
+    | ReasoningConfig
+    | ((sessionId: string) => Promise<ReasoningConfig | undefined>);
   readonly clientRequestId?: string;
   readonly expectedSessionId?: string;
   readonly sessionId: string | (() => Promise<string>);
@@ -138,6 +143,9 @@ export class WorkspacePromptScheduler {
           (typeof input.sessionId === "string" ? input.sessionId : undefined);
         if (
           existing.text !== input.text ||
+          (typeof input.reasoning !== "function" &&
+            input.reasoning !== undefined &&
+            !sameReasoning(existing.reasoning, input.reasoning)) ||
           (expectedSessionId !== undefined &&
             existing.sessionId !== expectedSessionId)
         ) {
@@ -162,6 +170,10 @@ export class WorkspacePromptScheduler {
         scopeKey: this.options.scopeKey,
         sessionId,
         text: input.text,
+        reasoning:
+          typeof input.reasoning === "function"
+            ? await input.reasoning(sessionId)
+            : input.reasoning,
         userMessageId:
           input.userMessageId ??
           this.options.createUserMessageId?.() ??

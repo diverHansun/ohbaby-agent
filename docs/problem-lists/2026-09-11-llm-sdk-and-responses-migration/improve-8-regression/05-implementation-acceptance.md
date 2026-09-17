@@ -48,10 +48,29 @@ node scripts/run-real-model-switch.mjs --run --from=zenmux-claude-sonnet5-anthro
 
 本地完整证据：`.ohbaby/test-evidence/improve-8/stage-b/`；独立生产审查和测试脚本审查均保存在 `.superpowers/sdd/improve-8-regression/`。
 
+## Stage C：能力发现与会话推理选择
+
+第三批实现、测试与独立生产复审已通过。连接先保存，再异步查询当前模型的准确资料；缺失或查询失败时允许按服务默认发送，不猜档位。已确认的档位按原名显示，默认优先 `medium`；当前会话分别保存选择，每条消息在接受时固定选择，队列、运行中请求和 SQLite 重开均保持该快照。Responses 在未知能力且不发强度控制时仍请求加密推理状态，以供续接。已知不兼容的队列消息明确失败，后续兼容消息继续运行。Web 输入框旁增加推理控件；TUI 编辑反馈和真实浏览器操作归 D。
+
+Sonnet 5 的[模型资料](https://zenmux.ai/anthropic/claude-sonnet-5)说明自适应推理始终开启；Luna 的[模型资料](https://zenmux.ai/openai/gpt-5.6-luna)确认档位但没有逐模型确认可关闭。因此这两条精确模型资料均不显示关闭选项，显式关闭也会被后端拒绝。通用协议支持关闭不能替代逐模型证据。
+
+最终定向单元、契约和集成：35 文件 / 646 项通过，含旧 SQLite schema 迁移、分页/超时/迟到探测、能力来源、两会话隔离、重放幂等、队列不兼容与未知服务默认。独立审查又发现并推动修复了远程 JSON-RPC 显式强度丢失、自定义档位顺序不完整、连接页旧异步结果覆盖及 Web 选择回滚；真实本地 HTTP daemon 与 Web 延迟事件回归均已补测。审查第二轮发现的“PATCH 已返回、旧 SSE 迟到”竞态也有先失败再通过的回归，最后定向复审 156 项通过。工作区 TypeScript、修改范围 ESLint/Prettier 通过。两套真实测试脚本的无网络清理/证据测试与观察器 24 项通过；独立脚本复核已关闭原生状态重放、非空工具配对和异常清理问题。
+
+最终代码的真实 API 验收四组通过，均从空模型配置经公开 REST 保存开始。Chat 和 Responses 各 6 条生成请求 HTTP 200，Anthropic 4 条主任务请求 HTTP 200；三者各有 1 条实际元数据请求 HTTP 200，工具调用与结果配对有效，两会话选择、SQLite 重开及原生状态实际进入后续 provider 请求均得到验证。Anthropic 另有 2 条自动标题请求在 HTTP 状态前报 `transport`，不能写成附属标题全绿。能力未知组只用受控元数据缺字段触发分支；4 条 Responses 生成请求都是真实模型 HTTP 200，无未证实的强度控制，仍保留加密状态续接和工具配对。每组最多允许 20 次请求，详见[脱敏证据](./evidence/stage-c-real-summary.json)；完整本地审计位于 `.ohbaby/test-evidence/improve-8/stage-c/`。
+
+```sh
+pnpm exec vitest run packages/ohbaby-agent/src/config/llm/__tests__ packages/ohbaby-agent/src/runtime/prompt-scheduler packages/ohbaby-agent/src/services/interface-providers/reasoning.unit.test.ts packages/ohbaby-agent/src/services/interface-providers/reasoning-view.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts packages/ohbaby-agent/src/adapters/model-switch.integration.test.ts packages/ohbaby-agent/src/adapters/ui-runtime/reasoning-summary.integration.test.ts packages/ohbaby-server/src/app/create-app.unit.test.ts packages/ohbaby-server/src/protocols/jsonrpc packages/ohbaby-server/src/runtime/daemon/client.integration.test.ts packages/ohbaby-server/src/runtime/daemon/server.integration.test.ts apps/ohbaby-web/src/ui/App.unit.test.tsx apps/ohbaby-web/src/api/daemon
+pnpm exec tsc -b --pretty false
+node scripts/run-real-session-reasoning.mjs --run --profile=zenmux-gpt56-luna-chat
+node scripts/run-real-session-reasoning.mjs --run --profile=zenmux-gpt56-luna-responses
+node scripts/run-real-session-reasoning.mjs --run --profile=zenmux-claude-sonnet5-anthropic
+node scripts/run-real-session-reasoning.mjs --run --profile=zenmux-gpt56-luna-responses --unknown
+```
+
 ## 后续阶段
 
 - B：保存配置与运行准入协调，已完成。
-- C：能力发现、会话推理偏好与发送快照，尚未实施。
+- C：能力发现、会话推理偏好与发送快照，验收通过；见本批提交。
 - D：TUI 编辑反馈、真实 Web/TUI 操作与全仓回归，尚未实施。
 
 ## 保留的验收边界

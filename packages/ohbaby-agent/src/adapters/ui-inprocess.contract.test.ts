@@ -2386,8 +2386,6 @@ describe("createInProcessUiBackendClient", () => {
         modelJsonPath,
         provider: "zenmux",
         saved: true,
-        warning:
-          "Unable to detect model context window from metadata; using the configured fallback.",
       });
       expect(JSON.stringify(result)).not.toContain("sk-connect-contract");
 
@@ -2740,7 +2738,7 @@ describe("createInProcessUiBackendClient", () => {
         projectDirectory: projectRoot,
       });
 
-      await expect(client.getCurrentModel()).resolves.toEqual({
+      await expect(client.getCurrentModel()).resolves.toMatchObject({
         apiKeyEnv: "ZENMUX_API_KEY",
         baseUrl: "https://zenmux.ai/api/anthropic",
         contextWindowTokens: 200_000,
@@ -2806,7 +2804,7 @@ describe("createInProcessUiBackendClient", () => {
         projectDirectory: projectRoot,
       });
 
-      await expect(client.getCurrentModel()).resolves.toEqual({
+      await expect(client.getCurrentModel()).resolves.toMatchObject({
         apiKeyEnv: "OPENAI_API_KEY",
         baseUrl: "https://api.openai.com/v1",
         contextWindowTokens: 128_000,
@@ -9436,3 +9434,159 @@ function createRejectingMessageManager(error: Error): MessageManager {
     idGenerator: createDeterministicMessageIds(),
   });
 }
+
+it("captures session reasoning per submission and keeps sessions independent", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: createInitialSnapshotWithTwoSessions(),
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [{ textDelta: "one", finishReason: "stop" }],
+        [{ textDelta: "two", finishReason: "stop" }],
+        [{ textDelta: "three", finishReason: "stop" }],
+      ],
+      requests,
+      {
+        modelProfiles: [
+          {
+            model: "fake-model",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "effort",
+              wire: "openai",
+              supportsDisabled: true,
+              efforts: ["low", "medium", "high"],
+            },
+          },
+        ],
+      },
+    ),
+  });
+  try {
+    await client.updateSessionReasoning({
+      sessionId: "session_1",
+      reasoning: { effort: "medium" },
+    });
+    const a = await client.submitPromptAccepted("first", {
+      sessionId: "session_1",
+      clientRequestId: "reasoning-a",
+    });
+    await client.updateSessionReasoning({
+      sessionId: "session_1",
+      reasoning: { effort: "high" },
+    });
+    await client.updateSessionReasoning({
+      sessionId: "session_2",
+      reasoning: { effort: "low" },
+    });
+    await client.waitForPrompt(a.promptId);
+    await client.submitPromptAndWait("second", { sessionId: "session_1" });
+    await client.submitPromptAndWait("third", { sessionId: "session_2" });
+    expect(requests.map((request) => request.reasoning?.effort)).toEqual([
+      "medium",
+      "high",
+      "low",
+    ]);
+    const snapshot = await client.getSnapshot();
+    expect(
+      snapshot.sessions.find((s) => s.id === "session_1")?.reasoning,
+    ).toEqual({ effort: "high" });
+    expect(
+      snapshot.sessions.find((s) => s.id === "session_2")?.reasoning,
+    ).toEqual({ effort: "low" });
+  } finally {
+    await client.dispose();
+  }
+});
+it("terminates an incompatible immutable submission and advances the compatible queue", async () => {
+  const store = new InMemoryPromptSubmissionStore();
+  const common = {
+    scopeKey: "/work",
+    sessionId: "session_1",
+    maxQueuedPrompts: 100,
+  };
+  await store.accept({
+    ...common,
+    promptId: "high",
+    clientRequestId: "high",
+    userMessageId: "uh",
+    text: "old high",
+    reasoning: { effort: "high" },
+  });
+  await store.accept({
+    ...common,
+    promptId: "default",
+    clientRequestId: "default",
+    userMessageId: "ud",
+    text: "new default",
+    reasoning: {},
+  });
+  const requests: InterfaceProviderRequest[] = [];
+  const client = createInProcessUiBackendClient({
+    promptScopeKey: "/work",
+    promptSubmissionStore: store,
+    initialSnapshot: createInitialSnapshotWithTwoSessions(),
+    llmClient: createSequentialFakeLLMClient(
+      [[{ textDelta: "ok", finishReason: "stop" }]],
+      requests,
+      {
+        modelProfiles: [
+          {
+            model: "fake-model",
+            contextWindowTokens: 128000,
+            reasoningCapabilities: {
+              mode: "binary",
+              wire: "thinking",
+              supportsDisabled: false,
+            },
+          },
+        ],
+      },
+    ),
+  });
+  try {
+    await client.getSnapshot();
+    const { prompt: failed } = await client.waitForPrompt("high");
+    expect(failed.status).toBe("failed");
+    expect(failed.error?.message).toMatch(/binary|on\/off/);
+    expect((await client.waitForPrompt("default")).prompt.status).toBe(
+      "succeeded",
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].reasoning?.mode).toBe("binary");
+  } finally {
+    await client.dispose();
+  }
+});
+it("preserves unknown session preference while the request uses service default", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: createInitialSnapshotWithTwoSessions(),
+    llmClient: createSequentialFakeLLMClient(
+      [[{ textDelta: "ok", finishReason: "stop" }]],
+      requests,
+      { modelProfiles: [] },
+    ),
+  });
+  try {
+    await client.updateSessionReasoning({
+      sessionId: "session_1",
+      reasoning: { enabled: false, effort: "high" },
+    });
+    expect(
+      (await client.submitPromptAndWait("hello", { sessionId: "session_1" }))
+        .prompt.status,
+    ).toBe("succeeded");
+    expect(requests[0].reasoning).toMatchObject({
+      mode: "service-default",
+      intent: { enabled: false, effort: "high" },
+    });
+    expect(
+      (await client.getSnapshot()).sessions.find(
+        (session) => session.id === "session_1",
+      )?.reasoning,
+    ).toEqual({ enabled: false, effort: "high" });
+  } finally {
+    await client.dispose();
+  }
+});

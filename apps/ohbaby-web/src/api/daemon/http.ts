@@ -1,3 +1,4 @@
+import type { UiBackendClient } from "ohbaby-sdk";
 import type {
   CompactSessionRequest,
   CompactSessionResponse,
@@ -154,6 +155,18 @@ export class DaemonHttpClient {
       {
         method: "PATCH",
       },
+    );
+  }
+
+  updateSessionReasoning(
+    input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
+  ): Promise<{
+    ok: true;
+    session: Awaited<ReturnType<UiBackendClient["updateSessionReasoning"]>>;
+  }> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/reasoning`,
+      { method: "PATCH", body: { reasoning: input.reasoning } },
     );
   }
 

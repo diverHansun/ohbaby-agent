@@ -41,6 +41,7 @@ export interface UiConnectModelResult {
 }
 
 export interface UiCurrentModelConfig {
+  readonly reasoning?: UiReasoningCapabilityView;
   readonly provider: string;
   readonly baseUrl: string;
   readonly interfaceProvider: UiCurrentModelInterfaceProvider;
@@ -62,6 +63,7 @@ export interface UiProbeModelContextWindowInput {
 }
 
 export interface UiProbeModelContextWindowResult {
+  readonly reasoning?: UiReasoningCapabilityView;
   readonly contextWindowTokens: number;
   readonly contextWindowSource: "detected" | "user" | "default";
   readonly warning?: string;
@@ -77,4 +79,41 @@ export function inferConnectModelInterfaceProvider(
     lower.includes("/v1/messages")
     ? "anthropic"
     : "openai-compatible";
+}
+
+/** Persisted preference; omitted fields select the current confirmed default. */
+export interface UiReasoningConfig {
+  readonly enabled?: boolean;
+  readonly effort?: string;
+}
+/** Sanitized public evidence. Protocol mapping and credentials are private. */
+export interface UiReasoningCapabilityView {
+  readonly status: (typeof UI_REASONING_STATUSES)[number];
+  readonly mode?: "none" | "binary" | "effort";
+  readonly supportsDisabled?: boolean;
+  readonly efforts: readonly string[];
+  readonly default?: UiReasoningConfig;
+  readonly source?: string;
+  readonly reason?: string;
+  readonly stale?: boolean;
+}
+
+export const UI_REASONING_STATUSES = [
+  "detecting",
+  "identified",
+  "unknown",
+] as const;
+export function isUiReasoningConfig(
+  value: unknown,
+): value is UiReasoningConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    Object.keys(record).every((key) => key === "enabled" || key === "effort") &&
+    (record.enabled === undefined || typeof record.enabled === "boolean") &&
+    (record.effort === undefined ||
+      (typeof record.effort === "string" &&
+        record.effort.trim() !== "" &&
+        !["none", "off", "disabled"].includes(record.effort.toLowerCase())))
+  );
 }

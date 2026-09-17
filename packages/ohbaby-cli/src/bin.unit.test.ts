@@ -986,6 +986,7 @@ describe("runOhbabyCli", () => {
 function createCore(): {
   readonly acquirePromptEditLease: ReturnType<typeof vi.fn>;
   readonly abortRun: ReturnType<typeof vi.fn>;
+  readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
@@ -1018,6 +1019,9 @@ function createCore(): {
       }),
     ),
     abortRun: vi.fn(() => Promise.resolve()),
+    updateSessionReasoning: vi.fn(() =>
+      Promise.reject(new Error("Unused reasoning test stub")),
+    ),
     archiveSession: vi.fn(() => Promise.resolve()),
     cancelQueuedPrompt: vi.fn(() => Promise.resolve(prompt)),
     compactSession: vi.fn(() => Promise.resolve()),

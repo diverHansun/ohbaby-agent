@@ -1,3 +1,7 @@
+import {
+  capabilitiesFor,
+  compatibleReasoningPreference,
+} from "../../services/interface-providers/reasoning.js";
 import { setManagedRuntimeEnv } from "../../utils/managed-runtime-env.js";
 import {
   coordinateModelConfig,
@@ -12,6 +16,7 @@ import type {
   ModelJsonConfig,
   PromptCachePolicy,
   ReasoningConfig,
+  ReasoningCapabilities,
 } from "./types.js";
 import { ConfigError } from "./types.js";
 import { validateModelJson, validateReasoningConfig } from "./validation.js";
@@ -35,6 +40,9 @@ export interface SetActiveLLMConfigInput {
   readonly promptCache?: PromptCachePolicy;
   readonly temperature?: number;
   readonly reasoning?: ReasoningConfig;
+  readonly clearReasoning?: boolean;
+  readonly discoveredReasoningCapabilities?: ReasoningCapabilities;
+  readonly clearDiscoveredReasoning?: boolean;
   readonly maxTokens?: number;
   readonly contextWindowTokens?: number;
   readonly clearContextWindowTokens?: boolean;
@@ -98,8 +106,9 @@ function buildLLMParams(
     ? undefined
     : (input.contextWindowTokens ?? existingParams?.contextWindowTokens);
   const temperature = input.temperature ?? existingParams?.temperature;
-  const reasoning =
-    existingParams?.reasoning === undefined && input.reasoning === undefined
+  const reasoning = input.clearReasoning
+    ? undefined
+    : existingParams?.reasoning === undefined && input.reasoning === undefined
       ? undefined
       : {
           ...existingParams?.reasoning,
@@ -160,6 +169,21 @@ function buildModelProfiles(
       ? {}
       : { maxOutputTokens: input.maxOutputTokens }),
   };
+  if (
+    input.clearDiscoveredReasoning &&
+    activeProfile.reasoningCapabilitySource === "model-metadata"
+  ) {
+    delete activeProfile.reasoningCapabilities;
+    delete activeProfile.reasoningCapabilitySource;
+  }
+  if (
+    input.discoveredReasoningCapabilities &&
+    (!activeProfile.reasoningCapabilities ||
+      activeProfile.reasoningCapabilitySource === "model-metadata")
+  ) {
+    activeProfile.reasoningCapabilities = input.discoveredReasoningCapabilities;
+    activeProfile.reasoningCapabilitySource = "model-metadata";
+  }
   const activeKey = key(activeProfile);
   const retainedForActive =
     existingModels?.filter((profile) => key(profile) !== activeKey) ?? [];
@@ -213,6 +237,20 @@ async function writeActiveConfig(
   const existing = await readExistingModelJson(modelJsonPath);
   const modelJson = buildModelJson(normalizedInput, existing);
 
+  const capability = capabilitiesFor({
+    provider: modelJson.provider,
+    model: modelJson.defaultModel,
+    baseUrl: modelJson.apiConfig.baseUrl,
+    interfaceProvider:
+      modelJson.apiConfig.interfaceProvider ?? "openai-compatible",
+    maxTokens: modelJson.llmParams.maxTokens,
+    modelProfiles: modelJson.models,
+  }).capability;
+  if (
+    input.reasoning === undefined &&
+    !compatibleReasoningPreference(modelJson.llmParams.reasoning, capability)
+  )
+    delete modelJson.llmParams.reasoning;
   validateModelJson(modelJson);
   const originalModel = await readOptionalConfigFile(modelJsonPath);
   const writesSecret =

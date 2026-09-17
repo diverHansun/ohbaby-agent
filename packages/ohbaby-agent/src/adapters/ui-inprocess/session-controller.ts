@@ -32,6 +32,7 @@ export function sessionMetadataToUiSession(session: CoreSession): UiSession {
     createdAt: new Date(session.createdAt).toISOString(),
     id: session.id,
     messages: [],
+    reasoning: session.reasoning,
     projectRoot: session.projectRoot,
     title: session.title,
     updatedAt: new Date(session.updatedAt).toISOString(),

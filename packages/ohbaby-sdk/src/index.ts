@@ -60,6 +60,8 @@ export type {
 export type { UiPromptCacheUsage } from "./prompt-cache-usage.js";
 export type {
   UiCurrentModelConfig,
+  UiReasoningConfig,
+  UiReasoningCapabilityView,
   UiCurrentModelInterfaceProvider,
   UiConnectModelInput,
   UiConnectModelInterfaceProvider,
@@ -204,3 +206,5 @@ export type { CoreAPI, SDKAPI } from "./rpc/types.js";
 export { createRPC } from "./rpc/proxy.js";
 export { isStableErrorCode } from "./error-code.js";
 export { isLoopbackHost } from "./loopback-host.js";
+
+export { isUiReasoningConfig, UI_REASONING_STATUSES } from "./connect-model.js";

@@ -14,6 +14,7 @@ export const DAEMON_RPC_METHODS = [
   "waitForPrompt",
   "compactSession",
   "archiveSession",
+  "updateSessionReasoning",
   "getCurrentModel",
   "probeModelContextWindow",
   "connectModel",

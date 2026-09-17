@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { summarizeWire } from "./agent-loop-observer.js";
 import { extractCacheUsageEvidence } from "./responses-cache-evidence.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -21,6 +22,9 @@ export interface FormalCacheGenerationEvidence extends FormalCacheEvidenceBase {
   protocol: "openai-compatible" | "openai-responses" | "anthropic";
   model?: string;
   reasoning: JsonRecord;
+  encryptedReasoningRequested?: boolean;
+  toolPairing?: FormalToolPairing;
+  nativeInputCount?: number;
   system: CacheDigest;
   tools: CacheDigest;
   input: CacheDigest;
@@ -33,6 +37,152 @@ export interface FormalCacheGenerationEvidence extends FormalCacheEvidenceBase {
 export type FormalCacheRequestEvidence =
   | FormalCacheMetadataEvidence
   | FormalCacheGenerationEvidence;
+
+export interface FormalToolPairing {
+  calls: string[];
+  results: string[];
+  invalidIds: number;
+  duplicateCalls: number;
+  duplicateResults: number;
+  resultsBeforeCalls: number;
+  unmatchedResults: number;
+  unansweredCalls: number;
+}
+
+const pairingFailures = [
+  "invalidIds",
+  "duplicateCalls",
+  "duplicateResults",
+  "resultsBeforeCalls",
+  "unmatchedResults",
+  "unansweredCalls",
+] as const;
+
+export function hasValidFormalToolPairing(
+  pairing: FormalToolPairing | undefined,
+): boolean {
+  return (
+    pairing !== undefined && pairingFailures.every((key) => pairing[key] === 0)
+  );
+}
+
+export function auditFormalToolExchange(
+  rows: readonly FormalCacheGenerationEvidence[],
+): {
+  exercised: boolean;
+  valid: boolean;
+  pairedRequestSequences: number[];
+} {
+  const pairedRequestSequences = rows
+    .filter(
+      (row) =>
+        (row.toolPairing?.calls.length ?? 0) > 0 &&
+        (row.toolPairing?.results.length ?? 0) > 0,
+    )
+    .map((row) => row.sequence);
+  return {
+    exercised: pairedRequestSequences.length > 0,
+    valid:
+      pairedRequestSequences.length > 0 &&
+      rows.every((row) => hasValidFormalToolPairing(row.toolPairing)),
+    pairedRequestSequences,
+  };
+}
+
+export function auditFormalNativeReplay(
+  expected: readonly string[],
+  actual: readonly string[] | undefined,
+): {
+  exercised: boolean;
+  valid: boolean;
+  expected: string[];
+  actual: string[];
+} {
+  const before = [...expected].sort(),
+    after = [...(actual ?? [])].sort();
+  return {
+    exercised: before.length > 0,
+    valid:
+      before.length === 0 ||
+      (actual !== undefined &&
+        JSON.stringify(before) === JSON.stringify(after)),
+    expected: before,
+    actual: after,
+  };
+}
+
+/** Inspect raw IDs only in memory; retain hashes and numeric verdicts. */
+function toolPairingEvidence(body: JsonRecord): FormalToolPairing {
+  const events: { kind: "call" | "result"; id: unknown }[] = [];
+  const rows = Array.isArray(body.input)
+    ? body.input
+    : Array.isArray(body.messages)
+      ? body.messages
+      : [];
+  for (const raw of rows) {
+    const row = record(raw);
+    if (!row) continue;
+    if (row.type === "function_call")
+      events.push({ kind: "call", id: row.call_id });
+    if (row.type === "function_call_output")
+      events.push({ kind: "result", id: row.call_id });
+    if (Array.isArray(row.tool_calls))
+      for (const call of row.tool_calls)
+        events.push({ kind: "call", id: record(call)?.id });
+    if (row.role === "tool")
+      events.push({ kind: "result", id: row.tool_call_id });
+    if (Array.isArray(row.content))
+      for (const rawPart of row.content) {
+        const part = record(rawPart);
+        if (part?.type === "tool_use")
+          events.push({ kind: "call", id: part.id });
+        if (part?.type === "tool_result")
+          events.push({ kind: "result", id: part.tool_use_id });
+      }
+  }
+  const audit: FormalToolPairing = {
+    calls: [],
+    results: [],
+    invalidIds: 0,
+    duplicateCalls: 0,
+    duplicateResults: 0,
+    resultsBeforeCalls: 0,
+    unmatchedResults: 0,
+    unansweredCalls: 0,
+  };
+  const calls = new Map<string, number>(),
+    results = new Map<string, number>();
+  for (const event of events) {
+    if (typeof event.id !== "string" || event.id.trim().length === 0) {
+      audit.invalidIds++;
+      continue;
+    }
+    const hash = createHash("sha256").update(event.id).digest("hex");
+    if (event.kind === "call") {
+      audit.calls.push(hash);
+      calls.set(hash, (calls.get(hash) ?? 0) + 1);
+    } else {
+      audit.results.push(hash);
+      results.set(hash, (results.get(hash) ?? 0) + 1);
+      if (!calls.has(hash)) audit.resultsBeforeCalls++;
+    }
+  }
+  audit.duplicateCalls = [...calls.values()].reduce(
+    (sum, n) => sum + Math.max(0, n - 1),
+    0,
+  );
+  audit.duplicateResults = [...results.values()].reduce(
+    (sum, n) => sum + Math.max(0, n - 1),
+    0,
+  );
+  audit.unmatchedResults = [...results.keys()].filter(
+    (id) => !calls.has(id),
+  ).length;
+  audit.unansweredCalls = [...calls.keys()].filter(
+    (id) => !results.has(id),
+  ).length;
+  return audit;
+}
 
 function record(value: unknown): JsonRecord | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -61,7 +211,14 @@ function digest(value: unknown): CacheDigest {
 }
 
 function safeReasoning(body: JsonRecord): JsonRecord {
-  const result: JsonRecord = {};
+  const result: JsonRecord = {
+    controlFields: [
+      "reasoning",
+      "reasoning_effort",
+      "thinking",
+      "output_config",
+    ].filter((key) => body[key] !== undefined),
+  };
   const reasoning = record(body.reasoning);
   const thinking = record(body.thinking);
   const outputConfig = record(body.output_config);
@@ -101,6 +258,9 @@ function requestEvidence(
   FormalCacheGenerationEvidence,
   | "model"
   | "reasoning"
+  | "encryptedReasoningRequested"
+  | "toolPairing"
+  | "nativeInputCount"
   | "system"
   | "tools"
   | "input"
@@ -121,7 +281,22 @@ function requestEvidence(
   const latestUser = input.findLastIndex(
     (item) => record(item)?.role === "user",
   );
+  const pairing = summarizeWire(body);
   return {
+    encryptedReasoningRequested:
+      Array.isArray(body.include) &&
+      body.include.includes("reasoning.encrypted_content"),
+    toolPairing: toolPairingEvidence(body),
+    nativeInputCount:
+      pairing.nativeTypes.length +
+      input.filter((item) => {
+        const row = record(item);
+        return (
+          row?.role === "assistant" &&
+          (typeof row.reasoning_content === "string" ||
+            typeof row.reasoning === "string")
+        );
+      }).length,
     ...(typeof body.model === "string" &&
     /^[a-zA-Z0-9/_.:-]{1,160}$/.test(body.model)
       ? { model: body.model }

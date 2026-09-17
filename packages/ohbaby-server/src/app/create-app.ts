@@ -7,6 +7,8 @@ import {
   filterWebPassthroughCommandCatalog,
   inferConnectModelInterfaceProvider,
   isConnectModelInterfaceProvider,
+  isUiReasoningConfig,
+  UI_REASONING_STATUSES,
   supportsWebOverlayCommandInvocation,
   supportsWebPassthroughCommandInvocation,
   supportsWebSkillCommandInvocation,
@@ -595,7 +597,60 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
       version: packageVersion ?? "0.1.12-dev",
     },
     openapi: "3.1.0",
+    components: {
+      schemas: {
+        ReasoningConfig: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            enabled: { type: "boolean" },
+            effort: { type: "string", minLength: 1 },
+          },
+        },
+        ReasoningCapabilityView: {
+          type: "object",
+          required: ["status", "efforts"],
+          properties: {
+            status: { type: "string", enum: UI_REASONING_STATUSES },
+            mode: { type: "string", enum: ["none", "binary", "effort"] },
+            supportsDisabled: { type: "boolean" },
+            efforts: { type: "array", items: { type: "string" } },
+            default: { $ref: "#/components/schemas/ReasoningConfig" },
+            source: { type: "string" },
+            reason: { type: "string" },
+            stale: { type: "boolean" },
+          },
+        },
+      },
+    },
     paths: {
+      "/v1/sessions/{id}/reasoning": {
+        patch: {
+          summary: "Save session reasoning preference",
+          requestBody: {
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["reasoning"],
+                  properties: {
+                    reasoning: {
+                      anyOf: [
+                        { $ref: "#/components/schemas/ReasoningConfig" },
+                        { type: "null" },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Session preference saved" },
+            "400": { description: "Invalid preference" },
+          },
+        },
+      },
       "/v1/clients": {
         post: {
           responses: {
@@ -1316,6 +1371,36 @@ class DaemonServerAppRuntime {
       }
     });
 
+    this.app.patch("/v1/sessions/:id/reasoning", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization")))
+        return context.json(webErrorBody("Unauthorized"), 401);
+      const clientId = this.clientIdFromRequest(context);
+      if (!clientId)
+        return context.json(webErrorBody("clientId is required"), 400);
+      if (!this.isRegisteredWebClient(clientId))
+        return context.json(webErrorBody("client is not registered"), 409);
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok)
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      if (body.reasoning !== null && !isUiReasoningConfig(body.reasoning))
+        return context.json(webErrorBody("Invalid reasoning preference"), 400);
+      try {
+        const session = await this.commandBackend("server-rest", {
+          clientId,
+        }).updateSessionReasoning({
+          sessionId: context.req.param("id"),
+          reasoning: body.reasoning,
+        });
+        return context.json({ ok: true, session });
+      } catch (error) {
+        return context.json(webErrorBody(errorMessage(error)), 400);
+      }
+    });
+
     this.app.post("/v1/sessions", async (context) => {
       if (!this.isAuthorized(context.req.header("authorization"))) {
         return context.json(webErrorBody("Unauthorized"), 401);
@@ -1463,6 +1548,8 @@ class DaemonServerAppRuntime {
         );
       }
       const body = isRecord(parsed.value) ? parsed.value : {};
+      if (body.reasoning !== undefined && !isUiReasoningConfig(body.reasoning))
+        return context.json(webErrorBody("Invalid reasoning preference"), 400);
       const text = asNonEmptyString(body.text);
       if (!text) {
         return context.json(webErrorBody("text is required"), 400);
@@ -1491,6 +1578,9 @@ class DaemonServerAppRuntime {
           createSessionId: this.createSessionId,
           options: {
             clientRequestId,
+            ...(body.reasoning === undefined
+              ? {}
+              : { reasoning: body.reasoning }),
             ...(sessionId === undefined ? {} : { sessionId }),
           },
           permissionRouter: this.permissionRouter,

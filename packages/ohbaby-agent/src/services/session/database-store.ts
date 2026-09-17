@@ -31,6 +31,7 @@ interface SessionRow {
 }
 
 interface SessionData {
+  readonly reasoning?: Session["reasoning"];
   readonly childrenIds?: readonly string[];
   readonly isSubagent?: boolean;
 }
@@ -84,6 +85,7 @@ function normalizeLimit(limit: number | undefined): number | undefined {
 
 function encodeData(session: Session): string {
   const data: SessionData = {
+    reasoning: session.reasoning,
     childrenIds: session.childrenIds,
     isSubagent: session.isSubagent,
   };
@@ -110,6 +112,7 @@ function rowToSession(row: SessionRow): Session {
       lastMessageAt: row.last_message_at ?? undefined,
     },
     parentId: row.parent_id ?? undefined,
+    reasoning: data.reasoning,
     childrenIds: data.childrenIds ?? [],
     isSubagent: data.isSubagent ?? row.parent_id !== null,
   };

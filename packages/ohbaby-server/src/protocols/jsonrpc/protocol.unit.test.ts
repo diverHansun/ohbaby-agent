@@ -150,6 +150,7 @@ describe("daemon protocol", () => {
       "waitForPrompt",
       "compactSession",
       "archiveSession",
+      "updateSessionReasoning",
       "getCurrentModel",
       "probeModelContextWindow",
       "connectModel",

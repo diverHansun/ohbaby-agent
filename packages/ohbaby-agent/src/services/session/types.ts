@@ -1,3 +1,4 @@
+import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { BusInstance } from "../../bus/index.js";
 
 export type SessionStatus = "active" | "archived";
@@ -8,6 +9,7 @@ export interface SessionStats {
 }
 
 export interface Session {
+  readonly reasoning?: ReasoningConfig;
   readonly id: string;
   readonly projectId: string;
   readonly projectRoot: string;
@@ -48,6 +50,7 @@ export interface ListSessionOptions {
 }
 
 export interface UpdateSessionPatch {
+  readonly reasoning?: ReasoningConfig;
   readonly title?: string;
   readonly status?: SessionStatus;
   readonly agentName?: string;

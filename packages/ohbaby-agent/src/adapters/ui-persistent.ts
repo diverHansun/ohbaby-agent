@@ -301,6 +301,12 @@ function withStartupRecovery(
       await ready();
       return client.compactSession(compactOptions);
     },
+    async updateSessionReasoning(
+      input,
+    ): ReturnType<UiBackendClient["updateSessionReasoning"]> {
+      await ready();
+      return client.updateSessionReasoning(input);
+    },
     async archiveSession(input): ReturnType<UiBackendClient["archiveSession"]> {
       await ready();
       return client.archiveSession(input);

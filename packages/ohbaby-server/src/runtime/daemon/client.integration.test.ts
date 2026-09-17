@@ -333,6 +333,19 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(compactResult());
   }
 
+  updateSessionReasoning(
+    input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionReasoning"]> {
+    return Promise.resolve({
+      id: input.sessionId,
+      reasoning: input.reasoning ?? undefined,
+      title: "Test",
+      messages: [],
+      createdAt: "2026-09-17T00:00:00Z",
+      updatedAt: "2026-09-17T00:00:00Z",
+    });
+  }
+
   archiveSession(
     input: Parameters<UiBackendClient["archiveSession"]>[0],
   ): ReturnType<UiBackendClient["archiveSession"]> {

@@ -86,7 +86,7 @@ describe("context window metadata probe helpers", () => {
           interfaceProvider: "openai-compatible",
           model: "openai/gpt-4.1",
         }),
-      ).resolves.toEqual({ contextWindowTokens: 1_000_000 });
+      ).resolves.toMatchObject({ contextWindowTokens: 1_000_000 });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -111,7 +111,7 @@ describe("context window metadata probe helpers", () => {
           interfaceProvider: "anthropic",
           model: "kimi-2.6",
         }),
-      ).resolves.toEqual({ contextWindowTokens: 262_144 });
+      ).resolves.toMatchObject({ contextWindowTokens: 262_144 });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -141,7 +141,7 @@ describe("context window metadata probe helpers", () => {
           interfaceProvider: "openai-compatible",
           model: "claude-sonnet-4.6",
         }),
-      ).resolves.toEqual({
+      ).resolves.toMatchObject({
         warning:
           "Unable to detect model context window from metadata; using the configured fallback.",
       });

@@ -3056,6 +3056,9 @@ function createFakeRuntime(input: {
   const client: UiBackendClient = {
     abortRun: vi.fn(() => Promise.resolve()),
     acquirePromptEditLease: vi.fn(() => Promise.reject(new Error("unused"))),
+    updateSessionReasoning: vi.fn(() =>
+      Promise.reject(new Error("Unused reasoning test stub")),
+    ),
     archiveSession: vi.fn(() => Promise.resolve()),
     compactSession,
     cancelQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
@@ -3698,3 +3701,312 @@ function deferred<T>(): {
   });
   return { promise, reject: rejectPromise, resolve: resolvePromise };
 }
+
+/* eslint-disable @typescript-eslint/unbound-method -- These client methods are Vitest mocks. */
+it("shows raw reasoning labels in the composer footer and persists session preference", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+    provider: "p",
+    model: "m",
+    baseUrl: "https://p",
+    interfaceProvider: "openai-compatible",
+    reasoning: {
+      status: "identified",
+      mode: "effort",
+      supportsDisabled: false,
+      efforts: ["high", "max"],
+      default: { enabled: true, effort: "high" },
+    },
+  });
+  vi.mocked(fake.client.updateSessionReasoning).mockResolvedValue({
+    id: "session_1",
+    title: "t",
+    messages: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    reasoning: { effort: "max" },
+  });
+  const app = mountApp(fake.runtime);
+  await waitFor(() =>
+    Boolean(app.container.querySelector('[aria-label="Reasoning effort"]')),
+  );
+  const select = app.container.querySelector<HTMLSelectElement>(
+    '[aria-label="Reasoning effort"]',
+  );
+  if (!select) throw new Error("Reasoning selector missing");
+  expect(Array.from(select.options).map((option) => option.text)).toEqual([
+    "high",
+    "max",
+  ]);
+  expect(select.value).toBe("high");
+  await act(async () => {
+    await Promise.resolve();
+    select.value = "max";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(fake.client.updateSessionReasoning).toHaveBeenCalledWith({
+    sessionId: "session_1",
+    reasoning: { enabled: true, effort: "max" },
+  });
+  expect(select.closest(".ohb-composer-tools")).not.toBeNull();
+});
+it("unknown capability keeps send available and shows service default without fake tiers", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+    provider: "p",
+    model: "m",
+    baseUrl: "https://p",
+    interfaceProvider: "openai-compatible",
+    reasoning: { status: "unknown", efforts: [] },
+  });
+  const app = mountApp(fake.runtime);
+  await waitFor(() => app.container.textContent.includes("服务默认"));
+  expect(
+    app.container.querySelector('[aria-label="Reasoning effort"]'),
+  ).toBeNull();
+  await setTextareaValue(app.container, "hello");
+  expect(
+    app.container.querySelector<HTMLTextAreaElement>("textarea")?.disabled,
+  ).toBe(false);
+});
+it("ignores a late probe after a newer edited model probe resolves", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  fake.listCommands.mockResolvedValue(catalog(["connect"]));
+  const first =
+    deferred<Awaited<ReturnType<UiBackendClient["probeModelContextWindow"]>>>();
+  vi.mocked(fake.client.probeModelContextWindow)
+    .mockReturnValueOnce(first.promise)
+    .mockResolvedValueOnce({
+      contextWindowTokens: 222222,
+      contextWindowSource: "detected",
+    });
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "/");
+  await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+  await pressTextareaKey(app.container, "Enter");
+  await waitFor(() =>
+    Boolean(app.container.querySelector(".ohb-structured-overlay")),
+  );
+  await setInputValue(app.container, "Provider", "p");
+  await setInputValue(app.container, "Model", "a");
+  await setInputValue(app.container, "Base URL", "https://p.test/v1");
+  await clickButton(app.container, "Probe context");
+  await setInputValue(app.container, "Model", "b");
+  await clickButton(app.container, "Probe context");
+  await act(async () => {
+    first.resolve({
+      contextWindowTokens: 111111,
+      contextWindowSource: "detected",
+    });
+    await Promise.resolve();
+  });
+  expect(app.container.textContent).not.toContain("111");
+});
+
+it.each(["late initialization", "draft edit during save"])(
+  "keeps the saved headline after %s",
+  async (scenario) => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const initial =
+      deferred<Awaited<ReturnType<UiBackendClient["getCurrentModel"]>>>();
+    const saved =
+      deferred<Awaited<ReturnType<UiBackendClient["connectModel"]>>>();
+    if (scenario === "late initialization")
+      vi.mocked(fake.client.getCurrentModel).mockReturnValue(initial.promise);
+    fake.connectModel.mockReturnValue(saved.promise);
+    fake.listCommands.mockResolvedValue(catalog(["connect"]));
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+    await setInputValue(app.container, "Provider", "new-provider");
+    await setInputValue(app.container, "Model", "new-model");
+    await setInputValue(app.container, "Base URL", "https://new.test/v1");
+    await clickButton(app.container, "Save model");
+    if (scenario === "draft edit during save")
+      await setInputValue(app.container, "Model", "unsaved-draft");
+    await act(async () => {
+      saved.resolve({
+        provider: "new-provider",
+        model: "new-model",
+        baseUrl: "https://new.test/v1",
+        interfaceProvider: "openai-compatible",
+        saved: true,
+        modelJsonPath: "model.json",
+        envPath: ".env",
+        contextWindowSource: "default",
+        contextWindowTokens: 128000,
+      });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      initial.resolve({
+        provider: "old-provider",
+        model: "old-model",
+        baseUrl: "https://old.test/v1",
+        interfaceProvider: "openai-compatible",
+      });
+      await Promise.resolve();
+    });
+    expect(app.container.textContent).toContain(
+      "Current model: new-provider · new-model",
+    );
+    if (scenario === "draft edit during save") {
+      await clickButton(app.container, "Save model");
+      expect(fake.connectModel).toHaveBeenLastCalledWith(
+        expect.objectContaining({ model: "unsaved-draft" }),
+      );
+    }
+  },
+);
+it("clears old workspace reasoning while the new client metadata is pending", async () => {
+  const first = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  vi.mocked(first.client.getCurrentModel).mockResolvedValue({
+    provider: "old",
+    model: "old",
+    baseUrl: "https://old.test",
+    interfaceProvider: "openai-compatible",
+    reasoning: {
+      status: "identified",
+      mode: "effort",
+      supportsDisabled: false,
+      efforts: ["high"],
+      default: { enabled: true, effort: "high" },
+    },
+  });
+  const second = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const next =
+    deferred<Awaited<ReturnType<UiBackendClient["getCurrentModel"]>>>();
+  vi.mocked(second.client.getCurrentModel).mockReturnValue(next.promise);
+  const app = mountApp(first.runtime);
+  await waitFor(() =>
+    Boolean(app.container.querySelector('[aria-label="Reasoning effort"]')),
+  );
+  const oldSelect = app.container.querySelector<HTMLSelectElement>(
+    '[aria-label="Reasoning effort"]',
+  );
+  if (!oldSelect) throw new Error("Old selector missing");
+  await act(async () => {
+    oldSelect.value = "high";
+    oldSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await act(async () => {
+    app.root.render(<OhbabyWebApp runtime={second.runtime} />);
+    await Promise.resolve();
+  });
+  expect(
+    app.container.querySelector('[aria-label="Reasoning effort"]'),
+  ).toBeNull();
+  await setTextareaValue(app.container, "new workspace");
+  await pressTextareaKey(app.container, "Enter");
+  expect(second.submitPromptAccepted.mock.calls[0]?.[0]).toBe("new workspace");
+  expect(
+    second.submitPromptAccepted.mock.calls[0]?.[1]?.reasoning,
+  ).toBeUndefined();
+});
+
+it.each(["pending", "acknowledged"])(
+  "keeps local reasoning through stale session events with PATCH %s",
+  async (phase) => {
+    const snapshot = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot });
+    vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+      provider: "p",
+      model: "m",
+      baseUrl: "https://p",
+      interfaceProvider: "openai-compatible",
+      reasoning: {
+        status: "identified",
+        mode: "effort",
+        supportsDisabled: false,
+        efforts: ["medium", "high"],
+        default: { effort: "medium" },
+      },
+    });
+    const save =
+      deferred<
+        Awaited<ReturnType<UiBackendClient["updateSessionReasoning"]>>
+      >();
+    vi.mocked(fake.client.updateSessionReasoning).mockReturnValue(save.promise);
+    const app = mountApp(fake.runtime);
+    await waitFor(() =>
+      Boolean(app.container.querySelector('[aria-label="Reasoning effort"]')),
+    );
+    const select = app.container.querySelector<HTMLSelectElement>(
+      '[aria-label="Reasoning effort"]',
+    );
+    if (!select) throw new Error("Selector missing");
+    await act(async () => {
+      select.value = "high";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    if (phase === "acknowledged") {
+      await act(async () => {
+        save.resolve({
+          ...snapshot.sessions[0],
+          reasoning: { enabled: true, effort: "high" },
+        });
+        await Promise.resolve();
+      });
+    }
+    await act(async () => {
+      fake.store.replaceSnapshot(
+        {
+          ...snapshot,
+          sessions: snapshot.sessions.map((session) => ({
+            ...session,
+            reasoning: { effort: "medium" },
+          })),
+        },
+        2,
+      );
+      await Promise.resolve();
+    });
+    expect(select.value).toBe("high");
+    await setTextareaValue(app.container, "use high");
+    await pressTextareaKey(app.container, "Enter");
+    expect(fake.submitPromptAccepted).toHaveBeenCalledWith(
+      "use high",
+      expect.objectContaining({ reasoning: { enabled: true, effort: "high" } }),
+    );
+    await act(async () => {
+      save.resolve({
+        ...snapshot.sessions[0],
+        reasoning: { enabled: true, effort: "high" },
+      });
+      await Promise.resolve();
+    });
+    expect(select.value).toBe("high");
+    await act(async () => {
+      fake.store.replaceSnapshot(
+        {
+          ...snapshot,
+          sessions: snapshot.sessions.map((session) => ({
+            ...session,
+            reasoning: { enabled: true, effort: "high" },
+          })),
+        },
+        3,
+      );
+      await Promise.resolve();
+    });
+    expect(select.value).toBe("high");
+  },
+);

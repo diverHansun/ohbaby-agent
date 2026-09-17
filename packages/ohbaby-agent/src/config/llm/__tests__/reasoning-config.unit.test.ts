@@ -184,3 +184,50 @@ describe("reasoning configuration", () => {
     }).toThrow(/reasoning|effort/i);
   });
 });
+
+describe("Stage C capability defaults and explicit clearing", () => {
+  it("clears old intent instead of merging undefined", async () => {
+    const path = await modelPath();
+    await writeFile(
+      path,
+      JSON.stringify(config({ reasoning: { enabled: true, effort: "high" } })),
+    );
+    await setActiveLLMConfig({
+      provider: "openai",
+      model: "gpt-5.2",
+      baseUrl: "https://api.openai.com/v1",
+      modelJsonPath: path,
+      clearReasoning: true,
+    });
+    expect(
+      (JSON.parse(await readFile(path, "utf8")) as ModelJsonConfig).llmParams
+        .reasoning,
+    ).toBeUndefined();
+  });
+  it.each([
+    { defaultEffort: "missing" },
+    { effortOrder: ["high", "high"] },
+    { effortOrder: ["low"] },
+    { effortOrder: ["none", "low"] },
+  ])("rejects invalid default/order %j", (extra) => {
+    const value = {
+      ...config({}),
+      models: [
+        {
+          model: "gpt-5.2",
+          contextWindowTokens: 12345,
+          reasoningCapabilities: {
+            mode: "effort",
+            wire: "openai",
+            supportsDisabled: true,
+            efforts: ["low", "high"],
+            ...extra,
+          },
+        },
+      ],
+    };
+    expect(() => {
+      validateModelJson(value);
+    }).toThrow(/reasoning/i);
+  });
+});

@@ -1,3 +1,4 @@
+import type { UiReasoningCapabilityView } from "ohbaby-sdk";
 import { normalizedEndpoint } from "../../config/llm/model-profile.js";
 import {
   ConfigError,
@@ -19,7 +20,7 @@ export interface ReasoningIntent {
 }
 export interface ResolvedReasoning {
   readonly intent: ReasoningIntent;
-  readonly mode: "none" | "disabled" | "binary" | "effort";
+  readonly mode: "none" | "disabled" | "binary" | "effort" | "service-default";
   readonly wire: ReasoningCapabilities["wire"];
   readonly effort?: string;
   readonly budgetTokens?: number;
@@ -74,11 +75,11 @@ const NON_REASONING: ReasoningCapabilities = {
   supportsDisabled: true,
   temperature: "allowed",
 };
-function capabilitiesFor(options: ResolveRequestReasoningOptions): {
-  capability: ReasoningCapabilities;
+export function capabilitiesFor(options: ResolveRequestReasoningOptions): {
+  capability?: ReasoningCapabilities;
   source: string;
 } {
-  const matching = options.modelProfiles?.filter(
+  let matching = options.modelProfiles?.filter(
     (profile) =>
       profile.model === options.model &&
       (profile.provider ?? options.provider) === options.provider &&
@@ -89,6 +90,10 @@ function capabilitiesFor(options: ResolveRequestReasoningOptions): {
           normalizedEndpoint(options.baseUrl)) &&
       profile.reasoningCapabilities !== undefined,
   );
+  const explicitProfiles = matching?.filter(
+    (profile) => profile.reasoningCapabilitySource !== "model-metadata",
+  );
+  if (explicitProfiles?.length) matching = explicitProfiles;
   // Prefer more constrained routes; preserve last-entry precedence for ties.
   matching?.sort(
     (a, b) =>
@@ -104,9 +109,75 @@ function capabilitiesFor(options: ResolveRequestReasoningOptions): {
     if (capability === undefined)
       return fail("Missing model reasoning capabilities");
     validateReasoningCapabilities(capability);
-    return { capability, source: "local-model-profile" };
+    return {
+      capability,
+      source:
+        matching[matching.length - 1].reasoningCapabilitySource ??
+        "local-model-profile",
+    };
   }
   const endpoint = normalizedEndpoint(options.baseUrl);
+  // Verified route profiles: Zenmux reasoning guide and the exact model pages.
+  // https://zenmux.ai/docs/guide/advanced/reasoning.html
+  // Live regression evidence lives in the native-reasoning harness.
+  if (options.provider === "zenmux") {
+    const common = {
+      mode: "effort" as const,
+      supportsDisabled: true,
+      temperature: "unsupported" as const,
+    };
+    if (endpoint === "https://zenmux.ai/api/v1") {
+      if (
+        options.model === "deepseek/deepseek-v4-flash" &&
+        options.interfaceProvider === "openai-compatible"
+      )
+        return {
+          capability: {
+            ...common,
+            wire: "reasoning",
+            efforts: ["high", "max"],
+          },
+          source: "builtin:zenmux/deepseek-v4-flash",
+        };
+      if (
+        options.model === "openai/gpt-5.6-luna" &&
+        options.interfaceProvider !== "anthropic"
+      )
+        return {
+          capability: {
+            ...common,
+            // The exact model page confirms levels, not a disable control.
+            // https://zenmux.ai/openai/gpt-5.6-luna
+            supportsDisabled: false,
+            wire:
+              options.interfaceProvider === "openai-responses"
+                ? "openai"
+                : "reasoning",
+            efforts:
+              options.interfaceProvider === "openai-responses"
+                ? ["low", "medium", "high", "xhigh", "max"]
+                : ["low", "medium", "high"],
+          },
+          source: "builtin:zenmux/gpt-5.6-luna",
+        };
+    }
+    if (
+      endpoint === "https://zenmux.ai/api/anthropic" &&
+      options.model === "anthropic/claude-sonnet-5" &&
+      options.interfaceProvider === "anthropic"
+    )
+      return {
+        capability: {
+          ...common,
+          // Sonnet 5 adaptive thinking is always on.
+          // https://zenmux.ai/anthropic/claude-sonnet-5
+          supportsDisabled: false,
+          wire: "anthropic-adaptive",
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+        },
+        source: "builtin:zenmux/claude-sonnet-5",
+      };
+  }
   // Exact identities only. Sources describe capabilities, not arbitrary proxy routes.
   // https://developers.openai.com/api/docs/models/gpt-5.2
   // https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.2
@@ -170,10 +241,7 @@ function capabilitiesFor(options: ResolveRequestReasoningOptions): {
         source: "builtin:anthropic/adaptive-thinking",
       };
   }
-  throw new ConfigError(
-    `Reasoning capabilities unknown for ${options.provider}/${options.model}; configure models[].reasoningCapabilities for this route`,
-    "INVALID_FIELD",
-  );
+  return { source: "unknown" };
 }
 function fail(message: string): never {
   throw new ConfigError(message, "INVALID_FIELD");
@@ -197,9 +265,27 @@ export function resolveRequestReasoning(
   options: ResolveRequestReasoningOptions,
 ): ResolvedReasoning {
   let intent = mergeReasoningIntent(options.reasoning, options.override);
-  if (options.purpose === "session-title")
-    intent = mergeReasoningIntent(intent, { enabled: false });
+  if (
+    options.temperature !== undefined &&
+    (!Number.isFinite(options.temperature) ||
+      options.temperature < 0 ||
+      options.temperature > 2)
+  )
+    fail("Invalid temperature: must be between 0 and 2");
   const { capability, source } = capabilitiesFor(options);
+  if (!capability)
+    return Object.freeze({
+      intent,
+      mode: "service-default",
+      wire: "none",
+      capabilitySource: source,
+    });
+  // Validate an explicit selection before applying the auxiliary title policy.
+  if (options.purpose === "session-title") {
+    resolveRequestReasoning({ ...options, purpose: "agent-step" });
+    if (capability.supportsDisabled)
+      intent = mergeReasoningIntent(intent, { enabled: false });
+  }
   validateWireProtocol(capability.wire, options.interfaceProvider);
   const base = { intent, wire: capability.wire, capabilitySource: source };
   if (options.temperature !== undefined) {
@@ -241,7 +327,11 @@ export function resolveRequestReasoning(
       );
     return Object.freeze({ ...base, mode: "binary" });
   }
-  const effort = capability.effortMap?.[intent.effort] ?? intent.effort;
+  const effort = intent.explicit.effort
+    ? (capability.effortMap?.[intent.effort] ?? intent.effort)
+    : defaultReasoningEffort(capability);
+  if (effort === undefined)
+    return Object.freeze({ ...base, mode: "service-default" });
   if (!capability.efforts?.includes(effort))
     fail(
       `Unsupported reasoning effort ${intent.effort}; supported: ${capability.efforts?.join(", ") ?? "none"}. Configure an explicit effortMap to map strengths`,
@@ -271,7 +361,12 @@ export interface ChatReasoningWire {
 export function toChatReasoningWire(
   reasoning?: ResolvedReasoning,
 ): ChatReasoningWire {
-  if (!reasoning || reasoning.mode === "none") return {};
+  if (
+    !reasoning ||
+    reasoning.mode === "none" ||
+    reasoning.mode === "service-default"
+  )
+    return {};
   const enabled = reasoning.mode !== "disabled";
   switch (reasoning.wire) {
     case "openai":
@@ -302,6 +397,8 @@ export interface ResponsesReasoningWire {
 export function toResponsesReasoningWire(
   reasoning?: ResolvedReasoning,
 ): ResponsesReasoningWire {
+  if (reasoning?.mode === "service-default")
+    return { include: ["reasoning.encrypted_content"] };
   if (!reasoning || reasoning.mode === "none") return {};
   if (reasoning.wire !== "openai")
     return fail(
@@ -324,7 +421,12 @@ export interface AnthropicReasoningWire {
 export function toAnthropicReasoningWire(
   reasoning?: ResolvedReasoning,
 ): AnthropicReasoningWire {
-  if (!reasoning || reasoning.mode === "none") return {};
+  if (
+    !reasoning ||
+    reasoning.mode === "none" ||
+    reasoning.mode === "service-default"
+  )
+    return {};
   if (!reasoning.wire.startsWith("anthropic-"))
     return fail(
       `Reasoning wire ${reasoning.wire} cannot be sent through Anthropic`,
@@ -342,4 +444,90 @@ export function toAnthropicReasoningWire(
     thinking: { type: "adaptive" },
     output_config: { effort: reasoning.effort },
   };
+}
+
+const STANDARD_EFFORT_ORDER = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export function orderedReasoningEfforts(
+  capability: ReasoningCapabilities,
+): readonly string[] {
+  const supported = capability.efforts ?? [];
+  const order = capability.effortOrder ?? STANDARD_EFFORT_ORDER;
+  return order.filter((value) => supported.includes(value));
+}
+export function defaultReasoningEffort(
+  capability: ReasoningCapabilities,
+): string | undefined {
+  if (capability.efforts?.includes("medium")) return "medium";
+  if (
+    capability.defaultEffort &&
+    capability.efforts?.includes(capability.defaultEffort)
+  )
+    return capability.defaultEffort;
+  return orderedReasoningEfforts(capability)[0];
+}
+
+export function reasoningCapabilityView(
+  options: ResolveRequestReasoningOptions,
+  discovery?: {
+    status: "detecting" | "identified" | "unknown";
+    reason?: string;
+  },
+): UiReasoningCapabilityView {
+  const { capability, source } = capabilitiesFor(options);
+  if (!capability)
+    return {
+      status: discovery?.status === "detecting" ? "detecting" : "unknown",
+      efforts: [],
+      ...(discovery?.reason ? { reason: discovery.reason } : {}),
+    };
+  const efforts = orderedReasoningEfforts(capability);
+  const effort = defaultReasoningEffort(capability);
+  if (capability.mode === "effort" && effort === undefined)
+    return {
+      status: "unknown",
+      mode: "effort",
+      supportsDisabled: capability.supportsDisabled,
+      efforts,
+      source,
+      reason: "unknown-effort-order",
+    };
+  return {
+    status: "identified",
+    mode: capability.mode,
+    supportsDisabled: capability.supportsDisabled,
+    efforts,
+    default:
+      capability.mode === "none"
+        ? {}
+        : { enabled: true, ...(effort === undefined ? {} : { effort }) },
+    source,
+    ...(discovery?.status === "unknown"
+      ? { stale: true, reason: discovery.reason }
+      : {}),
+  };
+}
+
+/** Revalidates stored defaults only; immutable submissions use the strict resolver. */
+export function compatibleReasoningPreference(
+  preference: ReasoningConfig | undefined,
+  capability: ReasoningCapabilities | undefined,
+): boolean {
+  if (!preference || !capability) return true;
+  if (preference.enabled === false) return capability.supportsDisabled;
+  if (capability.mode === "none")
+    return preference.enabled === undefined && preference.effort === undefined;
+  if (preference.effort === undefined) return true;
+  return (
+    capability.mode === "effort" &&
+    !!capability.efforts?.includes(
+      capability.effortMap?.[preference.effort] ?? preference.effort,
+    )
+  );
 }

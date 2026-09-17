@@ -1,3 +1,5 @@
+import type { UiReasoningConfig } from "./connect-model.js";
+import type { UiSession } from "./snapshot.js";
 import type {
   UiSlashCommandCatalog,
   UiSlashCommandInvocation,
@@ -40,6 +42,7 @@ import type {
 } from "./prompt.js";
 
 export interface SubmitPromptOptions {
+  readonly reasoning?: UiReasoningConfig;
   readonly clientRequestId?: string;
   readonly sessionId?: string;
 }
@@ -137,6 +140,10 @@ export interface UiCommandClient
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
   archiveSession(input: UiArchiveSessionInput): Promise<void>;
+  updateSessionReasoning(input: {
+    readonly sessionId: string;
+    readonly reasoning: UiReasoningConfig | null;
+  }): Promise<UiSession>;
   connectModel(input: UiConnectModelInput): Promise<UiConnectModelResult>;
   setSearchApiKey(
     input: UiSetSearchApiKeyInput,

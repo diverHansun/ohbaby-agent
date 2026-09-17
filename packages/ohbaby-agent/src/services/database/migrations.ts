@@ -369,4 +369,8 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
         WHERE client_request_id <> '';
     `,
   },
+  {
+    version: "016_prompt_submission_reasoning",
+    sql: `ALTER TABLE prompt_submission ADD COLUMN reasoning_data TEXT;`,
+  },
 ];

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   installFormalCacheObserver,
+  auditFormalNativeReplay,
+  auditFormalToolExchange,
   type FormalCacheGenerationEvidence,
 } from "./formal-cache-observer.js";
 
@@ -38,6 +40,144 @@ function stream(frames: unknown[]): { wire: string; response: Response } {
 }
 
 describe("formal backend passive cache observer", () => {
+  it("native replay requires actual expected hashes and distinguishes an unexercised branch", () => {
+    expect(auditFormalNativeReplay(["one"], [])).toMatchObject({
+      exercised: true,
+      valid: false,
+    });
+    expect(auditFormalNativeReplay(["one"], undefined).valid).toBe(false);
+    expect(auditFormalNativeReplay(["one"], ["other"]).valid).toBe(false);
+    expect(
+      auditFormalNativeReplay(["two", "one"], ["one", "two"]),
+    ).toMatchObject({ exercised: true, valid: true });
+    expect(auditFormalNativeReplay([], [])).toMatchObject({
+      exercised: false,
+      valid: true,
+    });
+  });
+  it.each([
+    {
+      path: "/api/v1/responses",
+      body: {
+        input: [
+          { type: "function_call", call_id: "private-a" },
+          { type: "function_call", call_id: "private-b" },
+          { type: "function_call_output", call_id: "private-b" },
+          { type: "function_call_output", call_id: "private-a" },
+        ],
+      },
+    },
+    {
+      path: "/api/v1/chat/completions",
+      body: {
+        messages: [
+          { role: "assistant", tool_calls: [{ id: "private-a" }] },
+          { role: "tool", tool_call_id: "private-a" },
+        ],
+      },
+    },
+    {
+      path: "/api/anthropic/v1/messages",
+      body: {
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "private-a" }],
+          },
+          {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "private-a" }],
+          },
+        ],
+      },
+    },
+  ])(
+    "requires a nonempty exchange and validates $path pairing without fixing parallel-result order",
+    async ({ path, body }) => {
+      globalThis.fetch = vi
+        .fn<typeof fetch>()
+        .mockImplementation(() => Promise.resolve(new Response("{}")));
+      const observer = installFormalCacheObserver();
+      expect(auditFormalToolExchange([])).toMatchObject({
+        exercised: false,
+        valid: false,
+      });
+      await fetch(`https://zenmux.ai${path}`, { method: "POST", body: "{}" });
+      await observer.drain();
+      expect(auditFormalToolExchange(generations(observer)).valid).toBe(false);
+      await fetch(`https://zenmux.ai${path}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      await observer.drain();
+      expect(auditFormalToolExchange(generations(observer))).toMatchObject({
+        exercised: true,
+        valid: true,
+        pairedRequestSequences: [2],
+      });
+      expect(JSON.stringify(observer.records)).not.toContain("private-");
+      observer.restore();
+    },
+  );
+  it.each([
+    {
+      label: "empty ID",
+      items: [
+        { type: "function_call", call_id: "" },
+        { type: "function_call_output", call_id: "" },
+      ],
+      key: "invalidIds",
+    },
+    {
+      label: "missing ID",
+      items: [{ type: "function_call" }, { type: "function_call_output" }],
+      key: "invalidIds",
+    },
+    {
+      label: "duplicate call",
+      items: [
+        { type: "function_call", call_id: "private-id" },
+        { type: "function_call", call_id: "private-id" },
+        { type: "function_call_output", call_id: "private-id" },
+      ],
+      key: "duplicateCalls",
+    },
+    {
+      label: "duplicate result",
+      items: [
+        { type: "function_call", call_id: "private-id" },
+        { type: "function_call_output", call_id: "private-id" },
+        { type: "function_call_output", call_id: "private-id" },
+      ],
+      key: "duplicateResults",
+    },
+    {
+      label: "result before call",
+      items: [
+        { type: "function_call_output", call_id: "private-id" },
+        { type: "function_call", call_id: "private-id" },
+      ],
+      key: "resultsBeforeCalls",
+    },
+  ])("safely flags $label in wire tool pairing", async ({ items, key }) => {
+    globalThis.fetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("{}"));
+    const observer = installFormalCacheObserver();
+    await fetch("https://zenmux.ai/api/v1/responses", {
+      method: "POST",
+      body: JSON.stringify({ input: items }),
+    });
+    await observer.drain();
+    const audit = generations(observer)[0].toolPairing as unknown as Record<
+      string,
+      unknown
+    >;
+    expect(audit[key]).toBeGreaterThan(0);
+    expect(auditFormalToolExchange(generations(observer)).valid).toBe(false);
+    expect(JSON.stringify(observer.records)).not.toContain("private-id");
+    observer.restore();
+  });
   it.each(["/api/v1/models", "/api/anthropic/v1/models"])(
     "passes metadata GET %s unchanged with only bounded request metadata",
     async (path) => {
@@ -276,6 +416,45 @@ describe("formal backend passive cache observer", () => {
       generations(observer)[1].reasoning.config,
     );
     expect(JSON.stringify(observer.records)).not.toContain("private");
+    observer.restore();
+  });
+
+  it("audits unknown reasoning omission, encrypted include, and tool pairing without raw IDs", async () => {
+    const transport = vi
+      .fn<typeof fetch>()
+      .mockImplementation(() => Promise.resolve(new Response("{}")));
+    globalThis.fetch = transport;
+    const observer = installFormalCacheObserver();
+    const init = {
+      method: "POST",
+      body: JSON.stringify({
+        model: "openai/gpt-5.6-luna",
+        include: ["reasoning.encrypted_content", "private-option"],
+        input: [
+          {
+            type: "function_call",
+            call_id: "private-call-id",
+            name: "read",
+            arguments: "{}",
+          },
+          {
+            type: "function_call_output",
+            call_id: "private-call-id",
+            output: "private-result",
+          },
+        ],
+      }),
+    };
+    await fetch("https://zenmux.ai/api/v1/responses", init);
+    await observer.drain();
+    const row = generations(observer)[0];
+    expect(row.reasoning.controlFields).toEqual([]);
+    expect(row.encryptedReasoningRequested).toBe(true);
+    expect(row.toolPairing?.calls).toHaveLength(1);
+    expect(row.toolPairing?.results).toEqual(row.toolPairing?.calls);
+    expect(row.toolPairing?.calls[0]).toMatch(/^[a-f0-9]{64}$/u);
+    expect(JSON.stringify(observer.records)).not.toContain("private");
+    expect(transport.mock.calls[0][1]).toBe(init);
     observer.restore();
   });
 

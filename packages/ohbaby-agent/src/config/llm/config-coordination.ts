@@ -73,3 +73,8 @@ export function modelConfigVersion(
       .digest("hex");
   });
 }
+
+/** Network callbacks must not inherit reentrant publication ownership. */
+export function outsideModelConfigCoordination<T>(work: () => T): T {
+  return heldPaths.exit(work);
+}

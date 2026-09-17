@@ -477,6 +477,19 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(compactResult());
   }
 
+  updateSessionReasoning(
+    input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionReasoning"]> {
+    return Promise.resolve({
+      id: input.sessionId,
+      reasoning: input.reasoning ?? undefined,
+      title: "Test",
+      messages: [],
+      createdAt: "2026-09-17T00:00:00Z",
+      updatedAt: "2026-09-17T00:00:00Z",
+    });
+  }
+
   archiveSession(): ReturnType<UiBackendClient["archiveSession"]> {
     return Promise.resolve();
   }
@@ -914,6 +927,94 @@ describe("createDaemonHttpServer", () => {
         result: snapshot,
       });
     });
+  });
+
+  it("preserves explicit RPC submission reasoning and rejects malformed intent", async () => {
+    const session = {
+      id: "session_1",
+      title: "t",
+      messages: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      reasoning: { effort: "medium" },
+    };
+    const backend = new FakeBackend({
+      ...emptySnapshot(),
+      activeSessionId: session.id,
+      sessions: [session],
+    });
+    let finishPreference!: (value: typeof session) => void;
+    const preferenceSave = vi
+      .spyOn(backend, "updateSessionReasoning")
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishPreference = resolve;
+          }),
+      );
+    const server = createDaemonHttpServer({
+      authToken,
+      backend,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    await server.start();
+    try {
+      await postRpc(server.url, {
+        clientId: "client_1",
+        id: "init",
+        method: "initializeClient",
+        params: [{ startupSessionMode: { type: "fresh" } }],
+      });
+      const pendingPreference = postRpc(server.url, {
+        clientId: "client_1",
+        id: "preference",
+        method: "updateSessionReasoning",
+        params: [{ sessionId: "session_1", reasoning: { effort: "high" } }],
+      });
+      await vi.waitUntil(() => preferenceSave.mock.calls.length === 1);
+      const accepted = await postRpc(server.url, {
+        clientId: "client_1",
+        id: "send",
+        method: "submitPromptAccepted",
+        params: [
+          "hello",
+          {
+            sessionId: "session_1",
+            reasoning: { enabled: true, effort: "high" },
+          },
+        ],
+      });
+      expect(accepted.status).toBe(200);
+      expect(backend.submitted[0]?.options?.reasoning).toEqual({
+        enabled: true,
+        effort: "high",
+      });
+      expect((await backend.getSnapshot()).sessions[0]?.reasoning).toEqual({
+        effort: "medium",
+      });
+      finishPreference({ ...session, reasoning: { effort: "high" } });
+      await pendingPreference;
+      for (const reasoning of [
+        null,
+        { effort: "off" },
+        { enabled: "yes" },
+        { effort: "high", secret: true },
+      ]) {
+        const rejected = await postRpc(server.url, {
+          clientId: "client_1",
+          id: "invalid",
+          method: "submitPromptAccepted",
+          params: ["bad", { sessionId: "session_1", reasoning }],
+        });
+        expect(await rejected.json()).toMatchObject({
+          error: { code: "INVALID_REASONING" },
+        });
+      }
+      expect(backend.submitted).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
   });
 
   it("settles a pending JSON-RPC prompt waiter before server shutdown", async () => {

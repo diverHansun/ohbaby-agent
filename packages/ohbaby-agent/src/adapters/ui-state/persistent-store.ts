@@ -209,6 +209,7 @@ function sessionToUiSession(input: {
       .map(messageToUiMessage)
       .filter((message): message is UiMessage => message !== undefined),
     projectRoot: input.session.projectRoot,
+    reasoning: input.session.reasoning,
     title: resolveSessionDisplayTitle({
       messages: input.messages,
       title: input.session.title,

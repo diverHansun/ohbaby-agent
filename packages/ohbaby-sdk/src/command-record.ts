@@ -7,6 +7,7 @@ export type UiCommandMethod =
   | "releasePromptEditLease"
   | "compactSession"
   | "archiveSession"
+  | "updateSessionReasoning"
   | "connectModel"
   | "setSearchApiKey"
   | "setPermission"
@@ -189,6 +190,7 @@ export function buildUiCommandDetails(
       });
     case "acquirePromptEditLease":
     case "archiveSession":
+    case "updateSessionReasoning":
     case "cancelQueuedPrompt":
     case "releasePromptEditLease":
     case "renewPromptEditLease":

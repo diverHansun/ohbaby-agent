@@ -20,6 +20,9 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
 } {
   return {
     abortRun: vi.fn(() => Promise.resolve()),
+    updateSessionReasoning: vi.fn(() =>
+      Promise.reject(new Error("Unused reasoning test stub")),
+    ),
     archiveSession: vi.fn(() => Promise.resolve()),
     compactSession: vi.fn(() =>
       Promise.resolve({

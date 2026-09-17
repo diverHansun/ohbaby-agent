@@ -1,3 +1,4 @@
+import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { UiPromptError } from "ohbaby-sdk";
 
 export type PromptSubmissionStatus =
@@ -10,6 +11,7 @@ export type PromptSubmissionStatus =
   | "interrupted";
 
 export interface PromptSubmissionRecord {
+  readonly reasoning?: ReasoningConfig;
   readonly promptId: string;
   readonly clientRequestId: string;
   readonly scopeKey: string;
@@ -31,6 +33,7 @@ export interface PromptSubmissionRecord {
 }
 
 export interface AcceptPromptSubmissionInput {
+  readonly reasoning?: ReasoningConfig;
   readonly promptId: string;
   readonly clientRequestId: string;
   readonly scopeKey: string;
@@ -135,3 +138,10 @@ export type PromptSubmissionExecutor = (
   prompt: PromptSubmissionRecord,
   controls: PromptExecutionControls,
 ) => Promise<PromptExecutionResult>;
+
+export function sameReasoning(
+  left?: ReasoningConfig,
+  right?: ReasoningConfig,
+): boolean {
+  return left?.enabled === right?.enabled && left?.effort === right?.effort;
+}

@@ -1,5 +1,6 @@
 import type {
   UiEvent,
+  UiReasoningConfig,
   UiCompactSessionResult,
   UiContextWindowUsage,
   UiConnectModelResult,
@@ -237,6 +238,7 @@ export type WebSseEvent =
     };
 
 export interface SubmitPromptRequest {
+  readonly reasoning?: UiReasoningConfig;
   readonly clientRequestId: string;
   readonly sessionId?: string;
   readonly text: string;

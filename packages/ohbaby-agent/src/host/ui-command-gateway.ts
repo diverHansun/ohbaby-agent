@@ -35,6 +35,7 @@ const RECORDED_METHODS = new Set<UiCommandMethod>([
   "releasePromptEditLease",
   "compactSession",
   "archiveSession",
+  "updateSessionReasoning",
   "connectModel",
   "setSearchApiKey",
   "setPermission",
@@ -101,6 +102,7 @@ function inputCorrelation(
       };
     case "compactSession":
     case "archiveSession":
+    case "updateSessionReasoning":
       return {
         ...(stringField(input, "sessionId") === undefined
           ? {}

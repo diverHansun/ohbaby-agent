@@ -120,6 +120,9 @@ describe("context window UI contract", () => {
           },
         });
       },
+      updateSessionReasoning(): ReturnType<CoreAPI["updateSessionReasoning"]> {
+        return Promise.reject(new Error("Unused reasoning test stub"));
+      },
       archiveSession(): ReturnType<CoreAPI["archiveSession"]> {
         return Promise.resolve();
       },

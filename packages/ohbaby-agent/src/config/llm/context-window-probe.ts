@@ -1,4 +1,5 @@
-import type { InterfaceProviderKind } from "./types.js";
+import { validateReasoningCapabilities } from "./validation.js";
+import type { InterfaceProviderKind, ReasoningCapabilities } from "./types.js";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 const CONTEXT_WINDOW_FIELDS = [
@@ -19,62 +20,166 @@ export interface ProbeContextWindowInput {
   readonly baseUrl: string;
   readonly interfaceProvider: InterfaceProviderKind;
   readonly model: string;
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
 }
 
 export interface ProbeContextWindowResult {
   readonly contextWindowTokens?: number;
   readonly warning?: string;
+  readonly reasoningCapabilities?: ReasoningCapabilities;
+  readonly reasoningReason?:
+    | "missing-fields"
+    | "model-not-found"
+    | "authentication"
+    | "rate-limit"
+    | "http-error"
+    | "timeout"
+    | "cancelled"
+    | "invalid-json"
+    | "network-error";
 }
 
 export async function probeContextWindow(
   input: ProbeContextWindowInput,
 ): Promise<ProbeContextWindowResult> {
-  if (typeof fetch !== "function") {
-    return { warning: detectionWarning() };
-  }
-
-  const url = buildModelMetadataUrl(input);
+  const controller = new AbortController();
+  const cancel = (): void => {
+    controller.abort(input.signal?.reason);
+  };
+  input.signal?.addEventListener("abort", cancel, { once: true });
+  if (input.signal?.aborted) cancel();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, input.timeoutMs ?? PROBE_TIMEOUT_MS);
+  const failed = (
+    reasoningReason: ProbeContextWindowResult["reasoningReason"],
+  ): ProbeContextWindowResult => ({
+    warning: detectionWarning(),
+    reasoningReason,
+  });
   const headers =
     input.interfaceProvider === "anthropic"
-      ? {
-          "anthropic-version": ANTHROPIC_VERSION,
-          "x-api-key": input.apiKey,
-        }
-      : {
-          Authorization: `Bearer ${input.apiKey}`,
-        };
-
+      ? { "anthropic-version": ANTHROPIC_VERSION, "x-api-key": input.apiKey }
+      : { Authorization: `Bearer ${input.apiKey}` };
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, PROBE_TIMEOUT_MS);
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers,
-        method: "GET",
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
+    let url = buildModelMetadataUrl(input);
+    const visited = new Set<string>();
+    let fuzzyContext: number | undefined;
+    while (!visited.has(url)) {
+      visited.add(url);
+      const response = await abortable(
+        fetch(url, { headers, method: "GET", signal: controller.signal }),
+        controller.signal,
+      );
+      if (!response.ok)
+        return failed(
+          response.status === 401 || response.status === 403
+            ? "authentication"
+            : response.status === 429
+              ? "rate-limit"
+              : "http-error",
+        );
+      let payload: unknown;
+      try {
+        payload = await abortable(response.json(), controller.signal);
+      } catch (error) {
+        if (controller.signal.aborted) throw error;
+        return failed("invalid-json");
+      }
+      const entries = modelEntriesFromPayload(payload);
+      const exact = entries.find(
+        (entry) =>
+          isRecord(entry) &&
+          (entry.id ?? entry.model ?? entry.name) === input.model,
+      );
+      // Existing fuzzy context-window matching remains independent of exact reasoning identity.
+      fuzzyContext ??= extractContextWindowTokens(
+        findBestModelEntry(entries, input.model),
+      );
+      if (isRecord(exact)) {
+        const contextWindowTokens =
+          extractContextWindowTokens(exact) ?? fuzzyContext;
+        const candidate =
+          exact.reasoningCapabilities ?? exact.reasoning_capabilities;
+        let reasoningCapabilities: ReasoningCapabilities | undefined;
+        if (candidate !== undefined) {
+          try {
+            validateReasoningCapabilities(candidate);
+            reasoningCapabilities = candidate;
+          } catch {
+            /* incomplete metadata */
+          }
+        } else if (exact.reasoning === false) {
+          reasoningCapabilities = {
+            mode: "none",
+            wire: "none",
+            supportsDisabled: true,
+          };
+        }
+        return {
+          ...(contextWindowTokens === undefined
+            ? { warning: detectionWarning() }
+            : { contextWindowTokens }),
+          ...(reasoningCapabilities
+            ? { reasoningCapabilities }
+            : { reasoningReason: "missing-fields" }),
+        };
+      }
+      if (!isRecord(payload) || payload.has_more !== true) break;
+      const cursor =
+        payload.last_id ??
+        (isRecord(entries.at(-1))
+          ? (entries.at(-1) as Record<string, unknown>).id
+          : undefined);
+      if (typeof cursor !== "string") break;
+      const next = new URL(url);
+      next.searchParams.set(
+        input.interfaceProvider === "anthropic" ? "after_id" : "after",
+        cursor,
+      );
+      url = next.toString();
     }
-    if (!response.ok) {
-      return { warning: detectionWarning() };
-    }
-
-    const payload = await response.json();
-    const modelMetadata = findBestModelEntry(
-      modelEntriesFromPayload(payload),
-      input.model,
-    );
-    const contextWindowTokens = extractContextWindowTokens(modelMetadata);
-    if (contextWindowTokens === undefined) {
-      return { warning: detectionWarning() };
-    }
-    return { contextWindowTokens };
+    return fuzzyContext === undefined
+      ? failed("model-not-found")
+      : {
+          reasoningReason: "model-not-found",
+          contextWindowTokens: fuzzyContext,
+        };
   } catch {
-    return { warning: detectionWarning() };
+    return failed(
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Mutated by the timeout callback while awaiting network/body reads.
+      timedOut
+        ? "timeout"
+        : input.signal?.aborted
+          ? "cancelled"
+          : "network-error",
+    );
+  } finally {
+    clearTimeout(timeout);
+    input.signal?.removeEventListener("abort", cancel);
+  }
+}
+
+async function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw signal.reason;
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_, reject) => {
+    abort = (): void => {
+      reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new Error("Metadata request aborted"),
+      );
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    return await Promise.race([work, cancelled]);
+  } finally {
+    signal.removeEventListener("abort", abort);
   }
 }
 

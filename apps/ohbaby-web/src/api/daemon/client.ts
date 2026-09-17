@@ -214,6 +214,9 @@ class BrowserDaemonClient implements UiBackendClient {
         ? {}
         : { sessionId: options.sessionId }),
       text,
+      ...(options?.reasoning === undefined
+        ? {}
+        : { reasoning: options.reasoning }),
     });
     return receipt;
   }
@@ -343,6 +346,12 @@ class BrowserDaemonClient implements UiBackendClient {
       ...(options.force === undefined ? {} : { force: options.force }),
     });
     return response.compact;
+  }
+
+  async updateSessionReasoning(
+    input: Parameters<UiBackendClient["updateSessionReasoning"]>[0],
+  ): ReturnType<UiBackendClient["updateSessionReasoning"]> {
+    return (await this.http.updateSessionReasoning(input)).session;
   }
 
   async archiveSession(

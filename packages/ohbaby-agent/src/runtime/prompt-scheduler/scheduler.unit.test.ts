@@ -834,3 +834,38 @@ describe("WorkspacePromptScheduler", () => {
     expect(executed).toEqual(["A", "B"]);
   });
 });
+
+it("captures a lazy session preference once and rejects explicit conflicting replay", async () => {
+  const store = new InMemoryPromptSubmissionStore();
+  const scheduler = new WorkspacePromptScheduler({
+    scopeKey: "scope",
+    store,
+    execute: (): Promise<{ status: "succeeded" }> =>
+      Promise.resolve({ status: "succeeded" }),
+  });
+  let effort = "medium";
+  const first = await scheduler.accept({
+    clientRequestId: "reasoning-req",
+    sessionId: "s",
+    text: "hi",
+    reasoning: () => Promise.resolve({ effort }),
+  });
+  effort = "high";
+  const replay = await scheduler.accept({
+    clientRequestId: "reasoning-req",
+    sessionId: "s",
+    text: "hi",
+    reasoning: () => Promise.resolve({ effort }),
+  });
+  expect(replay.promptId).toBe(first.promptId);
+  expect(replay.reasoning).toEqual({ effort: "medium" });
+  await expect(
+    scheduler.accept({
+      clientRequestId: "reasoning-req",
+      sessionId: "s",
+      text: "hi",
+      reasoning: { effort: "high" },
+    }),
+  ).rejects.toThrow(/conflict|different/i);
+  scheduler.close();
+});

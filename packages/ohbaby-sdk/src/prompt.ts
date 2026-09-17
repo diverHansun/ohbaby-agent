@@ -1,3 +1,4 @@
+import type { UiReasoningConfig } from "./connect-model.js";
 export type UiPromptSubmissionStatus =
   | "queued"
   | "starting"
@@ -20,6 +21,7 @@ export interface UiPromptError {
 }
 
 export interface UiPromptSubmission {
+  readonly reasoning?: UiReasoningConfig;
   readonly promptId: string;
   readonly clientRequestId: string;
   readonly scopeKey: string;

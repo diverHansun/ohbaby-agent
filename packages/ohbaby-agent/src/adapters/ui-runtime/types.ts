@@ -1,3 +1,4 @@
+import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { UiEvent } from "ohbaby-sdk";
 import type {
   CommandMcpServerSummary,
@@ -37,6 +38,7 @@ export interface UiRuntimeComposition {
     readonly title: string;
   }): Promise<void>;
   compactSession(input: {
+    readonly reasoning?: ReasoningConfig;
     readonly force?: boolean;
     readonly projectRoot: string;
     readonly sessionId: string;
