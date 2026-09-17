@@ -2,7 +2,7 @@
 
 开启日期：2026-09-17。基线：`openai-responses-migration@135a6cda`。
 
-本轮承接 improve-7 合入后的连接入口回归，以及 improve-5.5 留下的推理配置产品入口。用户已授权实施，当前在本地临时分支 `codex/improve-8-regression` 分阶段推进。实际结果见 05；本轮不合并、不推送。
+本轮承接 improve-7 合入后的连接入口回归，以及 improve-5.5 留下的推理配置产品入口。用户已授权实施；A–D 在本地临时分支 `codex/improve-8-regression` 完成，后续主动探测和 TUI `/effort` 收尾位于 `codex/improve-8-reasoning-probe`。实际结果见 05；本轮不合并、不推送。
 
 ## 阅读顺序与文档职责
 

@@ -42,6 +42,7 @@
 | T21 | 三协议首次生成、真实工具调用/结果配对、后续回答和重启恢复；不以必须 native 的错误断言拒绝合法纯工具回复。                                                                                                                                                                                | 真实 API / A–D 对应切片          |
 | T22 | 旧配置/旧 SDK 可读取兼容；新增存储字段迁移、刷新重启、构建/打包安装回归；失败保留诊断。                                                                                                                                                                                                  | 集成+全仓 / D                    |
 | T23 | 未知服务默认：保存旧 high/关闭偏好但请求不发送无法映射的控制，UI 不假称已应用；Responses 无 effort 仍有必要 include，真实 reasoning/native 保存、工具往返和 SQLite 续接正确；检测完成不改变本 Run，下一 Run 才应用已识别能力。实际生成 400/429/断流沿用原分类/重试，已知非法配置仍拒绝。 | fixture 集成+真实 API / C–D      |
+| T24 | TUI `/effort` 只显示当前模型经后端确认的档位；已有会话调用共用的会话更新 API，新会话首条消息携带选择并持久化。不支持或未知时不编造档位；箭头、PgUp/PgDn、Enter、Esc 可操作，明确显示焦点。至少一组真实 TUI→Responses 请求核对档位、工具往返和保存。 | Ink 契约+真实 TUI API / 收尾 |
 
 T12–T15 的竞态应使用 deferred/barrier 控制顺序，避免 sleep 猜测时机。按 Q4 验证后台排队后切换，不把立即并行当作本轮目标。
 
@@ -91,7 +92,7 @@ pnpm run preflight
 
 ### E2：TUI 三协议真实链路（UC01/UC02/UC04）
 
-在自己的进程中渲染真实 TerminalApp，连接真实 persistent backend；经 stdin 进入 `/connect`、选择协议、填写/保存、发消息。复用 Ink live 测试结构，但不替换 backend/模型响应。三协议各验证一次短回复，至少一组覆盖工具往返。核对实际请求和保存后的配置，区分 Ink 真实链路与下项物理终端视觉。
+在自己的进程中渲染真实 TerminalApp，连接真实 persistent backend；经 stdin 进入 `/connect`、选择协议、填写/保存、发消息。复用 Ink live 测试结构，但不替换 backend/模型响应。三协议各验证一次短回复，至少一组覆盖工具往返。收尾时再经 `/effort` 选择已确认档位，核对实际请求参数和会话保存。区分 Ink 真实链路与下项物理终端视觉。
 
 ### E3：保存切换与消息快照（UC02/UC03）
 

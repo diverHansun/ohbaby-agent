@@ -98,3 +98,19 @@ TUI 从空配置分别经 `/connect` 保存三协议，各有两次真实主请�
 真实 ZenMux `deepseek/deepseek-v4.1-flash` 验证：Chat 保存后的后台探测识别 `minimal/low/medium/high/xhigh/max` 与关闭；Responses 同样识别六档与关闭；Anthropic 识别 `low/medium/high/xhigh/max` 与关闭。无效档位被拒绝。对当前连接按原参数重存并重启本地开发服务后，后端 `/v1/model` 返回 `identified`、默认 `medium`；真实 Web 页面出现档位下拉及对应选项。用户原模型配置的 provider、默认模型、地址、协议、输出参数和 profile 数量均保持一致。
 
 新增反向对照、三协议请求形状、后台持久化与 Web 文案回归；定向 5 文件 / 119 项通过。完整 `pnpm run preflight` 通过：362 文件 / 3714 项测试、6 文件 / 17 项按原条件跳过，格式、lint、类型检查和构建通过。该验证证明服务接受这些控制值；无法单凭短请求证明各档位实际思考深度有稳定差异。
+
+## 2026-09-17 收尾：TUI `/effort` 与整链路回归
+
+本地分支 `codex/improve-8-reasoning-probe` 的第一批提交 `dd5778a4` 增加 TUI 专属 `/effort` 面板。它读取与 Web 相同的 `getCurrentModel().reasoning`，只列出已确认的原名档位和允许的关闭选项。已有会话经共用的 `updateSessionReasoning` 保存；新会话先保留本地选择，首条消息用 `submitPromptAccepted` 送入后端并落到会话。未知能力时不提供猜测档位。命令目录只向 TUI 暴露；Web 保持原有控件。Ink 测试覆盖已有会话、新会话首条消息和未知能力，相关命令/面板/应用测试 5 文件、166 项通过，lint 与类型检查通过。
+
+真实 TUI E2E 从空配置经 `/connect` 保存 ZenMux `openai/gpt-5.6-luna` 的 Responses 协议，再用 `/effort` 从默认 `medium` 选 `high`，发起真实文件读取任务。两条主生成请求完成，`read` 调用与结果配对，答案包含 Cedar / 17 / Lin；主请求的 reasoning effort 均为 `high`，会话保存的选择也为 `high`。辅助标题请求仍按默认 `medium`，不混入主任务断言。两条主回复均保存了完整 input/output usage，第二条观测到 cache-read 并写入会话累计；具体 token 数随服务响应变化，以脱敏审计为准。审计在 `.ohbaby/test-evidence/improve-8/stage-d/tui/openai-responses-effort-high.json`，未提交 API key 或完整原生推理状态。
+
+独立审查指出两个待补边界，均先写出失败测试再修复：已有会话只存 `{enabled:true}` 时，面板应高亮真实默认 `medium`；新会话先选强度再换模型，发送前要舍弃旧模型的选择。复审又指出发送前异步查模型可能让连续两条消息乱序；现在首条消息按输入顺序准入，下一条复用首条回执的会话 ID。修复后的 3 文件 / 222 项定向测试、真实 TUI Responses 工具往返及复审通过。
+
+完整 `pnpm run preflight` 通过：格式、lint、TypeScript、362 文件 / 3721 项测试、全仓构建；6 文件 / 17 项按现有条件跳过。打包安装 CLI 和真实进程测试本次也通过。Responses 另做了三条生产路径实网回归：
+
+- agent-loop：两次主请求完成，第一次调用 `read`，第二次携带同一 call ID 的工具结果及 Responses 原生状态；实际发送投影与计量材料一致，工具结果和持久记录一致。审计在 `.ohbaby/test-evidence/improve-7/live-loop/zenmux-gpt56-luna-responses-context-stage-a-1789629145872-audit.json`。
+- context：服务检测窗口 1,050,000 tokens，基线会话完成文件读取、续聊和 SQLite 重开；五次占用更新均按该窗口计算。强制压缩会话产生一份摘要、退休 10 个旧 part（其中 3 个原生 part），压缩后继续两轮真实请求并保留信息；这证明强制路径，**没有**证明自然达到 95% 自动阈值或真实上游 overflow。审计在 `.ohbaby/test-evidence/improve-6/live-context/`，文件名分别包含 `baseline-1789629197644` 和 `compaction-1789629247378`。
+- Responses usage/cache：旧迁移 smoke 的 Responses 单项实网通过，4 次 HTTP，正文与工具循环都完成；逐次 input/output 和 cache-read 明细与消息中保存的 usage 对齐。工具会话累计输入 14957、cache-read 14784。该 smoke 的初次三协议合跑中 Chat 也通过，但 Anthropic/Qwen 在一次请求后 `provider_stream_interrupted`；不能把它写成三协议通过。改用 Sonnet 5 复跑该旧 smoke 时，又在请求前遭到旧脚本缺少该模型推理能力资料的 `ConfigError`。现行 improve-8 会话推理 E2E 分别对 Chat/Luna、Responses/Luna、Anthropic/Sonnet 5 各 8 项通过，均经过真实请求、工具往返和 SQLite 恢复。旧 smoke 应单独维护，不用其失败掩盖当前生产路径已通过的证据。
+
+本轮未改压缩/prune 算法、95% 阈值、SDK 重试或工具生命周期。真实百万窗口自然达到 95%、真实上游 overflow 仍是未测边界；本次不声称覆盖。当前分支等待用户审查，尚未 merge/push；`tests/models-4-tests.md` 保持用户本地未跟踪文件。
