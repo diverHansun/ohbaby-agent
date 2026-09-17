@@ -3752,7 +3752,7 @@ it("shows raw reasoning labels in the composer footer and persists session prefe
   });
   expect(select.closest(".ohb-composer-tools")).not.toBeNull();
 });
-it("unknown capability keeps send available and shows service default without fake tiers", async () => {
+it("unknown capability keeps send available and shows reasoning default without fake tiers", async () => {
   const fake = createFakeRuntime({
     snapshot: snapshotWithStatus({ kind: "idle" }),
   });
@@ -3764,7 +3764,8 @@ it("unknown capability keeps send available and shows service default without fa
     reasoning: { status: "unknown", efforts: [] },
   });
   const app = mountApp(fake.runtime);
-  await waitFor(() => app.container.textContent.includes("服务默认"));
+  await waitFor(() => app.container.textContent.includes("推理默认"));
+  expect(app.container.textContent).not.toContain("服务默认");
   expect(
     app.container.querySelector('[aria-label="Reasoning effort"]'),
   ).toBeNull();

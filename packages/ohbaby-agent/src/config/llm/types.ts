@@ -94,7 +94,7 @@ export interface ModelJsonModelProfile {
   interfaceProvider?: InterfaceProviderKind;
   baseUrl?: string;
   reasoningCapabilities?: ReasoningCapabilities;
-  reasoningCapabilitySource?: "model-metadata";
+  reasoningCapabilitySource?: "model-metadata" | "active-probe";
 
   /** Display label for UI model lists */
   label?: string;

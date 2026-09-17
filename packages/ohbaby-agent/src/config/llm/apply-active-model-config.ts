@@ -22,6 +22,7 @@ import {
   type ContextWindowSource,
   type ProbeContextWindowResult,
 } from "./context-window-probe.js";
+import { probeReasoningCapabilities } from "./reasoning-active-probe.js";
 import { loadEnvFile, loadModelJson } from "./loaders.js";
 import { reloadLLMConfig, setActiveLLMConfig } from "./index.js";
 import {
@@ -554,10 +555,31 @@ function startModelDiscovery(input: {
     outsideModelConfigCoordination(() =>
       setTimeout(() => {
         void (async (): Promise<ProbeContextWindowResult> => {
-          const probe = await probeContextWindow({
+          const metadata = await probeContextWindow({
             ...input,
             signal: state.controller.signal,
           });
+          const known = capabilitiesFor({
+            provider: input.provider,
+            model: input.model,
+            baseUrl: input.baseUrl,
+            interfaceProvider: input.interfaceProvider,
+            maxTokens: input.maxOutputTokens ?? 4096,
+          }).capability;
+          const activeCapabilities =
+            metadata.reasoningCapabilities ||
+            known ||
+            state.controller.signal.aborted
+              ? undefined
+              : await probeReasoningCapabilities({
+                  ...input,
+                  signal: state.controller.signal,
+                });
+          const probe = {
+            ...metadata,
+            reasoningCapabilities:
+              metadata.reasoningCapabilities ?? activeCapabilities,
+          };
           await coordinateModelConfig(input.modelJsonPath, async () => {
             if (
               activeDiscoveries.get(key) !== state ||
@@ -580,6 +602,12 @@ function startModelDiscovery(input: {
                 maxOutputTokens: input.maxOutputTokens,
                 updateActiveModelProfile: true,
                 discoveredReasoningCapabilities: probe.reasoningCapabilities,
+                ...(activeCapabilities
+                  ? {
+                      discoveredReasoningCapabilitySource:
+                        "active-probe" as const,
+                    }
+                  : {}),
               });
               state.version = await modelConfigVersion(
                 input.modelJsonPath,

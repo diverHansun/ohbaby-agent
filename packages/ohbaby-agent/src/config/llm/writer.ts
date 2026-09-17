@@ -42,6 +42,9 @@ export interface SetActiveLLMConfigInput {
   readonly reasoning?: ReasoningConfig;
   readonly clearReasoning?: boolean;
   readonly discoveredReasoningCapabilities?: ReasoningCapabilities;
+  readonly discoveredReasoningCapabilitySource?:
+    | "model-metadata"
+    | "active-probe";
   readonly clearDiscoveredReasoning?: boolean;
   readonly maxTokens?: number;
   readonly contextWindowTokens?: number;
@@ -171,7 +174,8 @@ function buildModelProfiles(
   };
   if (
     input.clearDiscoveredReasoning &&
-    activeProfile.reasoningCapabilitySource === "model-metadata"
+    (activeProfile.reasoningCapabilitySource === "model-metadata" ||
+      activeProfile.reasoningCapabilitySource === "active-probe")
   ) {
     delete activeProfile.reasoningCapabilities;
     delete activeProfile.reasoningCapabilitySource;
@@ -179,10 +183,12 @@ function buildModelProfiles(
   if (
     input.discoveredReasoningCapabilities &&
     (!activeProfile.reasoningCapabilities ||
-      activeProfile.reasoningCapabilitySource === "model-metadata")
+      activeProfile.reasoningCapabilitySource === "model-metadata" ||
+      activeProfile.reasoningCapabilitySource === "active-probe")
   ) {
     activeProfile.reasoningCapabilities = input.discoveredReasoningCapabilities;
-    activeProfile.reasoningCapabilitySource = "model-metadata";
+    activeProfile.reasoningCapabilitySource =
+      input.discoveredReasoningCapabilitySource ?? "model-metadata";
   }
   const activeKey = key(activeProfile);
   const retainedForActive =

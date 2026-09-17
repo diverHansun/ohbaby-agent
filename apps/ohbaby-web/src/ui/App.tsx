@@ -2264,7 +2264,7 @@ function ReasoningControl(props: {
   if (view.status !== "identified")
     return (
       <span className="ohb-reasoning-status" title={view.reason}>
-        服务默认{view.status === "detecting" ? " · 检测中" : ""}
+        推理默认{view.status === "detecting" ? " · 检测中" : ""}
       </span>
     );
   const compatible =

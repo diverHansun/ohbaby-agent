@@ -12,6 +12,64 @@ afterEach(async () => {
     dirs.splice(0).map((p) => rm(p, { recursive: true, force: true })),
   );
 });
+it("discovers reasoning strengths in the background when model metadata only says reasoning is supported", async () => {
+  const root = await mkdtemp(join(tmpdir(), "reasoning-active-"));
+  dirs.push(root);
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", async (url: string | URL, init?: RequestInit) => {
+    const path = String(url);
+    calls.push(path);
+    if (path.endsWith("/models"))
+      return Response.json({
+        data: [
+          {
+            id: "exact",
+            context_length: 64000,
+            capabilities: { reasoning: true },
+          },
+        ],
+      });
+    const body = JSON.parse(init?.body as string) as {
+      reasoning?: { effort?: string; enabled?: boolean };
+    };
+    return new Response(null, {
+      status:
+        body.reasoning?.effort === "medium" || body.reasoning?.effort === "high"
+          ? 200
+          : 400,
+    });
+  });
+  let discovered!: () => void;
+  const done = new Promise<void>((resolve) => {
+    discovered = resolve;
+  });
+  const saved = await applyActiveModelConfig({
+    provider: "gateway",
+    interfaceProvider: "openai-compatible",
+    baseUrl: "https://gateway.example/v1",
+    model: "exact",
+    projectRoot: root,
+    modelJsonPath: join(root, "model.json"),
+    envPath: join(root, "env"),
+    apiKey: "fixture",
+    deferMetadata: true,
+    onDiscovery: discovered,
+  });
+  expect(saved.saved).toBe(true);
+  await done;
+  const config = JSON.parse(
+    await readFile(join(root, "model.json"), "utf8"),
+  ) as ModelJsonConfig;
+  expect(
+    config.models?.find((profile) => profile.model === "exact")
+      ?.reasoningCapabilities,
+  ).toMatchObject({
+    mode: "effort",
+    efforts: ["medium", "high"],
+    supportsDisabled: false,
+  });
+  expect(calls.some((url) => url.endsWith("/chat/completions"))).toBe(true);
+});
 it("reports saved without waiting for metadata and discards late previous-connection results", async () => {
   const root = await mkdtemp(join(tmpdir(), "reasoning-background-"));
   dirs.push(root);

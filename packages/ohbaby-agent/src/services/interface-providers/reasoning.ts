@@ -91,7 +91,9 @@ export function capabilitiesFor(options: ResolveRequestReasoningOptions): {
       profile.reasoningCapabilities !== undefined,
   );
   const explicitProfiles = matching?.filter(
-    (profile) => profile.reasoningCapabilitySource !== "model-metadata",
+    (profile) =>
+      profile.reasoningCapabilitySource !== "model-metadata" &&
+      profile.reasoningCapabilitySource !== "active-probe",
   );
   if (explicitProfiles?.length) matching = explicitProfiles;
   // Prefer more constrained routes; preserve last-entry precedence for ties.
