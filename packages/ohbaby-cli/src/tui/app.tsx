@@ -7,7 +7,6 @@ import type {
   UiCommandOutput,
   UiEvent,
   UiEventHandler,
-  UiReasoningConfig,
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
@@ -22,7 +21,10 @@ import {
 } from "./components/dialog/command-panel-state.js";
 import { Header } from "./components/header.js";
 import { TranscriptViewport } from "./components/transcript/transcript-viewport.js";
-import { Prompt } from "./components/prompt/index.js";
+import {
+  Prompt,
+  type PendingReasoningSelection,
+} from "./components/prompt/index.js";
 import { COMPACT_TODO_LIMIT, TodoPanel } from "./components/todo-panel.js";
 import { AppShell } from "./layout/app-shell.js";
 import { formatContextWindowUsage } from "./render/usage.js";
@@ -83,7 +85,7 @@ export function OhbabyTerminalApp({
   const disposedRef = useRef(false);
   const [screenGeneration, setScreenGeneration] = useState(0);
   const [pendingReasoning, setPendingReasoning] =
-    useState<UiReasoningConfig | null>(null);
+    useState<PendingReasoningSelection | null>(null);
   const [commandPanel, setCommandPanel] = useState<CommandPanelState | null>(
     null,
   );
@@ -706,7 +708,9 @@ export function OhbabyTerminalApp({
           onClose={closeCommandPanel}
           onEffortSelect={async (reasoning) => {
             if (activeSessionId === null) {
-              setPendingReasoning(reasoning);
+              const model = await client.getCurrentModel();
+              if (!model) throw new Error("No model is connected");
+              setPendingReasoning({ reasoning, model });
             } else {
               await client.updateSessionReasoning({
                 sessionId: activeSessionId,
@@ -714,7 +718,7 @@ export function OhbabyTerminalApp({
               });
             }
           }}
-          pendingReasoning={pendingReasoning}
+          pendingReasoning={pendingReasoning?.reasoning ?? null}
           panel={hasBackendDialog ? null : commandPanel}
           runtime={runtime}
         />

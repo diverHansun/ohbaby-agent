@@ -3169,6 +3169,169 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
+  it("highlights the model default for an enabled session without an explicit effort", async () => {
+    const base = snapshot();
+    const initial = {
+      ...base,
+      sessions: base.sessions.map((session) => ({
+        ...session,
+        reasoning: { enabled: true },
+      })),
+    };
+    const client = createFakeClient(initial, effortCommandCatalog);
+    client.getCurrentModel.mockResolvedValue({
+      provider: "zenmux",
+      baseUrl: "https://example.test",
+      interfaceProvider: "openai-responses",
+      model: "reasoning-model",
+      reasoning: {
+        status: "identified",
+        mode: "effort",
+        supportsDisabled: false,
+        efforts: ["low", "medium", "high"],
+        default: { enabled: true, effort: "medium" },
+      },
+    });
+    client.updateSessionReasoning.mockResolvedValue(initial.sessions[0]);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/effort");
+    app.stdin.write("\r");
+    await waitForFrame(
+      app,
+      (frame) => frame.includes("medium") && frame.includes("high"),
+    );
+    await settleConnectInput();
+    app.stdin.write("\r");
+    await flush();
+    expect(client.updateSessionReasoning).toHaveBeenCalledWith({
+      sessionId: "session_1",
+      reasoning: { enabled: true, effort: "medium" },
+    });
+    app.unmount();
+  });
+
+  it("does not send a pending effort chosen for a different model", async () => {
+    const initial = { ...snapshot(), activeSessionId: null, sessions: [] };
+    const client = createFakeClient(initial, effortCommandCatalog);
+    client.getCurrentModel.mockResolvedValue({
+      provider: "zenmux",
+      baseUrl: "https://example.test",
+      interfaceProvider: "openai-responses",
+      model: "old-model",
+      reasoning: {
+        status: "identified",
+        mode: "effort",
+        supportsDisabled: false,
+        efforts: ["medium", "high"],
+        default: { enabled: true, effort: "medium" },
+      },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/effort");
+    app.stdin.write("\r");
+    await waitForFrame(
+      app,
+      (frame) => frame.includes("medium") && frame.includes("high"),
+    );
+    await settleConnectInput();
+    app.stdin.write("\u001B[B");
+    await settleConnectInput();
+    app.stdin.write("\r");
+    await settleConnectInput();
+    client.getCurrentModel.mockResolvedValue({
+      provider: "zenmux",
+      baseUrl: "https://example.test",
+      interfaceProvider: "openai-responses",
+      model: "new-model",
+      reasoning: {
+        status: "identified",
+        mode: "effort",
+        supportsDisabled: false,
+        efforts: ["low", "medium"],
+        default: { enabled: true, effort: "medium" },
+      },
+    });
+    app.stdin.write("hello");
+    app.stdin.write("\r");
+    await flush();
+    expect(client.submitPromptAccepted).toHaveBeenCalledWith(
+      "hello",
+      expect.objectContaining({ reasoning: undefined }),
+    );
+    app.unmount();
+  });
+
+  it("keeps rapid first-session prompts in input order while checking pending effort", async () => {
+    const initial = { ...snapshot(), activeSessionId: null, sessions: [] };
+    const client = createFakeClient(initial, effortCommandCatalog);
+    const model = {
+      provider: "zenmux",
+      baseUrl: "https://example.test",
+      interfaceProvider: "openai-responses" as const,
+      model: "reasoning-model",
+      reasoning: {
+        status: "identified" as const,
+        mode: "effort" as const,
+        supportsDisabled: false,
+        efforts: ["medium", "high"],
+        default: { enabled: true, effort: "medium" },
+      },
+    };
+    client.getCurrentModel.mockResolvedValue(model);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/effort");
+    app.stdin.write("\r");
+    await waitForFrame(
+      app,
+      (frame) => frame.includes("medium") && frame.includes("high"),
+    );
+    await settleConnectInput();
+    app.stdin.write("\u001B[B");
+    await settleConnectInput();
+    app.stdin.write("\r");
+    await settleConnectInput();
+    let releaseFirst!: (value: typeof model) => void;
+    const firstLookup = new Promise<typeof model>((resolve) => {
+      releaseFirst = resolve;
+    });
+    client.getCurrentModel
+      .mockImplementationOnce(() => firstLookup)
+      .mockResolvedValue(model);
+    app.stdin.write("first");
+    app.stdin.write("\r");
+    app.stdin.write("second");
+    app.stdin.write("\r");
+    await flush();
+    expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+    releaseFirst(model);
+    await flush();
+    expect(
+      client.submitPromptAccepted.mock.calls.map((call) => String(call[0])),
+    ).toEqual(["first", "second"]);
+    expect(client.submitPromptAccepted.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ sessionId: "session_1" }),
+    );
+    app.unmount();
+  });
+
   it("does not offer invented effort levels when the model has no verified capability", async () => {
     const client = createFakeClient(snapshot(), effortCommandCatalog);
     client.getCurrentModel.mockResolvedValue({

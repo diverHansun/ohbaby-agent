@@ -66,7 +66,10 @@ export function EffortPanel({
           ? (snapshot.sessions.find((session) => session.id === sessionId)
               ?.reasoning ?? null)
           : pendingReasoning;
-        const active = preference ?? capability.default ?? null;
+        const active =
+          preference?.enabled !== false && preference?.effort === undefined
+            ? (capability.default ?? preference)
+            : preference;
         const options = choicesFor(capability);
         const index = options.findIndex((option) =>
           active?.enabled === false

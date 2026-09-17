@@ -3,13 +3,14 @@ import { Box, Text, useInput } from "ink";
 import { formatError } from "../../format-error.js";
 import type {
   CoreAPI,
+  UiCurrentModelConfig,
   UiCommandInvocation,
   UiGoal,
   UiPermissionState,
   UiPromptSubmission,
   UiReasoningConfig,
 } from "ohbaby-sdk";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   getSlashCompletion,
@@ -39,7 +40,7 @@ import {
 
 export interface PromptProps {
   readonly activeSessionId: string | null;
-  readonly pendingReasoning?: UiReasoningConfig | null;
+  readonly pendingReasoning?: PendingReasoningSelection | null;
   readonly catalog: TuiCommandCatalog | null;
   readonly client: CoreAPI;
   readonly contextWindowUsage?: string;
@@ -54,6 +55,11 @@ export interface PromptProps {
   readonly permission?: UiPermissionState;
   readonly queuedPrompts?: readonly UiPromptSubmission[];
   readonly runtimeStatusLabel?: string;
+}
+
+export interface PendingReasoningSelection {
+  readonly reasoning: UiReasoningConfig;
+  readonly model: UiCurrentModelConfig;
 }
 
 export function Prompt({
@@ -86,6 +92,16 @@ export function Prompt({
   const queuedMutationPendingRef = useRef(false);
   const lastLeaseRenewalAtRef = useRef(0);
   const selectedIndexRef = useRef(0);
+  const pendingSubmissionRef = useRef<Promise<void>>(Promise.resolve());
+  const acceptedNewSessionIdRef = useRef<string | null>(null);
+  const previousSessionIdRef = useRef(activeSessionId);
+
+  useEffect(() => {
+    if (previousSessionIdRef.current !== null && activeSessionId === null) {
+      acceptedNewSessionIdRef.current = null;
+    }
+    previousSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
 
   const replaceEditor = (nextEditor: EditorState): void => {
     editorRef.current = nextEditor;
@@ -245,6 +261,37 @@ export function Prompt({
 
         const result = applyEditor({ type: "submit" });
         if (result.submission === undefined) {
+          return;
+        }
+        if (
+          activeSessionId === null &&
+          pendingReasoning !== null &&
+          pendingReasoning !== undefined &&
+          !result.submission.trim().startsWith("/")
+        ) {
+          const submission = result.submission;
+          replaceInput("");
+          const send = (): Promise<void> =>
+            submitInput(
+              submission,
+              acceptedNewSessionIdRef.current,
+              pendingReasoning,
+              catalog,
+              client,
+              loadCatalog,
+              replaceInput,
+              setError,
+              selectedIndexRef.current,
+              onCommandPanelOpen,
+              true,
+              (sessionId) => {
+                acceptedNewSessionIdRef.current = sessionId;
+              },
+            );
+          pendingSubmissionRef.current = pendingSubmissionRef.current.then(
+            send,
+            send,
+          );
           return;
         }
         void submitInput(
@@ -525,7 +572,7 @@ function formatDockStatus(input: {
 async function submitInput(
   input: string,
   activeSessionId: string | null,
-  pendingReasoning: UiReasoningConfig | null | undefined,
+  pendingReasoning: PendingReasoningSelection | null | undefined,
   catalog: TuiCommandCatalog | null,
   client: CoreAPI,
   loadCatalog: (() => Promise<TuiCommandCatalog>) | undefined,
@@ -538,6 +585,8 @@ async function submitInput(
         readonly kind: CommandPanelKind;
       }) => void)
     | undefined,
+  alreadyCleared = false,
+  onAccepted?: (sessionId: string) => void,
 ): Promise<void> {
   const text = input.trim();
 
@@ -547,16 +596,44 @@ async function submitInput(
 
   if (!text.startsWith("/")) {
     setError(null);
-    replaceInput("");
-    void client
-      .submitPromptAccepted(text, {
+    if (!alreadyCleared) replaceInput("");
+    let reasoning: UiReasoningConfig | undefined;
+    if (pendingReasoning) {
+      try {
+        const current = await client.getCurrentModel();
+        const original = pendingReasoning.model;
+        const choice = pendingReasoning.reasoning;
+        const capability = current?.reasoning;
+        if (
+          current?.provider === original.provider &&
+          current.baseUrl === original.baseUrl &&
+          current.interfaceProvider === original.interfaceProvider &&
+          current.model === original.model &&
+          capability?.status === "identified" &&
+          (choice.enabled === false
+            ? capability.supportsDisabled === true
+            : capability.mode === "binary"
+              ? choice.effort === undefined
+              : capability.mode === "effort" &&
+                choice.effort !== undefined &&
+                capability.efforts.includes(choice.effort))
+        ) {
+          reasoning = choice;
+        }
+      } catch {
+        // Model lookup must not prevent an otherwise valid first prompt.
+      }
+    }
+    try {
+      const receipt = await client.submitPromptAccepted(text, {
         clientRequestId: randomUUID(),
-        reasoning: pendingReasoning ?? undefined,
+        reasoning,
         sessionId: activeSessionId ?? undefined,
-      })
-      .catch((caught: unknown) => {
-        setError(formatError(caught));
       });
+      onAccepted?.(receipt.sessionId);
+    } catch (caught) {
+      setError(formatError(caught));
+    }
     return;
   }
 
