@@ -1884,8 +1884,8 @@ describe("OhbabyWebApp slash command interactions", () => {
       await Promise.resolve();
     });
 
-    await waitFor(() =>
-      !app.container.textContent.includes("Editing queued prompt"),
+    await waitFor(
+      () => !app.container.textContent.includes("Editing queued prompt"),
     );
     expect(fake.editQueuedPrompt).toHaveBeenCalledWith({
       editLeaseId: "lease_1",

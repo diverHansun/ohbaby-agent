@@ -2129,9 +2129,7 @@ function ThinkingIndicator(props: {
       </span>
       <span>Thinking</span>
       <span>· {String(elapsedSeconds)}s</span>
-      {!props.canInterrupt ? (
-        <span>· starting agent</span>
-      ) : null}
+      {!props.canInterrupt ? <span>· starting agent</span> : null}
     </div>
   );
 }

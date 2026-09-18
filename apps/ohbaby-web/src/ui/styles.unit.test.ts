@@ -77,7 +77,9 @@ describe("web app layout styles", () => {
       "color: #6b6d73",
     ]);
     expectCssRule(".ohb-button-primary", ["border-radius: 8px"]);
-    expect(css).not.toMatch(/\.ohb-composer-input\s*\{\s*align-items:\s*stretch/u);
+    expect(css).not.toMatch(
+      /\.ohb-composer-input\s*\{\s*align-items:\s*stretch/u,
+    );
   });
 
   it("supports a bounded, contained composer textarea scroll", () => {
