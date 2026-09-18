@@ -77,15 +77,13 @@ describe("web app layout styles", () => {
       "color: #6b6d73",
     ]);
     expectCssRule(".ohb-button-primary", ["border-radius: 8px"]);
-    expect(css).not.toMatch(
-      /\.ohb-composer-input\s*\{\s*align-items:\s*stretch/u,
-    );
+    expectCssRule(".ohb-composer-input", ["flex-direction: column"]);
   });
 
   it("supports a bounded, contained composer textarea scroll", () => {
     expectCssRule(".ohb-composer textarea", [
-      "line-height: 24px",
-      "max-height: 168px",
+      "line-height: 22px",
+      "max-height: 154px",
       "overflow-y: auto",
       "overscroll-behavior: contain",
       "padding: 0",
@@ -121,10 +119,14 @@ describe("web app layout styles", () => {
   });
 
   it("centers one-line composer text without changing multiline sizing", () => {
-    expectCssRule(".ohb-composer-input", ["align-items: flex-end"]);
+    expectCssRule(".ohb-composer-input", [
+      "align-items: stretch",
+      "max-width: 800px",
+    ]);
+    expectCssRule(".ohb-composer-bar", ["display: flex"]);
     expectCssRule(".ohb-composer-text", [
       "align-items: center",
-      "min-height: 32px",
+      "min-height: 22px",
     ]);
     expect(css).not.toMatch(/\.ohb-prompt\s*\{/u);
     expectCssRule(".ohb-prompt-queue", ["position: relative"]);
@@ -138,6 +140,11 @@ describe("web app layout styles", () => {
         css,
       )?.groups?.body;
     expect(narrowHeader).toContain("padding: 8px 16px");
+  });
+
+  it("animates the sidebar and respects reduced motion", () => {
+    expectCssRule(".ohb-sidebar", ["transition:", "flex-basis"]);
+    expect(css).toContain("prefers-reduced-motion: reduce");
   });
 
   it("defines isolated permission button consequence styles", () => {

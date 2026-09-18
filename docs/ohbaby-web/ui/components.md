@@ -1,16 +1,16 @@
 # ohbaby-web · UI 组件
 
-> `src/ui/` 各组件的呈现规格。对齐 [`../architecture.md`](../architecture.md) §3 的组件清单；状态可视化见 [`states.md`](./states.md)。参考实现：[`design/session-screen.dc.html`](./design/session-screen.dc.html)。
+> `src/ui/` 各组件的呈现规格。对齐 [`../architecture.md`](../architecture.md) §3 的组件清单；状态可视化见 [`states.md`](./states.md)。[`design/session-screen.dc.html`](./design/session-screen.dc.html) 是历史视觉参考，header、composer 与 sidebar 以本规格和 improve-2 决策为准。
 
 ---
 
 ## 1. Header / StatusBar（顶栏，常驻）
 
-一行白底栏，左右分布：
+一行浅灰玻璃质感顶栏，左右分布；不支持模糊时使用实色浅灰：
 
 会话顶栏约 44px 高，优先收紧上下留白；侧栏项目顶仍约 58px，两者底边不要求对齐。窄屏允许右侧状态换行并相应长高。
 
-- **左**：品牌——2×2 三色网格点（gold/pink/blue/blue）+ `OHBABY` 字标（Plex Mono）。
+- **左**：与空态同一套黄、粉、蓝三段小写 `oh/ba/by` 字标；不显示旧点阵与大写字标。
 - **右**（从左到右，竖线分隔）：
   - **连接状态文字**：只显示带颜色的状态文字，不加圆点和内层胶囊；running/connecting/reconnecting 轻微呼吸，其余静止（见 states.md）。
   - **模型名**：只读文字（如 `glm-5.1`）——**仅展示，非切换器**（模型切换是 ND5，延后）。
@@ -40,13 +40,13 @@
 
 ## 3. Composer（输入区，底部 dock）
 
-- **输入框**：无装饰性 `>` 提示符；1–7 个视觉行的自适应输入，聚焦环 + 轻阴影。单行占位符及用户文字垂直居中，多行时主操作按钮保持右下；第 7 个视觉行后只在 textarea 内滚动；`↵` 发送、`⇧↵` 换行。
+- **输入框**：最大宽约 800px，阅读列仍 720px；无装饰性 `>` 提示符。输入文字与占位约 14px / 22px 行高，1–7 个视觉行自适应，第 7 行后只在 textarea 内滚动；`↵` 发送、`⇧↵` 换行。输入框下缘距窗口底约 10–12px。
 - **slash 输入**：以 `/` 开头时不作为普通 prompt，而是走 `UiSlashCommand` 解析/执行。v0.1.6 做 web-safe 候选面板、分组、`↑/↓` 选择、`Tab` 补全、`Enter` 执行、`Esc` 关闭；解析失败要保留草稿并显示错误。详细规格见 [`slash-commands/`](./slash-commands/README.md)。
-- **动作按钮**：输入框右侧始终只有一个主操作位，使用固定尺寸圆形图标按钮，不显示 Send/Stop/Save 文字。idle 或有草稿时显示纸飞机；发送请求待确认时圆内显示转圈；running / waiting-for-permission 且草稿为空时显示方块 Stop；running 且草稿有字时纸飞机进入队列；编辑已有队列条目时仍显示纸飞机，点击成功更新原条目并继续调度，不新增消息。`aria-label`/`title` 仍按语义区分 Send、Stop、Save queued prompt。重连或重同步期间依最后已知 run 状态保留按钮外观，但按钮不可点，顶栏显示连接状态。
+- **动作按钮**：输入框内底栏右侧始终只有一个主操作位，使用固定尺寸圆形图标按钮，不显示 Send/Stop/Save 文字。idle 或有草稿时显示纸飞机；发送请求待确认时圆内显示转圈；running / waiting-for-permission 且草稿为空时显示方块 Stop；running 且草稿有字时纸飞机进入队列；编辑已有队列条目时仍显示纸飞机，点击成功更新原条目并继续调度，不新增消息。`aria-label`/`title` 仍按语义区分 Send、Stop、Save queued prompt。重连或重同步期间依最后已知 run 状态保留按钮外观，但按钮不可点，顶栏显示连接状态。
 - **思考强度**：有思考能力的模型在输入框内、圆形主按钮左侧显示大脑和英文档位；主按钮缩窄后控件随弹性布局向右靠近，并保留输入宽度。平时透明无边，hover 有浅灰细边，键盘焦点清晰可见。检测中只转大脑、unknown 显示 `unknown`；无思考能力时不留空位。
-- **底部控件行**（本期纳入，决策 3）：
-  - **mode 切换**：`auto mode` / `plan mode`，`⇧⇥` 循环；auto=green 点、plan=blue 点。
-  - **权限策略**：`default`（ask before each action）/ `full-access`（run without prompts），与 mode 一样做成轻量单击循环按钮，不使用下拉/上拉菜单。`full-access` 时**不弹权限模态**。
+- **框内底栏**（决策 3）：
+  - **mode 切换**：默认 auto，无可见 mode 按钮或文字；`⇧⇥` 循环 auto/plan。auto 保持浅灰输入框描边，plan 使用浅黄描边；输入框可访问说明包含当前 mode。
+  - **权限策略**：底栏左侧用灰色手形图标表示 `default`（ask before protected actions），红色盾牌叹号表示 `full-access`（run without approval prompts）；单击循环切换，无菜单。图标小、点击区约 32px，hover 出现浅边线，键盘焦点可见；按钮的可访问名称和 tooltip 写明当前策略含义及点击后的切换效果。`full-access` 时**不弹权限模态**。
   - **提示**：不常驻展示 Enter、Esc 或连接状态说明；编辑队列时保留 `Editing queued prompt · Enter save · Esc keep original`。连接状态由顶栏文字展示。
 
 ---

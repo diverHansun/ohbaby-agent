@@ -5,12 +5,14 @@ import {
   ChevronDown,
   Folder,
   FolderPlus,
+  Hand,
   LoaderCircle,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Send,
+  ShieldAlert,
   Square,
   User,
   X,
@@ -1234,10 +1236,12 @@ function SessionSidebar(props: {
   );
   const activeSessionId = props.view.activeSession?.id;
 
-  if (!props.open) return <></>;
-
   return (
-    <aside className="ohb-sidebar">
+    <aside
+      aria-hidden={!props.open}
+      className={`ohb-sidebar${props.open ? "" : " is-collapsed"}`}
+      inert={!props.open}
+    >
       <header className="ohb-sidebar-header">
         <div className="ohb-project-header">
           <strong>
@@ -1345,14 +1349,10 @@ function StatusBar(props: {
     props.header.contextWindowUsage !== null || props.activeGoal !== null;
   return (
     <header className="ohb-statusbar">
-      <div className="ohb-brand" aria-label="ohbaby">
-        <span className="ohb-logo-grid" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-          <span />
-        </span>
-        <span>OHBABY</span>
+      <div className="ohb-brand ohb-brand-wordmark" aria-label="ohbaby">
+        <span>oh</span>
+        <span>ba</span>
+        <span>by</span>
       </div>
       <div className="ohb-statusbar-meta">
         <StatusPill
@@ -2526,7 +2526,7 @@ function Composer(props: {
     if (!textarea) {
       return;
     }
-    fitComposerTextarea(textarea, { lineHeight: 24, maxLines: 7 });
+    fitComposerTextarea(textarea, { lineHeight: 22, maxLines: 7 });
   }, [draft, props.view.composer.disabled, slashOpen]);
 
   useEffect(() => {
@@ -2536,7 +2536,7 @@ function Composer(props: {
       return;
     }
     const observer = new ResizeObserver(() => {
-      fitComposerTextarea(textarea, { lineHeight: 24, maxLines: 7 });
+      fitComposerTextarea(textarea, { lineHeight: 22, maxLines: 7 });
     });
     observer.observe(composerInput);
     return (): void => {
@@ -3093,7 +3093,10 @@ function Composer(props: {
           </div>
         </section>
       ) : null}
-      <div className="ohb-composer-input" ref={composerInputRef}>
+      <div
+        className={`ohb-composer-input${props.view.composer.mode === "plan" ? " is-plan" : ""}`}
+        ref={composerInputRef}
+      >
         {slashOpen ? (
           <SlashPalette
             items={slashItems}
@@ -3111,7 +3114,7 @@ function Composer(props: {
             phrases={COMPOSER_PLACEHOLDER_PHRASES}
           />
           <textarea
-            aria-label="Message"
+            aria-label={`Message, ${props.view.composer.mode} mode, ${props.view.composer.permissionLevel} permission`}
             disabled={props.view.composer.disabled || isSubmitting}
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
               const nextDraft = event.target.value;
@@ -3139,80 +3142,85 @@ function Composer(props: {
             <span>⇥ {selectedCommand.label}</span>
           </span>
         ) : null}
-        <ReasoningControl
-          client={props.client}
-          session={props.view.activeSession}
-          onChange={(reasoning) => {
-            selectedReasoning.current = reasoning;
-          }}
-        />
-        {showStop ? (
+        {slashError || queueError || queuedEdit ? (
+          <div className="ohb-composer-feedback">
+            {slashError ? (
+              <span className="ohb-slash-error">{slashError}</span>
+            ) : null}
+            {queueError ? (
+              <span className="ohb-slash-error">{queueError}</span>
+            ) : null}
+            {queuedEdit ? (
+              <span className="ohb-composer-hint ohb-queued-edit-hint">
+                Editing queued prompt · Enter save · Esc keep original
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="ohb-composer-bar">
           <button
-            aria-label="Stop run"
-            className="ohb-stop-button"
-            disabled={!props.view.composer.canStop}
-            onClick={props.onStop}
-            title="Stop run"
+            aria-label={
+              props.view.composer.permissionLevel === "default"
+                ? "Permission policy: default. Ask before protected actions. Click to enable full-access without approval prompts."
+                : "Permission policy: full-access. Run without approval prompts. Click to return to default."
+            }
+            className={`ohb-permission-toggle ohb-permission-${props.view.composer.permissionLevel}`}
+            disabled={props.view.composer.disabled}
+            onClick={cyclePermissionLevel}
+            title={
+              props.view.composer.permissionLevel === "default"
+                ? "Default: ask before protected actions. Click for full-access."
+                : "Full-access: run without approval prompts. Click for default."
+            }
             type="button"
           >
-            <Square size={14} />
-          </button>
-        ) : (
-          <button
-            aria-busy={props.isPromptAdmitting}
-            aria-label={queuedEdit ? "Save queued prompt" : "Send message"}
-            className="ohb-send-button"
-            disabled={!canSend}
-            onClick={send}
-            title={queuedEdit ? "Save queued prompt" : "Send message"}
-            type="button"
-          >
-            {props.isPromptAdmitting ? (
-              <LoaderCircle
-                aria-hidden="true"
-                className="ohb-send-spinner"
-                size={14}
-              />
+            {props.view.composer.permissionLevel === "default" ? (
+              <Hand aria-hidden="true" size={17} />
             ) : (
-              <Send size={14} />
+              <ShieldAlert aria-hidden="true" size={17} />
             )}
           </button>
-        )}
-      </div>
-      <div
-        className={`ohb-composer-tools${queuedEdit ? " ohb-composer-tools-queued-edit" : ""}`}
-      >
-        {slashError ? (
-          <span className="ohb-slash-error">{slashError}</span>
-        ) : null}
-        {queueError ? (
-          <span className="ohb-slash-error">{queueError}</span>
-        ) : null}
-        {queuedEdit ? (
-          <span className="ohb-composer-hint ohb-queued-edit-hint">
-            Editing queued prompt · Enter save · Esc keep original
-          </span>
-        ) : null}
-        <button
-          className={`ohb-mode-button ohb-mode-${props.view.composer.mode}`}
-          disabled={props.view.composer.disabled}
-          onClick={cycleMode}
-          title="Switch mode"
-          type="button"
-        >
-          <span />
-          {props.view.composer.mode} mode
-        </button>
-        <button
-          className={`ohb-policy-button ohb-policy-${props.view.composer.permissionLevel}`}
-          disabled={props.view.composer.disabled}
-          onClick={cyclePermissionLevel}
-          title="Permission policy"
-          type="button"
-        >
-          <span className="ohb-policy-glyph" aria-hidden="true" />
-          {props.view.composer.permissionLevel}
-        </button>
+          <div className="ohb-composer-bar-spacer" />
+          <ReasoningControl
+            client={props.client}
+            session={props.view.activeSession}
+            onChange={(reasoning) => {
+              selectedReasoning.current = reasoning;
+            }}
+          />
+          {showStop ? (
+            <button
+              aria-label="Stop run"
+              className="ohb-stop-button"
+              disabled={!props.view.composer.canStop}
+              onClick={props.onStop}
+              title="Stop run"
+              type="button"
+            >
+              <Square size={14} />
+            </button>
+          ) : (
+            <button
+              aria-busy={props.isPromptAdmitting}
+              aria-label={queuedEdit ? "Save queued prompt" : "Send message"}
+              className="ohb-send-button"
+              disabled={!canSend}
+              onClick={send}
+              title={queuedEdit ? "Save queued prompt" : "Send message"}
+              type="button"
+            >
+              {props.isPromptAdmitting ? (
+                <LoaderCircle
+                  aria-hidden="true"
+                  className="ohb-send-spinner"
+                  size={14}
+                />
+              ) : (
+                <Send size={14} />
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </section>
   );

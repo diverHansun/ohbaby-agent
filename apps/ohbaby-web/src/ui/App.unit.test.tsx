@@ -313,10 +313,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     }
     Object.defineProperty(textarea, "scrollHeight", {
       configurable: true,
-      value: 72,
+      value: 66,
     });
     await setTextareaValue(app.container, "line one\nline two\nline three");
-    expect(textarea.style.height).toBe("72px");
+    expect(textarea.style.height).toBe("66px");
     expect(textarea.style.overflowY).toBe("hidden");
 
     Object.defineProperty(textarea, "scrollHeight", {
@@ -327,7 +327,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container,
       "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten",
     );
-    expect(textarea.style.height).toBe("168px");
+    expect(textarea.style.height).toBe("154px");
     expect(textarea.style.overflowY).toBe("auto");
   });
 
@@ -2471,7 +2471,19 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
-    await clickButton(app.container, "Permission policy");
+    const permissionButton = app.container.querySelector<HTMLButtonElement>(
+      ".ohb-permission-toggle",
+    );
+    expect(permissionButton?.getAttribute("aria-label")).toContain("default");
+    expect(permissionButton?.getAttribute("aria-label")).toContain(
+      "without approval prompts",
+    );
+    expect(permissionButton?.querySelector("svg")).not.toBeNull();
+    expect(app.container.querySelector(".ohb-mode-button")).toBeNull();
+    await clickButton(
+      app.container,
+      "Default: ask before protected actions. Click for full-access.",
+    );
 
     expect(fake.setPermission).toHaveBeenCalledWith({ level: "full-access" });
     expect(app.container.querySelector(".ohb-policy-menu")).toBeNull();
@@ -2520,9 +2532,13 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
-    expect(app.container.querySelector(".ohb-sidebar")).toBeNull();
+    expect(
+      app.container.querySelector(".ohb-sidebar")?.hasAttribute("inert"),
+    ).toBe(true);
     await clickButton(app.container, "Expand sessions");
-    expect(app.container.querySelector(".ohb-sidebar")).not.toBeNull();
+    expect(
+      app.container.querySelector(".ohb-sidebar")?.hasAttribute("inert"),
+    ).toBe(false);
     expect(
       app.container.querySelector('button[title="Select Session 2"]')
         ?.textContent,
