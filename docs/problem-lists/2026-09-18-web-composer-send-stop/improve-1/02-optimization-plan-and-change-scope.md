@@ -65,7 +65,7 @@ showStop     = view.composer.isRunning && !sendHasWork && !queuedEdit
 - **目标**：`ReasoningControl` 渲染在 textarea 与主按钮之间；无边框芯片样式；打字机留白按「芯片 + 主按钮」重算。
 - **改动文件**：`App.tsx`（放置）；`styles.css`（`.ohb-reasoning-control` 去掉白底实边、hover 浅灰细边、键盘 focus 保留清晰焦点标识、高度低于 Send；同时清理 `.ohb-reasoning-control` 与检测中/unknown 使用的 `.ohb-reasoning-status` 的 footer `margin-left: auto`；typewriter 在剩余空间内裁切，不能只改绝对定位的 `right`，因为现有 `white-space: nowrap` 会越界绘制）；`styles.unit.test.ts` 若有 reasoning/typewriter 断言则更新。
 - **行为**：检测中只转大脑；unknown 为大脑 + `unknown`；identified 为大脑 + 档位 + chevron。`mode === "none"` 仍 `return null`。错误气泡仍向上，避免被 `.ohb-composer-input` `overflow: hidden` 裁掉（若有则改为可见）。
-- **DoD**：断言 identified、detecting、unknown 三态都在 `.ohb-composer-input` 内、不在 `.ohb-composer-tools`。检测中无「推理默认」。最长打字机短语与窄屏下，文字不得覆盖芯片/主按钮或把输入框撑出 composer `max-width`。
+- **DoD**：断言 identified、detecting、unknown 三态都在 `.ohb-composer-input` 内、不在 `.ohb-composer-tools`。检测中无「推理默认」。最长打字机短语与窄屏下，文字不得覆盖芯片/主按钮或把输入框撑出 composer `max-width`。窄屏隐藏占固定宽度的 slash 补全文案，极窄屏缩小间距并容许长档位在芯片中省略显示；原生 select 的完整选项与 Tab 补全键盘行为保留。
 
 ### Stage 3 — Web 文案与权威文档
 
@@ -98,7 +98,7 @@ showStop     = view.composer.isRunning && !sendHasWork && !queuedEdit
 | 风险 | 缓解 | 回滚 |
 |------|------|------|
 | 有草稿时用户找不到 Stop | 键盘焦点在 textarea 时仍可双击 Esc；清空草稿 Stop 回来。Stop 隐藏时其 title 无法提供帮助；触屏用户须清空草稿 | 若此已确认取舍无法接受，重新讨论动作优先级，不能在本轮悄悄加第二颗按钮 |
-| 芯片变宽导致输入区跳 | 细边用 transparent→gray 的 border，不新增 outline 厚度；typewriter inset 按最大档位宽估算或 `ch` | 芯片搬回 footer |
+| 芯片变宽导致输入区跳 | 细边用 transparent→gray 的 border，不新增 outline 厚度；把 textarea 和 typewriter 放在可收缩文本容器内，裁切超出文字；窄屏隐藏 slash 补全文案以保留输入宽度 | 芯片搬回 footer |
 | 错误气泡被裁切 | 检查 overflow；必要时允许气泡溢出输入框 | 恢复 footer 定位 |
 | 删 `hint` 漏改假 ViewModel | 编译 + `slashCommands.unit.test.ts` | 字段可先留着不渲染（若删除引发面过大，允许 Stage 3 只停渲染、字段下轮再删——须在 05 记录） |
 | 误改 TUI | 04 回归清单含 TUI 契约测 | 不碰 cli 则无回滚 |
@@ -107,7 +107,7 @@ showStop     = view.composer.isRunning && !sendHasWork && !queuedEdit
 
 | 00 结论 | 02 落点 |
 |---------|---------|
-| 单槽、不两颗并排 | Stage 1 规则 `showStop`/`showSend` |
+| 单槽、不两颗并排 | Stage 1 规则 `showStop` 与互斥渲染分支 |
 | 思考强度在 Send 左、running 不让位 | Stage 2 放置 |
 | 大脑 + 细框透明底 | Stage 2 CSS |
 | Send 不改名 Queue，Stop 不改名暂停 | Stage 1 标签 |

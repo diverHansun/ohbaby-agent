@@ -50,7 +50,7 @@
 
 ## 4.4 回归清单
 
-- Enter 发送、Shift+Enter 换行、slash palette 键盘、IME 守卫。
+- Enter 发送、Shift+Enter 换行、slash palette 键盘、IME 守卫；窄屏隐藏 slash 补全文案后 Tab 补全仍可用。
 - 队列：编辑 lease、Cancel、Esc 放弃编辑（此时 Esc **不是** abort）。
 - 权限模态、mode/policy 循环仍在 footer。
 - `mode === "none"` 无大脑。
@@ -92,7 +92,7 @@ pnpm typecheck
 1. **T6 保测试情结**：最容易把 busy Send 留在 Stop 旁边「好让旧断言过」。防御：T3/T6 明确禁止第二颗按钮；失败时改测试。
 2. **queued edit + running**：Save 占槽时不能偷偷再画 Stop。Esc 放弃编辑不得误触发 abort（现有 `onKeyDown` 先处理 queuedEdit）。
 3. **`isPromptAdmitting` 与 `isRunning` 重叠**：follow-up 入队瞬间两真。空草稿时 Stop 优先于转圈 Send；有草稿时 Send 占槽但 disabled。测 T6 不要回到 T5。
-4. **芯片 `return null` 与 typewriter 留白**：无思考模型时不能按「芯片+Send」永久留白。absolute typewriter 的 `white-space: nowrap` 也可能越界绘制，必须裁切并在实际浏览器检查 375px、720px 视口、最长占位短语、`high`/较长档位及无思考模型；同时确认 textarea 仍有可输入宽度、错误气泡不被裁。
+4. **芯片 `return null` 与 typewriter 留白**：无思考模型时不能按「芯片+Send」永久留白。absolute typewriter 的 `white-space: nowrap` 也可能越界绘制，必须裁切并在实际浏览器检查 320px、375px、720px 视口、最长占位短语、`high`/较长档位及无思考模型；同时确认 textarea 仍有可输入宽度、slash 补全文案在窄屏不挤压输入区、错误气泡不被裁。
 5. **误改 TUI**：搜索 `double click esc` 只应改 web；`Press Esc again to interrupt` 只属于 cli。发布 diff 扫这两句。
 
 残余风险：有草稿时 Stop 不在 DOM，新用户可能不知道双击 Esc；Stop 的 title 在此状态也不可用，触屏用户须先清空草稿。00 已接受。不在本轮加回第二颗按钮或 Thinking 可点击。

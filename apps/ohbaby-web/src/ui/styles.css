@@ -2992,6 +2992,10 @@ button.ohb-list-row:hover,
     display: none;
   }
 
+  .ohb-slash-completion {
+    display: none;
+  }
+
   .ohb-composer-tools {
     flex-wrap: wrap;
   }
@@ -3043,6 +3047,22 @@ button.ohb-list-row:hover,
   .ohb-empty-context {
     font-size: 11px;
     max-width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .ohb-composer-input {
+    gap: 6px;
+  }
+
+  .ohb-reasoning-control select {
+    max-width: 82px;
+    padding-right: 18px;
+    text-overflow: ellipsis;
+  }
+
+  .ohb-reasoning-chevron {
+    right: 4px;
   }
 }
 

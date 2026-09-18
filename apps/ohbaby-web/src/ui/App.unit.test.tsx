@@ -778,25 +778,84 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toHaveLength(1);
   });
 
-  it("keeps the last-known stop action disabled while reconnecting", () => {
+  it.each(["reconnecting", "resyncing"] as const)(
+    "keeps the last-known stop action disabled while %s",
+    (connectionState) => {
+      const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+      const fake = createFakeRuntime({ snapshot: initial });
+      const app = mountApp(fake.runtime);
+
+      act(() => {
+        fake.store.setConnectionState(connectionState);
+      });
+      expect(app.container.textContent).toContain(connectionState);
+      expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(
+        1,
+      );
+      expect(
+        app.container
+          .querySelector(".ohb-stop-button")
+          ?.hasAttribute("disabled"),
+      ).toBe(true);
+      expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(
+        0,
+      );
+
+      act(() => {
+        fake.store.replaceSnapshot(snapshotWithStatus({ kind: "idle" }), 2);
+        fake.store.setConnectionState("live");
+      });
+      expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(
+        0,
+      );
+      expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(
+        1,
+      );
+    },
+  );
+
+  it("keeps a drafted Send disabled until reconnection restores a running snapshot", async () => {
     const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
     const fake = createFakeRuntime({ snapshot: initial });
     const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "queued after reconnect");
 
     act(() => {
       fake.store.setConnectionState("reconnecting");
     });
-    expect(app.container.textContent).toContain("reconnecting");
-    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(1);
-    expect(app.container.querySelector(".ohb-stop-button")?.hasAttribute("disabled")).toBe(true);
-    expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(0);
+    expect(
+      app.container.querySelector("textarea")?.hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      app.container.querySelector(".ohb-send-button")?.hasAttribute("disabled"),
+    ).toBe(true);
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(0);
+    expect(textareaValue(app.container)).toBe("queued after reconnect");
 
     act(() => {
-      fake.store.replaceSnapshot(snapshotWithStatus({ kind: "idle" }), 2);
+      fake.store.replaceSnapshot(initial, 2);
       fake.store.setConnectionState("live");
     });
-    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(0);
-    expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(1);
+    expect(
+      app.container.querySelector(".ohb-send-button")?.hasAttribute("disabled"),
+    ).toBe(false);
+    await pressTextareaKey(app.container, "Enter");
+    expect(fake.submitPromptAccepted.mock.calls[0]?.[0]).toBe(
+      "queued after reconnect",
+    );
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(1);
+  });
+
+  it("shows Stop while a run waits for permission", () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({
+        kind: "waiting-for-permission",
+        requestId: "permission_1",
+      }),
+    });
+    const app = mountApp(fake.runtime);
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(0);
   });
 
   it("keeps double Escape interruption available while a draft replaces Stop", async () => {
@@ -809,11 +868,34 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(0);
     expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(1);
     await pressTextareaKey(app.container, "Escape");
+    expect(fake.abortSession).not.toHaveBeenCalled();
     await pressTextareaKey(app.container, "Escape");
 
     expect(fake.abortSession).toHaveBeenCalledTimes(1);
     expect(fake.abortSession).toHaveBeenCalledWith("session_1", "run_1");
     expect(textareaValue(app.container)).toBe("follow-up draft");
+  });
+
+  it("keeps one named Send action when idle and enables it only for a draft", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(0);
+    expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(1);
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-label"),
+    ).toBe("Send message");
+    expect(
+      app.container.querySelector(".ohb-send-button")?.hasAttribute("disabled"),
+    ).toBe(true);
+
+    await setTextareaValue(app.container, "ready to send");
+    expect(
+      app.container.querySelector(".ohb-send-button")?.hasAttribute("disabled"),
+    ).toBe(false);
   });
 
   it("keeps a follow-up queued while the first prompt is starting before a run appears", async () => {
@@ -1657,7 +1739,20 @@ describe("OhbabyWebApp slash command interactions", () => {
     await waitFor(() =>
       app.container.textContent.includes("Editing queued prompt"),
     );
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(0);
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-label"),
+    ).toBe("Save queued prompt");
+    expect(app.container.querySelector(".ohb-queued-edit-hint")).not.toBeNull();
     await pressTextareaKey(app.container, "Escape");
+    expect(fake.abortSession).not.toHaveBeenCalled();
+    expect(
+      app.container
+        .querySelector(".ohb-send-button")
+        ?.getAttribute("aria-label"),
+    ).toBe("Send message");
     await pressTextareaKey(app.container, "Enter");
     await waitFor(() => fake.submitPromptAccepted.mock.calls.length === 1);
 
@@ -3947,7 +4042,9 @@ it("unknown capability keeps send available and labels the control unknown witho
   const app = mountApp(fake.runtime);
   await waitFor(() => app.container.textContent.includes("unknown"));
   expect(
-    app.container.querySelector(".ohb-reasoning-unknown")?.closest(".ohb-composer-input"),
+    app.container
+      .querySelector(".ohb-reasoning-unknown")
+      ?.closest(".ohb-composer-input"),
   ).not.toBeNull();
   expect(app.container.textContent).not.toContain("推理默认");
   expect(
