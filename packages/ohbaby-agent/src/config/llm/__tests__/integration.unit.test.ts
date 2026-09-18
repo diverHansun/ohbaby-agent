@@ -57,7 +57,6 @@ describe("config/llm integration", () => {
         baseUrl: "https://api.openai.com/v1",
         interfaceProvider: "openai-compatible",
         promptCache: "auto",
-        temperature: 0.7,
         maxTokens: 4096,
       });
     });
@@ -199,11 +198,11 @@ describe("config/llm integration", () => {
 
       const config1 = await getLLMConfig();
       expect(config1.model).toBe("gpt-4");
-      expect(config1.temperature).toBe(0.7);
+      expect(config1.temperature).toBeUndefined();
 
       const config2 = await reloadLLMConfig();
       expect(config2.model).toBe("gpt-4-turbo");
-      expect(config2.temperature).toBe(1.0);
+      expect(config2.temperature).toBeUndefined();
     });
 
     it("should update cache after reload", async () => {

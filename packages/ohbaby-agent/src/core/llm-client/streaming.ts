@@ -318,7 +318,9 @@ export async function* streamResponse(
       const stream = await provider.streamResponse({
         model: config.model,
         messages,
-        temperature: config.temperature,
+        ...(config.temperature === undefined
+          ? {}
+          : { temperature: config.temperature }),
         reasoning,
         maxTokens: requestMaxTokens,
         tools,

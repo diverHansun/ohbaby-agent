@@ -220,9 +220,6 @@ class LLMConfigManager {
           modelJson.apiConfig.interfaceProvider ??
           inferConnectModelInterfaceProvider(modelJson.apiConfig.baseUrl),
         promptCache: modelJson.apiConfig.promptCache ?? "auto",
-        ...(modelJson.llmParams.temperature === undefined
-          ? {}
-          : { temperature: modelJson.llmParams.temperature }),
         ...(modelJson.llmParams.reasoning === undefined
           ? {}
           : { reasoning: { ...modelJson.llmParams.reasoning } }),

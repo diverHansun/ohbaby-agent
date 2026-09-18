@@ -39,6 +39,7 @@ export interface SetActiveLLMConfigInput {
   readonly interfaceProvider?: InterfaceProviderKind;
   readonly promptCache?: PromptCachePolicy;
   readonly temperature?: number;
+  readonly clearTemperature?: boolean;
   readonly reasoning?: ReasoningConfig;
   readonly clearReasoning?: boolean;
   readonly discoveredReasoningCapabilities?: ReasoningCapabilities;
@@ -108,7 +109,9 @@ function buildLLMParams(
   const contextWindowTokens = input.clearContextWindowTokens
     ? undefined
     : (input.contextWindowTokens ?? existingParams?.contextWindowTokens);
-  const temperature = input.temperature ?? existingParams?.temperature;
+  const temperature = input.clearTemperature
+    ? undefined
+    : (input.temperature ?? existingParams?.temperature);
   const reasoning = input.clearReasoning
     ? undefined
     : existingParams?.reasoning === undefined && input.reasoning === undefined

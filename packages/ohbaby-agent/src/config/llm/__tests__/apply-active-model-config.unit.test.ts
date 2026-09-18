@@ -458,6 +458,223 @@ describe("applyActiveModelConfig", () => {
     expect(modelJson.llmParams.contextWindowTokens).toBe(262_144);
   });
 
+  it.each(["same route", "switching back to a saved route"])(
+    "preserves discovered reasoning when %s",
+    async (scenario) => {
+      const target = {
+        provider: "zenmux",
+        model: "openai/gpt-5.6-luna",
+        baseUrl: "https://zenmux.ai/api/v1",
+        interfaceProvider: "openai-responses",
+        contextWindowTokens: 100_000,
+        reasoningCapabilitySource: "active-probe",
+        reasoningCapabilities: {
+          mode: "effort",
+          wire: "openai",
+          supportsDisabled: false,
+          efforts: ["medium", "high"],
+        },
+      };
+      const other = {
+        ...target,
+        interfaceProvider: "openai-compatible",
+        reasoningCapabilities: {
+          ...target.reasoningCapabilities,
+          wire: "reasoning",
+        },
+      };
+      await fs.mkdir(path.dirname(modelJsonPath), { recursive: true });
+      await fs.writeFile(
+        modelJsonPath,
+        JSON.stringify({
+          provider: "zenmux",
+          defaultModel: target.model,
+          apiConfig: {
+            baseUrl: target.baseUrl,
+            interfaceProvider:
+              scenario === "same route"
+                ? target.interfaceProvider
+                : other.interfaceProvider,
+          },
+          llmParams: { temperature: 0.7, maxTokens: 4096 },
+          models: [target, other],
+        }),
+      );
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: target.model,
+                context_length: target.contextWindowTokens,
+                reasoning: false,
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+      let notifyDiscovery: () => void = () => undefined;
+      const discoveryFinished = new Promise<void>((resolve) => {
+        notifyDiscovery = resolve;
+      });
+
+      await applyActiveModelConfig({
+        provider: target.provider,
+        model: target.model,
+        baseUrl: target.baseUrl,
+        interfaceProvider: "openai-responses",
+        contextWindowTokens: target.contextWindowTokens,
+        modelJsonPath,
+        projectRoot: tempRoot,
+        deferMetadata: true,
+        onDiscovery: notifyDiscovery,
+      });
+      await discoveryFinished;
+
+      const saved = JSON.parse(await fs.readFile(modelJsonPath, "utf8")) as {
+        llmParams: { temperature?: number };
+        models: (typeof target)[];
+      };
+      expect(saved.llmParams).not.toHaveProperty("temperature");
+      expect(saved.models).toHaveLength(2);
+      expect(
+        saved.models.find(
+          (profile) => profile.interfaceProvider === "openai-responses",
+        )?.reasoningCapabilities,
+      ).toEqual(target.reasoningCapabilities);
+      expect(
+        saved.models.find(
+          (profile) => profile.interfaceProvider === "openai-compatible",
+        )?.reasoningCapabilities,
+      ).toEqual(other.reasoningCapabilities);
+    },
+  );
+
+  it("reuses saved reasoning capabilities without another active reasoning probe", async () => {
+    await fs.mkdir(path.dirname(modelJsonPath), { recursive: true });
+    await fs.writeFile(
+      modelJsonPath,
+      JSON.stringify({
+        provider: "custom",
+        defaultModel: "reasoner",
+        apiConfig: {
+          baseUrl: "https://gateway.example/v1",
+          interfaceProvider: "openai-responses",
+        },
+        llmParams: { maxTokens: 4096 },
+        models: [
+          {
+            provider: "custom",
+            model: "reasoner",
+            baseUrl: "https://gateway.example/v1",
+            interfaceProvider: "openai-responses",
+            contextWindowTokens: 100_000,
+            reasoningCapabilitySource: "active-probe",
+            reasoningCapabilities: {
+              mode: "effort",
+              wire: "openai",
+              supportsDisabled: true,
+              efforts: ["low", "medium"],
+            },
+          },
+        ],
+      }),
+    );
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        new Response(
+          init?.method === "POST"
+            ? JSON.stringify({ error: "unexpected active probe" })
+            : JSON.stringify({ data: [] }),
+          { status: init?.method === "POST" ? 400 : 200 },
+        ),
+      ),
+    );
+    let notifyDiscovery: () => void = () => undefined;
+    const discoveryFinished = new Promise<void>((resolve) => {
+      notifyDiscovery = resolve;
+    });
+
+    await applyActiveModelConfig({
+      provider: "custom",
+      model: "reasoner",
+      baseUrl: "https://gateway.example/v1",
+      interfaceProvider: "openai-responses",
+      contextWindowTokens: 100_000,
+      modelJsonPath,
+      projectRoot: tempRoot,
+      deferMetadata: true,
+      onDiscovery: notifyDiscovery,
+    });
+    await discoveryFinished;
+
+    expect(
+      (fetchMock.mock.calls as [string, RequestInit?][]).filter(
+        ([, init]) => init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("does not use a legacy generic profile to skip discovery for a new protocol", async () => {
+    await fs.mkdir(path.dirname(modelJsonPath), { recursive: true });
+    await fs.writeFile(
+      modelJsonPath,
+      JSON.stringify({
+        provider: "custom",
+        defaultModel: "reasoner",
+        apiConfig: {
+          baseUrl: "https://gateway.example/v1",
+          interfaceProvider: "openai-compatible",
+        },
+        llmParams: { maxTokens: 4096 },
+        models: [
+          {
+            provider: "custom",
+            model: "reasoner",
+            contextWindowTokens: 100_000,
+            reasoningCapabilitySource: "active-probe",
+            reasoningCapabilities: {
+              mode: "binary",
+              wire: "thinking",
+              supportsDisabled: true,
+            },
+          },
+        ],
+      }),
+    );
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        new Response(JSON.stringify({ data: [] }), {
+          status: init?.method === "POST" ? 400 : 200,
+        }),
+      ),
+    );
+    let notifyDiscovery: () => void = () => undefined;
+    const discoveryFinished = new Promise<void>((resolve) => {
+      notifyDiscovery = resolve;
+    });
+
+    await applyActiveModelConfig({
+      provider: "custom",
+      model: "reasoner",
+      baseUrl: "https://gateway.example/v1",
+      interfaceProvider: "openai-responses",
+      contextWindowTokens: 100_000,
+      modelJsonPath,
+      projectRoot: tempRoot,
+      deferMetadata: true,
+      onDiscovery: notifyDiscovery,
+    });
+    await discoveryFinished;
+
+    expect(
+      (fetchMock.mock.calls as [string, RequestInit?][]).filter(
+        ([, init]) => init?.method === "POST",
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+
   it("uses the user-provided context window and returns a warning when detection fails", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 

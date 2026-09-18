@@ -414,8 +414,8 @@ describe("CLI prompt process smoke", () => {
         model: "fake-model",
         stream: true,
         stream_options: { include_usage: true },
-        temperature: 0,
       });
+      expect(mainRequest.body).not.toHaveProperty("temperature");
       const messages = mainRequest.body.messages;
       expect(Array.isArray(messages) ? messages.at(-1) : null).toMatchObject({
         content: expect.stringMatching(
@@ -424,15 +424,15 @@ describe("CLI prompt process smoke", () => {
         role: "user",
       });
 
-      // Title generation uses a small request-level output cap while keeping
-      // the active model and temperature from the configured client.
+      // Title generation uses a small request-level output cap and does not
+      // inherit the stale temperature stored in model.json.
       const titleRequest = titleRequests[0];
       expect(titleRequest.body).toMatchObject({
         max_tokens: 128,
         model: "fake-model",
         stream: true,
-        temperature: 0,
       });
+      expect(titleRequest.body).not.toHaveProperty("temperature");
     } finally {
       await server.close();
     }

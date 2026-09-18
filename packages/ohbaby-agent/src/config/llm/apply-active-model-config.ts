@@ -3,7 +3,7 @@ import {
   capabilitiesFor,
 } from "../../services/interface-providers/reasoning.js";
 import type { UiReasoningCapabilityView } from "ohbaby-sdk";
-import { normalizedEndpoint } from "./model-profile.js";
+import { modelProfileRouteKey, normalizedEndpoint } from "./model-profile.js";
 import {
   coordinateModelConfig,
   modelConfigVersion,
@@ -49,7 +49,6 @@ export interface ApplyActiveModelConfigInput {
   readonly reasoning?: ReasoningConfig;
   readonly deferMetadata?: boolean;
   readonly onDiscovery?: () => void | Promise<void>;
-  readonly temperature?: number;
   readonly provider?: string;
   readonly baseUrl: string;
   readonly interfaceProvider: InterfaceProviderKind;
@@ -204,7 +203,11 @@ export async function probeActiveModelContextWindow(
             : undefined,
     },
     {
-      status: probe.reasoningCapabilities ? "identified" : "unknown",
+      status: probe.reasoningReason
+        ? "unknown"
+        : probe.reasoningCapabilities
+          ? "identified"
+          : "unknown",
       reason: probe.reasoningReason,
     },
   );
@@ -314,11 +317,8 @@ export async function applyActiveModelConfig(
           maxTokens: resolvedMaxOutputTokens,
         }),
     updateActiveModelProfile: true,
-    clearDiscoveredReasoning: input.deferMetadata,
+    clearTemperature: true,
     ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
-    ...(input.temperature === undefined
-      ? {}
-      : { temperature: input.temperature }),
     ...(input.modelJsonPath === undefined
       ? {}
       : { modelJsonPath: input.modelJsonPath }),
@@ -559,14 +559,27 @@ function startModelDiscovery(input: {
             ...input,
             signal: state.controller.signal,
           });
+          const savedModel = await loadModelJson({
+            modelJsonPath: input.modelJsonPath,
+          });
+          validateModelJson(savedModel);
+          const routeKey = modelProfileRouteKey(input, input.provider);
+          const exactProfiles = savedModel.models?.filter(
+            (profile) =>
+              modelProfileRouteKey(profile, savedModel.provider) === routeKey,
+          );
+          const savedCapabilities =
+            exactProfiles?.at(-1)?.reasoningCapabilities;
           const known = capabilitiesFor({
             provider: input.provider,
             model: input.model,
             baseUrl: input.baseUrl,
             interfaceProvider: input.interfaceProvider,
             maxTokens: input.maxOutputTokens ?? 4096,
+            modelProfiles: exactProfiles,
           }).capability;
           const activeCapabilities =
+            savedCapabilities ||
             metadata.reasoningCapabilities ||
             known ||
             state.controller.signal.aborted
@@ -578,7 +591,9 @@ function startModelDiscovery(input: {
           const probe = {
             ...metadata,
             reasoningCapabilities:
-              metadata.reasoningCapabilities ?? activeCapabilities,
+              savedCapabilities ??
+              metadata.reasoningCapabilities ??
+              activeCapabilities,
           };
           await coordinateModelConfig(input.modelJsonPath, async () => {
             if (
@@ -601,7 +616,9 @@ function startModelDiscovery(input: {
                   probe.contextWindowTokens ?? input.contextWindowTokens,
                 maxOutputTokens: input.maxOutputTokens,
                 updateActiveModelProfile: true,
-                discoveredReasoningCapabilities: probe.reasoningCapabilities,
+                discoveredReasoningCapabilities: savedCapabilities
+                  ? undefined
+                  : probe.reasoningCapabilities,
                 ...(activeCapabilities
                   ? {
                       discoveredReasoningCapabilitySource:
@@ -619,9 +636,11 @@ function startModelDiscovery(input: {
                 projectDirectory: input.projectRoot,
               });
             }
-            state.status = probe.reasoningCapabilities
-              ? "identified"
-              : "unknown";
+            state.status = probe.reasoningReason
+              ? "unknown"
+              : probe.reasoningCapabilities || known
+                ? "identified"
+                : "unknown";
             state.reason = probe.reasoningReason;
           });
           if (

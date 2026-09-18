@@ -12,7 +12,6 @@ import type {
   ReasoningCapabilities,
 } from "./types.js";
 
-const ENDPOINT_PATHS = ["/chat/completions", "/messages", "/responses"];
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const INTERFACE_PROVIDER_KINDS = new Set<InterfaceProviderKind>([
   "openai-compatible",
@@ -24,10 +23,6 @@ const PROMPT_CACHE_POLICIES = new Set<PromptCachePolicy>([
   "enabled",
   "disabled",
 ]);
-
-function trimTrailingSlashes(value: string): string {
-  return value.replace(/\/+$/u, "");
-}
 
 function formatInvalidValue(value: unknown): string {
   if (typeof value === "string") {
@@ -46,20 +41,6 @@ function formatInvalidValue(value: unknown): string {
     return JSON.stringify(value);
   } catch {
     return Object.prototype.toString.call(value);
-  }
-}
-
-function validateBaseUrlValue(baseUrl: string): void {
-  const normalized = trimTrailingSlashes(baseUrl.trim()).toLowerCase();
-
-  for (const endpointPath of ENDPOINT_PATHS) {
-    if (normalized.endsWith(endpointPath)) {
-      throw new ConfigError(
-        `Invalid apiConfig.baseUrl: use the SDK base URL without '${endpointPath}'. For OpenAI-compatible providers, the SDK appends the chat completions path automatically.`,
-        "INVALID_FIELD",
-        { baseUrl, endpointPath },
-      );
-    }
   }
 }
 
@@ -223,8 +204,6 @@ export function validateModelJson(
 
     if (!apiConfig.baseUrl || typeof apiConfig.baseUrl !== "string") {
       errors.push("apiConfig.baseUrl (string) is required");
-    } else {
-      validateBaseUrlValue(apiConfig.baseUrl);
     }
 
     if (apiConfig.apiKeyEnv !== undefined) {

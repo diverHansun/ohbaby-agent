@@ -655,6 +655,20 @@ describe("LLM Client Integration Tests", () => {
       expect(callArgs.maxTokens).toBe(128000);
     });
 
+    it("omits temperature when the active model has no temperature override", async () => {
+      mockClient.config.temperature = undefined;
+      streamResponseMock.mockResolvedValue(
+        createProviderStream([{ textDelta: "test", finishReason: "stop" }]),
+      );
+
+      const iterator = streamResponse(mockClient, [
+        { role: "user", content: "test" },
+      ]);
+      await iterator.next();
+
+      expect(getInterfaceProviderRequest()).not.toHaveProperty("temperature");
+    });
+
     it("should pass tools parameter to API", async () => {
       streamResponseMock.mockResolvedValue(
         createProviderStream([{ textDelta: "test", finishReason: "stop" }]),

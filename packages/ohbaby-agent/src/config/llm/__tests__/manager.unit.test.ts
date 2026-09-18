@@ -84,7 +84,6 @@ describe("LLMConfigManager", () => {
         baseUrl: "https://api.openai.com/v1",
         interfaceProvider: "openai-compatible",
         promptCache: "auto",
-        temperature: 0.7,
         maxTokens: 4096,
         contextWindowTokens: 128_000,
         modelProfiles: [

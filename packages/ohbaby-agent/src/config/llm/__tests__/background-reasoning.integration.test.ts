@@ -263,6 +263,21 @@ it("explicit retry publishes identified capability and preserves verified eviden
     stale: true,
     reason: "rate-limit",
   });
+  let backgroundDone!: () => void;
+  const backgroundFinished = new Promise<void>((resolve) => {
+    backgroundDone = resolve;
+  });
+  await applyActiveModelConfig({
+    ...input,
+    deferMetadata: true,
+    onDiscovery: backgroundDone,
+  });
+  await backgroundFinished;
+  const { currentDiscoveryState } =
+    await import("../apply-active-model-config.js");
+  expect(
+    await currentDiscoveryState(input.modelJsonPath, input.envPath),
+  ).toMatchObject({ status: "unknown", reason: "rate-limit" });
   const persisted = JSON.parse(
     await readFile(input.modelJsonPath, "utf8"),
   ) as ModelJsonConfig;

@@ -201,6 +201,31 @@ describe("setActiveLLMConfig", () => {
     expect(envWrite).toBeUndefined();
   });
 
+  it("removes an inherited temperature when the connect writer explicitly clears it", async () => {
+    vi.mocked(fs.readFile).mockResolvedValue(
+      JSON.stringify({
+        provider: "zenmux",
+        defaultModel: "old-model",
+        apiConfig: { baseUrl: "https://zenmux.ai/api/v1" },
+        llmParams: { temperature: 0.7, maxTokens: 4096 },
+      }),
+    );
+
+    await setActiveLLMConfig({
+      provider: "zenmux",
+      model: "openai/gpt-5.6-luna",
+      baseUrl: "https://zenmux.ai/api/v1",
+      interfaceProvider: "openai-responses",
+      clearTemperature: true,
+      modelJsonPath: "D:/repo/.ohbaby/model.json",
+    });
+
+    const written = parseModelJsonWrite(
+      findWriteCall((file) => file.includes("model.json")),
+    );
+    expect(written.llmParams).toEqual({ maxTokens: 4096 });
+  });
+
   it.each(["enabled", "disabled"] as const)(
     "should preserve promptCache=%s during an unrelated active-model rewrite",
     async (promptCache) => {

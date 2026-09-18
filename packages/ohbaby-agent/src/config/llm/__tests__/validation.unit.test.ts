@@ -209,7 +209,7 @@ describe("validateModelJson", () => {
     }
   });
 
-  it("should reject full endpoint URLs in apiConfig.baseUrl", () => {
+  it("should allow a full endpoint URL while the Connect UI offers a warning", () => {
     const config = {
       ...validConfig,
       apiConfig: {
@@ -220,15 +220,7 @@ describe("validateModelJson", () => {
 
     expect(() => {
       validateModelJson(config);
-    }).toThrow(ConfigError);
-    expect(() => {
-      validateModelJson(config);
-    }).toThrow(/SDK base URL/);
-    try {
-      validateModelJson(config);
-    } catch (error) {
-      expect((error as ConfigError).code).toBe("INVALID_FIELD");
-    }
+    }).not.toThrow();
   });
 
   it("should throw for missing llmParams", () => {
