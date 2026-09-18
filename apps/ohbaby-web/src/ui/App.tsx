@@ -2129,11 +2129,9 @@ function ThinkingIndicator(props: {
       </span>
       <span>Thinking</span>
       <span>· {String(elapsedSeconds)}s</span>
-      {props.canInterrupt ? (
-        <span>· double click esc to interrupt</span>
-      ) : (
+      {!props.canInterrupt ? (
         <span>· starting agent</span>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -3196,7 +3194,6 @@ function Composer(props: {
           <span className="ohb-policy-glyph" aria-hidden="true" />
           {props.view.composer.permissionLevel}
         </button>
-        <span className="ohb-composer-hint">{props.view.composer.hint}</span>
       </div>
     </section>
   );

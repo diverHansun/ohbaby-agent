@@ -23,9 +23,10 @@
 
 ## 2. 运行态（run）
 
-- **running**：状态胶囊 `running`(slate,pulse) + 流内三色波点思考指示器（`Thinking · {elapsed}s · double click esc to interrupt`）+ composer 显示 Stop。
+- **running**：状态胶囊 `running`(slate,pulse) + 流内三色波点思考指示器（`Thinking · {elapsed}s`）。composer 空草稿显示 Stop，有草稿显示 Send；发送后 follow-up 进入队列、草稿清空，恢复 Stop。
 - **idle**：状态胶囊 `idle`(green) + 流内定稿行 + composer 显示 Send。
 - **中断**：double-esc 或 Stop → 转 idle（与 CLI 一致）。
+- **重连 / 重同步**：顶栏显示 `reconnecting` / `resyncing`，保留最后已知 run 状态。空草稿且最后已知 running 时显示不可点的 Stop；不能据此断言 run 当前仍在执行。同步后依最新快照更新主按钮。
 - **命令 UI**：slash 命令执行中显示 running notice；错误回流后就地更新；只读成功结果可打开结构化 modal。command UI 是易失投影，不改变 run 状态，除非 command 本身通过 backend 产生 session/run 事件。
 
 ---

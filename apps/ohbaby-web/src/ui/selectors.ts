@@ -38,7 +38,6 @@ export interface ComposerModel {
   readonly canSend: boolean;
   readonly canStop: boolean;
   readonly disabled: boolean;
-  readonly hint: string;
   readonly isRunning: boolean;
   readonly mode: UiPermissionMode;
   readonly permissionLevel: UiPermissionLevel;
@@ -107,7 +106,6 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
         activeSessionId !== undefined &&
         activeSessionId !== null,
       disabled: snapshot.connectionState !== "live",
-      hint: selectComposerHint(snapshot.connectionState, runStatus),
       isRunning,
       mode: permission?.mode ?? DEFAULT_MODE,
       permissionLevel: permission?.level ?? DEFAULT_PERMISSION_LEVEL,
@@ -223,27 +221,6 @@ function selectConnectionKind(
   return status.kind === "running" || status.kind === "waiting-for-permission"
     ? "running"
     : "idle";
-}
-
-function selectComposerHint(
-  connectionState: ConnectionState,
-  status: UiRunStatus,
-): string {
-  if (connectionState === "connecting") {
-    return "opening session";
-  }
-  if (connectionState === "reconnecting") {
-    return "reconnecting";
-  }
-  if (connectionState === "resyncing") {
-    return "resyncing";
-  }
-  if (connectionState === "disconnected") {
-    return "reload after restarting serve";
-  }
-  return status.kind === "running" || status.kind === "waiting-for-permission"
-    ? "double click esc to stop"
-    : "enter to send";
 }
 
 function selectStatusLabel(

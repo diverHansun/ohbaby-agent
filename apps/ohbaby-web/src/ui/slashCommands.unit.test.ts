@@ -124,7 +124,6 @@ function statusModels(): {
         canSend: true,
         canStop: false,
         disabled: false,
-        hint: "",
         isRunning: false,
         mode: "auto",
         permissionLevel: "default",

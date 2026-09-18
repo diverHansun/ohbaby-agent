@@ -41,12 +41,12 @@
 | snapshot barrier | 初始 seq=0 与本地 same-seq refresh 可应用；来自 SSE 的 same-seq/旧事件必须被拒绝且不通知 subscriber |
 | subscriber/listener 隔离 | 一个 SDK subscriber 或 store listener 抛错，不阻断其他 listener、store 或连接 |
 | Prompt 三种能力 | accepted 立即回 receipt；wait 返回严格四终态；andWait 只组合二者 |
-| prompt 首帧反馈 | Enter 后下一帧草稿已空，主布局已有 local 用户行、一个 startup Thinking，Send 仅在 HTTP admission 期间旋转 |
+| prompt 首帧反馈 | Enter 后下一帧草稿已空，主布局已有 local 用户行、一个 startup Thinking；主操作位尚未进入 running 时 Send 在 HTTP admission 期间旋转，进入 running 后空草稿由 Stop 占槽 |
 | prompt 展示接管 | formal message > starting/running submission > local attempt；receipt/SSE/message/run 乱序时无双行、无空窗、Thinking 不重复 |
 | prompt busy 回退 | `starting → queued` 后 provisional/ startup Thinking 退出，prompt 只在 Queue；不出现正式消息假象 |
 | prompt 失败恢复 | receipt 前失败仅在当前 draft 为空时恢复；accepted failed/interrupted 保留 submission 用户行并内联错误 |
 | prompt reload projection | 无 local state 时，starting/running/failed/interrupted 仍可由 snapshot 独立重建 |
-| active run follow-up | admission 有按钮反馈，但不插 conversation optimistic 行；queued 后只出现在 Queue |
+| active run follow-up | 有草稿时主槽显示 Send；发送清空草稿后恢复 Stop，admission 不再保留第二颗 busy Send；follow-up 不插 conversation optimistic 行，queued 后只出现在 Queue |
 | starting-window follow-up | 首轮已有 `starting`、run 尚未出现时，follow-up 仍只进入 Queue，不重复投影到 conversation |
 | pending session isolation | admission pending 期间切换 existing/new session，local row 与 startup Thinking 不得串到另一会话 |
 | mixed timeline ordering | 较早的 failed/interrupted provisional 与后续 formal message 按 `createdAt` 合并排序；reload 后顺序不变 |

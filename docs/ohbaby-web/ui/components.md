@@ -29,7 +29,7 @@
   - `READ`（gold）：路径 + 行数；展开列带行号的片段，命中行高亮。
   - `EDIT`（green）：文件 + `+N/−M`；展开列删改行（红/绿底）。
   - 折叠态一行摘要，点击展开（chevron 旋转）。
-- **思考指示器**（running 时）：三色波点 + `Thinking · {elapsed}s · double click esc to interrupt`——与 CLI 的 double-esc 中断一致（落 G3）。
+- **思考指示器**（running 时）：三色波点 + `Thinking · {elapsed}s`；startup 时可显示 `starting agent`。Web 不常驻 Esc 教学文案；TUI 保留自己的中断提示。
 - **定稿行**（idle 时）：如"Run stopped. 待审批的编辑已暂存"。
 - **命令结果**：web-safe slash 命令的 running/error 以轻量 notice 出现在流内；只读成功结果（`/status`、`/help`、`/mcps`、`/skills`）优先用结构化 modal 呈现，不进入消息历史。无法识别的数据回退为安全文本/markdown notice。
 
@@ -39,11 +39,12 @@
 
 - **输入框**：`>` 提示符 + 单行输入，聚焦环 + 轻阴影；`↵` 发送、`⇧↵` 换行。
 - **slash 输入**：以 `/` 开头时不作为普通 prompt，而是走 `UiSlashCommand` 解析/执行。v0.1.6 做 web-safe 候选面板、分组、`↑/↓` 选择、`Tab` 补全、`Enter` 执行、`Esc` 关闭；解析失败要保留草稿并显示错误。详细规格见 [`slash-commands/`](./slash-commands/README.md)。
-- **动作按钮**：running 时显示 **Stop**（红方块图标）；idle 时显示 **Send ↵**（蓝）。
+- **动作按钮**：输入框右侧始终只有一个主操作位。idle 显示 Send；发送请求待确认时可显示转圈 Send；running / waiting-for-permission 且草稿为空时显示 Stop；running 且草稿有字时显示 Send，发送后进入队列并恢复 Stop；编辑队列时显示 Save。重连或重同步期间依最后已知 run 状态保留按钮外观，但按钮不可点，顶栏显示连接状态。窄屏即使隐藏按钮文字，也须保留动态 `aria-label`。
+- **思考强度**：有思考能力的模型在输入框内、主按钮左侧显示大脑和英文档位；平时透明无边，hover 有浅灰细边，键盘焦点清晰可见。检测中只转大脑、unknown 显示 `unknown`；无思考能力时不留空位。
 - **底部控件行**（本期纳入，决策 3）：
   - **mode 切换**：`auto mode` / `plan mode`，`⇧⇥` 循环；auto=green 点、plan=blue 点。
   - **权限策略**：`default`（ask before each action）/ `full-access`（run without prompts），与 mode 一样做成轻量单击循环按钮，不使用下拉/上拉菜单。`full-access` 时**不弹权限模态**。
-  - **右侧提示**：随状态变化（`↵ · send` / `double click esc to stop` / `press esc again to stop`，armed 时变红）。
+  - **提示**：不常驻展示 Enter、Esc 或连接状态说明；编辑队列时保留 `Editing queued prompt · Enter save · Esc keep original`。连接状态由顶栏胶囊展示。
 
 ---
 

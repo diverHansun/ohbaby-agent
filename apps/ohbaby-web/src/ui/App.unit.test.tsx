@@ -1439,9 +1439,10 @@ describe("OhbabyWebApp slash command interactions", () => {
       1,
     );
     expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
-    expect(app.container.textContent).toContain(
+    expect(app.container.textContent).not.toContain(
       "double click esc to interrupt",
     );
+    expect(app.container.querySelector(".ohb-composer-hint")).toBeNull();
 
     act(() => {
       fake.store.replaceSnapshot(
