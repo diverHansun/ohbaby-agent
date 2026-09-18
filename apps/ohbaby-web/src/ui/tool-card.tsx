@@ -131,8 +131,9 @@ function ToolPanel(props: {
         <span className="ohb-tool-summary">{props.summary}</span>
         <span className="ohb-tool-meta">{props.meta}</span>
         <ChevronDown
-          className={props.open ? "ohb-chevron-open" : ""}
-          size={16}
+          aria-hidden="true"
+          className={`ohb-tool-chevron ${props.open ? "ohb-chevron-open" : ""}`}
+          size={14}
         />
       </button>
       {props.open && props.body !== "" ? <pre>{props.body}</pre> : null}

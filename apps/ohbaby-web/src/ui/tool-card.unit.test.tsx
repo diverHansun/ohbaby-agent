@@ -61,6 +61,18 @@ describe("pairToolParts", () => {
 });
 
 describe("ToolCard", () => {
+  it.each(["subagent_run", "web_search", "bash"])(
+    "uses the shared disclosure arrow for %s",
+    (name) => {
+      const app = mountCard(
+        { ...toolCall({ status: "running" }), name },
+        undefined,
+      );
+      const arrow = app.container.querySelector(".ohb-tool-chevron");
+      expect(arrow?.tagName.toLowerCase()).toBe("svg");
+    },
+  );
+
   it("shows a short failed result expanded without exposing its call id", () => {
     const app = mountCard(toolCall({ status: "failed" }), {
       callId: "call_bash",

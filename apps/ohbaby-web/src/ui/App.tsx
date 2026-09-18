@@ -3094,7 +3094,6 @@ function Composer(props: {
         </section>
       ) : null}
       <div className="ohb-composer-input" ref={composerInputRef}>
-        <span className="ohb-prompt">&gt;</span>
         {slashOpen ? (
           <SlashPalette
             items={slashItems}

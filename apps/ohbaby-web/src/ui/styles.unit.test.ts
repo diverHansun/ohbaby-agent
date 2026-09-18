@@ -111,6 +111,35 @@ describe("web app layout styles", () => {
     ]);
   });
 
+  it("keeps every tool disclosure arrow visible when its summary is long", () => {
+    expectCssRule(".ohb-tool-summary", ["flex: 1", "min-width: 0"]);
+    expectCssRule(".ohb-tool-chevron", [
+      "flex: none",
+      "height: 14px",
+      "width: 14px",
+    ]);
+  });
+
+  it("centers one-line composer text without changing multiline sizing", () => {
+    expectCssRule(".ohb-composer-input", ["align-items: flex-end"]);
+    expectCssRule(".ohb-composer-text", [
+      "align-items: center",
+      "min-height: 32px",
+    ]);
+    expect(css).not.toMatch(/\.ohb-prompt\s*\{/u);
+    expectCssRule(".ohb-prompt-queue", ["position: relative"]);
+  });
+
+  it("shortens only the conversation header", () => {
+    expectCssRule(".ohb-statusbar", ["min-height: 44px", "padding: 8px 24px"]);
+    expectCssRule(".ohb-sidebar-header", ["min-height: 58px"]);
+    const narrowHeader =
+      /@media \(max-width: 720px\)[\s\S]*?\.ohb-statusbar\s*\{(?<body>[^}]*)\}/u.exec(
+        css,
+      )?.groups?.body;
+    expect(narrowHeader).toContain("padding: 8px 16px");
+  });
+
   it("defines isolated permission button consequence styles", () => {
     expectCssRule(".ohb-perm-btn", [
       "align-items: center",

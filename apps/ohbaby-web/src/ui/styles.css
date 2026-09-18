@@ -593,8 +593,8 @@ textarea:disabled {
   display: flex;
   flex: none;
   justify-content: space-between;
-  min-height: 58px;
-  padding: 14px 24px;
+  min-height: 44px;
+  padding: 8px 24px;
 }
 
 .ohb-brand {
@@ -1090,6 +1090,7 @@ textarea:disabled {
 .ohb-tool-panel button span:first-child {
   background: transparent;
   border: 0;
+  flex: none;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 11px;
   font-weight: 500;
@@ -1098,6 +1099,7 @@ textarea:disabled {
 
 .ohb-tool-summary {
   color: #73767d;
+  flex: 1;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;
   min-width: 0;
@@ -1109,9 +1111,16 @@ textarea:disabled {
 
 .ohb-tool-meta {
   color: #aeb2ba;
+  flex: none;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;
   margin-left: auto;
+}
+
+.ohb-tool-chevron {
+  flex: none;
+  height: 14px;
+  width: 14px;
 }
 
 .ohb-tool-panel pre {
@@ -2260,17 +2269,11 @@ button.ohb-list-row:hover,
   z-index: auto;
 }
 
-.ohb-prompt {
-  align-self: flex-start;
-  color: #5f86c4;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-weight: 600;
-}
-
 .ohb-composer-text {
   align-items: center;
   display: flex;
   flex: 1;
+  min-height: 32px;
   min-width: 0;
   position: relative;
 }
@@ -2929,7 +2932,7 @@ button.ohb-list-row:hover,
   .ohb-statusbar {
     align-items: flex-start;
     gap: 14px;
-    padding: 13px 16px;
+    padding: 8px 16px;
   }
 
   .ohb-statusbar-meta {

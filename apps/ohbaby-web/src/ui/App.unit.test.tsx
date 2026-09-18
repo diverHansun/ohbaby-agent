@@ -89,6 +89,26 @@ interface FakeRuntime {
 
 const mountedApps: MountedApp[] = [];
 
+it.each(["session", "empty project"] as const)(
+  "renders the %s composer without a decorative prompt marker",
+  (location) => {
+    const base = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot:
+        location === "session"
+          ? base
+          : { ...base, activeSessionId: null, sessions: [] },
+    });
+    const app = mountApp(fake.runtime);
+    expect(
+      app.container.querySelector(".ohb-composer-input textarea"),
+    ).not.toBeNull();
+    expect(
+      app.container.querySelector(".ohb-composer-input .ohb-prompt"),
+    ).toBeNull();
+  },
+);
+
 afterEach(() => {
   for (const app of mountedApps.splice(0)) {
     act(() => {
