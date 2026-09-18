@@ -10,7 +10,7 @@
 
 - 主发送槽、运行中停止槽和 queued edit 保存槽都改为 32px 圆形图标按钮，去除可见的 Send、Stop、Save 文案；原有 `aria-label` 和 title 保留。
 - queued edit 点击纸飞机调用 `editQueuedPrompt`，沿用原 `promptId`/lease，不走新 prompt 提交；成功后退出编辑，失败保留草稿与错误。
-- textarea 使用独立的 [composerTextarea.ts](../../../../../apps/ohbaby-web/src/ui/composerTextarea.ts) DOM 高度函数：空稿约一行，最多 7 个视觉行，超出后 textarea 自身滚动并阻止滚动冒泡。
+- textarea 使用独立的 [composerTextarea.ts](../../../../apps/ohbaby-web/src/ui/composerTextarea.ts) DOM 高度函数：空稿约一行，最多 7 个视觉行，超出后 textarea 自身滚动并阻止滚动冒泡。
 - 推理控件与圆形主按钮继续位于同一输入行，桌面间距为 12px，窄屏（`<=420px`）为 6px；圆钮收窄后不会挤压或遮挡 textarea。
 - 顶栏连接状态和工具名去掉内层胶囊；running/connecting/reconnecting 保留轻微 pulse，idle/resyncing/disconnected 静止，并尊重 reduced-motion。
 - 权限弹窗和 overlay 的普通 `.ohb-button-primary` 未被圆形按钮选择器连带修改。
@@ -54,6 +54,7 @@ compiled web assets copy：passed
 
 - 当前编译版 E2E fixture 的模型不暴露可识别的 reasoning 能力，因此浏览器现场只观察到 `unknown` 档位；identified/detecting/无能力分支由 App.unit、CSS 规则和现有模型选择测试覆盖，未伪称已在该 fixture 中逐一观察。
 - 本轮未引入截图像素回归；圆形尺寸、间距、最大高度和 overflow 使用 DOM/CSS 断言及浏览器 computed geometry 验证。
+- 本轮没有把 queued edit reject、Stop 按钮真实点击 abort、PageUp/PageDown 与触控板滚动边界、720px 视口及全部 reasoning 能力档位写成“浏览器已通过”；这些仍由 04 的发布门列为后续人工验收项。
 
 ## 5. 提交批次
 

@@ -2532,6 +2532,12 @@ button.ohb-list-row:hover,
   color: #6b6d73;
 }
 
+.ohb-button {
+  background: #ffffff;
+  border: 1px solid #e4e4e4;
+  color: #6b6d73;
+}
+
 .ohb-stop-button svg {
   color: #c4756b;
   fill: #c4756b;
@@ -2964,7 +2970,7 @@ button.ohb-list-row:hover,
   }
 
   .ohb-composer-input {
-    align-items: stretch;
+    align-items: flex-end;
   }
 
   .ohb-slash-completion {
