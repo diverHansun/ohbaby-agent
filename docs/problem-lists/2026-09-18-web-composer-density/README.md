@@ -1,6 +1,6 @@
 # Web Composer：圆形发送、输入增高、少一层卡片
 
-> 状态：**规划完成，待用户审查后实施**（2026-09-18）。
+> 状态：**实施完成，待用户审查**（2026-09-18）。
 >
 > 日期：2026-09-18
 >
@@ -16,7 +16,7 @@
 
 | 轮次 | 开启日期 | 触发事件 | 状态 | 文档 |
 |------|----------|----------|------|------|
-| improve-1 | 2026-09-18 | 首轮规划 | 规划完成，待审查 | [improve-1/](./improve-1/) |
+| improve-1 | 2026-09-18 | 首轮规划与实施 | 实施完成，待审查 | [improve-1/](./improve-1/) |
 
 只有一轮。实施若分多次会话，用 improve-1 的 02 Stage，不预开 `improve-2/`。
 
@@ -29,7 +29,7 @@
 | [improve-1/02-optimization-plan-and-change-scope.md](./improve-1/02-optimization-plan-and-change-scope.md) | 实施契约：Stage 1–4、改动面、风险回滚 |
 | 03 | **跳过**：无仓库内可对照的参考项目；对话里的产品截图只约束「圆钮、少一层胶囊」，不单开 03 |
 | [improve-1/04-test-and-acceptance.md](./improve-1/04-test-and-acceptance.md) | 单测、回归与发布门 |
-| 05 | 本轮实施完成后由验收模式写入 `05-implementation-acceptance.md` |
+| [improve-1/05-implementation-acceptance.md](./improve-1/05-implementation-acceptance.md) | 实施结果、验证证据与剩余边界 |
 
 推荐阅读顺序：`00 → 01 → 02 → 04`。实施以 `02 + 04` 为准；与 `00` 冲突时先改文档再改代码。
 
