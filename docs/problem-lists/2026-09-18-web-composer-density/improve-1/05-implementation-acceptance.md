@@ -21,7 +21,7 @@
 ### 2.1 通过的测试
 
 ```text
-vitest：7 files / 288 tests passed
+vitest：7 files / 289 tests passed
 lint：passed
 typecheck：passed
 ohbaby-web production build：passed
@@ -40,10 +40,11 @@ compiled web assets copy：passed
 - 后端：3 次 agent-step 请求、prompt cache key 稳定、工具结果消费、标题请求均通过。
 - 清理：daemon 已停止、PID 已释放、端口已释放；诊断日志包含启动/迁移/停止事件且未泄露 fixture 内容。
 
-浏览器视觉/交互检查还覆盖了默认视口以及 375px、320px 宽度：
+浏览器视觉/交互检查还覆盖了默认视口以及 720px 断点、375px、320px 宽度（浏览器实际可用 CSS 宽度受宿主窗口限制，但 720px 以下媒体规则已生效）：
 
 - 发送按钮为 32×32 圆形且无可见文字；推理控件贴在其左侧，间距分别为 12px/6px。
 - 窄屏无横向溢出；长文本 textarea 封顶约 168px（24×7），`overflow-y:auto`、`overscroll-behavior:contain`。
+- 多行输入时 720/375/320 视口的 composer 均保持 `align-items:flex-end`，圆钮和推理控件贴在输入框右下，不被媒体规则拉伸。
 - 工具外层卡片仍保留，工具名不再有内层背景/边框；顶栏 idle 为纯文字。
 
 ## 3. 审查结果
@@ -61,5 +62,7 @@ compiled web assets copy：passed
 1. `01a8f852 docs(web): define composer density implementation`
 2. `2ff43560 feat(web): apply composer density layout`
 3. `596565d5 test(web): pin queued edit identity`
+4. `c52e2e7c docs(web): record density implementation acceptance`
+5. `f0ef5adc fix(web): preserve secondary button density styles`
 
 当前分支尚未合并或推送，等待用户审查。

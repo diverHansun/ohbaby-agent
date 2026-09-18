@@ -267,11 +267,19 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const runningApp = mountApp(runningFake.runtime);
     const stopButton = runningApp.container.querySelector(".ohb-stop-button");
-    expect(stopButton?.querySelector("span")).toBeNull();
-    expect(stopButton?.textContent).not.toContain("Stop");
+    if (!(stopButton instanceof HTMLButtonElement)) {
+      throw new Error("stop button not found");
+    }
+    expect(stopButton.querySelector("span")).toBeNull();
+    expect(stopButton.textContent).not.toContain("Stop");
     expect(
       runningApp.container.querySelector(".ohb-status-pill > span"),
     ).toBeNull();
+    await act(async () => {
+      stopButton.click();
+      await Promise.resolve();
+    });
+    expect(runningFake.abortSession).toHaveBeenCalledWith("session_1", "run_1");
   });
 
   it("fits the composer textarea to one through seven visual lines", async () => {
@@ -1884,6 +1892,64 @@ describe("OhbabyWebApp slash command interactions", () => {
       promptId: "prompt_queued",
       text: "edited queued text",
     });
+    expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
+  });
+
+  it("keeps queued edit content and hint when paper-plane save fails", async () => {
+    const queuedPrompt = {
+      clientRequestId: "request_queued_failure",
+      createdAt: timestamp,
+      promptId: "prompt_queued_failure",
+      scopeKey: "/repo-a",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: "queued text",
+      updatedAt: timestamp,
+      userMessageId: "message_queued_failure",
+    };
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+        prompts: [queuedPrompt],
+      },
+    });
+    vi.spyOn(fake.client, "acquirePromptEditLease").mockResolvedValue({
+      editLeaseId: "lease_failure",
+      expiresAt: "2026-07-12T00:01:00.000Z",
+      ownerClientId: "client_web",
+      prompt: queuedPrompt,
+    });
+    fake.editQueuedPrompt.mockRejectedValue(new Error("save failed"));
+    const app = mountApp(fake.runtime);
+    const editButton = app.container.querySelector(
+      '[aria-label="Edit queued prompt: queued text"]',
+    );
+    if (!(editButton instanceof HTMLButtonElement)) {
+      throw new Error("queued edit button not found");
+    }
+
+    await act(async () => {
+      editButton.click();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      app.container.textContent.includes("Editing queued prompt"),
+    );
+    await setTextareaValue(app.container, "edited queued text");
+    const saveButton = app.container.querySelector(
+      'button[aria-label="Save queued prompt"]',
+    );
+    if (!(saveButton instanceof HTMLButtonElement)) {
+      throw new Error("queued save button not found");
+    }
+
+    await act(async () => {
+      saveButton.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => app.container.textContent.includes("save failed"));
+    expect(textareaValue(app.container)).toBe("edited queued text");
+    expect(app.container.querySelector(".ohb-queued-edit-hint")).not.toBeNull();
     expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
   });
 
