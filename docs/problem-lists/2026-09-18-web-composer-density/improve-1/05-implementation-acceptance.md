@@ -40,22 +40,22 @@ compiled web assets copy：passed
 - 后端：3 次 agent-step 请求、prompt cache key 稳定、工具结果消费、标题请求均通过。
 - 清理：daemon 已停止、PID 已释放、端口已释放；诊断日志包含启动/迁移/停止事件且未泄露 fixture 内容。
 
-浏览器视觉/交互检查还覆盖了默认视口以及 720px 断点、375px、320px 宽度（浏览器实际可用 CSS 宽度受宿主窗口限制，但 720px 以下媒体规则已生效）：
+浏览器视觉/交互检查还覆盖了默认视口、宿主可用宽度下已生效的 `<=720px` 媒体分支，以及 375px、320px 宽度；由于宿主窗口限制，没有宣称精确 720px CSS 视口已单独测量：
 
 - 发送按钮为 32×32 圆形且无可见文字；推理控件贴在其左侧，间距分别为 12px/6px。
 - 窄屏无横向溢出；长文本 textarea 封顶约 168px（24×7），`overflow-y:auto`、`overscroll-behavior:contain`。
-- 多行输入时 720/375/320 视口的 composer 均保持 `align-items:flex-end`，圆钮和推理控件贴在输入框右下，不被媒体规则拉伸。
+- 多行输入时 `<=720px` 媒体分支以及 375/320 视口的 composer 均保持 `align-items:flex-end`，圆钮和推理控件贴在输入框右下，不被媒体规则拉伸。
 - 工具外层卡片仍保留，工具名不再有内层背景/边框；顶栏 idle 为纯文字。
 
 ## 3. 审查结果
 
-实施前后分别由子代理审查文档一致性、实施可靠性、验收与测试标准。最终结论均为无阻塞问题；可靠性审查特别确认 `commitEdit` 会触发调度，因此文档没有把保存后的最终状态永久写死为 queued。
+实施前后分别由子代理审查文档一致性、实施可靠性、验收与测试标准。最终代码与文档审查无阻塞问题；可靠性审查特别确认 `commitEdit` 会触发调度，因此文档没有把保存后的最终状态永久写死为 queued。04 中仍要求人工验证的边界不计入“已全部通过”。
 
 ## 4. 剩余边界
 
 - 当前编译版 E2E fixture 的模型不暴露可识别的 reasoning 能力，因此浏览器现场只观察到 `unknown` 档位；identified/detecting/无能力分支由 App.unit、CSS 规则和现有模型选择测试覆盖，未伪称已在该 fixture 中逐一观察。
 - 本轮未引入截图像素回归；圆形尺寸、间距、最大高度和 overflow 使用 DOM/CSS 断言及浏览器 computed geometry 验证。
-- 本轮没有把 queued edit reject、Stop 按钮真实点击 abort、PageUp/PageDown 与触控板滚动边界、720px 视口及全部 reasoning 能力档位写成“浏览器已通过”；这些仍由 04 的发布门列为后续人工验收项。
+- 本轮没有把 PageUp/PageDown 与触控板滚动边界、精确 720px 视口及全部 reasoning 能力档位写成“浏览器已通过”；这些仍由 04 的发布门列为后续人工验收项。queued edit reject 和 Stop 按钮点击已有 App.unit 覆盖。
 
 ## 5. 提交批次
 
@@ -64,5 +64,6 @@ compiled web assets copy：passed
 3. `596565d5 test(web): pin queued edit identity`
 4. `c52e2e7c docs(web): record density implementation acceptance`
 5. `f0ef5adc fix(web): preserve secondary button density styles`
+6. `865f8938 test(web): cover composer failure and stop actions`
 
 当前分支尚未合并或推送，等待用户审查。
