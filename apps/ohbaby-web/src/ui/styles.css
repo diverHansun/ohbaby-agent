@@ -2302,6 +2302,14 @@ button.ohb-list-row:hover,
   font-weight: 600;
 }
 
+.ohb-composer-text {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
 .ohb-composer textarea {
   background: transparent;
   border: 0;
@@ -2313,6 +2321,7 @@ button.ohb-list-row:hover,
   outline: 0;
   position: relative;
   resize: none;
+  width: 100%;
   z-index: 1;
 }
 
@@ -2322,10 +2331,11 @@ button.ohb-list-row:hover,
   display: flex;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   gap: 1px;
-  left: 40px;
+  left: 0;
+  overflow: hidden;
   pointer-events: none;
   position: absolute;
-  right: 106px;
+  right: 0;
   top: 0;
   bottom: 0;
   white-space: nowrap;
@@ -2624,14 +2634,13 @@ button.ohb-list-row:hover,
 .ohb-reasoning-control {
   display: inline-flex;
   flex-shrink: 0;
-  margin-left: auto;
   position: relative;
 }
 
 .ohb-reasoning-control select {
   appearance: none;
-  background: #ffffff;
-  border: 1px solid #e4e4e4;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 7px;
   color: #54565c;
   cursor: pointer;
@@ -2642,7 +2651,6 @@ button.ohb-list-row:hover,
 }
 
 .ohb-reasoning-control select:hover {
-  background: #f5f7fa;
   border-color: #c6cfdd;
 }
 
@@ -2673,7 +2681,6 @@ button.ohb-list-row:hover,
   color: #818792;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;
-  margin-left: auto;
 }
 
 .ohb-reasoning-detecting,
@@ -2700,11 +2707,6 @@ button.ohb-list-row:hover,
   position: absolute;
   right: 0;
   width: max-content;
-}
-
-.ohb-reasoning-control + .ohb-composer-hint,
-.ohb-reasoning-status + .ohb-composer-hint {
-  margin-left: 0;
 }
 
 .ohb-composer-tools-queued-edit {
@@ -2983,10 +2985,6 @@ button.ohb-list-row:hover,
 
   .ohb-composer-input {
     align-items: stretch;
-  }
-
-  .ohb-composer-typewriter {
-    right: 62px;
   }
 
   .ohb-send-button span,

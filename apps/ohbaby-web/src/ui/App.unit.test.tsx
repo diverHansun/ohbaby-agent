@@ -3882,7 +3882,7 @@ function deferred<T>(): {
 }
 
 /* eslint-disable @typescript-eslint/unbound-method -- These client methods are Vitest mocks. */
-it("shows raw reasoning labels in the composer footer and persists session preference", async () => {
+it("shows raw reasoning labels inside the input and persists session preference", async () => {
   const fake = createFakeRuntime({
     snapshot: snapshotWithStatus({ kind: "idle" }),
   });
@@ -3929,7 +3929,8 @@ it("shows raw reasoning labels in the composer footer and persists session prefe
     sessionId: "session_1",
     reasoning: { enabled: true, effort: "max" },
   });
-  expect(select.closest(".ohb-composer-tools")).not.toBeNull();
+  expect(select.closest(".ohb-composer-input")).not.toBeNull();
+  expect(select.closest(".ohb-composer-tools")).toBeNull();
 });
 it("unknown capability keeps send available and labels the control unknown without fake tiers", async () => {
   const fake = createFakeRuntime({
@@ -3944,6 +3945,9 @@ it("unknown capability keeps send available and labels the control unknown witho
   });
   const app = mountApp(fake.runtime);
   await waitFor(() => app.container.textContent.includes("unknown"));
+  expect(
+    app.container.querySelector(".ohb-reasoning-unknown")?.closest(".ohb-composer-input"),
+  ).not.toBeNull();
   expect(app.container.textContent).not.toContain("推理默认");
   expect(
     app.container.querySelector('[aria-label="Reasoning effort"]'),
@@ -3969,6 +3973,7 @@ it("shows only a spinning brain while reasoning capability is detecting", async 
     Boolean(app.container.querySelector(".ohb-reasoning-detecting")),
   );
   const status = app.container.querySelector(".ohb-reasoning-detecting");
+  expect(status?.closest(".ohb-composer-input")).not.toBeNull();
   expect(status?.querySelector(".ohb-reasoning-spinner")).not.toBeNull();
   expect(status?.textContent).toBe("");
   expect(app.container.textContent).not.toContain("检测中");

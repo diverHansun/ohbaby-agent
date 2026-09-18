@@ -3086,38 +3086,47 @@ function Composer(props: {
             selectedIndex={slashIndex}
           />
         ) : null}
-        <TypewriterPlaceholder
-          active={showTypewriterPlaceholder}
-          phrases={COMPOSER_PLACEHOLDER_PHRASES}
-        />
-        <textarea
-          aria-label="Message"
-          disabled={props.view.composer.disabled || isSubmitting}
-          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-            const nextDraft = event.target.value;
-            updateDraft(nextDraft);
-            setSlashIndex(0);
-            if (nextDraft !== slashDismissedDraft) {
-              setSlashDismissedDraft(null);
-            }
-          }}
-          onBlur={() => {
-            setIsFocused(false);
-          }}
-          onFocus={() => {
-            setIsFocused(true);
-          }}
-          onKeyDown={onKeyDown}
-          placeholder={composerPlaceholder(props.view)}
-          ref={textareaRef}
-          rows={1}
-          value={draft}
-        />
+        <div className="ohb-composer-text">
+          <TypewriterPlaceholder
+            active={showTypewriterPlaceholder}
+            phrases={COMPOSER_PLACEHOLDER_PHRASES}
+          />
+          <textarea
+            aria-label="Message"
+            disabled={props.view.composer.disabled || isSubmitting}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+              const nextDraft = event.target.value;
+              updateDraft(nextDraft);
+              setSlashIndex(0);
+              if (nextDraft !== slashDismissedDraft) {
+                setSlashDismissedDraft(null);
+              }
+            }}
+            onBlur={() => {
+              setIsFocused(false);
+            }}
+            onFocus={() => {
+              setIsFocused(true);
+            }}
+            onKeyDown={onKeyDown}
+            placeholder={composerPlaceholder(props.view)}
+            ref={textareaRef}
+            rows={1}
+            value={draft}
+          />
+        </div>
         {completionSuffix && selectedCommand ? (
           <span className="ohb-slash-completion" aria-hidden="true">
             <span>⇥ {selectedCommand.label}</span>
           </span>
         ) : null}
+        <ReasoningControl
+          client={props.client}
+          session={props.view.activeSession}
+          onChange={(reasoning) => {
+            selectedReasoning.current = reasoning;
+          }}
+        />
         {showStop ? (
           <button
             aria-label="Stop run"
@@ -3187,13 +3196,6 @@ function Composer(props: {
           <span className="ohb-policy-glyph" aria-hidden="true" />
           {props.view.composer.permissionLevel}
         </button>
-        <ReasoningControl
-          client={props.client}
-          session={props.view.activeSession}
-          onChange={(reasoning) => {
-            selectedReasoning.current = reasoning;
-          }}
-        />
         <span className="ohb-composer-hint">{props.view.composer.hint}</span>
       </div>
     </section>
