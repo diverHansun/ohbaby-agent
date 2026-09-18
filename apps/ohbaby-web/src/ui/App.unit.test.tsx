@@ -32,6 +32,9 @@ interface MountedApp {
 
 interface FakeRuntime {
   readonly client: UiBackendClient;
+  readonly abortSession: ReturnType<
+    typeof vi.fn<OhbabyWebRuntime["abortSession"]>
+  >;
   readonly archiveSession: ReturnType<
     typeof vi.fn<(sessionId: string) => Promise<void>>
   >;
@@ -717,16 +720,18 @@ describe("OhbabyWebApp slash command interactions", () => {
     fake.submitPromptAccepted.mockReturnValue(pendingReceipt.promise);
     const app = mountApp(fake.runtime);
 
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(0);
+
     await setTextareaValue(app.container, "visible immediately");
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(0);
+    expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(1);
     await pressTextareaKey(app.container, "Enter");
 
     expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
     expect(textareaValue(app.container)).toBe("");
-    expect(
-      app.container
-        .querySelector(".ohb-send-button")
-        ?.getAttribute("aria-busy"),
-    ).toBe("true");
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(0);
 
     await act(async () => {
       pendingReceipt.resolve({
@@ -771,6 +776,44 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(
       app.container.querySelectorAll(".ohb-prompt-queue-item"),
     ).toHaveLength(1);
+  });
+
+  it("keeps the last-known stop action disabled while reconnecting", () => {
+    const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const app = mountApp(fake.runtime);
+
+    act(() => {
+      fake.store.setConnectionState("reconnecting");
+    });
+    expect(app.container.textContent).toContain("reconnecting");
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(1);
+    expect(app.container.querySelector(".ohb-stop-button")?.hasAttribute("disabled")).toBe(true);
+    expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(0);
+
+    act(() => {
+      fake.store.replaceSnapshot(snapshotWithStatus({ kind: "idle" }), 2);
+      fake.store.setConnectionState("live");
+    });
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(0);
+    expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(1);
+  });
+
+  it("keeps double Escape interruption available while a draft replaces Stop", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "follow-up draft");
+
+    expect(app.container.querySelectorAll(".ohb-stop-button")).toHaveLength(0);
+    expect(app.container.querySelectorAll(".ohb-send-button")).toHaveLength(1);
+    await pressTextareaKey(app.container, "Escape");
+    await pressTextareaKey(app.container, "Escape");
+
+    expect(fake.abortSession).toHaveBeenCalledTimes(1);
+    expect(fake.abortSession).toHaveBeenCalledWith("session_1", "run_1");
+    expect(textareaValue(app.container)).toBe("follow-up draft");
   });
 
   it("keeps a follow-up queued while the first prompt is starting before a run appears", async () => {
@@ -3077,6 +3120,9 @@ function createFakeRuntime(input: {
   const store = createOhbabyWebStore();
   store.replaceSnapshot(input.snapshot, 1);
   store.setConnectionState("live");
+  const abortSession = vi.fn<OhbabyWebRuntime["abortSession"]>(() =>
+    Promise.resolve(),
+  );
   const executeSlashCommand = vi.fn<OhbabyWebRuntime["executeSlashCommand"]>(
     () => Promise.resolve(),
   );
@@ -3258,6 +3304,7 @@ function createFakeRuntime(input: {
     ),
   };
   return {
+    abortSession,
     archiveSession,
     client,
     compactSession,
@@ -3270,7 +3317,7 @@ function createFakeRuntime(input: {
     listDirectoryPicker,
     openWorkspace,
     runtime: {
-      abortSession: vi.fn(() => Promise.resolve()),
+      abortSession,
       archiveSession,
       client,
       createSession,

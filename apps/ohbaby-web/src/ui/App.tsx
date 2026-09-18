@@ -2448,6 +2448,8 @@ function Composer(props: {
     draft.trim().length > 0 &&
     !isSubmitting &&
     !props.isPromptAdmitting;
+  const showStop =
+    props.view.composer.isRunning && !queuedEdit && draft.trim().length === 0;
   const canUseSlash =
     props.view.composer.canSend && !isSubmitting && !props.isPromptAdmitting;
   const visibleQueuedPrompts = queueExpanded
@@ -3116,8 +3118,9 @@ function Composer(props: {
             <span>⇥ {selectedCommand.label}</span>
           </span>
         ) : null}
-        {props.view.composer.isRunning ? (
+        {showStop ? (
           <button
+            aria-label="Stop run"
             className="ohb-stop-button"
             disabled={!props.view.composer.canStop}
             onClick={props.onStop}
@@ -3127,26 +3130,28 @@ function Composer(props: {
             <Square size={14} />
             <span>Stop</span>
           </button>
-        ) : null}
-        <button
-          aria-busy={props.isPromptAdmitting}
-          className="ohb-send-button"
-          disabled={!canSend}
-          onClick={send}
-          title={queuedEdit ? "Save queued prompt" : "Send message"}
-          type="button"
-        >
-          {props.isPromptAdmitting ? (
-            <LoaderCircle
-              aria-hidden="true"
-              className="ohb-send-spinner"
-              size={14}
-            />
-          ) : (
-            <Send size={14} />
-          )}
-          <span>{queuedEdit ? "Save" : "Send"}</span>
-        </button>
+        ) : (
+          <button
+            aria-busy={props.isPromptAdmitting}
+            aria-label={queuedEdit ? "Save queued prompt" : "Send message"}
+            className="ohb-send-button"
+            disabled={!canSend}
+            onClick={send}
+            title={queuedEdit ? "Save queued prompt" : "Send message"}
+            type="button"
+          >
+            {props.isPromptAdmitting ? (
+              <LoaderCircle
+                aria-hidden="true"
+                className="ohb-send-spinner"
+                size={14}
+              />
+            ) : (
+              <Send size={14} />
+            )}
+            <span>{queuedEdit ? "Save" : "Send"}</span>
+          </button>
+        )}
       </div>
       <div
         className={`ohb-composer-tools${queuedEdit ? " ohb-composer-tools-queued-edit" : ""}`}
