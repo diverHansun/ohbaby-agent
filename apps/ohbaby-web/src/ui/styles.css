@@ -2676,6 +2676,18 @@ button.ohb-list-row:hover,
   margin-left: auto;
 }
 
+.ohb-reasoning-detecting,
+.ohb-reasoning-unknown {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  min-height: 30px;
+}
+
+.ohb-reasoning-spinner {
+  animation: ohb-spin 1s linear infinite;
+}
+
 .ohb-reasoning-error {
   background: #ffffff;
   border: 1px solid #e6ccc7;

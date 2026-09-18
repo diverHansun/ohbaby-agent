@@ -53,6 +53,44 @@ describe("normalizeRunError", () => {
     });
   });
 
+  it("shows a useful 400 reason without exposing an authorization header", () => {
+    const detail = normalizeRunError(
+      Object.assign(
+        new Error(
+          "temperature is deprecated for this model; Authorization: Bearer sk-secret",
+        ),
+        { status: 400 },
+      ),
+    );
+    expect(detail.message).toBe(
+      "HTTP 400: temperature is deprecated for this model",
+    );
+    expect(JSON.stringify(detail)).not.toContain("sk-secret");
+  });
+
+  it("shows a billing reason from a structured 402 response", () => {
+    expect(
+      normalizeRunError({
+        status: 402,
+        error: { message: "Insufficient balance for this request" },
+      }),
+    ).toMatchObject({
+      code: "PROVIDER_API",
+      message: "HTTP 402: Insufficient balance",
+      retryable: false,
+      statusCode: 402,
+    });
+  });
+
+  it("never persists an unrecognized credential from a provider error", () => {
+    const detail = normalizeRunError({
+      status: 400,
+      error: { message: "invalid credential zm-private-example" },
+    });
+    expect(detail.message).toBe("LLM provider rejected request (HTTP 400)");
+    expect(JSON.stringify(detail)).not.toContain("zm-private-example");
+  });
+
   it("maps output truncation and cancellation to stable runtime codes", () => {
     expect(
       normalizeLifecycleRunError("output truncated", "output_length"),

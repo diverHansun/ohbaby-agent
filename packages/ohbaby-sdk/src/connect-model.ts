@@ -81,6 +81,44 @@ export function inferConnectModelInterfaceProvider(
     : "openai-compatible";
 }
 
+/** A nonblocking warning for verified request-path risks. */
+export function connectUrlPathWarning(
+  baseUrl: string,
+  interfaceProvider: UiConnectModelInterfaceProvider,
+  model?: string,
+): string | undefined {
+  const resource = {
+    "openai-compatible": "/chat/completions",
+    "openai-responses": "/responses",
+    anthropic: "/messages",
+  }[interfaceProvider];
+  let path: string;
+  let hostname: string;
+  try {
+    const url = new URL(baseUrl);
+    path = url.pathname.replace(/\/+$/u, "").toLowerCase();
+    hostname = url.hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  if (
+    interfaceProvider === "anthropic" &&
+    hostname === "zenmux.ai" &&
+    path === "/api/v1" &&
+    model?.trim().toLowerCase() === "anthropic/claude-sonnet-5"
+  ) {
+    return "ZenMux Anthropic Messages: a full Claude Sonnet 5 request returned HTTP 500 at /api/v1. Try https://zenmux.ai/api/anthropic. You can still save this URL.";
+  }
+  const existingResource = [
+    "/chat/completions",
+    "/responses",
+    "/messages",
+  ].find((candidate) => path.endsWith(candidate));
+  return existingResource
+    ? `Base URL already ends with '${existingResource}'; this client appends '${resource}' as its request path. Check the URL before sending.`
+    : undefined;
+}
+
 /** Persisted preference; omitted fields select the current confirmed default. */
 export interface UiReasoningConfig {
   readonly enabled?: boolean;

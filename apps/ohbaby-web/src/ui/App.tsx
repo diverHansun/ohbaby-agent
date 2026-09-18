@@ -33,6 +33,7 @@ import type {
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import {
+  connectUrlPathWarning,
   inferConnectModelInterfaceProvider,
   parseSlashCommandInput,
   resolveSlashCommand,
@@ -375,6 +376,45 @@ function selectPromptProjection(input: {
   };
 }
 
+function selectPersistedPromptError(view: ViewModel): {
+  readonly message: string;
+  readonly promptId: string;
+} | null {
+  const activeSessionId = view.composer.activeSessionId;
+  if (
+    !activeSessionId ||
+    hasActiveTurnForSession(view.snapshot, activeSessionId)
+  ) {
+    return null;
+  }
+  const latest = (view.snapshot?.prompts ?? [])
+    .filter((prompt) => prompt.sessionId === activeSessionId)
+    .reduce<UiPromptSubmission | null>(
+      (current, prompt) =>
+        current === null || prompt.createdAt >= current.createdAt
+          ? prompt
+          : current,
+      null,
+    );
+  if (
+    !latest ||
+    (latest.status !== "failed" && latest.status !== "interrupted") ||
+    !view.activeSession?.messages.some(
+      (message) => message.id === latest.userMessageId,
+    )
+  ) {
+    return null;
+  }
+  return {
+    message:
+      latest.error?.message ??
+      (latest.status === "failed"
+        ? "Prompt failed."
+        : "Prompt was interrupted."),
+    promptId: latest.promptId,
+  };
+}
+
 export function mountOhbabyWebApp(runtime: OhbabyWebRuntime): void {
   const rootElement = document.getElementById("root");
   if (!rootElement) {
@@ -425,6 +465,9 @@ function ConnectedOhbabyWebApp({
     () => runtime.getWorkspaceSnapshot(),
   );
   const [actionError, setActionError] = useState<string | null>(null);
+  const [dismissedPromptErrorId, setDismissedPromptErrorId] = useState<
+    string | null
+  >(null);
   const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(false);
   const [closedCommandModalIds, setClosedCommandModalIds] = useState<
@@ -437,9 +480,20 @@ function ConnectedOhbabyWebApp({
   const [localPromptAttempts, setLocalPromptAttempts] = useState<
     readonly LocalPromptAttempt[]
   >([]);
+  const persistedPromptError = useMemo(
+    () => selectPersistedPromptError(view),
+    [view],
+  );
+  const errorBannerMessage =
+    actionError ??
+    view.error ??
+    (persistedPromptError?.promptId === dismissedPromptErrorId
+      ? null
+      : (persistedPromptError?.message ?? null));
   const clearActionError = useCallback(() => {
     setActionError(null);
-  }, []);
+    setDismissedPromptErrorId(persistedPromptError?.promptId ?? null);
+  }, [persistedPromptError]);
   const promptProjection = useMemo(
     () => selectPromptProjection({ attempts: localPromptAttempts, view }),
     [localPromptAttempts, view],
@@ -774,7 +828,7 @@ function ConnectedOhbabyWebApp({
               onOpenGoalPanel={openGoalPanel}
             />
             <ErrorBanner
-              message={actionError ?? view.error}
+              message={errorBannerMessage}
               onDismiss={clearActionError}
             />
             <ConversationStream
@@ -820,7 +874,7 @@ function ConnectedOhbabyWebApp({
         ) : (
           <>
             <ErrorBanner
-              message={actionError ?? view.error}
+              message={errorBannerMessage}
               onDismiss={clearActionError}
             />
             <EmptyState
@@ -2260,11 +2314,27 @@ function ReasoningControl(props: {
           );
       });
   };
-  if (!view || view.mode === "none") return null;
+  if (!view || (view.status === "identified" && view.mode === "none"))
+    return null;
+  if (view.status === "detecting")
+    return (
+      <span
+        className="ohb-reasoning-status ohb-reasoning-detecting"
+        aria-label="Detecting reasoning effort"
+        role="status"
+        title={view.reason}
+      >
+        <Brain className="ohb-reasoning-spinner" aria-hidden="true" size={14} />
+      </span>
+    );
   if (view.status !== "identified")
     return (
-      <span className="ohb-reasoning-status" title={view.reason}>
-        推理默认{view.status === "detecting" ? " · 检测中" : ""}
+      <span
+        className="ohb-reasoning-status ohb-reasoning-unknown"
+        title={view.reason}
+      >
+        <Brain aria-hidden="true" size={14} />
+        unknown
       </span>
     );
   const compatible =
@@ -2273,8 +2343,6 @@ function ReasoningControl(props: {
     (preference.effort === undefined ||
       view.efforts.includes(preference.effort));
   const effective = compatible ? preference : view.default;
-  if (view.mode === "binary" && !view.supportsDisabled)
-    return <span className="ohb-reasoning-status">Reasoning on</span>;
   return (
     <label
       className="ohb-reasoning-control"
@@ -3527,6 +3595,11 @@ function ConnectModelOverlayBody(props: {
     kind: "idle",
     message: "",
   });
+  const urlPathWarning = connectUrlPathWarning(
+    form.baseUrl,
+    form.interfaceProvider ?? inferConnectModelInterfaceProvider(form.baseUrl),
+    form.model,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -3706,6 +3779,11 @@ function ConnectModelOverlayBody(props: {
             <option value="anthropic">Anthropic Messages</option>
           </select>
         </label>
+        {urlPathWarning ? (
+          <p role="status" className="ohb-structured-warning">
+            {urlPathWarning}
+          </p>
+        ) : null}
         <TextField
           label="API key env"
           onChange={(value) => {

@@ -31,6 +31,17 @@ function providerCause(error: unknown): unknown {
   return error;
 }
 
+function providerErrorText(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const value = error as { error?: unknown; message?: unknown };
+  const nested = value.error;
+  if (typeof nested === "object" && nested !== null && "message" in nested) {
+    const nestedMessage = nested.message;
+    if (typeof nestedMessage === "string") return nestedMessage;
+  }
+  return typeof value.message === "string" ? value.message : undefined;
+}
+
 function providerMessage(
   error: unknown,
   statusCode: number | undefined,
@@ -40,6 +51,20 @@ function providerMessage(
   }
   if (error instanceof ProviderStreamInterruptedError) {
     return "LLM provider stream was interrupted";
+  }
+  if (statusCode === 400) {
+    const detail = providerErrorText(providerCause(error));
+    if (detail && /\btemperature\b.*\bdeprecated\b/iu.test(detail)) {
+      return "HTTP 400: temperature is deprecated for this model";
+    }
+    return "LLM provider rejected request (HTTP 400)";
+  }
+  if (statusCode === 402) {
+    const detail = providerErrorText(providerCause(error));
+    if (detail && /\binsufficient balance\b/iu.test(detail)) {
+      return "HTTP 402: Insufficient balance";
+    }
+    return "LLM provider billing failed (HTTP 402)";
   }
   if (statusCode === 401 || statusCode === 403) {
     return `LLM provider authentication failed (HTTP ${String(statusCode)})`;

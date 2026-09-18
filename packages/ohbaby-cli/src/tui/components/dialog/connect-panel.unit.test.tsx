@@ -12,6 +12,40 @@ async function key(
 }
 
 describe("ConnectPanel protocols", () => {
+  it("shows a request-path warning before saving and still passes the URL through", async () => {
+    const connectModel = vi.fn(() => Promise.resolve({ saved: true }));
+    const client = {
+      connectModel,
+      getCurrentModel: vi.fn(() =>
+        Promise.resolve({
+          provider: "fixture",
+          model: "model",
+          baseUrl: "https://fixture.test/v1",
+          interfaceProvider: "openai-compatible",
+          contextWindowTokens: 8192,
+        }),
+      ),
+    } as unknown as CoreAPI;
+    const app = render(
+      <ConnectPanel
+        client={client}
+        onClose={vi.fn()}
+        runtime={{ kind: "idle" }}
+      />,
+    );
+    await key(app, "");
+    await key(app, "\u001b[6~");
+    await key(app, "\r");
+    await key(app, "/chat/completions");
+    expect(app.lastFrame()).toMatch(/request path/i);
+    await key(app, "\r");
+    expect(connectModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: "https://fixture.test/v1/chat/completions",
+      }),
+    );
+    app.unmount();
+  });
   it("distinguishes selected and active edit rows without color, and keeps page navigation", async () => {
     const client = {
       connectModel: vi.fn(() => Promise.resolve({ saved: true })),

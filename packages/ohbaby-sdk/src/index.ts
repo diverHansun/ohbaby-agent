@@ -70,6 +70,7 @@ export type {
   UiProbeModelContextWindowResult,
 } from "./connect-model.js";
 export {
+  connectUrlPathWarning,
   inferConnectModelInterfaceProvider,
   isConnectModelInterfaceProvider,
 } from "./connect-model.js";

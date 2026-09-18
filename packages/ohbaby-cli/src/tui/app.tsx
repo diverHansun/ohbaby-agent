@@ -123,6 +123,11 @@ export function OhbabyTerminalApp({
   const permission = useTuiStoreSelector(store, (state) => state.permission);
   const permissions = useTuiStoreSelector(store, (state) => state.permissions);
   const prompts = useTuiStoreSelector(store, (state) => state.prompts);
+  const latestPrompt = prompts
+    .filter((prompt) => prompt.sessionId === activeSessionId)
+    .reduce<
+      (typeof prompts)[number] | null
+    >((current, prompt) => (current === null || prompt.createdAt >= current.createdAt ? prompt : current), null);
   const queuedPrompts = useMemo(
     () =>
       prompts.filter(
@@ -221,7 +226,11 @@ export function OhbabyTerminalApp({
       ? ESC_INTERRUPT_HINT
       : effectiveRuntime.kind === "error"
         ? formatRuntimeLabel(permissions, runtime)
-        : undefined;
+        : runtime.kind === "idle" &&
+            (latestPrompt?.status === "failed" ||
+              latestPrompt?.status === "interrupted")
+          ? `error: ${formatError(latestPrompt.error)}`
+          : undefined;
   const setActiveCommandPanel = useCallback(
     (panel: CommandPanelState | null): void => {
       commandPanelRef.current = panel;

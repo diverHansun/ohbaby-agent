@@ -1127,6 +1127,109 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelector(".ohb-thinking")).toBeNull();
   });
 
+  it("shows a persisted prompt failure beside its formal user message after reload", () => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...initial,
+        prompts: [
+          promptSubmission({
+            error: {
+              code: "PROVIDER_FAILED",
+              message: "Provider rejected the request",
+              retryable: false,
+              source: "provider",
+            },
+            status: "failed",
+          }),
+        ],
+        sessions: initial.sessions.map((session) => ({
+          ...session,
+          messages: [
+            {
+              createdAt: timestamp,
+              id: "message_projected",
+              parts: [{ text: "server projected prompt", type: "text" }],
+              role: "user",
+            },
+          ],
+        })),
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(
+      app.container.querySelector('[role="alert"]')?.textContent,
+    ).toContain("Provider rejected the request");
+    expect(
+      app.container.textContent.match(/server projected prompt/gu),
+    ).toHaveLength(1);
+  });
+
+  it("does not show an earlier prompt failure while a newer prompt runs", () => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...initial,
+        prompts: [
+          promptSubmission({
+            error: {
+              code: "PROVIDER_FAILED",
+              message: "Old provider failure",
+              retryable: false,
+              source: "provider",
+            },
+            status: "failed",
+          }),
+          promptSubmission({
+            createdAt: "2026-06-12T00:00:01.000Z",
+            promptId: "prompt_next",
+            status: "running",
+            userMessageId: "message_next",
+          }),
+        ],
+        sessions: initial.sessions.map((session) => ({
+          ...session,
+          messages: [
+            {
+              createdAt: timestamp,
+              id: "message_projected",
+              parts: [{ text: "server projected prompt", type: "text" }],
+              role: "user",
+            },
+          ],
+        })),
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("hides a prior prompt failure when a new run starts before its prompt event", () => {
+    const initial = snapshotWithStatus({ kind: "running", runId: "run_next" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...initial,
+        prompts: [
+          promptSubmission({
+            error: {
+              code: "PROVIDER_FAILED",
+              message: "Old provider failure",
+              retryable: false,
+              source: "provider",
+            },
+            status: "failed",
+            userMessageId: "message_1",
+          }),
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(app.container.querySelector('[role="alert"]')).toBeNull();
+  });
+
   it("does not retain a succeeded prompt when no formal row is present", () => {
     const fake = createFakeRuntime({
       snapshot: {
@@ -2443,6 +2546,35 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
+  it("warns about a duplicate Chat request path before saving without blocking the save", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["connect"]));
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/");
+    await waitFor(() => slashPaletteText(app.container).includes("/connect"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+    await setInputValue(app.container, "Provider", "fixture");
+    await setInputValue(app.container, "Model", "model");
+    await setInputValue(
+      app.container,
+      "Base URL",
+      "https://fixture.test/v1/chat/completions",
+    );
+    expect(app.container.textContent).toMatch(/request path/i);
+    await clickButton(app.container, "Save model");
+    expect(fake.connectModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: "https://fixture.test/v1/chat/completions",
+        interfaceProvider: "openai-compatible",
+      }),
+    );
+  });
+
   it("uses provider-neutral guidance for an empty model configuration", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -3752,7 +3884,7 @@ it("shows raw reasoning labels in the composer footer and persists session prefe
   });
   expect(select.closest(".ohb-composer-tools")).not.toBeNull();
 });
-it("unknown capability keeps send available and shows reasoning default without fake tiers", async () => {
+it("unknown capability keeps send available and labels the control unknown without fake tiers", async () => {
   const fake = createFakeRuntime({
     snapshot: snapshotWithStatus({ kind: "idle" }),
   });
@@ -3764,8 +3896,8 @@ it("unknown capability keeps send available and shows reasoning default without 
     reasoning: { status: "unknown", efforts: [] },
   });
   const app = mountApp(fake.runtime);
-  await waitFor(() => app.container.textContent.includes("推理默认"));
-  expect(app.container.textContent).not.toContain("服务默认");
+  await waitFor(() => app.container.textContent.includes("unknown"));
+  expect(app.container.textContent).not.toContain("推理默认");
   expect(
     app.container.querySelector('[aria-label="Reasoning effort"]'),
   ).toBeNull();
@@ -3773,6 +3905,55 @@ it("unknown capability keeps send available and shows reasoning default without 
   expect(
     app.container.querySelector<HTMLTextAreaElement>("textarea")?.disabled,
   ).toBe(false);
+});
+it("shows only a spinning brain while reasoning capability is detecting", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+    provider: "p",
+    model: "m",
+    baseUrl: "https://p",
+    interfaceProvider: "openai-compatible",
+    reasoning: { status: "detecting", efforts: [] },
+  });
+  const app = mountApp(fake.runtime);
+  await waitFor(() =>
+    Boolean(app.container.querySelector(".ohb-reasoning-detecting")),
+  );
+  const status = app.container.querySelector(".ohb-reasoning-detecting");
+  expect(status?.querySelector(".ohb-reasoning-spinner")).not.toBeNull();
+  expect(status?.textContent).toBe("");
+  expect(app.container.textContent).not.toContain("检测中");
+  expect(app.container.textContent).not.toContain("推理默认");
+});
+it("keeps the reasoning selector for an identified model that cannot disable reasoning", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  vi.mocked(fake.client.getCurrentModel).mockResolvedValue({
+    provider: "p",
+    model: "m",
+    baseUrl: "https://p",
+    interfaceProvider: "openai-compatible",
+    reasoning: {
+      status: "identified",
+      mode: "binary",
+      supportsDisabled: false,
+      efforts: [],
+      default: { enabled: true },
+    },
+  });
+  const app = mountApp(fake.runtime);
+  await waitFor(() =>
+    Boolean(app.container.querySelector('[aria-label="Reasoning effort"]')),
+  );
+  const select = app.container.querySelector<HTMLSelectElement>(
+    '[aria-label="Reasoning effort"]',
+  );
+  expect(
+    Array.from(select?.options ?? []).map((option) => option.text),
+  ).toEqual(["On"]);
 });
 it("ignores a late probe after a newer edited model probe resolves", async () => {
   const fake = createFakeRuntime({

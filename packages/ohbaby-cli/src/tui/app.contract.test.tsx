@@ -1304,6 +1304,53 @@ describe("OhbabyTerminalApp", () => {
     );
   });
 
+  it("shows the latest persisted prompt failure while the runtime stays idle", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      prompts: [completedPrompt("failed")],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await waitForFrame(app, (frame) => frame.includes("provider failed"));
+    expect(app.lastFrame()).toContain("PROVIDER_FAILED");
+    expect(app.lastFrame()).toContain("auto · default · session_1");
+  });
+
+  it("clears an old prompt failure when a newer prompt starts", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      prompts: [completedPrompt("failed")],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+
+    await waitForFrame(app, (frame) => frame.includes("provider failed"));
+    client.emit({
+      prompt: {
+        clientRequestId: "request_next",
+        createdAt: "2026-08-14T00:00:03.000Z",
+        promptId: "prompt_next",
+        scopeKey: "/repo",
+        sessionId: "session_1",
+        status: "starting",
+        text: "next prompt",
+        updatedAt: "2026-08-14T00:00:03.000Z",
+        userMessageId: "message_next",
+      },
+      type: "prompt.updated",
+    });
+    await waitForFrame(app, (frame) => !frame.includes("provider failed"));
+  });
+
   it("submits normal prompts with the active session id", async () => {
     const client = createFakeClient(snapshot());
     const app = render(
@@ -3332,7 +3379,7 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
-  it("does not offer invented effort levels when the model has no verified capability", async () => {
+  it("labels an unknown capability without offering invented effort levels", async () => {
     const client = createFakeClient(snapshot(), effortCommandCatalog);
     client.getCurrentModel.mockResolvedValue({
       provider: "example",
@@ -3350,12 +3397,84 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     app.stdin.write("/effort");
     app.stdin.write("\r");
-    await waitForFrame(app, (frame) =>
-      frame.includes("No verified reasoning levels"),
-    );
+    await waitForFrame(app, (frame) => frame.includes("unknown"));
+    expect(app.lastFrame()).not.toContain("No verified reasoning levels");
     app.stdin.write("\r");
     await flush();
     expect(client.updateSessionReasoning).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it("shows loading without selectable levels while /effort capability is detecting", async () => {
+    const client = createFakeClient(snapshot(), effortCommandCatalog);
+    client.getCurrentModel.mockResolvedValue({
+      provider: "example",
+      baseUrl: "https://example.test",
+      interfaceProvider: "openai-compatible",
+      model: "detecting-model",
+      reasoning: { status: "detecting", efforts: [] },
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/effort");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) =>
+      frame.includes("Loading reasoning options"),
+    );
+    await flush();
+    expect(app.lastFrame()).toContain("Loading reasoning options");
+    expect(app.lastFrame()).not.toContain("No verified reasoning levels");
+    app.stdin.write("\r");
+    await flush();
+    expect(client.updateSessionReasoning).not.toHaveBeenCalled();
+    app.unmount();
+  });
+
+  it("updates an open /effort panel when capability detection finishes", async () => {
+    const client = createFakeClient(snapshot(), effortCommandCatalog);
+    const current = {
+      provider: "example",
+      baseUrl: "https://example.test",
+      interfaceProvider: "openai-compatible" as const,
+      model: "reasoning-model",
+    };
+    client.getCurrentModel
+      .mockResolvedValueOnce({
+        ...current,
+        reasoning: { status: "detecting", efforts: [] },
+      })
+      .mockResolvedValue({
+        ...current,
+        reasoning: {
+          status: "identified",
+          mode: "effort",
+          supportsDisabled: false,
+          efforts: ["medium", "high"],
+          default: { enabled: true, effort: "medium" },
+        },
+      });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/effort");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) =>
+      frame.includes("Loading reasoning options"),
+    );
+    await waitForFrame(
+      app,
+      (frame) => frame.includes("medium") && frame.includes("high"),
+    );
+    expect(client.getCurrentModel).toHaveBeenCalledTimes(2);
     app.unmount();
   });
 

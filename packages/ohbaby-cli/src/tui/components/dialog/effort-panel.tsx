@@ -55,39 +55,50 @@ export function EffortPanel({
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([client.getCurrentModel(), client.getSnapshot()])
-      .then(([model, snapshot]) => {
-        if (cancelled) return;
-        const capability = model?.reasoning ?? {
-          status: "unknown" as const,
-          efforts: [],
-        };
-        const preference = sessionId
-          ? (snapshot.sessions.find((session) => session.id === sessionId)
-              ?.reasoning ?? null)
-          : pendingReasoning;
-        const active =
-          preference?.enabled !== false && preference?.effort === undefined
-            ? (capability.default ?? preference)
-            : preference;
-        const options = choicesFor(capability);
-        const index = options.findIndex((option) =>
-          active?.enabled === false
-            ? option.reasoning.enabled === false
-            : option.reasoning.enabled !== false &&
-              option.reasoning.effort === active?.effort,
-        );
-        setView(capability);
-        setCurrent(preference);
-        selectedIndexRef.current = Math.max(0, index);
-        setSelectedIndex(selectedIndexRef.current);
-      })
-      .catch((caught: unknown) => {
-        if (!cancelled)
-          setError(caught instanceof Error ? caught.message : String(caught));
-      });
+    let generation = 0;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = (): void => {
+      const request = ++generation;
+      void Promise.all([client.getCurrentModel(), client.getSnapshot()])
+        .then(([model, snapshot]) => {
+          if (cancelled || request !== generation) return;
+          const capability = model?.reasoning ?? {
+            status: "unknown" as const,
+            efforts: [],
+          };
+          const preference = sessionId
+            ? (snapshot.sessions.find((session) => session.id === sessionId)
+                ?.reasoning ?? null)
+            : pendingReasoning;
+          const active =
+            preference?.enabled !== false && preference?.effort === undefined
+              ? (capability.default ?? preference)
+              : preference;
+          const options = choicesFor(capability);
+          const index = options.findIndex((option) =>
+            active?.enabled === false
+              ? option.reasoning.enabled === false
+              : option.reasoning.enabled !== false &&
+                option.reasoning.effort === active?.effort,
+          );
+          setView(capability);
+          setCurrent(preference);
+          selectedIndexRef.current = Math.max(0, index);
+          setSelectedIndex(selectedIndexRef.current);
+          setError(null);
+          if (capability.status === "detecting")
+            refreshTimer = setTimeout(refresh, 250);
+        })
+        .catch((caught: unknown) => {
+          if (!cancelled && request === generation)
+            setError(caught instanceof Error ? caught.message : String(caught));
+        });
+    };
+    refresh();
     return (): void => {
       cancelled = true;
+      generation++;
+      if (refreshTimer) clearTimeout(refreshTimer);
     };
   }, [client, sessionId, pendingReasoning]);
 
@@ -127,11 +138,12 @@ export function EffortPanel({
 
   return (
     <Box flexDirection="column">
-      {view === null && error === null ? (
+      {(view === null || view.status === "detecting") && error === null ? (
         <Text dimColor>Loading reasoning options...</Text>
       ) : null}
-      {view !== null && choices.length === 0 ? (
-        <Text dimColor>No verified reasoning levels for this model.</Text>
+      {view?.status === "unknown" ? <Text dimColor>unknown</Text> : null}
+      {view?.status === "identified" && choices.length === 0 ? (
+        <Text dimColor>No reasoning levels for this model.</Text>
       ) : null}
       {choices.map((choice, index) => (
         <Text

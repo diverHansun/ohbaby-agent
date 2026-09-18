@@ -1,4 +1,5 @@
 import { Box, Text, useInput } from "ink";
+import { connectUrlPathWarning } from "ohbaby-sdk";
 import type {
   CoreAPI,
   UiCurrentModelConfig,
@@ -108,6 +109,16 @@ export function ConnectPanel({
 
   const selectedField =
     CONNECT_FIELDS[Math.min(selectedIndex, CONNECT_FIELDS.length - 1)];
+  const visibleUrl = editingField === "baseUrl" ? editValue : draft.baseUrl;
+  const visibleModel = editingField === "model" ? editValue : draft.model;
+  const visibleProtocol =
+    editingField === "interfaceProvider"
+      ? PROTOCOLS.find((protocol) => protocol === editValue)
+      : draft.interfaceProvider || inferInterfaceProvider(visibleUrl);
+  const urlPathWarning =
+    visibleProtocol === undefined
+      ? undefined
+      : connectUrlPathWarning(visibleUrl, visibleProtocol, visibleModel);
 
   const replaceEditValue = (nextValue: string): void => {
     editValueRef.current = nextValue;
@@ -329,6 +340,9 @@ export function ConnectPanel({
             </Text>
           ))}
         </Box>
+      ) : null}
+      {urlPathWarning ? (
+        <Text color={theme.status.warning}>{urlPathWarning}</Text>
       ) : null}
       <Box marginTop={1}>
         <ConnectStatusLine saveState={saveState} />
