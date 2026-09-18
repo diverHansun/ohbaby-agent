@@ -861,6 +861,8 @@ describe("createPersistentUiBackendClient", () => {
       if (!queuedSecond || !queuedThird) {
         throw new Error("expected queued prompt projections");
       }
+      const queuedPromptCount = snapshot.prompts?.length ?? 0;
+      expect(queuedSecond.status).toBe("queued");
       const secondLease = await client.acquirePromptEditLease({
         promptId: second.promptId,
       });
@@ -873,7 +875,20 @@ describe("createPersistentUiBackendClient", () => {
         promptId: third.promptId,
       });
       expect(edited.text).toBe("second edited");
+      expect(edited.promptId).toBe(second.promptId);
+      expect(edited.status).toBe("queued");
       expect(cancelled.status).toBe("cancelled");
+      const afterEdit = await client.getSnapshot();
+      expect(afterEdit.prompts).toHaveLength(queuedPromptCount);
+      expect(
+        afterEdit.prompts?.find(
+          (prompt) => prompt.promptId === second.promptId,
+        ),
+      ).toMatchObject({
+        promptId: second.promptId,
+        status: "queued",
+        text: "second edited",
+      });
 
       release.resolve(undefined);
       await Promise.all([
