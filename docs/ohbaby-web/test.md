@@ -47,7 +47,7 @@
 | prompt 失败恢复 | receipt 前失败仅在当前 draft 为空时恢复；accepted failed/interrupted 保留 submission 用户行并内联错误 |
 | prompt reload projection | 无 local state 时，starting/running/failed/interrupted 仍可由 snapshot 独立重建 |
 | active run follow-up | 有草稿时主槽显示 Send；发送清空草稿后恢复 Stop，admission 不再保留第二颗 busy Send；follow-up 不插 conversation optimistic 行，queued 后只出现在 Queue |
-| composer density | 主槽为无字圆形纸飞机/方块/转圈图标；编辑 queued prompt 点纸飞机只调用 `editQueuedPrompt`，成功更新原条目并继续调度，不新增 prompt；输入框最多 7 个视觉行，之后只在 textarea 内滚动；思考控件紧邻圆钮左侧且窄屏不挤压输入 |
+| composer density / chrome | 主槽为无字圆形纸飞机/方块/转圈图标；编辑 queued prompt 点纸飞机只调用 `editQueuedPrompt`，成功更新原条目并继续调度，不新增 prompt；输入框无 `>`、单行占位及正文垂直居中、最多 7 个视觉行，之后只在 textarea 内滚动；多行圆钮仍贴右下，思考控件紧邻圆钮左侧且窄屏不挤压输入；所有工具卡箭头固定 14px 不被长摘要挤缩；会话顶栏约 44px，侧栏顶保持约 58px |
 | starting-window follow-up | 首轮已有 `starting`、run 尚未出现时，follow-up 仍只进入 Queue，不重复投影到 conversation |
 | pending session isolation | admission pending 期间切换 existing/new session，local row 与 startup Thinking 不得串到另一会话 |
 | mixed timeline ordering | 较早的 failed/interrupted provisional 与后续 formal message 按 `createdAt` 合并排序；reload 后顺序不变 |

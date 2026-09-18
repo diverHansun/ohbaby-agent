@@ -8,6 +8,8 @@
 
 一行白底栏，左右分布：
 
+会话顶栏约 44px 高，优先收紧上下留白；侧栏项目顶仍约 58px，两者底边不要求对齐。窄屏允许右侧状态换行并相应长高。
+
 - **左**：品牌——2×2 三色网格点（gold/pink/blue/blue）+ `OHBABY` 字标（Plex Mono）。
 - **右**（从左到右，竖线分隔）：
   - **连接状态文字**：只显示带颜色的状态文字，不加圆点和内层胶囊；running/connecting/reconnecting 轻微呼吸，其余静止（见 states.md）。
@@ -29,6 +31,7 @@
   - `READ`（gold）：路径 + 行数；展开列带行号的片段，命中行高亮。
   - `EDIT`（green）：文件 + `+N/−M`；展开列删改行（红/绿底）。
   - 折叠态一行摘要，点击展开（chevron 旋转）。
+  - 所有工具调用及孤立结果使用同一 14px chevron，长摘要只能自身省略，不得挤缩箭头。
 - **思考指示器**（running 时）：三色波点 + `Thinking · {elapsed}s`；startup 时可显示 `starting agent`。Web 不常驻 Esc 教学文案；TUI 保留自己的中断提示。
 - **定稿行**（idle 时）：如"Run stopped. 待审批的编辑已暂存"。
 - **命令结果**：web-safe slash 命令的 running/error 以轻量 notice 出现在流内；只读成功结果（`/status`、`/help`、`/mcps`、`/skills`）优先用结构化 modal 呈现，不进入消息历史。无法识别的数据回退为安全文本/markdown notice。
@@ -37,7 +40,7 @@
 
 ## 3. Composer（输入区，底部 dock）
 
-- **输入框**：`>` 提示符 + 1–7 个视觉行的自适应输入，聚焦环 + 轻阴影；第 7 个视觉行后只在 textarea 内滚动；`↵` 发送、`⇧↵` 换行。
+- **输入框**：无装饰性 `>` 提示符；1–7 个视觉行的自适应输入，聚焦环 + 轻阴影。单行占位符及用户文字垂直居中，多行时主操作按钮保持右下；第 7 个视觉行后只在 textarea 内滚动；`↵` 发送、`⇧↵` 换行。
 - **slash 输入**：以 `/` 开头时不作为普通 prompt，而是走 `UiSlashCommand` 解析/执行。v0.1.6 做 web-safe 候选面板、分组、`↑/↓` 选择、`Tab` 补全、`Enter` 执行、`Esc` 关闭；解析失败要保留草稿并显示错误。详细规格见 [`slash-commands/`](./slash-commands/README.md)。
 - **动作按钮**：输入框右侧始终只有一个主操作位，使用固定尺寸圆形图标按钮，不显示 Send/Stop/Save 文字。idle 或有草稿时显示纸飞机；发送请求待确认时圆内显示转圈；running / waiting-for-permission 且草稿为空时显示方块 Stop；running 且草稿有字时纸飞机进入队列；编辑已有队列条目时仍显示纸飞机，点击成功更新原条目并继续调度，不新增消息。`aria-label`/`title` 仍按语义区分 Send、Stop、Save queued prompt。重连或重同步期间依最后已知 run 状态保留按钮外观，但按钮不可点，顶栏显示连接状态。
 - **思考强度**：有思考能力的模型在输入框内、圆形主按钮左侧显示大脑和英文档位；主按钮缩窄后控件随弹性布局向右靠近，并保留输入宽度。平时透明无边，hover 有浅灰细边，键盘焦点清晰可见。检测中只转大脑、unknown 显示 `unknown`；无思考能力时不留空位。
