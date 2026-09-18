@@ -64,6 +64,45 @@ describe("web app layout styles", () => {
     ]);
   });
 
+  it("keeps composer actions circular without changing overlay buttons", () => {
+    expectCssRule(".ohb-send-button,\n.ohb-stop-button", [
+      "border-radius: 50%",
+      "height: 32px",
+      "padding: 0",
+      "width: 32px",
+    ]);
+    expectCssRule(".ohb-button-primary", ["border-radius: 8px"]);
+  });
+
+  it("supports a bounded, contained composer textarea scroll", () => {
+    expectCssRule(".ohb-composer textarea", [
+      "line-height: 24px",
+      "max-height: 168px",
+      "overflow-y: auto",
+      "overscroll-behavior: contain",
+      "padding: 0",
+    ]);
+  });
+
+  it("renders status and tool names without nested chrome", () => {
+    expectCssRule(".ohb-status-pill", [
+      "background: transparent",
+      "border: 0",
+      "padding: 0",
+    ]);
+    expectCssRule(".ohb-status-running", ["animation: ohb-pulse"]);
+    expectCssRule(".ohb-status-resyncing", ["animation: none"]);
+    expectCssRule(".ohb-tool-panel button span:first-child", [
+      "background: transparent",
+      "border: 0",
+      "padding: 0",
+    ]);
+    expectCssRule(".ohb-tool-panel", [
+      "background: #ffffff",
+      "border: 1px solid #ececec",
+    ]);
+  });
+
   it("defines isolated permission button consequence styles", () => {
     expectCssRule(".ohb-perm-btn", [
       "align-items: center",

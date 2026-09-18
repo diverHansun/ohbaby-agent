@@ -66,6 +66,7 @@ import type { WorkspaceSnapshot } from "../api/daemon/wire.js";
 import type { SearchApiKeyRequest } from "../api/daemon/wire.js";
 import { MarkdownBlock } from "./MarkdownBlock.js";
 import { ContextUsageControl, ContextUsageDetails } from "./ContextUsage.js";
+import { fitComposerTextarea } from "./composerTextarea.js";
 import { DirectoryPickerDialog } from "./directory-picker/DirectoryPickerDialog.js";
 import { isImeComposing } from "./ime.js";
 import {
@@ -1399,7 +1400,6 @@ function StatusPill(props: {
 }): ReactElement {
   return (
     <span className={`ohb-status-pill ohb-status-${props.kind}`}>
-      <span />
       {props.label ?? props.kind}
     </span>
   );
@@ -2435,6 +2435,7 @@ function Composer(props: {
   const [slashError, setSlashError] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerInputRef = useRef<HTMLDivElement | null>(null);
   const draftRef = useRef("");
   const lastEscapeAt = useRef(0);
   const lastLeaseRenewalAt = useRef(0);
@@ -2521,6 +2522,29 @@ function Composer(props: {
         );
       });
   }, [props.client, props.draftScopeKey]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    fitComposerTextarea(textarea, { lineHeight: 24, maxLines: 7 });
+  }, [draft, props.view.composer.disabled, slashOpen]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    const composerInput = composerInputRef.current;
+    if (!textarea || !composerInput || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      fitComposerTextarea(textarea, { lineHeight: 24, maxLines: 7 });
+    });
+    observer.observe(composerInput);
+    return (): void => {
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     return (): void => {
@@ -3071,7 +3095,7 @@ function Composer(props: {
           </div>
         </section>
       ) : null}
-      <div className="ohb-composer-input">
+      <div className="ohb-composer-input" ref={composerInputRef}>
         <span className="ohb-prompt">&gt;</span>
         {slashOpen ? (
           <SlashPalette
@@ -3135,7 +3159,6 @@ function Composer(props: {
             type="button"
           >
             <Square size={14} />
-            <span>Stop</span>
           </button>
         ) : (
           <button
@@ -3156,7 +3179,6 @@ function Composer(props: {
             ) : (
               <Send size={14} />
             )}
-            <span>{queuedEdit ? "Save" : "Send"}</span>
           </button>
         )}
       </div>

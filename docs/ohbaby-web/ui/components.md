@@ -10,11 +10,11 @@
 
 - **左**：品牌——2×2 三色网格点（gold/pink/blue/blue）+ `OHBABY` 字标（Plex Mono）。
 - **右**（从左到右，竖线分隔）：
-  - **连接状态胶囊**：彩点 + 文字，颜色/动效随 ConnectionState 五态变化（见 states.md）。
+  - **连接状态文字**：只显示带颜色的状态文字，不加圆点和内层胶囊；running/connecting/reconnecting 轻微呼吸，其余静止（见 states.md）。
   - **模型名**：只读文字（如 `glm-5.1`）——**仅展示，非切换器**（模型切换是 ND5，延后）。
   - **上下文用量**：细进度条 + `32k / 200k` 读数。
 
-**不含诊断行**：`seqNum / clientId / 端口` 不在 UI 呈现（决策 1）。状态胶囊是用户能看到的唯一连接真相。
+**不含诊断行**：`seqNum / clientId / 端口` 不在 UI 呈现（决策 1）。状态文字是用户能看到的唯一连接真相。
 
 ---
 
@@ -37,14 +37,14 @@
 
 ## 3. Composer（输入区，底部 dock）
 
-- **输入框**：`>` 提示符 + 单行输入，聚焦环 + 轻阴影；`↵` 发送、`⇧↵` 换行。
+- **输入框**：`>` 提示符 + 1–7 个视觉行的自适应输入，聚焦环 + 轻阴影；第 7 个视觉行后只在 textarea 内滚动；`↵` 发送、`⇧↵` 换行。
 - **slash 输入**：以 `/` 开头时不作为普通 prompt，而是走 `UiSlashCommand` 解析/执行。v0.1.6 做 web-safe 候选面板、分组、`↑/↓` 选择、`Tab` 补全、`Enter` 执行、`Esc` 关闭；解析失败要保留草稿并显示错误。详细规格见 [`slash-commands/`](./slash-commands/README.md)。
-- **动作按钮**：输入框右侧始终只有一个主操作位。idle 显示 Send；发送请求待确认时可显示转圈 Send；running / waiting-for-permission 且草稿为空时显示 Stop；running 且草稿有字时显示 Send，发送后进入队列并恢复 Stop；编辑队列时显示 Save。重连或重同步期间依最后已知 run 状态保留按钮外观，但按钮不可点，顶栏显示连接状态。窄屏即使隐藏按钮文字，也须保留动态 `aria-label`。
-- **思考强度**：有思考能力的模型在输入框内、主按钮左侧显示大脑和英文档位；平时透明无边，hover 有浅灰细边，键盘焦点清晰可见。检测中只转大脑、unknown 显示 `unknown`；无思考能力时不留空位。
+- **动作按钮**：输入框右侧始终只有一个主操作位，使用固定尺寸圆形图标按钮，不显示 Send/Stop/Save 文字。idle 或有草稿时显示纸飞机；发送请求待确认时圆内显示转圈；running / waiting-for-permission 且草稿为空时显示方块 Stop；running 且草稿有字时纸飞机进入队列；编辑已有队列条目时仍显示纸飞机，点击成功更新原条目并继续调度，不新增消息。`aria-label`/`title` 仍按语义区分 Send、Stop、Save queued prompt。重连或重同步期间依最后已知 run 状态保留按钮外观，但按钮不可点，顶栏显示连接状态。
+- **思考强度**：有思考能力的模型在输入框内、圆形主按钮左侧显示大脑和英文档位；主按钮缩窄后控件随弹性布局向右靠近，并保留输入宽度。平时透明无边，hover 有浅灰细边，键盘焦点清晰可见。检测中只转大脑、unknown 显示 `unknown`；无思考能力时不留空位。
 - **底部控件行**（本期纳入，决策 3）：
   - **mode 切换**：`auto mode` / `plan mode`，`⇧⇥` 循环；auto=green 点、plan=blue 点。
   - **权限策略**：`default`（ask before each action）/ `full-access`（run without prompts），与 mode 一样做成轻量单击循环按钮，不使用下拉/上拉菜单。`full-access` 时**不弹权限模态**。
-  - **提示**：不常驻展示 Enter、Esc 或连接状态说明；编辑队列时保留 `Editing queued prompt · Enter save · Esc keep original`。连接状态由顶栏胶囊展示。
+  - **提示**：不常驻展示 Enter、Esc 或连接状态说明；编辑队列时保留 `Editing queued prompt · Enter save · Esc keep original`。连接状态由顶栏文字展示。
 
 ---
 

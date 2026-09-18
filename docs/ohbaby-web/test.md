@@ -47,6 +47,7 @@
 | prompt 失败恢复 | receipt 前失败仅在当前 draft 为空时恢复；accepted failed/interrupted 保留 submission 用户行并内联错误 |
 | prompt reload projection | 无 local state 时，starting/running/failed/interrupted 仍可由 snapshot 独立重建 |
 | active run follow-up | 有草稿时主槽显示 Send；发送清空草稿后恢复 Stop，admission 不再保留第二颗 busy Send；follow-up 不插 conversation optimistic 行，queued 后只出现在 Queue |
+| composer density | 主槽为无字圆形纸飞机/方块/转圈图标；编辑 queued prompt 点纸飞机只调用 `editQueuedPrompt`，成功更新原条目并继续调度，不新增 prompt；输入框最多 7 个视觉行，之后只在 textarea 内滚动；思考控件紧邻圆钮左侧且窄屏不挤压输入 |
 | starting-window follow-up | 首轮已有 `starting`、run 尚未出现时，follow-up 仍只进入 Queue，不重复投影到 conversation |
 | pending session isolation | admission pending 期间切换 existing/new session，local row 与 startup Thinking 不得串到另一会话 |
 | mixed timeline ordering | 较早的 failed/interrupted provisional 与后续 formal message 按 `createdAt` 合并排序；reload 后顺序不变 |
@@ -57,7 +58,7 @@
 | 401 token 失效 | 全局可见，进 `disconnected`，不静默 |
 | 输出消毒 | 恶意 markdown/HTML 经 sanitize 后不执行脚本 |
 | slash 解析失败 | 不调用 `/v1/commands`，显示错误且 draft 不丢 |
-| slash 候选与补全 | 展示 passthrough 命令与 overlay 命令；Tab 补全当前选中命令；输入/选择不改变 composer 尺寸 |
+| slash 候选与补全 | 展示 passthrough 命令与 overlay 命令；Tab 补全当前选中命令；候选浮层不裁切输入行，输入框高度规则仍按视觉行生效 |
 | slash 执行结果 | `command.started`→running notice，`command.result.delivered`→只读结果 modal 或 fallback notice |
 | slash 执行失败 | `command.failed`→错误 notice，不影响后续 prompt |
 | interaction slash | `/sessions`、`/permission` 等 `parentBehavior: "interaction"` 命令不出现在 web catalog，手写 POST 也被 400 拒绝 |

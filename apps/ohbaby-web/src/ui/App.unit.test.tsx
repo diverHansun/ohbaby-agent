@@ -47,6 +47,9 @@ interface FakeRuntime {
   readonly executeSlashCommand: ReturnType<
     typeof vi.fn<OhbabyWebRuntime["executeSlashCommand"]>
   >;
+  readonly editQueuedPrompt: ReturnType<
+    typeof vi.fn<UiBackendClient["editQueuedPrompt"]>
+  >;
   readonly connectModel: ReturnType<
     typeof vi.fn<UiBackendClient["connectModel"]>
   >;
@@ -246,6 +249,58 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     await setTextareaValue(app.container, "a");
     expect(app.container.querySelector(".ohb-composer-typewriter")).toBeNull();
+  });
+
+  it("renders icon-only send and stop actions", async () => {
+    const idleFake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const idleApp = mountApp(idleFake.runtime);
+    await setTextareaValue(idleApp.container, "send this");
+    const sendButton = idleApp.container.querySelector(".ohb-send-button");
+    expect(sendButton?.querySelector("span")).toBeNull();
+    expect(sendButton?.textContent).not.toContain("Send");
+
+    globalThis.sessionStorage.clear();
+    const runningFake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    const runningApp = mountApp(runningFake.runtime);
+    const stopButton = runningApp.container.querySelector(".ohb-stop-button");
+    expect(stopButton?.querySelector("span")).toBeNull();
+    expect(stopButton?.textContent).not.toContain("Stop");
+    expect(
+      runningApp.container.querySelector(".ohb-status-pill > span"),
+    ).toBeNull();
+  });
+
+  it("fits the composer textarea to one through seven visual lines", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+    const textarea = app.container.querySelector("textarea");
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error("textarea not found");
+    }
+    Object.defineProperty(textarea, "scrollHeight", {
+      configurable: true,
+      value: 72,
+    });
+    await setTextareaValue(app.container, "line one\nline two\nline three");
+    expect(textarea.style.height).toBe("72px");
+    expect(textarea.style.overflowY).toBe("hidden");
+
+    Object.defineProperty(textarea, "scrollHeight", {
+      configurable: true,
+      value: 300,
+    });
+    await setTextareaValue(
+      app.container,
+      "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten",
+    );
+    expect(textarea.style.height).toBe("168px");
+    expect(textarea.style.overflowY).toBe("auto");
   });
 
   it("keeps static placeholders for running and unavailable composer states", () => {
@@ -1764,6 +1819,74 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
   });
 
+  it("saves an edited queued prompt from the paper-plane button without creating a new prompt", async () => {
+    const queuedPrompt = {
+      clientRequestId: "request_queued",
+      createdAt: timestamp,
+      promptId: "prompt_queued",
+      scopeKey: "/repo-a",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: "queued text",
+      updatedAt: timestamp,
+      userMessageId: "message_queued",
+    };
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+        prompts: [queuedPrompt],
+      },
+    });
+    vi.spyOn(fake.client, "acquirePromptEditLease").mockResolvedValue({
+      editLeaseId: "lease_1",
+      expiresAt: "2026-07-12T00:01:00.000Z",
+      ownerClientId: "client_web",
+      prompt: queuedPrompt,
+    });
+    fake.editQueuedPrompt.mockResolvedValue({
+      ...queuedPrompt,
+      text: "edited queued text",
+    });
+    const app = mountApp(fake.runtime);
+    const editButton = app.container.querySelector(
+      '[aria-label="Edit queued prompt: queued text"]',
+    );
+    if (!(editButton instanceof HTMLButtonElement)) {
+      throw new Error("queued edit button not found");
+    }
+
+    await act(async () => {
+      editButton.click();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      app.container.textContent.includes("Editing queued prompt"),
+    );
+    await setTextareaValue(app.container, "edited queued text");
+
+    const saveButton = app.container.querySelector(
+      'button[aria-label="Save queued prompt"]',
+    );
+    if (!(saveButton instanceof HTMLButtonElement)) {
+      throw new Error("queued save button not found");
+    }
+    expect(saveButton.textContent).not.toContain("Save");
+    await act(async () => {
+      saveButton.click();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      !app.container.textContent.includes("Editing queued prompt"),
+    );
+    expect(fake.editQueuedPrompt).toHaveBeenCalledWith({
+      editLeaseId: "lease_1",
+      promptId: "prompt_queued",
+      text: "edited queued text",
+    });
+    expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
+  });
+
   it("persists the edit buffer as a draft when reload renewal loses the lease", async () => {
     globalThis.sessionStorage.setItem(
       "ohbaby:composer:/repo-a:session_1",
@@ -3222,6 +3345,9 @@ function createFakeRuntime(input: {
   const executeSlashCommand = vi.fn<OhbabyWebRuntime["executeSlashCommand"]>(
     () => Promise.resolve(),
   );
+  const editQueuedPrompt = vi.fn<UiBackendClient["editQueuedPrompt"]>(() =>
+    Promise.reject(new Error("unused")),
+  );
   const createSession = vi.fn<OhbabyWebRuntime["createSession"]>(() =>
     Promise.resolve(),
   );
@@ -3338,7 +3464,7 @@ function createFakeRuntime(input: {
     cancelQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     connectModel,
     executeCommand: vi.fn(() => Promise.resolve()),
-    editQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
+    editQueuedPrompt,
     getContextWindowUsage: vi.fn(() =>
       Promise.resolve({
         contextWindowRatio: 0.125,
@@ -3406,6 +3532,7 @@ function createFakeRuntime(input: {
     compactSession,
     connectModel,
     createSession,
+    editQueuedPrompt,
     executeSlashCommand,
     getDirectoryPickerRoots,
     hideWorkspace,
