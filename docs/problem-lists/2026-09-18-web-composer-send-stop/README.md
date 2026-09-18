@@ -1,6 +1,6 @@
 # Web Composer：单槽发送/停止 + 思考强度芯片
 
-> 状态：**方案经用户确认，实施中**。
+> 状态：**实施完成，验收通过**（2026-09-18；附带低优先级测试/手工缺口，见 05）。
 >
 > 日期：2026-09-18
 >
@@ -16,7 +16,7 @@
 
 | 轮次 | 开启日期 | 触发事件 | 状态 | 文档 |
 |------|----------|----------|------|------|
-| improve-1 | 2026-09-18 | 首轮规划 | 方案已确认，实施中 | [improve-1/](./improve-1/) |
+| improve-1 | 2026-09-18 | 首轮规划 | 实施完成，验收通过 | [improve-1/](./improve-1/) |
 
 只有一轮。实施若分多次会话，用 improve-1 的 02 Stage，不预开 `improve-2/`。
 
@@ -29,7 +29,7 @@
 | [improve-1/02-optimization-plan-and-change-scope.md](./improve-1/02-optimization-plan-and-change-scope.md) | 实施契约：Stage 1–3、改动面、风险回滚 |
 | 03 | **跳过**：无仓库内可对照的参考项目；对话里的产品截图只约束「无边框、hover 细描边」，不单开 03 |
 | [improve-1/04-test-and-acceptance.md](./improve-1/04-test-and-acceptance.md) | 单测、回归与发布门 |
-| 05 | 本轮实施完成后由验收模式写入 `05-implementation-acceptance.md` |
+| [improve-1/05-implementation-acceptance.md](./improve-1/05-implementation-acceptance.md) | 对照 02/04 的实施验收 |
 
 推荐阅读顺序：`00 → 01 → 02 → 04`。实施以 `02 + 04` 为准；与 `00` 冲突时先改文档再改代码。
 
@@ -58,4 +58,8 @@
 
 ## 5. 实施契约
 
-用户已确认 00–04 的产品方向，并明确授权本会话继续实施；按 `02 + 04` 开发、测试、审查，分批提交到临时分支。完成后等待用户审查，不合并、不推送。
+用户已确认 00–04 的产品方向，并明确授权实施会话按 `02 + 04` 开发。代码在临时分支 `codex/temp-web-composer-send-stop`（`5b930cde`…`d0ce7faf`）。验收见 [05](./improve-1/05-implementation-acceptance.md)。完成用户审查前，不合并、不推送。
+
+## 6. 后续视觉密度优化
+
+圆形无字主按钮、思考强度随按钮缩窄向右贴近、输入框 1–7 个视觉行、状态纯字与工具名去内层胶囊，见独立议题 [web-composer-density](../2026-09-18-web-composer-density/README.md)。本目录的 00–05 保留单槽行为和本轮实施记录；后续外观与高度的实施契约以新议题 02/04 为准。
