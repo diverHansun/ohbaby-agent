@@ -6,18 +6,20 @@ Development stays on the pnpm workspace. The user-facing npm package is `ohbaby-
 
 The publishable package graph is:
 
-- `ohbaby-cli` depends on `ohbaby-agent` and `ohbaby-sdk`.
+- `ohbaby-cli` depends on `ohbaby-agent`, `ohbaby-server`, and `ohbaby-sdk`.
+- `ohbaby-server` depends on `ohbaby-agent` and `ohbaby-sdk`.
 - `ohbaby-agent` depends on `ohbaby-sdk`.
 - `ohbaby-sdk` has no runtime workspace dependency.
 
 Workspace packages should be publishable npm packages, with `dist` as the shipped artifact. Development manifests keep `workspace:*` dependencies, and the publish artifact is produced with pnpm's pack/publish semantics so those workspace ranges are rewritten to package versions in the generated tarballs:
 
-- `ohbaby-cli` depends on the published `ohbaby-agent` and `ohbaby-sdk` package versions.
+- `ohbaby-cli` depends on the published `ohbaby-agent`, `ohbaby-server`, and `ohbaby-sdk` package versions.
+- `ohbaby-server` depends on the published `ohbaby-agent` and `ohbaby-sdk` package versions.
 - `ohbaby-agent` depends on the published `ohbaby-sdk` package version.
 
 External runtime dependencies still resolve through npm during installation. The packed smoke test verifies the npm-facing artifact by installing the locally packed package graph into a temporary global prefix.
 
-For a public release, publish the same version of `ohbaby-sdk`, `ohbaby-agent`, and `ohbaby-cli`, with `ohbaby-sdk` first and `ohbaby-cli` last. End users only install `ohbaby-cli`:
+For a public release, publish the same version of all four public packages in dependency order: `ohbaby-sdk`, `ohbaby-agent`, `ohbaby-server`, then `ohbaby-cli`. End users only install `ohbaby-cli`:
 
 ```bash
 npm install -g ohbaby-cli
@@ -36,10 +38,10 @@ ohbaby
 
 The packaging smoke test will:
 
-1. Pack `ohbaby-sdk`, `ohbaby-cli`, and `ohbaby-agent` into a temporary directory with `pnpm pack --json`.
+1. Pack `ohbaby-sdk`, `ohbaby-agent`, `ohbaby-server`, and `ohbaby-cli` into a temporary directory with `pnpm pack --json`.
 2. Assert packed file lists do not contain `node_modules` or parent-directory paths.
 3. Install those tarballs with `npm install -g --prefix <temp-prefix>`.
-4. Import the installed `ohbaby-cli` and `ohbaby-agent` packages and assert the public exports exist.
+4. Import the installed `ohbaby-cli`, `ohbaby-agent`, and `ohbaby-server` packages and assert the public exports exist.
 5. Run the installed `ohbaby --help` and assert the yargs command surface.
 6. Run the installed `ohbaby --version` and assert it matches the `ohbaby-cli` package version.
 
