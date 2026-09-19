@@ -36,19 +36,21 @@ describe("failed real-loop workspace retention", () => {
         httpRequests: 10,
         commit: "test-commit",
       });
-      for (const directory of [
-        root,
-        join(root, "config"),
-        join(root, "workspace"),
-      ])
-        expect((await stat(directory)).mode & 0o777).toBe(0o700);
-      for (const file of [
-        manifestPath,
-        join(root, "session.db"),
-        join(root, "config", "model.json"),
-        join(root, "workspace", "cache-note.md"),
-      ])
-        expect((await stat(file)).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") {
+        for (const directory of [
+          root,
+          join(root, "config"),
+          join(root, "workspace"),
+        ])
+          expect((await stat(directory)).mode & 0o777).toBe(0o700);
+        for (const file of [
+          manifestPath,
+          join(root, "session.db"),
+          join(root, "config", "model.json"),
+          join(root, "workspace", "cache-note.md"),
+        ])
+          expect((await stat(file)).mode & 0o777).toBe(0o600);
+      }
       const manifest = await readFile(manifestPath, "utf8");
       expect(manifest).not.toMatch(
         /OPAQUE_PRIVATE_STATE_FIXTURE|PRIVATE_VISIBLE_BODY_FIXTURE/,

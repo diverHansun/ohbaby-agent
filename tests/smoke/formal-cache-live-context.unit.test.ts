@@ -1,5 +1,7 @@
 import type { UiSnapshot } from "ohbaby-sdk";
 import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { createFormalCacheSession } from "./formal-cache-session.js";
 import {
@@ -35,8 +37,8 @@ it("reduces a provider error containing a synthetic secret to a safe phase and c
 });
 
 it("allows only the exact local read path and records no argument values", () => {
-  const workdir = "/tmp/controlled-workspace";
-  const allowedFile = `${workdir}/cache-note.md`;
+  const workdir = join(tmpdir(), "controlled-workspace");
+  const allowedFile = join(workdir, "cache-note.md");
   const allowed = classifyControlledRead(
     { name: "read", input: { file_path: "cache-note.md" } },
     workdir,
@@ -67,8 +69,8 @@ it("allows only the exact local read path and records no argument values", () =>
 });
 
 it("chooses one-time allow for the controlled read and deny for another tool", () => {
-  const workdir = "/tmp/controlled-workspace";
-  const allowedFile = `${workdir}/cache-note.md`;
+  const workdir = join(tmpdir(), "controlled-workspace");
+  const allowedFile = join(workdir, "cache-note.md");
   const request = {
     id: "permission-1",
     runId: "run-1",
