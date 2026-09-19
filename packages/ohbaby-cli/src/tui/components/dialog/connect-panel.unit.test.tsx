@@ -33,12 +33,18 @@ describe("ConnectPanel protocols", () => {
         runtime={{ kind: "idle" }}
       />,
     );
-    await key(app, "");
-    await key(app, "\u001b[6~");
-    await key(app, "\r");
-    await key(app, "/chat/completions");
+    await until(() =>
+      (app.lastFrame() ?? "").includes("https://fixture.test/v1"),
+    );
+    app.stdin.write("\u001b[6~");
+    await until(() => (app.lastFrame() ?? "").includes("> Base URL"));
+    app.stdin.write("\r");
+    await until(() => (app.lastFrame() ?? "").includes("[editing]"));
+    app.stdin.write("/chat/completions");
+    await until(() => (app.lastFrame() ?? "").includes("/chat/completions"));
     expect(app.lastFrame()).toMatch(/request path/i);
-    await key(app, "\r");
+    app.stdin.write("\r");
+    await until(() => connectModel.mock.calls.length === 1);
     expect(connectModel).toHaveBeenCalledWith(
       expect.objectContaining({
         baseUrl: "https://fixture.test/v1/chat/completions",
@@ -183,3 +189,15 @@ describe("ConnectPanel protocols", () => {
     app.unmount();
   });
 });
+
+async function until(
+  predicate: () => boolean,
+  timeoutMs = 1_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for condition");
+}
