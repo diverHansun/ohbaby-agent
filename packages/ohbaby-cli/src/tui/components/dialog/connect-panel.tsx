@@ -98,6 +98,7 @@ export function ConnectPanel({
   const [editValue, setEditValue] = useState("");
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
   const draftRef = useRef<ConnectDraft>(EMPTY_DRAFT);
+  const selectedIndexRef = useRef(0);
   const editingFieldRef = useRef<ConnectFieldKey | null>(null);
   const hasLocalEditRef = useRef(false);
   const editValueRef = useRef("");
@@ -107,8 +108,6 @@ export function ConnectPanel({
   const pendingSaveRef = useRef<PendingSave | null>(null);
   const lastSavedWarningRef = useRef<string | undefined>(undefined);
 
-  const selectedField =
-    CONNECT_FIELDS[Math.min(selectedIndex, CONNECT_FIELDS.length - 1)];
   const visibleUrl = editingField === "baseUrl" ? editValue : draft.baseUrl;
   const visibleModel = editingField === "model" ? editValue : draft.model;
   const visibleProtocol =
@@ -133,6 +132,11 @@ export function ConnectPanel({
   const replaceDraft = (nextDraft: ConnectDraft): void => {
     draftRef.current = nextDraft;
     setDraft(nextDraft);
+  };
+
+  const replaceSelectedIndex = (nextIndex: number): void => {
+    selectedIndexRef.current = nextIndex;
+    setSelectedIndex(nextIndex);
   };
 
   useEffect(() => {
@@ -290,17 +294,20 @@ export function ConnectPanel({
         return;
       }
       if (key.downArrow || key.pageDown) {
-        setSelectedIndex((current) => (current + 1) % CONNECT_FIELDS.length);
+        replaceSelectedIndex(
+          (selectedIndexRef.current + 1) % CONNECT_FIELDS.length,
+        );
         return;
       }
       if (key.upArrow || key.pageUp) {
-        setSelectedIndex(
-          (current) =>
-            (current - 1 + CONNECT_FIELDS.length) % CONNECT_FIELDS.length,
+        replaceSelectedIndex(
+          (selectedIndexRef.current - 1 + CONNECT_FIELDS.length) %
+            CONNECT_FIELDS.length,
         );
         return;
       }
       if (isReturn) {
+        const selectedField = CONNECT_FIELDS[selectedIndexRef.current];
         replaceEditingField(selectedField.key);
         replaceEditValue(
           selectedField.key === "interfaceProvider"
