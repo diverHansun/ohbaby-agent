@@ -8120,6 +8120,74 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
+  it("bumps updatedAt and republishes a stale empty session reused through /new so recency lists move it to the top", async () => {
+    const now = "2026-05-20T00:02:00.000Z";
+    const events: UiEvent[] = [];
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_recent",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-10T00:00:00.000Z",
+            id: "session_stale_empty",
+            messages: [],
+            projectRoot: "D:/repo",
+            title: "New session",
+            updatedAt: "2026-05-10T00:00:00.000Z",
+          },
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_recent",
+            messages: [
+              {
+                createdAt: "2026-05-20T00:00:01.000Z",
+                id: "message_1",
+                parts: [{ text: "Recent", type: "text" }],
+                role: "user",
+              },
+            ],
+            projectRoot: "D:/repo",
+            title: "Recent",
+            updatedAt: "2026-05-20T00:00:01.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      now: () => new Date(now),
+    });
+    const unsubscribe = client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "inv_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "web",
+    });
+    unsubscribe();
+
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.activeSessionId).toBe("session_stale_empty");
+    expect(
+      snapshot.sessions.find((session) => session.id === "session_stale_empty"),
+    ).toMatchObject({ messages: [], updatedAt: now });
+    expect(
+      events.some(
+        (event) =>
+          event.type === "session.updated" &&
+          event.session.id === "session_stale_empty" &&
+          event.session.updatedAt === now,
+      ),
+    ).toBe(true);
+  });
+
   it("keeps the current empty project session active when /new is repeated", async () => {
     const client = createInProcessUiBackendClient({
       initialSnapshot: {
@@ -8237,8 +8305,11 @@ describe("createInProcessUiBackendClient", () => {
         listByProjectRoot() {
           return Promise.resolve([]);
         },
-        update() {
-          throw new Error("update should not be called");
+        update(sessionId: string) {
+          if (sessionId !== corePrimary.id) {
+            throw new Error(`unexpected update for ${sessionId}`);
+          }
+          return Promise.resolve({ ...corePrimary, updatedAt: 3_000 });
         },
       },
     });
@@ -8257,7 +8328,12 @@ describe("createInProcessUiBackendClient", () => {
       activeSessionId: "session_primary_empty",
       sessions: [
         { id: "session_child_empty", messages: [] },
-        { id: "session_primary_empty", messages: [], title: "Primary empty" },
+        {
+          id: "session_primary_empty",
+          messages: [],
+          title: "Primary empty",
+          updatedAt: new Date(3_000).toISOString(),
+        },
       ],
     });
   });

@@ -1597,25 +1597,37 @@ export function createInProcessUiBackendClient(
     return resolveProjectRoot();
   }
 
+  /**
+   * Reuse an existing empty session for `/new`. The session is treated as if
+   * it had just been created: its `updatedAt` is bumped (core metadata and UI
+   * state) so recency-sorted session lists move it to the top, and a
+   * `session.updated` event is always published so connected clients reorder.
+   */
   async function activateSessionForNewCommand(input: {
-    readonly publishUpdate: boolean;
+    readonly coreSession?: CoreSession;
     readonly session: UiSession;
   }): Promise<CommandSessionSummary> {
     sessionIds.reserve(input.session.id);
-    await upsertSession(input.session);
-    await setActiveSessionAndReconcileStatus(input.session.id);
-    if (input.publishUpdate) {
-      publish({
-        type: "session.updated",
-        session: cloneSession(input.session),
-      });
+
+    let updatedAt = timestamp();
+    if (options.sessionManager && input.coreSession) {
+      const touched = await options.sessionManager.update(
+        input.coreSession.id,
+        {},
+      );
+      updatedAt = new Date(touched.updatedAt).toISOString();
     }
+
+    const session: UiSession = { ...input.session, updatedAt };
+    await upsertSession(session);
+    await setActiveSessionAndReconcileStatus(session.id);
+    publish({ type: "session.updated", session: cloneSession(session) });
     await publishSnapshotReplacement();
 
     return {
       created: false,
-      id: input.session.id,
-      title: input.session.title,
+      id: session.id,
+      title: session.title,
     };
   }
 
@@ -1653,13 +1665,10 @@ export function createInProcessUiBackendClient(
       snapshot,
     });
     const session = resolved.session;
-    const sessionAlreadyInSnapshot = snapshot.sessions.some(
-      (candidate) => candidate.id === session.id,
-    );
 
     if (!resolved.isNewSession) {
       return activateSessionForNewCommand({
-        publishUpdate: !sessionAlreadyInSnapshot,
+        ...(resolved.coreSession ? { coreSession: resolved.coreSession } : {}),
         session,
       });
     }
