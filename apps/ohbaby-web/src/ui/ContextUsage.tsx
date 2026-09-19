@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactElement } from "react";
 import type {
   UiContextOccupancyComposition,
@@ -33,14 +33,19 @@ const COMPOSITION_ROWS: readonly CompositionRow[] = [
 ];
 
 export function ContextUsageControl(props: {
+  readonly sessionId: string | null;
   readonly usage: UiContextWindowUsage | null;
-}): ReactElement | null {
-  const [openSessionId, setOpenSessionId] = useState<string | null>(null);
+}): ReactElement {
+  const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const tooltipId = useId();
   const dialogId = useId();
   const usage = props.usage;
-  const open = usage !== null && openSessionId === usage.sessionId;
+  const usageAvailable = usage !== null;
+
+  useLayoutEffect(() => {
+    setOpen(false);
+  }, [props.sessionId, usageAvailable]);
 
   useEffect(() => {
     if (!open) {
@@ -51,12 +56,12 @@ export function ContextUsageControl(props: {
         event.target instanceof Node &&
         !rootRef.current?.contains(event.target)
       ) {
-        setOpenSessionId(null);
+        setOpen(false);
       }
     };
     const handleKeyDown = (event: globalThis.KeyboardEvent): void => {
       if (event.key === "Escape") {
-        setOpenSessionId(null);
+        setOpen(false);
       }
     };
     document.addEventListener("pointerdown", handlePointerDown);
@@ -67,20 +72,20 @@ export function ContextUsageControl(props: {
     };
   }, [open]);
 
-  if (!usage) {
-    return null;
-  }
-
-  const percent = usagePercent(usage);
+  const percent = usage ? usagePercent(usage) : null;
   const circumference = 2 * Math.PI * 6;
-  const progress = clamp01(usage.contextWindowRatio) * circumference;
-  const ariaLabel = `${String(percent)}% context used, approximately ${formatTokens(
-    usage.currentTokens,
-  )} of ${formatTokens(usage.contextWindowTokens)} tokens`;
+  const progress = usage
+    ? clamp01(usage.contextWindowRatio) * circumference
+    : null;
+  const ariaLabel = usage
+    ? `${String(percent)}% context used, approximately ${formatTokens(
+        usage.currentTokens,
+      )} of ${formatTokens(usage.contextWindowTokens)} tokens`
+    : "Context usage unavailable";
 
   return (
     <div
-      className={`ohb-context-usage-control${open ? " is-open" : ""}`}
+      className={`ohb-context-usage-control${open ? " is-open" : ""}${usage ? "" : " is-unavailable"}`}
       ref={rootRef}
     >
       <button
@@ -91,30 +96,36 @@ export function ContextUsageControl(props: {
         aria-label={ariaLabel}
         className="ohb-context-ring-button"
         onClick={() => {
-          setOpenSessionId((current) =>
-            current === usage.sessionId ? null : usage.sessionId,
-          );
+          setOpen((current) => !current);
         }}
         type="button"
       >
         <svg aria-hidden="true" height="16" viewBox="0 0 16 16" width="16">
           <circle className="ohb-context-ring-track" cx="8" cy="8" r="6" />
-          <circle
-            className="ohb-context-ring-progress"
-            cx="8"
-            cy="8"
-            r="6"
-            strokeDasharray={`${String(progress)} ${String(circumference)}`}
-          />
+          {progress === null ? null : (
+            <circle
+              className="ohb-context-ring-progress"
+              cx="8"
+              cy="8"
+              r="6"
+              strokeDasharray={`${String(progress)} ${String(circumference)}`}
+            />
+          )}
         </svg>
       </button>
       {!open ? (
         <div className="ohb-context-tooltip" id={tooltipId} role="tooltip">
-          <strong>{percent}% context used</strong>
-          <span>
-            ~{formatTokens(usage.currentTokens)} /{" "}
-            {formatTokens(usage.contextWindowTokens)} tokens
-          </span>
+          {usage ? (
+            <>
+              <strong>{percent}% context used</strong>
+              <span>
+                ~{formatTokens(usage.currentTokens)} /{" "}
+                {formatTokens(usage.contextWindowTokens)} tokens
+              </span>
+            </>
+          ) : (
+            <strong>Context usage unavailable</strong>
+          )}
         </div>
       ) : null}
       {open ? (
@@ -129,14 +140,20 @@ export function ContextUsageControl(props: {
             <button
               aria-label="Close context usage"
               onClick={() => {
-                setOpenSessionId(null);
+                setOpen(false);
               }}
               type="button"
             >
               <X aria-hidden="true" size={14} />
             </button>
           </div>
-          <ContextUsageDetails usage={usage} />
+          {usage ? (
+            <ContextUsageDetails usage={usage} />
+          ) : (
+            <p className="ohb-context-unavailable-copy">
+              Usage data is not available yet.
+            </p>
+          )}
         </div>
       ) : null}
     </div>

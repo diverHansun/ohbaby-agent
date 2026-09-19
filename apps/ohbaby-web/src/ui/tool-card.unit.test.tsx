@@ -61,6 +61,42 @@ describe("pairToolParts", () => {
 });
 
 describe("ToolCard", () => {
+  it.each([
+    ["read_file", "ohb-tool-gold"],
+    ["write_file", "ohb-tool-green"],
+    ["edit_file", "ohb-tool-green"],
+    ["bash", "ohb-tool-blue"],
+    ["web_search", "ohb-tool-blue"],
+  ] as const)("keeps the semantic name color for %s", (name, className) => {
+    const app = mountCard(
+      { ...toolCall({ status: "completed" }), name },
+      undefined,
+    );
+
+    expect(app.container.querySelector(".ohb-tool-panel")?.classList).toContain(
+      className,
+    );
+  });
+
+  it("uses the red name color for a failed tool without exposing status", () => {
+    const app = mountCard(
+      { ...toolCall({ status: "failed" }), name: "read_file" },
+      {
+        callId: "call_bash",
+        error: "permission denied",
+        output: "",
+      },
+    );
+
+    expect(app.container.querySelector(".ohb-tool-panel")?.classList).toContain(
+      "ohb-tool-red",
+    );
+    expect(app.container.textContent).not.toContain("failed");
+    expect(
+      app.container.querySelector("button")?.getAttribute("aria-expanded"),
+    ).toBe("false");
+  });
+
   it.each(["subagent_run", "web_search", "bash"])(
     "uses the shared disclosure arrow for %s",
     (name) => {
@@ -73,7 +109,7 @@ describe("ToolCard", () => {
     },
   );
 
-  it("shows a short failed result expanded without exposing its call id", () => {
+  it("keeps a short failed result collapsed without exposing failure status", () => {
     const app = mountCard(toolCall({ status: "failed" }), {
       callId: "call_bash",
       error: "exit code 1",
@@ -81,13 +117,16 @@ describe("ToolCard", () => {
     });
 
     expect(app.container.textContent).toContain("bash");
-    expect(app.container.textContent).toContain("failed");
     expect(app.container.textContent).toContain("sleep 10");
-    expect(app.container.textContent).toContain("stderr text");
+    expect(app.container.textContent).not.toContain("failed");
+    expect(app.container.textContent).not.toContain("stderr text");
     expect(app.container.textContent).not.toContain("call_bash");
+    expect(
+      app.container.querySelector("button")?.getAttribute("aria-expanded"),
+    ).toBe("false");
   });
 
-  it("auto-opens once when a running call transitions to a short failure", () => {
+  it("stays collapsed when a running call transitions to failure", () => {
     const app = mountCard(toolCall({ status: "running" }), undefined);
     expect(app.container.querySelector("pre")).toBeNull();
 
@@ -96,51 +135,42 @@ describe("ToolCard", () => {
       error: "timed out",
       output: "partial output",
     });
-    expect(app.container.querySelector("pre")?.textContent).toBe(
-      "partial output",
-    );
-
-    act(() => {
-      app.container.querySelector("button")?.click();
-    });
-    expect(app.container.querySelector("pre")).toBeNull();
-
-    renderCard(app.root, toolCall({ status: "failed" }), {
-      callId: "call_bash",
-      error: "timed out",
-      output: "more output",
-    });
     expect(app.container.querySelector("pre")).toBeNull();
   });
 
-  it.each([
-    ["400 characters", "x".repeat(400), true],
-    ["401 characters", "x".repeat(401), false],
-    ["8 lines", Array.from({ length: 8 }, () => "x").join("\n"), true],
-    ["9 lines", Array.from({ length: 9 }, () => "x").join("\n"), false],
-  ] as const)(
-    "applies the short failure boundary for %s",
-    (_label, output, expectedOpen) => {
-      const app = mountCard(toolCall({ status: "failed" }), {
-        callId: "call_bash",
-        error: "failed",
-        output,
-      });
-
-      expect(app.container.querySelector("pre") !== null).toBe(expectedOpen);
-    },
-  );
-
-  it("falls back to the error when failed output is empty", () => {
+  it("shows input and the fallback error only after explicit expansion", () => {
     const app = mountCard(toolCall({ status: "failed" }), {
       callId: "call_bash",
       error: "permission denied",
       output: "",
     });
 
-    expect(app.container.querySelector("pre")?.textContent).toBe(
-      "permission denied",
-    );
+    expect(app.container.textContent).not.toContain("permission denied");
+    act(() => {
+      app.container.querySelector("button")?.click();
+    });
+    expect(
+      app.container.querySelector(".ohb-tool-input")?.textContent,
+    ).toContain('"command": "sleep 10"');
+    expect(
+      app.container.querySelector(".ohb-tool-output")?.textContent,
+    ).toContain("permission denied");
+  });
+
+  it("keeps partial output and a distinct error together after expansion", () => {
+    const app = mountCard(toolCall({ status: "failed" }), {
+      callId: "call_bash",
+      error: "exit code 1",
+      output: "partial stderr",
+    });
+
+    act(() => {
+      app.container.querySelector("button")?.click();
+    });
+
+    const output = app.container.querySelector(".ohb-tool-output")?.textContent;
+    expect(output).toContain("partial stderr");
+    expect(output).toContain("exit code 1");
   });
 
   it("renders an orphan result without exposing its call id", () => {
@@ -152,13 +182,18 @@ describe("ToolCard", () => {
     act(() => {
       root.render(
         <OrphanToolResultCard
-          result={{ callId: "internal_call_id", output: "visible output" }}
+          result={{
+            callId: "internal_call_id",
+            error: "failed internally",
+            output: "visible output",
+          }}
         />,
       );
     });
 
     expect(container.textContent).toContain("tool result");
     expect(container.textContent).not.toContain("internal_call_id");
+    expect(container.textContent).not.toContain("failed internally");
   });
 });
 

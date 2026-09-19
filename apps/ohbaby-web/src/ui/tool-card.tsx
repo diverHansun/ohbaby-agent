@@ -1,10 +1,7 @@
-import { ChevronDown } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ChevronRight } from "lucide-react";
+import { useState } from "react";
 import type { ReactElement } from "react";
 import type { UiMessagePart, UiToolCall, UiToolResult } from "ohbaby-sdk";
-
-const SHORT_FAILURE_MAX_CHARACTERS = 400;
-const SHORT_FAILURE_MAX_LINES = 8;
 
 export type PairedToolPart =
   | {
@@ -64,30 +61,19 @@ export function ToolCard(props: {
   readonly call: UiToolCall;
   readonly result: UiToolResult | undefined;
 }): ReactElement {
+  const [open, setOpen] = useState(false);
   const failed =
     props.call.status === "failed" || props.result?.error !== undefined;
-  const status = failed ? "failed" : props.call.status;
-  const body = toolBody(props.call, props.result);
-  const shortFailure = failed && isShortBody(body);
-  const [open, setOpen] = useState(shortFailure);
-  const wasFailed = useRef(failed);
-
-  useEffect(() => {
-    if (!wasFailed.current && failed && shortFailure) {
-      setOpen(true);
-    }
-    wasFailed.current = failed;
-  }, [failed, shortFailure]);
 
   return (
     <ToolPanel
       accent={failed ? "red" : toolAccent(props.call.name)}
-      body={body}
-      meta={status}
+      input={JSON.stringify(props.call.input, null, 2)}
       onToggle={() => {
         setOpen((value) => !value);
       }}
       open={open}
+      output={props.result === undefined ? undefined : resultBody(props.result)}
       summary={toolSummary(props.call.input)}
       title={props.call.name}
     />
@@ -97,19 +83,16 @@ export function ToolCard(props: {
 export function OrphanToolResultCard(props: {
   readonly result: UiToolResult;
 }): ReactElement {
-  const failed = props.result.error !== undefined;
-  const body = resultBody(props.result);
-  const [open, setOpen] = useState(failed && isShortBody(body));
+  const [open, setOpen] = useState(false);
   return (
     <ToolPanel
-      accent={failed ? "red" : "green"}
-      body={body}
-      meta={failed ? "failed" : "completed"}
+      accent={props.result.error === undefined ? "green" : "red"}
       onToggle={() => {
         setOpen((value) => !value);
       }}
       open={open}
-      summary={props.result.error ?? "result"}
+      output={resultBody(props.result)}
+      summary="result"
       title="tool result"
     />
   );
@@ -117,10 +100,10 @@ export function OrphanToolResultCard(props: {
 
 function ToolPanel(props: {
   readonly accent: "blue" | "gold" | "green" | "red";
-  readonly body: string;
-  readonly meta: string;
+  readonly input?: string;
   readonly onToggle: () => void;
   readonly open: boolean;
+  readonly output?: string;
   readonly summary: string;
   readonly title: string;
 }): ReactElement {
@@ -129,26 +112,54 @@ function ToolPanel(props: {
       <button aria-expanded={props.open} onClick={props.onToggle} type="button">
         <span>{props.title}</span>
         <span className="ohb-tool-summary">{props.summary}</span>
-        <span className="ohb-tool-meta">{props.meta}</span>
-        <ChevronDown
+        <ChevronRight
           aria-hidden="true"
           className={`ohb-tool-chevron ${props.open ? "ohb-chevron-open" : ""}`}
           size={14}
         />
       </button>
-      {props.open && props.body !== "" ? <pre>{props.body}</pre> : null}
+      {props.open &&
+      (props.input !== undefined || props.output !== undefined) ? (
+        <div className="ohb-tool-details">
+          {props.input !== undefined ? (
+            <section className="ohb-tool-input">
+              <span>Input</span>
+              <pre>{props.input}</pre>
+            </section>
+          ) : null}
+          {props.output !== undefined ? (
+            <section className="ohb-tool-output">
+              <span>Output</span>
+              <pre>{props.output}</pre>
+            </section>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function toolBody(call: UiToolCall, result: UiToolResult | undefined): string {
-  return result === undefined
-    ? JSON.stringify(call.input, null, 2)
-    : resultBody(result);
+function resultBody(result: UiToolResult): string {
+  const output = result.output.trim();
+  const error = result.error?.trim() ?? "";
+  if (output === "") {
+    return error;
+  }
+  if (error === "" || output.includes(error)) {
+    return result.output;
+  }
+  return `${result.output}\n\nError: ${error}`;
 }
 
-function resultBody(result: UiToolResult): string {
-  return result.output.trim() !== "" ? result.output : (result.error ?? "");
+function toolAccent(name: string): "blue" | "gold" | "green" {
+  const lowered = name.toLowerCase();
+  if (lowered.includes("read")) {
+    return "gold";
+  }
+  if (lowered.includes("edit") || lowered.includes("write")) {
+    return "green";
+  }
+  return "blue";
 }
 
 function toolSummary(input: Record<string, unknown>): string {
@@ -167,22 +178,4 @@ function toolSummary(input: Record<string, unknown>): string {
 
 function truncate(value: string, limit: number): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
-}
-
-function isShortBody(body: string): boolean {
-  return (
-    body.length <= SHORT_FAILURE_MAX_CHARACTERS &&
-    body.split("\n").length <= SHORT_FAILURE_MAX_LINES
-  );
-}
-
-function toolAccent(name: string): "blue" | "gold" | "green" | "red" {
-  const lowered = name.toLowerCase();
-  if (lowered.includes("read")) {
-    return "gold";
-  }
-  if (lowered.includes("edit") || lowered.includes("write")) {
-    return "green";
-  }
-  return "blue";
 }

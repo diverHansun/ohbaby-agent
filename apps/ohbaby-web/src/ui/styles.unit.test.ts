@@ -104,18 +104,44 @@ describe("web app layout styles", () => {
       "padding: 0",
     ]);
     expectCssRule(".ohb-tool-panel", [
-      "background: #ffffff",
-      "border: 1px solid #ececec",
+      "background: transparent",
+      "border: 0",
+      "margin: 2px 0",
     ]);
+    expectCssRule(".ohb-tool-panel button", ["padding: 3px 8px"]);
   });
 
-  it("keeps every tool disclosure arrow visible when its summary is long", () => {
+  it("reveals the tool disclosure arrow only on interaction or while open", () => {
     expectCssRule(".ohb-tool-summary", ["flex: 1", "min-width: 0"]);
     expectCssRule(".ohb-tool-chevron", [
       "flex: none",
       "height: 14px",
+      "opacity: 0",
       "width: 14px",
     ]);
+    expectCssRule(
+      '.ohb-tool-panel button:hover .ohb-tool-chevron,\n.ohb-tool-panel button:focus-visible .ohb-tool-chevron,\n.ohb-tool-panel button[aria-expanded="true"] .ohb-tool-chevron',
+      ["opacity: 1"],
+    );
+  });
+
+  it("colors only tool names by semantic type and failure", () => {
+    expectCssRule(".ohb-tool-blue button span:first-child", ["color: #5b6bb0"]);
+    expectCssRule(".ohb-tool-gold button span:first-child", ["color: #8f6d22"]);
+    expectCssRule(".ohb-tool-green button span:first-child", [
+      "color: #3f7d5c",
+    ]);
+    expectCssRule(".ohb-tool-red button span:first-child", ["color: #c23d38"]);
+  });
+
+  it("styles user prompts as inset blue bubbles and assistant replies as bare text", () => {
+    expectCssRule(".ohb-message-user", ["align-items: flex-end"]);
+    expectCssRule(".ohb-message-user-bubble", [
+      "background: #eaf4ff",
+      "border-radius: 14px",
+      "max-width: 76%",
+    ]);
+    expectCssRule(".ohb-message-assistant-bare", ["width: 100%"]);
   });
 
   it("centers one-line composer text without changing multiline sizing", () => {
@@ -145,6 +171,29 @@ describe("web app layout styles", () => {
   it("animates the sidebar and respects reduced motion", () => {
     expectCssRule(".ohb-sidebar", ["transition:", "flex-basis"]);
     expect(css).toContain("prefers-reduced-motion: reduce");
+  });
+
+  it("keeps the new-session action inset and borderless", () => {
+    expectCssRule(".ohb-sidebar > .ohb-sidebar-new", [
+      "min-width: 0",
+      "width: calc(100% - 28px)",
+    ]);
+    expect(css).toMatch(
+      /\.ohb-sidebar-new\s*\{[^}]*background:\s*transparent;[^}]*border:\s*0;/u,
+    );
+    expectCssRule(".ohb-sidebar-new:hover", ["background: #eceef2"]);
+  });
+
+  it("presents full-access confirmation as a restrained modal", () => {
+    expectCssRule(".ohb-full-access-layer", [
+      "inset: 0",
+      "position: fixed",
+      "z-index: 80",
+    ]);
+    expectCssRule(".ohb-full-access-dialog", [
+      "border-radius: 18px",
+      "max-width: 460px",
+    ]);
   });
 
   it("defines isolated permission button consequence styles", () => {

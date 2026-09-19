@@ -1,6 +1,5 @@
 import {
   Archive,
-  Bot,
   Brain,
   ChevronDown,
   Folder,
@@ -14,7 +13,7 @@ import {
   Send,
   ShieldAlert,
   Square,
-  User,
+  SquarePen,
   X,
 } from "lucide-react";
 import {
@@ -32,6 +31,7 @@ import type {
   KeyboardEvent,
   ReactElement,
 } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import {
@@ -829,6 +829,7 @@ function ConnectedOhbabyWebApp({
               activeGoal={view.activeGoal}
               header={view.header}
               onOpenGoalPanel={openGoalPanel}
+              sessionId={view.activeSession?.id ?? null}
             />
             <ErrorBanner
               message={errorBannerMessage}
@@ -1199,7 +1200,7 @@ function ProjectRail(props: {
             role="menuitem"
             type="button"
           >
-            从项目栏移除
+            Remove from project rail
           </button>
         </div>
       ) : null}
@@ -1259,7 +1260,7 @@ function SessionSidebar(props: {
         title="New session"
         type="button"
       >
-        <Plus size={15} />
+        <SquarePen aria-hidden="true" size={15} />
         <span>New session</span>
       </button>
       <section className="ohb-sidebar-section">
@@ -1344,9 +1345,8 @@ function StatusBar(props: {
   readonly activeGoal: ViewModel["activeGoal"];
   readonly header: HeaderModel;
   readonly onOpenGoalPanel: (intent?: GoalPanelIntent) => void;
+  readonly sessionId: string | null;
 }): ReactElement {
-  const hasTrailingStatus =
-    props.header.contextWindowUsage !== null || props.activeGoal !== null;
   return (
     <header className="ohb-statusbar">
       <div className="ohb-brand ohb-brand-wordmark" aria-label="ohbaby">
@@ -1361,8 +1361,11 @@ function StatusBar(props: {
         />
         <span className="ohb-divider" />
         <span className="ohb-model">{props.header.modelLabel}</span>
-        {hasTrailingStatus ? <span className="ohb-divider" /> : null}
-        <ContextUsageControl usage={props.header.contextWindowUsage} />
+        <span className="ohb-divider" />
+        <ContextUsageControl
+          sessionId={props.sessionId}
+          usage={props.header.contextWindowUsage}
+        />
         <GoalStatusChip
           goal={props.activeGoal}
           onOpen={props.onOpenGoalPanel}
@@ -1920,8 +1923,6 @@ function MessageRow(props: {
   readonly reasoning?: ViewModel["reasoningByMessageId"][string];
 }): ReactElement | null {
   const isUser = props.message.role === "user";
-  const isAssistant = props.message.role === "assistant";
-  const label = isUser ? "You" : isAssistant ? "ohbaby" : props.message.role;
   const visibleParts = filterTodoToolParts(props.message.parts);
   const pairedParts = pairToolParts(visibleParts);
   if (
@@ -1932,12 +1933,15 @@ function MessageRow(props: {
     return null;
   }
   return (
-    <article className={`ohb-message ohb-message-${props.message.role}`}>
-      <div className="ohb-message-label">
-        {isUser ? <User size={14} /> : <Bot size={14} />}
-        <span>{label}</span>
-      </div>
-      <div className="ohb-message-body">
+    <article
+      aria-label={`${messageRoleLabel(props.message.role)} message`}
+      className={`ohb-message ohb-message-${props.message.role}`}
+    >
+      <div
+        className={`ohb-message-body ${
+          isUser ? "ohb-message-user-bubble" : "ohb-message-assistant-bare"
+        }`}
+      >
         {props.reasoning ? (
           <details className="ohb-reasoning" open={!props.reasoning.folded}>
             <summary>Thought</summary>
@@ -1976,6 +1980,19 @@ function MessageRow(props: {
       </div>
     </article>
   );
+}
+
+function messageRoleLabel(role: UiMessage["role"]): string {
+  switch (role) {
+    case "user":
+      return "User";
+    case "assistant":
+      return "Assistant";
+    case "system":
+      return "System";
+    case "tool":
+      return "Tool";
+  }
 }
 
 function messagePartKey(
@@ -2424,6 +2441,7 @@ function Composer(props: {
   const [queueExpanded, setQueueExpanded] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [fullAccessConfirmOpen, setFullAccessConfirmOpen] = useState(false);
   const [slashCatalog, setSlashCatalog] = useState<UiWebCommandCatalog | null>(
     null,
   );
@@ -2434,6 +2452,8 @@ function Composer(props: {
   const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerInputRef = useRef<HTMLDivElement | null>(null);
+  const permissionButtonRef = useRef<HTMLButtonElement | null>(null);
+  const returnPermissionFocusRef = useRef(false);
   const draftRef = useRef("");
   const lastEscapeAt = useRef(0);
   const lastLeaseRenewalAt = useRef(0);
@@ -2899,12 +2919,30 @@ function Composer(props: {
   }, [props.onSetPermission, props.view.composer.mode]);
 
   const cyclePermissionLevel = useCallback(() => {
-    const level =
-      props.view.composer.permissionLevel === "default"
-        ? "full-access"
-        : "default";
-    props.onSetPermission({ level });
+    if (props.view.composer.permissionLevel === "default") {
+      setFullAccessConfirmOpen(true);
+      return;
+    }
+    props.onSetPermission({ level: "default" });
   }, [props.onSetPermission, props.view.composer.permissionLevel]);
+
+  const dismissFullAccessConfirm = useCallback((): void => {
+    returnPermissionFocusRef.current = true;
+    setFullAccessConfirmOpen(false);
+  }, []);
+
+  const confirmFullAccess = useCallback((): void => {
+    returnPermissionFocusRef.current = true;
+    setFullAccessConfirmOpen(false);
+    props.onSetPermission({ level: "full-access" });
+  }, [props.onSetPermission]);
+
+  useLayoutEffect(() => {
+    if (!fullAccessConfirmOpen && returnPermissionFocusRef.current) {
+      returnPermissionFocusRef.current = false;
+      permissionButtonRef.current?.focus();
+    }
+  }, [fullAccessConfirmOpen]);
 
   const runSlashCommand = useCallback(
     (item: SlashPaletteItem | undefined) => {
@@ -3167,6 +3205,7 @@ function Composer(props: {
             className={`ohb-permission-toggle ohb-permission-${props.view.composer.permissionLevel}`}
             disabled={props.view.composer.disabled}
             onClick={cyclePermissionLevel}
+            ref={permissionButtonRef}
             title={
               props.view.composer.permissionLevel === "default"
                 ? "Default: ask before protected actions. Click for full-access."
@@ -3222,7 +3261,110 @@ function Composer(props: {
           )}
         </div>
       </div>
+      {fullAccessConfirmOpen ? (
+        <FullAccessConfirmDialog
+          onConfirm={confirmFullAccess}
+          onDismiss={dismissFullAccessConfirm}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function FullAccessConfirmDialog(props: {
+  readonly onConfirm: () => void;
+  readonly onDismiss: () => void;
+}): ReactElement {
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+
+  useLayoutEffect(() => {
+    confirmRef.current?.focus();
+  }, []);
+
+  useLayoutEffect(() => {
+    const app = document.querySelector(".ohb-app");
+    const wasInert = app?.hasAttribute("inert") ?? false;
+    app?.setAttribute("inert", "");
+    return (): void => {
+      if (!wasInert) {
+        app?.removeAttribute("inert");
+      }
+    };
+  }, []);
+
+  return createPortal(
+    <div
+      className="ohb-full-access-layer"
+      onClick={props.onDismiss}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          props.onDismiss();
+          return;
+        }
+        if (event.key !== "Tab") {
+          return;
+        }
+        if (event.shiftKey && document.activeElement === cancelRef.current) {
+          event.preventDefault();
+          confirmRef.current?.focus();
+        } else if (
+          !event.shiftKey &&
+          document.activeElement === confirmRef.current
+        ) {
+          event.preventDefault();
+          cancelRef.current?.focus();
+        }
+      }}
+      role="presentation"
+    >
+      <section
+        aria-describedby="ohb-full-access-description"
+        aria-labelledby="ohb-full-access-title"
+        aria-modal="true"
+        className="ohb-full-access-dialog"
+        onClick={(event) => {
+          event.stopPropagation();
+        }}
+        role="dialog"
+      >
+        <div className="ohb-full-access-heading">
+          <span aria-hidden="true" className="ohb-full-access-icon">
+            <ShieldAlert size={18} />
+          </span>
+          <h2 id="ohb-full-access-title">Enable full access?</h2>
+        </div>
+        <p id="ohb-full-access-description">
+          When enabled, the agent skips confirmations for subsequent actions
+          and may run commands, access the network, or modify workspace files.
+          You can switch back to the default permission at any time.
+        </p>
+        <div className="ohb-full-access-actions">
+          <button
+            className="ohb-full-access-cancel"
+            onClick={props.onDismiss}
+            ref={cancelRef}
+            title="Not now"
+            type="button"
+          >
+            Not now
+          </button>
+          <button
+            className="ohb-full-access-confirm"
+            onClick={props.onConfirm}
+            ref={confirmRef}
+            title="Use full access"
+            type="button"
+          >
+            <ShieldAlert aria-hidden="true" size={15} />
+            Use full access
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
   );
 }
 

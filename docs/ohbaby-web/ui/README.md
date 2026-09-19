@@ -34,7 +34,8 @@
 
 1. **不暴露诊断行**：`seqNum / clientId / 端口` 是开发者信息，用户不需要——保持简洁。正确性仍在内部强制执行（seqNum 基线对齐、Last-Event-ID 续传、resync），只通过 **ConnectionState 五态**对用户可见；底层游标供开发者从 devtools/日志查看，不进 UI。
 2. **权限用模态**：保留当前 inline bar 的视觉样式，但**实现为模态**——从底部**向上弹出（⏏️ slide-up）**。由 PendingPermission 队列驱动，resync 时自动刷新/关闭（见 [`components.md`](./components.md) PermissionModal、[`../use-case.md`](../use-case.md) UC3）。
-3. **mode/policy 切换纳入 v0.1.6**：mode 默认 auto，`⇧⇥` 切换 auto/plan，输入框以浅灰/浅黄描边反馈，不显示 mode 按钮；权限策略由框内底栏的灰手 / 红色感叹盾图标切换 default / full-access（见 [`../goals-duty.md`](../goals-duty.md) D3）。`full-access` 时不弹权限。
+3. **mode/policy 切换纳入 v0.1.6**：mode 默认 auto，`⇧⇥` 切换 auto/plan，输入框以浅灰/浅黄描边反馈，不显示 mode 按钮；权限策略由框内底栏的灰手 / 红色感叹盾图标切换 default / full-access（见 [`../goals-duty.md`](../goals-duty.md) D3）。default → full-access 先显示简约确认卡，主按钮获得初始焦点并支持 Enter 确认；full-access → default 直接降级。`full-access` 时不弹工具审批 PermissionModal。
+4. **对话层级与工具披露**：用户消息使用右侧浅天蓝气泡，Agent 回复保持无气泡正文，双方不显示可见角色标签但保留辅助技术可读的说话者名称；Lychee 品牌标识暂缓。工具调用为无边框披露行，所有状态默认收起，失败摘要静默；主动展开后仍可查看 Input / Output 与错误输出。
 
 ## 设计 token
 

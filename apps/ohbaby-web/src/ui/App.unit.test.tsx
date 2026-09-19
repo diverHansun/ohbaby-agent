@@ -575,6 +575,66 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelectorAll(".ohb-message")).toHaveLength(1);
   });
 
+  it("renders user prompts as right-aligned bubbles without role labels", () => {
+    const base = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...base,
+        sessions: [
+          {
+            ...base.sessions[0],
+            messages: [
+              {
+                createdAt: timestamp,
+                id: "message_user",
+                parts: [{ text: "Please inspect this", type: "text" }],
+                role: "user",
+              },
+              {
+                createdAt: timestamp,
+                id: "message_assistant",
+                parts: [{ text: "I will inspect it.", type: "text" }],
+                role: "assistant",
+              },
+              {
+                createdAt: timestamp,
+                id: "message_system",
+                parts: [{ text: "System note", type: "text" }],
+                role: "system",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(
+      app.container.querySelector(".ohb-message-user-bubble")?.textContent,
+    ).toContain("Please inspect this");
+    expect(
+      app.container.querySelector(".ohb-message-assistant-bare")?.textContent,
+    ).toContain("I will inspect it.");
+    expect(
+      app.container
+        .querySelector(".ohb-message-user")
+        ?.getAttribute("aria-label"),
+    ).toBe("User message");
+    expect(
+      app.container
+        .querySelector(".ohb-message-assistant")
+        ?.getAttribute("aria-label"),
+    ).toBe("Assistant message");
+    expect(
+      app.container
+        .querySelector(".ohb-message-system")
+        ?.getAttribute("aria-label"),
+    ).toBe("System message");
+    expect(app.container.querySelector(".ohb-message-label")).toBeNull();
+    expect(app.container.textContent).not.toContain("OHBABY");
+    expect(app.container.textContent).not.toContain("YOU");
+  });
+
   it("keeps an expanded tool panel attached to its call when parts reorder", async () => {
     const base = snapshotWithStatus({ kind: "idle" });
     const toolA = {
@@ -643,7 +703,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(panelByTitle("tool_b").querySelector("pre")).toBeNull();
   });
 
-  it("renders a paired failed call and result as one expanded card", () => {
+  it("keeps a failed tool call quiet until the user expands it", async () => {
     const base = snapshotWithStatus({ kind: "idle" });
     const fake = createFakeRuntime({
       snapshot: {
@@ -684,9 +744,26 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     expect(app.container.querySelectorAll(".ohb-tool-panel")).toHaveLength(1);
-    expect(app.container.textContent).toContain("failed");
-    expect(app.container.textContent).toContain("stderr text");
+    expect(app.container.textContent).not.toContain("failed");
+    expect(app.container.textContent).not.toContain("stderr text");
     expect(app.container.textContent).not.toContain("call_bash");
+
+    await act(async () => {
+      app.container
+        .querySelector<HTMLButtonElement>(".ohb-tool-panel button")
+        ?.click();
+      await Promise.resolve();
+    });
+
+    expect(
+      app.container.querySelector(".ohb-tool-input")?.textContent,
+    ).toContain('"command": "false"');
+    expect(
+      app.container.querySelector(".ohb-tool-output")?.textContent,
+    ).toContain("stderr text");
+    expect(
+      app.container.querySelector(".ohb-tool-output")?.textContent,
+    ).toContain("exit code 1");
   });
 
   it("renders an adaptive queued list and expands after five items", async () => {
@@ -2465,7 +2542,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
   });
 
-  it("cycles permission policy directly without opening a menu", async () => {
+  it("confirms full-access before changing permission policy", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
@@ -2485,8 +2562,196 @@ describe("OhbabyWebApp slash command interactions", () => {
       "Default: ask before protected actions. Click for full-access.",
     );
 
+    expect(fake.setPermission).not.toHaveBeenCalled();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain("Enable full access?");
+    expect(dialog?.textContent).toContain("Not now");
+    const confirm = Array.from(dialog?.querySelectorAll("button") ?? []).find(
+      (button) => button.textContent === "Use full access",
+    );
+    expect(document.activeElement).toBe(confirm);
+
+    await act(async () => {
+      confirm?.click();
+      await Promise.resolve();
+    });
+
+    expect(fake.setPermission).toHaveBeenCalledTimes(1);
     expect(fake.setPermission).toHaveBeenCalledWith({ level: "full-access" });
-    expect(app.container.querySelector(".ohb-policy-menu")).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("keeps an empty context ring separated in a conversation header", () => {
+    const snapshot = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshot,
+        sessions: snapshot.sessions.map((session) => ({
+          ...session,
+          messages: [
+            {
+              createdAt: timestamp,
+              id: "message_context_pending",
+              parts: [{ text: "hello", type: "text" }],
+              role: "user",
+            },
+          ],
+        })),
+      },
+    });
+    const app = mountApp(fake.runtime);
+    const statusbar = app.container.querySelector(".ohb-statusbar");
+
+    expect(
+      statusbar?.querySelector(
+        'button[aria-label="Context usage unavailable"]',
+      ),
+    ).not.toBeNull();
+    expect(statusbar?.querySelectorAll(".ohb-divider")).toHaveLength(2);
+  });
+
+  it("renders measured context usage in the conversation header", () => {
+    const snapshot = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshot,
+        contextWindowUsages: [
+          {
+            contextWindowRatio: 0.25,
+            contextWindowTokens: 200_000,
+            currentTokens: 50_000,
+            estimatedAt: timestamp,
+            modelId: "fake-model",
+            sessionId: "session_1",
+          },
+        ],
+        sessions: snapshot.sessions.map((session) => ({
+          ...session,
+          messages: [
+            {
+              createdAt: timestamp,
+              id: "message_context_measured",
+              parts: [{ text: "hello", type: "text" }],
+              role: "user",
+            },
+          ],
+        })),
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    expect(
+      app.container.querySelector(
+        '.ohb-statusbar button[aria-label^="25% context used"]',
+      ),
+    ).not.toBeNull();
+  });
+
+  it("leaves default permission unchanged when full-access confirmation is dismissed", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+
+    await clickButton(
+      app.container,
+      "Default: ask before protected actions. Click for full-access.",
+    );
+    await clickButton(document, "Not now");
+
+    expect(fake.setPermission).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(app.container.querySelector(".ohb-app")?.hasAttribute("inert")).toBe(
+      false,
+    );
+    expect(document.activeElement).toBe(
+      app.container.querySelector(".ohb-permission-toggle"),
+    );
+  });
+
+  it("traps confirmation focus and dismisses with Escape or the backdrop", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+    const permissionButton = app.container.querySelector(
+      ".ohb-permission-toggle",
+    );
+
+    await clickButton(
+      app.container,
+      "Default: ask before protected actions. Click for full-access.",
+    );
+    const confirm = document.querySelector<HTMLButtonElement>(
+      'button[title="Use full access"]',
+    );
+    const cancel =
+      document.querySelector<HTMLButtonElement>('button[title="Not now"]');
+    expect(app.container.querySelector(".ohb-app")?.hasAttribute("inert")).toBe(
+      true,
+    );
+
+    await act(async () => {
+      confirm?.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, key: "Tab" }),
+      );
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(cancel);
+    await act(async () => {
+      cancel?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Tab",
+          shiftKey: true,
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(confirm);
+
+    await act(async () => {
+      confirm?.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }),
+      );
+      await Promise.resolve();
+    });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(permissionButton);
+
+    await clickButton(
+      app.container,
+      "Default: ask before protected actions. Click for full-access.",
+    );
+    await act(async () => {
+      document.querySelector<HTMLDivElement>(".ohb-full-access-layer")?.click();
+      await Promise.resolve();
+    });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(fake.setPermission).not.toHaveBeenCalled();
+  });
+
+  it("returns from full-access to default without confirmation", async () => {
+    const snapshot = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshot,
+        permission: {
+          level: "full-access",
+          mode: "auto",
+          sessionRules: [],
+        },
+      },
+    });
+    const app = mountApp(fake.runtime);
+
+    await clickButton(
+      app.container,
+      "Full-access: run without approval prompts. Click for default.",
+    );
+
+    expect(fake.setPermission).toHaveBeenCalledWith({ level: "default" });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it("styles permission choices by their consequence", () => {
@@ -2531,6 +2796,13 @@ describe("OhbabyWebApp slash command interactions", () => {
       },
     });
     const app = mountApp(fake.runtime);
+
+    expect(
+      app.container.querySelector(".ohb-sidebar-new .lucide-square-pen"),
+    ).not.toBeNull();
+    expect(
+      app.container.querySelector(".ohb-sidebar-new .lucide-plus"),
+    ).toBeNull();
 
     expect(
       app.container.querySelector(".ohb-sidebar")?.hasAttribute("inert"),
@@ -2595,7 +2867,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const remove = Array.from(
       app.container.querySelectorAll('[role="menuitem"]'),
-    ).find((element) => element.textContent === "从项目栏移除");
+    ).find((element) => element.textContent === "Remove from project rail");
     if (!(remove instanceof HTMLButtonElement)) {
       throw new Error("remove project action not found");
     }

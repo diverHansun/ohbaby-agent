@@ -46,13 +46,18 @@ function usage(withComposition: boolean): UiContextWindowUsage {
   };
 }
 
-function render(usageValue: UiContextWindowUsage | null): HTMLDivElement {
+function render(
+  usageValue: UiContextWindowUsage | null,
+  sessionId = usageValue?.sessionId ?? "session_1",
+): HTMLDivElement {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   roots.push(root);
   act(() => {
-    root.render(<ContextUsageControl usage={usageValue} />);
+    root.render(
+      <ContextUsageControl sessionId={sessionId} usage={usageValue} />,
+    );
   });
   return container;
 }
@@ -64,10 +69,22 @@ function click(element: Element): void {
 }
 
 describe("ContextUsageControl", () => {
-  it("does not render an empty ring when usage is unavailable", () => {
+  it("keeps an honest empty ring when usage is unavailable", () => {
     const container = render(null);
+    const trigger = container.querySelector(".ohb-context-ring-button");
+    if (!trigger) {
+      throw new Error("context trigger missing");
+    }
 
-    expect(container.querySelector("button")).toBeNull();
+    expect(trigger.getAttribute("aria-label")).toBe(
+      "Context usage unavailable",
+    );
+    expect(container.querySelector(".ohb-context-ring-progress")).toBeNull();
+    click(trigger);
+
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain(
+      "Usage data is not available yet.",
+    );
   });
 
   it("opens a total-only detail without inventing composition rows", () => {
@@ -143,9 +160,27 @@ describe("ContextUsageControl", () => {
     act(() => {
       root.render(
         <ContextUsageControl
+          sessionId="session_2"
           usage={{ ...usage(true), sessionId: "session_2" }}
         />,
       );
+    });
+
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("closes unavailable detail when the active session changes", () => {
+    const container = render(null, "session_1");
+    const root = roots.at(-1);
+    const trigger = container.querySelector(".ohb-context-ring-button");
+    if (!root || !trigger) {
+      throw new Error("context test fixture missing");
+    }
+    click(trigger);
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+
+    act(() => {
+      root.render(<ContextUsageControl sessionId="session_2" usage={null} />);
     });
 
     expect(container.querySelector('[role="dialog"]')).toBeNull();
