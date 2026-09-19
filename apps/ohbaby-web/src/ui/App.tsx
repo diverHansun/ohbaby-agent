@@ -3337,9 +3337,9 @@ function FullAccessConfirmDialog(props: {
           <h2 id="ohb-full-access-title">Enable full access?</h2>
         </div>
         <p id="ohb-full-access-description">
-          When enabled, the agent skips confirmations for subsequent actions
-          and may run commands, access the network, or modify workspace files.
-          You can switch back to the default permission at any time.
+          When enabled, the agent skips confirmations for subsequent actions and
+          may run commands, access the network, or modify workspace files. You
+          can switch back to the default permission at any time.
         </p>
         <div className="ohb-full-access-actions">
           <button

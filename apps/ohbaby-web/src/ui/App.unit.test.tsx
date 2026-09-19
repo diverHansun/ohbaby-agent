@@ -2685,8 +2685,9 @@ describe("OhbabyWebApp slash command interactions", () => {
     const confirm = document.querySelector<HTMLButtonElement>(
       'button[title="Use full access"]',
     );
-    const cancel =
-      document.querySelector<HTMLButtonElement>('button[title="Not now"]');
+    const cancel = document.querySelector<HTMLButtonElement>(
+      'button[title="Not now"]',
+    );
     expect(app.container.querySelector(".ohb-app")?.hasAttribute("inert")).toBe(
       true,
     );
