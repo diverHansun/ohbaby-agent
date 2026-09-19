@@ -1063,7 +1063,7 @@ textarea:disabled {
   flex-direction: column;
   gap: 26px;
   margin: 0 auto;
-  max-width: 720px;
+  max-width: 800px;
   padding: 0 24px;
 }
 
@@ -1152,6 +1152,7 @@ textarea:disabled {
   background: transparent;
   border: 0;
   margin: 2px 0;
+  min-width: 0;
 }
 
 .ohb-tool-panel button {
@@ -1214,8 +1215,14 @@ textarea:disabled {
   border-radius: 7px;
   display: grid;
   gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
   margin: 2px 8px 10px;
+  min-width: 0;
   padding: 10px 12px;
+}
+
+.ohb-tool-details section {
+  min-width: 0;
 }
 
 .ohb-tool-details section > span {
@@ -1229,6 +1236,29 @@ textarea:disabled {
 
 .ohb-tool-details pre {
   color: #64676f;
+  max-height: 420px;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  word-break: break-word;
+}
+
+.ohb-tool-input pre {
+  max-height: 220px;
+}
+
+.ohb-tool-details pre::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ohb-tool-details pre::-webkit-scrollbar-thumb {
+  background: rgba(76, 86, 104, 0.18);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
 }
 
 .ohb-tool-blue button span:first-child {
