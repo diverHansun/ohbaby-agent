@@ -1,0 +1,118 @@
+{
+  "fixtureBytes": 125035,
+  "readCount": 2,
+  "passed": true,
+  "requests": [
+    {
+      "label": "file-read-0",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "protocol": "chat",
+      "endpoint": "https://zenmux.ai/api/v1/chat/completions",
+      "startedAt": "2026-09-22T01:45:33.459Z",
+      "requestBytes": 1556,
+      "inputTextEstimatedTokens": 150,
+      "inputHash": "d165a69f63121a0782de72c3081add6510013a86adc578d908e4aa5085174b19",
+      "toolCalls": [
+        {
+          "id": "call_00_0u1mAssyQrVDh6vuNSsZ3363",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"file_path\": \"/tmp/ohbaby-improve3-probe-20260922/fixture-long.output\", \"offset\": 0, \"limit\": 30}"
+          }
+        }
+      ],
+      "status": 200,
+      "durationMs": 2004,
+      "firstTextMs": 1693,
+      "finish": "tool_calls",
+      "usage": {
+        "completion_tokens": 102,
+        "prompt_tokens": 502,
+        "total_tokens": 604,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 502
+      },
+      "finalTextBytes": 74,
+      "finalTextEstimatedTokens": 19,
+      "reasoningBytes": 0,
+      "eventTypes": {
+        "chat.chunk": 60
+      }
+    },
+    {
+      "label": "file-read-1",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "protocol": "chat",
+      "endpoint": "https://zenmux.ai/api/v1/chat/completions",
+      "startedAt": "2026-09-22T01:45:35.465Z",
+      "requestBytes": 7368,
+      "inputTextEstimatedTokens": 1896,
+      "inputHash": "d18a31e382b9bcc91e3a09398ca6d98321e1296201870d4180fa8dd2d3c4941d",
+      "toolCalls": [
+        {
+          "id": "call_00_FToih6eqAkCq3xBHx7Dv6412",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"file_path\": \"/tmp/ohbaby-improve3-probe-20260922/fixture-long.output\", \"offset\": 275, \"limit\": 1}"
+          }
+        }
+      ],
+      "status": 200,
+      "durationMs": 1369,
+      "firstTextMs": 1024,
+      "finish": "tool_calls",
+      "usage": {
+        "completion_tokens": 107,
+        "prompt_tokens": 1658,
+        "total_tokens": 1765,
+        "prompt_tokens_details": {
+          "cached_tokens": 512
+        },
+        "prompt_cache_hit_tokens": 512,
+        "prompt_cache_miss_tokens": 1146
+      },
+      "finalTextBytes": 86,
+      "finalTextEstimatedTokens": 22,
+      "reasoningBytes": 0,
+      "eventTypes": {
+        "chat.chunk": 65
+      }
+    },
+    {
+      "label": "file-read-2",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "protocol": "chat",
+      "endpoint": "https://zenmux.ai/api/v1/chat/completions",
+      "startedAt": "2026-09-22T01:45:36.836Z",
+      "requestBytes": 7886,
+      "inputTextEstimatedTokens": 1942,
+      "inputHash": "82e8d037a26411235f7bee903eca1dd44a7d4961abb920471305aa66e19aa37c",
+      "toolCalls": [],
+      "status": 200,
+      "durationMs": 2497,
+      "firstTextMs": 2370,
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 21,
+        "prompt_tokens": 1804,
+        "total_tokens": 1825,
+        "prompt_tokens_details": {
+          "cached_tokens": 1664
+        },
+        "prompt_cache_hit_tokens": 1664,
+        "prompt_cache_miss_tokens": 140
+      },
+      "finalTextBytes": 57,
+      "finalTextEstimatedTokens": 15,
+      "reasoningBytes": 0,
+      "eventTypes": {
+        "chat.chunk": 24
+      }
+    }
+  ]
+}

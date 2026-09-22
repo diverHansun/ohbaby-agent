@@ -1,0 +1,284 @@
+{
+  "generated": {
+    "label": "generated-report",
+    "model": "deepseek/deepseek-v4.1-flash",
+    "protocol": "chat",
+    "endpoint": "https://zenmux.ai/api/v1/chat/completions",
+    "startedAt": "2026-09-22T01:44:02.264Z",
+    "requestBytes": 1019,
+    "inputTextEstimatedTokens": 121,
+    "inputHash": "d2a1e8b5c1e50e0c55b5d9765ed10a955b28cb376930145f0bc20a75e12588a4",
+    "status": 200,
+    "durationMs": 11466,
+    "firstTextMs": 2146,
+    "finish": "stop",
+    "usage": {
+      "completion_tokens": 1474,
+      "prompt_tokens": 163,
+      "total_tokens": 1637,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 163
+    },
+    "finalTextBytes": 6854,
+    "finalTextEstimatedTokens": 2919,
+    "reasoningBytes": 0,
+    "eventTypes": {
+      "chat.chunk": 1477
+    }
+  },
+  "notifications": [
+    {
+      "label": "deepseek-chat-short",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "protocol": "chat",
+      "endpoint": "https://zenmux.ai/api/v1/chat/completions",
+      "startedAt": "2026-09-22T01:44:13.733Z",
+      "requestBytes": 2172,
+      "inputTextEstimatedTokens": 466,
+      "inputHash": "e431f789b246077f4044ba8f2e264c3a33ba19ee78ddd744dcf7d5ac33f695ad",
+      "status": 200,
+      "durationMs": 1931,
+      "firstTextMs": 1800,
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 29,
+        "prompt_tokens": 397,
+        "total_tokens": 426,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 397
+      },
+      "finalTextBytes": 85,
+      "finalTextEstimatedTokens": 22,
+      "reasoningBytes": 0,
+      "eventTypes": {
+        "chat.chunk": 32
+      },
+      "assertionsPassed": true,
+      "reportBodyBytes": [
+        1024
+      ]
+    },
+    {
+      "label": "luna-responses-short",
+      "model": "openai/gpt-5.6-luna",
+      "protocol": "responses",
+      "endpoint": "https://zenmux.ai/api/v1/responses",
+      "startedAt": "2026-09-22T01:44:13.733Z",
+      "requestBytes": 2127,
+      "inputTextEstimatedTokens": 466,
+      "inputHash": "ea64671d49748d8c260385d1fa34b8b6e949de74c44144a69787b02301075b9b",
+      "status": 200,
+      "durationMs": 5927,
+      "firstTextMs": 5585,
+      "finish": "response.completed",
+      "usage": {
+        "input_tokens": 401,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0,
+          "web_search": 0
+        },
+        "output_tokens": 48,
+        "output_tokens_details": {
+          "reasoning_tokens": 14
+        },
+        "total_tokens": 449
+      },
+      "finalTextBytes": 85,
+      "finalTextEstimatedTokens": 22,
+      "reasoningBytes": 0,
+      "eventTypes": {
+        "response.created": 1,
+        "response.in_progress": 1,
+        "response.output_item.added": 2,
+        "response.output_item.done": 2,
+        "response.content_part.added": 1,
+        "response.output_text.delta": 28,
+        "response.output_text.done": 1,
+        "response.content_part.done": 1,
+        "response.completed": 1
+      },
+      "assertionsPassed": true,
+      "reportBodyBytes": [
+        1024
+      ]
+    },
+    {
+      "label": "sonnet-anthropic-short",
+      "model": "anthropic/claude-sonnet-5",
+      "protocol": "anthropic",
+      "endpoint": "https://zenmux.ai/api/anthropic/v1/messages",
+      "startedAt": "2026-09-22T01:44:13.733Z",
+      "requestBytes": 2144,
+      "inputTextEstimatedTokens": 466,
+      "inputHash": "187c5fb088ff93de0f4d13323eb3c7f88d47abb3fe6f078b9199e6171129fd1c",
+      "status": 200,
+      "durationMs": 9769,
+      "firstTextMs": 9636,
+      "finish": "end_turn",
+      "usage": {
+        "input_tokens": 964,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 75,
+        "service_tier": "standard",
+        "output_tokens_details": {
+          "thinking_tokens": 29
+        }
+      },
+      "finalTextBytes": 85,
+      "finalTextEstimatedTokens": 22,
+      "reasoningBytes": 0,
+      "eventTypes": {
+        "message_start": 1,
+        "content_block_start": 2,
+        "content_block_delta": 12,
+        "content_block_stop": 2,
+        "message_delta": 1,
+        "message_stop": 1
+      },
+      "assertionsPassed": true,
+      "reportBodyBytes": [
+        1024
+      ]
+    },
+    {
+      "label": "deepseek-chat-three-50k",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "protocol": "chat",
+      "endpoint": "https://zenmux.ai/api/v1/chat/completions",
+      "startedAt": "2026-09-22T01:44:23.503Z",
+      "requestBytes": 155166,
+      "inputTextEstimatedTokens": 50923,
+      "inputHash": "ffd34f6b22ae5d01f15558c9b669c4d2b84592af7ea4a90bb2e913f525f17309",
+      "status": 200,
+      "durationMs": 13404,
+      "firstTextMs": 13118,
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 69,
+        "prompt_tokens": 29193,
+        "total_tokens": 29262,
+        "prompt_tokens_details": {
+          "cached_tokens": 128
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 29065
+      },
+      "finalTextBytes": 195,
+      "finalTextEstimatedTokens": 49,
+      "reasoningBytes": 0,
+      "eventTypes": {
+        "chat.chunk": 72
+      },
+      "assertionsPassed": true,
+      "reportBodyBytes": [
+        51199,
+        51200,
+        51201
+      ]
+    },
+    {
+      "label": "luna-responses-three-50k",
+      "model": "openai/gpt-5.6-luna",
+      "protocol": "responses",
+      "endpoint": "https://zenmux.ai/api/v1/responses",
+      "startedAt": "2026-09-22T01:44:23.508Z",
+      "requestBytes": 155121,
+      "inputTextEstimatedTokens": 50923,
+      "inputHash": "e9ac70d3999ce4e8aaa6e77f1b0b5499d29724b35b754b6ae0e8e96a59101ab7",
+      "status": 200,
+      "durationMs": 4701,
+      "firstTextMs": 3765,
+      "finish": "response.completed",
+      "usage": {
+        "input_tokens": 29197,
+        "input_tokens_details": {
+          "cache_write_tokens": 29194,
+          "cached_tokens": 0,
+          "web_search": 0
+        },
+        "output_tokens": 96,
+        "output_tokens_details": {
+          "reasoning_tokens": 24
+        },
+        "total_tokens": 29293
+      },
+      "finalTextBytes": 195,
+      "finalTextEstimatedTokens": 49,
+      "reasoningBytes": 0,
+      "eventTypes": {
+        "response.created": 1,
+        "response.in_progress": 1,
+        "response.output_item.added": 2,
+        "response.output_item.done": 2,
+        "response.content_part.added": 1,
+        "response.output_text.delta": 49,
+        "response.output_text.done": 1,
+        "response.content_part.done": 1,
+        "response.completed": 1
+      },
+      "assertionsPassed": true,
+      "reportBodyBytes": [
+        51199,
+        51200,
+        51201
+      ]
+    },
+    {
+      "label": "sonnet-anthropic-three-50k",
+      "model": "anthropic/claude-sonnet-5",
+      "protocol": "anthropic",
+      "endpoint": "https://zenmux.ai/api/anthropic/v1/messages",
+      "startedAt": "2026-09-22T01:44:23.512Z",
+      "requestBytes": 155138,
+      "inputTextEstimatedTokens": 50923,
+      "inputHash": "cdf9dcb2cb8ceea17f717632565c7b598824ce335d9be5a982e225f5041844fd",
+      "status": 200,
+      "durationMs": 10617,
+      "firstTextMs": 9839,
+      "finish": "end_turn",
+      "usage": {
+        "input_tokens": 100246,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 114,
+        "service_tier": "standard",
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        }
+      },
+      "finalTextBytes": 207,
+      "finalTextEstimatedTokens": 52,
+      "reasoningBytes": 0,
+      "eventTypes": {
+        "message_start": 1,
+        "content_block_start": 1,
+        "content_block_delta": 19,
+        "content_block_stop": 1,
+        "message_delta": 1,
+        "message_stop": 1
+      },
+      "assertionsPassed": true,
+      "reportBodyBytes": [
+        51199,
+        51200,
+        51201
+      ]
+    }
+  ]
+}
