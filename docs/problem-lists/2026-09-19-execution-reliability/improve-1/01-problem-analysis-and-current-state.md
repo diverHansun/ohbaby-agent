@@ -50,3 +50,17 @@ GPT 刷新恢复后旧按钮曾点击未释放等待，尚未独立稳定复现�
 按 SWE 基础受力与工程实践：这里优先修跨层身份和生命周期契约，而非再加一套 server pending 真相源。将显示排序与请求处理分离，减少隐含耦合；以跨层行为测试检验，不用局部 mock 通过代替恢复正确。无需求支撑的跨进程协调和持久审批重放留在范围外。
 
 P1–P8 在 02 分阶段回应，在 04 的验收 ID 中逐项覆盖。模块职责路线由[总索引](../README.md)链接，原模块文档保持不变，新建模块 improve-x 说明目标修订，不把规划写成已实现。
+
+## 1.6 讨论后复核：恢复入口与错误传播（2026-09-21）
+
+本节是对第一版方案的补充审核；代码尚未改变，不能将方案漏洞误写成新引入的产品回归。P5/P6 的处理以修订后的 [02 §2.4](02-optimization-plan-and-change-scope.md#24-投影快照和客户端恢复) 为准。
+
+| 复核发现 | 当前代码锚点 | 对方案的影响 |
+|---|---|---|
+| 第一版要求读快照前后全局 seqNum 不变；聊天 delta 也走同一总线 | server `coordination/event-bus.ts`（EventBus）；`app/create-app.ts` snapshot 路由；Web `eventReducer.ts` 全局水位过滤 | 持续输出可让重试耗尽，审批不能靠等待全局静止恢复；改为 root 审批独立版本，全页一致性放 improve-1.1 |
+| client 注册与后端启动通过 getSnapshot 做额外初始化 | server `app/create-app.ts` start、POST /v1/clients；`coordination/client-view.ts` initializeClient | 必需初始化保留并拆出；注册只读会话元数据，不让历史加载阻断审批连接 |
+| 会话选择走 resume command 并继续读完整状态 | server PATCH /v1/sessions/:id/select；agent `adapters/ui-inprocess.ts` selectSession/readSnapshotWithPermission | 抽出可信、轻量的选择与范围确认；不能只把前端刷新删除而忽略服务端路由仍未完成 |
+| Web connect 的一个 try 同时负责 SSE、snapshot 和模型；hello 被忽略；审批复用 composer.disabled | Web `src/api/daemon/client.ts` doConnect/handleEvent、`events.ts` reader；`src/ui/App.tsx` PermissionModal | 拆审批就绪状态与恢复器，后续 hello 也重同步；UI 挂载不能等待完整快照 |
+| 普通领域 Bus 和 UI event-router 捕获订阅者异常 | agent `bus/bus.ts` publish；`adapters/ui-inprocess/event-router.ts` emit | 审批关键提交必须有显式同步错误传播；普通通知失败则使接收端恢复，不能静默挂起，也不能无故撤销全部审批 |
+
+这些是满足 D19/D20 所需的窄接线，不重做聊天/run/todo 的整页一致性，也不改变 TUI 的运行方式。新增测试分别落在 04 T11、T12a–h。
