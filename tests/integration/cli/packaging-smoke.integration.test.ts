@@ -7,9 +7,17 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { acquireCliPackageBuildLock } from "./package-build-lock";
 
@@ -638,12 +646,16 @@ describe("npm packed CLI smoke", () => {
         },
       );
     }
-  }, 240_000);
+  }, 480_000);
 });
 
 async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   const packDestination = join(tempRoot, "pack");
-  const npmCache = join(tempRoot, "npm-cache");
+  // Opt-in reuse avoids re-downloading large registry dependencies on retries.
+  // The install prefix and locally packed workspace artifacts remain fresh.
+  const npmCache = process.env.OHBABY_PACKAGING_NPM_CACHE
+    ? resolve(process.env.OHBABY_PACKAGING_NPM_CACHE)
+    : join(tempRoot, "npm-cache");
   const npmTmp = join(tempRoot, "npm-tmp");
   const prefix = join(tempRoot, "prefix");
   const npm = npmCommand();
@@ -652,6 +664,9 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   const cliCwd = join(tempRoot, "cli-cwd");
   const isolatedEnv = {
     ...process.env,
+    // pnpm's Vitest launcher exposes workspace dependencies through NODE_PATH.
+    // Installed-package checks must resolve only their installed dependency tree.
+    NODE_PATH: "",
     OHBABY_HOME: ohbabyHome,
     XDG_DATA_HOME: xdgDataHome,
   };
@@ -730,7 +745,9 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
         npm_config_tmp: npmTmp,
       },
       cwd: cliCwd,
-      timeoutMs: 180_000,
+      // A clean cache downloads every transitive/platform manifest and tarball.
+      // Keep this network-install budget separate from runtime search deadlines.
+      timeoutMs: 360_000,
     });
     expectSuccess(installResult, "npm install global packed ohbaby-cli");
   } catch (error) {
@@ -795,6 +812,56 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   expectSuccess(cliImportResult, "import installed ohbaby packages");
   expect(cliImportResult.stdout).toBe("");
   expect(cliImportResult.stderr).toBe("");
+
+  // The package must supply rg even when lifecycle scripts and system rg are
+  // unavailable. Probe the actual installed tool, not the development PATH.
+  const grepSmokePath = join(installedCliPackage, "installed-grep-smoke.mjs");
+  await writeFile(
+    grepSmokePath,
+    await readFile(
+      join(repoRoot, "tests/integration/cli/fixtures/installed-grep-smoke.mjs"),
+    ),
+  );
+  const grepResult = await runCommand({
+    command: process.execPath,
+    args: [grepSmokePath],
+    cwd: cliCwd,
+    env: {
+      ...isolatedEnv,
+      PATH: "",
+      Path: "",
+      RIPGREP_CONFIG_PATH: "nonexistent-config",
+    },
+    timeoutMs: 30_000,
+  });
+  expectSuccess(grepResult, "search from installed package without system rg");
+  const installedSearch = JSON.parse(grepResult.stdout) as {
+    searched: boolean;
+    binary: string;
+  };
+  expect(installedSearch.searched).toBe(true);
+  const platformPackage = dirname(dirname(installedSearch.binary));
+  expect(platformPackage.startsWith(await realpath(installedCliPackage))).toBe(
+    true,
+  );
+  const hiddenPlatformPackage = platformPackage + ".missing-test";
+  await rename(platformPackage, hiddenPlatformPackage);
+  try {
+    const missingResult = await runCommand({
+      command: process.execPath,
+      args: [grepSmokePath, "--expect-unavailable"],
+      cwd: cliCwd,
+      env: { ...isolatedEnv, PATH: "", Path: "" },
+      timeoutMs: 30_000,
+    });
+    expectSuccess(
+      missingResult,
+      "start installed runtime with missing optional rg platform package",
+    );
+    expect(JSON.parse(missingResult.stdout).unavailable).toBe(true);
+  } finally {
+    await rename(hiddenPlatformPackage, platformPackage);
+  }
 
   const ohbaby = installedOhbabyPath(prefix);
   const helpResult = await runCommand({

@@ -1,6 +1,30 @@
 # B. 独立文件工具增强
 
-> 整项可靠性改造前置。2026-09-24 按用户要求独立记录。Read/Grep 主要行为与输出预算、Edit/Write 完整修改及独立预算原则、Read/Edit 严格 UTF-8 规则已确认；显式 path/include 组合按用户授权采用 rg 原生行为。长行续接计数、Grep 编码/二进制处理及 Write 覆盖非 UTF-8 旧文件的边界均已确认；具体修改容量和内部资源契约仍需补齐，未实施。
+> 整项可靠性改造前置。2026-09-24 按用户要求独立记录。Read/Grep 主要行为与输出预算、Edit/Write 完整修改及独立预算原则、Read/Edit 严格 UTF-8 规则已确认；显式 path/include 组合按用户授权采用 rg 原生行为。长行续接计数、Grep 编码/二进制处理及 Write 覆盖非 UTF-8 旧文件的边界均已确认；具体修改容量和内部资源契约已在 S0 补齐，本地实施与验收记录见文末。下文讨论记录中的“未实施”保留原时点。
+
+## 2026-09-24 实施 S0：基线、具体预算与交接
+
+本次从包含 A 及其验收补修的开发分支 `codex/execution-reliability`（`b2e1c23b`）创建本地 `codex/execution-reliability-pre-b`，使用当前 checkout，不使用 worktree。下文早期“未实施”表述保留其讨论时点；本节记录本次工程细化，最终验收以文末实测记录为准。
+
+分享页访问受当前网络代理影响，已通过 Codex 本地任务“全面审核执行可靠性文档”回读此前约定：B 的容量和协议细化可由实施者结合现状确定，B 自身验收与 C 的共享保护验收分开。当前 focused 基线为四个工具共 25 项测试通过。
+
+| 边界 | 本次默认值 / 协议 | 依据与限制 |
+|---|---|---|
+| Read I/O | 16 KiB 块；每次扫描最多 64 MiB；完整 output 50 KiB | 按 offset 找行有显式开销上限；cursor 直接 seek，不重复扫描前文。不做索引、全文哈希或跨页句柄保留 |
+| Read cursor | 版本化 canonical base64url JSON，目标规范路径 hash、dev/ino/size/mtimeNs/ctimeNs、下一字节/行/行中位置 | 文件版本用 bigint 十进制保留精度；每次复查路径权限、打开句柄与路径版本，结束前复查。cursor 无签名，仅支持原样回传，不是授权或不可伪造凭据；手改行号不受支持 |
+| Read 兼容 | `nextCursor`、`hasMore`；未知 `lineCount` 省略，`lineEndingScope=scanned` | `mtimeMs` 保留原生数值供旧 Write 覆盖检查，不从纳秒转换丢精度。正文提供完整 cursor 和英文提示，模型元数据投影同步适配 |
+| Grep 分发 | 运行时依赖固定 `@vscode/ripgrep@1.18.0`，首次调用解析平台包 | 不走系统 PATH、不联网下载、不切引擎。安装产物测试与源代码单测分开 |
+| Grep 范围 | `--no-config --engine=default --hidden --no-ignore-global --no-ignore-parent --no-require-git`；自动遍历排除 `.git` | 搜索起点内项目忽略规则生效，即使没有 `.git`；不继承起点外的父目录/全局 ignore。显式文件与 include 保持 rg 原生优先级；工具说明公开这些行为 |
+| Grep 接收 | 单条 JSON 4 MiB，累计 stdout 16 MiB，stderr 64 KiB | 在解码/JSON parse 之前限制。超长原始记录可明确停止，不能伪装成无匹配；每行预览 2,000 UTF-8 字节，完整 output 50 KiB，不导出搜索结果 |
+| Grep 执行 | 调度器 `timeout.byTool.grep=30000`；停止复用 `killTree`，等待 child close | 不新增搜索计时器。`scanComplete`、`displayLimited`、`stopReason` 与正文对应；默认二进制检测可能不发 JSON 记录，无匹配保证明确限于文本范围 |
+| Edit | 原文件/结果各 10 MiB，old/new 输入各 10 MiB | 全文严格 UTF-8，old/new 和 Write content 的非法 UTF-16 代理字符在处理前拒绝，避免拆开 emoji 后低估字节数。先计算结果大小再构造；精确匹配线性扫描且不收集全部位置；模糊匹配另外受限 |
+| Edit 模糊匹配 | 工作文本 256 KiB，重叠匹配工作估算 8 MiB | 大内容仍可精确编辑；超预算提示提供精确 old_string，不以局部匹配冒充全文唯一 |
+| Write | 最终 UTF-8 内容 20 MiB，含保留的 UTF-8 BOM | 新建/覆盖同一预算。正常覆盖只读取旧文件头/元数据，不读旧全文；仍检查普通文件、路径权限和 expected_mtime_ms |
+| diff | 两侧输入合计 256 KiB，输出 32 KiB；当前保守预检查实际仅接受合计 ≤16,320 字节 | 在调用旧 diff renderer 前按保守大小上界决定是否省略；元数据同样有界。普通 Write 不生成 diff；dry_run 或 Edit 省略时明确说明，修改结果与预览分开 |
+
+这些容量不是“任意大文件”承诺：Read 的高 offset 可能触发扫描上限；Grep 超大单条 JSON 会给出不完整结果；Edit 模糊匹配比精确匹配容量更小。四个工具不再受同一个旧 1 MB 全文门槛约束。
+
+**B / C 验收分界：**B 保证一次调用持有的文件句柄及 rg 进程被实际观察结束，沿用既有 Edit/Write 文件锁；C02/C03/C05 的跨会话读写互斥、目录树保护、公平性和取消后共享保护释放留给 C。C2 的受信访问描述应从工具实际规范化目标生成：Read 文件读，Edit 文件读写，Write 文件写及覆盖检查，Grep 文件或目录树读，Glob/List 目录树读。B 不提前新增第二套共享锁或改 scheduler 容量。
 
 ## 已核实的现状
 
@@ -409,6 +433,65 @@ OpenCode `core/src/ripgrep.ts`、DeepSeek `tool-fs-search/src/grep.ts` 都仅在
 - 第三轮依赖 B 的范围读取能力，实施前检查接口及独立验收证据；未通过时不能承诺任意长报告可读。
 - `.output` 生成、归属登记、内部只读授权、通知和随会话清理由第三轮负责。系统用内部存储 API 导出报告，不要求子代理调用 write；Edit/Write 全面增强不是报告导出的技术前提。
 - 最终正文的选择见 [A](a-final-result.md)；共享文件保护及调度准入见 [C](c-concurrency-and-resource-protection.md)，不在 B 重建第二套锁和清理机制。
-- B 不新增 improve 编号，本次讨论不实施产品代码。
+- B 不新增 improve 编号；讨论阶段与本次本地实施分别记录。
 
 返回：[前置索引](prerequisite-follow-ups.md) · [总体路线](../README.md) · [第三轮](../improve-3/README.md)。
+
+
+## 2026-09-24 本地实施与验收记录
+
+### 实现落点
+
+- Read：`tools/utils/read-file-page.ts` 负责按块严格解码、受限扫描、原行号与长行 cursor；`tools/read.ts` 负责参数、权限及工具输出。分页按实际交付位置推进，取消和文件替换会关闭本次句柄。
+- Grep：`tools/utils/ripgrep-search.ts` 负责随包二进制、argv、受限 JSON 接收和进程结束；`tools/grep.ts` 负责结果及完整性提示。调度器沿现有配置提供 30 秒默认期限；模型元数据投影同步接通 cursor 与搜索完成状态。
+- Edit/Write：`mutation-budgets.ts` 分开修改、模糊匹配和 diff 预算；`edit-match.ts` 使用线性精确匹配并在构造前计算结果大小；`text-files.ts` 提供有界严格读取、三字节文件头检查、普通文件打开及原子提交。Write 普通覆盖不读取旧全文；rename 后的元数据读取失败报告成功加 warning，避免把已提交写入误报为失败。
+- 测试：新增跨工具调度集成、公共发布产物 Grep 检查和 opt-in 真实 HTTP/LLM E2E。发布测试通过公开 `createInProcessUiBackendClient` 驱动 Grep，安装禁用 scripts、搜索进程 PATH 为空；再移走可选平台包，验证启动成功且搜索明确失败，最后恢复包目录。
+
+### 审查修复
+
+Read、Grep、Edit/Write 分项子代理审查及整批 Standards/Spec 审查均已完成，修复后复审通过。审查实际推动的修复包括：
+
+1. Read 与 Edit/Write 在 POSIX FIFO 上可能阻塞于 open：打开前拒绝非普通文件，POSIX 使用 O_NONBLOCK，打开后复查文件类型并在取消时关闭句柄；真实 FIFO 和 stat/open 间替换用例覆盖该边界。
+2. Grep 故障子进程夹具原先依赖 POSIX shebang：改由 Node 显式启动真实子进程；保留 PID/退出检查，平台专有信号断言作平台区分。
+3. Edit 以单独代理字符拆开 emoji 时可能低估最终 UTF-8 大小：在匹配/分配前拒绝非法 UTF-16 输入，增加原字节不变的回归测试。
+
+### 验证记录
+
+本机 macOS arm64、Node v26.3.1、pnpm 9.15.0。结果按实际执行范围记录：
+
+| 检查 | 结果与证据 |
+|---|---|
+| `OHBABY_PACKAGING_NPM_CACHE=<已有缓存绝对路径> pnpm exec vitest run` | Pi 补修后的最终全量通过：365 个测试文件 passed、6 skipped；3904 个测试 passed、17 skipped，约 258 秒。包括既有回归、本次工具单测、跨工具调度集成、真实服务/CLI 进程和发布包安装；不设置该变量则默认空缓存 |
+| 发布包安装复验 | 已随最终全量通过：实际冷安装后，空 PATH 搜索及缺包明确失败均通过；NODE_PATH 隔离后不依赖开发仓库。可用 `pnpm exec vitest run tests/integration/cli/packaging-smoke.integration.test.ts` 单独重跑 |
+| `pnpm typecheck`、`pnpm lint`、`pnpm build` | 全部通过；构建包含 SDK、agent、server、CLI 与 Web |
+| 改动文件 Prettier、`git diff --check` | 通过；不改动无关文件格式 |
+| 真实 HTTP/LLM E2E | `OHBABY_RUN_REAL_FILE_TOOLS=1 pnpm exec vitest run --config tests/smoke/file-tools-real.vitest.config.ts`：1 passed，Pi 补修后最终运行约 83 秒；使用 `tests/models-4-tests.md` 对应的 `openai/gpt-5.6-luna`，12 次真实请求，四个文件工具与 cursor 调用完成，磁盘内容核验通过，权限错误为空 |
+
+E2E 通过进程内真实 HTTP listener、持久 runtime 和模型发起工具请求；API key 由既有测试配置从 `.env` 读取，不写入测试或记录。最终运行模型另外尝试一次夹具中不可用的 skill，收到失败后继续；这不是文件工具成功证据，也未被记成成功。此前同一流程另有 9 次请求、无额外工具失败的通过记录。可重新生成的脱敏证据位于忽略目录 `.ohbaby/test-evidence/pre-b/real-http.json`，不提交临时工作区或凭据。
+
+发布包测试的两次超时发生于外部 npm 元数据/包下载；测试中的冷安装期限由 180 秒调整为 360 秒、整个测试由 240 秒调整为 480 秒。搜索进程自己的 30 秒断言期限及产品调度期限不变。安装通过后缺包探针暴露测试环境污染：pnpm 的 Vitest 启动器通过 NODE_PATH 暴露开发仓库依赖，移走安装包后仍可从仓库加载 rg。使用同一安装产物在 Vitest 中定向复现为 RED；清空安装/运行子进程 NODE_PATH 后 GREEN。最终发布检查同时隔离系统 PATH 与开发 NODE_PATH。夹具另增强每次 provider 请求的 callId 结果观察及失败诊断，避免只检查仍启用 tools 的请求。冷安装和隔离后的缺包断言均曾随 3901 项全量通过。Pi 补修后再次冷安装遭遇外部包下载 120 秒请求超时，累计达到 360 秒，并连带使另一个 CLI 构建锁等待超时；这些失败与诊断保留记录，不归类为产品断言失败。发布测试新增可选 `OHBABY_PACKAGING_NPM_CACHE`，默认仍使用临时空缓存；最终回归用此前成功安装留下的 npm 内容缓存，安装 prefix、当前 workspace 的重新构建/打包、平台包隔离与全部断言仍为新的一次执行。最终结果以上表为准。
+
+### Pi 独立审核与补修
+
+使用用户指定模型 `github-copilot/claude-opus-5.5`，会话 `codex-pre-b-review-20260924`。第一轮发现一个必须修复问题：Read 对每个 16 KiB 块重复执行控制字符比例判断，合法 UTF-8 日志的短尾块可能被误判二进制，且结果随 cursor 边界变化。新增三个回归用例，先得到 2 failed / 24 passed；改为仅对起始块中的前 4096 字节执行比例判断，其余块继续做 NUL 与严格 UTF-8 检查。cursor 保持直接 seek；Read 26 项加跨工具集成 3 项全部通过，typecheck/lint 通过。同一 Pi 会话定向复审通过：独立重跑 29 项测试，并核验初始控制字符、晚出现的 NUL/非法 UTF-8、cursor 与整页边界，没有剩余必须修复问题。Pi 补修后的真实 HTTP/LLM E2E 已通过；补修后的最终全量 3904 项通过，详见上表。
+
+Pi 还独立报告完成 300 轮随机 cursor 重建测试，覆盖混合多字节、emoji、BOM、CRLF 和独立 CR，未发现内容不一致或 50 KiB 超限；这些是 Pi 报告的补充证据，不替代仓库自动化测试。
+
+对其非阻塞建议逐项处理：
+
+| 事项 | 本轮判断与后续处理 |
+|---|---|
+| rg 遇不可读文件会失败并不交付已收集匹配 | 保持已公开的失败语义；未伪装扫描完整。后续如要改成可用的部分结果，需另定错误、诊断和完整性接口 |
+| `--threads=1` 的吞吐折中 | 保留单次搜索一个工作线程，以限制多个搜索并发时的 CPU 使用；不承诺输出排序。大树吞吐低于 rg 默认线程数，后续结合调度容量与基准再调 |
+| `killTree` 的约 200 ms 终止宽限 | 复用现有清理语义，本轮不改公共进程树清理；后续优化须验证子孙进程，不应仅凭父进程 close 就认定进程组已空 |
+| rename 与调度器取消竞态 | 工具已避免 rename 后主动检查取消；外层 Promise.race 仍有“提交已发生但中断先被交付”的既有窗口。交给 C/调度器真实终态设计，不能据 B 的工具单测声称消除该窗口 |
+| diff 有效容量比输入预算小 | S0 明确补充保守预检查的实际合计 16,320 字节门槛。大修改仍完整执行，预览省略；局部 diff renderer 留后续 |
+| rg 解析受 `npm_config_arch` / `NODE_PATH` 影响 | 依赖沿 Node 和平台包的原生解析规则；应用未做下载或系统 PATH fallback，但这些运行环境变量可以影响解析。发布验收隔离 NODE_PATH；运行环境硬化与跨平台发布说明留后续 |
+
+
+### 后续边界
+
+- 本次本机平台为 macOS arm64。单测夹具已处理 Windows 启动差异，但未执行 Windows/Linux 原生测试；不能据依赖声明或本机结果宣称所有平台兼容。发布前仍需各目标平台 CI 验证随包 rg 安装及退出行为。
+- B 不承诺元数据检测等于严格快照，不为 cursor 加入授权语义，也不提供无限文件容量。64 MiB offset 扫描上限、4 MiB rg 单条记录上限及修改/diff 预算均为可见边界。
+- 跨会话读写互斥、目录树保护、公平调度与共享保护在取消后释放仍由 C 验收；本次未实施 C，不把本次资源关闭测试充作 C 验收。
+- 全部改动留在本地临时分支，按用户要求分批提交，不合并开发分支、不推送。
