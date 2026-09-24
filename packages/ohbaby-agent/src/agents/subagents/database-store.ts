@@ -199,7 +199,6 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
              ${columns.updatedAt} = ?
          WHERE ${columns.subagentId} = ?
            AND ${columns.closedAt} IS NULL
-           AND ${columns.status} <> 'cancelled'
          RETURNING *`,
       )
       .get(JSON.stringify(input), updatedAt, subagentId);
@@ -277,7 +276,7 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
          SET ${assignments.join(", ")}
          WHERE subagent_id = ?
            AND closed_at IS NULL
-           AND status NOT IN ('running', 'cancelled')
+           AND status <> 'running'
          RETURNING *`,
       )
       .get(...values, subagentId);

@@ -48,10 +48,15 @@ interface ActiveQueuedSubagentInput extends QueuedSubagentInput {
   unbindQueueAbort?: () => void;
 }
 
+interface EntryOutcome {
+  readonly item: SubagentInstanceRecord;
+  readonly paused?: true;
+}
+
 interface DeferredCompletion {
-  readonly promise: Promise<SubagentInstanceRecord>;
+  readonly promise: Promise<EntryOutcome>;
   reject(error: unknown): void;
-  resolve(record: SubagentInstanceRecord): void;
+  resolve(outcome: EntryOutcome): void;
 }
 
 interface DeferredClaim {
@@ -243,7 +248,7 @@ export class SessionSubagentHost {
       };
     }
 
-    const item = await this.enqueueOrSchedule(
+    const { item, paused } = await this.enqueueOrSchedule(
       record,
       input.prompt,
       input.environment,
@@ -254,11 +259,9 @@ export class SessionSubagentHost {
       isNew,
       reasoning,
     );
-    return {
-      item,
-      output: item.output,
-      success: item.status === "completed",
-    };
+    return paused
+      ? { item, paused, success: false }
+      : { item, output: item.output, success: item.status === "completed" };
   }
 
   async status(input: SubagentStatusInput): Promise<SubagentStatusResult> {
@@ -285,9 +288,14 @@ export class SessionSubagentHost {
         active.pauseController.abort("subagent closed");
         active.abortController?.abort("subagent closed");
       }
+      const reason =
+        item.currentRunId !== undefined || item.pendingQueue.length > 0
+          ? "subagent closed"
+          : undefined;
       const closedAt = this.now();
       const updated = await this.options.store.update(input.subagentId, {
         closedAt,
+        ...(reason === undefined ? {} : { error: reason, output: reason }),
         completedAt:
           item.currentRunId === undefined ? item.completedAt : closedAt,
         currentInput: undefined,
@@ -306,7 +314,11 @@ export class SessionSubagentHost {
           ? {}
           : { runId: item.currentRunId }),
       });
-      return { item: updated, previousStatus };
+      return {
+        item: updated,
+        previousStatus,
+        ...(reason === undefined ? {} : { reason }),
+      };
     });
   }
 
@@ -563,7 +575,7 @@ export class SessionSubagentHost {
     signal?: AbortSignal,
     entryAlreadyQueued = false,
     reasoning?: ReasoningIntent,
-  ): Promise<SubagentInstanceRecord> {
+  ): Promise<EntryOutcome> {
     if (this.disposed) {
       await this.markOwnedInterrupted(record.parentSessionId);
       throw new Error("Subagent host is disposed");
@@ -672,7 +684,9 @@ export class SessionSubagentHost {
       );
     }
     if (!waitForEntry && scheduled.pendingSettlement !== undefined) {
-      return await this.mustGet(record.parentSessionId, record.subagentId);
+      return {
+        item: await this.mustGet(record.parentSessionId, record.subagentId),
+      };
     }
     await scheduled.claimCompletion.promise;
     return await this.awaitCompletionOrGet(
@@ -737,7 +751,7 @@ export class SessionSubagentHost {
               return { pausedForeground, pausedItem };
             },
           );
-          this.resolveQueuedCompletions(pausedForeground, pausedItem);
+          this.resolveQueuedCompletions(pausedForeground, pausedItem, true);
           return;
         }
         let next: ActiveQueuedSubagentInput | undefined;
@@ -822,7 +836,7 @@ export class SessionSubagentHost {
                 effectiveTimeoutMs,
               )
             : await this.finishInterruptedRun(record, runId, pauseReason);
-        next.completion?.resolve(item);
+        next.completion?.resolve({ item });
         inFlight = undefined;
         const drainAfterInterrupt = active.drainAfterInterrupt;
         const lastRunSettled = active.lastRunSettled;
@@ -855,7 +869,7 @@ export class SessionSubagentHost {
             return { pausedForeground, pausedItem };
           },
         );
-        this.resolveQueuedCompletions(pausedForeground, pausedItem);
+        this.resolveQueuedCompletions(pausedForeground, pausedItem, true);
         return;
       }
     } catch (error) {
@@ -1087,10 +1101,11 @@ export class SessionSubagentHost {
   private resolveQueuedCompletions(
     queue: readonly ActiveQueuedSubagentInput[],
     item: SubagentInstanceRecord,
+    paused?: true,
   ): void {
     for (const queued of queue) {
       queued.unbindQueueAbort?.();
-      queued.completion?.resolve(item);
+      queued.completion?.resolve({ item, ...(paused ? { paused } : {}) });
     }
   }
 
@@ -1200,14 +1215,12 @@ export class SessionSubagentHost {
   }
 
   private createDeferredCompletion(): DeferredCompletion {
-    let resolve!: (record: SubagentInstanceRecord) => void;
+    let resolve!: (outcome: EntryOutcome) => void;
     let reject!: (error: unknown) => void;
-    const promise = new Promise<SubagentInstanceRecord>(
-      (innerResolve, innerReject) => {
-        resolve = innerResolve;
-        reject = innerReject;
-      },
-    );
+    const promise = new Promise<EntryOutcome>((innerResolve, innerReject) => {
+      resolve = innerResolve;
+      reject = innerReject;
+    });
     void promise.catch(() => undefined);
     return { promise, reject, resolve };
   }
@@ -1240,9 +1253,9 @@ export class SessionSubagentHost {
     parentSessionId: string,
     subagentId: string,
     completion: DeferredCompletion | undefined,
-  ): Promise<SubagentInstanceRecord> {
+  ): Promise<EntryOutcome> {
     if (!completion) {
-      return await this.mustGet(parentSessionId, subagentId);
+      return { item: await this.mustGet(parentSessionId, subagentId) };
     }
     return await completion.promise;
   }

@@ -69,7 +69,12 @@ function runMode(params: Record<string, unknown>): SubagentRunMode {
 
 function renderRun(result: SubagentRunResult): string {
   const pending = result.item.pendingQueue.length > 0;
-  const settled = !pending && result.item.currentRunId === undefined;
+  // Foreground calls carry their own completion snapshot, which may still
+  // include inputs queued for later turns. Background calls carry only item.
+  const hasCompletion = result.paused !== true && result.success !== undefined;
+  const settled =
+    result.paused !== true &&
+    (hasCompletion || (!pending && result.item.currentRunId === undefined));
   const error =
     result.item.error ?? (result.success === false ? result.output : undefined);
   const completed =
@@ -79,7 +84,10 @@ function renderRun(result: SubagentRunResult): string {
     `subagent_id: ${result.item.subagentId}`,
     `session_id: ${result.item.sessionId}`,
     `context_scope_id: ${result.item.contextScopeId}`,
-    `status: ${pending ? "queued" : result.item.status}`,
+    `status: ${result.paused ? "paused" : pending && !hasCompletion ? "queued" : result.item.status}`,
+    result.paused
+      ? "program_note: Input remains queued and has not run. Resume the subagent to continue."
+      : undefined,
     pending
       ? `pending_inputs: ${String(result.item.pendingQueue.length)}`
       : undefined,
@@ -137,6 +145,9 @@ function renderClose(result: SubagentCloseResult): string {
     `previous_status: ${result.previousStatus}`,
     `subagent_id: ${result.item.subagentId}`,
     `status: ${result.item.status}`,
+    ...(result.reason
+      ? [`<subagent_error>\n${result.reason}\n</subagent_error>`]
+      : []),
   ].join("\n");
 }
 

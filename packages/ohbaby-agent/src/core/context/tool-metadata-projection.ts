@@ -148,6 +148,11 @@ export function projectToolMetadataForModel(
       const subagent = nestedMetadata(metadata, "subagent");
       const item =
         subagent === undefined ? undefined : nestedMetadata(subagent, "item");
+      const paused = subagent?.paused === true;
+      const queued =
+        subagent?.success === undefined &&
+        Array.isArray(item?.pendingQueue) &&
+        item.pendingQueue.length > 0;
       return subagent === undefined || item === undefined
         ? {}
         : {
@@ -158,9 +163,12 @@ export function projectToolMetadataForModel(
               "role",
               "name",
               "description",
-              "status",
-              "error",
             ]),
+            ...(paused
+              ? { status: "paused", paused: true }
+              : queued
+                ? { status: "queued" }
+                : copyMetadataFields(item, ["status", "error"])),
             ...copyMetadataFields(subagent, ["success"]),
           };
     }
@@ -193,7 +201,7 @@ export function projectToolMetadataForModel(
       return item === undefined
         ? copyMetadataFields(metadata, ["error"])
         : {
-            ...copyMetadataFields(close ?? {}, ["previousStatus"]),
+            ...copyMetadataFields(close ?? {}, ["previousStatus", "reason"]),
             ...copyMetadataFields(item, [
               "subagentId",
               "sessionId",
@@ -202,7 +210,6 @@ export function projectToolMetadataForModel(
               "name",
               "description",
               "status",
-              "error",
             ]),
           };
     }

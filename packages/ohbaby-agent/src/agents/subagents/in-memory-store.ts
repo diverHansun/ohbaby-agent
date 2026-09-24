@@ -58,7 +58,7 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     if (!existing) {
       return Promise.reject(new Error(`Subagent not found: ${subagentId}`));
     }
-    if (existing.closedAt !== undefined || existing.status === "cancelled") {
+    if (existing.closedAt !== undefined) {
       return Promise.resolve(null);
     }
     const updated: SubagentInstanceRecord = {
@@ -109,11 +109,7 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     if (!existing) {
       return Promise.reject(new Error(`Subagent not found: ${subagentId}`));
     }
-    if (
-      existing.closedAt !== undefined ||
-      existing.status === "running" ||
-      existing.status === "cancelled"
-    ) {
+    if (existing.closedAt !== undefined || existing.status === "running") {
       return Promise.resolve(null);
     }
     const claimed = { ...existing, ...update };

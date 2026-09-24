@@ -56,6 +56,21 @@ describe("tool metadata projection", () => {
     });
   });
 
+  it("does not project a previous error as a background queued input's result", () => {
+    expect(
+      projectToolMetadataForModel("subagent_run", {
+        subagent: {
+          item: {
+            subagentId: "child",
+            status: "interrupted",
+            error: "previous failure",
+            pendingQueue: [{ prompt: "next" }],
+          },
+        },
+      }),
+    ).toEqual({ subagentId: "child", status: "queued" });
+  });
+
   it("projects only the shell job fields for task tools", () => {
     expect(
       projectToolMetadataForModel("task_output", {

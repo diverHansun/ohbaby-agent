@@ -67,6 +67,8 @@ export interface SubagentRunInput {
 }
 
 export interface SubagentRunResult {
+  /** This input is retained in the queue and has not run. */
+  readonly paused?: true;
   readonly item: SubagentInstanceRecord;
   readonly output?: string;
   readonly success?: boolean;
@@ -82,6 +84,7 @@ export interface SubagentStatusResult {
 }
 
 export interface SubagentCloseResult {
+  readonly reason?: string;
   readonly item: SubagentInstanceRecord;
   readonly previousStatus: SubagentInstanceStatus;
 }

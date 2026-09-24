@@ -2,6 +2,43 @@ import { describe, expect, it } from "vitest";
 import { InMemorySubagentInstanceStore } from "./in-memory-store.js";
 
 describe("InMemorySubagentInstanceStore", () => {
+  it.each([false, true])(
+    "admits cancelled instances only when not closed (closed=%s)",
+    async (closed) => {
+      const store = new InMemorySubagentInstanceStore();
+      await store.create({
+        contextScopeId: "cancelled_scope",
+        createdAt: 1,
+        initialPrompt: "first",
+        parentSessionId: "parent_1",
+        pendingQueue: [],
+        role: "explore",
+        sessionId: "child_1",
+        status: "cancelled",
+        subagentId: "cancelled_child",
+        updatedAt: 1,
+        ...(closed ? { closedAt: 0 } : {}),
+      });
+      const queued = await store.appendPendingQueue(
+        "cancelled_child",
+        { prompt: "resume" },
+        2,
+      );
+      const claimed = await store.claim("cancelled_child", {
+        currentRunId: "next",
+        status: "running",
+        updatedAt: 3,
+      });
+      if (closed) {
+        expect(queued).toBeNull();
+        expect(claimed).toBeNull();
+      } else {
+        expect(queued?.pendingQueue).toEqual([{ prompt: "resume" }]);
+        expect(claimed?.status).toBe("running");
+      }
+    },
+  );
+
   it("claims only once and prevents late run completion from overwriting close", async () => {
     const store = new InMemorySubagentInstanceStore();
     await store.create({

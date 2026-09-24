@@ -17,6 +17,8 @@ import type {
   SubagentInstanceUpdate,
 } from "./subagents/types.js";
 import { SessionSubagentHost } from "./subagent-host.js";
+import { createSubagentTools } from "../tools/subagent.js";
+import { formatToolResultContentForModel } from "../core/context/tool-metadata-projection.js";
 
 const parent: Session = {
   agentName: "build",
@@ -165,6 +167,204 @@ function flushMicrotasks(): Promise<void> {
 }
 
 describe("SessionSubagentHost", () => {
+  it.each(["body", "empty", "failed", "interrupted", "timed_out"] as const)(
+    "delivers the foreground %s result even with a later background input queued",
+    async (outcome) => {
+      const { host, turn } = createHostFixture();
+      let release!: (result: AgentRunResult) => void;
+      let started!: () => void;
+      const startedPromise = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      turn.mockImplementationOnce(
+        () =>
+          new Promise<AgentRunResult>((resolve) => {
+            release = resolve;
+            started();
+          }),
+      );
+      const tool = createSubagentTools(host).find(
+        (candidate) => candidate.name === "subagent_run",
+      );
+      if (!tool) throw new Error("Missing subagent_run tool");
+      const first = tool.execute(
+        {
+          prompt: "first",
+          role: "explore",
+          ...(outcome === "timed_out" ? { timeout_ms: 100 } : {}),
+        },
+        {
+          callId: "first",
+          messageId: "message",
+          sessionId: "parent_1",
+          signal: new AbortController().signal,
+        },
+      );
+      await startedPromise;
+      try {
+        await host.run({
+          mode: "background",
+          parentSessionId: "parent_1",
+          subagentId: "subagent_1",
+          prompt: "second",
+        });
+        if (outcome !== "timed_out") {
+          release(
+            outcome === "body" || outcome === "empty"
+              ? {
+                  mode: "waitForCompletion",
+                  sessionId: "child_1",
+                  success: true,
+                  finalOutput: outcome === "body" ? "FIRST REPORT" : "",
+                }
+              : {
+                  mode: "waitForCompletion",
+                  sessionId: "child_1",
+                  success: false,
+                  runStatus: outcome,
+                  error: "first turn stopped",
+                },
+          );
+        }
+        const result = await first;
+        expect(result.output).not.toContain("status: queued");
+        expect(result.output).toContain("pending_inputs: 1");
+        if (outcome === "body") {
+          expect(result.output).toContain(
+            "<subagent_output>\nFIRST REPORT\n</subagent_output>",
+          );
+        } else if (outcome === "empty") {
+          expect(result.output).toContain("program_note: No output.");
+        } else {
+          expect(result.output).toContain(`status: ${outcome}`);
+          expect(result.output).toContain("<subagent_error>");
+          expect(result.output).not.toContain("<subagent_output>");
+        }
+      } finally {
+        release({
+          mode: "waitForCompletion",
+          sessionId: "child_1",
+          success: true,
+          finalOutput: "late",
+        });
+        await host.dispose();
+      }
+    },
+  );
+
+  it.each(["failed", "cancelled", "interrupted", "timed_out"] as const)(
+    "does not deliver an earlier %s turn as a paused foreground input's result",
+    async (outcome) => {
+      const { host, turn } = createHostFixture();
+      let release!: (result: AgentRunResult) => void;
+      let started!: () => void;
+      const startedPromise = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      turn.mockImplementationOnce(
+        () =>
+          new Promise<AgentRunResult>((resolve) => {
+            release = resolve;
+            started();
+          }),
+      );
+      const first = await host.run({
+        mode: "background",
+        parentSessionId: "parent_1",
+        role: "explore",
+        prompt: "first",
+        ...(outcome === "timed_out" ? { timeoutMs: 100 } : {}),
+      });
+      await startedPromise;
+      const tool = createSubagentTools(host).find(
+        (candidate) => candidate.name === "subagent_run",
+      );
+      if (!tool) throw new Error("Missing subagent_run tool");
+      try {
+        const second = tool.execute(
+          { subagent_id: first.item.subagentId, prompt: "second" },
+          {
+            callId: "second",
+            messageId: "message",
+            sessionId: "parent_1",
+            signal: new AbortController().signal,
+          },
+        );
+        await flushMicrotasks();
+        if (outcome !== "timed_out")
+          release({
+            mode: "waitForCompletion",
+            sessionId: "child_1",
+            success: false,
+            runStatus: outcome,
+            error: "first failed",
+          });
+        const result = await second;
+        const visible = formatToolResultContentForModel({
+          tool: "subagent_run",
+          content: result.output ?? "",
+          metadata: result.metadata,
+        });
+        expect(visible).toContain("status: paused");
+        expect(visible).toContain("has not run");
+        expect(visible).not.toContain("first failed");
+        expect(visible).not.toContain("Subagent timed out");
+        expect(visible).not.toContain("<subagent_error>");
+        expect(visible).not.toContain("<subagent_output>");
+        expect(turn).toHaveBeenCalledTimes(1);
+        expect(
+          (await host.status({ parentSessionId: "parent_1" })).items[0]
+            ?.pendingQueue,
+        ).toEqual([{ prompt: "second" }]);
+      } finally {
+        release({
+          mode: "waitForCompletion",
+          sessionId: "child_1",
+          success: true,
+          finalOutput: "late",
+        });
+        await host.dispose();
+      }
+    },
+  );
+
+  it("does not present the old failure as the reason for closing an idle instance", async () => {
+    const { host, turn } = createHostFixture();
+    turn.mockResolvedValueOnce({
+      mode: "waitForCompletion",
+      sessionId: "child_1",
+      success: false,
+      error: "old failure",
+    });
+    const first = await host.run({
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      prompt: "first",
+      role: "explore",
+    });
+    const tool = createSubagentTools(host).find(
+      (candidate) => candidate.name === "subagent_close",
+    );
+    if (!tool) throw new Error("Missing subagent_close tool");
+    const result = await tool.execute(
+      { subagent_id: first.item.subagentId },
+      {
+        callId: "close",
+        messageId: "message",
+        sessionId: "parent_1",
+        signal: new AbortController().signal,
+      },
+    );
+    expect(
+      formatToolResultContentForModel({
+        tool: "subagent_close",
+        content: result.output ?? "",
+        metadata: result.metadata,
+      }),
+    ).not.toContain("old failure");
+    await host.dispose();
+  });
+
   it("counts a background child turn but not its completed record", async () => {
     const { host, turn } = createHostFixture();
     let release!: (result: AgentRunResult) => void;
@@ -235,6 +435,15 @@ describe("SessionSubagentHost", () => {
 
     expect(result.item.status).toBe("cancelled");
     expect(result.item.error).toBe("run cancelled by owner");
+    expect(result.item.closedAt).toBeUndefined();
+    await expect(
+      host.run({
+        mode: "foreground",
+        parentSessionId: "parent_1",
+        subagentId: result.item.subagentId,
+        prompt: "resume",
+      }),
+    ).resolves.toMatchObject({ success: true, output: "subagent output" });
     await host.dispose();
   });
   it("inherits the invoking parent context instead of another sibling scope", async () => {
@@ -577,7 +786,20 @@ describe("SessionSubagentHost", () => {
       throw new Error("Expected running subagent");
     }
 
-    await host.close({ parentSessionId: "parent_1", subagentId });
+    const closeTool = createSubagentTools(host).find(
+      (tool) => tool.name === "subagent_close",
+    );
+    if (!closeTool) throw new Error("Missing subagent_close tool");
+    const closed = await closeTool.execute(
+      { subagent_id: subagentId },
+      {
+        callId: "close",
+        messageId: "message",
+        sessionId: "parent_1",
+        signal: new AbortController().signal,
+      },
+    );
+    expect(closed.output).toContain("subagent closed");
     resolveTurn();
     const result = await running;
 
@@ -589,6 +811,8 @@ describe("SessionSubagentHost", () => {
       subagentId,
     });
     expect(result.success).toBe(false);
+    expect(result.item.error).toBe("subagent closed");
+    expect(result.output).toBe("subagent closed");
     await expect(
       host.status({ parentSessionId: "parent_1", subagentId }),
     ).resolves.toMatchObject({
