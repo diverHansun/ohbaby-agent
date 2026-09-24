@@ -1,6 +1,18 @@
 # A. 最终结果提取
 
-> 整项可靠性改造前置。2026-09-24 按用户要求独立记录，随逐项讨论更新。已确认最终正文返回链、过程展示、正常空正文及失败/中断交付规则；调用方兼容与完整验收接线待补充，未实施。
+> 整项可靠性改造前置。2026-09-24 按用户要求独立记录，随逐项讨论更新。已确认最终正文返回链、过程展示、正常空正文及失败/中断交付规则；本地临时分支 `codex/execution-reliability-pre-a` 已实施并验收，尚未合回开发分支。
+
+## 2026-09-24 本地实施记录
+
+- `RunManager` 只在成功 completion 中传递本次 lifecycle 的 `finalResponse`；runner 的等待路径直接使用该字段，保留空字符串，不再查询整个 session/context scope 的历史来挑选最后一条非空消息。旧的 `extractFinalOutput` 导出仍保留供兼容，但生产等待路径不再调用它。
+- `AgentRunResult.runStatus` 保留 `succeeded`、`failed`、`cancelled`、`interrupted` 的真实结束事实；失败结果只携带原因，不带 `finalOutput`。子代理 host 把取消或中断保留为对应状态，不把它们记成普通失败。
+- `subagent_run` 和 `subagent_status` 仅对已完成、无当前 run、无待处理输入的空结果显示 `program_note: No output.`。后台排队时不回显上一轮结果；若后台执行在返回前已完成，显示本次结果。失败原因在 `<subagent_error>` 中显示，不包装成 `<subagent_output>`。
+- 测试覆盖本次正文、旧历史隔离、正常空正文、仅有 reasoning、失败和取消、前台/后台工具输出，以及完整 composition 的父子代理链。普通主会话 stream 与 Web 的工具和追问展示通过编译产物服务的浏览器 E2E 核对；刷新后消息和会话身份保持一致。
+- 2026-09-24 本地证据：全量 unit `2807 passed, 2 skipped`；全量 integration `546 passed`；子代理 composition E2E `6 passed`，其中受控 provider 先发片段再断流或被取消的用例确认原 scope 历史留片段、父代理只收到对应终态与原因；类型检查、lint、构建、格式检查及 compiled Web 浏览器 E2E 通过。
+
+子代理只读审查未发现确定的严重或重要缺陷，并指出后台结果展示的两个竞态；两者已修复并经红绿测试验证。部分正文后超时和中断尚未各自新增跨层端到端用例；目前由 lifecycle 与 host 的定向测试覆盖，不把单元证据写成这两个跨层场景都已逐一通过。
+
+本批未改变 reasoning 持久化或历史页面；前者由 improve-1.1、后者由第三轮负责。测试中的 reasoning-only 子代理最终正文为空，其即时 reasoning 仍按现有链路处理，不把它当报告。
 
 ## 已核实的现状
 

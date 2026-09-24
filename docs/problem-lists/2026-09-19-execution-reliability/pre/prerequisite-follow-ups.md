@@ -4,7 +4,7 @@
 
 | 工作 | 独立文档 | 当前进度 |
 |---|---|---|
-| A 最终结果提取 | [a-final-result.md](a-final-result.md) | 已确认正文返回链、过程展示、正常空正文提示及失败/中断只交付终态与原因；兼容和验收接线待补充 |
+| A 最终结果提取 | [a-final-result.md](a-final-result.md) | 本地临时分支已实施并验收，尚未合回开发分支；正文返回链、空正文提示及失败/中断区分见实施记录 |
 | B 文件工具增强 | [b-file-tools.md](b-file-tools.md) | 主要行为、Bash 显式替代、长行续接计数及英文工具说明要求已确认；Grep 原生编码识别、二进制检测及 Write 覆盖非 UTF-8 旧文件已确认，具体容量与验收接线待补齐 |
 | C 并发与资源保护 | [c-concurrency-and-resource-protection.md](c-concurrency-and-resource-protection.md) | 锁与超时分工、每会话普通容量及计数范围已确认；第二/四轮开始记录已统一；Grep 按文件或整个目录树声明读范围，由 C 统一保护，不另建锁；具体接线和验收证据仍须补齐 |
 
