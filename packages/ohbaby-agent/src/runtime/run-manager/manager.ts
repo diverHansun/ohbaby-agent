@@ -69,6 +69,9 @@ function completionFromResult(result: RunWorkerResult): RunCompletion {
   if (result.status === "succeeded") {
     return {
       status: "succeeded",
+      ...(result.result === undefined
+        ? {}
+        : { finalResponse: result.result.finalResponse }),
       ...(terminalReason === undefined ? {} : { terminalReason }),
       ...(usage === undefined ? {} : { usage }),
     };

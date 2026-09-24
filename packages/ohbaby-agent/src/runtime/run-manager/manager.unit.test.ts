@@ -857,6 +857,23 @@ it("freezes accepted run reasoning and isolates sibling context scopes", async (
 });
 
 describe("RunManager", () => {
+  it("passes the lifecycle's final body through this run's completion", async () => {
+    const { manager } = createManager(new SessionLifecycle());
+    const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await expect(
+      manager.waitForCompletion(record.runId),
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      finalResponse: "Hello",
+    });
+  });
+
   it("starts a session run without preassembled messages", async () => {
     const lifecycle = new SessionLifecycle();
     const { manager, bridge } = createManager(lifecycle);
@@ -870,6 +887,7 @@ describe("RunManager", () => {
     });
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "Hello",
     });
 
     expect(record.runId).toBe("run_explicit");
@@ -1184,6 +1202,7 @@ describe("RunManager", () => {
     });
     await expect(manager.waitForCompletion(sibling.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "",
     });
 
     lifecycle.firstFinish.resolve(undefined);
@@ -1195,6 +1214,7 @@ describe("RunManager", () => {
     );
     await expect(manager.waitForCompletion(next.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "",
     });
   });
 
@@ -1210,6 +1230,7 @@ describe("RunManager", () => {
 
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "done",
       usage: {
         inputTokens: 7,
         outputTokens: 5,
@@ -1335,6 +1356,7 @@ describe("RunManager", () => {
     });
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "done",
     });
 
     const toolStart = bridge.events.find(
@@ -1387,6 +1409,7 @@ describe("RunManager", () => {
     });
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "done",
     });
 
     expect(
@@ -1513,6 +1536,7 @@ describe("RunManager", () => {
 
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "Hello",
     });
     expect(sandboxManager.released).toEqual(["lease_session_1"]);
     expect(bridge.endedScopes).toEqual(["run/run_override"]);
@@ -1534,6 +1558,7 @@ describe("RunManager", () => {
 
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "Hello",
     });
     await expect(ledger.get(record.runId)).resolves.toMatchObject({
       status: "succeeded",
@@ -1623,6 +1648,7 @@ describe("RunManager", () => {
     });
     await expect(manager.waitForCompletion(second.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "replacement",
     });
   });
 

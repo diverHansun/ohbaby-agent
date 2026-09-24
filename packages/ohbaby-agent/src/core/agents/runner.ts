@@ -2,7 +2,6 @@ import { mergeReasoningIntent } from "../../services/interface-providers/reasoni
 import type { LifecycleEvent } from "../lifecycle/index.js";
 import type { ModelToolDefinition } from "../llm-client/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
-import { extractFinalOutput } from "./output.js";
 import type {
   AgentRunDeps,
   AgentRunEventSource,
@@ -268,18 +267,11 @@ export async function runAgent(
     const completion = await deps.runCoordinator.waitForCompletion(
       record.runId,
     );
-    const history =
-      scope.contextScopeId === undefined
-        ? await deps.messageManager.listBySession(scope.sessionId)
-        : await deps.messageManager.listBySession(scope.sessionId, {
-            contextScopeId: scope.contextScopeId,
-          });
-    const finalOutput = extractFinalOutput(history);
     const success = completion.status === "succeeded";
-    const output = finalOutput !== "" ? finalOutput : completion.error;
     const base = {
       mode: "waitForCompletion" as const,
       runId: record.runId,
+      runStatus: completion.status,
       sessionId: scope.sessionId,
       steps: 0,
       toolCalls: [] satisfies readonly AgentToolCallSummary[],
@@ -287,7 +279,7 @@ export async function runAgent(
     if (success) {
       return {
         ...base,
-        finalOutput: output ?? "",
+        finalOutput: completion.finalResponse ?? "",
         finishReason: "stop" as const,
         success: true,
       };

@@ -48,6 +48,7 @@ interface AgentRunWaitResultBase {
   readonly mode: "waitForCompletion";
   readonly sessionId: string;
   readonly runId?: string;
+  readonly runStatus?: AgentRunCompletion["status"];
   readonly finishReason?: AgentRunFinishReason;
   readonly steps?: number;
   readonly toolCalls?: readonly AgentToolCallSummary[];
@@ -97,6 +98,7 @@ export interface AgentRunHandle {
 
 export interface AgentRunCompletion {
   readonly status: "succeeded" | "failed" | "cancelled" | "interrupted";
+  readonly finalResponse?: string;
   readonly error?: string;
 }
 

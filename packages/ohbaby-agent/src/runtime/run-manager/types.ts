@@ -65,6 +65,7 @@ export interface RunRecord {
 
 export interface RunCompletion {
   readonly status: TerminalRunStatus;
+  readonly finalResponse?: string;
   readonly error?: string;
   readonly errorData?: UiPromptError;
   readonly terminalReason?: LifecycleResult["terminalReason"];
