@@ -48,7 +48,7 @@
 4. [03 参考项目及 ZCode 补查](improve-3/03-reference-projects.md)
 5. [04 测试与验收](improve-3/04-test-and-acceptance.md)
 
-独立前置工作见 [最终结果提取、文件工具增强与并发资源保护](prerequisite-follow-ups.md)。A/B 保持原先安排；C 已明确为 improve-2 前置：C1 文件锁正确性独立验收 → C2/C3 访问范围、跨会话准入、Bash 批次内调度与真实清理组合验收。已知文件按资源保护；未知残留 Bash 限制来源主会话及其子代理，其他独立主会话继续。C 与 improve-1、improve-1.1 均实际验收后进入 improve-2；第二轮消费基础接口，不重复实现锁和清理。全部仍为规划。
+独立前置工作见 [最终结果提取、文件工具增强与并发资源保护](pre/prerequisite-follow-ups.md)。A/B 保持原先安排；2026-09-24 用户明确 C 在 improve-1 完成后、improve-2 开始前实施：C1 文件锁正确性独立验收 → C2/C3 访问范围、跨会话准入、Bash 批次内调度与真实清理组合验收。已知文件按资源保护；未知残留 Bash 限制来源主会话及其子代理，其他独立主会话继续。C 与 improve-1、improve-1.1 均实际验收后进入 improve-2；第二轮消费基础接口，不重复实现锁和清理。全部仍为规划。
 
 第四轮：停止、退出和冷恢复。入口见 [improve-4 README](improve-4/README.md)。
 
@@ -64,13 +64,14 @@
 
 ## 顺序实施与跨轮交付检查
 
-实施顺序保留：独立A/B按原先整项前置安排完成；improve-1 → improve-1.1 → improve-2 → improve-3 → improve-4。C按C1 → C2/C3推进，最迟在improve-2前验收。A/B目前尚有待细化方案；1.1已展开规划但未实施，不因为四轮文档齐全就视为完成；本次对齐不代替这些独立讨论，也不改轮次编号。
+实施顺序保留：独立A/B按原先整项前置安排完成；improve-1 → improve-1.1 → improve-2 → improve-3 → improve-4。C在improve-1完成后按C1 → C2/C3推进，在improve-2前验收；与improve-1.1的相对顺序未进一步固定。A/B目前尚有待细化方案，已确认内容随讨论记录到pre；1.1已展开规划但未实施，不因为四轮文档齐全就视为完成；本次对齐不代替这些独立讨论，也不改轮次编号。
 
 ```mermaid
 flowchart LR
   AB[独立 A/B 前置] --> I1[improve-1 审批]
   I1 --> I11[improve-1.1 页面恢复]
   I11 --> I2[improve-2 工具交付与计时]
+  I1 --> C1
   C1[C1 文件锁] --> C23[C2/C3 准入与真实清理]
   C23 --> I2
   I2 --> I3[improve-3 子执行与输入交付]

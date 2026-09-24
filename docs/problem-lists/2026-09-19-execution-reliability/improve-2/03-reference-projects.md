@@ -117,7 +117,7 @@ UI `packages/client/ui-conversation/src/client/chat/ChatView.tsx:107,116,129,401
 | Kimi | `agent/background/index.ts:894,941,961` abort、有限宽限、forceStop后结算；`loop/tool-scheduler.ts:75` 随包装结果释放 | 未发现因残留清理而建立跨批次/session/workspace栅栏 |
 | DeepSeek | `shell/bash-local/src/index.ts:223` await handle.done；`subprocess-local/src/spawn.ts:439,472,490` 继续组清理且输出收尾有界；provider `index.ts:154` 持有handle直到waitForExit | provider `index.ts:146` 的新spawn不检查旧清理集合；后台清理owner不等于后续调用禁入 |
 
-**用户已确认：**已知文件按资源保护；未知残留 Bash 限制来源主会话及其子代理，其他独立主会话继续。该额外限制是 ohbaby 自己的折中，不是六项目的共同实现；其他主会话继续意味着不保证它们与未知 Bash 副作用无冲突。限制跟随真实 rootSessionId 跨批次/run 保留，各残留分别确认、分别解除；观察与清理入口保留。具体职责和验收见[前置 C](../prerequisite-follow-ups.md)，第二轮只接状态、审批、交付和计时，不重复实现基础层。
+**用户已确认：**已知文件按资源保护；未知残留 Bash 限制来源主会话及其子代理，其他独立主会话继续。该额外限制是 ohbaby 自己的折中，不是六项目的共同实现；其他主会话继续意味着不保证它们与未知 Bash 副作用无冲突。限制跟随真实 rootSessionId 跨批次/run 保留，各残留分别确认、分别解除；观察与清理入口保留。具体职责和验收见[前置 C](../pre/c-concurrency-and-resource-protection.md)，第二轮只接状态、审批、交付和计时，不重复实现基础层。
 
 ## 3.11 2026-09-23：审核意见与持久化边界补核
 

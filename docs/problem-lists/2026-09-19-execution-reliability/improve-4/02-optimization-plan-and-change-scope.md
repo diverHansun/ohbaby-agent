@@ -105,7 +105,7 @@ S0 对照前三轮实际结构确定恢复元数据的唯一持久落点与 SDK 
 
 若 raw 工具 Promise 还没结束，控制流可按第二轮逻辑 settle 返回，但 raw Promise 必须由 cleanup owner 持有并接收异常，保留对应锁/lease。不得通过“直接丢弃旧 Promise”实现快速 Stop。
 
-`run-manager.finalizeRun`、`projection.done`、adapter admission finally 必须共同遵守该完成条件。sandbox 的逻辑使用权退出与仍在使用资源的清理 lease 分开：不能把 await 真实清理塞进主 completion 阻塞 B，也不能提前 destroy context。资源规则沿用已确认整体前置的[并发与资源保护 C](../prerequisite-follow-ups.md)及第二轮接线，不再冻结旧 coarse 全局互斥；已确认已知文件按资源保护，未知残留 Bash 限制来源主会话及其子代理、其他独立主会话继续；B 若仍属该根会话就继续受限。第四轮不得自行放宽或扩大。
+`run-manager.finalizeRun`、`projection.done`、adapter admission finally 必须共同遵守该完成条件。sandbox 的逻辑使用权退出与仍在使用资源的清理 lease 分开：不能把 await 真实清理塞进主 completion 阻塞 B，也不能提前 destroy context。资源规则沿用已确认整体前置的[并发与资源保护 C](../pre/c-concurrency-and-resource-protection.md)及第二轮接线，不再冻结旧 coarse 全局互斥；已确认已知文件按资源保护，未知残留 Bash 限制来源主会话及其子代理、其他独立主会话继续；B 若仍属该根会话就继续受限。第四轮不得自行放宽或扩大。
 
 ### 完成、Stop、迟到事件竞争
 
@@ -188,8 +188,8 @@ queued 使用 §2.2 从入队就保存的同一对 owner 字段判断归属。�
 
 1. 校验 session/scope、根委托关系、版本及 owner，读取完整可解析事实。失效运行记录若 parent 已终态但 descendant 仍活动，也按每个记录实际归属检查，不能只从 active root 开始遍历。
 2. 保留所有已提交终态和结果。失主 Run、子 execution、starting/running prompt 登记 interrupted；原 queued 转 retained；旧子 pending 退队保留中断记录；Steer 仍归原任务。
-3. 对遗留工具调用补齐协议需要的结果/结束记录：有可靠执行前记录但无结果，标 `outcome unknown`；有证据确认未进入 execute，标 `not started`。旧数据缺证据一律 unknown，不能把“没有 start 字段”当未执行。
-4. 第二轮执行开始事实必须在调用 execute 之前可靠保存；若保存后、execute 前崩溃，保守归为 unknown。合成记录明确来源 recovery、原 callId/runId/消息归属，不能冒充工具实际返回正文。补模型 tool-call/result 配对但不重放调用，不破坏 provider 原生 model-state。
+3. 对遗留工具调用补齐协议需要的结果/结束记录：缺少可靠终态且不能证明未执行的，标 `outcome unknown`，明确说明“执行被中断，结果未知，可能已产生修改”。仅在有可靠的未执行证据时才标 `not started`；已经保存的明确拒绝、执行前取消结果原样保留，不重复合成。新旧数据都不能凭缺失 start 字段或最后保存的 preparing/queued 阶段判断未执行；接受部分实际上未执行的调用也只能恢复为 unknown。
+4. 按 2026-09-24 确认，沿第二轮顺序：已有调用及必要准备记录先保存，实际调用 execute 时采集开始时间并启动期限，开始事实随后按序保存，保存成功后发布。不额外增加执行前必须落盘的标记；结果保存和保存失败 fatal 规则不变。合成记录明确来源 recovery、原 callId/runId/消息归属，不能冒充工具实际返回正文，也不伪造 executionStartedAt。补模型 tool-call/result 配对但不重放调用，不破坏 provider 原生 model-state。
 5. 原子保存一个根会话范围可同事务更新的 run/prompt/child/message 事实；不在事务内 await 模型、网络或文件操作。大范围不能同事务完成时保持该树 recovering，分批幂等提交后重读验证全部不变量，最终才变 ready。任何中途退出，下次从持久事实重算，不依赖“最后保存成功”旗标。
 6. 恢复所补 id/唯一键由原 execution/call 与修复种类确定；重复恢复无第二份 synthetic result、delivery 或用户消息。新 owner 竞争用条件更新/版本检查，失败重读，不能覆盖另一个已提交结果。
 7. 第三轮子结果/交付保留原 rootRunId，不注入新 Run。已登记导出/删除意图按第三轮协议幂等核对；有原文可重新生成报告文件不等于重跑子代理。未 ready 路径不发布，无全盘孤儿文件扫描/垃圾回收承诺。

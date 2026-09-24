@@ -41,7 +41,7 @@
 | T18 | A运行、B/C queued后正常退出或SIGKILL，再启动：A中断，B/C retained，无provider/工具自动请求；重复打开/刷新仍不执行 | real daemon+DB / S3 | P5/P6 |
 | T19 | 同版本同库TUI与serve各自accept即保存owner，listQueued/启动范围/claim仅处理本owner，不因别人的队首阻塞自己；claim不能改写归属，requeueBusy保留owner。重启其中一个只修失效归属，另一方queued/running/审批不变；同PID多owner只dispose自身；不同owner不能冒充同一环境 | multi owner DB+process / S3 | P6 |
 | T20 | 在线恢复遇到归属不明、PID探测权限错误或旧scope-only入口，不按全scope中断、不自动认领；错误影响范围明确。与T43离线旧库迁移区分：已满足离线前提后旧记录缺owner本身不导致永久无法迁移 | owner recovery / S3 | P6 |
-| T21 | 工具在开始保存前、保存后执行前、产生副作用后结果保存前崩溃：分别not-started/unknown/unknown；不重跑；完整结果不被合成覆盖 | crash barriers / S3 | P7 |
+| T21 | 调用/准备已保存但尚未执行、已执行但开始事实未保存、开始已保存但结果未保存、已产生副作用但结果未保存时分别崩溃：恢复仅凭可读持久证据判断，缺少可靠终态且无法证明未执行的均为unknown；明确保存的执行前拒绝/取消与完整结果原样保留，不重跑、不伪造开始时间、不重复合成 | crash barriers / S3 | P7 |
 | T22 | 修复各store之间再次崩溃，重启后终态、tool配对、交付、retained一致且无重复；ready前用户输入不执行 | DB transaction / S3 | P6/P7 |
 | T23 | 单根会话malformed/格式不支持/定点保存失败，原记录保留、该树blocked、另一健康树可用；父已终态但子仍running也被核对 | fault integration / S3 | P6/P7 |
 | T24 | 共享DB不可写/迁移失败不冒充单会话故障，依赖它的新执行被阻止；错误不是永久Thinking | integration+UI / S3 | P7 |
@@ -66,7 +66,7 @@
 | T43 | 旧入队未写owner库：已知旧TUI/serve活着时拒绝危险升级且不drain；停止旧写入者后一致备份包含WAL已提交数据；retained约束、acceptedAt初始化、旧queued全部转retained及迁移版本同事务，不伪造owner。缺owner的可解析旧活动记录补中断，子pending留历史退队。SQL中途失败则该版本及队列转换一起回滚且不启调度；重试及重复启动无丢失/重复。schema提交后、会话恢复前退出，再启动无可领取的旧queued且仍补完恢复检查；没有旧queued时不制造消息。不要求扫描器证明全机退出，也不要求旧版读写新库 | migration+real process / S0基线/S3验收 | P5/P6/P7 |
 | T44 | 真实PTY准备三条queued/retained及现有草稿：Alt+↑进入选择，↑/↓选择中间项，Enter编辑，queued Save/retained Send只作用该项；Esc恢复草稿，队列Ctrl+D删除；编辑中Ctrl+D不走旧删队列分支；双页删除/claim不误操作相邻项，导航不触发模型或Stop | compiled PTY+DB / S4 | P5/P8 |
 
-T21 的 not-started 必须有可靠证据（例如新版本 execute 前可靠写入协议且确认未提交开始）；旧历史没有字段一律 unknown。T19/T20 不能只 mock isAlive=true，至少有一次同版本真实双进程同库测试；旧版只用于 T43 的升级拒绝与离线 fixture，不扩成混版本运行矩阵。T16 的 PID 复用用注入身份观察模拟，禁止碰用户真实无关进程。
+T21 按 2026-09-24 确认，不引入执行前强制落盘标记。测试控制的崩溃位置不是恢复程序的可用证据：准备/等待记录可能已经过时，缺少开始记录也不能证明没执行。新旧历史都只在有可靠证据时判 not-started；否则明确结果未知、可能已产生修改，不自动重跑。分别验证实际未执行与实际已执行却留下相同持久记录的场景，恢复均不能虚构确定结论；已有完整结果及明确执行前拒绝/取消记录保持不变。T19/T20 不能只 mock isAlive=true，至少有一次同版本真实双进程同库测试；旧版只用于 T43 的升级拒绝与离线 fixture，不扩成混版本运行矩阵。T16 的 PID 复用用注入身份观察模拟，禁止碰用户真实无关进程。
 
 T01 在 S0 验上游归属数据，不提前要求尚未实现的整树 Stop；后者由 S1 的 T03～T06 完成。T28/T43 在 S0 确定真实旧格式、操作前提和 fixture，在 S3 执行迁移验收。以上仍为44项场景，按真实风险选取故障点，不新增字段排列组合测试。
 

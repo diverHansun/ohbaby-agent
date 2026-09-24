@@ -19,7 +19,7 @@
 5. [04 测试与验收](04-test-and-acceptance.md)：分阶段、竞态、真实 serve 与 UI 验证。
 6. `05-implementation-acceptance.md`：仅实施完成后创建，本轮各 Stage 共用一份，当前不创建。
 
-最终结果提取、Read/Grep→Edit/Write 的独立前置增强见 [待办记录](../prerequisite-follow-ups.md)，具体方案后续再定。它们不计入本轮工作量，实际接口必须在 Stage 0 复核。
+最终结果提取、Read/Grep→Edit/Write 的独立前置增强见 [待办记录](../pre/prerequisite-follow-ups.md)，具体方案后续再定。它们不计入本轮工作量，实际接口必须在 Stage 0 复核。
 
 ## 边界
 

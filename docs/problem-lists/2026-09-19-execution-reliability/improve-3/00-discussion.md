@@ -66,7 +66,7 @@
 
 > “会话默认使用流式输出stream，确认最终结果提取和独立文件工具增强：Read/Grep，再 Edit/Write的部分我后续再来定，你可以先写到docs/problem-lists/2026-09-19-execution-reliability/下，记录一下”
 
-仅记录于 [独立前置待办](../prerequisite-follow-ups.md)，不冻结其方案、不在本轮实施。第一轮负责审批，第二轮负责工具执行可解释性，第三轮复用其结果；第四轮负责完整停止/重启恢复一致性。默认 TUI 保持 in-process，不改成 attach daemon。
+仅记录于 [独立前置待办](../pre/prerequisite-follow-ups.md)，不冻结其方案、不在本轮实施。第一轮负责审批，第二轮负责工具执行可解释性，第三轮复用其结果；第四轮负责完整停止/重启恢复一致性。默认 TUI 保持 in-process，不改成 attach daemon。
 
 ## 7. 参考要求
 

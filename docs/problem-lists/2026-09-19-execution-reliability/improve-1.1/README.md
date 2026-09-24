@@ -33,4 +33,4 @@
 
 实施前依据 improve-1 实际代码及 05 校正接线；其审批独立恢复不能因本轮改动退化。improve-2/3/4 消费本轮实际验收的会话恢复协议，新增事实必须进入同一提交、快照和事件通路，不能自行拼接全局水位。第四轮的 retained、恢复故障和确切未发送 Steer 等状态也遵循此规则，但不在本轮提前实现。
 
-返回：[总体路线](../README.md) · [improve-1](../improve-1/00-discussion.md) · [improve-2](../improve-2/README.md) · [独立前置](../prerequisite-follow-ups.md)。
+返回：[总体路线](../README.md) · [improve-1](../improve-1/00-discussion.md) · [improve-2](../improve-2/README.md) · [独立前置](../pre/prerequisite-follow-ups.md)。

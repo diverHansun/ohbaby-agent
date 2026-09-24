@@ -51,4 +51,4 @@
 
 页面恢复范围的新取舍见 [improve-1.1 文档集](../improve-1.1/README.md)。02/04 已按 D12/D19/D20 替换依赖全局 seqNum 静止的方案：审批独立查询、同步关键提交、按 root 的版本与独立就绪；工程选择详见 02，验收见 04。整页协议由 improve-1.1 独立规划（2026-09-22 已展开），不在本轮冻结或实施。
 
-修订依据：[前次讨论分享](https://chatgpt.com/s/cx_6ab0bd1334708191acf41158c8b5b01f)、[后续讨论分享](https://chatgpt.com/s/cx_6ab365db05c08191a39008f8584314ba)及 [Opus 方案审核](https://opncd.ai/share/0zpXXx6O)（均已通过浏览器阅读）。讨论后明确的决定以上述 D12–D21 为准；早先提到的固定浏览器脚本、全局稳定序号等建议已被后续决定或本次工程复核替代，不再作为实施要求。
+修订依据：[前次讨论分享](https://chatgpt.com/s/cx_6ab0bd1334708191acf41158c8b5b01f)、[后续讨论分享](https://chatgpt.com/s/cx_6ab365db05c08191a39008f8584314ba)及 [Opus 方案审核](https://opncd.ai/share/0zpXXx6O)（均已通过浏览器阅读）。讨论后明确的决定以上述 D12–D22 为准；早先提到的固定浏览器脚本、全局稳定序号及 Full Access 审批例外等建议已被后续决定或本次工程复核替代，不再作为实施要求。
