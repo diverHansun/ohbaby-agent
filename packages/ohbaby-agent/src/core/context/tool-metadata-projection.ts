@@ -111,6 +111,7 @@ export function projectToolMetadataForModel(
         "mtimeMs",
         "hasMore",
         "nextOffset",
+        "nextCursor",
         "lineCount",
       ]);
     case "write":
@@ -129,12 +130,20 @@ export function projectToolMetadataForModel(
       ]);
     case "list":
     case "glob":
-    case "grep":
       return copyMetadataFields(metadata, [
         "count",
         "truncated",
         "skippedBinaryFiles",
         "skippedLargeFiles",
+      ]);
+    case "grep":
+      return copyMetadataFields(metadata, [
+        "count",
+        "truncated",
+        "scanComplete",
+        "displayLimited",
+        "stopReason",
+        "processExited",
       ]);
     case "web_search":
     case "web_fetch":

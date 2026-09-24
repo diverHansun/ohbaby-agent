@@ -7,6 +7,7 @@ export const DEFAULT_TOOL_SCHEDULER_CONFIG: ToolSchedulerConfig = {
   },
   timeout: {
     defaultTimeout: 120_000,
+    byTool: { grep: 30_000 },
   },
 };
 

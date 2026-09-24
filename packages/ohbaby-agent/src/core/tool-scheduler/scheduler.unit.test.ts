@@ -11,6 +11,7 @@ import { createHostLocalEnvironment } from "../../adapters/ui-runtime/host-local
 import { createBus, type BusInstance } from "../../bus/index.js";
 import type { SpawnCommand } from "../../tools/bash.js";
 import { createBuiltinTools } from "../../tools/index.js";
+import { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
 import {
   createTaskOutputTool,
   ShellJobRegistry,
@@ -230,6 +231,12 @@ describe("ToolScheduler", () => {
   });
 
   it("resolves per-tool scheduler timeout overrides", () => {
+    expect(timeoutForTool(DEFAULT_TOOL_SCHEDULER_CONFIG.timeout, "grep")).toBe(
+      30_000,
+    );
+    expect(timeoutForTool(DEFAULT_TOOL_SCHEDULER_CONFIG.timeout, "read")).toBe(
+      120_000,
+    );
     expect(
       timeoutForTool(
         {

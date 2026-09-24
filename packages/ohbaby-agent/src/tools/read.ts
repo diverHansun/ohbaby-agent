@@ -2,27 +2,40 @@ import type {
   Tool,
   ToolExecutionResult,
 } from "../core/tool-scheduler/index.js";
-import { formatWithLineNumbers } from "../utils/index.js";
-import { splitTextLines } from "./utils/files.js";
-import { getNumberParam, getStringParam } from "./utils/params.js";
-import { truncateOutput } from "./utils/output.js";
+import {
+  getNumberParam,
+  getStringParam,
+  ToolParameterError,
+} from "./utils/params.js";
+import { readFilePage } from "./utils/read-file-page.js";
 import { resolvePathForExisting } from "./utils/context.js";
 import {
   DEFAULT_READ_LIMIT,
   FILE_PATH_SCHEMA,
   MAX_READ_LIMIT,
-  readTextFileContent,
 } from "./utils/text-files.js";
 
 export function createReadTool(): Tool {
   return {
     name: "read",
-    description: "Read a text file from the execution workspace.",
+    description:
+      "Read UTF-8 file content with original line numbers. Each call returns up to limit source lines and 50 KiB of total output, whichever is reached first. A continued partial line counts as one line for that call. Use the returned cursor to resume without skipping content. Offset scans are limited to 64 MiB; files changed between pages must be read again.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
         file_path: FILE_PATH_SCHEMA,
-        limit: { minimum: 1, type: "integer" },
+        limit: {
+          minimum: 1,
+          maximum: MAX_READ_LIMIT,
+          type: "integer",
+          description:
+            "Maximum source lines represented in this call (default: 2000). A continued partial line counts as one line. The output byte limit may stop the response earlier.",
+        },
+        cursor: {
+          type: "string",
+          description:
+            "Opaque continuation cursor returned by Read. Pass it unchanged to resume. Cannot be combined with offset. Each call has its own line limit, including the continued partial line.",
+        },
         offset: { minimum: 1, type: "integer" },
       },
       required: ["file_path"],
@@ -32,11 +45,18 @@ export function createReadTool(): Tool {
     category: "readonly",
     annotations: { readOnlyHint: true },
     async execute(params, context): Promise<ToolExecutionResult> {
+      if (params.cursor !== undefined && params.offset !== undefined)
+        throw new ToolParameterError("cursor cannot be combined with offset.");
+      const cursor =
+        params.cursor === undefined
+          ? undefined
+          : getStringParam(params, "cursor");
       const inputPath = getStringParam(params, "file_path");
       const offset = getNumberParam(params, "offset", {
         defaultValue: 1,
         integer: true,
         min: 1,
+        max: Number.MAX_SAFE_INTEGER,
       });
       const limit = getNumberParam(params, "limit", {
         defaultValue: DEFAULT_READ_LIMIT,
@@ -45,26 +65,13 @@ export function createReadTool(): Tool {
         min: 1,
       });
       const resolvedPath = await resolvePathForExisting(context, inputPath);
-      const file = await readTextFileContent(resolvedPath, inputPath);
-      const lines = splitTextLines(file.text);
-      const selected = lines.slice(offset - 1, offset - 1 + limit);
-      const hasMore = offset - 1 + selected.length < lines.length;
-      const output = formatWithLineNumbers(selected, { startLine: offset });
-
-      return {
-        output: truncateOutput(output),
-        metadata: {
-          encoding: file.encoding,
-          hasMore,
-          lineCount: lines.length,
-          lineEnding: file.lineEnding,
-          mtimeMs: file.mtimeMs,
-          nextOffset: hasMore ? offset + selected.length : undefined,
-          path: resolvedPath,
-          shownLineCount: selected.length,
-          sizeBytes: file.sizeBytes,
-        },
-      };
+      return readFilePage({
+        filePath: resolvedPath,
+        offset,
+        limit,
+        cursor,
+        signal: context.signal,
+      });
     },
   };
 }
