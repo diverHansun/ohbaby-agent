@@ -68,13 +68,25 @@ function runMode(params: Record<string, unknown>): SubagentRunMode {
 }
 
 function renderRun(result: SubagentRunResult): string {
+  const error =
+    result.item.error ?? (result.success === false ? result.output : undefined);
+  const completed =
+    result.success !== false &&
+    result.item.status === "completed" &&
+    result.item.currentRunId === undefined &&
+    result.item.pendingQueue.length === 0;
+  const output = result.output ?? result.item.output;
   return [
     `subagent_id: ${result.item.subagentId}`,
     `session_id: ${result.item.sessionId}`,
     `context_scope_id: ${result.item.contextScopeId}`,
     `status: ${result.item.status}`,
-    result.output
-      ? `<subagent_output>\n${result.output}\n</subagent_output>`
+    completed && output
+      ? `<subagent_output>\n${output}\n</subagent_output>`
+      : undefined,
+    completed && !output ? "program_note: No output." : undefined,
+    result.item.status !== "completed" && error
+      ? `<subagent_error>\n${error}\n</subagent_error>`
       : undefined,
   ]
     .filter((part): part is string => part !== undefined)
@@ -86,8 +98,12 @@ function renderStatus(result: SubagentStatusResult): string {
     return "No subagents found.";
   }
   return result.items
-    .map((item) =>
-      [
+    .map((item) => {
+      const completed =
+        item.status === "completed" &&
+        item.currentRunId === undefined &&
+        item.pendingQueue.length === 0;
+      return [
         `subagent_id: ${item.subagentId}`,
         `session_id: ${item.sessionId}`,
         `context_scope_id: ${item.contextScopeId}`,
@@ -100,16 +116,17 @@ function renderStatus(result: SubagentStatusResult): string {
         item.currentInput
           ? `<current_input>\n${item.currentInput.prompt}\n</current_input>`
           : undefined,
-        item.output
+        completed && item.output
           ? `<subagent_output>\n${item.output}\n</subagent_output>`
           : undefined,
+        completed && !item.output ? "program_note: No output." : undefined,
         item.error
           ? `<subagent_error>\n${item.error}\n</subagent_error>`
           : undefined,
       ]
         .filter((part): part is string => part !== undefined)
-        .join("\n"),
-    )
+        .join("\n");
+    })
     .join("\n\n");
 }
 

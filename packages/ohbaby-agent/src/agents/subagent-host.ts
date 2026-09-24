@@ -105,16 +105,25 @@ function errorMessage(error: unknown): string {
 function successfulOutput(result: AgentRunResult): {
   readonly output: string;
   readonly success: boolean;
+  readonly status: "completed" | "failed" | "cancelled" | "interrupted";
 } {
   if (result.mode !== "waitForCompletion") {
     return {
       output: "Subagent expected a completed agent run",
       success: false,
+      status: "failed",
     };
   }
   return result.success
-    ? { output: result.finalOutput, success: true }
-    : { output: result.error, success: false };
+    ? { output: result.finalOutput, success: true, status: "completed" }
+    : {
+        output: result.error,
+        success: false,
+        status:
+          result.runStatus === "cancelled" || result.runStatus === "interrupted"
+            ? result.runStatus
+            : "failed",
+      };
 }
 
 function normalizeTimeoutMs(timeoutMs: number | undefined): number | undefined {
@@ -995,7 +1004,7 @@ export class SessionSubagentHost {
         return await markInterrupted();
       }
       const result = turn.result;
-      const { output, success } = successfulOutput(result);
+      const { output, success, status } = successfulOutput(result);
       return await this.options.store.finishRun(record.subagentId, runId, {
         completedAt: this.now(),
         currentInput: undefined,
@@ -1003,7 +1012,7 @@ export class SessionSubagentHost {
         error: success ? undefined : output,
         lastRunId: result.runId ?? runId,
         output,
-        status: success ? "completed" : "failed",
+        status,
         updatedAt: this.now(),
       });
     } catch (error) {

@@ -156,6 +156,128 @@ describe("subagent builtin tools", () => {
     );
   });
 
+  it("shows a separate program note for a completed subagent with no final body", async () => {
+    const { host, run, status } = createHost();
+    const emptyItem = { ...item, output: "" };
+    run.mockResolvedValueOnce({ item: emptyItem, output: "", success: true });
+    status.mockResolvedValueOnce({ items: [emptyItem] });
+    const tools = createBuiltinTools({ subagentHost: host });
+
+    const runResult = await getTool(tools, "subagent_run").execute(
+      { prompt: "inspect" },
+      context,
+    );
+    const statusResult = await getTool(tools, "subagent_status").execute(
+      {},
+      context,
+    );
+
+    expect(runResult.output).toContain("program_note: No output.");
+    expect(statusResult.output).toContain("program_note: No output.");
+    expect(runResult.output).not.toContain("<subagent_output>");
+    expect(statusResult.output).not.toContain("<subagent_output>");
+    expect(runResult.metadata?.subagent).toMatchObject({ output: "" });
+  });
+
+  it("does not show an empty-output note while running or after failure", async () => {
+    const { host, run, status } = createHost();
+    run.mockResolvedValueOnce({
+      item: { ...item, output: "", status: "running" },
+      output: "",
+      success: true,
+    });
+    status.mockResolvedValueOnce({
+      items: [{ ...item, output: "", status: "failed", error: "timeout" }],
+    });
+    const tools = createBuiltinTools({ subagentHost: host });
+
+    const runResult = await getTool(tools, "subagent_run").execute(
+      { prompt: "inspect", mode: "background" },
+      context,
+    );
+    const statusResult = await getTool(tools, "subagent_status").execute(
+      {},
+      context,
+    );
+
+    expect(runResult.output).not.toContain("program_note");
+    expect(statusResult.output).not.toContain("program_note");
+  });
+
+  it("does not present the previous result while a queued continuation is pending", async () => {
+    const { host, run, status } = createHost();
+    const pendingItem = {
+      ...item,
+      output: "",
+      pendingQueue: [{ prompt: "continue" }],
+    };
+    run.mockResolvedValueOnce({ item: pendingItem });
+    status.mockResolvedValueOnce({ items: [pendingItem] });
+    const tools = createBuiltinTools({ subagentHost: host });
+
+    const runResult = await getTool(tools, "subagent_run").execute(
+      { prompt: "continue", mode: "background", subagent_id: "subagent_1" },
+      context,
+    );
+    const statusResult = await getTool(tools, "subagent_status").execute(
+      {},
+      context,
+    );
+
+    expect(runResult.output).not.toContain("program_note");
+    expect(statusResult.output).not.toContain("program_note");
+    expect(statusResult.output).not.toContain("<subagent_output>");
+  });
+
+  it("shows an immediately completed background result", async () => {
+    const { host, run } = createHost();
+    run.mockResolvedValueOnce({ item: { ...item, output: "" } });
+    const tools = createBuiltinTools({ subagentHost: host });
+
+    const result = await getTool(tools, "subagent_run").execute(
+      { prompt: "inspect", mode: "background" },
+      context,
+    );
+
+    expect(result.output).toContain("program_note: No output.");
+    expect(result.output).not.toContain("<subagent_output>");
+  });
+
+  it("renders a failed run's reason as an error rather than a completed report", async () => {
+    const { host, run, status } = createHost();
+    const failedItem = {
+      ...item,
+      status: "failed" as const,
+      output: "provider disconnected",
+      error: "provider disconnected",
+    };
+    run.mockResolvedValueOnce({
+      item: failedItem,
+      output: "provider disconnected",
+      success: false,
+    });
+    status.mockResolvedValueOnce({ items: [failedItem] });
+    const tools = createBuiltinTools({ subagentHost: host });
+
+    const runResult = await getTool(tools, "subagent_run").execute(
+      { prompt: "inspect" },
+      context,
+    );
+    const statusResult = await getTool(tools, "subagent_status").execute(
+      {},
+      context,
+    );
+
+    expect(runResult.output).toContain(
+      "<subagent_error>\nprovider disconnected\n</subagent_error>",
+    );
+    expect(statusResult.output).toContain(
+      "<subagent_error>\nprovider disconnected\n</subagent_error>",
+    );
+    expect(runResult.output).not.toContain("<subagent_output>");
+    expect(statusResult.output).not.toContain("<subagent_output>");
+  });
+
   it("renders durable in-flight and queued state for interrupted subagents", async () => {
     const { host, status } = createHost();
     status.mockResolvedValueOnce({

@@ -167,6 +167,12 @@ function toolCallEvent(
 function fakeLlmClient(
   requests: InterfaceProviderRequest[],
   options: {
+    readonly cancelExploreGate?: {
+      readonly release: Deferred<undefined>;
+      readonly started: Deferred<undefined>;
+    };
+    readonly emptyExplore?: boolean;
+    readonly failExplore?: boolean;
     readonly exploreMcpToolName?: string;
     readonly researchGate?: {
       readonly release: Deferred<void>;
@@ -213,6 +219,40 @@ function fakeLlmClient(
           );
         }
         if (messages.includes("Task: explore")) {
+          if (options.cancelExploreGate) {
+            const gate = options.cancelExploreGate;
+            return Promise.resolve(
+              (async function* (): AsyncGenerator<
+                InterfaceProviderStreamEvent,
+                void,
+                unknown
+              > {
+                yield { textDelta: "partial child report" };
+                gate.started.resolve(undefined);
+                await gate.release.promise;
+              })(),
+            );
+          }
+          if (options.failExplore) {
+            return Promise.resolve(
+              (async function* (): AsyncGenerator<
+                InterfaceProviderStreamEvent,
+                void,
+                unknown
+              > {
+                await Promise.resolve();
+                yield { textDelta: "partial child report" };
+                throw new Error("provider disconnected");
+              })(),
+            );
+          }
+          if (options.emptyExplore) {
+            return Promise.resolve(
+              createProviderStream([
+                { finishReason: "stop", reasoningTextDelta: "thinking" },
+              ]),
+            );
+          }
           if (options.exploreMcpToolName) {
             if (exploreMcpStep === 0) {
               exploreMcpStep += 1;
@@ -252,6 +292,53 @@ function fakeLlmClient(
           return Promise.resolve(
             createProviderStream([
               { finishReason: "stop", textDelta: "parent final result" },
+            ]),
+          );
+        }
+        if (messages.includes("program_note: No output.")) {
+          return Promise.resolve(
+            createProviderStream([
+              { finishReason: "stop", textDelta: "parent saw empty result" },
+            ]),
+          );
+        }
+        if (messages.includes("<subagent_error>")) {
+          return Promise.resolve(
+            createProviderStream([
+              { finishReason: "stop", textDelta: "parent saw child failure" },
+            ]),
+          );
+        }
+        if (messages.includes("Delegate failing subagent e2e")) {
+          return Promise.resolve(
+            createProviderStream([
+              toolCallEvent(
+                "subagent_run",
+                { prompt: "Find the failing target", role: "explore" },
+                "call_failing_subagent",
+              ),
+            ]),
+          );
+        }
+        if (messages.includes("Delegate cancelled subagent e2e")) {
+          return Promise.resolve(
+            createProviderStream([
+              toolCallEvent(
+                "subagent_run",
+                { prompt: "Find the cancelled target", role: "explore" },
+                "call_cancelled_subagent",
+              ),
+            ]),
+          );
+        }
+        if (messages.includes("Delegate empty subagent e2e")) {
+          return Promise.resolve(
+            createProviderStream([
+              toolCallEvent(
+                "subagent_run",
+                { prompt: "Find the empty target", role: "explore" },
+                "call_empty_subagent",
+              ),
             ]),
           );
         }
@@ -317,6 +404,7 @@ describe("subagent runtime e2e", () => {
     );
     expect(completion.error).toBeUndefined();
     expect(completion.status).toBe("succeeded");
+    expect(completion.finalResponse).toBe("parent final result");
 
     const parentMessages = await messageManager.listBySession("session_parent");
     const childMessages = await messageManager.listBySession("session_child", {
@@ -346,6 +434,12 @@ describe("subagent runtime e2e", () => {
     expect(parentText).toContain("context_scope_id: subagent_e2e_1");
     expect(parentText).toContain("context_scope_id: subagent_e2e_2");
     expect(parentText).toContain("parent final result");
+    expect(parentText).toContain(
+      "<subagent_output>\\nchild first result\\n</subagent_output>",
+    );
+    expect(parentText).toContain(
+      "<subagent_output>\\nchild second result\\n</subagent_output>",
+    );
     expect(firstChildText).toContain("Find the first e2e target");
     expect(firstChildText).toContain("child first result");
     expect(secondChildText).toContain("Find the second e2e target");
@@ -387,6 +481,224 @@ describe("subagent runtime e2e", () => {
       expect(
         JSON.stringify(request.messages).split("<environment_context>"),
       ).toHaveLength(2);
+    }
+  });
+
+  it("delivers a reasoning-only child as an empty final body with a separate parent-visible note", async () => {
+    const bus = createBus();
+    const workdir = process.cwd();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      createSubagentId: () => "subagent_empty",
+      llmClient: fakeLlmClient(requests, { emptyExplore: true }),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      permissionState: createPermissionState({ bus }),
+      sessionManager: createInMemorySessionManager({
+        bus,
+        createSessionId: () => "session_child",
+        messageCleaner: {
+          removeMessages(sessionId) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: () => 1,
+      }),
+      skillRegistry: new SkillRegistry({
+        loader: {
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
+        },
+      }),
+      workdir,
+    });
+
+    try {
+      const run = await composition.startSession({
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Delegate empty subagent e2e",
+        sessionId: "session_parent",
+      });
+      const completion = await composition.runManager.waitForCompletion(
+        run.runId,
+      );
+      const child = await messageManager.listBySession("session_child", {
+        contextScopeId: "subagent_empty",
+      });
+      const parent = await messageManager.listBySession("session_parent");
+      const parentText = JSON.stringify(parent);
+
+      expect(completion).toMatchObject({
+        status: "succeeded",
+        finalResponse: "parent saw empty result",
+      });
+      expect(parentText).toContain("program_note: No output.");
+      expect(parentText).not.toContain("<subagent_output>");
+      expect(child.at(-1)?.info.role).toBe("assistant");
+      expect(child.at(-1)?.parts).toEqual([]);
+      expect(parentText).not.toContain("thinking");
+      expect(requests).toHaveLength(3);
+    } finally {
+      await composition.dispose();
+    }
+  });
+
+  it("keeps a child stream fragment in history without delivering it as a failed report", async () => {
+    const bus = createBus();
+    const workdir = process.cwd();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      createSubagentId: () => "subagent_failing",
+      llmClient: fakeLlmClient(requests, { failExplore: true }),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      permissionState: createPermissionState({ bus }),
+      sessionManager: createInMemorySessionManager({
+        bus,
+        createSessionId: () => "session_child",
+        messageCleaner: {
+          removeMessages(sessionId) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: () => 1,
+      }),
+      skillRegistry: new SkillRegistry({
+        loader: {
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
+        },
+      }),
+      workdir,
+    });
+
+    try {
+      const run = await composition.startSession({
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Delegate failing subagent e2e",
+        sessionId: "session_parent",
+      });
+      const completion = await composition.runManager.waitForCompletion(
+        run.runId,
+      );
+      const child = await messageManager.listBySession("session_child", {
+        contextScopeId: "subagent_failing",
+      });
+      const parent = await messageManager.listBySession("session_parent");
+      const parentText = JSON.stringify(parent);
+
+      expect(completion).toMatchObject({
+        status: "succeeded",
+        finalResponse: "parent saw child failure",
+      });
+      expect(JSON.stringify(child)).toContain("partial child report");
+      expect(parentText).toContain("status: failed");
+      expect(parentText).toContain("<subagent_error>");
+      expect(parentText).toContain(
+        "LLM provider stream was interrupted after partial output.",
+      );
+      expect(parentText).not.toContain("<subagent_output>");
+      expect(parentText).not.toContain("partial child report");
+    } finally {
+      await composition.dispose();
+    }
+  });
+
+  it("keeps a cancelled child's stream fragment in history without delivering it as a report", async () => {
+    const bus = createBus();
+    const workdir = process.cwd();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const gate = {
+      release: createDeferred<undefined>(),
+      started: createDeferred<undefined>(),
+    };
+    const composition = await createUiRuntimeComposition({
+      agentManager: new AgentManager(),
+      bus,
+      createSubagentId: () => "subagent_cancelled",
+      llmClient: fakeLlmClient([], { cancelExploreGate: gate }),
+      mcpManager: { getAllTools: () => Promise.resolve([]) },
+      messageManager,
+      permissionState: createPermissionState({ bus }),
+      sessionManager: createInMemorySessionManager({
+        bus,
+        createSessionId: () => "session_child",
+        messageCleaner: {
+          removeMessages(sessionId) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: () => 1,
+      }),
+      skillRegistry: new SkillRegistry({
+        loader: {
+          loadContent: (): Promise<never> =>
+            Promise.reject(new Error("No skills loaded")),
+          scan: (): Promise<Map<string, never>> =>
+            Promise.resolve(new Map<string, never>()),
+        },
+      }),
+      workdir,
+    });
+
+    try {
+      const run = await composition.startSession({
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Delegate cancelled subagent e2e",
+        sessionId: "session_parent",
+      });
+      await gate.started.promise;
+      const childRun = composition.runManager.list("session_child").at(0);
+      if (!childRun) {
+        throw new Error("Child run did not start");
+      }
+      composition.runManager.cancel(childRun.runId, "test child cancellation");
+      gate.release.resolve(undefined);
+      const completion = await composition.runManager.waitForCompletion(
+        run.runId,
+      );
+      const child = await messageManager.listBySession("session_child", {
+        contextScopeId: "subagent_cancelled",
+      });
+      const parentText = JSON.stringify(
+        await messageManager.listBySession("session_parent"),
+      );
+
+      expect(completion).toMatchObject({
+        status: "succeeded",
+        finalResponse: "parent saw child failure",
+      });
+      expect(JSON.stringify(child)).toContain("partial child report");
+      expect(parentText).toContain("status: cancelled");
+      expect(parentText).toContain("test child cancellation");
+      expect(parentText).toContain("<subagent_error>");
+      expect(parentText).not.toContain("<subagent_output>");
+      expect(parentText).not.toContain("partial child report");
+    } finally {
+      gate.release.resolve(undefined);
+      await composition.dispose();
     }
   });
 

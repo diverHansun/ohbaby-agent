@@ -215,6 +215,28 @@ describe("SessionSubagentHost", () => {
     expect(turn.mock.calls[0][0].reasoning?.effort).toBe("high");
     await host.dispose();
   });
+
+  it("keeps a completed run's cancelled status and reason instead of reporting a failed report", async () => {
+    const { host, turn } = createHostFixture();
+    turn.mockResolvedValueOnce({
+      mode: "waitForCompletion",
+      sessionId: "child_1",
+      success: false,
+      runStatus: "cancelled",
+      error: "run cancelled by owner",
+    });
+
+    const result = await host.run({
+      mode: "foreground",
+      parentSessionId: "parent_1",
+      role: "explore",
+      prompt: "inspect",
+    });
+
+    expect(result.item.status).toBe("cancelled");
+    expect(result.item.error).toBe("run cancelled by owner");
+    await host.dispose();
+  });
   it("inherits the invoking parent context instead of another sibling scope", async () => {
     const getParentReasoning = vi.fn((_sessionId: string, scope?: string) =>
       mergeReasoningIntent(
