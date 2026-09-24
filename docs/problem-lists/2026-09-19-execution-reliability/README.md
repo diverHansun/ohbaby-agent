@@ -66,6 +66,8 @@
 
 实施顺序保留：独立A/B按原先整项前置安排完成；improve-1 → improve-1.1 → improve-2 → improve-3 → improve-4。C在improve-1完成后按C1 → C2/C3推进，在improve-2前验收；与improve-1.1的相对顺序未进一步固定。A/B目前尚有待细化方案，已确认内容随讨论记录到pre；1.1已展开规划但未实施，不因为四轮文档齐全就视为完成；本次对齐不代替这些独立讨论，也不改轮次编号。
 
+2026-09-24 全面审核后的推荐线性安排：A → B → improve-1 → improve-1.1 → C1 → C2/C3 → improve-2 → improve-3 → improve-4。用户已确认 C 的特殊合并门：C1 与 C2/C3 各用本地临时分支，后者从前者提交继续；组合验收通过后再依次合回开发分支，避免只有 C1 时旧 scheduler 的全局写槽长期阻挡其他调用。C1 独立锁层验收不代表整项 C 可用，详见 [C.2](pre/c-concurrency-and-resource-protection.md#c2-三阶段实施及最小交付)。本安排不新增 C 与 1.1 的技术依赖。
+
 ```mermaid
 flowchart LR
   AB[独立 A/B 前置] --> I1[improve-1 审批]
@@ -112,15 +114,21 @@ improve-1.1 的模块新增路线：[lifecycle improve-4](../../core/lifecycle/i
 ```text
 main
  └─ codex/execution-reliability            整项开发分支，规划与各轮验收汇总
+     ├─ codex/execution-reliability-pre-a     A 最终结果返回链
+     ├─ codex/execution-reliability-pre-b     B 文件工具
      ├─ codex/execution-reliability-improve-1  第一轮实施、测试、验收后合回
      ├─ codex/execution-reliability-improve-1.1  第一轮之后完善整页恢复
+     ├─ codex/execution-reliability-pre-c1    C1 锁层验收后暂不合回
+     │   └─ codex/execution-reliability-pre-c2-c3  从 C1 继续，组合通过后两支依次合回
      ├─ codex/execution-reliability-improve-2  从已验收第一轮、1.1 及其独立前置的开发分支创建
      ├─ codex/execution-reliability-improve-3  从最新开发分支创建
      └─ codex/execution-reliability-improve-4  从最新开发分支创建
 ```
 
-当前已建立 `codex/execution-reliability`；第一版 improve-1 规划已提交为 `039dca95`，后续规划修订已在本地继续提交，2026-09-22 本次调查基线为 `7cdd4a93`，当前 improve-1.1 修订尚未提交。本批没有创建实施分支或执行合并。实施开始前先将已确认规划形成可追踪提交，再从开发分支创建对应临时分支；不带着未提交规划切换多个阶段分支。
+当前已建立 `codex/execution-reliability`；第一版 improve-1 规划已提交为 `039dca95`，2026-09-24 本次全面审核基线为 `4956e0e9`，审核开始时工作区干净，既有 improve-1.1 规划修订已提交。本次仅调整规划，没有创建实施分支或执行合并。实施开始前先将已确认规划形成可追踪提交，再从最新开发分支创建对应临时分支；C2/C3 按上述约定从 C1 提交创建。全部使用当前 checkout 的本地分支，不使用 worktree，不带着未提交规划切换多个阶段分支。
 
 每轮按自己的 02/04 实施，独立审查后产出 05，解决阻断项并完成检查再合回开发分支。合回后验证跨轮组合，下一轮以实际代码和 05 为基线修订规划。四轮全部验收后，在开发分支完成综合回归与最终审查，再整体合入 main；阶段完成不直接合 main。分支合并本身不等于测试通过，也不自动发布或推送远端。
+
+C1/C2/C3 的例外只在合并时点：C1 先留独立锁层验收证据，C2/C3 连同 C1 通过整项组合门后，先合 C1、再合 C2/C3，最后验证开发分支上的组合结果。轮内 Stage 仍用小提交和内部验收推进，不将半套 SDK/server/client 协议视为整轮完成。包括 improve-1 在内，每批动手前都先核对前置合入后的真实接口，尤其 A 与第一轮共同涉及的 completion/runner 返回链。
 
 诊断报告集中在本议题 evidence 下，后续复现材料注明版本与证据类型，不能把最初诊断结论当作当前实现验收。
