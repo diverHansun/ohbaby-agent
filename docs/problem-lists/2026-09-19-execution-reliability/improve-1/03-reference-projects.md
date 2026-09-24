@@ -15,12 +15,12 @@
 
 ## 3.2 Kimi：会话待办与多页面收口
 
-来源：`kimi-code/packages/server/src/services/approval/approvalService.ts:22,74,207`；`packages/server/src/routes/snapshot.ts:166`；`routes/approvals.ts:127`；`apps/kimi-web/src/composables/client/useWorkspaceState.ts:1489`。
+来源：`kimi-code/packages/server/src/services/approval/approvalService.ts:22,74,207`；默认 auto 快照路径 `packages/server/src/services/snapshot/snapshotService.ts:122–162`（同一路由的 legacy 分支另见 `routes/snapshot.ts:166`）；`routes/approvals.ts:127`；`apps/kimi-web/src/composables/client/useWorkspaceState.ts:1489`。
 
 - 采用：approval/session/toolCall 身份分开；snapshot 包含 pending_approvals；其他页面抢先回答是正常终态。
 - 调整：broker 取消时监听 turn.ended 的 session 清理是桥接丢 signal 后的补救；ohbaby 直接连接 call signal，加 run 级终态兜底，不用 session 广撒网。
 - 不照搬：此处 reply 路由只凭 approvalId，不作为完整会话范围检查模板；request 的 publish 与 pending 创建顺序需避免同步重入。`packages/agent-core/src/agent/permission/index.ts:73` 存在父 pattern 继承，与本轮真实来源会话独立授权不一致。
-- 限制：pending 为内存，expires_at 字段不等于真正执行超时；没有证明它的全部子会话聚合路径。
+- 限制：默认快照路径先读取 `as_of_seq`，稍后才读取 `listPending`，不能据此证明审批列表与全局序号原子配套。其 resolved 事件的 `agentId` 固定为 `main`，也不能据终态事件推断真实子代理来源；ohbaby 用请求时冻结的 source。pending 为内存，expires_at 字段不等于真正执行超时；没有证明它的全部子会话聚合路径。
 
 ## 3.3 OpenCode：树状汇总、真实来源、独立回答
 
@@ -30,7 +30,7 @@
 - 采用其测试思路：`session-composer-state.test.ts:35` 覆盖孙会话与排除其他树。
 - 调整：ohbaby 在后台解析 root，不依赖 Web 的 sessions 列表已经包含隐藏子会话；审批只从根主会话入口处理，未来子页只读。
 - 明确不采用：reject 连带拒绝同 session 其他 pending；always 保存 project 规则并重评其他会话。用户已确认拒绝单项、授权只在真实来源 session。
-- 限制：Effect uninterruptible 不是互斥锁；不能据它声称争答绝对原子。assert finalizer 删除 pending 不等于一定广播撤销，ohbaby 必须完整处理 resolved。NotFound 不应在多页面正常争答时变成永久错误卡。
+- 限制：`reply` 先发布 Replied，再保存规则、完成 deferred、删除 pending；若后续步骤失败，页面可能先撤卡而原工具仍在等待。ohbaby 先同步提交**关键投影终态**并收口原等待，再发布**普通展示通知**；两种提交不能混为一谈，也不照搬 OpenCode 顺序。Effect uninterruptible 不是互斥锁；不能据它声称争答绝对原子。assert finalizer 删除 pending 不等于一定广播撤销，ohbaby 必须完整处理 resolved。NotFound 不应在多页面正常争答时变成永久错误卡。
 
 ## 3.4 Codex：请求与连接分离、一次消费
 
@@ -64,7 +64,7 @@ Pi 明确不内置子代理和审批弹窗；扩展示例拦截 tool_call，无 
 
 来源：`claude-code/README.md:1`；`src/utils/swarm/permissionSync.ts:12,49,360`；`src/hooks/useSwarmPermissionPoller.ts:124`；`src/hooks/useReplBridge.tsx:413`。
 
-采用思路：worker → leader UI → 用户 → worker，保留 worker/team/toolUseId；文件锁保护 pending 到 resolved 的一次决议。ohbaby 用本 runtime manager，不复制跨进程文件轮询，也不改变 TUI in-process。
+采用思路：worker → leader UI → 用户 → worker，保留 worker/team/toolUseId；文件锁在进程运行期间串行化竞争回答。其 resolved 文件写入与 pending 文件删除是两步，不能据此推断崩溃时原子提交。ohbaby 用本 runtime manager，不复制跨进程文件轮询，也不改变 TUI in-process。
 
 限制：remote adapter `packages/remote-control-server/web/src/lib/rcs-chat-adapter.ts:142,454` 历史与事件分开，部分 permission/control response 被忽略，不能当作已验证完整刷新恢复的范例。
 

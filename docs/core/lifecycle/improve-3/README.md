@@ -4,7 +4,7 @@
 
 ## 本轮职责
 
-- 从 agent turn 显式传真实 runId 到 ToolCallRequest，覆盖主/子真实执行入口；session/run/call 分别保留身份。
+- 从实际 RunContext 经 lifecycle 显式传真实 runId 到 ToolCallRequest，覆盖主/子真实执行入口；session/run/call 分别保留身份。core runner 已有 runId，实施重点是 RunWorker 到工具请求之间的断链。
 - 主/子执行结束出口按 runId 撤销残留审批，不由 UI 快照推断。
 - 确保旧 run 的清理不影响同会话后续 run。
 

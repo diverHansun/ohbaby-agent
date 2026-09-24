@@ -22,7 +22,7 @@
 - `agent/background/index.ts:546` 的 `waitForActiveTasks` 使用 Promise.all 等一批 active 任务，再重新枚举。它不因任意一个完成就返回，Steer 也不会唤醒该等待，只会缓冲。判定按 manager active agent tasks，不带 ohbaby 所需的本用户任务关联。
 - 补查：该方法没收到总期限时，内部 `wait(taskId, undefined)` 使用 L516 的默认 30 秒，之后再枚举；这是程序定时检查，不是每 30 秒请求主模型。子任务另有 deadline 和 abort 收尾；不能将它们等同为主代理重新判断的期限。
 - `session/subagent-host.ts:333` 提取最后 assistant text；过短时可请求同一个子代理补充一次。`agent/background/agent-task.ts:43` 把结果交 sink 写入，再 settle。
-- `agent/background/persist.ts:35` 写 `<sessionDir>/tasks/<taskId>/output.log`；默认应用 home 来自 `config/path.ts`，会话目录来自 `session/store/session-store.ts`。
+- `agent/background/persist.ts:35` 写 `<parentAgentHome>/tasks/<taskId>/output.log`（构造参数虽名sessionDir，实际传agent.homedir；默认会话根下的agents/main，非直接session根）；默认应用 home 来自 `config/path.ts`，会话目录来自 `session/store/session-store.ts`。
 - `agent/background/index.ts:753` 自动 `turn.steer`；父忙时缓冲，父 idle 时可新开 turn。有完整文件时通知给路径/大小，不是短正文/长文件分流。
 - 读取工作区外文件主要靠通用 Read 默认规则与绝对路径策略，不是“本父任务产物”的专属授权。
 
@@ -153,3 +153,33 @@
 - OpenCode/Pi的50 KiB适用层不同，见§3.11。[独立请求探针](evidence/2026-09-22-model-request-probes.md)验证三种协议接受user通知和单一模型的文件回读，未运行这些参考项目，也未验证ohbaby的整条交付链。
 
 本轮不复制参考项目的功能集合。对请求/压缩、审批前序及一层派遣的修订来自ohbaby自身源码与已确认规则，不能写成某个参考项目已经提供相同实现。
+
+## 3.14 Fable 5.1 后续审核：采纳、调整与保留边界
+
+来源是用户提供的本地导出，定位见00 §18；浏览器[分享页](https://opncd.ai/share/HPysIvuJ)当次只展示旧审核。本表针对后续正式答复，不将早期“额外赠一步”等已撤回建议重新带回。
+
+| 后续审核意见                                    | 本轮取舍               | 原因及文档落点                                                                                                                                     |
+| ----------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 明说等待留在lifecycle循环内                     | 采纳                   | 同一次调用、同一计数/usage/资格，等待自身不推进step；02 §2.1、T62                                                                                  |
+| 未处理消息打标禁止压缩                          | 采纳保护目标，调整手段 | 以输入账本为依据，优先压缩后纳入；仍计总预算，不能永久pin住无界正文；02 §2.4、T52                                                                  |
+| 30分钟审批暂停依赖第二轮真实phase/前序关系      | 采纳并补交接要求       | 第二轮当前waitReason只保证已知原因，不自动保证结构化前序ID；S0要核对并由原owner补最小事实，host不解析展示字符串；02 §2.9                           |
+| 60/120秒复查有成本与界面噪音                    | 采纳风险，保持用户节奏 | 快照足够不重复status、无变化简短回复；实际缓存/传输由provider决定，不能说每次都按全量无缓存收费或仅新增token收费；02 §2.8、T61                     |
+| 同会话一个活动任务，所以取消可沿parentSessionId | 不采纳该简化           | 迟到cancel(A)遇到B接班及A创建中委托是反例；身份同时约束交付、取消与启动资格。复用现有协调器增加目标约束即可，不另建取消平台；01 §1.9、02 §2.4、T58 |
+| 收齐检查排除状态观察                            | 有条件采纳             | 过期/已被终态或新事实替代的观察可撤销；有效到期观察仍要交还主模型判断，不能一律丢弃；02 §2.5、T57                                                  |
+| S3拆成S3a/S3b                                   | 采纳为内部验收批次     | S3a先验证交付/压缩/结束，S3b接复查与额度；S3a仍依赖前两轮的身份/工具批次/错误清理，不能提前发布无复查版本；02 §2.9                                 |
+| 集中S0上游接口清单                              | 采纳并增加1.1/C        | 明确真实身份、审批、会话提交、请求attempt、前序事实、结果提取与Read；不能将文档字段当完成接口；02 §2.9                                             |
+| >1MB只是少见边角，S0确认即可                    | 不以频率假设降低契约   | 本次探针没有测出自然报告分布；超长单行即使文件小于1MB也可能丢尾。B的Read验收与本轮权限校验分别落实；已知不可读须明确交付错误；02 §2.7、T60         |
+| 独立执行表及foreground指引仍需明确              | 采纳并限定职责         | 当前基线新增execution结构；foreground是等待工具直接返回的显式选择，有依赖不等于必须foreground；02 §2.3/2.8、T59/T07                                |
+
+### 本地参考实现与SWE取舍
+
+- **Kimi：同一循环等待、压缩后注入。** [run-turn.ts:107–185](../../../../../kimi-code/packages/agent-core/src/loop/run-turn.ts)保留steps/usage并await shouldContinueAfterStop；[turn/index.ts:753–763](../../../../../kimi-code/packages/agent-core/src/agent/turn/index.ts)先beforeStep压缩、再flushSteerBuffer。采用局部钩子与顺序，避免worker另起循环及重复预算；不复制其print-only、等待全部任务的条件，也不假定其已提供ohbaby的持久认领保证。 同文件:777/:812的stop hook另有提前flush分支，下一步[full.ts:255–260](../../../../../kimi-code/packages/agent-core/src/agent/compaction/full.ts)仍可能压缩，而[handoff.ts:61–81](../../../../../kimi-code/packages/agent-core/src/agent/compaction/handoff.ts)将background_task分类为可丢弃；这里只借鉴beforeStep的局部顺序，不将其作为首次请求纳入保护的完整证明。
+- **Kimi：可复用代理与单次任务分离。** [agent.ts:195–234](../../../../../kimi-code/packages/agent-core/src/tools/builtin/collaboration/agent.ts)、[background/index.ts:302–345](../../../../../kimi-code/packages/agent-core/src/agent/background/index.ts)每次registerTask生成taskId；[persist.ts:31–69](../../../../../kimi-code/packages/agent-core/src/agent/background/persist.ts)按taskId保存。符合instance与execution不同生命周期；ohbaby复用SQLite而不改存JSON。
+- **Kimi输出根纠正。** [agent/index.ts:218](../../../../../kimi-code/packages/agent-core/src/agent/index.ts)传入this.homedir；[session/index.ts:525](../../../../../kimi-code/packages/agent-core/src/session/index.ts)默认`<sessionRoot>/agents/<agentId>`，顶层后台产物通常为`<sessionRoot>/agents/main/tasks/<taskId>/output.log`。上文§3.2已同步纠正。
+- **Codex：显式执行上下文与目标核验。** [tools/context.rs:59](../../../../../codex/codex-rs/core/src/tools/context.rs)把turn/step/call/cancellation分开；[session/mod.rs:3864](../../../../../codex/codex-rs/core/src/session/mod.rs)在锁内核验expected_turn_id。采用明确身份、在接收边界核验的原则，不把整个Session对象传入ohbaby scheduler，也不以session等价run。该Steer实现不是ohbaby取消接口的直接模板。
+- **OpenCode：前后台交付有区别，job不等于独立执行账本。** [task.ts:200/216/273/317](../../../../../opencode/packages/opencode/src/tool/task.ts)前台返回工具结果、后台synthetic prompt；job ID复用子session。[background-job.ts:210](../../../../../opencode/packages/core/src/background-job.ts)终态后可替换同ID内存项。复用会话有价值，但不能替代本轮逐次报告与待办身份。
+- **Claude本地重建版：续派复用身份/输出路径。** [resumeAgent.ts:199](../../../../../claude-code/packages/builtin-tools/src/tools/AgentTool/resumeAgent.ts)、[LocalAgentTask.tsx:465/540](../../../../../claude-code/src/tasks/LocalAgentTask/LocalAgentTask.tsx)复用agentId、最新result及transcript入口；不能称其提供每次独立最终报告。其后台取消脱离父signal也不符合本轮父终止约定。只说明本地重建版。
+- **Pi：消费边界与工具串联。** [agent-loop.ts:155–274](../../../../../pi/packages/agent/src/agent-loop.ts)在同一runLoop消费steering/follow-up；[subagent示例:534–575](../../../../../pi/packages/coding-agent/examples/extensions/subagent/index.ts)chain明确await上个结果。借鉴“没有结果不执行依赖动作”，不照搬示例前台默认或推导必须foreground。
+- **DeepSeek：结果来源与关闭期间抑制唤醒。** [continuation.ts:1406–1443](../../../../../deepseek-harness/packages/subagent/subagent/src/continuation.ts)以source标识user通知，teardown时不再followup。采用关闭资格优先的原则；不采用idle自动开新turn或失败后只记警告，保留本轮持久结果与严格原任务归属。
+
+这些补充服务于单一事实来源、明确身份、局部控制流和分批验证。没有证据要求新增消息代理、通用依赖图、第二个模型循环或额外预算系统。本次只读参考代码，未运行参考项目或新增API请求。

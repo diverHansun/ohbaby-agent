@@ -90,3 +90,16 @@
 本次没有发现需要新增产品能力才能解决这些反例的证据。主要改动是把既有意图落实到请求认领、压缩、计时和结果类型边界，保持职责分层。实际前置接口尚未形成，S0仍需按前两轮完成后的代码复核，不能直接将草案当现成API。
 
 [独立请求证据](evidence/2026-09-22-model-request-probes.md)记录10次真实流式请求：三协议通知内容验证、合成报告生成和文件读取工具往返。它为协议可行性提供证据，不覆盖本节竞态和完整协作E2E。
+
+## 1.9 2026-09-23：后续审核对应的事实复核
+
+复核工作树HEAD `7cdd4a9342e6c67afa9e19b88fa35e01b24704f9`，保留其他轮次既有未提交修改；下列均为源码观察，未运行新增竞态测试。
+
+- `core/tool-scheduler/types.ts::ToolExecutionContext`仍无runId；第一轮D13计划补齐显式身份，第三轮S1不能从callId或当前会话活跃run临时推断。S0新增具体交接门槛。
+- `runtime/run-ledger/types.ts::RunLedgerRecord`只表达实际run生命周期；`agents/subagents/database-store.ts::SubagentInstanceRow`只存最新output/currentRun/lastRun。二者都没有accepted委托的逐次结果/交付记录；建议独立execution表有明确缺口依据，不是照搬参考项目表名。
+- `adapters/ui-inprocess.ts:618/775/2165`先预留userMessageId，execute时才创建core消息。普通queued当前并未自动进入模型历史；Steer新增路径需用该ID首次创建/关联，避免重复。
+- `adapters/ui-runtime/composition.ts:642–658`按旧run查session后调用`interruptByParent(session)`；host `subagent-host.ts:304`只筛当前active的parentSessionId。若A终止、B接班，迟到的cancel(A)可能命中B子执行。现有`composition.unit.test.ts:771`确认manager eviction后的session回退路径，但没有覆盖A/B隔离；这是静态反例，不称已实测复现。
+- host创建记录经过多次await才入active Map，旧pending在中断后仍可持久保留。任务级终止还需封闭accepted/creating入口并退出旧pending可执行集合；单纯按session扫一次不足以满足既有第三/四轮约定。
+- `core/context/context-manager.ts::assemble/commitCompaction`决定最终请求内容；保护标记本身不能保证正文能放入窗口。需保护首次交付并重新核验总预算，不能无限pin住长输入。
+
+状态观察过期、界面降噪和S3拆批属于新增工程细化，不是已存在产品缺陷的实测结论。它们分别由02 §2.5/2.8/2.9和T57/T61/T62约束，不扩大为新队列、预算或UI折叠系统。

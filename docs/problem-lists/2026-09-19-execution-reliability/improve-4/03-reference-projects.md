@@ -113,7 +113,7 @@ ohbaby 不采用 Codex 的 Stop 后合并全部 queued 行为，也不要求用�
 | Codex | [handlers](../../../../../codex/codex-rs/core/src/session/handlers.rs) L63/L67分开中断与后台终端清理；[process manager](../../../../../codex/codex-rs/core/src/unified_exec/process_manager.rs) L1437单终端终止返回结果 | 采用操作范围和结果诚实表达；后台清理范围不同，没有可直接复制的来源主会话限制UI |
 | Claude本地重建版 | [REPL](../../../../../claude-code/src/screens/REPL.tsx) L2597取消时forceEnd；[QueryGuard](../../../../../claude-code/src/utils/QueryGuard.ts) L74/L88旧generation隔离；[killShellTasks](../../../../../claude-code/src/tasks/LocalShellTask/killShellTasks.ts) L16清理错误只记日志后标killed | 采用代次保护，不把日志/结算当资源退出确认；重建版不代表官方产品保证 |
 
-**已确认的 ohbaby 选择：** 正常 Stop/清理静默；主执行退出并可靠登记后启动下一普通任务。前置 C 继续持有未释放资源；清理失败或有限观察后未确认且实际阻塞新调用时，仅该尚未执行调用返回普通资源错误，通过第二轮既有工具结果通道交付，不另建清理提示。不是无条件放行，也不是用“未执行”改写旧操作事实。这个异常准入出口是用户确认的本项目取舍，不是六项目共同默认行为。
+**已确认的 ohbaby 选择：** 正常清理不新增通知；Stop沿第二轮D34提供原按钮等待反馈，可靠终态后结束，不等残留清理；主执行退出并可靠登记后启动下一普通任务。前置 C 继续持有未释放资源；清理失败或有限观察后未确认且实际阻塞新调用时，仅该尚未执行调用返回普通资源错误，通过第二轮既有工具结果通道交付，不另建清理提示。不是无条件放行，也不是用“未执行”改写旧操作事实。这个异常准入出口是用户确认的本项目取舍，不是六项目共同默认行为。
 
 ## 3.11 2026-09-22：停止登记失败、有限重试与恢复入口
 
@@ -138,5 +138,18 @@ ohbaby 不采用 Codex 的 Stop 后合并全部 queued 行为，也不要求用�
 - Pi [agent-session.ts](../../../../../pi/packages/coding-agent/src/core/agent-session.ts) L1371先放入steering队列，L595在message_start移除pending；[interactive-mode.ts](../../../../../pi/packages/coding-agent/src/modes/interactive/interactive-mode.ts) L4051取消时取回队列文字并合并到editor。该回填是TUI行为，不是core abort的通用保证。
 
 **采用**输入接受与实际消费分开、不丢用户文字；**调整**为ohbaby第三轮持久输入/请求证据。ohbaby已接受Steer本来就保存为原任务用户消息，不照搬合并回输入框或恢复整个队列。新英文提示只表示可确认未送入，不表示模型理解程度；由第四轮展示在queued卡片上方，第三轮负责提供可恢复证据，T56→本轮T41验证。
+
+## 3.13 2026-09-23：迁移与字段保持最小
+
+本次重新核对以下本地实现；未运行参考项目的迁移。借鉴具体机制，不把参考项目更宽的兼容承诺变成 ohbaby 的需求。
+
+| 项目/证据 | 实际做法 | 本轮采用边界 |
+|---|---|---|
+| OpenCode [storage.ts](../../../../../opencode/packages/opencode/src/storage/storage.ts) L225，旧文件存储迁移 | 读取版本标记、依次执行 MIGRATIONS，成功后更新标记；失败记录并停止后续步骤 | 借鉴按版本推进；其文件迁移不是 SQLite 事务，不照搬失败后返回 storage 的行为作为执行可继续的依据 |
+| Codex [state/migrations.rs](../../../../../codex/codex-rs/state/src/migrations.rs) L12，runtime_migrator | 明确允许旧二进制打开已被新版迁移的库，ignore_missing 放宽未知较新迁移检查 | 作为不采用的对照：ohbaby 只支持旧数据升级后由新程序使用，不承担新旧程序混用同库 |
+| Kimi [background/index.ts](../../../../../kimi-code/packages/agent-core/src/agent/background/index.ts) L608/L626 | live 任务优先，重载遗留非终态标 lost 并保存 | 采用保留记录、修正失主状态；不能证明 ohbaby 另一个 TUI/serve 已退出 |
+| DeepSeek [coordinator.ts](../../../../../deepseek-harness/packages/session/session-persistence/src/coordinator.ts) L934 | 活持久化 owner 存在时拒绝 cold repair，修复前后核对版本并重读 | 采用不误动活执行和幂等核对；进程内 owner 检查不等于全机写入者探测 |
+
+ohbaby 自己已有 `services/database/index.ts::applyMigration/runMigrations` 的事务和版本表，直接复用。普通 prompt 接受与执行由同一 backend/store 承担，因此复用一对 owner 是本项目代码支持的简化，不宣称六个项目都有同样字段。必须保存的业务事实是入队归属、retained 执行资格、本次接受时间和恢复来源；不为这些事实再建通用迁移/恢复平台。对应 02 §2.2/§2.9、04 T19/T20/T26～T29/T43。
 
 返回：[本轮入口](README.md)。

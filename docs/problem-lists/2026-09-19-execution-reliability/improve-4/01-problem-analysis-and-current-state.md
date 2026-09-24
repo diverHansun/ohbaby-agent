@@ -39,6 +39,10 @@
 
 当前 scopeKey 是项目目录（`adapters/ui-persistent.ts:529`），并不是 TUI/serve 身份。即使筛同一个 scope，也不能认定所有 queued 属于刚退出的进程。
 
+2026-09-23 字段复核：现有 `prompt_submission`、run ledger、子实例均已有 owner 字段。“旧格式”不等于完全没有 owner 列，而是普通消息 `accept` 尚未填写归属。`ui-persistent.ts:472` 创建 backendOwnerId，`:531` 将其交同一个 prompt store；接受和执行没有独立的两类 backend。`database-store.ts::claim`（L440）目前覆盖 owner 且未按原归属过滤，`requeueBusy`（L499）会清空它，`listQueued`（L571）仅按 scope 查询；因此复用一对 owner 时必须一起修正这些入口，不能只补 INSERT。
+
+`services/database/index.ts::applyMigration/runMigrations`（L136/L161）已有逐版本事务、版本登记和失败回滚；`migrations.ts` 的 `014_prompt_submission` 对 status 设置 CHECK，当前只允许七种状态，新增 retained 不能只改 TypeScript。现有 accepted 时间只有 created_at，updated_at 又会被租约续期更新，不能直接替代重发的接受时间。迁移方案可在这套框架内扩展，无需新迁移服务，见 02 §2.9。
+
 `run-ledger/database.ts::isOrphaned` 使用 owner PID，unknown owner 由显式选项控制。`subagents/database-store.ts::markInterrupted` 有 owner/run 条件。`prompt-scheduler/database-store.ts::recoverAllInterrupted` 跳过仍活的 owner PID；但 `recoverInterrupted(scopeKey)` 的 SQL 仅按 scope 和 starting/running 更新。实施必须逐一确认调用入口，不把 scope-only 批量方法当作安全的多环境恢复入口。
 
 ## 1.4 数据流与取消接口（dfd-interface）
@@ -82,6 +86,7 @@ Web `apps/ohbaby-web/src/ui/App.tsx::beginQueuedEdit/finishQueuedEdit` 已有编
 - **复杂度与职责：** 保留各模块的执行、存储、投影职责，由 runtime 装配停止/恢复，不让 scheduler 直接写会话 DB，也不在 UI 自行判断进程是否死亡。
 - **身份与信息隐藏：** 用户只看任务中断和待发送消息；run/execution/owner 的检查在后台完成，不把恢复复杂度变成一排按钮。
 - **最小改造：** 复用共享 scheduler、registry、SQLite 和第三轮 execution/result，不为本轮新造分布式任务系统。
+- **KISS/YAGNI：** 复用现有 owner 列及版本化事务迁移；只为重新入队新增接受时间，恢复元数据按真实读取需求扩展。支持旧数据升级即可，不为当前无需求的新旧程序混用建设兼容系统。
 - **可测试性：** 把停止登记、领取任务、持久化提交、清理确认做成可注入故障的边界；不靠长时间 sleep 或真实模型概率复现判断正确性。
 - **取舍：** 允许 B 与旧清理并行提升响应，但需要更严格的归属和资源存续；本轮放弃跨重启进程管理，接受外部结果未知的明确边界。
 

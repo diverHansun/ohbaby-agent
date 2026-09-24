@@ -2,7 +2,7 @@
 
 > 规划目标，尚未实施。按 [00](00-discussion.md) 的已确认行为执行；用 [04](04-test-and-acceptance.md) 验收。实现者不得把本篇改成进度日志，实施结果另写 05。
 
-> 2026-09-21 讨论后修订：本轮建立审批独立恢复保证；整页聊天/run/todo 快照与全局事件续传一致性留给 [improve-1.1](../improve-1.1/README.md)。审批恢复不等待全局 seqNum 静止，也不等待完整聊天快照。D1–D20 是用户确认的产品边界；以下接口、提交顺序和测试接线是满足这些边界的工程方案，尚未实施。
+> 讨论后修订：本轮建立审批独立恢复保证；整页聊天/run/todo 快照与全局事件续传一致性留给 [improve-1.1](../improve-1.1/README.md)。审批恢复不等待全局 seqNum 静止，也不等待完整聊天快照。D1–D21 是用户确认的产品边界；以下接口、提交顺序和测试接线是满足这些边界的工程方案，尚未实施。
 
 ## 2.1 总体职责与数据流
 
@@ -24,9 +24,11 @@ permission 是运行时待审批的权威来源，UI store/server event buffer �
 
 ## 2.2 身份契约
 
-生产执行链必须把真实 `runId` 从 agent turn/lifecycle 传到 scheduler 的 request/call，再进入 PermissionAskInput、PermissionInfo 和 UI 投影。同步更新 PermissionPort 和 Bus schema；不能只给 UI 类型补字段。
+生产执行链以 run coordinator 最终建立的 `RunContext.runId` 为真实身份，把它传过 lifecycle、scheduler 的 request/call，再进入 PermissionAskInput、PermissionInfo 和 UI 投影。主会话在提交运行前生成预期编号，子代理在认领自己的执行时生成预期编号；两者都要与最终建立的 run 编号核对，不能把预期值或父 runId 当成未经核实的实际身份。子代理使用的 `waitForCompletion` 路径也必须核对；若返回编号异常，由于现有 coordinator 在返回前可能已启动 run，立即取消实际 run、按其真实 runId 撤销已出现的审批并结束等待，不能只在 stream 路径抛错后留下后台执行。同步更新 PermissionPort 和 Bus schema；不能只给 UI 类型补字段。
 
-按 D13，scheduler 只携带、记录和转交上游给定的 runId，不查询数据库、不自行生成或推断执行身份。外层 wrapper 负责可信父子关系解析，不能在 ask 时查询“当前 run”来替代源头传递。显式传递与现有 sessionId/messageId/signal 上下文同类，不构成 scheduler 对 run ledger 的依赖。借鉴的是 Codex ToolInvocation 显式携带执行上下文、call_id 与取消令牌的原则，不照搬其完整 Session/TurnContext 对象，见 [03 §3.4](03-reference-projects.md#34-codex请求与连接分离一次消费)。
+具体接线断点在 `RunWorker.lifecycleSessionParams()`：目前 `RunContext` 已有 `runId`，core 的 agent runner 也已认识 runId，但 `LifecycleSessionParams`、`ModelStepParams`、`ToolCallRequest`、scheduler 内部 `ToolCall` 和 PermissionAskInput 尚未逐级携带它。实施时从实际 RunContext 开始连续传递，每层保留同一编号；不能在最终 UI 投影处再反查 `getActiveRunId(sessionId)`，也不能用 `callId` 冒充 runId。`sessionId` 属于哪棵会话树，仍由 application wrapper 核实；它不负责猜测本次调用属于哪一轮执行。
+
+按 D13，scheduler 只携带、记录和转交上游给定的 runId，不查询数据库、不自行生成或推断执行身份。传一个不透明字符串不等于让 scheduler 依赖 run ledger 或 session 数据库；core 的 runner 已经处理 runId，这次补的是后半段遗漏的身份链。显式传递与现有 sessionId/messageId/signal 上下文同类。借鉴的是 Codex ToolInvocation 显式携带执行上下文、call_id 与取消令牌的原则，不照搬其完整 Session/TurnContext 对象，见 [03 §3.4](03-reference-projects.md#34-codex请求与连接分离一次消费)。
 
 | 字段 | 语义与来源 |
 |---|---|
@@ -44,9 +46,9 @@ UiPermissionRequest 显式携带以上所需来源字段；resolved 事件至少
 
 具体接线放在 composition 注入 scheduler 的 PermissionPort application wrapper：先根据真实 source session 异步解析并验证 root，将不可变来源传给 manager，再由 manager 注册请求。wrapper 等待解析期间持续响应原 call signal，解析返回后再次检查 signal；已取消则不注册，解析失败则 reject ask 为明确来源错误，scheduler 返回工具错误。manager 不自行查询 session 数据库；投影只消费已冻结来源，不在事件发布后再异步猜 root。
 
-来源关系为本次请求冻结；会话删除/失效应撤销其请求，不把旧请求重新挂到另一棵树。现有 Session.parentId 为关系依据，subagent record.parentSessionId 用于一致性核查，不新增第三套独立父子表。第一轮不要求把所有子会话消息暴露在 UiSnapshot.sessions。
+来源关系为本次请求冻结，包括从实际 source 到 root 经过的祖先会话 ID，仅供校验和清理，不新增第三套独立父子表。source、root 或其中任一祖先的会话记录被删除、可信父链校验失败时，都撤销经过该节点的待批请求，不把旧请求重新挂到另一棵树；页面切换或断连不属于这种失效。现有 Session.parentId 为关系依据，subagent record.parentSessionId 用于一致性核查。第一轮不要求把所有子会话消息暴露在 UiSnapshot.sessions。
 
-所有实际运行入口补足 runId；测试 harness 使用显式真实测试 runId。无 run 的底层独立工具执行若仍需保留，必须明确禁止进入交互式 ask 并返回可诊断错误，不可为兼容而伪造执行身份。
+所有实际运行入口补足 runId；测试 harness 使用显式真实测试 runId。无 run 的底层独立工具执行若仍需保留，必须明确禁止进入交互式 ask 并返回可诊断错误，不可为兼容而伪造执行身份。call signal 仍从该工具调用自己的 controller 传给 ask；runId 解决归属和终态清理，signal 解决及时撤销，两者各有职责。
 
 ## 2.3 请求生命周期与单次决议
 
@@ -56,12 +58,14 @@ UiPermissionRequest 显式携带以上所需来源字段；resolved 事件至少
 
 - ask 显式接收调用 controller.signal。signal 只属于调用/执行，不属于浏览器连接；不进入序列化事件。
 - 真正注册前再检查 signal，覆盖 scheduler 微任务开始前已经取消的窗口；注册 pending 和 abort listener 后再发事件，并再次核对取消状态。
-- respond/revoke 共用无 await 的一次决议入口：验证请求、当前 signal、choice、实际会话 → 从 pending 认领移除 → 移除 listener → 合法规则副作用 → 发终态 → 完成原 Promise。发布事件前先移除，防同步订阅者重入。
+- 命中既有 allow 规则而直接放行的调用没有登记 pending：先检查 signal，再按策略放行；不得为其发审批 requested/resolved 或推进审批 revision。若仍保留 `auto_approved` 领域审计事件，投影须凭明确的“未登记”语义跳过审批终态，不能把它当作卡片已解决。相反，always 自动通过**已登记**的其他待批请求时，每条仍走一次正常 resolved 与 revision 提交。
+- respond/revoke 共用无 await 的一次决议入口：验证请求、当前 signal、choice、实际会话 → 从 pending 认领移除 → 移除 listener → 合法规则副作用 → 同步提交关键投影终态 → 完成原 Promise；之后才发普通通知。关键提交前先认领移除，防同步订阅者重入。
 - 认领移除后，规则更新或关键内部终态提交即使抛错，也必须拆 listener 并完成原等待 Promise，以明确运行时错误结束，不重新插回 pending；已成功写入的合法规则不重复执行副作用。普通页面通知失败不改变已经生效的合法决议，也不撤销其他请求。投影错误按下文 D19 分类处理，不以通知失败无限挂起工具。
 - 两个回答、回答与撤销竞争时，只有首个合法转移生效；非法 choice 不得抢占请求。撤销已发生或 signal 已 aborted 时，迟到 always 不写规则。
 - 规则副作用先静默更新并收集 RuleAdded 通知；不得复用现有 addSessionRule 写完立即 publish 的路径，让观察者在关键提交前重入。关键投影提交与近期终态记录完成后，再统一发普通通知。always 对其他匹配 pending 的逐项决议也在原请求关键提交完成后开始，每项再次检查当前 signal、策略和健康状态。
 - 合法 always 先赢、随后执行被中断，不回滚此前已合法记住的规则；取消不是撤回用户先前的授权。仍仅限真实来源 session。
 - reject 只终结该请求。always 保留现有“同真实 session 中已 pending 且匹配规则、可记忆、最新策略允许的请求自动通过”行为；每个匹配请求也走统一决议。不可记忆请求仍需逐项批准，不跨 session。
+- 按 D21，子代理请求同样可选择可记忆的 always，规则仍写入实际子会话；这不是切换 `full-access`。`full-access` 是运行时 permission level，主/子代理按同一档位求值。按后续 D22，该档位的敏感路径、显式 MCP/工具批准及外部目录请求不再发人工 ask；现有明确 deny、禁止路径/命令、参数校验和资源保护仍生效。仅在有权设置的真实 Full Access 范围内自动放行，不伪造用户选择的 always 或跨子会话写入持久授权规则。当前代码中 `evaluateInvariantDecision` 的敏感路径 ask 及 scheduler 的 `requireExplicitApproval` 独立 ask 需要一起调整；不能只改权限 fallback，亦不能由 improve-2 的数量调度绕过这两处。
 - 不新增审批墙钟期限；既有执行期限仍有效。页面全部关闭也不触发撤销。后端 dispose 撤销自身 pending 并完成等待；不持久化 Promise，不恢复旧 ID。
 - 用有界近期终态记录区分重复回答和已撤销，保存必要身份及原因，不保存完整参数/正文；超过界限只返回 not-pending，不重建请求。不要以未找到 ID 为理由自动批准。
 
@@ -77,13 +81,13 @@ signal 及时撤销之外，在主/子 run 权威终态出口调用 `revokeByRun
 
 ### 审批关键提交与通知分离
 
-manager 的 pending 是业务权威。composition 注入窄的同步 `criticalCommit` 端口，将已冻结来源的 requested/resolved 提交到审批内存投影；permission 不引用 server、数据库或客户端。此端口必须显式返回成功或抛错，不能通过现有会吞订阅者异常的普通 Bus/event-router 调用。
+manager 的 pending 是业务权威，只有它的注册、回答或撤销路径能改变待批状态；投影只反映这些变化，不能独自生成或解决审批。composition 注入窄的同步 `criticalCommit` 端口，将已冻结来源的 requested/resolved 提交到审批内存投影；permission 不引用 server、数据库或客户端。此端口必须显式返回成功或抛错，不能通过现有会吞订阅者异常的普通 Bus/event-router 调用。
 
 一次关键提交在无 await 的临界段内完成：校验来源和请求身份 → 构造新的不可变根会话请求集合、版本和事件记录 → 一次替换该根投影。候选构造失败不得提交半份集合或只推进版本。manager 的注册/决议与该提交在同一同步调用栈内完成，提交期间禁止普通观察者重入；成功后才发布展示通知、执行 reconcile 或调用外部观察者。内部事件和审批快照保留 epoch/root/revision；server 投递时再附该连接当前的 bindingGeneration，客户端不能只看请求 ID 判定所属范围。resolved 的投影提交与 Promise 收口使用 §2.3 的一次决议入口，普通通知失败不得逆转已经生效的决议。
 
-每个 backend runtime 生成一个不复用的 `permissionEpoch`；每个 root 在该 epoch 内有连续递增的 `permissionRevision`，每次 requested/resolved 提交递增一次。空集合不重置版本，其他 root 和聊天 delta 不增加本 root 的版本。规则更新本身不推进 pending 版本；若因此放行多个 pending，则各自提交 resolved。同步读出的请求集合、epoch、revision 来自同一份已提交对象，不需等总线安静或读数据库。
+每个 backend runtime 生成一个不复用的 `permissionEpoch`；每个 root 在该 epoch 内有连续递增的 `permissionRevision`，每次**已登记审批**的 requested/resolved 提交递增一次。空集合不重置版本，其他 root 和聊天 delta 不增加本 root 的版本。既有规则直接放行调用没有 pending 转移，不发审批增量；规则更新本身也不推进 pending 版本，若因此放行多个已登记 pending，则各自提交 resolved。同步读出的请求集合、epoch、revision 来自同一份已提交对象，不需等总线安静或读数据库。
 
-审批通知使用有错误回传的专用投递路径，再兼容发布普通领域/UI 通知；不能仅依赖会吞异常的普通订阅器来完成可靠传输。关键提交成功后，单 SSE 写入失败关闭该连接、触发其重连同步，其他连接继续；若 server 的审批转发器失败，则使受影响订阅失效并重新建立同步。TUI 本地投递失败同样标记未同步、重新读取审批。不能只打日志后让客户端永久保持 ready，也不能为了网络送达失败撤销后端 pending。事件续传缓存不是审批权威记录，丢失可由独立快照恢复。
+审批通知使用有错误回传的专用投递路径，再兼容发布普通领域/UI 通知；不能仅依赖会吞异常的普通订阅器来完成可靠传输。关键提交成功后，检测到单 SSE 写入失败时立即关闭该连接；客户端观察断流后取消 ready 并重连同步，其他连接继续。若 server 的审批转发器失败，则关闭受影响订阅并重新建立同步。即使失败的是最后一条 resolved、之后不再有事件，也不能指望未来版本缺口才发现；成功写入传输缓冲本身不等于浏览器已收到，不能据此虚称解决不可检测的静默丢包。TUI 本地投递失败同样标记未同步、重新读取审批。不能只打日志后让客户端永久保持 ready，也不能为了网络送达失败撤销后端 pending。事件续传缓存不是审批权威记录，丢失可由独立快照恢复。
 
 ### 独立查询与必需接线
 
@@ -93,7 +97,7 @@ manager 的 pending 是业务权威。composition 注入窄的同步 `criticalCo
 |---|---|
 | SDK / in-process | 新增审批独立查询及版本化事件；新增只读 `getSessionIndex()`，只返回现有主会话元数据（id/title/projectRoot/父子判别所需字段），不读取 messages/runs/todos/model。具体 active root 由当前客户端选择决定，不能从共享 backend 的 activeSessionId 猜测 |
 | server 初始化 / 客户端注册 | 初始化调度器等必需运行服务从整页读取中拆出并继续完成；REST 注册和 RPC initializeClient 统一已认证的 client-view 初始化，使用轻量元数据保留原 new/continue/resume 语义。注册不等待完整聊天快照。未指定/未选定根时不擅自选择最新会话 |
-| 会话选择 | 复用现有 `PATCH /v1/sessions/:id/select` 及 RPC/本地选择入口，抽出不读聊天历史的校验和选择步骤。验证主会话、workspace 后再更新该客户端路由，返回 root 和递增 bindingGeneration；不得先改路由再验证，也不能以全量 snapshot 成功作为选择完成条件。并发选择需检查原 bindingGeneration，过期选择不得覆盖新选择。所有会改变 active root 的入口（new/resume/首条 prompt 建会话等）共用该绑定更新规则，不能只修 select 路由 |
+| 会话选择 | 复用现有 `PATCH /v1/sessions/:id/select` 及 RPC/本地选择入口，抽出不读聊天历史的校验和选择步骤。验证主会话、workspace 后再更新该客户端路由，返回 root 和递增 bindingGeneration；不得先改路由再验证，也不能以全量 snapshot 成功作为选择完成条件。尝试将子会话选为主会话须明确报错并保留原绑定，不得把空审批列表当作成功；若旧客户端状态异常地指向子会话，审批保持未就绪并提示返回主会话，不向子页开放审批。并发选择需检查原 bindingGeneration，过期选择不得覆盖新选择。所有会改变 active root 的入口（new/resume/首条 prompt 建会话等）共用该绑定更新规则，不能只修 select 路由 |
 | SSE | 保留“先安装订阅，再发送 hello”的确认顺序；hello 带 runtime epoch、已确认 root/bindingGeneration。每次自动重连的 hello 都触发审批恢复，不能沿用当前忽略后续 hello 的行为。选择成功后新范围同样开始恢复 |
 | Web | transport、审批同步、聊天/model 加载分开管理；聊天/model 失败不能关闭健康 SSE。审批入口从轻量根元数据即可挂载，不再要求完整 snapshot 非空或 composer 可用；全量 snapshot 的 permission 副本不能覆盖独立审批状态 |
 | TUI / 显式 RemoteDaemonClient | 默认 TUI 直接使用本进程的同一审批查询/事件契约。既有 RemoteDaemonClient 接入独立审批查询与恢复，RPC 注册后可按同一认证/注册规则读取审批，保持 respondPermission 返回 void。没有新增 remote 默认入口 |
@@ -154,7 +158,7 @@ sequenceDiagram
 
 按 D16，审批卡片只简短标明实际来源/授权作用的代理对象，例如“北大子代理”；主代理请求对应主代理。保留请求标题及必要操作内容，不增加长篇作用范围说明、联动放行数量或二次确认弹窗。名称仅用于展示，实际授权仍使用 sessionId，遵守 D7。
 
-按 D17，同一 callId 下的多次审批复用现有 reason → title 和操作内容，区分每次请求的实际目的，不新增步骤计数或进度条。每次 ask 独立生成 permissionId；客户端按该 id 处理和撤下请求，不按 callId 合并，也不把上次 allow_once 当成本次回答。已合法保存的 always 规则仍按原策略匹配。
+按 D17，同一 callId 可依工具预检查顺序先后产生多次审批，例如外部目录确认后才产生 bash 确认；尚未产生的下一次请求不能提前回答。复用现有 reason → title 和操作内容区分每次请求的实际目的，不新增步骤计数或进度条。每次 ask 独立生成 permissionId；客户端按该 id 处理和撤下请求，不按 callId 合并，也不把上次 allow_once 当成本次回答。后一步拒绝使该工具调用停止，不撤销前一步已合法保存的、仅限真实来源 session 的 always 规则。
 
 按 D20，审批使用独立的同步就绪判断，不继续直接复用 composer.disabled 或仅凭全局 connectionState === live 启用按钮。当前连接、workspace 和根会话范围的审批基线及缓冲更新应用完成后，才允许回答；断连、切范围、审批同步失败或严重审批一致性故障时不可操作旧请求。聊天历史、todo 或附带运行状态读取失败不清除已正确建立的审批就绪状态，也不能让审批恢复等待这些无关查询成功。旧连接/范围的响应不得恢复新范围按钮。此就绪状态只是客户端交互条件，后端仍按真实来源、根会话、请求终态和 signal 校验每次回答。
 

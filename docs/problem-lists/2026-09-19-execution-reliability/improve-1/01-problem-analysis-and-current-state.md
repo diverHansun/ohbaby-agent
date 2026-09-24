@@ -15,6 +15,8 @@
 | P7 | 身份、显示和控制职责混杂 | SDK `snapshot.ts` UiPermissionRequest 仅 runId；ui-inprocess respondPermission cancel 分支 | 不能可靠标注来源或限定根会话，Cancel run 对象不明 |
 | P8 | 源码确认公共清理粒度不足 | ui-inprocess clearPendingPermissionsForRun 从 UI 快照反查后 cancelPending(sessionId) | 新旧 run 同 session 时可能过度清理；尚未投影的 pending 又可能遗漏 |
 
+P1 的传递断点需要按实际层次理解：主会话提交和子代理认领执行时都有真实 runId，core 的 agent runner 也已使用它；`RunWorker` 构造 `LifecycleSessionParams` 时没有带上，后续 `ModelStepParams`、`ToolCallRequest`、scheduler 的 `ToolCall` 与 PermissionAskInput 均没有该字段。显示层的“查当前 run，否则用 callId”是在补这条断链，并不表示整个 core 原本完全不知道 run。具体接线与验证见 [02 §2.2](02-optimization-plan-and-change-scope.md#22-身份契约)和 [04 T02/T10](04-test-and-acceptance.md)。
+
 代码根：agent 为 `packages/ohbaby-agent/src/`；server 为 `packages/ohbaby-server/src/`；SDK 为 `packages/ohbaby-sdk/src/`。P1/P2 最迟 v0.1.12 存在；无全提交 bisect 结论。历史记录不能区分审批、排队或远端执行，因此不将每个历史卡顿都归入 P1–P8。
 
 ## 1.2 分层与七维检查
