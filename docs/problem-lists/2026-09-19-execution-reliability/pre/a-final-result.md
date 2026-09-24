@@ -1,8 +1,10 @@
 # A. 最终结果提取
 
-> 整项可靠性改造前置。2026-09-24 按用户要求独立记录，随逐项讨论更新。已确认最终正文返回链、过程展示、正常空正文及失败/中断交付规则；本地临时分支 `codex/execution-reliability-pre-a` 已实施并验收，尚未合回开发分支。
+> 整项可靠性改造前置。2026-09-24 按用户要求独立记录，随逐项讨论更新。已确认最终正文返回链、过程展示、正常空正文及失败/中断交付规则；本地临时分支 `codex/execution-reliability-pre-a` 已实施；独立验收指出的 A-R1、A-R2、A-S1 已补修并通过全量复验及 Pi 复审，具备本地合回条件。
 
 ## 2026-09-24 本地实施记录
+
+以下保留实施时的记录；当前是否可以合回，以下方验收问题补修与复验记录为准。
 
 - `RunManager` 只在成功 completion 中传递本次 lifecycle 的 `finalResponse`；runner 的等待路径直接使用该字段，保留空字符串，不再查询整个 session/context scope 的历史来挑选最后一条非空消息。旧的 `extractFinalOutput` 导出仍保留供兼容，但生产等待路径不再调用它。
 - `AgentRunResult.runStatus` 保留 `succeeded`、`failed`、`cancelled`、`interrupted` 的真实结束事实；失败结果只携带原因，不带 `finalOutput`。子代理 host 把取消或中断保留为对应状态，不把它们记成普通失败。
@@ -14,7 +16,82 @@
 
 本批未改变 reasoning 持久化或历史页面；前者由 improve-1.1、后者由第三轮负责。测试中的 reasoning-only 子代理最终正文为空，其即时 reasoning 仍按现有链路处理，不把它当报告。
 
-## 已核实的现状
+## 2026-09-24 验收问题补修
+
+- A-R1：host 的完成回执区分本次运行结果与未执行输入的 `paused` 结果，工具再与后台实例快照区分。本次前台终态、正文或错误不再被后续队列遮住；后台派遣仍抑制尚未执行输入的旧报告、旧错误。真实 host → store → tool 回归覆盖有后续队列的成功正文、成功空正文、失败、超时和中断；前台追问被前轮失败/取消/超时/中断暂停时，正文与模型 metadata 都显示 paused，不借用前轮错误。
+- A-R2：内存与数据库 store 均以 `closedAt` 判定关闭；保留单次 run 的 `cancelled` 状态，同时允许未关闭实例继续排队与 claim。测试同时验证取消后续跑、真正关闭后拒绝追加/claim，以及 late completion 不能覆盖 close。
+- A-S1：明确关闭有运行中或排队工作的实例时，保存 `subagent closed` 原因，交付给原前台等待者，并通过本次 close 的独立 `reason` 在文本和模型 metadata 中显示原因。关闭空闲实例仍保留历史记录，但不将历史错误作为关闭原因。
+- 补强完整链路证据：部分正文后超时、host 中断已加入 composition E2E，与原有取消、断流用例一起验证原 scope 留片段、父报告仅含终态与原因，当前 8 个 E2E 通过。
+- 首次 Pi 审查指出“尚未执行的前台追问被暂停”与“空闲 close 借用旧错误”的两个反例，已补回归并修复；同一 `github-copilot/claude-opus-5.5` 会话复审未发现阻塞项，确认可本地合回。
+- 最终复验：`pnpm test` 362 个文件通过、6 个文件跳过，3813 个用例通过、17 个跳过；composition E2E 8 个通过；lint、typecheck、format:check、build 和 diff 空白检查通过。新增回归均先确认失败，再验证修复后通过。测试代码中曾发现两处可选输出的类型错误，已修正并完整重跑。
+- Pi 独立重跑 8 个文件的 93 个单元/集成用例及 8 个 composition E2E，全部通过。未覆盖的组合仍包括父级中断在尚未 claim 时暂停前台输入的模型渲染、SQLite store 经 host 的暂停链路；原始 metadata 中保留的实例历史 error 仍存在，给模型的投影会过滤。此次未重跑手工浏览器验收或真实模型业务请求。
+- 本次只修复 A 的交付与实例准入边界，不包含 B/C、结果服务或资源清理改造。本地 `codex/execution-reliability-pre-a` 分支按用户要求保留。
+
+以下独立验收保留当时发现与证据，描述的是 `e5e98878`，不代表补修后的最终结论。
+
+## 2026-09-24 独立验收：暂不合回（补修前）
+
+### 范围与结论
+
+- 基线：开发分支 `codex/execution-reliability` 的 `675c8fc4c731db53356dd5e2852271ff12285305`。
+- 被验版本：`codex/execution-reliability-pre-a` 的 `e5e9887880f645d9c01011171c1c3e86ba9b2135`，共四个提交、13 个变更文件；开始验收时工作区干净。
+- 方法：主审完整核对 diff 和返回链；两个只读子代理分别审查代码正确性与原方案覆盖。问题通过真实 `SessionSubagentHost`、内存 store、工具渲染与模型 metadata 投影复现，并对前两项运行基线对照。
+- 结论：核心正文返回链符合方案，现有自动化检查通过，但结果交付和取消后的续跑存在缺口，暂不合回。此次只更新验收记录，未修改产品代码、测试或执行合并。
+
+### Standards：本次引入的回归
+
+**A-R1 / P1：后续排队输入会遮住本次前台成功报告。**
+
+定位：`packages/ohbaby-agent/src/tools/subagent.ts:71–90`。前台 first 还在执行时，对同一子代理排入后台 second；first 完成后，host 在 `subagent-host.ts:825` 交付的是 first 的完成快照，快照仍可包含 second 的 `pendingQueue`。渲染却用“整个队列为空”判断 first 是否完成，将文本改成 `status: queued / pending_inputs: 1`，删除 first 的正文。模型 metadata 只投影状态等信息，不包含报告正文，无法补回丢失内容。
+
+真实复现中，host 已返回 `success: true / output: FIRST TASK REPORT`，父模型可见内容却没有这段报告；基线能够返回正文。first 失败时也会误写 `queued` 并省略错误块，不过错误仍在模型 metadata 中，属于文本与 metadata 矛盾，不能说失败原因完全丢失。
+
+修复边界：区分“前台本次调用的完成结果”与“后台派遣后的实例快照”。后续队列不能遮住已经结束的前台结果；后台尚未执行的输入仍不能冒领上一轮报告。补充有后续队列时的成功正文、成功空正文、失败、超时和中断验收。
+
+**A-R2 / P2：取消单次 run 后，未关闭的实例也不能继续使用。**
+
+定位：`packages/ohbaby-agent/src/agents/subagent-host.ts:122–125`。新增映射将 run 的 `cancelled` 保存为实例状态，但内存 store 的 `appendPendingQueue/claim`（61、115 行）和数据库 store（202、280 行）都把此状态当作禁止再次使用的条件。
+
+真实复现中，取消结果的 `closedAt` 未设置，随后同一 `subagent_id` 续跑仍报 `Subagent is closed: subagent`。基线虽然把该次 run 记成 failed，但实例可以续跑。本次保留真实取消事实是正确方向，需要同时对齐实例准入规则，区分“取消这一轮”与“明确关闭实例”；不能通过重新谎报 failed 来规避。修复时同时覆盖内存、数据库 store，并保证真正 close 的实例仍禁止续跑。
+
+其余改动未发现需要报告的新增正确性问题。复用现有完成链、不增加历史扫描、自动补写或结果服务，改动范围符合 KISS；以上两项反映的是单次 run 与长期实例状态的边界未对齐，无需引入新的调度框架。
+
+### Spec：方案覆盖与既有遗漏
+
+| 原方案要求 | 本次核对结果 |
+|---|---|
+| 本次 run 最后一步正文，不回取历史或 reasoning | 已接通 lifecycle → worker → completion → runner；runner 不再查历史，成功空字符串保持为空 |
+| 空正文成功结束，独立英文 `program_note`，不补请求 | 普通路径通过，composition E2E 确认提示进入父模型、子正文为空、总请求数为 3；有后续队列时须修复 A-R1 |
+| 失败片段留原历史，不作为报告 | 断流失败、取消的真实 composition 用例通过；失败 completion 不携带 finalResponse，runner 失败分支没有 finalOutput |
+| 前台与后台交付一致，保留真实终态与原因 | 尚未完整达到：A-R1 影响前台结果；下述 A-S1 缺少明确关闭的原因 |
+| 普通 stream、旧调用方与原生 model-state 兼容 | stream 路径和 provider 回放边界未改；旧 extractFinalOutput 导出保留，新字段 optional。旧 coordinator 不给 finalResponse 时返回空正文，不回捞历史 |
+| 不提前实施后续轮次 | 未新增 partialOutput、结果持久化服务或自动重试；真实资源清理仍属于 C |
+
+**A-S1 / P2，基线已有验收缺口：明确 close 正在运行的子代理时，没有交付取消原因。**
+
+定位：`packages/ohbaby-agent/src/agents/subagent-host.ts:289–299` 未保存 close 的原因，991–992 行在关闭后直接返回该记录。真实 host/tool 复现中，前台等待者只收到 `status: cancelled`；模型 metadata 同样没有 error。这不是本次引入的回归，但仍不满足 A 已确认的“真实终态和原因”。应在本批补齐关闭原因的交付与用例；不扩展到进程清理或第三轮结果服务。
+
+还有三处测试证据需要补强，不据此直接断定实现错误：部分正文后超时、部分正文后 host 中断的完整父子链；前一步有正文且调用工具、最后一步为空的完整返回链；真实后台完成与连续追问的组合场景。现有 mock 工具测试和分层测试不能冒充这些跨层用例。
+
+### 当前版本重新执行的检查
+
+| 命令 / 检查 | 结果 |
+|---|---|
+| `pnpm test` | 362 个文件通过、6 个跳过；3798 个用例通过、17 个跳过；退出码 0 |
+| `pnpm exec vitest run --config vitest.e2e.config.ts packages/ohbaby-agent/src/adapters/ui-runtime/subagent.e2e.test.ts` | 6 个用例通过；退出码 0 |
+| `pnpm typecheck`、`pnpm lint`、`pnpm format:check` | 全部退出码 0 |
+| `pnpm build` | 全部工作区构建通过；退出码 0 |
+| `git diff --check` | 通过 |
+| 真实 host/store/tool 当前与基线对照 | A-R1 的成功、失败场景及 A-R2 均复现；主审独立重跑确认 |
+| 模型工具内容投影与 close 路径 | 确认 A-R1 的成功正文没有 metadata 兜底；确认 A-S1 没有原因 |
+
+本次没有重跑手工 compiled Web 浏览器验收或调用真实付费模型；上方本地实施记录中的浏览器证据属于实施阶段记录。受控 provider 的 6 个 composition 用例已重新执行。
+
+复现脚本和运行日志保存在本机临时目录 `/tmp/ohbaby-pre-a-acceptance.1bjrwz/`；原始当前/基线脚本为 `/tmp/pre-a-standards-repro.mts` 与 `/tmp/pre-a-standards-baseline-repro.mts`。临时文件不作为长期验收依赖，后续应把上述触发条件写入正式回归测试。
+
+修复后继续在当前 pre-a 临时分支复验，先确认 A-R1、A-R2、A-S1 及对应回归测试，再更新本节结论；通过后才进入合回开发分支步骤。
+
+## 已核实的实施前现状
 
 - 普通主会话在 `packages/ohbaby-agent/src/agents/service.ts` 使用 `waitMode: stream`；对用户保持流式输出。
 - `core/lifecycle/lifecycle.ts` 分别处理正文和 `reasoningTextDelta`；普通流式正文没有在这里拼接 reasoning。
@@ -61,7 +138,7 @@
 | 没有正文就失败/中断 | 仍返回真实终态和原因，不按正常空正文处理，不从旧历史补文字 |
 | 前台/后台子执行收口 | 两条路径遵守相同的正文选择和错误边界；不为携带片段新增模型请求、重跑工具或等待额外报告生成 |
 
-以上是待实施的验收要求，不是已通过的测试记录。底层进程清理与资源释放仍由 C 负责，结果返回不证明真实操作已经停止。
+以上是已确认的验收要求，通过情况见独立验收记录。底层进程清理与资源释放仍由 C 负责，结果返回不证明真实操作已经停止。
 
 ## 2026-09-24 参考核查：正文、空结果与结束原因
 
@@ -108,7 +185,7 @@ pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-runtime/run-stream-ad
 
 **用户已确认：真实状态＋空正文＋单独的英文 `program_note`。** 正常结束且最终正文为空时，保留真实终态和空的 `finalOutput`，在工具结果的程序说明区域展示 `program_note: No output.`，不放进 `<subagent_output>`，不写回为模型正文或报告。只在本次执行已正常结束时生成，后台派遣尚未完成或查询仍在运行时不显示。沿现有结果渲染补一条说明，不新增报告服务或自动补请求；后续第三轮后台交付采用相同语义。
 
-源码依据（ohbaby `10018b4d`）：`tools/subagent.ts::renderRun/renderStatus` 已把身份、状态与 `<subagent_output>` 分开，当前空 output 只被省略；`agents/subagent-host.ts::successfulOutput` 直接传递成功的 finalOutput。Pi `57cde86906` 子代理扩展示例在文本结果中显示 `(no output)`，说明提示必须进入模型可见文本；不照搬它的正文提取或失败兜底。待验收应检查父模型真正收到的工具文本、空的正文存储及不增加模型请求，不能只检查 UI 元数据。提示格式及英文输出要求已确认，未实施。验收同时检查程序提示使用英文；中文文档中的解释不得直接作为运行时提示输出。
+实施前源码依据（ohbaby `10018b4d`）：`tools/subagent.ts::renderRun/renderStatus` 已把身份、状态与 `<subagent_output>` 分开，当时空 output 只被省略；`agents/subagent-host.ts::successfulOutput` 直接传递成功的 finalOutput。Pi `57cde86906` 子代理扩展示例在文本结果中显示 `(no output)`，说明提示必须进入模型可见文本；不照搬它的正文提取或失败兜底。验收应检查父模型真正收到的工具文本、空的正文存储及不增加模型请求，不能只检查 UI 元数据。当前本地分支已接线，验收结论见上文。验收同时检查程序提示使用英文；中文文档中的解释不得直接作为运行时提示输出。
 
 ## 与后续轮次的边界
 
