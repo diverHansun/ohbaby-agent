@@ -25,7 +25,7 @@
 用户确认：“正常结束，但没有最终正文”这个事实应明确提示，不自动追加模型请求，不采用 Kimi 的自动补写做法。
 
 - 保留真实的正常结束状态；正文为空不改成执行失败，也不据此宣称用户任务已全部完成。
-- 最终正文保持为空，程序明确说明“本次执行未生成最终正文”。该说明属于程序反馈，与模型正文区分，不能作为模型生成的报告保存。
+- 最终正文保持为空，程序单独返回英文说明 `No output.`。该说明属于程序反馈，与模型正文区分，不能作为模型生成的报告保存。
 - 不回取上次答复、过程说明或 reasoning 填补空正文；已有过程文字和工具历史继续可查看。
 - 后端不因空正文自动补请求或重跑任务。父代理或用户可根据真实结果决定是否另行追问。
 
@@ -89,6 +89,14 @@ pnpm exec vitest run packages/ohbaby-agent/src/adapters/ui-runtime/run-stream-ad
 - DeepSeek Harness：`packages/subagent/subagent/src/out-of-process.ts::settleRunResult` 在失败/取消时可返回已收集 output，`types.ts::SubagentResult` 将它与 stopReason 分开；但 `run-settlement.ts::runOutcome` 的后台一次性任务路径在失败/中止时不转交部分输出。不能把底层保留能力说成所有父任务都会收到半成品。
 - OpenCode：`packages/opencode/src/tool/task.ts` 的前台等待路径遇到 error/cancelled 时返回对应错误；只有正常完成分支渲染 completed 正文。
 - Pi：`packages/coding-agent/examples/extensions/subagent/index.ts::getResultOutput` 在失败时优先 errorMessage/stderr，缺少错误说明才回退文字；完整 messages 仍在结果详情中。单任务调用标记 isError，不能因有文字就当成功。
+
+## 2026-09-24 外部反馈：最终正文与空正文提示
+
+[Opus 5.5 反馈](https://opncd.ai/share/1MQFKOmb) 提出最后一步正文和本次最后非空正文的区别。此前用户已确认不回取过程说明补最终报告，继续沿此规则：即使前一步写出看似完整的结论后又调用工具，正常结束时正文为空，仍说明没有最终正文；最后只说“好了”，就交付“好了”。前面的结论保留在历史中，不由程序判断其内容更像报告而替换最终正文。该例子细化已有选择，不改变正文来源。
+
+**用户已确认：真实状态＋空正文＋单独的英文 `program_note`。** 正常结束且最终正文为空时，保留真实终态和空的 `finalOutput`，在工具结果的程序说明区域展示 `program_note: No output.`，不放进 `<subagent_output>`，不写回为模型正文或报告。只在本次执行已正常结束时生成，后台派遣尚未完成或查询仍在运行时不显示。沿现有结果渲染补一条说明，不新增报告服务或自动补请求；后续第三轮后台交付采用相同语义。
+
+源码依据（ohbaby `10018b4d`）：`tools/subagent.ts::renderRun/renderStatus` 已把身份、状态与 `<subagent_output>` 分开，当前空 output 只被省略；`agents/subagent-host.ts::successfulOutput` 直接传递成功的 finalOutput。Pi `57cde86906` 子代理扩展示例在文本结果中显示 `(no output)`，说明提示必须进入模型可见文本；不照搬它的正文提取或失败兜底。待验收应检查父模型真正收到的工具文本、空的正文存储及不增加模型请求，不能只检查 UI 元数据。提示格式及英文输出要求已确认，未实施。验收同时检查程序提示使用英文；中文文档中的解释不得直接作为运行时提示输出。
 
 ## 与后续轮次的边界
 
