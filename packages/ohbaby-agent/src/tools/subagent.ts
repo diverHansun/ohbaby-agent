@@ -68,24 +68,26 @@ function runMode(params: Record<string, unknown>): SubagentRunMode {
 }
 
 function renderRun(result: SubagentRunResult): string {
+  const pending = result.item.pendingQueue.length > 0;
+  const settled = !pending && result.item.currentRunId === undefined;
   const error =
     result.item.error ?? (result.success === false ? result.output : undefined);
   const completed =
-    result.success !== false &&
-    result.item.status === "completed" &&
-    result.item.currentRunId === undefined &&
-    result.item.pendingQueue.length === 0;
+    result.success !== false && result.item.status === "completed" && settled;
   const output = result.output ?? result.item.output;
   return [
     `subagent_id: ${result.item.subagentId}`,
     `session_id: ${result.item.sessionId}`,
     `context_scope_id: ${result.item.contextScopeId}`,
-    `status: ${result.item.status}`,
+    `status: ${pending ? "queued" : result.item.status}`,
+    pending
+      ? `pending_inputs: ${String(result.item.pendingQueue.length)}`
+      : undefined,
     completed && output
       ? `<subagent_output>\n${output}\n</subagent_output>`
       : undefined,
     completed && !output ? "program_note: No output." : undefined,
-    result.item.status !== "completed" && error
+    settled && result.item.status !== "completed" && error
       ? `<subagent_error>\n${error}\n</subagent_error>`
       : undefined,
   ]

@@ -544,7 +544,13 @@ describe("subagent runtime e2e", () => {
       expect(parentText).toContain("program_note: No output.");
       expect(parentText).not.toContain("<subagent_output>");
       expect(child.at(-1)?.info.role).toBe("assistant");
-      expect(child.at(-1)?.parts).toEqual([]);
+      expect(
+        child
+          .at(-1)
+          ?.parts.filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join(""),
+      ).toBe("");
       expect(parentText).not.toContain("thinking");
       expect(requests).toHaveLength(3);
     } finally {

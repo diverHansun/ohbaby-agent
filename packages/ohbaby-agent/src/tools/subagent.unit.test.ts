@@ -229,6 +229,29 @@ describe("subagent builtin tools", () => {
     expect(statusResult.output).not.toContain("<subagent_output>");
   });
 
+  it("does not present a previous interrupted run's error as a queued continuation's result", async () => {
+    const { host, run } = createHost();
+    const pendingItem = {
+      ...item,
+      status: "interrupted" as const,
+      output: "previous run interrupted",
+      error: "previous run interrupted",
+      pendingQueue: [{ prompt: "continue" }],
+    };
+    run.mockResolvedValueOnce({ item: pendingItem });
+    const tools = createBuiltinTools({ subagentHost: host });
+
+    const result = await getTool(tools, "subagent_run").execute(
+      { prompt: "continue", mode: "background", subagent_id: "subagent_1" },
+      context,
+    );
+
+    expect(result.output).toContain("status: queued");
+    expect(result.output).toContain("pending_inputs: 1");
+    expect(result.output).not.toContain("<subagent_error>");
+    expect(result.output).not.toContain("previous run interrupted");
+  });
+
   it("shows an immediately completed background result", async () => {
     const { host, run } = createHost();
     run.mockResolvedValueOnce({ item: { ...item, output: "" } });
