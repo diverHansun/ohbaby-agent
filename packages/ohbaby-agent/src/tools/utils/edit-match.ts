@@ -1,3 +1,4 @@
+import { FUZZY_MAX_BYTES, FUZZY_MAX_WORK } from "./mutation-budgets.js";
 import { ToolParameterError } from "./params.js";
 
 export interface EditMatch {
@@ -12,22 +13,32 @@ interface MatchRange {
   readonly start: number;
 }
 
-function countOccurrences(content: string, target: string): number {
-  return content.split(target).length - 1;
-}
-
-function exactRanges(content: string, target: string): MatchRange[] {
-  const ranges: MatchRange[] = [];
-  let offset = 0;
-  while (offset < content.length) {
-    const start = content.indexOf(target, offset);
-    if (start === -1) {
-      break;
-    }
-    ranges.push({ start, end: start + target.length });
-    offset = start + target.length;
+// KMP scans the whole file in linear work, retaining only a prefix table
+// bounded by the already-validated old_string input.
+function exactMatches(
+  content: string,
+  target: string,
+): { count: number; first: number } {
+  if (!target.length)
+    throw new ToolParameterError("Edit target must not be empty.");
+  const prefix = new Uint32Array(target.length);
+  for (let i = 1, j = 0; i < target.length; i += 1) {
+    while (j > 0 && target[i] !== target[j]) j = prefix[j - 1] ?? 0;
+    if (target[i] === target[j]) j += 1;
+    prefix[i] = j;
   }
-  return ranges;
+  let count = 0;
+  let first = -1;
+  for (let i = 0, j = 0; i < content.length; i += 1) {
+    while (j > 0 && content[i] !== target[j]) j = prefix[j - 1] ?? 0;
+    if (content[i] === target[j]) j += 1;
+    if (j === target.length) {
+      if (first === -1) first = i - j + 1;
+      count += 1;
+      j = 0;
+    }
+  }
+  return { count, first };
 }
 
 function lineStartOffsets(lines: readonly string[]): number[] {
@@ -91,8 +102,9 @@ function removeSharedIndent(text: string): string {
   if (nonEmpty.length === 0) {
     return text;
   }
-  const minIndent = Math.min(
-    ...nonEmpty.map((line) => /^\s*/u.exec(line)?.[0].length ?? 0),
+  const minIndent = nonEmpty.reduce(
+    (minimum, line) => Math.min(minimum, /^\s*/u.exec(line)?.[0].length ?? 0),
+    Infinity,
   );
   return lines
     .map((line) => (line.trim() === "" ? line : line.slice(minIndent)))
@@ -185,8 +197,9 @@ export function findEditMatch(input: {
   readonly oldString: string;
   readonly replaceAll: boolean;
 }): EditMatch {
+  const exact = exactMatches(input.content, input.oldString);
   if (input.replaceAll) {
-    const occurrences = countOccurrences(input.content, input.oldString);
+    const occurrences = exact.count;
     if (occurrences === 0) {
       throw new Error("No occurrences found for edit target.");
     }
@@ -198,31 +211,42 @@ export function findEditMatch(input: {
     };
   }
 
-  const exact = exactRanges(input.content, input.oldString);
-  if (exact.length === 1) {
-    const [match] = exact;
+  if (exact.count === 1) {
     return {
-      ...match,
+      start: exact.first,
+      end: exact.first + input.oldString.length,
       replacementCount: 1,
-      text: input.content.slice(match.start, match.end),
+      text: input.oldString,
     };
   }
-  if (exact.length > 1) {
-    multipleMatches(exact.length);
+  if (exact.count > 1) multipleMatches(exact.count);
+  const contentBytes = Buffer.byteLength(input.content);
+  let findLines = 1;
+  for (const char of input.oldString) if (char === "\n") findLines += 1;
+  let contentLines = 1;
+  for (const char of input.content) if (char === "\n") contentLines += 1;
+  if (
+    contentLines * Buffer.byteLength(input.oldString) > FUZZY_MAX_WORK ||
+    contentBytes > FUZZY_MAX_BYTES ||
+    contentBytes * findLines > FUZZY_MAX_WORK
+  ) {
+    throw new Error(
+      "Edit fuzzy matching budget exceeded; provide an exact old_string.",
+    );
   }
-
   for (const fuzzy of [
-    uniqueRanges(lineTrimmedRanges(input.content, input.oldString)),
-    uniqueRanges(indentationFlexibleRanges(input.content, input.oldString)),
-    uniqueRanges(whitespaceNormalizedRanges(input.content, input.oldString)),
+    lineTrimmedRanges,
+    indentationFlexibleRanges,
+    whitespaceNormalizedRanges,
   ]) {
-    if (fuzzy.length === 0) {
+    const ranges = uniqueRanges(fuzzy(input.content, input.oldString));
+    if (ranges.length === 0) {
       continue;
     }
-    if (fuzzy.length > 1) {
-      multipleMatches(fuzzy.length);
+    if (ranges.length > 1) {
+      multipleMatches(ranges.length);
     }
-    const [match] = fuzzy;
+    const [match] = ranges;
     return {
       ...match,
       replacementCount: 1,
