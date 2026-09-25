@@ -1,3 +1,9 @@
+import type { UiPermissionEvent } from "./permission.js";
+export type {
+  UiPermissionRequestedEvent,
+  UiPermissionResolvedEvent,
+  UiPermissionUnavailableEvent,
+} from "./permission.js";
 import type {
   UiSlashCommandAction,
   UiSlashCommandError,
@@ -9,7 +15,6 @@ import type {
   UiMessage,
   UiGoal,
   UiPermissionState,
-  UiPermissionRequest,
   UiRun,
   UiRunStatus,
   UiSession,
@@ -130,18 +135,6 @@ export interface UiTodoUpdatedEvent {
   readonly timestamp?: number;
 }
 
-export interface UiPermissionRequestedEvent {
-  readonly type: "permission.requested";
-  readonly request: UiPermissionRequest;
-  readonly timestamp?: number;
-}
-
-export interface UiPermissionResolvedEvent {
-  readonly type: "permission.resolved";
-  readonly requestId: string;
-  readonly timestamp?: number;
-}
-
 export interface UiNotice {
   readonly id: string;
   readonly key?: string;
@@ -227,8 +220,7 @@ export type UiEvent =
   | UiContextWindowUpdatedEvent
   | UiGoalUpdatedEvent
   | UiTodoUpdatedEvent
-  | UiPermissionRequestedEvent
-  | UiPermissionResolvedEvent
+  | UiPermissionEvent
   | UiNoticeEmittedEvent
   | UiCommandStartedEvent
   | UiCommandResultDeliveredEvent

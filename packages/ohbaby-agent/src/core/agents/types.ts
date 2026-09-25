@@ -105,6 +105,7 @@ export interface AgentRunCompletion {
 export interface AgentRunCoordinator {
   create(options: AgentRunCreateOptions): Promise<AgentRunHandle>;
   cancel(runId: string, reason?: string): void;
+  revokePermissionsForRun?(runId: string, reason: string): void;
   waitForCompletion(runId: string): Promise<AgentRunCompletion>;
 }
 

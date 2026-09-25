@@ -16,6 +16,17 @@ import { createDaemonHttpServer, type WorkspaceBackend } from "./server.js";
 function createBackend(dispose = vi.fn()): WorkspaceBackend {
   return {
     dispose,
+    getSessionIndex: vi.fn(() => Promise.resolve([])),
+    getPermissionSnapshot: vi.fn(
+      ({ rootSessionId }: { rootSessionId: string | null }) =>
+        Promise.resolve({
+          permissionEpoch: "test-epoch",
+          rootSessionId,
+          permissionRevision: 0,
+          requests: [],
+        }),
+    ),
+    subscribePermissionEvents: vi.fn(() => vi.fn()),
     getSnapshot: vi.fn(() =>
       Promise.resolve({
         activeSessionId: null,

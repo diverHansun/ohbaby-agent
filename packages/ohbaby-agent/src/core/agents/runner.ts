@@ -226,6 +226,19 @@ export async function runAgent(
     }
     throw error;
   }
+  if (input.runId && record.runId !== input.runId) {
+    const reason = `Agent run coordinator created unexpected run id: ${record.runId}`;
+    try {
+      deps.runCoordinator.cancel(record.runId, reason);
+    } finally {
+      try {
+        deps.runCoordinator.revokePermissionsForRun?.(record.runId, reason);
+      } finally {
+        await preSubscribed?.close();
+      }
+    }
+    throw new Error(reason);
+  }
   const unbindAbort = bindAgentAbort({
     cancel: deps.runCoordinator.cancel.bind(deps.runCoordinator),
     runId: record.runId,
@@ -235,11 +248,6 @@ export async function runAgent(
     try {
       if (!runEventSource) {
         throw new Error("Agent run event source is required for stream mode");
-      }
-      if (input.runId && record.runId !== input.runId) {
-        throw new Error(
-          `Agent run coordinator created unexpected run id: ${record.runId}`,
-        );
       }
       const events =
         preSubscribed?.events ??

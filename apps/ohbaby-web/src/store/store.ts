@@ -4,12 +4,20 @@ import {
   replaceSnapshot,
 } from "../api/daemon/eventReducer.js";
 import type { ConnectionState, StoreSnapshot } from "../api/daemon/wire.js";
-import type { UiCurrentModelConfig, UiEvent, UiSnapshot } from "ohbaby-sdk";
+import type {
+  PermissionSyncState,
+  UiSessionIndexEntry,
+  UiCurrentModelConfig,
+  UiEvent,
+  UiSnapshot,
+} from "ohbaby-sdk";
 
 export type StoreListener = () => void;
 export type UiEventSource = "incremental" | "snapshot-barrier";
 
 export interface OhbabyWebStore {
+  setPermissionSync(state: PermissionSyncState): void;
+  setSessionIndex(sessions: readonly UiSessionIndexEntry[]): void;
   applyEvent(event: UiEvent, seqNum: number, source?: UiEventSource): boolean;
   getSnapshot(): StoreSnapshot;
   replaceSnapshot(snapshot: UiSnapshot, seqNum: number): void;
@@ -22,6 +30,14 @@ export interface OhbabyWebStore {
 
 export function createOhbabyWebStore(): OhbabyWebStore {
   let snapshot: StoreSnapshot = {
+    permissionSync: {
+      status: "idle",
+      binding: null,
+      requests: [],
+      permissionRevision: 0,
+      attempts: 0,
+    },
+    sessionIndex: [],
     connectionState: "connecting",
     currentModel: null,
     error: null,
@@ -51,7 +67,20 @@ export function createOhbabyWebStore(): OhbabyWebStore {
   }
 
   return {
+    setPermissionSync(permissionSync): void {
+      publish({ ...snapshot, permissionSync });
+    },
+    setSessionIndex(sessionIndex): void {
+      publish({ ...snapshot, sessionIndex });
+    },
     applyEvent(event, seqNum, source = "incremental"): boolean {
+      if (
+        event.type === "permission.requested" ||
+        event.type === "permission.resolved" ||
+        event.type === "permission.unavailable" ||
+        event.type === "permission.resync-required"
+      )
+        return false;
       const nextView =
         source === "snapshot-barrier" && event.type === "snapshot.replaced"
           ? seqNum < snapshot.view.lastAppliedSeqNum
@@ -78,6 +107,14 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     },
     reset(): void {
       publish({
+        permissionSync: {
+          status: "idle",
+          binding: null,
+          requests: [],
+          permissionRevision: 0,
+          attempts: 0,
+        },
+        sessionIndex: [],
         connectionState: "connecting",
         currentModel: null,
         error: null,

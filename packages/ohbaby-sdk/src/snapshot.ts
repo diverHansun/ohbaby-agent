@@ -134,6 +134,13 @@ export interface UiToolResult {
 
 export interface UiPermissionRequest {
   readonly id: string;
+  readonly sessionId: string;
+  readonly callId: string;
+  readonly messageId: string;
+  readonly rootSessionId: string;
+  readonly createdAt: number;
+  readonly contextScopeId?: string;
+  readonly sourceLabel?: string;
   readonly runId: string;
   readonly title: string;
   readonly description: string;

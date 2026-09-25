@@ -230,6 +230,22 @@ async function waitForStarted(path: string, count: number): Promise<void> {
   }
 }
 
+async function createServerSession(
+  origin: string,
+  headers: Record<string, string>,
+): Promise<string> {
+  const response = await fetch(`${origin}/v1/sessions`, {
+    body: JSON.stringify({}),
+    headers,
+    method: "POST",
+  });
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    readonly session: { readonly id: string };
+  };
+  return body.session.id;
+}
+
 describe("global single serve across real processes", () => {
   it("migrates legacy platform data before a direct server start opens SQLite", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-data-migrate-"));
@@ -339,11 +355,14 @@ describe("global single serve across real processes", () => {
       readonly clientRequestId: string;
       readonly promptId: string;
     }[] = [];
+    const sessionIds: string[] = [];
     for (let index = 1; index <= 11; index += 1) {
+      const sessionId = await createServerSession(origin, headers);
+      sessionIds.push(sessionId);
       const response = await fetch(`${origin}/v1/prompts`, {
         body: JSON.stringify({
           clientRequestId: `process_request_${String(index)}`,
-          sessionId: `process_session_${String(index)}`,
+          sessionId,
           text: `process prompt ${String(index)}`,
         }),
         headers,
@@ -361,7 +380,7 @@ describe("global single serve across real processes", () => {
     const retried = await fetch(`${origin}/v1/prompts`, {
       body: JSON.stringify({
         clientRequestId: "process_request_11",
-        sessionId: "process_session_11",
+        sessionId: sessionIds[10],
         text: "process prompt 11",
       }),
       headers,
@@ -428,13 +447,16 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionIds: string[] = [];
     let activePromptId = "";
     let queuedPromptId = "";
     for (let index = 1; index <= 11; index += 1) {
+      const sessionId = await createServerSession(firstOrigin, headers);
+      sessionIds.push(sessionId);
       const response = await fetch(`${firstOrigin}/v1/prompts`, {
         body: JSON.stringify({
           clientRequestId: `recovery_request_${String(index)}`,
-          sessionId: `recovery_session_${String(index)}`,
+          sessionId,
           text: `recovery prompt ${String(index)}`,
         }),
         headers,
@@ -463,7 +485,7 @@ describe("global single serve across real processes", () => {
     });
     const sessionHeaders: Record<string, Record<string, string>> = {};
     for (let index = 1; index <= 11; index += 1) {
-      const sessionId = `recovery_session_${String(index)}`;
+      const sessionId = sessionIds[index - 1];
       const clientId = `recovery_view_${String(index)}`;
       const scopedHeaders = {
         ...headers,
@@ -485,7 +507,7 @@ describe("global single serve across real processes", () => {
     for (;;) {
       statuses = await Promise.all(
         Array.from({ length: 11 }, async (_unused, zeroBasedIndex) => {
-          const sessionId = `recovery_session_${String(zeroBasedIndex + 1)}`;
+          const sessionId = sessionIds[zeroBasedIndex];
           const response = await fetch(`${secondOrigin}/v1/snapshot`, {
             headers: sessionHeaders[sessionId],
           });
@@ -529,7 +551,7 @@ describe("global single serve across real processes", () => {
       directory: repo,
       host: endpoint.hostname,
       port: Number(endpoint.port),
-      startupIntent: { resumeSessionId: "recovery_session_1" },
+      startupIntent: { resumeSessionId: sessionIds[0] },
     });
     try {
       const completion = await recoveredClient.waitForPrompt(activePromptId);
@@ -577,6 +599,7 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionId = await createServerSession(firstOrigin, headers);
     const receipts: { readonly promptId: string }[] = [];
     for (const [index, text] of [
       "active",
@@ -586,7 +609,7 @@ describe("global single serve across real processes", () => {
       const response = await fetch(`${firstOrigin}/v1/prompts`, {
         body: JSON.stringify({
           clientRequestId: `edit_request_${String(index)}`,
-          sessionId: "edit_session",
+          sessionId,
           text,
         }),
         headers,
@@ -660,7 +683,7 @@ describe("global single serve across real processes", () => {
     await fetch(`${secondOrigin}/v1/clients`, {
       body: JSON.stringify({
         clientId: "edit_client",
-        startupIntent: { resumeSessionId: "edit_session" },
+        startupIntent: { resumeSessionId: sessionId },
       }),
       headers,
       method: "POST",
@@ -733,10 +756,11 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionId = await createServerSession(origin, headers);
     const active = await fetch(`${origin}/v1/prompts`, {
       body: JSON.stringify({
         clientRequestId: "limit_request_active",
-        sessionId: "limit_session",
+        sessionId,
         text: "active",
       }),
       headers,
@@ -750,7 +774,7 @@ describe("global single serve across real processes", () => {
         return fetch(`${origin}/v1/prompts`, {
           body: JSON.stringify({
             clientRequestId: `limit_request_${String(index)}`,
-            sessionId: "limit_session",
+            sessionId,
             text: `queued ${String(index)}`,
           }),
           headers,
@@ -820,12 +844,13 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionId = await createServerSession(origin, headers);
     const receipts: { readonly promptId: string }[] = [];
     for (const [index, text] of ["active", "queued"].entries()) {
       const response = await fetch(`${origin}/v1/prompts`, {
         body: JSON.stringify({
           clientRequestId: `graceful_request_${String(index)}`,
-          sessionId: "graceful_session",
+          sessionId,
           text,
         }),
         headers,
@@ -873,7 +898,7 @@ describe("global single serve across real processes", () => {
     await fetch(`${secondOrigin}/v1/clients`, {
       body: JSON.stringify({
         clientId: "graceful_client",
-        startupIntent: { resumeSessionId: "graceful_session" },
+        startupIntent: { resumeSessionId: sessionId },
       }),
       headers,
       method: "POST",
@@ -937,10 +962,11 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionId = await createServerSession(origin, headers);
     const accepted = await fetch(`${origin}/v1/prompts`, {
       body: JSON.stringify({
         clientRequestId: "provider_request_1",
-        sessionId: "provider_session",
+        sessionId,
         text: "fail with provider 429",
       }),
       headers,
@@ -1020,12 +1046,13 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionId = await createServerSession(origin, headers);
     let queuedPromptId = "";
     for (const [index, text] of ["active", "queued"].entries()) {
       const response = await fetch(`${origin}/v1/prompts`, {
         body: JSON.stringify({
           clientRequestId: `unavailable_request_${String(index)}`,
-          sessionId: "unavailable_session",
+          sessionId,
           text,
         }),
         headers,

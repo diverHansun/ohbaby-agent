@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { isUiReasoningConfig } from "ohbaby-sdk";
 import type {
   SubmitPromptOptions,
   UiAcquirePromptEditLeaseInput,
   UiBackendClient,
+  UiEvent,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
   UiReleasePromptEditLeaseInput,
@@ -12,10 +14,16 @@ import type { UiPromptQueueExecutionPort } from "ohbaby-agent";
 import {
   DaemonForbiddenError,
   isDaemonForbiddenError,
-  parseDaemonStartupIntent,
   respondInteractionForClient,
   type DaemonClientViewCoordinator,
 } from "../../coordination/client-view.js";
+import {
+  initializePermissionClient,
+  parsePermissionBinding,
+  permissionSnapshotForClient,
+  respondPermissionForClient,
+  selectPermissionSession,
+} from "../../coordination/permission-access.js";
 import { PermissionRouter } from "../../coordination/permission-router.js";
 import {
   acquirePromptEditLeaseForClient,
@@ -120,13 +128,33 @@ export function parseDaemonRpcBody(body: string): {
   }
 }
 
+// Match the built-in resume command grammar without loading chat history or
+// mutating the shared backend selection.
+function parseResumeSessionId(argv: readonly string[]): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--session_id" || arg === "--session-id") {
+      const value = argv[index + 1];
+      return value && !value.startsWith("-") ? value : undefined;
+    }
+    if (arg.startsWith("--session_id=") || arg.startsWith("--session-id=")) {
+      const value = arg.slice(arg.indexOf("=") + 1);
+      return value && !value.startsWith("-") ? value : undefined;
+    }
+    if (!arg.startsWith("-")) return arg;
+  }
+  return undefined;
+}
+
 export async function callDaemonBackend(input: {
   readonly backend: UiBackendClient & UiPromptQueueExecutionPort;
   readonly clientViews: DaemonClientViewCoordinator;
   readonly createSessionId: () => string;
   readonly permissionRouter: PermissionRouter;
+  readonly permissionEpoch: string;
   readonly request: DaemonRpcRequest;
   readonly signal?: AbortSignal;
+  readonly emitCommandEvent: (event: UiEvent) => void;
 }): Promise<unknown> {
   const { backend, clientViews, createSessionId, permissionRouter, request } =
     input;
@@ -136,17 +164,63 @@ export async function callDaemonBackend(input: {
       const snapshot = await backend.getSnapshot();
       return permissionRouter.filterSnapshotForClient(
         clientViews.projectSnapshot(request.clientId, snapshot),
-        request.clientId,
+        clientViews.isRegistered(request.clientId)
+          ? clientViews.binding(request.clientId, input.permissionEpoch)
+              .rootSessionId
+          : null,
       );
     }
     case "initializeClient": {
-      const snapshot = await backend.getSnapshot();
-      clientViews.initializeClient(
+      return initializePermissionClient(
+        backend,
+        clientViews,
         request.clientId,
-        snapshot,
-        parseDaemonStartupIntent(request.params[0]),
+        request.params[0],
+        input.permissionEpoch,
       );
-      return undefined;
+    }
+    case "getSessionIndex":
+      return backend.getSessionIndex();
+    case "getSelectedSessionId":
+      return clientViews.binding(request.clientId, input.permissionEpoch)
+        .rootSessionId;
+    case "getPermissionSnapshot":
+      return permissionSnapshotForClient(
+        backend,
+        clientViews,
+        request.clientId,
+        parsePermissionBinding(request.params[0]),
+        input.permissionEpoch,
+      );
+    case "selectSession":
+      return selectPermissionSession(
+        backend,
+        clientViews,
+        request.clientId,
+        request.params[0] as string,
+        input.permissionEpoch,
+        typeof request.params[1] === "number" ? request.params[1] : undefined,
+      );
+    case "createSession": {
+      const previous = clientViews.binding(
+        request.clientId,
+        input.permissionEpoch,
+      );
+      const session = await backend.createSession();
+      clientViews.assertBinding(
+        request.clientId,
+        previous,
+        input.permissionEpoch,
+      );
+      clientViews.selectSession(
+        request.clientId,
+        session.id,
+        previous.bindingGeneration,
+      );
+      return {
+        session,
+        ...clientViews.binding(request.clientId, input.permissionEpoch),
+      };
     }
     case "getContextWindowUsage":
       return backend.getContextWindowUsage(
@@ -168,7 +242,10 @@ export async function callDaemonBackend(input: {
         permissionRouter,
         text: request.params[0] as string,
       });
-      return accepted.receipt;
+      return {
+        ...accepted.receipt,
+        ...clientViews.binding(request.clientId, input.permissionEpoch),
+      };
     }
     case "editQueuedPrompt": {
       const input = request.params[0] as UiEditQueuedPromptInput;
@@ -271,24 +348,130 @@ export async function callDaemonBackend(input: {
         request.clientId,
         request.params[0] as ExecuteCommandInvocation,
       );
+      if (invocation.commandId === "new" || invocation.commandId === "resume") {
+        const commandRunId = randomUUID();
+        const identity = {
+          commandRunId,
+          clientInvocationId: invocation.clientInvocationId,
+        };
+        input.emitCommandEvent({
+          type: "command.started",
+          timestamp: Date.now(),
+          command: {
+            ...identity,
+            commandId: invocation.commandId,
+            path: invocation.path,
+            surface: invocation.surface,
+            ...(invocation.sessionId === undefined
+              ? {}
+              : { sessionId: invocation.sessionId }),
+          },
+        });
+        const sessionId = parseResumeSessionId(invocation.argv);
+        if (invocation.commandId === "resume" && sessionId === undefined) {
+          input.emitCommandEvent({
+            type: "command.failed",
+            ...identity,
+            timestamp: Date.now(),
+            error: {
+              code: "SESSION_ID_REQUIRED",
+              message: "Use /resume --session_id <id> to resume a session",
+              recoverable: true,
+            },
+          });
+          return undefined;
+        }
+        try {
+          let selectedId: string;
+          let output: Extract<
+            UiEvent,
+            { type: "command.result.delivered" }
+          >["output"];
+          if (invocation.commandId === "new") {
+            const previous = clientViews.binding(
+              request.clientId,
+              input.permissionEpoch,
+            );
+            const session = await backend.createSession();
+            clientViews.assertBinding(
+              request.clientId,
+              previous,
+              input.permissionEpoch,
+            );
+            clientViews.selectSession(
+              request.clientId,
+              session.id,
+              previous.bindingGeneration,
+            );
+            selectedId = session.id;
+            output = {
+              kind: "data",
+              subject: "session.created",
+              data: { session },
+            };
+          } else {
+            // Missing resume arguments were rejected above; preserve every accepted flag spelling.
+            if (sessionId === undefined)
+              throw new Error("Resume session is required");
+            selectedId = sessionId;
+            await selectPermissionSession(
+              backend,
+              clientViews,
+              request.clientId,
+              selectedId,
+              input.permissionEpoch,
+            );
+            output = {
+              kind: "data",
+              subject: "session.current",
+              data: { sessionId: selectedId },
+            };
+          }
+          input.emitCommandEvent({
+            type: "command.result.delivered",
+            ...identity,
+            timestamp: Date.now(),
+            output,
+          });
+          input.emitCommandEvent({
+            type: "command.result.delivered",
+            ...identity,
+            timestamp: Date.now(),
+            action: {
+              kind: "session.selected",
+              data: {
+                choiceId: selectedId,
+                ...(invocation.commandId === "new" ? { source: "new" } : {}),
+              },
+            },
+          });
+        } catch (error) {
+          input.emitCommandEvent({
+            type: "command.failed",
+            ...identity,
+            timestamp: Date.now(),
+            error: {
+              code: "EXECUTION_ERROR",
+              message: error instanceof Error ? error.message : String(error),
+              recoverable: true,
+            },
+          });
+        }
+        return undefined;
+      }
       return backend.executeCommand(invocation);
     }
     case "respondPermission":
-      if (
-        !permissionRouter.canRespondPermission(
-          request.params[0] as string,
-          request.clientId,
-        )
-      ) {
-        throw new DaemonForbiddenError(
-          "Permission request is owned by another client",
-        );
-      }
-      return backend.respondPermission(
+      return respondPermissionForClient(
+        backend,
+        clientViews,
+        request.clientId,
         request.params[0] as string,
         request.params[1] as Parameters<
           UiBackendClient["respondPermission"]
         >[1],
+        parsePermissionBinding(request.params[2]),
+        input.permissionEpoch,
       );
     case "respondInteraction": {
       const interactionId = request.params[0] as string;

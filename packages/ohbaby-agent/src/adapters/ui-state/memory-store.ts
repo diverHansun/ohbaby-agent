@@ -99,6 +99,24 @@ export function createInMemoryUiStateStore(
       return Promise.resolve(snapshot.runs.some((run) => run.id === runId));
     },
 
+    getActiveSessionId(): Promise<string | null> {
+      return Promise.resolve(snapshot.activeSessionId);
+    },
+
+    getSessionIndex(): Promise<readonly Omit<UiSession, "messages">[]> {
+      return Promise.resolve(
+        snapshot.sessions.map(
+          ({ id, title, projectRoot, createdAt, updatedAt }) => ({
+            id,
+            title,
+            ...(projectRoot === undefined ? {} : { projectRoot }),
+            createdAt,
+            updatedAt,
+          }),
+        ),
+      );
+    },
+
     readSnapshot(): Promise<UiSnapshot> {
       return Promise.resolve(cloneSnapshot(snapshot));
     },

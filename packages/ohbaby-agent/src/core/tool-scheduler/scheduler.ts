@@ -665,6 +665,7 @@ export function createToolScheduler(
       toolName: request.toolName,
       params: request.params,
       sessionId: request.sessionId,
+      runId: request.runId,
       contextScopeId: request.contextScopeId,
       messageId: request.messageId,
       category,
@@ -760,6 +761,7 @@ export function createToolScheduler(
     const toolPromise = Promise.resolve(
       tool.execute(params, {
         callId: call.callId,
+        runId: call.runId,
         contextScopeId: call.contextScopeId,
         environment,
         messageId: call.messageId,
@@ -816,7 +818,17 @@ export function createToolScheduler(
     if (!options.permission) {
       return "reject";
     }
+    const controller = controllers.get(call.callId);
+    if (!controller || controller.signal.aborted) {
+      throw new SchedulerAbortError("cancelled");
+    }
+    if (!call.runId) {
+      throw new Error("Interactive tool approval requires an actual runId");
+    }
     return options.permission.ask({
+      runId: call.runId,
+      contextScopeId: call.contextScopeId,
+      signal: controller.signal,
       sessionId: call.sessionId,
       messageId: call.messageId,
       callId: call.callId,
@@ -962,7 +974,10 @@ export function createToolScheduler(
     call: ToolCall,
     context: ToolPermissionContext,
   ): Promise<ToolCallResult | null> {
-    if (!context.requireExplicitApproval) {
+    if (
+      !context.requireExplicitApproval ||
+      permissionState.getState().level === "full-access"
+    ) {
       return null;
     }
     return confirmPermission(
@@ -1305,10 +1320,7 @@ export function createToolScheduler(
               sessionId: call.sessionId,
               toolName: "external_directory",
             },
-            {
-              ...permissionState.getState(),
-              level: "default",
-            },
+            permissionState.getState(),
           ),
         controller.signal,
       );

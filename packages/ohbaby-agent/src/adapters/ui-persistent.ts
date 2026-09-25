@@ -180,13 +180,49 @@ function withStartupRecovery(
   client: InProcessUiBackendClient,
   recovery: Promise<unknown>,
 ): PersistentUiBackendClient {
+  let recovered = false;
+  const startup = recovery.then(() => {
+    recovered = true;
+  });
   async function ready(): Promise<void> {
-    await recovery;
+    await startup;
   }
 
   return {
     dispose(): ReturnType<InProcessUiBackendClient["dispose"]> {
       return client.dispose();
+    },
+    async getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+      await ready();
+      return client.getSessionIndex();
+    },
+    async getSelectedSessionId(): ReturnType<
+      UiBackendClient["getSelectedSessionId"]
+    > {
+      await ready();
+      return client.getSelectedSessionId();
+    },
+    async createSession(): ReturnType<UiBackendClient["createSession"]> {
+      await ready();
+      return client.createSession();
+    },
+    async selectSession(
+      sessionId,
+    ): ReturnType<UiBackendClient["selectSession"]> {
+      await ready();
+      return client.selectSession(sessionId);
+    },
+    async getPermissionSnapshot(
+      input,
+    ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+      await ready();
+      return client.getPermissionSnapshot(input);
+    },
+    subscribePermissionEvents(
+      handler,
+      onError,
+    ): ReturnType<UiBackendClient["subscribePermissionEvents"]> {
+      return client.subscribePermissionEvents(handler, onError);
     },
     async getSnapshot(): ReturnType<UiBackendClient["getSnapshot"]> {
       await ready();
@@ -341,12 +377,16 @@ function withStartupRecovery(
       await ready();
       return client.executeCommand(invocation);
     },
-    async respondPermission(
+    respondPermission(
       requestId,
       response,
+      context,
     ): ReturnType<UiBackendClient["respondPermission"]> {
-      await ready();
-      return client.respondPermission(requestId, response);
+      return recovered
+        ? client.respondPermission(requestId, response, context)
+        : ready().then(() =>
+            client.respondPermission(requestId, response, context),
+          );
     },
     async respondInteraction(
       interactionId,
@@ -425,7 +465,9 @@ async function resolvePersistentStartupSession(input: {
   if (sessionId === null) {
     return;
   }
-  const session = await input.stateStore.getSession(sessionId);
+  const session = (await input.stateStore.getSessionIndex()).find(
+    (item) => item.id === sessionId,
+  );
   if (!session) {
     throw new Error(`Session not found: ${sessionId} in current project`);
   }

@@ -64,7 +64,17 @@ const DEFAULT_PERMISSION_LEVEL: UiPermissionLevel = "default";
 
 export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
   const daemonSnapshot = snapshot.view.snapshot;
-  const activeSession = selectActiveSession(daemonSnapshot);
+  const selectedRoot = daemonSnapshot
+    ? daemonSnapshot.activeSessionId
+    : snapshot.permissionSync.binding?.rootSessionId;
+  const indexedSession = snapshot.sessionIndex.find(
+    (session) => session.id === selectedRoot,
+  );
+  const activeSession =
+    daemonSnapshot?.sessions.find((session) => session.id === selectedRoot) ??
+    (indexedSession
+      ? { ...indexedSession, messages: [] }
+      : selectActiveSession(daemonSnapshot));
   const runStatus = daemonSnapshot?.status ?? { kind: "idle" };
   const activeRun = selectActiveRun(
     daemonSnapshot,
@@ -74,8 +84,11 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
   const isRunning =
     runStatus.kind === "running" || runStatus.kind === "waiting-for-permission";
   const permission = daemonSnapshot?.permission;
-  const pendingPermissions = daemonSnapshot?.permissions ?? [];
-  const activeSessionId = activeSession?.id ?? daemonSnapshot?.activeSessionId;
+  const pendingPermissions = snapshot.permissionSync.requests;
+  const attentionStatus: UiRunStatus = pendingPermissions.length
+    ? { kind: "waiting-for-permission", requestId: pendingPermissions[0].id }
+    : runStatus;
+  const activeSessionId = selectedRoot ?? activeSession?.id;
   const activeRunId =
     runStatus.kind === "running"
       ? runStatus.runId
@@ -96,15 +109,12 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
       ...(activeRun?.startedAt === undefined
         ? {}
         : { activeRunStartedAt: activeRun.startedAt }),
-      ...(activeSessionId === undefined || activeSessionId === null
-        ? {}
-        : { activeSessionId }),
+      ...(activeSessionId === undefined ? {} : { activeSessionId }),
       canSend: snapshot.connectionState === "live",
       canStop:
         snapshot.connectionState === "live" &&
         isRunning &&
-        activeSessionId !== undefined &&
-        activeSessionId !== null,
+        activeSessionId !== undefined,
       disabled: snapshot.connectionState !== "live",
       isRunning,
       mode: permission?.mode ?? DEFAULT_MODE,
@@ -112,8 +122,11 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     },
     error: snapshot.error,
     header: {
-      connectionKind: selectConnectionKind(snapshot.connectionState, runStatus),
-      statusLabel: selectStatusLabel(snapshot.connectionState, runStatus),
+      connectionKind: selectConnectionKind(
+        snapshot.connectionState,
+        attentionStatus,
+      ),
+      statusLabel: selectStatusLabel(snapshot.connectionState, attentionStatus),
       ...selectContextModel(
         daemonSnapshot,
         activeSessionId,

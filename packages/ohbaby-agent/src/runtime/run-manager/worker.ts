@@ -251,6 +251,7 @@ export class RunWorker {
 
     return {
       directory: this.context.directory,
+      runId: this.context.runId,
       modelId: this.context.modelId,
       ...(this.context.reasoning === undefined
         ? {}

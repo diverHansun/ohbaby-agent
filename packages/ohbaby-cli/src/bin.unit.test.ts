@@ -984,6 +984,12 @@ describe("runOhbabyCli", () => {
 });
 
 function createCore(): {
+  readonly getSessionIndex: ReturnType<typeof vi.fn>;
+  readonly getSelectedSessionId: ReturnType<typeof vi.fn>;
+  readonly createSession: ReturnType<typeof vi.fn>;
+  readonly selectSession: ReturnType<typeof vi.fn>;
+  readonly getPermissionSnapshot: ReturnType<typeof vi.fn>;
+  readonly subscribePermissionEvents: ReturnType<typeof vi.fn>;
   readonly acquirePromptEditLease: ReturnType<typeof vi.fn>;
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
@@ -1010,6 +1016,12 @@ function createCore(): {
 } {
   const prompt = promptCompletion().prompt;
   return {
+    getSessionIndex: vi.fn(() => Promise.resolve([])),
+    getSelectedSessionId: vi.fn(() => Promise.resolve(null)),
+    createSession: vi.fn(() => Promise.resolve()),
+    selectSession: vi.fn(() => Promise.resolve()),
+    getPermissionSnapshot: vi.fn(() => Promise.resolve()),
+    subscribePermissionEvents: vi.fn(() => () => undefined),
     acquirePromptEditLease: vi.fn(() =>
       Promise.resolve({
         editLeaseId: "lease_1",

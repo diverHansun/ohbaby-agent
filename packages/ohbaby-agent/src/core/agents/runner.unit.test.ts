@@ -263,6 +263,45 @@ function createDeps(
 }
 
 describe("runAgent", () => {
+  it.each(["stream", "waitForCompletion"] as const)(
+    "cancels the actual run and revokes approvals on a mismatched %s run id",
+    async (waitMode) => {
+      const runCoordinator = createRunCoordinator();
+      const revokePermissionsForRun = vi.fn();
+      const pending = new Set(["run_1"]);
+      revokePermissionsForRun.mockImplementation((runId: string) =>
+        pending.delete(runId),
+      );
+      await expect(
+        runAgent(
+          createDeps({
+            runCoordinator: {
+              ...runCoordinator.coordinator,
+              revokePermissionsForRun,
+            },
+            runEventSource: {
+              subscribeRunEvents: () => ({
+                [Symbol.asyncIterator](): AsyncIterator<never> {
+                  return {
+                    next: () =>
+                      Promise.resolve({ done: true, value: undefined }),
+                  };
+                },
+              }),
+            },
+          }),
+          baseInput({ runId: "run_expected", waitMode }),
+        ),
+      ).rejects.toThrow("unexpected run id");
+      expect(runCoordinator.cancel).toHaveBeenCalledWith(
+        "run_1",
+        expect.stringContaining("unexpected run id"),
+      );
+      expect(pending.size).toBe(0);
+      expect(runCoordinator.waitForCompletion).not.toHaveBeenCalled();
+    },
+  );
+
   it("writes the initial user prompt, starts a session run, and returns final output", async () => {
     const messageManager = createMessageManager();
     const runCoordinator = createRunCoordinator();

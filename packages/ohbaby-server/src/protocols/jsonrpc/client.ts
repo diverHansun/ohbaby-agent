@@ -10,6 +10,9 @@ import type {
   UiEvent,
   UiEventHandler,
   UiSnapshot,
+  UiPermissionBinding,
+  UiPermissionEvent,
+  UiSessionIndexEntry,
 } from "ohbaby-sdk";
 import { daemonAuthHeader } from "../../auth/token.js";
 import {
@@ -154,6 +157,13 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   private readonly directory: string | undefined;
   private readonly startupIntent: DaemonStartupIntent | undefined;
   private readonly handlers = new Set<UiEventHandler>();
+  private readonly permissionHandlers = new Map<
+    (event: UiPermissionEvent) => void,
+    ((error: unknown) => void) | undefined
+  >();
+  private permissionBinding: UiPermissionBinding | undefined;
+  private connectionGeneration = 0;
+  private permissionConnectionLive = false;
   private abortController: AbortController | undefined;
   private initializePromise: Promise<void> | undefined;
   private lastEventId: string | undefined;
@@ -170,6 +180,75 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     }
     const host = options.host ?? DEFAULT_HOST;
     this.baseUrl = `http://${host}:${String(options.port)}`;
+  }
+
+  private adoptPermissionBinding(
+    binding: UiPermissionBinding,
+    expectedEpoch?: string,
+  ): void {
+    const current = this.permissionBinding;
+    if (
+      current &&
+      (current.permissionEpoch !== expectedEpoch ||
+        binding.permissionEpoch !== current.permissionEpoch ||
+        binding.bindingGeneration < current.bindingGeneration)
+    )
+      return;
+    this.permissionBinding = {
+      permissionEpoch: binding.permissionEpoch,
+      rootSessionId: binding.rootSessionId,
+      bindingGeneration: binding.bindingGeneration,
+    };
+  }
+
+  getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return this.rpc("getSessionIndex", []);
+  }
+  async getSelectedSessionId(): Promise<string | null> {
+    await this.ensureInitialized();
+    return this.permissionBinding?.rootSessionId ?? null;
+  }
+  async createSession(): Promise<UiSessionIndexEntry> {
+    await this.ensureInitialized();
+    const epoch = this.permissionBinding?.permissionEpoch;
+    const result = await this.rpc<
+      UiPermissionBinding & { session: UiSessionIndexEntry }
+    >("createSession", []);
+    this.adoptPermissionBinding(result, epoch);
+    return result.session;
+  }
+  async selectSession(sessionId: string): Promise<void> {
+    await this.ensureInitialized();
+    const epoch = this.permissionBinding?.permissionEpoch;
+    const binding = await this.rpc<UiPermissionBinding>("selectSession", [
+      sessionId,
+      this.permissionBinding?.bindingGeneration,
+    ]);
+    this.adoptPermissionBinding(binding, epoch);
+  }
+  async getPermissionSnapshot(
+    input: Parameters<UiBackendClient["getPermissionSnapshot"]>[0],
+  ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+    await this.ensureInitialized();
+    if (this.permissionHandlers.size > 0 && !this.permissionConnectionLive)
+      throw new Error("Permission event connection is not ready");
+    return this.rpc(
+      "getPermissionSnapshot",
+      [{ ...this.permissionBinding, ...input, signal: undefined }],
+      { signal: input.signal },
+    );
+  }
+  subscribePermissionEvents(
+    handler: (event: UiPermissionEvent) => void,
+    onError?: (error: unknown) => void,
+  ): () => void {
+    this.permissionHandlers.set(handler, onError);
+    this.ensureSseLoop();
+    return () => {
+      this.permissionHandlers.delete(handler);
+      if (this.handlers.size === 0 && this.permissionHandlers.size === 0)
+        this.abortSseLoop();
+    };
   }
 
   getSnapshot(): ReturnType<UiBackendClient["getSnapshot"]> {
@@ -189,7 +268,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     this.ensureSseLoop();
     return () => {
       this.handlers.delete(handler);
-      if (this.handlers.size === 0) {
+      if (this.handlers.size === 0 && this.permissionHandlers.size === 0) {
         this.abortSseLoop();
       }
     };
@@ -201,11 +280,18 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("listCommands", [query]);
   }
 
-  submitPromptAccepted(
+  async submitPromptAccepted(
     text: string,
     options?: Parameters<UiBackendClient["submitPromptAccepted"]>[1],
   ): ReturnType<UiBackendClient["submitPromptAccepted"]> {
-    return this.rpc("submitPromptAccepted", [text, options]);
+    await this.ensureInitialized();
+    const epoch = this.permissionBinding?.permissionEpoch;
+    const result = await this.rpc<
+      Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>> &
+        UiPermissionBinding
+    >("submitPromptAccepted", [text, options]);
+    this.adoptPermissionBinding(result, epoch);
+    return result;
   }
 
   submitPromptAndWait(
@@ -307,8 +393,15 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   respondPermission(
     requestId: string,
     response: Parameters<UiBackendClient["respondPermission"]>[1],
+    context?: Parameters<UiBackendClient["respondPermission"]>[2],
   ): ReturnType<UiBackendClient["respondPermission"]> {
-    return this.rpc("respondPermission", [requestId, response]);
+    return this.ensureInitialized().then(() =>
+      this.rpc("respondPermission", [
+        requestId,
+        response,
+        context ?? this.permissionBinding,
+      ]),
+    );
   }
 
   respondInteraction(
@@ -324,6 +417,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
 
   async dispose(): Promise<void> {
     this.handlers.clear();
+    this.permissionHandlers.clear();
     const pendingLoop = this.sseLoop;
     this.abortSseLoop();
     await pendingLoop?.catch((error: unknown) => {
@@ -388,13 +482,15 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     if (this.startupIntent === undefined) {
       return;
     }
-    this.initializePromise ??= this.rpc(
+    this.initializePromise ??= this.rpc<UiPermissionBinding>(
       "initializeClient",
       [this.startupIntent],
       {
         skipInitialize: true,
       },
-    );
+    ).then((binding) => {
+      this.permissionBinding = binding;
+    });
     await this.initializePromise;
   }
 
@@ -419,6 +515,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   }
 
   private abortSseLoop(): void {
+    this.permissionConnectionLive = false;
     this.abortController?.abort();
     this.abortController = undefined;
     this.sseLoop = undefined;
@@ -426,7 +523,10 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
 
   private async runSseReconnectLoop(signal: AbortSignal): Promise<void> {
     await this.ensureInitialized();
-    while (!signal.aborted && this.handlers.size > 0) {
+    while (
+      !signal.aborted &&
+      (this.handlers.size > 0 || this.permissionHandlers.size > 0)
+    ) {
       try {
         await this.openSseConnection(signal);
       } catch (error) {
@@ -434,7 +534,11 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
           return;
         }
       }
-      if (this.handlers.size > 0) {
+      this.permissionConnectionLive = false;
+      this.permissionFailure(
+        new Error("Permission event connection interrupted"),
+      );
+      if (this.handlers.size > 0 || this.permissionHandlers.size > 0) {
         await delay(SSE_RECONNECT_DELAY_MS, signal);
       }
     }
@@ -463,7 +567,17 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       throw new Error("Daemon SSE response body is missing");
     }
 
-    await this.readSseFrames(reader, signal);
+    this.connectionGeneration += 1;
+    const abortReader = (): void => {
+      void reader.cancel().catch(() => undefined);
+    };
+    signal.addEventListener("abort", abortReader, { once: true });
+    try {
+      await this.readSseFrames(reader, signal);
+    } finally {
+      signal.removeEventListener("abort", abortReader);
+      reader.releaseLock();
+    }
   }
 
   private async readSseFrames(
@@ -488,12 +602,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
         }
         const frame = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
-        await this.handleSseFrame(frame);
+        this.handleSseFrame(frame);
       }
     }
   }
 
-  private async handleSseFrame(frame: string): Promise<void> {
+  private handleSseFrame(frame: string): void {
     const lines = frame.split("\n");
     const id = lines
       .find((line) => line.startsWith("id: "))
@@ -506,19 +620,75 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     }
 
     const event = parseDaemonSseEvent(JSON.parse(data) as unknown);
+    if (event.type === "hello") {
+      this.permissionConnectionLive = true;
+      if (
+        this.permissionBinding?.permissionEpoch === event.permissionEpoch &&
+        event.bindingGeneration < this.permissionBinding.bindingGeneration
+      )
+        return;
+      this.permissionBinding = {
+        permissionEpoch: event.permissionEpoch,
+        rootSessionId: event.rootSessionId,
+        bindingGeneration: event.bindingGeneration,
+      };
+      this.emitPermissionEvent({
+        type: "permission.resync-required",
+        ...this.permissionBinding,
+        connectionGeneration: this.connectionGeneration,
+      });
+      return;
+    }
     if (event.type === "resync-required") {
       this.lastEventId = String(event.maxSeqNum);
-      const snapshot = await this.rpc<UiSnapshot>("getSnapshot", []);
-      this.emitEvent({ snapshot, type: "snapshot.replaced" });
+      if (this.permissionBinding)
+        this.emitPermissionEvent({
+          type: "permission.resync-required",
+          ...this.permissionBinding,
+        });
+      void this.rpc<UiSnapshot>("getSnapshot", [])
+        .then((snapshot) => {
+          this.emitEvent({ snapshot, type: "snapshot.replaced" });
+        })
+        .catch(() => undefined);
       return;
     }
     if (event.type !== "ui.event") {
       return;
     }
-    if (id !== undefined) {
-      this.lastEventId = id;
+    if (
+      event.event.type === "permission.requested" ||
+      event.event.type === "permission.resolved" ||
+      event.event.type === "permission.unavailable"
+    ) {
+      this.emitPermissionEvent(event.event);
+      return;
     }
+    if (id !== undefined) this.lastEventId = id;
     this.emitEvent(event.event);
+  }
+
+  private permissionFailure(error: unknown): void {
+    for (const onError of this.permissionHandlers.values()) {
+      try {
+        onError?.(error);
+      } catch {
+        /* Observer owns its failure. */
+      }
+    }
+  }
+  private emitPermissionEvent(event: UiPermissionEvent): void {
+    for (const [handler, onError] of [...this.permissionHandlers]) {
+      try {
+        handler(event);
+      } catch (error) {
+        try {
+          onError?.(error);
+        } catch {
+          /* Observer owns its failure. */
+        }
+      }
+    }
   }
 
   private emitEvent(event: UiEvent): void {

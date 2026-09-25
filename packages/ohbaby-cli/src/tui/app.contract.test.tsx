@@ -1,4 +1,4 @@
-﻿import { render as renderInk } from "ink-testing-library";
+import { render as renderInk } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiCommandInvocation,
@@ -7,6 +7,9 @@ import type {
   UiContextWindowUsage,
   UiEvent,
   UiEventHandler,
+  UiPermissionEvent,
+  UiPermissionRequest,
+  UiPermissionSnapshot,
   UiPromptCompletion,
   UiPromptReceipt,
   UiPromptTerminalStatus,
@@ -312,6 +315,11 @@ describe("OhbabyTerminalApp", () => {
 
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Run command",
         id: "permission_1",
@@ -319,12 +327,23 @@ describe("OhbabyTerminalApp", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
     expect(app.lastFrame()).toContain("todo 10");
     expect(app.lastFrame()).toContain("ctrl+t to collapse");
 
-    client.emit({ requestId: "permission_1", type: "permission.resolved" });
+    client.emit({
+      requestId: "permission_1",
+      type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      sessionId: "session_1",
+      reason: "once",
+    });
     await flush();
 
     app.stdin.write("\u0014");
@@ -1259,6 +1278,11 @@ describe("OhbabyTerminalApp", () => {
 
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [
           { id: "allow_once", intent: "allow", label: "Allow once" },
           { id: "reject", intent: "deny", label: "Reject" },
@@ -1269,6 +1293,9 @@ describe("OhbabyTerminalApp", () => {
         title: "Write file",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
 
@@ -1802,6 +1829,11 @@ describe("OhbabyTerminalApp", () => {
 
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [
           { id: "allow_once", intent: "allow", label: "Allow once" },
           { id: "reject", intent: "deny", label: "Reject" },
@@ -1812,11 +1844,19 @@ describe("OhbabyTerminalApp", () => {
         title: "Write file",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
     client.emit({
       requestId: "permission_1",
       type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      sessionId: "session_1",
+      reason: "once",
     });
     await waitForFrame(
       app,
@@ -1848,6 +1888,11 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [
           { id: "allow_once", intent: "allow", label: "Allow once" },
           { id: "reject", intent: "deny", label: "Reject" },
@@ -1858,6 +1903,9 @@ describe("OhbabyTerminalApp", () => {
         title: "Write file",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
 
@@ -2213,7 +2261,7 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
-  it("keeps the current transcript surface when an existing session refresh fails", async () => {
+  it("keeps the validated root selection when its history refresh fails", async () => {
     const currentSession: UiSnapshot["sessions"][number] = {
       createdAt: "2026-05-14T00:00:00.000Z",
       id: "session_1",
@@ -2272,13 +2320,15 @@ describe("OhbabyTerminalApp", () => {
     expect(app.stdout.frames.slice(frameCount).join("")).not.toContain(
       SESSION_VIEW_CLEAR_SEQUENCE,
     );
-    expect(app.lastFrame()).toContain("Source history before failed switch");
-    expect(app.lastFrame()).toContain("auto · default · session_1");
+    expect(app.lastFrame()).not.toContain(
+      "Source history before failed switch",
+    );
+    expect(app.lastFrame()).toContain("auto · default · session_2");
     expect(app.lastFrame()).not.toContain(renderOhbabyLogo());
     app.unmount();
   });
 
-  it("keeps the current transcript surface when an existing session refresh returns a mismatched active session", async () => {
+  it("ignores mismatched history without rolling back the validated root selection", async () => {
     const currentSession: UiSnapshot["sessions"][number] = {
       createdAt: "2026-05-14T00:00:00.000Z",
       id: "session_1",
@@ -2351,10 +2401,10 @@ describe("OhbabyTerminalApp", () => {
 
     const output = app.stdout.frames.slice(frameCount).join("");
     expect(output).not.toContain(SESSION_VIEW_CLEAR_SEQUENCE);
-    expect(app.lastFrame()).toContain(
+    expect(app.lastFrame()).not.toContain(
       "Source history before mismatched switch",
     );
-    expect(app.lastFrame()).toContain("auto · default · session_1");
+    expect(app.lastFrame()).toContain("auto · default · session_2");
     expect(app.lastFrame()).not.toContain("Mismatched target history");
     expect(app.lastFrame()).not.toContain(renderOhbabyLogo());
     app.unmount();
@@ -4355,6 +4405,11 @@ describe("OhbabyTerminalApp", () => {
     });
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Run bash",
         id: "permission_1",
@@ -4362,6 +4417,9 @@ describe("OhbabyTerminalApp", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
 
@@ -4370,9 +4428,13 @@ describe("OhbabyTerminalApp", () => {
 
     app.stdin.write("\r");
     await flush();
-    expect(client.respondPermission).toHaveBeenCalledWith("permission_1", {
-      choiceId: "allow",
-    });
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "permission_1",
+      {
+        choiceId: "allow",
+      },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
   });
 
   it("defaults permission selection to first allow when available", async () => {
@@ -4387,6 +4449,11 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [
           { id: "allow", intent: "allow", label: "Allow" },
           { id: "deny", intent: "deny", label: "Deny" },
@@ -4397,14 +4464,21 @@ describe("OhbabyTerminalApp", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
 
     app.stdin.write("\r");
     await flush();
-    expect(client.respondPermission).toHaveBeenCalledWith("permission_2", {
-      choiceId: "allow",
-    });
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "permission_2",
+      {
+        choiceId: "allow",
+      },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
   });
 
   it("keeps escape on the deny permission safe default", async () => {
@@ -4419,6 +4493,11 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [
           { id: "allow", intent: "allow", label: "Allow" },
           { id: "deny", intent: "deny", label: "Deny" },
@@ -4429,14 +4508,251 @@ describe("OhbabyTerminalApp", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
 
     app.stdin.write("\u001B");
     await flush();
-    expect(client.respondPermission).toHaveBeenCalledWith("permission_3", {
-      choiceId: "deny",
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "permission_3",
+      {
+        choiceId: "deny",
+      },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
+  });
+});
+
+function approval(
+  id: string,
+  sourceLabel = "Child agent",
+): UiPermissionRequest {
+  return {
+    id,
+    sessionId: "child",
+    rootSessionId: "session_1",
+    runId: "child-run",
+    callId: "child-call",
+    messageId: "child-message",
+    sourceLabel,
+    createdAt: 100,
+    title: `Approve ${id}`,
+    description: "Edit src/a.ts",
+    choices: [
+      { id: "allow_once", label: "Allow once", intent: "allow" },
+      { id: "reject", label: "Reject", intent: "deny" },
+    ],
+  };
+}
+
+describe("independent TUI approvals", () => {
+  it("keeps an abnormal selected child unready and requests a main session while history waits", async () => {
+    const initial = snapshot();
+    const child = {
+      ...initial.sessions[0],
+      id: "child",
+      parentId: "session_1",
+      isSubagent: true,
+    };
+    const client = createFakeClient({
+      ...initial,
+      activeSessionId: "child",
+      sessions: [...initial.sessions, child],
+      permissions: [],
     });
+    client.getSnapshot.mockImplementation(() => new Promise(() => undefined));
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) =>
+      frame.includes("Return to a main session to approve requests."),
+    );
+    app.stdin.write("\r");
+    await flush();
+    expect(client.respondPermission).not.toHaveBeenCalled();
+    expect(app.lastFrame()).not.toContain("Permission:");
+    expect(client.getPermissionSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ rootSessionId: "child" }),
+    );
+  });
+
+  it("restores approvals and permits non-first selection while chat history is unavailable", async () => {
+    const initial = {
+      ...snapshot(),
+      permissions: [approval("p1"), approval("p2")],
+    };
+    const client = createFakeClient(initial);
+    client.getSnapshot.mockImplementation(() => new Promise(() => undefined));
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    await flush();
+    expect(app.lastFrame()).toContain("Child agent");
+    expect(app.lastFrame()).toContain("Approve p1");
+    expect(app.lastFrame()).not.toContain("Cancel run");
+    app.stdin.write("]");
+    await flush();
+    expect(app.lastFrame()).toContain("Approve p2");
+    app.stdin.write("\r");
+    await flush();
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "p2",
+      { choiceId: "allow_once" },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
+  });
+
+  it("locks approval on transport failure until its new baseline arrives, independently of old full snapshots", async () => {
+    const initial = { ...snapshot(), permissions: [approval("p1")] };
+    const client = createFakeClient(initial);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    await flush();
+    let release!: (value: UiPermissionSnapshot) => void;
+    client.getPermissionSnapshot.mockImplementation(
+      (input: { rootSessionId: string | null }) =>
+        input.rootSessionId === null
+          ? Promise.resolve({
+              permissionEpoch: "epoch",
+              rootSessionId: null,
+              permissionRevision: 0,
+              requests: [],
+            })
+          : new Promise<UiPermissionSnapshot>((resolve) => {
+              release = resolve;
+            }),
+    );
+    client.failPermissionTransport();
+    await flush();
+    app.stdin.write("\r");
+    await flush();
+    expect(client.respondPermission).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(typeof release).toBe("function");
+    });
+    release({
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      requests: [],
+    });
+    await flush();
+    client.emit({ type: "snapshot.replaced", snapshot: initial });
+    await flush();
+    expect(app.lastFrame()).not.toContain("Approve p1");
+  });
+  it("keeps a severely unavailable root frozen through retry keys and delivery failures", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      permissions: [approval("frozen")],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Approve frozen"));
+    const queries = client.getPermissionSnapshot.mock.calls.length;
+    client.emit({
+      type: "permission.unavailable",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      reason: "Approval projection is unavailable.",
+    });
+    await flush();
+    app.stdin.write("r");
+    await flush();
+    client.failPermissionTransport();
+    await flush();
+    await flush();
+    app.stdin.write("\r");
+    await flush();
+    expect(client.getPermissionSnapshot).toHaveBeenCalledTimes(queries);
+    expect(client.respondPermission).not.toHaveBeenCalled();
+    expect(app.lastFrame()).not.toContain("R retry approval sync");
+  });
+
+  it("retries a transient approval query without waiting for failed chat history", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      permissions: [approval("retry")],
+    });
+    client.getSnapshot.mockRejectedValue(new Error("history failed"));
+    client.getPermissionSnapshot.mockRejectedValueOnce(
+      new Error("temporary approval failure"),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Approve retry"));
+    expect(client.getPermissionSnapshot).toHaveBeenCalledTimes(2);
+    app.stdin.write("\r");
+    await flush();
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "retry",
+      { choiceId: "allow_once" },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
+  });
+
+  it("shows a new independent id for the same call and ignores stale history and ordinary copies", async () => {
+    const first = approval("p1");
+    const client = createFakeClient({ ...snapshot(), permissions: [first] });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Approve p1"));
+    client.emit({
+      type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      requestId: "p1",
+      sessionId: "child",
+      reason: "once",
+    });
+    client.emit({
+      type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 3,
+      request: approval("p2"),
+    });
+    client.emit({
+      type: "snapshot.replaced",
+      snapshot: { ...snapshot(), permissions: [first] },
+    });
+    await waitForFrame(app, (frame) => frame.includes("Approve p2"));
+    expect(app.lastFrame()).not.toContain("Approve p1");
+    app.stdin.write("\r");
+    await flush();
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "p2",
+      { choiceId: "allow_once" },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
   });
 });
 
@@ -4457,6 +4773,8 @@ function createFakeClient(
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
   readonly getCurrentModel: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
+  readonly getPermissionSnapshot: ReturnType<typeof vi.fn>;
+  readonly failPermissionTransport: () => void;
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly probeModelContextWindow: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
@@ -4470,8 +4788,49 @@ function createFakeClient(
   readonly waitForPrompt: ReturnType<typeof vi.fn>;
 } {
   const handlers = new Set<UiEventHandler>();
+  const permissionHandlers = new Map<
+    (event: UiPermissionEvent) => void,
+    ((error: unknown) => void) | undefined
+  >();
+  let pendingPermissions = [...initialSnapshot.permissions];
+  let permissionRevision = initialSnapshot.permissions.length;
 
   return {
+    getSelectedSessionId: () =>
+      Promise.resolve(initialSnapshot.activeSessionId),
+    getSessionIndex: () =>
+      Promise.resolve(
+        initialSnapshot.sessions.map(
+          ({ messages: _messages, ...entry }) => entry,
+        ),
+      ),
+    createSession: () => Promise.reject(new Error("Unused test method")),
+    selectSession: () => Promise.resolve(),
+    getPermissionSnapshot: vi.fn(
+      (input: {
+        rootSessionId: string | null;
+      }): Promise<UiPermissionSnapshot> =>
+        Promise.resolve({
+          permissionEpoch: "epoch",
+          rootSessionId: input.rootSessionId,
+          permissionRevision,
+          requests: pendingPermissions.filter(
+            (request) => request.rootSessionId === input.rootSessionId,
+          ),
+        }),
+    ),
+    subscribePermissionEvents(handler, onError): () => void {
+      permissionHandlers.set(handler, onError);
+      return () => {
+        permissionHandlers.delete(handler);
+      };
+    },
+    failPermissionTransport(): void {
+      const errors = [...permissionHandlers.values()];
+      permissionHandlers.clear();
+      for (const onError of errors)
+        onError?.(new Error("local delivery failed"));
+    },
     abortRun: vi.fn(() => Promise.resolve()),
     acquirePromptEditLease: vi.fn((input: { readonly promptId: string }) => {
       const prompt = initialSnapshot.prompts?.find(
@@ -4534,6 +4893,24 @@ function createFakeClient(
     ),
     setSearchApiKey: vi.fn(() => Promise.resolve(searchConnectResult())),
     emit(event): void {
+      if (
+        event.type === "permission.requested" ||
+        event.type === "permission.resolved" ||
+        event.type === "permission.unavailable" ||
+        event.type === "permission.resync-required"
+      ) {
+        if (event.type === "permission.requested") {
+          pendingPermissions.push(event.request);
+          permissionRevision = event.permissionRevision;
+        }
+        if (event.type === "permission.resolved") {
+          pendingPermissions = pendingPermissions.filter(
+            (request) => request.id !== event.requestId,
+          );
+          permissionRevision = event.permissionRevision;
+        }
+        for (const handler of permissionHandlers.keys()) handler(event);
+      }
       for (const handler of handlers) {
         handler(event);
       }

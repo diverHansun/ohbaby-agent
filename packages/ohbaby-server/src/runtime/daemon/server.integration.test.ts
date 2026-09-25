@@ -247,20 +247,94 @@ function commandSessionSelected(sessionId: string): UiEvent {
 
 function permissionRequested(
   runId: string,
+  rootSessionId = "session_1",
 ): Extract<UiEvent, { type: "permission.requested" }> {
   return {
     request: {
       choices: [{ id: "allow", intent: "allow", label: "Allow" }],
       description: "Allow tool",
       id: `permission_${runId}`,
+      sessionId: rootSessionId,
+      rootSessionId,
+      callId: "call_1",
+      messageId: "message_1",
+      createdAt: 1,
       runId,
       title: "Tool permission",
     },
     type: "permission.requested",
+    permissionEpoch: "test-epoch",
+    rootSessionId,
+    permissionRevision: 1,
   };
 }
 
 class FakeBackend implements UiBackendClient {
+  private readonly createdSessions: Awaited<
+    ReturnType<UiBackendClient["getSessionIndex"]>
+  >[number][] = [];
+  getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return Promise.resolve([
+      ...this.snapshot.sessions,
+      ...this.createdSessions,
+      ...[
+        "session_1",
+        "session_2",
+        "session_selected",
+        "session_target",
+        "session_a",
+        "session_b",
+      ]
+        .filter((id) => !this.snapshot.sessions.some((s) => s.id === id))
+        .map((id) => ({
+          id,
+          title: id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+    ]);
+  }
+  getSelectedSessionId(): Promise<string | null> {
+    return Promise.resolve(this.snapshot.activeSessionId);
+  }
+  createSession(): ReturnType<UiBackendClient["createSession"]> {
+    const session = {
+      id: "session_new",
+      title: "New session",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.createdSessions.push(session);
+    return Promise.resolve(session);
+  }
+  selectSession(_sessionId: string): Promise<void> {
+    return Promise.resolve();
+  }
+  getPermissionSnapshot(
+    input: Parameters<UiBackendClient["getPermissionSnapshot"]>[0],
+  ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+    return Promise.resolve({
+      permissionEpoch: "test-epoch",
+      rootSessionId: input.rootSessionId,
+      permissionRevision: 0,
+      requests: this.snapshot.permissions.filter(
+        (request) => request.rootSessionId === input.rootSessionId,
+      ),
+    });
+  }
+  subscribePermissionEvents(
+    handler: Parameters<UiBackendClient["subscribePermissionEvents"]>[0],
+  ): () => void {
+    return this.subscribeEvents((event) => {
+      if (
+        event.type === "permission.requested" ||
+        event.type === "permission.resolved" ||
+        event.type === "permission.unavailable"
+      )
+        handler(event);
+    });
+  }
+
   private nextPromptId = 0;
   private readonly promptCompletions = new Map<
     string,
@@ -580,11 +654,40 @@ async function withServer<T>(
   }
 }
 
+const registeredTestClients = new Set<string>();
+async function registerTestClient(
+  url: string,
+  clientId: string,
+  headers: Record<string, string> = {},
+): Promise<void> {
+  const key = `${url}:${clientId}`;
+  if (registeredTestClients.has(key)) return;
+  const response = await fetch(`${url}/api/rpc`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...authHeaders(),
+      ...headers,
+    },
+    body: JSON.stringify({
+      id: "register",
+      clientId,
+      method: "initializeClient",
+      params: [{ resumeSessionId: "session_1" }],
+    }),
+  });
+  if (response.ok) registeredTestClients.add(key);
+}
+
 async function postRpc(
   url: string,
   body: Record<string, unknown>,
   headers: Record<string, string> = {},
 ): Promise<Response> {
+  if (typeof body.clientId === "string" && body.method !== "initializeClient")
+    await registerTestClient(url, body.clientId, headers);
+  if (body.method === "initializeClient" && typeof body.clientId === "string")
+    registeredTestClients.add(`${url}:${body.clientId}`);
   return fetch(`${url}/api/rpc`, {
     body: JSON.stringify(body),
     headers: {
@@ -605,11 +708,12 @@ function fetchHealth(
   });
 }
 
-function fetchEvents(
+async function fetchEvents(
   url: string,
   clientId: string,
   headers: Record<string, string> = {},
 ): Promise<Response> {
+  await registerTestClient(url, clientId, headers);
   return fetch(`${url}/api/events?clientId=${clientId}`, {
     headers: { ...authHeaders(), ...headers },
   });
@@ -924,7 +1028,7 @@ describe("createDaemonHttpServer", () => {
       expect(await response.json()).toEqual({
         id: "rpc_1",
         ok: true,
-        result: snapshot,
+        result: { ...snapshot, activeSessionId: "session_1" },
       });
     });
   });
@@ -1241,7 +1345,7 @@ describe("createDaemonHttpServer", () => {
     });
   });
 
-  it("replays prompt-owned runtime and permission events after reconnect", async () => {
+  it("replays runtime events and recovers permissions independently after reconnect", async () => {
     const backend = new FakeBackend({
       ...emptySnapshot(),
       sessions: [sessionWithMessages("session_1", [])],
@@ -1298,14 +1402,9 @@ describe("createDaemonHttpServer", () => {
           event: "ui.event",
           id: "2",
         });
-        await expect(resumedReader.read()).resolves.toEqual({
-          data: {
-            event: permissionRequested("run_1"),
-            type: "ui.event",
-          },
-          event: "ui.event",
-          id: "3",
-        });
+        await expect(readSseFrameWithTimeout(resumedReader)).rejects.toThrow(
+          "Timed out",
+        );
         await resumedReader.cancel();
       } finally {
         backend.resolveHeldSubmits();
@@ -1315,7 +1414,7 @@ describe("createDaemonHttpServer", () => {
     await expect(submitted).resolves.toMatchObject({ status: 200 });
   });
 
-  it("releases permission ownership after the disconnect replay window", async () => {
+  it("allows a same-root page to respond after another page disconnects", async () => {
     const backend = new FakeBackend();
     await withServer(
       backend,
@@ -1338,7 +1437,15 @@ describe("createDaemonHttpServer", () => {
           clientId: "client_b",
           id: "rpc_allow",
           method: "respondPermission",
-          params: ["permission_run_1", { choiceId: "allow" }],
+          params: [
+            "permission_run_1",
+            { choiceId: "allow" },
+            {
+              permissionEpoch: "test-epoch",
+              rootSessionId: "session_1",
+              bindingGeneration: 1,
+            },
+          ],
         });
 
         expect(response.status).toBe(200);
@@ -1695,7 +1802,7 @@ describe("createDaemonHttpServer", () => {
     });
   });
 
-  it("routes permission requests only to the prompt owner", async () => {
+  it("routes permission requests to all pages bound to the same root", async () => {
     const backend = new FakeBackend();
     await withServer(backend, async (url) => {
       const owner = await fetchEvents(url, "client_a");
@@ -1713,7 +1820,7 @@ describe("createDaemonHttpServer", () => {
       });
       expect(response.status).toBe(200);
 
-      expect(await readOwner()).toEqual({
+      expect(await readOwner()).toMatchObject({
         event: runUpdated("run_1"),
         type: "ui.event",
       });
@@ -1721,24 +1828,14 @@ describe("createDaemonHttpServer", () => {
         event: runUpdated("run_1"),
         type: "ui.event",
       });
-      expect(await readOwner()).toEqual({
+      expect(await readOwner()).toMatchObject({
         event: permissionRequested("run_1"),
         type: "ui.event",
       });
-      const observerPermission = readObserver().then(
-        (event) => ({ event, kind: "event" as const }),
-        () => ({ kind: "closed" as const }),
-      );
-      await expect(
-        Promise.race([
-          observerPermission,
-          new Promise<{ readonly kind: "timeout" }>((resolve) => {
-            setTimeout(() => {
-              resolve({ kind: "timeout" });
-            }, 25);
-          }),
-        ]),
-      ).resolves.toEqual({ kind: "timeout" });
+      expect(await readObserver()).toMatchObject({
+        event: permissionRequested("run_1"),
+        type: "ui.event",
+      });
     });
   });
 
@@ -1747,6 +1844,18 @@ describe("createDaemonHttpServer", () => {
     backend.emitOnSubmit = false;
     backend.holdSubmits = true;
     await withServer(backend, async (url) => {
+      await postRpc(url, {
+        clientId: "client_a",
+        id: "init_a",
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_a" }],
+      });
+      await postRpc(url, {
+        clientId: "client_b",
+        id: "init_b",
+        method: "initializeClient",
+        params: [{ resumeSessionId: "session_b" }],
+      });
       const owner = await fetchEvents(url, "client_a");
       const observer = await fetchEvents(url, "client_b");
       const readOwner = createSseReader(owner);
@@ -1769,18 +1878,14 @@ describe("createDaemonHttpServer", () => {
       await vi.waitUntil(() => backend.submitted.length === 2);
 
       backend.emit(runUpdated("run_a", "session_a"));
-      backend.emit(permissionRequested("run_a"));
+      backend.emit(permissionRequested("run_a", "session_a"));
 
-      expect(await readOwner()).toEqual({
+      expect(await readOwner()).toMatchObject({
         event: runUpdated("run_a", "session_a"),
         type: "ui.event",
       });
-      expect(await readObserver()).toEqual({
-        event: runUpdated("run_a", "session_a"),
-        type: "ui.event",
-      });
-      expect(await readOwner()).toEqual({
-        event: permissionRequested("run_a"),
+      expect(await readOwner()).toMatchObject({
+        event: permissionRequested("run_a", "session_a"),
         type: "ui.event",
       });
       await expect(
@@ -1809,6 +1914,9 @@ describe("createDaemonHttpServer", () => {
         method: "submitPromptAccepted",
         params: ["first", { sessionId: "session_1" }],
       });
+      // Establish admission order, not HTTP/client-registration arrival order.
+      // The first response is still held when the second reaches the backend.
+      await vi.waitUntil(() => backend.submitted.length === 1);
       const second = postRpc(url, {
         clientId: "client_b",
         id: "rpc_second",
@@ -1882,7 +1990,7 @@ describe("createDaemonHttpServer", () => {
       await expect(observer.json()).resolves.toMatchObject({
         id: "rpc_observer_snapshot",
         ok: true,
-        result: { activeSessionId: null },
+        result: { activeSessionId: "session_1" },
       });
 
       const submitted = await postRpc(url, {
@@ -2075,6 +2183,10 @@ describe("createDaemonHttpServer", () => {
       await expect(readEvent()).resolves.toEqual({
         event: selected,
         type: "ui.event",
+      });
+      await expect(readEvent()).resolves.toMatchObject({
+        type: "hello",
+        rootSessionId: "session_2",
       });
 
       const after = await postRpc(url, {
@@ -2507,8 +2619,8 @@ describe("createDaemonHttpServer", () => {
           {
             argv: [],
             clientInvocationId: "invoke_1",
-            commandId: "new",
-            path: ["new"],
+            commandId: "sessions",
+            path: ["sessions"],
             raw: "/new",
             rawArgs: "",
             surface: "tui",
@@ -2561,15 +2673,18 @@ describe("createDaemonHttpServer", () => {
         ],
       });
       expect(invoked.status).toBe(200);
-      expect(backend.commandInvocations[0]).toMatchObject({
-        argv: ["--no-reuse-empty-session"],
-        commandId: "new",
-        rawArgs: "--no-reuse-empty-session",
+      expect(backend.commandInvocations).toEqual([]);
+      const selected = await postRpc(url, {
+        clientId: "client_a",
+        id: "selected",
+        method: "getSelectedSessionId",
+        params: [],
       });
+      expect(await selected.json()).toMatchObject({ result: "session_new" });
     });
   });
 
-  it("rejects permission responses from non-owner clients", async () => {
+  it("rejects responses with a stale binding and accepts the current binding", async () => {
     const backend = new FakeBackend();
     await withServer(backend, async (url) => {
       const submit = await postRpc(url, {
@@ -2584,20 +2699,36 @@ describe("createDaemonHttpServer", () => {
         clientId: "client_b",
         id: "rpc_reject",
         method: "respondPermission",
-        params: ["permission_run_1", { choiceId: "allow" }],
+        params: [
+          "permission_run_1",
+          { choiceId: "allow" },
+          {
+            permissionEpoch: "test-epoch",
+            rootSessionId: "session_1",
+            bindingGeneration: 0,
+          },
+        ],
       });
       expect(rejected.status).toBe(403);
       expect(await rejected.json()).toMatchObject({
         id: "rpc_reject",
         ok: false,
-        error: { message: "Permission request is owned by another client" },
+        error: { code: "PERMISSION_SCOPE_CHANGED" },
       });
 
       const allowed = await postRpc(url, {
         clientId: "client_a",
         id: "rpc_allow",
         method: "respondPermission",
-        params: ["permission_run_1", { choiceId: "allow" }],
+        params: [
+          "permission_run_1",
+          { choiceId: "allow" },
+          {
+            permissionEpoch: "test-epoch",
+            rootSessionId: "session_1",
+            bindingGeneration: 1,
+          },
+        ],
       });
       expect(allowed.status).toBe(200);
       expect(backend.permissionResponses).toEqual([
@@ -2612,6 +2743,7 @@ describe("createDaemonHttpServer", () => {
   it("preserves UTF-8 request bodies across chunk boundaries", async () => {
     const backend = new FakeBackend();
     await withServer(backend, async (url) => {
+      await registerTestClient(url, "client_a");
       const body = Buffer.from(
         JSON.stringify({
           clientId: "client_a",
@@ -2652,7 +2784,7 @@ describe("createDaemonHttpServer", () => {
 
     await server.start();
     await fetchEvents(server.url, "client_a");
-    expect(backend.handlers.size).toBe(1);
+    expect(backend.handlers.size).toBe(2);
 
     await server.stop();
     expect(backend.handlers.size).toBe(0);
@@ -2713,5 +2845,51 @@ describe("createDaemonHttpServer", () => {
     });
     await nextServer.start();
     await nextServer.stop();
+  });
+});
+
+it("does not send unchanged binding hellos for repeated REST prompts or another page's selection", async () => {
+  const backend = new FakeBackend();
+  backend.emitOnSubmit = false;
+  await withServer(backend, async (url) => {
+    const observer = createSseFrameReader(await fetchEvents(url, "client_b"));
+    await observer.read();
+    for (let index = 0; index < 6; index += 1) {
+      const response = await fetch(`${url}/v1/prompts`, {
+        method: "POST",
+        headers: {
+          ...authHeaders(),
+          "content-type": "application/json",
+          "x-ohbaby-client-id": "client_b",
+        },
+        body: JSON.stringify({
+          text: "continue",
+          sessionId: "session_1",
+          clientRequestId: `repeat_${String(index)}`,
+        }),
+      });
+      expect(response.status).toBe(202);
+    }
+    await postRpc(url, {
+      id: "command",
+      clientId: "client_a",
+      method: "executeCommand",
+      params: [
+        {
+          commandId: "sessions",
+          path: ["sessions"],
+          argv: [],
+          raw: "/sessions",
+          rawArgs: "",
+          surface: "tui",
+          clientInvocationId: "invoke_1",
+        },
+      ],
+    });
+    backend.emit(commandSessionSelected("session_2"));
+    await expect(readSseFrameWithTimeout(observer)).rejects.toThrow(
+      "Timed out",
+    );
+    await observer.cancel();
   });
 });

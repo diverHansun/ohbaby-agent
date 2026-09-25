@@ -94,6 +94,36 @@ describe("context window UI contract", () => {
     };
 
     const core = {
+      getSessionIndex(): ReturnType<CoreAPI["getSessionIndex"]> {
+        return Promise.resolve([]);
+      },
+      getSelectedSessionId(): ReturnType<CoreAPI["getSelectedSessionId"]> {
+        return Promise.resolve(null);
+      },
+      getPermissionSnapshot(): ReturnType<CoreAPI["getPermissionSnapshot"]> {
+        return Promise.resolve({
+          permissionEpoch: "test",
+          rootSessionId: null,
+          permissionRevision: 0,
+          requests: [],
+        });
+      },
+      subscribePermissionEvents(): ReturnType<
+        CoreAPI["subscribePermissionEvents"]
+      > {
+        return (): void => undefined;
+      },
+      createSession(): ReturnType<CoreAPI["createSession"]> {
+        return Promise.resolve({
+          id: "session_1",
+          title: "Test",
+          createdAt: "2026-09-24",
+          updatedAt: "2026-09-24",
+        });
+      },
+      selectSession(): ReturnType<CoreAPI["selectSession"]> {
+        return Promise.resolve();
+      },
       acquirePromptEditLease(): ReturnType<CoreAPI["acquirePromptEditLease"]> {
         return Promise.reject(new Error("No queued prompt"));
       },

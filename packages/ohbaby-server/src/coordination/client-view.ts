@@ -4,11 +4,14 @@ import type {
   UiBackendClient,
   UiEvent,
   UiSnapshot,
+  UiSessionIndexEntry,
+  UiPermissionBinding,
 } from "ohbaby-sdk";
 import type { DaemonStartupIntent } from "../protocols/jsonrpc/protocol.js";
 import type { DaemonPromptItem } from "./prompt-backend.js";
 
 interface ClientView {
+  bindingGeneration: number;
   activeSessionId?: string | null;
   readonly initialPermission?: DaemonStartupIntent["initialPermission"];
   pendingSessionId?: string;
@@ -46,7 +49,17 @@ export function isDaemonForbiddenError(
   return error instanceof DaemonForbiddenError;
 }
 
+interface ProvisionalPromptBinding {
+  readonly view: ClientView;
+  readonly previousSessionId: string | null | undefined;
+  readonly previousPendingSessionId: string | undefined;
+  readonly sessionId: string;
+  readonly generation: number;
+  remaining: number;
+}
+
 export interface PreparedPromptSubmit {
+  readonly finishAdmission: (accepted: boolean) => void;
   readonly options?: SubmitPromptOptions;
   readonly sessionId?: string;
 }
@@ -95,13 +108,16 @@ export function parseDaemonStartupIntent(value: unknown): DaemonStartupIntent {
 }
 
 function resolveStartupActiveSessionId(
-  snapshot: UiSnapshot,
+  snapshot: { readonly sessions: readonly UiSessionIndexEntry[] },
   intent: DaemonStartupIntent,
 ): string | null {
   if (intent.resumeSessionId !== undefined) {
     if (
       !snapshot.sessions.some(
-        (session) => session.id === intent.resumeSessionId,
+        (session) =>
+          session.id === intent.resumeSessionId &&
+          !session.parentId &&
+          !session.isSubagent,
       )
     ) {
       throw new Error(`Session not found: ${intent.resumeSessionId}`);
@@ -112,10 +128,11 @@ function resolveStartupActiveSessionId(
     if (snapshot.sessions.length === 0) {
       return null;
     }
-    const latest = [...snapshot.sessions].sort((left, right) =>
-      right.updatedAt.localeCompare(left.updatedAt),
-    )[0];
-    return latest.id;
+    const latest = snapshot.sessions
+      .filter((session) => !session.parentId && !session.isSubagent)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .at(0);
+    return latest?.id ?? null;
   }
   return null;
 }
@@ -127,12 +144,9 @@ function permissionsForClientSnapshot(
   if (activeSessionId === null) {
     return [];
   }
-  return snapshot.permissions.filter((permission) => {
-    const run = snapshot.runs.find(
-      (candidate) => candidate.id === permission.runId,
-    );
-    return run?.sessionId === activeSessionId;
-  });
+  return snapshot.permissions.filter(
+    (permission) => permission.rootSessionId === activeSessionId,
+  );
 }
 
 function statusForClientSnapshot(
@@ -142,6 +156,10 @@ function statusForClientSnapshot(
   if (activeSessionId === null) {
     return { kind: "idle" };
   }
+  const pending = snapshot.permissions.find(
+    (permission) => permission.rootSessionId === activeSessionId,
+  );
+  if (pending) return { kind: "waiting-for-permission", requestId: pending.id };
   const selectedRuns = snapshot.runs.filter(
     (run) => run.sessionId === activeSessionId,
   );
@@ -186,16 +204,7 @@ function projectSnapshotForClient(
   if (!view) {
     return snapshot;
   }
-  const activeSessionId =
-    view.activeSessionId !== undefined &&
-    (view.activeSessionId === null ||
-      view.activeSessionId === view.pendingSessionId ||
-      snapshot.prompts?.some(
-        (prompt) => prompt.sessionId === view.activeSessionId,
-      ) === true ||
-      snapshot.sessions.some((session) => session.id === view.activeSessionId))
-      ? view.activeSessionId
-      : snapshot.activeSessionId;
+  const activeSessionId = view.activeSessionId ?? null;
   return {
     ...snapshot,
     activeSessionId,
@@ -302,6 +311,8 @@ function sessionIdForEvent(event: UiEvent): string | undefined {
 export class DaemonClientViewCoordinator {
   private readonly clientViews = new Map<string, ClientView>();
   private readonly commandOwnersByInvocationId = new Map<string, string>();
+  private readonly commandBindingGenerations = new Map<string, number>();
+  private readonly registrationAttempts = new Map<string, number>();
   private readonly commandOwnersByRunId = new Map<string, string>();
   private readonly interactionResponseStates = new Map<
     string,
@@ -311,18 +322,91 @@ export class DaemonClientViewCoordinator {
   private readonly runSessionIdsByRunId = new Map<string, string>();
   private readonly activePromptsBySession = new Map<string, DaemonPromptItem>();
   private activePrompt: DaemonPromptItem | undefined;
+  private readonly provisionalPromptBindings = new Map<
+    string,
+    ProvisionalPromptBinding
+  >();
 
   initializeClient(
     clientId: string,
-    snapshot: UiSnapshot,
+    snapshot: { readonly sessions: readonly UiSessionIndexEntry[] },
     intent: DaemonStartupIntent,
   ): void {
+    const activeSessionId = resolveStartupActiveSessionId(snapshot, intent);
+    this.provisionalPromptBindings.delete(clientId);
     this.clientViews.set(clientId, {
-      activeSessionId: resolveStartupActiveSessionId(snapshot, intent),
+      bindingGeneration:
+        (this.clientViews.get(clientId)?.bindingGeneration ?? 0) + 1,
+      activeSessionId,
       ...(intent.initialPermission === undefined
         ? {}
         : { initialPermission: intent.initialPermission }),
     });
+  }
+
+  beginRegistration(clientId: string): number {
+    const attempt = (this.registrationAttempts.get(clientId) ?? 0) + 1;
+    this.registrationAttempts.set(clientId, attempt);
+    return attempt;
+  }
+  assertRegistration(clientId: string, attempt: number): void {
+    if (this.registrationAttempts.get(clientId) !== attempt)
+      throw Object.assign(
+        new DaemonForbiddenError("Client registration has changed"),
+        { code: "PERMISSION_SCOPE_CHANGED" },
+      );
+  }
+
+  isRegistered(clientId: string): boolean {
+    return this.clientViews.has(clientId);
+  }
+
+  binding(clientId: string, permissionEpoch: string): UiPermissionBinding {
+    const view = this.clientViews.get(clientId);
+    if (!view)
+      throw Object.assign(
+        new DaemonForbiddenError("Client is not registered"),
+        { code: "CLIENT_NOT_REGISTERED" },
+      );
+    return {
+      permissionEpoch,
+      rootSessionId: view.activeSessionId ?? null,
+      bindingGeneration: view.bindingGeneration,
+    };
+  }
+
+  assertBinding(
+    clientId: string,
+    expected: UiPermissionBinding,
+    permissionEpoch: string,
+  ): void {
+    const current = this.binding(clientId, permissionEpoch);
+    if (
+      current.permissionEpoch !== expected.permissionEpoch ||
+      current.rootSessionId !== expected.rootSessionId ||
+      current.bindingGeneration !== expected.bindingGeneration
+    )
+      throw Object.assign(
+        new DaemonForbiddenError("Permission scope has changed"),
+        { code: "PERMISSION_SCOPE_CHANGED" },
+      );
+  }
+
+  selectSession(
+    clientId: string,
+    sessionId: string,
+    expectedGeneration: number,
+  ): void {
+    const view = this.clientViews.get(clientId);
+    if (view?.bindingGeneration !== expectedGeneration)
+      throw Object.assign(
+        new DaemonForbiddenError("Session selection has changed"),
+        { code: "PERMISSION_SCOPE_CHANGED" },
+      );
+    this.provisionalPromptBindings.delete(clientId);
+    view.activeSessionId = sessionId;
+    view.pendingSessionId = undefined;
+    view.bindingGeneration += 1;
   }
 
   projectSnapshot(clientId: string, snapshot: UiSnapshot): UiSnapshot {
@@ -350,19 +434,64 @@ export class DaemonClientViewCoordinator {
     const view = this.clientViews.get(clientId);
     let submitOptions = optionsForClientSubmit(options, view);
     if (submitOptions?.sessionId !== undefined && view !== undefined) {
+      if (view.activeSessionId !== submitOptions.sessionId) {
+        this.provisionalPromptBindings.delete(clientId);
+        view.bindingGeneration += 1;
+        view.pendingSessionId = undefined;
+      }
       view.activeSessionId = submitOptions.sessionId;
     } else if (view?.activeSessionId === null) {
+      const previousSessionId = view.activeSessionId;
+      const previousPendingSessionId = view.pendingSessionId;
       const sessionId = createSessionId();
       submitOptions = { ...options, sessionId };
       view.activeSessionId = sessionId;
+      view.bindingGeneration += 1;
       view.pendingSessionId = sessionId;
+      this.provisionalPromptBindings.set(clientId, {
+        view,
+        previousSessionId,
+        previousPendingSessionId,
+        sessionId,
+        generation: view.bindingGeneration,
+        remaining: 0,
+      });
     }
+    const provisional = this.provisionalPromptBindings.get(clientId);
+    if (provisional) provisional.remaining += 1;
+    let settled = false;
     return {
+      finishAdmission: (accepted): void => {
+        if (settled || !provisional) return;
+        settled = true;
+        provisional.remaining -= 1;
+        if (this.provisionalPromptBindings.get(clientId) !== provisional)
+          return;
+        if (!accepted && provisional.remaining > 0) return;
+        this.provisionalPromptBindings.delete(clientId);
+        if (
+          this.clientViews.get(clientId) !== provisional.view ||
+          provisional.view.bindingGeneration !== provisional.generation ||
+          provisional.view.activeSessionId !== provisional.sessionId
+        )
+          return;
+        if (!accepted) {
+          provisional.view.activeSessionId = provisional.previousSessionId;
+          provisional.view.pendingSessionId =
+            provisional.previousPendingSessionId;
+        }
+        // Commit and rollback both publish a fresh identity; never reuse the provisional generation.
+        provisional.view.bindingGeneration += 1;
+      },
       ...(submitOptions === undefined ? {} : { options: submitOptions }),
       ...(submitOptions?.sessionId === undefined
         ? {}
         : { sessionId: submitOptions.sessionId }),
     };
+  }
+
+  isPromptBindingProvisional(clientId: string): boolean {
+    return this.provisionalPromptBindings.has(clientId);
   }
 
   prepareCommandInvocation(
@@ -378,6 +507,12 @@ export class DaemonClientViewCoordinator {
         prepared.clientInvocationId,
         clientId,
       );
+      const view = this.clientViews.get(clientId);
+      if (view)
+        this.commandBindingGenerations.set(
+          prepared.clientInvocationId,
+          view.bindingGeneration,
+        );
     }
     return prepared;
   }
@@ -424,7 +559,12 @@ export class DaemonClientViewCoordinator {
         const selectedSessionId = selectedSessionIdFromCommandAction(
           event.action,
         );
-        if (owner !== undefined && selectedSessionId !== undefined) {
+        if (
+          owner !== undefined &&
+          selectedSessionId !== undefined &&
+          this.commandBindingGenerations.get(event.clientInvocationId) ===
+            this.clientViews.get(owner)?.bindingGeneration
+        ) {
           this.setClientActiveSession(owner, selectedSessionId);
         }
         return;
@@ -535,6 +675,7 @@ export class DaemonClientViewCoordinator {
     for (const [invocationId, owner] of this.commandOwnersByInvocationId) {
       if (owner === clientId) {
         this.commandOwnersByInvocationId.delete(invocationId);
+        this.commandBindingGenerations.delete(invocationId);
       }
     }
     for (const [runId, owner] of this.commandOwnersByRunId) {
@@ -559,6 +700,7 @@ export class DaemonClientViewCoordinator {
   }
 
   resetRuntimeState(): void {
+    this.provisionalPromptBindings.clear();
     this.activePrompt = undefined;
     this.activePromptsBySession.clear();
     this.runOwnersByRunId.clear();
@@ -712,6 +854,7 @@ export class DaemonClientViewCoordinator {
     >,
   ): void {
     this.commandOwnersByInvocationId.delete(event.clientInvocationId);
+    this.commandBindingGenerations.delete(event.clientInvocationId);
     this.commandOwnersByRunId.delete(event.commandRunId);
   }
 
@@ -720,7 +863,9 @@ export class DaemonClientViewCoordinator {
     if (view === undefined) {
       return;
     }
+    this.provisionalPromptBindings.delete(clientId);
     view.activeSessionId = sessionId;
+    view.bindingGeneration += 1;
     view.pendingSessionId = undefined;
   }
 }

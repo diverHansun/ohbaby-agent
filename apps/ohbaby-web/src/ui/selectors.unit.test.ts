@@ -10,6 +10,14 @@ function store(
   currentModel: StoreSnapshot["currentModel"] = null,
 ): StoreSnapshot {
   return {
+    permissionSync: {
+      status: "ready",
+      binding: null,
+      requests: snapshot.permissions,
+      permissionRevision: 0,
+      attempts: 0,
+    },
+    sessionIndex: [],
     connectionState: "live",
     currentModel,
     error: null,
@@ -243,6 +251,11 @@ describe("ohbaby-web ui selectors", () => {
           choices: [{ id: "allow", intent: "allow", label: "Allow" }],
           description: "Run bash",
           id: "permission_1",
+          sessionId: "session_1",
+          rootSessionId: "session_1",
+          callId: "call",
+          messageId: "message",
+          createdAt: 1,
           runId: "run_1",
           title: "Permission",
         },

@@ -419,7 +419,13 @@ describe("ohbaby web workspace switching", () => {
     );
     expect(
       repoBRequests.map((request) => new URL(request.url).pathname),
-    ).toEqual(["/v1/clients", "/v1/events", "/v1/snapshot", "/v1/model"]);
+    ).toEqual([
+      "/v1/clients",
+      "/v1/events",
+      "/v1/snapshot",
+      "/v1/model",
+      "/v1/sessions/index",
+    ]);
     expect(new Set(repoBRequests.map((request) => request.clientId)).size).toBe(
       1,
     );

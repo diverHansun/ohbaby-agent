@@ -142,6 +142,64 @@ async function eventuallyEmit(
 }
 
 class FakeBackend implements UiBackendClient {
+  private readonly createdSessions: Awaited<
+    ReturnType<UiBackendClient["getSessionIndex"]>
+  >[number][] = [];
+  getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return Promise.resolve([
+      ...this.snapshot.sessions,
+      ...this.createdSessions,
+      ...["session_1", "session_2", "session_selected", "session_target"]
+        .filter((id) => !this.snapshot.sessions.some((s) => s.id === id))
+        .map((id) => ({
+          id,
+          title: id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+    ]);
+  }
+  getSelectedSessionId(): Promise<string | null> {
+    return Promise.resolve(this.snapshot.activeSessionId);
+  }
+  createSession(): ReturnType<UiBackendClient["createSession"]> {
+    const session = {
+      id: "session_new",
+      title: "New session",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.createdSessions.push(session);
+    return Promise.resolve(session);
+  }
+  selectSession(_sessionId: string): Promise<void> {
+    return Promise.resolve();
+  }
+  getPermissionSnapshot(
+    input: Parameters<UiBackendClient["getPermissionSnapshot"]>[0],
+  ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+    return Promise.resolve({
+      permissionEpoch: "test-epoch",
+      rootSessionId: input.rootSessionId,
+      permissionRevision: 0,
+      requests: this.snapshot.permissions.filter(
+        (request) => request.rootSessionId === input.rootSessionId,
+      ),
+    });
+  }
+  subscribePermissionEvents(
+    handler: Parameters<UiBackendClient["subscribePermissionEvents"]>[0],
+  ): () => void {
+    return this.subscribeEvents((event) => {
+      if (
+        event.type === "permission.requested" ||
+        event.type === "permission.resolved" ||
+        event.type === "permission.unavailable"
+      )
+        handler(event);
+    });
+  }
+
   private nextPromptId = 0;
   private readonly promptCompletions = new Map<
     string,
@@ -709,8 +767,6 @@ describe("createRemoteUiBackendClient", () => {
 
     expect(backend.calls).toEqual([
       { args: [], method: "getSnapshot" },
-      { args: [], method: "getSnapshot" },
-      { args: [], method: "getSnapshot" },
       { args: [contextInput], method: "getContextWindowUsage" },
       { args: [listQuery], method: "listCommands" },
       {
@@ -836,3 +892,157 @@ describe("createRemoteUiBackendClient", () => {
     await expect(client.dispose()).resolves.toBeUndefined();
   });
 });
+
+it.each([
+  {
+    commandId: "new",
+    argv: [],
+    sessionId: "session_new",
+    subject: "session.created",
+  },
+  {
+    commandId: "new",
+    argv: ["--no-reuse-empty-session"],
+    sessionId: "session_new",
+    subject: "session.created",
+  },
+  {
+    commandId: "resume",
+    argv: ["--session_id", "session_2"],
+    sessionId: "session_2",
+    subject: "session.current",
+  },
+  {
+    commandId: "resume",
+    argv: ["--session-id=session_2"],
+    sessionId: "session_2",
+    subject: "session.current",
+  },
+  {
+    commandId: "resume",
+    argv: ["session_2"],
+    sessionId: "session_2",
+    subject: "session.current",
+  },
+])(
+  "delivers the remote $commandId selection contract using metadata only ($argv)",
+  async ({ commandId, argv, sessionId, subject }) => {
+    const backend = new FakeBackend();
+    const history = vi
+      .spyOn(backend, "getSnapshot")
+      .mockRejectedValue(new Error("history unavailable"));
+    await withRemoteClient(backend, async (client) => {
+      const events: UiEvent[] = [];
+      let connected = false;
+      const stop = client.subscribeEvents((event) => {
+        events.push(event);
+      });
+      const stopPermissions = client.subscribePermissionEvents((event) => {
+        if (event.type === "permission.resync-required") connected = true;
+      });
+      try {
+        await vi.waitUntil(() => connected);
+        await client.executeCommand({
+          commandId,
+          path: [commandId],
+          argv,
+          raw: `/${commandId}`,
+          rawArgs: argv.join(" "),
+          surface: "tui",
+          clientInvocationId: "remote-session-command",
+        });
+        await vi.waitUntil(
+          () =>
+            events.some(
+              (event) =>
+                event.type === "command.result.delivered" &&
+                event.action?.kind === "session.selected",
+            ),
+          { timeout: 300 },
+        );
+        expect(
+          events.find((event) => event.type === "command.started"),
+        ).toMatchObject({
+          command: { clientInvocationId: "remote-session-command", commandId },
+        });
+        expect(
+          events.find(
+            (event) =>
+              event.type === "command.result.delivered" &&
+              event.output !== undefined,
+          ),
+        ).toMatchObject({ output: { kind: "data", subject } });
+        expect(
+          events.find(
+            (event) =>
+              event.type === "command.result.delivered" &&
+              event.action !== undefined,
+          ),
+        ).toMatchObject({
+          action: { kind: "session.selected", data: { choiceId: sessionId } },
+        });
+        await vi.waitUntil(
+          async () => (await client.getSelectedSessionId()) === sessionId,
+        );
+        expect(history).not.toHaveBeenCalled();
+        expect(
+          backend.calls.filter((call) => call.method === "executeCommand"),
+        ).toEqual([]);
+      } finally {
+        stop();
+        stopPermissions();
+      }
+    });
+  },
+);
+
+it.each([
+  { argv: [], code: "SESSION_ID_REQUIRED" },
+  { argv: ["--session_id", "--other"], code: "SESSION_ID_REQUIRED" },
+  { argv: ["--session-id="], code: "SESSION_ID_REQUIRED" },
+  { argv: ["missing-session"], code: "EXECUTION_ERROR" },
+])(
+  "reports invalid remote resume arguments without changing the binding ($argv)",
+  async ({ argv, code }) => {
+    const backend = new FakeBackend();
+    const history = vi
+      .spyOn(backend, "getSnapshot")
+      .mockRejectedValue(new Error("history unavailable"));
+    await withRemoteClient(backend, async (client) => {
+      const events: UiEvent[] = [];
+      let connected = false;
+      const stop = client.subscribeEvents((event) => {
+        events.push(event);
+      });
+      const stopPermissions = client.subscribePermissionEvents((event) => {
+        if (event.type === "permission.resync-required") connected = true;
+      });
+      try {
+        await vi.waitUntil(() => connected);
+        await client.executeCommand({
+          commandId: "resume",
+          path: ["resume"],
+          argv,
+          raw: "/resume",
+          rawArgs: argv.join(" "),
+          surface: "tui",
+          clientInvocationId: "invalid-resume",
+        });
+        await vi.waitUntil(() =>
+          events.some((event) => event.type === "command.failed"),
+        );
+        expect(
+          events.find((event) => event.type === "command.failed"),
+        ).toMatchObject({ error: { code } });
+        expect(
+          events.some((event) => event.type === "command.result.delivered"),
+        ).toBe(false);
+        expect(await client.getSelectedSessionId()).toBe(null);
+        expect(history).not.toHaveBeenCalled();
+      } finally {
+        stop();
+        stopPermissions();
+      }
+    });
+  },
+);

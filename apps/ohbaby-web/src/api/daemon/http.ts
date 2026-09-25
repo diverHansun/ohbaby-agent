@@ -1,5 +1,12 @@
-import type { UiBackendClient } from "ohbaby-sdk";
 import type {
+  UiBackendClient,
+  UiPermissionSnapshotQuery,
+  UiSessionIndexEntry,
+} from "ohbaby-sdk";
+import type {
+  BindingResponse,
+  PermissionSnapshotResponse,
+  SessionIndexResponse,
   CompactSessionRequest,
   CompactSessionResponse,
   CommandCatalogResponse,
@@ -43,6 +50,7 @@ export interface DaemonHttpClientOptions {
 interface ErrorResponseBody {
   readonly error?: {
     readonly message?: string;
+    readonly code?: string;
   };
 }
 
@@ -87,6 +95,27 @@ export class DaemonHttpClient {
       },
       method: "POST",
       signal: options.signal,
+    });
+  }
+
+  getSessionIndex(
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<SessionIndexResponse> {
+    return this.request("/v1/sessions/index", options);
+  }
+
+  getPermissionSnapshot(
+    input: UiPermissionSnapshotQuery,
+  ): Promise<PermissionSnapshotResponse> {
+    const query = new URLSearchParams({
+      rootSessionId: input.rootSessionId ?? "",
+    });
+    if (input.permissionEpoch !== undefined)
+      query.set("permissionEpoch", input.permissionEpoch);
+    if (input.bindingGeneration !== undefined)
+      query.set("bindingGeneration", String(input.bindingGeneration));
+    return this.request(`/v1/permissions?${query.toString()}`, {
+      signal: input.signal,
     });
   }
 
@@ -143,13 +172,15 @@ export class DaemonHttpClient {
     });
   }
 
-  createSession(): Promise<OkResponse> {
+  createSession(): Promise<
+    BindingResponse & { readonly session: UiSessionIndexEntry }
+  > {
     return this.request("/v1/sessions", {
       method: "POST",
     });
   }
 
-  selectSession(sessionId: string): Promise<OkResponse> {
+  selectSession(sessionId: string): Promise<BindingResponse> {
     return this.request(
       `/v1/sessions/${encodeURIComponent(sessionId)}/select`,
       {
@@ -367,7 +398,9 @@ export class DaemonHttpClient {
         isErrorBody(value) && typeof value.error?.message === "string"
           ? value.error.message
           : `Daemon request failed with HTTP ${String(response.status)}`;
-      throw new Error(message);
+      throw Object.assign(new Error(message), {
+        code: isErrorBody(value) ? value.error?.code : undefined,
+      });
     }
     return value as T;
   }

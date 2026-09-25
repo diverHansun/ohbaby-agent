@@ -19,6 +19,24 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
   dispose(): Promise<void>;
 } {
   return {
+    getSessionIndex: () => Promise.resolve([]),
+    getSelectedSessionId: () => Promise.resolve(null),
+    createSession: () =>
+      Promise.resolve({
+        id: "new",
+        title: "New",
+        createdAt: "2026-09-24",
+        updatedAt: "2026-09-24",
+      }),
+    selectSession: () => Promise.resolve(),
+    getPermissionSnapshot: (input) =>
+      Promise.resolve({
+        permissionEpoch: "test-epoch",
+        rootSessionId: input.rootSessionId,
+        permissionRevision: 0,
+        requests: [],
+      }),
+    subscribePermissionEvents: () => () => undefined,
     abortRun: vi.fn(() => Promise.resolve()),
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),

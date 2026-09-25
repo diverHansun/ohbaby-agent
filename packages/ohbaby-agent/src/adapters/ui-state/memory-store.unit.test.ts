@@ -117,3 +117,28 @@ describe("createInMemoryUiStateStore", () => {
     });
   });
 });
+
+it("reads only lightweight session metadata for approval recovery", async () => {
+  const store = createInMemoryUiStateStore({
+    ...BASE_SNAPSHOT,
+    sessions: [
+      {
+        id: "root",
+        title: "Root",
+        createdAt: "2026-09-24",
+        updatedAt: "2026-09-24",
+        messages: [],
+      },
+    ],
+  });
+  const index = await store.getSessionIndex();
+  expect(index).toEqual([
+    {
+      id: "root",
+      title: "Root",
+      createdAt: "2026-09-24",
+      updatedAt: "2026-09-24",
+    },
+  ]);
+  expect(index[0]).not.toHaveProperty("messages");
+});

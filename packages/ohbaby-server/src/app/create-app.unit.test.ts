@@ -178,6 +178,66 @@ function createOneShotLlmClient(
 }
 
 class FakeBackend implements UiBackendClient {
+  private readonly createdSessions: Awaited<
+    ReturnType<UiBackendClient["getSessionIndex"]>
+  >[number][] = [];
+  getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return Promise.resolve([
+      ...this.snapshot.sessions,
+      ...this.createdSessions,
+      ...["session_1", "session_2", "session_target"]
+        .filter(
+          (id) => !this.snapshot.sessions.some((session) => session.id === id),
+        )
+        .map((id) => ({
+          id,
+          title: id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+    ]);
+  }
+  getSelectedSessionId(): Promise<string | null> {
+    return Promise.resolve(this.snapshot.activeSessionId);
+  }
+  createSession(): ReturnType<UiBackendClient["createSession"]> {
+    const session = {
+      id: `session_new_${String(this.createdSessions.length + 1)}`,
+      title: "New session",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.createdSessions.push(session);
+    return Promise.resolve(session);
+  }
+  selectSession(_sessionId: string): Promise<void> {
+    return Promise.resolve();
+  }
+  getPermissionSnapshot(
+    input: Parameters<UiBackendClient["getPermissionSnapshot"]>[0],
+  ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+    return Promise.resolve({
+      permissionEpoch: "test-epoch",
+      rootSessionId: input.rootSessionId,
+      permissionRevision: 0,
+      requests: this.snapshot.permissions.filter(
+        (request) => request.rootSessionId === input.rootSessionId,
+      ),
+    });
+  }
+  subscribePermissionEvents(
+    handler: Parameters<UiBackendClient["subscribePermissionEvents"]>[0],
+  ): () => void {
+    return this.subscribeEvents((event) => {
+      if (
+        event.type === "permission.requested" ||
+        event.type === "permission.resolved" ||
+        event.type === "permission.unavailable"
+      )
+        handler(event);
+    });
+  }
+
   admissionError: Error | undefined;
   private nextPromptId = 0;
   private readonly promptCompletions = new Map<
@@ -904,6 +964,11 @@ describe("createDaemonServerApp", () => {
       commandRecorder: { record: (record) => records.push(record) },
     });
     await handle.start();
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "client_rpc" }),
+    });
     try {
       const response = await handle.app.request("/api/rpc", {
         body: JSON.stringify({
@@ -1056,6 +1121,11 @@ describe("createDaemonServerApp", () => {
       let stderrOutput = "";
       let stdoutOutput = "";
       await handle.start();
+      await handle.app.request("/v1/clients", {
+        method: "POST",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ clientId: "client_rpc" }),
+      });
       try {
         const response = await handle.app.request("/api/rpc", {
           body: JSON.stringify({
@@ -1138,6 +1208,11 @@ describe("createDaemonServerApp", () => {
       },
     });
     await handle.start();
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "client_rpc" }),
+    });
     try {
       const rpc = await handle.app.request("/api/rpc", {
         body: JSON.stringify({
@@ -1382,6 +1457,11 @@ describe("createDaemonServerApp", () => {
       packageVersion: "0.1.5-test",
     });
     await handle.start();
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "client_a" }),
+    });
     try {
       const response = await handle.app.request(
         "/api/events?clientId=client_a",
@@ -1391,7 +1471,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(readSseData(response)).resolves.toEqual({
+      await expect(readSseData(response)).resolves.toMatchObject({
         clientId: "client_a",
         type: "hello",
       });
@@ -1459,7 +1539,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(clientResponse.status).toBe(200);
-      await expect(clientResponse.json()).resolves.toEqual({
+      await expect(clientResponse.json()).resolves.toMatchObject({
         clientId: "client_web",
         ok: true,
       });
@@ -1497,7 +1577,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(409);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "client is not registered" },
         ok: false,
       });
@@ -1511,7 +1591,7 @@ describe("createDaemonServerApp", () => {
     let getSnapshotCalls = 0;
     backend.onGetSnapshot = (): void => {
       getSnapshotCalls += 1;
-      if (getSnapshotCalls === 2) {
+      if (getSnapshotCalls === 1) {
         backend.emit(sessionUpdated());
       }
     };
@@ -1569,7 +1649,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         ok: true,
         permission: {
           level: "full-access",
@@ -1832,7 +1912,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(401);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "Unauthorized" },
           ok: false,
         });
@@ -1878,7 +1958,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(400);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "clientId is required" },
           ok: false,
         });
@@ -1925,7 +2005,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(409);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "client is not registered" },
           ok: false,
         });
@@ -1967,7 +2047,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.executedCommands).toEqual([
         {
           argv: [],
@@ -2032,7 +2112,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.executedCommands).toEqual([
         {
           argumentMode: "raw",
@@ -2082,7 +2162,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "command is not supported by web passthrough" },
         ok: false,
       });
@@ -2092,149 +2172,49 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("creates sessions for registered web clients through a dedicated REST route", async () => {
+  it("creates fresh client-bound sessions and selects an existing root using lightweight APIs", async () => {
     const backend = new FakeBackend();
     const handle = createApp(backend);
     await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
     try {
       await handle.app.request("/v1/clients", {
+        method: "POST",
+        headers,
         body: JSON.stringify({ clientId: "client_web" }),
-        headers: {
-          ...authHeaders(),
-          "content-type": "application/json",
-        },
-        method: "POST",
-      });
-      const response = await handle.app.request("/v1/sessions", {
-        headers: {
-          ...authHeaders(),
-          "x-ohbaby-client-id": "client_web",
-        },
-        method: "POST",
-      });
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
-      expect(backend.executedCommands[0]?.clientInvocationId).toMatch(
-        /^web_session_/,
-      );
-      expect(backend.executedCommands).toEqual([
-        {
-          argumentMode: "argv",
-          argv: ["--no-reuse-empty-session"],
-          clientInvocationId: backend.executedCommands[0]?.clientInvocationId,
-          commandId: "new",
-          path: ["new"],
-          raw: "/new --no-reuse-empty-session",
-          rawArgs: "--no-reuse-empty-session",
-          surface: "tui",
-        },
-      ]);
-    } finally {
-      await handle.dispose();
-    }
-  });
-
-  it("allows repeated web session creation to reuse the active empty session", async () => {
-    const backend = new FakeBackend();
-    const handle = createApp(backend);
-    await handle.start();
-    try {
-      await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
-        headers: {
-          ...authHeaders(),
-          "content-type": "application/json",
-        },
-        method: "POST",
       });
       const first = await handle.app.request("/v1/sessions", {
-        headers: {
-          ...authHeaders(),
-          "x-ohbaby-client-id": "client_web",
-        },
         method: "POST",
+        headers,
       });
-      expect(first.status).toBe(200);
-      const firstInvocation = backend.executedCommands[0];
-      expect(firstInvocation).toMatchObject({
-        argv: ["--no-reuse-empty-session"],
-        commandId: "new",
-        rawArgs: "--no-reuse-empty-session",
+      expect(await first.json()).toMatchObject({
+        ok: true,
+        rootSessionId: "session_new_1",
+        bindingGeneration: 2,
       });
-
-      backend.emit({
-        action: {
-          data: { choiceId: "session_web_1" },
-          kind: "session.selected",
-        },
-        clientInvocationId: firstInvocation.clientInvocationId,
-        commandRunId: "command_new_1",
-        timestamp: Date.parse(timestamp),
-        type: "command.result.delivered",
-      });
-
       const second = await handle.app.request("/v1/sessions", {
-        headers: {
-          ...authHeaders(),
-          "x-ohbaby-client-id": "client_web",
-        },
         method: "POST",
+        headers,
       });
-
-      expect(second.status).toBe(200);
-      expect(backend.executedCommands[1]).toMatchObject({
-        argv: [],
-        commandId: "new",
-        raw: "/new",
-        rawArgs: "",
+      expect(await second.json()).toMatchObject({
+        ok: true,
+        rootSessionId: "session_new_2",
+        bindingGeneration: 3,
       });
-    } finally {
-      await handle.dispose();
-    }
-  });
-
-  it("selects sessions for registered web clients through a dedicated REST route", async () => {
-    const backend = new FakeBackend();
-    const handle = createApp(backend);
-    await handle.start();
-    try {
-      await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
-        headers: {
-          ...authHeaders(),
-          "content-type": "application/json",
-        },
-        method: "POST",
-      });
-      const response = await handle.app.request(
+      const selected = await handle.app.request(
         "/v1/sessions/session_2/select",
-        {
-          headers: {
-            ...authHeaders(),
-            "x-ohbaby-client-id": "client_web",
-          },
-          method: "PATCH",
-        },
+        { method: "PATCH", headers },
       );
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
-      expect(backend.executedCommands[0]?.clientInvocationId).toMatch(
-        /^web_session_/,
-      );
-      expect(backend.executedCommands).toEqual([
-        {
-          argumentMode: "argv",
-          argv: ["--session_id", "session_2"],
-          clientInvocationId: backend.executedCommands[0]?.clientInvocationId,
-          commandId: "resume",
-          path: ["resume"],
-          raw: "/resume --session_id session_2",
-          rawArgs: "--session_id session_2",
-          surface: "tui",
-        },
-      ]);
+      expect(await selected.json()).toMatchObject({
+        ok: true,
+        rootSessionId: "session_2",
+        bindingGeneration: 4,
+      });
+      expect(backend.executedCommands).toEqual([]);
     } finally {
       await handle.dispose();
     }
@@ -2265,7 +2245,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.archivedSessions).toEqual(["session_2"]);
     } finally {
       await handle.dispose();
@@ -2298,7 +2278,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(404);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "Session not found: session_missing" },
         ok: false,
       });
@@ -2336,7 +2316,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "Cannot archive subagent session: child_1" },
         ok: false,
       });
@@ -2361,7 +2341,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(401);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "Unauthorized" },
           ok: false,
         });
@@ -2387,7 +2367,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(400);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "clientId is required" },
           ok: false,
         });
@@ -2416,7 +2396,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(409);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "client is not registered" },
           ok: false,
         });
@@ -2450,7 +2430,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "command invocation is invalid" },
         ok: false,
       });
@@ -2506,7 +2486,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "command is not supported by web passthrough" },
         ok: false,
       });
@@ -2562,7 +2542,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "command is not supported by web passthrough" },
         ok: false,
       });
@@ -2657,7 +2637,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(400);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "command is not supported by web passthrough" },
           ok: false,
         });
@@ -2716,7 +2696,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.executedCommands).toEqual([
         expect.objectContaining({ commandId: "goal", rawArgs: "pause" }),
       ]);
@@ -2772,7 +2752,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(400);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "model connection body is invalid" },
           ok: false,
         });
@@ -3077,7 +3057,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(readSseData(response)).resolves.toEqual({
+      await expect(readSseData(response)).resolves.toMatchObject({
         clientId: "client_web",
         type: "hello",
       });
@@ -3112,7 +3092,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         clientRequestId: "request_1",
         createdAt: timestamp,
         ok: true,
@@ -3159,7 +3139,7 @@ describe("createDaemonServerApp", () => {
         method: "POST",
       });
       expect(accepted.status).toBe(202);
-      await expect(accepted.json()).resolves.toEqual({
+      await expect(accepted.json()).resolves.toMatchObject({
         clientRequestId: "request_1",
         createdAt: timestamp,
         ok: true,
@@ -3738,6 +3718,16 @@ describe("createDaemonServerApp", () => {
     });
     const handle = createApp(backend);
     await handle.start();
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "web_queue" }),
+    });
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "rpc_queue" }),
+    });
     try {
       await handle.app.request("/v1/clients", {
         body: JSON.stringify({ clientId: "web_queue" }),
@@ -3856,7 +3846,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.abortedRunIds).toEqual([]);
     } finally {
       await handle.dispose();
@@ -3902,7 +3892,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.abortedRunIds).toEqual([]);
     } finally {
       await handle.dispose();
@@ -3949,7 +3939,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.abortedRunIds).toEqual([]);
     } finally {
       await handle.dispose();

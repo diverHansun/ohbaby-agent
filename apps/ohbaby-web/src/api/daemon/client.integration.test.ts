@@ -67,6 +67,8 @@ describe("ohbaby-web daemon client", () => {
         url,
       });
 
+      if (url.endsWith("/v1/sessions/index"))
+        return Promise.resolve(Response.json({ ok: true, sessions: [] }));
       if (url.endsWith("/v1/clients")) {
         return Promise.resolve(
           Response.json({ clientId: "client_web", ok: true }),
@@ -78,7 +80,13 @@ describe("ohbaby-web daemon client", () => {
             createSseStream((controller) => {
               sseController = controller;
               controller.enqueue(
-                sseFrame({ clientId: "client_web", type: "hello" }),
+                sseFrame({
+                  clientId: "client_web",
+                  type: "hello",
+                  permissionEpoch: "epoch",
+                  rootSessionId: null,
+                  bindingGeneration: 0,
+                }),
               );
               controller.enqueue(
                 sseFrame(
@@ -624,13 +632,12 @@ describe("ohbaby-web daemon client", () => {
     await expect(
       client.archiveSession({ sessionId: "session_1" }),
     ).resolves.toBeUndefined();
-    expect(requests.slice(-3).map((request) => request.url)).toEqual([
+    expect(requests.slice(-2).map((request) => request.url)).toEqual([
       "http://127.0.0.1:4096/v1/sessions/session_1/archive",
       "http://127.0.0.1:4096/v1/snapshot",
-      "http://127.0.0.1:4096/v1/model",
     ]);
-    expect(requests.at(-3)?.method).toBe("PATCH");
-    expect(requests.slice(-9).map((request) => request.url)).toEqual([
+    expect(requests.at(-2)?.method).toBe("PATCH");
+    expect(requests.slice(-8).map((request) => request.url)).toEqual([
       "http://127.0.0.1:4096/v1/model",
       "http://127.0.0.1:4096/v1/model/context-window-probe",
       "http://127.0.0.1:4096/v1/model",
@@ -639,7 +646,6 @@ describe("ohbaby-web daemon client", () => {
       "http://127.0.0.1:4096/v1/sessions/session_1/compact",
       "http://127.0.0.1:4096/v1/sessions/session_1/archive",
       "http://127.0.0.1:4096/v1/snapshot",
-      "http://127.0.0.1:4096/v1/model",
     ]);
     sseController?.close();
     await runtime.dispose();
@@ -657,6 +663,8 @@ describe("ohbaby-web daemon client", () => {
       }
       const url = urlFromRequestInput(input);
       calls.push(url);
+      if (url.endsWith("/v1/sessions/index"))
+        return Promise.resolve(Response.json({ ok: true, sessions: [] }));
       if (url.endsWith("/v1/clients")) {
         return Promise.resolve(
           Response.json({ clientId: "client_web", ok: true }),
@@ -667,7 +675,13 @@ describe("ohbaby-web daemon client", () => {
           new Response(
             createSseStream((controller) => {
               controller.enqueue(
-                sseFrame({ clientId: "client_web", type: "hello" }),
+                sseFrame({
+                  clientId: "client_web",
+                  type: "hello",
+                  permissionEpoch: "epoch",
+                  rootSessionId: null,
+                  bindingGeneration: 0,
+                }),
               );
               controller.close();
             }),
@@ -741,6 +755,8 @@ describe("ohbaby-web daemon client", () => {
 
     const fetchImpl: typeof fetch = (input, init = {}) => {
       const url = urlFromRequestInput(input);
+      if (url.endsWith("/v1/sessions/index"))
+        return Promise.resolve(Response.json({ ok: true, sessions: [] }));
       if (url.endsWith("/v1/clients")) {
         return Promise.resolve(
           Response.json({ clientId: "client_web", ok: true }),
@@ -758,7 +774,13 @@ describe("ohbaby-web daemon client", () => {
                 secondSseController = controller;
               }
               controller.enqueue(
-                sseFrame({ clientId: "client_web", type: "hello" }),
+                sseFrame({
+                  clientId: "client_web",
+                  type: "hello",
+                  permissionEpoch: "epoch",
+                  rootSessionId: null,
+                  bindingGeneration: 0,
+                }),
               );
             }),
             {
@@ -819,11 +841,16 @@ describe("ohbaby-web daemon client", () => {
     );
 
     await waitFor(
+      () => runtime.store.getSnapshot().error === "snapshot failed",
+      "snapshot error was not reported",
+    );
+    expect(eventRequestHeaders).toHaveLength(1);
+    firstSseController?.close();
+    await waitFor(
       () => eventRequestHeaders.length >= 2,
       "timed out waiting for SSE reconnect",
     );
     expect(eventRequestHeaders[1]?.get("last-event-id")).toBe("0");
-    firstSseController?.close();
     secondSseController?.close();
     await runtime.dispose();
   });
@@ -842,6 +869,8 @@ describe("ohbaby-web daemon client", () => {
       if (url.endsWith("/v1/scopes")) {
         return Promise.resolve(Response.json({}, { status: 404 }));
       }
+      if (url.endsWith("/v1/sessions/index"))
+        return Promise.resolve(Response.json({ ok: true, sessions: [] }));
       if (url.endsWith("/v1/clients")) {
         return Promise.resolve(Response.json({ ok: true }));
       }
@@ -851,7 +880,13 @@ describe("ohbaby-web daemon client", () => {
             createSseStream((controller) => {
               sseController = controller;
               controller.enqueue(
-                sseFrame({ clientId: "client_web", type: "hello" }),
+                sseFrame({
+                  clientId: "client_web",
+                  type: "hello",
+                  permissionEpoch: "epoch",
+                  rootSessionId: null,
+                  bindingGeneration: 0,
+                }),
               );
             }),
             { headers: { "content-type": "text/event-stream" } },
@@ -967,7 +1002,11 @@ describe("ohbaby-web daemon client", () => {
     resolveFailedSnapshot?.(
       Response.json({ error: { message: "snapshot failed" } }, { status: 500 }),
     );
-    await expect(selecting).rejects.toThrow("snapshot failed");
+    await expect(selecting).resolves.toBeUndefined();
+    await waitFor(
+      () => runtime.store.getSnapshot().error === "snapshot failed",
+      "snapshot error was not reported",
+    );
     sseController?.enqueue(
       sseFrame(
         {
@@ -995,8 +1034,10 @@ describe("ohbaby-web daemon client", () => {
     });
     expect(catalogRequests).toBe(2);
     failModelRefresh = true;
-    await expect(runtime.selectSession("session_1")).rejects.toThrow(
-      "model failed",
+    await expect(runtime.selectSession("session_1")).resolves.toBeUndefined();
+    await waitFor(
+      () => runtime.store.getSnapshot().error === "model failed",
+      "model error was not reported",
     );
     expect(runtime.store.getSnapshot().connectionState).toBe("live");
     sseController?.close();
@@ -1004,8 +1045,10 @@ describe("ohbaby-web daemon client", () => {
   });
 
   it("clears transient stream errors after the SSE connection returns live", async () => {
-    const fetchImpl: typeof fetch = (input) => {
+    const fetchImpl: typeof fetch = (input, init = {}) => {
       const url = urlFromRequestInput(input);
+      if (url.endsWith("/v1/sessions/index"))
+        return Promise.resolve(Response.json({ ok: true, sessions: [] }));
       if (url.endsWith("/v1/clients")) {
         return Promise.resolve(
           Response.json({ clientId: "client_web", ok: true }),
@@ -1019,9 +1062,21 @@ describe("ohbaby-web daemon client", () => {
                 sseFrame({ message: "temporary warning", type: "error" }),
               );
               controller.enqueue(
-                sseFrame({ clientId: "client_web", type: "hello" }),
+                sseFrame({
+                  clientId: "client_web",
+                  type: "hello",
+                  permissionEpoch: "epoch",
+                  rootSessionId: null,
+                  bindingGeneration: 0,
+                }),
               );
-              controller.close();
+              init.signal?.addEventListener(
+                "abort",
+                () => {
+                  controller.close();
+                },
+                { once: true },
+              );
             }),
             {
               headers: { "content-type": "text/event-stream" },
@@ -1092,6 +1147,8 @@ describe("ohbaby-web daemon client", () => {
     } as const;
     const fetchImpl: typeof fetch = (input) => {
       const url = urlFromRequestInput(input);
+      if (url.endsWith("/v1/sessions/index"))
+        return Promise.resolve(Response.json({ ok: true, sessions: [] }));
       if (url.endsWith("/v1/clients")) {
         return Promise.resolve(
           Response.json({ clientId: "client_web", ok: true }),
@@ -1103,7 +1160,13 @@ describe("ohbaby-web daemon client", () => {
             createSseStream((controller) => {
               sseController = controller;
               controller.enqueue(
-                sseFrame({ clientId: "client_web", type: "hello" }),
+                sseFrame({
+                  clientId: "client_web",
+                  type: "hello",
+                  permissionEpoch: "epoch",
+                  rootSessionId: null,
+                  bindingGeneration: 0,
+                }),
               );
             }),
             { headers: { "content-type": "text/event-stream" } },
@@ -1141,7 +1204,15 @@ describe("ohbaby-web daemon client", () => {
       delivered.push(event.type);
     });
 
-    sseController?.enqueue(sseFrame({ clientId: "client_web", type: "hello" }));
+    sseController?.enqueue(
+      sseFrame({
+        clientId: "client_web",
+        type: "hello",
+        permissionEpoch: "epoch",
+        rootSessionId: null,
+        bindingGeneration: 0,
+      }),
+    );
     sseController?.enqueue(
       sseFrame({ message: "transport warning", type: "error" }),
     );

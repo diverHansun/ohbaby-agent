@@ -62,7 +62,7 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     liveMessage: transcript.liveMessage,
     messages,
     notices: [],
-    permissions: snapshot.permissions,
+    permissions: [],
     permission: snapshot.permission,
     prompts: snapshot.prompts ?? [],
     reasoningByMessageId: {},
@@ -242,32 +242,10 @@ export function applyTuiEvent(
       });
 
     case "permission.requested":
-      if (state.resolvedPermissionIds.includes(event.request.id)) {
-        return state;
-      }
-      return rebuildWithPermissions(state, {
-        permissions: upsertById(state.permissions, event.request),
-        runtime: {
-          kind: "waiting-for-permission",
-          requestId: event.request.id,
-        },
-      });
-
     case "permission.resolved":
-      return rebuildWithPermissions(
-        {
-          ...state,
-          resolvedPermissionIds: rememberResolvedPermission(
-            state.resolvedPermissionIds,
-            event.requestId,
-          ),
-        },
-        {
-          permissions: state.permissions.filter(
-            (request) => request.id !== event.requestId,
-          ),
-        },
-      );
+    case "permission.unavailable":
+    case "permission.resync-required":
+      return state;
 
     case "permission.updated":
       return rebuildFromCollections(state, {
@@ -433,6 +411,10 @@ export function createTuiStore(snapshot: UiSnapshot): TuiStore {
       });
       notify();
     },
+    setPermissions(requests): void {
+      state = rebuildFromCollections(state, { permissions: requests });
+      notify();
+    },
     setCatalog(catalog): void {
       state = setCommandCatalog(state, catalog);
       notify();
@@ -458,11 +440,7 @@ function preserveLocalQueues(
 ): TuiStoreState {
   const activeSessionChanged =
     previous.activeSessionId !== next.activeSessionId;
-  const permissions = mergePermissions(
-    previous.permissions,
-    next.permissions,
-    previous.resolvedPermissionIds,
-  );
+  const permissions = activeSessionChanged ? [] : previous.permissions;
   const sessions = mergeSessions(next.sessions, previous.sessions);
   const runs = mergeRuns(next.runs, previous.runs);
   const permission = previous.permission ?? next.permission;
@@ -623,49 +601,6 @@ function resolveTranscriptState(
   return advanceTranscriptCommit(previousCommit, messages, runtime);
 }
 
-function rebuildWithPermissions(
-  state: TuiStoreState,
-  patch: {
-    readonly permissions: readonly UiPermissionRequest[];
-    readonly runtime?: TuiRuntimeStatus;
-  },
-): TuiStoreState {
-  const runtime =
-    patch.permissions.length > 0
-      ? {
-          kind: "waiting-for-permission" as const,
-          requestId: patch.permissions[0].id,
-        }
-      : (patch.runtime ?? resolveRuntimeAfterPermission(state));
-
-  return rebuildFromCollections(state, {
-    permissions: patch.permissions,
-    runtime,
-  });
-}
-
-function mergePermissions(
-  previous: readonly UiPermissionRequest[],
-  next: readonly UiPermissionRequest[],
-  resolvedPermissionIds: readonly string[],
-): readonly UiPermissionRequest[] {
-  const resolved = new Set(resolvedPermissionIds);
-  const merged = new Map<string, UiPermissionRequest>();
-
-  for (const request of next) {
-    if (!resolved.has(request.id)) {
-      merged.set(request.id, request);
-    }
-  }
-  for (const request of previous) {
-    if (!resolved.has(request.id) && !merged.has(request.id)) {
-      merged.set(request.id, request);
-    }
-  }
-
-  return Array.from(merged.values());
-}
-
 function mergeSessions(
   next: readonly UiSession[],
   previous: readonly UiSession[],
@@ -791,37 +726,6 @@ function resolveRuntimeAfterSnapshot(
   }
 
   return next.runtime;
-}
-
-function resolveRuntimeAfterPermission(state: TuiStoreState): TuiRuntimeStatus {
-  if (state.runtime.kind !== "waiting-for-permission") {
-    return state.runtime;
-  }
-
-  const waiting = state.runtime;
-  const request = state.permissions.find(
-    (candidate) => candidate.id === waiting.requestId,
-  );
-  const run = state.runs.find((candidate) => candidate.id === request?.runId);
-
-  if (run?.status.kind === "running") {
-    return run.status;
-  }
-  if (run?.status.kind === "waiting-for-permission") {
-    return { kind: "running", runId: run.id };
-  }
-
-  return { kind: "idle" };
-}
-
-function rememberResolvedPermission(
-  resolvedPermissionIds: readonly string[],
-  requestId: string,
-): readonly string[] {
-  return [
-    ...resolvedPermissionIds.filter((id) => id !== requestId),
-    requestId,
-  ].slice(-100);
 }
 
 function updateSessionMessages(

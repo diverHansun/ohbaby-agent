@@ -104,6 +104,7 @@ export interface TuiStore {
   readonly dispatch: (event: UiEvent) => void;
   readonly dispatchMany: (events: readonly UiEvent[]) => void;
   readonly replaceSnapshot: (snapshot: UiSnapshot) => void;
+  readonly setPermissions: (requests: readonly UiPermissionRequest[]) => void;
   readonly setCatalog: (catalog: TuiCommandCatalog) => void;
   readonly subscribe: (listener: () => void) => () => void;
 }

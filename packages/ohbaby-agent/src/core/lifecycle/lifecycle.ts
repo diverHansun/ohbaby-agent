@@ -73,6 +73,7 @@ interface StepResult {
 }
 
 interface ModelStepParams {
+  readonly runId?: string;
   readonly modelId: string;
   readonly reasoning?: LifecycleSessionParams["reasoning"];
   readonly sessionId: string;
@@ -461,6 +462,7 @@ export class Lifecycle {
       });
 
       const runParams: ModelStepParams = {
+        runId: params.runId,
         modelId: params.modelId,
         reasoning: params.reasoning,
         agent: params.agent,
@@ -1465,6 +1467,7 @@ export class Lifecycle {
       `${input.params.sessionId}:assistant:${String(input.step)}`;
     const requests: ToolCallRequest[] = input.toolCalls.map((toolCall) => ({
       callId: toolCall.id,
+      runId: input.params.runId,
       contextScopeId: input.params.contextScopeId,
       environment: input.params.environment,
       agentName: input.params.agent,

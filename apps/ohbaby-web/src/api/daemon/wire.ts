@@ -1,5 +1,9 @@
 import type {
   UiEvent,
+  UiPermissionBinding,
+  UiPermissionSnapshot,
+  UiSessionIndexEntry,
+  PermissionSyncState,
   UiReasoningConfig,
   UiCompactSessionResult,
   UiContextWindowUsage,
@@ -117,14 +121,28 @@ export interface CommandNotice {
 }
 
 export interface StoreSnapshot {
+  readonly permissionSync: PermissionSyncState;
+  readonly sessionIndex: readonly UiSessionIndexEntry[];
   readonly connectionState: ConnectionState;
   readonly currentModel: UiCurrentModelConfig | null;
   readonly error: string | null;
   readonly view: ViewState;
 }
 
-export interface RegisterClientResponse {
+export interface RegisterClientResponse extends UiPermissionBinding {
   readonly clientId: string;
+  readonly ok: true;
+}
+
+export interface PermissionSnapshotResponse {
+  readonly ok: true;
+  readonly snapshot: UiPermissionSnapshot;
+}
+export interface SessionIndexResponse {
+  readonly ok: true;
+  readonly sessions: readonly UiSessionIndexEntry[];
+}
+export interface BindingResponse extends UiPermissionBinding {
   readonly ok: true;
 }
 
@@ -221,6 +239,9 @@ export interface PermissionStateResponse {
 export type WebSseEvent =
   | {
       readonly type: "hello";
+      readonly permissionEpoch: string;
+      readonly rootSessionId: string | null;
+      readonly bindingGeneration: number;
       readonly clientId: string;
     }
   | {
@@ -254,4 +275,7 @@ export type CommandOutput = UiSlashCommandOutput;
 
 export type PermissionResponseRequest =
   | UiPermissionResponse
-  | { readonly response: UiPermissionResponse };
+  | {
+      readonly response: UiPermissionResponse;
+      readonly context: UiPermissionBinding;
+    };

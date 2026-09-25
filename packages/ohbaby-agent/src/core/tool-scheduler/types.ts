@@ -86,6 +86,8 @@ export interface ToolExecutionEnvironment {
 }
 
 export interface ToolExecutionContext {
+  /** Actual execution identity; absent only for standalone noninteractive calls. */
+  readonly runId?: string;
   readonly signal: AbortSignal;
   readonly sessionId: string;
   readonly contextScopeId?: string;
@@ -129,6 +131,8 @@ export interface ToolDefinition {
 }
 
 export interface ToolCallRequest {
+  /** Actual execution identity; absent only for standalone noninteractive calls. */
+  readonly runId?: string;
   readonly callId: string;
   readonly toolName: string;
   readonly params: Record<string, unknown>;
@@ -155,6 +159,8 @@ export interface ToolCallResult {
 }
 
 export interface ToolCall {
+  /** Actual execution identity; absent only for standalone noninteractive calls. */
+  readonly runId?: string;
   readonly callId: string;
   readonly toolName: string;
   readonly params: Record<string, unknown>;
@@ -176,6 +182,9 @@ export type PermissionResponse = "once" | "always" | "reject" | "cancel";
 export interface PermissionPort {
   readonly state?: PermissionStateStore;
   ask(input: {
+    readonly runId: string;
+    readonly contextScopeId?: string;
+    readonly signal: AbortSignal;
     readonly sessionId: string;
     readonly messageId: string;
     readonly callId: string;

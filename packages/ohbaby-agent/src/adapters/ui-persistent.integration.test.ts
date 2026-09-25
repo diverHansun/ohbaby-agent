@@ -996,7 +996,7 @@ describe("createPersistentUiBackendClient", () => {
         promptId: eleventh.promptId,
       });
       const permission = snapshot.permissions[0];
-      await client.respondPermission(permission.id, { choiceId: "cancel" });
+      await client.abortRun(permission.runId);
       releaseBlocked.resolve(undefined);
       await Promise.all(
         receipts.map((receipt) => client.waitForPrompt(receipt.promptId)),

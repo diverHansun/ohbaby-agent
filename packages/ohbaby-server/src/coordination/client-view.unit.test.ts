@@ -75,6 +75,11 @@ function snapshotWithSessions(): UiSnapshot {
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Allow tool",
         id: "permission_1",
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_1",
+        messageId: "message_1",
+        createdAt: 1,
         runId: "run_1",
         title: "Tool permission",
       },
@@ -82,6 +87,11 @@ function snapshotWithSessions(): UiSnapshot {
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Allow tool",
         id: "permission_2",
+        sessionId: "session_2",
+        rootSessionId: "session_2",
+        callId: "call_2",
+        messageId: "message_2",
+        createdAt: 2,
         runId: "run_2",
         title: "Tool permission",
       },
@@ -275,6 +285,7 @@ describe("DaemonClientViewCoordinator", () => {
     const base = snapshotWithSessions();
     const snapshot: UiSnapshot = {
       ...base,
+      permissions: [],
       runs: base.runs.map((run) =>
         run.sessionId === "session_1"
           ? {
@@ -355,7 +366,7 @@ describe("DaemonClientViewCoordinator", () => {
       permission: { level: "full-access", mode: "plan" },
       permissions: [{ id: "permission_1" }],
       runs: [{ id: "run_1" }],
-      status: { kind: "running", runId: "run_1" },
+      status: { kind: "waiting-for-permission", requestId: "permission_1" },
       sessions: [
         {
           id: "session_1",
@@ -397,7 +408,7 @@ describe("DaemonClientViewCoordinator", () => {
       () => "session_generated",
     );
 
-    expect(prepared).toEqual({
+    expect(prepared).toMatchObject({
       options: { sessionId: "session_generated" },
       sessionId: "session_generated",
     });
@@ -710,4 +721,86 @@ describe("DaemonClientViewCoordinator", () => {
       ),
     ).toBeUndefined();
   });
+});
+
+it.each([
+  { outcomes: [false, false], order: [0, 1], root: null },
+  { outcomes: [false, false], order: [1, 0], root: null },
+  { outcomes: [false, true], order: [0, 1], root: "provisional" },
+  { outcomes: [false, true], order: [1, 0], root: "provisional" },
+])(
+  "settles concurrent provisional prompt admissions without losing successful bindings ($outcomes, $order)",
+  ({ outcomes, order, root }) => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.initializeClient("client", emptySnapshot(), {
+      startupSessionMode: { type: "fresh" },
+    });
+    const first = coordinator.preparePromptSubmit(
+      "client",
+      undefined,
+      () => "provisional",
+    );
+    const second = coordinator.preparePromptSubmit(
+      "client",
+      undefined,
+      () => "unused",
+    );
+    const prepared = [first, second];
+    prepared[order[0]].finishAdmission(outcomes[order[0]]);
+    if (!outcomes[order[0]])
+      expect(coordinator.isPromptBindingProvisional("client")).toBe(true);
+    prepared[order[1]].finishAdmission(outcomes[order[1]]);
+    expect(coordinator.binding("client", "epoch")).toMatchObject({
+      rootSessionId: root,
+      bindingGeneration: 3,
+    });
+    expect(coordinator.isPromptBindingProvisional("client")).toBe(false);
+    if (root === null)
+      expect(
+        coordinator.preparePromptSubmit("client", undefined, () => "next")
+          .sessionId,
+      ).toBe("next");
+  },
+);
+
+it("does not roll back a concurrent explicit session selection when admission fails", () => {
+  const coordinator = new DaemonClientViewCoordinator();
+  coordinator.initializeClient("client", emptySnapshot(), {
+    startupSessionMode: { type: "fresh" },
+  });
+  const prepared = coordinator.preparePromptSubmit(
+    "client",
+    undefined,
+    () => "provisional",
+  );
+  coordinator.selectSession("client", "other", 2);
+  prepared.finishAdmission(false);
+  expect(coordinator.binding("client", "epoch")).toMatchObject({
+    rootSessionId: "other",
+    bindingGeneration: 3,
+  });
+  expect(coordinator.isPromptBindingProvisional("client")).toBe(false);
+});
+
+it("preserves an in-flight provisional admission when invalid registration fails", () => {
+  const coordinator = new DaemonClientViewCoordinator();
+  coordinator.initializeClient("client", emptySnapshot(), {
+    startupSessionMode: { type: "fresh" },
+  });
+  const prepared = coordinator.preparePromptSubmit(
+    "client",
+    undefined,
+    () => "provisional",
+  );
+  expect(() => {
+    coordinator.initializeClient("client", emptySnapshot(), {
+      resumeSessionId: "missing",
+    });
+  }).toThrow("Session not found");
+  prepared.finishAdmission(false);
+  expect(coordinator.binding("client", "epoch")).toMatchObject({
+    rootSessionId: null,
+    bindingGeneration: 3,
+  });
+  expect(coordinator.isPromptBindingProvisional("client")).toBe(false);
 });

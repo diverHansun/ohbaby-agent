@@ -1,3 +1,10 @@
+import type {
+  UiPermissionEvent,
+  UiPermissionSnapshot,
+  UiPermissionSnapshotQuery,
+  UiPermissionResponseContext,
+  UiSessionIndexEntry,
+} from "./permission.js";
 import type { UiReasoningConfig } from "./connect-model.js";
 import type { UiSession } from "./snapshot.js";
 import type {
@@ -91,6 +98,15 @@ export type UiEventHandler = (event: UiEvent) => void;
 export type UiUnsubscribe = () => void;
 
 export interface UiQueryClient {
+  getSelectedSessionId(): Promise<string | null>;
+  getSessionIndex(): Promise<readonly UiSessionIndexEntry[]>;
+  getPermissionSnapshot(
+    input: UiPermissionSnapshotQuery,
+  ): Promise<UiPermissionSnapshot>;
+  subscribePermissionEvents(
+    handler: (event: UiPermissionEvent) => void,
+    onError?: (error: unknown) => void,
+  ): UiUnsubscribe;
   getSnapshot(): Promise<UiSnapshot>;
   getContextWindowUsage(input: {
     readonly sessionId: string;
@@ -136,6 +152,8 @@ export interface UiPromptQueueCommandClient {
 
 export interface UiCommandClient
   extends UiPromptCommandClient, UiPromptQueueCommandClient {
+  createSession(): Promise<UiSessionIndexEntry>;
+  selectSession(sessionId: string): Promise<void>;
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
@@ -153,6 +171,7 @@ export interface UiCommandClient
   respondPermission(
     requestId: string,
     response: UiPermissionResponse,
+    context?: UiPermissionResponseContext,
   ): Promise<void>;
   respondInteraction(
     interactionId: string,

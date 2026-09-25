@@ -173,6 +173,7 @@ export class FetchDaemonEventStream implements DaemonEventStream {
       );
       try {
         await this.openOnce(callbacks, signal, ready);
+        callbacks.onConnectionState?.("reconnecting");
         reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
       } catch (error) {
         if (isAbortError(error)) {

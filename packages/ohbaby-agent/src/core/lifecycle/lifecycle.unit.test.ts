@@ -506,8 +506,12 @@ describe("Lifecycle.run", () => {
         initiatingUserMessageId: "user_1",
         modelId: "fake-model",
         sessionId: "session_test",
+        runId: "actual_run",
       }),
     );
+    expect(
+      vi.mocked(toolScheduler).executeBatch.mock.calls[0]?.[0].calls[0]?.runId,
+    ).toBe("actual_run");
 
     expect(prepareTurn).toHaveBeenNthCalledWith(
       1,

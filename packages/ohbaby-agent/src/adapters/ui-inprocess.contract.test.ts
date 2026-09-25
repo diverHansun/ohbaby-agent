@@ -4840,7 +4840,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("offers always approval for full-access external write confirmations", async () => {
+  it("performs full-access external writes without interactive approval", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-external-write-"),
@@ -4887,22 +4887,11 @@ describe("createInProcessUiBackendClient", () => {
         workdir: directory,
       });
 
-      const permission = waitForUiEvent(
-        client,
-        (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
-          event.type === "permission.requested",
-      );
-      const run = client.submitPromptAndWait("Write outside the workspace");
-      const permissionEvent = await permission;
-
-      expect(
-        permissionEvent.request.choices.map((choice) => choice.id),
-      ).toEqual(["allow_once", "allow_always", "reject", "cancel"]);
-
-      await client.respondPermission(permissionEvent.request.id, {
-        choiceId: "allow_always",
-      });
-      await run;
+      const approvalEvents: UiEvent[] = [];
+      client.subscribePermissionEvents((event) => approvalEvents.push(event));
+      await client.submitPromptAndWait("Write outside the workspace");
+      expect(approvalEvents).toEqual([]);
+      expect((await client.getSnapshot()).permission?.sessionRules).toEqual([]);
       await expect(readFile(outsidePath, "utf8")).resolves.toBe("external");
       await expect(readFile(secondOutsidePath, "utf8")).resolves.toBe(
         "external-2",
@@ -4913,7 +4902,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("treats permission cancel as aborting the whole run and clearing pending permission", async () => {
+  it("rejects legacy permission cancel without consuming the request; Stop stays separate", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-permission-cancel-"),
@@ -4948,9 +4937,19 @@ describe("createInProcessUiBackendClient", () => {
       const run = client.submitPromptAndWait("Cancel this write");
       const permissionEvent = await permission;
 
-      await client.respondPermission(permissionEvent.request.id, {
-        choiceId: "cancel",
-      });
+      await expect(
+        client.respondPermission(permissionEvent.request.id, {
+          choiceId: "cancel",
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_PERMISSION_CHOICE" });
+      expect(
+        (
+          await client.getPermissionSnapshot({
+            rootSessionId: permissionEvent.request.rootSessionId,
+          })
+        ).requests,
+      ).toHaveLength(1);
+      await client.abortRun(permissionEvent.request.runId);
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
       ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
@@ -5048,9 +5047,11 @@ describe("createInProcessUiBackendClient", () => {
         ),
       ).toBe(true);
 
-      await client.respondPermission(permissionEvent.request.id, {
-        choiceId: "allow_once",
-      });
+      await expect(
+        client.respondPermission(permissionEvent.request.id, {
+          choiceId: "allow_once",
+        }),
+      ).rejects.toMatchObject({ code: "PERMISSION_NOT_PENDING" });
 
       snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
@@ -5540,7 +5541,7 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
-  it("publishes a visible notice when async permission projection fails", async () => {
+  it("does not let ordinary bus notifications create authoritative approval state", async () => {
     const bus = createBus();
     const baseStateStore = createInMemoryUiStateStore({
       activeSessionId: null,
@@ -5560,15 +5561,15 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: createFakeLLMClient([]),
       stateStore,
     });
-    const notice = waitForUiEvent(
-      client,
-      (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
-        event.type === "notice.emitted" && event.notice.level === "error",
-    );
+    const events: UiEvent[] = [];
+    client.subscribePermissionEvents((event) => events.push(event));
 
     expect(() => {
       bus.publish(PermissionEvent.Updated, {
         info: {
+          runId: "run_1",
+          rootSessionId: "session_1",
+          ancestorSessionIds: [],
           callId: "call_permission_projection",
           id: "permission_projection_failure",
           messageId: "message_1",
@@ -5583,17 +5584,11 @@ describe("createInProcessUiBackendClient", () => {
       });
     }).not.toThrow();
 
-    const noticeEvent = await notice;
-    expect(noticeEvent).toMatchObject({
-      notice: {
-        level: "error",
-        title: "Permission update failed",
-      },
-      type: "notice.emitted",
-    });
-    expect(noticeEvent.notice.message).toContain(
-      "Permission event projection failed: permission store unavailable",
-    );
+    expect(events).toEqual([]);
+    expect(
+      (await client.getPermissionSnapshot({ rootSessionId: null })).requests,
+    ).toEqual([]);
+    await client.dispose();
   });
 
   it("activates an existing session when submitting to it", async () => {
@@ -9846,6 +9841,76 @@ it("preserves unknown session preference while the request uses service default"
         (session) => session.id === "session_1",
       )?.reasoning,
     ).toEqual({ enabled: false, effort: "high" });
+  } finally {
+    await client.dispose();
+  }
+});
+
+it("loads approval metadata and a baseline while full history fails", async () => {
+  const stateStore = createInMemoryUiStateStore({
+    activeSessionId: "root",
+    sessions: [
+      {
+        id: "root",
+        title: "Root",
+        createdAt: "2026-09-24",
+        updatedAt: "2026-09-24",
+        messages: [],
+      },
+    ],
+    runs: [],
+    permissions: [],
+    status: { kind: "idle" },
+  });
+  vi.spyOn(stateStore, "readSnapshot").mockRejectedValue(
+    new Error("History unavailable"),
+  );
+  const client = createInProcessUiBackendClient({ stateStore });
+  try {
+    expect(await client.getSessionIndex()).toEqual([
+      expect.objectContaining({ id: "root", title: "Root" }),
+    ]);
+    const approval = await client.getPermissionSnapshot({
+      rootSessionId: "root",
+    });
+    expect(approval).toMatchObject({
+      rootSessionId: "root",
+      permissionRevision: 0,
+      requests: [],
+    });
+    expect(approval.permissionEpoch).toBeTruthy();
+    await expect(client.getSnapshot()).rejects.toThrow("History unavailable");
+    expect(
+      await client.getPermissionSnapshot({ rootSessionId: "root" }),
+    ).toEqual(approval);
+  } finally {
+    await client.dispose();
+  }
+});
+
+it("does not let late lightweight selection replace a newer root", async () => {
+  const snapshot = createInitialSnapshotWithTwoSessions();
+  const stateStore = createInMemoryUiStateStore(snapshot);
+  const originalIndex = stateStore.getSessionIndex.bind(stateStore);
+  const paused = createDeferred<Awaited<ReturnType<typeof originalIndex>>>();
+  let calls = 0;
+  vi.spyOn(stateStore, "getSessionIndex").mockImplementation(() => {
+    calls += 1;
+    return calls === 1 ? paused.promise : originalIndex();
+  });
+  const client = createInProcessUiBackendClient({ stateStore });
+  try {
+    const first = client.selectSession("session_1");
+    const rejected = expect(first).rejects.toMatchObject({
+      code: "PERMISSION_SCOPE_CHANGED",
+    });
+    await vi.waitFor(() => {
+      expect(calls).toBe(1);
+    });
+    await client.selectSession("session_2");
+    paused.resolve(await originalIndex());
+    await rejected;
+    expect(await client.getSelectedSessionId()).toBe("session_2");
   } finally {
     await client.dispose();
   }

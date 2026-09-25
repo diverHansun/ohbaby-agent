@@ -8,6 +8,7 @@ import type {
   UiConnectModelResult,
   UiContextWindowUsage,
   UiEvent,
+  UiPermissionEvent,
   UiEventHandler,
   UiPermissionState,
   UiProbeModelContextWindowInput,
@@ -137,6 +138,54 @@ class FakeBackend implements UiBackendClient {
     if (input.snapshot !== undefined) {
       this.snapshot = input.snapshot;
     }
+  }
+
+  readonly createdSessionIds: string[] = [];
+  getSelectedSessionId(): ReturnType<UiBackendClient["getSelectedSessionId"]> {
+    return Promise.resolve(this.snapshot.activeSessionId);
+  }
+  getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return Promise.resolve(
+      this.snapshot.sessions.map(
+        ({ messages: _messages, ...session }) => session,
+      ),
+    );
+  }
+  getPermissionSnapshot(
+    input: Parameters<UiBackendClient["getPermissionSnapshot"]>[0],
+  ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+    return Promise.resolve({
+      permissionEpoch: "epoch",
+      rootSessionId: input.rootSessionId,
+      permissionRevision: 0,
+      requests: [],
+    });
+  }
+  subscribePermissionEvents(
+    _handler: (event: UiPermissionEvent) => void,
+  ): UiUnsubscribe {
+    return () => undefined;
+  }
+  createSession(): ReturnType<UiBackendClient["createSession"]> {
+    const session = {
+      id: `session_${String(this.snapshot.sessions.length + 1)}`,
+      title: "New session",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      messages: [],
+    };
+    this.createdSessionIds.push(session.id);
+    this.snapshot = {
+      ...this.snapshot,
+      sessions: [...this.snapshot.sessions, session],
+      activeSessionId: session.id,
+    };
+    this.emit({ type: "session.updated", session });
+    return Promise.resolve(session);
+  }
+  selectSession(sessionId: string): Promise<void> {
+    this.snapshot = { ...this.snapshot, activeSessionId: sessionId };
+    return Promise.resolve();
   }
 
   getSnapshot(): Promise<UiSnapshot> {
@@ -593,6 +642,12 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       expect(backend.abortedRunIds).toEqual(["run_1"]);
 
       await runtime.selectSession("session_2");
+      await waitFor(
+        () =>
+          runtime.store.getSnapshot().view.snapshot?.activeSessionId ===
+          "session_2",
+        "selected history did not load",
+      );
       await expect(
         runtime.abortSession("session_2", "run_2"),
       ).resolves.toBeUndefined();
@@ -876,29 +931,9 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       await runtime.createSession();
       await runtime.selectSession("session_2");
 
-      expect(backend.executedCommands).toEqual([
-        expect.objectContaining({
-          argv: ["--no-reuse-empty-session"],
-          commandId: "new",
-          path: ["new"],
-          raw: "/new --no-reuse-empty-session",
-          rawArgs: "--no-reuse-empty-session",
-        }),
-        expect.objectContaining({
-          argv: [],
-          commandId: "new",
-          path: ["new"],
-          raw: "/new",
-          rawArgs: "",
-        }),
-        expect.objectContaining({
-          argv: ["--session_id", "session_2"],
-          commandId: "resume",
-          path: ["resume"],
-          raw: "/resume --session_id session_2",
-          rawArgs: "--session_id session_2",
-        }),
-      ]);
+      expect(backend.createdSessionIds).toEqual(["session_1", "session_2"]);
+      expect(backend.executedCommands).toEqual([]);
+      expect(await runtime.client?.getSelectedSessionId()).toBe("session_2");
       await runtime.dispose();
     } finally {
       await server.dispose();

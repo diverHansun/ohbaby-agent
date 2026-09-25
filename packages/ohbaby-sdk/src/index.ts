@@ -209,3 +209,22 @@ export { isStableErrorCode } from "./error-code.js";
 export { isLoopbackHost } from "./loopback-host.js";
 
 export { isUiReasoningConfig, UI_REASONING_STATUSES } from "./connect-model.js";
+
+export type {
+  UiPermissionResyncRequiredEvent,
+  UiPermissionBinding,
+  UiPermissionSnapshot,
+  UiPermissionSnapshotQuery,
+  UiPermissionResponseContext,
+  UiSessionIndexEntry,
+  UiPermissionEvent,
+  UiPermissionUnavailableEvent,
+} from "./permission.js";
+
+export { createPermissionSync } from "./permission-sync.js";
+export type {
+  PermissionSync,
+  PermissionSyncState,
+  PermissionSyncOptions,
+  PermissionSyncEvent,
+} from "./permission-sync.js";

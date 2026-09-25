@@ -2755,6 +2755,58 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
+  it("shows independent approvals without a chat snapshot and lets the user choose another request", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.store.reset();
+    const first = { ...permissionRequest(), sourceLabel: "Researcher" };
+    const second = {
+      ...first,
+      id: "permission_2",
+      sourceLabel: "Editor",
+      title: "Edit file?",
+    };
+    fake.store.setPermissionSync({
+      status: "ready",
+      binding: {
+        permissionEpoch: "epoch",
+        rootSessionId: "session_1",
+        bindingGeneration: 1,
+      },
+      requests: [first, second],
+      permissionRevision: 2,
+      attempts: 1,
+    });
+    const respond = vi.spyOn(fake.client, "respondPermission");
+    const app = mountApp(fake.runtime);
+    expect(app.container.textContent).toContain("Researcher");
+    expect(permissionAction(app.container, "Allow once").disabled).toBe(false);
+    const next = app.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Next approval"]',
+    );
+    await act(async () => {
+      next?.click();
+      await Promise.resolve();
+    });
+    expect(app.container.textContent).toContain("Editor");
+    await act(async () => {
+      permissionAction(app.container, "Allow once").click();
+      await Promise.resolve();
+    });
+    expect(respond).toHaveBeenCalledWith("permission_2", {
+      choiceId: "allow_once",
+    });
+    expect(app.container.textContent).not.toContain("Cancel run");
+    act(() => {
+      fake.store.setPermissionSync({
+        ...fake.store.getSnapshot().permissionSync,
+        status: "syncing",
+      });
+    });
+    expect(permissionAction(app.container, "Allow once").disabled).toBe(true);
+  });
+
   it("styles permission choices by their consequence", () => {
     const fake = createFakeRuntime({
       snapshot: {
@@ -2773,9 +2825,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(permissionAction(app.container, "Reject").className).toBe(
       "ohb-perm-btn ohb-perm-deny",
     );
-    expect(permissionAction(app.container, "Cancel run").className).toBe(
-      "ohb-perm-btn ohb-perm-abort",
-    );
+    expect(app.container.textContent).not.toContain("Cancel run");
   });
 
   it("creates and selects sessions from the sidebar", async () => {
@@ -3713,6 +3763,17 @@ function createFakeRuntime(input: {
 }): FakeRuntime {
   const store = createOhbabyWebStore();
   store.replaceSnapshot(input.snapshot, 1);
+  store.setPermissionSync({
+    status: "ready",
+    binding: {
+      permissionEpoch: "epoch",
+      rootSessionId: input.snapshot.activeSessionId,
+      bindingGeneration: 1,
+    },
+    requests: input.snapshot.permissions,
+    permissionRevision: 0,
+    attempts: 1,
+  });
   store.setConnectionState("live");
   const abortSession = vi.fn<OhbabyWebRuntime["abortSession"]>(() =>
     Promise.resolve(),
@@ -3882,6 +3943,18 @@ function createFakeRuntime(input: {
         },
       }),
     ),
+    getSelectedSessionId: () => Promise.resolve(input.snapshot.activeSessionId),
+    createSession: () => Promise.reject(new Error("unused")),
+    selectSession: () => Promise.resolve(),
+    getSessionIndex: () => Promise.resolve([]),
+    getPermissionSnapshot: () =>
+      Promise.resolve({
+        permissionEpoch: "epoch",
+        rootSessionId: null,
+        permissionRevision: 0,
+        requests: [],
+      }),
+    subscribePermissionEvents: () => () => undefined,
     subscribeEvents: () => () => undefined,
     waitForPrompt: vi.fn<UiBackendClient["waitForPrompt"]>(() =>
       Promise.resolve({
@@ -3915,6 +3988,7 @@ function createFakeRuntime(input: {
     listDirectoryPicker,
     openWorkspace,
     runtime: {
+      retryPermissions: vi.fn(),
       abortSession,
       archiveSession,
       client,
@@ -4054,6 +4128,11 @@ function permissionRequest(): UiPermissionRequest {
     ],
     description: "Run shell command",
     id: "permission_1",
+    sessionId: "child",
+    rootSessionId: "session_1",
+    callId: "call",
+    messageId: "message",
+    createdAt: 1,
     runId: "run_1",
     title: "Permission required",
   };

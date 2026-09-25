@@ -174,7 +174,15 @@ export class RunManager {
     }
 
     record.cancelReason = reason;
-    record.abortController.abort(reason);
+    try {
+      this.revokePermissionsForRun(runId, reason);
+    } finally {
+      record.abortController.abort(reason);
+    }
+  }
+
+  revokePermissionsForRun(runId: string, reason: string): void {
+    this.deps.revokePermissionsForRun?.(runId, reason);
   }
 
   hasActiveWork(): boolean {
@@ -308,6 +316,18 @@ export class RunManager {
     outcome: RunWorkerResult,
   ): Promise<RunCompletion> {
     const sandboxManager = this.deps.sandboxManager;
+    try {
+      this.revokePermissionsForRun(
+        record.runId,
+        outcome.error ?? `Run ${outcome.status}`,
+      );
+    } catch (error) {
+      outcome = {
+        status: "failed",
+        error: errorToMessage(error),
+        errorData: normalizeRunError(error),
+      };
+    }
     const completion = completionFromResult(outcome);
 
     try {

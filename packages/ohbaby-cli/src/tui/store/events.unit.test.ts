@@ -939,7 +939,7 @@ describe("TUI store event reducer", () => {
     });
   });
 
-  it("tracks permission, interaction, and command event queues", () => {
+  it("ignores ordinary approval events while tracking interaction and command queues", () => {
     const interaction = {
       commandRunId: "command_1",
       interactionId: "interaction_1",
@@ -951,6 +951,11 @@ describe("TUI store event reducer", () => {
 
     state = applyTuiEvent(state, {
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Run bash",
         id: "permission_1",
@@ -958,6 +963,9 @@ describe("TUI store event reducer", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     state = applyTuiEvent(state, {
       request: interaction,
@@ -979,7 +987,7 @@ describe("TUI store event reducer", () => {
       type: "command.failed",
     });
 
-    expect(state.permissions).toHaveLength(1);
+    expect(state.permissions).toHaveLength(0);
     expect(state.interactions).toHaveLength(1);
     expect(state.commandNotices.map((notice) => notice.kind)).toEqual([
       "result",
@@ -990,6 +998,11 @@ describe("TUI store event reducer", () => {
     state = applyTuiEvent(state, {
       requestId: "permission_1",
       type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      sessionId: "session_1",
+      reason: "once",
     });
     state = applyTuiEvent(state, {
       commandRunId: "command_1",
@@ -1489,6 +1502,11 @@ describe("TUI store event reducer", () => {
     });
     state = applyTuiEvent(state, {
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Run bash",
         id: "permission_1",
@@ -1496,18 +1514,26 @@ describe("TUI store event reducer", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
 
     state = applyTuiEvent(state, {
       requestId: "permission_1",
       type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      sessionId: "session_1",
+      reason: "once",
     });
 
     expect(state.permissions).toHaveLength(0);
     expect(state.runtime).toEqual({ kind: "running", runId: "run_1" });
   });
 
-  it("keeps the active run visible when the stored run still says waiting for permission", () => {
+  it("does not infer run transitions from ordinary approval events", () => {
     let state = createStateFromSnapshot(snapshot());
     state = applyTuiEvent(state, {
       run: {
@@ -1521,6 +1547,11 @@ describe("TUI store event reducer", () => {
     });
     state = applyTuiEvent(state, {
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Run bash",
         id: "permission_1",
@@ -1528,15 +1559,26 @@ describe("TUI store event reducer", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
 
     state = applyTuiEvent(state, {
       requestId: "permission_1",
       type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      sessionId: "session_1",
+      reason: "once",
     });
 
     expect(state.permissions).toHaveLength(0);
-    expect(state.runtime).toEqual({ kind: "running", runId: "run_1" });
+    expect(state.runtime).toEqual({
+      kind: "waiting-for-permission",
+      requestId: "permission_1",
+    });
   });
 
   it("keeps successful state-changing command results silent", () => {
@@ -2264,40 +2306,26 @@ describe("TUI store event reducer", () => {
     expect(state.notices).toHaveLength(0);
   });
 
-  it("keeps live permissions across an old snapshot and does not revive resolved permissions", () => {
+  it("keeps independent approvals across full snapshots and never resurrects resolved cards", () => {
     const request = {
-      choices: [{ id: "allow", intent: "allow", label: "Allow" }],
-      description: "Run bash",
-      id: "permission_1",
-      runId: "run_1",
-      title: "Permission",
+      id: "p1",
+      sessionId: "child",
+      rootSessionId: "session_1",
+      callId: "call",
+      messageId: "message",
+      runId: "run-child",
+      createdAt: 100,
+      choices: [{ id: "allow_once", intent: "allow", label: "Allow once" }],
+      description: "Edit src/a.ts",
+      title: "Approval",
     } as const;
-    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
-      request,
-      type: "permission.requested",
-    });
-
-    state = applyTuiEvent(state, {
-      snapshot: snapshot(),
-      type: "snapshot.replaced",
-    });
-    expect(state.permissions.map((permission) => permission.id)).toEqual([
-      "permission_1",
-    ]);
-
-    state = applyTuiEvent(state, {
-      requestId: "permission_1",
-      type: "permission.resolved",
-    });
-    state = applyTuiEvent(state, {
-      snapshot: {
-        ...snapshot(),
-        permissions: [request],
-      },
-      type: "snapshot.replaced",
-    });
-
-    expect(state.permissions).toHaveLength(0);
+    const store = createTuiStore(snapshot());
+    store.setPermissions([request]);
+    store.replaceSnapshot(snapshot());
+    expect(store.getState().permissions.map((item) => item.id)).toEqual(["p1"]);
+    store.setPermissions([]);
+    store.replaceSnapshot({ ...snapshot(), permissions: [request] });
+    expect(store.getState().permissions).toEqual([]);
   });
 
   it("keeps command notice ids unique after truncation", () => {

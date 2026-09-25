@@ -77,6 +77,7 @@ function beginPromptOwnership(input: {
 }): {
   readonly item: DaemonPromptItem;
   readonly release: () => void;
+  readonly finishAdmission: (accepted: boolean) => void;
 } {
   const prepared = input.clientViews.preparePromptSubmit(
     input.clientId,
@@ -91,16 +92,12 @@ function beginPromptOwnership(input: {
       : { sessionId: prepared.sessionId }),
     text: input.text,
   };
-  const releasePermissionOwner = input.permissionRouter.trackPromptClient(
-    item.clientId,
-    item.sessionId,
-  );
   input.clientViews.promptStarted(item);
   return {
     item,
+    finishAdmission: prepared.finishAdmission,
     release: (): void => {
       input.clientViews.promptSettled(item);
-      releasePermissionOwner();
     },
   };
 }
@@ -119,12 +116,23 @@ export async function acceptDaemonPrompt(input: {
   readonly permissionRouter: PermissionRouter;
   readonly text: string;
 }): Promise<AcceptedDaemonPrompt> {
+  if (input.options?.sessionId !== undefined) {
+    const previous = input.clientViews.binding(input.clientId, "prompt");
+    const sessions = await input.backend.getSessionIndex();
+    const selected = sessions.find(
+      (session) => session.id === input.options?.sessionId,
+    );
+    if (!selected || selected.parentId || selected.isSubagent)
+      throw new Error("Prompt requires an available root session");
+    input.clientViews.assertBinding(input.clientId, previous, "prompt");
+  }
   const started = beginPromptOwnership(input);
   try {
     const receipt = await input.backend.submitPromptAccepted(
       input.text,
       started.item.options,
     );
+    started.finishAdmission(true);
     const completion = input.backend
       .waitForPrompt(receipt.promptId)
       .finally(() => {
@@ -137,6 +145,7 @@ export async function acceptDaemonPrompt(input: {
     void completion.catch(() => undefined);
     return { completion, receipt };
   } catch (error) {
+    started.finishAdmission(false);
     started.release();
     throw error;
   }

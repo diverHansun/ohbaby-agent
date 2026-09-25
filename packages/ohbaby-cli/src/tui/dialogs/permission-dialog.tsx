@@ -1,24 +1,59 @@
 import { Box, Text, useInput } from "ink";
-import type { CoreAPI, UiPermissionRequest } from "ohbaby-sdk";
-import { useRef, useState } from "react";
+import type {
+  CoreAPI,
+  UiPermissionRequest,
+  UiPermissionResponseContext,
+} from "ohbaby-sdk";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { useTheme } from "../theme/index.js";
 
 export interface PermissionDialogProps {
   readonly client: CoreAPI;
   readonly request: UiPermissionRequest;
+  readonly ready: boolean;
+  readonly context?: UiPermissionResponseContext;
+  readonly onResync: () => void;
 }
 
 export function PermissionDialog({
   client,
-  request,
+  request: originalRequest,
+  ready,
+  context,
+  onResync,
 }: PermissionDialogProps): ReactElement {
+  const request = {
+    ...originalRequest,
+    choices: originalRequest.choices.filter(
+      (choice) => choice.id !== "cancel" && choice.intent !== "abort",
+    ),
+  };
+  const mounted = useRef(true);
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return (): void => {
+      mounted.current = false;
+    };
+  }, []);
   const theme = useTheme();
   const [selectedIndex, setSelectedIndex] = useState(() =>
     findInitialChoiceIndex(request),
   );
   const selectedIndexRef = useRef(selectedIndex);
   const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const identity = JSON.stringify([
+    request.id,
+    context?.permissionEpoch,
+    context?.rootSessionId,
+    context?.bindingGeneration,
+  ]);
+  const responseScope = useRef({ identity });
+  if (responseScope.current.identity !== identity)
+    responseScope.current = { identity };
   const [error, setError] = useState<string | null>(null);
 
   const selectIndex = (index: number): void => {
@@ -26,8 +61,23 @@ export function PermissionDialog({
     setSelectedIndex(index);
   };
 
+  const current = useRef({ request, context, onResync });
+  current.current = { request, context, onResync };
+  useLayoutEffect(() => {
+    selectedIndexRef.current = findInitialChoiceIndex(request);
+    setSelectedIndex(selectedIndexRef.current);
+    pendingRef.current = false;
+    setPending(false);
+    setError(null);
+  }, [identity]);
   useInput((_, key) => {
-    if (pending) {
+    const { request, context, onResync } = current.current;
+    if (
+      pendingRef.current ||
+      !mounted.current ||
+      !readyRef.current ||
+      !context
+    ) {
       return;
     }
 
@@ -52,13 +102,23 @@ export function PermissionDialog({
       return;
     }
 
+    const scope = responseScope.current;
+    const isCurrent = (): boolean =>
+      mounted.current && responseScope.current === scope;
+    const updatePending = (value: boolean): void => {
+      pendingRef.current = value;
+      setPending(value);
+    };
     if (key.escape) {
       respondWithChoice(
         client,
         request,
         findEscapeDefaultChoiceIndex(request),
-        setPending,
+        updatePending,
         setError,
+        context,
+        onResync,
+        isCurrent,
       );
       return;
     }
@@ -68,8 +128,11 @@ export function PermissionDialog({
         client,
         request,
         selectedIndexRef.current,
-        setPending,
+        updatePending,
         setError,
+        context,
+        onResync,
+        isCurrent,
       );
     }
   });
@@ -77,6 +140,11 @@ export function PermissionDialog({
   return (
     <Box flexDirection="column">
       <Text color={theme.status.warning}>Permission: {request.title}</Text>
+      <Text>
+        {request.sessionId === request.rootSessionId
+          ? "Main agent"
+          : (request.sourceLabel ?? request.sessionId)}
+      </Text>
       <Text>{request.description}</Text>
       {request.choices.map((choice, index) => (
         <Text key={choice.id}>
@@ -87,6 +155,7 @@ export function PermissionDialog({
       {request.choices.length === 0 ? null : (
         <Text dimColor>Enter select | Esc safe default | arrows move</Text>
       )}
+      {!ready ? <Text dimColor>Synchronizing approvals...</Text> : null}
       {pending ? <Text dimColor>sending...</Text> : null}
       {error === null ? null : <Text color={theme.status.error}>{error}</Text>}
     </Box>
@@ -99,6 +168,9 @@ function respondWithChoice(
   choiceIndex: number,
   setPending: (pending: boolean) => void,
   setError: (message: string | null) => void,
+  context: UiPermissionResponseContext,
+  onResync: () => void,
+  isCurrent: () => boolean,
 ): void {
   if (request.choices.length === 0) {
     setError("Permission request has no choices");
@@ -109,10 +181,18 @@ function respondWithChoice(
 
   setPending(true);
   void client
-    .respondPermission(request.id, { choiceId: choice.id })
+    .respondPermission(request.id, { choiceId: choice.id }, context)
     .catch((caught: unknown) => {
+      if (!isCurrent()) return;
       setError(formatError(caught));
       setPending(false);
+      if (
+        typeof caught === "object" &&
+        caught !== null &&
+        "code" in caught &&
+        caught.code === "PERMISSION_NOT_PENDING"
+      )
+        onResync();
     });
 }
 
@@ -133,11 +213,7 @@ function findEscapeDefaultChoiceIndex(request: UiPermissionRequest): number {
     return denyIndex;
   }
 
-  const abortIndex = request.choices.findIndex(
-    (choice) => choice.intent === "abort",
-  );
-
-  return abortIndex >= 0 ? abortIndex : 0;
+  return 0;
 }
 
 function formatError(error: unknown): string {

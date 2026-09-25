@@ -30,7 +30,10 @@ import {
   type Tool,
   type ToolDefinition,
 } from "../../core/tool-scheduler/index.js";
-import type { PermissionStateStore } from "../../permission/index.js";
+import type {
+  PermissionManager,
+  PermissionStateStore,
+} from "../../permission/index.js";
 import { Shell } from "../../shell/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import {
@@ -123,6 +126,8 @@ import { formatUnknown } from "./runtime-format.js";
 import { createStreamBridgeRunEventSource } from "./stream-bridge-run-event-source.js";
 import type { UiRuntimeComposition } from "./types.js";
 
+import { createPermissionSourcePort } from "./permission-source.js";
+
 const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
   defaults: {
     user: {
@@ -151,6 +156,7 @@ export interface UiRuntimeCompositionOptions {
   readonly onStepUsage?: RunStepUsageObserver;
   readonly mcpManager?: McpManagerPort;
   readonly permission?: PermissionPort;
+  readonly permissionManager?: PermissionManager;
   readonly permissionState: PermissionStateStore;
   readonly runLedger?: RunLedger;
   readonly sandboxManager?: HostLocalSandboxManager;
@@ -263,6 +269,34 @@ export async function createUiRuntimeComposition(
   const mcpToolMenu = new McpToolMenu();
   const scopeToolSequence = new ScopeToolSequence();
   let registeredMcpToolNames = new Set<string>();
+  const sessionManager =
+    options.sessionManager ??
+    createInMemorySessionManager({
+      bus: options.bus,
+      messageCleaner: options.messageManager,
+      now: options.now,
+    });
+  const subagentInstanceStore =
+    options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
+  const permissionSource = options.permissionManager
+    ? createPermissionSourcePort({
+        manager: options.permissionManager,
+        bus: options.bus,
+        projectRoot: options.workdir ?? process.cwd(),
+        getSession: (sessionId) => sessionManager.get(sessionId),
+        getSubagentRecord: async (session, contextScopeId) => {
+          if (!session.parentId) return null;
+          return (
+            (await subagentInstanceStore.listByParent(session.parentId)).find(
+              (record) =>
+                record.sessionId === session.id &&
+                (contextScopeId === undefined ||
+                  record.contextScopeId === contextScopeId),
+            ) ?? null
+          );
+        },
+      })
+    : undefined;
   const toolScheduler = createToolScheduler({
     accessGuard({ request, tool }) {
       if (tool.source !== "mcp" || !registeredMcpToolNames.has(tool.name)) {
@@ -278,18 +312,12 @@ export async function createUiRuntimeComposition(
     },
     agentTools: agentManager,
     bus: options.bus,
-    permission: options.permission,
+    permission: permissionSource ?? options.permission,
     permissionState: options.permissionState,
   });
   const sandboxManager =
     options.sandboxManager ?? createHostLocalSandboxManager(options.workdir);
-  const sessionManager =
-    options.sessionManager ??
-    createInMemorySessionManager({
-      bus: options.bus,
-      messageCleaner: options.messageManager,
-      now: options.now,
-    });
+
   const todoService = new TodoService({
     history: options.messageManager,
     onWarning(message, error): void {
@@ -532,6 +560,9 @@ export async function createUiRuntimeComposition(
   });
 
   const runManager = new RunManager({
+    revokePermissionsForRun: (runId, reason): void => {
+      options.permissionManager?.revokeByRun(runId, reason);
+    },
     createRunId(): string {
       return reservedRunIds.shift() ?? nextRunId();
     },
@@ -617,8 +648,6 @@ export async function createUiRuntimeComposition(
     }
   };
 
-  const subagentInstanceStore =
-    options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
   const subagentHost = new SessionSubagentHost({
     getParentReasoning: (sessionId, contextScopeId): ReasoningIntent =>
       runManager.getActiveReasoning(sessionId, contextScopeId) ??
@@ -1026,6 +1055,7 @@ export async function createUiRuntimeComposition(
     },
     async dispose(): Promise<void> {
       unsubscribeSessionRemoved();
+      permissionSource?.dispose();
       todoService.dispose();
       todoWorkScopes.dispose();
       toolScheduler.cancelAll();

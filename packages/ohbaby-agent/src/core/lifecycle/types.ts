@@ -54,6 +54,7 @@ export interface StepUsageObservation {
 }
 
 export interface LifecycleSessionParams {
+  readonly runId?: string;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   /** Final accepted model result, observed synchronously once before calibration. */
   readonly onStepUsage?: (observation: StepUsageObservation) => void;

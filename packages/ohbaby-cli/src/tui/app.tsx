@@ -10,6 +10,7 @@ import type {
   UiSnapshot,
   UiUnsubscribe,
 } from "ohbaby-sdk";
+import { usePermissionSync } from "./use-permission-sync.js";
 import { formatError } from "./format-error.js";
 import { DialogManager } from "./dialogs/manager.js";
 import { CommandPanelManager } from "./components/dialog/command-panel-manager.js";
@@ -121,7 +122,14 @@ export function OhbabyTerminalApp({
     (state) => state.interactions,
   );
   const permission = useTuiStoreSelector(store, (state) => state.permission);
-  const permissions = useTuiStoreSelector(store, (state) => state.permissions);
+  const pendingPermissions = useTuiStoreSelector(
+    store,
+    (state) => state.permissions,
+  );
+  const permissionSync = usePermissionSync(client, store, activeSessionId);
+  const permissions = pendingPermissions.filter(
+    (request) => request.rootSessionId === activeSessionId,
+  );
   const prompts = useTuiStoreSelector(store, (state) => state.prompts);
   const latestPrompt = prompts
     .filter((prompt) => prompt.sessionId === activeSessionId)
@@ -536,9 +544,7 @@ export function OhbabyTerminalApp({
       const selectedExistingSessionId =
         selectedExistingSessionIdFromEvent(tuiEvent);
       if (selectedExistingSessionId !== undefined) {
-        eventDispatcher.dispatch(
-          commandResultWithoutSessionSelection(tuiEvent),
-        );
+        eventDispatcher.dispatch(tuiEvent);
         const requestSequence = snapshotRefreshSequenceRef.current + 1;
         snapshotRefreshSequenceRef.current = requestSequence;
         void client
@@ -593,6 +599,27 @@ export function OhbabyTerminalApp({
 
     const requestSequence = snapshotRefreshSequenceRef.current + 1;
     snapshotRefreshSequenceRef.current = requestSequence;
+    void Promise.all([client.getSelectedSessionId(), client.getSessionIndex()])
+      .then(([selectedId, index]) => {
+        if (
+          disposedRef.current ||
+          requestSequence !== snapshotRefreshSequenceRef.current ||
+          store.getState().activeSessionId !== null
+        )
+          return;
+        const current = store.getState().snapshot;
+        store.replaceSnapshot({
+          ...current,
+          activeSessionId: selectedId,
+          sessions: index.map((session) => ({
+            ...session,
+            messages:
+              current.sessions.find((existing) => existing.id === session.id)
+                ?.messages ?? [],
+          })),
+        });
+      })
+      .catch(() => undefined);
     void client
       .getSnapshot()
       .then((snapshot) => {
@@ -709,6 +736,8 @@ export function OhbabyTerminalApp({
           client={client}
           interactions={interactions}
           permissions={permissions}
+          permissionSync={permissionSync.state}
+          onRetryPermissions={permissionSync.retry}
         />
         <CommandPanelManager
           catalog={catalog}
@@ -858,19 +887,6 @@ function selectedExistingSessionIdFromEvent(
   return typeof choiceId === "string" && choiceId.length > 0
     ? choiceId
     : undefined;
-}
-
-function commandResultWithoutSessionSelection(tuiEvent: UiEvent): UiEvent {
-  if (
-    tuiEvent.type !== "command.result.delivered" ||
-    tuiEvent.action?.kind !== "session.selected"
-  ) {
-    return tuiEvent;
-  }
-  return {
-    ...tuiEvent,
-    action: undefined,
-  };
 }
 
 function isStringRecord(value: unknown): value is Record<string, unknown> {

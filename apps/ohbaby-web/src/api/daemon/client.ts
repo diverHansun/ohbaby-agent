@@ -1,4 +1,8 @@
 import {
+  createPermissionSync,
+  type PermissionSync,
+  type UiPermissionBinding,
+  type UiPermissionEvent,
   parseSlashCommandInput,
   resolveSlashCommand,
   submitPromptAndWait as composeSubmitPromptAndWait,
@@ -51,6 +55,7 @@ export interface OhbabyWebRuntime {
   readonly client: UiBackendClient | null;
   readonly ready: Promise<void>;
   readonly store: OhbabyWebStore;
+  retryPermissions(): void;
   abortSession(sessionId: string, runId?: string): Promise<void>;
   archiveSession(sessionId: string): Promise<void>;
   createSession(): Promise<void>;
@@ -77,6 +82,13 @@ class BrowserDaemonClient implements UiBackendClient {
   private readonly events: FetchDaemonEventStream;
   private readonly http: DaemonHttpClient;
   private readonly store: OhbabyWebStore;
+  private readonly permissionSync: PermissionSync;
+  private readonly permissionHandlers = new Set<{
+    handler: (event: UiPermissionEvent) => void;
+    onError?: (error: unknown) => void;
+  }>();
+  private connectionGeneration = 0;
+  private transportLive = false;
   private readonly eventHandlers = new Set<UiEventHandler>();
   private readonly lifecycleController = new AbortController();
   private buffering = false;
@@ -100,6 +112,31 @@ class BrowserDaemonClient implements UiBackendClient {
     this.events = input.events;
     this.http = input.http;
     this.store = input.store;
+    let validatedPermissionScope: string | undefined;
+    this.permissionSync = createPermissionSync({
+      query: async (binding, signal) => {
+        const scope = JSON.stringify([
+          binding.permissionEpoch,
+          binding.rootSessionId,
+          binding.bindingGeneration,
+        ]);
+        if (validatedPermissionScope !== scope) {
+          const index = await this.http.getSessionIndex({ signal });
+          const selected = index.sessions.find(
+            (session) => session.id === binding.rootSessionId,
+          );
+          if (!selected || selected.parentId || selected.isSubagent) {
+            throw new Error("Return to a main session to approve requests.");
+          }
+          validatedPermissionScope = scope;
+        }
+        return (await this.http.getPermissionSnapshot({ ...binding, signal }))
+          .snapshot;
+      },
+      onChange: (state) => {
+        this.store.setPermissionSync(state);
+      },
+    });
   }
 
   async connect(): Promise<void> {
@@ -124,66 +161,160 @@ class BrowserDaemonClient implements UiBackendClient {
     this.store.setError(null);
     try {
       await this.http.registerClient(
-        {
-          startupIntent: this.config.startupIntent,
-        },
+        { startupIntent: this.config.startupIntent },
         { signal: this.lifecycleController.signal },
       );
       if (this.isClosed()) return;
-      this.buffering = true;
       await this.events.start({
         onConnectionState: (state) => {
           if (this.closed) return;
-          this.store.setConnectionState(state);
           if (state === "live") {
+            if (!this.transportLive) this.connectionGeneration += 1;
+            this.transportLive = true;
             this.store.setError(null);
+          } else {
+            this.transportLive = false;
+            this.permissionSync.disconnect();
           }
+          this.store.setConnectionState(state);
         },
         onError: (error) => {
           if (this.closed) return;
+          this.transportLive = false;
+          this.permissionSync.disconnect();
           this.store.setError(error.message);
         },
-        onEvent: (event) => this.handleSseEvent(event.payload, event.id),
+        onEvent: (event) => {
+          this.handleSseEvent(event.payload, event.id);
+        },
       });
       if (this.isClosed()) return;
-      const response = await this.http.getSnapshot({
-        signal: this.lifecycleController.signal,
-      });
-      if (this.isClosed()) {
-        return;
-      }
-      this.dispatchUiEvent(
-        { snapshot: response.snapshot, type: "snapshot.replaced" },
-        response.seqNum,
-        "snapshot-barrier",
-      );
-      const model = (
-        await this.http.getCurrentModel({
-          signal: this.lifecycleController.signal,
-        })
-      ).model;
-      if (this.isClosed()) return;
-      this.store.setCurrentModel(model);
-      const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
-      this.events.setLastEventId(maxBufferedSeqNum);
-      this.buffering = false;
-      this.store.setConnectionState("live");
     } catch (error) {
       this.connected = false;
       if (!this.isClosed()) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.store.setError(message);
+        this.store.setError(
+          error instanceof Error ? error.message : String(error),
+        );
         this.store.setConnectionState("disconnected");
       }
       await this.events.close();
       throw error;
     }
+    // History and model failures do not own the transport or approval readiness.
+    this.refreshUnrelatedViews();
+  }
+
+  private refreshUnrelatedViews(): void {
+    void this.refreshProjectedSnapshot().catch((error: unknown) => {
+      if (!this.closed)
+        this.store.setError(
+          error instanceof Error ? error.message : String(error),
+        );
+    });
+    void this.http
+      .getCurrentModel({ signal: this.lifecycleController.signal })
+      .then((response) => {
+        if (!this.closed) this.store.setCurrentModel(response.model);
+      })
+      .catch((error: unknown) => {
+        if (!this.closed)
+          this.store.setError(
+            error instanceof Error ? error.message : String(error),
+          );
+      });
+    void this.getSessionIndex()
+      .then((sessions) => {
+        if (!this.closed) this.store.setSessionIndex(sessions);
+      })
+      .catch((error: unknown) => {
+        if (!this.closed)
+          this.store.setError(
+            error instanceof Error ? error.message : String(error),
+          );
+      });
+  }
+
+  private acceptBinding(binding: UiPermissionBinding, fromHello = false): void {
+    if (
+      typeof binding.permissionEpoch !== "string" ||
+      !Number.isSafeInteger(binding.bindingGeneration) ||
+      (binding.rootSessionId !== null &&
+        typeof binding.rootSessionId !== "string")
+    ) {
+      this.permissionSync.disconnect();
+      this.store.setError(
+        "Permission subscription binding is missing or invalid",
+      );
+      return;
+    }
+    const previous = this.permissionSync.getState().binding;
+    if (
+      previous &&
+      ((!fromHello && previous.permissionEpoch !== binding.permissionEpoch) ||
+        (previous.permissionEpoch === binding.permissionEpoch &&
+          previous.bindingGeneration > binding.bindingGeneration))
+    )
+      return;
+    if (this.transportLive)
+      this.permissionSync.begin(binding, this.connectionGeneration);
+  }
+
+  retryPermissions(): void {
+    this.permissionSync.retry();
+  }
+
+  getSelectedSessionId(): ReturnType<UiBackendClient["getSelectedSessionId"]> {
+    return Promise.resolve(
+      this.permissionSync.getState().binding?.rootSessionId ?? null,
+    );
+  }
+
+  createSession(): ReturnType<UiBackendClient["createSession"]> {
+    return this.createSessionForRuntime();
+  }
+
+  selectSession(
+    sessionId: string,
+  ): ReturnType<UiBackendClient["selectSession"]> {
+    return this.selectSessionForRuntime(sessionId);
+  }
+
+  async getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return (
+      await this.http.getSessionIndex({
+        signal: this.lifecycleController.signal,
+      })
+    ).sessions;
+  }
+
+  async getPermissionSnapshot(
+    input: Parameters<UiBackendClient["getPermissionSnapshot"]>[0],
+  ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+    return (
+      await this.http.getPermissionSnapshot({
+        ...this.permissionSync.getState().binding,
+        ...input,
+      })
+    ).snapshot;
+  }
+
+  subscribePermissionEvents(
+    handler: (event: UiPermissionEvent) => void,
+    onError?: (error: unknown) => void,
+  ): UiUnsubscribe {
+    const subscription = { handler, onError };
+    this.permissionHandlers.add(subscription);
+    return () => {
+      this.permissionHandlers.delete(subscription);
+    };
   }
 
   async close(): Promise<void> {
     this.closed = true;
     this.connected = false;
     this.lifecycleController.abort();
+    this.permissionSync.dispose();
+    this.permissionHandlers.clear();
     await this.events.close();
     this.store.setConnectionState("disconnected");
   }
@@ -218,6 +349,12 @@ class BrowserDaemonClient implements UiBackendClient {
         ? {}
         : { reasoning: options.reasoning }),
     });
+    if (
+      "permissionEpoch" in receipt &&
+      "rootSessionId" in receipt &&
+      "bindingGeneration" in receipt
+    )
+      this.acceptBinding(receipt as typeof receipt & UiPermissionBinding);
     return receipt;
   }
 
@@ -361,14 +498,19 @@ class BrowserDaemonClient implements UiBackendClient {
     await this.refreshProjectedSnapshot();
   }
 
-  async createSessionForRuntime(): Promise<void> {
-    await this.http.createSession();
-    await this.refreshProjectedSnapshot();
+  async createSessionForRuntime(): ReturnType<
+    UiBackendClient["createSession"]
+  > {
+    const response = await this.http.createSession();
+    this.acceptBinding(response);
+    this.refreshUnrelatedViews();
+    return response.session;
   }
 
   async selectSessionForRuntime(sessionId: string): Promise<void> {
-    await this.http.selectSession(sessionId);
-    await this.refreshProjectedSnapshot();
+    const response = await this.http.selectSession(sessionId);
+    this.acceptBinding(response);
+    this.refreshUnrelatedViews();
   }
 
   async executeCommand(
@@ -380,8 +522,52 @@ class BrowserDaemonClient implements UiBackendClient {
   async respondPermission(
     requestId: string,
     response: Parameters<UiBackendClient["respondPermission"]>[1],
+    context?: Parameters<UiBackendClient["respondPermission"]>[2],
   ): ReturnType<UiBackendClient["respondPermission"]> {
-    await this.http.respondPermission(requestId, response);
+    const state = this.permissionSync.getState();
+    const binding = state.binding;
+    if (
+      state.status !== "ready" ||
+      !binding ||
+      !state.requests.some((request) => request.id === requestId)
+    )
+      throw new Error("Approvals are not synchronized");
+    if (
+      context &&
+      (context.permissionEpoch !== binding.permissionEpoch ||
+        context.rootSessionId !== binding.rootSessionId ||
+        (context.bindingGeneration !== undefined &&
+          context.bindingGeneration !== binding.bindingGeneration))
+    )
+      throw new Error("Permission scope changed");
+    try {
+      await this.http.respondPermission(requestId, {
+        response,
+        context: binding,
+      });
+    } catch (error) {
+      const latest = this.permissionSync.getState().binding;
+      if (
+        latest?.permissionEpoch !== binding.permissionEpoch ||
+        latest.rootSessionId !== binding.rootSessionId ||
+        latest.bindingGeneration !== binding.bindingGeneration
+      )
+        return;
+      if (typeof error === "object" && error !== null && "code" in error) {
+        if (error.code === "PERMISSION_NOT_PENDING") {
+          this.permissionSync.resync();
+          return;
+        }
+        if (error.code === "PERMISSION_UNAVAILABLE")
+          this.permissionSync.receive({
+            type: "permission.unavailable",
+            ...binding,
+            reason:
+              error instanceof Error ? error.message : "Approvals unavailable",
+          });
+      }
+      throw error;
+    }
   }
 
   async respondInteraction(
@@ -406,23 +592,48 @@ class BrowserDaemonClient implements UiBackendClient {
     await this.http.abortSession(sessionId, { runId });
   }
 
-  private async handleSseEvent(
-    event: WebSseEvent,
-    seqNum: number | undefined,
-  ): Promise<void> {
+  private handleSseEvent(event: WebSseEvent, seqNum: number | undefined): void {
     if (this.closed) {
       return;
     }
     switch (event.type) {
       case "hello":
+        this.acceptBinding(event, true);
         return;
       case "error":
         this.store.setError(event.message);
         return;
       case "resync-required":
-        await this.resync(event.maxSeqNum);
+        this.permissionSync.resync();
+        void this.resync(event.maxSeqNum).catch((error: unknown) => {
+          if (!this.closed)
+            this.store.setError(
+              error instanceof Error ? error.message : String(error),
+            );
+        });
         return;
       case "ui.event": {
+        if (
+          event.event.type === "permission.requested" ||
+          event.event.type === "permission.resolved" ||
+          event.event.type === "permission.unavailable" ||
+          event.event.type === "permission.resync-required"
+        ) {
+          this.permissionSync.receive(event.event);
+          for (const subscription of this.permissionHandlers) {
+            try {
+              subscription.handler(event.event);
+            } catch (error) {
+              this.permissionHandlers.delete(subscription);
+              try {
+                subscription.onError?.(error);
+              } catch {
+                // A failed observer must not interrupt the live event reader.
+              }
+            }
+          }
+          return;
+        }
         if (
           seqNum === undefined ||
           !Number.isSafeInteger(seqNum) ||
@@ -456,7 +667,6 @@ class BrowserDaemonClient implements UiBackendClient {
   private async doResync(lastEventId: number): Promise<void> {
     const previousBuffering = this.buffering;
     this.buffering = true;
-    this.store.setConnectionState("resyncing");
     let committedSeqNum = this.store.getSnapshot().view.lastAppliedSeqNum;
     try {
       const response = await this.http.getSnapshot({
@@ -481,19 +691,10 @@ class BrowserDaemonClient implements UiBackendClient {
       // that the reducer actually committed.
       const maxBufferedSeqNum = this.applyBufferedEventsAfter(committedSeqNum);
       this.events.setLastEventId(Math.max(committedSeqNum, maxBufferedSeqNum));
-      if (!this.isClosed()) this.store.setConnectionState("live");
       throw error;
     } finally {
       this.buffering = previousBuffering;
     }
-    this.store.setConnectionState("live");
-    const model = (
-      await this.http.getCurrentModel({
-        signal: this.lifecycleController.signal,
-      })
-    ).model;
-    if (this.isClosed()) return;
-    this.store.setCurrentModel(model);
   }
 
   private applyBufferedEventsAfter(seqNum: number): number {
@@ -642,6 +843,10 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
 
   get client(): UiBackendClient | null {
     return this.activeClient ?? null;
+  }
+
+  retryPermissions(): void {
+    this.activeClient?.retryPermissions();
   }
 
   async createSession(): Promise<void> {

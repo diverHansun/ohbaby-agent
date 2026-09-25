@@ -124,8 +124,20 @@ describe("daemon protocol", () => {
     };
 
     expect(
-      parseDaemonSseEvent({ type: "hello", clientId: "client_1" }),
-    ).toEqual({ clientId: "client_1", type: "hello" });
+      parseDaemonSseEvent({
+        type: "hello",
+        permissionEpoch: "test-epoch",
+        rootSessionId: null,
+        bindingGeneration: 1,
+        clientId: "client_1",
+      }),
+    ).toEqual({
+      clientId: "client_1",
+      type: "hello",
+      permissionEpoch: "test-epoch",
+      rootSessionId: null,
+      bindingGeneration: 1,
+    });
     expect(parseDaemonSseEvent({ type: "ui.event", event: uiEvent })).toEqual({
       event: uiEvent,
       type: "ui.event",
@@ -138,6 +150,11 @@ describe("daemon protocol", () => {
   it("covers every CoreAPI method", () => {
     expect(DAEMON_RPC_METHODS).toEqual([
       "getSnapshot",
+      "getSessionIndex",
+      "getSelectedSessionId",
+      "getPermissionSnapshot",
+      "createSession",
+      "selectSession",
       "initializeClient",
       "getContextWindowUsage",
       "listCommands",

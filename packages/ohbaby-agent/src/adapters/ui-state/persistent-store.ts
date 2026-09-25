@@ -439,6 +439,28 @@ export function createPersistentUiStateStore(
       return (await options.runLedger.get(runId)) !== undefined;
     },
 
+    async getActiveSessionId(): Promise<string | null> {
+      return (await readSessions()).activeSessionId;
+    },
+
+    async getSessionIndex(): Promise<readonly Omit<UiSession, "messages">[]> {
+      const projectRoot = await currentProjectRoot();
+      const sessions = (
+        await withSessionTransactionRetry(() =>
+          options.sessionManager.listByProjectRoot(projectRoot, {
+            status: "active",
+          }),
+        )
+      ).filter(isPrimarySession);
+      return sessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        projectRoot: session.projectRoot,
+        createdAt: new Date(session.createdAt).toISOString(),
+        updatedAt: new Date(session.updatedAt).toISOString(),
+      }));
+    },
+
     async readSnapshot(): Promise<UiSnapshot> {
       const { activeSessionId, sessions } = await readSessions();
       const runs = await readRuns(sessions);

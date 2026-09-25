@@ -150,6 +150,66 @@ describe("createRPC", () => {
     ).toBe(unsubscribe);
   });
 
+  it("keeps approval subscriptions synchronous and preserves callbacks and receiver", () => {
+    const handler = (): void => undefined;
+    const onError = (): void => undefined;
+    const unsubscribe = (): void => undefined;
+    const impl = {
+      value: "backend",
+      subscribePermissionEvents(
+        received: typeof handler,
+        error: typeof onError,
+      ): () => void {
+        expect(this.value).toBe("backend");
+        expect(received).toBe(handler);
+        expect(error).toBe(onError);
+        return unsubscribe;
+      },
+    };
+    const rpc = createRPC<typeof impl>();
+    rpc.connectImpl(impl);
+    const proxy = rpc.createProxy({});
+    const result = proxy.subscribePermissionEvents(handler, onError);
+    if (result instanceof Promise) void result.catch(() => undefined);
+    expect(result).toBe(unsubscribe);
+  });
+
+  it("passes approval query cancellation out of band at argument zero", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const rpc = createRPC<{
+      getPermissionSnapshot(input: {
+        rootSessionId: string;
+        signal?: AbortSignal;
+      }): Promise<string>;
+    }>();
+    rpc.connectImpl({
+      getPermissionSnapshot(input) {
+        receivedSignal = input.signal;
+        expect(input.rootSessionId).toBe("root");
+        return new Promise((_resolve, reject) => {
+          input.signal?.addEventListener(
+            "abort",
+            () => {
+              reject(new Error("cancelled"));
+            },
+            { once: true },
+          );
+        });
+      },
+    });
+    const controller = new AbortController();
+    const pending = rpc.createProxy({}).getPermissionSnapshot({
+      rootSessionId: "root",
+      signal: controller.signal,
+    });
+    const rejected = pending.catch((error: unknown) => error);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    expect(await rejected).toMatchObject({ name: "AbortError" });
+    expect(receivedSignal).toBe(controller.signal);
+    expect(receivedSignal?.aborted).toBe(true);
+  });
+
   it("rejects a pending call when its AbortSignal is aborted", async () => {
     const rpc = createRPC<DemoAPI>();
     rpc.connectImpl({

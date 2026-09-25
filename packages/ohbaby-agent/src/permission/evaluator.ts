@@ -119,6 +119,10 @@ export function evaluatePermission(
     return denyDecision;
   }
 
+  if (state.level === "full-access") {
+    return allow();
+  }
+
   const invariantDecision = evaluateInvariantDecision(call, classification);
   if (invariantDecision) {
     return invariantDecision;

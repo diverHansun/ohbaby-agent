@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { createBus } from "../../bus/index.js";
+import { createPermissionManager } from "../../permission/index.js";
+import type { SchedulerPermissionResponse } from "../../permission/index.js";
 import type {
   LifecycleEvent,
   LifecycleResult,
@@ -774,11 +777,13 @@ function createManagerWithOverrides(input: {
   readonly bridge?: StreamBridge;
   readonly hookExecutor?: HookExecutor;
   readonly onStepUsage?: RunStepUsageObserver;
+  readonly revokePermissionsForRun?: (runId: string, reason: string) => void;
   readonly sandboxManager?: SandboxManager;
 }): ManagerFixture {
   const fixture = createManager(input.lifecycle);
   const manager = new RunManager({
     lifecycle: input.lifecycle,
+    revokePermissionsForRun: input.revokePermissionsForRun,
     runLedger: fixture.ledger,
     streamBridge: input.bridge ?? fixture.bridge,
     hookExecutor: input.hookExecutor ?? fixture.hooks,
@@ -1021,6 +1026,7 @@ describe("RunManager", () => {
     await manager.waitForCompletion(record.runId);
 
     expect(lifecycle.calls[0]).toMatchObject({
+      runId: record.runId,
       contextScopeId: "subagent_1",
       directory: "D:/repo",
       initiatingUserMessageId: "user_child_1",
@@ -1760,5 +1766,124 @@ describe("RunManager", () => {
     expect(() => {
       manager.cancel("missing_run");
     }).toThrow(RunManagerNotFoundError);
+  });
+});
+
+describe("run permission cleanup", () => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])(
+    "settles a real orphaned wait at the worker terminal (child=%s, failure=%s)",
+    async (isSubagent, fails) => {
+      const permission = createPermissionManager({ bus: createBus() });
+      let waiting: Promise<SchedulerPermissionResponse> | undefined;
+      let requestId = "";
+      const lifecycle: RunLifecycle = {
+        async *run(params) {
+          if (!params.runId || !params.signal)
+            throw new Error("Missing identity");
+          waiting = permission.ask({
+            runId: params.runId,
+            sessionId: params.sessionId,
+            callId: "terminal_call",
+            messageId: "terminal_message",
+            toolName: "bash",
+            params: { command: "printf terminal" },
+            category: "dangerous",
+            signal: params.signal,
+            source: {
+              rootSessionId: "root",
+              ancestorSessionIds: isSubagent ? ["root"] : [],
+              sourceLabel: isSubagent ? "Child" : "Main agent",
+            },
+          });
+          await Promise.resolve();
+          requestId = permission.listPending()[0].id;
+          yield {
+            type: "llm:start",
+            sessionId: params.sessionId,
+            step: 1,
+            timestamp: 1,
+          };
+          if (fails) throw new Error("Controlled lifecycle failure");
+          return { success: true, finishReason: "stop", finalResponse: "done" };
+        },
+      };
+      const { manager } = createManagerWithOverrides({
+        lifecycle,
+        revokePermissionsForRun: (runId, reason) => {
+          permission.revokeByRun(runId, reason);
+        },
+      });
+      const sessionId = isSubagent ? "child" : "root";
+      try {
+        const run = await manager.create({
+          directory: "D:/repo",
+          modelId: "fake-model",
+          sessionId,
+          triggerSource: "user",
+          isSubagent,
+        });
+        const completion = await manager.waitForCompletion(run.runId);
+        expect(completion.status).toBe(fails ? "failed" : "succeeded");
+        await expect(waiting).resolves.toBe("cancel");
+        expect(permission.listPending()).toEqual([]);
+        expect(
+          permission.respond(sessionId, requestId, { type: "always" }),
+        ).toBe("revoked");
+        expect(permission.state.getSessionRules(sessionId)).toEqual([]);
+      } finally {
+        permission.dispose();
+      }
+    },
+  );
+
+  it.each([
+    ["success", (): SessionLifecycle => new SessionLifecycle()],
+    ["failure", (): ThrowingLifecycle => new ThrowingLifecycle()],
+  ] as const)(
+    "revokes the actual run on %s before completion",
+    async (_name, lifecycle) => {
+      const revoked: string[] = [];
+      const { manager } = createManagerWithOverrides({
+        lifecycle: lifecycle(),
+        revokePermissionsForRun(runId) {
+          revoked.push(runId);
+        },
+      });
+      const run = await manager.create({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_1",
+        triggerSource: "user",
+      });
+      await manager.waitForCompletion(run.runId);
+      expect(revoked).toEqual([run.runId]);
+    },
+  );
+
+  it("revokes synchronously on cancel without waiting for execution cleanup", async () => {
+    const lifecycle = new AbortAwareLifecycle();
+    const revoked: string[] = [];
+    const { manager } = createManagerWithOverrides({
+      lifecycle,
+      revokePermissionsForRun(runId) {
+        revoked.push(runId);
+      },
+    });
+    const run = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await lifecycle.started.promise;
+    manager.cancel(run.runId);
+    expect(revoked).toEqual([run.runId]);
+    await manager.waitForCompletion(run.runId);
+    expect(revoked.every((id) => id === run.runId)).toBe(true);
   });
 });

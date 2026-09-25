@@ -132,6 +132,7 @@ export interface RunLifecycle {
 }
 
 export interface RunManagerDeps {
+  readonly revokePermissionsForRun?: (runId: string, reason: string) => void;
   readonly lifecycle: RunLifecycle;
   readonly runLedger: RunLedger;
   readonly streamBridge: StreamBridge;

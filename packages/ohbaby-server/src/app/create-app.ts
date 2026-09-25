@@ -39,7 +39,17 @@ import {
   respondInteractionForClient,
 } from "../coordination/client-view.js";
 import { EventBus, type EventEnvelope } from "../coordination/event-bus.js";
-import { PermissionRouter } from "../coordination/permission-router.js";
+import {
+  PermissionRouter,
+  isPermissionEvent,
+} from "../coordination/permission-router.js";
+import {
+  initializePermissionClient,
+  parsePermissionBinding,
+  permissionSnapshotForClient,
+  respondPermissionForClient,
+  selectPermissionSession,
+} from "../coordination/permission-access.js";
 import {
   acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
@@ -334,9 +344,9 @@ function contentTypeForPath(path: string): string {
 function permissionRouterSnapshotForClient(
   permissionRouter: PermissionRouter,
   snapshot: UiSnapshot,
-  clientId: string,
+  rootSessionId: string | null,
 ): UiSnapshot {
-  return permissionRouter.filterSnapshotForClient(snapshot, clientId);
+  return permissionRouter.filterSnapshotForClient(snapshot, rootSessionId);
 }
 
 function permissionResponseFromBody(
@@ -394,37 +404,6 @@ function slashCommandInvocationFromBody(
     ...(argumentMode === undefined ? {} : { argumentMode }),
     ...(body === undefined ? {} : { body }),
     ...(sessionId === undefined ? {} : { sessionId }),
-  };
-}
-
-function sessionCommandInvocation(
-  command: "new" | "resume",
-  sessionId?: string,
-): UiSlashCommandInvocation {
-  if (command === "new") {
-    return {
-      argumentMode: "argv",
-      argv: [],
-      clientInvocationId: `web_session_${randomUUID()}`,
-      commandId: "new",
-      path: ["new"],
-      raw: "/new",
-      rawArgs: "",
-      surface: "tui",
-    };
-  }
-  if (!sessionId) {
-    throw new Error("sessionId is required");
-  }
-  return {
-    argumentMode: "argv",
-    argv: ["--session_id", sessionId],
-    clientInvocationId: `web_session_${randomUUID()}`,
-    commandId: "resume",
-    path: ["resume"],
-    raw: `/resume --session_id ${sessionId}`,
-    rawArgs: `--session_id ${sessionId}`,
-    surface: "tui",
   };
 }
 
@@ -903,6 +882,8 @@ class DaemonServerAppRuntime {
   private readonly waitControllers = new Set<AbortController>();
   private started = false;
   private unsubscribe: UiUnsubscribe | undefined;
+  private unsubscribePermissions: UiUnsubscribe | undefined;
+  private permissionEpoch = "";
 
   constructor(private readonly options: DaemonServerAppOptions) {
     this.authToken = requireAuthToken(options.authToken);
@@ -927,20 +908,48 @@ class DaemonServerAppRuntime {
       return;
     }
     this.unsubscribe = this.options.backend.subscribeEvents((event) => {
+      if (isPermissionEvent(event)) return;
       const envelope = this.eventBus.publish(event);
       this.broadcast(envelope);
     });
     this.started = true;
     try {
-      // Initial snapshot also activates the durable scheduler so recovered
-      // queued work drains even when no browser reconnects after restart.
-      await this.options.backend.getSnapshot();
+      await this.options.backend.getSessionIndex();
+      this.permissionEpoch = (
+        await this.options.backend.getPermissionSnapshot({
+          rootSessionId: null,
+        })
+      ).permissionEpoch;
+      this.subscribePermissionForwarder();
     } catch (error) {
       this.unsubscribe();
       this.unsubscribe = undefined;
       this.started = false;
       throw error;
     }
+  }
+
+  private subscribePermissionForwarder(): void {
+    this.unsubscribePermissions =
+      this.options.backend.subscribePermissionEvents(
+        (event) => {
+          this.broadcastPermission(event);
+        },
+        () => {
+          for (const client of [...this.clients]) this.disconnectClient(client);
+          this.unsubscribePermissions?.();
+          this.unsubscribePermissions = undefined;
+          // Reinstall after the backend has detached the failed listener.
+          queueMicrotask(() => {
+            if (!this.started || this.unsubscribePermissions) return;
+            try {
+              this.subscribePermissionForwarder();
+            } catch {
+              // An unhealthy backend will reject permission queries until restart.
+            }
+          });
+        },
+      );
   }
 
   // Preserve rejected-Promise semantics if any synchronous cleanup step throws.
@@ -950,6 +959,8 @@ class DaemonServerAppRuntime {
     this.waitControllers.clear();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    this.unsubscribePermissions?.();
+    this.unsubscribePermissions = undefined;
 
     for (const client of Array.from(this.clients)) {
       client.close();
@@ -1001,6 +1012,27 @@ class DaemonServerAppRuntime {
   }
 
   private mountRoutes(): void {
+    this.app.onError((error, context) => {
+      const code =
+        isRecord(error) && typeof error.code === "string"
+          ? error.code
+          : undefined;
+      return context.json(
+        {
+          ok: false,
+          error: { message: errorMessage(error), ...(code ? { code } : {}) },
+        },
+        code === "INVALID_PERMISSION_CHOICE"
+          ? 400
+          : code === "PERMISSION_UNAVAILABLE"
+            ? 503
+            : code?.startsWith("PERMISSION_")
+              ? 409
+              : isDaemonForbiddenError(error)
+                ? 403
+                : 500,
+      );
+    });
     this.app.get("/doc", (context) => {
       return context.json(createOpenApiDocument(this.options.packageVersion));
     });
@@ -1048,6 +1080,14 @@ class DaemonServerAppRuntime {
         if (context.req.raw.signal.aborted) controller.abort();
         context.req.raw.signal.addEventListener("abort", abort, { once: true });
         this.waitControllers.add(controller);
+        const priorGeneration = this.clientViews.isRegistered(
+          parsed.request.clientId,
+        )
+          ? this.clientViews.binding(
+              parsed.request.clientId,
+              this.permissionEpoch,
+            ).bindingGeneration
+          : undefined;
         try {
           const result = await callDaemonBackend({
             backend: this.commandBackend("server-rpc", {
@@ -1057,13 +1097,33 @@ class DaemonServerAppRuntime {
             clientViews: this.clientViews,
             createSessionId: this.createSessionId,
             permissionRouter: this.permissionRouter,
+            permissionEpoch: this.permissionEpoch,
+            emitCommandEvent: (event) => {
+              this.broadcast(this.eventBus.publish(event));
+            },
             request: parsed.request,
             signal: controller.signal,
           });
+          if (parsed.request.method === "initializeClient") {
+            this.knownClientIds.add(parsed.request.clientId);
+            this.registeredWebClientIds.add(parsed.request.clientId);
+          }
           return context.json(
             createDaemonRpcSuccessResponse(parsed.request, result),
           );
         } finally {
+          if (
+            this.clientViews.isRegistered(parsed.request.clientId) &&
+            !this.clientViews.isPromptBindingProvisional(
+              parsed.request.clientId,
+            ) &&
+            this.clientViews.binding(
+              parsed.request.clientId,
+              this.permissionEpoch,
+            ).bindingGeneration !== priorGeneration &&
+            parsed.request.method !== "initializeClient"
+          )
+            this.notifyBinding(parsed.request.clientId);
           context.req.raw.signal.removeEventListener("abort", abort);
           this.waitControllers.delete(controller);
         }
@@ -1091,6 +1151,8 @@ class DaemonServerAppRuntime {
       if (!this.isAuthorized(context.req.header("authorization"))) {
         return context.json(unauthorizedBody(), 401);
       }
+      if (!this.clientViews.isRegistered(clientId))
+        return context.json(webErrorBody("client is not registered"), 409);
       return this.createSseResponse(
         clientId,
         context.req.raw.signal,
@@ -1118,13 +1180,27 @@ class DaemonServerAppRuntime {
       const startupIntent = parseDaemonStartupIntent(
         body.startupIntent ?? DEFAULT_WEB_STARTUP_INTENT,
       );
-      const snapshot = await this.options.backend.getSnapshot();
-      this.clientViews.initializeClient(clientId, snapshot, startupIntent);
+      const binding = await initializePermissionClient(
+        this.options.backend,
+        this.clientViews,
+        clientId,
+        startupIntent,
+        this.permissionEpoch,
+      );
       this.knownClientIds.add(clientId);
       this.registeredWebClientIds.add(clientId);
       this.cancelClientRoutingCleanup(clientId);
 
-      return context.json({ clientId, ok: true });
+      return context.json({ clientId, ok: true, ...binding });
+    });
+
+    this.app.get("/v1/sessions/index", async (context) => {
+      const authorization = this.authorizePromptMutation(context);
+      if ("response" in authorization) return authorization.response;
+      return context.json({
+        ok: true,
+        sessions: await this.options.backend.getSessionIndex(),
+      });
     });
 
     this.app.get("/v1/snapshot", async (context) => {
@@ -1147,7 +1223,8 @@ class DaemonServerAppRuntime {
         snapshot: permissionRouterSnapshotForClient(
           this.permissionRouter,
           this.clientViews.projectSnapshot(clientId, snapshot),
-          clientId,
+          this.clientViews.binding(clientId, this.permissionEpoch)
+            .rootSessionId,
         ),
       });
     });
@@ -1163,6 +1240,8 @@ class DaemonServerAppRuntime {
       if (!this.isRegisteredWebClient(clientId)) {
         return context.json(webErrorBody("client is not registered"), 409);
       }
+      if (!this.clientViews.isRegistered(clientId))
+        return context.json(webErrorBody("client is not registered"), 409);
       return this.createSseResponse(
         clientId,
         context.req.raw.signal,
@@ -1413,13 +1492,20 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("client is not registered"), 409);
       }
 
-      await this.commandBackend("server-rest", { clientId }).executeCommand(
-        this.clientViews.prepareCommandInvocation(
-          clientId,
-          sessionCommandInvocation("new"),
-        ),
+      const previous = this.clientViews.binding(clientId, this.permissionEpoch);
+      const session = await this.options.backend.createSession();
+      this.clientViews.assertBinding(clientId, previous, this.permissionEpoch);
+      this.clientViews.selectSession(
+        clientId,
+        session.id,
+        previous.bindingGeneration,
       );
-      return context.json({ ok: true });
+      this.notifyBinding(clientId);
+      return context.json({
+        ok: true,
+        session,
+        ...this.clientViews.binding(clientId, this.permissionEpoch),
+      });
     });
 
     this.app.patch("/v1/sessions/:id/select", async (context) => {
@@ -1438,13 +1524,15 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("sessionId is required"), 400);
       }
 
-      await this.commandBackend("server-rest", { clientId }).executeCommand(
-        this.clientViews.prepareCommandInvocation(
-          clientId,
-          sessionCommandInvocation("resume", sessionId),
-        ),
+      const binding = await selectPermissionSession(
+        this.options.backend,
+        this.clientViews,
+        clientId,
+        sessionId,
+        this.permissionEpoch,
       );
-      return context.json({ ok: true });
+      this.notifyBinding(clientId);
+      return context.json({ ok: true, ...binding });
     });
 
     this.app.patch("/v1/sessions/:id/archive", async (context) => {
@@ -1570,6 +1658,10 @@ class DaemonServerAppRuntime {
         );
       }
       const commandBackend = this.commandBackend("server-rest", { clientId });
+      const priorGeneration = this.clientViews.binding(
+        clientId,
+        this.permissionEpoch,
+      ).bindingGeneration;
       try {
         const accepted = await acceptDaemonPrompt({
           backend: commandBackend,
@@ -1586,12 +1678,26 @@ class DaemonServerAppRuntime {
           permissionRouter: this.permissionRouter,
           text,
         });
-        return context.json({ ok: true, ...accepted.receipt }, 202);
+        return context.json(
+          {
+            ok: true,
+            ...accepted.receipt,
+            ...this.clientViews.binding(clientId, this.permissionEpoch),
+          },
+          202,
+        );
       } catch (error) {
         return context.json(
           promptErrorBody(error),
           promptMutationStatus(error),
         );
+      } finally {
+        if (
+          !this.clientViews.isPromptBindingProvisional(clientId) &&
+          this.clientViews.binding(clientId, this.permissionEpoch)
+            .bindingGeneration !== priorGeneration
+        )
+          this.notifyBinding(clientId);
       }
     });
 
@@ -1912,6 +2018,25 @@ class DaemonServerAppRuntime {
       return context.json({ ok: true, permission });
     });
 
+    this.app.get("/v1/permissions", async (context) => {
+      const authorization = this.authorizePromptMutation(context);
+      if ("response" in authorization) return authorization.response;
+      const rootSessionId = context.req.query("rootSessionId");
+      const expected = parsePermissionBinding({
+        rootSessionId: rootSessionId === "" ? null : (rootSessionId ?? null),
+        permissionEpoch: context.req.query("permissionEpoch"),
+        bindingGeneration: Number(context.req.query("bindingGeneration")),
+      });
+      const snapshot = await permissionSnapshotForClient(
+        this.options.backend,
+        this.clientViews,
+        authorization.clientId,
+        expected,
+        this.permissionEpoch,
+      );
+      return context.json({ ok: true, snapshot });
+    });
+
     this.app.post("/v1/permissions/:id", async (context) => {
       if (!this.isAuthorized(context.req.header("authorization"))) {
         return context.json(webErrorBody("Unauthorized"), 401);
@@ -1924,13 +2049,6 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("client is not registered"), 409);
       }
       const requestId = context.req.param("id");
-      if (!this.permissionRouter.canRespondPermission(requestId, clientId)) {
-        return context.json(
-          webErrorBody("Permission request is owned by another client"),
-          403,
-        );
-      }
-
       const parsed = await readJsonWithLimit(context.req.raw);
       if (!parsed.ok) {
         return context.json(
@@ -1944,9 +2062,15 @@ class DaemonServerAppRuntime {
       if (!response) {
         return context.json(webErrorBody("choiceId is required"), 400);
       }
-      await this.commandBackend("server-rest", {
+      await respondPermissionForClient(
+        this.commandBackend("server-rest", { clientId }),
+        this.clientViews,
         clientId,
-      }).respondPermission(requestId, response);
+        requestId,
+        response,
+        parsePermissionBinding(body.context),
+        this.permissionEpoch,
+      );
       return context.json({ ok: true });
     });
 
@@ -2030,7 +2154,7 @@ class DaemonServerAppRuntime {
   }
 
   private isRegisteredWebClient(clientId: string): boolean {
-    return this.registeredWebClientIds.has(clientId);
+    return this.clientViews.isRegistered(clientId);
   }
 
   private clientIdFromRequest(context: {
@@ -2197,7 +2321,11 @@ class DaemonServerAppRuntime {
         this.cancelClientRoutingCleanup(clientId);
         this.knownClientIds.add(clientId);
         this.options.onClientConnected?.(clientId);
-        client.write({ clientId, type: "hello" });
+        client.write({
+          clientId,
+          type: "hello",
+          ...this.clientViews.binding(clientId, this.permissionEpoch),
+        });
         this.replayMissedEvents(client, lastEventId);
         signal.addEventListener(
           "abort",
@@ -2258,7 +2386,6 @@ class DaemonServerAppRuntime {
       if (this.hasConnectedClient(clientId)) {
         return;
       }
-      this.permissionRouter.disconnectClient(clientId);
       const interactionIds = this.clientViews.disconnectClient(clientId);
       this.knownClientIds.delete(clientId);
       this.expiredClientIds.add(clientId);
@@ -2325,9 +2452,61 @@ class DaemonServerAppRuntime {
     });
   }
 
+  private notifyBinding(clientId: string): void {
+    for (const client of [...this.clients]) {
+      if (client.clientId !== clientId) continue;
+      try {
+        client.write({
+          type: "hello",
+          clientId,
+          ...this.clientViews.binding(clientId, this.permissionEpoch),
+        });
+      } catch {
+        this.disconnectClient(client);
+      }
+    }
+  }
+
+  private broadcastPermission(event: UiEvent): void {
+    for (const client of [...this.clients]) {
+      try {
+        const binding = this.clientViews.binding(
+          client.clientId,
+          this.permissionEpoch,
+        );
+        const routed = this.permissionRouter.filterEventForClient(
+          event,
+          binding.rootSessionId,
+        );
+        if (routed)
+          client.write({
+            type: "ui.event",
+            event: {
+              ...routed,
+              bindingGeneration: binding.bindingGeneration,
+            } as UiEvent,
+          });
+      } catch {
+        this.disconnectClient(client);
+      }
+    }
+  }
+
   private broadcast(envelope: EventEnvelope): void {
     const event = envelope.event;
-    this.permissionRouter.observeEvent(event);
+    const previousBindings =
+      event.type === "command.result.delivered" &&
+      event.action?.kind === "session.selected"
+        ? new Map(
+            [...this.knownClientIds]
+              .filter((id) => this.clientViews.isRegistered(id))
+              .map((id) => [
+                id,
+                this.clientViews.binding(id, this.permissionEpoch)
+                  .bindingGeneration,
+              ]),
+          )
+        : undefined;
     this.clientViews.observeEvent(event);
     const replayEvents = this.routeEnvelopeForKnownClients(envelope);
     this.replayEventsBySeqNum.set(envelope.seqNum, replayEvents);
@@ -2338,6 +2517,18 @@ class DaemonServerAppRuntime {
       }
     }
     this.clientViews.afterEventBroadcast(event);
+    if (
+      event.type === "command.result.delivered" &&
+      event.action?.kind === "session.selected"
+    ) {
+      for (const [clientId, generation] of previousBindings ?? []) {
+        if (
+          this.clientViews.binding(clientId, this.permissionEpoch)
+            .bindingGeneration !== generation
+        )
+          this.notifyBinding(clientId);
+      }
+    }
     this.pruneReplayEvents();
   }
 
@@ -2367,7 +2558,7 @@ class DaemonServerAppRuntime {
     }
     const filtered = this.permissionRouter.filterEventForClient(
       routed,
-      clientId,
+      this.clientViews.binding(clientId, this.permissionEpoch).rootSessionId,
     );
     return filtered ?? undefined;
   }

@@ -450,7 +450,13 @@ describe("createRemoteUiBackendClient", () => {
         if (eventRequests === 1) {
           return Promise.resolve(
             sseResponse([
-              sseFrame({ clientId: "client_1", type: "hello" }),
+              sseFrame({
+                clientId: "client_1",
+                type: "hello",
+                permissionEpoch: "test-epoch",
+                rootSessionId: null,
+                bindingGeneration: 1,
+              }),
               sseFrame({ event: notice("notice_1"), type: "ui.event" }, 1),
             ]),
           );
@@ -557,3 +563,207 @@ describe("createRemoteUiBackendClient", () => {
     expect(rpcMethods).toEqual(["initializeClient", "getSnapshot"]);
   });
 });
+
+it("keeps permission events and reconnect recovery independent of failed or pending full snapshots", async () => {
+  const binding = {
+    permissionEpoch: "epoch",
+    rootSessionId: "root",
+    bindingGeneration: 1,
+  };
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  let connections = 0;
+  let releaseQuery!: () => void;
+  const queryBarrier = new Promise<void>((resolve) => {
+    releaseQuery = resolve;
+  });
+  const client = createRemoteUiBackendClient({
+    port: 1,
+    clientId: "client_1",
+    fetch: async (input, init) => {
+      if (
+        (input instanceof Request ? input.url : input.toString()).includes(
+          "/api/events",
+        )
+      ) {
+        connections += 1;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(value): void {
+              controller = value;
+              value.enqueue(
+                encoder.encode(
+                  sseFrame({ type: "hello", clientId: "client_1", ...binding }),
+                ),
+              );
+            },
+          }),
+        );
+      }
+      const rpc = JSON.parse(requireStringBody(init)) as {
+        id: string;
+        method: string;
+      };
+      if (rpc.method === "initializeClient")
+        return Response.json({ id: rpc.id, ok: true, result: binding });
+      if (rpc.method === "getPermissionSnapshot") {
+        await queryBarrier;
+        return Response.json({
+          id: rpc.id,
+          ok: true,
+          result: { ...binding, permissionRevision: 0, requests: [] },
+        });
+      }
+      return Response.json({
+        id: rpc.id,
+        ok: false,
+        error: { message: "history unavailable" },
+      });
+    },
+  });
+  const received: import("ohbaby-sdk").UiPermissionEvent[] = [];
+  const stop = client.subscribePermissionEvents((event) => {
+    received.push(event);
+  });
+  try {
+    await vi.waitUntil(() =>
+      received.some((event) => event.type === "permission.resync-required"),
+    );
+    controller.enqueue(
+      encoder.encode(
+        sseFrame({ type: "resync-required", minSeqNum: 1, maxSeqNum: 100 }),
+      ),
+    );
+    controller.enqueue(
+      encoder.encode(
+        sseFrame(
+          {
+            type: "ui.event",
+            event: {
+              type: "permission.resolved",
+              ...binding,
+              permissionRevision: 1,
+              requestId: "old",
+              sessionId: "child",
+              reason: "aborted",
+            },
+          },
+          2,
+        ),
+      ),
+    );
+    await vi.waitUntil(() =>
+      received.some((event) => event.type === "permission.resolved"),
+    );
+    controller.close();
+    await vi.waitUntil(() => connections === 2);
+    await vi.waitUntil(() =>
+      received.some(
+        (event) =>
+          event.type === "permission.resync-required" &&
+          event.connectionGeneration === 2,
+      ),
+    );
+    expect(await client.getSelectedSessionId()).toBe("root");
+  } finally {
+    releaseQuery();
+    stop();
+    await client.dispose();
+  }
+});
+
+it.each(["selectSession", "createSession", "submitPromptAccepted"] as const)(
+  "ignores a late %s binding after a newer hello",
+  async (method) => {
+    const binding = {
+      permissionEpoch: "epoch",
+      rootSessionId: "root",
+      bindingGeneration: 1,
+    };
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let finish: (() => void) | undefined;
+    let queries = 0;
+    const received: import("ohbaby-sdk").UiPermissionEvent[] = [];
+    const client = createRemoteUiBackendClient({
+      port: 1,
+      clientId: "client_1",
+      fetch: async (input, init) => {
+        if (
+          (input instanceof Request ? input.url : input.toString()).includes(
+            "/api/events",
+          )
+        ) {
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(value): void {
+                controller = value;
+                value.enqueue(
+                  encoder.encode(
+                    sseFrame({
+                      type: "hello",
+                      clientId: "client_1",
+                      ...binding,
+                    }),
+                  ),
+                );
+              },
+            }),
+          );
+        }
+        const rpc = JSON.parse(requireStringBody(init)) as {
+          id: string;
+          method: string;
+        };
+        if (rpc.method === "initializeClient")
+          return Response.json({ id: rpc.id, ok: true, result: binding });
+        if (rpc.method === "getPermissionSnapshot") queries += 1;
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return Response.json({
+          id: rpc.id,
+          ok: true,
+          result: {
+            ...binding,
+            rootSessionId: "old-root",
+            bindingGeneration: 2,
+            session: { id: "old-root" },
+            promptId: "prompt",
+          },
+        });
+      },
+    });
+    const stop = client.subscribePermissionEvents((event) => {
+      received.push(event);
+    });
+    try {
+      await vi.waitUntil(() => received.length === 1);
+      const pending =
+        method === "selectSession"
+          ? client.selectSession("old-root")
+          : method === "createSession"
+            ? client.createSession()
+            : client.submitPromptAccepted("prompt");
+      await vi.waitUntil(() => finish !== undefined);
+      controller.enqueue(
+        encoder.encode(
+          sseFrame({
+            type: "hello",
+            clientId: "client_1",
+            ...binding,
+            rootSessionId: "new-root",
+            bindingGeneration: 3,
+          }),
+        ),
+      );
+      await vi.waitUntil(() => received.length === 2);
+      finish?.();
+      await pending;
+      expect(await client.getSelectedSessionId()).toBe("new-root");
+      expect(queries).toBe(0);
+    } finally {
+      finish?.();
+      stop();
+      await client.dispose();
+    }
+  },
+);

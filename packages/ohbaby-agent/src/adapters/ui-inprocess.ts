@@ -11,6 +11,7 @@ import {
   modelConfigVersion,
 } from "../config/llm/config-coordination.js";
 import { reloadLLMConfig } from "../config/llm/index.js";
+import { createPermissionProjection } from "./app-events/permission-projection.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { submitPromptAndWait as composeSubmitPromptAndWait } from "ohbaby-sdk";
@@ -45,6 +46,7 @@ import type {
   UiMessage,
   UiNotice,
   UiPermissionResponse,
+  UiSessionIndexEntry,
   UiPermissionUpdate,
   UiRun,
   UiRunStatus,
@@ -111,6 +113,8 @@ import {
 import {
   createPermissionManager,
   createPermissionState,
+  InvalidPermissionChoiceError,
+  PermissionUnavailableError,
 } from "../permission/index.js";
 import type { PermissionResponse as CorePermissionResponse } from "../permission/index.js";
 import { Project } from "../project/index.js";
@@ -389,16 +393,13 @@ function toCorePermissionResponse(
   response: UiPermissionResponse,
 ): CorePermissionResponse {
   if (response.choiceId === "allow_once") {
-    return { type: "once" };
+    return response.remember === true ? { type: "always" } : { type: "once" };
   }
-  if (response.choiceId === "allow_always" || response.remember === true) {
+  if (response.choiceId === "allow_always" && response.remember !== false)
     return { type: "always" };
-  }
-  if (response.choiceId === "cancel") {
-    return { type: "cancel" };
-  }
-
-  return { type: "reject" };
+  if (response.choiceId === "reject" && response.remember !== true)
+    return { type: "reject" };
+  throw new InvalidPermissionChoiceError();
 }
 
 export function createInProcessUiBackendClient(
@@ -430,7 +431,14 @@ export function createInProcessUiBackendClient(
       permissionState.addSessionRule(rules.sessionId, rule);
     }
   }
-  const permission = createPermissionManager({ bus, state: permissionState });
+  const permissionProjection = createPermissionProjection();
+  const permission = createPermissionManager({
+    bus,
+    state: permissionState,
+    criticalCommit: permissionProjection.criticalCommit,
+    onCommitted: permissionProjection.notifyCommitted,
+    onUnavailable: permissionProjection.markUnavailable,
+  });
   const messageManager =
     options.messageManager ??
     createMessageManager({
@@ -500,7 +508,7 @@ export function createInProcessUiBackendClient(
   const promptRunReadyWaiters = new Map<string, Set<() => void>>();
   let configSaveQueue: Promise<void> = Promise.resolve();
   let skillRegistryPromise: Promise<SkillRegistry> | undefined;
-  const pendingPermissionSessions = new Map<string, string>();
+
   const runtimeController = new InProcessRuntimeController({
     clearPendingPermissionsForRun,
     ...(!options.llmClient
@@ -553,7 +561,7 @@ export function createInProcessUiBackendClient(
         },
         onTodoWrite: publishTodoWrite,
         onNotice: publishNotice,
-        permission,
+        permissionManager: permission,
         permissionState,
         runLedger: options.runLedger ?? stateStore.runLedger,
         sandboxManager: options.sandboxManager,
@@ -1201,9 +1209,9 @@ export function createInProcessUiBackendClient(
       selectedSessionId === null
         ? undefined
         : runtimeController.getActiveRunId(selectedSessionId);
-    const selectedPermission = snapshot.permissions.find(
-      (request) => request.runId === activeRunId,
-    );
+    const selectedPermission = permissionProjection
+      .listRequests()
+      .find((request) => request.rootSessionId === selectedSessionId);
     let status: UiRunStatus;
     if (selectedPermission) {
       status = {
@@ -1219,7 +1227,10 @@ export function createInProcessUiBackendClient(
       status = { kind: "idle" };
     }
 
-    if (activeRunId) {
+    if (
+      activeRunId &&
+      (!selectedPermission || selectedPermission.runId === activeRunId)
+    ) {
       await updateActiveRunStatus(status, activeRunId);
     }
     const updated = stateStore.updateStatusForActiveSession(
@@ -1244,33 +1255,9 @@ export function createInProcessUiBackendClient(
     await reconcileRuntimeStatus(sessionId);
   }
 
-  async function clearPendingPermissionsForRun(
-    runId: string | undefined,
-  ): Promise<void> {
-    const snapshot = await stateStore.readSnapshot();
-    const requests = snapshot.permissions.filter(
-      (request) => runId === undefined || request.runId === runId,
-    );
-    if (requests.length === 0) {
-      return;
-    }
-
-    const sessionIds = new Set<string>();
-    for (const request of requests) {
-      const sessionId = pendingPermissionSessions.get(request.id);
-      if (sessionId) {
-        sessionIds.add(sessionId);
-      }
-    }
-
-    for (const sessionId of sessionIds) {
-      permission.cancelPending(sessionId);
-    }
-    for (const request of requests) {
-      pendingPermissionSessions.delete(request.id);
-      await stateStore.removePermission(request.id);
-    }
-    await reconcileRuntimeStatus();
+  function clearPendingPermissionsForRun(runId: string): Promise<void> {
+    permission.revokeByRun(runId, "Run ended");
+    return Promise.resolve();
   }
 
   function currentPermissionState(): UiPermissionState {
@@ -1295,6 +1282,93 @@ export function createInProcessUiBackendClient(
         : {}),
       ...(todos.length > 0 || snapshot.todos !== undefined ? { todos } : {}),
       permission: currentPermissionState(),
+      permissions: permissionProjection.listRequests(),
+    };
+  }
+
+  function permissionError(
+    code: string,
+    message: string,
+  ): Error & { code: string } {
+    return Object.assign(new Error(message), { code });
+  }
+
+  async function getSessionIndex(): Promise<readonly UiSessionIndexEntry[]> {
+    await promptScheduler.init();
+    return stateStore.getSessionIndex();
+  }
+
+  async function validatePermissionRoot(
+    sessionId: string,
+  ): Promise<UiSessionIndexEntry> {
+    if (options.sessionManager) {
+      const core = await options.sessionManager.get(sessionId);
+      if (core && !isPrimarySession(core))
+        throw permissionError(
+          "PERMISSION_SCOPE_CHANGED",
+          "Select a primary session to manage permissions",
+        );
+    }
+    const session = (await getSessionIndex()).find(
+      (item) => item.id === sessionId,
+    );
+    if (
+      !session ||
+      (session.projectRoot !== undefined &&
+        !sameSessionProjectRoot(
+          session.projectRoot,
+          await resolveProjectRoot(),
+        ))
+    )
+      throw permissionError(
+        "PERMISSION_SCOPE_CHANGED",
+        "Permission session is unavailable",
+      );
+    return session;
+  }
+
+  let selectionGeneration = 0;
+  async function selectSessionMetadata(sessionId: string): Promise<void> {
+    const generation = ++selectionGeneration;
+    await validatePermissionRoot(sessionId);
+    if (generation !== selectionGeneration)
+      throw permissionError(
+        "PERMISSION_SCOPE_CHANGED",
+        "Session selection has changed",
+      );
+    await stateStore.setActiveSessionId(sessionId);
+    void publishSnapshotReplacement().catch(() => {
+      /* History is independent of selection. */
+    });
+  }
+
+  async function createSessionMetadata(): Promise<UiSessionIndexEntry> {
+    const index = await getSessionIndex();
+    for (const entry of index) sessionIds.reserve(entry.id);
+    const projectRoot = await resolveProjectRoot();
+    const createdAt = timestamp();
+    const core = await options.sessionManager?.create(projectRoot, {
+      agentName: options.agentManager?.getDefault() ?? "default",
+      title: "New session",
+    });
+    const session: UiSession = core
+      ? sessionMetadataToUiSession(core)
+      : {
+          id: sessionIds.next(),
+          title: "New session",
+          projectRoot,
+          createdAt,
+          updatedAt: createdAt,
+          messages: [],
+        };
+    await upsertSession(session);
+    publish({ type: "session.updated", session });
+    return {
+      id: session.id,
+      title: session.title,
+      projectRoot: session.projectRoot,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
     };
   }
 
@@ -1603,6 +1677,7 @@ export function createInProcessUiBackendClient(
    * state) so recency-sorted session lists move it to the top, and a
    * `session.updated` event is always published so connected clients reorder.
    */
+
   async function activateSessionForNewCommand(input: {
     readonly coreSession?: CoreSession;
     readonly session: UiSession;
@@ -2745,31 +2820,18 @@ export function createInProcessUiBackendClient(
         publish(projected.uiEvent);
       },
     }),
-    startPermissionEventProjection({
-      bus,
-      currentPermissionState,
-      getActiveRunId: (sessionId) =>
-        runtimeController.getActiveRunId(sessionId),
-      now: () => Date.now(),
-      pendingPermissionSessions,
-      publish,
-      reconcileRuntimeStatus,
-      stateStore,
-      onAsyncError(error): void {
-        const message = getErrorMessage(error);
-        publishNotice({
-          key: `permission:projection:${message}`,
-          level: "error",
-          message: `Permission event projection failed: ${message}`,
-          source: "permission",
-          title: "Permission update failed",
-        });
-      },
+    startPermissionEventProjection({ bus, currentPermissionState, publish }),
+    permissionProjection.subscribe((event) => {
+      publish(event);
+      void reconcileRuntimeStatus().catch(() => {
+        /* Chat status does not control approvals. */
+      });
     }),
   );
   return {
     async dispose(): Promise<void> {
       acceptsPromptCacheUsage = false;
+      permission.dispose();
       runtimeController.close();
       promptScheduler.close();
       interactionBroker.abortAll("daemon-stopping");
@@ -2780,6 +2842,31 @@ export function createInProcessUiBackendClient(
       await runtimeController.resetRuntime();
     },
 
+    getSessionIndex,
+    getSelectedSessionId: () => stateStore.getActiveSessionId(),
+    createSession: createSessionMetadata,
+    selectSession: selectSessionMetadata,
+    subscribePermissionEvents: permissionProjection.subscribe,
+    async getPermissionSnapshot(
+      input,
+    ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+      input.signal?.throwIfAborted();
+      if (
+        input.permissionEpoch &&
+        input.permissionEpoch !== permissionProjection.permissionEpoch
+      )
+        throw permissionError(
+          "PERMISSION_SCOPE_CHANGED",
+          "Permission runtime changed",
+        );
+      if (input.rootSessionId !== null) {
+        await validatePermissionRoot(input.rootSessionId);
+        if (!permission.isHealthy(input.rootSessionId))
+          throw new PermissionUnavailableError(input.rootSessionId);
+      }
+      input.signal?.throwIfAborted();
+      return permissionProjection.getSnapshot(input.rootSessionId);
+    },
     getSnapshot(): Promise<UiSnapshot> {
       return readSnapshotWithPermission();
     },
@@ -2969,30 +3056,49 @@ export function createInProcessUiBackendClient(
     respondPermission(
       requestId: string,
       response: UiPermissionResponse,
+      context?: {
+        readonly rootSessionId: string | null;
+        readonly permissionEpoch: string;
+        readonly bindingGeneration?: number;
+      },
     ): Promise<void> {
-      const sessionId = pendingPermissionSessions.get(requestId);
-      if (!sessionId) {
+      try {
+        const choice = toCorePermissionResponse(response);
+        const identity =
+          permission.getPending(requestId) ?? permission.getTerminal(requestId);
+        if (!identity)
+          throw permissionError(
+            "PERMISSION_NOT_PENDING",
+            "Permission is no longer pending",
+          );
+        if (
+          context &&
+          (context.permissionEpoch !== permissionProjection.permissionEpoch ||
+            context.rootSessionId !== identity.rootSessionId)
+        ) {
+          throw permissionError(
+            "PERMISSION_SCOPE_CHANGED",
+            "Permission scope changed",
+          );
+        }
+        if (!permission.isHealthy(identity.rootSessionId))
+          throw new PermissionUnavailableError(identity.rootSessionId);
+        const result = permission.respond(
+          identity.sessionId,
+          requestId,
+          choice,
+        );
+        if (result === "revoked" || result === "not-pending")
+          throw permissionError(
+            "PERMISSION_NOT_PENDING",
+            "Permission is no longer pending",
+          );
         return Promise.resolve();
+      } catch (error) {
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
       }
-      if (response.choiceId === "cancel") {
-        return (async (): Promise<void> => {
-          const snapshot = await stateStore.readSnapshot();
-          const runId =
-            snapshot.permissions.find((request) => request.id === requestId)
-              ?.runId ?? runtimeController.getActiveRunId(sessionId);
-          if (runId) {
-            await runtimeController.cancelPromptRun(runId);
-            return;
-          }
-          permission.cancelPending(sessionId);
-        })();
-      }
-      permission.respond(
-        sessionId,
-        requestId,
-        toCorePermissionResponse(response),
-      );
-      return Promise.resolve();
     },
 
     respondInteraction(

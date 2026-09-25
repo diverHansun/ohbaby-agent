@@ -77,10 +77,15 @@ export function createPermissionState(
     return [...(sessionRules.get(sessionId) ?? [])];
   }
 
-  function addSessionRule(sessionId: string, rule: PermissionRule): void {
+  function addSessionRule(
+    sessionId: string,
+    rule: PermissionRule,
+    options?: { readonly silent?: boolean },
+  ): void {
     const rules = sessionRules.get(sessionId) ?? [];
     sessionRules.set(sessionId, [...rules, rule]);
-    bus.publish(PermissionEvent.RuleAdded, { rule, sessionId });
+    if (!options?.silent)
+      bus.publish(PermissionEvent.RuleAdded, { rule, sessionId });
   }
 
   function clearSession(sessionId: string): void {
