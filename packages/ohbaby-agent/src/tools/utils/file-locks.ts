@@ -1,11 +1,10 @@
 import path from "node:path";
 
-const DEFAULT_FILE_LOCK_TIMEOUT_MS = 120_000;
-
+// Process-local protection for cooperating file mutations, not a cross-process lock.
 const fileLockTails = new Map<string, Promise<void>>();
 
 export interface FileLockOptions {
-  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
 }
 
 function fileLockKey(filePath: string): string {
@@ -13,62 +12,46 @@ function fileLockKey(filePath: string): string {
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
-function getTimeoutMs(options: FileLockOptions | undefined): number {
-  const timeoutMs = options?.timeoutMs ?? DEFAULT_FILE_LOCK_TIMEOUT_MS;
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new Error("File lock timeout must be a positive finite number.");
-  }
-  return timeoutMs;
-}
-
-async function runWithTimeout<T>(
-  operation: () => Promise<T>,
-  timeoutMs: number,
-): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const operationPromise = Promise.resolve().then(operation);
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error(`File lock timed out after ${String(timeoutMs)}ms.`));
-    }, timeoutMs);
-    if (typeof timeout === "object" && "unref" in timeout) {
-      timeout.unref();
-    }
-  });
-
-  try {
-    return await Promise.race([operationPromise, timeoutPromise]);
-  } finally {
-    if (timeout !== undefined) {
-      clearTimeout(timeout);
-    }
-  }
-}
-
+/**
+ * Serializes mutations by normalized path; this lock is not reentrant for that path.
+ * The operation promise must cover all protected work, including reads and writes.
+ * The signal only cancels waiting; once started, the operation must settle to unlock.
+ */
 export async function withFileLock<T>(
   filePath: string,
   operation: () => Promise<T>,
   options?: FileLockOptions,
 ): Promise<T> {
+  const signal = options?.signal;
+  signal?.throwIfAborted();
   const key = fileLockKey(filePath);
-  const timeoutMs = getTimeoutMs(options);
   const previous = fileLockTails.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const queuedTail = previous.catch(() => undefined).then(() => current);
-  fileLockTails.set(key, queuedTail);
 
-  await previous.catch(() => undefined);
-  try {
-    return await runWithTimeout(operation, timeoutMs);
-  } finally {
-    release();
-    // The map stores the newest queue tail. Delete only when no later waiter
-    // replaced this tail while the current operation was running.
-    if (fileLockTails.get(key) === queuedTail) {
-      fileLockTails.delete(key);
-    }
-  }
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(
+        signal?.reason instanceof Error
+          ? signal.reason
+          : new Error("File lock wait aborted", { cause: signal?.reason }),
+      );
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const execution = previous.then(async () => {
+      signal?.removeEventListener("abort", onAbort);
+      signal?.throwIfAborted();
+      // Once started, only the actual operation's settlement releases ownership.
+      // Execution deadlines and active cancellation belong to the caller.
+      return await operation();
+    });
+    const tail = execution.then(
+      () => undefined,
+      () => undefined,
+    );
+    fileLockTails.set(key, tail);
+    void tail.then(() => {
+      if (fileLockTails.get(key) === tail) fileLockTails.delete(key);
+    });
+    // Observe rejection even when cancellation already settled the waiting caller.
+    void execution.then(resolve, reject);
+  });
 }
