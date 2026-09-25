@@ -178,6 +178,33 @@ function createOneShotLlmClient(
 }
 
 class FakeBackend implements UiBackendClient {
+  getSessionView(): Promise<never> {
+    return Promise.reject(new Error("view unused by abort fixture"));
+  }
+  getSessionHistory(): Promise<never> {
+    return Promise.reject(new Error("history unused by abort fixture"));
+  }
+  getPromptReceipt(): Promise<never> {
+    return Promise.reject(new Error("receipt unused by abort fixture"));
+  }
+  getSessionControl(input: {
+    sessionId: string;
+  }): Promise<import("ohbaby-sdk").UiSessionControl> {
+    const run = this.snapshot.runs.find(
+      (run) =>
+        run.sessionId === input.sessionId &&
+        (run.status.kind === "running" ||
+          run.status.kind === "waiting-for-permission"),
+    );
+    return Promise.resolve({
+      runtimeEpoch: "test-epoch",
+      sessionId: input.sessionId,
+      rootSessionId: input.sessionId,
+      runId: run?.id ?? null,
+      driver: "user",
+    });
+  }
+
   private readonly createdSessions: Awaited<
     ReturnType<UiBackendClient["getSessionIndex"]>
   >[number][] = [];
@@ -3783,7 +3810,7 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("returns prompt admission failures before issuing a receipt", async () => {
+  it("keeps unclassified prompt admission failures distinguishable from definite rejection", async () => {
     const backend = new FakeBackend();
     backend.admissionError = new Error("admission failed");
     const handle = createApp(backend, {
@@ -3809,7 +3836,7 @@ describe("createDaemonServerApp", () => {
         method: "POST",
       });
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(500);
       await expect(response.json()).resolves.toMatchObject({
         error: { message: "admission failed" },
         ok: false,
@@ -3819,13 +3846,16 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("treats a session without an active run as an idempotent abort", async () => {
+  it("rejects Stop without an explicit run ID", async () => {
     const backend = new FakeBackend();
     const handle = createApp(backend);
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -3845,8 +3875,7 @@ describe("createDaemonServerApp", () => {
         },
       );
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({ ok: true });
+      expect(response.status).toBe(400);
       expect(backend.abortedRunIds).toEqual([]);
     } finally {
       await handle.dispose();
@@ -3871,7 +3900,10 @@ describe("createDaemonServerApp", () => {
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -3881,7 +3913,11 @@ describe("createDaemonServerApp", () => {
       const response = await handle.app.request(
         "/v1/sessions/session_1/abort",
         {
-          body: JSON.stringify({ runId: "run_completed" }),
+          body: JSON.stringify({
+            runtimeEpoch: "test-epoch",
+            bindingGeneration: 1,
+            runId: "run_completed",
+          }),
           headers: {
             ...authHeaders(),
             "content-type": "application/json",
@@ -3891,15 +3927,14 @@ describe("createDaemonServerApp", () => {
         },
       );
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({ ok: true });
+      expect(response.status).toBe(409);
       expect(backend.abortedRunIds).toEqual([]);
     } finally {
       await handle.dispose();
     }
   });
 
-  it("treats an unknown runId as an idempotent abort", async () => {
+  it("rejects an unknown runId without aborting the active run", async () => {
     const backend = new FakeBackend({
       ...emptySnapshot(),
       activeSessionId: "session_1",
@@ -3918,7 +3953,10 @@ describe("createDaemonServerApp", () => {
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -3928,7 +3966,11 @@ describe("createDaemonServerApp", () => {
       const response = await handle.app.request(
         "/v1/sessions/session_1/abort",
         {
-          body: JSON.stringify({ runId: "run_unknown" }),
+          body: JSON.stringify({
+            runtimeEpoch: "test-epoch",
+            bindingGeneration: 1,
+            runId: "run_unknown",
+          }),
           headers: {
             ...authHeaders(),
             "content-type": "application/json",
@@ -3938,8 +3980,7 @@ describe("createDaemonServerApp", () => {
         },
       );
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({ ok: true });
+      expect(response.status).toBe(409);
       expect(backend.abortedRunIds).toEqual([]);
     } finally {
       await handle.dispose();
@@ -3972,7 +4013,10 @@ describe("createDaemonServerApp", () => {
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_2" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -3983,7 +4027,11 @@ describe("createDaemonServerApp", () => {
       const response = await handle.app.request(
         "/v1/sessions/session_2/abort",
         {
-          body: JSON.stringify({ runId: "run_2" }),
+          body: JSON.stringify({
+            runtimeEpoch: "test-epoch",
+            bindingGeneration: 1,
+            runId: "run_2",
+          }),
           headers: {
             ...authHeaders(),
             "content-type": "application/json",
@@ -4025,7 +4073,10 @@ describe("createDaemonServerApp", () => {
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -4072,7 +4123,10 @@ describe("createDaemonServerApp", () => {
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -4082,7 +4136,11 @@ describe("createDaemonServerApp", () => {
       const response = await handle.app.request(
         "/v1/sessions/session_1/abort",
         {
-          body: JSON.stringify({ runId: "run_2" }),
+          body: JSON.stringify({
+            runtimeEpoch: "test-epoch",
+            bindingGeneration: 1,
+            runId: "run_2",
+          }),
           headers: {
             ...authHeaders(),
             "content-type": "application/json",

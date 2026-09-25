@@ -1,3 +1,10 @@
+import {
+  abortForClient,
+  parseSessionQuery,
+  receiptForClient,
+  sessionReadForClient,
+  sessionRecoveryCapability,
+} from "../coordination/session-access.js";
 import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
@@ -121,59 +128,6 @@ function reportInteractionCleanupFailure(logger: Logger, error: unknown): void {
   });
 }
 
-function activeSnapshotRunForSession(
-  snapshot: UiSnapshot,
-  sessionId: string,
-): UiSnapshot["runs"][number] | undefined {
-  const status = snapshot.status;
-  if (status.kind === "running") {
-    const run = snapshot.runs.find(
-      (candidate) => candidate.id === status.runId,
-    );
-    if (run?.sessionId === sessionId) {
-      return run;
-    }
-  }
-  if (status.kind === "waiting-for-permission") {
-    const permission = snapshot.permissions.find(
-      (candidate) => candidate.id === status.requestId,
-    );
-    const run = snapshot.runs.find(
-      (candidate) => candidate.id === permission?.runId,
-    );
-    if (run?.sessionId === sessionId) {
-      return run;
-    }
-  }
-  return snapshot.runs.find(
-    (candidate) =>
-      candidate.sessionId === sessionId &&
-      (candidate.status.kind === "running" ||
-        candidate.status.kind === "waiting-for-permission"),
-  );
-}
-
-function isAbortableSnapshotRun(snapshot: UiSnapshot, runId: string): boolean {
-  const status = snapshot.status;
-  if (status.kind === "running" && status.runId === runId) {
-    return true;
-  }
-  if (
-    status.kind === "waiting-for-permission" &&
-    snapshot.permissions.some(
-      (permission) =>
-        permission.id === status.requestId && permission.runId === runId,
-    )
-  ) {
-    return true;
-  }
-  const run = snapshot.runs.find((candidate) => candidate.id === runId);
-  return (
-    run?.status.kind === "running" ||
-    run?.status.kind === "waiting-for-permission"
-  );
-}
-
 export interface DaemonServerAppHandle {
   readonly app: Hono;
   dispose(): Promise<void>;
@@ -231,6 +185,24 @@ function requestTooLargeBody(): unknown {
 
 function webErrorBody(message: string): unknown {
   return { error: { message }, ok: false };
+}
+
+function promptRejectionBody(message: string): unknown {
+  return { error: { code: "PROMPT_SUBMISSION_REJECTED", message }, ok: false };
+}
+
+/** An unclassified admission error can occur after the durable receipt was saved. */
+function promptAdmissionStatus(error: unknown): 400 | 409 | 429 | 500 {
+  const code = isRecord(error) ? error.code : undefined;
+  if (code === "QUEUE_FULL") return 429;
+  if (code === "IDEMPOTENCY_CONFLICT") return 409;
+  if (
+    code === "PROMPT_SUBMISSION_REJECTED" ||
+    code === "INVALID_CLIENT_REQUEST_ID" ||
+    code === "PROMPT_SCHEDULER_CLOSED"
+  )
+    return 400;
+  return 500;
 }
 
 function promptErrorBody(error: unknown): unknown {
@@ -570,6 +542,37 @@ async function readJsonWithLimit(request: Request): Promise<
 }
 
 function createOpenApiDocument(packageVersion: string | undefined): unknown {
+  const recoveryParameters = [
+    {
+      name: "x-ohbaby-client-id",
+      in: "header",
+      required: true,
+      schema: { type: "string", minLength: 1 },
+    },
+    {
+      name: "runtimeEpoch",
+      in: "query",
+      required: true,
+      schema: { type: "string", minLength: 1 },
+    },
+    {
+      name: "bindingGeneration",
+      in: "query",
+      required: true,
+      schema: { type: "integer", minimum: 1 },
+    },
+  ];
+  const recoveryResponses = {
+    "200": {
+      description:
+        "Source-owned data with its original session version and current binding",
+    },
+    "400": { description: "Invalid query or cursor" },
+    "409": { description: "Session binding changed or scope is unavailable" },
+    "426": { description: "Session recovery capability is unsupported" },
+    "503": { description: "Source projection or control is unavailable" },
+  };
+
   return {
     info: {
       title: "ohbaby local daemon API",
@@ -578,6 +581,42 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
     openapi: "3.1.0",
     components: {
       schemas: {
+        SessionVersion: {
+          type: "object",
+          required: [
+            "runtimeEpoch",
+            "sessionId",
+            "viewGeneration",
+            "sessionRevision",
+          ],
+          properties: {
+            runtimeEpoch: { type: "string" },
+            sessionId: { type: "string" },
+            viewGeneration: { type: "string" },
+            sessionRevision: { type: "integer", minimum: 0 },
+          },
+        },
+        RecoveryBinding: {
+          type: "object",
+          required: [
+            "runtimeEpoch",
+            "permissionEpoch",
+            "bindingGeneration",
+            "rootSessionId",
+            "sessionRecoveryVersion",
+          ],
+          properties: {
+            runtimeEpoch: {
+              type: "string",
+              description: "Identical to permissionEpoch in this runtime",
+            },
+            permissionEpoch: { type: "string" },
+            bindingGeneration: { type: "integer", minimum: 1 },
+            rootSessionId: { type: ["string", "null"] },
+            sessionRecoveryVersion: { type: "integer", enum: [0, 1] },
+          },
+        },
+
         ReasoningConfig: {
           type: "object",
           additionalProperties: false,
@@ -603,6 +642,62 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
       },
     },
     paths: {
+      ...Object.fromEntries(
+        ["view", "history", "control"].map((kind) => [
+          `/v1/sessions/{id}/${kind}`,
+          {
+            get: {
+              summary: `Read source session ${kind}`,
+              parameters: [
+                {
+                  name: "id",
+                  in: "path",
+                  required: true,
+                  schema: { type: "string" },
+                },
+                ...recoveryParameters,
+                ...(kind === "history"
+                  ? [
+                      {
+                        name: "before",
+                        in: "query",
+                        schema: { type: "string", maxLength: 4096 },
+                      },
+                      {
+                        name: "limit",
+                        in: "query",
+                        schema: {
+                          type: "integer",
+                          minimum: 1,
+                          maximum: 200,
+                          default: 50,
+                        },
+                      },
+                    ]
+                  : []),
+              ],
+              responses: recoveryResponses,
+            },
+          },
+        ]),
+      ),
+      "/v1/prompts/receipt": {
+        get: {
+          summary: "Recover the original prompt receipt without resubmitting",
+          parameters: [
+            ...recoveryParameters,
+            {
+              name: "clientRequestId",
+              in: "query",
+              required: true,
+              schema: { type: "string", minLength: 1 },
+            },
+            { name: "sessionId", in: "query", schema: { type: "string" } },
+          ],
+          responses: recoveryResponses,
+        },
+      },
+
       "/v1/sessions/{id}/reasoning": {
         patch: {
           summary: "Save session reasoning preference",
@@ -635,6 +730,11 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
           responses: {
             "200": {
               description: "Registered browser client",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/RecoveryBinding" },
+                },
+              },
             },
           },
           summary: "Register a browser client view",
@@ -644,7 +744,8 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
         get: {
           responses: {
             "200": {
-              description: "SSE stream of daemon events",
+              description:
+                "SSE hello includes RecoveryBinding; session.changed carries the unchanged SessionVersion. Every revision for the selected root is delivered, including history-only invalidations. Transport sequence numbers are replay positions only.",
             },
           },
           summary: "Subscribe to replayable event stream",
@@ -798,7 +899,24 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
               description: "Abort request accepted",
             },
           },
-          summary: "Abort a session run",
+          summary:
+            "Abort the exact active run from independent session control",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["runId", "runtimeEpoch", "bindingGeneration"],
+                  properties: {
+                    runId: { type: "string", minLength: 1 },
+                    runtimeEpoch: { type: "string" },
+                    bindingGeneration: { type: "integer", minimum: 1 },
+                  },
+                },
+              },
+            },
+          },
         },
       },
       "/v1/sessions/{id}/compact": {
@@ -1022,15 +1140,24 @@ class DaemonServerAppRuntime {
           ok: false,
           error: { message: errorMessage(error), ...(code ? { code } : {}) },
         },
-        code === "INVALID_PERMISSION_CHOICE"
+        code === "INVALID_SESSION_QUERY"
           ? 400
-          : code === "PERMISSION_UNAVAILABLE"
-            ? 503
-            : code?.startsWith("PERMISSION_")
-              ? 409
-              : isDaemonForbiddenError(error)
-                ? 403
-                : 500,
+          : code === "SESSION_RECOVERY_UNSUPPORTED"
+            ? 426
+            : code === "SESSION_VIEW_UNAVAILABLE" ||
+                code === "SESSION_CONTROL_UNAVAILABLE"
+              ? 503
+              : code === "SESSION_SCOPE_CHANGED"
+                ? 409
+                : code === "INVALID_PERMISSION_CHOICE"
+                  ? 400
+                  : code === "PERMISSION_UNAVAILABLE"
+                    ? 503
+                    : code?.startsWith("PERMISSION_")
+                      ? 409
+                      : isDaemonForbiddenError(error)
+                        ? 403
+                        : 500,
       );
     });
     this.app.get("/doc", (context) => {
@@ -1128,11 +1255,19 @@ class DaemonServerAppRuntime {
           this.waitControllers.delete(controller);
         }
       } catch (error) {
-        const status = isDaemonForbiddenError(error)
-          ? 403
-          : isRecord(error) && error.code === "INVALID_CLIENT_REQUEST_ID"
-            ? 400
-            : 500;
+        const status =
+          isRecord(error) && error.code === "SESSION_SCOPE_CHANGED"
+            ? 409
+            : isRecord(error) && error.code === "SESSION_RECOVERY_UNSUPPORTED"
+              ? 426
+              : isRecord(error) && error.code === "INVALID_SESSION_QUERY"
+                ? 400
+                : isDaemonForbiddenError(error)
+                  ? 403
+                  : isRecord(error) &&
+                      error.code === "INVALID_CLIENT_REQUEST_ID"
+                    ? 400
+                    : 500;
         return context.json(
           createDaemonRpcFailure(parsed.request.id, error),
           status,
@@ -1191,7 +1326,15 @@ class DaemonServerAppRuntime {
       this.registeredWebClientIds.add(clientId);
       this.cancelClientRoutingCleanup(clientId);
 
-      return context.json({ clientId, ok: true, ...binding });
+      return context.json({
+        clientId,
+        ok: true,
+        ...binding,
+        ...sessionRecoveryCapability(
+          this.options.backend,
+          this.permissionEpoch,
+        ),
+      });
     });
 
     this.app.get("/v1/sessions/index", async (context) => {
@@ -1201,6 +1344,50 @@ class DaemonServerAppRuntime {
         ok: true,
         sessions: await this.options.backend.getSessionIndex(),
       });
+    });
+
+    for (const [suffix, kind, field] of [
+      ["view", "getSessionView", "view"],
+      ["history", "getSessionHistory", "history"],
+      ["control", "getSessionControl", "control"],
+    ] as const) {
+      this.app.get(`/v1/sessions/:id/${suffix}`, async (context) => {
+        const authorization = this.authorizePromptMutation(context);
+        if ("response" in authorization) return authorization.response;
+        const raw: Record<string, string | undefined> = context.req.query();
+        const query = parseSessionQuery({
+          ...raw,
+          sessionId: context.req.param("id"),
+          bindingGeneration: Number(raw.bindingGeneration),
+          ...(raw.limit === undefined ? {} : { limit: Number(raw.limit) }),
+        });
+        const result = await sessionReadForClient({
+          backend: this.options.backend,
+          views: this.clientViews,
+          clientId: authorization.clientId,
+          epoch: this.permissionEpoch,
+          kind,
+          query: { ...query, signal: context.req.raw.signal },
+        });
+        return context.json({ ok: true, [field]: result });
+      });
+    }
+    this.app.get("/v1/prompts/receipt", async (context) => {
+      const authorization = this.authorizePromptMutation(context);
+      if ("response" in authorization) return authorization.response;
+      const raw: Record<string, string | undefined> = context.req.query();
+      const query = parseSessionQuery(
+        { ...raw, bindingGeneration: Number(raw.bindingGeneration) },
+        true,
+      );
+      const result = await receiptForClient({
+        backend: this.options.backend,
+        views: this.clientViews,
+        clientId: authorization.clientId,
+        epoch: this.permissionEpoch,
+        query: { ...query, signal: context.req.raw.signal },
+      });
+      return context.json({ ok: true, result });
     });
 
     this.app.get("/v1/snapshot", async (context) => {
@@ -1505,6 +1692,10 @@ class DaemonServerAppRuntime {
         ok: true,
         session,
         ...this.clientViews.binding(clientId, this.permissionEpoch),
+        ...sessionRecoveryCapability(
+          this.options.backend,
+          this.permissionEpoch,
+        ),
       });
     });
 
@@ -1532,7 +1723,14 @@ class DaemonServerAppRuntime {
         this.permissionEpoch,
       );
       this.notifyBinding(clientId);
-      return context.json({ ok: true, ...binding });
+      return context.json({
+        ok: true,
+        ...binding,
+        ...sessionRecoveryCapability(
+          this.options.backend,
+          this.permissionEpoch,
+        ),
+      });
     });
 
     this.app.patch("/v1/sessions/:id/archive", async (context) => {
@@ -1618,29 +1816,35 @@ class DaemonServerAppRuntime {
 
     this.app.post("/v1/prompts", async (context) => {
       if (!this.isAuthorized(context.req.header("authorization"))) {
-        return context.json(webErrorBody("Unauthorized"), 401);
+        return context.json(promptRejectionBody("Unauthorized"), 401);
       }
       const clientId = this.clientIdFromRequest(context);
       if (!clientId) {
-        return context.json(webErrorBody("clientId is required"), 400);
+        return context.json(promptRejectionBody("clientId is required"), 400);
       }
       if (!this.isRegisteredWebClient(clientId)) {
-        return context.json(webErrorBody("client is not registered"), 409);
+        return context.json(
+          promptRejectionBody("client is not registered"),
+          409,
+        );
       }
 
       const parsed = await readJsonWithLimit(context.req.raw);
       if (!parsed.ok) {
         return context.json(
-          webErrorBody(parsed.message),
+          promptRejectionBody(parsed.message),
           parsed.status as 400 | 413,
         );
       }
       const body = isRecord(parsed.value) ? parsed.value : {};
       if (body.reasoning !== undefined && !isUiReasoningConfig(body.reasoning))
-        return context.json(webErrorBody("Invalid reasoning preference"), 400);
+        return context.json(
+          promptRejectionBody("Invalid reasoning preference"),
+          400,
+        );
       const text = asNonEmptyString(body.text);
       if (!text) {
-        return context.json(webErrorBody("text is required"), 400);
+        return context.json(promptRejectionBody("text is required"), 400);
       }
       const sessionId = asNonEmptyString(body.sessionId);
       const clientRequestId = asNonEmptyString(body.clientRequestId);
@@ -1683,13 +1887,17 @@ class DaemonServerAppRuntime {
             ok: true,
             ...accepted.receipt,
             ...this.clientViews.binding(clientId, this.permissionEpoch),
+            ...sessionRecoveryCapability(
+              this.options.backend,
+              this.permissionEpoch,
+            ),
           },
           202,
         );
       } catch (error) {
         return context.json(
           promptErrorBody(error),
-          promptMutationStatus(error),
+          promptAdmissionStatus(error),
         );
       } finally {
         if (
@@ -2107,21 +2315,19 @@ class DaemonServerAppRuntime {
           400,
         );
       }
-      const resolution = await this.resolveRunForAbort(
-        context.req.param("id"),
-        requestedRunId,
-      );
-      if (resolution.kind === "session-mismatch") {
-        return context.json(
-          webErrorBody("Run does not belong to the requested session"),
-          409,
-        );
-      }
-      if (resolution.kind === "abort") {
-        await this.commandBackend("server-rest", { clientId }).abortRun(
-          resolution.runId,
-        );
-      }
+      if (!requestedRunId)
+        return context.json(webErrorBody("An exact runId is required"), 400);
+      await abortForClient({
+        backend: this.commandBackend("server-rest", { clientId }),
+        views: this.clientViews,
+        clientId,
+        epoch: this.permissionEpoch,
+        query: parseSessionQuery({
+          ...body,
+          sessionId: context.req.param("id"),
+        }),
+        runId: requestedRunId,
+      });
       return context.json({ ok: true });
     });
 
@@ -2167,36 +2373,6 @@ class DaemonServerAppRuntime {
       asNonEmptyString(context.req.header(CLIENT_ID_HEADER)) ??
       asNonEmptyString(context.req.query("clientId"))
     );
-  }
-
-  private async resolveRunForAbort(
-    sessionId: string,
-    requestedRunId: string | undefined,
-  ): Promise<
-    | { readonly kind: "abort"; readonly runId: string }
-    | { readonly kind: "no-op" }
-    | { readonly kind: "session-mismatch" }
-  > {
-    const snapshot = await this.options.backend.getSnapshot();
-    if (requestedRunId !== undefined) {
-      const requestedRun = snapshot.runs.find(
-        (candidate) => candidate.id === requestedRunId,
-      );
-      if (!requestedRun) {
-        return { kind: "no-op" };
-      }
-      if (requestedRun.sessionId !== sessionId) {
-        return { kind: "session-mismatch" };
-      }
-      return isAbortableSnapshotRun(snapshot, requestedRun.id)
-        ? { kind: "abort", runId: requestedRun.id }
-        : { kind: "no-op" };
-    }
-    const run = activeSnapshotRunForSession(snapshot, sessionId);
-    if (!run) {
-      return { kind: "no-op" };
-    }
-    return { kind: "abort", runId: run.id };
   }
 
   private async serveWebAsset(context: Context): Promise<Response> {
@@ -2325,6 +2501,10 @@ class DaemonServerAppRuntime {
           clientId,
           type: "hello",
           ...this.clientViews.binding(clientId, this.permissionEpoch),
+          ...sessionRecoveryCapability(
+            this.options.backend,
+            this.permissionEpoch,
+          ),
         });
         this.replayMissedEvents(client, lastEventId);
         signal.addEventListener(
@@ -2460,6 +2640,10 @@ class DaemonServerAppRuntime {
           type: "hello",
           clientId,
           ...this.clientViews.binding(clientId, this.permissionEpoch),
+          ...sessionRecoveryCapability(
+            this.options.backend,
+            this.permissionEpoch,
+          ),
         });
       } catch {
         this.disconnectClient(client);
@@ -2492,6 +2676,31 @@ class DaemonServerAppRuntime {
     }
   }
 
+  private async reconcileSessionBindings(): Promise<void> {
+    const previous = [...this.knownClientIds]
+      .filter((id) => this.clientViews.isRegistered(id))
+      .map((id) => ({
+        id,
+        binding: this.clientViews.binding(id, this.permissionEpoch),
+      }));
+    const index = await this.options.backend.getSessionIndex();
+    const roots = new Set(
+      index
+        .filter((session) => !session.parentId && !session.isSubagent)
+        .map((session) => session.id),
+    );
+    for (const { id, binding } of previous) {
+      if (!binding.rootSessionId || roots.has(binding.rootSessionId)) continue;
+      try {
+        this.clientViews.assertBinding(id, binding, this.permissionEpoch);
+        this.clientViews.selectSession(id, null, binding.bindingGeneration);
+        this.notifyBinding(id);
+      } catch {
+        /* A newer client selection owns the binding. */
+      }
+    }
+  }
+
   private broadcast(envelope: EventEnvelope): void {
     const event = envelope.event;
     const previousBindings =
@@ -2513,10 +2722,16 @@ class DaemonServerAppRuntime {
     for (const client of Array.from(this.clients)) {
       const routed = replayEvents.get(client.clientId);
       if (routed) {
-        client.write({ event: routed, type: "ui.event" }, envelope.seqNum);
+        try {
+          client.write({ event: routed, type: "ui.event" }, envelope.seqNum);
+        } catch {
+          this.disconnectClient(client);
+        }
       }
     }
     this.clientViews.afterEventBroadcast(event);
+    if (event.type === "session.index.invalidated")
+      void this.reconcileSessionBindings().catch(() => undefined);
     if (
       event.type === "command.result.delivered" &&
       event.action?.kind === "session.selected"
@@ -2560,7 +2775,46 @@ class DaemonServerAppRuntime {
       routed,
       this.clientViews.binding(clientId, this.permissionEpoch).rootSessionId,
     );
-    return filtered ?? undefined;
+    if (!filtered || filtered.type === "snapshot.replaced") return undefined;
+    if (
+      filtered.type === "session.changed" ||
+      filtered.type === "session.unavailable"
+    ) {
+      return {
+        ...filtered,
+        bindingGeneration: this.clientViews.binding(
+          clientId,
+          this.permissionEpoch,
+        ).bindingGeneration,
+      };
+    }
+    return this.projectSelectionForBinding(filtered, clientId, false);
+  }
+
+  private projectSelectionForBinding(
+    event: UiEvent,
+    clientId: string,
+    replay: boolean,
+  ): UiEvent {
+    const selected = this.clientViews.binding(
+      clientId,
+      this.permissionEpoch,
+    ).rootSessionId;
+    if (event.type === "session.index.invalidated")
+      return { ...event, selectedSessionId: selected };
+    if (
+      event.type === "command.result.delivered" &&
+      event.action?.kind === "session.selected" &&
+      (replay ||
+        !isRecord(event.action.data) ||
+        event.action.data.choiceId !== selected)
+    ) {
+      // hello owns reconnect selection; historical command results remain visible
+      // but their one-shot selection action must never execute again.
+      const { action: _action, ...result } = event;
+      return result;
+    }
+    return event;
   }
 
   private writeReplayEnvelopeToClient(
@@ -2571,7 +2825,13 @@ class DaemonServerAppRuntime {
       .get(envelope.seqNum)
       ?.get(client.clientId);
     if (routed) {
-      client.write({ event: routed, type: "ui.event" }, envelope.seqNum);
+      client.write(
+        {
+          event: this.projectSelectionForBinding(routed, client.clientId, true),
+          type: "ui.event",
+        },
+        envelope.seqNum,
+      );
     }
   }
 

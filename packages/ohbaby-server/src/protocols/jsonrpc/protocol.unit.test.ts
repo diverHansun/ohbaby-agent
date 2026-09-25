@@ -150,6 +150,10 @@ describe("daemon protocol", () => {
   it("covers every CoreAPI method", () => {
     expect(DAEMON_RPC_METHODS).toEqual([
       "getSnapshot",
+      "getSessionView",
+      "getSessionHistory",
+      "getSessionControl",
+      "getPromptReceipt",
       "getSessionIndex",
       "getSelectedSessionId",
       "getPermissionSnapshot",

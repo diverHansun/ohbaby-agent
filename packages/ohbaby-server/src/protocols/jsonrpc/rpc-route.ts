@@ -1,3 +1,10 @@
+import {
+  abortForClient,
+  parseSessionQuery,
+  receiptForClient,
+  sessionReadForClient,
+  sessionRecoveryCapability,
+} from "../../coordination/session-access.js";
 import { randomUUID } from "node:crypto";
 import { isUiReasoningConfig } from "ohbaby-sdk";
 import type {
@@ -160,6 +167,31 @@ export async function callDaemonBackend(input: {
     input;
 
   switch (request.method) {
+    case "getSessionView":
+    case "getSessionHistory":
+    case "getSessionControl":
+      return sessionReadForClient({
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        kind: request.method,
+        query: {
+          ...parseSessionQuery(request.params[0]),
+          signal: input.signal,
+        },
+      });
+    case "getPromptReceipt":
+      return receiptForClient({
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        query: {
+          ...parseSessionQuery(request.params[0], true),
+          signal: input.signal,
+        },
+      });
     case "getSnapshot": {
       const snapshot = await backend.getSnapshot();
       return permissionRouter.filterSnapshotForClient(
@@ -171,13 +203,17 @@ export async function callDaemonBackend(input: {
       );
     }
     case "initializeClient": {
-      return initializePermissionClient(
+      const binding = await initializePermissionClient(
         backend,
         clientViews,
         request.clientId,
         request.params[0],
         input.permissionEpoch,
       );
+      return {
+        ...binding,
+        ...sessionRecoveryCapability(backend, input.permissionEpoch),
+      };
     }
     case "getSessionIndex":
       return backend.getSessionIndex();
@@ -192,8 +228,8 @@ export async function callDaemonBackend(input: {
         parsePermissionBinding(request.params[0]),
         input.permissionEpoch,
       );
-    case "selectSession":
-      return selectPermissionSession(
+    case "selectSession": {
+      const binding = await selectPermissionSession(
         backend,
         clientViews,
         request.clientId,
@@ -201,6 +237,11 @@ export async function callDaemonBackend(input: {
         input.permissionEpoch,
         typeof request.params[1] === "number" ? request.params[1] : undefined,
       );
+      return {
+        ...binding,
+        ...sessionRecoveryCapability(backend, input.permissionEpoch),
+      };
+    }
     case "createSession": {
       const previous = clientViews.binding(
         request.clientId,
@@ -220,6 +261,7 @@ export async function callDaemonBackend(input: {
       return {
         session,
         ...clientViews.binding(request.clientId, input.permissionEpoch),
+        ...sessionRecoveryCapability(backend, input.permissionEpoch),
       };
     }
     case "getContextWindowUsage":
@@ -245,6 +287,7 @@ export async function callDaemonBackend(input: {
       return {
         ...accepted.receipt,
         ...clientViews.binding(request.clientId, input.permissionEpoch),
+        ...sessionRecoveryCapability(backend, input.permissionEpoch),
       };
     }
     case "editQueuedPrompt": {
@@ -486,8 +529,21 @@ export async function callDaemonBackend(input: {
       });
       return undefined;
     }
-    case "abortRun":
-      return backend.abortRun(request.params[0] as string);
+    case "abortRun": {
+      const runId = request.params[0];
+      if (typeof runId !== "string" || !runId)
+        throw Object.assign(new Error("An exact runId is required"), {
+          code: "INVALID_SESSION_QUERY",
+        });
+      return abortForClient({
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        query: parseSessionQuery(request.params[1]),
+        runId,
+      });
+    }
   }
 }
 

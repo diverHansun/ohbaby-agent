@@ -2,6 +2,10 @@ import type { UiEvent } from "ohbaby-sdk";
 
 export const DAEMON_RPC_METHODS = [
   "getSnapshot",
+  "getSessionView",
+  "getSessionHistory",
+  "getSessionControl",
+  "getPromptReceipt",
   "getSessionIndex",
   "getSelectedSessionId",
   "getPermissionSnapshot",
@@ -75,6 +79,8 @@ export type DaemonRpcResponse =
 export type DaemonSseEvent =
   | {
       readonly type: "hello";
+      readonly runtimeEpoch?: string;
+      readonly sessionRecoveryVersion?: number;
       readonly clientId: string;
       readonly permissionEpoch: string;
       readonly rootSessionId: string | null;
@@ -245,6 +251,12 @@ export function parseDaemonSseEvent(value: unknown): DaemonSseEvent {
       )
         throw new TypeError("Daemon SSE hello rootSessionId is required");
       return {
+        ...(typeof value.runtimeEpoch === "string"
+          ? { runtimeEpoch: value.runtimeEpoch }
+          : {}),
+        ...(typeof value.sessionRecoveryVersion === "number"
+          ? { sessionRecoveryVersion: value.sessionRecoveryVersion }
+          : {}),
         permissionEpoch: requireString(
           value,
           "permissionEpoch",

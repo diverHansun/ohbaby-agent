@@ -64,7 +64,12 @@ export async function initializePermissionClient(
     { sessions },
     parseDaemonStartupIntent(intent),
   );
-  return views.binding(clientId, epoch);
+  const binding = views.binding(clientId, epoch);
+  if (binding.rootSessionId)
+    void backend
+      .initializeSession?.(binding.rootSessionId)
+      .catch(() => undefined);
+  return binding;
 }
 
 export async function validateRoot(
@@ -101,7 +106,12 @@ export async function selectPermissionSession(
   await validateRoot(backend, rootSessionId);
   views.assertBinding(clientId, previous, epoch);
   views.selectSession(clientId, rootSessionId, previous.bindingGeneration);
-  return views.binding(clientId, epoch);
+  const binding = views.binding(clientId, epoch);
+  if (binding.rootSessionId)
+    void backend
+      .initializeSession?.(binding.rootSessionId)
+      .catch(() => undefined);
+  return binding;
 }
 
 export async function permissionSnapshotForClient(

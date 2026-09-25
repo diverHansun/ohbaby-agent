@@ -2061,7 +2061,7 @@ describe("createDaemonHttpServer", () => {
     });
   });
 
-  it("rewrites snapshot replacement events for each initialized client view", async () => {
+  it("suppresses legacy snapshot replacement events for every client view", async () => {
     const backend = new FakeBackend({
       ...emptySnapshot(),
       sessions: [
@@ -2097,19 +2097,17 @@ describe("createDaemonHttpServer", () => {
 
       backend.emit(snapshotReplaced("session_1"));
 
+      backend.emit({ type: "session.index.invalidated" });
       await expect(readActive()).resolves.toMatchObject({
-        event: { snapshot: { activeSessionId: "session_1" } },
         type: "ui.event",
+        event: {
+          type: "session.index.invalidated",
+          selectedSessionId: "session_1",
+        },
       });
       await expect(readFresh()).resolves.toMatchObject({
-        event: {
-          snapshot: {
-            activeSessionId: null,
-            runs: [],
-            sessions: [{ id: "session_1", messages: [] }],
-          },
-        },
         type: "ui.event",
+        event: { type: "session.index.invalidated", selectedSessionId: null },
       });
     });
   });

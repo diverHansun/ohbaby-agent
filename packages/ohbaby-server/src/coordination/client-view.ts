@@ -287,6 +287,10 @@ function selectedSessionIdFromCommandAction(
 
 function sessionIdForEvent(event: UiEvent): string | undefined {
   switch (event.type) {
+    case "session.changed":
+      return event.version.sessionId;
+    case "session.unavailable":
+      return event.sessionId;
     case "session.updated":
       return event.session.id;
     case "message.appended":
@@ -394,7 +398,7 @@ export class DaemonClientViewCoordinator {
 
   selectSession(
     clientId: string,
-    sessionId: string,
+    sessionId: string | null,
     expectedGeneration: number,
   ): void {
     const view = this.clientViews.get(clientId);

@@ -621,7 +621,9 @@ describe("createRemoteUiBackendClient", () => {
       backend,
       async (client) => {
         const eventPromise = new Promise<UiEvent>((resolve) => {
-          client.subscribeEvents(resolve);
+          client.subscribeEvents((event) => {
+            if (event.type !== "session.resync-required") resolve(event);
+          });
         });
 
         await eventuallyEmit(backend, noticeEmitted(), eventPromise);
@@ -650,7 +652,9 @@ describe("createRemoteUiBackendClient", () => {
           sessionId: "session_1",
         });
         const eventPromise = new Promise<UiEvent>((resolve) => {
-          client.subscribeEvents(resolve);
+          client.subscribeEvents((event) => {
+            if (event.type !== "session.resync-required") resolve(event);
+          });
         });
         await eventuallyEmit(backend, sessionUpdated(), eventPromise);
 
@@ -762,7 +766,9 @@ describe("createRemoteUiBackendClient", () => {
         choiceId: "choice_1",
         kind: "accepted",
       });
-      await client.abortRun("run_1");
+      await expect(client.abortRun("run_1")).rejects.toMatchObject({
+        code: "SESSION_RECOVERY_UNSUPPORTED",
+      });
     });
 
     expect(backend.calls).toEqual([
@@ -789,7 +795,6 @@ describe("createRemoteUiBackendClient", () => {
         args: ["interaction_1", { choiceId: "choice_1", kind: "accepted" }],
         method: "respondInteraction",
       },
-      { args: ["run_1"], method: "abortRun" },
     ]);
   });
 
@@ -798,7 +803,9 @@ describe("createRemoteUiBackendClient", () => {
 
     await withRemoteClient(backend, async (client) => {
       const eventPromise = new Promise<UiEvent>((resolve) => {
-        client.subscribeEvents(resolve);
+        client.subscribeEvents((event) => {
+          if (event.type !== "session.resync-required") resolve(event);
+        });
       });
 
       await eventuallyEmit(backend, noticeEmitted(), eventPromise);
