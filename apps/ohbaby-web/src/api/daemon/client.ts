@@ -669,12 +669,19 @@ class BrowserDaemonClient implements UiBackendClient {
     this.buffering = true;
     let committedSeqNum = this.store.getSnapshot().view.lastAppliedSeqNum;
     try {
-      const response = await this.http.getSnapshot({
-        signal: this.lifecycleController.signal,
-      });
-      if (this.closed) {
-        return;
-      }
+      let binding: string;
+      let response: Awaited<ReturnType<DaemonHttpClient["getSnapshot"]>>;
+      do {
+        binding = JSON.stringify(this.permissionSync.getState().binding);
+        response = await this.http.getSnapshot({
+          signal: this.lifecycleController.signal,
+        });
+        if (this.closed) return;
+        // A selection can finish while old history is loading. Re-read that
+        // view rather than committing it or losing the coalesced refresh.
+      } while (
+        binding !== JSON.stringify(this.permissionSync.getState().binding)
+      );
       this.dispatchUiEvent(
         { snapshot: response.snapshot, type: "snapshot.replaced" },
         response.seqNum,
@@ -818,6 +825,9 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   private controlPlaneAvailable = true;
   private disposed = false;
   private hasConnectedWorkspace = false;
+  private restoringSession = false;
+  private preserveRememberedSession = false;
+  private sessionSelectionGeneration = 0;
   private navigationState: WebNavigationState;
   private switchPromise: Promise<void> = Promise.resolve();
   private workspaceSnapshot: WorkspaceSnapshot;
@@ -850,6 +860,8 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   }
 
   async createSession(): Promise<void> {
+    this.sessionSelectionGeneration += 1;
+    this.preserveRememberedSession = false;
     await this.requireActiveClient().createSessionForRuntime();
   }
 
@@ -860,6 +872,8 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   }
 
   async selectSession(sessionId: string): Promise<void> {
+    this.sessionSelectionGeneration += 1;
+    this.preserveRememberedSession = false;
     await this.requireActiveClient().selectSessionForRuntime(sessionId);
   }
 
@@ -911,6 +925,10 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       input.allowOverlay !== true
     ) {
       throw new Error(`Command "${input.text}" must be opened from the UI`);
+    }
+    if (resolved.command.id === "new" || resolved.command.id === "resume") {
+      this.sessionSelectionGeneration += 1;
+      this.preserveRememberedSession = false;
     }
     await client.executeCommand({
       argumentMode: resolved.command.argumentMode,
@@ -1013,6 +1031,13 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       this.rememberSelectedDirectory(selectedDirectory);
       return;
     }
+    const startupIntent = this.scopedBootstrapConfig().startupIntent;
+    const rememberedSessionId =
+      startupIntent?.resumeSessionId ||
+      startupIntent?.startupSessionMode?.type === "fresh"
+        ? undefined
+        : this.navigationState.sessionByDirectory[selectedDirectory];
+    const selectionGeneration = this.sessionSelectionGeneration;
     const previousDirectory = this.workspaceSnapshot.selectedDirectory;
     const previousScopes = this.workspaceSnapshot.scopes;
     const previousClient = this.activeClient;
@@ -1034,6 +1059,8 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       ),
       selectedDirectory,
     });
+    this.preserveRememberedSession = false;
+    this.restoringSession = true;
     try {
       await nextClient.connect();
       if (this.isDisposed()) {
@@ -1042,7 +1069,11 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
         return;
       }
       this.hasConnectedWorkspace = true;
-      await this.restoreRememberedSession(selectedDirectory);
+      await this.restoreRememberedSession(
+        nextClient,
+        rememberedSessionId,
+        selectionGeneration,
+      );
       if (this.controlPlaneAvailable) {
         await this.refreshWorkspaces();
       }
@@ -1068,6 +1099,9 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       });
       await this.activeClient?.connect().catch(() => undefined);
       throw error;
+    } finally {
+      this.restoringSession = false;
+      this.persistActiveSession();
     }
   }
 
@@ -1130,22 +1164,50 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     return this.disposed;
   }
 
-  private async restoreRememberedSession(directory: string): Promise<void> {
-    const sessionId = this.navigationState.sessionByDirectory[directory];
-    const snapshot = this.store.getSnapshot().view.snapshot;
+  private async restoreRememberedSession(
+    client: BrowserDaemonClient,
+    sessionId: string | undefined,
+    selectionGeneration: number,
+  ): Promise<void> {
+    if (!sessionId || (await client.getSelectedSessionId()) === sessionId) {
+      return;
+    }
+    // Navigation needs only lightweight metadata, never the history/model
+    // refresh that runs independently from the live permission subscription.
+    const sessions = await client.getSessionIndex().catch((error: unknown) => {
+      if (this.disposed || this.activeClient !== client) return [];
+      // Failed metadata is not evidence that the remembered session vanished.
+      // Keep that preference until a subsequent explicit user selection.
+      this.preserveRememberedSession =
+        this.sessionSelectionGeneration === selectionGeneration;
+      this.store.setError(
+        error instanceof Error ? error.message : String(error),
+      );
+      return [];
+    });
     if (
-      !sessionId ||
-      snapshot?.activeSessionId === sessionId ||
-      !snapshot?.sessions.some((session) => session.id === sessionId)
+      this.disposed ||
+      this.activeClient !== client ||
+      this.sessionSelectionGeneration !== selectionGeneration ||
+      !sessions.some(
+        (session) =>
+          session.id === sessionId && !session.parentId && !session.isSubagent,
+      )
     ) {
       return;
     }
-    await this.activeClient?.selectSessionForRuntime(sessionId);
+    await client.selectSessionForRuntime(sessionId);
   }
 
   private persistActiveSession(): void {
+    if (this.restoringSession || this.preserveRememberedSession) return;
     const directory = this.workspaceSnapshot.selectedDirectory;
-    const sessionId = this.store.getSnapshot().view.snapshot?.activeSessionId;
+    const { permissionSync, view } = this.store.getSnapshot();
+    // A delayed history response may still describe the previous selection.
+    // The live transport binding owns the selected session when available.
+    const sessionId = permissionSync.binding
+      ? permissionSync.binding.rootSessionId
+      : view.snapshot?.activeSessionId;
     if (!directory || !sessionId) {
       return;
     }

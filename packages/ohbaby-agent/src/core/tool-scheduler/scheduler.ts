@@ -1074,6 +1074,7 @@ export function createToolScheduler(
         path: externalPath.absolutePath,
         pattern: externalPath.askPattern,
       };
+      const permissionSnapshot = permissionState.getState();
       let decision: PermissionDecision;
       try {
         decision = await waitForAbortable(
@@ -1087,7 +1088,7 @@ export function createToolScheduler(
                 sessionId: call.sessionId,
                 toolName: "external_directory",
               },
-              permissionState.getState(),
+              permissionSnapshot,
             ),
           controller.signal,
         );
@@ -1108,7 +1109,10 @@ export function createToolScheduler(
         });
       }
       if (decision.type === "allow") {
-        await trustExternalPath(externalPath);
+        // FullAccess authorizes this call without remembering directory trust.
+        if (permissionSnapshot.level !== "full-access") {
+          await trustExternalPath(externalPath);
+        }
         continue;
       }
 
@@ -1307,6 +1311,7 @@ export function createToolScheduler(
       });
     }
 
+    const permissionSnapshot = permissionState.getState();
     let decision: PermissionDecision;
     try {
       decision = await waitForAbortable(
@@ -1320,7 +1325,7 @@ export function createToolScheduler(
               sessionId: call.sessionId,
               toolName: "external_directory",
             },
-            permissionState.getState(),
+            permissionSnapshot,
           ),
         controller.signal,
       );
@@ -1341,7 +1346,10 @@ export function createToolScheduler(
       });
     }
     if (decision.type === "allow") {
-      await trustExternalWritePath();
+      // FullAccess authorizes this call without remembering directory trust.
+      if (permissionSnapshot.level !== "full-access") {
+        await trustExternalWritePath();
+      }
       return null;
     }
 

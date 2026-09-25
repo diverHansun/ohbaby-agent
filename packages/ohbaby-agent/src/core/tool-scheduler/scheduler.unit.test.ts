@@ -7,7 +7,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createHostLocalEnvironment } from "../../adapters/ui-runtime/host-local-environment.js";
+import {
+  createHostLocalEnvironment,
+  createHostLocalSandboxManager,
+} from "../../adapters/ui-runtime/host-local-environment.js";
 import { createBus, type BusInstance } from "../../bus/index.js";
 import type { SpawnCommand } from "../../tools/bash.js";
 import { createBuiltinTools } from "../../tools/index.js";
@@ -1029,19 +1032,24 @@ describe("ToolScheduler", () => {
     expect(trustPath).not.toHaveBeenCalled();
   });
 
-  it("records auto-approved external directories as trusted read roots", async () => {
+  it("records explicit session allow rules as trusted read roots", async () => {
     const trustPath = vi.fn();
     const permission = {
       ask: vi.fn(() => Promise.resolve("once" as const)),
     } satisfies PermissionPort;
     const execute = vi.fn(() => ({ output: "auto" }));
-    const { scheduler } = createScheduler({
-      permission,
-      permissionState: createPermissionState({
-        bus: createBus(),
-        initialLevel: "full-access",
-      }),
+    const permissionState = createPermissionState({ bus: createBus() });
+    permissionState.addSessionRule("session_1", {
+      tool: "external_directory",
+      decision: "allow",
+      scope: "session",
     });
+    permissionState.addSessionRule("session_1", {
+      tool: "bash",
+      decision: "allow",
+      scope: "session",
+    });
+    const { scheduler } = createScheduler({ permission, permissionState });
     scheduler.register(createTool({ execute, name: "bash" }));
 
     await expect(
@@ -1148,13 +1156,7 @@ describe("ToolScheduler", () => {
           toolName: "bash",
         }),
       ).resolves.toMatchObject({ status: "success" });
-      expect(trustedRoots).toEqual([
-        {
-          kind: "external-approved",
-          path: path.resolve(outside),
-          source: "external_directory",
-        },
-      ]);
+      expect(trustedRoots).toEqual([]);
 
       await expect(
         scheduler.execute({
@@ -2659,6 +2661,97 @@ describe("ToolScheduler", () => {
       await fs.rm(tempRoot, { force: true, recursive: true });
     }
   });
+
+  it.each(["write", "bash"] as const)(
+    "does not retain FullAccess %s directory trust after returning to default",
+    async (toolName) => {
+      const tempRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), "ohbaby-fullaccess-transient-"),
+      );
+      const workspace = path.join(tempRoot, "workspace");
+      const outside = path.join(tempRoot, "outside");
+      const externalFile = path.join(outside, "output.txt");
+      await fs.mkdir(workspace);
+      await fs.mkdir(outside);
+      const sandbox = createHostLocalSandboxManager(workspace);
+      const environment = await sandbox.acquire("session_1");
+      const permissionState = createPermissionState({
+        bus: createBus(),
+        initialLevel: "full-access",
+      });
+      const requests: string[] = [];
+      const { scheduler } = createScheduler({
+        permissionState,
+        permission: {
+          ask: (input) => {
+            requests.push(input.toolName);
+            return Promise.resolve("reject");
+          },
+        },
+      });
+      for (const tool of createBuiltinTools()) {
+        if (["write", "read", "bash"].includes(tool.name)) {
+          scheduler.register(tool);
+        }
+      }
+      const params =
+        toolName === "write"
+          ? { file_path: externalFile, content: "full access" }
+          : { command: `printf 'full access' > "${externalFile}"` };
+      const call = {
+        runId: "test_run",
+        environment,
+        messageId: "message_1",
+        sessionId: "session_1",
+      };
+      try {
+        await expect(
+          scheduler.execute({
+            ...call,
+            callId: "full_access",
+            params,
+            toolName,
+          }),
+        ).resolves.toMatchObject({ status: "success" });
+        expect(await fs.readFile(externalFile, "utf8")).toBe("full access");
+        expect(requests).toEqual([]);
+
+        permissionState.setLevel("default");
+        await expect(
+          scheduler.execute({
+            ...call,
+            callId: "default_read",
+            toolName: "read",
+            params: { file_path: externalFile },
+          }),
+        ).resolves.toMatchObject({ status: "rejected" });
+        await expect(
+          scheduler.execute({
+            ...call,
+            callId: "default_write",
+            toolName: "write",
+            params: {
+              file_path: path.join(outside, "after-default.txt"),
+              content: "must not write",
+            },
+          }),
+        ).resolves.toMatchObject({ status: "rejected" });
+        expect(requests).toEqual(["external_directory", "write"]);
+        expect(await fs.readFile(externalFile, "utf8")).toBe("full access");
+        await expect(
+          fs.stat(path.join(outside, "after-default.txt")),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+        expect(environment.trustedRoots()).toEqual([
+          { kind: "workspace", path: await fs.realpath(workspace) },
+        ]);
+        expect(permissionState.getSessionRules("session_1")).toEqual([]);
+      } finally {
+        await environment.release();
+        await sandbox.dispose();
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("does not grant sibling or ancestor writes after approving an external file", async () => {
     const tempRoot = await fs.mkdtemp(

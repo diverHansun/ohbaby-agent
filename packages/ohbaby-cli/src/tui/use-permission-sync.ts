@@ -7,7 +7,6 @@ import type {
   UiPermissionBinding,
   UiPermissionEvent,
   UiPermissionSnapshot,
-  UiSessionIndexEntry,
 } from "ohbaby-sdk";
 import type { TuiStore } from "./store/snapshot.js";
 
@@ -140,8 +139,6 @@ export function usePermissionSync(
       }, 0);
     });
 
-    const indexPromise: Promise<readonly UiSessionIndexEntry[]> =
-      client.getSessionIndex();
     const isBootstrapObsolete = (): boolean => disposed || engine !== undefined;
     const bootstrap = async (): Promise<void> => {
       if (disposed || engine || rootSessionId === null) return;
@@ -167,7 +164,7 @@ export function usePermissionSync(
               rootSessionId,
               signal: controller.signal,
             }),
-            indexPromise,
+            client.getSessionIndex(),
           ]),
           aborted,
         ]);
@@ -214,10 +211,12 @@ export function usePermissionSync(
         }
       } finally {
         clearTimeout(timeout);
+        // A failed sibling (metadata) must not leave this attempt
+        // querying after the retry starts or the root becomes unavailable.
+        controller.abort();
+        if (bootstrapController === controller) bootstrapController = undefined;
       }
     };
-    // Attach a rejection handler even when no root is selected.
-    void indexPromise.catch(() => undefined);
     void bootstrap();
     return (): void => {
       disposed = true;
