@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRPC } from "./proxy.js";
 
 interface DemoAPI {
@@ -209,6 +209,49 @@ describe("createRPC", () => {
     expect(receivedSignal).toBe(controller.signal);
     expect(receivedSignal?.aborted).toBe(true);
   });
+
+  it.each([
+    "getSessionView",
+    "getSessionHistory",
+    "getSessionControl",
+    "getPromptReceipt",
+  ] as const)(
+    "preserves %s cancellation across the JSON proxy boundary",
+    async (method) => {
+      let receivedSignal: AbortSignal | undefined;
+      const implementation = {
+        [method]: (input: {
+          sessionId: string;
+          signal?: AbortSignal;
+        }): Promise<string> => {
+          receivedSignal = input.signal;
+          input.signal?.throwIfAborted();
+          return new Promise((_resolve, reject) =>
+            input.signal?.addEventListener(
+              "abort",
+              () => {
+                reject(new Error("backend cancelled"));
+              },
+              { once: true },
+            ),
+          );
+        },
+      };
+      const rpc = createRPC<typeof implementation>();
+      rpc.connectImpl(implementation);
+      const controller = new AbortController();
+      const outcome = rpc
+        .createProxy({})
+        [method]({ sessionId: "root", signal: controller.signal })
+        .catch((error: unknown) => error);
+      await vi.waitFor(() => {
+        expect(receivedSignal).toBeDefined();
+      });
+      controller.abort();
+      expect(await outcome).toMatchObject({ name: "AbortError" });
+      expect(receivedSignal).toBe(controller.signal);
+    },
+  );
 
   it("rejects a pending call when its AbortSignal is aborted", async () => {
     const rpc = createRPC<DemoAPI>();

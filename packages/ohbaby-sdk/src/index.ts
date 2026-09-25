@@ -104,6 +104,7 @@ export type {
   UiRunUpdatedEvent,
   UiRuntimeUpdatedEvent,
   UiSnapshotReplacedEvent,
+  UiSessionResyncRequiredEvent,
 } from "./events.js";
 export type {
   UiCommandAction,
@@ -222,6 +223,8 @@ export type {
 } from "./permission.js";
 
 export { createPermissionSync } from "./permission-sync.js";
+export * from "./session-view.js";
+export * from "./session-sync.js";
 export type {
   PermissionSync,
   PermissionSyncState,

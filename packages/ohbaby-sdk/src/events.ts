@@ -1,4 +1,9 @@
 import type { UiPermissionEvent } from "./permission.js";
+import type {
+  UiSessionRecoveryEvent,
+  UiSessionIndexInvalidatedEvent,
+  UiModelInvalidatedEvent,
+} from "./session-view.js";
 export type {
   UiPermissionRequestedEvent,
   UiPermissionResolvedEvent,
@@ -203,7 +208,22 @@ export interface UiInteractionResolvedEvent {
   readonly timestamp: number;
 }
 
+/** Local transport notification; never a business revision or a snapshot replacement. */
+export interface UiSessionResyncRequiredEvent {
+  readonly type: "session.resync-required";
+  readonly runtimeEpoch: string;
+  readonly sessionId: string | null;
+  readonly bindingGeneration?: number;
+  readonly connectionGeneration?: number;
+  readonly disconnected?: boolean;
+  readonly unsupported?: boolean;
+}
+
 export type UiEvent =
+  | UiSessionResyncRequiredEvent
+  | UiSessionRecoveryEvent
+  | UiSessionIndexInvalidatedEvent
+  | UiModelInvalidatedEvent
   | UiSnapshotReplacedEvent
   | UiRuntimeUpdatedEvent
   | UiPermissionUpdatedEvent

@@ -103,6 +103,7 @@ export interface UiRun {
 }
 
 export interface UiMessage {
+  readonly runId?: string;
   readonly id: string;
   readonly role: "user" | "assistant" | "system" | "tool";
   readonly parts: readonly UiMessagePart[];
@@ -113,11 +114,17 @@ export interface UiMessage {
   readonly finishReason?: string;
 }
 
-export type UiMessagePart =
+export type UiMessagePart = {
+  readonly id?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly endReason?: "normal" | "interrupted" | "failed";
+  readonly saveState?: "pending" | "saved" | "failed";
+} & (
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "reasoning"; readonly text: string }
   | { readonly type: "tool-call"; readonly call: UiToolCall }
-  | { readonly type: "tool-result"; readonly result: UiToolResult };
+  | { readonly type: "tool-result"; readonly result: UiToolResult }
+);
 
 export interface UiToolCall {
   readonly id: string;

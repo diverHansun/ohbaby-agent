@@ -15,6 +15,10 @@ const NESTED_SIGNAL_ARGUMENTS = new Map<PropertyKey, number>([
   ["submitPromptAndWait", 1],
   ["waitForPrompt", 1],
   ["getPermissionSnapshot", 0],
+  ["getSessionView", 0],
+  ["getSessionHistory", 0],
+  ["getSessionControl", 0],
+  ["getPromptReceipt", 0],
 ]);
 
 function boundaryDelay(): Promise<void> {

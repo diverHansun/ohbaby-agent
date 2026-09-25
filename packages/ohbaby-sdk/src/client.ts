@@ -6,6 +6,7 @@ import type {
   UiSessionIndexEntry,
 } from "./permission.js";
 import type { UiReasoningConfig } from "./connect-model.js";
+import type { UiSessionRecoveryClient } from "./session-view.js";
 import type { UiSession } from "./snapshot.js";
 import type {
   UiSlashCommandCatalog,
@@ -97,7 +98,9 @@ export interface UiListCommandsQuery {
 export type UiEventHandler = (event: UiEvent) => void;
 export type UiUnsubscribe = () => void;
 
-export interface UiQueryClient {
+export interface UiQueryClient extends Partial<UiSessionRecoveryClient> {
+  /** Explicit selection/startup barrier; never called by read endpoints. */
+  initializeSession?(sessionId: string): Promise<void>;
   getSelectedSessionId(): Promise<string | null>;
   getSessionIndex(): Promise<readonly UiSessionIndexEntry[]>;
   getPermissionSnapshot(
