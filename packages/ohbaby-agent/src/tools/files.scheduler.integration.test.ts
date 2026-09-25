@@ -15,6 +15,7 @@ import {
   type PermissionInfo,
 } from "../permission/index.js";
 import { createBuiltinTools } from "./index.js";
+import * as fileLocks from "./utils/file-locks.js";
 
 function createScheduler(): ToolSchedulerInstance {
   const bus = createBus();
@@ -50,6 +51,160 @@ describe("file tools scheduler integration", () => {
     await fs.rm(outsideRoot, { force: true, recursive: true });
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
+
+  it.each(["write", "edit"] as const)(
+    "cancels a queued %s before entering its protected operation",
+    async (toolName) => {
+      const scheduler = createScheduler();
+      const environment = createHostLocalEnvironment(tempRoot);
+      const filePath = path.join(tempRoot, "queued.txt");
+      await fs.writeFile(filePath, "old\n");
+      const mtime = (await fs.stat(filePath)).mtimeMs;
+      let release!: () => void;
+      let entered!: () => void;
+      const enteredPromise = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holder = fileLocks.withFileLock(filePath, () => gate);
+      const originalLock = fileLocks.withFileLock;
+      vi.spyOn(fileLocks, "withFileLock").mockImplementation((...args) => {
+        const result = originalLock(...args);
+        entered();
+        return result;
+      });
+      const tool = scheduler.get(toolName);
+      if (!tool) throw new Error(`Missing tool: ${toolName}`);
+      const execute = tool.execute.bind(tool);
+      let operationSettled = false;
+      let rawOperation: Promise<unknown> | undefined;
+      vi.spyOn(tool, "execute").mockImplementation((...args) => {
+        const result = Promise.resolve(execute(...args));
+        rawOperation = result.then(
+          () => {
+            operationSettled = true;
+          },
+          () => {
+            operationSettled = true;
+          },
+        );
+        return result;
+      });
+      const controller = new AbortController();
+      const call = scheduler.execute({
+        runId: "queued_run",
+        callId: "queued_call",
+        environment,
+        messageId: "queued_message",
+        sessionId: "queued_session",
+        toolName,
+        signal: controller.signal,
+        params:
+          toolName === "write"
+            ? {
+                file_path: filePath,
+                content: "new\n",
+                expected_mtime_ms: mtime,
+              }
+            : { file_path: filePath, old_string: "old", new_string: "new" },
+      });
+      try {
+        await enteredPromise;
+        controller.abort();
+        expect((await call).status).toBe("cancelled");
+        // Cancellation must settle the actual queued tool, not only its scheduler wrapper.
+        await originalLock(path.join(tempRoot, "independent.txt"), () =>
+          Promise.resolve(),
+        );
+        expect(operationSettled).toBe(true);
+        await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
+      } finally {
+        release();
+        await holder;
+        await call;
+        await rawOperation;
+      }
+      await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
+    },
+  );
+
+  it.each([
+    ["write", "resolve"],
+    ["write", "reject"],
+    ["edit", "resolve"],
+    ["edit", "reject"],
+  ] as const)(
+    "keeps %s protected after scheduler timeout until rename %s",
+    async (toolName, settlement) => {
+      const scheduler = createScheduler();
+      const environment = createHostLocalEnvironment(tempRoot);
+      const filePath = path.join(tempRoot, "late.txt");
+      await fs.writeFile(filePath, "old\n");
+      const mtime = (await fs.stat(filePath)).mtimeMs;
+      let release!: () => void;
+      let entered!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const enteredPromise = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const rename = fs.rename;
+      vi.spyOn(fs, "rename").mockImplementationOnce(async (...args) => {
+        entered();
+        await gate;
+        if (settlement === "reject") throw new Error("late rename failure");
+        await rename(...args);
+      });
+      vi.useFakeTimers();
+      const call = scheduler.execute({
+        runId: "late_run",
+        callId: "late_call",
+        environment,
+        messageId: "late_message",
+        sessionId: "late_session",
+        toolName,
+        params:
+          toolName === "write"
+            ? {
+                file_path: filePath,
+                content: "new\n",
+                expected_mtime_ms: mtime,
+              }
+            : { file_path: filePath, old_string: "old", new_string: "new" },
+      });
+      let successor: Promise<string> | undefined;
+      try {
+        await enteredPromise;
+        // The existing scheduler owns the deadline. The stalled rename ignores abort.
+        await vi.advanceTimersByTimeAsync(120_001);
+        const result = await call;
+        expect(result.status).toBe("error");
+        expect(result.error?.message).toContain("timed out");
+        let successorStarted = false;
+        successor = fileLocks.withFileLock(filePath, async () => {
+          successorStarted = true;
+          return await fs.readFile(filePath, "utf8");
+        });
+        await vi.advanceTimersByTimeAsync(120_001);
+        expect(successorStarted).toBe(false);
+        release();
+        await expect(successor).resolves.toBe(
+          settlement === "resolve" ? "new\n" : "old\n",
+        );
+        await expect(fs.readdir(tempRoot)).resolves.toEqual(["late.txt"]);
+      } finally {
+        release();
+        await call;
+        if (successor) await successor;
+        // Drain the protected operation even if assertions failed before enqueueing.
+        await fileLocks.withFileLock(filePath, () => Promise.resolve());
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("routes write dry_run and absolute-path writes through ToolScheduler", async () => {
     const scheduler = createScheduler();

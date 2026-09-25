@@ -88,96 +88,100 @@ export function createEditTool(): Tool {
       const dryRun = getDryRunParam(params);
       const existingPath = await resolvePathForExisting(context, inputPath);
       const writePath = await resolveWritableFile(context, inputPath);
-      return await withFileLock(writePath, async () => {
-        const file = await readTextFileContent(
-          existingPath,
-          inputPath,
-          context.signal,
-        );
-        const editLineEnding = preferredEditLineEnding(file.lineEnding);
-        const oldStringForFile = convertToLineEnding(
-          oldString,
-          editLineEnding,
-          { label: "Edit normalized old_string", limit: EDIT_MAX_BYTES },
-        );
-        const newStringForFile = convertToLineEnding(
-          newString,
-          editLineEnding,
-          { label: "Edit normalized new_string", limit: EDIT_MAX_BYTES },
-        );
-        const match = findEditMatch({
-          content: file.text,
-          oldString: oldStringForFile,
-          replaceAll,
-        });
-        const replacementCount = match.replacementCount;
-        const resultBytes =
-          Buffer.byteLength(file.text) +
-          replacementCount *
-            (Buffer.byteLength(newStringForFile) -
-              Buffer.byteLength(match.text)) +
-          (file.bom ? 3 : 0);
-        assertMutationBudget("Edit result", resultBytes, EDIT_MAX_BYTES);
-        context.signal.throwIfAborted();
-        const updated = replaceAll
-          ? file.text.replaceAll(match.text, () => newStringForFile)
-          : `${file.text.slice(0, match.start)}${newStringForFile}${file.text.slice(match.end)}`;
-        const preview = boundedDiff(file.text, updated);
-        const diff = diffPreviewMessage(preview);
-        if (dryRun) {
+      return await withFileLock(
+        writePath,
+        async () => {
+          const file = await readTextFileContent(
+            existingPath,
+            inputPath,
+            context.signal,
+          );
+          const editLineEnding = preferredEditLineEnding(file.lineEnding);
+          const oldStringForFile = convertToLineEnding(
+            oldString,
+            editLineEnding,
+            { label: "Edit normalized old_string", limit: EDIT_MAX_BYTES },
+          );
+          const newStringForFile = convertToLineEnding(
+            newString,
+            editLineEnding,
+            { label: "Edit normalized new_string", limit: EDIT_MAX_BYTES },
+          );
+          const match = findEditMatch({
+            content: file.text,
+            oldString: oldStringForFile,
+            replaceAll,
+          });
+          const replacementCount = match.replacementCount;
+          const resultBytes =
+            Buffer.byteLength(file.text) +
+            replacementCount *
+              (Buffer.byteLength(newStringForFile) -
+                Buffer.byteLength(match.text)) +
+            (file.bom ? 3 : 0);
+          assertMutationBudget("Edit result", resultBytes, EDIT_MAX_BYTES);
+          context.signal.throwIfAborted();
+          const updated = replaceAll
+            ? file.text.replaceAll(match.text, () => newStringForFile)
+            : `${file.text.slice(0, match.start)}${newStringForFile}${file.text.slice(match.end)}`;
+          const preview = boundedDiff(file.text, updated);
+          const diff = diffPreviewMessage(preview);
+          if (dryRun) {
+            return {
+              output: [
+                "Dry run: no changes written.",
+                `Replacements: ${String(replacementCount)}`,
+                diff,
+              ].join("\n"),
+              metadata: {
+                ...preview,
+                dryRun: true,
+                encoding: file.encoding,
+                lineEnding: file.lineEnding,
+                mtimeMs: file.mtimeMs,
+                path: writePath,
+                replacementCount,
+                sizeBytes: Buffer.byteLength(
+                  withUtf8Bom(updated, file.bom),
+                  "utf8",
+                ),
+              },
+            };
+          }
+          await writeTextFileAtomic(
+            writePath,
+            withUtf8Bom(updated, file.bom),
+            context.signal,
+          );
+          const written = await readCommittedFileMetadata(
+            writePath,
+            Buffer.byteLength(withUtf8Bom(updated, file.bom)),
+          );
+
           return {
             output: [
-              "Dry run: no changes written.",
               `Replacements: ${String(replacementCount)}`,
               diff,
-            ].join("\n"),
+              written.metadataWarning,
+            ]
+              .filter(Boolean)
+              .join("\n"),
             metadata: {
               ...preview,
-              dryRun: true,
               encoding: file.encoding,
               lineEnding: file.lineEnding,
-              mtimeMs: file.mtimeMs,
+              mtimeMs: written.mtimeMs,
+              ...(written.metadataWarning
+                ? { metadataWarning: written.metadataWarning }
+                : {}),
               path: writePath,
               replacementCount,
-              sizeBytes: Buffer.byteLength(
-                withUtf8Bom(updated, file.bom),
-                "utf8",
-              ),
+              sizeBytes: written.sizeBytes,
             },
           };
-        }
-        await writeTextFileAtomic(
-          writePath,
-          withUtf8Bom(updated, file.bom),
-          context.signal,
-        );
-        const written = await readCommittedFileMetadata(
-          writePath,
-          Buffer.byteLength(withUtf8Bom(updated, file.bom)),
-        );
-
-        return {
-          output: [
-            `Replacements: ${String(replacementCount)}`,
-            diff,
-            written.metadataWarning,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-          metadata: {
-            ...preview,
-            encoding: file.encoding,
-            lineEnding: file.lineEnding,
-            mtimeMs: written.mtimeMs,
-            ...(written.metadataWarning
-              ? { metadataWarning: written.metadataWarning }
-              : {}),
-            path: writePath,
-            replacementCount,
-            sizeBytes: written.sizeBytes,
-          },
-        };
-      });
+        },
+        { signal: context.signal },
+      );
     },
   };
 }
