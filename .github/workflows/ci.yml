@@ -43,5 +43,14 @@ jobs:
       - name: Unit tests
         run: pnpm test:unit
 
+      - name: Permission runtime integration
+        run: pnpm exec vitest run packages/ohbaby-agent/src/permission/permission.unit.test.ts packages/ohbaby-agent/src/permission/permission-lifecycle.unit.test.ts packages/ohbaby-agent/src/host/core-api-permission.integration.test.ts tests/integration/core/tool-scheduler-permission.integration.test.ts tests/integration/agents/permission-run-lifecycle.integration.test.ts tests/integration/agents/inprocess-child-permission.integration.test.ts
+
+      - name: Permission projection and transport contracts
+        run: pnpm exec vitest run packages/ohbaby-agent/src/adapters/app-events/permission-projection.unit.test.ts packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts packages/ohbaby-server/src/coordination/client-view.unit.test.ts packages/ohbaby-server/src/coordination/permission-router.unit.test.ts packages/ohbaby-server/src/coordination/permission-lifecycle.integration.test.ts packages/ohbaby-server/src/app/create-app.unit.test.ts
+
+      - name: Permission clients and runtime coexistence
+        run: pnpm exec vitest run apps/ohbaby-web/src/api/daemon/server-client.integration.test.ts apps/ohbaby-web/src/ui/App.unit.test.tsx packages/ohbaby-cli/src/tui/app.contract.test.tsx packages/ohbaby-agent/src/runtime/run-ledger/dual-writer-process.integration.test.ts packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-server/src/protocols/jsonrpc/client.unit.test.ts
+
       - name: Build
         run: pnpm build
