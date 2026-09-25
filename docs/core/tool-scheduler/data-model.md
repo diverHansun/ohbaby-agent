@@ -128,7 +128,7 @@ interface Tool {
 }
 ```
 
-`requireExplicitApproval: true` 在默认权限档位下要求 scheduler 调用 `Permission.ask()`，使用 `reason: "explicit-approval-required"` 与 `rememberable: false`。`full-access` 跳过包括此项在内的人工 ask，但明确 deny、禁止路径/命令和参数/资源检查仍执行；切换档位不自动回答已有待办。该字段是通用工具语义；MCP 的 `trust`/`isTrusted` 只在 MCP adapter 内映射，不由 scheduler 直接消费。
+`requireExplicitApproval: true` 在默认权限档位下要求 scheduler 调用 `Permission.ask()`，使用 `reason: "explicit-approval-required"` 与 `rememberable: false`。`full-access` 跳过包括此项在内的人工 ask，但明确 deny、禁止路径/命令和参数/资源检查仍执行；切换档位不自动回答已有待办。FullAccess 自动放行外部写入或 shell preflight 时不新增目录信任，切回 default 后重新按常规边界判断；显式 always/session allow 的信任语义保留。该字段是通用工具语义；MCP 的 `trust`/`isTrusted` 只在 MCP adapter 内映射，不由 scheduler 直接消费。
 
 ### 2.3 调用状态类型
 

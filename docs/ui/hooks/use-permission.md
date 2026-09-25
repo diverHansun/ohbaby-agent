@@ -8,6 +8,6 @@
 4. 更新 `TuiStore.setPermissions`；DialogManager 按所选 ID 渲染，并用 `[` / `]` 切换任意待办。
 5. 默认 TUI 的 CoreAPI 是 in-process；loopback RPC 对同步订阅直接透传函数，不将回调做 JSON clone。已有 RemoteDaemonClient 发出每次实际 hello 的连接代次，由同一同步器恢复审批。
 
-每个恢复周期累计最多四次查询，单次上限10秒，退避100/250/500毫秒。缓冲上限1024条/2MiB；缺口和溢出要求新基线，不重置预算。实际新连接、范围切换或显式重试开启新周期。PERMISSION_UNAVAILABLE 停用且不自动重试。dispose/切换清理订阅、查询信号、计时器与 buffer。
+每个恢复周期累计最多四次查询，单次上限10秒，退避100/250/500毫秒。缓冲上限1024条/2MiB；缺口和溢出要求新基线，不重置预算。实际新连接、范围切换或显式重试开启新周期。PERMISSION_UNAVAILABLE 停用且不自动重试。每次 bootstrap 重试均重新读取 session index，不复用前次失败或过期的 Promise；每次尝试退出都会取消该次权限查询，包括 metadata 分支先失败的情况。dispose/切换清理订阅、查询信号、计时器与 buffer。
 
 关闭窗口或切换会话不撤销 backend pending。只有执行生命周期、来源失效或显式响应结束等待；默认 TUI 不改为 attach serve，也不承诺跨 runtime 审批同步。

@@ -4,11 +4,12 @@
   "implementationFileHashes": {
     ".github/workflows/ci.yml": "cd8b99445c4ba5b80378bbb8eebbe38f7731760d73d4d30e1a723824856beafd",
     "apps/ohbaby-web/src/api/daemon/client.integration.test.ts": "16494edadaba426880b4d4f7fa550f2f26413dd39052188ad56fda37ae234d3f",
-    "apps/ohbaby-web/src/api/daemon/client.ts": "4a240b4082757437b5701652413e2c884542befedcf1535196a6a5ea4c4716a5",
+    "apps/ohbaby-web/src/api/daemon/client.ts": "5b8b50923a8e9f5bea3190f594f76aba40fbff3deacb22401fbda169b6097ab3",
     "apps/ohbaby-web/src/api/daemon/events.ts": "81a9ba0bba89dc6ac497a1ab87b98867ea43b3674f31868e9ed7fedb91c0afbf",
     "apps/ohbaby-web/src/api/daemon/http.ts": "75dfa6e082f1e512637c867f739d9218da5d3e18e8dc5839d10573dc8d79f9e2",
     "apps/ohbaby-web/src/api/daemon/permission-recovery.integration.test.ts": "a14f4e670215b95c1b0340025ae9bbcafe85004aecd441fc47ee79cd811b86a2",
     "apps/ohbaby-web/src/api/daemon/server-client.integration.test.ts": "b61d89f62e847aa4cc16c401b4586ef3c8363e99958ccd7b4265d01c88aa4813",
+    "apps/ohbaby-web/src/api/daemon/session-restore.integration.test.ts": "a2b469f1dcf4b5edfe54bca8c2044ba2b6f8562f103a27cb7d57790a442c5b48",
     "apps/ohbaby-web/src/api/daemon/wire.ts": "ef383a0cd944058167e670cc237370cc69b274fdded205724c7272769ed69994",
     "apps/ohbaby-web/src/api/daemon/workspace-switch.integration.test.ts": "cba4f72b50c64ecf94769321cec25004fafc9187cbe7f5085c26557f97dcf884",
     "apps/ohbaby-web/src/store/store.ts": "a348844cce2895acccda1937a7984dbc030c432166d136169aa8aa52cd9bcea1",
@@ -35,8 +36,8 @@
     "packages/ohbaby-agent/src/core/lifecycle/lifecycle.ts": "3509cc5337da650e94423731509a0bc8d42dc6c26ae939a8b1f76b3be8d9b144",
     "packages/ohbaby-agent/src/core/lifecycle/lifecycle.unit.test.ts": "978a30219967b4cc3d49b6d847f70ac83760d8291c2118025bd0937e5f658f86",
     "packages/ohbaby-agent/src/core/lifecycle/types.ts": "14008112b2877068d8e41c43de18358f8f9a2e653b6ed51984847474da37ee6c",
-    "packages/ohbaby-agent/src/core/tool-scheduler/scheduler.ts": "a96c77bf45851a508144065036e91752f8097995400a071b6bc2183be2805089",
-    "packages/ohbaby-agent/src/core/tool-scheduler/scheduler.unit.test.ts": "464b387e2ccc6d5637bd2aa67dacd32b0b415c9a45379c329695732bdf5ac2eb",
+    "packages/ohbaby-agent/src/core/tool-scheduler/scheduler.ts": "444f4975f65504d8256db55848e2ee366f22d735f9a19261a5b62590cc695460",
+    "packages/ohbaby-agent/src/core/tool-scheduler/scheduler.unit.test.ts": "d08e169d3d6e545944d768612a390717f51c504fe15a1e13a4e1e28e7112d70b",
     "packages/ohbaby-agent/src/core/tool-scheduler/types.ts": "6d5d8595beb9e030cbb24916094d5a7e51378a3e798fd2a26d0163642edfe46f",
     "packages/ohbaby-agent/src/host/core-api-permission.integration.test.ts": "15464b5b96a381cddea5830d02b1d0dc4661969f1f1bc14a907a013c3cacebe6",
     "packages/ohbaby-agent/src/permission/evaluator.ts": "c6e819363b324bac2537adbc1e44dffd57ce9f8ed78c1d73317ce772a4e3785e",
@@ -62,7 +63,8 @@
     "packages/ohbaby-cli/src/tui/store/events.ts": "5ee65bbc8a1534bf7223d8d29a6db9986ddfbcc23ed0a79bf77557b2575734fe",
     "packages/ohbaby-cli/src/tui/store/events.unit.test.ts": "97eb4bd05116136e7ceb6c8cb554dcc04a2b6602d8125bef002bfc9d1f5cb99d",
     "packages/ohbaby-cli/src/tui/store/snapshot.ts": "347ca7a20cb23980827a1d996d3fe1372c847c0fb9a7558ab1951a9be6978dc9",
-    "packages/ohbaby-cli/src/tui/use-permission-sync.ts": "a8d19d8ed2f2d00e37fd0020a92e2b69f4ed5199b7299071b631f7811988e4b7",
+    "packages/ohbaby-cli/src/tui/use-permission-sync.ts": "20b700ce469f8bc986ac2cd7215b4c09cc886db0d27eb83146bcbbf1b4490b3c",
+    "packages/ohbaby-cli/src/tui/use-permission-sync.unit.test.tsx": "8b5bf49a7f612b73506a64b4187369c4f61f22806aaf6c6311d449e826102348",
     "packages/ohbaby-sdk/src/client.ts": "c8bcb9adfebbec07e6dbf8b9f280eb7e08654ef3996c70b32416ae5c7edc1977",
     "packages/ohbaby-sdk/src/context-window.contract.test.ts": "79c4b6f6733665918717f3f0666c800a31fb14fec20a5fe14a74010c7a9007e8",
     "packages/ohbaby-sdk/src/events.ts": "3837fcf246e8ac2be20aee9b2b1a2ebab05443e8cc567cb6e37ce1554d326b24",
@@ -98,40 +100,43 @@
     "tests/integration/core/bash-tool-scheduler.integration.test.ts": "5ffe751966ea15c3e9fd4f9035a2a320f9ff27b5ee6420523c3d6cc6d885439e",
     "tests/integration/core/tool-scheduler-permission.integration.test.ts": "f830f945db948b1e04856a5101b9ba61e8c0c6877b3bc7a94437f9c4b9b0b029"
   },
-  "implementationFingerprint": "83a013f550ce4353976f91a1af885baf7a0c2ea5976385b07c9e651162d6b6c6",
+  "implementationFingerprint": "ae3b9dc022395e75943857ad13355823b8dc89767e345df1351027d5fcda983e",
   "finalVerification": {
     "date": "2026-09-25",
     "tests": {
-      "passedFiles": 375,
+      "passedFiles": 377,
       "skippedFiles": 6,
-      "passedTests": 4094,
+      "passedTests": 4108,
       "skippedTests": 17,
-      "durationSeconds": 314.73,
+      "durationSeconds": 153.0,
       "exitCode": 0,
-      "log": "/tmp/improve1-final-tests.log"
+      "log": "/tmp/improve1-four-p2-tests.log"
     },
     "checks": {
       "build": {
         "exitCode": 0,
-        "log": "/tmp/improve1-final-build.log"
+        "log": "/tmp/improve1-four-p2-build.log"
       },
       "typecheck": {
         "exitCode": 0,
-        "log": "/tmp/improve1-final-typecheck.log"
+        "log": "/tmp/improve1-four-p2-typecheck.log"
       },
       "lint": {
         "exitCode": 0,
-        "log": "/tmp/improve1-final-lint.log"
+        "log": "/tmp/improve1-four-p2-lint.log"
       },
       "format": {
         "exitCode": 0,
-        "log": "/tmp/improve1-final-format.log"
+        "log": "/tmp/improve1-four-p2-format.log"
       }
     },
     "lastNativeBrowser": "live-post-pi.json",
     "lastAdmissionReview": "admission-final-review.md",
-    "piReview": "two completed OpenCode rounds; no further call per user request"
+    "piReview": "two completed OpenCode rounds; no further call per user request",
+    "lastReview": "four-p2-independent-review.md"
   },
   "implementationCommit": "862f82d0",
-  "acceptanceTestsCommit": "b330596f"
+  "acceptanceTestsCommit": "b330596f",
+  "fourP2Baseline": "5e84e539",
+  "fourP2FixCommit": "888286ab"
 }

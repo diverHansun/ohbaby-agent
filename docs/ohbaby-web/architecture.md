@@ -86,3 +86,5 @@ apps/ohbaby-web/
 ### 独立审批数据流
 
 审批事件在普通 seq 检查之前分流给 SDK `createPermissionSync`，不进入普通 replay 或 ViewState reducer。连接先安装订阅，再由 `hello` 确认 epoch、root 和 bindingGeneration；独立 `GET /v1/permissions` 提供基线。共享引擎负责有界查询、增量缓冲、gap 恢复和旧 generation 隔离，Web store 只保存其输出。全量 snapshot 慢或失败不阻塞审批恢复；消息的连接态 `live` 也不能使未完成基线同步的审批按钮可用。
+
+记忆会话恢复使用轻量 session index，不等待历史或 model 查询。恢复期间的旧快照不能覆盖记忆目标；显式 startup resume/fresh、后续手动选择及 new/resume 命令优先。metadata 暂时失败保留记忆偏好和现有连接，只有确认不存在或属于 child 时才跳过目标。导航持久化优先采用当前 transport binding；历史查询期间绑定改变则重新读取当前视图，避免迟到历史覆盖新选择。

@@ -1,12 +1,12 @@
-Final verification, 2026-09-25
+Final verification after four P2 fixes, 2026-09-25
 Command: OHBABY_PACKAGING_NPM_CACHE=/tmp/ohbaby-improve1-packaging-cache pnpm test
 Exit: 0
- 375 passed | 6 skipped (381)
-      Tests  4094 passed | 17 skipped (4111)
-   Start at  09:39:36
-   Duration  314.73s (transform 6.87s, setup 1.60s, collect 45.15s, tests 936.19s, environment 1.48s, prepare 13.45s)
+Test Files  377 passed | 6 skipped (383)
+      Tests  4108 passed | 17 skipped (4125)
+   Start at  10:34:22
+   Duration  153.00s (transform 6.70s, setup 1.60s, collect 43.21s, tests 355.80s, environment 1.42s, prepare 12.89s)
 
 
 Build, lint, typecheck, format:check: all exit 0.
-Native subagent: 172 tests + 52 independent state scenarios passed.
-No further Pi invocation after user cost instruction.
+Native independent review: 99 tests / 5 files passed; no remaining confirmed P0/P1/P2 in reviewed scope.
+No additional Pi calls or real LLM/browser run for this follow-up. Prior live evidence retains its own build scope.
