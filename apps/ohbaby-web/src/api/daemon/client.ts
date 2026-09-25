@@ -1,5 +1,14 @@
 import {
   createPermissionSync,
+  createSessionSync,
+  sameSessionGeneration,
+  type SessionSync,
+  type UiSessionScope,
+  type UiSessionHistory,
+  type UiPromptReceiptQuery,
+  type UiSessionControl,
+  type UiSessionView,
+  type UiPromptReceiptResult,
   type PermissionSync,
   type UiPermissionBinding,
   type UiPermissionEvent,
@@ -11,7 +20,6 @@ import {
   type UiEventHandler,
   type UiPromptCompletion,
   type UiPromptReceipt,
-  type UiSnapshot,
   type UiUnsubscribe,
   type UiSlashCommandInvocation,
   type UiWebCommandCatalog,
@@ -24,6 +32,7 @@ import type {
   OhbabyBootstrapConfig,
   WebSseEvent,
   WorkspaceSnapshot,
+  UnknownPromptRequest,
 } from "./wire.js";
 import {
   createOhbabyWebStore,
@@ -35,11 +44,6 @@ import {
   writeWebNavigationState,
   type WebNavigationState,
 } from "./navigation-state.js";
-
-interface BufferedEvent {
-  readonly event: Extract<WebSseEvent, { type: "ui.event" }>["event"];
-  readonly seqNum: number;
-}
 
 function reportEventSubscriberFailure(): void {
   try {
@@ -56,6 +60,10 @@ export interface OhbabyWebRuntime {
   readonly ready: Promise<void>;
   readonly store: OhbabyWebStore;
   retryPermissions(): void;
+  retrySession(): void;
+  loadEarlierHistory(): Promise<void>;
+  retryUnknownPrompts(): Promise<void>;
+  forgetUnknownPrompt(clientRequestId: string): void;
   abortSession(sessionId: string, runId?: string): Promise<void>;
   archiveSession(sessionId: string): Promise<void>;
   createSession(): Promise<void>;
@@ -83,6 +91,19 @@ class BrowserDaemonClient implements UiBackendClient {
   private readonly http: DaemonHttpClient;
   private readonly store: OhbabyWebStore;
   private readonly permissionSync: PermissionSync;
+  private readonly sessionSync: SessionSync;
+  private recoverySupported = false;
+  private scopeTicket = 0;
+  private selectionTicket = 0;
+  private modelTicket = 0;
+  private indexTicket = 0;
+  private controlTicket = 0;
+  private historyTicket = 0;
+  private receiptTicket = 0;
+  private control: UiSessionControl | null = null;
+  private unknownPrompts: UnknownPromptRequest[] = [];
+  private readonly submittingPrompts = new Set<string>();
+  private persistedUnknownIds = new Set<string>();
   private readonly permissionHandlers = new Set<{
     handler: (event: UiPermissionEvent) => void;
     onError?: (error: unknown) => void;
@@ -91,7 +112,6 @@ class BrowserDaemonClient implements UiBackendClient {
   private transportLive = false;
   private readonly eventHandlers = new Set<UiEventHandler>();
   private readonly lifecycleController = new AbortController();
-  private buffering = false;
   private readonly commandCatalogPromises = new Map<
     string,
     Promise<UiWebCommandCatalog>
@@ -99,8 +119,6 @@ class BrowserDaemonClient implements UiBackendClient {
   private connectPromise: Promise<void> | undefined;
   private connected = false;
   private closed = false;
-  private resyncPromise: Promise<void> | undefined;
-  private readonly bufferedEvents: BufferedEvent[] = [];
 
   constructor(input: {
     readonly config: OhbabyBootstrapConfig;
@@ -112,6 +130,23 @@ class BrowserDaemonClient implements UiBackendClient {
     this.events = input.events;
     this.http = input.http;
     this.store = input.store;
+    this.unknownPrompts = readUnknownPrompts(this.config.directory ?? "");
+    this.persistedUnknownIds = new Set(
+      this.unknownPrompts.map((request) => request.clientRequestId),
+    );
+    this.store.setUnknownPromptRequests(this.unknownPrompts);
+    this.sessionSync = createSessionSync({
+      query: async (scope, signal) =>
+        (await this.http.getSessionView({ ...scope, signal })).view,
+      onChange: (state) => {
+        if (this.closed) return;
+        const becameReady =
+          state.status === "ready" &&
+          this.store.getSnapshot().sessionSync.status !== "ready";
+        this.store.setSessionSync(state);
+        if (becameReady) void this.refreshControl();
+      },
+    });
     let validatedPermissionScope: string | undefined;
     this.permissionSync = createPermissionSync({
       query: async (binding, signal) => {
@@ -175,6 +210,8 @@ class BrowserDaemonClient implements UiBackendClient {
           } else {
             this.transportLive = false;
             this.permissionSync.disconnect();
+            this.sessionSync.disconnect();
+            this.clearControl();
           }
           this.store.setConnectionState(state);
         },
@@ -182,6 +219,8 @@ class BrowserDaemonClient implements UiBackendClient {
           if (this.closed) return;
           this.transportLive = false;
           this.permissionSync.disconnect();
+          this.sessionSync.disconnect();
+          this.clearControl();
           this.store.setError(error.message);
         },
         onEvent: (event) => {
@@ -201,40 +240,64 @@ class BrowserDaemonClient implements UiBackendClient {
       throw error;
     }
     // History and model failures do not own the transport or approval readiness.
-    this.refreshUnrelatedViews();
   }
 
   private refreshUnrelatedViews(): void {
-    void this.refreshProjectedSnapshot().catch((error: unknown) => {
-      if (!this.closed)
-        this.store.setError(
-          error instanceof Error ? error.message : String(error),
-        );
-    });
-    void this.http
-      .getCurrentModel({ signal: this.lifecycleController.signal })
-      .then((response) => {
-        if (!this.closed) this.store.setCurrentModel(response.model);
-      })
-      .catch((error: unknown) => {
-        if (!this.closed)
-          this.store.setError(
-            error instanceof Error ? error.message : String(error),
-          );
-      });
-    void this.getSessionIndex()
-      .then((sessions) => {
-        if (!this.closed) this.store.setSessionIndex(sessions);
-      })
-      .catch((error: unknown) => {
-        if (!this.closed)
-          this.store.setError(
-            error instanceof Error ? error.message : String(error),
-          );
-      });
+    void this.refreshModel();
+    void this.refreshIndex();
   }
 
-  private acceptBinding(binding: UiPermissionBinding, fromHello = false): void {
+  private async refreshModel(): Promise<void> {
+    const ticket = ++this.modelTicket;
+    const scope = this.scopeTicket;
+    try {
+      const response = await this.http.getCurrentModel({
+        signal: this.lifecycleController.signal,
+      });
+      if (
+        !this.closed &&
+        ticket === this.modelTicket &&
+        scope === this.scopeTicket
+      )
+        this.store.setCurrentModel(response.model);
+    } catch (error) {
+      if (
+        !this.closed &&
+        ticket === this.modelTicket &&
+        scope === this.scopeTicket
+      )
+        this.store.setError(errorMessage(error));
+    }
+  }
+
+  private async refreshIndex(): Promise<void> {
+    const ticket = ++this.indexTicket;
+    const scope = this.scopeTicket;
+    try {
+      const sessions = await this.getSessionIndex();
+      if (
+        !this.closed &&
+        ticket === this.indexTicket &&
+        scope === this.scopeTicket
+      )
+        this.store.setSessionIndex(sessions);
+    } catch (error) {
+      if (
+        !this.closed &&
+        ticket === this.indexTicket &&
+        scope === this.scopeTicket
+      )
+        this.store.setError(errorMessage(error));
+    }
+  }
+
+  private acceptBinding(
+    binding: UiPermissionBinding & {
+      readonly runtimeEpoch?: string;
+      readonly sessionRecoveryVersion?: number;
+    },
+    fromHello = false,
+  ): void {
     if (
       typeof binding.permissionEpoch !== "string" ||
       !Number.isSafeInteger(binding.bindingGeneration) ||
@@ -255,8 +318,235 @@ class BrowserDaemonClient implements UiBackendClient {
           previous.bindingGeneration > binding.bindingGeneration))
     )
       return;
+    const changed =
+      previous?.rootSessionId !== binding.rootSessionId ||
+      previous.bindingGeneration !== binding.bindingGeneration ||
+      previous.permissionEpoch !== binding.permissionEpoch;
+    if (changed) {
+      ++this.scopeTicket;
+      ++this.historyTicket;
+      this.clearControl();
+    }
     if (this.transportLive)
       this.permissionSync.begin(binding, this.connectionGeneration);
+    if (binding.sessionRecoveryVersion !== undefined || fromHello) {
+      this.recoverySupported =
+        binding.sessionRecoveryVersion === 1 &&
+        binding.runtimeEpoch === binding.permissionEpoch;
+    }
+    if (!this.recoverySupported) {
+      this.sessionSync.disconnect();
+      this.store.setSessionSync({
+        status: "error",
+        scope: null,
+        attempts: 0,
+        error: "Server does not support session recovery version 1",
+      });
+      return;
+    }
+    if (this.transportLive)
+      this.sessionSync.begin(this.currentScope(), this.connectionGeneration);
+    void this.refreshControl();
+    void this.retryUnknownPrompts();
+    this.refreshUnrelatedViews();
+  }
+
+  private currentScope(): UiSessionScope | null {
+    const binding = this.permissionSync.getState().binding;
+    return binding?.rootSessionId
+      ? {
+          sessionId: binding.rootSessionId,
+          runtimeEpoch: binding.permissionEpoch,
+          bindingGeneration: binding.bindingGeneration,
+        }
+      : null;
+  }
+
+  private clearControl(): void {
+    ++this.controlTicket;
+    this.control = null;
+    this.store.setSessionControl(null);
+  }
+
+  private async refreshControl(): Promise<void> {
+    const scope = this.currentScope();
+    if (!this.transportLive || !this.recoverySupported || !scope) {
+      this.clearControl();
+      return;
+    }
+    const scopeTicket = this.scopeTicket;
+    const ticket = ++this.controlTicket;
+    try {
+      const control = await this.getSessionControl({
+        ...scope,
+        signal: this.lifecycleController.signal,
+      });
+      if (
+        this.closed ||
+        scopeTicket !== this.scopeTicket ||
+        ticket !== this.controlTicket
+      )
+        return;
+      if (
+        control.runtimeEpoch !== scope.runtimeEpoch ||
+        control.sessionId !== scope.sessionId ||
+        control.rootSessionId !== scope.sessionId ||
+        control.bindingGeneration !== scope.bindingGeneration
+      )
+        throw new Error("Session control scope changed");
+      this.control = control;
+      this.store.setSessionControl(control);
+    } catch {
+      if (
+        !this.closed &&
+        scopeTicket === this.scopeTicket &&
+        ticket === this.controlTicket
+      )
+        this.clearControl();
+    }
+  }
+
+  retrySession(): void {
+    this.sessionSync.retry();
+    void this.refreshControl();
+  }
+
+  async loadEarlierHistory(): Promise<void> {
+    const state = this.sessionSync.getState();
+    const scope = this.currentScope();
+    if (!scope || state.status !== "ready" || !state.view) return;
+    const stored = this.store.getSnapshot();
+    const before = stored.historyStale
+      ? state.view.history.before
+      : stored.historyBefore;
+    if (!before) return;
+    const ticket = ++this.historyTicket;
+    const scopeTicket = this.scopeTicket;
+    this.store.setHistoryState("loading");
+    try {
+      const history = await this.getSessionHistory({
+        ...scope,
+        before,
+        signal: this.lifecycleController.signal,
+      });
+      const current = this.sessionSync.getState().view;
+      if (
+        this.closed ||
+        scopeTicket !== this.scopeTicket ||
+        ticket !== this.historyTicket
+      )
+        return;
+      if (
+        !current ||
+        history.bindingGeneration !== scope.bindingGeneration ||
+        !sameSessionGeneration(history.version, current.version)
+      )
+        throw new Error("History changed while loading; retry the page");
+      this.store.installSessionHistory(history);
+      this.store.setHistoryState("ready");
+    } catch (error) {
+      if (
+        !this.closed &&
+        scopeTicket === this.scopeTicket &&
+        ticket === this.historyTicket
+      )
+        this.store.setHistoryState("error", errorMessage(error));
+    }
+  }
+
+  async getSessionView(input: UiSessionScope): Promise<UiSessionView> {
+    return (await this.http.getSessionView(input)).view;
+  }
+  async getSessionHistory(
+    input: UiSessionScope & {
+      readonly before?: string;
+      readonly limit?: number;
+    },
+  ): Promise<UiSessionHistory> {
+    return (await this.http.getSessionHistory(input)).history;
+  }
+  async getSessionControl(input: UiSessionScope): Promise<UiSessionControl> {
+    return (await this.http.getSessionControl(input)).control;
+  }
+  async getPromptReceipt(
+    input: UiPromptReceiptQuery,
+  ): Promise<UiPromptReceiptResult> {
+    return (await this.http.getPromptReceipt(input)).result;
+  }
+
+  private publishUnknownPrompts(): void {
+    writeUnknownPrompts(
+      this.config.directory ?? "",
+      this.unknownPrompts,
+      this.persistedUnknownIds,
+    );
+    this.persistedUnknownIds = new Set(
+      this.unknownPrompts.map((request) => request.clientRequestId),
+    );
+    if (!this.closed)
+      this.store.setUnknownPromptRequests(
+        this.unknownPrompts.map((request) => ({
+          ...request,
+          submitting: this.submittingPrompts.has(request.clientRequestId),
+        })),
+      );
+  }
+
+  forgetUnknownPrompt(clientRequestId: string): void {
+    if (this.submittingPrompts.has(clientRequestId)) return;
+    this.unknownPrompts = this.unknownPrompts.filter(
+      (request) => request.clientRequestId !== clientRequestId,
+    );
+    this.publishUnknownPrompts();
+  }
+
+  async retryUnknownPrompts(): Promise<void> {
+    const binding = this.permissionSync.getState().binding;
+    if (!binding || !this.recoverySupported || this.closed) return;
+    const ticket = ++this.receiptTicket;
+    for (const request of [...this.unknownPrompts]) {
+      if (request.runtimeEpoch !== binding.permissionEpoch) {
+        this.unknownPrompts = this.unknownPrompts.map((value) =>
+          value.clientRequestId === request.clientRequestId
+            ? { ...value, status: "epoch-changed" }
+            : value,
+        );
+        this.publishUnknownPrompts();
+        continue;
+      }
+      try {
+        const result = await this.getPromptReceipt({
+          clientRequestId: request.clientRequestId,
+          sessionId: request.sessionId,
+          runtimeEpoch: request.runtimeEpoch,
+          bindingGeneration: binding.bindingGeneration,
+          signal: this.lifecycleController.signal,
+        });
+        if (
+          this.lifecycleController.signal.aborted ||
+          ticket !== this.receiptTicket ||
+          binding.bindingGeneration !==
+            this.permissionSync.getState().binding?.bindingGeneration
+        )
+          return;
+        if (
+          result.runtimeEpoch !== request.runtimeEpoch ||
+          result.bindingGeneration !== binding.bindingGeneration ||
+          result.clientRequestId !== request.clientRequestId
+        )
+          continue;
+        if (result.receipt) {
+          this.unknownPrompts = this.unknownPrompts.filter(
+            (value) => value.clientRequestId !== request.clientRequestId,
+          );
+          this.publishUnknownPrompts();
+          if (this.currentScope()?.sessionId === result.receipt.sessionId)
+            this.sessionSync.resync();
+        }
+      } catch {
+        /* An unknown result stays unknown. Never resend or navigate. */
+      }
+    }
   }
 
   retryPermissions(): void {
@@ -314,6 +604,7 @@ class BrowserDaemonClient implements UiBackendClient {
     this.connected = false;
     this.lifecycleController.abort();
     this.permissionSync.dispose();
+    this.sessionSync.dispose();
     this.permissionHandlers.clear();
     await this.events.close();
     this.store.setConnectionState("disconnected");
@@ -338,24 +629,94 @@ class BrowserDaemonClient implements UiBackendClient {
     text: string,
     options?: SubmitPromptOptions,
   ): Promise<UiPromptReceipt> {
-    const { ok: _ok, ...receipt } = await this.http.submitPromptAccepted({
-      clientRequestId:
-        options?.clientRequestId ?? globalThis.crypto.randomUUID(),
-      ...(options?.sessionId === undefined
-        ? {}
-        : { sessionId: options.sessionId }),
-      text,
-      ...(options?.reasoning === undefined
-        ? {}
-        : { reasoning: options.reasoning }),
-    });
+    const binding = this.permissionSync.getState().binding;
     if (
-      "permissionEpoch" in receipt &&
-      "rootSessionId" in receipt &&
-      "bindingGeneration" in receipt
+      !this.recoverySupported ||
+      !binding ||
+      (binding.rootSessionId !== null &&
+        this.sessionSync.getState().status !== "ready")
     )
-      this.acceptBinding(receipt as typeof receipt & UiPermissionBinding);
-    return receipt;
+      throw new Error("Session is not synchronized");
+    const clientRequestId =
+      options?.clientRequestId ?? globalThis.crypto.randomUUID();
+    if (
+      this.unknownPrompts.some(
+        (request) => request.clientRequestId === clientRequestId,
+      )
+    )
+      throw new Error(
+        "Prompt result is unknown; query its receipt before submitting again",
+      );
+    const scopeTicket = this.scopeTicket;
+    const sessionId = options?.sessionId ?? binding.rootSessionId ?? undefined;
+    if (sessionId !== (binding.rootSessionId ?? undefined))
+      throw new Error("Selected session changed before submission");
+    if (
+      this.unknownPrompts.some(
+        (request) =>
+          request.sessionId === sessionId && request.status !== "epoch-changed",
+      )
+    )
+      throw new Error(
+        "A prompt result is unknown for this session; query its receipt before submitting again",
+      );
+    this.submittingPrompts.add(clientRequestId);
+    this.unknownPrompts = [
+      ...this.unknownPrompts,
+      {
+        directory: this.config.directory ?? "",
+        runtimeEpoch: binding.permissionEpoch,
+        clientRequestId,
+        sessionId,
+        status: "unknown",
+      },
+    ];
+    this.publishUnknownPrompts();
+    try {
+      const { ok: _ok, ...receipt } = await this.http.submitPromptAccepted({
+        clientRequestId,
+        sessionId,
+        text,
+        ...(options?.reasoning === undefined
+          ? {}
+          : { reasoning: options.reasoning }),
+      });
+      this.unknownPrompts = this.unknownPrompts.filter(
+        (request) => request.clientRequestId !== clientRequestId,
+      );
+      this.publishUnknownPrompts();
+      if (
+        !this.closed &&
+        scopeTicket === this.scopeTicket &&
+        "permissionEpoch" in receipt &&
+        "rootSessionId" in receipt &&
+        "bindingGeneration" in receipt
+      )
+        this.acceptBinding(receipt as typeof receipt & UiPermissionBinding);
+      return receipt;
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        [
+          "QUEUE_FULL",
+          "INVALID_CLIENT_REQUEST_ID",
+          "PROMPT_SCHEDULER_CLOSED",
+          "IDEMPOTENCY_CONFLICT",
+          "PROMPT_SUBMISSION_REJECTED",
+        ].includes(String(error.code))
+      ) {
+        this.unknownPrompts = this.unknownPrompts.filter(
+          (request) => request.clientRequestId !== clientRequestId,
+        );
+        this.publishUnknownPrompts();
+      }
+      throw error;
+    } finally {
+      this.submittingPrompts.delete(clientRequestId);
+      this.publishUnknownPrompts();
+    }
   }
 
   submitPromptAndWait(
@@ -451,8 +812,15 @@ class BrowserDaemonClient implements UiBackendClient {
   async connectModel(
     input: Parameters<UiBackendClient["connectModel"]>[0],
   ): ReturnType<UiBackendClient["connectModel"]> {
+    const scopeTicket = this.scopeTicket;
+    const ticket = ++this.modelTicket;
     const response = await this.http.connectModel(input);
-    this.store.setCurrentModel(response.model);
+    if (
+      !this.closed &&
+      scopeTicket === this.scopeTicket &&
+      ticket === this.modelTicket
+    )
+      this.store.setCurrentModel(response.model);
     return response.model;
   }
 
@@ -495,21 +863,26 @@ class BrowserDaemonClient implements UiBackendClient {
     input: Parameters<UiBackendClient["archiveSession"]>[0],
   ): ReturnType<UiBackendClient["archiveSession"]> {
     await this.http.archiveSession(input.sessionId);
-    await this.refreshProjectedSnapshot();
+    this.sessionSync.resync();
+    void this.refreshIndex();
   }
 
   async createSessionForRuntime(): ReturnType<
     UiBackendClient["createSession"]
   > {
+    const ticket = ++this.selectionTicket;
     const response = await this.http.createSession();
-    this.acceptBinding(response);
+    if (!this.closed && ticket === this.selectionTicket)
+      this.acceptBinding(response);
     this.refreshUnrelatedViews();
     return response.session;
   }
 
   async selectSessionForRuntime(sessionId: string): Promise<void> {
+    const ticket = ++this.selectionTicket;
     const response = await this.http.selectSession(sessionId);
-    this.acceptBinding(response);
+    if (!this.closed && ticket === this.selectionTicket)
+      this.acceptBinding(response);
     this.refreshUnrelatedViews();
   }
 
@@ -584,12 +957,28 @@ class BrowserDaemonClient implements UiBackendClient {
   }
 
   async abortRun(runId: string): ReturnType<UiBackendClient["abortRun"]> {
-    const snapshot = this.store.getSnapshot().view.snapshot;
-    const sessionId = snapshot?.runs.find((run) => run.id === runId)?.sessionId;
-    if (!sessionId) {
-      return;
-    }
-    await this.http.abortSession(sessionId, { runId });
+    const target = this.control;
+    if (target?.runId !== runId)
+      throw new Error("The exact running task has not been verified");
+    await this.http.abortSession(target.sessionId, {
+      runId,
+      runtimeEpoch: target.runtimeEpoch,
+      bindingGeneration: target.bindingGeneration,
+    });
+    await this.refreshControl();
+  }
+  async abortSessionForRuntime(
+    sessionId: string,
+    runId?: string,
+  ): Promise<void> {
+    const target = this.control;
+    if (
+      target?.sessionId !== sessionId ||
+      !target.runId ||
+      (runId !== undefined && target.runId !== runId)
+    )
+      throw new Error("The exact running task has not been verified");
+    await this.abortRun(target.runId);
   }
 
   private handleSseEvent(event: WebSseEvent, seqNum: number | undefined): void {
@@ -605,12 +994,7 @@ class BrowserDaemonClient implements UiBackendClient {
         return;
       case "resync-required":
         this.permissionSync.resync();
-        void this.resync(event.maxSeqNum).catch((error: unknown) => {
-          if (!this.closed)
-            this.store.setError(
-              error instanceof Error ? error.message : String(error),
-            );
-        });
+        this.sessionSync.resync();
         return;
       case "ui.event": {
         if (
@@ -635,6 +1019,58 @@ class BrowserDaemonClient implements UiBackendClient {
           return;
         }
         if (
+          event.event.type === "session.changed" ||
+          event.event.type === "session.unavailable"
+        ) {
+          if (event.event.type === "session.changed")
+            this.store.invalidateSessionHistory(event.event);
+          this.sessionSync.receive(event.event);
+          if (event.event.type === "session.changed" && event.event.runs)
+            void this.refreshControl();
+          this.notifyUiEvent(event.event);
+          if (
+            seqNum !== undefined &&
+            Number.isSafeInteger(seqNum) &&
+            seqNum >= 0
+          )
+            this.events.setLastEventId(seqNum);
+          return;
+        }
+        if (event.event.type === "session.index.invalidated") {
+          void this.refreshIndex();
+          return;
+        }
+        if (event.event.type === "model.invalidated") {
+          void this.refreshModel();
+          return;
+        }
+        if (event.event.type === "session.resync-required") {
+          this.sessionSync.resync();
+          return;
+        }
+        if (event.event.type === "snapshot.replaced") return;
+        if (
+          [
+            "message.appended",
+            "message.updated",
+            "message.part.delta",
+            "message.reasoning.delta",
+            "message.reasoning.end",
+            "session.updated",
+            "session.archived",
+            "run.updated",
+            "run.interrupted",
+            "prompt.submitted",
+            "prompt.updated",
+            "todo.updated",
+            "goal.updated",
+            "context.window.updated",
+          ].includes(event.event.type)
+        ) {
+          this.notifyUiEvent(event.event);
+          return;
+        }
+        if (
           seqNum === undefined ||
           !Number.isSafeInteger(seqNum) ||
           seqNum < 0
@@ -642,77 +1078,22 @@ class BrowserDaemonClient implements UiBackendClient {
           this.store.setError("Daemon event is missing a valid sequence id");
           return;
         }
-        if (this.buffering) {
-          this.bufferedEvents.push({ event: event.event, seqNum });
-          return;
-        }
-        if (this.dispatchUiEvent(event.event, seqNum, "incremental")) {
+        if (this.dispatchUiEvent(event.event, seqNum, "incremental"))
           this.events.setLastEventId(seqNum);
-        }
       }
     }
   }
 
-  private async resync(lastEventId: number): Promise<void> {
-    this.resyncPromise ??= this.doResync(lastEventId).finally(() => {
-      this.resyncPromise = undefined;
-    });
-    await this.resyncPromise;
-  }
-
-  private async refreshProjectedSnapshot(): Promise<void> {
-    await this.resync(this.store.getSnapshot().view.lastAppliedSeqNum);
-  }
-
-  private async doResync(lastEventId: number): Promise<void> {
-    const previousBuffering = this.buffering;
-    this.buffering = true;
-    let committedSeqNum = this.store.getSnapshot().view.lastAppliedSeqNum;
-    try {
-      let binding: string;
-      let response: Awaited<ReturnType<DaemonHttpClient["getSnapshot"]>>;
-      do {
-        binding = JSON.stringify(this.permissionSync.getState().binding);
-        response = await this.http.getSnapshot({
-          signal: this.lifecycleController.signal,
-        });
-        if (this.closed) return;
-        // A selection can finish while old history is loading. Re-read that
-        // view rather than committing it or losing the coalesced refresh.
-      } while (
-        binding !== JSON.stringify(this.permissionSync.getState().binding)
-      );
-      this.dispatchUiEvent(
-        { snapshot: response.snapshot, type: "snapshot.replaced" },
-        response.seqNum,
-        "snapshot-barrier",
-      );
-      const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
-      committedSeqNum = Math.max(response.seqNum, maxBufferedSeqNum);
-      this.events.setLastEventId(
-        Math.max(lastEventId, response.seqNum, maxBufferedSeqNum),
-      );
-    } catch (error) {
-      // The SSE remains open for imperative resyncs. Preserve every frame that
-      // arrived during the failed snapshot request and advance only to data
-      // that the reducer actually committed.
-      const maxBufferedSeqNum = this.applyBufferedEventsAfter(committedSeqNum);
-      this.events.setLastEventId(Math.max(committedSeqNum, maxBufferedSeqNum));
-      throw error;
-    } finally {
-      this.buffering = previousBuffering;
-    }
-  }
-
-  private applyBufferedEventsAfter(seqNum: number): number {
-    let maxSeqNum = seqNum;
-    for (const event of this.bufferedEvents.splice(0)) {
-      if (event.seqNum > seqNum) {
-        this.dispatchUiEvent(event.event, event.seqNum, "incremental");
-        maxSeqNum = Math.max(maxSeqNum, event.seqNum);
+  private notifyUiEvent(event: Parameters<UiEventHandler>[0]): void {
+    let failed = false;
+    for (const handler of this.eventHandlers) {
+      try {
+        handler(event);
+      } catch {
+        failed = true;
       }
     }
-    return maxSeqNum;
+    if (failed) reportEventSubscriberFailure();
   }
 
   private dispatchUiEvent(
@@ -741,58 +1122,6 @@ class BrowserDaemonClient implements UiBackendClient {
 
 function createClientInvocationId(): string {
   return globalThis.crypto.randomUUID();
-}
-
-function activeRunForSession(
-  snapshot: UiSnapshot,
-  sessionId: string,
-): UiSnapshot["runs"][number] | undefined {
-  const status = snapshot.status;
-  if (status.kind === "running") {
-    const run = snapshot.runs.find(
-      (candidate) => candidate.id === status.runId,
-    );
-    if (run?.sessionId === sessionId) {
-      return run;
-    }
-  }
-  if (status.kind === "waiting-for-permission") {
-    const request = snapshot.permissions.find(
-      (candidate) => candidate.id === status.requestId,
-    );
-    const run = snapshot.runs.find(
-      (candidate) => candidate.id === request?.runId,
-    );
-    if (run?.sessionId === sessionId) {
-      return run;
-    }
-  }
-  return snapshot.runs.find(
-    (candidate) =>
-      candidate.sessionId === sessionId &&
-      (candidate.status.kind === "running" ||
-        candidate.status.kind === "waiting-for-permission"),
-  );
-}
-
-function isAbortableRun(snapshot: UiSnapshot, runId: string): boolean {
-  const status = snapshot.status;
-  if (status.kind === "running" && status.runId === runId) {
-    return true;
-  }
-  if (
-    status.kind === "waiting-for-permission" &&
-    snapshot.permissions.some(
-      (request) => request.id === status.requestId && request.runId === runId,
-    )
-  ) {
-    return true;
-  }
-  const run = snapshot.runs.find((candidate) => candidate.id === runId);
-  return (
-    run?.status.kind === "running" ||
-    run?.status.kind === "waiting-for-permission"
-  );
 }
 
 function createBrowserDaemonClient(input: {
@@ -845,7 +1174,13 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       scopes: [],
       selectedDirectory: null,
     };
+    let priorIndex = this.store.getSnapshot().sessionIndex;
     this.store.subscribe(() => {
+      const index = this.store.getSnapshot().sessionIndex;
+      if (index !== priorIndex) {
+        priorIndex = index;
+        void this.retryRememberedSelection();
+      }
       this.persistActiveSession();
     });
     this.ready = this.initialize();
@@ -857,6 +1192,18 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
 
   retryPermissions(): void {
     this.activeClient?.retryPermissions();
+  }
+  retrySession(): void {
+    this.activeClient?.retrySession();
+  }
+  async loadEarlierHistory(): Promise<void> {
+    await this.activeClient?.loadEarlierHistory();
+  }
+  async retryUnknownPrompts(): Promise<void> {
+    await this.activeClient?.retryUnknownPrompts();
+  }
+  forgetUnknownPrompt(clientRequestId: string): void {
+    this.activeClient?.forgetUnknownPrompt(clientRequestId);
   }
 
   async createSession(): Promise<void> {
@@ -882,24 +1229,7 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
   }
 
   async abortSession(sessionId: string, runId?: string): Promise<void> {
-    const snapshot = this.store.getSnapshot().view.snapshot;
-    if (!snapshot) {
-      return;
-    }
-    const run =
-      runId === undefined
-        ? activeRunForSession(snapshot, sessionId)
-        : snapshot.runs.find((candidate) => candidate.id === runId);
-    if (!run) {
-      return;
-    }
-    if (run.sessionId !== sessionId) {
-      throw new Error(`Run ${run.id} does not belong to session ${sessionId}`);
-    }
-    if (!isAbortableRun(snapshot, run.id)) {
-      return;
-    }
-    await this.requireActiveClient().abortRun(run.id);
+    await this.requireActiveClient().abortSessionForRuntime(sessionId, runId);
   }
 
   async executeSlashCommand(input: {
@@ -1101,6 +1431,9 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       throw error;
     } finally {
       this.restoringSession = false;
+      // Index recovery can finish while bootstrap is still refreshing workspace
+      // metadata. Its subscriber defers selection while this lock is held.
+      await this.retryRememberedSelection();
       this.persistActiveSession();
     }
   }
@@ -1199,6 +1532,54 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
     await client.selectSessionForRuntime(sessionId);
   }
 
+  private async retryRememberedSelection(): Promise<void> {
+    const client = this.activeClient;
+    const directory = this.workspaceSnapshot.selectedDirectory;
+    if (
+      this.disposed ||
+      !client ||
+      !directory ||
+      this.restoringSession ||
+      !this.preserveRememberedSession
+    )
+      return;
+    const sessionId = this.navigationState.sessionByDirectory[directory];
+    if (
+      !sessionId ||
+      !this.store
+        .getSnapshot()
+        .sessionIndex.some(
+          (session) =>
+            session.id === sessionId &&
+            !session.parentId &&
+            !session.isSubagent,
+        )
+    )
+      return;
+    const generation = this.sessionSelectionGeneration;
+    this.restoringSession = true;
+    try {
+      await client.selectSessionForRuntime(sessionId);
+      if (
+        this.activeClient === client &&
+        generation === this.sessionSelectionGeneration
+      )
+        this.preserveRememberedSession = false;
+    } catch (error) {
+      if (
+        !this.isDisposed() &&
+        this.activeClient === client &&
+        generation === this.sessionSelectionGeneration
+      )
+        this.store.setError(errorMessage(error));
+    } finally {
+      if (this.activeClient === client) {
+        this.restoringSession = false;
+        this.persistActiveSession();
+      }
+    }
+  }
+
   private persistActiveSession(): void {
     if (this.restoringSession || this.preserveRememberedSession) return;
     const directory = this.workspaceSnapshot.selectedDirectory;
@@ -1286,4 +1667,58 @@ export function createOhbabyWebRuntime(
   options: { readonly fetch?: typeof fetch } = {},
 ): OhbabyWebRuntime {
   return new BrowserOhbabyWebRuntime(config, options.fetch);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+const UNKNOWN_PROMPTS_KEY = "ohbaby.web.unknown-prompts.v1";
+function readUnknownPrompts(directory: string): UnknownPromptRequest[] {
+  try {
+    const storage = (globalThis as { localStorage?: Storage }).localStorage;
+    if (!storage) return [];
+    const prefix = `${UNKNOWN_PROMPTS_KEY}:${encodeURIComponent(directory)}:`;
+    const result: UnknownPromptRequest[] = [];
+    for (let index = 0; index < storage.length; index++) {
+      const key = storage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const value: unknown = JSON.parse(storage.getItem(key) ?? "null");
+      if (typeof value !== "object" || value === null) continue;
+      const record = value as Partial<UnknownPromptRequest>;
+      if (
+        record.directory === directory &&
+        typeof record.clientRequestId === "string" &&
+        typeof record.runtimeEpoch === "string" &&
+        (record.sessionId === undefined ||
+          typeof record.sessionId === "string") &&
+        (record.status === "unknown" || record.status === "epoch-changed")
+      )
+        result.push(record as UnknownPromptRequest);
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+function writeUnknownPrompts(
+  directory: string,
+  requests: readonly UnknownPromptRequest[],
+  previousIds: ReadonlySet<string>,
+): void {
+  try {
+    const storage = (globalThis as { localStorage?: Storage }).localStorage;
+    if (!storage) return;
+    const prefix = `${UNKNOWN_PROMPTS_KEY}:${encodeURIComponent(directory)}:`;
+    const ids = new Set(requests.map((request) => request.clientRequestId));
+    for (const id of previousIds)
+      if (!ids.has(id))
+        storage.removeItem(`${prefix}${encodeURIComponent(id)}`);
+    for (const request of requests)
+      storage.setItem(
+        `${prefix}${encodeURIComponent(request.clientRequestId)}`,
+        JSON.stringify(request),
+      );
+  } catch {
+    /* The active client still retains the unresolved identity in memory. */
+  }
 }

@@ -19,6 +19,15 @@ import type {
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { createDaemonServerApp } from "ohbaby-server";
+import { sessionViewFromSnapshot } from "./session-recovery.test-utils.js";
+import type {
+  UiSessionScope,
+  UiSessionView,
+  UiSessionHistory,
+  UiSessionControl,
+  UiPromptReceiptQuery,
+  UiPromptReceiptResult,
+} from "ohbaby-sdk";
 import { createOhbabyWebRuntime } from "./client.js";
 import type { OhbabyBootstrapConfig } from "./wire.js";
 
@@ -188,6 +197,53 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve();
   }
 
+  getSessionView(input: UiSessionScope): Promise<UiSessionView> {
+    const view = sessionViewFromSnapshot({
+      ...this.snapshot,
+      activeSessionId: input.sessionId,
+    });
+    return Promise.resolve({
+      ...view,
+      version: { ...view.version, runtimeEpoch: input.runtimeEpoch ?? "epoch" },
+      bindingGeneration: input.bindingGeneration,
+    });
+  }
+  async getSessionHistory(input: UiSessionScope): Promise<UiSessionHistory> {
+    const view = await this.getSessionView(input);
+    return {
+      version: view.version,
+      bindingGeneration: input.bindingGeneration,
+      messages: [],
+      prompts: [],
+      reasoningMissing: false,
+      hasMore: false,
+    };
+  }
+  getSessionControl(input: UiSessionScope): Promise<UiSessionControl> {
+    const run = this.snapshot.runs.find(
+      (run) =>
+        run.sessionId === input.sessionId &&
+        ["running", "waiting-for-permission"].includes(run.status.kind),
+    );
+    return Promise.resolve({
+      runtimeEpoch: input.runtimeEpoch ?? "epoch",
+      sessionId: input.sessionId,
+      rootSessionId: input.sessionId,
+      bindingGeneration: input.bindingGeneration,
+      runId: run?.id ?? null,
+      driver: run ? "user" : null,
+    });
+  }
+  getPromptReceipt(
+    input: UiPromptReceiptQuery,
+  ): Promise<UiPromptReceiptResult> {
+    return Promise.resolve({
+      runtimeEpoch: input.runtimeEpoch ?? "epoch",
+      bindingGeneration: input.bindingGeneration,
+      clientRequestId: input.clientRequestId,
+      receipt: null,
+    });
+  }
   getSnapshot(): Promise<UiSnapshot> {
     return Promise.resolve(this.snapshot);
   }
@@ -630,6 +686,10 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         { fetch: fetchImpl },
       );
       await runtime.ready;
+      await waitFor(
+        () => runtime.store.getSnapshot().sessionControl?.runId === "run_1",
+        "control did not load",
+      );
 
       await expect(
         runtime.abortSession("session_1", "run_1"),
@@ -637,7 +697,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       expect(backend.abortedRunIds).toEqual(["run_1"]);
 
       await expect(runtime.abortSession("session_2", "run_1")).rejects.toThrow(
-        "does not belong to session",
+        "exact running task",
       );
       expect(backend.abortedRunIds).toEqual(["run_1"]);
 
@@ -648,17 +708,21 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
           "session_2",
         "selected history did not load",
       );
+      await waitFor(
+        () => runtime.store.getSnapshot().sessionControl?.runId === "run_2",
+        "new control did not load",
+      );
       await expect(
         runtime.abortSession("session_2", "run_2"),
       ).resolves.toBeUndefined();
       expect(backend.abortedRunIds).toEqual(["run_1", "run_2"]);
 
-      await expect(
-        runtime.abortSession("session_without_run"),
-      ).resolves.toBeUndefined();
+      await expect(runtime.abortSession("session_without_run")).rejects.toThrow(
+        "exact running task",
+      );
       await expect(
         runtime.abortSession("session_2", "run_unknown"),
-      ).resolves.toBeUndefined();
+      ).rejects.toThrow("exact running task");
       expect(backend.abortedRunIds).toEqual(["run_1", "run_2"]);
       await runtime.dispose();
     } finally {
@@ -1017,7 +1081,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       const initialProjectedSession = runtime.store
         .getSnapshot()
         .view.snapshot?.sessions.find((session) => session.id === "session_2");
-      expect(initialProjectedSession?.messages).toEqual([]);
+      expect(initialProjectedSession?.messages ?? []).toEqual([]);
 
       await runtime.selectSession("session_2");
       await waitFor(

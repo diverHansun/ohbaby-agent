@@ -1,3 +1,4 @@
+import { sessionViewFromSnapshot } from "./session-recovery.test-utils.js";
 import { describe, expect, it } from "vitest";
 import type { UiPermissionRequest } from "ohbaby-sdk";
 import { createOhbabyWebRuntime } from "./client.js";
@@ -5,6 +6,8 @@ import type { WebSseEvent } from "./wire.js";
 
 const binding = {
   permissionEpoch: "epoch",
+  runtimeEpoch: "epoch",
+  sessionRecoveryVersion: 1,
   rootSessionId: "root",
   bindingGeneration: 1,
 };
@@ -107,7 +110,7 @@ function fixture(options: FixtureOptions = {}): {
           { headers: { "content-type": "text/event-stream" } },
         ),
       );
-    if (url.pathname === "/v1/snapshot") return history.promise;
+    if (url.pathname.endsWith("/view")) return history.promise;
     if (url.pathname === "/v1/model")
       return Promise.resolve(
         Response.json(
@@ -202,7 +205,7 @@ function fixture(options: FixtureOptions = {}): {
 }
 
 describe("independent web approval recovery", () => {
-  it("keeps new approvals actionable after more than five unchanged hellos and prompt receipts", async () => {
+  it("keeps new approvals actionable after more than five unchanged hellos while chat recovery remains pending", async () => {
     const test = fixture();
     try {
       await test.runtime.ready;
@@ -211,10 +214,6 @@ describe("independent web approval recovery", () => {
         .toBe("ready");
       for (let prompt = 0; prompt < 6; prompt++) {
         test.emit({ type: "hello", clientId: "client", ...binding });
-        await test.runtime.client?.submitPromptAccepted(
-          `Prompt ${String(prompt)}`,
-          { sessionId: "root" },
-        );
         for (let step = 0; step < 30; step++) await Promise.resolve();
       }
       expect(test.runtime.store.getSnapshot().permissionSync).toMatchObject({
@@ -250,7 +249,14 @@ describe("independent web approval recovery", () => {
         }),
       ).resolves.toBeUndefined();
       expect(test.replies).toEqual([
-        { response: { choiceId: "allow_once" }, context: binding },
+        {
+          response: { choiceId: "allow_once" },
+          context: {
+            permissionEpoch: binding.permissionEpoch,
+            rootSessionId: binding.rootSessionId,
+            bindingGeneration: binding.bindingGeneration,
+          },
+        },
       ]);
     } finally {
       await test.runtime.dispose();
@@ -299,7 +305,14 @@ describe("independent web approval recovery", () => {
         choiceId: "allow_once",
       });
       expect(fixtureState.replies).toEqual([
-        { response: { choiceId: "allow_once" }, context: binding },
+        {
+          response: { choiceId: "allow_once" },
+          context: {
+            permissionEpoch: binding.permissionEpoch,
+            rootSessionId: binding.rootSessionId,
+            bindingGeneration: binding.bindingGeneration,
+          },
+        },
       ]);
       expect(runtime.store.getSnapshot().connectionState).toBe("live");
     } finally {
@@ -338,13 +351,13 @@ describe("independent web approval recovery", () => {
         Response.json({
           ok: true,
           seqNum: 600,
-          snapshot: {
+          view: sessionViewFromSnapshot({
             activeSessionId: "root",
             sessions: [],
             runs: [],
             permissions: [request],
             status: { kind: "idle" },
-          },
+          }),
         }),
       );
       await expect

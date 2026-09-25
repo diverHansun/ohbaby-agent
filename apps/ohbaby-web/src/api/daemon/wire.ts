@@ -1,5 +1,7 @@
 import type {
   UiEvent,
+  SessionSyncState,
+  UiSessionControl,
   UiPermissionBinding,
   UiPermissionSnapshot,
   UiSessionIndexEntry,
@@ -120,7 +122,24 @@ export interface CommandNotice {
   readonly text?: string;
 }
 
+export interface UnknownPromptRequest {
+  readonly directory: string;
+  readonly runtimeEpoch: string;
+  readonly clientRequestId: string;
+  readonly sessionId?: string;
+  readonly status: "unknown" | "epoch-changed";
+  /** Transient UI state; never persisted with the unresolved identity. */
+  readonly submitting?: boolean;
+}
 export interface StoreSnapshot {
+  readonly sessionSync: SessionSyncState;
+  readonly sessionControl: UiSessionControl | null;
+  readonly historyState: "loading" | "ready" | "error";
+  readonly historyError?: string;
+  readonly historyBefore?: string;
+  readonly historyHasMore: boolean;
+  readonly historyStale: boolean;
+  readonly unknownPromptRequests: readonly UnknownPromptRequest[];
   readonly permissionSync: PermissionSyncState;
   readonly sessionIndex: readonly UiSessionIndexEntry[];
   readonly connectionState: ConnectionState;
@@ -143,6 +162,8 @@ export interface SessionIndexResponse {
   readonly sessions: readonly UiSessionIndexEntry[];
 }
 export interface BindingResponse extends UiPermissionBinding {
+  readonly runtimeEpoch?: string;
+  readonly sessionRecoveryVersion?: number;
   readonly ok: true;
 }
 
@@ -239,6 +260,8 @@ export interface PermissionStateResponse {
 export type WebSseEvent =
   | {
       readonly type: "hello";
+      readonly runtimeEpoch?: string;
+      readonly sessionRecoveryVersion?: number;
       readonly permissionEpoch: string;
       readonly rootSessionId: string | null;
       readonly bindingGeneration: number;

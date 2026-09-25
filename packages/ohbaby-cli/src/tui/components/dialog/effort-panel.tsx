@@ -17,6 +17,7 @@ export interface EffortPanelProps {
   readonly client: CoreAPI;
   readonly sessionId: string | null;
   readonly pendingReasoning: UiReasoningConfig | null;
+  readonly sessionReasoning?: UiReasoningConfig | null;
   readonly onSelect: (reasoning: UiReasoningConfig) => Promise<void>;
   readonly onClose: () => void;
 }
@@ -39,6 +40,7 @@ export function EffortPanel({
   client,
   sessionId,
   pendingReasoning,
+  sessionReasoning,
   onSelect,
   onClose,
 }: EffortPanelProps): ReactElement {
@@ -59,16 +61,16 @@ export function EffortPanel({
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     const refresh = (): void => {
       const request = ++generation;
-      void Promise.all([client.getCurrentModel(), client.getSnapshot()])
-        .then(([model, snapshot]) => {
+      void client
+        .getCurrentModel()
+        .then((model) => {
           if (cancelled || request !== generation) return;
           const capability = model?.reasoning ?? {
             status: "unknown" as const,
             efforts: [],
           };
           const preference = sessionId
-            ? (snapshot.sessions.find((session) => session.id === sessionId)
-                ?.reasoning ?? null)
+            ? (sessionReasoning ?? null)
             : pendingReasoning;
           const active =
             preference?.enabled !== false && preference?.effort === undefined
@@ -100,7 +102,7 @@ export function EffortPanel({
       generation++;
       if (refreshTimer) clearTimeout(refreshTimer);
     };
-  }, [client, sessionId, pendingReasoning]);
+  }, [client, sessionId, pendingReasoning, sessionReasoning]);
 
   useInput((_value, key) => {
     if (key.escape) {

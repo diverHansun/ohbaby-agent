@@ -221,7 +221,7 @@ export function promptLine(frame: string): string {
 export function promptIsReady(frame: string): boolean {
   const line = promptLine(frame).replace(/[^\x00-\x7F]/gu, "");
 
-  return line.trim() === ">";
+  return line.trim() === ">" && !frame.includes("Syncing session");
 }
 
 function stripAnsi(input: string): string {

@@ -89,6 +89,7 @@ export interface CliCommandRuntime {
   readonly readDaemonStatus: () => Promise<CliDaemonState | undefined>;
   readonly readStdin: () => Promise<string>;
   readonly renderTerminalUi: (options: {
+    readonly pendingPromptWorkspace?: string;
     readonly clearOnStart?: boolean;
     readonly client: CoreAPI;
     readonly initialNotices?: readonly string[];

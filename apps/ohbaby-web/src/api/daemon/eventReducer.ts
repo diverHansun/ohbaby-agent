@@ -40,9 +40,7 @@ export function reduceUiEvent(
   if (seqNum <= state.lastAppliedSeqNum) {
     return state;
   }
-  if (event.type === "snapshot.replaced") {
-    return replaceSnapshot(event.snapshot, seqNum);
-  }
+  if (event.type === "snapshot.replaced") return state;
   const commandNotices = applyCommandEvent(state.commandNotices, event);
   if (event.type === "command.catalog.updated") {
     return {

@@ -1,3 +1,4 @@
+import { sessionViewFromSnapshot } from "./session-recovery.test-utils.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UiPermissionBinding, UiSnapshot } from "ohbaby-sdk";
 import { createOhbabyWebRuntime } from "./client.js";
@@ -21,19 +22,34 @@ interface Fixture {
   holdIndex(): void;
   releaseIndex(): void;
   releaseHistory(): void;
+  releaseWorkspaceRefresh(): void;
+  recoverIndexAndHello(): void;
+  reconnectWithRecoveredIndex(): void;
 }
 function fixture(
   startupIntent?: WebStartupIntent,
-  options: { remembered?: "child" | "missing"; failIndex?: boolean } = {},
+  options: {
+    remembered?: "child" | "missing";
+    failIndex?: boolean;
+    freshRoot?: boolean;
+    holdWorkspaceRefresh?: boolean;
+  } = {},
 ): Fixture {
   const history = deferred<Response>();
   const index = deferred<undefined>();
+  const workspaceRefresh = deferred<undefined>();
+  let scopeCalls = 0;
   let delayIndex = false;
-  let selected = startupIntent?.resumeSessionId ?? "default";
+  let selected: string | null = options.freshRoot
+    ? null
+    : (startupIntent?.resumeSessionId ?? "default");
   let generation = 1;
   let snapshotCalls = 0;
   let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
   const selections: string[] = [];
+  const closedStreams = new WeakSet<
+    ReadableStreamDefaultController<Uint8Array>
+  >();
   const sessions = ["default", "remembered", "explicit"]
     .filter((id) => options.remembered !== "missing" || id !== "remembered")
     .map((id) => ({
@@ -45,14 +61,29 @@ function fixture(
       createdAt: "2026-09-25",
       updatedAt: "2026-09-25",
     }));
-  const binding = (): UiPermissionBinding => ({
+  const binding = (): UiPermissionBinding & {
+    runtimeEpoch: string;
+    sessionRecoveryVersion: number;
+  } => ({
+    runtimeEpoch: "epoch",
+    sessionRecoveryVersion: 1,
     permissionEpoch: "epoch",
     rootSessionId: selected,
     bindingGeneration: generation,
   });
   const snapshot = (activeSessionId: string): UiSnapshot => ({
     activeSessionId,
-    sessions: sessions.map((session) => ({ ...session, messages: [] })),
+    sessions: sessions.map((session) => ({
+      ...session,
+      messages: [
+        {
+          id: `${session.id}-message`,
+          role: "assistant" as const,
+          createdAt: "2026-09-25",
+          parts: [{ type: "text" as const, text: `${session.id} transcript` }],
+        },
+      ],
+    })),
     permission: { level: "default", mode: "auto", sessionRules: [] },
     permissions: [],
     runs: [],
@@ -61,7 +92,10 @@ function fixture(
   const fetchImpl: typeof fetch = async (input, init = {}) => {
     const request = new Request(input, init);
     const path = new URL(request.url).pathname;
-    if (path === "/v1/scopes")
+    if (path === "/v1/scopes") {
+      scopeCalls += 1;
+      if (scopeCalls > 1 && options.holdWorkspaceRefresh)
+        await workspaceRefresh.promise;
       return Response.json({
         ok: true,
         scopes: [
@@ -74,6 +108,7 @@ function fixture(
           },
         ],
       });
+    }
     if (path === "/v1/clients")
       return Response.json({ ok: true, clientId: "client", ...binding() });
     if (path === "/v1/events")
@@ -89,7 +124,10 @@ function fixture(
             request.signal.addEventListener(
               "abort",
               () => {
-                controller.close();
+                if (!closedStreams.has(controller)) {
+                  closedStreams.add(controller);
+                  controller.close();
+                }
               },
               {
                 once: true,
@@ -99,11 +137,19 @@ function fixture(
         }),
         { headers: { "content-type": "text/event-stream" } },
       );
-    if (path === "/v1/snapshot") {
+    if (path.endsWith("/view")) {
       snapshotCalls += 1;
-      return snapshotCalls === 1
+      return snapshotCalls === 1 && !options.freshRoot
         ? history.promise
-        : Response.json({ ok: true, seqNum: 2, snapshot: snapshot(selected) });
+        : Response.json({
+            ok: true,
+            seqNum: 2,
+            view: sessionViewFromSnapshot(
+              snapshot(selected ?? "default"),
+              2,
+              generation,
+            ),
+          });
     }
     if (path === "/v1/model") return new Promise<Response>(() => undefined);
     if (path === "/v1/sessions/index") {
@@ -155,6 +201,12 @@ function fixture(
       selected = match[1];
       generation += 1;
       selections.push(selected);
+      if (options.freshRoot)
+        stream?.enqueue(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({ type: "hello", clientId: "client", ...binding() })}\n\n`,
+          ),
+        );
       return Response.json({ ok: true, ...binding() });
     }
     throw new Error(`Unexpected request ${path}`);
@@ -172,6 +224,24 @@ function fixture(
   return {
     runtime,
     selections,
+    releaseWorkspaceRefresh(): void {
+      workspaceRefresh.resolve(undefined);
+    },
+    reconnectWithRecoveredIndex(): void {
+      options.failIndex = false;
+      if (stream) {
+        closedStreams.add(stream);
+        stream.close();
+      }
+    },
+    recoverIndexAndHello(): void {
+      options.failIndex = false;
+      stream?.enqueue(
+        new TextEncoder().encode(
+          `data: ${JSON.stringify({ type: "hello", clientId: "client", ...binding() })}\n\n`,
+        ),
+      );
+    },
     holdIndex(): void {
       delayIndex = true;
     },
@@ -183,7 +253,9 @@ function fixture(
         Response.json({
           ok: true,
           seqNum: 1,
-          snapshot: snapshot(startupIntent?.resumeSessionId ?? "default"),
+          view: sessionViewFromSnapshot(
+            snapshot(startupIntent?.resumeSessionId ?? "default"),
+          ),
         }),
       );
     },
@@ -220,7 +292,9 @@ describe("remembered Web session restoration", () => {
           "ready",
         );
       });
-      expect(app.runtime.store.getSnapshot().view.snapshot).toBeNull();
+      expect(
+        app.runtime.store.getSnapshot().view.snapshot?.activeSessionId,
+      ).toBe("remembered");
       app.releaseHistory();
       await vi.waitFor(() => {
         expect(
@@ -336,6 +410,97 @@ describe("remembered Web session restoration", () => {
       );
     } finally {
       app.releaseIndex();
+      app.releaseHistory();
+      await app.runtime.dispose();
+    }
+  });
+  it("keeps an explicit fresh startup empty when recovered index contains a remembered session", async () => {
+    const app = fixture(
+      { startupSessionMode: { type: "fresh" } },
+      { failIndex: true, freshRoot: true },
+    );
+    try {
+      await app.runtime.ready;
+      app.reconnectWithRecoveredIndex();
+      await vi.waitFor(() => {
+        expect(app.runtime.store.getSnapshot().sessionIndex).toHaveLength(3);
+      });
+      expect(app.selections).toEqual([]);
+      expect(await app.runtime.client?.getSelectedSessionId()).toBeNull();
+      expect(app.runtime.store.getSnapshot().sessionSync.scope).toBeNull();
+      expect(app.runtime.store.getSnapshot().view.snapshot).toBeNull();
+    } finally {
+      app.releaseHistory();
+      await app.runtime.dispose();
+    }
+  });
+
+  it("restores when index recovery finishes before bootstrap workspace metadata", async () => {
+    const app = fixture(undefined, {
+      failIndex: true,
+      freshRoot: true,
+      holdWorkspaceRefresh: true,
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(app.runtime.store.getSnapshot().error).toContain(
+          "index unavailable",
+        );
+      });
+      app.reconnectWithRecoveredIndex();
+      await vi.waitFor(() => {
+        expect(app.runtime.store.getSnapshot().sessionIndex).toHaveLength(3);
+      });
+      app.releaseWorkspaceRefresh();
+      await app.runtime.ready;
+      await vi.waitFor(() => {
+        const state = app.runtime.store.getSnapshot();
+        expect(state.sessionSync.status).toBe("ready");
+        expect(state.view.snapshot?.activeSessionId).toBe("remembered");
+        expect(state.view.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([
+          { type: "text", text: "remembered transcript" },
+        ]);
+      });
+    } finally {
+      app.releaseWorkspaceRefresh();
+      app.releaseHistory();
+      await app.runtime.dispose();
+    }
+  });
+
+  it("recovers the actual transcript from fresh binding after index failure and SSE reconnect", async () => {
+    const app = fixture(undefined, { failIndex: true, freshRoot: true });
+    try {
+      await app.runtime.ready;
+      expect(app.runtime.store.getSnapshot().sessionSync.scope).toBeNull();
+      app.reconnectWithRecoveredIndex();
+      await vi.waitFor(() => {
+        const state = app.runtime.store.getSnapshot();
+        expect(state.sessionSync.status).toBe("ready");
+        expect(state.sessionSync.scope?.sessionId).toBe("remembered");
+        expect(state.view.snapshot?.sessions[0]?.messages[0]?.parts).toEqual([
+          { type: "text", text: "remembered transcript" },
+        ]);
+      });
+      expect(app.selections).toEqual(["remembered"]);
+    } finally {
+      app.releaseHistory();
+      await app.runtime.dispose();
+    }
+  });
+  it("restores the remembered selection after reconnect metadata recovers from a bootstrap failure", async () => {
+    const app = fixture(undefined, { failIndex: true });
+    try {
+      await app.runtime.ready;
+      expect(app.selections).toEqual([]);
+      app.recoverIndexAndHello();
+      await vi.waitFor(() => {
+        expect(app.selections).toEqual(["remembered"]);
+      });
+      expect(await app.runtime.client?.getSelectedSessionId()).toBe(
+        "remembered",
+      );
+    } finally {
       app.releaseHistory();
       await app.runtime.dispose();
     }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UiMessage, UiSnapshot } from "ohbaby-sdk";
 import type { StoreSnapshot } from "../api/daemon/wire.js";
+import { createOhbabyWebStore } from "../store/store.js";
 import { messageText, selectViewModel } from "./selectors.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
@@ -10,6 +11,26 @@ function store(
   currentModel: StoreSnapshot["currentModel"] = null,
 ): StoreSnapshot {
   return {
+    ...createOhbabyWebStore().getSnapshot(),
+    sessionSync: {
+      status: "ready",
+      scope: {
+        sessionId: snapshot.activeSessionId ?? "session_1",
+        runtimeEpoch: "epoch",
+      },
+      attempts: 1,
+    },
+    sessionControl: {
+      sessionId: snapshot.activeSessionId ?? "session_1",
+      rootSessionId: snapshot.activeSessionId ?? "session_1",
+      runtimeEpoch: "epoch",
+      runId:
+        snapshot.status.kind === "running"
+          ? snapshot.status.runId
+          : (snapshot.runs.find((run) => run.status.kind === "running")?.id ??
+            null),
+      driver: "user",
+    },
     permissionSync: {
       status: "ready",
       binding: null,
@@ -393,5 +414,212 @@ describe("ohbaby-web ui selectors", () => {
       commandId: "status",
       text: "status",
     });
+  });
+});
+
+describe("independent session recovery gates", () => {
+  function recoveringState(): StoreSnapshot {
+    const state = store(baseSnapshot());
+    return {
+      ...state,
+      view: { ...state.view, snapshot: null },
+      permissionSync: {
+        ...state.permissionSync,
+        binding: {
+          rootSessionId: "session_1",
+          permissionEpoch: "epoch",
+          bindingGeneration: 2,
+        },
+      },
+      sessionSync: {
+        status: "error",
+        error: "view unavailable",
+        attempts: 1,
+        scope: {
+          sessionId: "session_1",
+          runtimeEpoch: "epoch",
+          bindingGeneration: 2,
+        },
+      },
+      sessionControl: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        runtimeEpoch: "epoch",
+        bindingGeneration: 2,
+        runId: "verified-run",
+        driver: "user",
+      },
+    };
+  }
+
+  it("shows the independently verified run while the chat baseline is unavailable", () => {
+    const view = selectViewModel(recoveringState());
+    expect(view.composer).toMatchObject({
+      isRunning: true,
+      canStop: true,
+      activeRunId: "verified-run",
+    });
+    expect(view.header).toMatchObject({
+      connectionKind: "running",
+      statusLabel: "running",
+    });
+  });
+
+  it.each(["syncing", "error"] as const)(
+    "does not claim idle with %s chat and unavailable or stale control",
+    (status) => {
+      const state = recoveringState();
+      if (!state.sessionControl) throw new Error("Missing control");
+      for (const control of [
+        null,
+        { ...state.sessionControl, bindingGeneration: 1 },
+        { ...state.sessionControl, runtimeEpoch: "old-epoch" },
+        { ...state.sessionControl, sessionId: "other-session" },
+      ]) {
+        const view = selectViewModel({
+          ...state,
+          sessionSync: { ...state.sessionSync, status },
+          sessionControl: control,
+        });
+        expect(view.composer.isRunning).toBe(false);
+        expect(view.composer.canStop).toBe(false);
+        expect(view.header).toMatchObject({
+          connectionKind: "resyncing",
+          statusLabel: status === "syncing" ? "syncing" : "unknown",
+        });
+      }
+    },
+  );
+
+  it("uses confirmed idle control and does not treat retained stale chat as current", () => {
+    const state = recoveringState();
+    if (!state.sessionControl) throw new Error("Missing control");
+    const retained = {
+      ...state,
+      view: {
+        ...state.view,
+        snapshot: {
+          ...baseSnapshot(),
+          status: { kind: "running" as const, runId: "stale-run" },
+        },
+      },
+    };
+    const unknown = selectViewModel({ ...retained, sessionControl: null });
+    expect(unknown.header.statusLabel).toBe("unknown");
+    expect(unknown.composer.isRunning).toBe(false);
+    const idle = selectViewModel({
+      ...retained,
+      sessionControl: { ...state.sessionControl, runId: null },
+    });
+    expect(idle.header.statusLabel).toBe("idle");
+    expect(idle.composer.isRunning).toBe(false);
+    expect(idle.composer.canStop).toBe(false);
+  });
+
+  it("prioritizes independent approval attention over running or unknown chat", () => {
+    const state = recoveringState();
+    for (const control of [state.sessionControl, null]) {
+      const view = selectViewModel({
+        ...state,
+        sessionControl: control,
+        permissionSync: {
+          ...state.permissionSync,
+          requests: [
+            {
+              id: "approval",
+              sessionId: "session_1",
+              rootSessionId: "session_1",
+              runId: "verified-run",
+              messageId: "message",
+              callId: "call",
+              createdAt: 1,
+              title: "Permission required",
+              description: "Read file",
+              choices: [],
+            },
+          ],
+        },
+      });
+      expect(view.header).toMatchObject({
+        connectionKind: "running",
+        statusLabel: "waiting for permission",
+      });
+      expect(view.composer.isRunning).toBe(true);
+    }
+  });
+
+  it("allows drafting and exact Stop while core baseline is unavailable", () => {
+    const state = store(baseSnapshot());
+    if (!state.sessionControl) throw new Error("Missing control");
+    const view = selectViewModel({
+      ...state,
+      sessionSync: {
+        ...state.sessionSync,
+        status: "error",
+        error: "offline view",
+      },
+      sessionControl: { ...state.sessionControl, runId: "verified-run" },
+    });
+    expect(view.composer.disabled).toBe(false);
+    expect(view.composer.canSend).toBe(false);
+    expect(view.composer.canStop).toBe(true);
+    expect(view.composer.activeRunId).toBe("verified-run");
+  });
+  it("does not guess idle or resend an unknown submission", () => {
+    const state = store(baseSnapshot());
+    expect(
+      selectViewModel({ ...state, sessionControl: null }).composer.canSend,
+    ).toBe(false);
+    const unknown = {
+      directory: "/repo",
+      runtimeEpoch: "epoch",
+      clientRequestId: "original",
+      sessionId: "session_1",
+      status: "unknown" as const,
+    };
+    expect(
+      selectViewModel({ ...state, unknownPromptRequests: [unknown] }).composer
+        .canSend,
+    ).toBe(false);
+  });
+  it("allows new intent after an epoch change and rejects controls from a prior binding", () => {
+    const state = store(baseSnapshot());
+    expect(
+      selectViewModel({
+        ...state,
+        unknownPromptRequests: [
+          {
+            directory: "/repo",
+            runtimeEpoch: "old",
+            clientRequestId: "request",
+            sessionId: "session_1",
+            status: "epoch-changed",
+          },
+        ],
+      }).composer.canSend,
+    ).toBe(true);
+    const current = {
+      ...state.sessionSync,
+      scope: {
+        sessionId: "session_1",
+        runtimeEpoch: "epoch",
+        bindingGeneration: 2,
+      },
+    };
+    const control = {
+      sessionId: "session_1",
+      rootSessionId: "session_1",
+      runtimeEpoch: "epoch",
+      bindingGeneration: 1,
+      runId: "old-run",
+      driver: "user" as const,
+    };
+    expect(
+      selectViewModel({
+        ...state,
+        sessionSync: current,
+        sessionControl: control,
+      }).composer.canStop,
+    ).toBe(false);
   });
 });

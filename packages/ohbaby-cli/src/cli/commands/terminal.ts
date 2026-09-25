@@ -101,12 +101,10 @@ export function createTerminalCommand(
         ...(resume === undefined ? {} : { resume }),
       });
       try {
-        if (resume !== undefined || args.continue === true) {
-          await host.core.getSnapshot();
-        }
         const instance = runtime.renderTerminalUi({
           clearOnStart: resume === undefined && args.continue !== true,
           client: host.core,
+          pendingPromptWorkspace: process.cwd(),
           initialNotices: runtime.takeStartupNotices?.() ?? [],
           subscribeEvents: (handler) => host.callbacks.subscribeEvents(handler),
           ...(host.subscribeDiagnosticsUnavailable === undefined

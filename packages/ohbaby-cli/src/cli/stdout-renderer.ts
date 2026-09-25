@@ -88,10 +88,95 @@ export function createStdoutRenderer(
       process.stderr.write(chunk);
     });
 
+  const emittedTextByPart = new Map<string, string>();
+  const sourceMessageIds = new Set<string>();
+  const sourceTextParts = new Map<string, ReadonlySet<string>>();
+  const messageKey = (sessionId: string, messageId: string): string =>
+    JSON.stringify([sessionId, messageId]);
+  const partKey = (
+    sessionId: string,
+    messageId: string,
+    partId: string | number,
+  ): string => JSON.stringify([sessionId, messageId, partId]);
+
+  function writeCumulativeText(key: string, text: string): void {
+    const emitted = emittedTextByPart.get(key) ?? "";
+    // stdout cannot retract earlier bytes. Duplicate, stale or rewritten prefixes
+    // must not replay them; only a cumulative extension adds output.
+    if (!text.startsWith(emitted)) return;
+    const delta = text.slice(emitted.length);
+    emittedTextByPart.set(key, text);
+    if (delta.length > 0) write(delta);
+  }
+
   return {
     handle(event: UiEvent): void {
+      if (event.type === "session.changed") {
+        for (const message of event.messages ?? []) {
+          if (message.role !== "assistant") continue;
+          const sourceKey = messageKey(event.version.sessionId, message.id);
+          sourceMessageIds.add(sourceKey);
+          sourceTextParts.set(
+            sourceKey,
+            new Set(
+              message.parts.flatMap((part) =>
+                part.type === "text" && part.id !== undefined ? [part.id] : [],
+              ),
+            ),
+          );
+          message.parts.forEach((part, index) => {
+            if (part.type === "text") {
+              writeCumulativeText(
+                partKey(event.version.sessionId, message.id, part.id ?? index),
+                part.text,
+              );
+            }
+          });
+        }
+        for (const id of event.removedMessageIds ?? [])
+          sourceTextParts.delete(messageKey(event.version.sessionId, id));
+        for (const append of event.textAppends ?? []) {
+          if (
+            !sourceTextParts
+              .get(messageKey(event.version.sessionId, append.messageId))
+              ?.has(append.partId)
+          )
+            continue;
+          const key = partKey(
+            event.version.sessionId,
+            append.messageId,
+            append.partId,
+          );
+          const emitted = emittedTextByPart.get(key);
+          // Offsets are UTF-16 String.length, exactly matching the source contract.
+          // Unknown, missing or replayed ranges cannot safely add bytes to stdout.
+          if (
+            emitted === undefined ||
+            !Number.isSafeInteger(append.offset) ||
+            append.offset !== emitted.length
+          )
+            continue;
+          writeCumulativeText(key, emitted + append.text);
+        }
+        return;
+      }
+
       if (event.type === "message.part.delta") {
-        write(event.delta);
+        if (
+          event.messageId !== undefined &&
+          sourceMessageIds.has(messageKey(event.sessionId, event.messageId))
+        )
+          return;
+        if (event.messageId !== undefined && event.partId !== undefined) {
+          const key = partKey(event.sessionId, event.messageId, event.partId);
+          writeCumulativeText(
+            key,
+            event.content ??
+              `${emittedTextByPart.get(key) ?? ""}${event.delta}`,
+          );
+        } else {
+          write(event.delta);
+        }
         return;
       }
 

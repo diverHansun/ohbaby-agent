@@ -1,7 +1,7 @@
 ﻿import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { render } from "ink-testing-library";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPersistentUiBackendClient } from "ohbaby-agent";
 import { OhbabyTerminalApp } from "ohbaby-cli";
 import {
@@ -16,6 +16,13 @@ import {
   promptIsReady,
   waitForFrame,
 } from "./helpers.js";
+
+vi.mock("../../../packages/ohbaby-cli/src/tui/pending-prompts.js", () => ({
+  createPendingPromptStorage: () => ({
+    read: () => [],
+    write: () => undefined,
+  }),
+}));
 
 const cleanupDirectories: string[] = [];
 

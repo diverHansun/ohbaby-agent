@@ -59,6 +59,7 @@ import type {
   UiProbeModelContextWindowResult,
   UiSetSearchApiKeyResult,
   UiSession,
+  UiSessionIndexEntry,
   UiTodoStatus,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
@@ -513,44 +514,47 @@ function ConnectedOhbabyWebApp({
     promptProjection.startupThinkingAt !== undefined;
 
   useEffect(() => {
-    setLocalPromptAttempts((attempts) => {
-      const next = attempts.filter((attempt) => {
-        if (attempt.userMessageId === undefined) return true;
-        const matchingPrompt = view.snapshot?.prompts?.find((prompt) =>
-          promptMatchesAttempt(prompt, attempt),
-        );
-        const sessionId =
-          attempt.submittedSessionId ?? matchingPrompt?.sessionId;
-        const formalVisible = view.snapshot?.sessions
-          .find((session) => session.id === sessionId)
-          ?.messages.some((message) => message.id === attempt.userMessageId);
-        if (matchingPrompt) {
-          if (
-            matchingPrompt.status === "starting" ||
-            matchingPrompt.status === "running" ||
-            matchingPrompt.status === "succeeded" ||
-            matchingPrompt.status === "failed" ||
-            matchingPrompt.status === "cancelled" ||
-            matchingPrompt.status === "interrupted"
-          ) {
-            return false;
-          }
-          if (
-            attempt.placement === "queue" ||
-            hasLiveRunForSession(view.snapshot, sessionId)
-          ) {
-            return false;
-          }
+    const keepAttempt = (attempt: LocalPromptAttempt): boolean => {
+      if (attempt.userMessageId === undefined) return true;
+      const matchingPrompt = view.snapshot?.prompts?.find((prompt) =>
+        promptMatchesAttempt(prompt, attempt),
+      );
+      const sessionId = attempt.submittedSessionId ?? matchingPrompt?.sessionId;
+      const formalVisible = view.snapshot?.sessions
+        .find((session) => session.id === sessionId)
+        ?.messages.some((message) => message.id === attempt.userMessageId);
+      if (matchingPrompt) {
+        if (
+          matchingPrompt.status === "starting" ||
+          matchingPrompt.status === "running" ||
+          matchingPrompt.status === "succeeded" ||
+          matchingPrompt.status === "failed" ||
+          matchingPrompt.status === "cancelled" ||
+          matchingPrompt.status === "interrupted"
+        ) {
+          return false;
         }
-        return !(
-          formalVisible === true &&
-          (matchingPrompt !== undefined ||
-            hasLiveRunForSession(view.snapshot, sessionId))
-        );
-      });
+        if (
+          attempt.placement === "queue" ||
+          hasLiveRunForSession(view.snapshot, sessionId)
+        ) {
+          return false;
+        }
+      }
+      return !(
+        formalVisible === true &&
+        (matchingPrompt !== undefined ||
+          hasLiveRunForSession(view.snapshot, sessionId))
+      );
+    };
+    // Even a same-state setter can schedule work while SyncLane stream updates
+    // are pending. Only enqueue cleanup when this snapshot retires an attempt.
+    if (!localPromptAttempts.some((attempt) => !keepAttempt(attempt))) return;
+    setLocalPromptAttempts((attempts) => {
+      const next = attempts.filter(keepAttempt);
       return next.length === attempts.length ? attempts : next;
     });
-  }, [view.snapshot]);
+  }, [localPromptAttempts, view.snapshot]);
 
   const runAction = useCallback(
     async (action: () => Promise<void>): Promise<boolean> => {
@@ -699,7 +703,12 @@ function ConnectedOhbabyWebApp({
               : attempt,
           ),
         );
-        if (submittedSessionId === undefined) {
+        if (
+          submittedSessionId === undefined &&
+          runtime.store.getSnapshot().sessionSync.scope === null &&
+          runtime.getWorkspaceSnapshot().selectedDirectory ===
+            workspace.selectedDirectory
+        ) {
           void runtime
             .selectSession(receipt.sessionId)
             .catch((error: unknown) => {
@@ -728,6 +737,7 @@ function ConnectedOhbabyWebApp({
       runtime,
       view.composer.activeSessionId,
       view.snapshot,
+      workspace.selectedDirectory,
     ],
   );
   const createSession = useCallback((): void => {
@@ -837,6 +847,63 @@ function ConnectedOhbabyWebApp({
           }}
           permissions={view.pendingPermissions}
         />
+        {storeSnapshot.sessionSync.status === "syncing" ||
+        storeSnapshot.sessionSync.status === "error" ? (
+          <div className="ohb-error-banner" role="status">
+            <span>
+              {storeSnapshot.sessionSync.status === "syncing"
+                ? "Recovering conversation… Your draft remains editable."
+                : `Conversation unavailable: ${storeSnapshot.sessionSync.error ?? "Recovery failed"}`}
+            </span>
+            {storeSnapshot.sessionSync.status === "error" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  runtime.retrySession();
+                }}
+              >
+                Retry conversation
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {storeSnapshot.unknownPromptRequests.length > 0 ? (
+          <div className="ohb-error-banner" role="status">
+            <span>
+              {storeSnapshot.unknownPromptRequests.some(
+                (request) => request.status === "epoch-changed",
+              )
+                ? "The backend restarted. A previous submission could not be confirmed; check its original conversation before sending again."
+                : "Submission result is unknown. Check its receipt before sending again."}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                void runtime.retryUnknownPrompts();
+              }}
+            >
+              Check submission
+            </button>
+            {storeSnapshot.unknownPromptRequests.map((request) => (
+              <button
+                key={request.clientRequestId}
+                type="button"
+                disabled={request.submitting}
+                title="Remove this local reminder. The original submission may still have run; this does not cancel or resend it."
+                onClick={() => {
+                  runtime.forgetUnknownPrompt(request.clientRequestId);
+                }}
+              >
+                Forget pending submission
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {storeSnapshot.sessionSync.view?.reasoningMissing ? (
+          <div className="ohb-error-banner" role="status">
+            Some thinking could not be saved and is no longer available.
+          </div>
+        ) : null}
         {showMain ? (
           <>
             <StatusBar
@@ -850,6 +917,11 @@ function ConnectedOhbabyWebApp({
               onDismiss={clearActionError}
             />
             <ConversationStream
+              historyState={storeSnapshot.historyState}
+              historyHasMore={storeSnapshot.historyHasMore}
+              historyStale={storeSnapshot.historyStale}
+              historyError={storeSnapshot.historyError}
+              onLoadHistory={() => runtime.loadEarlierHistory()}
               promptRows={promptProjection.rows}
               startupThinkingAt={promptProjection.startupThinkingAt}
               view={view}
@@ -1235,8 +1307,8 @@ function SessionSidebar(props: {
   readonly workspace: WorkspaceSnapshot;
 }): ReactElement {
   const sessions = useMemo(
-    () => sortedSessions(props.view.snapshot?.sessions ?? []),
-    [props.view.snapshot?.sessions],
+    () => sortedSessions(props.view.sessionIndex),
+    [props.view.sessionIndex],
   );
   const activeSessionId = props.view.activeSession?.id;
 
@@ -1299,7 +1371,7 @@ function SessionSidebar(props: {
                     <span className="ohb-session-dot" />
                     <span className="ohb-session-copy">
                       <strong>{title}</strong>
-                      <small>{sessionMeta(session, active)}</small>
+                      <small>{sessionMeta(session)}</small>
                     </span>
                   </button>
                   <button
@@ -1429,6 +1501,11 @@ function ErrorBanner(props: {
 }
 
 function ConversationStream(props: {
+  readonly historyState: "loading" | "ready" | "error";
+  readonly historyHasMore: boolean;
+  readonly historyStale: boolean;
+  readonly historyError?: string;
+  readonly onLoadHistory: () => Promise<void>;
   readonly promptRows: readonly PromptProjectionModel[];
   readonly startupThinkingAt?: string;
   readonly view: ViewModel;
@@ -1437,6 +1514,7 @@ function ConversationStream(props: {
   const streamInnerRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const scheduledScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const anchorRef = useRef<{ top: number; height: number } | null>(null);
   const messages = props.view.activeSession?.messages ?? [];
   const visibleMessages = filterTodoToolMessages(messages);
   const timelineItems = [
@@ -1493,14 +1571,12 @@ function ConversationStream(props: {
   }, []);
 
   useLayoutEffect(() => {
+    anchorRef.current = null;
     stickToBottomRef.current = true;
     scheduleStickScroll();
   }, [activeSessionId, scheduleStickScroll]);
 
   useLayoutEffect(() => {
-    if (props.promptRows.length > 0) {
-      stickToBottomRef.current = true;
-    }
     scheduleStickScroll();
   }, [
     messagesSignature,
@@ -1509,6 +1585,15 @@ function ConversationStream(props: {
     props.view.composer.isRunning,
     scheduleStickScroll,
   ]);
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const element = streamRef.current;
+    if (anchor && element && props.historyState !== "loading") {
+      element.scrollTop = anchor.top + (element.scrollHeight - anchor.height);
+      anchorRef.current = null;
+    }
+  }, [messagesSignature, props.historyState]);
 
   useEffect(() => {
     const element = streamRef.current;
@@ -1549,6 +1634,39 @@ function ConversationStream(props: {
   return (
     <section className="ohb-stream" ref={streamRef}>
       <div className="ohb-stream-inner" ref={streamInnerRef}>
+        {props.historyHasMore ||
+        props.historyStale ||
+        props.historyState === "error" ? (
+          <div role="status">
+            {props.historyStale ? (
+              <span>
+                Earlier history changed. Refresh to see the latest version.{" "}
+              </span>
+            ) : null}
+            {props.historyError ? <span>{props.historyError} </span> : null}
+            <button
+              type="button"
+              disabled={props.historyState === "loading"}
+              onClick={() => {
+                const element = streamRef.current;
+                if (element) {
+                  anchorRef.current = {
+                    top: element.scrollTop,
+                    height: element.scrollHeight,
+                  };
+                  stickToBottomRef.current = false;
+                }
+                void props.onLoadHistory();
+              }}
+            >
+              {props.historyState === "loading"
+                ? "Loading history…"
+                : props.historyStale
+                  ? "Refresh earlier history"
+                  : "Load earlier messages"}
+            </button>
+          </div>
+        ) : null}
         {timelineItems.map((item) =>
           item.kind === "message" ? (
             <MessageRow
@@ -2003,6 +2121,7 @@ function messagePartKey(
   index: number,
 ): string {
   const part = parts[index];
+  if (part.id) return part.id;
   if (part.type === "tool-call") {
     return `tool-call-${part.call.id}`;
   }
@@ -2109,7 +2228,27 @@ function MessagePart(props: {
         <MarkdownBlock text={props.part.text} />
       );
     case "reasoning":
-      return <pre className="ohb-reasoning">{props.part.text}</pre>;
+      return (
+        <details
+          className="ohb-reasoning"
+          open={props.part.endReason === undefined}
+        >
+          <summary>
+            Thought
+            {props.part.endReason === "interrupted"
+              ? " · interrupted"
+              : props.part.endReason === "failed"
+                ? " · failed"
+                : ""}
+            {props.part.saveState === "pending"
+              ? " · saving"
+              : props.part.saveState === "failed"
+                ? " · not saved"
+                : ""}
+          </summary>
+          <pre>{props.part.text}</pre>
+        </details>
+      );
     case "tool-call":
       return <ToolCard call={props.part.call} result={undefined} />;
     case "tool-result":
@@ -2342,11 +2481,9 @@ function ReasoningControl(props: {
     };
     refresh();
     const unsubscribe = props.client.subscribeEvents((event) => {
-      if (
-        event.type === "snapshot.replaced" ||
-        event.type === "session.updated"
-      )
-        refresh();
+      // Session preferences arrive through props; token events do not change
+      // model capabilities and must not trigger a metadata request per token.
+      if (event.type === "model.invalidated") refresh();
     });
     return (): void => {
       closed = true;
@@ -2515,6 +2652,7 @@ function Composer(props: {
   const permissionButtonRef = useRef<HTMLButtonElement | null>(null);
   const returnPermissionFocusRef = useRef(false);
   const draftRef = useRef("");
+  const draftScopeGeneration = useRef(0);
   const lastEscapeAt = useRef(0);
   const lastLeaseRenewalAt = useRef(0);
   const leaseRenewalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2526,7 +2664,10 @@ function Composer(props: {
     !isSubmitting &&
     !props.isPromptAdmitting;
   const showStop =
-    props.view.composer.isRunning && !queuedEdit && draft.trim().length === 0;
+    !queuedEdit &&
+    ((props.view.composer.isRunning && draft.trim().length === 0) ||
+      (props.view.composer.canStop &&
+        (!props.view.composer.canSend || draft.trim().length === 0)));
   const canUseSlash =
     props.view.composer.canSend && !isSubmitting && !props.isPromptAdmitting;
   const visibleQueuedPrompts = queueExpanded
@@ -2555,10 +2696,12 @@ function Composer(props: {
     !props.view.composer.isRunning;
 
   useLayoutEffect(() => {
+    draftScopeGeneration.current += 1;
     const stored = readSessionValue(
       composerDraftKey(props.draftScopeKey),
     ) as StoredComposerDraft | null;
-    setDraft(stored?.text ?? "");
+    draftRef.current = stored?.text ?? "";
+    setDraft(draftRef.current);
     setPendingRequestId(stored?.clientRequestId ?? null);
     setPendingText(stored?.pendingText ?? null);
     setQueueExpanded(false);
@@ -2575,6 +2718,7 @@ function Composer(props: {
       setQueuedEdit(null);
       return;
     }
+    draftRef.current = storedLease.editText;
     setDraft(storedLease.editText);
     setQueuedEdit(storedLease);
     void props.client
@@ -2937,6 +3081,7 @@ function Composer(props: {
       finishQueuedEdit();
       return;
     }
+    const generation = draftScopeGeneration.current;
     const clientRequestId = pendingRequestId ?? globalThis.crypto.randomUUID();
     setPendingRequestId(clientRequestId);
     setPendingText(text);
@@ -2946,6 +3091,18 @@ function Composer(props: {
     void props
       .onSubmit(text, clientRequestId, selectedReasoning.current)
       .then((sent) => {
+        if (generation !== draftScopeGeneration.current) {
+          const key = composerDraftKey(props.draftScopeKey);
+          const stored = readSessionValue(key) as StoredComposerDraft | null;
+          if (stored?.clientRequestId === clientRequestId) {
+            if (sent && !stored.text) removeSessionValue(key);
+            else
+              writeSessionValue(key, {
+                text: stored.text || (sent ? "" : text),
+              } satisfies StoredComposerDraft);
+          }
+          return;
+        }
         setPendingRequestId(null);
         setPendingText(null);
         if (sent) {
@@ -4507,7 +4664,9 @@ function formatTokenCount(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
-function sortedSessions(sessions: readonly UiSession[]): readonly UiSession[] {
+function sortedSessions(
+  sessions: readonly UiSessionIndexEntry[],
+): readonly UiSessionIndexEntry[] {
   return [...sessions].sort(
     (left, right) =>
       Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
@@ -4515,26 +4674,19 @@ function sortedSessions(sessions: readonly UiSession[]): readonly UiSession[] {
   );
 }
 
-function sessionTitle(session: UiSession): string {
+function sessionTitle(session: UiSessionIndexEntry): string {
   const trimmed = session.title.trim();
   return trimmed.length > 0 ? trimmed : "Untitled session";
 }
 
-function sessionMeta(session: UiSession, active: boolean): string {
-  const messageCount = session.messages.length;
+function sessionMeta(session: UiSessionIndexEntry): string {
   const date = new Date(session.updatedAt);
-  const dateLabel = Number.isNaN(date.getTime())
+  return Number.isNaN(date.getTime())
     ? "recent"
     : new Intl.DateTimeFormat("en-US", {
         day: "2-digit",
         month: "short",
       }).format(date);
-  if (!active) {
-    return dateLabel;
-  }
-  return `${String(messageCount)} ${
-    messageCount === 1 ? "message" : "messages"
-  } · ${dateLabel}`;
 }
 
 function SlashPalette(props: {
@@ -4623,8 +4775,12 @@ function mcpServerMeta(server: Record<string, unknown>): string {
 }
 
 function composerPlaceholder(view: ViewModel): string {
-  if (view.composer.disabled) {
-    return "daemon unavailable";
+  if (
+    ["connecting", "reconnecting", "resyncing", "disconnected"].includes(
+      view.header.connectionKind,
+    )
+  ) {
+    return "Draft while reconnecting…";
   }
   if (view.composer.isRunning) {
     return "run in progress";

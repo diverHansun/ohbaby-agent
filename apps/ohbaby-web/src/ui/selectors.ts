@@ -9,6 +9,7 @@ import type {
   UiRunStatus,
   UiPromptSubmission,
   UiSession,
+  UiSessionIndexEntry,
   UiSessionTodoList,
   UiSnapshot,
 } from "ohbaby-sdk";
@@ -46,6 +47,7 @@ export interface ComposerModel {
 export interface ViewModel {
   readonly activeGoal: UiGoal | null;
   readonly activeSession: UiSession | null;
+  readonly sessionIndex: readonly UiSessionIndexEntry[];
   readonly activeTodoList: UiSessionTodoList | null;
   readonly commandCatalogVersion: string | null;
   readonly commandNotices: readonly CommandNotice[];
@@ -75,32 +77,50 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     (indexedSession
       ? { ...indexedSession, messages: [] }
       : selectActiveSession(daemonSnapshot));
-  const runStatus = daemonSnapshot?.status ?? { kind: "idle" };
-  const activeRun = selectActiveRun(
-    daemonSnapshot,
-    activeSession?.id,
-    runStatus,
-  );
-  const isRunning =
-    runStatus.kind === "running" || runStatus.kind === "waiting-for-permission";
+  const activeSessionId = selectedRoot ?? activeSession?.id;
+  const control = snapshot.sessionControl;
+  const controlMatches =
+    control !== null &&
+    control.sessionId === activeSessionId &&
+    control.rootSessionId === activeSessionId &&
+    control.runtimeEpoch === snapshot.sessionSync.scope?.runtimeEpoch &&
+    control.bindingGeneration === snapshot.sessionSync.scope.bindingGeneration;
+  const activeRunId = controlMatches ? (control.runId ?? undefined) : undefined;
+  const coreReady =
+    snapshot.sessionSync.status === "ready" ||
+    (snapshot.sessionSync.status === "idle" && !activeSessionId);
+  const snapshotStatus = daemonSnapshot?.status;
+  const runStatus: UiRunStatus = activeRunId
+    ? snapshotStatus?.kind === "running" && snapshotStatus.runId === activeRunId
+      ? snapshotStatus
+      : { kind: "running", runId: activeRunId }
+    : coreReady
+      ? (snapshotStatus ?? { kind: "idle" })
+      : { kind: "idle" };
   const permission = daemonSnapshot?.permission;
   const pendingPermissions = snapshot.permissionSync.requests;
   const attentionStatus: UiRunStatus = pendingPermissions.length
     ? { kind: "waiting-for-permission", requestId: pendingPermissions[0].id }
     : runStatus;
-  const activeSessionId = selectedRoot ?? activeSession?.id;
-  const activeRunId =
-    runStatus.kind === "running"
-      ? runStatus.runId
-      : runStatus.kind === "waiting-for-permission"
-        ? pendingPermissions.find(
-            (request) => request.id === runStatus.requestId,
-          )?.runId
-        : activeRun?.id;
+  const activeRun = selectActiveRun(daemonSnapshot, activeSessionId, runStatus);
+  const isRunning =
+    attentionStatus.kind === "running" ||
+    attentionStatus.kind === "waiting-for-permission";
+  const runStateUnknown = !coreReady && !controlMatches && !isRunning;
+  const headerConnection =
+    snapshot.connectionState === "live" && runStateUnknown
+      ? "resyncing"
+      : snapshot.connectionState;
+  const pendingUnknown = snapshot.unknownPromptRequests.some(
+    (request) =>
+      request.sessionId === activeSessionId &&
+      request.status !== "epoch-changed",
+  );
 
   return {
     activeGoal: selectActiveGoal(daemonSnapshot, activeSessionId),
     activeSession,
+    sessionIndex: snapshot.sessionIndex,
     activeTodoList: selectActiveTodoList(daemonSnapshot, activeSessionId),
     commandCatalogVersion: snapshot.view.commandCatalogVersion,
     commandNotices: snapshot.view.commandNotices,
@@ -110,23 +130,29 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
         ? {}
         : { activeRunStartedAt: activeRun.startedAt }),
       ...(activeSessionId === undefined ? {} : { activeSessionId }),
-      canSend: snapshot.connectionState === "live",
+      canSend:
+        snapshot.connectionState === "live" &&
+        coreReady &&
+        (!activeSessionId || controlMatches) &&
+        !pendingUnknown,
       canStop:
         snapshot.connectionState === "live" &&
-        isRunning &&
-        activeSessionId !== undefined,
-      disabled: snapshot.connectionState !== "live",
+        controlMatches &&
+        activeRunId !== undefined,
+      disabled: false,
       isRunning,
       mode: permission?.mode ?? DEFAULT_MODE,
       permissionLevel: permission?.level ?? DEFAULT_PERMISSION_LEVEL,
     },
     error: snapshot.error,
     header: {
-      connectionKind: selectConnectionKind(
-        snapshot.connectionState,
-        attentionStatus,
-      ),
-      statusLabel: selectStatusLabel(snapshot.connectionState, attentionStatus),
+      connectionKind: selectConnectionKind(headerConnection, attentionStatus),
+      statusLabel:
+        snapshot.connectionState === "live" && runStateUnknown
+          ? snapshot.sessionSync.status === "syncing"
+            ? "syncing"
+            : "unknown"
+          : selectStatusLabel(snapshot.connectionState, attentionStatus),
       ...selectContextModel(
         daemonSnapshot,
         activeSessionId,
@@ -240,6 +266,9 @@ function selectStatusLabel(
   connectionState: ConnectionState,
   status: UiRunStatus,
 ): string {
+  if (connectionState === "live" && status.kind === "waiting-for-permission") {
+    return "waiting for permission";
+  }
   if (
     connectionState === "live" &&
     status.kind === "running" &&

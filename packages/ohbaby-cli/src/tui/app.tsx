@@ -11,6 +11,13 @@ import type {
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { usePermissionSync } from "./use-permission-sync.js";
+import {
+  createTuiSessionRecovery,
+  pendingPromptBlocks,
+  type TuiSessionRecovery,
+  type TuiRecoveryState,
+} from "./session-recovery.js";
+import { createPendingPromptStorage } from "./pending-prompts.js";
 import { formatError } from "./format-error.js";
 import { DialogManager } from "./dialogs/manager.js";
 import { CommandPanelManager } from "./components/dialog/command-panel-manager.js";
@@ -59,6 +66,7 @@ const EMPTY_INITIAL_NOTICES: readonly string[] = [];
 type TranscriptSurfaceResetReason = "new-session" | "switch-session";
 
 export interface TerminalUiOptions {
+  readonly pendingPromptWorkspace?: string;
   readonly clearOnStart?: boolean;
   readonly client: CoreAPI;
   readonly initialNotices?: readonly string[];
@@ -70,6 +78,7 @@ export interface TerminalUiOptions {
 
 export function OhbabyTerminalApp({
   clearOnStart = false,
+  pendingPromptWorkspace,
   client,
   initialNotices = EMPTY_INITIAL_NOTICES,
   subscribeEvents,
@@ -81,10 +90,17 @@ export function OhbabyTerminalApp({
   const contextRefreshSequenceRef = useRef(0);
   const contextNoticeSequenceRef = useRef(0);
   const diagnosticsNoticeSequenceRef = useRef(0);
-  const snapshotRefreshSequenceRef = useRef(0);
+  const recoveryRef = useRef<TuiSessionRecovery | null>(null);
+  const [recoveryState, setRecoveryState] = useState<TuiRecoveryState>({
+    sync: { status: "idle", scope: null, attempts: 0 },
+    control: null,
+    initialized: false,
+    pending: [],
+  });
   const didClearOnStartRef = useRef(false);
   const disposedRef = useRef(false);
   const [screenGeneration, setScreenGeneration] = useState(0);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [pendingReasoning, setPendingReasoning] =
     useState<PendingReasoningSelection | null>(null);
   const [commandPanel, setCommandPanel] = useState<CommandPanelState | null>(
@@ -202,12 +218,16 @@ export function OhbabyTerminalApp({
     }
     if (
       permissions.length > 0 ||
-      runtime.kind !== "running" ||
-      runtime.runId !== escInterruptArmedRunId
+      recoveryState.control?.runId !== escInterruptArmedRunId
     ) {
       disarmEscInterrupt(escInterruptArmedRunId);
     }
-  }, [disarmEscInterrupt, escInterruptArmedRunId, permissions.length, runtime]);
+  }, [
+    disarmEscInterrupt,
+    escInterruptArmedRunId,
+    permissions.length,
+    recoveryState.control,
+  ]);
   const todoRunId =
     runtime.kind === "running"
       ? runtime.runId
@@ -230,7 +250,8 @@ export function OhbabyTerminalApp({
   );
   const effectiveRuntime = resolveEffectiveRuntime(permissions, runtime);
   const runtimeStatusLabel =
-    runtime.kind === "running" && escInterruptArmedRunId === runtime.runId
+    recoveryState.control?.runId &&
+    escInterruptArmedRunId === recoveryState.control.runId
       ? ESC_INTERRUPT_HINT
       : effectiveRuntime.kind === "error"
         ? formatRuntimeLabel(permissions, runtime)
@@ -441,17 +462,28 @@ export function OhbabyTerminalApp({
         return;
       }
 
+      if (key.ctrl && value === "r") {
+        recoveryRef.current?.retry();
+        return;
+      }
+      if (key.ctrl && value === "x") {
+        recoveryRef.current?.discardPending(
+          recoveryState.pending.map((item) => item.clientRequestId),
+        );
+        return;
+      }
       if (key.escape) {
-        if (permissions.length > 0 || runtime.kind !== "running") {
+        const stopRunId = recoveryState.control?.runId;
+        if (permissions.length > 0 || !stopRunId) {
           disarmEscInterrupt();
           return;
         }
-        if (escInterruptArmedRunIdRef.current !== runtime.runId) {
-          armEscInterrupt(runtime.runId);
+        if (escInterruptArmedRunIdRef.current !== stopRunId) {
+          armEscInterrupt(stopRunId);
           return;
         }
-        disarmEscInterrupt(runtime.runId);
-        void client.abortRun(runtime.runId).catch((caught: unknown) => {
+        disarmEscInterrupt(stopRunId);
+        void recoveryRef.current?.stop(stopRunId).catch((caught: unknown) => {
           store.dispatch({
             status: {
               kind: "error",
@@ -468,22 +500,19 @@ export function OhbabyTerminalApp({
         return;
       }
 
-      if (permissions.length > 0) {
-        void client.abortRun(permissions[0].runId).catch((caught: unknown) => {
-          store.dispatch({
-            status: {
-              kind: "error",
-              message: formatError(caught),
-              recoverable: true,
-            },
-            type: "runtime.updated",
-          });
-        });
+      if (
+        permissions.length > 0 &&
+        (recoveryState.control?.rootSessionId !==
+          permissions[0].rootSessionId ||
+          !recoveryState.control.runId)
+      )
         return;
-      }
 
-      if (runtime.kind === "running") {
-        void client.abortRun(runtime.runId).catch((caught: unknown) => {
+      // Unknown control is neither a confirmed idle session nor a Stop target.
+      if (activeSessionId !== null && recoveryState.control === null) return;
+      const stopRunId = recoveryState.control?.runId;
+      if (stopRunId) {
+        void recoveryRef.current?.stop(stopRunId).catch((caught: unknown) => {
           store.dispatch({
             status: {
               kind: "error",
@@ -512,11 +541,13 @@ export function OhbabyTerminalApp({
         !disposedRef.current &&
         requestSequence === catalogRequestSequenceRef.current
       ) {
+        setCatalogError(null);
         store.setCatalog(catalog);
       }
       return catalog;
     } catch (caught) {
       if (!disposedRef.current) {
+        setCatalogError(`error: ${formatError(caught)}`);
         store.dispatch({
           status: {
             kind: "error",
@@ -536,52 +567,48 @@ export function OhbabyTerminalApp({
       store.dispatchMany(events);
     });
 
+    const pendingStorage = createPendingPromptStorage(pendingPromptWorkspace);
+    let installedSessionId: string | undefined;
+    const recovery = createTuiSessionRecovery({
+      client,
+      store,
+      onChange: (state) => {
+        if (state.sync.status === "ready" && state.sync.view) {
+          const id = state.sync.view.session.id;
+          if (installedSessionId !== undefined && installedSessionId !== id)
+            resetTranscriptSurface("switch-session");
+          installedSessionId = id;
+        }
+        setRecoveryState(state);
+      },
+      pending: pendingStorage.read(),
+      savePending: (pending) => {
+        pendingStorage.write(pending);
+      },
+      onHistory: () => {
+        resetTranscriptSurface("switch-session");
+      },
+      onModelInvalidated: () => {
+        void loadCatalog().catch(() => undefined);
+      },
+    });
+    recoveryRef.current = recovery;
     const unsubscribe = subscribeEvents((tuiEvent: UiEvent) => {
       if (consumeCommandPanelEvent(tuiEvent)) {
         return;
       }
 
+      if (recovery.receive(tuiEvent)) return;
       const selectedExistingSessionId =
         selectedExistingSessionIdFromEvent(tuiEvent);
       if (selectedExistingSessionId !== undefined) {
         eventDispatcher.dispatch(tuiEvent);
-        const requestSequence = snapshotRefreshSequenceRef.current + 1;
-        snapshotRefreshSequenceRef.current = requestSequence;
-        void client
-          .getSnapshot()
-          .then((snapshot) => {
-            if (
-              disposedRef.current ||
-              requestSequence !== snapshotRefreshSequenceRef.current ||
-              snapshot.activeSessionId !== selectedExistingSessionId
-            ) {
-              return;
-            }
-            resetTranscriptSurface("switch-session");
-            store.replaceSnapshot(snapshot);
-          })
-          .catch((caught: unknown) => {
-            if (
-              !disposedRef.current &&
-              requestSequence === snapshotRefreshSequenceRef.current
-            ) {
-              store.dispatch({
-                status: {
-                  kind: "error",
-                  message: formatError(caught),
-                  recoverable: true,
-                },
-                type: "runtime.updated",
-              });
-            }
-          });
+        recovery.select(selectedExistingSessionId);
       } else {
         eventDispatcher.dispatch(tuiEvent);
-
-        const isNewSessionSelection = isNewSessionSelectionEvent(tuiEvent);
-        if (isNewSessionSelection) {
-          snapshotRefreshSequenceRef.current += 1;
+        if (isNewSessionSelectionEvent(tuiEvent)) {
           resetTranscriptSurface("new-session");
+          recovery.select(null);
         }
       }
 
@@ -597,64 +624,20 @@ export function OhbabyTerminalApp({
       }
     });
 
-    const requestSequence = snapshotRefreshSequenceRef.current + 1;
-    snapshotRefreshSequenceRef.current = requestSequence;
-    void Promise.all([client.getSelectedSessionId(), client.getSessionIndex()])
-      .then(([selectedId, index]) => {
-        if (
-          disposedRef.current ||
-          requestSequence !== snapshotRefreshSequenceRef.current ||
-          store.getState().activeSessionId !== null
-        )
-          return;
-        const current = store.getState().snapshot;
-        store.replaceSnapshot({
-          ...current,
-          activeSessionId: selectedId,
-          sessions: index.map((session) => ({
-            ...session,
-            messages:
-              current.sessions.find((existing) => existing.id === session.id)
-                ?.messages ?? [],
-          })),
-        });
-      })
-      .catch(() => undefined);
-    void client
-      .getSnapshot()
-      .then((snapshot) => {
-        if (
-          !disposedRef.current &&
-          requestSequence === snapshotRefreshSequenceRef.current
-        ) {
-          store.replaceSnapshot(snapshot);
-        }
-      })
-      .catch((caught: unknown) => {
-        if (
-          !disposedRef.current &&
-          requestSequence === snapshotRefreshSequenceRef.current
-        ) {
-          store.dispatch({
-            status: {
-              kind: "error",
-              message: formatError(caught),
-              recoverable: true,
-            },
-            type: "runtime.updated",
-          });
-        }
-      });
+    void recovery.start();
     void loadCatalog().catch(() => undefined);
 
     return (): void => {
       disposedRef.current = true;
+      recovery.dispose();
+      recoveryRef.current = null;
       eventDispatcher.dispose();
       unsubscribe();
     };
   }, [
     client,
     consumeCommandPanelEvent,
+    pendingPromptWorkspace,
     exit,
     loadCatalog,
     resetTranscriptSurface,
@@ -739,6 +722,14 @@ export function OhbabyTerminalApp({
           permissionSync={permissionSync.state}
           onRetryPermissions={permissionSync.retry}
         />
+        {permissions.length > 0 ? (
+          <Text dimColor>
+            {recoveryState.control?.rootSessionId ===
+              permissions[0].rootSessionId && recoveryState.control.runId
+              ? "Ctrl+C stop root run"
+              : "Stop target syncing · Ctrl+R retry"}
+          </Text>
+        ) : null}
         <CommandPanelManager
           catalog={catalog}
           client={client}
@@ -757,6 +748,7 @@ export function OhbabyTerminalApp({
             }
           }}
           pendingReasoning={pendingReasoning?.reasoning ?? null}
+          sessionReasoning={recoveryState.sync.view?.session.reasoning}
           panel={hasBackendDialog ? null : commandPanel}
           runtime={runtime}
         />
@@ -767,6 +759,27 @@ export function OhbabyTerminalApp({
           catalog={catalog}
           client={client}
           disabled={hasDialog}
+          canSubmit={
+            recoveryState.initialized &&
+            recoveryState.runtimeEpoch !== undefined &&
+            !recoveryState.pending.some((item) =>
+              pendingPromptBlocks(
+                item,
+                activeSessionId,
+                recoveryState.runtimeEpoch,
+              ),
+            ) &&
+            !recoveryState.error?.includes("SESSION_RECOVERY_UNSUPPORTED") &&
+            (activeSessionId === null || recoveryState.sync.status === "ready")
+          }
+          onLoadHistory={() => {
+            void recoveryRef.current?.loadHistory();
+          }}
+          submitPrompt={(text, reasoning) => {
+            if (!recoveryRef.current)
+              return Promise.reject(new Error("Session recovery unavailable"));
+            return recoveryRef.current.submit(text, reasoning);
+          }}
           goalStatus={activeGoal?.status}
           isRuntimeRunning={runtime.kind === "running"}
           loadCatalog={loadCatalog}
@@ -774,7 +787,33 @@ export function OhbabyTerminalApp({
           permission={permission}
           queuedPrompts={queuedPrompts}
           contextWindowUsage={contextWindowUsageLabel}
-          runtimeStatusLabel={runtimeStatusLabel}
+          runtimeStatusLabel={
+            escInterruptArmedRunId !== null
+              ? ESC_INTERRUPT_HINT
+              : (catalogError ??
+                recoveryState.error ??
+                (recoveryState.sync.status === "error"
+                  ? `Sync failed: ${recoveryState.sync.error ?? "unknown"} · Ctrl+R retry`
+                  : !recoveryState.initialized ||
+                      recoveryState.runtimeEpoch === undefined ||
+                      recoveryState.sync.status === "syncing"
+                    ? "Syncing session… draft kept"
+                    : recoveryState.historyStale
+                      ? "Earlier history may be stale · PageUp refresh"
+                      : recoveryState.sync.view?.reasoningMissing ||
+                          recoveryState.historyReasoningMissing
+                        ? "Some reasoning is unavailable"
+                        : recoveryState.pending.length > 0
+                          ? recoveryState.pending.some(
+                              (item) =>
+                                item.runtimeEpoch !== undefined &&
+                                item.runtimeEpoch !==
+                                  recoveryState.runtimeEpoch,
+                            )
+                            ? "Previous runtime submission unconfirmed · Ctrl+X forget all (may still run)"
+                            : "Submission outcome unknown · Ctrl+R query · Ctrl+X forget all (may still run)"
+                          : runtimeStatusLabel))
+          }
         />
         <CatalogInvalidation store={store} />
       </AppShell>
@@ -789,7 +828,7 @@ function HeaderContainer({
 }): ReactElement {
   const isEmpty = useTuiStoreSelector(
     store,
-    (state) => state.messages.length === 0,
+    (state) => state.activeSessionId === null && state.messages.length === 0,
   );
 
   return <Header isEmpty={isEmpty} />;

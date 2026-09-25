@@ -117,6 +117,7 @@ function statusModels(): {
     view: {
       activeGoal: null,
       activeSession: null,
+      sessionIndex: [],
       activeTodoList: null,
       commandCatalogVersion: null,
       commandNotices: [],

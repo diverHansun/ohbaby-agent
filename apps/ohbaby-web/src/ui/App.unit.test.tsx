@@ -2,8 +2,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSessionSync, type UiSessionView } from "ohbaby-sdk";
 import type {
   UiBackendClient,
+  UiEvent,
   UiCompactSessionUsage,
   UiPermissionRequest,
   UiPromptEditLease,
@@ -88,6 +90,32 @@ interface FakeRuntime {
 }
 
 const mountedApps: MountedApp[] = [];
+
+it("offers explicit forgetting without resubmitting or cancelling an unknown prompt", () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const forget = vi.spyOn(fake.runtime, "forgetUnknownPrompt");
+  const submit = vi.spyOn(fake.client, "submitPromptAccepted");
+  fake.runtime.store.setUnknownPromptRequests([
+    {
+      directory: "/repo-a",
+      runtimeEpoch: "epoch",
+      clientRequestId: "pending-one",
+      sessionId: "session_1",
+      status: "unknown",
+    },
+  ]);
+  const app = mountApp(fake.runtime);
+  const button = [...app.container.querySelectorAll("button")].find(
+    (item) => item.textContent === "Forget pending submission",
+  );
+  expect(button).toBeDefined();
+  act(() => button?.click());
+  expect(forget).toHaveBeenCalledWith("pending-one");
+  expect(submit).not.toHaveBeenCalled();
+  expect(fake.abortSession).not.toHaveBeenCalled();
+});
 
 it.each(["session", "empty project"] as const)(
   "renders the %s composer without a decorative prompt marker",
@@ -186,6 +214,77 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(1_400);
   });
 
+  it("keeps the scroll anchor after scrolling up while a pending prompt is still visible", async () => {
+    const admission =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const initial = {
+      ...snapshotWithStatus({ kind: "running", runId: "old-run" }),
+      status: { kind: "idle" as const },
+      runs: [],
+    };
+    const fake = createFakeRuntime({ snapshot: initial });
+    fake.submitPromptAccepted.mockReturnValue(admission.promise);
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "pending");
+    await pressTextareaKey(app.container, "Enter");
+    const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+    if (!stream) throw new Error("missing stream");
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1000,
+      scrollTop: 0,
+    });
+    await flushTimers();
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1000,
+      scrollTop: 400,
+    });
+    act(() => {
+      stream.dispatchEvent(new Event("scroll"));
+    });
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1200,
+      scrollTop: 400,
+    });
+    act(() => {
+      fake.store.replaceSnapshot(
+        snapshotWithMessageText(initial, "new live content"),
+        2,
+      );
+    });
+    await flushTimers();
+    expect(stream.scrollTop).toBe(400);
+  });
+  it("does not restore a late rejected submission into a different session draft", async () => {
+    const admission =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const initial = {
+      ...snapshotWithStatus({ kind: "idle" }),
+      activeSessionId: null,
+    };
+    const fake = createFakeRuntime({ snapshot: initial });
+    fake.submitPromptAccepted.mockReturnValue(admission.promise);
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "original new-session prompt");
+    await pressTextareaKey(app.container, "Enter");
+    act(() => {
+      fake.store.replaceSnapshot(
+        { ...initial, activeSessionId: "session_1" },
+        2,
+      );
+    });
+    await act(async () => {
+      admission.reject(new Error("response lost"));
+      await admission.promise.catch(() => undefined);
+    });
+    expect(textareaValue(app.container)).toBe("");
+    act(() => {
+      fake.store.replaceSnapshot(initial, 3);
+    });
+    expect(textareaValue(app.container)).toBe("original new-session prompt");
+  });
   it("resets stick-to-bottom when the active session changes", async () => {
     const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
     const fake = createFakeRuntime({ snapshot: initial });
@@ -352,7 +451,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const unavailableTextarea =
       unavailableApp.container.querySelector("textarea");
     expect(unavailableTextarea?.getAttribute("placeholder")).toBe(
-      "daemon unavailable",
+      "Draft while reconnecting…",
     );
     expect(
       unavailableApp.container.querySelector(".ohb-composer-typewriter"),
@@ -985,7 +1084,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     expect(
       app.container.querySelector("textarea")?.hasAttribute("disabled"),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       app.container.querySelector(".ohb-send-button")?.hasAttribute("disabled"),
     ).toBe(true);
@@ -2828,6 +2927,61 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.textContent).not.toContain("Cancel run");
   });
 
+  it("shows and navigates the independent session index before core history is available", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      },
+    });
+    act(() => {
+      fake.store.setSessionIndex(
+        ["one", "two"].map((id) => ({
+          id,
+          title: `Saved ${id}`,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+      );
+      fake.store.setSessionSync({
+        status: "syncing",
+        scope: { sessionId: "one", runtimeEpoch: "epoch" },
+        attempts: 1,
+      });
+    });
+    const app = mountApp(fake.runtime);
+    expect(
+      app.container.querySelector('button[title="Select Saved one"]'),
+    ).not.toBeNull();
+    expect(
+      app.container.querySelector('button[title="Select Saved two"]'),
+    ).not.toBeNull();
+    await clickButton(app.container, "Select Saved two");
+    expect(fake.selectSession).toHaveBeenCalledWith("two");
+  });
+  it("shows verified Stop while history is pending and a draft is being edited", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    act(() => {
+      fake.store.setSessionSync({
+        status: "syncing",
+        scope: { sessionId: "session_1", runtimeEpoch: "epoch" },
+        attempts: 1,
+      });
+      fake.store.setSessionControl({
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        runtimeEpoch: "epoch",
+        runId: "verified",
+        driver: "user",
+      });
+    });
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "keep this draft");
+    expect(app.container.querySelector(".ohb-stop-button")).not.toBeNull();
+  });
   it("creates and selects sessions from the sidebar", async () => {
     const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
     const fake = createFakeRuntime({
@@ -3762,6 +3916,36 @@ function createFakeRuntime(input: {
   readonly snapshot: UiSnapshot;
 }): FakeRuntime {
   const store = createOhbabyWebStore();
+  const replaceFixture = store.replaceSnapshot.bind(store);
+  store.replaceSnapshot = (snapshot, seq): void => {
+    store.setSessionIndex(
+      snapshot.sessions.map(({ messages: _messages, ...session }) => session),
+    );
+    store.setSessionSync({
+      status: snapshot.activeSessionId ? "ready" : "idle",
+      scope: snapshot.activeSessionId
+        ? { sessionId: snapshot.activeSessionId, runtimeEpoch: "epoch" }
+        : null,
+      attempts: 1,
+    });
+    store.setSessionControl(
+      snapshot.activeSessionId
+        ? {
+            sessionId: snapshot.activeSessionId,
+            rootSessionId: snapshot.activeSessionId,
+            runtimeEpoch: "epoch",
+            runId:
+              snapshot.status.kind === "running"
+                ? snapshot.status.runId
+                : (snapshot.permissions.find(
+                    (request) => request.sessionId === snapshot.activeSessionId,
+                  )?.runId ?? null),
+            driver: "user",
+          }
+        : null,
+    );
+    replaceFixture(snapshot, seq);
+  };
   store.replaceSnapshot(input.snapshot, 1);
   store.setPermissionSync({
     status: "ready",
@@ -3989,6 +4173,10 @@ function createFakeRuntime(input: {
     openWorkspace,
     runtime: {
       retryPermissions: vi.fn(),
+      retrySession: vi.fn(),
+      loadEarlierHistory: vi.fn(() => Promise.resolve()),
+      retryUnknownPrompts: vi.fn(() => Promise.resolve()),
+      forgetUnknownPrompt: vi.fn(),
       abortSession,
       archiveSession,
       client,
@@ -4559,6 +4747,63 @@ function deferred<T>(): {
 }
 
 /* eslint-disable @typescript-eslint/unbound-method -- These client methods are Vitest mocks. */
+it("does not reload model metadata for streaming tokens or session preference changes", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const handlers = new Set<(event: UiEvent) => void>();
+  vi.spyOn(fake.client, "subscribeEvents").mockImplementation((handler) => {
+    handlers.add(handler);
+    return (): void => {
+      handlers.delete(handler);
+    };
+  });
+  mountApp(fake.runtime);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const initial = vi.mocked(fake.client.getCurrentModel).mock.calls.length;
+  expect(initial).toBeGreaterThan(0);
+  act(() => {
+    for (let revision = 1; revision <= 100; revision++) {
+      for (const handler of handlers)
+        handler({
+          type: "session.changed",
+          version: {
+            runtimeEpoch: "epoch",
+            sessionId: "session_1",
+            viewGeneration: "view",
+            sessionRevision: revision,
+          },
+          textAppends: [
+            { messageId: "m", partId: "p", offset: revision - 1, text: "x" },
+          ],
+        });
+    }
+    for (const handler of handlers)
+      handler({
+        type: "session.changed",
+        version: {
+          runtimeEpoch: "epoch",
+          sessionId: "session_1",
+          viewGeneration: "view",
+          sessionRevision: 101,
+        },
+        session: {
+          id: "session_1",
+          title: "renamed",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          reasoning: { enabled: true, effort: "high" },
+        },
+      });
+  });
+  expect(fake.client.getCurrentModel).toHaveBeenCalledTimes(initial);
+  act(() => {
+    for (const handler of handlers) handler({ type: "model.invalidated" });
+  });
+  expect(fake.client.getCurrentModel).toHaveBeenCalledTimes(initial + 1);
+});
 it("shows raw reasoning labels inside the input and persists session preference", async () => {
   const fake = createFakeRuntime({
     snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -4921,5 +5166,99 @@ it.each(["pending", "acknowledged"])(
       await Promise.resolve();
     });
     expect(select.value).toBe("high");
+  },
+);
+
+it.each([false, true])(
+  "keeps React external-store updates healthy through 400 microtask source appends (pending admission=%s)",
+  async (pendingAdmission) => {
+    const initial = snapshotWithStatus({
+      kind: "running",
+      runId: "run-stream",
+    });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const baseline: UiSessionView = {
+      version: {
+        runtimeEpoch: "epoch",
+        sessionId: "session_1",
+        viewGeneration: "stream-view",
+        sessionRevision: 0,
+      },
+      session: {
+        ...initial.sessions[0],
+        messages: [
+          {
+            id: "streamed",
+            role: "assistant",
+            status: "streaming",
+            createdAt: timestamp,
+            parts: [{ id: "part", type: "text", text: "" }],
+          },
+        ],
+      },
+      runs: [],
+      prompts: [],
+      history: { hasMore: false },
+      reasoningMissing: false,
+      todo: { status: "ready", value: null },
+      goal: { status: "ready", value: null },
+      context: { status: "ready", value: null },
+    };
+    const sync = createSessionSync({
+      query: () => Promise.resolve(baseline),
+      onChange: (state) => {
+        fake.store.setSessionSync(state);
+      },
+    });
+    if (pendingAdmission)
+      fake.submitPromptAccepted.mockImplementation(
+        () => new Promise(() => undefined),
+      );
+    const app = mountApp(fake.runtime);
+    await act(async () => {
+      sync.begin({ sessionId: "session_1", runtimeEpoch: "epoch" }, 1);
+      await Promise.resolve();
+    });
+    if (pendingAdmission) {
+      await setTextareaValue(app.container, "concurrent admission retained");
+      await pressTextareaKey(app.container, "Enter");
+      expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
+    }
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const environment = globalThis as typeof globalThis & {
+      IS_REACT_ACT_ENVIRONMENT?: boolean;
+    };
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      // A real SSE chunk awaits each frame; act() would batch away this scheduling boundary.
+      for (let offset = 0; offset < 400; offset++) {
+        sync.receive({
+          type: "session.changed",
+          version: { ...baseline.version, sessionRevision: offset + 1 },
+          textAppends: [
+            { messageId: "streamed", partId: "part", offset, text: "x" },
+          ],
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      environment.IS_REACT_ACT_ENVIRONMENT = true;
+      sync.dispose();
+    }
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(app.container.textContent).toContain("x".repeat(400));
+    if (pendingAdmission)
+      expect(app.container.textContent).toContain(
+        "concurrent admission retained",
+      );
+    expect(errors.mock.calls.flat().map(String).join("\n")).not.toMatch(
+      /ui\.observation\.failure|Maximum update depth/,
+    );
   },
 );

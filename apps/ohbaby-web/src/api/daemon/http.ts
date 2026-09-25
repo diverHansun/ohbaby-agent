@@ -1,5 +1,11 @@
 import type {
   UiBackendClient,
+  UiSessionScope,
+  UiSessionView,
+  UiSessionHistory,
+  UiSessionControl,
+  UiPromptReceiptQuery,
+  UiPromptReceiptResult,
   UiPermissionSnapshotQuery,
   UiSessionIndexEntry,
 } from "ohbaby-sdk";
@@ -115,6 +121,47 @@ export class DaemonHttpClient {
     if (input.bindingGeneration !== undefined)
       query.set("bindingGeneration", String(input.bindingGeneration));
     return this.request(`/v1/permissions?${query.toString()}`, {
+      signal: input.signal,
+    });
+  }
+
+  getSessionView(
+    input: UiSessionScope,
+  ): Promise<{ ok: true; view: UiSessionView }> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/view?${scopeQuery(input)}`,
+      { signal: input.signal },
+    );
+  }
+  getSessionHistory(
+    input: UiSessionScope & {
+      readonly before?: string;
+      readonly limit?: number;
+    },
+  ): Promise<{ ok: true; history: UiSessionHistory }> {
+    const query = scopeQuery(input);
+    if (input.before !== undefined) query.set("before", input.before);
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/history?${query}`,
+      { signal: input.signal },
+    );
+  }
+  getSessionControl(
+    input: UiSessionScope,
+  ): Promise<{ ok: true; control: UiSessionControl }> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/control?${scopeQuery(input)}`,
+      { signal: input.signal },
+    );
+  }
+  getPromptReceipt(
+    input: UiPromptReceiptQuery,
+  ): Promise<{ ok: true; result: UiPromptReceiptResult }> {
+    const query = scopeQuery(input);
+    query.set("clientRequestId", input.clientRequestId);
+    if (input.sessionId !== undefined) query.set("sessionId", input.sessionId);
+    return this.request(`/v1/prompts/receipt?${query}`, {
       signal: input.signal,
     });
   }
@@ -356,7 +403,11 @@ export class DaemonHttpClient {
 
   abortSession(
     sessionId: string,
-    input: { readonly runId?: string } = {},
+    input: {
+      readonly runId?: string;
+      readonly runtimeEpoch?: string;
+      readonly bindingGeneration?: number;
+    } = {},
   ): Promise<OkResponse> {
     return this.request(`/v1/sessions/${encodeURIComponent(sessionId)}/abort`, {
       body: input,
@@ -400,6 +451,7 @@ export class DaemonHttpClient {
           : `Daemon request failed with HTTP ${String(response.status)}`;
       throw Object.assign(new Error(message), {
         code: isErrorBody(value) ? value.error?.code : undefined,
+        status: response.status,
       });
     }
     return value as T;
@@ -417,4 +469,16 @@ export function createDaemonHttpClient(
     ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
     token: config.token,
   });
+}
+
+function scopeQuery(input: {
+  readonly runtimeEpoch?: string;
+  readonly bindingGeneration?: number;
+}): URLSearchParams {
+  const query = new URLSearchParams();
+  if (input.runtimeEpoch !== undefined)
+    query.set("runtimeEpoch", input.runtimeEpoch);
+  if (input.bindingGeneration !== undefined)
+    query.set("bindingGeneration", String(input.bindingGeneration));
+  return query;
 }

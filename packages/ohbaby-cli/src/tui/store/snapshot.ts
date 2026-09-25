@@ -18,6 +18,7 @@ import type {
   UiSessionGoal,
   UiSessionTodoList,
   UiSnapshot,
+  UiSessionView,
 } from "ohbaby-sdk";
 import type { TranscriptItem } from "./transcript.js";
 
@@ -103,6 +104,15 @@ export interface TuiStore {
   readonly getState: () => TuiStoreState;
   readonly dispatch: (event: UiEvent) => void;
   readonly dispatchMany: (events: readonly UiEvent[]) => void;
+  readonly installSessionView: (
+    view: UiSessionView,
+    older?: readonly UiMessage[],
+    resetTranscript?: boolean,
+  ) => void;
+  readonly selectSession: (sessionId: string | null) => void;
+  readonly setSessionIndex: (
+    sessions: readonly Omit<UiSession, "messages">[],
+  ) => void;
   readonly replaceSnapshot: (snapshot: UiSnapshot) => void;
   readonly setPermissions: (requests: readonly UiPermissionRequest[]) => void;
   readonly setCatalog: (catalog: TuiCommandCatalog) => void;

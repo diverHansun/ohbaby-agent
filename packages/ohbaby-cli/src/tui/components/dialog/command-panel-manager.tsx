@@ -54,6 +54,7 @@ export interface CommandPanelManagerProps {
   readonly onClose: () => void;
   readonly onEffortSelect: (reasoning: UiReasoningConfig) => Promise<void>;
   readonly pendingReasoning: UiReasoningConfig | null;
+  readonly sessionReasoning?: UiReasoningConfig | null;
   readonly panel: CommandPanelState | null;
   readonly runtime: UiRunStatus;
 }
@@ -65,6 +66,7 @@ export function CommandPanelManager({
   onClose,
   onEffortSelect,
   pendingReasoning,
+  sessionReasoning,
   panel,
   runtime,
 }: CommandPanelManagerProps): ReactElement | null {
@@ -150,6 +152,7 @@ export function CommandPanelManager({
           client={client}
           sessionId={panel.sessionId}
           pendingReasoning={pendingReasoning}
+          sessionReasoning={sessionReasoning}
           onSelect={onEffortSelect}
           onClose={onClose}
         />

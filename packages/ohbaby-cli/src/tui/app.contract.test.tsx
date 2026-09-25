@@ -1,3 +1,5 @@
+import { applyTuiEvent, createStateFromSnapshot } from "./store/events.js";
+import type { UiSessionView } from "ohbaby-sdk";
 import { render as renderInk } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -27,6 +29,13 @@ import type {
   TuiCommandCatalog,
   TuiCommandSpec,
 } from "./store/snapshot.js";
+
+vi.mock("./pending-prompts.js", () => ({
+  createPendingPromptStorage: (): { read(): never[]; write(): void } => ({
+    read: (): never[] => [],
+    write: (): void => undefined,
+  }),
+}));
 
 function snapshot(): UiSnapshot {
   return {
@@ -807,7 +816,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await waitForFrame(
       app,
-      (frame) => frame.includes("Visible answer") && !frame.includes("Thought"),
+      (frame) => frame.includes("Visible answer") && frame.includes("Thought"),
     );
   });
 
@@ -891,11 +900,11 @@ describe("OhbabyTerminalApp", () => {
     );
   });
 
-  it("shows a readable status error when the initial snapshot fails", async () => {
+  it("shows a readable sync status when the initial session view fails", async () => {
     const client = {
       ...createFakeClient(snapshot()),
-      getSnapshot: vi.fn(() =>
-        Promise.reject(new Error("snapshot unavailable")),
+      getSessionView: vi.fn(() =>
+        Promise.reject(new Error("session unavailable")),
       ),
     };
     const app = render(
@@ -907,7 +916,7 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("error: snapshot unavailable");
+    expect(app.lastFrame()).toContain("Syncing session");
     expect(app.lastFrame()).not.toContain("status: error");
   });
 
@@ -1424,7 +1433,7 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("> draft");
   });
 
-  it("clears submitted prompts immediately and surfaces concurrent submit errors", async () => {
+  it("clears accepted drafts and preserves another draft while receipt is unresolved", async () => {
     const client = createFakeClient(snapshot());
     client.submitPromptAccepted
       .mockImplementationOnce(
@@ -1454,11 +1463,9 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     await flush();
 
-    expect(client.submitPromptAccepted).toHaveBeenCalledWith(
-      "second",
-      expect.objectContaining({ sessionId: "session_1" }),
-    );
-    expect(app.lastFrame()).toContain("A prompt is already running");
+    expect(client.submitPromptAccepted).toHaveBeenCalledTimes(1);
+    expect(app.lastFrame()).toContain("> second");
+    expect(app.lastFrame()).toContain("Submission outcome unknown");
   });
 
   it("shows queued state for prompts submitted while a run is active", async () => {
@@ -1582,6 +1589,13 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\r");
     await flush();
 
+    firstSubmit.resolve(promptReceipt("prompt_first"));
+    await firstSubmit.promise;
+    await flush();
+    await waitForFrame(
+      app,
+      (frame) => !frame.includes("Submission outcome unknown"),
+    );
     app.stdin.write("second");
     app.stdin.write("\r");
     client.emit({
@@ -1876,8 +1890,11 @@ describe("OhbabyTerminalApp", () => {
     expect(client.abortRun).toHaveBeenCalledWith("run_1");
   });
 
-  it("aborts the permission run on Ctrl+C while a permission dialog is open", async () => {
-    const client = createFakeClient(snapshot());
+  it("aborts the verified root run on Ctrl+C while a permission dialog is open", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      status: { kind: "running", runId: "run_1" },
+    });
     const app = render(
       <OhbabyTerminalApp
         client={client}
@@ -2214,7 +2231,7 @@ describe("OhbabyTerminalApp", () => {
     };
     const refresh = createDeferred<UiSnapshot>();
     const client = createFakeClient(initialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(initialSnapshot)
       .mockReturnValueOnce(refresh.promise);
     const app = render(
@@ -2291,7 +2308,7 @@ describe("OhbabyTerminalApp", () => {
       sessions: [currentSession, targetSession],
     };
     const client = createFakeClient(initialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(initialSnapshot)
       .mockRejectedValueOnce(new Error("snapshot refresh failed"));
     const app = render(
@@ -2373,7 +2390,7 @@ describe("OhbabyTerminalApp", () => {
       sessions: [currentSession, targetSession],
     };
     const client = createFakeClient(initialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(initialSnapshot)
       .mockResolvedValueOnce(mismatchedSnapshot);
     const app = render(
@@ -2459,7 +2476,7 @@ describe("OhbabyTerminalApp", () => {
       ],
     };
     const client = createFakeClient(staleFilteredSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(staleFilteredSnapshot)
       .mockResolvedValueOnce(refreshedSnapshot);
     const app = render(
@@ -2486,7 +2503,7 @@ describe("OhbabyTerminalApp", () => {
       candidate.includes("Restored target history"),
     );
     expect(frame).not.toContain(renderOhbabyLogo());
-    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+    expect(client.readSessionSnapshot).toHaveBeenCalledTimes(2);
     const output = app.stdout.frames.slice(frameCount).join("");
     expect(countOccurrences(output, SESSION_VIEW_CLEAR_SEQUENCE)).toBe(1);
     const clearIndex = output.lastIndexOf(SESSION_VIEW_CLEAR_SEQUENCE);
@@ -2552,7 +2569,7 @@ describe("OhbabyTerminalApp", () => {
     const initial = createDeferred<UiSnapshot>();
     const refresh = createDeferred<UiSnapshot>();
     const client = createFakeClient(staleInitialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockReturnValueOnce(initial.promise)
       .mockReturnValueOnce(refresh.promise);
     const app = render(
@@ -2623,7 +2640,7 @@ describe("OhbabyTerminalApp", () => {
     const secondSelection = createDeferred<UiSnapshot>();
     const thirdSelection = createDeferred<UiSnapshot>();
     const client = createFakeClient(initialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(initialSnapshot)
       .mockReturnValueOnce(secondSelection.promise)
       .mockReturnValueOnce(thirdSelection.promise);
@@ -2645,6 +2662,7 @@ describe("OhbabyTerminalApp", () => {
       timestamp: Date.now(),
       type: "command.result.delivered",
     });
+    await flush();
     client.emit({
       action: {
         data: { choiceId: "session_3" },
@@ -2733,7 +2751,7 @@ describe("OhbabyTerminalApp", () => {
     };
     const oldRefresh = createDeferred<UiSnapshot>();
     const client = createFakeClient(initialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(initialSnapshot)
       .mockReturnValueOnce(oldRefresh.promise);
     const app = render(
@@ -2793,7 +2811,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
     expect(app.lastFrame()).not.toContain("Old refresh history");
-    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+    expect(client.readSessionSnapshot).toHaveBeenCalledTimes(1);
     app.unmount();
   });
 
@@ -3013,24 +3031,20 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\r");
     await waitForFrame(app, (nextFrame) => nextFrame.includes("Loading..."));
 
-    client.emit({
-      snapshot: {
-        activeSessionId: "session_2",
-        permissions: [],
-        runs: [],
-        sessions: [
-          {
-            createdAt: "2026-05-14T00:00:00.000Z",
-            id: "session_2",
-            messages: [],
-            title: "Second",
-            updatedAt: "2026-05-14T00:00:01.000Z",
-          },
-        ],
-        status: { kind: "idle" },
-      },
-      timestamp: 2,
-      type: "snapshot.replaced",
+    client.installSourceSnapshot({
+      activeSessionId: "session_2",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-14T00:00:00.000Z",
+          id: "session_2",
+          messages: [],
+          title: "Second",
+          updatedAt: "2026-05-14T00:00:01.000Z",
+        },
+      ],
+      status: { kind: "idle" },
     });
 
     await waitForFrame(
@@ -3057,24 +3071,20 @@ describe("OhbabyTerminalApp", () => {
     await waitForCommandCount(client, 1);
     const invocation = firstExecutedCommand(client);
 
-    client.emit({
-      snapshot: {
-        activeSessionId: "session_2",
-        permissions: [],
-        runs: [],
-        sessions: [
-          {
-            createdAt: "2026-05-14T00:00:00.000Z",
-            id: "session_2",
-            messages: [],
-            title: "Second",
-            updatedAt: "2026-05-14T00:00:01.000Z",
-          },
-        ],
-        status: { kind: "idle" },
-      },
-      timestamp: 5,
-      type: "snapshot.replaced",
+    client.installSourceSnapshot({
+      activeSessionId: "session_2",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-14T00:00:00.000Z",
+          id: "session_2",
+          messages: [],
+          title: "Second",
+          updatedAt: "2026-05-14T00:00:01.000Z",
+        },
+      ],
+      status: { kind: "idle" },
     });
     client.emit({
       clientInvocationId: invocation.clientInvocationId,
@@ -3525,6 +3535,7 @@ describe("OhbabyTerminalApp", () => {
       (frame) => frame.includes("medium") && frame.includes("high"),
     );
     expect(client.getCurrentModel).toHaveBeenCalledTimes(2);
+    expect(client.getSnapshot).not.toHaveBeenCalled();
     app.unmount();
   });
 
@@ -4563,7 +4574,9 @@ describe("independent TUI approvals", () => {
       sessions: [...initial.sessions, child],
       permissions: [],
     });
-    client.getSnapshot.mockImplementation(() => new Promise(() => undefined));
+    client.readSessionSnapshot.mockImplementation(
+      () => new Promise(() => undefined),
+    );
     const app = render(
       <OhbabyTerminalApp
         client={client}
@@ -4588,7 +4601,9 @@ describe("independent TUI approvals", () => {
       permissions: [approval("p1"), approval("p2")],
     };
     const client = createFakeClient(initial);
-    client.getSnapshot.mockImplementation(() => new Promise(() => undefined));
+    client.readSessionSnapshot.mockImplementation(
+      () => new Promise(() => undefined),
+    );
     const app = render(
       <OhbabyTerminalApp
         client={client}
@@ -4693,7 +4708,7 @@ describe("independent TUI approvals", () => {
       ...snapshot(),
       permissions: [approval("retry")],
     });
-    client.getSnapshot.mockRejectedValue(new Error("history failed"));
+    client.readSessionSnapshot.mockRejectedValue(new Error("history failed"));
     client.getPermissionSnapshot.mockRejectedValueOnce(
       new Error("temporary approval failure"),
     );
@@ -4754,6 +4769,200 @@ describe("independent TUI approvals", () => {
       { permissionEpoch: "epoch", rootSessionId: "session_1" },
     );
   });
+  it.each(["Escape", "Ctrl+C"])(
+    "does not redirect %s Stop from the displayed run A to a newly discovered B",
+    async (key) => {
+      const client = createFakeClient({
+        ...snapshot(),
+        status: { kind: "running", runId: "run-A" },
+      });
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await flush();
+      if (key === "Escape") {
+        app.stdin.write("\u001B");
+        await waitForFrame(app, (frame) =>
+          frame.includes("Press Esc again to interrupt"),
+        );
+      }
+      client.getSessionControl.mockResolvedValue({
+        runtimeEpoch: "epoch",
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        runId: "run-B",
+        driver: "user",
+      });
+      app.stdin.write(key === "Escape" ? "\u001B" : "\u0003");
+      await flush();
+      expect(client.abortRun).not.toHaveBeenCalled();
+      app.unmount();
+    },
+  );
+  it("does not discover and stop a run on Ctrl+C while control is unknown", async () => {
+    const client = createFakeClient(snapshot());
+    const control = client.getSessionControl.mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    const calls = control.mock.calls.length;
+    app.stdin.write("\u0003");
+    await flush();
+    expect(control).toHaveBeenCalledTimes(calls);
+    expect(client.abortRun).not.toHaveBeenCalled();
+    app.unmount();
+  });
+  it("offers explicit forget for an unknown submission without replaying it", async () => {
+    const client = createFakeClient(snapshot());
+    client.submitPromptAccepted.mockRejectedValue(
+      new TypeError("fetch failed"),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("uncertain prompt");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) => frame.includes("Ctrl+X forget"));
+    app.stdin.write("\u0018");
+    await flush();
+    expect(client.submitPromptAccepted).toHaveBeenCalledTimes(1);
+    expect(app.lastFrame()).not.toContain("Ctrl+X forget");
+    app.unmount();
+  });
+  it("refreshes Ink Static for a completed source part append and ignores its duplicate", async () => {
+    vi.stubEnv("OHBABY_TUI_STATIC_TRANSCRIPT", "1");
+    try {
+      const initial = snapshot();
+      const client = createFakeClient({
+        ...initial,
+        sessions: initial.sessions.map((session) => ({
+          ...session,
+          messages: [
+            {
+              id: "done",
+              role: "assistant",
+              status: "completed",
+              createdAt: "2026-01-01",
+              parts: [{ id: "part", type: "text", text: "😀hello" }],
+            },
+          ],
+        })),
+      });
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await flush();
+      const append = {
+        type: "session.changed" as const,
+        version: {
+          runtimeEpoch: "epoch",
+          sessionId: "session_1",
+          viewGeneration: "test-view",
+          sessionRevision: 2,
+        },
+        textAppends: [
+          { messageId: "done", partId: "part", offset: 7, text: " world" },
+        ],
+      };
+      client.emit(append);
+      await flush();
+      expect(app.frames.join("\n")).toContain("😀hello world");
+      client.emit(append);
+      await flush();
+      expect(app.lastFrame()).toContain("😀hello world");
+      expect(app.lastFrame()).not.toContain("world world");
+      app.unmount();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it.each(["root", "unknown", "changed"])(
+    "uses only verified root Stop for a child approval (%s control)",
+    async (state) => {
+      const request = {
+        ...approval("child-stop"),
+        sessionId: "child",
+        rootSessionId: "session_1",
+        runId: "child-run",
+      };
+      const client = createFakeClient({
+        ...snapshot(),
+        permissions: [request],
+        status: { kind: "running", runId: "root-run" },
+      });
+      if (state === "unknown")
+        client.getSessionControl.mockImplementation(
+          () => new Promise(() => undefined),
+        );
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await waitForFrame(app, (frame) => frame.includes("Approve child-stop"));
+      if (state === "changed")
+        client.getSessionControl.mockResolvedValue({
+          runtimeEpoch: "epoch",
+          sessionId: "session_1",
+          rootSessionId: "session_1",
+          runId: "new-root-run",
+          driver: "user",
+        });
+      app.stdin.write("\u0003");
+      await flush();
+      if (state === "root")
+        expect(client.abortRun).toHaveBeenCalledWith("root-run");
+      else expect(client.abortRun).not.toHaveBeenCalled();
+      expect(client.abortRun).not.toHaveBeenCalledWith("child-run");
+      app.unmount();
+    },
+  );
+  it("keeps drafts editable and confirmed Stop available while the core view hangs", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      status: { kind: "running", runId: "run_1" },
+    });
+    client.readSessionSnapshot.mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("draft while syncing");
+    app.stdin.write("\r");
+    await flush();
+    expect(app.lastFrame()).toContain("draft while syncing");
+    expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (frame) =>
+      frame.includes("Press Esc again to interrupt"),
+    );
+    app.stdin.write("\u001B");
+    await flush();
+    expect(client.abortRun).toHaveBeenCalledWith("run_1");
+    expect(client.getSnapshot).not.toHaveBeenCalled();
+  });
 });
 
 function createFakeClient(
@@ -4772,7 +4981,10 @@ function createFakeClient(
   readonly editQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
   readonly getCurrentModel: ReturnType<typeof vi.fn>;
+  readonly getSessionControl: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
+  readonly readSessionSnapshot: ReturnType<typeof vi.fn>;
+  readonly installSourceSnapshot: (snapshot: UiSnapshot) => void;
   readonly getPermissionSnapshot: ReturnType<typeof vi.fn>;
   readonly failPermissionTransport: () => void;
   readonly listCommands: ReturnType<typeof vi.fn>;
@@ -4794,10 +5006,111 @@ function createFakeClient(
   >();
   let pendingPermissions = [...initialSnapshot.permissions];
   let permissionRevision = initialSnapshot.permissions.length;
+  let sourceState = createStateFromSnapshot(initialSnapshot);
+  let sessionRevision = 1;
+  const readSessionSnapshot = vi.fn(() =>
+    Promise.resolve(sourceState.snapshot),
+  );
+  const sourceView = (value: UiSnapshot, sessionId: string): UiSessionView => ({
+    version: {
+      runtimeEpoch: "epoch",
+      sessionId: value.activeSessionId ?? sessionId,
+      viewGeneration: "test-view",
+      sessionRevision,
+    },
+    session: value.sessions.find((session) => session.id === sessionId) ?? {
+      id: sessionId,
+      title: sessionId,
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+      messages: [],
+    },
+    runs: value.runs.length
+      ? value.runs.filter((run) => run.sessionId === sessionId)
+      : value.status.kind === "running" || value.status.kind === "error"
+        ? [
+            {
+              id:
+                value.status.kind === "running"
+                  ? value.status.runId
+                  : "run-error",
+              sessionId,
+              status: value.status,
+              startedAt: "2026-01-01",
+              updatedAt: "2026-01-01",
+            },
+          ]
+        : [],
+    prompts: (value.prompts ?? []).filter(
+      (prompt) => prompt.sessionId === sessionId,
+    ),
+    history: { hasMore: false },
+    reasoningMissing: false,
+    goal: {
+      status: "ready",
+      value:
+        value.goals?.find((item) => item.sessionId === sessionId)?.goal ?? null,
+    },
+    todo: {
+      status: "ready",
+      value: value.todos?.find((item) => item.sessionId === sessionId) ?? null,
+    },
+    context: {
+      status: "ready",
+      value:
+        value.contextWindowUsages?.find(
+          (item) => item.sessionId === sessionId,
+        ) ?? null,
+    },
+  });
 
   return {
-    getSelectedSessionId: () =>
-      Promise.resolve(initialSnapshot.activeSessionId),
+    installSourceSnapshot(value): void {
+      sourceState = createStateFromSnapshot(value);
+      for (const handler of handlers)
+        handler({
+          type: "session.index.invalidated",
+          selectedSessionId: value.activeSessionId,
+        });
+    },
+    readSessionSnapshot,
+    getSessionView: vi.fn(async ({ sessionId }: { sessionId: string }) =>
+      sourceView(await readSessionSnapshot(), sessionId),
+    ),
+    getSessionHistory: vi.fn(({ sessionId }: { sessionId: string }) =>
+      Promise.resolve({
+        version: sourceView(sourceState.snapshot, sessionId).version,
+        messages: [],
+        prompts: [],
+        reasoningMissing: false,
+        hasMore: false,
+      }),
+    ),
+    getSessionControl: vi.fn(({ sessionId }: { sessionId: string }) =>
+      Promise.resolve({
+        runtimeEpoch: "epoch",
+        sessionId,
+        rootSessionId: sessionId,
+        runId:
+          sourceState.runs.find(
+            (run) =>
+              run.sessionId === sessionId && run.status.kind === "running",
+          )?.id ??
+          (sourceState.runtime.kind === "running"
+            ? sourceState.runtime.runId
+            : null),
+        driver: "user" as const,
+      }),
+    ),
+    getPromptReceipt: vi.fn(
+      ({ clientRequestId }: { clientRequestId: string }) =>
+        Promise.resolve({
+          runtimeEpoch: "epoch",
+          clientRequestId,
+          receipt: null,
+        }),
+    ),
+    getSelectedSessionId: () => Promise.resolve(sourceState.activeSessionId),
     getSessionIndex: () =>
       Promise.resolve(
         initialSnapshot.sessions.map(
@@ -4911,6 +5224,92 @@ function createFakeClient(
         }
         for (const handler of permissionHandlers.keys()) handler(event);
       }
+      if (
+        [
+          "session.updated",
+          "message.appended",
+          "message.updated",
+          "message.part.delta",
+          "message.reasoning.delta",
+          "message.reasoning.end",
+          "run.updated",
+          "prompt.submitted",
+          "prompt.updated",
+          "todo.updated",
+          "goal.updated",
+        ].includes(event.type)
+      ) {
+        const previousSessionId = sourceState.activeSessionId;
+        sourceState = applyTuiEvent(sourceState, event);
+        if (
+          event.type === "message.reasoning.delta" ||
+          event.type === "message.reasoning.end"
+        ) {
+          sourceState = {
+            ...sourceState,
+            snapshot: {
+              ...sourceState.snapshot,
+              sessions: sourceState.sessions.map((session) => ({
+                ...session,
+                messages: session.messages.map((message) =>
+                  message.id === event.messageId
+                    ? {
+                        ...message,
+                        parts: [
+                          ...message.parts.filter(
+                            (part) => part.type !== "reasoning",
+                          ),
+                          {
+                            id: `${message.id}-thought`,
+                            type: "reasoning" as const,
+                            text: event.content,
+                            ...(event.type === "message.reasoning.end"
+                              ? {
+                                  endReason: "normal" as const,
+                                  saveState: "saved" as const,
+                                }
+                              : {}),
+                          },
+                        ],
+                      }
+                    : message,
+                ),
+              })),
+            },
+          };
+        }
+        sourceState = {
+          ...sourceState,
+          sessions: sourceState.snapshot.sessions,
+        };
+        if (previousSessionId !== sourceState.activeSessionId)
+          for (const handler of handlers)
+            handler({
+              type: "session.index.invalidated",
+              selectedSessionId: sourceState.activeSessionId,
+            });
+        sessionRevision++;
+        const sessionId =
+          "sessionId" in event && typeof event.sessionId === "string"
+            ? event.sessionId
+            : sourceState.activeSessionId;
+        if (sessionId) {
+          const next = sourceView(sourceState.snapshot, sessionId);
+          for (const handler of handlers)
+            handler({
+              type: "session.changed",
+              version: next.version,
+              messages: next.session.messages,
+              runs: next.runs,
+              prompts: next.prompts,
+              todo: next.todo,
+              goal: next.goal,
+              context: next.context,
+            });
+        }
+        return;
+      }
+      sourceState = applyTuiEvent(sourceState, event);
       for (const handler of handlers) {
         handler(event);
       }

@@ -424,9 +424,13 @@ function renderSingleMessagePart(
         ? mdToAnsi(part.text, { width: partWidth }).join("\n")
         : wrapAnsi(part.text, partWidth).join("\n");
     case "reasoning":
-      return message.status === "streaming"
+      return message.status === "streaming" && part.endReason === undefined
         ? wrapAnsi(part.text, partWidth).join("\n")
-        : "Thought";
+        : part.saveState === "failed"
+          ? "Thought · save failed"
+          : part.saveState === "pending"
+            ? "Thought · saving"
+            : "Thought";
     case "tool-call":
     case "tool-result":
       return wrapAnsi(renderToolPart(part), partWidth).join("\n");

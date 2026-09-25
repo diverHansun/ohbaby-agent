@@ -404,11 +404,93 @@ export function createTuiStore(snapshot: UiSnapshot): TuiStore {
     getState(): TuiStoreState {
       return state;
     },
-    replaceSnapshot(nextSnapshot): void {
-      state = applyTuiEvent(state, {
-        snapshot: nextSnapshot,
-        type: "snapshot.replaced",
+    selectSession(sessionId): void {
+      state = rebuildFromCollections(state, {
+        activeSessionId: sessionId,
+        runtime: { kind: "idle" },
       });
+      notify();
+    },
+    setSessionIndex(index): void {
+      state = rebuildFromCollections(state, {
+        sessions: index.map((session) => ({
+          ...session,
+          messages:
+            state.sessions.find((existing) => existing.id === session.id)
+              ?.messages ?? [],
+        })),
+      });
+      notify();
+    },
+    installSessionView(view, older = [], resetTranscript = false): void {
+      const messages = new Map(
+        [...older, ...view.session.messages].map((message) => [
+          message.id,
+          message,
+        ]),
+      );
+      const session = {
+        ...view.session,
+        messages: [...messages.values()].sort(
+          (a, b) =>
+            a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+        ),
+      };
+      const runs = view.runs;
+      const activeRun = [...runs]
+        .reverse()
+        .find(
+          (run) =>
+            run.status.kind === "running" ||
+            run.status.kind === "waiting-for-permission" ||
+            run.status.kind === "error",
+        );
+      const previous = resetTranscript
+        ? {
+            ...state,
+            committedItems: [],
+            committedPartCounts: {},
+            liveMessage: null,
+          }
+        : state;
+      state = rebuildFromCollections(previous, {
+        activeSessionId: session.id,
+        sessions: upsertById(state.sessions, session),
+        runs,
+        prompts: view.prompts,
+        runtime:
+          activeRun?.status ??
+          (state.runtime.kind === "error" ? state.runtime : { kind: "idle" }),
+        goals:
+          view.goal.status === "ready"
+            ? [
+                ...state.goals.filter((item) => item.sessionId !== session.id),
+                ...(view.goal.value
+                  ? [{ sessionId: session.id, goal: view.goal.value }]
+                  : []),
+              ]
+            : state.goals,
+        todos:
+          view.todo.status === "ready"
+            ? [
+                ...state.todos.filter((item) => item.sessionId !== session.id),
+                ...(view.todo.value ? [view.todo.value] : []),
+              ]
+            : state.todos,
+        contextWindowUsages:
+          view.context.status === "ready"
+            ? [
+                ...state.contextWindowUsages.filter(
+                  (item) => item.sessionId !== session.id,
+                ),
+                ...(view.context.value ? [view.context.value] : []),
+              ]
+            : state.contextWindowUsages,
+      });
+      notify();
+    },
+    replaceSnapshot(nextSnapshot): void {
+      state = preserveLocalQueues(state, createStateFromSnapshot(nextSnapshot));
       notify();
     },
     setPermissions(requests): void {

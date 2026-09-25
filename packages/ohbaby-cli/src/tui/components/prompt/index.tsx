@@ -38,7 +38,14 @@ import {
   type CommandPanelKind,
 } from "../dialog/command-panel-state.js";
 
+type SubmitPrompt = (
+  text: string,
+  reasoning?: UiReasoningConfig,
+) => Promise<import("ohbaby-sdk").UiPromptReceipt>;
 export interface PromptProps {
+  readonly canSubmit?: boolean;
+  readonly submitPrompt?: SubmitPrompt;
+  readonly onLoadHistory?: () => void;
   readonly activeSessionId: string | null;
   readonly pendingReasoning?: PendingReasoningSelection | null;
   readonly catalog: TuiCommandCatalog | null;
@@ -64,6 +71,9 @@ export interface PendingReasoningSelection {
 
 export function Prompt({
   activeSessionId,
+  canSubmit = true,
+  submitPrompt,
+  onLoadHistory,
   pendingReasoning,
   catalog,
   client,
@@ -240,6 +250,10 @@ export function Prompt({
           return;
         }
 
+        if (!canSubmit && !currentInput.trim().startsWith("/")) {
+          setError("Session is syncing; draft kept. Ctrl+R retries recovery.");
+          return;
+        }
         if (currentQueuedEdit) {
           if (currentInput.trim() === "") return;
           replaceQueuedMutationPending(true);
@@ -287,6 +301,7 @@ export function Prompt({
               (sessionId) => {
                 acceptedNewSessionIdRef.current = sessionId;
               },
+              submitPrompt,
             );
           pendingSubmissionRef.current = pendingSubmissionRef.current.then(
             send,
@@ -305,6 +320,9 @@ export function Prompt({
           setError,
           selectedIndexRef.current,
           onCommandPanelOpen,
+          true,
+          undefined,
+          submitPrompt,
         );
         return;
       }
@@ -346,6 +364,11 @@ export function Prompt({
           );
           return;
         }
+      }
+
+      if (key.pageUp) {
+        onLoadHistory?.();
+        return;
       }
 
       if (key.upArrow) {
@@ -587,6 +610,7 @@ async function submitInput(
     | undefined,
   alreadyCleared = false,
   onAccepted?: (sessionId: string) => void,
+  submitPrompt?: SubmitPrompt,
 ): Promise<void> {
   const text = input.trim();
 
@@ -625,11 +649,13 @@ async function submitInput(
       }
     }
     try {
-      const receipt = await client.submitPromptAccepted(text, {
-        clientRequestId: randomUUID(),
-        reasoning,
-        sessionId: activeSessionId ?? undefined,
-      });
+      const receipt = await (submitPrompt
+        ? submitPrompt(text, reasoning)
+        : client.submitPromptAccepted(text, {
+            clientRequestId: randomUUID(),
+            reasoning,
+            sessionId: activeSessionId ?? undefined,
+          }));
       onAccepted?.(receipt.sessionId);
     } catch (caught) {
       setError(formatError(caught));

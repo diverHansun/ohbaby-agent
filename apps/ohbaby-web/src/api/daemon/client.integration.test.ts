@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  recoveryBinding,
+  sessionViewFromSnapshot,
+} from "./session-recovery.test-utils.js";
 import { createOhbabyWebRuntime } from "./client.js";
 import type { OhbabyBootstrapConfig, WebSseEvent } from "./wire.js";
 
@@ -47,7 +51,7 @@ async function waitFor(
 }
 
 describe("ohbaby-web daemon client", () => {
-  it("connects, buffers events before snapshot, and submits prompts", async () => {
+  it("connects to the current session view and submits prompts", async () => {
     const requests: {
       readonly body?: string;
       readonly headers: Headers;
@@ -83,9 +87,7 @@ describe("ohbaby-web daemon client", () => {
                 sseFrame({
                   clientId: "client_web",
                   type: "hello",
-                  permissionEpoch: "epoch",
-                  rootSessionId: null,
-                  bindingGeneration: 0,
+                  ...recoveryBinding(),
                 }),
               );
               controller.enqueue(
@@ -113,12 +115,12 @@ describe("ohbaby-web daemon client", () => {
           ),
         );
       }
-      if (url.endsWith("/v1/snapshot")) {
+      if (new URL(url).pathname.endsWith("/view")) {
         return Promise.resolve(
           Response.json({
             ok: true,
             seqNum: 1,
-            snapshot: {
+            view: sessionViewFromSnapshot({
               activeSessionId: "session_1",
               permission: {
                 level: "default",
@@ -129,7 +131,7 @@ describe("ohbaby-web daemon client", () => {
               runs: [],
               sessions: [],
               status: { kind: "idle" },
-            },
+            }),
           }),
         );
       }
@@ -371,7 +373,7 @@ describe("ohbaby-web daemon client", () => {
       connectionState: "live",
       currentModel: { model: "glm-4.7", provider: "zhipu" },
       view: {
-        lastAppliedSeqNum: 2,
+        lastAppliedSeqNum: 0,
         snapshot: {
           sessions: [{ id: "session_1" }],
         },
@@ -416,8 +418,14 @@ describe("ohbaby-web daemon client", () => {
       method: "POST",
       url: "http://127.0.0.1:4096/v1/interactions/interaction_1/respond",
     });
-    await expect(client.getSnapshot()).resolves.toMatchObject({
-      activeSessionId: "session_1",
+    await expect(
+      client.getSessionView?.({
+        sessionId: "session_1",
+        runtimeEpoch: "epoch",
+        bindingGeneration: 1,
+      }),
+    ).resolves.toMatchObject({
+      session: { id: "session_1" },
     });
 
     await client.setPermission({
@@ -632,21 +640,16 @@ describe("ohbaby-web daemon client", () => {
     await expect(
       client.archiveSession({ sessionId: "session_1" }),
     ).resolves.toBeUndefined();
-    expect(requests.slice(-2).map((request) => request.url)).toEqual([
-      "http://127.0.0.1:4096/v1/sessions/session_1/archive",
-      "http://127.0.0.1:4096/v1/snapshot",
-    ]);
-    expect(requests.at(-2)?.method).toBe("PATCH");
-    expect(requests.slice(-8).map((request) => request.url)).toEqual([
-      "http://127.0.0.1:4096/v1/model",
-      "http://127.0.0.1:4096/v1/model/context-window-probe",
-      "http://127.0.0.1:4096/v1/model",
-      "http://127.0.0.1:4096/v1/settings/search-api-key",
-      "http://127.0.0.1:4096/v1/sessions/session_1/context-window",
-      "http://127.0.0.1:4096/v1/sessions/session_1/compact",
-      "http://127.0.0.1:4096/v1/sessions/session_1/archive",
-      "http://127.0.0.1:4096/v1/snapshot",
-    ]);
+    expect(
+      requests.some(
+        (request) =>
+          request.method === "PATCH" &&
+          request.url.endsWith("/v1/sessions/session_1/archive"),
+      ),
+    ).toBe(true);
+    expect(
+      requests.some((request) => request.url.includes("/v1/snapshot")),
+    ).toBe(false);
     sseController?.close();
     await runtime.dispose();
   });
@@ -678,9 +681,7 @@ describe("ohbaby-web daemon client", () => {
                 sseFrame({
                   clientId: "client_web",
                   type: "hello",
-                  permissionEpoch: "epoch",
-                  rootSessionId: null,
-                  bindingGeneration: 0,
+                  ...recoveryBinding(),
                 }),
               );
               controller.close();
@@ -689,12 +690,12 @@ describe("ohbaby-web daemon client", () => {
           ),
         );
       }
-      if (url.endsWith("/v1/snapshot")) {
+      if (new URL(url).pathname.endsWith("/view")) {
         return Promise.resolve(
           Response.json({
             ok: true,
             seqNum: 0,
-            snapshot: {
+            view: sessionViewFromSnapshot({
               activeSessionId: null,
               permission: {
                 level: "default",
@@ -705,7 +706,7 @@ describe("ohbaby-web daemon client", () => {
               runs: [],
               sessions: [],
               status: { kind: "idle" },
-            },
+            }),
           }),
         );
       }
@@ -734,314 +735,15 @@ describe("ohbaby-web daemon client", () => {
 
       expect(calls).toContain("http://127.0.0.1:4096/v1/clients");
       expect(calls).toContain("http://127.0.0.1:4096/v1/events");
-      expect(calls).toContain("http://127.0.0.1:4096/v1/snapshot");
+      expect(calls.some((url) => new URL(url).pathname.endsWith("/view"))).toBe(
+        true,
+      );
     } finally {
       Object.defineProperty(globalThis, "fetch", {
         configurable: true,
         value: originalFetch,
       });
     }
-  });
-
-  it("does not advance Last-Event-ID beyond the committed resync snapshot", async () => {
-    const eventRequestHeaders: Headers[] = [];
-    let firstSseController:
-      | ReadableStreamDefaultController<Uint8Array>
-      | undefined;
-    let secondSseController:
-      | ReadableStreamDefaultController<Uint8Array>
-      | undefined;
-    let snapshotRequests = 0;
-
-    const fetchImpl: typeof fetch = (input, init = {}) => {
-      const url = urlFromRequestInput(input);
-      if (url.endsWith("/v1/sessions/index"))
-        return Promise.resolve(Response.json({ ok: true, sessions: [] }));
-      if (url.endsWith("/v1/clients")) {
-        return Promise.resolve(
-          Response.json({ clientId: "client_web", ok: true }),
-        );
-      }
-      if (url.endsWith("/v1/events")) {
-        eventRequestHeaders.push(new Headers(init.headers));
-        const index = eventRequestHeaders.length;
-        return Promise.resolve(
-          new Response(
-            createSseStream((controller) => {
-              if (index === 1) {
-                firstSseController = controller;
-              } else {
-                secondSseController = controller;
-              }
-              controller.enqueue(
-                sseFrame({
-                  clientId: "client_web",
-                  type: "hello",
-                  permissionEpoch: "epoch",
-                  rootSessionId: null,
-                  bindingGeneration: 0,
-                }),
-              );
-            }),
-            {
-              headers: { "content-type": "text/event-stream" },
-            },
-          ),
-        );
-      }
-      if (url.endsWith("/v1/snapshot")) {
-        snapshotRequests += 1;
-        if (snapshotRequests > 1) {
-          return Promise.resolve(
-            Response.json(
-              { error: { message: "snapshot failed" } },
-              { status: 500 },
-            ),
-          );
-        }
-        return Promise.resolve(
-          Response.json({
-            ok: true,
-            seqNum: 0,
-            snapshot: {
-              activeSessionId: null,
-              permission: {
-                level: "default",
-                mode: "auto",
-                sessionRules: [],
-              },
-              permissions: [],
-              runs: [],
-              sessions: [],
-              status: { kind: "idle" },
-            },
-          }),
-        );
-      }
-      if (url.endsWith("/v1/model")) {
-        return Promise.resolve(Response.json({ model: null, ok: true }));
-      }
-      return Promise.resolve(
-        Response.json({ error: { message: "not found" } }, { status: 404 }),
-      );
-    };
-
-    const runtime = createOhbabyWebRuntime(
-      {
-        baseUrl: "http://127.0.0.1:4096",
-        clientId: "client_web",
-        directory: "/repo",
-        token: "token_1",
-      },
-      { fetch: fetchImpl },
-    );
-    await runtime.ready;
-    firstSseController?.enqueue(
-      sseFrame({ maxSeqNum: 5, minSeqNum: 1, type: "resync-required" }),
-    );
-
-    await waitFor(
-      () => runtime.store.getSnapshot().error === "snapshot failed",
-      "snapshot error was not reported",
-    );
-    expect(eventRequestHeaders).toHaveLength(1);
-    firstSseController?.close();
-    await waitFor(
-      () => eventRequestHeaders.length >= 2,
-      "timed out waiting for SSE reconnect",
-    );
-    expect(eventRequestHeaders[1]?.get("last-event-id")).toBe("0");
-    secondSseController?.close();
-    await runtime.dispose();
-  });
-
-  it("replays buffered SSE events when an imperative snapshot resync fails", async () => {
-    let sseController: ReadableStreamDefaultController<Uint8Array> | undefined;
-    let catalogRequests = 0;
-    let failModelRefresh = false;
-    let snapshotRequests = 0;
-    let resolveFailedSnapshot: ((response: Response) => void) | undefined;
-    const failedSnapshot = new Promise<Response>((resolve) => {
-      resolveFailedSnapshot = resolve;
-    });
-    const fetchImpl: typeof fetch = (input) => {
-      const url = urlFromRequestInput(input);
-      if (url.endsWith("/v1/scopes")) {
-        return Promise.resolve(Response.json({}, { status: 404 }));
-      }
-      if (url.endsWith("/v1/sessions/index"))
-        return Promise.resolve(Response.json({ ok: true, sessions: [] }));
-      if (url.endsWith("/v1/clients")) {
-        return Promise.resolve(Response.json({ ok: true }));
-      }
-      if (url.endsWith("/v1/events")) {
-        return Promise.resolve(
-          new Response(
-            createSseStream((controller) => {
-              sseController = controller;
-              controller.enqueue(
-                sseFrame({
-                  clientId: "client_web",
-                  type: "hello",
-                  permissionEpoch: "epoch",
-                  rootSessionId: null,
-                  bindingGeneration: 0,
-                }),
-              );
-            }),
-            { headers: { "content-type": "text/event-stream" } },
-          ),
-        );
-      }
-      if (url.endsWith("/v1/snapshot")) {
-        snapshotRequests += 1;
-        if (snapshotRequests === 2) return failedSnapshot;
-        return Promise.resolve(
-          Response.json({
-            ok: true,
-            seqNum: 0,
-            snapshot: {
-              activeSessionId: "session_1",
-              permission: {
-                level: "default",
-                mode: "auto",
-                sessionRules: [],
-              },
-              permissions: [],
-              runs: [],
-              sessions: [
-                {
-                  createdAt: "2026-06-12T00:00:00.000Z",
-                  id: "session_1",
-                  messages: [],
-                  title: "before",
-                  updatedAt: "2026-06-12T00:00:00.000Z",
-                },
-              ],
-              status: { kind: "idle" },
-            },
-          }),
-        );
-      }
-      if (url.endsWith("/v1/model")) {
-        if (failModelRefresh) {
-          failModelRefresh = false;
-          return Promise.resolve(
-            Response.json(
-              { error: { message: "model failed" } },
-              { status: 500 },
-            ),
-          );
-        }
-        return Promise.resolve(Response.json({ model: null, ok: true }));
-      }
-      if (url.endsWith("/v1/commands?surface=web")) {
-        catalogRequests += 1;
-        return Promise.resolve(
-          Response.json({
-            catalog: { commands: [], version: `v${String(catalogRequests)}` },
-            ok: true,
-          }),
-        );
-      }
-      if (url.endsWith("/v1/sessions/session_1/select")) {
-        return Promise.resolve(Response.json({ ok: true }));
-      }
-      return Promise.resolve(Response.json({}, { status: 404 }));
-    };
-    const runtime = createOhbabyWebRuntime(
-      {
-        baseUrl: "http://127.0.0.1:4096",
-        clientId: "client_web",
-        directory: "/repo",
-        token: "token_1",
-      },
-      { fetch: fetchImpl },
-    );
-    await runtime.ready;
-    const client = runtime.client;
-    if (!client) throw new Error("Expected active client");
-    await expect(
-      client.listCommands({ surface: "web" }),
-    ).resolves.toMatchObject({ version: "v1" });
-
-    const selecting = runtime.selectSession("session_1");
-    await waitFor(() => snapshotRequests === 2, "snapshot did not start");
-    sseController?.enqueue(
-      sseFrame(
-        {
-          event: {
-            reason: "buffered",
-            timestamp: Date.parse("2026-06-12T00:00:01.000Z"),
-            type: "command.catalog.updated",
-            version: "v2",
-          },
-          type: "ui.event",
-        },
-        1,
-      ),
-    );
-    sseController?.enqueue(
-      sseFrame(
-        {
-          event: {
-            session: {
-              createdAt: "2026-06-12T00:00:00.000Z",
-              id: "session_1",
-              messages: [],
-              title: "buffered",
-              updatedAt: "2026-06-12T00:00:01.000Z",
-            },
-            type: "session.updated",
-          },
-          type: "ui.event",
-        },
-        2,
-      ),
-    );
-    resolveFailedSnapshot?.(
-      Response.json({ error: { message: "snapshot failed" } }, { status: 500 }),
-    );
-    await expect(selecting).resolves.toBeUndefined();
-    await waitFor(
-      () => runtime.store.getSnapshot().error === "snapshot failed",
-      "snapshot error was not reported",
-    );
-    sseController?.enqueue(
-      sseFrame(
-        {
-          event: { status: { kind: "idle" }, type: "runtime.updated" },
-          type: "ui.event",
-        },
-        3,
-      ),
-    );
-    await waitFor(
-      () => runtime.store.getSnapshot().view.lastAppliedSeqNum === 3,
-      "events did not resume",
-    );
-    await expect(
-      client.listCommands({ surface: "web" }),
-    ).resolves.toMatchObject({ version: "v2" });
-
-    expect(runtime.store.getSnapshot()).toMatchObject({
-      connectionState: "live",
-      view: {
-        commandCatalogVersion: "v2",
-        lastAppliedSeqNum: 3,
-        snapshot: { sessions: [{ id: "session_1", title: "buffered" }] },
-      },
-    });
-    expect(catalogRequests).toBe(2);
-    failModelRefresh = true;
-    await expect(runtime.selectSession("session_1")).resolves.toBeUndefined();
-    await waitFor(
-      () => runtime.store.getSnapshot().error === "model failed",
-      "model error was not reported",
-    );
-    expect(runtime.store.getSnapshot().connectionState).toBe("live");
-    sseController?.close();
-    await runtime.dispose();
   });
 
   it("clears transient stream errors after the SSE connection returns live", async () => {
@@ -1065,9 +767,7 @@ describe("ohbaby-web daemon client", () => {
                 sseFrame({
                   clientId: "client_web",
                   type: "hello",
-                  permissionEpoch: "epoch",
-                  rootSessionId: null,
-                  bindingGeneration: 0,
+                  ...recoveryBinding(),
                 }),
               );
               init.signal?.addEventListener(
@@ -1084,12 +784,12 @@ describe("ohbaby-web daemon client", () => {
           ),
         );
       }
-      if (url.endsWith("/v1/snapshot")) {
+      if (new URL(url).pathname.endsWith("/view")) {
         return Promise.resolve(
           Response.json({
             ok: true,
             seqNum: 0,
-            snapshot: {
+            view: sessionViewFromSnapshot({
               activeSessionId: null,
               permission: {
                 level: "default",
@@ -1100,7 +800,7 @@ describe("ohbaby-web daemon client", () => {
               runs: [],
               sessions: [],
               status: { kind: "idle" },
-            },
+            }),
           }),
         );
       }
@@ -1163,9 +863,7 @@ describe("ohbaby-web daemon client", () => {
                 sseFrame({
                   clientId: "client_web",
                   type: "hello",
-                  permissionEpoch: "epoch",
-                  rootSessionId: null,
-                  bindingGeneration: 0,
+                  ...recoveryBinding(),
                 }),
               );
             }),
@@ -1173,10 +871,10 @@ describe("ohbaby-web daemon client", () => {
           ),
         );
       }
-      if (url.endsWith("/v1/snapshot")) {
+      if (new URL(url).pathname.endsWith("/view")) {
         snapshotRequests += 1;
         return Promise.resolve(
-          Response.json({ ok: true, seqNum: 0, snapshot }),
+          Response.json({ ok: true, view: sessionViewFromSnapshot(snapshot) }),
         );
       }
       if (url.endsWith("/v1/model")) {
@@ -1208,9 +906,7 @@ describe("ohbaby-web daemon client", () => {
       sseFrame({
         clientId: "client_web",
         type: "hello",
-        permissionEpoch: "epoch",
-        rootSessionId: null,
-        bindingGeneration: 0,
+        ...recoveryBinding(),
       }),
     );
     sseController?.enqueue(
@@ -1245,10 +941,10 @@ describe("ohbaby-web daemon client", () => {
       sseFrame({ maxSeqNum: 0, minSeqNum: 0, type: "resync-required" }),
     );
     await waitFor(
-      () => snapshotRequests === 2 && delivered.length === 1,
+      () => snapshotRequests >= 2,
       "timed out waiting for the local resync barrier",
     );
-    expect(delivered).toEqual(["snapshot.replaced"]);
+    expect(delivered).toEqual([]);
     expect(runtime.store.getSnapshot().view.lastAppliedSeqNum).toBe(0);
 
     sseController?.close();

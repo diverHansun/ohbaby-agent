@@ -1,85 +1,213 @@
 import { describe, expect, it, vi } from "vitest";
-import type { UiSnapshot } from "ohbaby-sdk";
+import type { UiSessionView, UiMessage, SessionSyncState } from "ohbaby-sdk";
 import { createOhbabyWebStore } from "./store.js";
-
-function snapshot(title: string): UiSnapshot {
+const message = (id: string, text = id): UiMessage => ({
+  id,
+  role: "assistant" as const,
+  createdAt: id,
+  parts: [{ type: "text" as const, text }],
+});
+function view(revision = 0): UiSessionView {
   return {
-    activeSessionId: "session_1",
-    permission: { level: "default", mode: "auto", sessionRules: [] },
-    permissions: [],
+    version: {
+      runtimeEpoch: "e",
+      sessionId: "s",
+      viewGeneration: "g",
+      sessionRevision: revision,
+    },
+    session: {
+      id: "s",
+      title: "session",
+      createdAt: "0",
+      updatedAt: "0",
+      messages: [message("2", `live${String(revision)}`)],
+    },
     runs: [],
-    sessions: [
-      {
-        createdAt: "2026-06-12T00:00:00.000Z",
-        id: "session_1",
-        messages: [],
-        title,
-        updatedAt: "2026-06-12T00:00:00.000Z",
-      },
-    ],
-    status: { kind: "idle" },
+    prompts: [],
+    history: { before: "cursor", hasMore: true },
+    reasoningMissing: false,
+    todo: { status: "ready", value: null },
+    goal: { status: "ready", value: null },
+    context: { status: "ready", value: null },
   };
 }
-
-describe("createOhbabyWebStore", () => {
-  it("distinguishes authoritative snapshot barriers from incremental events", () => {
+const ready = (v: UiSessionView): SessionSyncState => ({
+  status: "ready" as const,
+  scope: { sessionId: "s", runtimeEpoch: "e" },
+  view: v,
+  attempts: 1,
+});
+describe("session view store", () => {
+  it("keeps loaded pages across deltas and reconnect, rejects stale page overwrites", () => {
     const store = createOhbabyWebStore();
-
+    store.setSessionSync(ready(view()));
+    store.installSessionHistory({
+      version: view().version,
+      messages: [message("1"), message("2", "stale")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    store.setSessionSync(ready(view(2)));
     expect(
-      store.applyEvent(
-        { snapshot: snapshot("initial"), type: "snapshot.replaced" },
-        0,
-        "snapshot-barrier",
-      ),
-    ).toBe(true);
-    expect(store.getSnapshot().view.snapshot?.sessions[0]?.title).toBe(
-      "initial",
-    );
-
+      store
+        .getSnapshot()
+        .view.snapshot?.sessions[0]?.messages.map((m) => m.parts),
+    ).toEqual([message("1").parts, message("2", "live2").parts]);
+    expect(store.getSnapshot().historyHasMore).toBe(false);
+    store.installSessionHistory({
+      version: { ...view().version, viewGeneration: "wrong" },
+      messages: [message("0")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
     expect(
-      store.applyEvent(
-        { snapshot: snapshot("stale SSE"), type: "snapshot.replaced" },
-        0,
-        "incremental",
-      ),
-    ).toBe(false);
-    expect(
-      store.applyEvent(
-        { snapshot: snapshot("projected"), type: "snapshot.replaced" },
-        0,
-        "snapshot-barrier",
-      ),
-    ).toBe(true);
-    expect(store.getSnapshot().view.snapshot?.sessions[0]?.title).toBe(
-      "projected",
-    );
+      store.getSnapshot().view.snapshot?.sessions[0]?.messages,
+    ).toHaveLength(2);
   });
-
-  it("isolates a throwing store listener from later observers", () => {
+  it("marks history stale on invalidation while preserving readable content and approvals", () => {
+    const store = createOhbabyWebStore();
+    store.setSessionSync(ready(view()));
+    store.installSessionHistory({
+      version: view().version,
+      messages: [message("1")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    const permissions = store.getSnapshot().permissionSync;
+    store.invalidateSessionHistory({
+      type: "session.changed",
+      version: { ...view().version, sessionRevision: 1 },
+      historyInvalidated: true,
+    });
+    expect(store.getSnapshot().historyStale).toBe(true);
+    expect(
+      store.getSnapshot().view.snapshot?.sessions[0]?.messages,
+    ).toHaveLength(2);
+    expect(store.getSnapshot().permissionSync).toBe(permissions);
+  });
+  it("rejects legacy replacement and isolates throwing listeners", () => {
     const store = createOhbabyWebStore();
     const observed = vi.fn();
-    const observationDiagnostic = vi
+    const diagnostic = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
     store.subscribe(() => {
-      throw new Error("observer failed");
+      throw new Error("observer");
     });
     store.subscribe(observed);
-
     try {
+      store.setSessionSync(ready(view()));
+      expect(observed).toHaveBeenCalledOnce();
+      const snapshot = store.getSnapshot().view.snapshot;
+      if (!snapshot) throw new Error("Missing snapshot");
       expect(
         store.applyEvent(
-          { snapshot: snapshot("safe"), type: "snapshot.replaced" },
-          0,
+          { type: "snapshot.replaced", snapshot },
+          99,
           "snapshot-barrier",
         ),
-      ).toBe(true);
-      expect(observed).toHaveBeenCalledTimes(1);
-      expect(observationDiagnostic).toHaveBeenCalledWith(
-        '{"stage":"store-listener","type":"ui.observation.failure"}',
-      );
+      ).toBe(false);
     } finally {
-      observationDiagnostic.mockRestore();
+      diagnostic.mockRestore();
     }
+  });
+  it("does not revive a deleted message from a late history page", () => {
+    const store = createOhbabyWebStore();
+    store.setSessionSync(ready(view()));
+    store.installSessionHistory({
+      version: view().version,
+      messages: [message("1")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    store.invalidateSessionHistory({
+      type: "session.changed",
+      version: view(1).version,
+      removedMessageIds: ["1"],
+    });
+    store.setSessionSync(ready(view(1)));
+    store.installSessionHistory({
+      version: view().version,
+      messages: [message("1", "old deleted")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    expect(
+      store.getSnapshot().view.snapshot?.sessions[0]?.messages.map((m) => m.id),
+    ).toEqual(["2"]);
+  });
+  it("preserves a newer live entity outside the hot window during stale-page replacement", () => {
+    const store = createOhbabyWebStore();
+    store.setSessionSync(ready(view()));
+    store.installSessionHistory({
+      version: view().version,
+      messages: [message("1")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    store.invalidateSessionHistory({
+      type: "session.changed",
+      version: view(1).version,
+      historyInvalidated: true,
+    });
+    store.setSessionSync(
+      ready({
+        ...view(2),
+        session: { ...view().session, messages: [message("1", "new live")] },
+      }),
+    );
+    store.setSessionSync(ready(view(3)));
+    store.installSessionHistory({
+      version: view(1).version,
+      messages: [message("1", "old page")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    expect(
+      store
+        .getSnapshot()
+        .view.snapshot?.sessions[0]?.messages.find((m) => m.id === "1")?.parts,
+    ).toEqual(message("1", "new live").parts);
+  });
+  it("replaces older cached entities with newer history and rejects pages ahead of the installed version", () => {
+    const store = createOhbabyWebStore();
+    store.setSessionSync(ready(view()));
+    store.installSessionHistory({
+      version: view().version,
+      messages: [message("1", "old")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    store.setSessionSync(ready(view(2)));
+    store.installSessionHistory({
+      version: view(1).version,
+      messages: [message("1", "updated")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    expect(
+      store.getSnapshot().view.snapshot?.sessions[0]?.messages[0]?.parts,
+    ).toEqual(message("1", "updated").parts);
+    store.installSessionHistory({
+      version: view(9).version,
+      messages: [message("0", "future")],
+      prompts: [],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    expect(
+      store
+        .getSnapshot()
+        .view.snapshot?.sessions[0]?.messages.some((m) => m.id === "0"),
+    ).toBe(false);
   });
 });

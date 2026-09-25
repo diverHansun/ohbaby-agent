@@ -428,7 +428,7 @@ describe("runOhbabyCli", () => {
     expect(stderr.join("")).toContain("Unknown argument");
   });
 
-  it("preflights the terminal UI when resuming a session at startup", async () => {
+  it("starts terminal recovery without a legacy snapshot preflight when resuming", async () => {
     vi.resetModules();
     const core = createCore();
     const dispose = vi.fn(() => Promise.resolve());
@@ -465,7 +465,7 @@ describe("runOhbabyCli", () => {
       inProcess: true,
       resume: "session_2",
     });
-    expect(core.getSnapshot).toHaveBeenCalledTimes(1);
+    expect(core.getSnapshot).not.toHaveBeenCalled();
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
   });
@@ -752,7 +752,7 @@ describe("runOhbabyCli", () => {
       remotePort: 4096,
       resume: "session_1",
     });
-    expect(core.getSnapshot).toHaveBeenCalledTimes(1);
+    expect(core.getSnapshot).not.toHaveBeenCalled();
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
   });
@@ -794,7 +794,7 @@ describe("runOhbabyCli", () => {
       diagnosticsRole: "tui",
       inProcess: true,
     });
-    expect(core.getSnapshot).toHaveBeenCalledTimes(1);
+    expect(core.getSnapshot).not.toHaveBeenCalled();
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
   });
@@ -841,7 +841,7 @@ describe("runOhbabyCli", () => {
     expect(renderTerminalUi).not.toHaveBeenCalled();
   });
 
-  it("fails startup before rendering when resume preflight fails", async () => {
+  it("leaves resume errors to the subscribed session recovery UI", async () => {
     vi.resetModules();
     const core = createCore();
     core.getSnapshot.mockRejectedValue(new Error("Session not found: missing"));
@@ -853,7 +853,9 @@ describe("runOhbabyCli", () => {
     }));
     const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
     const subscribeEvents = vi.fn((): (() => void) => () => undefined);
-    const renderTerminalUi = vi.fn();
+    const renderTerminalUi = vi.fn(() => ({
+      waitUntilExit: (): Promise<void> => Promise.resolve(),
+    }));
     vi.doMock("ohbaby-agent", () => {
       throw new Error("agent should be loaded only by the default loader");
     });
@@ -872,8 +874,9 @@ describe("runOhbabyCli", () => {
           loadRuntimeEnvIntoProcessEnv,
         },
       ),
-    ).rejects.toThrow("Session not found: missing");
-    expect(renderTerminalUi).not.toHaveBeenCalled();
+    ).resolves.toBe(0);
+    expect(renderTerminalUi).toHaveBeenCalledTimes(1);
+    expect(core.getSnapshot).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
