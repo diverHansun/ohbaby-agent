@@ -1,0 +1,57 @@
+Actual compiled default TUI PTY excerpt; repeated redraws omitted.
+
+    Permission: Shell command requires confirmation: bash
+    TUI approval child
+    bash(printf 'tui-once\n' >> tui-count.txt)
+    > Allow once [allow]
+      Always allow [allow]
+      Reject [deny]
+    Enter select | Esc safe default | arrows move
+
+Actual keyboard input: Enter (Allow once). Final screen:
+
+                                           │
+    ╰──────────────────────────────────────────────────────────────────────╯
+    auto · default · session_1790265402197_i072381        8.9K / 65.5K (14%)
+    | Launch one generic foreground subagent named TUI approval child with
+      timeout_ms 180000. Its only task is bash exactly once: printf
+      'tui-once\n' >> tui-count.txt . Wait for approval, never retry, then
+      report completion. After it finishes give a short final answer without
+      any other tools.
+
+      Subagent Run Your only task: run bash exactly once with this exact
+      command:
+
+      printf 'tui-once\n' >> tui-count.txt
+
+      Rules:
+      - Run the bash tool exactly one time. Do not run any other tool,
+      and...
+    Subagent "TUI approval child" (generic, foreground, 180s timeout) ran to
+    completion.
+
+    Its report: exactly one bash call, printf 'tui-once\n' >> tui-count.txt,
+    which succeeded (exit code 0, no output). No retries and no further
+    actions.
+
+      Subagent Run Your only task: run bash exactly once with this exact
+      command:
+
+      printf 'tui-once\n' >> tui-count.txt
+
+      Rules:
+      - Run the bash tool exactly one time. Do not run any other tool,
+      and...
+
+    Subagent "TUI approval child" (generic, foreground, 180s timeout) ran to
+    completion.
+
+    Its report: exactly one bash call, printf 'tui-once\n' >> tui-count.txt,
+    which succeeded (exit code 0, no output). No retries and no further
+    actions.
+
+    ╭──────────────────────────────────────────────────────────────────────╮
+    │ >                                                                    │
+    ╰──────────────────────────────────────────────────────────────────────╯
+    auto · default · session_1790265402197_i072381        8.9K / 65.5K (14%)
+Exit: Ctrl+C, process exit code 0.

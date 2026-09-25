@@ -1,448 +1,85 @@
 # permission 模块 architecture.md
 
-本文档描述 `permission` 模块的内部结构与设计决策。所有内容均服务于 `goals-duty.md` 中定义的设计目标与职责。
+本文档对应当前实现；职责见 [goals-duty.md](goals-duty.md)，字段与接口见 [data-model.md](data-model.md)、[dfd-interface.md](dfd-interface.md)。
 
----
+## 一、总体结构
 
-## 一、Architecture Overview（总体架构）
-
-permission 模块采用**事件驱动 + 队列管理**架构，将职责分为三个层次：
-
-```
-+---------------------------------------------------------------------+
-| PermissionManager（对外接口层）                                      |
-|                                                                     |
-| 职责：                                                               |
-| - 提供统一的权限确认 API（ask, respond, clearSession）               |
-| - 协调队列管理和批准列表管理                                         |
-| - 通过 Bus 发布权限事件                                              |
-|                                                                     |
-|   +-----------------------------------------------------------+     |
-|   | RequestQueue（请求队列）                                   |     |
-|   |                                                           |     |
-|   | 职责：                                                    |     |
-|   | - 维护待批准请求队列                                       |     |
-|   | - 确保串行处理（一次一个确认框）                            |     |
-|   | - 管理 Promise 的 resolve/reject                          |     |
-|   +-----------------------------------------------------------+     |
-|                                                                     |
-|   +-----------------------------------------------------------+     |
-|   | ApprovalRegistry（批准注册表）                             |     |
-|   |                                                           |     |
-|   | 职责：                                                    |     |
-|   | - 维护已批准的权限列表                                     |     |
-|   | - Pattern 生成与匹配                                       |     |
-|   | - 会话级存储                                               |     |
-|   +-----------------------------------------------------------+     |
-|                                                                     |
-+---------------------------------------------------------------------+
-                              |
-                              v
-                     +------------------+
-                     | Bus 模块         |
-                     | (事件发布)        |
-                     +------------------+
+```mermaid
+flowchart LR
+  L[lifecycle / scheduler] --> W[application source wrapper]
+  W --> M[PermissionManager]
+  M --> P[pending Map]
+  M --> T[bounded terminals Map]
+  M --> S[PermissionStateStore]
+  E[evaluator / classifier / matcher] --> M
+  M --> C[synchronous criticalCommit]
+  C --> V[adapter approval projection]
+  M --> N[post-commit onCommitted / Bus]
 ```
 
-### 主要组件及职责
-
-| 组件 | 职责 |
-|------|------|
-| **PermissionManager** | 对外 API 入口，协调各组件，发布事件 |
-| **RequestQueue** | 管理待批准请求队列，确保串行处理 |
-| **ApprovalRegistry** | 管理已批准列表，Pattern 生成与匹配 |
-| **PatternMatcher** | Pattern 匹配逻辑，支持通配符 |
-
-### 组件间依赖关系
-
-```
-PermissionManager
-    +-- RequestQueue（调用）
-    +-- ApprovalRegistry（调用）
-    +-- Bus（依赖）
-
-RequestQueue
-    +-- 无外部依赖
-
-ApprovalRegistry
-    +-- PatternMatcher（调用）
-
-PatternMatcher
-    +-- 无外部依赖（纯函数）
-```
-
----
-
-## 二、Design Pattern & Rationale（设计模式与理由）
-
-### 1. 事件驱动模式
-
-**使用理由**：
-- 与 UI 层解耦，permission 模块不直接操作 UI
-- 支持多种 UI 实现（CLI、IDE 扩展、Web）
-- 符合 OpenCode 的设计风格
-
-**实现方式**：
-```typescript
-// 发布权限请求事件
-Bus.publish(Permission.Event.Updated, info)
-
-// UI 层订阅事件
-Bus.subscribe(Permission.Event.Updated, (event) => {
-  showConfirmationDialog(event.info)
-})
-```
-
-**不采用回调函数的理由**：
-- 回调函数会导致 permission 模块与 UI 层耦合
-- 不利于多 UI 实现
-
-### 2. Promise 模式
-
-**使用理由**：
-- ask() 返回 Promise，调用方可以 await 等待结果
-- 自然支持异步流程
-- 便于错误处理（reject 表示拒绝）
-
-**实现方式**：
-```typescript
-async function ask(input: AskInput): Promise<void> {
-  return new Promise((resolve, reject) => {
-    queue.add({
-      info: createPermissionInfo(input),
-      resolve,
-      reject
-    })
-  })
-}
-```
-
-### 3. 队列模式
-
-**使用理由**：
-- 确保一次只显示一个确认框
-- 避免用户混淆
-- 按顺序处理请求
-
-**实现方式**：
-```typescript
-class RequestQueue {
-  private queue: PendingRequest[] = []
-  private current: PendingRequest | null = null
-
-  add(request: PendingRequest): void {
-    this.queue.push(request)
-    this.processNext()
-  }
-
-  private processNext(): void {
-    if (this.current || this.queue.length === 0) return
-    this.current = this.queue.shift()
-    Bus.publish(Event.Updated, this.current.info)
-  }
-}
-```
-
-### 3.1 Auto-Approval 机制
-
-**设计背景**：
-用户选择 "always"（Yes and don't ask again）后，系统需要：
-1. 将当前请求的 Pattern 添加到批准列表
-2. 自动批准队列中所有匹配该 Pattern 的待处理请求
-3. 发布审计/协调事件，说明本次 always 授权已产生
-
-**实现方式**：
-```typescript
-// 在 respond() 处理 'always' 响应时
-function handleAlwaysResponse(sessionId: string, pattern: string): void {
-  // 1. 添加到批准列表
-  approvalRegistry.add(sessionId, pattern)
-
-  // 2. 自动批准队列中匹配的请求
-  const autoApproved = requestQueue.approveMatching(sessionId, pattern)
-
-  // 3. 对每个自动批准的请求，发布 Replied 事件
-  for (const request of autoApproved) {
-    request.resolve()
-    Bus.publish(Event.Replied, {
-      sessionId,
-      permissionId: request.info.id,
-      response: { type: 'auto_approved', pattern }
-    })
-  }
-
-  // 4. 发布审计/协调事件；permission 不直接切换 Policy 状态
-  Bus.publish(Event.SwitchModeRequested, {
-    sessionId,
-    targetMode: 'edit-automatically',
-    trigger: { callId: current.info.callId, permissionId: current.info.id, pattern }
-  })
-}
-```
-
-**RequestQueue.approveMatching() 方法**：
-```typescript
-class RequestQueue {
-  // 批准队列中所有匹配 pattern 的请求
-  approveMatching(sessionId: string, pattern: string): PendingRequest[] {
-    const approved: PendingRequest[] = []
-
-    this.queue = this.queue.filter(request => {
-      if (request.info.sessionId !== sessionId) return true
-
-      if (patternMatcher.match(request.info.pattern, new Set([pattern]))) {
-        approved.push(request)
-        return false  // 从队列移除
-      }
-      return true
-    })
-
-    return approved
-  }
-}
-```
-
-**设计原则**：
-- 仅批准同一会话的请求
-- 使用 PatternMatcher 进行精确匹配
-- 自动批准的请求也会发布 Replied 事件，便于追踪
-
-### 4. 策略模式（Pattern 匹配）
-
-**使用理由**：
-- Pattern 匹配逻辑可能需要扩展
-- 不同工具类型可能有不同的匹配规则
-- 便于测试
-
-**实现方式**：
-```typescript
-interface PatternMatcher {
-  match(pattern: string, approved: Set<string>): boolean
-  generate(type: string, name: string, args: unknown): string
-}
-```
-
-### 5. 未使用的模式
-
-**未使用观察者模式（内部）**：
-- 事件发布通过外部 Bus 模块完成
-- 模块内部不维护订阅者列表
-
-**未使用单例模式**：
-- PermissionManager 可由调用方管理实例生命周期
-- 便于测试时创建多个独立实例
-
-**未使用超时模式**：
-- 根据设计决策，permission 模块不实现超时
-- 超时由 Agent 运行时层面处理
-
----
-
-## 三、Module Structure & File Layout（模块结构与文件组织）
-
-```
-src/permission/
-+-- index.ts                  # 模块入口，导出公共 API
-+-- manager.ts                # PermissionManager 实现
-+-- queue.ts                  # RequestQueue 实现
-+-- registry.ts               # ApprovalRegistry 实现
-+-- matcher.ts                # PatternMatcher 实现
-+-- types.ts                  # 类型定义
-+-- events.ts                 # 事件类型定义
-+-- errors.ts                 # 自定义错误类型
-+-- __tests__/
-    +-- manager.test.ts
-    +-- queue.test.ts
-    +-- registry.test.ts
-    +-- matcher.test.ts
-```
-
-### 各文件职责
-
-| 文件 | 定位 | 说明 |
-|------|------|------|
-| `index.ts` | 公共接口 | 导出 PermissionManager、类型和错误 |
-| `manager.ts` | 核心逻辑 | 实现所有对外 API，协调各组件 |
-| `queue.ts` | 队列管理 | 管理待批准请求队列 |
-| `registry.ts` | 批准管理 | 管理已批准列表 |
-| `matcher.ts` | 匹配逻辑 | Pattern 生成与匹配 |
-| `types.ts` | 类型定义 | PermissionInfo、Response 等类型 |
-| `events.ts` | 事件定义 | 权限相关事件类型 |
-| `errors.ts` | 错误定义 | RejectedError 等自定义错误 |
-
-### 对外稳定接口
-
-以下内容构成模块的公共 API，修改需谨慎：
-- `Permission.ask()` 方法
-- `Permission.respond()` 方法
-- `Permission.clearSession()` 方法
-- `PermissionInfo` 类型
-- `PermissionResponse` 类型
-- `Permission.Event` 事件定义
-- `PermissionRejectedError` 错误类型
-
-### 内部实现
-
-以下内容为内部实现，可自由重构：
-- `RequestQueue` 类
-- `ApprovalRegistry` 类
-- `PatternMatcher` 类
-- Pattern 生成算法
-- 队列处理逻辑
-
----
-
-## 四、Pattern 设计（批准模式）
-
-### Pattern 格式
-
-```
-<type>:<name>[:<path_pattern>]
-
-示例：
-- tool:edit                    # 工具级批准
-- tool:edit:src/**             # 路径级批准
-- tool:write:src/components/** # 路径级批准
-- bash:git                     # 命令级批准
-- bash:git:push                # 子命令级批准
-- bash:rm:*                    # 通配符批准
-- skill:code-review            # 技能级批准
-- skill:*                      # 所有技能批准
-```
-
-### Pattern 生成规则
-
-```typescript
-function generatePattern(type: string, name: string, args: unknown): string {
-  // 工具类型
-  if (type === 'tool') {
-    if (name === 'edit' || name === 'write') {
-      const filePath = args.file_path
-      const dir = extractDirectory(filePath)  // src/components/Button.tsx -> src/components
-      return `tool:${name}:${dir}/**`
-    }
-    return `tool:${name}`
-  }
-
-  // bash 命令
-  if (type === 'bash') {
-    const command = parseCommand(args.command)
-    const head = command[0]  // git, rm, npm 等
-    if (command.length > 1) {
-      return `bash:${head}:${command[1]}`  // bash:git:push
-    }
-    return `bash:${head}`
-  }
-
-  // skill 技能
-  if (type === 'skill') {
-    return `skill:${name}`  // skill:code-review
-  }
-
-  return `${type}:${name}`
-}
-```
-
-### Pattern 匹配规则
-
-```typescript
-function matchPattern(pattern: string, approved: Set<string>): boolean {
-  // 精确匹配
-  if (approved.has(pattern)) return true
-
-  // 通配符匹配
-  for (const approvedPattern of approved) {
-    if (wildcardMatch(pattern, approvedPattern)) return true
-  }
-
-  // 父级匹配
-  // tool:edit:src/components/Button.tsx 匹配 tool:edit:src/**
-  const parts = pattern.split(':')
-  for (let i = parts.length - 1; i >= 2; i--) {
-    const parentPattern = parts.slice(0, i).join(':') + ':**'
-    if (approved.has(parentPattern)) return true
-  }
-
-  return false
-}
-```
-
----
-
-## 五、Architectural Constraints & Trade-offs（约束与权衡）
-
-### 约束 1: 会话级存储 vs 持久化
-
-**当前选择**：批准列表只存储在内存中（会话级）
-
-**代价**：
-- 会话结束后批准记录丢失
-- 用户需要重新批准
-
-**理由**：
-- 简化实现，YAGNI 原则
-- 更安全（每次会话重新确认）
-- 未来如需持久化，可扩展 ApprovalRegistry
-
-### 约束 2: 串行处理 vs 并行处理
-
-**当前选择**：同一会话的权限请求串行处理
-
-**代价**：
-- 多个工具同时需要确认时，处理较慢
-- 用户需要逐个确认
-
-**理由**：
-- 避免多个确认框同时显示导致混淆
-- 简化 UI 实现
-- 更符合用户习惯
-
-### 约束 3: 无超时 vs 有超时
-
-**当前选择**：permission 模块不实现超时
-
-**代价**：
-- 用户不响应时会一直等待
-- 可能导致进程挂起
-
-**理由**：
-- 超时控制应由上层（Agent 运行时）处理
-- 不同场景可能需要不同超时策略
-- 简化 permission 模块职责
-
-### 约束 4: 事件驱动 vs 直接回调
-
-**当前选择**：通过 Bus 发布事件
-
-**代价**：
-- 引入 Bus 依赖
-- 事件流程略复杂
-
-**理由**：
-- 与 UI 层解耦
-- 支持多种 UI 实现
-- 符合 OpenCode 设计风格
-
----
-
-## 六、扩展预留点
-
-虽然当前版本不实现，但架构预留了以下扩展点：
-
-| 扩展功能 | 预留方式 |
-|----------|----------|
-| 持久化批准 | ApprovalRegistry 可扩展存储后端 |
-| 批准撤销 | 可添加 revoke() 方法 |
-| 批准过期 | 可在批准记录中添加时间戳 |
-| 自定义匹配规则 | PatternMatcher 可替换实现 |
-| 批量批准 | 可扩展 respond() 支持批量操作 |
-
----
-
-## 七、文档自检
-
-- [x] 每个组件存在的理由可以清楚说明
-- [x] 所有结构可追溯到 goals-duty.md 中的职责
-- [x] 没有为了"优雅"而增加的复杂度
-- [x] 明确说明了被放弃的方案及其代价
-- [x] 架构支持 KISS 和 YAGNI 原则
+manager 内的 `pending` 是审批权威，按独立 permissionId 索引；每个条目持有请求、原始调用上下文、Promise 回调和 abort listener。没有 RequestQueue、current、processNext，也不以 UI 当前卡片决定哪个请求可以回答。近期终态 Map 保存最小身份与原因，默认限制 1024 条。root/runtime 健康状态独立保存，不从投影集合反推。
+
+`PermissionStateStore` 保存 mode、level 和按真实 session 分组的规则；classifier/evaluator/matcher/rule 是分类、求值和规则处理函数。manager 不导入 server 或 session 数据库。
+
+## 二、请求登记与一次结算
+
+### 登记
+
+`ask()` 先检查真实执行上下文、健康状态、撤销范围和 signal，再求值。明确 deny 拒绝；Full Access 返回 once；命中可用会话 allow 规则返回 always。这些直接路径没有 pending 转移或审批增量。调用方仍负责先进行通常的权限求值，只有需要显式确认的路径进入 ask。
+
+需交互时，manager 生成独立 ID、冻结来源字段及祖先数组，检查与 pending/近期终态的 ID 冲突，再登记条目和 abort listener。在同一调用栈执行 `criticalCommit({ type: 'requested', info })`；成功后才调用 `onCommitted` 和普通 `PermissionEvent.Updated`。发通知期间再次检查 signal 和条目是否仍存在，允许同步观察者回答而不重复处理。
+
+### 结算
+
+respond 与 revoke 共用无 await 的 `settle`：
+
+1. 校验响应、实际来源 session、健康、signal 和最新 deny；非法 choice 不认领条目。
+2. 从 pending 认领移除并拆除 listener，阻止重复回答或观察者重入。
+3. always 静默写入来源 session 规则，不提前发布 RuleAdded。
+4. 同步提交 resolved 投影，保存近期终态。
+5. 完成原 ask Promise。
+6. 调用 `onCommitted`，发布 RuleAdded / Replied；always 再对其他匹配 pending 逐项结算。
+
+后续重复返回 already-resolved、revoked 或 not-pending，不重建条目。已淘汰的终态按 not-pending 处理，不自动允许。普通通知抛错不会改变已提交决议。批准后 signal 仍由 scheduler/工具遵守。
+
+### always
+
+规则采用 `tool(pattern)` 格式，如 `edit(src/**)`、`bash(git push)`、`skill(code-review)`。仅匹配来源 session；不可记忆请求或当前策略不允许的请求不自动通过。已登记的每个匹配项独立提交 resolved；后续新调用命中既有规则不产生 requested/resolved。always 不切 mode 或 Full Access，也没有 SwitchModeRequested 事件。
+
+## 三、撤销与故障
+
+`revokeByRun(realRunId, reason)` 是正常 run 结束的清理入口，不扫描整个 session，避免旧 run 结束误伤新 run。`revokeBySession()` 匹配来源、root 和冻结祖先链，用于来源失效或会话删除；`clearSession()` 同时清除目标 session 的规则。`dispose()` 先禁止新准入，再撤销全部 pending。批量撤销期间设置临时范围保护，防止通知回调重入批准或重新登记同范围请求。
+
+正常撤销使 ask 返回 cancel，这是执行控制结果，不是公开审批选项。取消先赢时迟到 always 不写规则；合法 always 先赢后执行取消不回滚规则。
+
+关键提交或规则副作用抛错、内部 ID 冲突属于严重故障。manager 冻结可信 root，直接从 pending 拆 listener、记录 revoked 并用 `PermissionUnavailableError` 结束等待，不再次调用坏投影完成清理。`onUnavailable` 通知 adapter 使受影响查询/连接失效。只有共享设施损坏且不能划定 root 时使用 `freezeRuntime()`。普通非法输入、断线或页面查询失败不会冻结 manager。
+
+## 四、投影端口
+
+`PermissionManagerOptions` 注入三个窄端口：
+
+| 端口                                        | 约束                                                                    |
+| ------------------------------------------- | ----------------------------------------------------------------------- |
+| `criticalCommit(event): void`               | 同步、无观察者；成功不抛错，失败抛错；适配器原子替换根集合与版本        |
+| `onCommitted(event): void`                  | requested 已提交或 terminal 已记录且 Promise 已结算后调用；负责专用通知 |
+| `onUnavailable(rootSessionId, error): void` | 独立健康故障通知；root 为 undefined 表示 runtime 范围                   |
+
+adapter 的审批投影持有 runtime epoch 和每个 root 独立 revision。每次已登记请求的 requested/resolved 推进一次版本，聊天事件和单纯规则变化不推进。snapshot、集合和 revision 来自同一不可变对象。专用通知失败由传输隔离并重新同步，不能通过普通 Bus 吞异常来保证可靠投递。manager 自身不维护客户端订阅或恢复预算。
+
+## 五、文件组织
+
+| 文件                    | 职责                                         |
+| ----------------------- | -------------------------------------------- |
+| `manager.ts`            | pending/terminal、登记、一次结算、健康与撤销 |
+| `types.ts`              | 身份、来源、请求/响应、状态、公开接口和错误  |
+| `state.ts`              | mode/level 与会话规则；支持静默写入          |
+| `evaluator.ts`          | deny 优先、Full Access 和默认权限求值        |
+| `classifier.ts`         | 工具行为分类                                 |
+| `matcher.ts`、`rule.ts` | Pattern 生成、解析与匹配                     |
+| `events.ts`             | mode/level/rule 与 Updated/Replied 领域事件  |
+| `index.ts`              | 公共导出                                     |
+| `*.unit.test.ts`        | 与对应实现同目录的行为回归测试               |
+
+## 六、约束
+
+当前规则、pending 和终态只在内存中；不跨 runtime 共享审批。Full Access 保留明确 deny 和工具安全检查，切换不自动结算旧 pending。审批不新增墙钟超时；执行生命周期仍必须给出 signal 和终态兜底。UI 可按 createdAt/id 排序，但顺序没有授权语义。

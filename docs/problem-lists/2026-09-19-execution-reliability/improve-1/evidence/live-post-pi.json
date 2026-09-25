@@ -1,0 +1,58 @@
+{
+  "date": "2026-09-25",
+  "browser": "native IAB; same page, no reload or root switch across six prompts and approval",
+  "model": "zenmux/deepseek/deepseek-v4.1-flash",
+  "port": 59506,
+  "subagent": {
+    "subagent_id": "subagent_mufrk7jf_0mguoqum",
+    "session_id": "session_1790268365354_6g3c9o1",
+    "parent_session_id": "session_1790268219780_w2kcu01",
+    "name": "Post Pi approval child",
+    "status": "completed",
+    "last_run_id": "subagent_run_mufrk7jg_9pq3pprs"
+  },
+  "runs": [
+    {
+      "run_id": "run_9f6d49fa-3105-474b-acf0-56d54a09736b",
+      "session_id": "session_1790268219780_w2kcu01",
+      "status": "succeeded"
+    },
+    {
+      "run_id": "run_5a369740-e320-4baf-87da-d2dc117aedd5",
+      "session_id": "session_1790268219780_w2kcu01",
+      "status": "succeeded"
+    },
+    {
+      "run_id": "run_d23246ff-9200-453f-a08a-e51981c0a341",
+      "session_id": "session_1790268219780_w2kcu01",
+      "status": "succeeded"
+    },
+    {
+      "run_id": "run_f2017634-4607-4df1-bf54-8ccb3d9ac44e",
+      "session_id": "session_1790268219780_w2kcu01",
+      "status": "succeeded"
+    },
+    {
+      "run_id": "run_dc457d09-5971-4f62-9e62-157924311cbf",
+      "session_id": "session_1790268219780_w2kcu01",
+      "status": "succeeded"
+    },
+    {
+      "run_id": "run_fe5b12f6-5117-4c05-9e10-8b68c043b249",
+      "session_id": "session_1790268219780_w2kcu01",
+      "status": "succeeded"
+    },
+    {
+      "run_id": "run_f79adfc9-9e67-42d0-a0d8-d3e97cf308ef",
+      "session_id": "session_1790268219780_w2kcu01",
+      "status": "succeeded"
+    },
+    {
+      "run_id": "subagent_run_mufrk7jg_9pq3pprs",
+      "session_id": "session_1790268365354_6g3c9o1",
+      "status": "succeeded"
+    }
+  ],
+  "fileLines": 1,
+  "nonterminalRuns": 0
+}

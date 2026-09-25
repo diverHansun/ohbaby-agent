@@ -12,13 +12,13 @@ ToolScheduler 位于 Agent 与 tools/Policy/Permission 之间，是工具调用�
 
 ### 交互模块
 
-| 外部模块 | 交互方向 | 交互内容 |
-|----------|----------|----------|
-| **Agent** | 输入 | 工具调用请求、工具列表查询 |
-| **Policy** | 输入 | 模式查询、决策查询 |
-| **Permission** | 双向 | 用户确认请求和响应 |
-| **tools** | 输出 | 工具执行 |
-| **Bus** | 输出 | 状态变化事件 |
+| 外部模块       | 交互方向 | 交互内容                   |
+| -------------- | -------- | -------------------------- |
+| **Agent**      | 输入     | 工具调用请求、工具列表查询 |
+| **Policy**     | 输入     | 模式查询、决策查询         |
+| **Permission** | 双向     | 用户确认请求和响应         |
+| **tools**      | 输出     | 工具执行                   |
+| **Bus**        | 输出     | 状态变化事件               |
 
 ### 本文档范围
 
@@ -120,6 +120,7 @@ ToolScheduler (内部)
 `executeBatch()` 接收一个 batch（来自 LLM 单次响应的全部工具调用），按 wave 策略分组并行执行。
 
 **Wave 分组规则**：
+
 - **可并行类别**（`readonly` / `network`）：归入同一 wave，内部受读写互斥锁约束（并行上限 5）
 - **串行类别**（`write` / `dangerous`）：每个独占一个 wave，必须等前一个 wave 完全结束
 - **不参与 wave 分组的类别**（policy 通过后立即执行，不阻塞 wave）：
@@ -140,7 +141,7 @@ executeBatch([call_A, call_B, call_C, call_D, call_E, call_F])
 │  规则：                                                    │
 │  - 并行发出所有 policy check，等待全部完成后再分组     │
 │  - 包含用户确认（ASK 决策）的等待：                      │
-│    · 多个 ASK 请求通过 Permission 串行确认（一次一个）   │
+│    · 多个 ASK 独立登记 pending，任意一项均可回答   │
 │    · 用户拒绝的 call 状态设为 rejected，不影响其他   │
 │    · 超时未响应的 call 状态设为 cancelled            │
 │  - 被 reject/cancel 的 calls 不参与 wave 分组          │
@@ -211,37 +212,39 @@ memory 和 subagent 不参与 wave 分组，在 policy 检查通过后立即执�
 
 ```typescript
 function splitIntoWaves(calls: ToolCall[]): ToolCall[][] {
-  const waves: ToolCall[][] = []
-  let currentWave: ToolCall[] = []
+  const waves: ToolCall[][] = [];
+  let currentWave: ToolCall[] = [];
 
   for (const call of calls) {
-    if (call.category === 'memory' || call.category === 'subagent') {
-      continue  // memory 和 subagent 单独处理，不入 wave
+    if (call.category === "memory" || call.category === "subagent") {
+      continue; // memory 和 subagent 单独处理，不入 wave
     }
 
     const isParallelizable =
-      call.category === 'readonly' ||
-      call.category === 'network'
+      call.category === "readonly" || call.category === "network";
 
     if (isParallelizable) {
       // 如果当前 wave 是串行类别，先结束它
-      if (currentWave.length > 0 && !isParallelizableCategory(currentWave[0].category)) {
-        waves.push(currentWave)
-        currentWave = []
+      if (
+        currentWave.length > 0 &&
+        !isParallelizableCategory(currentWave[0].category)
+      ) {
+        waves.push(currentWave);
+        currentWave = [];
       }
-      currentWave.push(call)
+      currentWave.push(call);
     } else {
       // write/dangerous：每个独占一个 wave
       if (currentWave.length > 0) {
-        waves.push(currentWave)
+        waves.push(currentWave);
       }
-      waves.push([call])
-      currentWave = []
+      waves.push([call]);
+      currentWave = [];
     }
   }
 
-  if (currentWave.length > 0) waves.push(currentWave)
-  return waves
+  if (currentWave.length > 0) waves.push(currentWave);
+  return waves;
 }
 ```
 
@@ -285,7 +288,7 @@ Lifecycle                ToolScheduler              Policy         AgentManager
    - `tools['toolName'] = true`：显式启用特定工具
 
 3. 特殊规则（子代理）：
-   - 子代理的 task 和 agent_* 递归控制工具始终禁用；todo 工具按 agent 配置启用
+   - 子代理的 task 和 agent\_\* 递归控制工具始终禁用；todo 工具按 agent 配置启用
 
 ### 2.4 状态变化通知流程
 
@@ -314,13 +317,14 @@ ToolScheduler                     Bus                        UI
 **语义**：执行单个工具调用
 
 **输入**：
+
 ```typescript
 {
-  callId: string           // 调用标识
-  toolName: string         // 工具名称
-  params: Record<string, unknown>  // 工具参数
-  sessionId: string        // 会话标识
-  messageId: string        // 消息标识
+  callId: string; // 调用标识
+  toolName: string; // 工具名称
+  params: Record<string, unknown>; // 工具参数
+  sessionId: string; // 会话标识
+  messageId: string; // 消息标识
 }
 ```
 
@@ -329,6 +333,7 @@ ToolScheduler                     Bus                        UI
 **异步特性**：异步，工具执行完成后 resolve
 
 **可能的结果**：
+
 - status: 'success' - 执行成功
 - status: 'error' - 执行失败
 - status: 'rejected' - 被拒绝（Policy 或用户）
@@ -341,6 +346,7 @@ ToolScheduler                     Bus                        UI
 **语义**：批量执行工具调用（来自 LLM 单次响应的所有工具调用）
 
 **输入**：
+
 ```typescript
 {
   calls: ToolCallRequest[]
@@ -354,7 +360,7 @@ ToolScheduler                     Bus                        UI
 **Wave-based 并发行为**：
 
 1. **Policy 检查**：对 batch 中所有 calls 并行发出 policy check，等待全部完成（含用户确认）后再分组
-   - 需要用户确认的工具（Policy 返回 ASK）通过 Permission 模块串行确认（一次一个确认框）
+   - 需要用户确认的工具（Policy 返回 ASK）通过 Permission 模块独立登记，按 permissionId 任意顺序回答
    - 用户拒绝的 call 状态设为 `rejected`，不参与 wave 分组
    - 超时未响应的 call 状态设为 `cancelled`，不参与 wave 分组
    - 设计理由：LLM 同一次响应中的 tool calls 可能存在依赖关系，全阻塞等待保证语义正确性（与 gemini-cli 一致）
@@ -405,6 +411,7 @@ ConcurrencyController  [资源层/锁层]
 **语义**：获取当前模式和 Agent 配置下可用的工具列表
 
 **输入**：
+
 ```typescript
 {
   agentName?: string  // 可选，指定 Agent 名称，用于读取其工具配置
@@ -412,6 +419,7 @@ ConcurrencyController  [资源层/锁层]
 ```
 
 **输出**：
+
 ```typescript
 ToolDefinition[]
 
@@ -423,6 +431,7 @@ interface ToolDefinition {
 ```
 
 **过滤逻辑**：
+
 1. 根据 Policy.getMode() 过滤（Ask/Plan 模式限制工具类别）
 2. 根据 AgentManager.get(agentName).tools 配置过滤
 
@@ -435,11 +444,13 @@ interface ToolDefinition {
 **语义**：取消单个工具调用
 
 **输入**：
+
 - callId: string
 
 **输出**：boolean - 是否成功取消
 
 **行为**：
+
 - 如果工具在队列中：直接移除，状态设为 cancelled
 - 如果工具在执行中：发送 abort 信号，状态设为 cancelled
 
@@ -462,6 +473,7 @@ interface ToolDefinition {
 **语义**：获取工具调用的当前状态
 
 **输入**：
+
 - callId: string
 
 **输出**：ToolCallStatus | null
@@ -485,6 +497,7 @@ interface ToolDefinition {
 **语义**：注册工具
 
 **输入**：
+
 - tool: Tool
 
 **输出**：无
@@ -498,6 +511,7 @@ interface ToolDefinition {
 **语义**：注册或覆盖工具类别
 
 **输入**：
+
 - toolName: string
 - category: ToolCategory
 
@@ -514,13 +528,14 @@ interface ToolDefinition {
 **语义**：工具调用状态变化
 
 **携带数据**：
+
 ```typescript
 {
-  callId: string
-  toolName: string
-  previousStatus: ToolCallStatus
-  currentStatus: ToolCallStatus
-  timestamp: number
+  callId: string;
+  toolName: string;
+  previousStatus: ToolCallStatus;
+  currentStatus: ToolCallStatus;
+  timestamp: number;
 }
 ```
 
@@ -533,12 +548,13 @@ interface ToolDefinition {
 **语义**：工具开始执行
 
 **携带数据**：
+
 ```typescript
 {
-  callId: string
-  toolName: string
-  params: Record<string, unknown>
-  timestamp: number
+  callId: string;
+  toolName: string;
+  params: Record<string, unknown>;
+  timestamp: number;
 }
 ```
 
@@ -549,12 +565,13 @@ interface ToolDefinition {
 **语义**：工具执行完成
 
 **携带数据**：
+
 ```typescript
 {
-  callId: string
-  toolName: string
-  result: ToolCallResult
-  timestamp: number
+  callId: string;
+  toolName: string;
+  result: ToolCallResult;
+  timestamp: number;
 }
 ```
 
@@ -612,31 +629,31 @@ interface ToolDefinition {
 
 ### 4.1 数据创建责任
 
-| 数据 | 创建者 | 说明 |
-|------|--------|------|
-| ToolCallRequest | Agent | 工具调用请求 |
-| ToolCall | ToolScheduler | 内部状态对象 |
-| ToolCallResult | ToolScheduler | 执行结果（包装 tool 输出） |
-| ToolDefinition | ToolScheduler | 工具定义（从 Tool 转换） |
+| 数据            | 创建者        | 说明                       |
+| --------------- | ------------- | -------------------------- |
+| ToolCallRequest | Agent         | 工具调用请求               |
+| ToolCall        | ToolScheduler | 内部状态对象               |
+| ToolCallResult  | ToolScheduler | 执行结果（包装 tool 输出） |
+| ToolDefinition  | ToolScheduler | 工具定义（从 Tool 转换）   |
 
 ### 4.2 数据更新责任
 
-| 数据 | 更新者 | 更新时机 |
-|------|--------|----------|
-| ToolCall.status | ToolScheduler | 状态转换时 |
+| 数据             | 更新者        | 更新时机            |
+| ---------------- | ------------- | ------------------- |
+| ToolCall.status  | ToolScheduler | 状态转换时          |
 | ConcurrencyState | ToolScheduler | 工具开始/结束执行时 |
-| pendingQueue | ToolScheduler | 入队/出队时 |
+| pendingQueue     | ToolScheduler | 入队/出队时         |
 
 ### 4.3 责任边界
 
-| 职责 | 负责模块 | 不负责模块 |
-|------|----------|------------|
-| 工具调度 | ToolScheduler | Agent, tools |
-| 工具实现 | tools | ToolScheduler |
-| 策略决策 | Policy | ToolScheduler |
-| 用户确认 | Permission | ToolScheduler |
-| 状态存储 | ToolScheduler | tools |
-| 并发控制 | ToolScheduler | tools |
+| 职责     | 负责模块      | 不负责模块    |
+| -------- | ------------- | ------------- |
+| 工具调度 | ToolScheduler | Agent, tools  |
+| 工具实现 | tools         | ToolScheduler |
+| 策略决策 | Policy        | ToolScheduler |
+| 用户确认 | Permission    | ToolScheduler |
+| 状态存储 | ToolScheduler | tools         |
+| 并发控制 | ToolScheduler | tools         |
 
 ---
 
@@ -653,14 +670,14 @@ async function handleToolCall(toolCall: LLMToolCall) {
     params: toolCall.arguments,
     sessionId: currentSession.id,
     messageId: currentMessage.id,
-  })
+  });
 
-  if (result.status === 'success') {
-    return result.output
-  } else if (result.status === 'rejected') {
-    return `Tool execution was rejected: ${result.error?.message}`
+  if (result.status === "success") {
+    return result.output;
+  } else if (result.status === "rejected") {
+    return `Tool execution was rejected: ${result.error?.message}`;
   } else {
-    return `Tool execution failed: ${result.error?.message}`
+    return `Tool execution failed: ${result.error?.message}`;
   }
 }
 ```
@@ -688,12 +705,12 @@ const llmRequest = {
 ```typescript
 // UI 中
 Bus.subscribe(ToolScheduler.Event.StatusChanged, (event) => {
-  updateToolCallDisplay(event.callId, event.currentStatus)
-})
+  updateToolCallDisplay(event.callId, event.currentStatus);
+});
 
 Bus.subscribe(ToolScheduler.Event.ExecutionCompleted, (event) => {
-  showToolResult(event.callId, event.result)
-})
+  showToolResult(event.callId, event.result);
+});
 ```
 
 ---

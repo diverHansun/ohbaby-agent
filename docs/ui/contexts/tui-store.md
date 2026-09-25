@@ -14,6 +14,7 @@ TuiStore 是 `ohbaby-cli` 中 SDK 数据的唯一本地投影。所有来自 `Ui
 - 处理 `stream.gap` 时的硬重置协议。
 
 **不做的事**：
+
 - 不持有纯 UI 控制状态（view/dialog/loading 归 AppStateContext）。
 - 不持有输入设施状态（keypress/mouse 归各自 Context）。
 - 不直接调用 `UiBackendClient` 方法（调用由 hooks 负责）。
@@ -24,35 +25,36 @@ TuiStore 是 `ohbaby-cli` 中 SDK 数据的唯一本地投影。所有来自 `Ui
 
 ```typescript
 interface TuiStoreState {
-  runtime: UiRuntimeState | null
-  sessions: readonly UiSessionSummary[]
-  activeSessionId: string | null
-  messages: readonly UiMessage[]
-  runs: readonly UiRun[]
-  permissions: readonly UiPermissionRequest[]
-  catalog: UiCommandCatalog | null
-  catalogInvalidation: CatalogInvalidation | null
-  pending: PendingState
+  runtime: UiRuntimeState | null;
+  sessions: readonly UiSessionSummary[];
+  activeSessionId: string | null;
+  messages: readonly UiMessage[];
+  runs: readonly UiRun[];
+  permissions: readonly UiPermissionRequest[];
+  catalog: UiCommandCatalog | null;
+  catalogInvalidation: CatalogInvalidation | null;
+  pending: PendingState;
 }
 
 interface CatalogInvalidation {
-  version: string
-  reason: string
-  receivedAt: number
+  version: string;
+  reason: string;
+  receivedAt: number;
 }
 
 interface PendingState {
-  invocations: Map<string, PendingInvocation>
-  interactions: Map<string, UiInteractionRequest>
+  invocations: Map<string, PendingInvocation>;
+  interactions: Map<string, UiInteractionRequest>;
 }
 
 interface PendingInvocation {
-  clientInvocationId: string
-  commandId: string
-  startedAt: number
-  status: 'submitted' | 'started' | 'completed' | 'failed'
+  clientInvocationId: string;
+  commandId: string;
+  startedAt: number;
+  status: "submitted" | "started" | "completed" | "failed";
 }
 ```
+
 初始值由 `getSnapshot()` + `listCommands()` 填充。`messages` 初始为空，首屏通过 `getMessages(activeSessionId)` 拉取。
 
 ---
@@ -61,22 +63,22 @@ interface PendingInvocation {
 
 TuiStore 使用单一 reducer 入口。每个 SDK 事件映射到一个或多个切片更新：
 
-| SDK 事件 | 目标切片 | 更新规则 |
-|---|---|---|
-| `snapshot.replaced` | runtime/sessions/runs/messages/permissions | 用 backend snapshot 重建持久状态；保留本地 catalog、command notices、interactions、live permissions 与 resolved-permission tombstones |
-| `runtime.updated` | `runtime` | 整体替换 |
-| `session.updated` | `sessions` | 按 id upsert |
-| `message.appended` | `messages` | append 到列表尾部 |
-| `message.part.delta` | — | 不走 reducer，走 part-delta emitter（见下文） |
-| `run.updated` | `runs` | 按 id upsert |
-| `permission.requested` | `permissions` | append |
-| `permission.resolved` | `permissions` | 按 id 移除 |
-| `command.started` | `pending.invocations` | 状态 → `started` |
-| `command.result.delivered` | `pending.invocations` | 状态 → `completed` |
-| `command.failed` | `pending.invocations` | 状态 → `failed` |
-| `command.catalog.updated` | `catalogInvalidation` | 标记 catalog 失效；由 `useCatalog` 观察后重新调 `listCommands` 写入 `catalog` |
-| `interaction.requested` | `pending.interactions` | 按 interactionId 写入 |
-| `interaction.resolved` | `pending.interactions` | 按 interactionId 移除 |
+| SDK 事件                   | 目标切片                       | 更新规则                                                                      |
+| -------------------------- | ------------------------------ | ----------------------------------------------------------------------------- |
+| `snapshot.replaced`        | runtime/sessions/runs/messages | 重建聊天状态；保留本地 catalog、command notices、interactions 和独立审批状态  |
+| `runtime.updated`          | `runtime`                      | 整体替换                                                                      |
+| `session.updated`          | `sessions`                     | 按 id upsert                                                                  |
+| `message.appended`         | `messages`                     | append 到列表尾部                                                             |
+| `message.part.delta`       | —                              | 不走 reducer，走 part-delta emitter（见下文）                                 |
+| `run.updated`              | `runs`                         | 按 id upsert                                                                  |
+| 独立 permission sync       | `permissions`                  | 按 root revision 发布权威列表                                                 |
+| 通用流的 permission 事件   | 无                             | 不直接修改独立审批列表                                                        |
+| `command.started`          | `pending.invocations`          | 状态 → `started`                                                              |
+| `command.result.delivered` | `pending.invocations`          | 状态 → `completed`                                                            |
+| `command.failed`           | `pending.invocations`          | 状态 → `failed`                                                               |
+| `command.catalog.updated`  | `catalogInvalidation`          | 标记 catalog 失效；由 `useCatalog` 观察后重新调 `listCommands` 写入 `catalog` |
+| `interaction.requested`    | `pending.interactions`         | 按 interactionId 写入                                                         |
+| `interaction.resolved`     | `pending.interactions`         | 按 interactionId 移除                                                         |
 
 ---
 
@@ -99,10 +101,10 @@ TuiStore 使用单一 reducer 入口。每个 SDK 事件映射到一个或多个
 
 1. **暂停**：暂停向 reducer dispatch 后续普通事件。
 2. **重建**：
-   - 调用 `client.getSnapshot()` → 写入 runtime/sessions/runs/permissions。
+   - 调用 `client.getSnapshot()` → 写入 runtime/sessions/runs。
    - 调用 `client.listCommands({ surface: 'tui' })` → 写入 catalog。
    - 调用 `client.getMessages(activeSessionId)` → 写入 messages。
-3. **合并本地队列**：保留本地 command notices、pending interactions、live permissions 与 resolved-permission tombstones，避免旧 snapshot 复活已处理的权限请求。
+3. **合并本地队列**：保留本地 command notices、pending interactions、独立 permission sync 的列表与 ready，避免旧 snapshot 复活已处理的权限请求。
 4. **保留**：用户正在编辑的 Prompt 文本不受影响（PromptState 归 AppStateContext）。
 5. **恢复**：恢复消费后续事件。
 
@@ -110,12 +112,12 @@ TuiStore 使用单一 reducer 入口。每个 SDK 事件映射到一个或多个
 
 ## 六、与 UI Context 的边界
 
-| 数据 | 归属 | 理由 |
-|---|---|---|
-| runtime/sessions/messages/catalog/catalogInvalidation/permissions/pending | TuiStore | 来自 SDK，是 backend 状态的投影 |
-| view state / dialog queue / loading phase | AppStateContext | 纯 UI 控制状态，不来自 SDK |
-| navigateTo / enqueueDialog / setLoading | AppActionsContext | UI 控制动作 |
-| keypress / mouse events | KeypressContext / MouseContext | 输入设施 |
+| 数据                                                                      | 归属                           | 理由                            |
+| ------------------------------------------------------------------------- | ------------------------------ | ------------------------------- |
+| runtime/sessions/messages/catalog/catalogInvalidation/permissions/pending | TuiStore                       | 来自 SDK，是 backend 状态的投影 |
+| view state / dialog queue / loading phase                                 | AppStateContext                | 纯 UI 控制状态，不来自 SDK      |
+| navigateTo / enqueueDialog / setLoading                                   | AppActionsContext              | UI 控制动作                     |
+| keypress / mouse events                                                   | KeypressContext / MouseContext | 输入设施                        |
 
 TuiStore 不读取任何 UI Context；UI Context 不写入 TuiStore。两者通过 hooks 层间接协作（例如 `useStream` 同时 dispatch 到 TuiStore 和调用 AppActions.setLoading）。
 
@@ -128,6 +130,7 @@ TuiStore 不读取任何 UI Context；UI Context 不写入 TuiStore。两者通�
 TuiStore 采用 `useSyncExternalStore` 模式（React 18+），组件通过 selector 函数订阅切片，只在切片引用变化时重渲染。
 
 **理由**：
+
 - 避免 Context 嵌套过深。
 - selector 粒度比 Context 更细，减少不必要的重渲染。
 - 与 zustand / jotai 等社区方案的心智模型一致，降低后续迁移成本。

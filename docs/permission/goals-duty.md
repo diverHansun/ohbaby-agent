@@ -1,162 +1,52 @@
 # permission 模块 goals-duty.md
 
-本文档定义 `permission` 模块的设计目标与职责边界。
-
----
+本文档描述当前 `packages/ohbaby-agent/src/permission/` 的职责。执行可靠性契约见 [improve-1 实施契约](../problem-lists/2026-09-19-execution-reliability/improve-1/02-optimization-plan-and-change-scope.md)。
 
 ## 一、模块定位
 
-**一句话说明**：permission 模块负责在运行时对敏感操作进行权限确认，是 Policy 模块决策的执行层，通过与用户交互获取操作授权。
+permission 负责运行时权限求值、会话规则和独立审批请求的生命周期。`evaluatePermission()` 给出 allow/deny/ask；`PermissionManager` 管理需要交互确认的请求。它是 pending 的业务权威，UI 列表、事件缓存和审批投影均为派生视图。
 
-**如果没有这个模块**：
-- Policy 返回 "ask" 决策后无人处理，工具可能直接执行（不安全）
-- 工具模块需要自行处理 UI 交互（违反职责分离）
-- 无法支持 "always allow"（会话级批准）
-- 无法统一管理待批准的权限请求队列
-- 用户无法在拒绝操作时提供替代建议
+## 二、设计目标
 
----
+| 目标           | 当前约束                                                                                                                    |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| 独立请求       | 每次登记生成独立 permissionId，保存到 `Map<permissionId, PendingRequest>`；任何 pending ID 都能直接回答，显示顺序不限制决议 |
+| 一次决议       | 回答、signal abort 和撤销共用同步结算入口；只有首个合法终态生效                                                             |
+| 真实身份       | 显式携带真实 sessionId/runId/callId/messageId、冻结来源和调用 signal，不以当前主代理 run 或 callId 推断 runId               |
+| 有限授权       | always 只写入实际来源 session 的规则，不扩大到根会话、兄弟或后代                                                            |
+| 可结束等待     | 执行结束按真实 runId 撤销；来源失效、会话删除和 backend dispose 均完成相关等待                                              |
+| 提交与通知分离 | 同步关键提交成功后才通知观察者；普通通知失败不回滚合法决议                                                                  |
+| 故障隔离       | 严重内部一致性故障冻结可信 root；其他 root 保持可用，清理不依赖已经损坏的投影                                               |
 
-## 二、Design Goals（设计目标）
+## 三、职责
 
-### G1: 职责单一
+1. `classifier`、`evaluator` 和 `state` 管理分类、权限求值、mode/level 与会话规则。mode 为 `plan | auto`，level 为 `default | full-access`。
+2. `ask()` 校验执行上下文、健康状态和 signal；已有合法规则或 Full Access 直接放行时不登记 pending、不发布审批 requested/resolved。
+3. 每条需确认的请求独立登记并提交 requested；用户可回答任意待批 ID，不存在 current 或队首门槛。
+4. `respond()` 校验实际来源 session、choice、signal 和最新 deny。once 本次允许；always 保存规则；reject 拒绝；suggest 拒绝并携带建议。外部 cancel 是非法 choice。
+5. always 对同一来源 session 中已经登记、可记忆且匹配规则的请求逐项重新检查并自动结算，每项保留独立终态。
+6. 通过 `revokeByRun()` 精确结束一个 run 的等待；通过 `revokeBySession()` 撤销来源、根或冻结祖先链经过目标节点的请求。`clearSession()` 另清理目标 session 的规则。
+7. 保存有界近期终态身份，区分安全重复、撤销和未知 ID。默认最多 1024 条，不保留工具参数或正文。
 
-模块只负责权限确认的执行，不负责决策逻辑。决策（allow/deny/ask）由 Policy 模块完成，permission 模块只处理 "ask" 场景下的用户交互。
+## 四、Full Access
 
-### G2: 事件驱动
+主、子代理按相同运行时 level 求值。Full Access 下，新请求不再因敏感路径、显式工具/MCP 批准或外部目录访问进入人工 ask；已有明确 deny 仍优先，工具自身路径/命令限制、参数校验和资源保护继续生效。Full Access 不生成 always 规则，不跨 session 写授权；切换 level 只影响后续准入，不自动处理已经登记的 pending。
 
-通过 Bus 模块发布权限事件，与 UI 层解耦。permission 模块不直接渲染 UI，而是发布事件通知 UI 层显示确认框。
+## 五、非职责与边界
 
-### G3: 队列管理
+- 不查询会话数据库或解析父子树。application wrapper 验证 workspace 和父链，把不可变 `PermissionSource` 传入 manager。
+- 不渲染 UI，不管理浏览器连接、clientId 或认证。adapter/server 校验根范围和传输绑定；UI 使用独立审批快照及事件恢复。
+- 不执行工具，不把一次拒绝扩大为整棵代理树 Stop。调用 signal 和 run 终态由执行生命周期提供。
+- 不新增审批墙钟期限。执行已有期限仍可通过 signal 或 run 撤销结束等待；关闭页面或连接断开本身不撤销请求。
+- 不持久化 pending、Promise 或近期终态，不恢复旧 runtime 的请求 ID；会话规则也仅在当前运行时内存中保存。
+- 不处理 Ctrl+C。运行中断属于独立的 CLI/runtime 控制，审批卡片提供允许/拒绝，不提供 Cancel run。
 
-同一会话中的多个权限请求串行处理，一次只显示一个确认框，避免用户混淆。
+## 六、协作模块
 
-### G4: 支持批准记忆
-
-支持会话级的 "always allow" 功能，用户批准后同类操作不再询问。批准记录以参数级粒度存储（如 tool:edit:src/**）。
-
-### G5: 支持用户建议
-
-当用户拒绝操作时，允许用户输入替代建议，该建议将返回给 LLM 重新规划。
-
-### G6: Always 授权审计通知
-
-当用户选择 "always allow" 时，通过 Bus 发布审计/协调事件，说明产生了会话级、Pattern 级的自动批准。permission 不直接切换 Policy 到 edit-automatically，后续匹配请求由 permission 自己按批准 Pattern 自动通过。
-
----
-
-## 三、Duties（职责）
-
-### D1: 执行权限确认
-
-接收权限确认请求，通过 Bus 发布事件通知 UI 层显示确认框，等待用户响应。
-
-### D2: 管理待批准队列
-
-维护待批准的权限请求队列，确保串行处理。新请求加入队列末尾，当前请求处理完成后自动处理下一个。
-
-### D3: 管理已批准列表
-
-维护会话级的已批准权限列表，支持参数级粒度的模式匹配。在处理新请求前检查是否已被批准。
-
-### D4: 处理用户响应
-
-处理四种用户响应：
-- once：本次允许，resolve Promise
-- always：添加到批准列表，resolve Promise，发布审计/协调事件
-- reject：拒绝操作，reject Promise
-- suggest：拒绝操作并携带用户建议，reject Promise
-
-### D5: 生成批准 Pattern
-
-根据工具类型和参数自动生成批准 Pattern（如 tool:edit:src/**），用于后续匹配。
-
-### D6: 发布权限事件
-
-通过 Bus 发布以下事件：
-- Permission.Event.Updated：新权限请求，通知 UI 显示确认框
-- Permission.Event.Replied：用户响应，通知相关模块
-- Permission.Event.SwitchModeRequested：通知上层一次 always 授权已产生，可用于审计或后续协调
-
-### D7: 清理会话资源
-
-会话结束时清理该会话的待批准队列和已批准列表，拒绝所有未处理的请求。
-
----
-
-## 四、Non-Duties（非职责）
-
-### N1: 不负责决策逻辑
-
-权限决策（allow/deny/ask）由 Policy 模块完成。permission 模块只处理 Policy 返回 "ask" 的场景。
-
-### N2: 不负责 UI 渲染
-
-确认框的渲染由 CLI/UI 层负责。permission 模块只发布事件，不直接操作 UI。
-
-### N3: 不负责模式管理
-
-模式（ask/plan/ask-before-edit/edit-automatically）的管理由 Policy 模块负责。permission 模块不直接变更 Policy 状态，只发布 always 授权事件供上层记录或协调。
-
-### N4: 不负责工具执行
-
-工具的实际执行由各工具模块负责。permission 模块只返回确认结果（resolve/reject）。
-
-### N5: 不负责超时控制
-
-permission 模块不实现超时机制。如需超时控制，由 Agent 运行时层面处理。
-
-### N6: 不负责关键操作定义
-
-哪些操作是"关键操作"需要强制确认，由 Policy 模块定义。permission 模块只执行确认。
-
-### N7: 不负责持久化
-
-批准列表只存储在内存中（会话级），不持久化到文件系统。会话结束后批准记录自动清除。
-
-### N8: 不处理 Ctrl+C 中断
-
-当 Permission UI 显示等待用户决策时：
-- Ctrl+C（包括双击）**不触发循环中断**
-- 用户应使用 Permission UI 提供的 "Reject" 按钮拒绝操作
-- CLI 层在 Permission UI 显示期间应忽略 SIGINT 信号
-
----
-
-## 五、设计约束与假设
-
-### 约束
-
-1. **依赖 Bus 模块**：所有事件通过 Bus 发布，与 UI 层解耦
-2. **会话级存储**：批准列表只在会话生命周期内有效，不跨会话
-3. **串行处理**：同一会话的权限请求必须串行处理，避免并发确认
-4. **不可恢复**：进程崩溃后待批准的请求丢失，需重新发起
-
-### 假设
-
-1. Bus 模块已正确实现事件发布订阅机制
-2. UI 层会订阅 Permission.Event.Updated 事件并显示确认框
-3. UI 层会调用 Permission.respond() 传递用户响应
-4. 调用方保证传入有效的 sessionId 和 messageId
-
----
-
-## 六、与其他模块的关系
-
-| 模块 | 关系 | 说明 |
-|------|------|------|
-| Policy | 被依赖 | 工具调用 Policy 获取决策；permission 不直接切换 Policy 状态 |
-| Bus | 依赖 | 使用 Bus 发布权限事件 |
-| CLI/UI | 被依赖 | UI 层订阅事件显示确认框，调用 respond() 传递响应 |
-| 工具模块 | 被依赖 | 工具在执行前调用 Permission.ask() 获取确认 |
-| Session | 被依赖 | Session 结束时调用 clearSession() 清理资源 |
-
----
-
-## 七、文档自检
-
-- [x] 可以用一句话说明模块存在的意义
-- [x] 可以清楚回答"这个模块不该做什么"
-- [x] 不存在职责与其他模块明显重叠的风险
-- [x] 所有职责可被测试或验证
-- [x] 设计目标服务于 KISS 和 YAGNI 原则
+| 模块                       | 边界                                                                    |
+| -------------------------- | ----------------------------------------------------------------------- |
+| lifecycle / scheduler      | 传递真实执行身份和调用 signal，批准后继续检查取消，run 结束调用精确撤销 |
+| application source wrapper | 校验并冻结来源到 root 的完整祖先链                                      |
+| approval projection        | 通过同步 `criticalCommit` 接收权威变化，提供同一版本的集合和 revision   |
+| Bus                        | 在提交后发布兼容领域通知及 mode/level/rule 变化                         |
+| SDK / server / UI          | 独立同步审批、校验根范围与绑定、展示来源、允许选择非首项                |

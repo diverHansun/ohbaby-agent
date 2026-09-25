@@ -9,6 +9,7 @@
 ## 1. 问题回顾（S1）
 
 现状 `server.ts`：
+
 - `handleEvents()` 只读 `clientId`，**不解析 `Last-Event-ID`**；事件无序号、无缓冲。
 - `broadcast()` 实时遍历当前连接 `writeSse`，过期即丢。
 - remote client SSE 读循环 `done → return`，**无重连、无补发**。
@@ -18,6 +19,8 @@ CLI 在本机稳定长连接下无感；但浏览器刷新、移动端切后台/
 ---
 
 ## 2. 核心机制
+
+以下全局 seqNum/replay 描述适用于普通聊天、run、command 事件。审批绕开全局序号过滤与 replay 缓存，经专用投递和独立快照恢复；每次 hello 后按 epoch/root/bindingGeneration 读取基线，连续应用 permissionRevision。聊天快照失败不阻塞审批，详见 [审批流 C](../dfd-interface.md#流-c审批往返permission-round-trip)。
 
 ```
 backend.subscribeEvents ─► event-bus.publish(UiEvent)
@@ -31,11 +34,11 @@ backend.subscribeEvents ─► event-bus.publish(UiEvent)
          └─ 无 Last-Event-ID → 从当前实时开始（首连）
 ```
 
-| 概念（沿用 [`../data-model.md`](../data-model.md)） | 本文落点 |
-|------|------|
-| **EventEnvelope** = `{ seqNum, payload: UiEvent }` | `coordination/event-bus.ts` 打号 |
-| **EventRingBuffer** 有界、按序保存近期 envelope | event-bus owns，server 启动建、停止清 |
-| **ClientConnection.cursor** = 已确认最大 seqNum | transport 维护，断连清理 |
+| 概念（沿用 [`../data-model.md`](../data-model.md)） | 本文落点                              |
+| --------------------------------------------------- | ------------------------------------- |
+| **EventEnvelope** = `{ seqNum, payload: UiEvent }`  | `coordination/event-bus.ts` 打号      |
+| **EventRingBuffer** 有界、按序保存近期 envelope     | event-bus owns，server 启动建、停止清 |
+| **ClientConnection.cursor** = 已确认最大 seqNum     | transport 维护，断连清理              |
 
 > `seqNum` 即 SSE 的 `id:` 字段；浏览器 `EventSource` 断线重连会自动带 `Last-Event-ID` header——event-bus 据此补发。这是「用平台原生能力，不自造重连协议」。
 
@@ -46,7 +49,7 @@ backend.subscribeEvents ─► event-bus.publish(UiEvent)
 `Last-Event-ID` 早于缓冲最小 seqNum（事件已被淘汰）时**绝不静默丢**（父目录 non-functional §1）。二选一，本阶段选**显式重同步信号**：
 
 - event-bus 发一条 `resync-required` 控制事件（带当前最小/最大 seqNum）。
-- 前端收到后丢弃本地状态，重新 `GET /v1/snapshot` 拉全量，再从最新 seqNum 续 SSE。
+- 前端收到后重新 `GET /v1/snapshot` 恢复普通 ViewState；审批另触发独立 resync，不能用全量 snapshot 中的兼容 permissions 覆盖独立审批状态。
 
 理由：补发任意久远历史需要无界缓冲（违反 non-functional §2 内存有界）。有界缓冲 + 显式重同步，是「正确性 + 内存可控」的平衡。
 
@@ -72,6 +75,7 @@ publish → 打号入缓冲 → 对每个连接：client-view 投影/过滤 → 
 - `UiBackendClient.subscribeConnection?(cb)`（可选）：远程 client 据 SSE/传输状态推送。
 
 用途：
+
 - 前端区分「在连 / 断开重连中 / 已关」，据此提示「连接中断，请重新提交」（N3：不自动重放 prompt）。
 - **仅远程 client 实现**；in-process 直连 backend 无连接状态（恒 connected），保持契约一致但不强制实现。
 
@@ -79,10 +83,10 @@ publish → 打号入缓冲 → 对每个连接：client-view 投影/过滤 → 
 
 ## 6. 顺手处理的协调缺陷
 
-| 缺陷 | 现状 | 本阶段 |
-|------|------|------|
-| S8 | prompt-queue 把所有无 sessionId 的 prompt 归入同一 `__fresh__` lane，跨客户端过度串行 | 见 [`04`](./04-multi-project-runtime.md)（按 client/scope 分 lane） |
-| S9 | `disconnectClient` 是空 stub，断连客户端已排队未启动的 prompt 仍执行 | 见 [`04`](./04-multi-project-runtime.md)（断连清待决队列，已启动的不取消——N3） |
+| 缺陷 | 现状                                                                                  | 本阶段                                                                         |
+| ---- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| S8   | prompt-queue 把所有无 sessionId 的 prompt 归入同一 `__fresh__` lane，跨客户端过度串行 | 见 [`04`](./04-multi-project-runtime.md)（按 client/scope 分 lane）            |
+| S9   | `disconnectClient` 是空 stub，断连客户端已排队未启动的 prompt 仍执行                  | 见 [`04`](./04-multi-project-runtime.md)（断连清待决队列，已启动的不取消——N3） |
 
 > 这两项属 coordination，与 event-bus 同目录，迁移时一并处理；细节落在 04，本文只标关联。
 
@@ -90,11 +94,11 @@ publish → 打号入缓冲 → 对每个连接：client-view 投影/过滤 → 
 
 ## 7. 约束与权衡
 
-| 决策 | 放弃的方案 | 代价 |
-|------|-----------|------|
-| 有界环形缓冲 + 显式重同步 | 无界缓冲全量补发 | 久断线要全量重拉一次；换来内存有界（non-functional §2） |
-| seqNum 全局单调、投影后置 | per-client 各自序号 | 投影逻辑要在补发路径也跑一遍；换来 replay 锚点一致、实现简单 |
-| 复用浏览器 `Last-Event-ID` | 自造重连握手协议 | 受限于 SSE 语义；换来零自造协议、app 也能照搬 |
+| 决策                       | 放弃的方案          | 代价                                                         |
+| -------------------------- | ------------------- | ------------------------------------------------------------ |
+| 有界环形缓冲 + 显式重同步  | 无界缓冲全量补发    | 久断线要全量重拉一次；换来内存有界（non-functional §2）      |
+| seqNum 全局单调、投影后置  | per-client 各自序号 | 投影逻辑要在补发路径也跑一遍；换来 replay 锚点一致、实现简单 |
+| 复用浏览器 `Last-Event-ID` | 自造重连握手协议    | 受限于 SSE 语义；换来零自造协议、app 也能照搬                |
 
 ---
 

@@ -64,8 +64,8 @@
 
 > 决策 2：保留 inline bar 的视觉样式（蓝调卡片：标题"Allow ohbaby to …?" + `操作 · 路径` + Deny/Approve 按钮），但**实现为模态**，从底部 **slide-up（⏏️）** 弹出，浮于 composer 之上。
 
-- **由 PendingPermission 队列驱动**：只渲染队首；多于一个时显示"还有 N 个待处理"。模态不持有独立状态，纯投影。
-- **resync 时**：ViewState 整体重建 → 队列重算 → 模态自动刷新/关闭（该请求可能已被它端处置）。见 [`../use-case.md`](../use-case.md) UC3。
-- **错主 403**：提示"该审批属于另一连接"，不误标为已处置。
+- **由独立审批列表驱动**：按 createdAt/id 稳定排序，单卡显示；多于一个时提供 Previous/Next，可以处理非首项。卡片简短显示 Main agent 或真实来源名称，缺名称回退 sessionId。
+- **独立就绪**：只有 permissionSync=ready 时允许回答；审批基线和增量不等待聊天/model，整页旧 permissions 不能覆盖卡片。每次 hello、切范围和显式恢复都使用同一有界恢复器。
+- **应答结果**：同根多页任一处可答；PERMISSION_NOT_PENDING 触发同步，PERMISSION_SCOPE_CHANGED 拒绝旧绑定，PERMISSION_UNAVAILABLE 停用审批且不自动重试。
 - **断连**（`reconnecting`/`disconnected`）：按钮置灰，避免向死链路发应答。
-- **策略联动**：仅当权限策略为 `default` 且有待决请求时出现；`full-access` 下不出现。
+- **选项**：Allow once、可记忆时的 Always allow、Reject；无 Cancel run。拒绝只结束该请求，always 只记住真实来源 session 的规则，不切换 permission level。full-access 的新调用不再产生人工 ask；显示依据仍是实际 pending。

@@ -1,344 +1,117 @@
 # permission 模块 dfd-interface.md
 
-本文档描述 `permission` 模块的数据流与对外接口。所有内容基于 `goals-duty.md`、`architecture.md` 和 `data-model.md` 中的定义。
+本文档定义当前 manager 的调用边界。具体类型见 [data-model.md](data-model.md)，提交约束见 [architecture.md](architecture.md)。
 
----
+## 一、主数据流
 
-## 一、Context & Scope（上下文与范围）
-
-### 模块位置
-
-permission 模块位于工具执行层与 UI 层之间，负责权限确认的执行流程。
-
-### 交互模块
-
-| 外部模块 | 交互方向 | 交互内容 |
-|----------|----------|----------|
-| **Tool 模块** | 输入 | 工具调用权限确认请求 |
-| **Bus 模块** | 输出 | 权限事件发布 |
-| **UI 层** | 双向 | 显示确认框 / 接收用户响应 |
-| **Policy 模块** | 上游调用方 | Policy 先给出 allow/deny/ask 决策；permission 只处理 ask 场景 |
-| **Session 模块** | 输入 | 会话清理触发 |
-
-### 本文档范围
-
-- 描述数据如何进入 permission 模块
-- 描述数据如何从 permission 模块输出
-- 定义模块的对外接口
-- 明确数据归属与责任
-
----
-
-## 二、Data Flow Description（数据流描述）
-
-### 2.1 主流程：权限确认请求
-
-```
-工具模块                    permission 模块                         UI 层
-   |                              |                                    |
-   |  1. 调用 ask()               |                                    |
-   |----------------------------->|                                    |
-   |                              |                                    |
-   |                 2. 生成 PermissionInfo                            |
-   |                 3. 检查是否已批准                                  |
-   |                              |                                    |
-   |                    [已批准]  |                                    |
-   |<-------- 4a. resolve --------|                                    |
-   |                              |                                    |
-   |                    [未批准]  |                                    |
-   |                 4b. 加入队列                                       |
-   |                 5. 发布 Event.Updated                              |
-   |                              |------------------------------------>|
-   |                              |                                    |
-   |                              |   6. UI 显示确认框                  |
-   |                              |                                    |
-   |                              |   7. 用户响应                       |
-   |                              |<------------------------------------|
-   |                              |                                    |
-   |                 8. 调用 respond()                                  |
-   |                 9. 处理响应                                        |
-   |                              |                                    |
-   |              [once/always]   |                                    |
-   |<-------- 10a. resolve -------|                                    |
-   |                              |                                    |
-   |              [always]        |                                    |
-   |                 10b. 记录批准                                      |
-   |                 10c. 发布 SwitchModeRequested（审计/协调）          |
-   |                              |------------------------------------>|
-   |                              |                                    |
-   |              [reject]        |                                    |
-   |<--- 10d. reject (Error) -----|                                    |
-   |                              |                                    |
-   |              [suggest]       |                                    |
-   |<- 10e. reject (Suggestion) --|                                    |
-   |                              |                                    |
-   |                 11. 处理下一个队列项                               |
+```mermaid
+sequenceDiagram
+  participant L as lifecycle / scheduler
+  participant A as source adapter
+  participant P as PermissionManager
+  participant V as approval projection
+  participant U as UI / transport
+  L->>A: ask(real run / call / session / signal)
+  A->>A: 校验来源、父链和 workspace；再次检查 signal
+  A->>P: ask(input + frozen source)
+  alt 已取消 / 已有合法规则 / Full Access
+    P-->>L: cancel / always / once，无 pending 事件
+  else 明确 deny
+    P-->>L: PermissionRejectedError
+  else 需要登记
+    P->>P: 登记独立 ID、pending 和 abort listener
+    P->>V: criticalCommit(requested)，同步无观察者
+    P->>U: onCommitted，再发普通 Updated
+    U->>P: respond(真实来源 sessionId, 任意 pending ID, choice)
+    P->>P: 校验、认领移除、拆 listener、静默规则副作用
+    P->>V: criticalCommit(resolved)
+    P->>P: 记录终态并完成原 Promise
+    P-->>L: once / always 或拒绝错误
+    P->>U: onCommitted，再发 RuleAdded / Replied
+  end
 ```
 
-### 2.2 流程步骤说明
+来源解析失败结束该 ask，不伪造根、不广播到全局。UI 读独立审批快照及增量，不以整页聊天快照作为审批权威。普通显示、历史/model 查询或单连接失败不撤销后端请求。
 
-**输入阶段（步骤 1-3）**
+## 二、manager API
 
-1. **工具模块调用 ask()**：工具在执行敏感操作前调用 `Permission.ask()`
-2. **生成 PermissionInfo**：permission 模块根据输入生成完整的权限信息，包括 permissionId、pattern 等
-3. **检查已批准列表**：通过 PatternMatcher 检查是否已有匹配的批准记录
+通过 `createPermissionManager(options)` 创建实例。
 
-**快速路径（步骤 4a）**
+| 方法                                                        | 输入与结果                                                                                                                                             |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ask(input)`                                                | 必需真实 runId/source/signal/sessionId/messageId/callId/toolName/category/params；返回 `Promise<SchedulerPermissionResponse>`，拒绝或严重故障时 reject |
+| `respond(sessionId, permissionId, response)`                | sessionId 必须是实际来源会话；同步返回 accepted / already-resolved / revoked / not-pending，可抛非法 choice 或 unavailable                             |
+| `listPending()`                                             | 返回当前全部 PermissionInfo，不包含 Promise 回调，不限制应答顺序                                                                                       |
+| `getPending(id)`                                            | 返回单条 pending info 或 undefined                                                                                                                     |
+| `getTerminal(id)`                                           | 返回有界近期终态身份或 undefined，供 adapter 做范围校验                                                                                                |
+| `revoke(id, reason)`                                        | 通过同一结算入口撤销单条请求，返回 PermissionRespondResult                                                                                             |
+| `revokeByRun(runId, reason)`                                | 精确撤销该真实 run 的所有请求；正常 run 终态使用此入口                                                                                                 |
+| `revokeBySession(sessionId, reason)`                        | 匹配实际来源、root 或冻结祖先链，用于来源失效/会话删除                                                                                                 |
+| `clearSession(sessionId)`                                   | 清除该 session 的规则，并按来源链撤销相关请求                                                                                                          |
+| `cancelPending(sessionId)`                                  | 保留的兼容入口，只撤销该实际来源 session；不能替代正常 run 精确清理                                                                                    |
+| `isHealthy(rootSessionId)`                                  | 查询 manager 独立健康状态                                                                                                                              |
+| `freezeRoot(rootSessionId, error)` / `freezeRuntime(error)` | 严重内部故障隔离；结束受影响等待，不依赖坏投影                                                                                                         |
+| `dispose()`                                                 | 禁止新准入并撤销当前 manager 的全部 pending                                                                                                            |
+| `state`                                                     | mode/level/会话规则状态接口                                                                                                                            |
 
-4a. **已批准直接通过**：如果找到匹配的批准记录，直接 resolve Promise，工具继续执行
+`PermissionManagerOptions` 必需 bus；可注入 generateId、now、state、terminalLimit，以及 `criticalCommit`、`onCommitted`、`onUnavailable`。关键提交为同步 void，失败通过抛错表达；专用通知在关键提交之后，不能在 criticalCommit 内执行 UI/Bus 观察者。
 
-**等待用户确认路径（步骤 4b-11）**
+## 三、响应和范围校验
 
-4b. **加入请求队列**：将请求加入 RequestQueue
-5. **发布更新事件**：通过 Bus 发布 `Permission.Event.Updated`，通知 UI 层
-6. **UI 显示确认框**：UI 层接收事件后显示确认对话框
-7. **用户响应**：用户在 UI 中选择 once/always/reject/suggest
-8. **调用 respond()**：UI 层调用 `Permission.respond()` 传递用户选择
-9. **处理响应**：根据响应类型执行不同逻辑
-10. **完成处理**：
-   - `once`：resolve Promise，工具继续执行
-   - `always`：resolve Promise + 记录批准 + 发布 SwitchModeRequested（审计/协调事件，不直接切换 Policy）
-   - `reject`：reject Promise，抛出 PermissionRejectedError
-   - `suggest`：reject Promise，抛出 PermissionRejectedWithSuggestionError
-11. **处理下一项**：从队列中移除当前请求，处理下一个待处理请求
+manager 接受 once、合法 always、reject、非空 suggest。未知 choice、cancel、不可记忆请求的 always、试图扩大 pattern 的 always 均返回非法 choice 错误而保留 pending。signal 已取消时迟到批准不能写规则；最新规则已 deny 时批准转为拒绝。多个回答或回答/撤销竞争只有一次有效终态。
 
-### 2.3 辅助流程：会话清理
+UI SDK 使用 `respondPermission(requestId, response, context?)`，response 的公开 choice 为 allow_once、请求提供时的 allow_always、reject。根页面可以回答其树下请求，但 adapter 必须从可信记录取实际 sessionId 传给 manager。always 因此落到实际子会话而非 root。服务器验证认证、workspace、epoch/root/bindingGeneration；本地 adapter 验证选中根及选择代次。近期终态也必须先做范围校验，才能将安全重复视为成功。
 
-```
-Session 模块                 permission 模块
-     |                              |
-     |  1. 调用 clearSession()      |
-     |----------------------------->|
-     |                              |
-     |           2. 清除该会话的批准记录
-     |           3. 清除该会话的待处理请求
-     |                              |
-     |  4. 返回                     |
-     |<-----------------------------|
-```
+内部 cancel 只用于生命周期撤销，不是 UI 的 Cancel run。not-pending 由 adapter 映射为 `PERMISSION_NOT_PENDING` 并让客户端重新同步；严重健康故障为 `PERMISSION_UNAVAILABLE`，不能返回正常空集合。
 
----
+## 四、事件边界
 
-## 三、Interface Definition（接口定义）
+| 事件/端口                   | 内容与使用者                                                                      |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| PermissionCommit requested  | info；同步投影新增请求                                                            |
+| PermissionCommit resolved   | terminal identity 和 response；同步投影删除请求并推进版本                         |
+| `onCommitted`               | 关键提交后的专用投递，adapter 负责隔离失败订阅                                    |
+| `PermissionEvent.Updated`   | `{ info }`，兼容领域观察者                                                        |
+| `PermissionEvent.Replied`   | sessionId/permissionId/runId/rootSessionId/reason/callId/response，兼容领域观察者 |
+| `PermissionEvent.RuleAdded` | sessionId/rule；always 完成关键提交后才发布                                       |
+| ModeChanged / LevelChanged  | previous/current，更新普通权限设置视图                                            |
+| `onUnavailable`             | 可信 root 或 runtime 故障，adapter 阻止正常查询并使受影响连接失效                 |
 
-### 3.1 对外提供的接口
+新版审批消费者通过 SDK 的 `getPermissionSnapshot()` 和 `subscribePermissionEvents()` 获取 epoch/root/revision 请求集合。全量 getSnapshot 保留兼容形状，但其 permissions 副本不能覆盖独立审批状态。普通 Bus 事件不承担关键提交或可靠传输的职责。
 
-#### Permission.ask()
+## 五、调用示例
 
-**语义**：请求权限确认，等待用户批准后继续
-
-**输入**：
-- sessionId：所属会话标识
-- messageId：关联的消息标识
-- type：权限类型（tool/bash/external_directory）
-- name：工具名或命令名
-- title：确认框显示标题
-- metadata：额外信息（如命令内容、文件路径）
-- callId：工具调用标识
-
-**输出**：
-- Promise<void>：批准时 resolve，拒绝时 reject
-
-**异步特性**：异步，返回 Promise
-
-**数据流对应**：主流程步骤 1-10
-
----
-
-#### Permission.respond()
-
-**语义**：处理用户对权限请求的响应
-
-**输入**：
-- sessionId：会话标识
-- permissionId：权限请求标识
-- response：用户响应（once/always/reject/suggest）
-
-**输出**：无直接返回值
-
-**异步特性**：同步执行，但会触发 Promise resolve/reject
-
-**数据流对应**：主流程步骤 8-11
-
----
-
-#### Permission.clearSession()
-
-**语义**：清理指定会话的所有权限相关数据
-
-**输入**：
-- sessionId：要清理的会话标识
-
-**输出**：无
-
-**异步特性**：同步
-
-**数据流对应**：辅助流程
-
----
-
-### 3.2 发布的事件（通过 Bus）
-
-#### Permission.Event.Updated
-
-**语义**：通知有新的权限请求或请求状态变化
-
-**携带数据**：PermissionInfo
-
-**订阅者**：UI 层
-
-**触发时机**：主流程步骤 5
-
----
-
-#### Permission.Event.Replied
-
-**语义**：通知权限请求已收到响应
-
-**携带数据**：
-- sessionId：会话标识
-- permissionId：权限请求标识
-- callId：工具调用标识
-- response：用户响应
-
-**订阅者**：需要跟踪权限状态的模块
-
-**触发时机**：主流程步骤 9
-
----
-
-#### Permission.Event.SwitchModeRequested
-
-**语义**：通知一次 always 授权已经产生
-
-**携带数据**：
-- sessionId：会话标识
-- targetMode：建议目标模式（edit-automatically），仅作为上层协调信号
-- trigger：触发信息（callId, permissionId, pattern）
-
-**订阅者**：审计、UI 或 runtime composition；Policy 不直接订阅该事件
-
-**触发时机**：主流程步骤 10c（用户选择 always 时）
-
----
-
-### 3.3 依赖的外部接口
-
-#### Bus.publish()
-
-**语义**：发布事件
-
-**使用场景**：
-- 发布 Event.Updated
-- 发布 Event.Replied
-- 发布 Event.SwitchModeRequested
-
----
-
-## 四、Data Ownership & Responsibility（数据归属与责任）
-
-### 4.1 数据创建责任
-
-| 数据 | 创建者 | 说明 |
-|------|--------|------|
-| AskInput（请求输入） | 工具模块 | 调用 ask() 时传入 |
-| PermissionInfo | permission 模块 | 由 ask() 内部创建 |
-| permissionId | permission 模块 | 由 ID 生成器创建 |
-| Pattern | permission 模块 | 由 PatternMatcher 生成 |
-| PendingRequest | permission 模块 | 由 RequestQueue 创建 |
-| PermissionResponse | UI 层 | 用户响应后传入 |
-
-### 4.2 数据更新责任
-
-| 数据 | 更新者 | 更新时机 |
-|------|--------|----------|
-| 批准记录（ApprovalStore） | permission 模块 | 用户选择 always 时添加 |
-| 请求队列 | permission 模块 | 添加/移除请求时 |
-
-### 4.3 数据销毁责任
-
-| 数据 | 销毁者 | 销毁时机 |
-|------|--------|----------|
-| PendingRequest | permission 模块 | respond() 处理后移除 |
-| 批准记录 | permission 模块 | clearSession() 调用时 |
-| PermissionInfo | permission 模块 | 请求完成后不再保留引用 |
-
-### 4.4 责任边界
-
-| 职责 | 负责模块 | 不负责模块 |
-|------|----------|------------|
-| 创建权限请求内容 | 工具模块 | permission 模块 |
-| 管理请求生命周期 | permission 模块 | UI 层 |
-| 显示确认 UI | UI 层 | permission 模块 |
-| 收集用户输入 | UI 层 | permission 模块 |
-| 决定是否需要确认 | Policy 模块（调用方） | permission 模块 |
-| 模式切换执行 | Commands / runtime composition | permission 模块 |
-
----
-
-## 五、接口使用示例
-
-### 5.1 工具调用权限确认
+下面展示 application wrapper 已验证来源后，显式审批入口的核心调用。身份和 signal 来自本次实际执行，不在 permission 内生成替代值。
 
 ```typescript
-// 工具模块中
-async function executeEdit(file: string, content: string) {
-  // 请求权限确认
-  await Permission.ask({
-    sessionId: currentSession.id,
-    messageId: currentMessage.id,
-    type: 'tool',
-    name: 'edit',
-    title: 'Edit file',
-    metadata: {
-      file_path: file,
-      preview: content.slice(0, 100)
-    }
-  })
+const result = await permission.ask({
+  runId: execution.runId,
+  sessionId: execution.sessionId,
+  messageId: execution.messageId,
+  callId: call.id,
+  contextScopeId: execution.contextScopeId,
+  source: validatedSource,
+  signal: call.signal,
+  toolName: call.name,
+  category: call.category,
+  params: call.params,
+  reason: "Confirm this operation",
+  rememberable: true,
+});
 
-  // 权限通过后执行实际编辑
-  await fs.writeFile(file, content)
+if (result === "cancel" || call.signal.aborted) {
+  return;
 }
+// scheduler 随后遵循自己的执行和安全检查，不把批准视作工具已完成。
 ```
 
-### 5.2 UI 层响应处理
-
 ```typescript
-// UI 层中
-Bus.subscribe(Permission.Event.Updated, (event) => {
-  const { info } = event
-  showConfirmDialog({
-    title: info.title,
-    metadata: info.metadata,
-    onOnce: () => Permission.respond(info.sessionId, info.id, { type: 'once' }),
-    onAlways: () => Permission.respond(info.sessionId, info.id, { type: 'always' }),
-    onReject: () => Permission.respond(info.sessionId, info.id, { type: 'reject' }),
-    onSuggest: (text) => Permission.respond(info.sessionId, info.id, {
-      type: 'suggest',
-      suggestion: text
-    })
-  })
-})
-```
-
-### 5.3 会话清理
-
-```typescript
-// Session 模块中
-async function endSession(sessionId: string) {
-  // 清理权限相关数据
-  Permission.clearSession(sessionId)
-
-  // 其他清理逻辑...
+// adapter 已校验 root/workspace/传输绑定后，使用可信的实际来源。
+const request = permission.getPending(permissionId);
+if (request) {
+  permission.respond(request.sessionId, request.id, { type: "once" });
 }
+
+// lifecycle 在真实 run 终态出口兜底，不能换成按 session 清理。
+permission.revokeByRun(execution.runId, "run_completed");
 ```
-
----
-
-## 六、文档自检
-
-- [x] 可以清楚说明每一条数据从哪里来、到哪里去
-- [x] 所有接口都服务于明确的数据流
-- [x] 数据责任边界清晰，无重复处理风险
-- [x] 接口定义与 data-model.md 中的类型一致
-- [x] 事件定义与 architecture.md 中的设计一致

@@ -1,73 +1,25 @@
 # Permission Buttons · 实现与测试
 
-> 如何把 [color-system.md](./color-system.md) 与 [sizing-typography.md](./sizing-typography.md) 的规格落到代码。核心是一个有意识的隔离决策:**新建权限弹窗专用类,不复用 `.ohb-button`**。
+`PermissionModal` 位于 `apps/ohbaby-web/src/ui/App.tsx`，消费独立审批列表及同步状态。它在聊天主视图之外挂载，因此审批入口不等待完整历史或 composer 就绪。
 
----
+## 样式映射
 
-## 1. 专用类隔离决策
+| 当前选项     | id           | intent | 修饰类                   |
+| ------------ | ------------ | ------ | ------------------------ |
+| Allow once   | allow_once   | allow  | ohb-perm-allow-primary   |
+| Always allow | allow_always | allow  | ohb-perm-allow-secondary |
+| Reject       | reject       | deny   | ohb-perm-deny            |
 
-`.ohb-button` / `.ohb-button-primary` 同时被 composer 的 send/stop 等按钮共用。若直接改它们,会波及无关按钮。因此新建一组**仅用于权限弹窗**的类,把改动严格关在 `PermissionModal` 内:
+共享基类为 `.ohb-perm-btn`。`permissionButtonClass` 先识别 allow_always，再处理通用 allow，其他可见选项使用 deny 样式。现有 abort 分支/CSS 可保留，但渲染前过滤 `id === "cancel"` 或 `intent === "abort"`，不能因此重新开放 Cancel run。
 
-- 基类:`.ohb-perm-btn` — 承载共享布局(`min-height` / `radius` / `padding` / `font-size` / `font-weight` / inline-flex 居中)。
-- 修饰类(各承载一档配色 + hover):
-  - `.ohb-perm-allow-primary`
-  - `.ohb-perm-allow-secondary`
-  - `.ohb-perm-deny`
-  - `.ohb-perm-abort`(额外 `margin-left: 6px`)
+## 同步与应答
 
-## 2. className 映射
+- 数据来自 `createPermissionSync`，不从全量 snapshot 的兼容 permissions 重建。
+- 按 createdAt/id 稳定排序，局部 selectedId 支持 Previous/Next；请求消失时回到可用项。
+- 只有独立 status=ready 才启用回答。同步失败显示原因及恢复入口；PERMISSION_UNAVAILABLE 不自动重试。
+- 应答携带当前 epoch/root/bindingGeneration。PERMISSION_NOT_PENDING 触发同步，已合法回答可幂等成功；HTTP 成功不等于工具已执行。
+- same callId 的后续 permissionId 是新请求，不能继承上一次选择。旧范围回调不得重新启用新范围。
 
-`App.tsx` 中 `PermissionModal` 渲染每个 `choice` 时,由一个纯函数决定 class:
+## 验证落点
 
-```ts
-function permissionButtonClass(choice: UiPermissionChoice): string {
-  const base = "ohb-perm-btn";
-  if (choice.id === "allow_always") return `${base} ohb-perm-allow-secondary`;
-  if (choice.intent === "allow") return `${base} ohb-perm-allow-primary`;
-  if (choice.intent === "abort") return `${base} ohb-perm-abort`;
-  return `${base} ohb-perm-deny`;
-}
-```
-
-替换现有 `App.tsx` 中 `className={choice.intent === "allow" ? "ohb-button-primary" : "ohb-button"}` 一处。
-
-判定顺序覆盖所有现存 `choices` 形态:
-
-| 选项 | `id` | `intent` | class |
-| --- | --- | --- | --- |
-| Allow once | `allow_once` | `allow` | `ohb-perm-allow-primary` |
-| Always allow | `allow_always` | `allow` | `ohb-perm-allow-secondary` |
-| Reject | `reject` | `deny` | `ohb-perm-deny` |
-| Cancel run | `cancel` | `abort` | `ohb-perm-abort` |
-| (通用)Allow | `allow` | `allow` | `ohb-perm-allow-primary` |
-| (通用)Deny | `deny` | `deny` | `ohb-perm-deny` |
-
-> 关键:`allow_always` 先于通用 `allow` 判定,确保"记住"变体落到次级而非主按钮;`deny` 为兜底分支,任何非 allow/abort 的 intent 都归入警示档。
-
-## 3. 改动点清单
-
-- `apps/ohbaby-web/src/ui/App.tsx`
-  - 新增 `permissionButtonClass()` helper。
-  - 替换 `PermissionModal` 中按钮的 `className` 表达式为 `permissionButtonClass(choice)`。
-- `apps/ohbaby-web/src/ui/styles.css`
-  - 新增 `.ohb-perm-btn` 基类与 4 个修饰类(配色见 color-system,尺寸/字号见 sizing-typography)。
-  - 各修饰类的 `:hover`。
-  - `.ohb-perm-abort { margin-left: 6px }`。
-- 不动 `.ohb-button` / `.ohb-button-primary`、不动 markup 结构、不动按钮顺序。
-
-## 4. 测试计划
-
-- `apps/ohbaby-web/src/ui/styles.unit.test.ts`(沿用现成 `expectCssRule`):
-  - `.ohb-perm-btn`:断言 `min-height: 36px`、`font-size: 13px`。
-  - 4 个修饰类:断言各自 `background` / `border-color` / `color`。
-  - `.ohb-perm-abort`:断言 `margin-left: 6px`。
-- `apps/ohbaby-web/src/ui/App.unit.test.tsx`(可选,推荐):
-  - 用 4 个 `choices` 渲染 `PermissionModal`,断言每个按钮挂到预期修饰类。
-- 不新增/不改动权限模型测试:`permission-projection.unit.test.ts`、TUI 契约测试均不受影响。
-
-## 5. Acceptance
-
-- `App.tsx` 仅改 className 决策(+ 一个 helper),无行为/模型变化。
-- 4 个按钮分别挂到 4 个修饰类,映射符合上表。
-- 新样式只命中权限弹窗;send/stop/composer 按钮像素级不变。
-- 现有测试全绿;`styles.unit.test.ts` 新增断言全部通过。
+`App.unit.test.tsx` 验证来源、无取消按钮、非首项选择及独立就绪；daemon client 的 integration 测试验证重连、范围切换、聊天失败与旧响应隔离。`styles.unit.test.ts` 保留样式规则验证，兼容 CSS 的存在不代表公开 choice。

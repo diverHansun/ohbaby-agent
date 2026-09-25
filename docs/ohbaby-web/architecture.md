@@ -17,7 +17,7 @@ web 端由 SDK client、浏览器 façade、store 与 UI 四个角色组成。�
   - `eventReducer` —— 纯函数 `(event, state) → state`：把 `UiEvent` 投影为 ViewState（含轻量 `CommandNotice`）。
   - `BrowserDaemonClient` —— 唯一浏览器 backend client，直接实现 SDK `UiBackendClient`；一个活动 workspace 只拥有一个实例和一条逻辑 SSE。
   - `OhbabyWebRuntime` —— 浏览器应用 façade，只编排 workspace、导航、client 生命周期、session 选择和 slash 文本解析；它不复制整套 backend 方法。
-- **状态层 `store/`**：持有投影后的 ViewState 与 ConnectionState，喂给 React（`useSyncExternalStore`）。
+- **状态层 `store/`**：持有投影后的 ViewState、ConnectionState 与独立 PermissionSyncState，喂给 React（`useSyncExternalStore`）。
 - **视图层 `ui/`**：会话流、输入框、权限弹窗、状态条等组件。
 
 纯逻辑（`wire` / `events` / `eventReducer`）**不 import React**，可无头单测（落 G2）。
@@ -27,7 +27,7 @@ web 端由 SDK client、浏览器 façade、store 与 UI 四个角色组成。�
 ## 2. Design Pattern & Rationale（设计模式与理由）
 
 - **单向数据流（Flux 式）**：用户命令经 `http` 出站；会话真相只经 SSE 事件 → `eventReducer` → store → view 回来。**不对会话真相做乐观本地改写**（落 G1）。
-  - 理由：daemon 是唯一事实源。乐观更新会引入"本地态 vs 真相"分叉，而 resync 时要丢弃本地态重建——单向流让 resync 退化为"清空 ViewState + 重拉 snapshot"，最简单可靠。
+  - 理由：daemon 是唯一事实源。乐观更新会引入"本地态 vs 真相"分叉，而 resync 时要丢弃本地态重建——单向流让 普通事件 resync 退化为"清空 ViewState + 重拉 snapshot"；审批使用独立 snapshot 与 revision 恢复，最简单可靠。
 - **端口适配器 `BrowserDaemonClient`**：把 `http` + `events` + `eventReducer` 适配为 SDK `UiBackendClient`。UI 的业务调用走 `runtime.client`，浏览器编排走 `OhbabyWebRuntime`；二者不是两套 client。
 - **应用 façade `OhbabyWebRuntime`**：负责选择/切换 workspace，并保证旧 client 失效后才启用新 client。无活动 workspace 时 `client` 明确为 `null`，不靠 getter 抛错伪装可用。
 - **Reducer 模式 `eventReducer`**：纯 `(event, state) → state`，框架无关，是最易出错逻辑（流式累积、顺序、resync）的可单测内核。
@@ -56,7 +56,7 @@ apps/ohbaby-web/
     ui/
       ConversationStream.tsx   会话/消息流（流式渲染 + markdown 消毒 + 工具卡片）
       Composer.tsx             输入框 + 发/中断 + mode(auto/plan) + 权限策略(default/full-access)
-      PermissionModal.tsx      权限模态（slide-up，队列驱动）
+      App.tsx                  权限模态（独立待处理列表，可选择非首项）
       StatusBar.tsx            连接态 / run 状态 / 上下文用量（无诊断行）
       CommandNotice.tsx         slash 命令结果/错误的轻量投影（非完整命令面板）
 ```
@@ -79,6 +79,10 @@ apps/ohbaby-web/
 
 ### 单一事件数据流
 
-`FetchDaemonEventStream` 只负责一个物理 fetch-stream 的连接、重连和 frame 解析。有效 `ui.event` 进入 `BrowserDaemonClient.dispatchUiEvent` 后，先由 store 做 sequence 校验和投影，再通知所有 SDK subscriber；重复、过期或无效序号不会通知 subscriber。subscriber 或 store listener 抛错均被隔离。首屏和 resync 以本地 `snapshot.replaced` barrier 进入同一分发点，只有实际应用成功后才推进 `Last-Event-ID`。
+`FetchDaemonEventStream` 只负责一个物理 fetch-stream 的连接、重连和 frame 解析。普通有效 `ui.event` 进入 `BrowserDaemonClient.dispatchUiEvent` 后，先由 store 做 sequence 校验和投影，再通知所有 SDK subscriber；重复、过期或无效序号不会通知 subscriber。subscriber 或 store listener 抛错均被隔离。首屏和 resync 以本地 `snapshot.replaced` barrier 进入同一分发点，只有实际应用成功后才推进 `Last-Event-ID`。
 
 > 以上取舍都为后续维护者标注"为什么不能随意改"：尤其单向流 + 非乐观更新是 resync 正确性的结构前提，改动需回到本文与 dfd 重新评估。
+
+### 独立审批数据流
+
+审批事件在普通 seq 检查之前分流给 SDK `createPermissionSync`，不进入普通 replay 或 ViewState reducer。连接先安装订阅，再由 `hello` 确认 epoch、root 和 bindingGeneration；独立 `GET /v1/permissions` 提供基线。共享引擎负责有界查询、增量缓冲、gap 恢复和旧 generation 隔离，Web store 只保存其输出。全量 snapshot 慢或失败不阻塞审批恢复；消息的连接态 `live` 也不能使未完成基线同步的审批按钮可用。

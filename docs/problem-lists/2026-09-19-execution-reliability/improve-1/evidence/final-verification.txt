@@ -1,0 +1,12 @@
+Final verification, 2026-09-25
+Command: OHBABY_PACKAGING_NPM_CACHE=/tmp/ohbaby-improve1-packaging-cache pnpm test
+Exit: 0
+ 375 passed | 6 skipped (381)
+      Tests  4094 passed | 17 skipped (4111)
+   Start at  09:39:36
+   Duration  314.73s (transform 6.87s, setup 1.60s, collect 45.15s, tests 936.19s, environment 1.48s, prepare 13.45s)
+
+
+Build, lint, typecheck, format:check: all exit 0.
+Native subagent: 172 tests + 52 independent state scenarios passed.
+No further Pi invocation after user cost instruction.

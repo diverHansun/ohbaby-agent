@@ -18,11 +18,11 @@
 
 本包的职责边界，建立在对"到底有几种进程、谁需要被管理"的清晰区分上：
 
-| 模型 | 进程数 | 谁管它生死 | 需要 pid/state/supervisor/spawn | 归属 |
-|------|--------|-----------|------------------------------|------|
-| **默认 CLI（in-process）** | 1：UI + agent runtime 同进程 | 终端 / 用户 Ctrl+C | ❌ 不需要 | 不经过本包 |
-| **foreground server（`ohbaby serve`）** | 1：server + 多 workspace runtime 同进程 | 终端 / Ctrl+C / `serve stop` | ✅ 需要用户级 pid/state 保证全机唯一与可发现 | 本包主路径 |
-| **detached server（后台常驻）** | 独立后台进程，脱离终端 | 无人盯守 → 靠管家文件 | ✅ 唯一需要 | 本包降级抽屉 |
+| 模型                                    | 进程数                                  | 谁管它生死                   | 需要 pid/state/supervisor/spawn              | 归属         |
+| --------------------------------------- | --------------------------------------- | ---------------------------- | -------------------------------------------- | ------------ |
+| **默认 CLI（in-process）**              | 1：UI + agent runtime 同进程            | 终端 / 用户 Ctrl+C           | ❌ 不需要                                    | 不经过本包   |
+| **foreground server（`ohbaby serve`）** | 1：server + 多 workspace runtime 同进程 | 终端 / Ctrl+C / `serve stop` | ✅ 需要用户级 pid/state 保证全机唯一与可发现 | 本包主路径   |
+| **detached server（后台常驻）**         | 独立后台进程，脱离终端                  | 无人盯守 → 靠管家文件        | ✅ 唯一需要                                  | 本包降级抽屉 |
 
 两条关键判断：
 
@@ -49,8 +49,8 @@
   - web（供浏览器的 REST + SSE）。
 - **D3 多客户端协调**（仅 server 模式）：
   - prompt queue（per-workspace / per-session FIFO，不同 scope 不互相阻塞）。
-  - permission routing（审批事件回到发起方）。
-  - 事件分发 + **SSE replay**（修 S1：带 seqNum + 环形缓冲，支持断线补发）。
+  - permission routing（认证 workspace 内按客户端所选根会话共享审批；客户端不拥有审批）。
+  - 普通事件分发 + **SSE replay**（seqNum + 环形缓冲）；审批使用独立 epoch/root/revision 快照与专用投递，不依赖全局 replay。
 - **D4 横切中间件**：
   - auth（token，**fail-closed**，修 S4；常量时间比较）。
   - CORS（origin 白名单，修 S2，让本机 web 可跨 origin 访问）。
