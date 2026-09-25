@@ -1282,10 +1282,10 @@ describe("createPersistentUiBackendClient", () => {
       expect(
         snapshot.sessions[0].messages.map((message) => message.role),
       ).toEqual(["user", "assistant"]);
-      expect(snapshot.sessions[0].messages[0].parts).toEqual([
+      expect(snapshot.sessions[0].messages[0].parts).toMatchObject([
         { type: "text", text: "Remember this" },
       ]);
-      expect(snapshot.sessions[0].messages[1].parts).toEqual([
+      expect(snapshot.sessions[0].messages[1].parts).toMatchObject([
         { type: "text", text: "Persisted" },
       ]);
       expect(snapshot.runs).toHaveLength(1);
@@ -1384,7 +1384,7 @@ describe("createPersistentUiBackendClient", () => {
         "user",
         "assistant",
       ]);
-      expect(transcript?.at(-1)?.parts).toEqual([
+      expect(transcript?.at(-1)?.parts).toMatchObject([
         { type: "text", text: "Persisted continued reply" },
       ]);
       expect(readParts()).toEqual(storedBeforeClose);

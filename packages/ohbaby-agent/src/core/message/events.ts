@@ -37,6 +37,8 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
   z.object({
     id: z.string(),
     sessionId: z.string(),
+    contextScopeId: z.string().optional(),
+    runId: z.string().optional(),
     role: z.literal("user"),
     time: MessageTimeSchema,
     agent: z.string(),
@@ -52,6 +54,8 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
   z.object({
     id: z.string(),
     sessionId: z.string(),
+    contextScopeId: z.string().optional(),
+    runId: z.string().optional(),
     role: z.literal("assistant"),
     time: MessageTimeSchema,
     agent: z.string(),
@@ -64,6 +68,8 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
   z.object({
     id: z.string(),
     sessionId: z.string(),
+    contextScopeId: z.string().optional(),
+    runId: z.string().optional(),
     role: z.literal("system"),
     time: MessageTimeSchema,
     kind: z.union([z.literal("abort"), z.literal("error"), z.literal("info")]),
@@ -74,6 +80,7 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
 const PartBaseSchema = {
   id: z.string(),
   messageId: z.string(),
+  contextScopeId: z.string().optional(),
   sessionId: z.string(),
   orderIndex: z.number(),
   time: z
@@ -126,6 +133,7 @@ const PartSchema: z.ZodType<Part> = z.discriminatedUnion("type", [
   z.object({
     ...PartBaseSchema,
     type: z.literal("reasoning"),
+    endReason: z.enum(["normal", "interrupted", "failed"]).optional(),
     text: z.string(),
     metadata: z.record(z.unknown()).optional(),
   }),

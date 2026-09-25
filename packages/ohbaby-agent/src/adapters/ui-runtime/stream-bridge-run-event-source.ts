@@ -123,9 +123,16 @@ function contextCompositionData(value: unknown): PreparedComposition {
 
 function scopeData(data: Record<string, unknown>): {
   readonly contextScopeId?: string;
+  readonly runId?: string;
+  readonly messageId?: string;
+  readonly partId?: string;
 } {
-  const contextScopeId = stringData(data, "contextScopeId");
-  return contextScopeId === undefined ? {} : { contextScopeId };
+  return Object.fromEntries(
+    ["contextScopeId", "runId", "messageId", "partId"].flatMap((key) => {
+      const value = stringData(data, key);
+      return value === undefined ? [] : [[key, value]];
+    }),
+  );
 }
 
 function lifecycleEventFromStream(
@@ -189,6 +196,9 @@ function lifecycleEventFromStream(
       step: numberData(data, "step") ?? 0,
       timestamp,
       type: "llm:reasoning-end",
+      ...(["normal", "interrupted", "failed"].includes(String(data.endReason))
+        ? { endReason: data.endReason as "normal" | "interrupted" | "failed" }
+        : {}),
     };
   }
   if (item.event === "run.llm.start") {

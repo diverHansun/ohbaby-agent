@@ -156,6 +156,9 @@ describe("createStreamBridgeRunEventSource", () => {
     const iterator = source.subscribeRunEvents("run_1")[Symbol.asyncIterator]();
 
     streamBridge.publish("run/run_1", "message.part.delta", {
+      runId: "run_1",
+      messageId: "message_2",
+      partId: "part_3",
       content: "Hello world",
       delta: " world",
       sessionId: "session_1",
@@ -163,6 +166,9 @@ describe("createStreamBridgeRunEventSource", () => {
     });
 
     await expect(nextEvent(iterator)).resolves.toEqual({
+      runId: "run_1",
+      messageId: "message_2",
+      partId: "part_3",
       content: "Hello world",
       delta: " world",
       messageSnapshot: { content: "Hello world" },

@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import {
+  DisplayReasoningOwner,
+  type ReasoningEndReason,
+} from "./display-reasoning.js";
 import {
   isContextOverflowError,
   ProviderRetryExhaustedError,
@@ -320,9 +325,17 @@ async function markAssistantMessageError(
 
 export class Lifecycle {
   private readonly deps: LifecycleDeps;
+  private readonly displayReasoning: DisplayReasoningOwner;
+  private sourceOrder = 0;
 
   constructor(deps: LifecycleDeps) {
     this.deps = deps;
+    this.displayReasoning =
+      deps.displayReasoning ??
+      new DisplayReasoningOwner({
+        save: (part): Promise<unknown> =>
+          deps.messageManager.saveReasoningPart(part),
+      });
   }
 
   async *run(
@@ -837,6 +850,7 @@ export class Lifecycle {
             tools: parsedToolCalls.map((call) => ({
               ...call,
               argumentsJson: JSON.stringify(call.arguments),
+              metadata: { sourceOrder: ++this.sourceOrder },
             })),
             tokenUsage: finalEvent.tokenUsage,
             finishReason: finalEvent.finishReason ?? "stop",
@@ -978,6 +992,9 @@ export class Lifecycle {
         });
         yield {
           type: "tool:start",
+          runId: params.runId,
+          messageId: assistantMessage?.id,
+          partId: toolParts.get(toolCall.id)?.id,
           callId: toolCall.id,
           contextScopeId: params.contextScopeId,
           params: toolCall.arguments,
@@ -1018,6 +1035,9 @@ export class Lifecycle {
         });
         yield {
           type: "tool:result",
+          runId: params.runId,
+          messageId: assistantMessage?.id,
+          partId: toolParts.get(toolCall.id)?.id,
           callId: result.callId,
           contextScopeId: params.contextScopeId,
           params: toolCall.arguments,
@@ -1119,20 +1139,13 @@ export class Lifecycle {
         })
       | undefined;
     let previousContent = "";
+    let previousToolSnapshot = "[]";
     let previousReasoning = "";
-    let reasoningEnded = false;
+    const reasoningState = { ended: false };
     let assistantTextPart: Part | undefined;
     let modelState: ModelState | undefined;
     let streamStopReason: StepResult["streamStopReason"];
     let observedUsage: TokenUsage | undefined;
-
-    yield {
-      type: "llm:start",
-      contextScopeId: params.contextScopeId,
-      sessionId: params.sessionId,
-      step,
-      timestamp: Date.now(),
-    };
 
     const assistantMessage = await this.deps.messageManager.createMessage({
       ...(params.contextScopeId === undefined
@@ -1140,12 +1153,48 @@ export class Lifecycle {
         : { contextScopeId: params.contextScopeId }),
       sessionId: params.sessionId,
       role: "assistant",
+      runId: params.runId,
       agent: params.agent ?? "default",
       parentId: input.parentMessageId,
       providerId: this.deps.llmClient.config.provider,
       modelId: params.modelId,
     });
 
+    let reasoningPartId = randomUUID();
+    let segmentReasoning = "";
+    let reasoningSourceOrder: number | undefined;
+    const identity = {
+      contextScopeId: params.contextScopeId,
+      sessionId: params.sessionId,
+      runId: params.runId,
+      messageId: assistantMessage.id,
+    };
+    yield {
+      type: "llm:start",
+      ...identity,
+      contextScopeId: params.contextScopeId,
+      step,
+      timestamp: Date.now(),
+    };
+    const finishReasoning = async (
+      endReason: ReasoningEndReason,
+    ): Promise<
+      Extract<LifecycleEvent, { type: "llm:reasoning-end" }> | undefined
+    > => {
+      if (!segmentReasoning || reasoningState.ended) return undefined;
+      reasoningState.ended = true;
+      await this.displayReasoning.finish(reasoningPartId, endReason);
+      return {
+        type: "llm:reasoning-end",
+        ...identity,
+        partId: reasoningPartId,
+        contextScopeId: params.contextScopeId,
+        content: segmentReasoning,
+        endReason,
+        step,
+        timestamp: Date.now(),
+      };
+    };
     try {
       for await (const response of streamResponse(
         requestClient,
@@ -1183,11 +1232,29 @@ export class Lifecycle {
           const content =
             response.reasoningText ??
             `${previousReasoning}${response.reasoningTextDelta}`;
+          if (reasoningState.ended) {
+            reasoningPartId = randomUUID();
+            segmentReasoning = "";
+            reasoningState.ended = false;
+            reasoningSourceOrder = undefined;
+          }
+          reasoningSourceOrder ??= ++this.sourceOrder;
           previousReasoning = content;
+          segmentReasoning += response.reasoningTextDelta;
+          await this.displayReasoning.update(
+            {
+              ...identity,
+              partId: reasoningPartId,
+              metadata: { sourceOrder: reasoningSourceOrder },
+            },
+            segmentReasoning,
+          );
           yield {
             type: "llm:reasoning-delta",
+            runId: params.runId,
+            partId: reasoningPartId,
             contextScopeId: params.contextScopeId,
-            content,
+            content: segmentReasoning,
             delta: response.reasoningTextDelta,
             messageId: assistantMessage.id,
             sessionId: params.sessionId,
@@ -1197,19 +1264,21 @@ export class Lifecycle {
         }
         const content = getTextContent(response.messageSnapshot);
 
+        const toolSnapshot = JSON.stringify(
+          response.messageSnapshot.toolCalls ?? [],
+        );
+        if (
+          toolSnapshot !== previousToolSnapshot &&
+          (response.messageSnapshot.toolCalls?.length ?? 0) > 0
+        ) {
+          const reasoningEnd = await finishReasoning("normal");
+          if (reasoningEnd) yield reasoningEnd;
+        }
+        previousToolSnapshot = toolSnapshot;
+
         if (content !== "" && content !== previousContent) {
-          if (previousReasoning !== "" && !reasoningEnded) {
-            reasoningEnded = true;
-            yield {
-              type: "llm:reasoning-end",
-              contextScopeId: params.contextScopeId,
-              content: previousReasoning,
-              messageId: assistantMessage.id,
-              sessionId: params.sessionId,
-              step,
-              timestamp: Date.now(),
-            };
-          }
+          const reasoningEnd = await finishReasoning("normal");
+          if (reasoningEnd) yield reasoningEnd;
           const delta = content.startsWith(previousContent)
             ? content.slice(previousContent.length)
             : content;
@@ -1229,12 +1298,15 @@ export class Lifecycle {
               {
                 type: "text",
                 text: content,
+                metadata: { sourceOrder: ++this.sourceOrder },
               },
             );
           }
 
           yield {
             type: "llm:delta",
+            ...identity,
+            partId: assistantTextPart.id,
             messageSnapshot: response.messageSnapshot,
             contextScopeId: params.contextScopeId,
             content,
@@ -1246,19 +1318,20 @@ export class Lifecycle {
         }
 
         if (response.isComplete) {
-          if (previousReasoning !== "" && !reasoningEnded) {
-            reasoningEnded = true;
-            yield {
-              type: "llm:reasoning-end",
-              content: previousReasoning,
-              messageId: assistantMessage.id,
-              sessionId: params.sessionId,
-              step,
-              timestamp: Date.now(),
-            };
-          }
+          const reasoningEnd = await finishReasoning(
+            params.signal?.aborted ||
+              streamStopReason === "user_aborted" ||
+              response.finishReason === "length"
+              ? "interrupted"
+              : response.finishReason === "content_filter"
+                ? "failed"
+                : "normal",
+          );
+          if (reasoningEnd) yield reasoningEnd;
           finalEvent = {
             type: "llm:complete",
+            ...identity,
+            partId: assistantTextPart?.id,
             messageSnapshot: response.messageSnapshot,
             contextScopeId: params.contextScopeId,
             finishReason: response.finishReason,
@@ -1271,17 +1344,14 @@ export class Lifecycle {
         }
       }
     } catch (error) {
-      if (previousReasoning !== "" && !reasoningEnded) {
-        yield {
-          type: "llm:reasoning-end",
-          contextScopeId: params.contextScopeId,
-          content: previousReasoning,
-          messageId: assistantMessage.id,
-          sessionId: params.sessionId,
-          step,
-          timestamp: Date.now(),
-        };
-      }
+      const reasoningEnd = await finishReasoning(
+        params.signal?.aborted ||
+          (error instanceof ProviderStreamInterruptedError &&
+            error.source !== "protocol")
+          ? "interrupted"
+          : "failed",
+      );
+      if (reasoningEnd) yield reasoningEnd;
       await markAssistantMessageError(
         this.deps.messageManager,
         assistantMessage,
@@ -1290,6 +1360,14 @@ export class Lifecycle {
       throw error;
     }
 
+    const reasoningEnd = await finishReasoning(
+      params.signal?.aborted ||
+        streamStopReason === "user_aborted" ||
+        !finalEvent
+        ? "interrupted"
+        : "normal",
+    );
+    if (reasoningEnd) yield reasoningEnd;
     if (params.signal?.aborted || streamStopReason === "user_aborted") {
       streamStopReason = "user_aborted";
       finalEvent = undefined;
@@ -1428,7 +1506,7 @@ export class Lifecycle {
         {
           type: "tool",
           callId: toolCall.id,
-          ...(metadata === undefined ? {} : { metadata }),
+          metadata: { ...metadata, sourceOrder: ++this.sourceOrder },
           state: {
             input: toolCall.arguments,
             raw: toolCall.rawArguments,

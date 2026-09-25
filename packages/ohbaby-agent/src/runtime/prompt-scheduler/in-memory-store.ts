@@ -18,6 +18,7 @@ import type {
   FinishPromptSubmissionInput,
   PromptEditLease,
   PromptSubmissionRecord,
+  PromptHistoryWindow,
   PromptSubmissionStore,
 } from "./types.js";
 
@@ -367,6 +368,28 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
   ): Promise<readonly PromptSubmissionRecord[]> {
     return [...this.records.values()]
       .filter((record) => record.scopeKey === scopeKey)
+      .sort(compareOrder)
+      .map(clone);
+  }
+
+  async listForSession(
+    scopeKey: string,
+    sessionId: string,
+    window: PromptHistoryWindow = {},
+  ): Promise<readonly PromptSubmissionRecord[]> {
+    const messageIds = new Set(window.messageIds ?? []);
+    const runIds = new Set(window.runIds ?? []);
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.scopeKey === scopeKey &&
+          record.sessionId === sessionId &&
+          (record.status === "queued" ||
+            record.status === "starting" ||
+            record.status === "running" ||
+            messageIds.has(record.userMessageId) ||
+            (record.runId !== undefined && runIds.has(record.runId))),
+      )
       .sort(compareOrder)
       .map(clone);
   }

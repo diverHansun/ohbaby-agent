@@ -1,15 +1,7 @@
-import type { UiEvent, UiNotice, UiSnapshot } from "ohbaby-sdk";
+import type { UiEvent, UiNotice } from "ohbaby-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { InProcessEventRouter } from "./event-router.js";
 import type { NoticeDraft } from "./types.js";
-
-const SNAPSHOT: UiSnapshot = {
-  activeSessionId: null,
-  permissions: [],
-  runs: [],
-  sessions: [],
-  status: { kind: "idle" },
-};
 
 function noticeFromDraft(draft: NoticeDraft): UiNotice {
   return {
@@ -43,25 +35,101 @@ describe("InProcessEventRouter", () => {
     expect(received).toEqual([event]);
   });
 
-  it("publishes a snapshot replacement after routed state changes", async (): Promise<void> => {
+  it("reports failed critical delivery and disconnects that observer", () => {
+    const router = new InProcessEventRouter({
+      createNotice: noticeFromDraft,
+      nowMs: (): number => 2,
+    });
+    const healthy = vi.fn<(event: UiEvent) => void>();
+    router.subscribeEvents(() => {
+      throw new Error("socket failed");
+    });
+    router.subscribeEvents(healthy);
+    const event: UiEvent = {
+      type: "session.unavailable",
+      sessionId: "a",
+      runtimeEpoch: "e",
+      reason: "projection failed",
+    };
+    expect(() => {
+      router.publishRecovery(event);
+    }).toThrow("socket failed");
+    expect(healthy).toHaveBeenCalledOnce();
+    expect(() => {
+      router.publishRecovery(event);
+    }).not.toThrow();
+  });
+
+  it("delivers unavailable to an observer that only rejects changed events", () => {
     const router = new InProcessEventRouter({
       createNotice: noticeFromDraft,
       nowMs: (): number => 2,
     });
     const received: UiEvent[] = [];
-    router.subscribeEvents((event): void => {
+    const healthy = vi.fn<(event: UiEvent) => void>();
+    router.subscribeEvents((event) => {
+      if (event.type === "session.changed")
+        throw new Error("delta renderer failed");
       received.push(event);
     });
-
-    await router.publishSnapshotReplacement(() => Promise.resolve(SNAPSHOT));
-
-    expect(received).toEqual([
-      {
-        snapshot: SNAPSHOT,
-        timestamp: 2,
-        type: "snapshot.replaced",
+    router.subscribeEvents(healthy);
+    const changed: UiEvent = {
+      type: "session.changed",
+      version: {
+        runtimeEpoch: "e",
+        sessionId: "a",
+        viewGeneration: "g",
+        sessionRevision: 1,
       },
+    };
+    expect(() => {
+      router.publishRecovery(changed);
+    }).toThrow("delta renderer failed");
+    const unavailable: UiEvent = {
+      type: "session.unavailable",
+      runtimeEpoch: "e",
+      sessionId: "a",
+      reason: "delta renderer failed",
+    };
+    expect(() => {
+      router.publishRecovery(unavailable);
+    }).not.toThrow();
+    expect(received).toEqual([unavailable]);
+    expect(healthy.mock.calls.map((call) => call[0])).toEqual([
+      changed,
+      unavailable,
     ]);
+  });
+
+  it("reports even an undefined observer failure and attempts unavailable delivery", () => {
+    const router = new InProcessEventRouter({
+      createNotice: noticeFromDraft,
+      nowMs: (): number => 2,
+    });
+    const unavailable = vi.fn();
+    router.subscribeEvents((event) => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- exercise an untyped observer failure
+      if (event.type === "session.changed") throw undefined;
+      unavailable(event);
+    });
+    expect(() => {
+      router.publishRecovery({
+        type: "session.changed",
+        version: {
+          runtimeEpoch: "e",
+          sessionId: "a",
+          viewGeneration: "g",
+          sessionRevision: 1,
+        },
+      });
+    }).toThrow("Session observer failed");
+    router.publishRecovery({
+      type: "session.unavailable",
+      runtimeEpoch: "e",
+      sessionId: "a",
+      reason: "observer failed",
+    });
+    expect(unavailable).toHaveBeenCalledOnce();
   });
 
   it("stops delivery after unsubscribe", (): void => {

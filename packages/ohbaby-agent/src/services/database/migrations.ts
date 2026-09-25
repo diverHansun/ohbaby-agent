@@ -373,4 +373,15 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
     version: "016_prompt_submission_reasoning",
     sql: `ALTER TABLE prompt_submission ADD COLUMN reasoning_data TEXT;`,
   },
+  {
+    version: "017_message_recovery_pages",
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_message_session_page
+        ON message(session_id, created_at, id);
+      CREATE INDEX IF NOT EXISTS idx_message_session_scope_page
+        ON message(session_id, context_scope_id, created_at, id);
+      CREATE INDEX IF NOT EXISTS idx_message_session_run_page
+        ON message(session_id, json_extract(data, '$.runId'), created_at, id);
+    `,
+  },
 ];

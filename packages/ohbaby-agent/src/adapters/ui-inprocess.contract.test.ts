@@ -2000,55 +2000,32 @@ describe("createInProcessUiBackendClient", () => {
 
     await client.submitPromptAndWait("Say hello");
 
-    expect(
-      events
-        .filter((event) => event.type !== "notice.emitted")
-        .map((event) => event.type),
-    ).toEqual([
-      "session.updated",
-      "prompt.submitted",
-      "prompt.updated",
-      "prompt.updated",
-      "session.updated",
-      "message.appended",
-      "runtime.updated",
-      "run.updated",
-      "context.window.updated",
-      "message.appended",
-      "message.part.delta",
-      "message.part.delta",
-      "run.updated",
-      "message.updated",
-      "runtime.updated",
-      "prompt.updated",
-    ]);
-
-    const assistantUpdates = events.filter(
-      (event): event is Extract<UiEvent, { type: "message.updated" }> =>
-        event.type === "message.updated",
+    const changes = events.filter(
+      (event): event is Extract<UiEvent, { type: "session.changed" }> =>
+        event.type === "session.changed",
     );
-
-    expect(assistantUpdates.map((event) => event.message.parts)).toEqual([
-      [{ type: "text", text: "Hello world" }],
-    ]);
-    expect(assistantUpdates.at(-1)?.message).toMatchObject({
-      finishReason: "succeeded",
+    expect(changes.length).toBeGreaterThan(2);
+    expect(changes.map((event) => event.version.sessionRevision)).toEqual(
+      changes.map((_, index) => index + 1),
+    );
+    const assistantUpdates = changes
+      .flatMap((event) => event.messages ?? [])
+      .filter((message) => message.role === "assistant");
+    expect(
+      assistantUpdates.some((message) =>
+        message.parts.some(
+          (part) => part.type === "text" && part.text === "Hello",
+        ),
+      ),
+    ).toBe(true);
+    expect(assistantUpdates.at(-1)).toMatchObject({
       status: "completed",
+      parts: [{ type: "text", text: "Hello world" }],
     });
-    const assistantDeltas = events.filter(
-      (event): event is Extract<UiEvent, { type: "message.part.delta" }> =>
-        event.type === "message.part.delta",
+    expect(new Set(assistantUpdates.map((message) => message.id)).size).toBe(1);
+    expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
+      false,
     );
-
-    expect(
-      assistantDeltas.map((event) => ({
-        content: event.content,
-        delta: event.delta,
-      })),
-    ).toEqual([
-      { content: "Hello", delta: "Hello" },
-      { content: "Hello world", delta: " world" },
-    ]);
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
@@ -2066,7 +2043,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(
       snapshot.sessions[0].messages.map((message) => message.role),
     ).toEqual(["user", "assistant"]);
-    expect(snapshot.sessions[0].messages[1].parts).toEqual([
+    expect(snapshot.sessions[0].messages[1].parts).toMatchObject([
       { type: "text", text: "Hello world" },
     ]);
   });
@@ -2221,7 +2198,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("streams reasoning through UI events without persisting it as message parts", async () => {
+  it("streams cumulative reasoning with stable identity and persists display parts", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-reasoning-db-"));
     const bus = createBus();
 
@@ -2274,40 +2251,37 @@ describe("createInProcessUiBackendClient", () => {
 
       await client.submitPromptAndWait("Show reasoning transiently");
 
-      const reasoningTextDeltas = events.filter(
-        (
-          event,
-        ): event is Extract<UiEvent, { type: "message.reasoning.delta" }> =>
-          event.type === "message.reasoning.delta",
+      const changes = events.filter(
+        (event): event is Extract<UiEvent, { type: "session.changed" }> =>
+          event.type === "session.changed",
       );
+      const reasoning = changes
+        .flatMap((event) => event.messages ?? [])
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "reasoning");
+      expect(reasoning.some((part) => part.text === "Checking")).toBe(true);
       expect(
-        reasoningTextDeltas.map((event) => ({
-          content: event.content,
-          delta: event.delta,
-        })),
-      ).toEqual([
-        { content: "Checking", delta: "Checking" },
-        { content: "Checking context", delta: " context" },
-      ]);
-      expect(
-        events.find(
-          (
-            event,
-          ): event is Extract<UiEvent, { type: "message.reasoning.end" }> =>
-            event.type === "message.reasoning.end",
+        reasoning.some(
+          (part) =>
+            part.text === "Checking context" && part.endReason === "normal",
         ),
-      ).toMatchObject({
-        content: "Checking context",
-        type: "message.reasoning.end",
-      });
-
+      ).toBe(true);
+      expect(new Set(reasoning.map((part) => part.id)).size).toBe(1);
       const snapshot = await client.getSnapshot();
       const assistant = snapshot.sessions[0].messages.find(
         (message) => message.role === "assistant",
       );
-      expect(assistant?.parts).toEqual([
+      expect(assistant?.parts).toMatchObject([
+        { type: "reasoning", text: "Checking context" },
         { type: "text", text: "Visible answer" },
       ]);
+      await vi.waitFor(async () => {
+        expect(
+          (await messageManager.listBySession(snapshot.sessions[0].id))
+            .flatMap((message) => message.parts)
+            .some((part) => part.type === "reasoning"),
+        ).toBe(true);
+      });
 
       const persistedMessages = await messageManager.listBySession(
         snapshot.sessions[0].id,
@@ -2317,7 +2291,7 @@ describe("createInProcessUiBackendClient", () => {
       );
       expect(persistedParts.some(isModelContextPart)).toBe(true);
       expect(persistedParts.some((part) => part.type === "reasoning")).toBe(
-        false,
+        true,
       );
     } finally {
       closeDatabase();
@@ -2418,7 +2392,7 @@ describe("createInProcessUiBackendClient", () => {
           projectDirectory: projectRoot,
         }),
       ).resolves.toMatchObject({ promptCache: "disabled" });
-      expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
+      expect(events.some((event) => event.type === "model.invalidated")).toBe(
         true,
       );
     } finally {
@@ -2857,7 +2831,7 @@ describe("createInProcessUiBackendClient", () => {
     await prompt;
   });
 
-  it("rejects context window usage refresh failures for existing sessions", async () => {
+  it("leaves context usage unavailable before runtime startup", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-context-fail-"));
     const initialSnapshot: UiSnapshot = {
       activeSessionId: "session_1",
@@ -2885,7 +2859,7 @@ describe("createInProcessUiBackendClient", () => {
     try {
       await expect(
         client.getContextWindowUsage({ sessionId: "session_1" }),
-      ).rejects.toThrow("token estimator unavailable");
+      ).resolves.toBeNull();
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -2948,6 +2922,9 @@ describe("createInProcessUiBackendClient", () => {
       },
     });
 
+    await client.submitPromptAndWait("Initialize the primary context", {
+      sessionId: "session_child",
+    });
     await expect(
       client.getContextWindowUsage({ sessionId: "session_child" }),
     ).resolves.not.toBeNull();
@@ -3291,6 +3268,19 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(manualWindowEvents).toHaveLength(1);
     expect(manualWindowEvents[0]?.usage).toMatchObject(expectedWindowUsage);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "session.changed" && event.context?.status === "ready",
+      ),
+    ).toBe(true);
+    expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
+      false,
+    );
+    expect(
+      (await client.getSessionView({ sessionId: "session_1" })).context,
+    ).toMatchObject({ status: "ready", value: expectedWindowUsage });
+
     await expect(messageManager.listBySession("session_1")).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -3399,6 +3389,15 @@ describe("createInProcessUiBackendClient", () => {
         event.type === "context.window.updated",
     );
     expect(windowEvents).toHaveLength(1);
+    expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
+      false,
+    );
+    expect(
+      events.some(
+        (event) =>
+          event.type === "session.changed" && event.context?.status === "ready",
+      ),
+    ).toBe(true);
 
     await client.executeCommand({
       argv: [],
@@ -3613,8 +3612,10 @@ describe("createInProcessUiBackendClient", () => {
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
-    const parts = snapshot.sessions[0].messages[1].parts;
-    expect(parts[0]).toEqual({
+    const parts = snapshot.sessions[0].messages
+      .filter((message) => message.role === "assistant")
+      .flatMap((message) => message.parts);
+    expect(parts[0]).toMatchObject({
       type: "tool-call",
       call: {
         id: "call_list",
@@ -3630,7 +3631,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(
       parts[1]?.type === "tool-result" ? parts[1].result.output : "",
     ).toContain("builtin.ts");
-    expect(parts[2]).toEqual({ type: "text", text: "Listed." });
+    expect(parts[2]).toMatchObject({ type: "text", text: "Listed." });
   });
 
   it("keeps completed todos visible through the run and hides them at run end", async () => {
@@ -4245,7 +4246,9 @@ describe("createInProcessUiBackendClient", () => {
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.sessions).toHaveLength(1);
-    const parts = snapshot.sessions[0].messages.at(-1)?.parts ?? [];
+    const parts = snapshot.sessions[0].messages
+      .filter((message) => message.role === "assistant")
+      .flatMap((message) => message.parts);
     expect(parts).toHaveLength(3);
     expect(parts[0]?.type).toBe("tool-call");
     if (parts[0]?.type !== "tool-call") {
@@ -4264,7 +4267,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(parts[1].result.error).toContain(
       "Subagent not found: subagent_missing_child",
     );
-    expect(parts[2]).toEqual({
+    expect(parts[2]).toMatchObject({
       text: "parent saw invalid resume",
       type: "text",
     });
@@ -4672,8 +4675,10 @@ describe("createInProcessUiBackendClient", () => {
       const snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
       expect(snapshot.permissions).toEqual([]);
-      const parts = snapshot.sessions[0].messages[1].parts;
-      expect(parts[0]).toEqual({
+      const parts = snapshot.sessions[0].messages
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.parts);
+      expect(parts[0]).toMatchObject({
         type: "tool-call",
         call: {
           id: "call_write_once",
@@ -4691,7 +4696,7 @@ describe("createInProcessUiBackendClient", () => {
       }
       expect(parts[1].result.callId).toBe("call_write_once");
       expect(parts[1].result.output).toContain("Wrote");
-      expect(parts[2]).toEqual({ type: "text", text: "Write complete." });
+      expect(parts[2]).toMatchObject({ type: "text", text: "Write complete." });
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -4747,7 +4752,9 @@ describe("createInProcessUiBackendClient", () => {
       const snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
       expect(snapshot.permissions).toEqual([]);
-      const parts = snapshot.sessions[0].messages[1].parts;
+      const parts = snapshot.sessions[0].messages
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.parts);
       expect(parts[0]).toMatchObject({
         call: {
           id: "call_write_reject",
@@ -4762,7 +4769,7 @@ describe("createInProcessUiBackendClient", () => {
       }
       expect(parts[1].result.callId).toBe("call_write_reject");
       expect(parts[1].result.error).toContain("Tool rejected by user");
-      expect(parts[2]).toEqual({
+      expect(parts[2]).toMatchObject({
         type: "text",
         text: "I could not write it.",
       });
@@ -4824,14 +4831,16 @@ describe("createInProcessUiBackendClient", () => {
       ).toHaveLength(1);
       expect(requests).toHaveLength(3);
       const snapshot = await client.getSnapshot();
-      const parts = snapshot.sessions[0].messages[1].parts;
+      const parts = snapshot.sessions[0].messages
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.parts);
       expect(
         parts.filter(
           (part) =>
             part.type === "tool-call" && part.call.status === "completed",
         ),
       ).toHaveLength(2);
-      expect(parts.at(-1)).toEqual({
+      expect(parts.at(-1)).toMatchObject({
         type: "text",
         text: "Both writes complete.",
       });
@@ -4972,7 +4981,7 @@ describe("createInProcessUiBackendClient", () => {
 
       snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
-      expect(snapshot.sessions[0].messages.at(-1)?.parts).toEqual([
+      expect(snapshot.sessions[0].messages.at(-1)?.parts).toMatchObject([
         { type: "text", text: "Next answer." },
       ]);
     } finally {
@@ -5055,7 +5064,7 @@ describe("createInProcessUiBackendClient", () => {
 
       snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
-      expect(snapshot.sessions[0].messages.at(-1)?.parts).toEqual([
+      expect(snapshot.sessions[0].messages.at(-1)?.parts).toMatchObject([
         { type: "text", text: "After abort." },
       ]);
     } finally {
@@ -5196,7 +5205,9 @@ describe("createInProcessUiBackendClient", () => {
         : "",
     ).toContain("Tool not available for agent: bash");
     const snapshot = await client.getSnapshot();
-    const parts = snapshot.sessions[0].messages[1].parts;
+    const parts = snapshot.sessions[0].messages
+      .filter((message) => message.role === "assistant")
+      .flatMap((message) => message.parts);
     expect(parts[0]).toMatchObject({
       call: {
         id: "call_bash",
@@ -5228,7 +5239,7 @@ describe("createInProcessUiBackendClient", () => {
     ).toEqual(["user", "assistant", "user", "assistant"]);
     expect(
       snapshot.sessions[0].messages.map((message) => message.parts),
-    ).toEqual([
+    ).toMatchObject([
       [{ type: "text", text: "First" }],
       [{ type: "text", text: "First answer" }],
       [{ type: "text", text: "Second" }],
@@ -5753,7 +5764,14 @@ describe("createInProcessUiBackendClient", () => {
       snapshot.sessions.flatMap((session) =>
         session.messages.map((message) => message.id),
       ),
-    ).toEqual(["message_2", "message_3", "message_4"]);
+    ).toEqual(["message_2", "message_3", expect.any(String)]);
+    expect(
+      new Set(
+        snapshot.sessions.flatMap((session) =>
+          session.messages.map((message) => message.id),
+        ),
+      ).size,
+    ).toBe(3);
     expect(snapshot.runs.map((run) => run.id)).toEqual(["run_2", "run_3"]);
   });
 
@@ -6195,7 +6213,7 @@ describe("createInProcessUiBackendClient", () => {
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
-    expect(snapshot.sessions[0].messages[1].parts).toEqual([
+    expect(snapshot.sessions[0].messages[1].parts).toMatchObject([
       { type: "text", text: "Still works" },
     ]);
   });
@@ -6262,7 +6280,7 @@ describe("createInProcessUiBackendClient", () => {
         parts: message.parts,
         role: message.role,
       })),
-    ).toEqual([
+    ).toMatchObject([
       { role: "user", parts: [{ type: "text", text: "First" }] },
       { role: "assistant", parts: [{ type: "text", text: "Done 1" }] },
       { role: "user", parts: [{ type: "text", text: "Second" }] },
@@ -7600,10 +7618,12 @@ describe("createInProcessUiBackendClient", () => {
       const answerParts = snapshot.sessions.flatMap((session) =>
         session.messages.flatMap((message) => message.parts),
       );
-      expect(answerParts).toContainEqual({
-        text: "fail-open answer",
-        type: "text",
-      });
+      expect(answerParts).toContainEqual(
+        expect.objectContaining({
+          text: "fail-open answer",
+          type: "text",
+        }),
+      );
     } finally {
       await rawClient.dispose();
     }
@@ -7961,8 +7981,10 @@ describe("createInProcessUiBackendClient", () => {
       ],
     });
     const snapshotEvent = events.find(
-      (event): event is Extract<UiEvent, { type: "snapshot.replaced" }> =>
-        event.type === "snapshot.replaced",
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "session.index.invalidated" }> =>
+        event.type === "session.index.invalidated",
     );
     const selectedEvent = events.find(
       (
@@ -7971,7 +7993,7 @@ describe("createInProcessUiBackendClient", () => {
         event.type === "command.result.delivered" &&
         event.action?.kind === "session.selected",
     );
-    expect(snapshotEvent?.snapshot.activeSessionId).toBe("session_2");
+    expect(snapshotEvent?.selectedSessionId).toBe("session_2");
     expect(selectedEvent?.action).toEqual({
       data: { choiceId: "session_2" },
       kind: "session.selected",
@@ -8030,8 +8052,8 @@ describe("createInProcessUiBackendClient", () => {
     expect(
       events.some(
         (event) =>
-          event.type === "snapshot.replaced" &&
-          event.snapshot.activeSessionId === "session_2",
+          event.type === "session.index.invalidated" &&
+          event.selectedSessionId === "session_2",
       ),
     ).toBe(true);
     const createdEvent = events.find(
@@ -8508,13 +8530,12 @@ describe("createInProcessUiBackendClient", () => {
       sessions: [{ id: "session_2", title: "Remaining" }],
     });
     const snapshotEvent = events.find(
-      (event): event is Extract<UiEvent, { type: "snapshot.replaced" }> =>
-        event.type === "snapshot.replaced",
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "session.index.invalidated" }> =>
+        event.type === "session.index.invalidated",
     );
-    expect(snapshotEvent?.snapshot).toMatchObject({
-      activeSessionId: "session_2",
-      sessions: [{ id: "session_2" }],
-    });
+    expect(snapshotEvent).toMatchObject({ selectedSessionId: "session_2" });
   });
 
   it("archives the only active persistent session and clears the active session", async () => {
@@ -9382,10 +9403,12 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     );
     const snapshotEvent = events.find(
-      (event): event is Extract<UiEvent, { type: "snapshot.replaced" }> =>
-        event.type === "snapshot.replaced",
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "session.index.invalidated" }> =>
+        event.type === "session.index.invalidated",
     );
-    expect(snapshotEvent?.snapshot.activeSessionId).toBe("session_2");
+    expect(snapshotEvent?.selectedSessionId).toBe("session_2");
   });
 
   it("does not interpret a command run id as a prompt run id", async () => {
@@ -9416,7 +9439,9 @@ describe("createInProcessUiBackendClient", () => {
     });
     await interaction;
 
-    await client.abortRun("command_1");
+    await expect(client.abortRun("command_1")).rejects.toMatchObject({
+      code: "SESSION_SCOPE_CHANGED",
+    });
     expect(events).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -9894,11 +9919,13 @@ it("does not let late lightweight selection replace a newer root", async () => {
   const originalIndex = stateStore.getSessionIndex.bind(stateStore);
   const paused = createDeferred<Awaited<ReturnType<typeof originalIndex>>>();
   let calls = 0;
+  const client = createInProcessUiBackendClient({ stateStore });
+  await client.initialize();
+  await client.initializeSession("session_1");
   vi.spyOn(stateStore, "getSessionIndex").mockImplementation(() => {
     calls += 1;
     return calls === 1 ? paused.promise : originalIndex();
   });
-  const client = createInProcessUiBackendClient({ stateStore });
   try {
     const first = client.selectSession("session_1");
     const rejected = expect(first).rejects.toMatchObject({

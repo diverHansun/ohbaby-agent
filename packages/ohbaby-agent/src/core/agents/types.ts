@@ -35,6 +35,8 @@ export interface AgentRunInput {
   readonly modelId: string;
   readonly runId?: string;
   readonly initialUserMessageId?: string;
+  /** Original user text when model input includes execution-only context. */
+  readonly displayUserText?: string;
   readonly initialUserPrompt?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
@@ -163,6 +165,8 @@ export interface AgentContextScope {
 export interface AgentTurnInput {
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly initialUserMessageId?: string;
+  /** Original user text when model input includes execution-only context. */
+  readonly displayUserText?: string;
   readonly prompt: string;
   readonly waitMode: AgentWaitMode;
   readonly signal?: AbortSignal;

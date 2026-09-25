@@ -25,6 +25,7 @@ import type {
   FinishPromptSubmissionInput,
   PromptEditLease,
   PromptSubmissionRecord,
+  PromptHistoryWindow,
   PromptSubmissionStatus,
   PromptSubmissionStore,
 } from "./types.js";
@@ -589,6 +590,35 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
          ORDER BY created_at ASC, prompt_id ASC`,
       )
       .all(scopeKey)
+      .map(rowToRecord);
+  }
+
+  async listForSession(
+    scopeKey: string,
+    sessionId: string,
+    window: PromptHistoryWindow = {},
+  ): Promise<readonly PromptSubmissionRecord[]> {
+    const messageIds = [...new Set(window.messageIds ?? [])];
+    const runIds = [...new Set(window.runIds ?? [])];
+    const associations = ["status IN ('queued', 'starting', 'running')"];
+    const values: string[] = [scopeKey, sessionId];
+    if (messageIds.length > 0) {
+      associations.push(
+        `user_message_id IN (${messageIds.map(() => "?").join(", ")})`,
+      );
+      values.push(...messageIds);
+    }
+    if (runIds.length > 0) {
+      associations.push(`run_id IN (${runIds.map(() => "?").join(", ")})`);
+      values.push(...runIds);
+    }
+    return this.db
+      .prepare<PromptSubmissionRow>(
+        `SELECT * FROM ${this.tableName}
+       WHERE scope_key = ? AND session_id = ? AND (${associations.join(" OR ")})
+       ORDER BY created_at ASC, prompt_id ASC`,
+      )
+      .all(...values)
       .map(rowToRecord);
   }
 

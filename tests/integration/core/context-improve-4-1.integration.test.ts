@@ -481,7 +481,7 @@ describe("context improve-4.1 integration", () => {
     const staticOnlyUsage = await client.getContextWindowUsage({
       sessionId: "session_static",
     });
-    expect(staticOnlyUsage).not.toHaveProperty("composition");
+    expect(staticOnlyUsage).toBeNull();
     await client.submitPromptAndWait("seed a measured request", {
       sessionId: "session_1",
     });

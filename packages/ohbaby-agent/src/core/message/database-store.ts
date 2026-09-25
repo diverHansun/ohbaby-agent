@@ -1,3 +1,8 @@
+import {
+  decodeMessagePage,
+  makeMessagePage,
+  validateMessageIds,
+} from "./pagination.js";
 import { prepareModelStep } from "./store.js";
 import {
   getDatabase,
@@ -6,6 +11,9 @@ import {
   type DatabaseConnection,
 } from "../../services/database/index.js";
 import type {
+  MessagePageOptions,
+  MessagePage,
+  ReasoningPart,
   CreatePartInput,
   StoreModelStepInput,
   CommitModelStepResult,
@@ -166,7 +174,151 @@ export function createDatabaseMessageStore(
     return row?.next_index ?? 0;
   }
 
+  function hydrateRows(rows: MessageRow[]): MessageWithParts[] {
+    if (rows.length === 0) return [];
+    const allParts = db
+      .prepare<PartRow>(
+        `SELECT * FROM ${schema.part.tableName} WHERE message_id IN (${rows.map(() => "?").join(",")}) ORDER BY order_index ASC`,
+      )
+      .all(...rows.map((row) => row.id));
+    const grouped = new Map<string, Part[]>();
+    for (const row of allParts) {
+      const entries = grouped.get(row.message_id) ?? [];
+      entries.push(rowToPart(row));
+      grouped.set(row.message_id, entries);
+    }
+    return rows.map((row) => ({
+      info: rowToMessage(row),
+      parts: grouped.get(row.id) ?? [],
+    }));
+  }
+
+  function listPage(
+    sessionId: string,
+    options: MessagePageOptions = {},
+    runId?: string,
+  ): Promise<MessagePage> {
+    return withAsyncBoundary(() => {
+      const { limit, cursor } = decodeMessagePage(sessionId, options, runId);
+      const clauses = ["session_id = ?"];
+      const params: (string | number)[] = [sessionId];
+      if (options.scope !== undefined) {
+        if (options.scope.contextScopeId === undefined)
+          clauses.push("context_scope_id IS NULL");
+        else {
+          clauses.push("context_scope_id = ?");
+          params.push(options.scope.contextScopeId);
+        }
+      }
+      if (runId !== undefined) {
+        clauses.push("json_extract(data, '$.runId') = ?");
+        params.push(runId);
+      }
+      if (cursor !== undefined) {
+        clauses.push("(created_at, id) < (?, ?)");
+        params.push(cursor.createdAt, cursor.id);
+      }
+      const rows = db
+        .prepare<MessageRow>(
+          `SELECT * FROM ${schema.message.tableName} WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC, id DESC LIMIT ?`,
+        )
+        .all(...params, limit + 1);
+      const hydrated = hydrateRows(rows.slice(0, limit));
+      // The extra row proves hasMore; its potentially large parts are not returned.
+      const sentinel = rows.at(limit);
+      if (sentinel) hydrated.push({ info: rowToMessage(sentinel), parts: [] });
+      return makeMessagePage(sessionId, options, hydrated, limit, runId);
+    });
+  }
+
   return {
+    listPageBySession: listPage,
+    listPageByRun(sessionId, runId, options): Promise<MessagePage> {
+      return listPage(sessionId, options, runId);
+    },
+    listByIds(sessionId, messageIds): Promise<MessageWithParts[]> {
+      return withAsyncBoundary(() => {
+        validateMessageIds(messageIds);
+        if (messageIds.length === 0) return [];
+        return hydrateRows(
+          db
+            .prepare<MessageRow>(
+              `SELECT * FROM ${schema.message.tableName} WHERE session_id = ? AND id IN (${messageIds.map(() => "?").join(",")}) ORDER BY created_at ASC, id ASC`,
+            )
+            .all(sessionId, ...messageIds),
+        );
+      });
+    },
+    getPart(partId): Promise<Part | undefined> {
+      return withAsyncBoundary(() => {
+        const row = db
+          .prepare<PartRow>(
+            `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
+          )
+          .get(partId);
+        return row === undefined ? undefined : rowToPart(row);
+      });
+    },
+    saveReasoningPart(input): Promise<ReasoningPart | undefined> {
+      return withAsyncBoundary(() =>
+        withImmediateTransaction(() => {
+          const row = getMessageRow(input.messageId);
+          if (row === undefined)
+            throw new Error(`Message not found: ${input.messageId}`);
+          const message = rowToMessage(row);
+          if (
+            input.sessionId !== undefined &&
+            input.sessionId !== message.sessionId
+          )
+            throw new Error("Reasoning identity belongs to another session");
+          const existingRow = db
+            .prepare<PartRow>(
+              `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
+            )
+            .get(input.partId);
+          const existing =
+            existingRow === undefined ? undefined : rowToPart(existingRow);
+          if (
+            existing !== undefined &&
+            (existing.messageId !== input.messageId ||
+              existing.type !== "reasoning")
+          )
+            throw new Error("Reasoning identity belongs to another part");
+          if (input.text === "") return existing;
+          const part: ReasoningPart = {
+            ...existing,
+            id: input.partId,
+            messageId: message.id,
+            sessionId: message.sessionId,
+            contextScopeId: message.contextScopeId,
+            orderIndex: existing?.orderIndex ?? nextOrderIndex(message.id),
+            type: "reasoning",
+            text: input.text,
+            ...(input.endReason === undefined
+              ? {}
+              : { endReason: input.endReason }),
+            metadata: {
+              ...existing?.metadata,
+              ...input.metadata,
+              ...(input.runId === undefined ? {} : { runId: input.runId }),
+            },
+          };
+          db.prepare(
+            `INSERT INTO ${schema.part.tableName} (id, message_id, session_id, type, order_index, created_at, updated_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, data = excluded.data`,
+          ).run(
+            part.id,
+            part.messageId,
+            part.sessionId,
+            part.type,
+            part.orderIndex,
+            input.updatedAt,
+            input.updatedAt,
+            partToRowData(part),
+          );
+          return clone(part);
+        }),
+      );
+    },
     commitModelStep(
       input: StoreModelStepInput,
     ): Promise<CommitModelStepResult> {

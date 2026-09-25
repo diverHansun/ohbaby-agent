@@ -19,7 +19,10 @@ import {
   type ContextManager,
   type ContextUsage,
 } from "../../core/context/index.js";
-import { Lifecycle } from "../../core/lifecycle/index.js";
+import {
+  Lifecycle,
+  type DisplayReasoningOwner,
+} from "../../core/lifecycle/index.js";
 import type { ResolvedStepTools } from "../../core/lifecycle/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
@@ -167,6 +170,8 @@ export interface UiRuntimeCompositionOptions {
   readonly workdir?: string;
   /** goal 记录的持久化；缺省用内存实现（与 messageManager 的缺省姿态一致）。 */
   readonly goalPersistence?: GoalPersistencePort;
+  readonly goalService?: GoalService;
+  readonly displayReasoning?: DisplayReasoningOwner;
   readonly goalExecutionControl: GoalExecutionControlPort;
   readonly onGoalChange?: GoalServiceDeps["onChange"];
   readonly onTodoWrite?: (event: TodoWriteEvent) => void;
@@ -541,6 +546,7 @@ export async function createUiRuntimeComposition(
       }),
     });
   const lifecycle = new Lifecycle({
+    displayReasoning: options.displayReasoning,
     contextManager,
     llmClient: options.llmClient,
     messageManager: options.messageManager,
@@ -726,34 +732,36 @@ export async function createUiRuntimeComposition(
     },
   );
 
-  const goalService = new GoalService({
-    executionControl: options.goalExecutionControl,
-    onChange: (event): void => {
-      options.onGoalChange?.(event);
-      const status = event.snapshot?.status;
-      options.onNotice?.({
-        level: "info",
-        message:
-          event.change.kind === "completion"
-            ? "Goal completed."
-            : event.snapshot === null
-              ? "Goal cleared."
-              : `Goal ${status ?? "updated"}${event.snapshot.pauseReason ? `: ${event.snapshot.pauseReason}` : ""}`,
-        source: "goals",
-        title: "Goal",
-      });
-    },
-    onError: ({ error, sessionId }): void => {
-      options.onNotice?.({
-        key: `goal:execution:${sessionId}:${formatUnknown(error)}`,
-        level: "error",
-        message: formatUnknown(error),
-        source: "goals",
-        title: "Goal execution control failed",
-      });
-    },
-    persistence: options.goalPersistence ?? new InMemoryGoalPersistence(),
-  });
+  const goalService =
+    options.goalService ??
+    new GoalService({
+      executionControl: options.goalExecutionControl,
+      onChange: (event): void => {
+        options.onGoalChange?.(event);
+        const status = event.snapshot?.status;
+        options.onNotice?.({
+          level: "info",
+          message:
+            event.change.kind === "completion"
+              ? "Goal completed."
+              : event.snapshot === null
+                ? "Goal cleared."
+                : `Goal ${status ?? "updated"}${event.snapshot.pauseReason ? `: ${event.snapshot.pauseReason}` : ""}`,
+          source: "goals",
+          title: "Goal",
+        });
+      },
+      onError: ({ error, sessionId }): void => {
+        options.onNotice?.({
+          key: `goal:execution:${sessionId}:${formatUnknown(error)}`,
+          level: "error",
+          message: formatUnknown(error),
+          source: "goals",
+          title: "Goal execution control failed",
+        });
+      },
+      persistence: options.goalPersistence ?? new InMemoryGoalPersistence(),
+    });
 
   for (const tool of createBuiltinTools({
     goalBackend: goalService,

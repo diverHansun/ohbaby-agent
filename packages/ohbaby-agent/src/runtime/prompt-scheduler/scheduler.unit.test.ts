@@ -44,6 +44,156 @@ async function settleWithin<T>(
 }
 
 describe("WorkspacePromptScheduler", () => {
+  it("labels initialization rejection only before durable acceptance begins", async () => {
+    const store = new InMemoryPromptSubmissionStore();
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "safe-error",
+      store,
+      beforeSessionWrite: (): Promise<void> =>
+        Promise.reject(new Error("seed failed")),
+      execute: (): Promise<{ status: "succeeded" }> =>
+        Promise.resolve({ status: "succeeded" }),
+    });
+    try {
+      await expect(
+        scheduler.accept({
+          sessionId: "s",
+          text: "hello",
+          clientRequestId: "known-rejected",
+        }),
+      ).rejects.toMatchObject({
+        code: "PROMPT_SUBMISSION_REJECTED",
+        message: "seed failed",
+      });
+      expect(
+        await store.getByClientRequestId("safe-error", "known-rejected"),
+      ).toBeUndefined();
+    } finally {
+      scheduler.close();
+    }
+    const accept = store.accept.bind(store);
+    vi.spyOn(store, "accept").mockImplementation(async (input) => {
+      await accept(input);
+      throw new Error("response lost after commit");
+    });
+    const uncertain = new WorkspacePromptScheduler({
+      scopeKey: "safe-error",
+      store,
+      execute: (): Promise<{ status: "succeeded" }> =>
+        Promise.resolve({ status: "succeeded" }),
+    });
+    try {
+      const failure = await uncertain
+        .accept({ sessionId: "s", text: "hello", clientRequestId: "unknown" })
+        .catch((error: unknown) => error);
+      expect(failure).not.toHaveProperty("code", "PROMPT_SUBMISSION_REJECTED");
+      expect(
+        await store.getByClientRequestId("safe-error", "unknown"),
+      ).toBeDefined();
+    } finally {
+      uncertain.close();
+    }
+  });
+
+  it("retries a failed seed on the next explicit write and shares concurrent initialization", async () => {
+    const gate = deferred();
+    let healthy = false;
+    const seed = vi.fn(async () => {
+      if (!healthy) throw new Error("transient seed");
+      await gate.promise;
+    });
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "retry",
+      store: new InMemoryPromptSubmissionStore(),
+      beforeSessionWrite: seed,
+      execute: (): Promise<{ status: "succeeded" }> =>
+        Promise.resolve({ status: "succeeded" }),
+    });
+    try {
+      await expect(
+        scheduler.accept({ sessionId: "s", text: "first" }),
+      ).rejects.toThrow("transient seed");
+      healthy = true;
+      const a = scheduler.accept({ sessionId: "s", text: "second" });
+      const b = scheduler.accept({ sessionId: "s", text: "third" });
+      void a.catch(() => undefined);
+      void b.catch(() => undefined);
+      await vi.waitFor(() => {
+        expect(seed).toHaveBeenCalledTimes(2);
+      });
+      gate.resolve();
+      const records = await Promise.all([a, b]);
+      await Promise.all(
+        records.map((record) => scheduler.waitForCompletion(record.promptId)),
+      );
+      expect(seed).toHaveBeenCalledTimes(2);
+    } finally {
+      gate.resolve();
+      scheduler.close();
+    }
+  });
+
+  it("retries persisted queued work after a seed failure with backoff", async () => {
+    const store = new InMemoryPromptSubmissionStore();
+    await store.accept({
+      scopeKey: "retry",
+      promptId: "queued",
+      clientRequestId: "queued",
+      sessionId: "s",
+      text: "hello",
+      userMessageId: "m",
+      maxQueuedPrompts: 100,
+    });
+    const seed = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary"))
+      .mockResolvedValue(undefined);
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "retry",
+      store,
+      beforeSessionWrite: seed,
+      busyRetryDelayMs: 10,
+      execute: (): Promise<{ status: "succeeded" }> =>
+        Promise.resolve({ status: "succeeded" }),
+    });
+    try {
+      await scheduler.init();
+      await vi.waitFor(async () => {
+        expect((await store.get("queued"))?.status).toBe("succeeded");
+      });
+      expect(seed).toHaveBeenCalledTimes(2);
+    } finally {
+      scheduler.close();
+    }
+  });
+
+  it("cancels persisted queued work even while business initialization fails", async () => {
+    const store = new InMemoryPromptSubmissionStore();
+    await store.accept({
+      scopeKey: "retry",
+      promptId: "queued",
+      clientRequestId: "queued",
+      sessionId: "s",
+      text: "hello",
+      userMessageId: "m",
+      maxQueuedPrompts: 100,
+    });
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "retry",
+      store,
+      beforeSessionWrite: (): Promise<void> =>
+        Promise.reject(new Error("unavailable")),
+      execute: (): Promise<{ status: "succeeded" }> =>
+        Promise.resolve({ status: "succeeded" }),
+    });
+    try {
+      expect((await scheduler.cancelQueued("queued")).status).toBe("cancelled");
+      expect((await store.get("queued"))?.status).toBe("cancelled");
+    } finally {
+      scheduler.close();
+    }
+  });
+
   it("cancels a starting admission before it can create a run", async () => {
     const entered = deferred();
     const gate = deferred();

@@ -87,6 +87,8 @@ function toolResultPart(part: ToolPart): UiMessagePart | undefined {
         ? (part.state.output ?? "")
         : "";
   return {
+    id: part.id,
+    metadata: part.metadata,
     result: {
       callId: part.callId,
       ...(outcome.error === undefined ? {} : { error: outcome.error }),
@@ -114,6 +116,8 @@ function toolStateOutcome(
 
 function toolPartToUiParts(part: ToolPart): UiMessagePart[] {
   const callPart: UiMessagePart = {
+    id: part.id,
+    metadata: part.metadata,
     call: {
       id: part.callId,
       input: toolInput(part.state),
@@ -132,10 +136,29 @@ function partToUiParts(part: Part): UiMessagePart[] {
   }
   if (part.type === "model-state") return [];
   if (part.type === "text") {
-    return [{ text: part.text, type: "text" }];
+    return [
+      {
+        id: part.id,
+        text:
+          typeof part.metadata?.displayText === "string"
+            ? part.metadata.displayText
+            : part.text,
+        type: "text",
+        metadata: part.metadata,
+      },
+    ];
   }
   if (part.type === "reasoning") {
-    return [{ text: part.text, type: "reasoning" }];
+    return [
+      {
+        id: part.id,
+        text: part.text,
+        type: "reasoning",
+        metadata: part.metadata,
+        endReason: part.endReason,
+        saveState: "saved",
+      },
+    ];
   }
   if (HIDDEN_TRANSCRIPT_TOOLS.has(part.tool)) {
     return [];
@@ -146,7 +169,13 @@ function partToUiParts(part: Part): UiMessagePart[] {
 export function messageToUiMessage(
   message: MessageWithParts,
 ): UiMessage | undefined {
-  const activeParts = message.parts.filter(isActivePart);
+  const activeParts = message.parts
+    .filter(isActivePart)
+    .sort(
+      (left, right) =>
+        Number(left.metadata?.sourceOrder ?? left.orderIndex) -
+        Number(right.metadata?.sourceOrder ?? right.orderIndex),
+    );
   if (
     message.info.agent === SUMMARY_AGENT_NAME &&
     activeParts.some(isContextSummaryPart)
@@ -169,6 +198,7 @@ export function messageToUiMessage(
     id: message.info.id,
     parts,
     role: message.info.role,
+    runId: message.info.runId,
     ...assistantCompletionFields(message.info),
   };
 }
@@ -232,7 +262,7 @@ function runStatusToUiStatus(record: RunLedgerRecord): UiRunStatus {
   };
 }
 
-function runToUiRun(record: RunLedgerRecord): UiRun {
+export function runToUiRun(record: RunLedgerRecord): UiRun {
   return {
     id: record.runId,
     sessionId: record.sessionId,

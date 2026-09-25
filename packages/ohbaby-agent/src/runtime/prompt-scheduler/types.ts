@@ -77,6 +77,11 @@ export type FinishPromptSubmissionInput = PromptTerminalResult & {
   readonly expectedRunId?: string;
 };
 
+export interface PromptHistoryWindow {
+  readonly messageIds?: readonly string[];
+  readonly runIds?: readonly string[];
+}
+
 export interface PromptSubmissionStore {
   assertCapacity(scopeKey: string, maxQueuedPrompts: number): Promise<void>;
   accept(
@@ -123,6 +128,11 @@ export interface PromptSubmissionStore {
   ): Promise<PromptSubmissionRecord>;
   listQueued(scopeKey: string): Promise<readonly PromptSubmissionRecord[]>;
   listVisible(scopeKey: string): Promise<readonly PromptSubmissionRecord[]>;
+  listForSession(
+    scopeKey: string,
+    sessionId: string,
+    window?: PromptHistoryWindow,
+  ): Promise<readonly PromptSubmissionRecord[]>;
   listScopesWithQueued(): Promise<readonly string[]>;
   recoverInterrupted(scopeKey: string): Promise<number>;
 }

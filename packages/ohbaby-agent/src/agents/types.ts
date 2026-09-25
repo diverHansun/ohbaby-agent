@@ -57,6 +57,8 @@ export interface StartSessionParams {
   readonly reasoning?: ReasoningConfig;
   readonly agentName: string;
   readonly initialUserMessageId?: string;
+  /** Original user text when model input includes execution-only context. */
+  readonly displayUserText?: string;
   readonly sessionId: string;
   readonly projectRoot: string;
   readonly prompt: string;

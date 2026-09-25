@@ -1,3 +1,7 @@
+import type {
+  DisplayReasoningOwner,
+  ReasoningEndReason,
+} from "./display-reasoning.js";
 import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type {
@@ -25,6 +29,7 @@ import type {
 } from "../tool-scheduler/index.js";
 
 export interface LifecycleDeps {
+  readonly displayReasoning?: DisplayReasoningOwner;
   readonly llmClient: LLMClientInstance;
   readonly messageManager: MessageManager;
   readonly toolScheduler: ToolSchedulerInstance;
@@ -123,131 +128,140 @@ export type AgentTerminalReason =
   | "content_filter"
   | "model_state_persistence_failure";
 
-export type LifecycleEvent =
-  | {
-      readonly type: "turn:start";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step: number;
-      readonly timestamp: number;
-      readonly usage: ContextUsage;
-      readonly compaction?: CompactResult;
-      readonly hasSummary: boolean;
-    }
-  | {
-      readonly type: "context:compacting";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step: number;
-      readonly timestamp: number;
-    }
-  | {
-      readonly type: "context:prepared";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step: number;
-      readonly timestamp: number;
-      readonly usage: ContextUsage;
-      readonly composition?: ContextOccupancyComposition;
-      readonly compaction?: CompactResult;
-      readonly hasSummary: boolean;
-    }
-  | {
-      readonly type: "turn:end";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step: number;
-      readonly timestamp: number;
-      readonly usage: ContextUsage;
-      readonly finishReason?: ModelFinishReason | "error";
-      readonly toolResults?: readonly ToolCallResult[];
-    }
-  | {
-      readonly type: "llm:start";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step?: number;
-      readonly timestamp: number;
-    }
-  | ({
-      readonly type: "llm:retrying";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step?: number;
-      readonly timestamp: number;
-    } & ProviderRetryEvent)
-  | {
-      readonly type: "llm:delta";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step?: number;
-      readonly timestamp: number;
-      readonly delta: string;
-      readonly content: string;
-      /** May be absent on observation-only projections. */
-      readonly messageSnapshot?: ModelResponseSnapshot;
-    }
-  | {
-      readonly type: "llm:reasoning-delta";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly messageId: string;
-      readonly step?: number;
-      readonly timestamp: number;
-      readonly delta: string;
-      readonly content: string;
-    }
-  | {
-      readonly type: "llm:reasoning-end";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly messageId: string;
-      readonly step?: number;
-      readonly timestamp: number;
-      readonly content: string;
-    }
-  | {
-      readonly type: "llm:complete";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step?: number;
-      readonly timestamp: number;
-      readonly finishReason?: ModelFinishReason;
-      /** May be absent when the observation transport has no response body. */
-      readonly messageSnapshot?: ModelResponseSnapshot;
-      readonly parsedToolCalls?: readonly ParsedToolCall[];
-      readonly tokenUsage?: TokenUsage;
-    }
-  | {
-      readonly type: "tool:start";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step: number;
-      readonly timestamp: number;
-      readonly callId: string;
-      readonly toolName: string;
-      readonly params: Record<string, unknown>;
-    }
-  | {
-      readonly type: "tool:result";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step: number;
-      readonly timestamp: number;
-      readonly callId: string;
-      readonly toolName: string;
-      readonly params: Record<string, unknown>;
-      readonly result: ToolCallResult;
-    }
-  | {
-      readonly type: "step:complete";
-      readonly sessionId: string;
-      readonly contextScopeId?: string;
-      readonly step: number;
-      readonly timestamp: number;
-      readonly finishReason?: ModelFinishReason;
-      readonly toolResults?: readonly ToolCallResult[];
-    };
+export interface LifecycleSourceIdentity {
+  readonly runId?: string;
+  readonly messageId?: string;
+  readonly partId?: string;
+}
+
+export type LifecycleEvent = LifecycleSourceIdentity &
+  (
+    | {
+        readonly type: "turn:start";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step: number;
+        readonly timestamp: number;
+        readonly usage: ContextUsage;
+        readonly compaction?: CompactResult;
+        readonly hasSummary: boolean;
+      }
+    | {
+        readonly type: "context:compacting";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step: number;
+        readonly timestamp: number;
+      }
+    | {
+        readonly type: "context:prepared";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step: number;
+        readonly timestamp: number;
+        readonly usage: ContextUsage;
+        readonly composition?: ContextOccupancyComposition;
+        readonly compaction?: CompactResult;
+        readonly hasSummary: boolean;
+      }
+    | {
+        readonly type: "turn:end";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step: number;
+        readonly timestamp: number;
+        readonly usage: ContextUsage;
+        readonly finishReason?: ModelFinishReason | "error";
+        readonly toolResults?: readonly ToolCallResult[];
+      }
+    | {
+        readonly type: "llm:start";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step?: number;
+        readonly timestamp: number;
+      }
+    | ({
+        readonly type: "llm:retrying";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step?: number;
+        readonly timestamp: number;
+      } & ProviderRetryEvent)
+    | {
+        readonly type: "llm:delta";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step?: number;
+        readonly timestamp: number;
+        readonly delta: string;
+        readonly content: string;
+        /** May be absent on observation-only projections. */
+        readonly messageSnapshot?: ModelResponseSnapshot;
+      }
+    | {
+        readonly type: "llm:reasoning-delta";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly messageId: string;
+        readonly step?: number;
+        readonly timestamp: number;
+        readonly delta: string;
+        readonly content: string;
+      }
+    | {
+        readonly type: "llm:reasoning-end";
+        readonly endReason?: ReasoningEndReason;
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly messageId: string;
+        readonly step?: number;
+        readonly timestamp: number;
+        readonly content: string;
+      }
+    | {
+        readonly type: "llm:complete";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step?: number;
+        readonly timestamp: number;
+        readonly finishReason?: ModelFinishReason;
+        /** May be absent when the observation transport has no response body. */
+        readonly messageSnapshot?: ModelResponseSnapshot;
+        readonly parsedToolCalls?: readonly ParsedToolCall[];
+        readonly tokenUsage?: TokenUsage;
+      }
+    | {
+        readonly type: "tool:start";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step: number;
+        readonly timestamp: number;
+        readonly callId: string;
+        readonly toolName: string;
+        readonly params: Record<string, unknown>;
+      }
+    | {
+        readonly type: "tool:result";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step: number;
+        readonly timestamp: number;
+        readonly callId: string;
+        readonly toolName: string;
+        readonly params: Record<string, unknown>;
+        readonly result: ToolCallResult;
+      }
+    | {
+        readonly type: "step:complete";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step: number;
+        readonly timestamp: number;
+        readonly finishReason?: ModelFinishReason;
+        readonly toolResults?: readonly ToolCallResult[];
+      }
+  );
 
 export interface LifecycleResult {
   readonly success: boolean;

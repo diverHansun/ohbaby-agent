@@ -68,6 +68,7 @@ async function writeInitialUserMessage(
     | "agentName"
     | "contextScopeId"
     | "initialUserMessageId"
+    | "displayUserText"
     | "initialUserPrompt"
     | "sessionId"
   >,
@@ -89,6 +90,9 @@ async function writeInitialUserMessage(
   });
   await deps.messageManager.appendPart(message.id, {
     text: input.initialUserPrompt,
+    ...(input.displayUserText === undefined
+      ? {}
+      : { metadata: { displayText: input.displayUserText } }),
     type: "text",
   });
   return message.id;
@@ -180,6 +184,7 @@ export async function runAgent(
     agentName: input.agentName,
     contextScopeId: scope.contextScopeId,
     initialUserMessageId: input.initialUserMessageId,
+    displayUserText: input.displayUserText,
     initialUserPrompt: input.initialUserPrompt,
     sessionId: scope.sessionId,
   });

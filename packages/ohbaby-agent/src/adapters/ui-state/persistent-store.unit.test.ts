@@ -121,7 +121,7 @@ describe("messageToUiMessage", () => {
         info,
         parts: [textPart("message_user", "hello"), runtimePart],
       })?.parts,
-    ).toEqual([{ text: "hello", type: "text" }]);
+    ).toMatchObject([{ text: "hello", type: "text" }]);
   });
 
   it("omits todo tool calls and results from a persisted transcript", () => {
@@ -151,7 +151,7 @@ describe("messageToUiMessage", () => {
       ],
     };
 
-    expect(messageToUiMessage(message)?.parts).toEqual([
+    expect(messageToUiMessage(message)?.parts).toMatchObject([
       { text: "Working on it.", type: "text" },
     ]);
   });
@@ -171,7 +171,7 @@ describe("messageToUiMessage", () => {
         status: "completed",
       });
 
-      expect(messageToUiMessage(message)?.parts).toEqual([
+      expect(messageToUiMessage(message)?.parts).toMatchObject([
         {
           call: {
             id: "call_bash",
@@ -201,7 +201,7 @@ describe("messageToUiMessage", () => {
       status: "aborted",
     });
 
-    expect(messageToUiMessage(message)?.parts[1]).toEqual({
+    expect(messageToUiMessage(message)?.parts[1]).toMatchObject({
       result: {
         callId: "call_bash",
         error: "Tool execution aborted by user",
@@ -218,7 +218,7 @@ describe("messageToUiMessage", () => {
       status: "error",
     });
 
-    expect(messageToUiMessage(message)?.parts).toEqual([
+    expect(messageToUiMessage(message)?.parts).toMatchObject([
       {
         call: {
           id: "call_bash",
@@ -247,7 +247,7 @@ describe("messageToUiMessage", () => {
       status: "completed",
     });
 
-    expect(messageToUiMessage(message)?.parts).toEqual([
+    expect(messageToUiMessage(message)?.parts).toMatchObject([
       {
         call: {
           id: "call_bash",

@@ -330,6 +330,7 @@ export class RunWorker {
     if (event.type === "llm:reasoning-end") {
       this.publish(scope, "run.llm.reasoning.end", {
         ...this.streamBase(event),
+        endReason: event.endReason,
         timestamp: event.timestamp,
         step: event.step,
         messageId: event.messageId,
@@ -515,6 +516,8 @@ export class RunWorker {
   private streamBase(event: LifecycleEvent): Record<string, unknown> {
     return withDefined({
       contextScopeId: event.contextScopeId ?? this.context.contextScopeId,
+      messageId: event.messageId,
+      partId: event.partId,
       runId: this.context.runId,
       sessionId: this.context.sessionId,
     });

@@ -99,6 +99,7 @@ describe("services/database", () => {
       { version: "014_prompt_submission" },
       { version: "015_prompt_submission_idempotency_lease" },
       { version: "016_prompt_submission_reasoning" },
+      { version: "017_message_recovery_pages" },
     ]);
   });
 

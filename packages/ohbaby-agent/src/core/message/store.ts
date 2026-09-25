@@ -1,3 +1,9 @@
+import {
+  compareMessages,
+  decodeMessagePage,
+  makeMessagePage,
+  validateMessageIds,
+} from "./pagination.js";
 import { isDeepStrictEqual } from "node:util";
 import {
   ModelStateSchema,
@@ -5,6 +11,9 @@ import {
 } from "../../services/interface-providers/native-state.js";
 import { createTokenUsageMetadata } from "./token-usage-metadata.js";
 import type {
+  MessagePage,
+  MessagePageOptions,
+  ReasoningPart,
   Message,
   ModelStatePart,
   ToolPart,
@@ -71,7 +80,102 @@ export function createInMemoryMessageStore(): MessageStore {
     };
   }
 
+  function listPage(
+    sessionId: string,
+    options: MessagePageOptions = {},
+    runId?: string,
+  ): MessagePage {
+    const { limit, cursor } = decodeMessagePage(sessionId, options, runId);
+    const entries = [...messages.values()]
+      .filter(
+        (message) =>
+          message.sessionId === sessionId &&
+          (options.scope === undefined ||
+            message.contextScopeId === options.scope.contextScopeId) &&
+          (runId === undefined || message.runId === runId) &&
+          (cursor === undefined ||
+            message.time.created < cursor.createdAt ||
+            (message.time.created === cursor.createdAt &&
+              message.id < cursor.id)),
+      )
+      .sort((a, b) => compareMessages(b, a))
+      .slice(0, limit + 1)
+      .map((message) => ({
+        info: clone(message),
+        parts: listPartsForMessage(message.id),
+      }));
+    return makeMessagePage(sessionId, options, entries, limit, runId);
+  }
+
   return {
+    async listPageBySession(sessionId, options): Promise<MessagePage> {
+      await Promise.resolve();
+      return listPage(sessionId, options);
+    },
+    async listPageByRun(sessionId, runId, options): Promise<MessagePage> {
+      await Promise.resolve();
+      return listPage(sessionId, options, runId);
+    },
+    async listByIds(sessionId, messageIds): Promise<MessageWithParts[]> {
+      await Promise.resolve();
+      validateMessageIds(messageIds);
+      const ids = new Set(messageIds);
+      return [...messages.values()]
+        .filter(
+          (message) => message.sessionId === sessionId && ids.has(message.id),
+        )
+        .sort(compareMessages)
+        .map((message) => ({
+          info: clone(message),
+          parts: listPartsForMessage(message.id),
+        }));
+    },
+    async getPart(partId): Promise<Part | undefined> {
+      await Promise.resolve();
+      const part = parts.get(partId);
+      return part === undefined ? undefined : clone(part);
+    },
+    async saveReasoningPart(input): Promise<ReasoningPart | undefined> {
+      await Promise.resolve();
+      const message = messages.get(input.messageId);
+      if (message === undefined)
+        throw new Error(`Message not found: ${input.messageId}`);
+      if (
+        input.sessionId !== undefined &&
+        input.sessionId !== message.sessionId
+      )
+        throw new Error("Reasoning identity belongs to another session");
+      const existing = parts.get(input.partId);
+      if (
+        existing !== undefined &&
+        (existing.messageId !== input.messageId ||
+          existing.type !== "reasoning")
+      )
+        throw new Error("Reasoning identity belongs to another part");
+      if (input.text === "")
+        return existing === undefined ? undefined : clone(existing);
+      const part: ReasoningPart = {
+        ...existing,
+        id: input.partId,
+        messageId: message.id,
+        sessionId: message.sessionId,
+        contextScopeId: message.contextScopeId,
+        orderIndex:
+          existing?.orderIndex ?? listPartsForMessage(message.id).length,
+        type: "reasoning",
+        text: input.text,
+        ...(input.endReason === undefined
+          ? {}
+          : { endReason: input.endReason }),
+        metadata: {
+          ...existing?.metadata,
+          ...input.metadata,
+          ...(input.runId === undefined ? {} : { runId: input.runId }),
+        },
+      };
+      parts.set(part.id, clone(part));
+      return clone(part);
+    },
     commitModelStep(
       input: StoreModelStepInput,
     ): Promise<CommitModelStepResult> {
@@ -458,6 +562,7 @@ export function prepareModelStep(
     type: "tool",
     callId: tool.callId,
     tool: tool.name,
+    ...(tool.metadata === undefined ? {} : { metadata: tool.metadata }),
     state: {
       status: "pending",
       input: tool.arguments,

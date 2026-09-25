@@ -14,6 +14,7 @@ export interface PartTime {
 }
 
 interface MessageBase {
+  readonly runId?: string;
   readonly id: string;
   readonly sessionId: string;
   readonly contextScopeId?: string;
@@ -92,6 +93,7 @@ export interface TextPart extends PartBase {
 
 export interface ReasoningPart extends PartBase {
   readonly type: "reasoning";
+  readonly endReason?: "normal" | "interrupted" | "failed";
   readonly text: string;
   readonly metadata?: PartMetadata;
 }
@@ -148,7 +150,10 @@ export interface MessageWithParts {
   readonly parts: readonly Part[];
 }
 
-export type CreateMessageInput = { readonly id?: string } & (
+export type CreateMessageInput = {
+  readonly id?: string;
+  readonly runId?: string;
+} & (
   | {
       readonly sessionId: string;
       readonly contextScopeId?: string;
@@ -251,6 +256,7 @@ export interface CommitModelStepInput {
     readonly name: string;
     readonly arguments: Record<string, unknown>;
     readonly argumentsJson: string;
+    readonly metadata?: PartMetadata;
   }[];
   readonly tokenUsage?: TokenUsage;
   readonly finishReason: string;
@@ -270,7 +276,63 @@ export interface StoreModelStepInput extends CommitModelStepInput {
   readonly toolPartIds: readonly string[];
 }
 
+export interface MessagePageOptions {
+  readonly limit?: number;
+  readonly before?: string;
+  readonly scope?: MessageScopeFilter;
+}
+
+export interface MessagePage {
+  readonly messages: MessageWithParts[];
+  readonly hasMore: boolean;
+  readonly nextCursor?: string;
+  readonly firstMessageId?: string;
+  readonly lastMessageId?: string;
+}
+
+export interface SaveReasoningPartInput {
+  readonly sessionId?: string;
+  readonly runId?: string;
+  readonly messageId: string;
+  readonly partId: string;
+  readonly text: string;
+  readonly endReason?: ReasoningPart["endReason"];
+  readonly metadata?: PartMetadata;
+}
+
+export interface MessageCommittedChange {
+  readonly createdMessageIds?: readonly string[];
+  readonly sessionId: string;
+  readonly messages?: readonly Message[];
+  readonly parts?: readonly Part[];
+  readonly removedMessageIds?: readonly string[];
+}
+
+/** Application owner serializes DB writes and projection acceptance per session. */
+export interface MessageCommitCoordinator {
+  run<T>(sessionId: string, operation: () => Promise<T>): Promise<T>;
+  onCommitted(change: MessageCommittedChange): void;
+  onProjectionError(sessionId: string, error: unknown): void;
+}
+
 export interface MessageManager {
+  setCommitCoordinator(coordinator: MessageCommitCoordinator | undefined): void;
+  saveReasoningPart(
+    input: SaveReasoningPartInput,
+  ): Promise<ReasoningPart | undefined>;
+  listPageBySession(
+    sessionId: string,
+    options?: MessagePageOptions,
+  ): Promise<MessagePage>;
+  listPageByRun(
+    sessionId: string,
+    runId: string,
+    options?: MessagePageOptions,
+  ): Promise<MessagePage>;
+  listByIds(
+    sessionId: string,
+    messageIds: readonly string[],
+  ): Promise<MessageWithParts[]>;
   commitModelStep(input: CommitModelStepInput): Promise<CommitModelStepResult>;
   createMessage(input: CreateMessageInput): Promise<Message>;
   updateMessage(messageId: string, patch: UpdateMessagePatch): Promise<Message>;
@@ -293,6 +355,23 @@ export interface MessageManager {
 }
 
 export interface MessageStore {
+  getPart(partId: string): Promise<Part | undefined>;
+  saveReasoningPart(
+    input: SaveReasoningPartInput & { readonly updatedAt: number },
+  ): Promise<ReasoningPart | undefined>;
+  listPageBySession(
+    sessionId: string,
+    options?: MessagePageOptions,
+  ): Promise<MessagePage>;
+  listPageByRun(
+    sessionId: string,
+    runId: string,
+    options?: MessagePageOptions,
+  ): Promise<MessagePage>;
+  listByIds(
+    sessionId: string,
+    messageIds: readonly string[],
+  ): Promise<MessageWithParts[]>;
   commitModelStep(input: StoreModelStepInput): Promise<CommitModelStepResult>;
   insertMessage(message: Message): Promise<void>;
   getMessage(messageId: string): Promise<Message | undefined>;

@@ -7,12 +7,14 @@ import {
   PromptIdempotencyConflictError,
   PromptSchedulerClosedError,
   PromptSubmissionNotFoundError,
+  PromptSubmissionRejectedError,
   PromptWaitAbortedError,
 } from "./errors.js";
 import type {
   PromptSubmissionExecutor,
   PromptEditLease,
   PromptSubmissionRecord,
+  PromptHistoryWindow,
   PromptSubmissionStore,
 } from "./types.js";
 
@@ -26,6 +28,19 @@ export interface WorkspacePromptSchedulerOptions {
   readonly createUserMessageId?: () => string;
   readonly isBusyError?: (error: unknown) => boolean;
   readonly busyRetryDelayMs?: number;
+  readonly beforeSessionWrite?: (sessionId: string) => Promise<void>;
+  readonly commitCoordinator?: {
+    run<T>(sessionId: string, operation: () => Promise<T>): Promise<T>;
+    runControl?<T>(sessionId: string, operation: () => Promise<T>): Promise<T>;
+  };
+  readonly onProjectionError?: (
+    error: unknown,
+    prompt: PromptSubmissionRecord,
+  ) => void;
+  readonly onSessionInitializationError?: (
+    error: unknown,
+    sessionId: string,
+  ) => void;
   readonly onSubmitted?: (prompt: PromptSubmissionRecord) => void;
   readonly onUpdated?: (prompt: PromptSubmissionRecord) => void;
 }
@@ -75,6 +90,8 @@ function runtimeError(error: unknown): UiPromptError {
 }
 
 export class WorkspacePromptScheduler {
+  private readonly sessionSeeds = new Map<string, Promise<void>>();
+  private readonly readySessions = new Set<string>();
   private readonly startingControllers = new Map<string, AbortController>();
   private readonly activeBySession = new Map<string, string>();
   private readonly completionWaiters = new Map<string, Set<CompletionWaiter>>();
@@ -86,7 +103,7 @@ export class WorkspacePromptScheduler {
   private draining = false;
   private drainAgain = false;
   private initialized = false;
-  private acceptanceBarrier: Promise<void> = Promise.resolve();
+  private readonly acceptanceBarriers = new Map<string, Promise<void>>();
 
   constructor(private readonly options: WorkspacePromptSchedulerOptions) {
     this.maxActiveSessions = options.maxActiveSessions ?? 10;
@@ -116,12 +133,26 @@ export class WorkspacePromptScheduler {
   ): Promise<PromptSubmissionRecord> {
     this.assertOpen();
     await this.init();
-    let release!: () => void;
-    const previous = this.acceptanceBarrier;
-    this.acceptanceBarrier = new Promise<void>((resolve) => {
-      release = resolve;
+    const explicitSessionId =
+      input.expectedSessionId ??
+      (typeof input.sessionId === "string" ? input.sessionId : undefined);
+    const admissionKey =
+      explicitSessionId === undefined
+        ? "implicit"
+        : `session:${explicitSessionId}`;
+    let unlock!: () => void;
+    const previous = this.acceptanceBarriers.get(admissionKey);
+    const barrier = new Promise<void>((resolve) => {
+      unlock = resolve;
     });
+    this.acceptanceBarriers.set(admissionKey, barrier);
+    const release = (): void => {
+      unlock();
+      if (this.acceptanceBarriers.get(admissionKey) === barrier)
+        this.acceptanceBarriers.delete(admissionKey);
+    };
     await previous;
+    let knownUnaccepted = false;
     try {
       this.assertOpen();
       if (
@@ -153,6 +184,7 @@ export class WorkspacePromptScheduler {
         }
         return existing;
       }
+      knownUnaccepted = true;
       await this.options.store.assertCapacity(
         this.options.scopeKey,
         this.maxQueuedPrompts,
@@ -163,32 +195,40 @@ export class WorkspacePromptScheduler {
           ? await input.sessionId()
           : input.sessionId;
       this.assertOpen();
-      const accepted = await this.options.store.accept({
-        clientRequestId,
-        maxQueuedPrompts: this.maxQueuedPrompts,
-        promptId: this.options.createPromptId?.() ?? `prompt_${randomUUID()}`,
-        scopeKey: this.options.scopeKey,
-        sessionId,
-        text: input.text,
-        reasoning:
-          typeof input.reasoning === "function"
-            ? await input.reasoning(sessionId)
-            : input.reasoning,
-        userMessageId:
-          input.userMessageId ??
-          this.options.createUserMessageId?.() ??
-          `message_${randomUUID()}`,
+      // Session initialization is independent of the workspace admission lane.
+      // Release it before waiting so an unavailable session cannot block others.
+      release();
+      const reasoning =
+        typeof input.reasoning === "function"
+          ? await input.reasoning(sessionId)
+          : input.reasoning;
+      const prompt = await this.commit(sessionId, async () => {
+        this.assertOpen();
+        knownUnaccepted = false;
+        const accepted = await this.options.store.accept({
+          clientRequestId,
+          maxQueuedPrompts: this.maxQueuedPrompts,
+          promptId: this.options.createPromptId?.() ?? `prompt_${randomUUID()}`,
+          scopeKey: this.options.scopeKey,
+          sessionId,
+          text: input.text,
+          reasoning,
+          userMessageId:
+            input.userMessageId ??
+            this.options.createUserMessageId?.() ??
+            `message_${randomUUID()}`,
+        });
+        // The durable receipt survives projection failures and shutdown races.
+        if (accepted.inserted)
+          this.notify(accepted.record, this.options.onSubmitted);
+        return accepted.record;
       });
-      // Durable acceptance is the admission linearization point. Once the
-      // store commits, the caller must receive the receipt even if close or a
-      // scheduler fault wins before this continuation resumes; otherwise a
-      // queued prompt could survive without any caller knowing its promptId.
-      const prompt = accepted.record;
-      if (accepted.inserted) {
-        this.options.onSubmitted?.(prompt);
-      }
       this.requestDrain();
       return prompt;
+    } catch (error) {
+      if (knownUnaccepted && !(error instanceof Error && "code" in error))
+        throw new PromptSubmissionRejectedError(error);
+      throw error;
     } finally {
       release();
     }
@@ -200,12 +240,15 @@ export class WorkspacePromptScheduler {
     ttlMs = 60_000,
   ): Promise<PromptEditLease> {
     this.assertOpen();
-    const lease = await this.options.store.acquireEditLease(
-      promptId,
-      ownerClientId,
-      ttlMs,
-    );
-    this.options.onUpdated?.(lease.prompt);
+    const lease = await this.mutatePrompt(promptId, async () => {
+      const result = await this.options.store.acquireEditLease(
+        promptId,
+        ownerClientId,
+        ttlMs,
+      );
+      this.notify(result.prompt, this.options.onUpdated);
+      return result;
+    });
     this.requestDrain(Math.max(1, lease.expiresAt - Date.now()));
     return lease;
   }
@@ -217,13 +260,16 @@ export class WorkspacePromptScheduler {
     ttlMs = 60_000,
   ): Promise<PromptEditLease> {
     this.assertOpen();
-    const lease = await this.options.store.renewEditLease(
-      promptId,
-      editLeaseId,
-      ownerClientId,
-      ttlMs,
-    );
-    this.options.onUpdated?.(lease.prompt);
+    const lease = await this.mutatePrompt(promptId, async () => {
+      const result = await this.options.store.renewEditLease(
+        promptId,
+        editLeaseId,
+        ownerClientId,
+        ttlMs,
+      );
+      this.notify(result.prompt, this.options.onUpdated);
+      return result;
+    });
     this.requestDrain(Math.max(1, lease.expiresAt - Date.now()));
     return lease;
   }
@@ -235,13 +281,16 @@ export class WorkspacePromptScheduler {
     ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
     this.assertOpen();
-    const prompt = await this.options.store.commitEdit(
-      promptId,
-      editLeaseId,
-      text,
-      ownerClientId,
-    );
-    this.options.onUpdated?.(prompt);
+    const prompt = await this.mutatePrompt(promptId, async () => {
+      const result = await this.options.store.commitEdit(
+        promptId,
+        editLeaseId,
+        text,
+        ownerClientId,
+      );
+      this.notify(result, this.options.onUpdated);
+      return result;
+    });
     this.requestDrain();
     return prompt;
   }
@@ -252,12 +301,15 @@ export class WorkspacePromptScheduler {
     ownerClientId?: string,
   ): Promise<PromptSubmissionRecord> {
     this.assertOpen();
-    const prompt = await this.options.store.releaseEditLease(
-      promptId,
-      editLeaseId,
-      ownerClientId,
-    );
-    this.options.onUpdated?.(prompt);
+    const prompt = await this.mutatePrompt(promptId, async () => {
+      const result = await this.options.store.releaseEditLease(
+        promptId,
+        editLeaseId,
+        ownerClientId,
+      );
+      this.notify(result, this.options.onUpdated);
+      return result;
+    });
     this.requestDrain();
     return prompt;
   }
@@ -272,19 +324,33 @@ export class WorkspacePromptScheduler {
     if (starting) {
       // Stop an admission that has not completed the run-start handshake.
       starting.abort("Queued prompt cancelled");
-      const cancelled = await this.options.store.finish(promptId, {
-        status: "cancelled",
-      });
-      this.options.onUpdated?.(cancelled);
+      const cancelled = await this.mutatePrompt(
+        promptId,
+        async () => {
+          const result = await this.options.store.finish(promptId, {
+            status: "cancelled",
+          });
+          this.notify(result, this.options.onUpdated);
+          return result;
+        },
+        true,
+      );
       this.resolveCompletion(cancelled);
       return cancelled;
     }
-    const prompt = await this.options.store.cancelQueued(
+    const prompt = await this.mutatePrompt(
       promptId,
-      editLeaseId,
-      ownerClientId,
+      async () => {
+        const result = await this.options.store.cancelQueued(
+          promptId,
+          editLeaseId,
+          ownerClientId,
+        );
+        this.notify(result, this.options.onUpdated);
+        return result;
+      },
+      true,
     );
-    this.options.onUpdated?.(prompt);
     this.resolveCompletion(prompt);
     this.requestDrain();
     return prompt;
@@ -292,6 +358,26 @@ export class WorkspacePromptScheduler {
 
   async get(promptId: string): Promise<PromptSubmissionRecord | undefined> {
     return this.options.store.get(promptId);
+  }
+
+  async getByClientRequestId(
+    clientRequestId: string,
+  ): Promise<PromptSubmissionRecord | undefined> {
+    return this.options.store.getByClientRequestId(
+      this.options.scopeKey,
+      clientRequestId,
+    );
+  }
+
+  async listForSession(
+    sessionId: string,
+    window: PromptHistoryWindow = {},
+  ): Promise<readonly PromptSubmissionRecord[]> {
+    return this.options.store.listForSession(
+      this.options.scopeKey,
+      sessionId,
+      window,
+    );
   }
 
   async listVisible(): Promise<readonly PromptSubmissionRecord[]> {
@@ -382,6 +468,77 @@ export class WorkspacePromptScheduler {
     this.rejectAllCompletionWaiters(error);
   }
 
+  private seedSession(sessionId: string): Promise<void> {
+    const existing = this.sessionSeeds.get(sessionId);
+    if (existing) return existing;
+    const seed = Promise.resolve()
+      .then(() => this.options.beforeSessionWrite?.(sessionId))
+      .then(
+        () => {
+          this.readySessions.add(sessionId);
+          this.busySessionsUntil.delete(sessionId);
+        },
+        (error: unknown) => {
+          this.sessionSeeds.delete(sessionId);
+          this.busySessionsUntil.set(
+            sessionId,
+            Date.now() + Math.max(1, this.options.busyRetryDelayMs ?? 250),
+          );
+          try {
+            this.options.onSessionInitializationError?.(error, sessionId);
+          } catch {
+            /* Observers cannot affect other sessions. */
+          }
+          throw error;
+        },
+      );
+    this.sessionSeeds.set(sessionId, seed);
+    return seed;
+  }
+
+  private async commit<T>(
+    sessionId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    await this.seedSession(sessionId);
+    return (
+      this.options.commitCoordinator?.run(sessionId, operation) ?? operation()
+    );
+  }
+
+  private async mutatePrompt<T>(
+    promptId: string,
+    operation: () => Promise<T>,
+    controlOnly = false,
+  ): Promise<T> {
+    const current = await this.options.store.get(promptId);
+    if (!current) throw new PromptSubmissionNotFoundError(promptId);
+    if (controlOnly) {
+      const coordinator = this.options.commitCoordinator;
+      if (coordinator?.runControl)
+        return coordinator.runControl(current.sessionId, operation);
+      if (coordinator && this.readySessions.has(current.sessionId))
+        return coordinator.run(current.sessionId, operation);
+      return operation();
+    }
+    return this.commit(current.sessionId, operation);
+  }
+
+  private notify(
+    prompt: PromptSubmissionRecord,
+    listener: ((prompt: PromptSubmissionRecord) => void) | undefined,
+  ): void {
+    try {
+      listener?.(prompt);
+    } catch (error) {
+      try {
+        this.options.onProjectionError?.(error, prompt);
+      } catch {
+        /* Keep committed business results. */
+      }
+    }
+  }
+
   private assertOpen(): void {
     if (this.closed) {
       throw this.terminalError ?? new PromptSchedulerClosedError();
@@ -440,6 +597,8 @@ export class WorkspacePromptScheduler {
           (prompt) =>
             !this.activeBySession.has(prompt.sessionId) &&
             !this.busySessionsUntil.has(prompt.sessionId) &&
+            (!this.sessionSeeds.has(prompt.sessionId) ||
+              this.readySessions.has(prompt.sessionId)) &&
             (prompt.editLeaseExpiresAt ?? 0) <= now,
         );
         if (!candidate) {
@@ -460,13 +619,33 @@ export class WorkspacePromptScheduler {
           }
           break;
         }
-        const claimed = await this.options.store.claim(candidate.promptId);
+        if (!this.readySessions.has(candidate.sessionId)) {
+          void this.seedSession(candidate.sessionId).then(
+            () => {
+              this.requestDrain();
+            },
+            () => {
+              this.requestDrain();
+            },
+          );
+          continue;
+        }
+        const claimed = await this.commit(candidate.sessionId, async () => {
+          const result = await this.options.store.claim(candidate.promptId);
+          if (result) this.notify(result, this.options.onUpdated);
+          return result;
+        });
         if (!claimed) {
           continue;
         }
         if (this.isClosed()) {
           try {
-            await this.options.store.requeueBusy(claimed.promptId);
+            await this.commit(claimed.sessionId, async () => {
+              const queued = await this.options.store.requeueBusy(
+                claimed.promptId,
+              );
+              this.notify(queued, this.options.onUpdated);
+            });
           } catch {
             // Startup recovery will reconcile a claim that cannot be requeued
             // after the scheduler has already entered its terminal state.
@@ -474,7 +653,6 @@ export class WorkspacePromptScheduler {
           break;
         }
         this.activeBySession.set(claimed.sessionId, claimed.promptId);
-        this.options.onUpdated?.(claimed);
         void this.executeClaimed(claimed);
       }
     } finally {
@@ -504,12 +682,14 @@ export class WorkspacePromptScheduler {
             starting.signal.throwIfAborted();
             this.startingControllers.delete(prompt.promptId);
             try {
-              const running = await this.options.store.markRunning(
-                prompt.promptId,
-                nextRunId,
-              );
-              runId = nextRunId;
-              this.options.onUpdated?.(running);
+              await this.commit(prompt.sessionId, async () => {
+                const running = await this.options.store.markRunning(
+                  prompt.promptId,
+                  nextRunId,
+                );
+                runId = nextRunId;
+                this.notify(running, this.options.onUpdated);
+              });
             } catch (error) {
               runningPersistenceError =
                 error instanceof Error ? error : new Error(String(error));
@@ -525,11 +705,13 @@ export class WorkspacePromptScheduler {
         }
         if (this.options.isBusyError?.(error) && runId === undefined) {
           try {
-            const queued = await this.options.store.requeueBusy(
-              prompt.promptId,
-            );
+            await this.commit(prompt.sessionId, async () => {
+              const queued = await this.options.store.requeueBusy(
+                prompt.promptId,
+              );
+              this.notify(queued, this.options.onUpdated);
+            });
             if (isStartingCancelled()) return;
-            this.options.onUpdated?.(queued);
             this.busySessionsUntil.set(
               prompt.sessionId,
               Date.now() + (this.options.busyRetryDelayMs ?? 250),
@@ -541,12 +723,15 @@ export class WorkspacePromptScheduler {
         }
         this.busySessionsUntil.delete(prompt.sessionId);
         try {
-          const failed = await this.options.store.finish(prompt.promptId, {
-            status: "failed",
-            expectedRunId: runId,
-            error: runtimeError(error),
+          const failed = await this.commit(prompt.sessionId, async () => {
+            const result = await this.options.store.finish(prompt.promptId, {
+              status: "failed",
+              expectedRunId: runId,
+              error: runtimeError(error),
+            });
+            this.notify(result, this.options.onUpdated);
+            return result;
           });
-          this.options.onUpdated?.(failed);
           this.resolveCompletion(failed);
         } catch (storageError) {
           this.fault(storageError);
@@ -556,11 +741,14 @@ export class WorkspacePromptScheduler {
 
       if (isStartingCancelled()) return;
       try {
-        const finished = await this.options.store.finish(prompt.promptId, {
-          ...result,
-          expectedRunId: runId,
+        const finished = await this.commit(prompt.sessionId, async () => {
+          const record = await this.options.store.finish(prompt.promptId, {
+            ...result,
+            expectedRunId: runId,
+          });
+          this.notify(record, this.options.onUpdated);
+          return record;
         });
-        this.options.onUpdated?.(finished);
         this.resolveCompletion(finished);
       } catch (storageError) {
         this.fault(storageError);

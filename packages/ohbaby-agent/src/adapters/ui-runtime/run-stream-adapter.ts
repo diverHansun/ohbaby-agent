@@ -58,6 +58,7 @@ type NoticeDraft = Omit<UiNotice, "id" | "createdAt"> & {
 };
 
 export interface RunStreamProjectionOptions {
+  readonly projectMessages?: boolean;
   readonly assistantMessageId?: string;
   readonly autoStart?: boolean;
   readonly contextWindowUsage?: ContextWindowUsageTracker;
@@ -600,6 +601,13 @@ export function startRunStreamProjection(
   }
 
   async function handleEvent(event: StreamBridgeEvent): Promise<void> {
+    if (
+      options.projectMessages === false &&
+      (event.event === "message.part.delta" ||
+        event.event.startsWith("run.llm.") ||
+        event.event.startsWith("run.tool."))
+    )
+      return;
     if (event.event === "run.updated") {
       await handleRunUpdated(event);
       return;

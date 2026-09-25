@@ -114,6 +114,27 @@ function createMessageManager(): {
     appendPart,
     createMessage,
     manager: {
+      setCommitCoordinator: vi.fn(),
+      saveReasoningPart: vi.fn(() =>
+        Promise.reject(
+          new Error("Display persistence is not used by this fixture"),
+        ),
+      ),
+      listPageBySession: vi.fn(() =>
+        Promise.reject(
+          new Error("Recovery paging is not used by this fixture"),
+        ),
+      ),
+      listPageByRun: vi.fn(() =>
+        Promise.reject(
+          new Error("Recovery paging is not used by this fixture"),
+        ),
+      ),
+      listByIds: vi.fn(() =>
+        Promise.reject(
+          new Error("Recovery reads are not used by this fixture"),
+        ),
+      ),
       commitModelStep: vi.fn<MessageManager["commitModelStep"]>(() =>
         Promise.reject(new Error("Native steps are not used by this fixture")),
       ),

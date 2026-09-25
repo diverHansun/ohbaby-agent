@@ -22,7 +22,10 @@ describe("DatabasePromptSubmissionStore", () => {
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "ohbaby-prompt-store-"));
     now = 100;
-    initDatabase({ dbPath: join(directory, "agent.db"), now: () => ++now });
+    initDatabase({
+      dbPath: join(directory, "agent.db"),
+      now: (): number => ++now,
+    });
     getDatabase()
       .prepare(
         `INSERT INTO session
@@ -35,6 +38,62 @@ describe("DatabasePromptSubmissionStore", () => {
   afterEach(async () => {
     closeDatabase();
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it("selects only session active prompts and bounded history associations", async () => {
+    const store = new DatabasePromptSubmissionStore({
+      now: (): number => ++now,
+    });
+    for (const id of ["active", "run", "message", "old", "other-scope"]) {
+      await store.accept({
+        clientRequestId: id,
+        promptId: id,
+        sessionId: "session_1",
+        scopeKey: id === "other-scope" ? "/other" : "/workspace",
+        text: id,
+        userMessageId: `message_${id}`,
+        maxQueuedPrompts: 100,
+      });
+      if (id !== "active") {
+        await store.claim(id);
+        await store.markRunning(id, `run_${id}`);
+        await store.finish(id, {
+          status: "succeeded",
+          expectedRunId: `run_${id}`,
+        });
+      }
+    }
+    expect(
+      (await store.listForSession("/workspace", "session_1")).map(
+        (p) => p.promptId,
+      ),
+    ).toEqual(["active"]);
+    expect(
+      (
+        await store.listForSession("/workspace", "session_1", {
+          messageIds: ["message_message", "message_other-scope"],
+          runIds: ["run_run"],
+        })
+      ).map((p) => p.promptId),
+    ).toEqual(["active", "run", "message"]);
+    expect(
+      await store.listForSession("/workspace", "missing", {
+        runIds: ["run_run"],
+      }),
+    ).toEqual([]);
+    expect(
+      (
+        await store.listForSession("/workspace", "session_1", {
+          messageIds: [
+            ...Array.from(
+              { length: 40_000 },
+              (_, index) => `unknown_${String(index)}`,
+            ),
+            "message_message",
+          ],
+        })
+      ).map((p) => p.promptId),
+    ).toEqual(["active", "message"]);
   });
 
   it("persists edit, cancel, claim and recovery transitions", async () => {

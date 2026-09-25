@@ -66,6 +66,8 @@ export interface PersistentUiBackendOptions extends Omit<
 
 export interface PersistentUiBackendClient
   extends UiBackendClient, UiPromptQueueExecutionPort {
+  initialize(): Promise<void>;
+  initializeSession(sessionId: string): Promise<void>;
   dispose(): Promise<void> | void;
 }
 
@@ -189,6 +191,38 @@ function withStartupRecovery(
   }
 
   return {
+    async getSessionView(
+      input,
+    ): ReturnType<InProcessUiBackendClient["getSessionView"]> {
+      await ready();
+      return client.getSessionView(input);
+    },
+    async getSessionHistory(
+      input,
+    ): ReturnType<InProcessUiBackendClient["getSessionHistory"]> {
+      await ready();
+      return client.getSessionHistory(input);
+    },
+    async getSessionControl(
+      input,
+    ): ReturnType<InProcessUiBackendClient["getSessionControl"]> {
+      await ready();
+      return client.getSessionControl(input);
+    },
+    async getPromptReceipt(
+      input,
+    ): ReturnType<InProcessUiBackendClient["getPromptReceipt"]> {
+      await ready();
+      return client.getPromptReceipt(input);
+    },
+    async initializeSession(sessionId): Promise<void> {
+      await ready();
+      await client.initializeSession(sessionId);
+    },
+    async initialize(): Promise<void> {
+      await ready();
+      await client.initialize();
+    },
     dispose(): ReturnType<InProcessUiBackendClient["dispose"]> {
       return client.dispose();
     },
@@ -562,6 +596,7 @@ export function createPersistentUiBackendClient(
       goalPersistence: createSqliteGoalPersistence(db, now),
       hookExecutor,
       initialSnapshot: options.initialSnapshot,
+      startupReady,
       llmClient: options.llmClient,
       logger: options.logger,
       diagnosticsFilePath: options.diagnosticsFilePath,
