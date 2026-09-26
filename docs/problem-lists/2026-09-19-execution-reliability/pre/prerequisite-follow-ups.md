@@ -14,6 +14,8 @@
 
 2026-09-26：按用户最新要求，从 C2 的 `ad92e49e` 新建本地 `codex/pre-c3-bash-cleanup`，保留 C1 → C2 → C3 三条继承分支。C3 的真实进程清理、来源限制、环境所有权和测试记录见 [C3 实施与验证](c3-implementation-acceptance.md)。本次不合并、不推送；Windows 尚不能由 leader 退出证明整个所属进程树停止，不能据 macOS 测试认定完整 C 通过。
 
+2026-09-26 组合验收更新：按用户最新平台范围，C1+C2+C3 完成 macOS 整体验收与两项补修后，已依次快进合入 `codex/execution-reliability`（产品与验收基线 `563bb7d5`）。合并后 26 文件/294 项组合复验通过，三条临时分支保留且未推送；完整证据和已知边界见 [C 阶段验收](05-implementation-acceptance.md)。前文未合并及 Windows 阻塞描述保留其当时状态，不再作为当前合并门。
+
 ## 实施顺序
 
 A/B 在整项可靠性改造实施前完成。按 2026-09-24 用户明确的顺序，C 在 improve-1 完成后、improve-2 开始前实施；C 内部为 C1 独立验收 → C2/C3 组合实施验收。

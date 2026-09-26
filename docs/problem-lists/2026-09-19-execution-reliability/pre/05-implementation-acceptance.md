@@ -96,4 +96,14 @@ C1 的锁只负责互斥，真实操作 Promise 结束才释放。C2 将批次�
 | `83b96cd3` | C1/C2/C3 真实文件超时组合门、规则放行 owner 验证。 |
 | 本记录所在提交 | C 组合验收、平台决定和 improve-2 输入索引。 |
 
-每批保留原有 lint/typecheck 提交钩子且通过。按已授权路线，下一步将开发分支从 `68b11ba2` 依次 fast-forward 到 C1 `0bb2d5a9`、C2 `ad92e49e` 及 C3 验收提交，再验证开发分支的组合结果。三条临时分支保留，不 push；实际合并结果随后补记。
+每批保留原有 lint/typecheck 提交钩子且通过。已按授权将 `codex/execution-reliability` 从 `68b11ba2` 依次 fast-forward 到 C1 `0bb2d5a9`、C2 `ad92e49e`、C3 `563bb7d5`，无冲突；合并后 `git diff --exit-code HEAD codex/pre-c3-bash-cleanup` 为空，确认与已验收文件树一致。
+
+开发分支上额外运行 C 组合回归：tool-scheduler 全目录、文件锁及真实文件工具、Bash scheduler/registry、shell 全目录、两份真实 composition、MCP cleanup 与资源路径回归，共 **26 文件、294 项通过**，退出码 0，10.17 秒。最终合并记录作为开发分支上的独立文档提交，不改变已测产品代码。
+
+保留分支：
+
+- `codex/pre-c1-file-lock-lifetime` → `0bb2d5a9`
+- `codex/pre-c2-resource-admission` → `ad92e49e`
+- `codex/pre-c3-bash-cleanup` → `563bb7d5`
+
+没有删除临时分支、没有 push、没有合入 main。下一次 improve-2 从本开发分支实际状态开始 S0；本次不启动 improve-2 实施。
