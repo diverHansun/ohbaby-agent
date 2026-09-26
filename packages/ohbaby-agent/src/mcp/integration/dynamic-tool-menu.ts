@@ -1,6 +1,7 @@
 import {
   withToolAdmission,
   independentToolAdmission,
+  trustedToolAdmission,
 } from "../../core/tool-scheduler/tool-admission.js";
 import { scanPromptLikeContent } from "../../core/system-prompt/security/index.js";
 import type {
@@ -162,19 +163,22 @@ function admitMcpToolUnchecked(tool: Tool): McpToolAdmissionResult {
     return reject(tool, "unsafe-schema");
   }
 
+  const admitted: Tool = {
+    ...tool,
+    category:
+      tool.isTrusted === true && tool.annotations?.readOnlyHint === true
+        ? "readonly"
+        : "write",
+    description: FIXED_MCP_TOOL_DESCRIPTION,
+    requireExplicitApproval:
+      tool.isTrusted !== true || tool.requireExplicitApproval === true,
+  };
+  // Sanitization copies the implementation object; preserve only this trusted
+  // cancellation fact capability, never claims in serialized tool metadata.
+  if (trustedToolAdmission(tool)?.settlementConfirmsCleanup === false)
+    withToolAdmission(admitted, { settlementConfirmsCleanup: false });
   return {
-    accepted: [
-      {
-        ...tool,
-        category:
-          tool.isTrusted === true && tool.annotations?.readOnlyHint === true
-            ? "readonly"
-            : "write",
-        description: FIXED_MCP_TOOL_DESCRIPTION,
-        requireExplicitApproval:
-          tool.isTrusted !== true || tool.requireExplicitApproval === true,
-      },
-    ],
+    accepted: [admitted],
     rejected: [],
   };
 }

@@ -902,7 +902,14 @@ export function createToolScheduler(
               cleanup: "unconfirmed",
             });
           });
-      if (cleaning) publish({ phase: "cleanup", cleanup: "confirmed" });
+      if (cleaning)
+        publish({
+          phase: "cleanup",
+          cleanup:
+            trustedToolAdmission(tool)?.settlementConfirmsCleanup === false
+              ? "unconfirmed"
+              : "confirmed",
+        });
     };
     // Both branches observe the original operation, including rejection after
     // timeout. Cleanup observation failure never stands in for this settlement.

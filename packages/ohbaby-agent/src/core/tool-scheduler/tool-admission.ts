@@ -12,6 +12,8 @@ export interface ResolvedToolAccess {
 }
 export interface ToolAdmission {
   readonly cleanupOwner?: "tool";
+  /** After cancellation, local request settlement cannot prove remote work stopped. */
+  readonly settlementConfirmsCleanup?: false;
   readonly capacity?: CapacityKind;
   /** No existence, permission or content checks here: predecessors have not run. */
   readonly plan?: (
