@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { activeModelProfiles } from "../../config/llm/model-profile.js";
 import {
   mergeReasoningIntent,
@@ -283,25 +284,24 @@ export async function createUiRuntimeComposition(
     });
   const subagentInstanceStore =
     options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
-  const permissionSource = options.permissionManager
-    ? createPermissionSourcePort({
-        manager: options.permissionManager,
-        bus: options.bus,
-        projectRoot: options.workdir ?? process.cwd(),
-        getSession: (sessionId) => sessionManager.get(sessionId),
-        getSubagentRecord: async (session, contextScopeId) => {
-          if (!session.parentId) return null;
-          return (
-            (await subagentInstanceStore.listByParent(session.parentId)).find(
-              (record) =>
-                record.sessionId === session.id &&
-                (contextScopeId === undefined ||
-                  record.contextScopeId === contextScopeId),
-            ) ?? null
-          );
-        },
-      })
-    : undefined;
+  const runtimeGeneration = randomUUID();
+  const permissionSource = createPermissionSourcePort({
+    manager: options.permissionManager,
+    bus: options.bus,
+    projectRoot: options.workdir ?? process.cwd(),
+    getSession: (sessionId) => sessionManager.get(sessionId),
+    getSubagentRecord: async (session, contextScopeId) => {
+      if (!session.parentId) return null;
+      return (
+        (await subagentInstanceStore.listByParent(session.parentId)).find(
+          (record) =>
+            record.sessionId === session.id &&
+            (contextScopeId === undefined ||
+              record.contextScopeId === contextScopeId),
+        ) ?? null
+      );
+    },
+  });
   const toolScheduler = createToolScheduler({
     accessGuard({ request, tool }) {
       if (tool.source !== "mcp" || !registeredMcpToolNames.has(tool.name)) {
@@ -317,7 +317,24 @@ export async function createUiRuntimeComposition(
     },
     agentTools: agentManager,
     bus: options.bus,
-    permission: permissionSource ?? options.permission,
+    permission: options.permissionManager
+      ? permissionSource
+      : options.permission,
+    async resolveOwner(request) {
+      const source = await permissionSource.resolveSource(request);
+      if (!source) throw new Error("Tool owner resolution was cancelled");
+      return {
+        sessionId: request.sessionId,
+        runId: request.runId,
+        messageId: request.messageId,
+        callId: request.callId,
+        contextScopeId: request.contextScopeId,
+        scopeKey: request.environment?.scopeKey,
+        workspaceKey: permissionSource.workspaceKey,
+        rootSessionId: source.rootSessionId,
+        runtimeGeneration,
+      };
+    },
     permissionState: options.permissionState,
   });
   const sandboxManager =
@@ -1063,7 +1080,7 @@ export async function createUiRuntimeComposition(
     },
     async dispose(): Promise<void> {
       unsubscribeSessionRemoved();
-      permissionSource?.dispose();
+      permissionSource.dispose();
       todoService.dispose();
       todoWorkScopes.dispose();
       toolScheduler.cancelAll();

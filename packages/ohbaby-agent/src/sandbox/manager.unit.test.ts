@@ -335,6 +335,28 @@ describe("SandboxManager", () => {
     expect(manager.getContext("session_1")?.leaseCount).toBe(0);
   });
 
+  it("retains a run lease until every real tool releases its reference", async () => {
+    const { manager } = createManager();
+    await manager.createContext("session_1", {
+      adapterId: "fake",
+      workdir: "D:/repo",
+    });
+    const lease = await manager.acquire("session_1");
+    if (!lease.retain)
+      throw new Error("Built-in sandbox lease must support retain");
+    const releaseToolA = lease.retain();
+    const releaseToolB = lease.retain();
+    await lease.release();
+    await lease.release();
+    expect(manager.getContext("session_1")?.leaseCount).toBe(1);
+    await releaseToolA();
+    await releaseToolA();
+    expect(manager.getContext("session_1")?.leaseCount).toBe(1);
+    await releaseToolB();
+    expect(manager.getContext("session_1")?.leaseCount).toBe(0);
+    expect(() => lease.retain?.()).toThrow("released");
+  });
+
   it("returns immutable capability snapshots for contexts and leases", async () => {
     const { manager } = createManager();
     const context = await manager.createContext("session_1", {
@@ -382,6 +404,39 @@ describe("SandboxManager", () => {
 
     expect(adapter.destroyed).toHaveLength(1);
     expect(manager.getContext("session_1")).toBeUndefined();
+  });
+
+  it("defers physical destruction past drain timeout until retained tools finish", async () => {
+    const { adapter, manager } = createManager({ drainTimeoutMs: 1 });
+    await manager.createContext("session_1", {
+      adapterId: "fake",
+      workdir: "D:/repo",
+    });
+    const lease = await manager.acquire("session_1");
+    if (!lease.retain) throw new Error("Built-in lease must retain tools");
+    const releaseFirst = lease.retain();
+    const releaseSecond = lease.retain();
+    await lease.release();
+    const destroying = manager.destroyContext("session_1");
+    await expect(manager.acquire("session_1")).rejects.toBeInstanceOf(
+      SandboxContextNotFoundError,
+    );
+    await destroying;
+    await manager.destroyContext("session_1");
+    await manager.dispose();
+    expect(adapter.destroyed).toHaveLength(0);
+    expect(manager.getContext("session_1")).toMatchObject({
+      status: "destroying",
+      leaseCount: 1,
+    });
+    await releaseSecond();
+    await releaseSecond();
+    expect(adapter.destroyed).toHaveLength(0);
+    await releaseFirst();
+    expect(adapter.destroyed).toHaveLength(1);
+    expect(manager.getContext("session_1")).toBeUndefined();
+    await manager.destroyContext("session_1");
+    expect(adapter.destroyed).toHaveLength(1);
   });
 
   it("force drains leaked leases and keeps late releases idempotent", async () => {

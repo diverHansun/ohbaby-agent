@@ -1487,6 +1487,13 @@ describe("createUiRuntimeComposition skill tools", () => {
       skillRegistry: createMutableSkillRegistry([]),
     });
 
+    await composition.ensureSessionRecord({
+      id: "session_1",
+      agentName: "build",
+      projectRoot: process.cwd(),
+      title: "MCP resource test",
+    });
+
     await expect(
       composition.toolScheduler.execute({
         agentName: "build",
@@ -1650,6 +1657,13 @@ describe("createUiRuntimeComposition skill tools", () => {
         mcpTools: [mcpTool(toolName, "Look up repository release notes")],
         policyMode: "agent",
       });
+
+    await composition.ensureSessionRecord({
+      id: "session_search_mcp",
+      agentName: "build",
+      projectRoot: workdir,
+      title: "MCP search test",
+    });
 
     const searchResult = await composition.toolScheduler.execute({
       agentName: "build",

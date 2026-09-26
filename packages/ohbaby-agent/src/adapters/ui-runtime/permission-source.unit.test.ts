@@ -96,6 +96,43 @@ async function waitPending(
 }
 
 describe("permission source port", () => {
+  it("resolves trusted ancestry without creating an approval", async () => {
+    const { port, manager } = setup();
+    expect(await port.resolveSource({ sessionId: "child" })).toMatchObject({
+      rootSessionId: "root",
+      ancestorSessionIds: ["middle", "root"],
+    });
+    expect(manager.listPending()).toHaveLength(0);
+    expect(port.workspaceKey).toBe(
+      process.platform === "win32"
+        ? process.cwd().toLowerCase()
+        : process.cwd(),
+    );
+  });
+
+  it("resolves owners without a permission manager and honours cancellation", async () => {
+    const gate = deferred<Session | null>();
+    const port = createPermissionSourcePort({
+      bus: createBus(),
+      projectRoot: process.cwd(),
+      getSession: () => gate.promise,
+    });
+    cleanups.push(() => {
+      port.dispose();
+    });
+    const controller = new AbortController();
+    const pending = port.resolveSource({
+      sessionId: "root",
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).resolves.toBeUndefined();
+    gate.resolve(session("root"));
+    await expect(
+      port.resolveSource({ sessionId: "root" }),
+    ).resolves.toMatchObject({ rootSessionId: "root" });
+  });
+
   it("freezes the trusted source ancestry and preserves the real call identity", async () => {
     const { port, manager } = setup();
     const answer = port.ask(input());

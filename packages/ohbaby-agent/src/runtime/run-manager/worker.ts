@@ -111,6 +111,8 @@ function toToolExecutionEnvironment(
 
   return {
     workdir: lease.workdir,
+    scopeKey: lease.scopeKey,
+    retain: lease.retain?.bind(lease),
     containsTrustedPath: lease.containsTrustedPath.bind(lease),
     resolveCommandContext: lease.resolveCommandContext.bind(lease),
     preflight: lease.preflight.bind(lease),

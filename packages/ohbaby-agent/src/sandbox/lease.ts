@@ -52,9 +52,15 @@ export function createSandboxLease(input: {
   readonly context: InternalSandboxContext;
   readonly leaseId: string;
   readonly release: (leaseId: string) => Promise<void>;
+  readonly retain?: () => () => Promise<void>;
 }): SandboxLease {
   let released = false;
+  let references = 1;
   const { context } = input;
+  async function releaseReference(): Promise<void> {
+    references -= 1;
+    if (references === 0) await input.release(input.leaseId);
+  }
 
   return {
     adapterId: context.adapterId,
@@ -113,12 +119,28 @@ export function createSandboxLease(input: {
       return context.trustedRoots.snapshot();
     },
 
+    retain(): () => Promise<void> {
+      if (released) throw new Error("Cannot retain a released sandbox lease");
+      const releaseRetention = input.retain?.();
+      references += 1;
+      let referenceReleased = false;
+      return async (): Promise<void> => {
+        if (referenceReleased) return;
+        referenceReleased = true;
+        try {
+          await releaseReference();
+        } finally {
+          await releaseRetention?.();
+        }
+      };
+    },
+
     async release(): Promise<void> {
       if (released) {
         return;
       }
       released = true;
-      await input.release(input.leaseId);
+      await releaseReference();
     },
   };
 }

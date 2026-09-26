@@ -12,7 +12,7 @@ import { SessionEvent } from "../../services/session/events.js";
 import type { Session } from "../../services/session/types.js";
 
 export interface PermissionSourcePortOptions {
-  readonly manager: Pick<
+  readonly manager?: Pick<
     PermissionManager,
     "ask" | "state" | "revokeBySession"
   >;
@@ -29,6 +29,12 @@ export interface PermissionSourcePortOptions {
 }
 
 export interface PermissionSourcePort extends PermissionPort {
+  readonly workspaceKey: string;
+  resolveSource(input: {
+    readonly sessionId: string;
+    readonly contextScopeId?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<PermissionSource | undefined>;
   dispose(): void;
 }
 
@@ -104,7 +110,7 @@ export function createPermissionSourcePort(
 
   function invalidate(sessionId: string): void {
     invalidations.set(sessionId, ++generation);
-    options.manager.revokeBySession(sessionId, "source_invalidated");
+    options.manager?.revokeBySession(sessionId, "source_invalidated");
     pruneEvents();
   }
 
@@ -231,59 +237,79 @@ export function createPermissionSourcePort(
     }
   }
 
-  return {
-    state: options.manager.state,
-    async ask(input): Promise<SchedulerPermissionResponse> {
-      if (disposal.signal.aborted || input.signal.aborted) return "cancel";
-      const current: SourceResolution = {
-        startedGeneration: generation,
-        nodes: new Map(),
-        resolving: true,
+  async function withResolvedSource<T>(
+    input: {
+      readonly sessionId: string;
+      readonly contextScopeId?: string;
+      readonly signal?: AbortSignal;
+    },
+    consume: (source: PermissionSource) => T | Promise<T>,
+  ): Promise<T | undefined> {
+    if (disposal.signal.aborted || input.signal?.aborted) return undefined;
+    const current: SourceResolution = {
+      startedGeneration: generation,
+      nodes: new Map(),
+      resolving: true,
+    };
+    resolutions.add(current);
+    const signal = input.signal
+      ? AbortSignal.any([input.signal, disposal.signal])
+      : disposal.signal;
+    let onAbort: () => void = () => undefined;
+    const cancelled = new Promise<undefined>((resolve) => {
+      onAbort = (): void => {
+        resolve(undefined);
       };
-      resolutions.add(current);
-      const signal = AbortSignal.any([input.signal, disposal.signal]);
-      let onAbort: () => void = () => undefined;
-      const cancelled = new Promise<undefined>((resolve) => {
-        onAbort = (): void => {
-          resolve(undefined);
-        };
-        signal.addEventListener("abort", onAbort, { once: true });
-      });
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      let source: PermissionSource | undefined;
       try {
-        let source: PermissionSource | undefined;
-        try {
-          source = await Promise.race([
-            resolveSource(
-              input.sessionId,
-              current,
-              signal,
-              input.contextScopeId,
-            ),
-            cancelled,
-          ]);
-        } catch (error) {
-          if (error instanceof PermissionSourceError) throw error;
-          throw new PermissionSourceError(
-            `could not resolve session ${input.sessionId}`,
-            { cause: error },
-          );
-        }
-        if (!source || signal.aborted) return "cancel";
-        // No await between final validation and registration in the manager.
-        assertCurrent(current);
-        current.resolving = false;
-        pruneEvents();
-        return await options.manager.ask({
-          ...input,
-          category:
-            input.category === "subagent-control" ? "subagent" : input.category,
-          source,
-        });
-      } finally {
-        signal.removeEventListener("abort", onAbort);
-        resolutions.delete(current);
-        pruneEvents();
+        source = await Promise.race([
+          resolveSource(input.sessionId, current, signal, input.contextScopeId),
+          cancelled,
+        ]);
+      } catch (error) {
+        if (error instanceof PermissionSourceError) throw error;
+        throw new PermissionSourceError(
+          `could not resolve session ${input.sessionId}`,
+          { cause: error },
+        );
       }
+      if (!source || signal.aborted) return undefined;
+      // No await between final validation and registration in the manager.
+      assertCurrent(current);
+      current.resolving = false;
+      pruneEvents();
+      return await consume(source);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+      resolutions.delete(current);
+      pruneEvents();
+    }
+  }
+
+  return {
+    state: options.manager?.state,
+    workspaceKey: workspace,
+    resolveSource(input): Promise<PermissionSource | undefined> {
+      return withResolvedSource(input, (source) => source);
+    },
+    async ask(input): Promise<SchedulerPermissionResponse> {
+      if (!options.manager) return "reject";
+      const manager = options.manager;
+      return (
+        (await withResolvedSource(input, (source) =>
+          manager.ask({
+            ...input,
+            category:
+              input.category === "subagent-control"
+                ? "subagent"
+                : input.category,
+            source,
+          }),
+        )) ?? "cancel"
+      );
     },
     dispose(): void {
       unsubscribeRemoved();

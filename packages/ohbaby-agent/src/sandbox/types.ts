@@ -149,6 +149,8 @@ export interface SandboxLease {
   preflight(command: string, shellKind: ShellKind): Promise<PreflightResult>;
   trustPath(input: TrustPathInput): Promise<TrustedRoot>;
   trustedRoots(): readonly TrustedRoot[];
+  /** Retains adapter state for an actual tool operation beyond logical run completion. */
+  retain?(): () => Promise<void>;
   release(): Promise<void>;
 }
 
