@@ -4,6 +4,9 @@
 
 用户已授权在第一轮尚未实施时提前规划。进入本轮实施前，必须核对 **improve-1、improve-1.1、独立前置 C** 的实际代码和验收证据；不将前置规划当作现有能力。
 
+
+2026-09-26 S0 输入更新：improve-1、improve-1.1 已在开发基线 `68b11ba2`；前置 C 的组合验证、补修、平台范围与合并记录见 [整项 C 验收](../pre/05-implementation-acceptance.md)。用户明确 Windows/Linux 留后续，不阻塞本次 macOS C 验收。本轮尚未实施，S0 仍须核对真实 owner、准入、取消、事实 hook 与持久化接线，不能把 C 通过等同于 improve-2 通过。
+
 ## 阅读顺序
 
 1. [00 已确认行为](00-discussion.md)
