@@ -1,14 +1,16 @@
 # 独立前置工作索引
 
-> 2026-09-24 按用户要求，将 A、B、C 各自的讨论、方案和验收要求集中在一份文档中。本页只保留导航和实施顺序，不重复维护具体规则。A 已在本地实施并进入验收；B 已在独立本地分支实施，验收记录见其文末；C 仍是规划。
+> 2026-09-24 按用户要求，将 A、B、C 各自的讨论、方案和验收要求集中在一份文档中。本页只保留导航和实施顺序，不重复维护具体规则。A 已在本地实施并进入验收；B 已在独立本地分支实施，验收记录见其文末；C1 已完成锁层验收，C2 已完成本地实施验收，C3 与完整 C 组合门仍待完成。
 
 | 工作 | 独立文档 | 当前进度 |
 |---|---|---|
 | A 最终结果提取 | [a-final-result.md](a-final-result.md) | 独立验收问题已补修，全量复验与 Pi 复审通过，具备本地合回条件；保留 pre-a 分支 |
 | B 文件工具增强 | [b-file-tools.md](b-file-tools.md) | 已在 `codex/execution-reliability-pre-b` 实施；具体预算、接口、测试与审核记录见 B 文档 S0 及文末；C 联动验收仍留给 C |
-| C 并发与资源保护 | [c-concurrency-and-resource-protection.md](c-concurrency-and-resource-protection.md) | 锁与超时分工、每会话普通容量及计数范围已确认；第二/四轮开始记录已统一；Grep 按文件或整个目录树声明读范围，由 C 统一保护，不另建锁；具体接线和验收证据仍须补齐 |
+| C 并发与资源保护 | [c-concurrency-and-resource-protection.md](c-concurrency-and-resource-protection.md) | C1 锁层、C2 资源访问与会话容量已在继承分支完成本地验收；C3 Bash/后台清理和完整 C 组合门仍待完成 |
 
-2026-09-25：C1 已在本地临时分支 `codex/pre-c1-file-lock-lifetime` 实施，锁层验证与独立审查见 [C1 实施与验收](c1-implementation-acceptance.md)。C2/C3 未实施，完整 C 组合门未通过；C1 未合回或推送，不据此将整项 C 标为完成。
+2026-09-25：C1 已在本地临时分支 `codex/pre-c1-file-lock-lifetime` 实施，锁层验证与独立审查见 [C1 实施与验收](c1-implementation-acceptance.md)。当时 C2/C3 未实施，完整 C 组合门未通过；C1 未合回或推送，不据此将整项 C 标为完成。
+
+2026-09-26：C2 从 C1 的 `0bb2d5a9` 继承，在本地临时分支 `codex/pre-c2-resource-admission` 完成资源访问、会话容量与真实 owner/清理接口的本地实施验收，证据见 [C2 实施与验收](c2-implementation-acceptance.md)。C3 后续从 C2 继续；完整 C 尚未验收，不合并、不推送。
 
 ## 实施顺序
 
