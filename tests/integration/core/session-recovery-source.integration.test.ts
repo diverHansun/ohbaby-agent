@@ -66,14 +66,20 @@ describe("session recovery through real lifecycle", () => {
         clientRequestId: "test-recovery",
       });
       await emitted.promise;
-      const baseline = await backend.getSessionView!({ sessionId: session.id });
-      expect(
-        baseline.session.messages.some((message) =>
-          message.parts.some(
-            (part) => part.type === "text" && part.text === "first ",
+      // The provider yield is upstream of message persistence and the UI
+      // projection. Capture the cut only once that projection contains the
+      // first chunk, while the provider is still blocked on resume.
+      const baseline = await vi.waitFor(async () => {
+        const view = await backend.getSessionView!({ sessionId: session.id });
+        expect(
+          view.session.messages.some((message) =>
+            message.parts.some(
+              (part) => part.type === "text" && part.text === "first ",
+            ),
           ),
-        ),
-      ).toBe(true);
+        ).toBe(true);
+        return view;
+      });
       expect(baseline.version.runtimeEpoch).toBe(
         (await backend.getPermissionSnapshot({ rootSessionId: session.id }))
           .permissionEpoch,
