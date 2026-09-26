@@ -1,3 +1,4 @@
+import type { ResourceAccess, ResourceLease } from "./resources.js";
 import type { BusInstance } from "../../bus/index.js";
 import type {
   PermissionDecision,
@@ -65,6 +66,8 @@ export interface ToolCommandContextOptions {
 }
 
 export interface ToolExecutionEnvironment {
+  readonly scopeKey?: string;
+  retain?(): () => void | Promise<void>;
   readonly workdir: string;
   containsTrustedPath?(absolutePath: string): boolean;
   resolvePath(inputPath: string): string;
@@ -86,6 +89,8 @@ export interface ToolExecutionEnvironment {
 }
 
 export interface ToolExecutionContext {
+  readonly resourceLease?: ResourceLease;
+  readonly owner?: ToolExecutionOwner;
   /** Actual execution identity; absent only for standalone noninteractive calls. */
   readonly runId?: string;
   readonly signal: AbortSignal;
@@ -213,7 +218,10 @@ export interface AgentToolConfigProvider {
 }
 
 export interface ConcurrencyConfig {
-  readonly maxReadConcurrency: number;
+  /** Maximum ordinary executions per session, across all batches and categories. */
+  readonly maxConcurrency?: number;
+  /** Legacy name for ordinary capacity; used when maxConcurrency is absent. */
+  readonly maxReadConcurrency?: number;
   readonly maxSubagentConcurrency: number;
 }
 
@@ -260,7 +268,43 @@ export interface ToolScheduler {
   getPendingCalls(): ToolCall[];
 }
 
+export interface ToolExecutionOwner {
+  readonly workspaceKey?: string;
+  readonly sessionId: string;
+  readonly runId?: string;
+  readonly messageId: string;
+  readonly callId: string;
+  readonly contextScopeId?: string;
+  readonly scopeKey?: string;
+  readonly rootSessionId?: string;
+  readonly runtimeGeneration?: string;
+}
+export type AdmissionWaitReason =
+  | "capacity"
+  | "predecessor"
+  | "resource"
+  | "source-cleanup";
+export interface ToolExecutionFact {
+  readonly owner: ToolExecutionOwner;
+  readonly phase: "waiting" | "started" | "settled" | "cleanup";
+  readonly timestamp: number;
+  readonly reason?: AdmissionWaitReason;
+  readonly resources?: readonly ResourceAccess[];
+  readonly cleanup?: "in-progress" | "confirmed" | "unconfirmed";
+  readonly outcome?: ToolCallResult;
+}
 export interface ToolSchedulerOptions {
+  readonly resolveOwner?: (
+    request: ToolCallRequest,
+  ) => ToolExecutionOwner | Promise<ToolExecutionOwner>;
+  /** Awaitable delivery hook; admission and cancellation do not wait for persistence. */
+  readonly onExecutionFact?: (fact: ToolExecutionFact) => void | Promise<void>;
+  readonly onExecutionFactError?: (
+    error: unknown,
+    fact: ToolExecutionFact,
+  ) => void;
+  readonly cleanupObservationMs?: number;
+
   readonly bus: BusInstance;
   readonly permissionState?: PermissionStateStore;
   readonly permission?: PermissionPort;

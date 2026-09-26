@@ -1,3 +1,4 @@
+import { withFileAccess } from "./utils/file-access.js";
 import type {
   Tool,
   ToolExecutionResult,
@@ -17,54 +18,57 @@ import {
 } from "./utils/text-files.js";
 
 export function createGlobTool(): Tool {
-  return {
-    name: "glob",
-    description: "Find files by glob pattern in the execution workspace.",
-    parametersJsonSchema: {
-      additionalProperties: false,
-      properties: {
-        limit: { minimum: 1, type: "integer" },
-        path: FILE_PATH_SCHEMA,
-        pattern: { type: "string" },
+  return withFileAccess(
+    {
+      name: "glob",
+      description: "Find files by glob pattern in the execution workspace.",
+      parametersJsonSchema: {
+        additionalProperties: false,
+        properties: {
+          limit: { minimum: 1, type: "integer" },
+          path: FILE_PATH_SCHEMA,
+          pattern: { type: "string" },
+        },
+        required: ["pattern"],
+        type: "object",
       },
-      required: ["pattern"],
-      type: "object",
-    },
-    source: "builtin",
-    category: "readonly",
-    annotations: { readOnlyHint: true },
-    async execute(params, context): Promise<ToolExecutionResult> {
-      const pattern = getStringParam(params, "pattern");
-      const inputPath = getOptionalStringParam(params, "path") ?? ".";
-      const limit = getNumberParam(params, "limit", {
-        defaultValue: DEFAULT_SEARCH_LIMIT,
-        integer: true,
-        min: 1,
-      });
-      const matcher = createGlobMatcher(pattern);
-      const resolvedPath = await resolvePathForExisting(context, inputPath);
-      const matches: string[] = [];
-      const scan = await scanFiles({
-        basePath: resolvedPath,
-        maxVisitedFiles: MAX_SEARCH_VISITED_FILES,
-        visit(file) {
-          if (matcher(file.relativePath)) {
-            matches.push(file.relativePath);
-          }
+      source: "builtin",
+      category: "readonly",
+      annotations: { readOnlyHint: true },
+      async execute(params, context): Promise<ToolExecutionResult> {
+        const pattern = getStringParam(params, "pattern");
+        const inputPath = getOptionalStringParam(params, "path") ?? ".";
+        const limit = getNumberParam(params, "limit", {
+          defaultValue: DEFAULT_SEARCH_LIMIT,
+          integer: true,
+          min: 1,
+        });
+        const matcher = createGlobMatcher(pattern);
+        const resolvedPath = await resolvePathForExisting(context, inputPath);
+        const matches: string[] = [];
+        const scan = await scanFiles({
+          basePath: resolvedPath,
+          maxVisitedFiles: MAX_SEARCH_VISITED_FILES,
+          visit(file) {
+            if (matcher(file.relativePath)) {
+              matches.push(file.relativePath);
+            }
 
-          return matches.length < limit;
-        },
-      });
-      const truncated = scan.truncated || matches.length >= limit;
+            return matches.length < limit;
+          },
+        });
+        const truncated = scan.truncated || matches.length >= limit;
 
-      return {
-        output: renderList(matches, "No files matched."),
-        metadata: {
-          count: matches.length,
-          truncated,
-          visitedFileCount: scan.visitedFileCount,
-        },
-      };
+        return {
+          output: renderList(matches, "No files matched."),
+          metadata: {
+            count: matches.length,
+            truncated,
+            visitedFileCount: scan.visitedFileCount,
+          },
+        };
+      },
     },
-  };
+    "tree",
+  );
 }

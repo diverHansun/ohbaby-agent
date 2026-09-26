@@ -1,3 +1,7 @@
+import {
+  withToolAdmission,
+  independentToolAdmission,
+} from "../core/tool-scheduler/tool-admission.js";
 import type {
   Tool,
   ToolExecutionContext,
@@ -31,7 +35,9 @@ export interface WebToolsOptions {
 }
 
 export function createWebTools(options: WebToolsOptions = {}): Tool[] {
-  return [createWebSearchTool(options), createWebFetchTool(options)];
+  return [createWebSearchTool(options), createWebFetchTool(options)].map(
+    (tool) => withToolAdmission(tool, independentToolAdmission),
+  );
 }
 
 function createWebSearchTool(options: WebToolsOptions): Tool {

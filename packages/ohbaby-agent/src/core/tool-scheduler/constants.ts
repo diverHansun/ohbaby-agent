@@ -2,7 +2,7 @@ import type { ToolCategory, ToolSchedulerConfig } from "./types.js";
 
 export const DEFAULT_TOOL_SCHEDULER_CONFIG: ToolSchedulerConfig = {
   concurrency: {
-    maxReadConcurrency: 5,
+    maxReadConcurrency: 10,
     maxSubagentConcurrency: 3,
   },
   timeout: {

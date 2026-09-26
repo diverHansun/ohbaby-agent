@@ -1,3 +1,4 @@
+import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type {
@@ -481,76 +482,82 @@ function snapshotResult(snapshot: ShellJobSnapshot): ToolExecutionResult {
 }
 
 export function createTaskOutputTool(registry: ShellJobRegistry): Tool {
-  return {
-    annotations: { readOnlyHint: true },
-    category: "subagent-control",
-    description:
-      "Read a shell job's current bounded tail-output snapshot. With block=true, wait up to wait_ms for the job to finish; wait_ms only limits this read and never changes the bash job timeout.",
-    name: "task_output",
-    parametersJsonSchema: {
-      additionalProperties: false,
-      properties: {
-        block: { default: false, type: "boolean" },
-        job_id: { type: "string" },
-        wait_ms: {
-          default: DEFAULT_TASK_OUTPUT_WAIT_MS,
-          maximum: MAX_SHELL_JOB_TIMEOUT_MS,
-          minimum: 1,
-          type: "integer",
+  return withToolAdmission(
+    {
+      annotations: { readOnlyHint: true },
+      category: "subagent-control",
+      description:
+        "Read a shell job's current bounded tail-output snapshot. With block=true, wait up to wait_ms for the job to finish; wait_ms only limits this read and never changes the bash job timeout.",
+      name: "task_output",
+      parametersJsonSchema: {
+        additionalProperties: false,
+        properties: {
+          block: { default: false, type: "boolean" },
+          job_id: { type: "string" },
+          wait_ms: {
+            default: DEFAULT_TASK_OUTPUT_WAIT_MS,
+            maximum: MAX_SHELL_JOB_TIMEOUT_MS,
+            minimum: 1,
+            type: "integer",
+          },
         },
+        required: ["job_id"],
+        type: "object",
       },
-      required: ["job_id"],
-      type: "object",
-    },
-    source: "builtin",
-    timeoutOwner: "tool",
-    async execute(params, context): Promise<ToolExecutionResult> {
-      const block = params.block ?? false;
-      if (typeof block !== "boolean") {
-        throw new ToolParameterError(
-          'Expected parameter "block" to be a boolean.',
+      source: "builtin",
+      timeoutOwner: "tool",
+      async execute(params, context): Promise<ToolExecutionResult> {
+        const block = params.block ?? false;
+        if (typeof block !== "boolean") {
+          throw new ToolParameterError(
+            'Expected parameter "block" to be a boolean.',
+          );
+        }
+        const waitMs = getNumberParam(params, "wait_ms", {
+          defaultValue: DEFAULT_TASK_OUTPUT_WAIT_MS,
+          integer: true,
+          max: MAX_SHELL_JOB_TIMEOUT_MS,
+          min: 1,
+        });
+        return snapshotResult(
+          await registry.output(
+            getRequiredNonEmptyStringParam(params, "job_id"),
+            context.sessionId,
+            { block, signal: context.signal, waitMs },
+            context.contextScopeId,
+          ),
         );
-      }
-      const waitMs = getNumberParam(params, "wait_ms", {
-        defaultValue: DEFAULT_TASK_OUTPUT_WAIT_MS,
-        integer: true,
-        max: MAX_SHELL_JOB_TIMEOUT_MS,
-        min: 1,
-      });
-      return snapshotResult(
-        await registry.output(
-          getRequiredNonEmptyStringParam(params, "job_id"),
-          context.sessionId,
-          { block, signal: context.signal, waitMs },
-          context.contextScopeId,
-        ),
-      );
+      },
     },
-  };
+    { capacity: "control", plan: () => [] },
+  );
 }
 
 export function createTaskKillTool(registry: ShellJobRegistry): Tool {
-  return {
-    category: "subagent-control",
-    description:
-      "Cancel a running shell job (stop/kill are equivalent). A cancelled job is distinct from an automatically timed_out job; killing an already terminal job is idempotent.",
-    name: "task_kill",
-    parametersJsonSchema: {
-      additionalProperties: false,
-      properties: { job_id: { type: "string" } },
-      required: ["job_id"],
-      type: "object",
+  return withToolAdmission(
+    {
+      category: "subagent-control",
+      description:
+        "Cancel a running shell job (stop/kill are equivalent). A cancelled job is distinct from an automatically timed_out job; killing an already terminal job is idempotent.",
+      name: "task_kill",
+      parametersJsonSchema: {
+        additionalProperties: false,
+        properties: { job_id: { type: "string" } },
+        required: ["job_id"],
+        type: "object",
+      },
+      source: "builtin",
+      timeoutOwner: "tool",
+      async execute(params, context): Promise<ToolExecutionResult> {
+        return snapshotResult(
+          await registry.kill(
+            getRequiredNonEmptyStringParam(params, "job_id"),
+            context.sessionId,
+            context.contextScopeId,
+          ),
+        );
+      },
     },
-    source: "builtin",
-    timeoutOwner: "tool",
-    async execute(params, context): Promise<ToolExecutionResult> {
-      return snapshotResult(
-        await registry.kill(
-          getRequiredNonEmptyStringParam(params, "job_id"),
-          context.sessionId,
-          context.contextScopeId,
-        ),
-      );
-    },
-  };
+    { capacity: "control", plan: () => [] },
+  );
 }

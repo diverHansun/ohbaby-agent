@@ -1,3 +1,4 @@
+import { withFileAccess } from "./utils/file-access.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -56,99 +57,102 @@ const STOP_NOTICE: Record<SearchStopReason, string> = {
 };
 
 export function createGrepTool(): Tool {
-  return {
-    name: "grep",
-    description:
-      "Locate matching lines with ripgrep's default regex syntax (no look-around or backreferences). Returns paths, line numbers and limited previews; use Read for full content. Directory searches honor project .gitignore/.ignore/.rgignore, include hidden files and exclude .git traversal; parent/global ignores are disabled. Explicit include uses rg glob precedence and can override ignores, but does not filter explicitly named files. Binary files and arbitrary encodings are not guaranteed; previews may be unavailable. Use Bash explicitly for other encodings or raw bytes. No pagination or export.",
-    parametersJsonSchema: {
-      additionalProperties: false,
-      properties: {
-        include: { type: "string" },
-        limit: { minimum: 1, type: "integer" },
-        path: FILE_PATH_SCHEMA,
-        pattern: { type: "string" },
+  return withFileAccess(
+    {
+      name: "grep",
+      description:
+        "Locate matching lines with ripgrep's default regex syntax (no look-around or backreferences). Returns paths, line numbers and limited previews; use Read for full content. Directory searches honor project .gitignore/.ignore/.rgignore, include hidden files and exclude .git traversal; parent/global ignores are disabled. Explicit include uses rg glob precedence and can override ignores, but does not filter explicitly named files. Binary files and arbitrary encodings are not guaranteed; previews may be unavailable. Use Bash explicitly for other encodings or raw bytes. No pagination or export.",
+      parametersJsonSchema: {
+        additionalProperties: false,
+        properties: {
+          include: { type: "string" },
+          limit: { minimum: 1, type: "integer" },
+          path: FILE_PATH_SCHEMA,
+          pattern: { type: "string" },
+        },
+        required: ["pattern"],
+        type: "object",
       },
-      required: ["pattern"],
-      type: "object",
+      source: "builtin",
+      category: "readonly",
+      annotations: { readOnlyHint: true },
+      async execute(params, context): Promise<ToolExecutionResult> {
+        const pattern = getStringParam(params, "pattern");
+        const include = getOptionalStringParam(params, "include");
+        const inputPath = getOptionalStringParam(params, "path") ?? ".";
+        const limit = getNumberParam(params, "limit", {
+          defaultValue: DEFAULT_SEARCH_LIMIT,
+          integer: true,
+          min: 1,
+        });
+        if (context.signal.aborted)
+          throw context.signal.reason instanceof Error
+            ? context.signal.reason
+            : new Error("Search cancelled.");
+        const resolvedPath = await resolvePathForExisting(context, inputPath);
+        const stats = await fs.stat(resolvedPath);
+        if (!stats.isDirectory() && !stats.isFile())
+          throw new Error(
+            "Search failed: path must be a regular file or directory.",
+          );
+        const matches: string[] = [];
+        let outputBytes = 0;
+        const display = { limited: false };
+        const result = await searchWithRipgrep({
+          executablePath: resolveBundledRipgrepPath(),
+          cwd: stats.isDirectory() ? resolvedPath : path.dirname(resolvedPath),
+          target: resolvedPath,
+          pattern,
+          include,
+          signal: context.signal,
+          onMatch(match) {
+            const rendered = preview(match);
+            const line = `${match.path}:${String(match.line)}: ${rendered.text}`;
+            const cost = Buffer.byteLength(line) + 1;
+            if (outputBytes + cost > OUTPUT_BYTES - NOTICE_RESERVE_BYTES)
+              return "output-limit";
+            matches.push(line);
+            outputBytes += cost;
+            display.limited ||= rendered.limited;
+            return matches.length >= limit ? "match-limit" : undefined;
+          },
+        });
+        const scanComplete = !result.stopReason && result.binaryFileCount === 0;
+        const notices: string[] = [];
+        if (result.stopReason)
+          notices.push(
+            `Search incomplete: ${STOP_NOTICE[result.stopReason]} Narrow path/include/pattern.`,
+          );
+        if (result.binaryFileCount)
+          notices.push(
+            `Search incomplete: binary detection stopped or suppressed content in ${String(result.binaryFileCount)} file(s). Binary contents are outside the text-search guarantee.`,
+          );
+        if (display.limited)
+          notices.push(
+            "Result display limited: some previews are omitted or unavailable. Use Read at the returned path and line for details (Read supports UTF-8).",
+          );
+        const output = [
+          matches.length
+            ? matches.join("\n")
+            : scanComplete
+              ? "No matches found in the declared text-search scope (binary contents are not guaranteed)."
+              : "No matching locations were returned from the scanned portion.",
+          ...notices,
+        ].join("\n\n");
+        return {
+          output,
+          metadata: {
+            count: matches.length,
+            scanComplete,
+            displayLimited: display.limited || Boolean(result.stopReason),
+            truncated: !scanComplete || display.limited,
+            stopReason: result.stopReason,
+            binaryFileCount: result.binaryFileCount,
+            processExited: result.processExited,
+          },
+        };
+      },
     },
-    source: "builtin",
-    category: "readonly",
-    annotations: { readOnlyHint: true },
-    async execute(params, context): Promise<ToolExecutionResult> {
-      const pattern = getStringParam(params, "pattern");
-      const include = getOptionalStringParam(params, "include");
-      const inputPath = getOptionalStringParam(params, "path") ?? ".";
-      const limit = getNumberParam(params, "limit", {
-        defaultValue: DEFAULT_SEARCH_LIMIT,
-        integer: true,
-        min: 1,
-      });
-      if (context.signal.aborted)
-        throw context.signal.reason instanceof Error
-          ? context.signal.reason
-          : new Error("Search cancelled.");
-      const resolvedPath = await resolvePathForExisting(context, inputPath);
-      const stats = await fs.stat(resolvedPath);
-      if (!stats.isDirectory() && !stats.isFile())
-        throw new Error(
-          "Search failed: path must be a regular file or directory.",
-        );
-      const matches: string[] = [];
-      let outputBytes = 0;
-      const display = { limited: false };
-      const result = await searchWithRipgrep({
-        executablePath: resolveBundledRipgrepPath(),
-        cwd: stats.isDirectory() ? resolvedPath : path.dirname(resolvedPath),
-        target: resolvedPath,
-        pattern,
-        include,
-        signal: context.signal,
-        onMatch(match) {
-          const rendered = preview(match);
-          const line = `${match.path}:${String(match.line)}: ${rendered.text}`;
-          const cost = Buffer.byteLength(line) + 1;
-          if (outputBytes + cost > OUTPUT_BYTES - NOTICE_RESERVE_BYTES)
-            return "output-limit";
-          matches.push(line);
-          outputBytes += cost;
-          display.limited ||= rendered.limited;
-          return matches.length >= limit ? "match-limit" : undefined;
-        },
-      });
-      const scanComplete = !result.stopReason && result.binaryFileCount === 0;
-      const notices: string[] = [];
-      if (result.stopReason)
-        notices.push(
-          `Search incomplete: ${STOP_NOTICE[result.stopReason]} Narrow path/include/pattern.`,
-        );
-      if (result.binaryFileCount)
-        notices.push(
-          `Search incomplete: binary detection stopped or suppressed content in ${String(result.binaryFileCount)} file(s). Binary contents are outside the text-search guarantee.`,
-        );
-      if (display.limited)
-        notices.push(
-          "Result display limited: some previews are omitted or unavailable. Use Read at the returned path and line for details (Read supports UTF-8).",
-        );
-      const output = [
-        matches.length
-          ? matches.join("\n")
-          : scanComplete
-            ? "No matches found in the declared text-search scope (binary contents are not guaranteed)."
-            : "No matching locations were returned from the scanned portion.",
-        ...notices,
-      ].join("\n\n");
-      return {
-        output,
-        metadata: {
-          count: matches.length,
-          scanComplete,
-          displayLimited: display.limited || Boolean(result.stopReason),
-          truncated: !scanComplete || display.limited,
-          stopReason: result.stopReason,
-          binaryFileCount: result.binaryFileCount,
-          processExited: result.processExited,
-        },
-      };
-    },
-  };
+    "search",
+  );
 }

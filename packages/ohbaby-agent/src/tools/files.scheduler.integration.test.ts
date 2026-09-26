@@ -16,6 +16,7 @@ import {
 } from "../permission/index.js";
 import { createBuiltinTools } from "./index.js";
 import * as fileLocks from "./utils/file-locks.js";
+import { ResourceUnavailableError } from "../core/tool-scheduler/resources.js";
 
 function createScheduler(): ToolSchedulerInstance {
   const bus = createBus();
@@ -55,7 +56,23 @@ describe("file tools scheduler integration", () => {
   it.each(["write", "edit"] as const)(
     "cancels a queued %s before entering its protected operation",
     async (toolName) => {
-      const scheduler = createScheduler();
+      const bus = createBus();
+      let resourceWaiting!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        resourceWaiting = resolve;
+      });
+      const scheduler = createToolScheduler({
+        bus,
+        permissionState: createPermissionState({
+          bus,
+          initialLevel: "full-access",
+        }),
+        onExecutionFact: (fact) => {
+          if (fact.owner.callId === "queued_call" && fact.reason === "resource")
+            resourceWaiting();
+        },
+      });
+      for (const builtin of createBuiltinTools()) scheduler.register(builtin);
       const environment = createHostLocalEnvironment(tempRoot);
       const filePath = path.join(tempRoot, "queued.txt");
       await fs.writeFile(filePath, "old\n");
@@ -68,29 +85,18 @@ describe("file tools scheduler integration", () => {
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      const holder = fileLocks.withFileLock(filePath, () => gate);
-      const originalLock = fileLocks.withFileLock;
-      vi.spyOn(fileLocks, "withFileLock").mockImplementation((...args) => {
-        const result = originalLock(...args);
+      const holder = fileLocks.withFileLock(filePath, () => {
         entered();
-        return result;
+        return gate;
       });
+      await enteredPromise;
       const tool = scheduler.get(toolName);
       if (!tool) throw new Error(`Missing tool: ${toolName}`);
       const execute = tool.execute.bind(tool);
-      let operationSettled = false;
-      let rawOperation: Promise<unknown> | undefined;
+      let executionCount = 0;
       vi.spyOn(tool, "execute").mockImplementation((...args) => {
-        const result = Promise.resolve(execute(...args));
-        rawOperation = result.then(
-          () => {
-            operationSettled = true;
-          },
-          () => {
-            operationSettled = true;
-          },
-        );
-        return result;
+        executionCount++;
+        return execute(...args);
       });
       const controller = new AbortController();
       const call = scheduler.execute({
@@ -110,22 +116,30 @@ describe("file tools scheduler integration", () => {
               }
             : { file_path: filePath, old_string: "old", new_string: "new" },
       });
+      let successor: Promise<void> | undefined;
       try {
-        await enteredPromise;
+        await waiting;
         controller.abort();
         expect((await call).status).toBe("cancelled");
-        // Cancellation must settle the actual queued tool, not only its scheduler wrapper.
-        await originalLock(path.join(tempRoot, "independent.txt"), () =>
-          Promise.resolve(),
+        expect(executionCount).toBe(0);
+        let successorStarted = false;
+        successor = fileLocks.withFileLock(filePath, () => {
+          successorStarted = true;
+          return Promise.resolve();
+        });
+        await fileLocks.withFileLock(
+          path.join(tempRoot, "independent.txt"),
+          () => Promise.resolve(),
         );
-        expect(operationSettled).toBe(true);
+        expect(successorStarted).toBe(false);
         await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
       } finally {
         release();
         await holder;
         await call;
-        await rawOperation;
+        await successor;
       }
+      expect(executionCount).toBe(0);
       await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
     },
   );
@@ -138,7 +152,23 @@ describe("file tools scheduler integration", () => {
   ] as const)(
     "keeps %s protected after scheduler timeout until rename %s",
     async (toolName, settlement) => {
-      const scheduler = createScheduler();
+      let confirmed!: () => void;
+      const cleanupConfirmed = new Promise<void>((resolve) => {
+        confirmed = resolve;
+      });
+      const bus = createBus();
+      const scheduler = createToolScheduler({
+        bus,
+        permissionState: createPermissionState({
+          bus,
+          initialLevel: "full-access",
+        }),
+        onExecutionFact: (fact) => {
+          if (fact.owner.callId === "late_call" && fact.cleanup === "confirmed")
+            confirmed();
+        },
+      });
+      for (const tool of createBuiltinTools()) scheduler.register(tool);
       const environment = createHostLocalEnvironment(tempRoot);
       const filePath = path.join(tempRoot, "late.txt");
       await fs.writeFile(filePath, "old\n");
@@ -175,33 +205,54 @@ describe("file tools scheduler integration", () => {
               }
             : { file_path: filePath, old_string: "old", new_string: "new" },
       });
-      let successor: Promise<string> | undefined;
       try {
         await enteredPromise;
-        // The existing scheduler owns the deadline. The stalled rename ignores abort.
+        // Timeout ends the logical call; cleanup continues to own the file.
         await vi.advanceTimersByTimeAsync(120_001);
         const result = await call;
         expect(result.status).toBe("error");
         expect(result.error?.message).toContain("timed out");
+        await vi.advanceTimersByTimeAsync(1_000);
         let successorStarted = false;
-        successor = fileLocks.withFileLock(filePath, async () => {
-          successorStarted = true;
-          return await fs.readFile(filePath, "utf8");
-        });
-        await vi.advanceTimersByTimeAsync(120_001);
+        const successor = fileLocks
+          .withFileLock(filePath, async () => {
+            successorStarted = true;
+            return await fs.readFile(filePath, "utf8");
+          })
+          .catch((error: unknown) => error);
+        expect(await successor).toBeInstanceOf(ResourceUnavailableError);
         expect(successorStarted).toBe(false);
+        await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
+        const blockedRead = await scheduler.execute({
+          callId: "late_reader",
+          messageId: "late_message",
+          sessionId: "other_session",
+          toolName: "read",
+          params: { file_path: filePath },
+          environment,
+        });
+        expect(blockedRead.status).toBe("error");
+        expect(blockedRead.error?.message).toContain("unconfirmed");
+        // Disjoint resources stay usable while the old operation is quarantined.
+        await expect(
+          fileLocks.withFileLock(path.join(tempRoot, "unrelated.txt"), () =>
+            Promise.resolve("independent"),
+          ),
+        ).resolves.toBe("independent");
         release();
-        await expect(successor).resolves.toBe(
-          settlement === "resolve" ? "new\n" : "old\n",
-        );
+        await cleanupConfirmed;
+        await expect(
+          fileLocks.withFileLock(filePath, () => fs.readFile(filePath, "utf8")),
+        ).resolves.toBe(settlement === "resolve" ? "new\n" : "old\n");
         await expect(fs.readdir(tempRoot)).resolves.toEqual(["late.txt"]);
       } finally {
         release();
-        await call;
-        if (successor) await successor;
-        // Drain the protected operation even if assertions failed before enqueueing.
-        await fileLocks.withFileLock(filePath, () => Promise.resolve());
-        vi.useRealTimers();
+        try {
+          await call;
+          await cleanupConfirmed;
+        } finally {
+          vi.useRealTimers();
+        }
       }
     },
   );

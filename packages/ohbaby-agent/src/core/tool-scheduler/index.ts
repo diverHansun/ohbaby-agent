@@ -9,6 +9,7 @@ export { ToolSchedulerEvent } from "./events.js";
 export { createToolRegistry } from "./registry.js";
 export { createToolScheduler, timeoutForTool } from "./scheduler.js";
 export type {
+  AdmissionWaitReason,
   AgentToolConfig,
   AgentToolConfigProvider,
   BatchToolCallRequest,
@@ -32,6 +33,8 @@ export type {
   ToolDefinition,
   ToolExecutionContext,
   ToolExecutionEnvironment,
+  ToolExecutionFact,
+  ToolExecutionOwner,
   ToolExecutionResult,
   ToolRegistry,
   ToolScheduler as ToolSchedulerInstance,

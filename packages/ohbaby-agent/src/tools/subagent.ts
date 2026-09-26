@@ -1,3 +1,4 @@
+import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type {
   SessionSubagentHost,
   SubagentCloseResult,
@@ -259,5 +260,9 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
     },
   };
 
-  return [run, status, close];
+  return [
+    withToolAdmission(run, { capacity: "dispatch", plan: () => [] }),
+    withToolAdmission(status, { capacity: "control", plan: () => [] }),
+    withToolAdmission(close, { capacity: "control", plan: () => [] }),
+  ];
 }

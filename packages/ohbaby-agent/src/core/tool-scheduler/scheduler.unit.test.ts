@@ -14,6 +14,8 @@ import {
 import { createBus, type BusInstance } from "../../bus/index.js";
 import type { SpawnCommand } from "../../tools/bash.js";
 import { createBuiltinTools } from "../../tools/index.js";
+import type { ResourceAccess } from "./resources.js";
+import { withToolAdmission, type ToolAdmission } from "./tool-admission.js";
 import { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
 import {
   createTaskOutputTool,
@@ -135,6 +137,16 @@ interface SchedulerFixture {
   readonly statuses: ToolCallStatus[];
 }
 
+function resourceAdmission(
+  resourcePath: string,
+  mode: "read" | "write",
+): ToolAdmission {
+  const resources: ResourceAccess[] = [
+    { kind: "file", path: resourcePath, scope: "file", mode },
+  ];
+  return { plan: () => resources, resolve: () => ({ resources }) };
+}
+
 function createTool(input: {
   readonly name: string;
   readonly category?: Tool["category"];
@@ -144,8 +156,9 @@ function createTool(input: {
   readonly requireExplicitApproval?: Tool["requireExplicitApproval"];
   readonly source?: Tool["source"];
   readonly timeoutOwner?: Tool["timeoutOwner"];
+  readonly admission?: ToolAdmission;
 }): Tool {
-  return {
+  const tool: Tool = {
     category: input.category,
     description: `${input.name} description`,
     execute:
@@ -159,6 +172,7 @@ function createTool(input: {
     source: input.source ?? "builtin",
     timeoutOwner: input.timeoutOwner,
   };
+  return input.admission ? withToolAdmission(tool, input.admission) : tool;
 }
 
 function createScheduler(
@@ -1614,7 +1628,7 @@ describe("ToolScheduler", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("queues write calls behind read calls and releases them afterward", async () => {
+  it("queues writes behind reads of the same declared resource and releases them afterward", async () => {
     const readBlocker = deferred<{ readonly output: string }>();
     const started: string[] = [];
     const { scheduler } = createScheduler();
@@ -1624,6 +1638,7 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return readBlocker.promise;
         },
+        admission: resourceAdmission("/scheduler-unit-resource-0", "read"),
         name: "read",
       }),
     );
@@ -1633,6 +1648,7 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return Promise.resolve({ output: "written" });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-0", "write"),
         name: "edit",
       }),
     );
@@ -1665,7 +1681,7 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["read_1", "write_1"]);
   });
 
-  it("keeps a cancelled non-cooperative write slot until the tool settles", async () => {
+  it("keeps a cancelled non-cooperative write resource protected until the tool settles", async () => {
     const firstBlocker = deferred<{ readonly output: string }>();
     const started: string[] = [];
     const { scheduler } = createScheduler();
@@ -1678,6 +1694,7 @@ describe("ToolScheduler", () => {
             ? firstBlocker.promise
             : Promise.resolve({ output: "second done" });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-1", "write"),
         name: "edit",
       }),
     );
@@ -1712,7 +1729,7 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["write_1", "write_2"]);
   });
 
-  it("lets memory tools bypass read/write locks and limits subagent concurrency", async () => {
+  it("runs independent memory work without a category lock and limits trusted dispatch concurrency", async () => {
     const blockers = [
       deferred<{ readonly output: string }>(),
       deferred<{ readonly output: string }>(),
@@ -1748,6 +1765,7 @@ describe("ToolScheduler", () => {
           return blockers[1].promise;
         },
         name: "subagent_run",
+        admission: { capacity: "dispatch", plan: () => [] },
       }),
     );
 
@@ -1810,6 +1828,7 @@ describe("ToolScheduler", () => {
         category: "subagent",
         execute: () => blocker.promise,
         name: "subagent_run",
+        admission: { capacity: "dispatch", plan: () => [] },
       }),
     );
     scheduler.register(
@@ -1817,6 +1836,7 @@ describe("ToolScheduler", () => {
         category: "subagent-control",
         execute: () => Promise.resolve({ output: "closed" }),
         name: "subagent_close",
+        admission: { capacity: "control", plan: () => [] },
       }),
     );
 
@@ -1846,7 +1866,7 @@ describe("ToolScheduler", () => {
     await expect(run).resolves.toMatchObject({ status: "success" });
   });
 
-  it("lets task_output bypass the file-read concurrency limit", async () => {
+  it("lets trusted task_output bypass the ordinary concurrency limit", async () => {
     const child = new FakeChildProcess();
     const registry = new ShellJobRegistry({
       createJobId: (): string => "job_1",
@@ -2829,7 +2849,7 @@ describe("ToolScheduler", () => {
     }
   });
 
-  it("preflights every batch call before starting tools and confirms asks serially", async () => {
+  it("checks each conflicting batch call permission before its execution in input order", async () => {
     const executionOrder: string[] = [];
     const permissionOrder: string[] = [];
     const bus = createBus();
@@ -2846,7 +2866,12 @@ describe("ToolScheduler", () => {
       scheduler.register(
         createTool({
           execute: (_params, context) => {
-            expect(permissionOrder).toEqual(["edit", "bash"]);
+            if (context.callId === "write_1") {
+              expect(permissionOrder).toContain("edit");
+            }
+            if (context.callId === "danger_1") {
+              expect(permissionOrder).toContain("bash");
+            }
             executionOrder.push(context.callId);
             return Promise.resolve({ output: context.callId });
           },
@@ -2891,6 +2916,61 @@ describe("ToolScheduler", () => {
     ]);
     expect(permissionOrder).toEqual(["edit", "bash"]);
     expect(executionOrder).toEqual(["read_1", "write_1", "danger_1"]);
+  });
+
+  it("starts an independent batch read while an earlier unrelated write awaits approval", async () => {
+    const approval = deferred<"once">();
+    const permissionBus = createBus();
+    const { scheduler, started } = createScheduler({
+      permissionState: createPermissionState({ bus: permissionBus }),
+      permission: { ask: () => approval.promise },
+    });
+    scheduler.register(
+      createTool({
+        name: "edit",
+        admission: resourceAdmission("/scheduler-unit-approval", "write"),
+      }),
+    );
+    scheduler.register(
+      createTool({ name: "read", admission: { plan: () => [] } }),
+    );
+    const running = scheduler.executeBatch({
+      calls: [
+        {
+          runId: "test_run",
+          callId: "waiting-write",
+          messageId: "message_1",
+          params: {},
+          sessionId: "session_1",
+          toolName: "edit",
+        },
+        {
+          runId: "test_run",
+          callId: "independent-read",
+          messageId: "message_1",
+          params: {},
+          sessionId: "session_1",
+          toolName: "read",
+        },
+      ],
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(scheduler.getStatus("waiting-write")).toBe("awaiting_approval");
+        expect(scheduler.getStatus("independent-read")).toBe("success");
+      });
+      expect(started).toEqual(["independent-read"]);
+      approval.resolve("once");
+      await expect(running).resolves.toMatchObject([
+        { status: "success" },
+        { status: "success" },
+      ]);
+      expect(started).toEqual(["independent-read", "waiting-write"]);
+    } finally {
+      approval.resolve("once");
+      scheduler.cancelAll();
+      await running;
+    }
   });
 
   it("does not run batch permission side effects for already cancelled calls", async () => {
@@ -2966,6 +3046,7 @@ describe("ToolScheduler", () => {
           }
           return Promise.resolve({ output: context.callId });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-2", "read"),
         name: "read",
       }),
     );
@@ -2975,6 +3056,7 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return writeBlocker.promise;
         },
+        admission: resourceAdmission("/scheduler-unit-resource-2", "write"),
         name: "edit",
       }),
     );
@@ -3034,10 +3116,16 @@ describe("ToolScheduler", () => {
           }
           return Promise.resolve({ output: context.callId });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-3", "read"),
         name: "read",
       }),
     );
-    scheduler.register(createTool({ name: "edit" }));
+    scheduler.register(
+      createTool({
+        admission: resourceAdmission("/scheduler-unit-resource-3", "write"),
+        name: "edit",
+      }),
+    );
 
     const read1 = scheduler.execute({
       runId: "test_run",
@@ -3081,7 +3169,9 @@ describe("ToolScheduler", () => {
   it("cancels queued calls and aborts executing calls", async () => {
     const running = deferred<{ readonly output: string }>();
     let executingSignal: AbortSignal | undefined;
-    const { scheduler } = createScheduler();
+    const { scheduler } = createScheduler({
+      config: { concurrency: { maxConcurrency: 1 } },
+    });
     scheduler.register(
       createTool({
         execute: (_params, context: ToolExecutionContext) => {
@@ -3121,11 +3211,14 @@ describe("ToolScheduler", () => {
     await expect(executing).resolves.toMatchObject({ status: "cancelled" });
   });
 
-  it("times out non-cooperative tools but retains their slot until settlement", async () => {
+  it("returns timed-out tool capacity while retaining its resource until settlement", async () => {
     const started: string[] = [];
     const slow = deferred<ToolExecutionResult>();
     const { scheduler } = createScheduler({
-      config: { timeout: { defaultTimeout: 10 } },
+      config: {
+        concurrency: { maxConcurrency: 1 },
+        timeout: { defaultTimeout: 10 },
+      },
     });
     scheduler.register(
       createTool({
@@ -3133,6 +3226,7 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return slow.promise;
         },
+        admission: resourceAdmission("/scheduler-unit-resource-4", "write"),
         name: "slow_write",
       }),
     );
@@ -3142,6 +3236,7 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return Promise.resolve({ output: "after timeout" });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-4", "write"),
         name: "edit",
       }),
     );
@@ -3171,6 +3266,19 @@ describe("ToolScheduler", () => {
     await vi.waitFor(() => {
       expect(scheduler.getStatus("write_2")).toBe("queued");
     });
+    scheduler.register(
+      createTool({ name: "independent", admission: { plan: () => [] } }),
+    );
+    await expect(
+      scheduler.execute({
+        runId: "test_run",
+        callId: "independent",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "independent",
+      }),
+    ).resolves.toMatchObject({ status: "success" });
     slow.resolve({ output: "late slow" });
     await expect(second).resolves.toMatchObject({
       output: "after timeout",
@@ -3179,16 +3287,19 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["slow_1", "write_2"]);
   });
 
-  it("cancels non-cooperative tools but retains their slot until settlement", async () => {
+  it("returns cancelled tool capacity while retaining its resource until settlement", async () => {
     const started: string[] = [];
     const slow = deferred<ToolExecutionResult>();
-    const { scheduler } = createScheduler();
+    const { scheduler } = createScheduler({
+      config: { concurrency: { maxConcurrency: 1 } },
+    });
     scheduler.register(
       createTool({
         execute: (_params, context) => {
           started.push(context.callId);
           return slow.promise;
         },
+        admission: resourceAdmission("/scheduler-unit-resource-5", "write"),
         name: "slow_write",
       }),
     );
@@ -3198,6 +3309,7 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return Promise.resolve({ output: "after cancel" });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-5", "write"),
         name: "edit",
       }),
     );
@@ -3227,6 +3339,19 @@ describe("ToolScheduler", () => {
     await vi.waitFor(() => {
       expect(scheduler.getStatus("write_2")).toBe("queued");
     });
+    scheduler.register(
+      createTool({ name: "independent", admission: { plan: () => [] } }),
+    );
+    await expect(
+      scheduler.execute({
+        runId: "test_run",
+        callId: "independent",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "independent",
+      }),
+    ).resolves.toMatchObject({ status: "success" });
     slow.resolve({ output: "late slow" });
     await expect(second).resolves.toMatchObject({
       output: "after cancel",
@@ -3235,10 +3360,12 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["slow_1", "write_2"]);
   });
 
-  it("releases a granted slot when a queued call is cancelled before it resumes", async () => {
+  it("releases acquired capacity when cancellation occurs at the pre-invoke executing transition", async () => {
     const first = deferred<ToolExecutionResult>();
     const started: string[] = [];
-    const { bus, scheduler } = createScheduler();
+    const { bus, scheduler } = createScheduler({
+      config: { concurrency: { maxConcurrency: 1 } },
+    });
     scheduler.register(
       createTool({
         execute: (_params, context) => {
@@ -3251,8 +3378,13 @@ describe("ToolScheduler", () => {
         name: "edit",
       }),
     );
-    bus.subscribe(ToolSchedulerEvent.ExecutionCompleted, (payload) => {
-      if (payload.callId === "write_1") {
+    // This transition follows capacity acquisition and precedes invoke.
+    // Completion publication is deliberately not a barrier for the next call.
+    bus.subscribe(ToolSchedulerEvent.StatusChanged, (payload) => {
+      if (
+        payload.callId === "write_2" &&
+        payload.currentStatus === "executing"
+      ) {
         scheduler.cancel("write_2");
       }
     });
@@ -3282,22 +3414,29 @@ describe("ToolScheduler", () => {
       toolName: "edit",
     });
 
-    await vi.waitFor(() => {
-      expect(scheduler.getStatus("write_2")).toBe("queued");
-    });
-    first.resolve({ output: "first" });
-
-    await expect(write1).resolves.toMatchObject({ status: "success" });
-    await expect(write2).resolves.toMatchObject({ status: "cancelled" });
-    await expect(write3).resolves.toMatchObject({
-      output: "write_3",
-      status: "success",
-    });
-    expect(started).toEqual(["write_1", "write_3"]);
+    try {
+      await vi.waitFor(() => {
+        expect(scheduler.getStatus("write_2")).toBe("queued");
+      });
+      first.resolve({ output: "first" });
+      await expect(write1).resolves.toMatchObject({ status: "success" });
+      await expect(write2).resolves.toMatchObject({ status: "cancelled" });
+      await expect(write3).resolves.toMatchObject({
+        output: "write_3",
+        status: "success",
+      });
+      expect(started).toEqual(["write_1", "write_3"]);
+    } finally {
+      first.resolve({ output: "first" });
+      scheduler.cancelAll();
+      await Promise.all([write1, write2, write3]);
+    }
   });
 
-  it("does not execute a tool after execution-started subscribers cancel it", async () => {
-    const execute = vi.fn().mockResolvedValue({ output: "should not run" });
+  it("publishes execution-started after invoke and propagates subscriber cancellation", async () => {
+    const execute = vi
+      .fn<Tool["execute"]>()
+      .mockResolvedValue({ output: "already invoked" });
     const { bus, scheduler } = createScheduler();
     scheduler.register(createTool({ execute, name: "edit" }));
     bus.subscribe(ToolSchedulerEvent.ExecutionStarted, (payload) => {
@@ -3318,7 +3457,8 @@ describe("ToolScheduler", () => {
     ).resolves.toMatchObject({
       status: "cancelled",
     });
-    expect(execute).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[1].signal.aborted).toBe(true);
   });
 
   it("passes the context scope through to tool execution", async () => {
@@ -3354,7 +3494,9 @@ describe("ToolScheduler", () => {
       }
       return Promise.resolve({ output: context.callId });
     });
-    const { scheduler } = createScheduler();
+    const { scheduler, started } = createScheduler({
+      config: { concurrency: { maxConcurrency: 1 } },
+    });
     scheduler.register(createTool({ execute, name: "edit" }));
 
     const preAborted = new AbortController();
@@ -3402,5 +3544,6 @@ describe("ToolScheduler", () => {
     blocker.resolve({ output: "write_1" });
     await expect(write1).resolves.toMatchObject({ status: "success" });
     expect(execute).toHaveBeenCalledTimes(1);
+    expect(started).toEqual(["write_1"]);
   });
 });
