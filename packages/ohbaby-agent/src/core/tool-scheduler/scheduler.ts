@@ -1,3 +1,7 @@
+import {
+  getSourceCleanupState,
+  SourceCleanupUnavailableError,
+} from "./source-cleanup.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -761,13 +765,33 @@ export function createToolScheduler(
     resources: readonly ResourceAccess[],
     publish: ReturnType<typeof factPublisher>,
     takeOwnership: () => void,
+    checkAdmission: () => void,
   ): Promise<ToolExecutionResult> {
     const { call, tool, controller, owner } = prepared;
     controller.signal.throwIfAborted();
     const releaseEnvironment = environment?.retain?.();
-    if (controller.signal.aborted) {
-      if (releaseEnvironment) await releaseEnvironment();
-      throw new SchedulerAbortError("cancelled");
+    try {
+      // Status observers and retain() can synchronously introduce protection.
+      // Recheck after those callbacks, before taking ownership or recording start.
+      controller.signal.throwIfAborted();
+      checkAdmission();
+    } catch (error) {
+      if (releaseEnvironment) {
+        try {
+          await releaseEnvironment();
+        } catch (releaseError) {
+          void Promise.resolve()
+            .then(() =>
+              options.onExecutionFactError?.(releaseError, {
+                owner,
+                phase: "cleanup",
+                timestamp: now(),
+              }),
+            )
+            .catch(() => undefined);
+        }
+      }
+      throw error;
     }
     takeOwnership();
     let timedOut = false;
@@ -776,12 +800,14 @@ export function createToolScheduler(
     let observation: NodeJS.Timeout | undefined;
     let cleaning = false;
     let startPublished = false;
+    const earlyCleanup: ("in-progress" | "unconfirmed" | "confirmed")[] = [];
     let rejectAbort!: (reason: unknown) => void;
     const abortPromise = new Promise<never>((_resolve, reject) => {
       rejectAbort = reject;
     });
+    const toolOwnsCleanup = trustedToolAdmission(tool)?.cleanupOwner === "tool";
     const onAbort = (): void => {
-      if (!settled && !cleaning) {
+      if (!settled && !cleaning && !toolOwnsCleanup) {
         cleaning = true;
         // The original resource owner and scope reference already exist before
         // returning a logical result or making ordinary capacity available.
@@ -822,6 +848,24 @@ export function createToolScheduler(
           signal: controller.signal,
           resourceLease,
           owner,
+          reportCleanupError: toolOwnsCleanup
+            ? (error): void => {
+                const fact: ToolExecutionFact = {
+                  owner,
+                  phase: "cleanup",
+                  timestamp: now(),
+                };
+                void Promise.resolve()
+                  .then(() => options.onExecutionFactError?.(error, fact))
+                  .catch(() => undefined);
+              }
+            : undefined,
+          reportCleanup: toolOwnsCleanup
+            ? (cleanup): void => {
+                if (startPublished) publish({ phase: "cleanup", cleanup });
+                else earlyCleanup.push(cleanup);
+              }
+            : undefined,
         }),
       );
     } catch (error) {
@@ -833,6 +877,7 @@ export function createToolScheduler(
     }
     publish({ phase: "started", timestamp: call.startedAt, resources });
     startPublished = true;
+    for (const cleanup of earlyCleanup) publish({ phase: "cleanup", cleanup });
     // execute can synchronously trigger onAbort.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (cleaning) publish({ phase: "cleanup", cleanup: "in-progress" });
@@ -1488,6 +1533,26 @@ export function createToolScheduler(
           },
         controller.signal,
       );
+      const plan = admission?.plan;
+      const plannedResources = plan
+        ? await waitForAbortable(
+            () => plan(params, contextFor(prepared, environment)),
+            controller.signal,
+          )
+        : undefined;
+      const sourceSensitive =
+        admission?.capacity !== "control" &&
+        admission?.capacity !== "dispatch" &&
+        (access.resources.some((resource) => resource.kind === "file") ||
+          (plannedResources === undefined &&
+            admission?.resolve === undefined) ||
+          plannedResources?.some((resource) => resource.kind === "file"));
+      const sourceWait = (): "source-cleanup" | undefined => {
+        if (!sourceSensitive) return undefined;
+        const state = getSourceCleanupState(prepared.owner);
+        if (state === "unconfirmed") throw new SourceCleanupUnavailableError();
+        return state === "in-progress" ? "source-cleanup" : undefined;
+      };
       params = access.params ?? params;
       if (
         prepared.permissionContext.accessIdentity &&
@@ -1504,6 +1569,7 @@ export function createToolScheduler(
       transition(call, "queued");
       resourceLease = await acquireResources(access.resources, {
         signal: controller.signal,
+        admissionWait: sourceWait,
         canAcquire: () => {
           if (isStopped(call, controller)) return false;
           capacity = concurrency.tryAcquire(
@@ -1542,6 +1608,7 @@ export function createToolScheduler(
         )
       )
         throw new AdmissionChangedError();
+      if (sourceWait()) throw new AdmissionChangedError();
       transition(call, "executing");
       if (isStopped(call, controller)) return makeCancelledResult(call);
       const output = await executeToolWithTimeout(
@@ -1553,6 +1620,9 @@ export function createToolScheduler(
         publish,
         () => {
           invoked = true;
+        },
+        () => {
+          if (sourceWait()) throw new AdmissionChangedError();
         },
       );
       if (isStopped(call, controller)) return makeCancelledResult(call);

@@ -110,6 +110,18 @@ async function waitForSpawn(spawn: ReturnType<typeof vi.fn>): Promise<void> {
 }
 
 describe("bash builtin tool", () => {
+  it("rejects interactive execution without a trusted owner before starting a process", async () => {
+    const spawn = vi.fn<SpawnCommand>();
+    const bash = createBashTool({ spawn });
+    await expect(
+      bash.execute(
+        { command: "echo hello" },
+        createContext({ runId: "interactive-run" }),
+      ),
+    ).rejects.toThrow("trusted execution owner");
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("lets the tool own the foreground/background lifecycle timeout", () => {
     const bash = getBashTool({
       shell: {

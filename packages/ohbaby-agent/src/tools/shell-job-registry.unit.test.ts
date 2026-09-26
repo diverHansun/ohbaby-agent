@@ -12,8 +12,8 @@ import {
 class FakeChild extends EventEmitter {
   readonly pid = 42;
   readonly stdin = { end: vi.fn() };
-  readonly stdout = new EventEmitter();
-  readonly stderr = new EventEmitter();
+  readonly stdout = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+  readonly stderr = Object.assign(new EventEmitter(), { destroy: vi.fn() });
 
   override emit(eventName: string | symbol, ...args: unknown[]): boolean {
     const emitted = super.emit(eventName, ...args);
@@ -65,6 +65,7 @@ describe("ShellJobRegistry", () => {
   it("counts background work until close drains its pipes, but ignores completed records", () => {
     const child = new FakeChild();
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => "activity",
       killTree: vi.fn(),
     });
@@ -80,6 +81,7 @@ describe("ShellJobRegistry", () => {
   it("keeps a bounded tail and marks it truncated", () => {
     const child = new FakeChild();
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => "job_1",
       killTree: vi.fn(),
     });
@@ -105,6 +107,7 @@ describe("ShellJobRegistry", () => {
       child.emit("close", null, "SIGTERM");
     });
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => "job_1",
       killTree,
     });
@@ -133,6 +136,7 @@ describe("ShellJobRegistry", () => {
       child.emit("close", null, "SIGTERM");
     });
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => "job_1",
       killTree,
     });
@@ -159,6 +163,7 @@ describe("ShellJobRegistry", () => {
       (child as unknown as FakeChild).emit("close", null, "SIGTERM");
     });
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => `job_${String(++nextJobId)}`,
       killTree,
     });
@@ -208,6 +213,7 @@ describe("ShellJobRegistry", () => {
       (child as unknown as FakeChild).emit("close", null, "SIGTERM");
     });
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => `job_${String(++nextJobId)}`,
       killTree,
     });
@@ -256,6 +262,7 @@ describe("ShellJobRegistry", () => {
         child.emit("close", null, "SIGTERM");
       });
       const registry = new ShellJobRegistry({
+        probeTree: (): "stopped" => "stopped",
         createJobId: (): string => "job_1",
         killTree,
       });
@@ -274,7 +281,7 @@ describe("ShellJobRegistry", () => {
     }
   });
 
-  it("keeps the lifecycle timeout active until close", async () => {
+  it("clears the execution timeout once the group stops even with open pipes", async () => {
     vi.useFakeTimers();
     try {
       const child = new FakeChild();
@@ -282,6 +289,7 @@ describe("ShellJobRegistry", () => {
         child.emit("close", null, "SIGTERM");
       });
       const registry = new ShellJobRegistry({
+        probeTree: (): "stopped" => "stopped",
         createJobId: (): string => "job_1",
         killTree,
       });
@@ -290,8 +298,12 @@ describe("ShellJobRegistry", () => {
       child.emitExitOnly(0, null);
       await vi.advanceTimersByTimeAsync(10);
 
-      expect(killTree).toHaveBeenCalledTimes(1);
-      expect(registry.get(started.jobId, "session_1").status).toBe("timed_out");
+      expect(killTree).not.toHaveBeenCalled();
+      expect(registry.get(started.jobId, "session_1").metadata.cleanup).toBe(
+        "confirmed",
+      );
+      child.emit("close", 0, null);
+      expect(registry.get(started.jobId, "session_1").status).toBe("completed");
     } finally {
       vi.useRealTimers();
     }
@@ -300,6 +312,7 @@ describe("ShellJobRegistry", () => {
   it("blocks task_output only for the current read", async () => {
     const child = new FakeChild();
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => "job_1",
       killTree: vi.fn(),
     });
@@ -326,6 +339,7 @@ describe("ShellJobRegistry", () => {
     const child = new FakeChild();
     const controller = new AbortController();
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => "job_1",
       killTree: vi.fn(),
     });
@@ -354,6 +368,7 @@ describe("ShellJobRegistry", () => {
     try {
       const child = new FakeChild();
       const registry = new ShellJobRegistry({
+        probeTree: (): "stopped" => "stopped",
         createJobId: (): string => "job_1",
         killTree: vi.fn(),
       });
@@ -376,6 +391,7 @@ describe("ShellJobRegistry", () => {
     const cancelledChild = new FakeChild();
     let nextJobId = 0;
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => `job_${String(++nextJobId)}`,
       killTree: (child): void => {
         (child as unknown as FakeChild).emit("close", null, "SIGTERM");
@@ -398,6 +414,7 @@ describe("ShellJobRegistry", () => {
   it("evicts the oldest terminal jobs after the retention limit", () => {
     let nextJobId = 0;
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => `job_${String(++nextJobId)}`,
       killTree: vi.fn(),
     });
@@ -420,6 +437,7 @@ describe("ShellJobRegistry", () => {
     try {
       let nextJobId = 0;
       const registry = new ShellJobRegistry({
+        probeTree: (): "stopped" => "stopped",
         createJobId: (): string => `job_${String(++nextJobId)}`,
         killTree: vi.fn(),
       });
@@ -456,6 +474,7 @@ describe("ShellJobRegistry", () => {
       child.emit("exit", 0, null);
     });
     const registry = new ShellJobRegistry({
+      probeTree: (): "stopped" => "stopped",
       createJobId: (): string => "job_1",
       killTree,
     });

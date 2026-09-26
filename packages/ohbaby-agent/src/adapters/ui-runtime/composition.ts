@@ -357,7 +357,9 @@ export async function createUiRuntimeComposition(
   });
   const todoWorkScopes = new TodoWorkScopeRegistry();
   const shellJobRegistry = new ShellJobRegistry({
-    killTree: (child): Promise<void> | void => Shell.killTree(child),
+    terminationManagesObservation: true,
+    killTree: (child): ReturnType<typeof Shell.killTree> =>
+      Shell.killTree(child),
   });
 
   async function ensureRootSession(input: {

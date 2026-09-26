@@ -11,6 +11,7 @@ export interface ResolvedToolAccess {
   readonly params?: Record<string, unknown>;
 }
 export interface ToolAdmission {
+  readonly cleanupOwner?: "tool";
   readonly capacity?: CapacityKind;
   /** No existence, permission or content checks here: predecessors have not run. */
   readonly plan?: (

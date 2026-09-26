@@ -38,7 +38,8 @@ export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
   const shellJobRegistry =
     options.shellJobRegistry ??
     new ShellJobRegistry({
-      killTree: (child): Promise<void> | void =>
+      terminationManagesObservation: !options.shell || options.shell === Shell,
+      killTree: (child): ReturnType<BashShell["killTree"]> =>
         (options.shell ?? Shell).killTree(child),
     });
   const tools = [

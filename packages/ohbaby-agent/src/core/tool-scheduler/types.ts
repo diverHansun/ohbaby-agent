@@ -89,6 +89,12 @@ export interface ToolExecutionEnvironment {
 }
 
 export interface ToolExecutionContext {
+  /** Trusted tool cleanup owner reports process lifetime independently of its result. */
+  readonly reportCleanup?: (
+    state: "in-progress" | "unconfirmed" | "confirmed",
+  ) => void;
+  /** Delivery/disposal errors do not change the process cleanup state. */
+  readonly reportCleanupError?: (error: unknown) => void;
   readonly resourceLease?: ResourceLease;
   readonly owner?: ToolExecutionOwner;
   /** Actual execution identity; absent only for standalone noninteractive calls. */

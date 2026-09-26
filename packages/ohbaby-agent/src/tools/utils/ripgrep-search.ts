@@ -120,7 +120,7 @@ export async function searchWithRipgrep(
     let summarySeen = false;
     let openFiles = 0;
     let closed = false;
-    let cleanup: Promise<void> | undefined;
+    let cleanup: ReturnType<typeof killTree> | undefined;
 
     const terminate = (): void => {
       cleanup ??= killTree(child, { exited: () => closed });

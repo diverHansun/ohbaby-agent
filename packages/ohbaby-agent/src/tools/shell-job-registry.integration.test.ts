@@ -35,7 +35,7 @@ function createContext(workdir: string): ToolExecutionContext {
   };
 }
 
-function killShellTree(child: ChildProcess): Promise<void> {
+function killShellTree(child: ChildProcess): ReturnType<typeof Shell.killTree> {
   return Shell.killTree(child);
 }
 

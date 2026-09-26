@@ -31,9 +31,13 @@ export class ResourceUnavailableError extends Error {
 
 export interface ResourceOptions {
   readonly signal?: AbortSignal;
-  readonly onWait?: (reason: "resource" | "capacity") => void;
+  readonly onWait?: (
+    reason: "resource" | "capacity" | "source-cleanup",
+  ) => void;
   /** Synchronous joint admission; return true only after reserving caller capacity. */
   readonly canAcquire?: () => boolean;
+  /** Checked before resource conflicts and capacity, including already queued calls. */
+  readonly admissionWait?: () => "source-cleanup" | undefined;
 }
 
 function contains(parent: string, child: string): boolean {
@@ -99,10 +103,14 @@ interface Waiter {
   readonly resolve: (lease: ResourceLease) => void;
   readonly reject: (error: unknown) => void;
   readonly signal?: AbortSignal;
-  readonly onWait?: (reason: "resource" | "capacity") => void;
+  readonly onWait?: (
+    reason: "resource" | "capacity" | "source-cleanup",
+  ) => void;
   readonly canAcquire?: () => boolean;
+  /** Checked before resource conflicts and capacity, including already queued calls. */
+  readonly admissionWait?: () => "source-cleanup" | undefined;
   abort: () => void;
-  notified?: "resource" | "capacity";
+  notified?: "resource" | "capacity" | "source-cleanup";
 }
 const holders = new Map<ResourceLease, Holder>();
 const waiters: Waiter[] = [];
@@ -203,16 +211,24 @@ function drainPass(): void {
       waiter.reject(new ResourceUnavailableError());
       continue;
     }
-    let reason: "resource" | "capacity" | undefined;
+    let reason: "resource" | "capacity" | "source-cleanup" | undefined;
+    try {
+      reason = waiter.admissionWait?.();
+    } catch (error) {
+      remove(waiter);
+      waiter.reject(error);
+      continue;
+    }
     if (
-      conflicts.length ||
-      earlier.some(
-        (previous) =>
-          waiters.includes(previous) && waiterConflicts(previous, accesses),
-      )
+      !reason &&
+      (conflicts.length ||
+        earlier.some(
+          (previous) =>
+            waiters.includes(previous) && waiterConflicts(previous, accesses),
+        ))
     ) {
       reason = "resource";
-    } else {
+    } else if (!reason) {
       try {
         if (waiter.canAcquire && !waiter.canAcquire()) reason = "capacity";
       } catch (error) {
@@ -222,7 +238,8 @@ function drainPass(): void {
       }
     }
     if (reason) {
-      earlier.push(waiter);
+      // A source restriction owns no file reservation: independent roots can pass.
+      if (reason !== "source-cleanup") earlier.push(waiter);
       if (waiter.notified !== reason) {
         waiter.notified = reason;
         try {
@@ -230,7 +247,7 @@ function drainPass(): void {
         } catch (error) {
           remove(waiter);
           waiter.reject(error);
-          earlier.pop();
+          if (reason !== "source-cleanup") earlier.pop();
         }
       }
       continue;
@@ -269,6 +286,7 @@ export function acquireResources(
       signal: options.signal,
       onWait: options.onWait,
       canAcquire: options.canAcquire,
+      admissionWait: options.admissionWait,
       abort,
     };
     waiters.push(waiter);

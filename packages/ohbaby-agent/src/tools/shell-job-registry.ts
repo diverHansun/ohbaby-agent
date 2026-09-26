@@ -1,3 +1,10 @@
+import {
+  probeProcessTree,
+  type KillTreeResult,
+  type ProcessTreeState,
+} from "../shell/process.js";
+import { beginSourceCleanup } from "../core/tool-scheduler/source-cleanup.js";
+import type { ToolExecutionOwner } from "../core/tool-scheduler/types.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -29,7 +36,13 @@ export type ShellJobStatus =
 type TerminationReason = "cancelled" | "timed_out";
 
 export interface ShellJobStartInput {
-  readonly child: ChildProcess;
+  readonly child: ChildProcess | (() => ChildProcess);
+  readonly owner?: ToolExecutionOwner;
+  readonly release?: () => void | Promise<void>;
+  readonly reportCleanupError?: (error: unknown) => void;
+  readonly reportCleanup?: (
+    state: "in-progress" | "unconfirmed" | "confirmed",
+  ) => void;
   readonly captureMode?: "head" | "tail";
   readonly contextScopeId?: string;
   readonly sessionId: string;
@@ -48,11 +61,35 @@ export interface ShellJobSnapshot {
 }
 
 export interface ShellJobRegistryOptions {
-  readonly killTree: (child: ChildProcess) => Promise<void> | void;
+  // Legacy custom shells may return void; absence of proof is never confirmation.
+
+  readonly killTree: (
+    child: ChildProcess,
+    // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
+  ) => Promise<KillTreeResult | void> | KillTreeResult | void;
+  readonly probeTree?: (child: ChildProcess) => ProcessTreeState;
+  /** Upper bound for custom termination helpers that fail to settle. */
+  readonly cleanupObservationMs?: number;
+  /** The built-in terminator owns TERM and post-KILL observation budgets. */
+  readonly terminationManagesObservation?: boolean;
+  readonly outputDrainMs?: number;
   readonly createJobId?: () => string;
 }
 
 interface ShellJob {
+  readonly owner?: ToolExecutionOwner;
+  readonly release?: () => void | Promise<void>;
+  readonly reportCleanup?: ShellJobStartInput["reportCleanup"];
+  readonly reportCleanupError?: ShellJobStartInput["reportCleanupError"];
+  cleanup?: "in-progress" | "unconfirmed" | "confirmed";
+  sourceCleanup?: ReturnType<typeof beginSourceCleanup>;
+  cleanupTask?: Promise<void>;
+  resolveCleanup?: () => void;
+  observation?: ReturnType<typeof setTimeout>;
+  outputDrain?: ReturnType<typeof setTimeout>;
+  closed: boolean;
+  exited: boolean;
+  terminationSucceeded: boolean;
   readonly child: ChildProcess;
   readonly captureMode: "head" | "tail";
   readonly contextScopeId?: string;
@@ -157,22 +194,35 @@ export class ShellJobRegistry {
   private readonly createJobId: () => string;
   private readonly killTree: ShellJobRegistryOptions["killTree"];
 
-  constructor(options: ShellJobRegistryOptions) {
+  constructor(private readonly options: ShellJobRegistryOptions) {
     this.createJobId = options.createJobId ?? randomUUID;
     this.killTree = options.killTree;
   }
 
   start(input: ShellJobStartInput): ShellJobSnapshot {
+    // Allocate identity before launch: registration failure must not orphan work.
+    const jobId = this.createJobId();
+    if (this.jobs.has(jobId))
+      throw new Error("Shell job identity already exists.");
+    const child =
+      typeof input.child === "function" ? input.child() : input.child;
     let resolveTerminal!: () => void;
     const terminal = new Promise<void>((resolve) => {
       resolveTerminal = resolve;
     });
     const job: ShellJob = {
-      child: input.child,
+      child,
+      owner: input.owner,
+      release: input.release,
+      reportCleanup: input.reportCleanup,
+      reportCleanupError: input.reportCleanupError,
+      closed: false,
+      exited: false,
+      terminationSucceeded: false,
       captureMode: input.captureMode ?? "tail",
       contextScopeId: input.contextScopeId,
-      jobId: this.createJobId(),
-      metadata: input.metadata ?? {},
+      jobId,
+      metadata: { ...input.metadata, pid: child.pid },
       output: "",
       stderr: "",
       stdout: "",
@@ -182,14 +232,14 @@ export class ShellJobRegistry {
       terminal,
       terminationStarted: false,
       timeoutId: setTimeout(() => {
-        void this.terminate(job, "timed_out");
+        this.terminate(job, "timed_out");
       }, input.timeoutMs),
       truncated: false,
     };
     this.jobs.set(job.jobId, job);
     this.pruneTerminalJobs();
 
-    input.child.stdout?.on("data", (chunk: unknown) => {
+    child.stdout?.on("data", (chunk: unknown) => {
       const next =
         job.captureMode === "tail"
           ? appendTail(job.output, chunkToString(chunk))
@@ -201,7 +251,7 @@ export class ShellJobRegistry {
       }
       job.truncated ||= next.truncated;
     });
-    input.child.stderr?.on("data", (chunk: unknown) => {
+    child.stderr?.on("data", (chunk: unknown) => {
       const next =
         job.captureMode === "tail"
           ? appendTail(job.output, chunkToString(chunk))
@@ -213,24 +263,32 @@ export class ShellJobRegistry {
       }
       job.truncated ||= next.truncated;
     });
-    input.child.once("error", (error: Error) => {
+    child.once("error", (error: Error) => {
       job.error = error.message;
     });
-    input.child.once("exit", (exitCode, signal) => {
-      if (isTerminal(job.status)) {
-        return;
-      }
+    child.once("exit", (exitCode, signal) => {
+      job.exited = true;
       job.exitCode = exitCode;
       job.signal = signal;
+      this.observeStopped(job);
     });
-    input.child.once("close", (exitCode, signal) => {
-      this.finishFromChild(
-        job,
-        exitCode ?? job.exitCode ?? null,
-        signal ?? job.signal ?? null,
-      );
+    child.once("close", (exitCode, signal) => {
+      job.closed = true;
+      job.exitCode ??= exitCode;
+      job.signal ??= signal;
+      // Spawn failure without a PID proves no managed process was launched.
+      if (job.error && !job.child.pid) this.confirmStopped(job);
+      else this.observeStopped(job);
+      // The shell exit result is distinct from proof that descendants stopped.
+      this.finishFromChild(job, job.exitCode ?? null, job.signal ?? null);
     });
 
+    try {
+      child.stdin?.end();
+    } catch (error) {
+      job.error = error instanceof Error ? error.message : String(error);
+      this.terminate(job, "cancelled");
+    }
     return this.snapshot(job);
   }
 
@@ -243,7 +301,9 @@ export class ShellJobRegistry {
   }
 
   hasActiveWork(): boolean {
-    return [...this.jobs.values()].some((job) => job.status === "running");
+    return [...this.jobs.values()].some(
+      (job) => job.status === "running" || job.cleanup !== "confirmed",
+    );
   }
 
   async waitForTerminal(
@@ -309,9 +369,10 @@ export class ShellJobRegistry {
     contextScopeId?: string,
   ): Promise<ShellJobSnapshot> {
     const job = this.getOwnedJob(jobId, sessionId, contextScopeId);
-    if (!isTerminal(job.status)) {
-      await this.terminate(job, "cancelled");
+    if (job.cleanup !== "confirmed") {
+      this.terminate(job, "cancelled");
     }
+    await job.terminal;
     return this.snapshot(job);
   }
 
@@ -332,27 +393,25 @@ export class ShellJobRegistry {
 
   private async disposeJobs(ownedJobs: readonly ShellJob[]): Promise<void> {
     await Promise.all(
-      ownedJobs
-        .filter((job) => !isTerminal(job.status))
-        .map((job) => this.terminate(job, "cancelled")),
+      ownedJobs.map(async (job) => {
+        if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
+        await job.cleanupTask;
+        if (job.cleanup === "confirmed") this.jobs.delete(job.jobId);
+      }),
     );
-
-    const ownedJobIds = new Set(ownedJobs.map((job) => job.jobId));
-    for (const jobId of ownedJobIds) {
-      this.jobs.delete(jobId);
-    }
     for (let index = this.terminalJobIds.length - 1; index >= 0; index -= 1) {
-      if (ownedJobIds.has(this.terminalJobIds[index] ?? "")) {
+      if (!this.jobs.has(this.terminalJobIds[index] ?? ""))
         this.terminalJobIds.splice(index, 1);
-      }
     }
   }
 
   async dispose(): Promise<void> {
-    const active = [...this.jobs.values()].filter(
-      (job) => !isTerminal(job.status),
+    await Promise.all(
+      [...this.jobs.values()].map(async (job) => {
+        if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
+        await job.cleanupTask;
+      }),
     );
-    await Promise.all(active.map((job) => this.terminate(job, "cancelled")));
   }
 
   private getOwnedJob(
@@ -379,6 +438,7 @@ export class ShellJobRegistry {
       jobId: job.jobId,
       status: job.status,
       truncated: rendered.truncated,
+      ...(job.cleanup ? { cleanup: job.cleanup } : {}),
       ...(job.error ? { error: job.error } : {}),
       ...(isTerminal(job.status)
         ? { exitCode: job.exitCode ?? null, signal: job.signal ?? null }
@@ -421,7 +481,9 @@ export class ShellJobRegistry {
     if (isTerminal(job.status)) {
       return;
     }
-    clearTimeout(job.timeoutId);
+    if (job.terminationStarted || job.cleanup === "confirmed")
+      clearTimeout(job.timeoutId);
+    if (job.closed && job.outputDrain) clearTimeout(job.outputDrain);
     job.status = status;
     job.exitCode = exitCode;
     job.signal = signal;
@@ -432,48 +494,110 @@ export class ShellJobRegistry {
 
   private pruneTerminalJobs(): void {
     while (this.jobs.size > MAX_RETAINED_SHELL_JOBS) {
-      const oldestTerminalId = this.terminalJobIds.shift();
-      if (!oldestTerminalId) {
-        return;
-      }
-      this.jobs.delete(oldestTerminalId);
+      const index = this.terminalJobIds.findIndex(
+        (id) => this.jobs.get(id)?.cleanup === "confirmed",
+      );
+      if (index < 0) return;
+      const [id] = this.terminalJobIds.splice(index, 1);
+      if (id) this.jobs.delete(id);
     }
   }
 
-  private async waitForTerminalGrace(job: ShellJob): Promise<void> {
-    if (isTerminal(job.status)) {
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, SHELL_JOB_TERMINATION_GRACE_MS);
-      void job.terminal.then(() => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
-  }
-
-  private async terminate(
-    job: ShellJob,
-    reason: TerminationReason,
-  ): Promise<void> {
-    if (isTerminal(job.status)) {
-      return;
-    }
-    if (job.terminationStarted) {
-      return job.terminal;
-    }
-    job.terminationStarted = true;
-    job.terminationReason = reason;
+  private observeStopped(job: ShellJob): void {
+    if (job.cleanup === "confirmed") return;
+    let state: ProcessTreeState;
     try {
-      await this.killTree(job.child);
+      state =
+        this.options.probeTree?.(job.child) ??
+        probeProcessTree(job.child, {
+          exited: () => job.exited,
+          terminationSucceeded: job.terminationSucceeded,
+        });
     } catch {
-      // The child exit still determines the terminal metadata.
+      state = "unknown";
     }
-    await this.waitForTerminalGrace(job);
-    if (!isTerminal(job.status)) {
-      this.finish(job, reason, job.exitCode ?? null, job.signal ?? null);
+    if (state === "stopped") this.confirmStopped(job);
+    // An uncertain event probe is not the end of the terminator observation.
+    // Only its authoritative result (or the legacy helper budget) ends that wait.
+  }
+
+  private confirmStopped(job: ShellJob): void {
+    if (job.cleanup === "confirmed") return;
+    job.cleanup = "confirmed";
+    clearTimeout(job.timeoutId);
+    if (job.observation) clearTimeout(job.observation);
+    job.resolveCleanup?.();
+    job.sourceCleanup?.confirm();
+    if (job.terminationStarted) job.reportCleanup?.("confirmed");
+    if (job.release)
+      void Promise.resolve()
+        .then(job.release)
+        .catch((error: unknown) => {
+          // Environment disposal failure is not evidence that the process is alive.
+          try {
+            job.reportCleanupError?.(error);
+          } catch {
+            /* Observers do not own cleanup. */
+          }
+        });
+    if (job.closed)
+      this.finishFromChild(job, job.exitCode ?? null, job.signal ?? null);
+    else {
+      job.outputDrain = setTimeout(() => {
+        job.child.stdout?.destroy();
+        job.child.stderr?.destroy();
+        this.finishFromChild(job, job.exitCode ?? null, job.signal ?? null);
+      }, this.options.outputDrainMs ?? SHELL_JOB_TERMINATION_GRACE_MS);
+      job.outputDrain.unref();
     }
+    this.pruneTerminalJobs();
+  }
+
+  private markUnconfirmed(job: ShellJob): void {
+    if (job.cleanup === "confirmed" || job.cleanup === "unconfirmed") return;
+    job.cleanup = "unconfirmed";
+    if (job.observation) clearTimeout(job.observation);
+    job.sourceCleanup?.markUnconfirmed();
+    job.reportCleanup?.("unconfirmed");
+    job.resolveCleanup?.();
+  }
+
+  private terminate(job: ShellJob, reason: TerminationReason): void {
+    if (job.terminationStarted || job.cleanup === "confirmed") return;
+    job.terminationStarted = true;
+    clearTimeout(job.timeoutId);
+    job.terminationReason = reason;
+    job.cleanup = "in-progress";
+    if (job.owner) job.sourceCleanup = beginSourceCleanup(job.owner);
+    job.reportCleanup?.("in-progress");
+    job.cleanupTask = new Promise<void>((resolve) => {
+      job.resolveCleanup = resolve;
+    });
+    if (!this.options.terminationManagesObservation) {
+      job.observation = setTimeout(() => {
+        this.markUnconfirmed(job);
+      }, this.options.cleanupObservationMs ?? 1200);
+      job.observation.unref();
+    }
+    // Protection and the cleanup owner exist before publishing the logical result.
+    // Start the helper synchronously so cancellation is not queued behind delivery.
+    try {
+      const termination = this.killTree(job.child);
+      void Promise.resolve(termination).then(
+        (result) => {
+          if (result?.terminationSucceeded) job.terminationSucceeded = true;
+          if (result?.status === "confirmed") this.confirmStopped(job);
+          else if (result?.status === "unconfirmed") this.markUnconfirmed(job);
+          else this.observeStopped(job);
+        },
+        () => {
+          this.markUnconfirmed(job);
+        },
+      );
+    } catch {
+      this.markUnconfirmed(job);
+    }
+    this.finish(job, reason, job.exitCode ?? null, job.signal ?? null);
   }
 }
 
