@@ -1,5 +1,5 @@
 import path from "node:path";
-import { canonicalizePathTarget } from "../../utils/path-canonicalize.js";
+import { canonicalizeResourcePath } from "../../utils/path-canonicalize.js";
 
 export type ResourceAccess =
   | {
@@ -84,10 +84,10 @@ async function canonicalize(
     accesses.map(async (input) => {
       const access = { ...input };
       if (access.kind === "scope") return access;
-      const target = await canonicalizePathTarget(access.path);
+      const target = await canonicalizeResourcePath(access.path);
       return {
         ...access,
-        path: process.platform === "win32" ? target.toLowerCase() : target,
+        path: target,
       };
     }),
   );

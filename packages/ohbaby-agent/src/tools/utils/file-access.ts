@@ -7,7 +7,10 @@ import type {
   Tool,
   ToolExecutionContext,
 } from "../../core/tool-scheduler/types.js";
-import { canonicalizePathTarget } from "../../utils/path-canonicalize.js";
+import {
+  canonicalizePathTarget,
+  canonicalizeResourcePath,
+} from "../../utils/path-canonicalize.js";
 import { resolvePath, resolvePathForExisting } from "./context.js";
 import { getStringParam } from "./params.js";
 
@@ -64,7 +67,7 @@ export function withFileAccess(tool: Tool, kind: FileAccessKind): Tool {
         : resolvePath(context, value);
       return [
         resource(
-          await canonicalizePathTarget(lexical),
+          await canonicalizeResourcePath(lexical),
           kind === "tree" || kind === "search",
         ),
       ];

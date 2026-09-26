@@ -26,6 +26,84 @@ const tick = (): Promise<void> =>
   new Promise<void>((resolve) => setImmediate(resolve));
 
 describe("shared resource protection", () => {
+  it("serializes missing case aliases on the actual case-insensitive volume", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "c2-case-alias-"));
+    let first: ResourceLease | undefined;
+    let second: Promise<ResourceLease> | undefined;
+    try {
+      await fs.writeFile(path.join(root, "Probe"), "case-insensitive");
+      const insensitive = await fs
+        .readFile(path.join(root, "pROBE"), "utf8")
+        .catch(() => "");
+      if (insensitive !== "case-insensitive") return;
+      first = await acquireResources([file(path.join(root, "Missing.txt"))]);
+      let waiting!: () => void;
+      const wait = new Promise<"waiting">((resolve) => {
+        waiting = (): void => {
+          resolve("waiting");
+        };
+      });
+      second = acquireResources([file(path.join(root, "missing.txt"))], {
+        onWait: waiting,
+      });
+      expect(await Promise.race([wait, second.then(() => "acquired")])).toBe(
+        "waiting",
+      );
+      expect(
+        await leaseCoversResources(first, [
+          file(path.join(root, "missing.txt")),
+        ]),
+      ).toBe(true);
+      await fs.writeFile(path.join(root, "Missing.txt"), "created while held");
+      expect(
+        await leaseCoversResources(first, [
+          file(path.join(root, "missing.txt")),
+        ]),
+      ).toBe(true);
+      first.markUnconfirmed();
+      await expect(second).rejects.toBeInstanceOf(ResourceUnavailableError);
+      second = undefined;
+      await expect(
+        acquireResources([file(path.join(root, "missing.txt"))]),
+      ).rejects.toBeInstanceOf(ResourceUnavailableError);
+    } finally {
+      first?.release();
+      (await second)?.release();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects missing case aliases while their original owner is unconfirmed", async () => {
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), "c2-case-unconfirmed-"),
+    );
+    let first: ResourceLease | undefined;
+    try {
+      await fs.writeFile(path.join(root, "Probe"), "case-insensitive");
+      if (
+        (await fs
+          .readFile(path.join(root, "pROBE"), "utf8")
+          .catch(() => "")) !== "case-insensitive"
+      )
+        return;
+      first = await acquireResources([file(path.join(root, "Missing.txt"))]);
+      first.markUnconfirmed();
+      const result = await acquireResources([
+        file(path.join(root, "missing.txt")),
+      ]).then(
+        (lease) => {
+          lease.release();
+          return "acquired";
+        },
+        (error: unknown) => error,
+      );
+      expect(result).toBeInstanceOf(ResourceUnavailableError);
+    } finally {
+      first?.release();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("does not let unresolved file identity block control or independent scopes, while retaining mixed-scope fairness", async () => {
     const root = await fs.realpath(
       await fs.mkdtemp(path.join(os.tmpdir(), "c2-canonical-gate-")),
