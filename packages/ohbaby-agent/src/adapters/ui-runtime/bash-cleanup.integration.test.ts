@@ -72,180 +72,204 @@ class Child extends EventEmitter {
 }
 
 describe("composition Bash cleanup ownership", () => {
-  it("resolves full-access child ancestry across runs and retains the real sandbox until confirmed", async () => {
-    const root = await fs.realpath(
-      await fs.mkdtemp(path.join(os.tmpdir(), "c3-composition-")),
-    );
-    const bus = createBus();
-    const messageManager = createMessageManager({
-      bus,
-      store: createInMemoryMessageStore(),
-    });
-    const sessions = createInMemorySessionManager({
-      bus,
-      messageCleaner: messageManager,
-    });
-    const primary = await sessions.create(root, {
-      id: "primary",
-      agentName: "build",
-    });
-    const other = await sessions.create(root, {
-      id: "other",
-      agentName: "build",
-    });
-    const childSession = await sessions.create(root, {
-      id: "child",
-      parentId: primary.id,
-      agentName: "build",
-    });
-    const sandbox = createHostLocalSandboxManager(root);
-    const composition = await createUiRuntimeComposition({
-      bus,
-      messageManager,
-      sessionManager: sessions,
-      sandboxManager: sandbox,
-      workdir: root,
-      llmClient: unusedLlmClient(),
-      permissionState: createPermissionState({
-        bus,
-        initialLevel: "full-access",
-      }),
-      mcpManager: { getAllTools: () => Promise.resolve([]) },
-      goalExecutionControl: { interruptGoalExecution: () => Promise.resolve() },
-      skillRegistry: new SkillRegistry({
-        loader: {
-          loadContent: (): Promise<never> =>
-            Promise.reject(new Error("No skills loaded")),
-          scan: (): Promise<Map<string, never>> =>
-            Promise.resolve(new Map<string, never>()),
-        },
-      }),
-    });
-    const lease = await sandbox.acquire({
-      sessionId: childSession.id,
-      contextScopeId: "child-scope",
-    });
-    const otherLease = await sandbox.acquire(other.id);
-    const children: Child[] = [];
-    const killTree = vi.fn(() =>
-      Promise.reject(new Error("injected termination failure")),
-    );
-    const registry = new ShellJobRegistry({
-      killTree,
-      probeTree: (child): "stopped" | "running" =>
-        (child as unknown as Child).stopped ? "stopped" : "running",
-    });
-    const owners: ToolExecutionOwner[] = [];
-    const bash = createBashTool({
-      registry,
-      shell: { acceptable: () => "/bin/sh", killTree },
-      preflight: () => Promise.resolve({ cdTargets: [], resolvedPaths: [] }),
-      spawn: () => {
-        const child = new Child();
-        children.push(child);
-        return child as unknown as ChildProcess;
-      },
-    });
-    const execute = bash.execute.bind(bash);
-    vi.spyOn(bash, "execute").mockImplementation((params, context) => {
-      if (context.owner) owners.push(context.owner);
-      return execute(params, context);
-    });
-    composition.toolScheduler.unregister("bash");
-    composition.toolScheduler.register(bash);
-    const request = (
-      callId: string,
-      overrides: Partial<ToolCallRequest> = {},
-    ): ToolCallRequest => ({
-      callId,
-      sessionId: childSession.id,
-      contextScopeId: "child-scope",
-      runId: "old-run",
-      messageId: "message",
-      toolName: "bash",
-      environment: lease,
-      params: { command: "echo fixture" },
-      ...overrides,
-    });
-    const controller = new AbortController();
-    const running = composition.toolScheduler.execute(
-      request("old-child", { signal: controller.signal }),
-    );
-    let destroying: Promise<void> | undefined;
-    try {
-      await expect.poll(() => children.length).toBe(1);
-      expect(owners[0]).toMatchObject({
-        sessionId: childSession.id,
-        rootSessionId: primary.id,
-        runId: "old-run",
-        contextScopeId: "child-scope",
-        scopeKey: lease.scopeKey,
-      });
-      controller.abort();
-      expect((await running).status).toBe("cancelled");
-      await lease.release();
-      let destroyed = false;
-      destroying = sandbox
-        .destroyContext({
-          sessionId: childSession.id,
-          contextScopeId: "child-scope",
-        })
-        .then(() => {
-          destroyed = true;
-        });
-      const independent = await composition.toolScheduler.execute(
-        request("other-root", {
-          sessionId: other.id,
-          contextScopeId: undefined,
-          environment: otherLease,
-          params: { command: "echo other", run_in_background: true },
-        }),
+  it.each(["full-access", "session-rule"] as const)(
+    "resolves %s child ancestry across runs and retains the real sandbox until confirmed",
+    async (approvalMode) => {
+      const root = await fs.realpath(
+        await fs.mkdtemp(path.join(os.tmpdir(), "c3-composition-")),
       );
-      expect(independent.status).toBe("success");
-      expect(destroyed).toBe(false);
-      const newChild = await sessions.create(root, {
-        id: "new-child",
+      const bus = createBus();
+      const messageManager = createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      });
+      const sessions = createInMemorySessionManager({
+        bus,
+        messageCleaner: messageManager,
+      });
+      const primary = await sessions.create(root, {
+        id: "primary",
+        agentName: "build",
+      });
+      const other = await sessions.create(root, {
+        id: "other",
+        agentName: "build",
+      });
+      const childSession = await sessions.create(root, {
+        id: "child",
         parentId: primary.id,
         agentName: "build",
       });
-      for (const sessionId of [primary.id, childSession.id, newChild.id]) {
-        const rejected = await composition.toolScheduler.execute(
-          request(`blocked-${sessionId}`, { sessionId, runId: "new-run" }),
-        );
-        expect(rejected.error?.message).toContain("unconfirmed");
+      const sandbox = createHostLocalSandboxManager(root);
+      const permissionState = createPermissionState({
+        bus,
+        initialLevel:
+          approvalMode === "full-access" ? "full-access" : "default",
+      });
+      if (approvalMode === "session-rule") {
+        for (const sessionId of [
+          primary.id,
+          other.id,
+          childSession.id,
+          "new-child",
+        ]) {
+          permissionState.addSessionRule(sessionId, {
+            tool: "bash",
+            decision: "allow",
+            scope: "session",
+          });
+        }
       }
-      expect(children).toHaveLength(2);
-      expect(killTree).toHaveBeenCalledTimes(1);
-      children[0].finish();
-      await destroying;
-      expect(destroyed).toBe(true);
-      const rootLease = await sandbox.acquire(primary.id);
+      const ask = vi.fn(() => Promise.resolve("reject" as const));
+      const composition = await createUiRuntimeComposition({
+        bus,
+        messageManager,
+        sessionManager: sessions,
+        sandboxManager: sandbox,
+        workdir: root,
+        llmClient: unusedLlmClient(),
+        permissionState,
+        permission: { ask },
+        mcpManager: { getAllTools: () => Promise.resolve([]) },
+        goalExecutionControl: {
+          interruptGoalExecution: () => Promise.resolve(),
+        },
+        skillRegistry: new SkillRegistry({
+          loader: {
+            loadContent: (): Promise<never> =>
+              Promise.reject(new Error("No skills loaded")),
+            scan: (): Promise<Map<string, never>> =>
+              Promise.resolve(new Map<string, never>()),
+          },
+        }),
+      });
+      const lease = await sandbox.acquire({
+        sessionId: childSession.id,
+        contextScopeId: "child-scope",
+      });
+      const otherLease = await sandbox.acquire(other.id);
+      const children: Child[] = [];
+      const killTree = vi.fn(() =>
+        Promise.reject(new Error("injected termination failure")),
+      );
+      const registry = new ShellJobRegistry({
+        killTree,
+        probeTree: (child): "stopped" | "running" =>
+          (child as unknown as Child).stopped ? "stopped" : "running",
+      });
+      const owners: ToolExecutionOwner[] = [];
+      const bash = createBashTool({
+        registry,
+        shell: { acceptable: () => "/bin/sh", killTree },
+        preflight: () => Promise.resolve({ cdTargets: [], resolvedPaths: [] }),
+        spawn: () => {
+          const child = new Child();
+          children.push(child);
+          return child as unknown as ChildProcess;
+        },
+      });
+      const execute = bash.execute.bind(bash);
+      vi.spyOn(bash, "execute").mockImplementation((params, context) => {
+        if (context.owner) owners.push(context.owner);
+        return execute(params, context);
+      });
+      composition.toolScheduler.unregister("bash");
+      composition.toolScheduler.register(bash);
+      const request = (
+        callId: string,
+        overrides: Partial<ToolCallRequest> = {},
+      ): ToolCallRequest => ({
+        callId,
+        sessionId: childSession.id,
+        contextScopeId: "child-scope",
+        runId: "old-run",
+        messageId: "message",
+        toolName: "bash",
+        environment: lease,
+        params: { command: "echo fixture" },
+        ...overrides,
+      });
+      const controller = new AbortController();
+      const running = composition.toolScheduler.execute(
+        request("old-child", { signal: controller.signal }),
+      );
+      let destroying: Promise<void> | undefined;
       try {
-        const resumed = await composition.toolScheduler.execute(
-          request("resumed", {
-            sessionId: primary.id,
+        await expect.poll(() => children.length).toBe(1);
+        expect(owners[0]).toMatchObject({
+          sessionId: childSession.id,
+          rootSessionId: primary.id,
+          runId: "old-run",
+          contextScopeId: "child-scope",
+          scopeKey: lease.scopeKey,
+        });
+        controller.abort();
+        expect((await running).status).toBe("cancelled");
+        await lease.release();
+        let destroyed = false;
+        destroying = sandbox
+          .destroyContext({
+            sessionId: childSession.id,
+            contextScopeId: "child-scope",
+          })
+          .then(() => {
+            destroyed = true;
+          });
+        const independent = await composition.toolScheduler.execute(
+          request("other-root", {
+            sessionId: other.id,
             contextScopeId: undefined,
-            environment: rootLease,
-            runId: "new-run",
-            params: { command: "echo resumed", run_in_background: true },
+            environment: otherLease,
+            params: { command: "echo other", run_in_background: true },
           }),
         );
-        expect(resumed.status).toBe("success");
-        expect(children).toHaveLength(3);
+        expect(independent.status).toBe("success");
+        expect(destroyed).toBe(false);
+        const newChild = await sessions.create(root, {
+          id: "new-child",
+          parentId: primary.id,
+          agentName: "build",
+        });
+        for (const sessionId of [primary.id, childSession.id, newChild.id]) {
+          const rejected = await composition.toolScheduler.execute(
+            request(`blocked-${sessionId}`, { sessionId, runId: "new-run" }),
+          );
+          expect(rejected.error?.message).toContain("unconfirmed");
+        }
+        expect(children).toHaveLength(2);
+        expect(killTree).toHaveBeenCalledTimes(1);
+        children[0].finish();
+        await destroying;
+        expect(destroyed).toBe(true);
+        const rootLease = await sandbox.acquire(primary.id);
+        try {
+          const resumed = await composition.toolScheduler.execute(
+            request("resumed", {
+              sessionId: primary.id,
+              contextScopeId: undefined,
+              environment: rootLease,
+              runId: "new-run",
+              params: { command: "echo resumed", run_in_background: true },
+            }),
+          );
+          expect(resumed.status).toBe("success");
+          expect(children).toHaveLength(3);
+          expect(ask).not.toHaveBeenCalled();
+        } finally {
+          await rootLease.release();
+        }
       } finally {
-        await rootLease.release();
+        children.forEach((child) => {
+          child.finish();
+        });
+        await running;
+        await registry.dispose();
+        await Promise.all([lease.release(), otherLease.release()]);
+        await destroying;
+        await composition.dispose();
+        vi.restoreAllMocks();
+        await fs.rm(root, { recursive: true, force: true });
       }
-    } finally {
-      children.forEach((child) => {
-        child.finish();
-      });
-      await running;
-      await registry.dispose();
-      await Promise.all([lease.release(), otherLease.release()]);
-      await destroying;
-      await composition.dispose();
-      vi.restoreAllMocks();
-      await fs.rm(root, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 });

@@ -156,14 +156,26 @@ describe("file tools scheduler integration", () => {
       const cleanupConfirmed = new Promise<void>((resolve) => {
         confirmed = resolve;
       });
+      let capacityWaiting!: () => void;
+      const waitingForCapacity = new Promise<void>((resolve) => {
+        capacityWaiting = resolve;
+      });
+      const startedCalls: string[] = [];
       const bus = createBus();
       const scheduler = createToolScheduler({
         bus,
+        config: { concurrency: { maxConcurrency: 1 } },
         permissionState: createPermissionState({
           bus,
           initialLevel: "full-access",
         }),
         onExecutionFact: (fact) => {
+          if (fact.phase === "started") startedCalls.push(fact.owner.callId);
+          if (
+            fact.owner.callId === "capacity_waiter" &&
+            fact.reason === "capacity"
+          )
+            capacityWaiting();
           if (fact.owner.callId === "late_call" && fact.cleanup === "confirmed")
             confirmed();
         },
@@ -181,6 +193,15 @@ describe("file tools scheduler integration", () => {
       const enteredPromise = new Promise<void>((resolve) => {
         entered = resolve;
       });
+      let releaseIndependent!: () => void;
+      const independentGate = new Promise<void>((resolve) => {
+        releaseIndependent = resolve;
+      });
+      let independentEntered!: () => void;
+      const independentStarted = new Promise<void>((resolve) => {
+        independentEntered = resolve;
+      });
+      const pending: Promise<unknown>[] = [];
       const rename = fs.rename;
       vi.spyOn(fs, "rename").mockImplementationOnce(async (...args) => {
         entered();
@@ -233,21 +254,85 @@ describe("file tools scheduler integration", () => {
         });
         expect(blockedRead.status).toBe("error");
         expect(blockedRead.error?.message).toContain("unconfirmed");
-        // Disjoint resources stay usable while the old operation is quarantined.
-        await expect(
-          fileLocks.withFileLock(path.join(tempRoot, "unrelated.txt"), () =>
-            Promise.resolve("independent"),
-          ),
-        ).resolves.toBe("independent");
+        const blockedWrite = await scheduler.execute({
+          callId: "late_writer",
+          messageId: "late_message",
+          sessionId: "late_session",
+          toolName: "write",
+          params: { file_path: filePath, content: "must not execute\n" },
+          environment,
+        });
+        expect(blockedWrite.error?.message).toContain("unconfirmed");
+        expect(startedCalls).not.toContain("late_reader");
+        expect(startedCalls).not.toContain("late_writer");
+        const independentPath = path.join(tempRoot, "independent.txt");
+        const run = (
+          callId: string,
+          name: string,
+          params: Record<string, unknown>,
+        ): ReturnType<typeof scheduler.execute> =>
+          scheduler.execute({
+            callId,
+            messageId: "late_message",
+            sessionId: "late_session",
+            toolName: name,
+            params,
+            environment,
+          });
+        // Real file tools use the returned single slot while A still owns its file.
+        expect(
+          (
+            await run("independent_write", "write", {
+              file_path: independentPath,
+              content: "independent\n",
+            })
+          ).status,
+        ).toBe("success");
+        const independentRead = await run("independent_read", "read", {
+          file_path: independentPath,
+        });
+        expect(independentRead.status).toBe("success");
+        expect(independentRead.output).toContain("independent");
+        vi.mocked(fs.rename).mockImplementationOnce(async (...args) => {
+          independentEntered();
+          await independentGate;
+          await rename(...args);
+        });
+        const independentHolder = run("independent_holder", "write", {
+          file_path: independentPath,
+          content: "second\n",
+          expected_mtime_ms: (await fs.stat(independentPath)).mtimeMs,
+        });
+        pending.push(independentHolder);
+        await independentStarted;
+        const capacityWaiter = run("capacity_waiter", "write", {
+          file_path: path.join(tempRoot, "third.txt"),
+          content: "third\n",
+        });
+        pending.push(capacityWaiter);
+        await waitingForCapacity;
         release();
         await cleanupConfirmed;
+        // A's late settlement must not return the slot now owned by B.
+        await vi.advanceTimersByTimeAsync(0);
+        expect(scheduler.getStatus("capacity_waiter")).toBe("queued");
+        expect(startedCalls).not.toContain("capacity_waiter");
+        releaseIndependent();
+        expect((await independentHolder).status).toBe("success");
+        expect((await capacityWaiter).status).toBe("success");
         await expect(
           fileLocks.withFileLock(filePath, () => fs.readFile(filePath, "utf8")),
         ).resolves.toBe(settlement === "resolve" ? "new\n" : "old\n");
-        await expect(fs.readdir(tempRoot)).resolves.toEqual(["late.txt"]);
+        await expect(fs.readdir(tempRoot)).resolves.toEqual([
+          "independent.txt",
+          "late.txt",
+          "third.txt",
+        ]);
       } finally {
         release();
+        releaseIndependent();
         try {
+          await Promise.allSettled(pending);
           await call;
           await cleanupConfirmed;
         } finally {
