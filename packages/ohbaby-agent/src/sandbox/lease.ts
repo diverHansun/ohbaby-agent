@@ -99,7 +99,7 @@ export function createSandboxLease(input: {
     async resolvePathForExisting(inputPath: string): Promise<string> {
       const target = resolveInputPath(context.workdir, inputPath);
       const resolvedPath = await fs.realpath(target);
-      if (await authorizeInternalRead(target)) return resolvedPath;
+      if (await authorizeInternalRead(resolvedPath)) return resolvedPath;
       return assertTrusted(context, inputPath, resolvedPath);
     },
 

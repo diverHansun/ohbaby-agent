@@ -45,6 +45,11 @@ export interface ExecutionHistory {
   };
 }
 export type ExecutionArtifact =
+  | {
+      readonly state: "deleted";
+      readonly cleanupPending: boolean;
+      readonly error?: string;
+    }
   | { readonly state: "none" | "preparing" }
   | {
       readonly state: "ready";
@@ -90,6 +95,10 @@ export interface SubagentExecutionStore {
   get(input: ExecutionLookup): Promise<SubagentExecutionRecord | null>;
   list(input: ExecutionHistory): Promise<readonly SubagentExecutionRecord[]>;
   listByRootRun(rootRunId: string): Promise<readonly SubagentExecutionRecord[]>;
+  revokeSessionArtifacts(
+    sessionId: string,
+    at: number,
+  ): Promise<readonly SubagentExecutionRecord[]>;
   bindChild(
     input: ExecutionLookup,
     child: { sessionId: string; contextScopeId: string },
@@ -183,6 +192,25 @@ abstract class ExecutionStore implements SubagentExecutionStore {
   protected abstract rootRecords(
     rootRunId: string,
   ): readonly SubagentExecutionRecord[];
+  protected abstract sessionRecords(
+    sessionId: string,
+  ): readonly SubagentExecutionRecord[];
+  revokeSessionArtifacts(
+    sessionId: string,
+    at: number,
+  ): Promise<readonly SubagentExecutionRecord[]> {
+    return this.transaction(() =>
+      this.sessionRecords(sessionId).map((record) => {
+        const next: SubagentExecutionRecord = {
+          ...record,
+          artifact: { state: "deleted", cleanupPending: true },
+          updatedAt: at,
+        };
+        this.save(next);
+        return next;
+      }),
+    );
+  }
   private scoped(input: ExecutionLookup): SubagentExecutionRecord | null {
     const r = this.read(input.executionId);
     return r?.parentSessionId === input.parentSessionId &&
@@ -348,7 +376,10 @@ abstract class ExecutionStore implements SubagentExecutionStore {
     )
       throw new Error("Invalid ready artifact");
     return this.mutate(input, (r) => {
-      if (!terminal(r)) throw new Error("Artifact requires terminal result");
+      if (r.artifact.state === "deleted" && artifact.state !== "deleted")
+        throw new Error("Result artifact was deleted");
+      if (!terminal(r) && artifact.state !== "deleted")
+        throw new Error("Artifact requires terminal result");
       return { ...r, artifact, updatedAt: at };
     });
   }
@@ -429,6 +460,18 @@ abstract class ExecutionStore implements SubagentExecutionStore {
 }
 export class InMemorySubagentExecutionStore extends ExecutionStore {
   private readonly records = new Map<string, SubagentExecutionRecord>();
+  protected sessionRecords(
+    sessionId: string,
+  ): readonly SubagentExecutionRecord[] {
+    return [...this.records.values()]
+      .filter(
+        (r) =>
+          r.parentSessionId === sessionId ||
+          r.rootSessionId === sessionId ||
+          r.childSessionId === sessionId,
+      )
+      .map((r) => structuredClone(r));
+  }
   protected async transaction<T>(operation: () => T): Promise<T> {
     await Promise.resolve();
     return operation();
@@ -530,6 +573,16 @@ export class DatabaseSubagentExecutionStore extends ExecutionStore {
   }
   protected transaction<T>(operation: () => T): Promise<T> {
     return runWriteTransaction(this.db, operation);
+  }
+  protected sessionRecords(
+    sessionId: string,
+  ): readonly SubagentExecutionRecord[] {
+    return this.db
+      .prepare<Row>(
+        `SELECT * FROM ${schema.subagentExecution.tableName} WHERE parent_session_id = ? OR root_session_id = ? OR child_session_id = ?`,
+      )
+      .all(sessionId, sessionId, sessionId)
+      .map(fromRow);
   }
   protected read(id: string): SubagentExecutionRecord | null {
     const row = this.db
