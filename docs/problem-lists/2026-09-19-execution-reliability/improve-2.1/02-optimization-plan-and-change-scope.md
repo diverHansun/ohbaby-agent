@@ -36,6 +36,8 @@
 
 Web 的私有 `POST /v1/sessions` 增加可选 `reuseEmpty` 意图，缺省为 false 保持底层创建行为；浏览器 New 明确传 true。daemon `/new` 将 flag 转换为同一 server 操作，不直接借全局 backend 选中态。JSONRPC createSession 必须透传 SDK 的可选参数，server 对目标候选与调用绑定校验，并合并自己的排除集合；不得信任客户端自报的“其他 client 已离线”。
 
+追加验收补齐浏览器 SDK 适配：REST 同时支持显式 `options`（SDK 的 `reuseSessionId` / `reuseInactiveEmpty.excludeSessionIds`），与旧 `reuseEmpty` 不能同时指定。两者均缺省仍明确创建；旧 `reuseEmpty` 兼容保留。Web runtime 的 New 显式传复用 options，公开 `client.createSession()` 维持低层默认新建。非法 options 在产生会话前返回 400，selected-root 和其他客户端保护仍由 server 校验。
+
 创建/复用结果要来自实际操作，而非用“绑定是否改变”猜测：从 A 换到既有空 B 是 changed=true、created=false。定义只用于 `createSession` 操作返回的 `UiSessionCreationResult extends UiSessionIndexEntry`，增加可选 `created`；`UiSessionIndexEntry` 本身保持纯索引 DTO，该字段不得进入 index/数据库或持久态。本仓库参与复用的 adapters 和 test doubles 必须提供准确 `created`，旧 backend 没有 outcome 或不支持复用时，复用路径显式报告能力/合同错误，不伪造 created。无选项的明确创建仍可返回不含该字段的既有形状。REST/JSONRPC wrapper 对齐操作结果；`rpc-route.ts` 当前硬编码 `session.created`，须和已按结果区分 current/created 的 `commands/builtin.ts` 一并改为真实操作结果。
 
 ### 有界并发与提交屏障

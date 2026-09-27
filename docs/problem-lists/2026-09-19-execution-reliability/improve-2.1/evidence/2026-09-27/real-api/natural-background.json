@@ -1,0 +1,24 @@
+{
+  "source": "temporary deterministic REST/backend test, fake upstream; no explicit probe and no reopen",
+  "passed": 2,
+  "scenarios": [
+    {
+      "duringRun": false,
+      "initial": 128000,
+      "afterBackground": 1050000,
+      "firstWindow": 1050000,
+      "secondWindow": 1050000,
+      "metadataCalls": 1,
+      "modelInvalidations": 2
+    },
+    {
+      "duringRun": true,
+      "initial": 128000,
+      "afterBackground": 1050000,
+      "firstWindow": 128000,
+      "secondWindow": 1050000,
+      "metadataCalls": 1,
+      "modelInvalidations": 2
+    }
+  ]
+}
