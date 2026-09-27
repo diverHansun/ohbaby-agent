@@ -482,7 +482,7 @@ async function startFreshDaemon(input: {
   let server: DaemonHttpServerHandle | undefined;
   const logger = input.diagnosticsHandle?.logger ?? NOOP_LOGGER;
   const supervisor = new Supervisor({
-    bootstrap(): DaemonRuntimeHandle {
+    async bootstrap(): Promise<DaemonRuntimeHandle> {
       const createBackend = (workdir: string): PersistentUiBackendClient =>
         createPersistentUiBackendClient({
           ...(input.options.dbPath === undefined
@@ -497,7 +497,7 @@ async function startFreshDaemon(input: {
       const backend = createBackend(input.scopeRoot);
       const releaseDatabase = retainLocalDaemonDatabase();
       const workspaceRegistry = createWorkspaceRegistryIfAvailable();
-      workspaceRegistry?.open(input.scopeRoot);
+      await workspaceRegistry?.open(input.scopeRoot);
       server = createDaemonHttpServer({
         authToken: input.authToken,
         backend,

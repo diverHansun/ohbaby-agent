@@ -2,7 +2,8 @@ import { NodeSqliteConnection } from "./connection.js";
 import { DatabaseNotInitializedError, MigrationError } from "./errors.js";
 import { INITIAL_MIGRATIONS } from "./migrations.js";
 import { ensureDatabaseDirectory, resolveDatabasePath } from "./path.js";
-import { runWithBusyRetry } from "./busy-retry.js";
+import { isSqliteBusy } from "./busy-retry.js";
+import { DatabaseBusyError } from "./errors.js";
 import type {
   DatabaseConnection,
   DatabaseStatement,
@@ -106,9 +107,11 @@ function createScopedTransactionConnection(connection: DatabaseConnection): {
 }
 
 function initializePragma(connection: DatabaseConnection): void {
+  // Configure the startup budget before initialization writes. SQLite journal
+  // conversion can still reject immediately; failed initialization closes below.
+  connection.exec("PRAGMA busy_timeout = 5000");
   connection.exec("PRAGMA journal_mode = WAL");
   connection.exec("PRAGMA foreign_keys = ON");
-  connection.exec("PRAGMA busy_timeout = 5000");
 }
 
 function ensureMigrationTable(connection: DatabaseConnection): void {
@@ -175,7 +178,12 @@ export function initDatabase(options: InitDatabaseOptions = {}): void {
 
   if (currentConnection) {
     if (currentPath === dbPath) {
-      runMigrations(currentConnection, migrations, now);
+      currentConnection.exec("PRAGMA busy_timeout = 5000");
+      try {
+        runMigrations(currentConnection, migrations, now);
+      } finally {
+        currentConnection.exec("PRAGMA busy_timeout = 25");
+      }
       return;
     }
     closeDatabase();
@@ -186,6 +194,7 @@ export function initDatabase(options: InitDatabaseOptions = {}): void {
   try {
     initializePragma(connection);
     runMigrations(connection, migrations, now);
+    connection.exec("PRAGMA busy_timeout = 25");
   } catch (error) {
     connection.close();
     throw error;
@@ -211,17 +220,55 @@ export function closeDatabase(): void {
   currentPath = undefined;
 }
 
-export function withTransaction<T>(operation: SyncTransactionCallback<T>): T {
+// One FIFO per connection: reserve before waiting, never hold a transaction over await.
+const writeTails = new WeakMap<DatabaseConnection, Promise<void>>();
+const WRITE_WAIT_BUDGET_MS = 5000;
+
+export async function runWriteTransaction<T>(
+  connection: DatabaseConnection,
+  operation: (db: DatabaseConnection) => T,
+): Promise<T> {
   if (isAsyncFunction(operation)) {
     throw new Error("Database transactions require a synchronous callback");
   }
-  return runWithBusyRetry(() => {
-    const connection = getDatabase();
+  const deadline = performance.now() + WRITE_WAIT_BUDGET_MS;
+  const previous = writeTails.get(connection) ?? Promise.resolve();
+  let release!: () => void;
+  const turn = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  writeTails.set(connection, turn);
+  await previous;
+  try {
+    // Yield even between uncontended writes so a long FIFO cannot starve Stop.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    connection.exec("PRAGMA busy_timeout = 25");
+    let attempts = 0;
+    let lastBusy: unknown;
+    for (;;) {
+      if (performance.now() >= deadline) {
+        throw new DatabaseBusyError(attempts, lastBusy);
+      }
+      attempts += 1;
+      try {
+        connection.exec("BEGIN IMMEDIATE");
+        break;
+      } catch (error) {
+        if (!isSqliteBusy(error)) throw error;
+        lastBusy = error;
+        const remaining = deadline - performance.now();
+        if (remaining <= 0) throw new DatabaseBusyError(attempts, error);
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, Math.min(25, remaining)),
+        );
+      }
+    }
     const scoped = createScopedTransactionConnection(connection);
-    connection.exec("BEGIN IMMEDIATE");
     try {
       const result = operation(scoped.db);
       if (isThenable(result)) {
+        // Observe a rejected accidental async callback as well as rejecting this write.
+        void Promise.resolve(result).catch(() => undefined);
         throw new Error("Database transactions require a synchronous callback");
       }
       connection.exec("COMMIT");
@@ -230,11 +277,20 @@ export function withTransaction<T>(operation: SyncTransactionCallback<T>): T {
       try {
         connection.exec("ROLLBACK");
       } catch {
-        // Keep the original operation error intact.
+        /* Preserve the original failure. */
       }
       throw error;
     } finally {
       scoped.deactivate();
     }
-  });
+  } finally {
+    release();
+    if (writeTails.get(connection) === turn) writeTails.delete(connection);
+  }
+}
+
+export function withTransaction<T>(
+  operation: SyncTransactionCallback<T>,
+): Promise<T> {
+  return runWriteTransaction(getDatabase(), operation);
 }

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { UiPromptError } from "ohbaby-sdk";
 import {
   getDatabase,
-  runWithBusyRetry,
+  runWriteTransaction,
   schema,
   type DatabaseConnection,
 } from "../../services/database/index.js";
@@ -767,7 +767,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     editLeaseId: string,
     ownerClientId: string | undefined,
     update: (db: DatabaseConnection, current: PromptSubmissionRecord) => void,
-  ): PromptSubmissionRecord {
+  ): Promise<PromptSubmissionRecord> {
     return this.transaction((db) => {
       const current = this.requireFrom(db, promptId);
       this.assertLease(current, editLeaseId, ownerClientId);
@@ -780,21 +780,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     return Math.max(this.now(), record.updatedAt + 1);
   }
 
-  private transaction<T>(operation: (db: DatabaseConnection) => T): T {
-    return runWithBusyRetry(() => {
-      this.db.exec("BEGIN IMMEDIATE");
-      try {
-        const result = operation(this.db);
-        this.db.exec("COMMIT");
-        return result;
-      } catch (error) {
-        try {
-          this.db.exec("ROLLBACK");
-        } catch {
-          // Preserve the original failure.
-        }
-        throw error;
-      }
-    });
+  private transaction<T>(operation: (db: DatabaseConnection) => T): Promise<T> {
+    return runWriteTransaction(this.db, operation);
   }
 }

@@ -80,7 +80,7 @@ export class SnapshotService {
     );
 
     try {
-      return this.store.createCheckpoint({
+      return await this.store.createCheckpoint({
         ...params,
         checkpointId,
         preTreeRef,
@@ -117,13 +117,13 @@ export class SnapshotService {
 
     const existing = this.store.getPatchByCheckpoint(params.checkpointId);
     if (existing !== undefined) {
-      this.updateCursorIfProvided(checkpoint.checkpointId, params);
+      await this.updateCursorIfProvided(checkpoint.checkpointId, params);
       return existing;
     }
 
     const computed = await this.diffEngine.computeDiff(checkpoint);
     try {
-      const created = this.store.createPatchIfAbsent({
+      const created = await this.store.createPatchIfAbsent({
         patchId: this.createPatchId(),
         checkpointId: checkpoint.checkpointId,
         postTreeRef: computed.commit,
@@ -133,11 +133,11 @@ export class SnapshotService {
 
       if (!created.created) {
         await this.restoreExistingPostRef(checkpoint, created.patch);
-        this.updateCursorIfProvided(checkpoint.checkpointId, params);
+        await this.updateCursorIfProvided(checkpoint.checkpointId, params);
         return created.patch;
       }
 
-      this.store.updateCheckpointMessageCursor(
+      await this.store.updateCheckpointMessageCursor(
         checkpoint.checkpointId,
         params.messageCursorAfter,
       );
@@ -215,7 +215,7 @@ export class SnapshotService {
 
     await this.diffEngine.dropRef(checkpointId, checkpoint.workdir);
     try {
-      this.store.deleteCheckpoint(checkpointId);
+      await this.store.deleteCheckpoint(checkpointId);
     } catch (error) {
       await this.diffEngine
         .restoreRefs(checkpointId, checkpoint.workdir, {
@@ -250,12 +250,12 @@ export class SnapshotService {
     return this.store.getPatches(checkpointId);
   }
 
-  private updateCursorIfProvided(
+  private async updateCursorIfProvided(
     checkpointId: string,
     params: CaptureSnapshotParams,
-  ): void {
+  ): Promise<void> {
     if (params.messageCursorAfter !== undefined) {
-      this.store.updateCheckpointMessageCursor(
+      await this.store.updateCheckpointMessageCursor(
         checkpointId,
         params.messageCursorAfter,
       );

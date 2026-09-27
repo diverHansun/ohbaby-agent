@@ -440,9 +440,7 @@ function createPermissionSlotLLMClient(input: {
           );
         }
         if (
-          lastPersistentRequestMessageText(request).includes(
-            "permission prompt 1",
-          )
+          lastPersistentRequestMessageText(request) === "permission prompt 1"
         ) {
           return Promise.resolve(
             createProviderStream([

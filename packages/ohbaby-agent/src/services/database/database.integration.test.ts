@@ -54,7 +54,7 @@ describe("services/database", () => {
     ).toBe(1);
     expect(
       db.pragma<{ busy_timeout: number }>("busy_timeout")[0]?.busy_timeout,
-    ).toBe(5000);
+    ).toBe(25);
     expect(
       db
         .prepare<{
@@ -470,7 +470,7 @@ describe("services/database", () => {
     const dbPath = await tempDbPath();
     initDatabase({ dbPath });
 
-    expect(() => {
+    await expect(
       withTransaction((db) => {
         db.prepare(
           `INSERT INTO ${schema.session.tableName}
@@ -493,8 +493,8 @@ describe("services/database", () => {
             (id, session_id, role, created_at, updated_at, data)
            VALUES (?, ?, ?, ?, ?, ?)`,
         ).run("msg_1", "missing_session", "user", 1, 1, "{}");
-      });
-    }).toThrow(/FOREIGN KEY/i);
+      }),
+    ).rejects.toThrow(/FOREIGN KEY/i);
 
     expect(
       getDatabase()
@@ -509,7 +509,7 @@ describe("services/database", () => {
     const dbPath = await tempDbPath();
     initDatabase({ dbPath });
 
-    withTransaction((db) => {
+    await withTransaction((db) => {
       db.prepare(
         `INSERT INTO ${schema.session.tableName}
           (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
@@ -561,11 +561,11 @@ describe("services/database", () => {
       );
     };
 
-    expect(() => {
+    await expect(
       withTransaction(
         asyncOperation as unknown as (db: DatabaseConnection) => void,
-      );
-    }).toThrow(/synchronous/);
+      ),
+    ).rejects.toThrow(/synchronous/);
     await Promise.resolve();
 
     expect(
@@ -603,9 +603,9 @@ describe("services/database", () => {
       return escaped;
     }) as unknown as SyncTransactionCallback<void>;
 
-    expect(() => {
-      withTransaction(escapingOperation);
-    }).toThrow(/synchronous/);
+    await expect(withTransaction(escapingOperation)).rejects.toThrow(
+      /synchronous/,
+    );
 
     await expect(escaped).rejects.toThrow(/transaction is no longer active/);
     expect(
@@ -640,9 +640,9 @@ describe("services/database", () => {
       return Promise.resolve();
     }) as unknown as SyncTransactionCallback<void>;
 
-    expect(() => {
-      withTransaction(thenableOperation);
-    }).toThrow(/synchronous/);
+    await expect(withTransaction(thenableOperation)).rejects.toThrow(
+      /synchronous/,
+    );
 
     expect(
       getDatabase()

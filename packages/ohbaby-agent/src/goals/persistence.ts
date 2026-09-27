@@ -1,5 +1,5 @@
 import type { DatabaseConnection } from "../services/database/index.js";
-import { schema } from "../services/database/index.js";
+import { schema, runWriteTransaction } from "../services/database/index.js";
 import type {
   GoalPersistencePort,
   GoalRecord,
@@ -20,16 +20,17 @@ export function createSqliteGoalPersistence(
   const tableName = schema.goalRecord.tableName;
   return {
     append(sessionId: string, data: GoalRecordData): Promise<void> {
-      db.prepare(
-        `INSERT INTO ${tableName} (session_id, seq, created_at, data)
+      return runWriteTransaction(db, () => {
+        db.prepare(
+          `INSERT INTO ${tableName} (session_id, seq, created_at, data)
          VALUES (
            ?,
            (SELECT COALESCE(MAX(seq), 0) + 1 FROM ${tableName} WHERE session_id = ?),
            ?,
            ?
          )`,
-      ).run(sessionId, sessionId, now(), JSON.stringify(data));
-      return Promise.resolve();
+        ).run(sessionId, sessionId, now(), JSON.stringify(data));
+      });
     },
     list(sessionId: string): Promise<readonly GoalRecord[]> {
       const rows = db

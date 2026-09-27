@@ -351,10 +351,10 @@ describe("startDaemonServer", () => {
       Supervisor: class {
         constructor(
           private readonly options: {
-            readonly bootstrap: () => {
+            readonly bootstrap: () => Promise<{
               readonly start: () => Promise<void>;
               readonly stop: () => Promise<void>;
-            };
+            }>;
             readonly idleTimeoutMs?: number;
           },
         ) {
@@ -362,7 +362,7 @@ describe("startDaemonServer", () => {
         }
 
         async start(): Promise<void> {
-          await this.options.bootstrap().start();
+          await (await this.options.bootstrap()).start();
         }
 
         stop(): Promise<void> {

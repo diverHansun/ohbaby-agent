@@ -1,6 +1,6 @@
 import {
   getDatabase,
-  runWithBusyRetry,
+  runWriteTransaction,
   schema,
   type DatabaseConnection,
 } from "../database/index.js";
@@ -70,6 +70,7 @@ interface DatabaseSessionStoreOptions {
 interface SessionTransactionState {
   active: boolean;
   readonly upserts: Map<string, Session>;
+  readonly originals: Map<string, string>;
   readonly removals: Set<string>;
 }
 
@@ -263,6 +264,9 @@ export function createDatabaseSessionStore(
       return cloneSession(staged);
     }
     const session = getRow(sessionId);
+    if (!transaction.originals.has(sessionId)) {
+      transaction.originals.set(sessionId, JSON.stringify(session));
+    }
     return session ? cloneSession(session) : null;
   }
 
@@ -285,38 +289,45 @@ export function createDatabaseSessionStore(
     return Array.from(sessions.values());
   }
 
-  function commitTransaction(transaction: SessionTransactionState): void {
-    if (transaction.upserts.size === 0 && transaction.removals.size === 0) {
-      return;
-    }
-    runWithBusyRetry(() => {
-      db.exec("BEGIN IMMEDIATE");
-    });
-    try {
+  function commitTransaction(
+    transaction: SessionTransactionState,
+  ): Promise<void> {
+    return runWriteTransaction(db, () => {
+      // Staging may await application work. Reject stale replacement; never replay it.
+      for (const sessionId of new Set([
+        ...transaction.removals,
+        ...transaction.upserts.keys(),
+      ])) {
+        if (
+          JSON.stringify(getRow(sessionId)) !==
+          transaction.originals.get(sessionId)
+        ) {
+          throw new Error(`Session ${sessionId} changed during transaction`);
+        }
+      }
       for (const sessionId of transaction.removals) {
         db.prepare(`DELETE FROM ${schema.session.tableName} WHERE id = ?`).run(
           sessionId,
         );
       }
-      for (const session of transaction.upserts.values()) {
-        upsertRow(session);
-      }
-      db.exec("COMMIT");
-    } catch (error) {
-      try {
-        db.exec("ROLLBACK");
-      } catch {
-        // Preserve the original store error.
-      }
-      throw error;
-    }
+      for (const session of transaction.upserts.values()) upsertRow(session);
+    });
+  }
+
+  async function withWriteBoundary<T>(
+    operation: () => T,
+    transaction?: SessionTransactionState,
+  ): Promise<T> {
+    assertStoreAvailable(transaction);
+    return transaction
+      ? withAsyncBoundary(operation)
+      : runWriteTransaction(db, operation);
   }
 
   function createStore(transaction?: SessionTransactionState): SessionStore {
     const store: SessionStore = {
       insert(session: Session): Promise<void> {
-        return withAsyncBoundary(() => {
-          assertStoreAvailable(transaction);
+        return withWriteBoundary(() => {
           if (transaction) {
             if (getTransactionSession(transaction, session.id)) {
               throw new DuplicateSessionError(session.id);
@@ -326,7 +337,7 @@ export function createDatabaseSessionStore(
             return;
           }
           insertRow(session);
-        });
+        }, transaction);
       },
 
       get(sessionId: string): Promise<Session | null> {
@@ -487,8 +498,7 @@ export function createDatabaseSessionStore(
       },
 
       update(sessionId: string, patch: Partial<Session>): Promise<Session> {
-        return withAsyncBoundary(() => {
-          assertStoreAvailable(transaction);
+        return withWriteBoundary(() => {
           const existing = transaction
             ? getTransactionSession(transaction, sessionId)
             : getRow(sessionId);
@@ -511,13 +521,13 @@ export function createDatabaseSessionStore(
             writeRow(updated);
           }
           return cloneSession(updated);
-        });
+        }, transaction);
       },
 
       remove(sessionId: string): Promise<void> {
-        return withAsyncBoundary(() => {
-          assertStoreAvailable(transaction);
+        return withWriteBoundary(() => {
           if (transaction) {
+            getTransactionSession(transaction, sessionId);
             transaction.upserts.delete(sessionId);
             transaction.removals.add(sessionId);
             return;
@@ -525,7 +535,7 @@ export function createDatabaseSessionStore(
           db.prepare(
             `DELETE FROM ${schema.session.tableName} WHERE id = ?`,
           ).run(sessionId);
-        });
+        }, transaction);
       },
 
       async withTransaction<T>(
@@ -539,16 +549,20 @@ export function createDatabaseSessionStore(
         const state: SessionTransactionState = {
           active: true,
           upserts: new Map(),
+          originals: new Map(),
           removals: new Set(),
         };
+        let result: T;
         try {
-          const result = await operation(createStore(state));
-          commitTransaction(state);
-          return result;
+          result = await operation(createStore(state));
         } finally {
+          // Only application staging owns this guard. The frozen commit joins
+          // the shared FIFO; unrelated sessions may proceed while it waits.
           state.active = false;
           activeTransaction = false;
         }
+        await commitTransaction(state);
+        return result;
       },
     };
 

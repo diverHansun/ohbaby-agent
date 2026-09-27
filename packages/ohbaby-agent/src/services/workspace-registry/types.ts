@@ -15,9 +15,9 @@ export interface WorkspaceRegistryStore {
   list(): readonly WorkspaceRegistryEntry[];
   ensureDiscovered(
     scopeKeys: readonly string[],
-  ): readonly WorkspaceRegistryEntry[];
-  open(scopeKey: string): WorkspaceRegistryEntry;
-  hide(scopeKey: string): boolean;
+  ): Promise<readonly WorkspaceRegistryEntry[]>;
+  open(scopeKey: string): Promise<WorkspaceRegistryEntry>;
+  hide(scopeKey: string): Promise<boolean>;
 }
 
 export interface WorkspaceRegistryStoreOptions {

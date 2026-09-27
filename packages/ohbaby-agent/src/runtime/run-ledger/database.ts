@@ -1,6 +1,6 @@
 import {
   getDatabase,
-  runWithBusyRetry,
+  runWriteTransaction,
   schema,
   type DatabaseConnection,
 } from "../../services/database/index.js";
@@ -284,22 +284,8 @@ export function createDatabaseRunLedger(
     return updatedCount;
   }
 
-  function withImmediateTransaction<T>(operation: () => T): T {
-    return runWithBusyRetry(() => {
-      db.exec("BEGIN IMMEDIATE");
-      try {
-        const result = operation();
-        db.exec("COMMIT");
-        return result;
-      } catch (error) {
-        try {
-          db.exec("ROLLBACK");
-        } catch {
-          // Preserve the original ledger error.
-        }
-        throw error;
-      }
-    });
+  function withImmediateTransaction<T>(operation: () => T): Promise<T> {
+    return runWriteTransaction(db, operation);
   }
 
   function transition(
@@ -347,7 +333,7 @@ export function createDatabaseRunLedger(
     createPending(
       input: CreatePendingRunLedgerInput,
     ): Promise<RunLedgerRecord> {
-      return withAsyncBoundary(() => {
+      return withImmediateTransaction(() => {
         return cloneRecord(insertPendingRow(db, input));
       });
     },
@@ -355,28 +341,25 @@ export function createDatabaseRunLedger(
     claimPendingRun(
       input: ClaimPendingRunLedgerInput,
     ): Promise<RunLedgerRecord> {
-      return withAsyncBoundary(() => {
-        const record = withImmediateTransaction(() => {
-          const activeRows = getActiveRowsForSession(
-            db,
-            input.sessionId,
-            input.contextScopeId,
-          );
-          recoverOrphanedRows(db, activeRows, false);
-          const activeRunIds = activeRows
-            .filter((row) => !isOrphaned(row, false))
-            .map((row) => row.run_id);
-          if (activeRunIds.length > 0) {
-            throw new SessionRunBusyError(input.sessionId, activeRunIds);
-          }
-          return insertPendingRow(db, input);
-        });
-        return cloneRecord(record);
+      return withImmediateTransaction(() => {
+        const activeRows = getActiveRowsForSession(
+          db,
+          input.sessionId,
+          input.contextScopeId,
+        );
+        recoverOrphanedRows(db, activeRows, false);
+        const activeRunIds = activeRows
+          .filter((row) => !isOrphaned(row, false))
+          .map((row) => row.run_id);
+        if (activeRunIds.length > 0) {
+          throw new SessionRunBusyError(input.sessionId, activeRunIds);
+        }
+        return cloneRecord(insertPendingRow(db, input));
       });
     },
 
     markRunning(runId: string): Promise<RunLedgerRecord> {
-      return withAsyncBoundary(() =>
+      return withImmediateTransaction(() =>
         cloneRecord(
           transition(runId, "running", ["pending"], (record) => ({
             ...record,
@@ -391,7 +374,7 @@ export function createDatabaseRunLedger(
     },
 
     markSucceeded(runId: string): Promise<RunLedgerRecord> {
-      return withAsyncBoundary(() =>
+      return withImmediateTransaction(() =>
         cloneRecord(
           transition(runId, "succeeded", ["running"], (record) => ({
             ...record,
@@ -409,7 +392,7 @@ export function createDatabaseRunLedger(
       error: unknown,
       errorData?: RunLedgerRecord["errorData"],
     ): Promise<RunLedgerRecord> {
-      return withAsyncBoundary(() =>
+      return withImmediateTransaction(() =>
         cloneRecord(
           transition(runId, "failed", ["pending", "running"], (record) => ({
             ...record,
@@ -423,7 +406,7 @@ export function createDatabaseRunLedger(
     },
 
     markCancelled(runId: string, reason?: string): Promise<RunLedgerRecord> {
-      return withAsyncBoundary(() =>
+      return withImmediateTransaction(() =>
         cloneRecord(
           transition(runId, "cancelled", ["pending", "running"], (record) => ({
             ...record,
@@ -439,7 +422,7 @@ export function createDatabaseRunLedger(
     markInterrupted(
       options: MarkInterruptedOptions = {},
     ): Promise<MarkInterruptedResult> {
-      return withAsyncBoundary(() => {
+      return withImmediateTransaction(() => {
         const statuses = Array.from(
           new Set(options.statuses ?? INTERRUPTABLE_STATUSES),
         );
@@ -466,10 +449,8 @@ export function createDatabaseRunLedger(
     },
 
     recoverOrphanedRuns(): Promise<MarkInterruptedResult> {
-      return withAsyncBoundary(() => {
-        const updatedCount = withImmediateTransaction(() =>
-          recoverOrphanedRows(db, getActiveRows(db), true),
-        );
+      return withImmediateTransaction(() => {
+        const updatedCount = recoverOrphanedRows(db, getActiveRows(db), true);
         return { updatedCount };
       });
     },

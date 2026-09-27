@@ -310,7 +310,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
         }
       }
     }
-    registry.ensureDiscovered([...available]);
+    await registry.ensureDiscovered([...available]);
     const scopes = registry
       .list()
       .filter((entry) => entry.visibility === "visible")
@@ -381,7 +381,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   ): Promise<Response> {
     try {
       const directory = await resolveWorkspaceScope(requestedDirectory);
-      const entry = this.options.workspaceRegistry?.open(directory);
+      const entry = await this.options.workspaceRegistry?.open(directory);
       return context.json({
         ...options,
         ok: true,
@@ -476,7 +476,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       return input;
     }
     const registry = this.options.workspaceRegistry;
-    if (registry?.hide(input.directory) !== true) {
+    if ((await registry?.hide(input.directory)) !== true) {
       return context.json(
         {
           error: {

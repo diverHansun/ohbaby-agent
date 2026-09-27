@@ -6,7 +6,7 @@ import {
 import { prepareModelStep } from "./store.js";
 import {
   getDatabase,
-  runWithBusyRetry,
+  runWriteTransaction,
   schema,
   type DatabaseConnection,
 } from "../../services/database/index.js";
@@ -104,22 +104,8 @@ export function createDatabaseMessageStore(
     return operation();
   }
 
-  function withImmediateTransaction<T>(operation: () => T): T {
-    runWithBusyRetry(() => {
-      db.exec("BEGIN IMMEDIATE");
-    });
-    try {
-      const result = operation();
-      db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      try {
-        db.exec("ROLLBACK");
-      } catch {
-        // Preserve the original store error.
-      }
-      throw error;
-    }
+  function withImmediateTransaction<T>(operation: () => T): Promise<T> {
+    return runWriteTransaction(db, operation);
   }
 
   function touchMessage(messageId: string, updatedAt: number): void {
@@ -260,108 +246,104 @@ export function createDatabaseMessageStore(
       });
     },
     saveReasoningPart(input): Promise<ReasoningPart | undefined> {
-      return withAsyncBoundary(() =>
-        withImmediateTransaction(() => {
-          const row = getMessageRow(input.messageId);
-          if (row === undefined)
-            throw new Error(`Message not found: ${input.messageId}`);
-          const message = rowToMessage(row);
-          if (
-            input.sessionId !== undefined &&
-            input.sessionId !== message.sessionId
+      return withImmediateTransaction(() => {
+        const row = getMessageRow(input.messageId);
+        if (row === undefined)
+          throw new Error(`Message not found: ${input.messageId}`);
+        const message = rowToMessage(row);
+        if (
+          input.sessionId !== undefined &&
+          input.sessionId !== message.sessionId
+        )
+          throw new Error("Reasoning identity belongs to another session");
+        const existingRow = db
+          .prepare<PartRow>(
+            `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
           )
-            throw new Error("Reasoning identity belongs to another session");
-          const existingRow = db
-            .prepare<PartRow>(
-              `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
-            )
-            .get(input.partId);
-          const existing =
-            existingRow === undefined ? undefined : rowToPart(existingRow);
-          if (
-            existing !== undefined &&
-            (existing.messageId !== input.messageId ||
-              existing.type !== "reasoning")
+          .get(input.partId);
+        const existing =
+          existingRow === undefined ? undefined : rowToPart(existingRow);
+        if (
+          existing !== undefined &&
+          (existing.messageId !== input.messageId ||
+            existing.type !== "reasoning")
+        )
+          throw new Error("Reasoning identity belongs to another part");
+        if (input.text === "") return existing;
+        const part: ReasoningPart = {
+          ...existing,
+          id: input.partId,
+          messageId: message.id,
+          sessionId: message.sessionId,
+          contextScopeId: message.contextScopeId,
+          orderIndex: existing?.orderIndex ?? nextOrderIndex(message.id),
+          type: "reasoning",
+          text: input.text,
+          ...(input.endReason === undefined
+            ? {}
+            : { endReason: input.endReason }),
+          metadata: {
+            ...existing?.metadata,
+            ...input.metadata,
+            ...(input.runId === undefined ? {} : { runId: input.runId }),
+          },
+        };
+        db.prepare(
+          `INSERT INTO ${schema.part.tableName} (id, message_id, session_id, type, order_index, created_at, updated_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, data = excluded.data`,
+        ).run(
+          part.id,
+          part.messageId,
+          part.sessionId,
+          part.type,
+          part.orderIndex,
+          input.updatedAt,
+          input.updatedAt,
+          partToRowData(part),
+        );
+        return clone(part);
+      });
+    },
+    commitModelStep(
+      input: StoreModelStepInput,
+    ): Promise<CommitModelStepResult> {
+      return withImmediateTransaction(() => {
+        const row = getMessageRow(input.assistantMessageId);
+        const existingParts = db
+          .prepare<PartRow>(
+            `SELECT * FROM ${schema.part.tableName} WHERE message_id = ? ORDER BY order_index ASC`,
           )
-            throw new Error("Reasoning identity belongs to another part");
-          if (input.text === "") return existing;
-          const part: ReasoningPart = {
-            ...existing,
-            id: input.partId,
-            messageId: message.id,
-            sessionId: message.sessionId,
-            contextScopeId: message.contextScopeId,
-            orderIndex: existing?.orderIndex ?? nextOrderIndex(message.id),
-            type: "reasoning",
-            text: input.text,
-            ...(input.endReason === undefined
-              ? {}
-              : { endReason: input.endReason }),
-            metadata: {
-              ...existing?.metadata,
-              ...input.metadata,
-              ...(input.runId === undefined ? {} : { runId: input.runId }),
-            },
-          };
+          .all(input.assistantMessageId)
+          .map(rowToPart);
+        const prepared = prepareModelStep(
+          row === undefined ? undefined : rowToMessage(row),
+          existingParts,
+          input,
+        );
+        for (const part of prepared.updatedParts) {
           db.prepare(
-            `INSERT INTO ${schema.part.tableName} (id, message_id, session_id, type, order_index, created_at, updated_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, data = excluded.data`,
+            `UPDATE ${schema.part.tableName} SET data = ?, updated_at = ? WHERE id = ?`,
+          ).run(partToRowData(part), input.completedAt, part.id);
+        }
+        for (const part of prepared.insertedParts) {
+          db.prepare(
+            `INSERT INTO ${schema.part.tableName} (id,message_id,session_id,type,order_index,created_at,updated_at,data) VALUES (?,?,?,?,?,?,?,?)`,
           ).run(
             part.id,
             part.messageId,
             part.sessionId,
             part.type,
             part.orderIndex,
-            input.updatedAt,
-            input.updatedAt,
+            input.completedAt,
+            input.completedAt,
             partToRowData(part),
           );
-          return clone(part);
-        }),
-      );
-    },
-    commitModelStep(
-      input: StoreModelStepInput,
-    ): Promise<CommitModelStepResult> {
-      return withAsyncBoundary(() =>
-        withImmediateTransaction(() => {
-          const row = getMessageRow(input.assistantMessageId);
-          const existingParts = db
-            .prepare<PartRow>(
-              `SELECT * FROM ${schema.part.tableName} WHERE message_id = ? ORDER BY order_index ASC`,
-            )
-            .all(input.assistantMessageId)
-            .map(rowToPart);
-          const prepared = prepareModelStep(
-            row === undefined ? undefined : rowToMessage(row),
-            existingParts,
-            input,
-          );
-          for (const part of prepared.updatedParts) {
-            db.prepare(
-              `UPDATE ${schema.part.tableName} SET data = ?, updated_at = ? WHERE id = ?`,
-            ).run(partToRowData(part), input.completedAt, part.id);
-          }
-          for (const part of prepared.insertedParts) {
-            db.prepare(
-              `INSERT INTO ${schema.part.tableName} (id,message_id,session_id,type,order_index,created_at,updated_at,data) VALUES (?,?,?,?,?,?,?,?)`,
-            ).run(
-              part.id,
-              part.messageId,
-              part.sessionId,
-              part.type,
-              part.orderIndex,
-              input.completedAt,
-              input.completedAt,
-              partToRowData(part),
-            );
-          }
-          updateMessageRow(prepared.result.message);
-          return clone(prepared.result);
-        }),
-      );
+        }
+        updateMessageRow(prepared.result.message);
+        return clone(prepared.result);
+      });
     },
     insertMessage(message: Message): Promise<void> {
-      return withAsyncBoundary(() => {
+      return withImmediateTransaction(() => {
         const timestamps = messageTimestamps(message);
         db.prepare(
           `INSERT INTO ${schema.message.tableName}
@@ -391,7 +373,7 @@ export function createDatabaseMessageStore(
       messageId: string,
       patch: UpdateMessagePatch,
     ): Promise<Message> {
-      return withAsyncBoundary(() => {
+      return withImmediateTransaction(() => {
         const row = getMessageRow(messageId);
         if (!row) {
           throw new Error(`Message not found: ${messageId}`);
@@ -408,38 +390,36 @@ export function createDatabaseMessageStore(
       readonly data: CreatePartInput;
       readonly updatedAt: number;
     }): Promise<Part> {
-      return withAsyncBoundary(() =>
-        withImmediateTransaction(() => {
-          const row = getMessageRow(input.message.id);
-          if (!row) {
-            throw new Error(`Message not found: ${input.message.id}`);
-          }
-          const part = {
-            contextScopeId: input.message.contextScopeId,
-            id: input.partId,
-            messageId: input.message.id,
-            sessionId: input.message.sessionId,
-            orderIndex: nextOrderIndex(input.message.id),
-            ...input.data,
-          } as Part;
-          db.prepare(
-            `INSERT INTO ${schema.part.tableName}
+      return withImmediateTransaction(() => {
+        const row = getMessageRow(input.message.id);
+        if (!row) {
+          throw new Error(`Message not found: ${input.message.id}`);
+        }
+        const part = {
+          contextScopeId: input.message.contextScopeId,
+          id: input.partId,
+          messageId: input.message.id,
+          sessionId: input.message.sessionId,
+          orderIndex: nextOrderIndex(input.message.id),
+          ...input.data,
+        } as Part;
+        db.prepare(
+          `INSERT INTO ${schema.part.tableName}
             (id, message_id, session_id, type, order_index, created_at, updated_at, data)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).run(
-            part.id,
-            part.messageId,
-            part.sessionId,
-            part.type,
-            part.orderIndex,
-            input.updatedAt,
-            input.updatedAt,
-            partToRowData(part),
-          );
-          touchMessage(input.message.id, input.updatedAt);
-          return clone(part);
-        }),
-      );
+        ).run(
+          part.id,
+          part.messageId,
+          part.sessionId,
+          part.type,
+          part.orderIndex,
+          input.updatedAt,
+          input.updatedAt,
+          partToRowData(part),
+        );
+        touchMessage(input.message.id, input.updatedAt);
+        return clone(part);
+      });
     },
 
     appendModelContextPart(input: {
@@ -448,53 +428,51 @@ export function createDatabaseMessageStore(
       readonly text: string;
       readonly updatedAt: number;
     }): Promise<{ readonly inserted: boolean; readonly part: TextPart }> {
-      return withAsyncBoundary(() =>
-        withImmediateTransaction(() => {
-          const messageRow = getMessageRow(input.messageId);
-          if (!messageRow) {
-            throw new Error(`Message not found: ${input.messageId}`);
-          }
-          const message = rowToMessage(messageRow);
-          const existing = db
-            .prepare<PartRow>(
-              `SELECT * FROM ${schema.part.tableName}
+      return withImmediateTransaction(() => {
+        const messageRow = getMessageRow(input.messageId);
+        if (!messageRow) {
+          throw new Error(`Message not found: ${input.messageId}`);
+        }
+        const message = rowToMessage(messageRow);
+        const existing = db
+          .prepare<PartRow>(
+            `SELECT * FROM ${schema.part.tableName}
                WHERE message_id = ? ORDER BY order_index ASC`,
-            )
-            .all(input.messageId)
-            .map(rowToPart)
-            .find(isModelContextPart);
-          if (existing?.type === "text") {
-            return { inserted: false, part: clone(existing) };
-          }
-          const part: TextPart = {
-            contextScopeId: message.contextScopeId,
-            id: input.partId,
-            messageId: input.messageId,
-            metadata: { kind: MODEL_CONTEXT_RUNTIME_KIND },
-            orderIndex: nextOrderIndex(input.messageId),
-            sessionId: message.sessionId,
-            synthetic: true,
-            text: input.text,
-            type: "text",
-          };
-          db.prepare(
-            `INSERT INTO ${schema.part.tableName}
+          )
+          .all(input.messageId)
+          .map(rowToPart)
+          .find(isModelContextPart);
+        if (existing?.type === "text") {
+          return { inserted: false, part: clone(existing) };
+        }
+        const part: TextPart = {
+          contextScopeId: message.contextScopeId,
+          id: input.partId,
+          messageId: input.messageId,
+          metadata: { kind: MODEL_CONTEXT_RUNTIME_KIND },
+          orderIndex: nextOrderIndex(input.messageId),
+          sessionId: message.sessionId,
+          synthetic: true,
+          text: input.text,
+          type: "text",
+        };
+        db.prepare(
+          `INSERT INTO ${schema.part.tableName}
               (id, message_id, session_id, type, order_index, created_at, updated_at, data)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).run(
-            part.id,
-            part.messageId,
-            part.sessionId,
-            part.type,
-            part.orderIndex,
-            input.updatedAt,
-            input.updatedAt,
-            partToRowData(part),
-          );
-          touchMessage(input.messageId, input.updatedAt);
-          return { inserted: true, part: clone(part) };
-        }),
-      );
+        ).run(
+          part.id,
+          part.messageId,
+          part.sessionId,
+          part.type,
+          part.orderIndex,
+          input.updatedAt,
+          input.updatedAt,
+          partToRowData(part),
+        );
+        touchMessage(input.messageId, input.updatedAt);
+        return { inserted: true, part: clone(part) };
+      });
     },
 
     updatePart(
@@ -502,155 +480,151 @@ export function createDatabaseMessageStore(
       patch: Omit<UpdatePartPatch, "delta">,
       updatedAt: number,
     ): Promise<Part> {
-      return withAsyncBoundary(() =>
-        withImmediateTransaction(() => {
-          const row = db
-            .prepare<PartRow>(
-              `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
-            )
-            .get(partId);
-          if (!row) {
-            throw new Error(`Part not found: ${partId}`);
-          }
-          const updated = { ...rowToPart(row), ...patch } as Part;
-          db.prepare(
-            `UPDATE ${schema.part.tableName}
+      return withImmediateTransaction(() => {
+        const row = db
+          .prepare<PartRow>(
+            `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
+          )
+          .get(partId);
+        if (!row) {
+          throw new Error(`Part not found: ${partId}`);
+        }
+        const updated = { ...rowToPart(row), ...patch } as Part;
+        db.prepare(
+          `UPDATE ${schema.part.tableName}
            SET type = ?, order_index = ?, updated_at = ?, data = ?
            WHERE id = ?`,
-          ).run(
-            updated.type,
-            updated.orderIndex,
-            updatedAt,
-            partToRowData(updated),
-            partId,
-          );
-          touchMessage(updated.messageId, updatedAt);
-          return clone(updated);
-        }),
-      );
+        ).run(
+          updated.type,
+          updated.orderIndex,
+          updatedAt,
+          partToRowData(updated),
+          partId,
+        );
+        touchMessage(updated.messageId, updatedAt);
+        return clone(updated);
+      });
     },
 
     commitCompaction(
       input: StoreCompactionInput,
     ): Promise<CommitCompactionResult | undefined> {
-      return withAsyncBoundary(() =>
-        withImmediateTransaction(() => {
-          const expectedPartIds = new Set(
-            input.expectedParts.map((part) => part.id),
-          );
-          if (expectedPartIds.size !== input.expectedParts.length) {
-            throw new Error("Compaction expected parts contain duplicate ids");
+      return withImmediateTransaction(() => {
+        const expectedPartIds = new Set(
+          input.expectedParts.map((part) => part.id),
+        );
+        if (expectedPartIds.size !== input.expectedParts.length) {
+          throw new Error("Compaction expected parts contain duplicate ids");
+        }
+        const targets: Part[] = [];
+        for (const expectedPart of input.expectedParts) {
+          if (
+            expectedPart.sessionId !== input.sessionId ||
+            expectedPart.contextScopeId !== input.contextScopeId
+          ) {
+            throw new Error(
+              `Compaction part belongs to another scope: ${expectedPart.id}`,
+            );
           }
-          const targets: Part[] = [];
-          for (const expectedPart of input.expectedParts) {
-            if (
-              expectedPart.sessionId !== input.sessionId ||
-              expectedPart.contextScopeId !== input.contextScopeId
-            ) {
-              throw new Error(
-                `Compaction part belongs to another scope: ${expectedPart.id}`,
-              );
-            }
-            const row = db
-              .prepare<PartRow>(
-                `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
-              )
-              .get(expectedPart.id);
-            if (!row) {
-              return undefined;
-            }
-            const part = rowToPart(row);
-            if (
-              part.sessionId !== input.sessionId ||
-              part.contextScopeId !== input.contextScopeId
-            ) {
-              throw new Error(
-                `Compaction part belongs to another scope: ${expectedPart.id}`,
-              );
-            }
-            if (
-              part.time?.compacted !== undefined ||
-              partToRowData(part) !== partToRowData(expectedPart)
-            ) {
-              return undefined;
-            }
-            targets.push(part);
+          const row = db
+            .prepare<PartRow>(
+              `SELECT * FROM ${schema.part.tableName} WHERE id = ?`,
+            )
+            .get(expectedPart.id);
+          if (!row) {
+            return undefined;
           }
+          const part = rowToPart(row);
+          if (
+            part.sessionId !== input.sessionId ||
+            part.contextScopeId !== input.contextScopeId
+          ) {
+            throw new Error(
+              `Compaction part belongs to another scope: ${expectedPart.id}`,
+            );
+          }
+          if (
+            part.time?.compacted !== undefined ||
+            partToRowData(part) !== partToRowData(expectedPart)
+          ) {
+            return undefined;
+          }
+          targets.push(part);
+        }
 
-          let summaryPart: TextPart | undefined;
-          if (input.summary !== undefined) {
-            const timestamps = messageTimestamps(input.summary.message);
-            db.prepare(
-              `INSERT INTO ${schema.message.tableName}
+        let summaryPart: TextPart | undefined;
+        if (input.summary !== undefined) {
+          const timestamps = messageTimestamps(input.summary.message);
+          db.prepare(
+            `INSERT INTO ${schema.message.tableName}
                 (id, session_id, context_scope_id, role, agent, created_at, updated_at, data)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            ).run(
-              input.summary.message.id,
-              input.summary.message.sessionId,
-              messageContextScope(input.summary.message),
-              input.summary.message.role,
-              messageAgent(input.summary.message),
-              timestamps.createdAt,
-              timestamps.updatedAt,
-              messageToRowData(input.summary.message),
-            );
-            summaryPart = {
-              contextScopeId: input.summary.message.contextScopeId,
-              id: input.summary.partId,
-              messageId: input.summary.message.id,
-              orderIndex: 0,
-              sessionId: input.summary.message.sessionId,
-              ...input.summary.data,
-            };
-            db.prepare(
-              `INSERT INTO ${schema.part.tableName}
+          ).run(
+            input.summary.message.id,
+            input.summary.message.sessionId,
+            messageContextScope(input.summary.message),
+            input.summary.message.role,
+            messageAgent(input.summary.message),
+            timestamps.createdAt,
+            timestamps.updatedAt,
+            messageToRowData(input.summary.message),
+          );
+          summaryPart = {
+            contextScopeId: input.summary.message.contextScopeId,
+            id: input.summary.partId,
+            messageId: input.summary.message.id,
+            orderIndex: 0,
+            sessionId: input.summary.message.sessionId,
+            ...input.summary.data,
+          };
+          db.prepare(
+            `INSERT INTO ${schema.part.tableName}
                 (id, message_id, session_id, type, order_index, created_at, updated_at, data)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            ).run(
-              summaryPart.id,
-              summaryPart.messageId,
-              summaryPart.sessionId,
-              summaryPart.type,
-              summaryPart.orderIndex,
-              input.updatedAt,
-              input.updatedAt,
-              partToRowData(summaryPart),
-            );
-          }
+          ).run(
+            summaryPart.id,
+            summaryPart.messageId,
+            summaryPart.sessionId,
+            summaryPart.type,
+            summaryPart.orderIndex,
+            input.updatedAt,
+            input.updatedAt,
+            partToRowData(summaryPart),
+          );
+        }
 
-          const updatedParts = targets.map((part) => {
-            const updated = {
-              ...part,
-              time: { ...part.time, compacted: input.compactedAt },
-            } as Part;
-            db.prepare(
-              `UPDATE ${schema.part.tableName}
+        const updatedParts = targets.map((part) => {
+          const updated = {
+            ...part,
+            time: { ...part.time, compacted: input.compactedAt },
+          } as Part;
+          db.prepare(
+            `UPDATE ${schema.part.tableName}
                SET type = ?, order_index = ?, updated_at = ?, data = ?
                WHERE id = ?`,
-            ).run(
-              updated.type,
-              updated.orderIndex,
-              input.updatedAt,
-              partToRowData(updated),
-              updated.id,
-            );
-            touchMessage(updated.messageId, input.updatedAt);
-            return clone(updated);
-          });
+          ).run(
+            updated.type,
+            updated.orderIndex,
+            input.updatedAt,
+            partToRowData(updated),
+            updated.id,
+          );
+          touchMessage(updated.messageId, input.updatedAt);
+          return clone(updated);
+        });
 
-          return {
-            ...(input.summary === undefined || summaryPart?.type !== "text"
-              ? {}
-              : {
-                  summary: {
-                    message: clone(input.summary.message),
-                    part: clone(summaryPart),
-                  },
-                }),
-            updatedParts,
-          };
-        }),
-      );
+        return {
+          ...(input.summary === undefined || summaryPart?.type !== "text"
+            ? {}
+            : {
+                summary: {
+                  message: clone(input.summary.message),
+                  part: clone(summaryPart),
+                },
+              }),
+          updatedParts,
+        };
+      });
     },
 
     listBySession(
@@ -707,7 +681,7 @@ export function createDatabaseMessageStore(
     },
 
     deleteMessage(messageId: string): Promise<void> {
-      return withAsyncBoundary(() => {
+      return withImmediateTransaction(() => {
         db.prepare(`DELETE FROM ${schema.message.tableName} WHERE id = ?`).run(
           messageId,
         );
@@ -715,7 +689,7 @@ export function createDatabaseMessageStore(
     },
 
     deleteBySession(sessionId: string): Promise<void> {
-      return withAsyncBoundary(() => {
+      return withImmediateTransaction(() => {
         db.prepare(
           `DELETE FROM ${schema.message.tableName} WHERE session_id = ?`,
         ).run(sessionId);

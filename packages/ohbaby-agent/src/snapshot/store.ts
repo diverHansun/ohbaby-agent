@@ -2,7 +2,7 @@ import type {
   DatabaseConnection,
   SqliteValue,
 } from "../services/database/index.js";
-import { schema } from "../services/database/index.js";
+import { schema, runWriteTransaction } from "../services/database/index.js";
 import {
   type CreateCheckpointInput,
   type CreatePatchInput,
@@ -95,56 +95,60 @@ const PATCH_COLUMNS = `patch_id, checkpoint_id, post_tree_ref, file_count,
 export class SnapshotStore {
   constructor(private readonly options: SnapshotStoreOptions) {}
 
-  createCheckpoint(input: CreateCheckpointInput): SnapshotCheckpoint {
-    this.options.db
-      .prepare(
-        `INSERT INTO ${schema.snapshotCheckpoint.tableName}
+  createCheckpoint(input: CreateCheckpointInput): Promise<SnapshotCheckpoint> {
+    return runWriteTransaction(this.options.db, () => {
+      this.options.db
+        .prepare(
+          `INSERT INTO ${schema.snapshotCheckpoint.tableName}
           (checkpoint_id, session_id, run_id, turn_id, workdir, workspace_source,
            message_cursor_before, message_cursor_after, pre_tree_ref, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        input.checkpointId,
-        input.sessionId,
-        input.runId ?? null,
-        input.turnId,
-        input.workdir,
-        input.workspaceSource ?? null,
-        encodeCursor(input.messageCursorBefore),
-        null,
-        input.preTreeRef,
-        input.createdAt,
-      );
+        )
+        .run(
+          input.checkpointId,
+          input.sessionId,
+          input.runId ?? null,
+          input.turnId,
+          input.workdir,
+          input.workspaceSource ?? null,
+          encodeCursor(input.messageCursorBefore),
+          null,
+          input.preTreeRef,
+          input.createdAt,
+        );
 
-    return {
-      checkpointId: input.checkpointId,
-      sessionId: input.sessionId,
-      ...(input.runId === undefined ? {} : { runId: input.runId }),
-      turnId: input.turnId,
-      workdir: input.workdir,
-      ...(input.workspaceSource === undefined
-        ? {}
-        : { workspaceSource: input.workspaceSource }),
-      ...(input.messageCursorBefore === undefined
-        ? {}
-        : { messageCursorBefore: input.messageCursorBefore }),
-      preTreeRef: input.preTreeRef,
-      createdAt: input.createdAt,
-    };
+      return {
+        checkpointId: input.checkpointId,
+        sessionId: input.sessionId,
+        ...(input.runId === undefined ? {} : { runId: input.runId }),
+        turnId: input.turnId,
+        workdir: input.workdir,
+        ...(input.workspaceSource === undefined
+          ? {}
+          : { workspaceSource: input.workspaceSource }),
+        ...(input.messageCursorBefore === undefined
+          ? {}
+          : { messageCursorBefore: input.messageCursorBefore }),
+        preTreeRef: input.preTreeRef,
+        createdAt: input.createdAt,
+      };
+    });
   }
 
   updateCheckpointMessageCursor(
     checkpointId: string,
     messageCursorAfter: MessageCursor | undefined,
-  ): SnapshotCheckpoint {
-    this.options.db
-      .prepare(
-        `UPDATE ${schema.snapshotCheckpoint.tableName}
+  ): Promise<SnapshotCheckpoint> {
+    return runWriteTransaction(this.options.db, () => {
+      this.options.db
+        .prepare(
+          `UPDATE ${schema.snapshotCheckpoint.tableName}
          SET message_cursor_after = ?
          WHERE checkpoint_id = ?`,
-      )
-      .run(encodeCursor(messageCursorAfter), checkpointId);
-    return this.requireCheckpoint(checkpointId);
+        )
+        .run(encodeCursor(messageCursorAfter), checkpointId);
+      return this.requireCheckpoint(checkpointId);
+    });
   }
 
   getCheckpoint(checkpointId: string): SnapshotCheckpoint | undefined {
@@ -166,13 +170,15 @@ export class SnapshotStore {
     return checkpoint;
   }
 
-  deleteCheckpoint(checkpointId: string): void {
-    this.options.db
-      .prepare(
-        `DELETE FROM ${schema.snapshotCheckpoint.tableName}
+  deleteCheckpoint(checkpointId: string): Promise<void> {
+    return runWriteTransaction(this.options.db, () => {
+      this.options.db
+        .prepare(
+          `DELETE FROM ${schema.snapshotCheckpoint.tableName}
          WHERE checkpoint_id = ?`,
-      )
-      .run(checkpointId);
+        )
+        .run(checkpointId);
+    });
   }
 
   listCheckpoints(
@@ -201,7 +207,11 @@ export class SnapshotStore {
     return rows.map(rowToCheckpoint);
   }
 
-  createPatch(input: CreatePatchInput): SnapshotPatch {
+  createPatch(input: CreatePatchInput): Promise<SnapshotPatch> {
+    return runWriteTransaction(this.options.db, () => this.insertPatch(input));
+  }
+
+  private insertPatch(input: CreatePatchInput): SnapshotPatch {
     this.options.db
       .prepare(
         `INSERT INTO ${schema.snapshotPatch.tableName}
@@ -224,25 +234,14 @@ export class SnapshotStore {
     };
   }
 
-  createPatchIfAbsent(input: CreatePatchInput): CreatePatchIfAbsentResult {
-    this.options.db.exec("BEGIN IMMEDIATE");
-    try {
+  createPatchIfAbsent(
+    input: CreatePatchInput,
+  ): Promise<CreatePatchIfAbsentResult> {
+    return runWriteTransaction(this.options.db, () => {
       const existing = this.getPatchByCheckpoint(input.checkpointId);
-      if (existing !== undefined) {
-        this.options.db.exec("COMMIT");
-        return { patch: existing, created: false };
-      }
-      const patch = this.createPatch(input);
-      this.options.db.exec("COMMIT");
-      return { patch, created: true };
-    } catch (error) {
-      try {
-        this.options.db.exec("ROLLBACK");
-      } catch {
-        // Preserve the original write failure.
-      }
-      throw error;
-    }
+      if (existing !== undefined) return { patch: existing, created: false };
+      return { patch: this.insertPatch(input), created: true };
+    });
   }
 
   getPatch(patchId: string): SnapshotPatch | undefined {

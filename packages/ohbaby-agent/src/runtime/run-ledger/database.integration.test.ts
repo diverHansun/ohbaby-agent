@@ -8,9 +8,6 @@ import {
   initDatabase,
   schema,
   type DatabaseConnection,
-  type DatabaseStatement,
-  type SqliteValue,
-  type StatementRunResult,
 } from "../../services/database/index.js";
 import { NodeSqliteConnection } from "../../services/database/connection.js";
 import {
@@ -415,44 +412,26 @@ function createStatusRaceConnection(
   let armed = true;
   return {
     path: db.path,
-    exec(sql: string): void {
+    exec(sql): void {
+      if (armed && sql === "BEGIN IMMEDIATE") {
+        armed = false;
+        const other = new NodeSqliteConnection(db.path);
+        try {
+          other
+            .prepare(
+              `UPDATE ${schema.runLedger.tableName} SET status = ?, ended_at = ? WHERE run_id = ?`,
+            )
+            .run(status, 9_999, runId);
+        } finally {
+          other.close();
+        }
+      }
       db.exec(sql);
     },
-    prepare<Row = Record<string, unknown>>(
-      sql: string,
-    ): DatabaseStatement<Row> {
-      const statement = db.prepare<Row>(sql);
-      if (
-        !sql.includes(`FROM ${schema.runLedger.tableName} WHERE run_id = ?`)
-      ) {
-        return statement;
-      }
-      return {
-        get(...params: SqliteValue[]): Row | undefined {
-          const row = statement.get(...params);
-          if (armed && row !== undefined && params[0] === runId) {
-            armed = false;
-            db.prepare(
-              `UPDATE ${schema.runLedger.tableName}
-               SET status = ?, ended_at = ?
-               WHERE run_id = ?`,
-            ).run(status, 9_999, runId);
-          }
-          return row;
-        },
-        all(...params: SqliteValue[]): Row[] {
-          return statement.all(...params);
-        },
-        run(...params: SqliteValue[]): StatementRunResult {
-          return statement.run(...params);
-        },
-      };
-    },
-    pragma<Row = Record<string, unknown>>(name: string): Row[] {
-      return db.pragma<Row>(name);
-    },
+    prepare: db.prepare.bind(db),
+    pragma: db.pragma.bind(db),
     close(): void {
-      throw new Error("Test connection wrapper must not close the database");
+      throw new Error("Test wrapper must not close shared database");
     },
   };
 }

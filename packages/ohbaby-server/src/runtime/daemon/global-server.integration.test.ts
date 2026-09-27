@@ -48,7 +48,7 @@ function createRegistry(
     list: () => [...entries.values()].sort((a, b) => a.position - b.position),
     ensureDiscovered(
       scopeKeys: readonly string[],
-    ): readonly WorkspaceRegistryEntry[] {
+    ): Promise<readonly WorkspaceRegistryEntry[]> {
       for (const scopeKey of new Set(scopeKeys)) {
         if (!entries.has(scopeKey)) {
           const timestamp = now();
@@ -62,19 +62,19 @@ function createRegistry(
           });
         }
       }
-      return this.list();
+      return Promise.resolve(this.list());
     },
-    hide(scopeKey: string): boolean {
+    hide(scopeKey: string): Promise<boolean> {
       const entry = entries.get(scopeKey);
-      if (!entry) return false;
+      if (!entry) return Promise.resolve(false);
       entries.set(scopeKey, {
         ...entry,
         updatedAt: now(),
         visibility: "hidden",
       });
-      return true;
+      return Promise.resolve(true);
     },
-    open(scopeKey: string): WorkspaceRegistryEntry {
+    open(scopeKey: string): Promise<WorkspaceRegistryEntry> {
       const timestamp = now();
       const current = entries.get(scopeKey);
       const entry: WorkspaceRegistryEntry = current
@@ -93,7 +93,7 @@ function createRegistry(
             visibility: "visible",
           };
       entries.set(scopeKey, entry);
-      return entry;
+      return Promise.resolve(entry);
     },
   };
 }

@@ -1,9 +1,8 @@
 import {
   getDatabase,
   schema,
-  withTransaction,
+  runWriteTransaction,
   type DatabaseConnection,
-  type SyncTransactionCallback,
 } from "../database/index.js";
 import type {
   WorkspaceRegistryEntry,
@@ -50,23 +49,8 @@ export function createWorkspaceRegistryStore(
       .map(rowToEntry);
   }
 
-  function transact<T>(operation: (db: DatabaseConnection) => T): T {
-    if (database === getDatabase()) {
-      return withTransaction(operation as SyncTransactionCallback<T>);
-    }
-    database.exec("BEGIN IMMEDIATE");
-    try {
-      const result = operation(database);
-      database.exec("COMMIT");
-      return result;
-    } catch (error) {
-      try {
-        database.exec("ROLLBACK");
-      } catch {
-        // Preserve the original write failure.
-      }
-      throw error;
-    }
+  function transact<T>(operation: (db: DatabaseConnection) => T): Promise<T> {
+    return runWriteTransaction(database, operation);
   }
 
   function nextPosition(db: DatabaseConnection): number {
@@ -101,7 +85,7 @@ export function createWorkspaceRegistryStore(
 
     ensureDiscovered(
       scopeKeys: readonly string[],
-    ): readonly WorkspaceRegistryEntry[] {
+    ): Promise<readonly WorkspaceRegistryEntry[]> {
       return transact((db) => {
         const discoveredAt = now();
         const insert = db.prepare(
@@ -127,7 +111,7 @@ export function createWorkspaceRegistryStore(
       });
     },
 
-    open(scopeKey: string): WorkspaceRegistryEntry {
+    open(scopeKey: string): Promise<WorkspaceRegistryEntry> {
       return transact((db) => {
         const openedAt = now();
         const existing = getFrom(db, scopeKey);
@@ -152,7 +136,7 @@ export function createWorkspaceRegistryStore(
       });
     },
 
-    hide(scopeKey: string): boolean {
+    hide(scopeKey: string): Promise<boolean> {
       return transact((db) => {
         const hiddenAt = now();
         const result = db
