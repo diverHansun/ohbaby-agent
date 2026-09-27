@@ -189,8 +189,8 @@ describe("permission actual run lifecycle", () => {
   });
 });
 
-it("expires a real child run while permission is pending", async () => {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+it("pauses a real child quota during pure approval waiting but still obeys root interruption", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   const f = await fixture(true, 50);
   let receive!: (info: PermissionInfo) => void;
   const requested = new Promise<PermissionInfo>((resolve) => {
@@ -205,7 +205,14 @@ it("expires a real child run while permission is pending", async () => {
       prompt: "Run the permission test",
     });
     const request = await requested;
-    await vi.advanceTimersByTimeAsync(51);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(f.permission.listPending()).toHaveLength(1);
+    expect(f.composition.runManager.get(request.runId)?.status).toBe("running");
+    expect(f.composition.runManager.get(run.runId)?.status).toBe("running");
+    await f.composition.interruptRunTree(
+      run.runId,
+      "stop during approval pause",
+    );
     await f.composition.runManager.waitForCompletion(run.runId);
     expect(f.permission.listPending()).toEqual([]);
     expect(
