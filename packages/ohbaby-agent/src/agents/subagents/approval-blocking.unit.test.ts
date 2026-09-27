@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { classifyApprovalBlocking } from "./approval-blocking.js";
+import { createBus } from "../../bus/index.js";
+import { MessageEvent } from "../../core/message/events.js";
+import { PermissionEvent } from "../../permission/events.js";
+import type { ToolPart } from "../../core/message/types.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  classifyApprovalBlocking,
+  subscribeApprovalExecutionChanges,
+} from "./approval-blocking.js";
 import type { PermissionInfo } from "../../permission/types.js";
 import type { ToolExecutionObservation } from "../../core/tool-scheduler/types.js";
 const pending: PermissionInfo = {
@@ -135,5 +142,131 @@ describe("pure approval blocking", () => {
       classifyApprovalBlocking({ ...input, tools: [], permissions: [pending] })
         .blocked,
     ).toBe(false);
+  });
+});
+
+describe("approval execution wake subscription", () => {
+  it("ignores content deltas and foreign runs but wakes immediately on structural changes", () => {
+    const bus = createBus();
+    const wake = vi.fn();
+    const unsubscribe = subscribeApprovalExecutionChanges(
+      bus,
+      "child",
+      "run",
+      wake,
+    );
+    const part: ToolPart = {
+      id: "part",
+      sessionId: "child",
+      messageId: "message",
+      orderIndex: 0,
+      type: "tool",
+      callId: "first",
+      tool: "write",
+      state: { status: "running", input: {} },
+      metadata: { execution: approval },
+    };
+    bus.publish(MessageEvent.PartUpdated, {
+      part: { ...part, type: "text", text: "delta" },
+      delta: "delta",
+    });
+    bus.publish(MessageEvent.PartUpdated, {
+      part: { ...part, type: "reasoning", text: "delta" },
+      delta: "delta",
+    });
+    bus.publish(MessageEvent.PartUpdated, {
+      part: {
+        ...part,
+        metadata: { execution: { ...approval, runId: "other" } },
+      },
+    });
+    expect(wake).not.toHaveBeenCalled();
+    bus.publish(MessageEvent.PartUpdated, { part });
+    expect(wake).toHaveBeenCalledTimes(1);
+    bus.publish(MessageEvent.PartUpdated, {
+      part: {
+        ...part,
+        state: { status: "running", input: {}, title: "streamed output" },
+      },
+      delta: "output",
+    });
+    bus.publish(MessageEvent.PartUpdated, {
+      part: {
+        ...part,
+        metadata: { execution: { ...approval, phaseStartedAt: 999 } },
+      },
+    });
+    expect(wake).toHaveBeenCalledTimes(1);
+    bus.publish(MessageEvent.PartUpdated, {
+      part: { ...part, metadata: { execution: waiting } },
+    });
+    bus.publish(MessageEvent.PartUpdated, {
+      part: {
+        ...part,
+        metadata: { execution: { ...waiting, blockingCallIds: ["changed"] } },
+      },
+    });
+    bus.publish(MessageEvent.PartUpdated, {
+      part: {
+        ...part,
+        state: { status: "completed", input: {}, output: "done" },
+        metadata: { execution: { ...waiting, blockingCallIds: ["changed"] } },
+      },
+    });
+    expect(wake).toHaveBeenCalledTimes(4);
+    bus.publish(MessageEvent.PartUpdated, {
+      part: { ...part, id: "new-part" },
+      delta: "output",
+    });
+    expect(wake).toHaveBeenCalledTimes(4);
+    bus.publish(MessageEvent.PartUpdated, {
+      part: {
+        ...part,
+        id: "new-part",
+        metadata: { execution: { ...approval, phase: "executing" } },
+      },
+      delta: "output",
+    });
+    expect(wake).toHaveBeenCalledTimes(5);
+    unsubscribe();
+    bus.publish(MessageEvent.PartUpdated, { part });
+    expect(wake).toHaveBeenCalledTimes(5);
+  });
+  it("wakes for matching permission Updated and Replied only, and unsubscribes both", () => {
+    const bus = createBus();
+    const wake = vi.fn();
+    const unsubscribe = subscribeApprovalExecutionChanges(
+      bus,
+      "child",
+      "run",
+      wake,
+    );
+    bus.publish(PermissionEvent.Updated, {
+      info: { ...pending, runId: "other" },
+    });
+    bus.publish(PermissionEvent.Updated, {
+      info: { ...pending, sessionId: "other" },
+    });
+    expect(wake).not.toHaveBeenCalled();
+    bus.publish(PermissionEvent.Updated, { info: pending });
+    expect(wake).toHaveBeenCalledTimes(1);
+    const reply = {
+      sessionId: "child",
+      runId: "run",
+      rootSessionId: "parent",
+      permissionId: "permission",
+      callId: "first",
+      reason: "reply",
+      response: { type: "once" as const },
+    };
+    bus.publish(PermissionEvent.Replied, { ...reply, runId: "other" });
+    bus.publish(PermissionEvent.Replied, { ...reply, sessionId: "other" });
+    expect(wake).toHaveBeenCalledTimes(1);
+    bus.publish(PermissionEvent.Replied, reply);
+    expect(wake).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    bus.publish(PermissionEvent.Updated, { info: pending });
+    bus.publish(PermissionEvent.Replied, reply);
+    expect(wake).toHaveBeenCalledTimes(2);
   });
 });

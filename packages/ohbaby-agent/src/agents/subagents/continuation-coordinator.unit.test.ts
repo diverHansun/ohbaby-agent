@@ -197,6 +197,19 @@ describe("subagent continuation", () => {
     expect(
       (await s.inputs.listPending("root"))[0].observation?.waitGeneration,
     ).toBe(2);
+    await s.processPending();
+    finished = false;
+    const third = s.port.beforeFinish().then((value) => {
+      finished = true;
+      return value;
+    });
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(finished).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await third).toBe("continue");
+    expect(
+      (await s.inputs.listPending("root"))[0].observation?.waitGeneration,
+    ).toBe(3);
   });
   it("pauses repeat model checks only after successful approval disclosure and still reconciles", async () => {
     vi.useFakeTimers();

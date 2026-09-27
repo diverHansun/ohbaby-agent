@@ -72,8 +72,12 @@ export interface PersistentUiBackendOptions extends Omit<
 
 export interface PersistentUiBackendClient
   extends UiBackendClient, UiPromptQueueExecutionPort {
-  listSubagentExecutions: NonNullable<UiBackendClient["listSubagentExecutions"]>;
-  getSubagentExecutionView: NonNullable<UiBackendClient["getSubagentExecutionView"]>;
+  listSubagentExecutions: NonNullable<
+    UiBackendClient["listSubagentExecutions"]
+  >;
+  getSubagentExecutionView: NonNullable<
+    UiBackendClient["getSubagentExecutionView"]
+  >;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
   dispose(): Promise<void> | void;
@@ -621,6 +625,7 @@ export function createPersistentUiBackendClient(
   ]);
   const startupRecovery = runLedger.recoverOrphanedRuns();
   const startupReady = startupRecovery.then(async () => {
+    await subagentExecutionStore.interruptTerminalRootExecutions(now());
     await resolvePersistentStartupSession({
       mode: startupSessionMode,
       projectRoot: await projectRoot,

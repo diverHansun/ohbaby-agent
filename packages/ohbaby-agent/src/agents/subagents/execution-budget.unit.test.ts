@@ -56,6 +56,37 @@ it("cancels a held check and all timers when the original parent stops", async (
   deadline.dispose();
   expect(vi.getTimerCount()).toBe(0);
 });
+it("accounts 10 active minutes, 40 approval minutes, then 5 active minutes against the production quota", async () => {
+  vi.useFakeTimers();
+  const minute = 60_000;
+  let blocked = false;
+  let wake = (): void => undefined;
+  const deadline = createApprovalAwareDeadline({
+    timeoutMs: 30 * minute,
+    reason: "quota",
+    isApprovalBlocked: () => Promise.resolve(blocked),
+    subscribe: (listener) => {
+      wake = listener;
+      return () => undefined;
+    },
+  });
+  await vi.advanceTimersByTimeAsync(10 * minute);
+  blocked = true;
+  wake();
+  await vi.advanceTimersByTimeAsync(40 * minute);
+  blocked = false;
+  wake();
+  await vi.advanceTimersByTimeAsync(5 * minute);
+  expect(deadline.snapshot()).toEqual({
+    elapsedMs: 55 * minute,
+    activeMs: 15 * minute,
+    remainingMs: 15 * minute,
+    approvalWaitMs: 40 * minute,
+  });
+  expect(deadline.didTimeout()).toBe(false);
+  deadline.dispose();
+  expect(vi.getTimerCount()).toBe(0);
+});
 it("reports unavailable approval facts after bounded retries instead of pausing forever", async () => {
   vi.useFakeTimers();
   const failures: unknown[] = [];

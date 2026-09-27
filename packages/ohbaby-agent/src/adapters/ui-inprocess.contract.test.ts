@@ -45,6 +45,7 @@ import {
   AgentManager,
   AgentRegistry,
   InMemorySubagentInstanceStore,
+  InMemorySubagentExecutionStore,
 } from "../agents/index.js";
 import type { AgentsConfig, SubagentRole } from "../agents/index.js";
 import { InMemoryGoalPersistence } from "../goals/index.js";
@@ -10266,4 +10267,410 @@ it("keeps child sessions read-only for primary prompts, selection and direct can
     client.getSessionView({ sessionId: child.id }),
   ).rejects.toThrow();
   await client.dispose();
+});
+
+it.each([false, true])(
+  "saves the complete parent tool wave before consuming a child result (with Steer: %s)",
+  async (withSteer) => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-input-wave-"));
+    const childRelease = createDeferred<undefined>();
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const persistedToolStates: { callId: string; status: string }[][] = [];
+    const parentRequests: InterfaceProviderRequest[] = [];
+    const executions = new InMemorySubagentExecutionStore();
+    const permissions: Extract<UiEvent, { type: "permission.requested" }>[] =
+      [];
+    const base = createFakeLLMClient([]);
+    const client = createInProcessUiBackendClient({
+      workdir: directory,
+      bus,
+      messageManager,
+      subagentExecutionStore: executions,
+      llmClient: {
+        ...base,
+        provider: {
+          ...base.provider,
+          async streamResponse(request) {
+            if (isTitleGenerationRequest(request))
+              return createTitleProviderStream(request);
+            if (isExploreSubagentRequest(request)) {
+              await childRelease.promise;
+              return createProviderStream([
+                { textDelta: "WAVE-CHILD-COMPLETE", finishReason: "stop" },
+              ]);
+            }
+            parentRequests.push(request);
+            if (parentRequests.length === 1) {
+              const calls = [
+                subagentRunToolCallEvent({
+                  callId: "wave-child",
+                  mode: "background",
+                  prompt: "Return the wave finding",
+                }),
+                writeToolCallEvent({
+                  callId: "wave-write-a",
+                  filePath: "a.txt",
+                  content: "first saved",
+                }),
+                writeToolCallEvent({
+                  callId: "wave-write-b",
+                  filePath: "b.txt",
+                  content: "second saved",
+                }),
+              ];
+              return createProviderStream([
+                {
+                  toolCallDeltas: calls.flatMap((event, index) =>
+                    (event.toolCallDeltas ?? []).map((call) => ({
+                      ...call,
+                      index,
+                    })),
+                  ),
+                  finishReason: "tool_calls",
+                },
+              ]);
+            }
+            persistedToolStates.push(
+              (await messageManager.listBySession("session_1"))
+                .flatMap((message) => message.parts)
+                .filter((part) => part.type === "tool")
+                .map((part) => ({
+                  callId: part.callId,
+                  status: part.state.status,
+                })),
+            );
+            return createProviderStream([
+              {
+                textDelta: "Parent consumed complete wave",
+                finishReason: "stop",
+              },
+            ]);
+          },
+        },
+      },
+    });
+    client.subscribeEvents((event) => {
+      if (event.type === "permission.requested") permissions.push(event);
+    });
+    try {
+      const run = client
+        .submitPromptAndWait("Delegate and write both files in one wave")
+        .then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        );
+      await vi.waitFor(() => {
+        expect(permissions).toHaveLength(2);
+      });
+      const first = permissions.at(0);
+      const second = permissions.at(1);
+      if (!first || !second) throw new Error("Missing write permissions");
+      childRelease.resolve(undefined);
+      await vi.waitFor(async () => {
+        expect(
+          await executions.list({ rootSessionId: "session_1" }),
+        ).toMatchObject([
+          { status: "completed", output: "WAVE-CHILD-COMPLETE" },
+        ]);
+      });
+      if (withSteer) {
+        const queued = await client.submitPromptAccepted(
+          "WAVE-STEER-KEEP-ALL-RESULTS",
+          {
+            sessionId: "session_1",
+            clientRequestId: "wave-queued",
+          },
+        );
+        const receipt = await client.steerQueuedPrompt({
+          promptId: queued.promptId,
+          expectedRunId: first.request.runId,
+          clientRequestId: "wave-steer",
+        });
+        expect(receipt.userMessageId).toBe(queued.userMessageId);
+      }
+      expect(parentRequests).toHaveLength(1);
+      await client.respondPermission(first.request.id, {
+        choiceId: "allow_once",
+      });
+      await vi.waitFor(async () => {
+        const firstFile =
+          first.request.callId === "wave-write-a" ? "a.txt" : "b.txt";
+        expect(await readFile(join(directory, firstFile), "utf8")).toBe(
+          firstFile === "a.txt" ? "first saved" : "second saved",
+        );
+      });
+      const secondFile =
+        second.request.callId === "wave-write-a" ? "a.txt" : "b.txt";
+      await expect(
+        readFile(join(directory, secondFile), "utf8"),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      // The second tool is still awaiting approval: the result/Steer cannot cut the wave short.
+      expect(parentRequests).toHaveLength(1);
+      await client.respondPermission(second.request.id, {
+        choiceId: "allow_once",
+      });
+      expect(
+        await withTimeout(run, 5000, "parent wave did not finish"),
+      ).toHaveProperty("result");
+      expect(await readFile(join(directory, "a.txt"), "utf8")).toBe(
+        "first saved",
+      );
+      expect(await readFile(join(directory, "b.txt"), "utf8")).toBe(
+        "second saved",
+      );
+      expect(parentRequests).toHaveLength(2);
+      expect(persistedToolStates).toEqual([
+        [
+          { callId: "wave-child", status: "completed" },
+          { callId: "wave-write-a", status: "completed" },
+          { callId: "wave-write-b", status: "completed" },
+        ],
+      ]);
+      const next = parentRequests.at(1);
+      if (!next) throw new Error("Missing continuation request");
+      const toolResults = next.messages.filter(
+        (message) => message.role === "tool",
+      );
+      expect(toolResults.map((message) => message.callId)).toEqual([
+        "wave-child",
+        "wave-write-a",
+        "wave-write-b",
+      ]);
+      const toolCalls = next.messages.flatMap((message) =>
+        message.role === "assistant" ? (message.toolCalls ?? []) : [],
+      );
+      expect(toolCalls.map((call) => call.callId)).toEqual(
+        toolResults.map((message) => message.callId),
+      );
+      expect(JSON.stringify(next.messages)).toContain("WAVE-CHILD-COMPLETE");
+      if (withSteer)
+        expect(JSON.stringify(next.messages)).toContain(
+          "WAVE-STEER-KEEP-ALL-RESULTS",
+        );
+      expect(
+        await executions.list({ rootSessionId: "session_1" }),
+      ).toMatchObject([
+        { status: "completed", delivery: { state: "processed" } },
+      ]);
+    } finally {
+      childRelease.resolve(undefined);
+      await client.dispose();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it.each([false, true])(
+  "preserves the actual one-step child terminal reason through parent notification and readonly UI (requests tools: %s)",
+  async (requestsTools) => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-child-terminal-"));
+    const executions = new InMemorySubagentExecutionStore();
+    const parentRequests: InterfaceProviderRequest[] = [];
+    const childRequests: InterfaceProviderRequest[] = [];
+    const registry = new AgentRegistry({
+      builtinAgents: [
+        {
+          default: true,
+          description: "Primary",
+          mode: "primary",
+          name: "main",
+          tools: { include: ["subagent_run"] },
+        },
+        {
+          description: "Bounded child",
+          maxSteps: 1,
+          mode: "subagent",
+          name: "generic",
+          tools: { include: ["list"] },
+        },
+      ],
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
+    const base = createFakeLLMClient([]);
+    const client = createInProcessUiBackendClient({
+      workdir: directory,
+      agentManager: new AgentManager({ registry }),
+      subagentExecutionStore: executions,
+      llmClient: {
+        ...base,
+        provider: {
+          ...base.provider,
+          streamResponse(request) {
+            if (isTitleGenerationRequest(request))
+              return Promise.resolve(createTitleProviderStream(request));
+            if (isGenericSubagentRequest(request)) {
+              childRequests.push(request);
+              return Promise.resolve(
+                createProviderStream(
+                  requestsTools
+                    ? [
+                        listToolCallEvent({
+                          callId: "beyond-child-budget",
+                          path: directory,
+                        }),
+                      ]
+                    : [
+                        {
+                          textDelta: "BOUNDED-CHILD-FINAL-BODY",
+                          finishReason: "stop",
+                        },
+                      ],
+                ),
+              );
+            }
+            parentRequests.push(request);
+            return Promise.resolve(
+              createProviderStream(
+                parentRequests.length === 1
+                  ? [
+                      subagentRunToolCallEvent({
+                        callId: "bounded-child",
+                        mode: "background",
+                        role: "generic",
+                        prompt: "Finish within one step",
+                      }),
+                    ]
+                  : [
+                      {
+                        textDelta: "Parent handled bounded outcome",
+                        finishReason: "stop",
+                      },
+                    ],
+              ),
+            );
+          },
+        },
+      },
+    });
+    try {
+      await client.submitPromptAndWait("Delegate a bounded background task");
+      expect(childRequests).toHaveLength(1);
+      expect(childRequests[0]?.tools).toEqual([]);
+      expect(JSON.stringify(childRequests[0]?.messages)).toContain(
+        "Maximum lifecycle steps reached",
+      );
+      const records = await executions.list({ rootSessionId: "session_1" });
+      expect(records).toHaveLength(1);
+      const record = records.at(0);
+      if (!record) throw new Error("Missing bounded execution");
+      const reason = requestsTools
+        ? "max_steps_finalization_requested_tool"
+        : "max_steps_finalized";
+      expect(record).toMatchObject({
+        status: requestsTools ? "failed" : "completed",
+        reason,
+        delivery: { state: "processed" },
+      });
+      const notification = parentRequests
+        .flatMap((request) => request.messages)
+        .find(
+          (message) =>
+            message.role === "user" &&
+            JSON.stringify(message.content).includes("Runtime subagent result"),
+        );
+      expect(JSON.stringify(notification?.content)).toContain(
+        `reason: ${reason}`,
+      );
+      if (!requestsTools) {
+        expect(record.output).toBe("BOUNDED-CHILD-FINAL-BODY");
+        expect(JSON.stringify(notification?.content)).toContain(
+          "BOUNDED-CHILD-FINAL-BODY",
+        );
+      }
+      const view = await client.getSubagentExecutionView({
+        rootSessionId: "session_1",
+        executionId: record.executionId,
+      });
+      expect(view.execution.terminalReason).toBe(reason);
+      expect(view.readOnly).toBe(true);
+      expect(
+        view.messages
+          .flatMap((message) => message.parts)
+          .filter((part) => part.type === "tool-result"),
+      ).toEqual([]);
+    } finally {
+      await client.dispose();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it("rejects a late Steer while the actual final provider step is in flight and keeps it queued", async () => {
+  const runLedger = createInMemoryRunLedger();
+  const entered = createDeferred<undefined>();
+  const release = createDeferred<undefined>();
+  const requests: InterfaceProviderRequest[] = [];
+  const base = createFakeLLMClient([]);
+  const client = createInProcessUiBackendClient({
+    runLedger,
+    agentManager: new AgentManager({
+      registry: new AgentRegistry({
+        builtinAgents: [
+          {
+            default: true,
+            description: "One step",
+            mode: "primary",
+            name: "main",
+            maxSteps: 1,
+          },
+        ],
+        configLoader: (): AgentsConfig => ({ agents: {} }),
+      }),
+    }),
+    llmClient: {
+      ...base,
+      provider: {
+        ...base.provider,
+        async streamResponse(request) {
+          if (isTitleGenerationRequest(request))
+            return createTitleProviderStream(request);
+          requests.push(request);
+          if (requests.length === 1) {
+            entered.resolve(undefined);
+            await release.promise;
+          }
+          return createProviderStream([
+            { textDelta: "Done", finishReason: "stop" },
+          ]);
+        },
+      },
+    },
+  });
+  try {
+    const first = client.submitPromptAndWait("Finish in one step");
+    await entered.promise;
+    const [run] = await runLedger.getActiveRuns("session_1");
+    expect(run.steerClosedAt).toEqual(expect.any(Number));
+    const queued = await client.submitPromptAccepted(
+      "Next task remains queued",
+      { sessionId: "session_1", clientRequestId: "late-final-submit" },
+    );
+    await expect(
+      client.steerQueuedPrompt({
+        promptId: queued.promptId,
+        expectedRunId: run.runId,
+        clientRequestId: "late-final-steer",
+      }),
+    ).rejects.toThrow(/final step/i);
+    expect(requests).toHaveLength(1);
+    release.resolve(undefined);
+    await first;
+    const next = await client.waitForPrompt(queued.promptId);
+    expect(next.prompt.status).toBe("succeeded");
+    expect(next.prompt.runId).not.toBe(run.runId);
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[0].messages)).not.toContain(
+      "Next task remains queued",
+    );
+    expect(JSON.stringify(requests[1].messages)).toContain(
+      "Next task remains queued",
+    );
+  } finally {
+    release.resolve(undefined);
+    await client.dispose();
+  }
 });

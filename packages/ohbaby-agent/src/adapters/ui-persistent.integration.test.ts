@@ -1,3 +1,4 @@
+import { DatabaseSubagentExecutionStore } from "../agents/subagents/execution-store.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -2098,6 +2099,135 @@ describe("createPersistentUiBackendClient", () => {
       expect(parentTranscript).toContain("subagent_persistent_1");
       expect(parentTranscript).toContain("background child persisted");
     } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("closes unfinished executions of terminal roots on SQLite reopen without replaying completed results", async () => {
+    const directory = await tempDir("ohbaby-execution-recovery-");
+    const dbPath = join(directory, "agent.db");
+    const workdir = join(directory, "workspace");
+    let client: PersistentUiBackendClient | undefined;
+    try {
+      client = createPersistentUiBackendClient({
+        dbPath,
+        workdir,
+        llmClient: createFakeLLMClient([
+          { textDelta: "seed", finishReason: "stop" },
+        ]),
+      });
+      await client.submitPromptAndWait("seed");
+      const sessionId = (await client.getSnapshot()).activeSessionId;
+      if (!sessionId) throw new Error("expected seed session");
+      await client.dispose();
+      client = undefined;
+      const ledger = createDatabaseRunLedger();
+      await ledger.createPending({
+        runId: "orphan-root",
+        sessionId,
+        triggerSource: "user",
+      });
+      await ledger.markRunning("orphan-root");
+      const store = new DatabaseSubagentExecutionStore();
+      for (const id of ["queued", "running", "completed"]) {
+        const lookup = {
+          executionId: id,
+          parentSessionId: sessionId,
+          requesterScopeId: "primary",
+        };
+        await store.accept({
+          ...lookup,
+          requestId: id,
+          requesterRunId: "orphan-root",
+          rootRunId: "orphan-root",
+          rootSessionId: sessionId,
+          subagentId: id,
+          mode: "background",
+          prompt: "never replay",
+          timeoutMs: 1000,
+          createdAt: 1,
+        });
+        if (id !== "queued") {
+          await store.bindChild(
+            lookup,
+            { sessionId: "child-" + id, contextScopeId: "child" },
+            2,
+          );
+          await store.start(lookup, "child-run-" + id, 3);
+        }
+        if (id === "completed")
+          await store.finish(lookup, {
+            status: "completed",
+            output: "complete original output",
+            completedAt: 4,
+          });
+      }
+      const completed = await store.getForRoot("completed", sessionId);
+      for (const root of ["live-root", "ended-root"]) {
+        await ledger.createPending({
+          runId: root,
+          sessionId,
+          triggerSource: "user",
+          ownerId: "live-owner",
+          ownerPid: process.pid,
+        });
+        await ledger.markRunning(root);
+        if (root === "ended-root") await ledger.markSucceeded(root);
+        await store.accept({
+          executionId: root,
+          requestId: root,
+          parentSessionId: sessionId,
+          requesterScopeId: "primary",
+          requesterRunId: root,
+          rootRunId: root,
+          rootSessionId: sessionId,
+          subagentId: root,
+          mode: "background",
+          prompt: "never replay",
+          timeoutMs: 1000,
+          createdAt: 1,
+        });
+      }
+      closeDatabase();
+      const llm = createFakeLLMClient([]);
+      const requests = vi.spyOn(llm.provider, "streamResponse");
+      client = createPersistentUiBackendClient({
+        dbPath,
+        workdir,
+        llmClient: llm,
+      });
+      await client.getSnapshot();
+      const reopened = new DatabaseSubagentExecutionStore();
+      for (const id of ["queued", "running"])
+        expect(await reopened.getForRoot(id, sessionId)).toMatchObject({
+          status: "interrupted",
+        });
+      expect(await reopened.getForRoot("completed", sessionId)).toEqual(
+        completed,
+      );
+      expect(await reopened.getForRoot("ended-root", sessionId)).toMatchObject({
+        status: "interrupted",
+      });
+      expect(await reopened.getForRoot("live-root", sessionId)).toMatchObject({
+        status: "queued",
+      });
+      const recovered = await reopened.listByRootRun("orphan-root");
+      await reopened.interruptTerminalRootExecutions(Date.now() + 1000);
+      expect(await reopened.listByRootRun("orphan-root")).toEqual(recovered);
+      expect(await reopened.listByRootRun("orphan-root")).toHaveLength(3);
+      expect(requests).not.toHaveBeenCalled();
+      expect(
+        getDatabase()
+          .prepare<{
+            count: number;
+          }>(
+            `SELECT COUNT(*) AS count FROM ${schema.currentRunInput.tableName}`,
+          )
+          .get()?.count,
+      ).toBe(0);
+    } finally {
+      await client?.dispose();
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }

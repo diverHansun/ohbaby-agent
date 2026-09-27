@@ -292,6 +292,51 @@ it.runIf(process.env.OHBABY_RUN_REAL_SUBAGENT_CONTINUATION === "1")(
           )
           .all(rootRunId)
           .map((row) => JSON.parse(row.data) as CurrentRunInputRecord);
+      // Keep the real production 60-second deadline; do not accelerate the
+      // coordinator or infer delivery from an input merely being accepted.
+      phase = "real-deadline-observation";
+      await until(
+        () =>
+          inputs().some(
+            (input) =>
+              input.observation?.reason === "deadline" &&
+              input.processedRequestId !== undefined,
+          ),
+        "production deadline included in a successful real provider request",
+      );
+      const deadlineInput = inputs().find(
+        (input) =>
+          input.observation?.reason === "deadline" &&
+          input.processedRequestId !== undefined,
+      );
+      expect(deadlineInput).toBeDefined();
+      const deadlineCall = providerCalls.find(
+        (call) =>
+          call.identity?.requestId === deadlineInput?.processedRequestId,
+      );
+      expect(deadlineCall?.identity?.inputIds).toContain(
+        deadlineInput?.inputId,
+      );
+      expect(
+        deadlineCall?.userContents.some((content) =>
+          content.includes(messageText(deadlineInput?.messageId ?? "")),
+        ),
+      ).toBe(true);
+      expect(
+        (await store.list({ parentSessionId: receipt.sessionId })).every(
+          (execution) => execution.status === "running",
+        ),
+      ).toBe(true);
+      evidence.deadlineObservation = {
+        inputId: deadlineInput?.inputId,
+        observation: deadlineInput?.observation,
+        processedRequestId: deadlineInput?.processedRequestId,
+        providerSequence: deadlineCall?.sequence,
+        completeRuntimeBodyInProvider: true,
+        childrenStillRunning: true,
+        productionFirstWaitMs: 60000,
+      };
+      phase = "steer-and-partial-completion";
       const queued = await http<UiPromptReceipt>("/v1/prompts", {
         sessionId: receipt.sessionId,
         clientRequestId: randomUUID(),

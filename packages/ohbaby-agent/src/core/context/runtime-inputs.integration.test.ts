@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { createInMemoryRunLedger } from "../../runtime/run-ledger/index.js";
+import { InMemoryPromptSubmissionStore } from "../../runtime/prompt-scheduler/in-memory-store.js";
+import { InMemoryCurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
 import { createBus } from "../../bus/index.js";
 import {
   createInMemoryMessageStore,
@@ -133,4 +136,89 @@ describe("durable inputs in prepared context", () => {
     ).rejects.toThrow("budget");
     expect(JSON.stringify(collected)).not.toContain("protectedprotected");
   });
+});
+
+it("rejects an oversized batch of individually fitting durable results without losing their pending bodies", async () => {
+  const { context, messages, protectedInput, collected } = await setup(10000);
+  const ledger = createInMemoryRunLedger();
+  await ledger.createPending({
+    runId: "run-a",
+    sessionId: "session",
+    triggerSource: "user",
+  });
+  await ledger.markRunning("run-a");
+  const inputs = new InMemoryCurrentRunInputStore({
+    runLedger: ledger,
+    promptStore: new InMemoryPromptSubmissionStore(),
+    messageManager: messages,
+  });
+  const bodies = [
+    "RESULT-A:" + "a".repeat(5500),
+    "RESULT-B:" + "b".repeat(5500),
+  ];
+  for (const [index, body] of bodies.entries()) {
+    const inputId = `result-${String(index)}`;
+    const messageId = `result-message-${String(index)}`;
+    await inputs.acceptRuntimeInput({
+      inputId,
+      runId: "run-a",
+      sessionId: "session",
+      source: "subagent-result",
+      sourceId: `execution-${String(index)}`,
+      message: {
+        info: {
+          ...protectedInput.info,
+          id: messageId,
+          runtimeInput: undefined,
+        },
+        parts: [
+          {
+            type: "text",
+            id: `${messageId}:body`,
+            messageId,
+            sessionId: "session",
+            orderIndex: 0,
+            text: body,
+          },
+        ],
+      },
+    });
+  }
+  const pendingBefore = await inputs.listPending("run-a");
+  const batch = await inputs.getMessages("run-a");
+  for (const message of batch) {
+    const single = await context.prepareTurn({
+      ...prepare,
+      force: true,
+      protectedInputs: [message],
+    });
+    expect(single.request.inputIds).toEqual([
+      message.info.runtimeInput?.inputId,
+    ]);
+    expect(single.usage.currentTokens).toBeLessThanOrEqual(
+      single.usage.inputBudgetTokens ?? single.usage.contextLimit,
+    );
+  }
+  await expect(
+    context.prepareTurn({ ...prepare, force: true, protectedInputs: batch }),
+  ).rejects.toThrow(/input.*budget/i);
+  expect(await inputs.listPending("run-a")).toEqual(pendingBefore);
+  expect(pendingBefore).toHaveLength(2);
+  expect(
+    pendingBefore.every(
+      (input) =>
+        input.firstAttemptRequestId === undefined &&
+        input.processedRequestId === undefined,
+    ),
+  ).toBe(true);
+  expect(
+    (await inputs.getMessages("run-a")).map((message) =>
+      message.parts
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join(""),
+    ),
+  ).toEqual(bodies);
+  expect(JSON.stringify(collected)).not.toContain("RESULT-A:");
+  expect(JSON.stringify(collected)).not.toContain("RESULT-B:");
 });

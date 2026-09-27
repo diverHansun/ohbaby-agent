@@ -461,4 +461,18 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       CREATE INDEX idx_current_run_input_run ON current_run_input(run_id,accepted_at,input_id);
     `,
   },
+  {
+    version: "020_final_step_steer_admission",
+    sql: `
+      ALTER TABLE run_ledger ADD COLUMN steer_closed_at INTEGER;
+      CREATE TABLE current_run_request_owner (
+        request_id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL REFERENCES message(id) ON DELETE CASCADE
+      );
+      INSERT INTO current_run_request_owner(request_id,message_id)
+      SELECT json_extract(request.value,'$.requestId'),message.id
+      FROM message, json_each(message.data,'$.modelRequests') request
+      WHERE json_extract(request.value,'$.requestId') IS NOT NULL;
+    `,
+  },
 ];

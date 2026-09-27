@@ -124,6 +124,36 @@ for (const backend of ["memory", "sqlite"] as const)
       ).rejects.toThrow(/conflict/i);
       expect(await f.inputs.tryCloseForCompletion("run-a")).toBe(false);
     });
+    it("orders a converted Steer at acceptance time after newer persisted history", async () => {
+      const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+      try {
+        const f = await fixture();
+        const queued = await f.queue.get("queued");
+        if (!queued) throw new Error("expected queued prompt");
+        const createdAt = queued.createdAt;
+        clock.mockReturnValue(createdAt + 100);
+        await f.messages.createMessage({
+          sessionId: "session",
+          role: "user",
+          agent: "default",
+        });
+        clock.mockReturnValue(createdAt + 200);
+        const accepted = await f.inputs.steerQueued(f.steer);
+        const history = await f.messages.listBySession("session");
+        expect(history.map((message) => message.info.id).at(-1)).toBe(
+          "reserved-message",
+        );
+        expect(accepted.message.info.time.created).toBe(
+          accepted.receipt.acceptedAt,
+        );
+        expect(accepted.receipt.acceptedAt).toBe(createdAt + 200);
+        expect((await f.queue.get("queued"))?.createdAt).toBe(createdAt);
+        clock.mockReturnValue(createdAt + 300);
+        expect(await f.inputs.steerQueued(f.steer)).toEqual(accepted);
+      } finally {
+        clock.mockRestore();
+      }
+    });
     it("makes normal finish and acceptance mutually exclusive and rejects active leases", async () => {
       const f = await fixture();
       await f.queue.acquireEditLease("queued", "editor", 60000);
@@ -132,6 +162,38 @@ for (const backend of ["memory", "sqlite"] as const)
       await expect(f.inputs.steerQueued(f.steer)).rejects.toThrow();
       expect((await f.queue.get("queued"))?.status).toBe("queued");
       expect(await f.messages.listBySession("session")).toHaveLength(0);
+    });
+    it("seals final-step Steer admission without closing already accepted inputs or request delivery", async () => {
+      const f = await fixture();
+      const first = await f.inputs.steerQueued(f.steer);
+      await f.queue.accept({
+        promptId: "late",
+        clientRequestId: "late-submit",
+        scopeKey: "workspace",
+        sessionId: "session",
+        userMessageId: "late-message",
+        text: "too late",
+        maxQueuedPrompts: 10,
+      });
+      await f.inputs.sealSteer("run-a");
+      const reader =
+        backend === "sqlite"
+          ? new DatabaseCurrentRunInputStore({ db: getDatabase() })
+          : f.inputs;
+      await expect(
+        reader.steerQueued({
+          ...f.steer,
+          promptId: "late",
+          clientRequestId: "late-steer",
+        }),
+      ).rejects.toThrow(/final step/i);
+      expect((await f.queue.get("late"))?.status).toBe("queued");
+      expect(await reader.listPending("run-a")).toMatchObject([
+        { inputId: first.receipt.inputId },
+      ]);
+      expect(await reader.steerQueued(f.steer)).toEqual(first);
+      expect((await f.ledger.get("run-a"))?.status).toBe("running");
+      expect(await reader.getMessages("run-a")).toHaveLength(1);
     });
     it("freezes attempt membership, excludes late input, preserves unsent input after stop and filters it from later history", async () => {
       const f = await fixture();

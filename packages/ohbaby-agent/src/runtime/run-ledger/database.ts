@@ -29,6 +29,7 @@ const ORPHANED_OWNER_REASON = "process interrupted before owner exited";
 
 interface RunLedgerRow {
   readonly inputs_closed_at: number | null;
+  readonly steer_closed_at: number | null;
   readonly inputs_close_reason: string | null;
   readonly run_id: string;
   readonly session_id: string;
@@ -52,6 +53,7 @@ function rowToRecord(row: RunLedgerRow): RunLedgerRecord {
   return {
     runId: row.run_id,
     inputsClosedAt: row.inputs_closed_at ?? undefined,
+    steerClosedAt: row.steer_closed_at ?? undefined,
     inputsCloseReason: row.inputs_close_reason ?? undefined,
     sessionId: row.session_id,
     contextScopeId: row.context_scope_id ?? undefined,

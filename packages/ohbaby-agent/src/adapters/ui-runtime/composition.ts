@@ -1,10 +1,10 @@
+import { subscribeApprovalExecutionChanges } from "../../agents/subagents/approval-blocking.js";
 import type { CurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
 import { createSubagentResultArtifacts } from "../../agents/subagents/result-artifacts.js";
 import { createSubagentContinuationCoordinator } from "../../agents/subagents/continuation-coordinator.js";
 import { collectExecutionFacts } from "../../agents/subagents/execution-facts.js";
 import { createStorage } from "../../services/storage/index.js";
 import { PermissionEvent } from "../../permission/events.js";
-import { MessageEvent } from "../../core/message/events.js";
 import { randomUUID } from "node:crypto";
 import { activeModelProfiles } from "../../config/llm/model-profile.js";
 import {
@@ -758,19 +758,8 @@ export async function createUiRuntimeComposition(
       });
       return execution ? (await factsFor(execution)).approval.blocked : false;
     },
-    subscribeExecution: (sessionId, runId, wake) => {
-      const unsubs = [
-        options.bus.subscribe(MessageEvent.PartUpdated, ({ part }) => {
-          if (part.sessionId === sessionId) wake();
-        }),
-        options.bus.subscribe(PermissionEvent.Replied, (info) => {
-          if (info.runId === runId) wake();
-        }),
-      ];
-      return () => {
-        for (const unsubscribe of unsubs) unsubscribe();
-      };
-    },
+    subscribeExecution: (sessionId, runId, wake) =>
+      subscribeApprovalExecutionChanges(options.bus, sessionId, runId, wake),
     executionStore: subagentExecutionStore,
     async resolveRequester(
       input,

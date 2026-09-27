@@ -520,6 +520,7 @@ export class Lifecycle {
       const isFinalStep = step === maxSteps;
       const protectedInputs = await params.currentRunInputs?.beforeStep(
         params.signal,
+        isFinalStep,
       );
       const resolvedStepTools =
         (await this.deps.resolveTools?.({

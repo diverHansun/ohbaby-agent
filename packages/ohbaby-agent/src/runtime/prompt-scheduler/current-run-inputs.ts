@@ -78,6 +78,7 @@ export interface SteerQueuedPromptResult {
   readonly message: MessageWithParts;
 }
 export interface CurrentRunInputStore {
+  sealSteer(runId: string): Promise<void>;
   acceptRuntimeInput(input: AcceptRuntimeInput): Promise<CurrentRunInputRecord>;
   steerQueued(input: SteerQueuedPromptInput): Promise<SteerQueuedPromptResult>;
   getInput(inputId: string): Promise<CurrentRunInputRecord | undefined>;
@@ -128,6 +129,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
   protected abstract transaction<T>(operation: () => T): Promise<T>;
   protected abstract run(runId: string): RunLedgerRecord | undefined;
   protected abstract closeRun(runId: string, reason: string, at: number): void;
+  protected abstract sealSteerRun(runId: string, at: number): void;
   protected abstract readInput(id: string): CurrentRunInputRecord | undefined;
   protected abstract inputs(runId: string): readonly CurrentRunInputRecord[];
   protected abstract saveInput(record: CurrentRunInputRecord): void;
@@ -142,6 +144,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
   protected abstract requestMessage(
     requestId: string,
   ): MessageWithParts | undefined;
+  protected abstract indexRequest(requestId: string, messageId: string): void;
   protected effectiveInput(
     record: CurrentRunInputRecord,
   ): CurrentRunInputRecord {
@@ -214,7 +217,10 @@ abstract class CurrentInputs implements CurrentRunInputStore {
       info: { ...message.info, runId: input.runId, runtimeInput: expected },
     };
   }
-  private acceptSync(input: AcceptRuntimeInput): CurrentRunInputRecord {
+  private acceptSync(
+    input: AcceptRuntimeInput,
+    acceptedAt = this.now(),
+  ): CurrentRunInputRecord {
     for (const id of [
       input.inputId,
       input.runId,
@@ -278,7 +284,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
       source: input.source,
       sourceId: input.sourceId,
       messageId: message.info.id,
-      acceptedAt: this.now(),
+      acceptedAt,
       ...(input.observation ? { observation: input.observation } : {}),
     };
     this.putMessage(message);
@@ -328,8 +334,15 @@ abstract class CurrentInputs implements CurrentRunInputStore {
         conflict("Queued prompt scope or status conflict");
       if ((prompt.editLeaseExpiresAt ?? 0) > this.now())
         conflict("Queued prompt edit lease is active");
-      this.active(input.expectedRunId, input.sessionId, input.contextScopeId);
+      const target = this.active(
+        input.expectedRunId,
+        input.sessionId,
+        input.contextScopeId,
+      );
+      if (target.steerClosedAt !== undefined)
+        conflict("Target run is already on its final step");
       const inputId = `steer:${prompt.promptId}`;
+      const acceptedAt = this.now();
       const message: MessageWithParts = {
         info: {
           id: prompt.userMessageId,
@@ -337,7 +350,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
           contextScopeId: input.contextScopeId,
           role: "user",
           agent: input.agent ?? "default",
-          time: { created: prompt.createdAt, updated: this.now() },
+          time: { created: acceptedAt, updated: acceptedAt },
         },
         parts: [
           {
@@ -351,15 +364,18 @@ abstract class CurrentInputs implements CurrentRunInputStore {
           },
         ],
       };
-      const accepted = this.acceptSync({
-        inputId,
-        runId: input.expectedRunId,
-        sessionId: input.sessionId,
-        contextScopeId: input.contextScopeId,
-        source: "user-steer",
-        sourceId: prompt.promptId,
-        message,
-      });
+      const accepted = this.acceptSync(
+        {
+          inputId,
+          runId: input.expectedRunId,
+          sessionId: input.sessionId,
+          contextScopeId: input.contextScopeId,
+          source: "user-steer",
+          sourceId: prompt.promptId,
+          message,
+        },
+        acceptedAt,
+      );
       const receipt: SteerQueuedPromptReceipt = {
         promptId: prompt.promptId,
         userMessageId: prompt.userMessageId,
@@ -461,6 +477,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
       const existingOwner = this.requestMessage(request.requestId);
       if (existingOwner && existingOwner.info.id !== owner.info.id)
         conflict("Request identity owner conflict");
+      this.indexRequest(request.requestId, owner.info.id);
       const previous = owner.info.modelRequests?.find(
         (r) => r.requestId === request.requestId,
       );
@@ -525,6 +542,12 @@ abstract class CurrentInputs implements CurrentRunInputStore {
           this.saveInput({ ...r, closedAt: at, closeReason: reason });
     }).then(() => {
       this.wake(runId);
+    });
+  }
+  async sealSteer(runId: string): Promise<void> {
+    await this.transaction(() => {
+      this.active(runId);
+      this.sealSteerRun(runId, this.now());
     });
   }
   async tryCloseForCompletion(runId: string): Promise<boolean> {
@@ -605,6 +628,9 @@ export class InMemoryCurrentRunInputStore extends CurrentInputs {
   protected closeRun(id: string, reason: string, at: number): void {
     this.options.runLedger.runtimeInputMemory?.close(id, reason, at);
   }
+  protected sealSteerRun(id: string, at: number): void {
+    this.options.runLedger.runtimeInputMemory?.sealSteer(id, at);
+  }
   protected readInput(id: string): CurrentRunInputRecord | undefined {
     const r = this.records.get(id);
     return r ? this.effectiveInput(structuredClone(r)) : undefined;
@@ -651,6 +677,9 @@ export class InMemoryCurrentRunInputStore extends CurrentInputs {
     const owner = this.requestOwners.get(id);
     return owner ? this.readMessage(owner) : undefined;
   }
+  protected indexRequest(id: string, messageId: string): void {
+    this.requestOwners.set(id, messageId);
+  }
 }
 
 export class DatabaseCurrentRunInputStore extends CurrentInputs {
@@ -670,6 +699,7 @@ export class DatabaseCurrentRunInputStore extends CurrentInputs {
         context_scope_id: string | null;
         status: RunLedgerRecord["status"];
         inputs_closed_at: number | null;
+        steer_closed_at: number | null;
         inputs_close_reason: string | null;
       }>("SELECT * FROM run_ledger WHERE run_id=?")
       .get(id);
@@ -682,6 +712,7 @@ export class DatabaseCurrentRunInputStore extends CurrentInputs {
           triggerSource: "user",
           createdAt: 0,
           inputsClosedAt: r.inputs_closed_at ?? undefined,
+          steerClosedAt: r.steer_closed_at ?? undefined,
           inputsCloseReason: r.inputs_close_reason ?? undefined,
         }
       : undefined;
@@ -692,6 +723,13 @@ export class DatabaseCurrentRunInputStore extends CurrentInputs {
         "UPDATE run_ledger SET inputs_closed_at=COALESCE(inputs_closed_at,?),inputs_close_reason=COALESCE(inputs_close_reason,?) WHERE run_id=?",
       )
       .run(at, reason, id);
+  }
+  protected sealSteerRun(id: string, at: number): void {
+    this.db
+      .prepare(
+        "UPDATE run_ledger SET steer_closed_at=COALESCE(steer_closed_at,?) WHERE run_id=?",
+      )
+      .run(at, id);
   }
   protected readInput(id: string): CurrentRunInputRecord | undefined {
     const r = this.db
@@ -821,9 +859,16 @@ export class DatabaseCurrentRunInputStore extends CurrentInputs {
       .prepare<{
         id: string;
       }>(
-        "SELECT id FROM message WHERE EXISTS(SELECT 1 FROM json_each(message.data,'$.modelRequests') request WHERE json_extract(request.value,'$.requestId')=?)",
+        "SELECT message_id AS id FROM current_run_request_owner WHERE request_id=?",
       )
       .get(id);
     return r ? this.readMessage(r.id) : undefined;
+  }
+  protected indexRequest(id: string, messageId: string): void {
+    this.db
+      .prepare(
+        "INSERT INTO current_run_request_owner(request_id,message_id) VALUES(?,?) ON CONFLICT(request_id) DO NOTHING",
+      )
+      .run(id, messageId);
   }
 }

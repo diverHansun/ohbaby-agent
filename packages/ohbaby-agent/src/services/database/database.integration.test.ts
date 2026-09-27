@@ -102,6 +102,7 @@ describe("services/database", () => {
       { version: "017_message_recovery_pages" },
       { version: "018_subagent_execution" },
       { version: "019_current_run_input" },
+      { version: "020_final_step_steer_admission" },
     ]);
   });
 
@@ -803,4 +804,38 @@ describe("services/database", () => {
       }
     }
   });
+});
+
+it("upgrades existing request owners once and cascades the lookup index with messages", async () => {
+  const dbPath = await tempDbPath();
+  initDatabase({
+    dbPath,
+    migrations: INITIAL_MIGRATIONS.filter((m) => m.version < "020"),
+  });
+  const db = getDatabase();
+  db.prepare(
+    "INSERT INTO session(id,project_id,project_root,agent,title,status,created_at,updated_at,message_count,data) VALUES('lookup-session','project','/repo','default','test','active',1,1,1,'{}')",
+  ).run();
+  db.prepare(
+    "INSERT INTO message(id,session_id,role,created_at,updated_at,data) VALUES('lookup-message','lookup-session','assistant',1,1,?)",
+  ).run(
+    JSON.stringify({
+      id: "lookup-message",
+      modelRequests: [{ requestId: "existing-request" }],
+    }),
+  );
+  closeDatabase();
+  initDatabase({ dbPath });
+  const reopened = getDatabase();
+  expect(
+    reopened
+      .prepare(
+        "SELECT message_id FROM current_run_request_owner WHERE request_id=?",
+      )
+      .get("existing-request"),
+  ).toEqual({ message_id: "lookup-message" });
+  reopened.prepare("DELETE FROM message WHERE id='lookup-message'").run();
+  expect(
+    reopened.prepare("SELECT * FROM current_run_request_owner").all(),
+  ).toEqual([]);
 });

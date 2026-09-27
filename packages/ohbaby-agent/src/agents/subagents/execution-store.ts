@@ -617,6 +617,29 @@ export class DatabaseSubagentExecutionStore extends ExecutionStore {
     super();
     this.db = options.db ?? getDatabase();
   }
+  /** Recovery never schedules work or delivers results into a replacement run. */
+  async interruptTerminalRootExecutions(at: number): Promise<void> {
+    await this.transaction(() => {
+      const records = this.db
+        .prepare<Row>(
+          `SELECT execution.* FROM ${schema.subagentExecution.tableName} execution
+         JOIN ${schema.runLedger.tableName} root ON root.run_id = execution.root_run_id
+         WHERE execution.status IN ('queued', 'running')
+           AND root.status IN ('succeeded', 'failed', 'cancelled', 'interrupted')`,
+        )
+        .all()
+        .map(fromRow);
+      for (const record of records)
+        this.save(
+          finishRecord(record, {
+            status: "interrupted",
+            reason:
+              "Root run ended before execution completed (startup recovery)",
+            completedAt: at,
+          }),
+        );
+    });
+  }
   protected transaction<T>(operation: () => T): Promise<T> {
     return runWriteTransaction(this.db, operation);
   }

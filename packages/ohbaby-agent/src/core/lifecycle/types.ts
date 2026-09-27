@@ -83,7 +83,10 @@ export interface LifecycleSessionParams {
 
 /** Bound to one exact run; implementations persist before waking or admitting I/O. */
 export interface LifecycleRunInputPort {
-  beforeStep(signal?: AbortSignal): Promise<readonly MessageWithParts[]>;
+  beforeStep(
+    signal?: AbortSignal,
+    finalStep?: boolean,
+  ): Promise<readonly MessageWithParts[]>;
   beforeFinish(signal?: AbortSignal): Promise<"continue" | "finish">;
   admitRequestAttempt(
     request: ModelRequestRecord,

@@ -250,8 +250,9 @@ export function createSubagentContinuationCoordinator(options: {
       previousApproval = snapshot.approvalFingerprint;
     }
     return {
-      async beforeStep(signal) {
+      async beforeStep(signal, finalStep) {
         await check(signal);
+        if (finalStep) await options.inputs.sealSteer(identity.runId);
         return options.inputs.getMessages(identity.runId);
       },
       async beforeFinish(signal) {

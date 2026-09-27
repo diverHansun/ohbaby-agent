@@ -69,6 +69,11 @@ function validateInterruptibleStatuses(statuses: Iterable<RunStatus>): void {
 export class InMemoryRunLedger implements RunLedger {
   private readonly records = new Map<string, RunLedgerRecord>();
   readonly runtimeInputMemory = {
+    sealSteer: (runId: string, at: number): void => {
+      const record = this.records.get(runId);
+      if (record && record.steerClosedAt === undefined)
+        this.records.set(runId, { ...record, steerClosedAt: at });
+    },
     get: (runId: string): RunLedgerRecord | undefined => {
       const record = this.records.get(runId);
       return record ? cloneRecord(record) : undefined;
