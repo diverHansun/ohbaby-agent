@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UiSessionView, UiBackendClient } from "ohbaby-sdk";
-import { createOhbabyWebRuntime, type OhbabyWebRuntime } from "./client.js";
+import { createOhbabyWebRuntime, type OhbabyWebRuntime } from "../../runtime.js";
 import type { WebSseEvent } from "./wire.js";
 const binding = {
   permissionEpoch: "epoch",

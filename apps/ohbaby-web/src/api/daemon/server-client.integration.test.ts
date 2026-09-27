@@ -28,7 +28,7 @@ import type {
   UiPromptReceiptQuery,
   UiPromptReceiptResult,
 } from "ohbaby-sdk";
-import { createOhbabyWebRuntime } from "./client.js";
+import { createOhbabyWebRuntime } from "../../runtime.js";
 import type { OhbabyBootstrapConfig } from "./wire.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";

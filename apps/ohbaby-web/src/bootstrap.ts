@@ -1,7 +1,7 @@
 import {
   createOhbabyWebRuntime,
   type OhbabyWebRuntime,
-} from "./api/daemon/client.js";
+} from "./runtime.js";
 import type { OhbabyBootstrapConfig } from "./api/daemon/wire.js";
 import { mountBootstrapError, mountOhbabyWebApp } from "./ui/App.js";
 import "./ui/styles.css";

@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
 import type { UiMessage, UiSnapshot } from "ohbaby-sdk";
+import { describe, expect, it } from "vitest";
 import type { StoreSnapshot } from "../api/daemon/wire.js";
 import { createOhbabyWebStore } from "../store/store.js";
-import { messageText, selectViewModel } from "./selectors.js";
+import { messageText, selectViewModel } from "./session/selectors.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
 

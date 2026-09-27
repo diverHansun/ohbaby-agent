@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
+import type { SessionSyncState, UiSessionView } from "ohbaby-sdk";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionSyncState, UiSessionView } from "ohbaby-sdk";
 import {
   INITIAL_LOAD_BANNER_DELAY_MS,
   isSessionRecovery,
   useSessionSyncBanner,
-} from "./use-session-sync-banner.js";
+} from "./session/use-session-sync-banner.js";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }

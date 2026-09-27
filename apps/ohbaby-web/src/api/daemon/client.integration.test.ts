@@ -3,7 +3,7 @@ import {
   recoveryBinding,
   sessionViewFromSnapshot,
 } from "./session-recovery.test-utils.js";
-import { createOhbabyWebRuntime } from "./client.js";
+import { createOhbabyWebRuntime } from "../../runtime.js";
 import type { OhbabyBootstrapConfig, WebSseEvent } from "./wire.js";
 
 const encoder = new TextEncoder();

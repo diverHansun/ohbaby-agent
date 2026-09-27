@@ -5,17 +5,20 @@ import type {
   UiPermissionLevel,
   UiPermissionMode,
   UiPermissionRequest,
+  UiPromptSubmission,
   UiRun,
   UiRunStatus,
-  UiPromptSubmission,
   UiSession,
   UiSessionIndexEntry,
   UiSessionTodoList,
   UiSnapshot,
 } from "ohbaby-sdk";
-import type { ConnectionState, StoreSnapshot } from "../api/daemon/wire.js";
-import type { CommandNotice } from "../api/daemon/wire.js";
-import type { ReasoningViewState } from "../api/daemon/wire.js";
+import type {
+  CommandNotice,
+  ConnectionState,
+  ReasoningViewState,
+  StoreSnapshot,
+} from "../../api/daemon/wire.js";
 
 export interface HeaderModel {
   readonly connectionKind:

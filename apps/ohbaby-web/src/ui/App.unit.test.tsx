@@ -1,12 +1,8 @@
 // @vitest-environment jsdom
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSessionSync, type UiSessionView } from "ohbaby-sdk";
 import type {
   UiBackendClient,
-  UiEvent,
   UiCompactSessionUsage,
+  UiEvent,
   UiPermissionRequest,
   UiPromptEditLease,
   UiPromptSubmission,
@@ -14,9 +10,13 @@ import type {
   UiSnapshot,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
-import type { OhbabyWebRuntime } from "../api/daemon/client.js";
-import { createOhbabyWebStore } from "../store/store.js";
+import { createSessionSync, type UiSessionView } from "ohbaby-sdk";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { OhbabyWebRuntime } from "../runtime.js";
 import type { OhbabyWebStore } from "../store/store.js";
+import { createOhbabyWebStore } from "../store/store.js";
 import { OhbabyWebApp } from "./App.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";

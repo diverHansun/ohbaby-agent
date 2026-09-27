@@ -1,3 +1,4 @@
+import type { UiContextWindowUsage, UiPromptCacheUsage } from "ohbaby-sdk";
 import {
   filterSlashCommandCatalog,
   isWebPassthroughCommandId,
@@ -5,9 +6,8 @@ import {
   type UiWebCommandCatalog,
   type UiWebCommandSpec,
 } from "ohbaby-sdk";
-import type { UiContextWindowUsage, UiPromptCacheUsage } from "ohbaby-sdk";
-import type { CommandNotice } from "../api/daemon/wire.js";
-import type { HeaderModel, ViewModel } from "./selectors.js";
+import type { CommandNotice } from "../../api/daemon/wire.js";
+import type { HeaderModel, ViewModel } from "../session/selectors.js";
 
 export interface SlashPaletteItem {
   readonly command: UiWebCommandSpec;

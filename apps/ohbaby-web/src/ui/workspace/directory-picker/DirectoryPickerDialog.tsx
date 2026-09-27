@@ -1,10 +1,10 @@
 import { ChevronLeft, ChevronRight, Folder, FolderOpen, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   DirectoryPickerListResponse,
   DirectoryPickerRootsResponse,
-} from "../../api/daemon/wire.js";
+} from "../../../api/daemon/wire.js";
 
 export interface DirectoryPickerApi {
   getDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse>;

@@ -1,7 +1,7 @@
 import { sessionViewFromSnapshot } from "./session-recovery.test-utils.js";
 import { describe, expect, it } from "vitest";
 import type { UiPermissionRequest } from "ohbaby-sdk";
-import { createOhbabyWebRuntime } from "./client.js";
+import { createOhbabyWebRuntime } from "../../runtime.js";
 import type { WebSseEvent } from "./wire.js";
 
 const binding = {

@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { DurationSampleContext } from "./execution-duration.js";
+import type { UiMessagePart, UiToolCall, UiToolResult } from "ohbaby-sdk";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { UiMessagePart, UiToolCall, UiToolResult } from "ohbaby-sdk";
-import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
+import { DurationSampleContext } from "./conversation/execution-duration.js";
+import {
+  OrphanToolResultCard,
+  pairToolParts,
+  ToolCard,
+} from "./conversation/tool-card.js";
 
 (
   globalThis as typeof globalThis & {

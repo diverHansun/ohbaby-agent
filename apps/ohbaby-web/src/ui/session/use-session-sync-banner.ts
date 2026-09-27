@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
 import type { SessionSyncState } from "ohbaby-sdk";
+import { useEffect, useState } from "react";
 
 /** A first read slower than this is worth telling the user about. */
 export const INITIAL_LOAD_BANNER_DELAY_MS = 800;

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COMPOSER_PLACEHOLDER_PHRASES,
   TypewriterPlaceholder,
-} from "./TypewriterPlaceholder.js";
+} from "./composer/TypewriterPlaceholder.js";
 
 (
   globalThis as typeof globalThis & {

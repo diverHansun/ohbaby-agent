@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
+import type { UiContextWindowUsage } from "ohbaby-sdk";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import type { UiContextWindowUsage } from "ohbaby-sdk";
-import { ContextUsageControl } from "./ContextUsage.js";
+import { ContextUsageControl } from "./shared/ContextUsage.js";
 
 (
   globalThis as typeof globalThis & {

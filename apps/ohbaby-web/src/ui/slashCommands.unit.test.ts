@@ -1,7 +1,6 @@
-import { describe, expect, it } from "vitest";
 import type { UiWebCommandCatalog } from "ohbaby-sdk";
+import { describe, expect, it } from "vitest";
 import type { CommandNotice } from "../api/daemon/wire.js";
-import type { HeaderModel, ViewModel } from "./selectors.js";
 import {
   createCommandResultModel,
   createSlashPaletteItems,
@@ -11,7 +10,8 @@ import {
   statusContextWindowUsage,
   statusPromptCacheUsage,
   statusRows,
-} from "./slashCommands.js";
+} from "./commands/slashCommands.js";
+import type { HeaderModel, ViewModel } from "./session/selectors.js";
 
 function commandCatalog(): UiWebCommandCatalog {
   return {

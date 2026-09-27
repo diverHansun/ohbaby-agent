@@ -4,7 +4,7 @@ import {
 } from "./session-recovery.test-utils.js";
 import { describe, expect, it } from "vitest";
 import type { UiSnapshot } from "ohbaby-sdk";
-import { createOhbabyWebRuntime } from "./client.js";
+import { createOhbabyWebRuntime } from "../../runtime.js";
 
 const encoder = new TextEncoder();
 

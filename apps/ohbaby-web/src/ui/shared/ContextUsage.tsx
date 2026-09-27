@@ -1,10 +1,10 @@
 import { X } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import type { CSSProperties, ReactElement } from "react";
 import type {
   UiContextOccupancyComposition,
   UiContextWindowUsage,
 } from "ohbaby-sdk";
+import type { CSSProperties, ReactElement } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 type CompositionKey = keyof UiContextOccupancyComposition;
 

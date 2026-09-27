@@ -1,7 +1,7 @@
 import { sessionViewFromSnapshot } from "./session-recovery.test-utils.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UiPermissionBinding, UiSnapshot } from "ohbaby-sdk";
-import { createOhbabyWebRuntime } from "./client.js";
+import { createOhbabyWebRuntime } from "../../runtime.js";
 import {
   readWebNavigationState,
   writeWebNavigationState,

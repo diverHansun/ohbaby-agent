@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
+import { useEffect, useState } from "react";
 
 export const COMPOSER_PLACEHOLDER_PHRASES = [
   "Ask Lychee anything…",
