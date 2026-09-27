@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -884,7 +885,7 @@ try {
   console.log(`E2E_UI_EVIDENCE_PASS ${JSON.stringify(browserEvidence)}`);
   if (newSessionRegression) {
     const databaseEvidence = verifyNewSessionDatabase(
-      dbPath, workspace, browserEvidence.newSessionRegression,
+      dbPath, await realpath(workspace), browserEvidence.newSessionRegression,
     );
     console.log(`E2E_NEW_SESSION_DATABASE_PASS ${JSON.stringify(databaseEvidence)}`);
   }
