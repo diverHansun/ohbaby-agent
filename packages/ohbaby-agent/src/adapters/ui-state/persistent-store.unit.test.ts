@@ -337,3 +337,32 @@ function messageWithToolState(state: ToolState): MessageWithParts {
     ],
   };
 }
+
+it("projects automatic runtime input as a system fact while preserving user Steer origin", () => {
+  const message = assistantMessage({ time: { created: 1 } });
+  const origin = {
+    kind: "subagent-result" as const,
+    inputId: "input",
+    targetRunId: "run",
+    sourceId: "execution",
+  };
+  expect(
+    messageToUiMessage({
+      ...message,
+      info: { ...message.info, runtimeInput: origin },
+    })?.role,
+  ).toBe("system");
+  expect(
+    messageToUiMessage({
+      ...message,
+      info: {
+        id: "user",
+        sessionId: "root",
+        role: "user",
+        agent: "main",
+        time: { created: 1 },
+        runtimeInput: { ...origin, kind: "user-steer" },
+      },
+    })?.role,
+  ).toBe("user");
+});

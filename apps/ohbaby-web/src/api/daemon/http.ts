@@ -1,4 +1,9 @@
 import type {
+  UiSubagentQuery,
+  UiSubagentExecutionList,
+  UiSubagentExecutionView,
+} from "ohbaby-sdk";
+import type {
   UiBackendClient,
   UiSessionScope,
   UiSessionView,
@@ -125,6 +130,28 @@ export class DaemonHttpClient {
     });
   }
 
+  listSubagentExecutions(
+    input: UiSubagentQuery,
+  ): Promise<{ ok: true; result: UiSubagentExecutionList }> {
+    return this.subagentRead(input);
+  }
+  getSubagentExecutionView(
+    input: UiSubagentQuery & { executionId: string },
+  ): Promise<{ ok: true; result: UiSubagentExecutionView }> {
+    return this.subagentRead(input, input.executionId);
+  }
+  private subagentRead<T>(
+    input: UiSubagentQuery,
+    executionId?: string,
+  ): Promise<T> {
+    const query = scopeQuery(input);
+    if (input.before !== undefined) query.set("before", input.before);
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.rootSessionId)}/subagents${executionId ? `/${encodeURIComponent(executionId)}` : ""}?${query}`,
+      { signal: input.signal },
+    );
+  }
   getSessionView(
     input: UiSessionScope,
   ): Promise<{ ok: true; view: UiSessionView }> {

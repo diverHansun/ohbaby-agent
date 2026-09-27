@@ -1,3 +1,4 @@
+import { subagentReadForClient } from "../../coordination/session-access.js";
 import {
   createOrReuseClientSession,
   parseSessionCreationOptions,
@@ -173,6 +174,35 @@ export async function callDaemonBackend(input: {
     input;
 
   switch (request.method) {
+    case "listSubagentExecutions":
+    case "getSubagentExecutionView": {
+      const raw = request.params[0] as
+        | (import("ohbaby-sdk").UiSubagentQuery & {
+            executionId?: string;
+          })
+        | undefined;
+      if (
+        !raw ||
+        typeof raw !== "object" ||
+        (request.method === "getSubagentExecutionView" && !raw.executionId)
+      )
+        throw new Error("Invalid execution query");
+      return subagentReadForClient({
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        query: {
+          ...raw,
+          executionId:
+            request.method === "getSubagentExecutionView"
+              ? raw.executionId
+              : undefined,
+          signal: input.signal,
+        },
+      });
+    }
+
     case "getSessionView":
     case "getSessionHistory":
     case "getSessionControl":

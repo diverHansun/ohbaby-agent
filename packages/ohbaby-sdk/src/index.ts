@@ -237,3 +237,14 @@ export type {
 
 export * from "./execution.js";
 export * from "./duration.js";
+
+export type {
+  UiSubagentBudget,
+  UiSubagentExecution,
+  UiSubagentQuery,
+  UiSubagentExecutionList,
+  UiSubagentExecutionView,
+  UiSubagentReadClient,
+} from "./subagent.js";
+export { createSubagentReader } from "./subagent-reader.js";
+export type { UiSubagentReaderState } from "./subagent-reader.js";

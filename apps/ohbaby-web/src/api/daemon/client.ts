@@ -1,3 +1,8 @@
+import type {
+  UiSubagentQuery,
+  UiSubagentExecutionList,
+  UiSubagentExecutionView,
+} from "ohbaby-sdk";
 import {
   createPermissionSync,
   createSessionSync,
@@ -431,6 +436,32 @@ export class BrowserDaemonClient implements UiBackendClient {
     }
   }
 
+  async listSubagentExecutions(
+    input: UiSubagentQuery,
+  ): Promise<UiSubagentExecutionList> {
+    const binding = this.permissionSync.getState().binding;
+    const result = await this.http.listSubagentExecutions({
+      ...input,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.permissionSync.getState().binding)
+      throw new Error("Session binding changed during execution query");
+    return result.result;
+  }
+  async getSubagentExecutionView(
+    input: UiSubagentQuery & { executionId: string },
+  ): Promise<UiSubagentExecutionView> {
+    const binding = this.permissionSync.getState().binding;
+    const result = await this.http.getSubagentExecutionView({
+      ...input,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.permissionSync.getState().binding)
+      throw new Error("Session binding changed during execution query");
+    return result.result;
+  }
   async getSessionView(input: UiSessionScope): Promise<UiSessionView> {
     return (await this.http.getSessionView(input)).view;
   }

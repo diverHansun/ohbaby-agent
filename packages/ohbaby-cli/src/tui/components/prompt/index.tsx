@@ -47,6 +47,7 @@ export interface PromptProps {
   readonly submitPrompt?: SubmitPrompt;
   readonly onLoadHistory?: () => void;
   readonly activeSessionId: string | null;
+  readonly activeRunId?: string;
   readonly pendingReasoning?: PendingReasoningSelection | null;
   readonly catalog: TuiCommandCatalog | null;
   readonly client: CoreAPI;
@@ -71,6 +72,7 @@ export interface PendingReasoningSelection {
 
 export function Prompt({
   activeSessionId,
+  activeRunId,
   canSubmit = true,
   submitPrompt,
   onLoadHistory,
@@ -86,6 +88,16 @@ export function Prompt({
   queuedPrompts = [],
   runtimeStatusLabel,
 }: PromptProps): ReactElement {
+  const [steerSelection, setSteerSelection] = useState(0);
+  const [steerNotice, setSteerNotice] = useState<string>();
+  const steerAttempts = useRef(
+    new Map<string, import("ohbaby-sdk").UiSteerQueuedPromptInput>(),
+  );
+  useEffect(() => {
+    steerAttempts.current.clear();
+    setSteerNotice(undefined);
+    setSteerSelection(0);
+  }, [activeSessionId]);
   const theme = useTheme();
   const layout = useTuiLayout();
   const [editor, setEditor] = useState<EditorState>(() => createEditorState());
@@ -179,6 +191,64 @@ export function Prompt({
   useInput(
     (value, key) => {
       if (queuedMutationPendingRef.current) return;
+      if (key.ctrl && (key.upArrow || key.downArrow)) {
+        setSteerSelection((current) =>
+          Math.max(
+            0,
+            Math.min(
+              queuedPrompts.length - 1,
+              current + (key.downArrow ? 1 : -1),
+            ),
+          ),
+        );
+        return;
+      }
+      if (key.ctrl && (value === "s" || value === "\x13")) {
+        const prompt = queuedPrompts.at(
+          Math.min(steerSelection, queuedPrompts.length - 1),
+        );
+        if (
+          !prompt ||
+          !activeRunId ||
+          prompt.status !== "queued" ||
+          prompt.editLeaseOwnerId ||
+          queuedEditRef.current
+        )
+          return;
+        const previous = steerAttempts.current.get(prompt.promptId);
+        if (previous && previous.expectedRunId !== activeRunId) {
+          setError(
+            "The original Steer target ended; the queued prompt was retained",
+          );
+          return;
+        }
+        const input = previous ?? {
+          promptId: prompt.promptId,
+          expectedRunId: activeRunId,
+          clientRequestId: randomUUID(),
+        };
+        steerAttempts.current.set(prompt.promptId, input);
+        replaceQueuedMutationPending(true);
+        setError(null);
+        void client
+          .steerQueuedPrompt(input)
+          .then(
+            () => {
+              setSteerNotice(
+                "Steer accepted · waiting for the active run’s next safe boundary",
+              );
+            },
+            (caught: unknown) => {
+              setError(
+                `${formatError(caught)} · retry keeps the original target`,
+              );
+            },
+          )
+          .finally(() => {
+            replaceQueuedMutationPending(false);
+          });
+        return;
+      }
       const currentInput = editorText(editorRef.current);
       const candidates = getSlashCompletionCandidates(currentInput, catalog);
 
@@ -442,19 +512,29 @@ export function Prompt({
 
   return (
     <Box flexDirection="column">
+      {steerNotice ? <Text>{steerNotice}</Text> : null}
       {queuedPrompts.length === 0 ? null : (
         <Box flexDirection="column" paddingX={1} width={layout.contentWidth}>
           <Text dimColor>Queued {queuedPrompts.length}</Text>
-          {queuedPrompts.map((prompt) => (
+          {queuedPrompts.map((prompt, index) => (
             <Text
               dimColor={queuedEdit?.promptId !== prompt.promptId}
               key={prompt.promptId}
             >
-              ↳ {prompt.text.replace(/\s+/gu, " ").trim()}
+              {index === Math.min(steerSelection, queuedPrompts.length - 1)
+                ? "›"
+                : "↳"}{" "}
+              {prompt.text.replace(/\s+/gu, " ").trim()}
               {queuedEdit?.promptId === prompt.promptId ? " · editing" : ""}
+              {activeRunId && !prompt.editLeaseOwnerId && !queuedEdit
+                ? " · Steer"
+                : " · Steer unavailable"}
             </Text>
           ))}
-          <Text dimColor>Alt+↑ edit latest · Ctrl+D cancel while editing</Text>
+          <Text dimColor>
+            Ctrl+↑/↓ select queue row · Ctrl+S Steer · Alt+↑ edit latest ·
+            Ctrl+D cancel while editing
+          </Text>
         </Box>
       )}
       <Box

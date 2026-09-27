@@ -1,9 +1,21 @@
+import { createSubagentReader } from "ohbaby-sdk";
+import {
+  SubagentBrowser,
+  SubagentWait,
+} from "./components/subagent-browser.js";
 import {
   DurationSampleContext,
   DurationDiagnosticContext,
 } from "./components/execution-duration.js";
-import { Text, useApp, useInput, useStdout } from "ink";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { ReactElement } from "react";
 import type {
   CoreAPI,
@@ -137,6 +149,27 @@ export function OhbabyTerminalApp({
     selectActiveContextWindowUsage,
   );
   const activeGoal = useTuiStoreSelector(store, selectActiveGoal);
+  const subagents = useMemo(
+    () => createSubagentReader(client, activeSessionId ?? ""),
+    [client, activeSessionId],
+  );
+  const subagentState = useSyncExternalStore(
+    subagents.subscribe,
+    subagents.getSnapshot,
+  );
+  const [subagentBrowserOpen, setSubagentBrowserOpen] = useState(false);
+  useEffect(() => {
+    setSubagentBrowserOpen(false);
+    if (!activeSessionId) return;
+    void subagents.refresh();
+    const timer = setInterval(() => {
+      void subagents.refresh();
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+      subagents.dispose();
+    };
+  }, [subagents, activeSessionId]);
   const activeTodoList = useTuiStoreSelector(store, selectActiveTodoList);
   const catalog = useTuiStoreSelector(store, (state) => state.catalog);
   const interactions = useTuiStoreSelector(
@@ -428,6 +461,11 @@ export function OhbabyTerminalApp({
 
   useInput(
     (value, key) => {
+      if (key.ctrl && value === "g" && client.listSubagentExecutions) {
+        setSubagentBrowserOpen((open) => !open);
+        return;
+      }
+      if (subagentBrowserOpen) return;
       if (commandPanelRef.current !== null) {
         return;
       }
@@ -720,110 +758,149 @@ export function OhbabyTerminalApp({
     <ThemeProvider>
       <AppShell key={screenGeneration}>
         <HeaderContainer store={store} />
-        <DurationDiagnosticContext.Provider value={reportDurationClockAnomaly}>
-          <TranscriptViewportContainer store={store} />
-        </DurationDiagnosticContext.Provider>
-        <DialogManager
-          client={client}
-          interactions={interactions}
-          permissions={permissions}
-          permissionSync={permissionSync.state}
-          onRetryPermissions={permissionSync.retry}
-        />
-        {permissions.length > 0 ? (
-          <Text dimColor>
-            {recoveryState.control?.rootSessionId ===
-              permissions[0].rootSessionId && recoveryState.control.runId
-              ? "Ctrl+C stop root run"
-              : "Stop target syncing · Ctrl+R retry"}
-          </Text>
-        ) : null}
-        <CommandPanelManager
-          catalog={catalog}
-          client={client}
-          contextWindowUsage={activeContextWindowUsage}
-          onClose={closeCommandPanel}
-          onEffortSelect={async (reasoning) => {
-            if (activeSessionId === null) {
-              const model = await client.getCurrentModel();
-              if (!model) throw new Error("No model is connected");
-              setPendingReasoning({ reasoning, model });
-            } else {
-              await client.updateSessionReasoning({
-                sessionId: activeSessionId,
-                reasoning,
-              });
+        {subagentBrowserOpen ? (
+          <SubagentBrowser
+            reader={subagents}
+            state={subagentState}
+            onClose={() => {
+              subagents.select();
+              setSubagentBrowserOpen(false);
+            }}
+          />
+        ) : (
+          <>
+            {client.listSubagentExecutions ? (
+              <Text dimColor>
+                Ctrl+G subagents · {subagentState.list?.executions.length ?? 0}{" "}
+                executions
+              </Text>
+            ) : null}
+            <SubagentWait
+              state={subagentState}
+              run={recoveryState.sync.view?.runs.find(
+                (run) => run.id === recoveryState.control?.runId,
+              )}
+            />
+            <DurationDiagnosticContext.Provider
+              value={reportDurationClockAnomaly}
+            >
+              <TranscriptViewportContainer
+                store={store}
+                waitingForSubagents={subagentState.list?.waiting}
+              />
+            </DurationDiagnosticContext.Provider>
+            <DialogManager
+              client={client}
+              interactions={interactions}
+              permissions={permissions}
+              permissionSync={permissionSync.state}
+              onRetryPermissions={permissionSync.retry}
+            />
+            {permissions.length > 0 ? (
+              <Text dimColor>
+                {recoveryState.control?.rootSessionId ===
+                  permissions[0].rootSessionId && recoveryState.control.runId
+                  ? "Ctrl+C stop root run"
+                  : "Stop target syncing · Ctrl+R retry"}
+              </Text>
+            ) : null}
+            <CommandPanelManager
+              catalog={catalog}
+              client={client}
+              contextWindowUsage={activeContextWindowUsage}
+              onClose={closeCommandPanel}
+              onEffortSelect={async (reasoning) => {
+                if (activeSessionId === null) {
+                  const model = await client.getCurrentModel();
+                  if (!model) throw new Error("No model is connected");
+                  setPendingReasoning({ reasoning, model });
+                } else {
+                  await client.updateSessionReasoning({
+                    sessionId: activeSessionId,
+                    reasoning,
+                  });
+                }
+              }}
+              pendingReasoning={pendingReasoning?.reasoning ?? null}
+              sessionReasoning={recoveryState.sync.view?.session.reasoning}
+              panel={hasBackendDialog ? null : commandPanel}
+              runtime={runtime}
+            />
+            <TodoPanel expanded={todoExpanded} todoList={activeTodoList} />
+            <CatalogInvalidation store={store} />
+          </>
+        )}
+        <Box
+          display={subagentBrowserOpen ? "none" : "flex"}
+          flexDirection="column"
+        >
+          <Prompt
+            activeSessionId={activeSessionId}
+            activeRunId={recoveryState.control?.runId ?? undefined}
+            pendingReasoning={pendingReasoning}
+            catalog={catalog}
+            client={client}
+            disabled={hasDialog || subagentBrowserOpen}
+            canSubmit={
+              recoveryState.initialized &&
+              recoveryState.runtimeEpoch !== undefined &&
+              !recoveryState.pending.some((item) =>
+                pendingPromptBlocks(
+                  item,
+                  activeSessionId,
+                  recoveryState.runtimeEpoch,
+                ),
+              ) &&
+              !recoveryState.error?.includes("SESSION_RECOVERY_UNSUPPORTED") &&
+              (activeSessionId === null ||
+                recoveryState.sync.status === "ready")
             }
-          }}
-          pendingReasoning={pendingReasoning?.reasoning ?? null}
-          sessionReasoning={recoveryState.sync.view?.session.reasoning}
-          panel={hasBackendDialog ? null : commandPanel}
-          runtime={runtime}
-        />
-        <TodoPanel expanded={todoExpanded} todoList={activeTodoList} />
-        <Prompt
-          activeSessionId={activeSessionId}
-          pendingReasoning={pendingReasoning}
-          catalog={catalog}
-          client={client}
-          disabled={hasDialog}
-          canSubmit={
-            recoveryState.initialized &&
-            recoveryState.runtimeEpoch !== undefined &&
-            !recoveryState.pending.some((item) =>
-              pendingPromptBlocks(
-                item,
-                activeSessionId,
-                recoveryState.runtimeEpoch,
-              ),
-            ) &&
-            !recoveryState.error?.includes("SESSION_RECOVERY_UNSUPPORTED") &&
-            (activeSessionId === null || recoveryState.sync.status === "ready")
-          }
-          onLoadHistory={() => {
-            void recoveryRef.current?.loadHistory();
-          }}
-          submitPrompt={(text, reasoning) => {
-            if (!recoveryRef.current)
-              return Promise.reject(new Error("Session recovery unavailable"));
-            return recoveryRef.current.submit(text, reasoning);
-          }}
-          goalStatus={activeGoal?.status}
-          isRuntimeRunning={runtime.kind === "running"}
-          loadCatalog={loadCatalog}
-          onCommandPanelOpen={openCommandPanel}
-          permission={permission}
-          queuedPrompts={queuedPrompts}
-          contextWindowUsage={contextWindowUsageLabel}
-          runtimeStatusLabel={
-            escInterruptArmedRunId !== null
-              ? ESC_INTERRUPT_HINT
-              : (catalogError ??
-                recoveryState.error ??
-                (recoveryState.sync.status === "error"
-                  ? `Sync failed: ${recoveryState.sync.error ?? "unknown"} · Ctrl+R retry`
-                  : !recoveryState.initialized ||
-                      recoveryState.runtimeEpoch === undefined ||
-                      recoveryState.sync.status === "syncing"
-                    ? "Syncing session… draft kept"
-                    : recoveryState.historyStale
-                      ? "Earlier history may be stale · PageUp refresh"
-                      : recoveryState.sync.view?.reasoningMissing ||
-                          recoveryState.historyReasoningMissing
-                        ? "Some reasoning is unavailable"
-                        : recoveryState.pending.length > 0
-                          ? recoveryState.pending.some(
-                              (item) =>
-                                item.runtimeEpoch !== undefined &&
-                                item.runtimeEpoch !==
-                                  recoveryState.runtimeEpoch,
-                            )
-                            ? "Previous runtime submission unconfirmed · Ctrl+X forget all (may still run)"
-                            : "Submission outcome unknown · Ctrl+R query · Ctrl+X forget all (may still run)"
-                          : runtimeStatusLabel))
-          }
-        />
-        <CatalogInvalidation store={store} />
+            onLoadHistory={() => {
+              void recoveryRef.current?.loadHistory();
+            }}
+            submitPrompt={(text, reasoning) => {
+              if (!recoveryRef.current)
+                return Promise.reject(
+                  new Error("Session recovery unavailable"),
+                );
+              return recoveryRef.current.submit(text, reasoning);
+            }}
+            goalStatus={activeGoal?.status}
+            isRuntimeRunning={runtime.kind === "running"}
+            loadCatalog={loadCatalog}
+            onCommandPanelOpen={openCommandPanel}
+            permission={permission}
+            queuedPrompts={queuedPrompts}
+            contextWindowUsage={contextWindowUsageLabel}
+            runtimeStatusLabel={
+              escInterruptArmedRunId !== null
+                ? ESC_INTERRUPT_HINT
+                : (catalogError ??
+                  recoveryState.error ??
+                  (recoveryState.sync.status === "error"
+                    ? `Sync failed: ${recoveryState.sync.error ?? "unknown"} · Ctrl+R retry`
+                    : !recoveryState.initialized ||
+                        recoveryState.runtimeEpoch === undefined ||
+                        recoveryState.sync.status === "syncing"
+                      ? "Syncing session… draft kept"
+                      : recoveryState.historyStale
+                        ? "Earlier history may be stale · PageUp refresh"
+                        : recoveryState.sync.view?.reasoningMissing ||
+                            recoveryState.historyReasoningMissing
+                          ? "Some reasoning is unavailable"
+                          : recoveryState.pending.length > 0
+                            ? recoveryState.pending.some(
+                                (item) =>
+                                  item.runtimeEpoch !== undefined &&
+                                  item.runtimeEpoch !==
+                                    recoveryState.runtimeEpoch,
+                              )
+                              ? "Previous runtime submission unconfirmed · Ctrl+X forget all (may still run)"
+                              : "Submission outcome unknown · Ctrl+R query · Ctrl+X forget all (may still run)"
+                            : runtimeStatusLabel))
+            }
+          />
+        </Box>
       </AppShell>
     </ThemeProvider>
   );
@@ -844,8 +921,10 @@ function HeaderContainer({
 
 function TranscriptViewportContainer({
   store,
+  waitingForSubagents,
 }: {
   readonly store: TuiStore;
+  readonly waitingForSubagents?: boolean;
 }): ReactElement {
   const activeSessionId = useTuiStoreSelector(
     store,
@@ -882,7 +961,7 @@ function TranscriptViewportContainer({
         liveReasoning={liveReasoning}
         notices={notices}
         runtime={runtime}
-        modelActivity={modelActivity}
+        modelActivity={waitingForSubagents ? undefined : modelActivity}
       />
     </DurationSampleContext.Provider>
   );

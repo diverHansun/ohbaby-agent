@@ -1,3 +1,4 @@
+import type { UiSubagentReadClient } from "ohbaby-sdk";
 import { randomUUID } from "node:crypto";
 import type { CoreApiHost } from "ohbaby-agent";
 import {
@@ -294,6 +295,41 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
         code: "SESSION_SCOPE_CHANGED",
       });
     return result;
+  }
+  private async subagentQuery<K extends keyof UiSubagentReadClient>(
+    method: K,
+    input: Parameters<UiSubagentReadClient[K]>[0],
+  ): Promise<Awaited<ReturnType<UiSubagentReadClient[K]>>> {
+    await this.ensureInitialized();
+    const binding = this.permissionBinding;
+    const result = await this.rpc<Awaited<ReturnType<UiSubagentReadClient[K]>>>(
+      method,
+      [
+        {
+          ...input,
+          signal: undefined,
+          runtimeEpoch: binding?.permissionEpoch,
+          bindingGeneration: binding?.bindingGeneration,
+        },
+      ],
+      { signal: input.signal },
+    );
+    if (
+      binding?.permissionEpoch !== this.permissionBinding?.permissionEpoch ||
+      binding?.bindingGeneration !== this.permissionBinding?.bindingGeneration
+    )
+      throw new Error("Session binding changed during execution query");
+    return result;
+  }
+  listSubagentExecutions(
+    input: Parameters<UiSubagentReadClient["listSubagentExecutions"]>[0],
+  ): ReturnType<UiSubagentReadClient["listSubagentExecutions"]> {
+    return this.subagentQuery("listSubagentExecutions", input);
+  }
+  getSubagentExecutionView(
+    input: Parameters<UiSubagentReadClient["getSubagentExecutionView"]>[0],
+  ): ReturnType<UiSubagentReadClient["getSubagentExecutionView"]> {
+    return this.subagentQuery("getSubagentExecutionView", input);
   }
   getSessionView(
     input: UiSessionScope,

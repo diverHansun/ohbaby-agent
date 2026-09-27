@@ -5621,3 +5621,191 @@ async function waitForFrame(
   }
   throw new Error(`Timed out waiting for frame. Last frame:\n${frame}`);
 }
+
+it("Steers a selected queued row with a stable request after an uncertain response", async () => {
+  const prompt = {
+    clientRequestId: "queued-request",
+    createdAt: "2026-05-14T00:00:04Z",
+    promptId: "queued-steer",
+    scopeKey: "/repo",
+    sessionId: "session_1",
+    status: "queued" as const,
+    text: "steer this row",
+    updatedAt: "2026-05-14T00:00:04Z",
+    userMessageId: "queued-message",
+  };
+  const client = createFakeClient({
+    ...snapshot(),
+    prompts: [prompt],
+    runs: [
+      {
+        id: "run_1",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:03Z",
+        status: { kind: "running", runId: "run_1" },
+        updatedAt: "2026-05-14T00:00:03Z",
+      },
+    ],
+    status: { kind: "running", runId: "run_1" },
+  });
+  client.listSubagentExecutions = () =>
+    Promise.resolve({
+      executions: [],
+      hasMore: false,
+      waiting: false,
+      approvalBlocked: false,
+      activeCount: 0,
+      completedCount: 0,
+    });
+  client.getSubagentExecutionView = () =>
+    Promise.reject(new Error("No selection"));
+  client.steerQueuedPrompt
+    .mockRejectedValueOnce(new Error("response lost"))
+    .mockResolvedValueOnce({ acceptedTargetRunId: "run_1" });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("Steer"));
+  await flush();
+  app.stdin.write("\u0013");
+  await waitForFrame(app, (frame) => frame.includes("response lost"));
+  app.stdin.write("\u0007");
+  await waitForFrame(app, (frame) => frame.includes("Read only"));
+  await flush();
+  app.stdin.write("\u001b");
+  await waitForFrame(app, (frame) => frame.includes("Ctrl+G subagents"));
+  app.stdin.write("\u0013");
+  await waitForFrame(app, (frame) => frame.includes("Steer accepted"));
+  expect(client.steerQueuedPrompt.mock.calls[0][0]).toMatchObject({
+    promptId: "queued-steer",
+    expectedRunId: "run_1",
+  });
+  expect(client.steerQueuedPrompt.mock.calls[1][0]).toEqual(
+    client.steerQueuedPrompt.mock.calls[0][0],
+  );
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+  expect(client.abortRun).not.toHaveBeenCalled();
+});
+
+it("opens execution reads without rebinding root or exposing child stop and approval controls", async () => {
+  const client = createFakeClient({
+    ...snapshot(),
+    status: { kind: "running", runId: "run_1" },
+  });
+  client.listSubagentExecutions = () =>
+    Promise.resolve({
+      executions: [
+        {
+          executionId: "execution",
+          subagentId: "worker",
+          rootSessionId: "session_1",
+          rootRunId: "run_1",
+          status: "running",
+          createdAt: 1,
+          updatedAt: 2,
+          resultStored: false,
+          delivery: "none",
+        },
+      ],
+      hasMore: false,
+      waiting: true,
+      approvalBlocked: false,
+      activeCount: 1,
+      completedCount: 0,
+    });
+  client.getSubagentExecutionView = () =>
+    Promise.resolve({
+      execution: {
+        executionId: "execution",
+        subagentId: "worker",
+        rootSessionId: "session_1",
+        rootRunId: "run_1",
+        status: "running",
+        createdAt: 1,
+        updatedAt: 2,
+        resultStored: false,
+        delivery: "none",
+      },
+      messages: [],
+      history: { hasMore: false },
+      reasoningMissing: false,
+      readOnly: true,
+    });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("Ctrl+G subagents"));
+  app.stdin.write("\u0007");
+  await waitForFrame(app, (frame) => frame.includes("Read only"));
+  await flush();
+  app.stdin.write("\r");
+  await flush();
+  app.stdin.write("\u0003");
+  await flush();
+  expect(client.abortRun).not.toHaveBeenCalled();
+  expect(client.respondPermission).not.toHaveBeenCalled();
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+});
+
+it("preserves the root draft and leased queue edit while visiting a read-only child browser", async () => {
+  const prompt = {
+    clientRequestId: "q",
+    createdAt: "2026-05-14T00:00:04Z",
+    promptId: "p",
+    scopeKey: "/repo",
+    sessionId: "session_1",
+    status: "queued" as const,
+    text: "queued original",
+    updatedAt: "2026-05-14T00:00:04Z",
+    userMessageId: "m",
+  };
+  const client = createFakeClient({ ...snapshot(), prompts: [prompt] });
+  client.listSubagentExecutions = () =>
+    Promise.resolve({
+      executions: [],
+      hasMore: false,
+      waiting: false,
+      approvalBlocked: false,
+      activeCount: 0,
+      completedCount: 0,
+    });
+  client.getSubagentExecutionView = () =>
+    Promise.reject(new Error("No selection"));
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("queued original"));
+  app.stdin.write("kept draft");
+  await flush();
+  app.stdin.write("\u0007");
+  await waitForFrame(app, (frame) => frame.includes("Read only"));
+  await flush();
+  app.stdin.write("forbidden child typing");
+  await flush();
+  app.stdin.write("\u001b");
+  await waitForFrame(app, (frame) => frame.includes("Ctrl+G subagents"));
+  expect(app.lastFrame()).toContain("kept draft");
+  expect(app.lastFrame()).not.toContain("forbidden child typing");
+  app.stdin.write("\u001B[1;3A");
+  await waitForFrame(app, (frame) => frame.includes("editing"));
+  app.stdin.write(" edited");
+  await flush();
+  app.stdin.write("\u0007");
+  await waitForFrame(app, (frame) => frame.includes("Read only"));
+  await flush();
+  app.stdin.write("\u001b");
+  await waitForFrame(app, (frame) => frame.includes("Ctrl+G subagents"));
+  expect(app.lastFrame()).toContain("queued original edited");
+  expect(app.lastFrame()).toContain("Enter save");
+  expect(client.acquirePromptEditLease).toHaveBeenCalledTimes(1);
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+});

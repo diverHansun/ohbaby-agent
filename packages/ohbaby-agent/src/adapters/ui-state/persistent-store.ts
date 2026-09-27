@@ -210,7 +210,11 @@ export function messageToUiMessage(
     createdAt: toIsoString(message.info.time.created),
     id: message.info.id,
     parts,
-    role: message.info.role,
+    role:
+      message.info.runtimeInput &&
+      message.info.runtimeInput.kind !== "user-steer"
+        ? "system"
+        : message.info.role,
     runId: message.info.runId,
     ...(message.info.role === "assistant"
       ? { modelRequests: message.info.modelRequests }

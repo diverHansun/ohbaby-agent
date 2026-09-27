@@ -1,3 +1,4 @@
+import { subagentReadForClient } from "../coordination/session-access.js";
 import {
   createOrReuseClientSession,
   abortForClient,
@@ -1406,6 +1407,32 @@ class DaemonServerAppRuntime {
           query: { ...query, signal: context.req.raw.signal },
         });
         return context.json({ ok: true, [field]: result });
+      });
+    }
+    for (const route of [
+      "/v1/sessions/:id/subagents",
+      "/v1/sessions/:id/subagents/:executionId",
+    ] as const) {
+      this.app.get(route, async (context) => {
+        const authorization = this.authorizePromptMutation(context);
+        if ("response" in authorization) return authorization.response;
+        const raw: Record<string, string | undefined> = context.req.query();
+        const result = await subagentReadForClient({
+          backend: this.options.backend,
+          views: this.clientViews,
+          clientId: authorization.clientId,
+          epoch: this.permissionEpoch,
+          query: {
+            rootSessionId: context.req.param("id"),
+            executionId: context.req.param("executionId"),
+            runtimeEpoch: raw.runtimeEpoch,
+            bindingGeneration: Number(raw.bindingGeneration),
+            before: raw.before,
+            limit: raw.limit === undefined ? undefined : Number(raw.limit),
+            signal: context.req.raw.signal,
+          },
+        });
+        return context.json({ ok: true, result });
       });
     }
     this.app.get("/v1/prompts/receipt", async (context) => {

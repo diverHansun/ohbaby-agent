@@ -2,6 +2,8 @@ import type { UiEvent } from "ohbaby-sdk";
 
 export const DAEMON_RPC_METHODS = [
   "getSnapshot",
+  "listSubagentExecutions",
+  "getSubagentExecutionView",
   "getSessionView",
   "getSessionHistory",
   "getSessionControl",

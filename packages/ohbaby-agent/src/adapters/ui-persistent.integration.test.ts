@@ -1873,6 +1873,7 @@ describe("createPersistentUiBackendClient", () => {
               createProviderSubagentRunEvent({
                 callId: "call_subagent_run",
                 prompt: "Inspect persistent child files",
+                mode: "foreground",
               }),
             ],
             [{ textDelta: "child transcript persisted", finishReason: "stop" }],
@@ -1966,6 +1967,16 @@ describe("createPersistentUiBackendClient", () => {
       const childTranscript = JSON.stringify(childParts);
       expect(childTranscript).toContain("Inspect persistent child files");
       expect(childTranscript).toContain("child transcript persisted");
+      const executions = await client.listSubagentExecutions({
+        rootSessionId: parentSessionId,
+      });
+      expect(executions.executions).toHaveLength(1);
+      const view = await client.getSubagentExecutionView({
+        rootSessionId: parentSessionId,
+        executionId: executions.executions[0].executionId,
+      });
+      expect(view.readOnly).toBe(true);
+      expect(view.output).toBe("child transcript persisted");
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
@@ -2085,7 +2096,7 @@ describe("createPersistentUiBackendClient", () => {
         .all(parentSessionId);
       const parentTranscript = JSON.stringify(parentParts);
       expect(parentTranscript).toContain("subagent_persistent_1");
-      expect(parentTranscript).not.toContain("background child persisted");
+      expect(parentTranscript).toContain("background child persisted");
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

@@ -316,6 +316,7 @@ describe("final step cache accounting through the in-process runtime", () => {
             name: "subagent_run",
             argumentsDelta: JSON.stringify({
               prompt: "Inspect directory",
+              mode: "foreground",
               description: "Inspect",
               role: "explore",
             }),

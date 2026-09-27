@@ -238,7 +238,7 @@ export function ConversationStream(props: {
           <PromptDuration key={prompt.promptId} prompt={prompt} />
         ))}
         {props.commandNotices}
-        <ModelWaiting run={props.activeRun} />
+        {props.isRunning ? <ModelWaiting run={props.activeRun} /> : null}
       </div>
     </section>
   );

@@ -1,3 +1,4 @@
+import { SteerButton } from "./SteerButton.js";
 import { LoaderCircle, Send, Square, X } from "lucide-react";
 import type {
   UiBackendClient,
@@ -76,6 +77,7 @@ export function Composer(props: {
     | "releasePromptEditLease"
     | "editQueuedPrompt"
     | "cancelQueuedPrompt"
+    | "steerQueuedPrompt"
     | "getCurrentModel"
     | "subscribeEvents"
     | "updateSessionReasoning"
@@ -110,6 +112,10 @@ export function Composer(props: {
   useEffect(() => {
     selectedReasoning.current = undefined;
   }, [props.activeSession?.id, props.client]);
+  const [steerNotice, setSteerNotice] = useState(false);
+  useEffect(() => {
+    setSteerNotice(false);
+  }, [props.model.activeSessionId, props.model.activeRunId]);
   const [draft, setDraft] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
@@ -815,6 +821,11 @@ export function Composer(props: {
       }
     >
       {props.topContent}
+      {steerNotice ? (
+        <p role="status">
+          Steer accepted · waiting for the active run’s next safe boundary
+        </p>
+      ) : null}
       {props.queuedPrompts.length > 0 ? (
         <section className="ohb-prompt-queue" aria-label="Queued prompts">
           <div className="ohb-prompt-queue-header">
@@ -856,6 +867,20 @@ export function Composer(props: {
                     <span>{prompt.text.replaceAll("\n", " ")}</span>
                     {editing ? <small>editing</small> : null}
                   </button>
+                  <SteerButton
+                    prompt={prompt}
+                    runId={props.model.activeRunId}
+                    disabled={
+                      isSubmitting ||
+                      queueAcquirePending ||
+                      editing ||
+                      props.model.disabled
+                    }
+                    steer={(input) => props.client.steerQueuedPrompt(input)}
+                    onAccepted={() => {
+                      setSteerNotice(true);
+                    }}
+                  />
                   <button
                     aria-label={`Cancel queued prompt: ${prompt.text}`}
                     className="ohb-prompt-queue-cancel"

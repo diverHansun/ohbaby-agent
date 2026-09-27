@@ -26,6 +26,7 @@ function fixture(): {
   let revision = 0;
   const props: ComponentProps<typeof Composer> = {
     client: {
+      steerQueuedPrompt: vi.fn<UiBackendClient["steerQueuedPrompt"]>(),
       getCurrentModel: () => Promise.resolve(null),
       subscribeEvents: () => () => undefined,
       updateSessionReasoning:

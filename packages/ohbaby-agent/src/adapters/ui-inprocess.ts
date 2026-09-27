@@ -1,3 +1,5 @@
+import { InMemorySubagentExecutionStore } from "../agents/subagents/execution-store.js";
+import { createSubagentViewReader } from "./ui-inprocess/subagent-views.js";
 import {
   InMemoryCurrentRunInputStore,
   type CurrentRunInputStore,
@@ -320,6 +322,12 @@ export interface InProcessUiBackendClient
     Omit<UiBackendClient, keyof UiSessionRecoveryClient>,
     UiPromptQueueExecutionPort,
     UiSessionRecoveryClient {
+  listSubagentExecutions: NonNullable<
+    UiBackendClient["listSubagentExecutions"]
+  >;
+  getSubagentExecutionView: NonNullable<
+    UiBackendClient["getSubagentExecutionView"]
+  >;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
   dispose(): Promise<void>;
@@ -607,6 +615,8 @@ export function createInProcessUiBackendClient(
     string,
     { goal?: string; todo?: string }
   >();
+  const subagentExecutionStore =
+    options.subagentExecutionStore ?? new InMemorySubagentExecutionStore();
   const sourceLedger =
     options.runLedger ?? stateStore.runLedger ?? createInMemoryRunLedger();
   const sourceProjection: SourceSessionProjection = new SourceSessionProjection(
@@ -872,7 +882,7 @@ export function createInProcessUiBackendClient(
         skillRegistry,
         streamBridge: options.streamBridge,
         subagentInstanceStore: options.subagentInstanceStore,
-        subagentExecutionStore: options.subagentExecutionStore,
+        subagentExecutionStore,
         subagentOwnerId: options.subagentOwnerId,
         subagentOwnerPid: options.subagentOwnerPid,
         workdir: baseProjectRoot,
@@ -2350,7 +2360,7 @@ export function createInProcessUiBackendClient(
       return;
     }
     const session = await options.sessionManager.get(sessionId);
-    if (session?.isSubagent === true) {
+    if (session?.isSubagent === true || session?.parentId !== undefined) {
       const action =
         operation === "compact"
           ? "manually compact context for"
@@ -3425,6 +3435,27 @@ export function createInProcessUiBackendClient(
     await validatePermissionRoot(input.sessionId);
     input.signal?.throwIfAborted();
   }
+  async function subagentViews(): Promise<
+    ReturnType<typeof createSubagentViewReader>
+  > {
+    const runtime = await runtimeController.getRuntimeIfStarted();
+    return createSubagentViewReader({
+      executions: subagentExecutionStore,
+      source: sourceProjection,
+      rootExists: async (id): Promise<boolean> => {
+        await validatePermissionRoot(id);
+        return true;
+      },
+      activeRootRun: (id): Promise<string | undefined> =>
+        Promise.resolve(runtimeController.getActiveRunId(id)),
+      waitState: (id) =>
+        runtime?.getSubagentWaitState(id) ?? {
+          waiting: false,
+          approvalBlocked: false,
+        },
+      budget: (id) => runtime?.getSubagentExecutionBudget(id),
+    });
+  }
   let disposed = false;
   const ready = Promise.resolve(options.startupReady).then(async () => {
     if (disposed) return;
@@ -3448,6 +3479,12 @@ export function createInProcessUiBackendClient(
       await ready;
       await validatePermissionRoot(sessionId);
       await initializeSessionView(sessionId);
+    },
+    async listSubagentExecutions(input) {
+      return (await subagentViews()).list(input);
+    },
+    async getSubagentExecutionView(input) {
+      return (await subagentViews()).view(input);
     },
     async getSessionView(input): Promise<UiSessionView> {
       await validateSessionRead(input);

@@ -1,3 +1,4 @@
+import type { UiSubagentReadClient } from "./subagent.js";
 import type {
   UiPermissionEvent,
   UiPermissionSnapshot,
@@ -100,7 +101,8 @@ export interface UiListCommandsQuery {
 export type UiEventHandler = (event: UiEvent) => void;
 export type UiUnsubscribe = () => void;
 
-export interface UiQueryClient extends Partial<UiSessionRecoveryClient> {
+export interface UiQueryClient
+  extends Partial<UiSessionRecoveryClient>, Partial<UiSubagentReadClient> {
   /** Explicit selection/startup barrier; never called by read endpoints. */
   initializeSession?(sessionId: string): Promise<void>;
   getSelectedSessionId(): Promise<string | null>;

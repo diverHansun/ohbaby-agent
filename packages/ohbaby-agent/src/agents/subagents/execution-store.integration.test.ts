@@ -59,6 +59,42 @@ for (const backend of ["memory", "sqlite"] as const)
       await database();
       return new DatabaseSubagentExecutionStore({ db: getDatabase() });
     }
+    it("pages existing descendants by root and never grants a different root access", async () => {
+      const s = await store();
+      await s.accept(input());
+      await s.accept(
+        input({
+          executionId: "nested",
+          requestId: "nested-call",
+          parentSessionId: "child",
+          requesterRunId: "child-run",
+          createdAt: 2,
+        }),
+      );
+      expect(
+        (await s.list({ rootSessionId: "parent", limit: 1 })).map(
+          (r) => r.executionId,
+        ),
+      ).toEqual(["nested"]);
+      expect(
+        (
+          await s.list({
+            rootSessionId: "parent",
+            before: { createdAt: 2, executionId: "nested" },
+          })
+        ).map((r) => r.executionId),
+      ).toEqual(["exec-1"]);
+      expect(
+        (await s.list({ parentSessionId: "parent" })).map((r) => r.executionId),
+      ).toEqual(["exec-1"]);
+      expect(await s.getForRoot("nested", "parent")).toMatchObject({
+        parentSessionId: "child",
+      });
+      expect(await s.getForRoot("nested", "other")).toBeNull();
+      expect(
+        await s.get({ executionId: "nested", parentSessionId: "parent" }),
+      ).toBeNull();
+    });
     it("accepts before child creation and preserves original receipt across retries and identity conflicts", async () => {
       const s = await store();
       const accepted = await s.accept(input());

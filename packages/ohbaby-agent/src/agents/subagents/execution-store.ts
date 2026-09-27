@@ -35,8 +35,10 @@ export interface ExecutionLookup {
   readonly parentSessionId: string;
   readonly requesterScopeId?: string;
 }
-export interface ExecutionHistory {
-  readonly parentSessionId: string;
+export type ExecutionHistory = (
+  | { readonly parentSessionId: string; readonly rootSessionId?: string }
+  | { readonly parentSessionId?: string; readonly rootSessionId: string }
+) & {
   readonly requesterScopeId?: string;
   readonly subagentId?: string;
   readonly rootRunId?: string;
@@ -45,7 +47,7 @@ export interface ExecutionHistory {
     readonly createdAt: number;
     readonly executionId: string;
   };
-}
+};
 export type ExecutionArtifact =
   | {
       readonly state: "deleted";
@@ -96,6 +98,10 @@ export interface SubagentExecutionStore {
   ): Promise<{ record: SubagentExecutionRecord; created: boolean }>;
   get(input: ExecutionLookup): Promise<SubagentExecutionRecord | null>;
   list(input: ExecutionHistory): Promise<readonly SubagentExecutionRecord[]>;
+  getForRoot(
+    executionId: string,
+    rootSessionId: string,
+  ): Promise<SubagentExecutionRecord | null>;
   listByRootRun(rootRunId: string): Promise<readonly SubagentExecutionRecord[]>;
   revokeSessionArtifacts(
     sessionId: string,
@@ -229,6 +235,15 @@ abstract class ExecutionStore implements SubagentExecutionStore {
   async get(input: ExecutionLookup): Promise<SubagentExecutionRecord | null> {
     await Promise.resolve();
     return this.scoped(input);
+  }
+  async getForRoot(
+    executionId: string,
+    rootSessionId: string,
+  ): Promise<SubagentExecutionRecord | null> {
+    required(rootSessionId);
+    await Promise.resolve();
+    const record = this.read(executionId);
+    return record?.rootSessionId === rootSessionId ? record : null;
   }
   async list(
     input: ExecutionHistory,
@@ -526,7 +541,10 @@ export class InMemorySubagentExecutionStore extends ExecutionStore {
     return [...this.records.values()]
       .filter(
         (r) =>
-          r.parentSessionId === input.parentSessionId &&
+          (input.parentSessionId === undefined ||
+            r.parentSessionId === input.parentSessionId) &&
+          (input.rootSessionId === undefined ||
+            r.rootSessionId === input.rootSessionId) &&
           (input.requesterScopeId === undefined ||
             r.requesterScopeId === input.requesterScopeId) &&
           (input.subagentId === undefined ||
@@ -646,9 +664,11 @@ export class DatabaseSubagentExecutionStore extends ExecutionStore {
   protected history(
     input: ExecutionHistory,
   ): readonly SubagentExecutionRecord[] {
-    const where = ["parent_session_id = ?"];
-    const values: SqliteValue[] = [input.parentSessionId];
+    const where: string[] = [];
+    const values: SqliteValue[] = [];
     for (const [column, value] of [
+      ["parent_session_id", input.parentSessionId],
+      ["root_session_id", input.rootSessionId],
       ["requester_scope_id", input.requesterScopeId],
       ["subagent_id", input.subagentId],
       ["root_run_id", input.rootRunId],

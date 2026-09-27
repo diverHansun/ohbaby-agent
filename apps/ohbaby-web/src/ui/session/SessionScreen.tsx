@@ -1,3 +1,5 @@
+import { createSubagentReader } from "ohbaby-sdk";
+import { SubagentTree, SubagentView } from "./SubagentView.js";
 import { TodoDock } from "../conversation/TodoDock.js";
 import { PermissionPolicyControl } from "../permissions/PermissionPolicyControl.js";
 import type {
@@ -663,6 +665,27 @@ export function SessionScreen({
     [closedCommandModalIds, view.commandNotices],
   );
 
+  const subagents = useMemo(
+    () => createSubagentReader(client, view.activeSession?.id ?? ""),
+    [client, view.activeSession?.id],
+  );
+  const subagentState = useSyncExternalStore(
+    subagents.subscribe,
+    subagents.getSnapshot,
+  );
+  useEffect(() => {
+    if (!view.activeSession?.id) return;
+    void subagents.refresh();
+    const timer = setInterval(() => {
+      void subagents.refresh();
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+      subagents.dispose();
+    };
+  }, [subagents, view.activeSession?.id]);
+  const viewingSubagent = subagentState.selectedId !== undefined;
+
   return (
     <main
       className={`ohb-app ohb-app-shell ${
@@ -692,20 +715,22 @@ export function SessionScreen({
           showMain ? "ohb-app-content-main" : "ohb-app-content-empty"
         } ${view.activeTodoList ? "ohb-app-content-has-todos" : ""}`}
       >
-        <PermissionModal
-          disabled={storeSnapshot.permissionSync.status !== "ready"}
-          error={storeSnapshot.permissionSync.error}
-          syncing={storeSnapshot.permissionSync.status === "syncing"}
-          onRetry={() => {
-            runtime.retryPermissions();
-          }}
-          onRespond={(request, choice) => {
-            void runAction(() =>
-              client.respondPermission(request.id, { choiceId: choice.id }),
-            );
-          }}
-          permissions={view.pendingPermissions}
-        />
+        {!viewingSubagent && (
+          <PermissionModal
+            disabled={storeSnapshot.permissionSync.status !== "ready"}
+            error={storeSnapshot.permissionSync.error}
+            syncing={storeSnapshot.permissionSync.status === "syncing"}
+            onRetry={() => {
+              runtime.retryPermissions();
+            }}
+            onRespond={(request, choice) => {
+              void runAction(() =>
+                client.respondPermission(request.id, { choiceId: choice.id }),
+              );
+            }}
+            permissions={view.pendingPermissions}
+          />
+        )}
         {sessionSyncBanner ? (
           <div className="ohb-error-banner" role="status">
             <span>
@@ -762,7 +787,20 @@ export function SessionScreen({
             Some thinking could not be saved and is no longer available.
           </div>
         ) : null}
-        {showMain ? (
+        {view.activeSession && client.listSubagentExecutions ? (
+          <DurationSampleContext.Provider value={storeSnapshot.durationSample}>
+            <SubagentTree
+              reader={subagents}
+              state={subagentState}
+              run={view.snapshot?.runs.find(
+                (run) => run.id === view.composer.activeRunId,
+              )}
+            />
+          </DurationSampleContext.Provider>
+        ) : null}
+        {viewingSubagent ? (
+          <SubagentView reader={subagents} state={subagentState} />
+        ) : showMain ? (
           <>
             <StatusBar
               activeGoal={view.activeGoal}
@@ -795,7 +833,9 @@ export function SessionScreen({
                     run.sessionId === view.composer.activeSessionId &&
                     run.id === view.composer.activeRunId,
                 )}
-                isRunning={view.composer.isRunning}
+                isRunning={
+                  view.composer.isRunning && !subagentState.list?.waiting
+                }
                 reasoningByMessageId={view.reasoningByMessageId}
                 commandNotices={
                   <CommandNoticeList notices={view.commandNotices} />
@@ -852,47 +892,55 @@ export function SessionScreen({
             />
           </>
         )}
-        <Composer
-          client={client}
-          compact={!showMain}
-          draftScopeKey={draftScopeKey}
-          onEditRevision={trackComposerRevision}
-          isPromptAdmitting={isPromptAdmitting}
-          prefill={composerPrefill}
-          onListCommands={listCommands}
-          onSetPermission={(input) => {
-            void runAction(async () => {
-              await client.setPermission(input);
-            });
-          }}
-          onStructuredCommand={openStructuredCommand}
-          onSubmit={submitText}
-          onStop={stopRequest.stop}
-          stopLabel={stopRequest.label}
-          model={view.composer}
-          activeSession={view.activeSession}
-          queuedPrompts={view.queuedPrompts}
-          commandCatalogVersion={view.commandCatalogVersion}
-          connectionKind={view.header.connectionKind}
-          topContent={
-            <TodoDock
-              key={view.activeTodoList?.sessionId ?? "hidden"}
-              todoList={view.activeTodoList}
-            />
-          }
-          permissionControl={
-            <PermissionPolicyControl
-              level={view.composer.permissionLevel}
-              disabled={view.composer.disabled}
-              onSetPermission={(input) => {
-                void runAction(async () => {
-                  await client.setPermission(input);
-                });
-              }}
-            />
-          }
-        />
-        {structuredOverlay ? (
+        <div
+          style={{ display: viewingSubagent ? "none" : "contents" }}
+          inert={viewingSubagent}
+        >
+          <Composer
+            client={client}
+            compact={!showMain}
+            draftScopeKey={draftScopeKey}
+            onEditRevision={trackComposerRevision}
+            isPromptAdmitting={isPromptAdmitting}
+            prefill={composerPrefill}
+            onListCommands={listCommands}
+            onSetPermission={(input) => {
+              void runAction(async () => {
+                await client.setPermission(input);
+              });
+            }}
+            onStructuredCommand={openStructuredCommand}
+            onSubmit={submitText}
+            onStop={stopRequest.stop}
+            stopLabel={stopRequest.label}
+            model={{
+              ...view.composer,
+              disabled: view.composer.disabled || viewingSubagent,
+            }}
+            activeSession={view.activeSession}
+            queuedPrompts={view.queuedPrompts}
+            commandCatalogVersion={view.commandCatalogVersion}
+            connectionKind={view.header.connectionKind}
+            topContent={
+              <TodoDock
+                key={view.activeTodoList?.sessionId ?? "hidden"}
+                todoList={view.activeTodoList}
+              />
+            }
+            permissionControl={
+              <PermissionPolicyControl
+                level={view.composer.permissionLevel}
+                disabled={view.composer.disabled}
+                onSetPermission={(input) => {
+                  void runAction(async () => {
+                    await client.setPermission(input);
+                  });
+                }}
+              />
+            }
+          />
+        </div>
+        {!viewingSubagent && structuredOverlay ? (
           <StructuredCommandOverlay
             key={draftScopeKey}
             client={client}

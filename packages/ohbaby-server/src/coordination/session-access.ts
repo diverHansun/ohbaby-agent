@@ -1,4 +1,9 @@
 import type {
+  UiSubagentQuery,
+  UiSubagentExecutionList,
+  UiSubagentExecutionView,
+} from "ohbaby-sdk";
+import type {
   UiBackendClient,
   UiPermissionBinding,
   UiPromptReceiptQuery,
@@ -357,4 +362,60 @@ function sessionCreationConflict(): Error {
       retryable: true,
     },
   );
+}
+
+export async function subagentReadForClient(
+  input: Access & {
+    readonly query: UiSubagentQuery & { executionId?: string };
+  },
+): Promise<UiSubagentExecutionList | UiSubagentExecutionView> {
+  const { query, backend } = input;
+  parseSessionQuery({ ...query, sessionId: query.rootSessionId });
+  if (
+    query.executionId !== undefined &&
+    (typeof query.executionId !== "string" || !query.executionId)
+  )
+    throw new Error("Invalid execution identity");
+  const binding = capture(input, query);
+  if (binding.rootSessionId !== query.rootSessionId)
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Execution reads require the selected root session",
+    );
+  await validateRoot(backend, query.rootSessionId);
+  recheck(input, binding);
+  let result: UiSubagentExecutionList | UiSubagentExecutionView;
+  if (query.executionId !== undefined) {
+    if (!backend.getSubagentExecutionView)
+      throw new Error("Subagent views are unavailable");
+    result = await backend.getSubagentExecutionView({
+      ...query,
+      executionId: query.executionId,
+    });
+    if (
+      result.execution.rootSessionId !== query.rootSessionId ||
+      result.execution.executionId !== query.executionId
+    )
+      throw permissionError(
+        "SESSION_SCOPE_CHANGED",
+        "Execution scope mismatch",
+      );
+  } else {
+    if (!backend.listSubagentExecutions)
+      throw new Error("Subagent views are unavailable");
+    result = await backend.listSubagentExecutions(query);
+    if (
+      result.executions.some(
+        (record) => record.rootSessionId !== query.rootSessionId,
+      )
+    )
+      throw permissionError(
+        "SESSION_SCOPE_CHANGED",
+        "Execution scope mismatch",
+      );
+  }
+  recheck(input, binding);
+  await validateRoot(backend, query.rootSessionId);
+  recheck(input, binding);
+  return result;
 }

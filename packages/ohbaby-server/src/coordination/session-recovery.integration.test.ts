@@ -623,3 +623,100 @@ describe("source session recovery HTTP/RPC/SSE", () => {
     expect(backend.getSnapshot).not.toHaveBeenCalled();
   });
 });
+
+describe("readonly execution transports", () => {
+  it("shares REST/RPC root-bound reads and rejects another selected root", async () => {
+    const { request, backend } = await setup();
+    const execution = {
+      executionId: "execution",
+      subagentId: "agent",
+      rootSessionId: "root",
+      rootRunId: "run",
+      status: "running" as const,
+      createdAt: 1,
+      updatedAt: 2,
+      resultStored: false,
+      delivery: "none" as const,
+    };
+    backend.listSubagentExecutions = vi.fn().mockResolvedValue({
+      executions: [execution],
+      hasMore: false,
+      waiting: true,
+      approvalBlocked: false,
+      activeCount: 1,
+      completedCount: 0,
+    });
+    backend.getSubagentExecutionView = vi.fn().mockResolvedValue({
+      execution,
+      messages: [],
+      history: { hasMore: false },
+      readOnly: true,
+      reasoningMissing: false,
+    });
+    const list = await request(`/v1/sessions/root/subagents?${query}`);
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject({
+      result: { executions: [execution], waiting: true },
+    });
+    const rest = await request(
+      `/v1/sessions/root/subagents/execution?${query}`,
+    );
+    expect(rest.status).toBe(200);
+    const rpc = await request("/api/rpc", {
+      method: "POST",
+      body: JSON.stringify({
+        id: "read",
+        clientId: "client",
+        method: "getSubagentExecutionView",
+        params: [
+          {
+            rootSessionId: "root",
+            executionId: "execution",
+            runtimeEpoch: epoch,
+            bindingGeneration: 1,
+          },
+        ],
+      }),
+    });
+    expect(await rpc.json()).toMatchObject({
+      ok: true,
+      result: { execution, readOnly: true },
+    });
+    expect(
+      (await request(`/v1/sessions/other/subagents?${query}`)).status,
+    ).toBe(409);
+    expect(
+      (await request(`/v1/sessions/root/subagents?${query}&limit=201`)).status,
+    ).toBe(400);
+  });
+  it("drops an execution response when the root binding changes during the read", async () => {
+    const { request, backend } = await setup();
+    let release: (
+      value: import("ohbaby-sdk").UiSubagentExecutionList,
+    ) => void = () => undefined;
+    let announce: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      announce = resolve;
+    });
+    backend.listSubagentExecutions = () => {
+      announce();
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    };
+    const pending = request(`/v1/sessions/root/subagents?${query}`);
+    await started;
+    expect(
+      (await request("/v1/sessions/other/select", { method: "PATCH" })).status,
+    ).toBe(200);
+    release({
+      executions: [],
+      hasMore: false,
+      waiting: false,
+      approvalBlocked: false,
+      activeCount: 0,
+      completedCount: 0,
+    });
+    expect((await pending).status).toBe(409);
+  });
+});

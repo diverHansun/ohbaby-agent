@@ -72,6 +72,8 @@ export interface PersistentUiBackendOptions extends Omit<
 
 export interface PersistentUiBackendClient
   extends UiBackendClient, UiPromptQueueExecutionPort {
+  listSubagentExecutions: NonNullable<UiBackendClient["listSubagentExecutions"]>;
+  getSubagentExecutionView: NonNullable<UiBackendClient["getSubagentExecutionView"]>;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
   dispose(): Promise<void> | void;
@@ -203,6 +205,14 @@ function withStartupRecovery(
   }
 
   return {
+    async listSubagentExecutions(input) {
+      await ready();
+      return client.listSubagentExecutions(input);
+    },
+    async getSubagentExecutionView(input) {
+      await ready();
+      return client.getSubagentExecutionView(input);
+    },
     async getSessionView(
       input,
     ): ReturnType<InProcessUiBackendClient["getSessionView"]> {

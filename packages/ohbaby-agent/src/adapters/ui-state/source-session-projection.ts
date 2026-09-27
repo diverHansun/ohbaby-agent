@@ -301,7 +301,6 @@ export class SourceSessionProjection {
 
   private commitReasoning(change: DisplayReasoningChange): void {
     const { part } = change;
-    if (part.contextScopeId !== undefined) return;
     const records = this.messages.get(part.sessionId);
     const record = records?.get(part.messageId);
     const current = this.owner
@@ -481,6 +480,44 @@ export class SourceSessionProjection {
         historyInvalidated: true,
       });
     }
+  }
+
+  /** Read the complete execution under the same revision lane as live commits. */
+  executionHistory(
+    sessionId: string,
+    contextScopeId: string,
+    runId: string,
+    before?: string,
+    limit?: number,
+  ): Promise<UiSessionHistory> {
+    return this.owner.run(sessionId, async () => {
+      const page = await this.options.messageManager.listPageByRun(
+        sessionId,
+        runId,
+        { before, limit, scope: { contextScopeId } },
+      );
+      const messages = page.messages
+        .map((record) =>
+          this.project({
+            ...record,
+            parts: record.parts.map((part) => ({
+              ...part,
+              time: { ...part.time, compacted: undefined },
+            })),
+          }),
+        )
+        .filter((message): message is UiMessage => message !== undefined);
+      const view = this.owner.read(sessionId);
+      return {
+        version: view.version,
+        serverNow: Date.now(),
+        messages,
+        prompts: [],
+        before: page.nextCursor,
+        hasMore: page.hasMore,
+        reasoningMissing: view.reasoningMissing,
+      };
+    });
   }
 
   history(

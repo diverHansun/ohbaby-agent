@@ -1,0 +1,52 @@
+.ohb-subagents {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border, #ddd);
+  font-size: 0.85rem;
+}
+.ohb-subagents summary {
+  cursor: pointer;
+}
+.ohb-subagents ul {
+  max-height: 12rem;
+  overflow: auto;
+  padding-left: 1rem;
+}
+.ohb-subagents li {
+  margin: 0.35rem 0;
+}
+.ohb-subagents small {
+  overflow-wrap: anywhere;
+  opacity: 0.65;
+}
+.ohb-subagents button,
+.ohb-subagent-view > button {
+  cursor: pointer;
+}
+.ohb-subagent-view {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: auto;
+  padding: 1rem;
+  gap: 0.5rem;
+}
+.ohb-subagent-view > h2,
+.ohb-subagent-view > p {
+  margin: 0;
+}
+.ohb-subagent-view pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ohb-subagent-view > button {
+  align-self: flex-start;
+}
+.ohb-prompt-queue-item > span {
+  flex-shrink: 0;
+}
+.ohb-prompt-queue-item small[role="alert"] {
+  display: block;
+  max-width: 18rem;
+  color: #b42318;
+}
