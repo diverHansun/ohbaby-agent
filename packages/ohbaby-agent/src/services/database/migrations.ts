@@ -384,4 +384,44 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
         ON message(session_id, json_extract(data, '$.runId'), created_at, id);
     `,
   },
+  {
+    version: "018_subagent_execution",
+    sql: `
+      CREATE TABLE subagent_execution (
+        execution_id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL,
+        parent_session_id TEXT NOT NULL,
+        requester_scope_id TEXT NOT NULL,
+        requester_run_id TEXT NOT NULL,
+        root_session_id TEXT NOT NULL,
+        root_run_id TEXT NOT NULL,
+        root_prompt_id TEXT,
+        subagent_id TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('foreground', 'background')),
+        prompt TEXT NOT NULL,
+        timeout_ms INTEGER,
+        created_at INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted', 'timed_out')),
+        child_session_id TEXT,
+        child_scope_id TEXT,
+        child_run_id TEXT,
+        started_at INTEGER,
+        completed_at INTEGER,
+        updated_at INTEGER NOT NULL,
+        reason TEXT,
+        output TEXT,
+        error TEXT,
+        artifact TEXT NOT NULL,
+        delivery TEXT NOT NULL,
+        late_result TEXT,
+        UNIQUE(requester_run_id, request_id)
+      );
+      CREATE INDEX idx_subagent_execution_root
+        ON subagent_execution(root_run_id, created_at, execution_id);
+      CREATE INDEX idx_subagent_execution_history
+        ON subagent_execution(parent_session_id, subagent_id, created_at, execution_id);
+      CREATE INDEX idx_subagent_execution_scope_history
+        ON subagent_execution(parent_session_id, requester_scope_id, created_at, execution_id);
+    `,
+  },
 ];
