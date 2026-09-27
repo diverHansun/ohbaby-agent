@@ -44,6 +44,70 @@ async function settleWithin<T>(
 }
 
 describe("WorkspacePromptScheduler", () => {
+  it("includes queue, approval and tools and ends only after the final reply save", async () => {
+    let now = 10;
+    const firstGate = deferred();
+    const approval = deferred();
+    const tools = deferred();
+    const finalSave = deferred();
+    const started = deferred();
+    const saving = deferred();
+    const store = new InMemoryPromptSubmissionStore({ now: (): number => now });
+    let savedText = "";
+    const scheduler = new WorkspacePromptScheduler({
+      scopeKey: "timing",
+      store,
+      execute: async (
+        prompt,
+        controls,
+      ): Promise<import("./types.js").PromptExecutionResult> => {
+        if (prompt.text === "first") {
+          await firstGate.promise;
+          return { status: "succeeded" };
+        }
+        await controls.markRunning("real-run");
+        started.resolve();
+        await approval.promise;
+        await tools.promise;
+        saving.resolve();
+        await finalSave.promise;
+        savedText = "final reply";
+        return { status: "succeeded" };
+      },
+    });
+    try {
+      const first = await scheduler.accept({ sessionId: "s", text: "first" });
+      now = 20;
+      const queued = await scheduler.accept({ sessionId: "s", text: "second" });
+      now = 100;
+      firstGate.resolve();
+      await scheduler.waitForCompletion(first.promptId);
+      await started.promise;
+      now = 200;
+      approval.resolve();
+      now = 300;
+      tools.resolve();
+      await saving.promise;
+      const pending = await store.get(queued.promptId);
+      expect(pending?.endedAt).toBeUndefined();
+      expect(savedText).toBe("");
+      now = 500;
+      finalSave.resolve();
+      const completed = await scheduler.waitForCompletion(queued.promptId);
+      expect(savedText).toBe("final reply");
+      expect(completed.createdAt).toBe(20);
+      expect(completed.endedAt).toBe(500);
+      if (completed.endedAt === undefined)
+        throw new Error("Missing terminal timestamp");
+      expect(completed.endedAt - completed.createdAt).toBe(480);
+    } finally {
+      firstGate.resolve();
+      approval.resolve();
+      tools.resolve();
+      finalSave.resolve();
+      scheduler.close();
+    }
+  });
   it("labels initialization rejection only before durable acceptance begins", async () => {
     const store = new InMemoryPromptSubmissionStore();
     const scheduler = new WorkspacePromptScheduler({

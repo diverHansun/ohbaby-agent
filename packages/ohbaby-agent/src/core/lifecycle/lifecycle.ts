@@ -1,3 +1,5 @@
+import type { ModelRequestRecord } from "../llm-client/types.js";
+import { ModelObservationError } from "../llm-client/request-observation.js";
 import { ToolBatchEventQueue } from "./tool-event-queue.js";
 import { ToolDeliveryError } from "../tool-scheduler/index.js";
 import { randomUUID } from "node:crypto";
@@ -111,6 +113,11 @@ function providerFailure(error: unknown):
       readonly terminalReason: LifecycleResult["terminalReason"];
     }
   | undefined {
+  if (error instanceof ModelObservationError)
+    return {
+      finalResponse: error.message,
+      terminalReason: "model_persistence_failure",
+    };
   if (error instanceof ProviderRetryExhaustedError) {
     return {
       finalResponse: `LLM provider is unavailable after ${String(error.attempts)} retries. Retry or resume this run when the connection recovers.`,
@@ -330,6 +337,29 @@ export class Lifecycle {
   private readonly deps: LifecycleDeps;
   private readonly displayReasoning: DisplayReasoningOwner;
   private sourceOrder = 0;
+  private readonly activeModelRequests = new Map<
+    string,
+    { readonly request: ModelRequestRecord; readonly saved: Promise<unknown> }
+  >();
+
+  private async closeModelRequests(
+    runId: string | undefined,
+    endedAt: number,
+  ): Promise<void> {
+    if (!runId) return;
+    for (const [id, active] of this.activeModelRequests) {
+      if (active.request.runId !== runId) continue;
+      await active.saved;
+      const latest = this.activeModelRequests.get(id);
+      if (!latest) continue;
+      if (latest.request.endedAt !== undefined) await latest.saved;
+      else
+        await this.deps.messageManager.updateMessage(latest.request.messageId, {
+          modelRequests: [{ ...latest.request, endedAt, outcome: "aborted" }],
+        });
+      this.activeModelRequests.delete(id);
+    }
+  }
 
   constructor(deps: LifecycleDeps) {
     this.deps = deps;
@@ -393,6 +423,7 @@ export class Lifecycle {
     } catch (error) {
       if (!failure) throw error;
       active = false;
+      await this.closeModelRequests(params.runId, Date.now());
       if (latestContext)
         yield {
           type: "turn:end",
@@ -415,6 +446,7 @@ export class Lifecycle {
       active = false;
       if (!completed) {
         controller.abort(failure);
+        await this.closeModelRequests(params.runId, Date.now());
         // An uncooperative provider cannot delay fatal delivery. Its pending next
         // remains observed by the race, and return closes it when it cooperates.
         void loop
@@ -1293,6 +1325,35 @@ export class Lifecycle {
         [...input.request.messages],
         {
           purpose: "agent-step",
+          ...(params.runId === undefined
+            ? {}
+            : {
+                requestOwner: {
+                  runId: params.runId,
+                  messageId: assistantMessage.id,
+                  step,
+                },
+                onRequestObservation: async (
+                  fact: import("../llm-client/types.js").ModelRequestObservation,
+                ): Promise<void> => {
+                  const saved = this.deps.messageManager.updateMessage(
+                    assistantMessage.id,
+                    { modelRequests: [fact.request] },
+                  );
+                  this.activeModelRequests.set(fact.request.requestId, {
+                    request: fact.request,
+                    saved,
+                  });
+                  try {
+                    await saved;
+                  } catch (error) {
+                    this.activeModelRequests.delete(fact.request.requestId);
+                    throw error;
+                  }
+                  if (fact.request.endedAt !== undefined)
+                    this.activeModelRequests.delete(fact.request.requestId);
+                },
+              }),
           reasoning: mergeReasoningIntent(params.reasoning),
           sessionId: params.sessionId,
           ...(params.contextScopeId === undefined
@@ -1302,6 +1363,32 @@ export class Lifecycle {
           tools: input.request.tools,
         },
       )) {
+        if (response.requestObservation) {
+          const { type, request } = response.requestObservation;
+          const timestamp =
+            type === "request-started"
+              ? request.startedAt
+              : type === "first-text"
+                ? request.firstTextAt
+                : request.endedAt;
+          if (timestamp === undefined)
+            throw new ModelObservationError(
+              "Missing request observation timestamp",
+            );
+          yield {
+            type:
+              type === "request-started"
+                ? "llm:request-started"
+                : type === "first-text"
+                  ? "llm:first-text"
+                  : "llm:request-ended",
+            ...identity,
+            step,
+            request,
+            timestamp,
+          };
+          continue;
+        }
         if (response.modelState) modelState = response.modelState;
         if (response.streamStopReason)
           streamStopReason = response.streamStopReason;
@@ -1436,6 +1523,7 @@ export class Lifecycle {
         }
       }
     } catch (error) {
+      if (error instanceof ModelObservationError) throw error;
       const reasoningEnd = await finishReasoning(
         params.signal?.aborted ||
           (error instanceof ProviderStreamInterruptedError &&

@@ -434,7 +434,7 @@ it("streams long text into a slow baseline with bounded incremental transport", 
       bytes,
       `100 token events transferred ${String(bytes)} bytes`,
     ).toBeLessThan(100_000);
-    expect(bytes).toBe(23_392);
+    expect(bytes).toBe(25_992);
     blocked.resolve();
     await vi.waitFor(() => {
       expect(sync.getState().status).toBe("ready");

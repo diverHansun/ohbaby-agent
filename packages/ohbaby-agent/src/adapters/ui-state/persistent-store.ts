@@ -1,3 +1,8 @@
+import {
+  projectToolExecution,
+  toolExecutionStatus,
+  projectModelActivity,
+} from "ohbaby-sdk";
 import type {
   UiMessage,
   UiMessagePart,
@@ -91,6 +96,7 @@ function toolResultPart(part: ToolPart): UiMessagePart | undefined {
     metadata: part.metadata,
     result: {
       callId: part.callId,
+      execution: projectToolExecution(part.metadata?.execution),
       ...(outcome.error === undefined ? {} : { error: outcome.error }),
       output,
     },
@@ -122,7 +128,11 @@ function toolPartToUiParts(part: ToolPart): UiMessagePart[] {
       id: part.callId,
       input: toolInput(part.state),
       name: part.tool,
-      status: toolCallStatus(part.state),
+      status: toolExecutionStatus(
+        projectToolExecution(part.metadata?.execution),
+        toolCallStatus(part.state),
+      ),
+      execution: projectToolExecution(part.metadata?.execution),
     },
     type: "tool-call",
   };
@@ -189,7 +199,10 @@ export function messageToUiMessage(
   }
 
   const parts = activeParts.flatMap(partToUiParts);
-  if (parts.length === 0) {
+  if (
+    parts.length === 0 &&
+    !(message.info.role === "assistant" && message.info.modelRequests?.length)
+  ) {
     return undefined;
   }
 
@@ -199,6 +212,9 @@ export function messageToUiMessage(
     parts,
     role: message.info.role,
     runId: message.info.runId,
+    ...(message.info.role === "assistant"
+      ? { modelRequests: message.info.modelRequests }
+      : {}),
     ...assistantCompletionFields(message.info),
   };
 }
@@ -494,11 +510,23 @@ export function createPersistentUiStateStore(
     async readSnapshot(): Promise<UiSnapshot> {
       const { activeSessionId, sessions } = await readSessions();
       const runs = await readRuns(sessions);
+      const uiSessions = await Promise.all(sessions.map(readUiSession));
       const snapshot: UiSnapshot = {
+        serverNow: Date.now(),
         activeSessionId,
         permissions: mutable.permissions.map(clonePermission),
-        runs: runs.map(runToUiRun),
-        sessions: await Promise.all(sessions.map(readUiSession)),
+        runs: runs.map((record) => {
+          const run = runToUiRun(record);
+          return {
+            ...run,
+            modelActivity: projectModelActivity(
+              run,
+              uiSessions.find((session) => session.id === run.sessionId)
+                ?.messages ?? [],
+            ),
+          };
+        }),
+        sessions: uiSessions,
         status: snapshotStatus({ activeSessionId, runs }),
       };
       return cloneSnapshot(snapshot);

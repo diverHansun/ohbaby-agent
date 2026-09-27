@@ -75,6 +75,51 @@ afterEach(async () => {
 });
 
 describe("createDatabaseMessageStore", () => {
+  it("merges request observations into current JSON and keeps terminal records across reopen", async () => {
+    let store = createDatabaseMessageStore();
+    await store.insertMessage({
+      id: "assistant",
+      role: "assistant",
+      agent: "default",
+      sessionId: "session_1",
+      runId: "run",
+      time: { created: 100 },
+    });
+    const request = {
+      requestId: "r",
+      runId: "run",
+      messageId: "assistant",
+      step: 1,
+      attempt: 1,
+      purpose: "agent-step",
+      startedAt: 100,
+      outcome: "running" as const,
+    };
+    await store.updateMessage("assistant", { modelRequests: [request] });
+    await store.updateMessage("assistant", {
+      finish: "stop",
+      time: { created: 100, completed: 500 },
+    });
+    await store.updateMessage("assistant", {
+      modelRequests: [{ ...request, endedAt: 450, outcome: "success" }],
+    });
+    await store.updateMessage("assistant", {
+      modelRequests: [{ ...request, firstTextAt: 999 }],
+    });
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    store = createDatabaseMessageStore();
+    expect(await store.getMessage("assistant")).toMatchObject({
+      finish: "stop",
+      time: { completed: 500 },
+      modelRequests: [{ ...request, endedAt: 450, outcome: "success" }],
+    });
+    await expect(
+      store.updateMessage("assistant", {
+        modelRequests: [{ ...request, requestId: "foreign", runId: "child" }],
+      }),
+    ).rejects.toThrow("owner");
+  });
   it("uses covering order indexes for session, scope and run keyset pages", () => {
     const queries = [
       {

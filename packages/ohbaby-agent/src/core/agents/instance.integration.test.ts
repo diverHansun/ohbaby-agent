@@ -12,6 +12,7 @@ import {
   createMessageManager,
 } from "../message/index.js";
 import type {
+  BatchToolCallRequest,
   ToolCallResult,
   ToolDefinition,
   ToolSchedulerInstance,
@@ -173,6 +174,27 @@ function createSmallBudgetTokenCounter(): TokenCounter {
   };
 }
 
+async function deliverFixtureResults(
+  batch: BatchToolCallRequest,
+  results: ToolCallResult[],
+): Promise<ToolCallResult[]> {
+  for (const [index, result] of results.entries()) {
+    const execution = {
+      runId: batch.calls[index].runId,
+      phase: "ended" as const,
+      createdAt: 1,
+      phaseStartedAt: 2,
+      endedAt: 2,
+      outcome: result.status,
+    };
+    await batch.observer?.onCallSettled(batch.calls[index], index, {
+      ...result,
+      execution,
+    });
+  }
+  return results;
+}
+
 function createToolScheduler(): ToolSchedulerInstance {
   return {
     cancel: vi.fn(),
@@ -180,7 +202,8 @@ function createToolScheduler(): ToolSchedulerInstance {
     execute: vi.fn(),
     executeBatch: vi.fn<ToolSchedulerInstance["executeBatch"]>(
       (input): Promise<ToolCallResult[]> =>
-        Promise.resolve(
+        deliverFixtureResults(
+          input,
           input.calls.map((call) => {
             const index =
               typeof call.params.index === "number" ||
@@ -232,7 +255,8 @@ function createToolSchedulerFixture(): ToolSchedulerFixture {
   scheduler.executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>(
     (input): Promise<ToolCallResult[]> => {
       executedCallIds.push(...input.calls.map((call) => call.callId));
-      return Promise.resolve(
+      return deliverFixtureResults(
+        input,
         input.calls.map((call) => {
           const index =
             typeof call.params.index === "number" ||

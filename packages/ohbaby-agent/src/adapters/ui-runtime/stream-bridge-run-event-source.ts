@@ -1,3 +1,5 @@
+import type { ModelRequestRecord } from "../../core/llm-client/types.js";
+import type { ToolExecutionObservation } from "../../core/tool-scheduler/types.js";
 import type { AgentRunEventSource } from "../../core/agents/index.js";
 import type { LifecycleEvent } from "../../core/lifecycle/index.js";
 import type { ToolCallResult } from "../../core/tool-scheduler/index.js";
@@ -151,6 +153,49 @@ function lifecycleEventFromStream(
     return undefined;
   }
 
+  if (
+    item.event === "run.llm.request-started" ||
+    item.event === "run.llm.first-text" ||
+    item.event === "run.llm.request-ended"
+  ) {
+    const request = objectData(data.request);
+    if (
+      !request ||
+      typeof request.requestId !== "string" ||
+      request.runId !== data.runId ||
+      request.messageId !== data.messageId ||
+      typeof request.startedAt !== "number"
+    )
+      return undefined;
+    return {
+      ...scopeData(data),
+      sessionId,
+      timestamp,
+      step: numberData(data, "step") ?? 0,
+      type:
+        item.event === "run.llm.request-started"
+          ? "llm:request-started"
+          : item.event === "run.llm.first-text"
+            ? "llm:first-text"
+            : "llm:request-ended",
+      request: request as unknown as ModelRequestRecord,
+    };
+  }
+  if (item.event === "run.tool.state") {
+    const execution = objectData(data.execution);
+    if (!execution || typeof execution.phase !== "string") return undefined;
+    return {
+      ...scopeData(data),
+      sessionId,
+      timestamp,
+      step: numberData(data, "step") ?? 0,
+      type: "tool:state",
+      execution: execution as unknown as ToolExecutionObservation,
+      callId: stringData(data, "callId") ?? "",
+      toolName: stringData(data, "toolName") ?? "",
+      params: objectData(data.params) ?? {},
+    };
+  }
   if (item.event === "message.part.delta") {
     const content = stringData(data, "content") ?? "";
     const delta = stringData(data, "delta") ?? "";

@@ -61,6 +61,7 @@ export function cloneSnapshot(
   const goals = snapshot.goals ?? [];
   const todos = snapshot.todos ?? [];
   return {
+    ...("serverNow" in snapshot ? { serverNow: snapshot.serverNow } : {}),
     sessions: snapshot.sessions.map(cloneSession),
     activeSessionId: snapshot.activeSessionId,
     runs: snapshot.runs.map(cloneRun),
@@ -76,6 +77,7 @@ export function cloneSnapshot(
 
 function toMutableSnapshot(snapshot: UiSnapshot): MutableUiSnapshot {
   return {
+    ...("serverNow" in snapshot ? { serverNow: snapshot.serverNow } : {}),
     sessions: snapshot.sessions.map(cloneSession),
     activeSessionId: snapshot.activeSessionId,
     runs: snapshot.runs.map(cloneRun),

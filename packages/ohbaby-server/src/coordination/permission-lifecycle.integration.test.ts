@@ -606,7 +606,8 @@ async function realPermissionValidationFixture(
   const { createInProcessUiBackendClient } = await import("ohbaby-agent");
   const directory = await mkdtemp(path.join(tmpdir(), "permission-transport-"));
   await writeFile(path.join(directory, ".env"), "TEST_ONLY_VALUE=fixture\n");
-  let step = 0;
+  let emittedCalls = 0;
+  let modelToolSteps = 0;
   const backend = createInProcessUiBackendClient({
     workdir: directory,
     projectDirectory: directory,
@@ -637,23 +638,27 @@ async function realPermissionValidationFixture(
         kind: "openai-compatible",
         isAbortError: () => false,
         streamResponse() {
+          // Cache eviction spans runs/steps. Bound each real model reply so
+          // the 1026-approval test measures that contract, not quadratic full-
+          // message projection of one artificial 1026-tool reply.
+          const count = Math.min(64, (options.count ?? 1) - emittedCalls);
+          const firstCall = emittedCalls;
+          emittedCalls += count;
+          if (count > 0) modelToolSteps += 1;
           const event =
-            step++ === 0
+            count > 0
               ? {
                   finishReason: "tool_calls" as const,
-                  toolCallDeltas: Array.from(
-                    { length: options.count ?? 1 },
-                    (_, index) => ({
-                      index,
-                      id: `validation-call-${String(index)}`,
-                      name: "bash",
-                      argumentsDelta: JSON.stringify({
-                        command: options.sensitive
-                          ? "cat .env"
-                          : "node -e \"require('node:fs').appendFileSync('never-run.txt','x')\"",
-                      }),
+                  toolCallDeltas: Array.from({ length: count }, (_, index) => ({
+                    index,
+                    id: `validation-call-${String(firstCall + index)}`,
+                    name: "bash",
+                    argumentsDelta: JSON.stringify({
+                      command: options.sensitive
+                        ? "cat .env"
+                        : "node -e \"require('node:fs').appendFileSync('never-run.txt','x')\"",
                     }),
-                  ),
+                  })),
                 }
               : { finishReason: "stop" as const, textDelta: "done" };
           return Promise.resolve(
@@ -745,6 +750,8 @@ async function realPermissionValidationFixture(
       });
     },
     async assertNoExecution(): Promise<void> {
+      expect(emittedCalls).toBe(options.count ?? 1);
+      expect(modelToolSteps).toBe(Math.ceil((options.count ?? 1) / 64));
       await expect(
         access(path.join(directory, "never-run.txt")),
       ).rejects.toThrow();
@@ -873,6 +880,7 @@ it("rejects evicted real terminal IDs through REST/RPC without reviving or leaki
     const pending = await lastPending;
     stop();
     expect(errors).toEqual([]);
+    expect(seen).toBe(1026); // All 17 model tool steps reached real approval.
     expect(firstId).toBeTypeOf("string");
     for (const transport of ["REST", "RPC"] as const) {
       for (const [context, clientId] of [

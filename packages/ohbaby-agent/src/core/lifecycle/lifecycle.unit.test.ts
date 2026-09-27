@@ -343,6 +343,73 @@ function createContextManagerMock(
 }
 
 describe("Lifecycle.run", () => {
+  it("persists request transitions before publishing their true owner", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(
+        vi
+          .fn()
+          .mockResolvedValue(
+            preparedTurn([{ role: "user", content: "hello" }]),
+          ),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            { reasoningTextDelta: "think" },
+            { textDelta: "" },
+            { textDelta: "Done.", finishReason: "stop" },
+          ],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const observations: LifecycleEvent[] = [];
+    for await (const event of lifecycle.run({
+      runId: "real-run",
+      directory: "/repo",
+      modelId: "fake-model",
+      sessionId: "session_test",
+    })) {
+      if (
+        event.type.startsWith("llm:request-") ||
+        event.type === "llm:first-text"
+      ) {
+        const records = await messageManager.listBySession("session_test");
+        const message = records.find(
+          (record) => record.info.id === event.messageId,
+        )?.info;
+        expect(
+          message?.role === "assistant" && message.modelRequests?.length,
+        ).toBe(1);
+        observations.push(event);
+      }
+    }
+    expect(observations.map((event) => event.type)).toEqual([
+      "llm:request-started",
+      "llm:first-text",
+      "llm:request-ended",
+    ]);
+    const records = await messageManager.listBySession("session_test");
+    expect(records[0].info).toMatchObject({
+      runId: "real-run",
+      modelRequests: [
+        { runId: "real-run", step: 1, attempt: 1, outcome: "success" },
+      ],
+    });
+    expect(
+      JSON.stringify(await messageManager.toModelMessages("session_test")),
+    ).not.toContain("modelRequests");
+  });
+
   it("uses a Kimi-style generous default maxSteps", () => {
     expect(DEFAULT_MAX_STEPS).toBe(1000);
   });
@@ -607,13 +674,18 @@ describe("Lifecycle.run", () => {
       "turn:start",
       "context:prepared",
       "llm:start",
+      "llm:request-started",
+      "llm:request-ended",
       "llm:complete", // Final parsed tool snapshot after normal stream exhaustion.
       "tool:start",
       "tool:result",
       "step:complete",
       "context:prepared",
       "llm:start",
+      "llm:request-started",
+      "llm:first-text",
       "llm:delta",
+      "llm:request-ended",
       "llm:complete",
       "turn:end",
     ]);
@@ -3609,6 +3681,7 @@ it("discards native state and usage from an overflowing attempt before accepting
   });
   const { result } = await consumeLifecycleEvents(
     lifecycle.run({
+      runId: "compaction-run",
       sessionId: "session_test",
       directory: "/test",
       modelId: "fake-model",
@@ -3627,6 +3700,18 @@ it("discards native state and usage from an overflowing attempt before accepting
   expect(states).toHaveLength(1);
   expect(JSON.stringify(states)).toContain("sig-2");
   expect(JSON.stringify(states)).not.toContain("sig-1");
+  const attempts = (await manager.listBySession("session_test")).flatMap(
+    (message) =>
+      message.info.role === "assistant"
+        ? [...(message.info.modelRequests ?? [])]
+        : [],
+  );
+  expect(attempts.map((request) => request.step)).toEqual([1, 1]);
+  expect(new Set(attempts.map((request) => request.requestId)).size).toBe(2);
+  expect(attempts.map((request) => request.outcome)).toEqual([
+    "error",
+    "success",
+  ]);
 });
 
 it.each(["message", "usage", "tools", "permanent"] as const)(

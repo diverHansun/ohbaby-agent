@@ -29,6 +29,7 @@ export interface UiHistoryBoundary {
   readonly hasMore: boolean;
 }
 export interface UiSessionView {
+  readonly serverNow?: number;
   readonly version: UiSessionVersion;
   readonly bindingGeneration?: number;
   readonly session: UiSession;
@@ -41,6 +42,7 @@ export interface UiSessionView {
   readonly context: UiOptionalRead<UiContextWindowUsage | null>;
 }
 export interface UiSessionHistory extends UiHistoryBoundary {
+  readonly serverNow?: number;
   readonly version: UiSessionVersion;
   readonly bindingGeneration?: number;
   readonly messages: readonly UiMessage[];
@@ -76,6 +78,7 @@ export interface UiSessionTextAppend {
   readonly text: string;
 }
 export interface UiSessionChangedEvent {
+  readonly serverNow?: number;
   readonly type: "session.changed";
   readonly version: UiSessionVersion;
   readonly bindingGeneration?: number;
@@ -185,6 +188,7 @@ export function applySessionChange(
   return {
     ...view,
     version: event.version,
+    serverNow: event.serverNow ?? view.serverNow,
     session: {
       ...view.session,
       ...event.session,

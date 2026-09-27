@@ -1,3 +1,4 @@
+import { projectModelActivity } from "ohbaby-sdk";
 import type {
   UiEvent,
   UiMessage,
@@ -157,7 +158,10 @@ export class SourceSessionProjection {
       .sort(compareMessages);
     return {
       session: { ...metadata, messages },
-      runs,
+      runs: runs.map((run) => ({
+        ...run,
+        modelActivity: projectModelActivity(run, messages),
+      })),
       prompts: await this.options.prompts(sessionId, messages, runs),
       history: { before: page.nextCursor, hasMore: page.hasMore },
       reasoningMissing: this.reasoning.snapshot(sessionId).missingCount > 0,
@@ -263,7 +267,20 @@ export class SourceSessionProjection {
         return this.project(record);
       })
       .filter((message): message is UiMessage => message !== undefined);
+    const current = this.owner.read(change.sessionId);
+    const projectedMessages = new Map(
+      current.session.messages.map((message) => [message.id, message]),
+    );
+    for (const message of messages) projectedMessages.set(message.id, message);
+    for (const id of change.removedMessageIds ?? [])
+      projectedMessages.delete(id);
     this.owner.commit(change.sessionId, {
+      runs: current.runs.map((run) => ({
+        ...run,
+        modelActivity: projectModelActivity(run, [
+          ...projectedMessages.values(),
+        ]),
+      })),
       messages,
       removedMessageIds: change.removedMessageIds,
       historyInvalidated,
@@ -351,7 +368,12 @@ export class SourceSessionProjection {
         event.run,
         ...current.runs.filter((run) => run.id !== event.run.id),
       ].slice(0, 50);
-      this.owner.commit(id, { runs });
+      this.owner.commit(id, {
+        runs: runs.map((run) => ({
+          ...run,
+          modelActivity: projectModelActivity(run, current.session.messages),
+        })),
+      });
       this.trim(id);
     } else if (
       event.type === "prompt.submitted" ||
@@ -467,6 +489,7 @@ export class SourceSessionProjection {
       const prompts = await this.options.prompts(sessionId, messages, []);
       return {
         version: view.version,
+        serverNow: Date.now(),
         messages,
         prompts,
         before: page.nextCursor,

@@ -1,3 +1,4 @@
+import type { UiModelRequest, UiToolExecution } from "./execution.js";
 import type { UiReasoningConfig } from "./connect-model.js";
 import type { UiContextWindowUsage } from "./context-window.js";
 import type { UiPromptSubmission } from "./prompt.js";
@@ -45,6 +46,7 @@ export interface UiPermissionState {
 }
 
 export interface UiSnapshot {
+  readonly serverNow?: number;
   readonly sessions: readonly UiSession[];
   readonly activeSessionId: string | null;
   readonly runs: readonly UiRun[];
@@ -94,6 +96,7 @@ export interface UiSession {
 }
 
 export interface UiRun {
+  readonly modelActivity?: UiModelRequest;
   readonly id: string;
   readonly sessionId: string;
   readonly status: UiRunStatus;
@@ -103,6 +106,7 @@ export interface UiRun {
 }
 
 export interface UiMessage {
+  readonly modelRequests?: readonly UiModelRequest[];
   readonly runId?: string;
   readonly id: string;
   readonly role: "user" | "assistant" | "system" | "tool";
@@ -127,6 +131,7 @@ export type UiMessagePart = {
 );
 
 export interface UiToolCall {
+  readonly execution?: UiToolExecution;
   readonly id: string;
   readonly name: string;
   readonly input: Record<string, unknown>;
@@ -134,6 +139,7 @@ export interface UiToolCall {
 }
 
 export interface UiToolResult {
+  readonly execution?: UiToolExecution;
   readonly callId: string;
   readonly output: string;
   readonly error?: string;

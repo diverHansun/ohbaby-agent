@@ -27,6 +27,7 @@ Bus is the internal domain event bus. This catalog records scope, required conte
 | context.turn-prepared | Context | session | domain, tests | medium | sessionId, usage, tookMs | complete | no | Run stream owns user-visible context events; contextScopeId is omitted only for primary. |
 | context.compact-skipped | Context | session | domain, tests | low | sessionId, attemptId, reason, usage | complete | no | Internal domain event; contextScopeId is omitted only for primary. |
 | context.masked | Context | session | domain, tests | medium | sessionId, enabled, maskedPartIds, maskedTokens, cutoff, usageRatio | complete | no | Internal projection telemetry; contextScopeId is omitted only for primary. |
+| tool-scheduler.delivery-failed | ToolScheduler | run | domain, tests | low | sessionId, messageId, callId, timestamp | complete | no | Routes durable delivery failures to the owning lifecycle run. |
 | tool-scheduler.status-changed | ToolScheduler | run | domain, tests | high | callId, toolName, timestamp | known-gap | no | Missing runId/sessionId/messageId; run stream owns visible tool events. |
 | tool-scheduler.execution-started | ToolScheduler | run | domain, tests | high | callId, toolName, timestamp | known-gap | no | Missing runId/sessionId/messageId; run stream owns visible tool events. |
 | tool-scheduler.execution-completed | ToolScheduler | run | domain, tests | high | callId, toolName, timestamp | known-gap | no | Missing runId/sessionId/messageId; run stream owns visible tool events. |

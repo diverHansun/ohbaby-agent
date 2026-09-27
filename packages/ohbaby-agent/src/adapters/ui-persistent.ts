@@ -183,11 +183,17 @@ function withStartupRecovery(
   recovery: Promise<unknown>,
 ): PersistentUiBackendClient {
   let recovered = false;
+  let startupFailureReported = false;
   const startup = recovery.then(() => {
     recovered = true;
   });
   async function ready(): Promise<void> {
-    await startup;
+    try {
+      await startup;
+    } catch (error) {
+      startupFailureReported = true;
+      throw error;
+    }
   }
 
   return {
@@ -223,8 +229,18 @@ function withStartupRecovery(
       await ready();
       await client.initialize();
     },
-    dispose(): ReturnType<InProcessUiBackendClient["dispose"]> {
-      return client.dispose();
+    async dispose(): Promise<void> {
+      // Startup owns durable recovery writes even if no public read was made.
+      // Drain that owner before callers are allowed to close its database.
+      try {
+        await startup;
+      } catch (error) {
+        // Preserve disposal after a failed public initialization/read, while
+        // still surfacing startup failures that no caller has observed yet.
+        if (!startupFailureReported) throw error;
+      } finally {
+        await client.dispose();
+      }
     },
     async getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
       await ready();

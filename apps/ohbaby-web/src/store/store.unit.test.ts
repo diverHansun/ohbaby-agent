@@ -38,6 +38,31 @@ const ready = (v: UiSessionView): SessionSyncState => ({
   attempts: 1,
 });
 describe("session view store", () => {
+  it("retains terminal prompt duration associations from older history pages", () => {
+    const store = createOhbabyWebStore();
+    store.setSessionSync(ready(view()));
+    const prompt = {
+      promptId: "p",
+      clientRequestId: "c",
+      scopeKey: "k",
+      sessionId: "s",
+      userMessageId: "1",
+      text: "hello",
+      status: "succeeded" as const,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:01:00Z",
+      endedAt: "2026-01-01T00:01:00Z",
+    };
+    store.installSessionHistory({
+      version: view().version,
+      messages: [message("1")],
+      prompts: [prompt],
+      hasMore: false,
+      reasoningMissing: false,
+    });
+    store.setSessionSync(ready(view(1)));
+    expect(store.getSnapshot().view.snapshot?.prompts).toEqual([prompt]);
+  });
   it("keeps loaded pages across deltas and reconnect, rejects stale page overwrites", () => {
     const store = createOhbabyWebStore();
     store.setSessionSync(ready(view()));

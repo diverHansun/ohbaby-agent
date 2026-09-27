@@ -1,3 +1,12 @@
+import {
+  mergeModelRequests,
+  mergeToolExecution,
+  projectModelActivity,
+  projectToolExecution,
+  toolExecutionStatus,
+  type UiModelRequest,
+  type UiToolExecution,
+} from "ohbaby-sdk";
 import type {
   UiNotice,
   UiMessage,
@@ -37,6 +46,7 @@ interface StreamRunRecord {
 }
 
 interface ToolResultPayload {
+  readonly execution?: UiToolExecution;
   readonly callId: string;
   readonly error?: {
     readonly message?: string;
@@ -152,6 +162,12 @@ function appendToolCall(input: {
   readonly name: string;
   readonly params: Record<string, unknown>;
 }): UiMessage {
+  if (
+    input.message.parts.some(
+      (part) => part.type === "tool-call" && part.call.id === input.callId,
+    )
+  )
+    return input.message;
   return {
     ...input.message,
     parts: [
@@ -162,7 +178,7 @@ function appendToolCall(input: {
           id: input.callId,
           input: input.params,
           name: input.name,
-          status: "running",
+          status: "pending",
         },
       },
     ],
@@ -188,7 +204,13 @@ function appendToolResult(input: {
               ...part,
               call: {
                 ...part.call,
-                status: outcome.status,
+                status: toolExecutionStatus(
+                  input.result.execution,
+                  outcome.status,
+                ),
+                execution: projectToolExecution(
+                  input.result.execution ?? part.call.execution,
+                ),
               },
             }
           : part,
@@ -199,6 +221,7 @@ function appendToolResult(input: {
           callId: input.callId,
           error: outcome.error,
           output: input.result.output ?? "",
+          execution: projectToolExecution(input.result.execution),
         },
       },
     ],
@@ -206,7 +229,7 @@ function appendToolResult(input: {
 }
 
 function markAssistantStreaming(message: UiMessage): UiMessage {
-  return message.status === "streaming"
+  return message.status !== undefined
     ? message
     : {
         ...message,
@@ -279,6 +302,7 @@ export function startRunStreamProjection(
     if (settings.publishUpdate !== false) {
       options.publish({
         type: "message.updated",
+        timestamp: Date.now(),
         message: cloneMessage(updated),
         sessionId: options.sessionId,
       });
@@ -358,6 +382,11 @@ export function startRunStreamProjection(
       return;
     }
     const record = run as unknown as StreamRunRecord;
+    if (
+      record.runId !== options.runId ||
+      record.sessionId !== options.sessionId
+    )
+      return;
     if (record.status === "pending") {
       return;
     }
@@ -600,7 +629,130 @@ export function startRunStreamProjection(
     contextCompacting = false;
   }
 
+  async function selectAssistant(data: Record<string, unknown>): Promise<void> {
+    if (
+      typeof data.messageId !== "string" ||
+      assistantMessage?.id === data.messageId
+    )
+      return;
+    const session = await requireSession();
+    assistantMessage = session.messages.find(
+      (message) => message.id === data.messageId,
+    );
+    if (!assistantMessage) {
+      assistantMessage = {
+        id: data.messageId,
+        runId: options.runId,
+        role: "assistant",
+        createdAt:
+          typeof data.timestamp === "number"
+            ? new Date(data.timestamp).toISOString()
+            : options.timestamp(),
+        status: "streaming",
+        parts: [],
+      };
+      await options.stateStore.upsertSession({
+        ...session,
+        messages: [...session.messages, assistantMessage],
+      });
+    }
+  }
+
+  async function handleModelObservation(
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    if (!isRecord(data.request)) return;
+    const request = data.request as unknown as UiModelRequest;
+    if (
+      request.runId !== options.runId ||
+      request.messageId !== data.messageId ||
+      terminalRunStarted
+    )
+      return;
+    await selectAssistant(data);
+    await updateAssistant((message) => ({
+      ...message,
+      modelRequests: mergeModelRequests(message.modelRequests, [request]),
+    }));
+    const snapshot = await options.stateStore.readSnapshot();
+    const run = snapshot.runs.find(
+      (candidate) =>
+        candidate.id === options.runId &&
+        candidate.sessionId === options.sessionId,
+    );
+    if (!run) return;
+    const projected = {
+      ...run,
+      modelActivity: projectModelActivity(
+        run,
+        (await requireSession()).messages,
+      ),
+    };
+    await upsertRun(projected);
+    options.publish({
+      type: "run.updated",
+      run: projected,
+      timestamp:
+        typeof data.timestamp === "number" ? data.timestamp : Date.now(),
+    });
+  }
+
+  async function handleToolState(data: Record<string, unknown>): Promise<void> {
+    if (
+      !isRecord(data.execution) ||
+      typeof data.callId !== "string" ||
+      typeof data.toolName !== "string" ||
+      HIDDEN_TRANSCRIPT_TOOLS.has(data.toolName)
+    )
+      return;
+    const execution = data.execution as unknown as UiToolExecution;
+    if (execution.runId !== undefined && execution.runId !== options.runId)
+      return;
+    await selectAssistant(data);
+    await updateAssistant((message) => {
+      const existing = message.parts.find(
+        (part) => part.type === "tool-call" && part.call.id === data.callId,
+      );
+      const previous =
+        existing?.type === "tool-call" ? existing.call.execution : undefined;
+      const merged = mergeToolExecution(previous, execution);
+      const parts = message.parts.map((part) =>
+        part.type === "tool-call" && part.call.id === data.callId
+          ? {
+              ...part,
+              call: {
+                ...part.call,
+                execution: merged,
+                status: toolExecutionStatus(merged, part.call.status),
+              },
+            }
+          : part.type === "tool-result" && part.result.callId === data.callId
+            ? { ...part, result: { ...part.result, execution: merged } }
+            : part,
+      );
+      if (!existing)
+        parts.push({
+          type: "tool-call",
+          call: {
+            id: data.callId as string,
+            name: data.toolName as string,
+            input: isRecord(data.params) ? data.params : {},
+            execution: merged,
+            status: toolExecutionStatus(merged, "pending"),
+          },
+        });
+      return { ...message, parts };
+    });
+  }
+
   async function handleEvent(event: StreamBridgeEvent): Promise<void> {
+    const data = eventData(event);
+    if (
+      (typeof data.sessionId === "string" &&
+        data.sessionId !== options.sessionId) ||
+      (typeof data.runId === "string" && data.runId !== options.runId)
+    )
+      return;
     if (
       options.projectMessages === false &&
       (event.event === "message.part.delta" ||
@@ -608,6 +760,23 @@ export function startRunStreamProjection(
         event.event.startsWith("run.tool."))
     )
       return;
+    if (
+      event.event === "run.llm.request-started" ||
+      event.event === "run.llm.first-text" ||
+      event.event === "run.llm.request-ended"
+    ) {
+      await handleModelObservation(data);
+      return;
+    }
+    if (event.event === "run.tool.state") {
+      await handleToolState(data);
+      return;
+    }
+    if (
+      event.event === "message.part.delta" ||
+      event.event.startsWith("run.tool.")
+    )
+      await selectAssistant(data);
     if (event.event === "run.updated") {
       await handleRunUpdated(event);
       return;

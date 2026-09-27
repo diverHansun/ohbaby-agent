@@ -1,3 +1,4 @@
+import type { ModelRequestRecord } from "../llm-client/types.js";
 import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
 import type { ModelState } from "../../services/interface-providers/native-state.js";
 import type { ModelMessage, TokenUsage } from "../llm-client/index.js";
@@ -35,6 +36,7 @@ export interface UserMessage extends MessageBase {
 }
 
 export interface AssistantMessage extends MessageBase {
+  readonly modelRequests?: readonly ModelRequestRecord[];
   readonly role: "assistant";
   readonly agent: string;
   readonly parentId?: string;
@@ -169,6 +171,7 @@ export type CreateMessageInput = {
       readonly sessionId: string;
       readonly contextScopeId?: string;
       readonly role: "assistant";
+      readonly modelRequests?: readonly ModelRequestRecord[];
       readonly agent: string;
       readonly parentId?: string;
       readonly providerId?: string;
@@ -184,7 +187,7 @@ export type CreateMessageInput = {
 );
 
 export type UpdateMessagePatch = Partial<
-  Pick<AssistantMessage, "finish" | "error"> & {
+  Pick<AssistantMessage, "finish" | "error" | "modelRequests"> & {
     readonly time: MessageTime;
   }
 >;

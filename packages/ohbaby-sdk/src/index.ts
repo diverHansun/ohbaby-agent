@@ -231,3 +231,6 @@ export type {
   PermissionSyncOptions,
   PermissionSyncEvent,
 } from "./permission-sync.js";
+
+export * from "./execution.js";
+export * from "./duration.js";

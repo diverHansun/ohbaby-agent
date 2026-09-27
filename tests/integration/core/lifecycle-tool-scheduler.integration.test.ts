@@ -1669,6 +1669,19 @@ it.each(["active", "finished"] as const)(
       ),
       llmClient: llm,
     });
+    let releaseRequestEnd!: () => void;
+    const requestEndGate = new Promise<void>((resolve) => {
+      releaseRequestEnd = resolve;
+    });
+    const updateMessage = manager.updateMessage.bind(manager);
+    manager.updateMessage = async (id, patch) => {
+      if (
+        originalState === "active" &&
+        patch.modelRequests?.some((request) => request.outcome === "aborted")
+      )
+        await requestEndGate;
+      return updateMessage(id, patch);
+    };
     let originalResult: unknown;
     const original = consumeLifecycle(
       lifecycle.run({
@@ -1722,12 +1735,26 @@ it.each(["active", "finished"] as const)(
         await vi.waitFor(() => {
           expect(modelSignal?.aborted).toBe(true);
         });
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        expect(originalResult).toBeUndefined();
+        releaseRequestEnd();
         expect(await original).toMatchObject({
           success: false,
           terminalReason: "tool_persistence_failure",
           failureCause: { name: "ToolDeliveryError" },
         });
         expect(count).toBe(2);
+        const records = (await manager.listBySession("session_1")).flatMap(
+          (message) =>
+            message.info.role === "assistant"
+              ? [...(message.info.modelRequests ?? [])]
+              : [],
+        );
+        expect(records).toHaveLength(2);
+        expect(records.every((request) => request.endedAt !== undefined)).toBe(
+          true,
+        );
+        expect(records[1].outcome).toBe("aborted");
       } else {
         expect(modelSignal?.aborted).toBe(false);
         expect(originalResult).toMatchObject({ success: true });
@@ -1748,6 +1775,7 @@ it.each(["active", "finished"] as const)(
         },
       });
     } finally {
+      releaseRequestEnd();
       releaseModel();
       await original;
       await healthy;

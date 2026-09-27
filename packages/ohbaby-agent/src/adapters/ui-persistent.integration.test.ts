@@ -22,6 +22,8 @@ import {
   type PersistentUiBackendClient,
 } from "./ui-persistent.js";
 
+import * as uiInProcess from "./ui-inprocess.js";
+
 interface FakeSdkClient {
   readonly kind: "fake";
 }
@@ -775,6 +777,37 @@ afterEach(() => {
 });
 
 describe("createPersistentUiBackendClient", () => {
+  it("does not hide disposal errors after a reported startup failure", async () => {
+    const directory = await tempDir("ohbaby-persistent-dispose-failure-");
+    const original = uiInProcess.createInProcessUiBackendClient;
+    const factory = vi
+      .spyOn(uiInProcess, "createInProcessUiBackendClient")
+      .mockImplementation((options) => {
+        const backend = original(options);
+        return {
+          ...backend,
+          async dispose(): Promise<void> {
+            await backend.dispose();
+            throw new Error("fixture disposal failed");
+          },
+        };
+      });
+    try {
+      const client = createPersistentUiBackendClient({
+        dbPath: join(directory, "agent.db"),
+        llmClient: createFakeLLMClient([]),
+        resumeSessionId: "missing-session",
+        workdir: join(directory, "workspace"),
+      });
+      await expect(client.getSnapshot()).rejects.toThrow("Session not found");
+      await expect(client.dispose()).rejects.toThrow("fixture disposal failed");
+    } finally {
+      factory.mockRestore();
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("runs ten sessions through the real backend and admits the eleventh as queued", async () => {
     const directory = await tempDir("ohbaby-persistent-concurrency-");
     const release = createDeferred<undefined>();
@@ -1551,6 +1584,16 @@ describe("createPersistentUiBackendClient", () => {
         /current project|Session not found/u,
       );
       await restored.dispose();
+      const unread = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        resumeSessionId: otherSessionId ?? undefined,
+        workdir: currentWorkdir,
+      });
+      // Disposal drains startup and must not hide an unobserved failure.
+      await expect(unread.dispose()).rejects.toThrow(
+        /current project|Session not found/u,
+      );
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

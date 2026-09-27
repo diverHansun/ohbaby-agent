@@ -280,11 +280,22 @@ describe("failed model history persistence", () => {
         finishReason: "tool_calls",
       },
     ]);
-    f.execute.mockImplementation(() => {
+    f.execute.mockImplementation(async (batch) => {
+      const result = {
+        callId: "read-1",
+        status: "success" as const,
+        output: "saved tool fact",
+        execution: {
+          phase: "ended" as const,
+          createdAt: 1,
+          phaseStartedAt: 2,
+          endedAt: 2,
+          outcome: "success" as const,
+        },
+      };
+      await batch.observer?.onCallSettled(batch.calls[0], 0, result);
       controller.abort();
-      return Promise.resolve([
-        { callId: "read-1", status: "success", output: "saved tool fact" },
-      ]);
+      return [result];
     });
     const { result } = await f.run(controller.signal);
     expect(result.terminalReason).toBe("cancelled");

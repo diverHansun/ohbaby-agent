@@ -57,6 +57,22 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
     contextScopeId: z.string().optional(),
     runId: z.string().optional(),
     role: z.literal("assistant"),
+    modelRequests: z
+      .array(
+        z.object({
+          requestId: z.string(),
+          runId: z.string(),
+          messageId: z.string(),
+          step: z.number(),
+          attempt: z.number(),
+          purpose: z.string(),
+          startedAt: z.number(),
+          firstTextAt: z.number().optional(),
+          endedAt: z.number().optional(),
+          outcome: z.enum(["running", "success", "error", "aborted"]),
+        }),
+      )
+      .optional(),
     time: MessageTimeSchema,
     agent: z.string(),
     parentId: z.string().optional(),

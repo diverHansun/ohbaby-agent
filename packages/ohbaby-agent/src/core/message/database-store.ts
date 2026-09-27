@@ -1,3 +1,4 @@
+import { applyMessagePatch } from "./message-patch.js";
 import {
   decodeMessagePage,
   makeMessagePage,
@@ -378,7 +379,7 @@ export function createDatabaseMessageStore(
         if (!row) {
           throw new Error(`Message not found: ${messageId}`);
         }
-        const updated = { ...rowToMessage(row), ...patch } as Message;
+        const updated = applyMessagePatch(rowToMessage(row), patch);
         updateMessageRow(updated);
         return clone(updated);
       });

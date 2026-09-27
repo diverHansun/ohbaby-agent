@@ -8,6 +8,27 @@ import { InMemoryGoalPersistence } from "../goals/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 
 describe("recovery subview initialization", () => {
+  it("samples server time on every cached session view and snapshot delivery", async () => {
+    const backend = createInProcessUiBackendClient();
+    try {
+      const session = await backend.createSession();
+      await backend.initializeSession(session.id);
+      const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+      try {
+        const first = await backend.getSessionView({ sessionId: session.id });
+        clock.mockReturnValue(2000);
+        const second = await backend.getSessionView({ sessionId: session.id });
+        expect(first.serverNow).toBe(1000);
+        expect(second.serverNow).toBe(2000);
+        expect(second.version).toEqual(first.version);
+        expect((await backend.getSnapshot()).serverNow).toBe(2000);
+      } finally {
+        clock.mockRestore();
+      }
+    } finally {
+      await backend.dispose();
+    }
+  });
   it("retains known todo and goal facts after a notification failure without repeating initialization", async () => {
     const bus = createBus();
     const messageManager = createMessageManager({

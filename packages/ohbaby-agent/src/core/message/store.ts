@@ -1,3 +1,4 @@
+import { applyMessagePatch } from "./message-patch.js";
 import {
   compareMessages,
   decodeMessagePage,
@@ -219,7 +220,7 @@ export function createInMemoryMessageStore(): MessageStore {
       if (!existing) {
         return Promise.reject(new Error(`Message not found: ${messageId}`));
       }
-      const updated = { ...existing, ...patch } as Message;
+      const updated = applyMessagePatch(existing, patch);
       messages.set(messageId, clone(updated));
       return Promise.resolve(clone(updated));
     },

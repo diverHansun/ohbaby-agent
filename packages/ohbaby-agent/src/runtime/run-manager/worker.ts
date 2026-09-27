@@ -342,6 +342,19 @@ export class RunWorker {
       return;
     }
 
+    if (
+      event.type === "llm:request-started" ||
+      event.type === "llm:first-text" ||
+      event.type === "llm:request-ended"
+    ) {
+      this.publish(scope, `run.${event.type.replace(":", ".")}`, {
+        ...this.streamBase(event),
+        timestamp: event.timestamp,
+        step: event.step,
+        request: event.request,
+      });
+      return;
+    }
     if (event.type === "llm:start") {
       this.publish(
         scope,
@@ -534,8 +547,8 @@ export class RunWorker {
       contextScopeId: event.contextScopeId ?? this.context.contextScopeId,
       messageId: event.messageId,
       partId: event.partId,
-      runId: this.context.runId,
-      sessionId: this.context.sessionId,
+      runId: event.runId ?? this.context.runId,
+      sessionId: event.sessionId,
     });
   }
 

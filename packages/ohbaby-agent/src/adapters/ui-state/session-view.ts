@@ -151,6 +151,7 @@ export class SessionViewOwner {
       const event: UiSessionChangedEvent = structuredClone({
         ...incrementalTextChange(view, change),
         type: "session.changed",
+        serverNow: Date.now(),
         version: {
           ...view.version,
           sessionRevision: view.version.sessionRevision + 1,

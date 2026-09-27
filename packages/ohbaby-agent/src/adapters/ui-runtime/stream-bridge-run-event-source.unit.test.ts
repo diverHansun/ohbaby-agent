@@ -14,6 +14,60 @@ async function nextEvent(
 }
 
 describe("createStreamBridgeRunEventSource", () => {
+  it("decodes saved model and tool observations with their actual child owner", async () => {
+    const bridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const source = createStreamBridgeRunEventSource(bridge);
+    const iterator = source.subscribeRunEvents("child")[Symbol.asyncIterator]();
+    const request = {
+      requestId: "r",
+      runId: "child",
+      messageId: "m",
+      step: 1,
+      attempt: 1,
+      purpose: "agent-step",
+      startedAt: 100,
+      outcome: "running",
+    };
+    const execution = {
+      runId: "child",
+      phase: "queued",
+      createdAt: 100,
+      phaseStartedAt: 120,
+      waitReason: "capacity",
+    };
+    bridge.publish("run/child", "run.llm.request-started", {
+      runId: "child",
+      sessionId: "child-session",
+      contextScopeId: "scope",
+      messageId: "m",
+      step: 1,
+      timestamp: 100,
+      request,
+    });
+    bridge.publish("run/child", "run.tool.state", {
+      runId: "child",
+      sessionId: "child-session",
+      contextScopeId: "scope",
+      messageId: "m",
+      step: 1,
+      timestamp: 120,
+      execution,
+      callId: "c",
+      toolName: "bash",
+      params: {},
+    });
+    const facts = [await nextEvent(iterator), await nextEvent(iterator)];
+    bridge.end("run/child");
+    expect(facts).toMatchObject([
+      {
+        type: "llm:request-started",
+        runId: "child",
+        sessionId: "child-session",
+        request,
+      },
+      { type: "tool:state", runId: "child", execution },
+    ]);
+  });
   it("translates automatic compaction progress events from the run stream", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const source = createStreamBridgeRunEventSource(streamBridge);

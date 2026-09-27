@@ -1,3 +1,4 @@
+import type { ModelRequestRecord } from "../llm-client/types.js";
 import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
 import type {
   DisplayReasoningOwner,
@@ -128,7 +129,8 @@ export type AgentTerminalReason =
   | "output_length"
   | "content_filter"
   | "model_state_persistence_failure"
-  | "tool_persistence_failure";
+  | "tool_persistence_failure"
+  | "model_persistence_failure";
 
 export interface LifecycleSourceIdentity {
   readonly runId?: string;
@@ -176,6 +178,17 @@ export type LifecycleEvent = LifecycleSourceIdentity &
         readonly finishReason?: ModelFinishReason | "error";
         readonly toolResults?: readonly ToolCallResult[];
       }
+    | ((
+        | { readonly type: "llm:request-started" }
+        | { readonly type: "llm:first-text" }
+        | { readonly type: "llm:request-ended" }
+      ) & {
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step: number;
+        readonly timestamp: number;
+        readonly request: ModelRequestRecord;
+      })
     | {
         readonly type: "llm:start";
         readonly sessionId: string;

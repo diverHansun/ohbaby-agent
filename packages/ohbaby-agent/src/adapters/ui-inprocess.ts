@@ -3205,10 +3205,16 @@ export function createInProcessUiBackendClient(
       await validateSessionRead(input);
       try {
         await sourceProjection.owner.ready(input.sessionId);
-        return sourceProjection.owner.read(input.sessionId);
+        return {
+          ...sourceProjection.owner.read(input.sessionId),
+          serverNow: Date.now(),
+        };
       } catch {
         await sourceProjection.owner.rebuild(input.sessionId);
-        return sourceProjection.owner.read(input.sessionId);
+        return {
+          ...sourceProjection.owner.read(input.sessionId),
+          serverNow: Date.now(),
+        };
       }
     },
     async getSessionHistory(input): Promise<UiSessionHistory> {
@@ -3314,8 +3320,8 @@ export function createInProcessUiBackendClient(
       input.signal?.throwIfAborted();
       return permissionProjection.getSnapshot(input.rootSessionId);
     },
-    getSnapshot(): Promise<UiSnapshot> {
-      return readSnapshotWithPermission();
+    async getSnapshot(): Promise<UiSnapshot> {
+      return { ...(await readSnapshotWithPermission()), serverNow: Date.now() };
     },
 
     getContextWindowUsage(input): Promise<UiContextWindowUsage | null> {

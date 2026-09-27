@@ -162,13 +162,22 @@ describe("failed child scope and primary run handoff", () => {
       };
       const executeBatch = vi
         .fn<ToolSchedulerInstance["executeBatch"]>()
-        .mockResolvedValue([
-          {
+        .mockImplementation(async (batch) => {
+          const result = {
             callId: "primary_call",
-            status: "success",
+            status: "success" as const,
             output: "primary tool fact",
-          },
-        ]);
+            execution: {
+              phase: "ended" as const,
+              createdAt: 1,
+              phaseStartedAt: 2,
+              endedAt: 2,
+              outcome: "success" as const,
+            },
+          };
+          await batch.observer?.onCallSettled(batch.calls[0], 0, result);
+          return [result];
+        });
       const lifecycle = new Lifecycle({
         contextManager,
         llmClient,

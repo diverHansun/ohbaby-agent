@@ -1,3 +1,4 @@
+import type { UiPromptSubmission } from "ohbaby-sdk";
 import {
   createInitialViewState,
   reduceUiEvent,
@@ -71,6 +72,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
   let historyLoaded = false;
   let invalidatedAt = -1;
   const deleted = new Set<string>();
+  const loadedPrompts = new Map<string, UiPromptSubmission>();
   const listeners = new Set<StoreListener>();
 
   function publish(next: StoreSnapshot): void {
@@ -121,7 +123,13 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         sessions: [{ ...view.session, messages: ordered }],
         activeSessionId: view.session.id,
         runs: view.runs,
-        prompts: view.prompts,
+        serverNow: view.serverNow,
+        prompts: [
+          ...new Map([
+            ...loadedPrompts,
+            ...view.prompts.map((prompt) => [prompt.promptId, prompt] as const),
+          ]).values(),
+        ],
         permissions: [],
         permission: snapshot.view.snapshot?.permission,
         status: active?.status ?? { kind: "idle" },
@@ -150,6 +158,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
           sessionSync.scope?.bindingGeneration;
       if (changedScope) {
         loaded.clear();
+        loadedPrompts.clear();
         observed.clear();
         deleted.clear();
         invalidatedAt = -1;
@@ -237,6 +246,12 @@ export function createOhbabyWebStore(): OhbabyWebStore {
             observed.delete(id);
           }
         }
+      for (const prompt of page.prompts) {
+        if (prompt.sessionId !== view.session.id) continue;
+        const previous = loadedPrompts.get(prompt.promptId);
+        if (!previous || previous.updatedAt <= prompt.updatedAt)
+          loadedPrompts.set(prompt.promptId, prompt);
+      }
       const hotIds = new Set(
         view.session.messages.map((message) => message.id),
       );

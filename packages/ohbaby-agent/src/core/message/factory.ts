@@ -34,6 +34,7 @@ export function createMessage(input: {
     return {
       ...base,
       role: "assistant",
+      modelRequests: input.data.modelRequests,
       agent: input.data.agent,
       parentId: input.data.parentId,
       providerId: input.data.providerId,
