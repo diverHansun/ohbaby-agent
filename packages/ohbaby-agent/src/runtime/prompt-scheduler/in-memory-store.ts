@@ -29,6 +29,7 @@ export interface InMemoryPromptSubmissionStoreOptions {
 function clone(record: PromptSubmissionRecord): PromptSubmissionRecord {
   return {
     ...record,
+    steerReceipt: record.steerReceipt ? { ...record.steerReceipt } : undefined,
     reasoning: record.reasoning ? { ...record.reasoning } : undefined,
     error: record.error ? { ...record.error } : undefined,
   };

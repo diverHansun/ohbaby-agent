@@ -11,6 +11,7 @@ import {
   type SandboxLease,
   type SandboxManagerPort,
   type SandboxScopeInput,
+  type SandboxManagerOptions,
 } from "../../sandbox/index.js";
 
 export interface HostLocalSandboxManager extends SandboxManagerPort {
@@ -123,11 +124,12 @@ export function createHostLocalEnvironment(
 
 export function createHostLocalSandboxManager(
   workdir = process.cwd(),
+  options: Pick<SandboxManagerOptions, "authorizeInternalRead"> = {},
 ): HostLocalSandboxManager {
   const fallbackWorkdir = createHostLocalEnvironment(workdir).workdir;
   const registry = new AdapterRegistry();
   registry.register(new HostLocalAdapter());
-  const manager = new SandboxManager({ adapterRegistry: registry });
+  const manager = new SandboxManager({ adapterRegistry: registry, ...options });
   const operations = new Map<string, Promise<void>>();
   const sessionWorkdirs = new Map<string, string>();
 

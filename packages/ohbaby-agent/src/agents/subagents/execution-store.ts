@@ -6,6 +6,8 @@ import {
   type SqliteValue,
 } from "../../services/database/index.js";
 
+export class SubagentExecutionConflictError extends Error {}
+
 export type ExecutionTerminalStatus =
   | "completed"
   | "failed"
@@ -137,7 +139,10 @@ export interface SubagentExecutionStore {
 const terminal = (r: SubagentExecutionRecord): boolean =>
   r.status !== "queued" && r.status !== "running";
 function required(value: string): void {
-  if (!value.trim()) throw new Error("Execution identity must not be empty");
+  if (!value.trim())
+    throw new SubagentExecutionConflictError(
+      "Execution identity must not be empty",
+    );
 }
 function receiptIdentity(r: AcceptSubagentExecution): string {
   return JSON.stringify([
@@ -157,7 +162,9 @@ function receiptIdentity(r: AcceptSubagentExecution): string {
 function limitFor(input: ExecutionHistory): number {
   const limit = input.limit ?? 50;
   if (!Number.isInteger(limit) || limit < 1 || limit > 200)
-    throw new Error("History limit must be between 1 and 200");
+    throw new SubagentExecutionConflictError(
+      "History limit must be between 1 and 200",
+    );
   return limit;
 }
 function finishRecord(
@@ -255,7 +262,7 @@ abstract class ExecutionStore implements SubagentExecutionStore {
       input.timeoutMs !== undefined &&
       (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0)
     )
-      throw new Error("Invalid timeout");
+      throw new SubagentExecutionConflictError("Invalid timeout");
     return this.transaction(() => {
       const previous = this.findInvocation(
         input.requesterRunId,
@@ -263,11 +270,13 @@ abstract class ExecutionStore implements SubagentExecutionStore {
       );
       if (previous) {
         if (receiptIdentity(previous) !== receiptIdentity(input))
-          throw new Error("Execution acceptance conflict");
+          throw new SubagentExecutionConflictError(
+            "Execution acceptance conflict",
+          );
         return { record: previous, created: false };
       }
       if (this.read(input.executionId))
-        throw new Error("Execution ID conflict");
+        throw new SubagentExecutionConflictError("Execution ID conflict");
       const record: SubagentExecutionRecord = {
         ...input,
         status: "queued",
@@ -287,7 +296,10 @@ abstract class ExecutionStore implements SubagentExecutionStore {
   ): Promise<SubagentExecutionRecord> {
     return this.transaction(() => {
       const r = this.scoped(input);
-      if (!r) throw new Error("Execution not found in requester scope");
+      if (!r)
+        throw new SubagentExecutionConflictError(
+          "Execution not found in requester scope",
+        );
       const next = change(r);
       this.save(next);
       return next;
@@ -301,13 +313,16 @@ abstract class ExecutionStore implements SubagentExecutionStore {
     required(child.sessionId);
     required(child.contextScopeId);
     return this.mutate(input, (r) => {
-      if (terminal(r)) throw new Error("Cannot bind terminal execution");
+      if (terminal(r))
+        throw new SubagentExecutionConflictError(
+          "Cannot bind terminal execution",
+        );
       if (r.childSessionId !== undefined) {
         if (
           r.childSessionId !== child.sessionId ||
           r.childScopeId !== child.contextScopeId
         )
-          throw new Error("Child identity conflict");
+          throw new SubagentExecutionConflictError("Child identity conflict");
         return r;
       }
       return {
@@ -325,12 +340,19 @@ abstract class ExecutionStore implements SubagentExecutionStore {
   ): Promise<SubagentExecutionRecord> {
     required(childRunId);
     return this.mutate(input, (r) => {
-      if (terminal(r)) throw new Error("Cannot start terminal execution");
+      if (terminal(r))
+        throw new SubagentExecutionConflictError(
+          "Cannot start terminal execution",
+        );
       if (!r.childSessionId || !r.childScopeId)
-        throw new Error("Child must be bound before start");
+        throw new SubagentExecutionConflictError(
+          "Child must be bound before start",
+        );
       if (r.childRunId) {
         if (r.childRunId !== childRunId)
-          throw new Error("Child run identity conflict");
+          throw new SubagentExecutionConflictError(
+            "Child run identity conflict",
+          );
         return r;
       }
       return {
@@ -374,12 +396,14 @@ abstract class ExecutionStore implements SubagentExecutionStore {
         !Number.isSafeInteger(artifact.sizeBytes) ||
         artifact.sizeBytes < 0)
     )
-      throw new Error("Invalid ready artifact");
+      throw new SubagentExecutionConflictError("Invalid ready artifact");
     return this.mutate(input, (r) => {
       if (r.artifact.state === "deleted" && artifact.state !== "deleted")
-        throw new Error("Result artifact was deleted");
+        throw new SubagentExecutionConflictError("Result artifact was deleted");
       if (!terminal(r) && artifact.state !== "deleted")
-        throw new Error("Artifact requires terminal result");
+        throw new SubagentExecutionConflictError(
+          "Artifact requires terminal result",
+        );
       return { ...r, artifact, updatedAt: at };
     });
   }
@@ -391,10 +415,12 @@ abstract class ExecutionStore implements SubagentExecutionStore {
     required(inputId);
     return this.mutate(input, (r) => {
       if (!terminal(r) || r.mode === "foreground")
-        throw new Error("No background delivery intent");
+        throw new SubagentExecutionConflictError(
+          "No background delivery intent",
+        );
       if (r.delivery.inputId) {
         if (r.delivery.inputId !== inputId)
-          throw new Error("Delivered input conflict");
+          throw new SubagentExecutionConflictError("Delivered input conflict");
         return r;
       }
       return {
@@ -417,12 +443,14 @@ abstract class ExecutionStore implements SubagentExecutionStore {
     required(requestId);
     return this.mutate(input, (r) => {
       if (!r.delivery.inputId)
-        throw new Error(
+        throw new SubagentExecutionConflictError(
           "Delivery must be recorded before processing opportunity",
         );
       if (r.delivery.processedRequestId) {
         if (r.delivery.processedRequestId !== requestId)
-          throw new Error("Processed request conflict");
+          throw new SubagentExecutionConflictError(
+            "Processed request conflict",
+          );
         return r;
       }
       return {

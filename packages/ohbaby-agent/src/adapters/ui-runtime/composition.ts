@@ -1,3 +1,10 @@
+import type { CurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
+import { createSubagentResultArtifacts } from "../../agents/subagents/result-artifacts.js";
+import { createSubagentContinuationCoordinator } from "../../agents/subagents/continuation-coordinator.js";
+import { collectExecutionFacts } from "../../agents/subagents/execution-facts.js";
+import { createStorage } from "../../services/storage/index.js";
+import { PermissionEvent } from "../../permission/events.js";
+import { MessageEvent } from "../../core/message/events.js";
 import { randomUUID } from "node:crypto";
 import { activeModelProfiles } from "../../config/llm/model-profile.js";
 import {
@@ -180,6 +187,8 @@ export interface UiRuntimeCompositionOptions {
   readonly onTodoWrite?: (event: TodoWriteEvent) => void;
   readonly subagentInstanceStore?: SubagentInstanceStore;
   readonly subagentExecutionStore?: SubagentExecutionStore;
+  readonly currentRunInputStore?: CurrentRunInputStore;
+  readonly resultStorageRoot?: string;
   readonly subagentOwnerId?: string;
   readonly subagentOwnerPid?: number;
 }
@@ -287,6 +296,46 @@ export async function createUiRuntimeComposition(
     });
   const subagentExecutionStore =
     options.subagentExecutionStore ?? new InMemorySubagentExecutionStore();
+  const resultArtifacts = createSubagentResultArtifacts({
+    store: subagentExecutionStore,
+    storage: createStorage({ rootDir: options.resultStorageRoot }),
+    rootDir: options.resultStorageRoot,
+    sessionExists: async (sessionId) =>
+      Boolean(await sessionManager.get(sessionId)),
+    now: options.now,
+  });
+  const factsFor = (
+    execution: Parameters<typeof collectExecutionFacts>[0]["execution"],
+  ): ReturnType<typeof collectExecutionFacts> =>
+    collectExecutionFacts({
+      execution,
+      messages: options.messageManager,
+      permissions: options.permissionManager,
+      now: options.now,
+    });
+  const continuation = options.currentRunInputStore
+    ? createSubagentContinuationCoordinator({
+        inputs: options.currentRunInputStore,
+        executions: subagentExecutionStore,
+        prepareResult: (execution, signal) =>
+          resultArtifacts.prepare(execution, { signal }),
+        collectFacts: factsFor,
+        now: options.now,
+        subscribe: (identity, wake) => {
+          const unsubs = [
+            options.bus.subscribe(PermissionEvent.Updated, ({ info }) => {
+              if (info.rootSessionId === identity.sessionId) wake();
+            }),
+            options.bus.subscribe(PermissionEvent.Replied, (info) => {
+              if (info.rootSessionId === identity.sessionId) wake();
+            }),
+          ];
+          return () => {
+            for (const unsubscribe of unsubs) unsubscribe();
+          };
+        },
+      })
+    : undefined;
   const subagentInstanceStore =
     options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
   const runtimeGeneration = randomUUID();
@@ -343,7 +392,11 @@ export async function createUiRuntimeComposition(
     permissionState: options.permissionState,
   });
   const sandboxManager =
-    options.sandboxManager ?? createHostLocalSandboxManager(options.workdir);
+    options.sandboxManager ??
+    createHostLocalSandboxManager(options.workdir, {
+      authorizeInternalRead: (input) =>
+        resultArtifacts.authorizeRead({ ...input, operation: "read" }),
+    });
 
   const todoService = new TodoService({
     history: options.messageManager,
@@ -547,6 +600,9 @@ export async function createUiRuntimeComposition(
   const contextManager =
     options.contextManager ??
     createContextManager({
+      filterModelHistory: options.currentRunInputStore?.filterModelHistory.bind(
+        options.currentRunInputStore,
+      ),
       bus: options.bus,
       llmClient: createContextSummaryClient(options.llmClient),
       memory: createMemoryLoader(),
@@ -590,6 +646,17 @@ export async function createUiRuntimeComposition(
   });
 
   const runManager = new RunManager({
+    currentRunInputs: {
+      close(runId, reason) {
+        // Both owners seal synchronously before either durable write is awaited.
+        const inputsClosed = options.currentRunInputStore?.close(runId, reason);
+        const childrenClosed = subagentHost.interruptByRootRun(runId, reason);
+        return Promise.all([inputsClosed, childrenClosed]).then(
+          () => undefined,
+        );
+      },
+    },
+    createCurrentRunInputPort: continuation?.createPort,
     revokePermissionsForRun: (runId, reason): void => {
       options.permissionManager?.revokeByRun(runId, reason);
     },
@@ -679,6 +746,31 @@ export async function createUiRuntimeComposition(
   };
 
   const subagentHost = new SessionSubagentHost({
+    collectExecutionFacts: factsFor,
+    ensureResultArtifact: async (execution) => {
+      await resultArtifacts.prepare(execution, { forceFile: true });
+    },
+    onTerminal: (record) => continuation?.notify(record.rootRunId),
+    isApprovalBlocked: async (executionId, parentSessionId) => {
+      const execution = await subagentExecutionStore.get({
+        executionId,
+        parentSessionId,
+      });
+      return execution ? (await factsFor(execution)).approval.blocked : false;
+    },
+    subscribeExecution: (sessionId, runId, wake) => {
+      const unsubs = [
+        options.bus.subscribe(MessageEvent.PartUpdated, ({ part }) => {
+          if (part.sessionId === sessionId) wake();
+        }),
+        options.bus.subscribe(PermissionEvent.Replied, (info) => {
+          if (info.runId === runId) wake();
+        }),
+      ];
+      return () => {
+        for (const unsubscribe of unsubs) unsubscribe();
+      };
+    },
     executionStore: subagentExecutionStore,
     async resolveRequester(
       input,
@@ -772,6 +864,7 @@ export async function createUiRuntimeComposition(
   const unsubscribeSessionRemoved = options.bus.subscribe(
     SessionEvent.Removed,
     (payload) => {
+      trackLifecycleCleanup(resultArtifacts.deleteSession(payload.sessionId));
       contextManager.disposeSession(payload.sessionId);
       mcpToolMenu.disposeSession(payload.sessionId);
       scopeToolSequence.disposeSession(payload.sessionId);
@@ -1001,6 +1094,13 @@ export async function createUiRuntimeComposition(
   }
 
   return {
+    getSubagentWaitState: (rootRunId) =>
+      continuation?.getWaitState(rootRunId) ?? {
+        waiting: false,
+        approvalBlocked: false,
+      },
+    getSubagentExecutionBudget: (executionId) =>
+      subagentHost.getExecutionBudget(executionId),
     agentManager,
     goals: goalService,
     todos: todoService,

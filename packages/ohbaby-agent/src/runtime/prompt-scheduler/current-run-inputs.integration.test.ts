@@ -103,6 +103,14 @@ for (const backend of ["memory", "sqlite"] as const)
         userMessageId: "reserved-message",
       });
       expect(await f.inputs.steerQueued(f.steer)).toEqual(first);
+      const exported = await f.queue.get("queued");
+      Object.assign(exported?.steerReceipt ?? {}, {
+        acceptedTargetRunId: "foreign-run",
+      });
+      expect(
+        (await f.queue.get("queued"))?.steerReceipt?.acceptedTargetRunId,
+      ).toBe("run-a");
+      expect(await f.inputs.steerQueued(f.steer)).toEqual(first);
       expect((await f.queue.get("queued"))?.status).toBe("steered");
       expect(await f.queue.claim("queued")).toBeNull();
       const messages = await f.messages.listBySession("session");

@@ -29,6 +29,21 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 describe("source session commit boundary", () => {
+  it("ignores late failure reporting after the view owner is disposed", async () => {
+    const publish = vi.fn();
+    const owner = new SessionViewOwner({
+      runtimeEpoch: "late",
+      seed: (id) => Promise.resolve(seed(id)),
+      publish,
+    });
+    await owner.initialize("session");
+    owner.dispose();
+    publish.mockClear();
+    expect(() => {
+      owner.markUnavailable("session", new Error("late projection"));
+    }).not.toThrow();
+    expect(publish).not.toHaveBeenCalled();
+  });
   it("yields only between budgeted commits without delaying results or fatal errors", async () => {
     vi.useFakeTimers({ toFake: ["setImmediate"] });
     let now = 0;

@@ -53,6 +53,8 @@ function createHostFixture(
       contextScopeId?: string,
     ) => ReasoningIntent | undefined;
     readonly existingChild?: Session;
+    readonly executionStore?: InMemorySubagentExecutionStore;
+    readonly onFatal?: (error: Error, rootRunId: string) => void;
     readonly store?: InMemorySubagentInstanceStore;
   } = {},
 ): {
@@ -104,7 +106,9 @@ function createHostFixture(
       } satisfies RuntimeAgent),
   );
   const host = new SessionSubagentHost({
-    executionStore: new InMemorySubagentExecutionStore(),
+    executionStore:
+      options.executionStore ?? new InMemorySubagentExecutionStore(),
+    onFatal: options.onFatal,
     resolveRequester: (
       input,
     ): Promise<{ rootRunId: string; rootSessionId: string }> =>
@@ -240,6 +244,157 @@ async function runAndObserve(
 }
 
 describe("SessionSubagentHost", () => {
+  it.each(["accept", "bindChild", "start"] as const)(
+    "seals and reports fatal %s persistence failures",
+    async (method) => {
+      const executionStore = new InMemorySubagentExecutionStore();
+      const onFatal = vi.fn();
+      vi.spyOn(executionStore, method).mockRejectedValue(
+        new Error("database unavailable"),
+      );
+      const { host } = createHostFixture({ executionStore, onFatal });
+      await expect(
+        host.run({
+          requesterRunId: "root",
+          requesterMessageId: "message",
+          requestId: "call",
+          parentSessionId: "parent_1",
+          prompt: "task",
+          role: "explore",
+          mode: "foreground",
+        }),
+      ).rejects.toThrow("database unavailable");
+      expect(onFatal).toHaveBeenCalledWith(expect.any(Error), "root");
+      await expect(
+        host.run({
+          requesterRunId: "root",
+          requesterMessageId: "message",
+          requestId: "later",
+          parentSessionId: "parent_1",
+          prompt: "task",
+          role: "explore",
+          mode: "foreground",
+        }),
+      ).rejects.toThrow(/closed/);
+    },
+  );
+  it("replays an accepted continuation after its reusable instance is closed", async () => {
+    const { host, turn } = createHostFixture();
+    const base = {
+      requesterRunId: "root",
+      requesterMessageId: "message",
+      parentSessionId: "parent_1",
+      mode: "foreground" as const,
+    };
+    const first = await host.run({
+      ...base,
+      requestId: "first",
+      prompt: "first",
+      role: "explore",
+    });
+    const input = {
+      ...base,
+      requestId: "follow",
+      prompt: "follow",
+      subagentId: first.execution.subagentId,
+    };
+    const follow = await host.run(input);
+    await host.close({
+      parentSessionId: "parent_1",
+      subagentId: follow.execution.subagentId,
+    });
+    expect((await host.run(input)).execution.executionId).toBe(
+      follow.execution.executionId,
+    );
+    expect(turn).toHaveBeenCalledTimes(2);
+  });
+  it("skips a sealed root queue entry without stranding the next root", async () => {
+    const executionStore = new InMemorySubagentExecutionStore();
+    const { host, turn } = createHostFixture({ executionStore });
+    let finishFirst!: (value: AgentRunResult) => void;
+    turn.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFirst = resolve;
+        }),
+    );
+    const base = {
+      requesterMessageId: "message",
+      parentSessionId: "parent_1",
+      mode: "background" as const,
+    };
+    const first = await host.run({
+      ...base,
+      requesterRunId: "C",
+      requestId: "C",
+      prompt: "C",
+      role: "explore",
+    });
+    await vi.waitFor(
+      () => {
+        expect(turn).toHaveBeenCalledTimes(1);
+      },
+      {
+        interval: 1,
+      },
+    );
+    await host.run({
+      ...base,
+      requesterRunId: "A",
+      requestId: "A",
+      prompt: "A",
+      subagentId: first.execution.subagentId,
+    });
+    await host.run({
+      ...base,
+      requesterRunId: "B",
+      requestId: "B",
+      prompt: "B",
+      subagentId: first.execution.subagentId,
+    });
+    await vi.waitFor(
+      async () => {
+        expect(
+          (await host.status({ parentSessionId: "parent_1" })).items[0]
+            ?.pendingQueue,
+        ).toHaveLength(2);
+      },
+      { interval: 1 },
+    );
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const original = executionStore.interruptRoot.bind(executionStore);
+    vi.spyOn(executionStore, "interruptRoot").mockImplementation(
+      async (...args) => {
+        await held;
+        return original(...args);
+      },
+    );
+    const interrupted = host.interruptByRootRun("A");
+    finishFirst({
+      mode: "waitForCompletion",
+      sessionId: "child_1",
+      success: true,
+      finalOutput: "C done",
+    });
+    try {
+      await vi.waitFor(
+        () => {
+          expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual([
+            "C",
+            "B",
+          ]);
+        },
+        { interval: 1, timeout: 200 },
+      );
+    } finally {
+      release();
+      await interrupted;
+      await host.dispose();
+    }
+  });
   it.each(["body", "empty", "failed", "interrupted", "timed_out"] as const)(
     "delivers the foreground %s result even with a later background input queued",
     async (outcome) => {
@@ -264,6 +419,7 @@ describe("SessionSubagentHost", () => {
         {
           prompt: "first",
           role: "explore",
+          mode: "foreground",
           ...(outcome === "timed_out" ? { timeout_ms: 100 } : {}),
         },
         {
@@ -356,7 +512,11 @@ describe("SessionSubagentHost", () => {
       if (!tool) throw new Error("Missing subagent_run tool");
       try {
         const second = tool.execute(
-          { subagent_id: first.item.subagentId, prompt: "second" },
+          {
+            subagent_id: first.item.subagentId,
+            prompt: "second",
+            mode: "foreground",
+          },
           {
             runId: "parent_run",
             callId: "second",
@@ -1198,9 +1358,12 @@ describe("SessionSubagentHost", () => {
       signal: controller.signal,
       timeoutMs: 50,
     });
-    await vi.waitFor(() => {
-      expect(turn).toHaveBeenCalledTimes(1);
-    });
+    await vi.waitFor(
+      () => {
+        expect(turn).toHaveBeenCalledTimes(1);
+      },
+      { interval: 1 },
+    );
     controller.abort("Subagent timed out after 50ms");
     const result = await running;
 

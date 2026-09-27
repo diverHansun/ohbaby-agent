@@ -101,6 +101,7 @@ describe("services/database", () => {
       { version: "016_prompt_submission_reasoning" },
       { version: "017_message_recovery_pages" },
       { version: "018_subagent_execution" },
+      { version: "019_current_run_input" },
     ]);
   });
 
@@ -298,7 +299,7 @@ describe("services/database", () => {
     const legacyMigrations: MigrationDefinition[] = [
       {
         version: "001_initial",
-        sql: "CREATE TABLE scheduler_job (id TEXT PRIMARY KEY);",
+        sql: `${INITIAL_MIGRATIONS[0]?.sql ?? ""} CREATE TABLE scheduler_job (id TEXT PRIMARY KEY);`,
       },
       {
         version: "002_part_order_unique",
@@ -355,18 +356,7 @@ describe("services/database", () => {
     const legacyMigrations: MigrationDefinition[] = [
       {
         version: "001_initial",
-        sql: `
-          CREATE TABLE run_ledger (
-            run_id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            trigger TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending',
-            created_at INTEGER NOT NULL,
-            started_at INTEGER,
-            ended_at INTEGER,
-            error TEXT
-          );
-        `,
+        sql: INITIAL_MIGRATIONS[0]?.sql ?? "",
       },
       { version: "002_part_order_unique", sql: "SELECT 1;" },
       {

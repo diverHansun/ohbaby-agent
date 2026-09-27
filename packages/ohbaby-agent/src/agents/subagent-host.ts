@@ -1,3 +1,4 @@
+import { SubagentExecutionConflictError } from "./subagents/execution-store.js";
 import { createHash } from "node:crypto";
 import type {
   SubagentExecutionRecord,
@@ -14,7 +15,10 @@ import type {
 } from "../core/agents/index.js";
 import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
 import type { Session, SessionManager } from "../services/session/index.js";
-import { createDeadlineController } from "./deadline.js";
+import {
+  createApprovalAwareDeadline,
+  type ExecutionBudgetSnapshot,
+} from "./subagents/execution-budget.js";
 import type { AgentManager } from "./manager.js";
 import type { SubagentRole } from "./roles.js";
 import type {
@@ -82,6 +86,21 @@ export interface SessionSubagentHostOptions {
   readonly onTerminal?: (
     record: SubagentExecutionRecord,
   ) => void | Promise<void>;
+  readonly collectExecutionFacts?: (
+    execution: SubagentExecutionRecord,
+  ) => Promise<import("./subagents/execution-facts.js").ExecutionFactView>;
+  readonly ensureResultArtifact?: (
+    execution: SubagentExecutionRecord,
+  ) => Promise<void>;
+  readonly isApprovalBlocked?: (
+    executionId: string,
+    parentSessionId: string,
+  ) => Promise<boolean>;
+  readonly subscribeExecution?: (
+    sessionId: string,
+    runId: string,
+    wake: () => void,
+  ) => () => void;
   readonly onFatal?: (error: Error, rootRunId: string) => void;
   readonly getParentReasoning?: (
     sessionId: string,
@@ -228,6 +247,14 @@ export class SessionSubagentHost {
   private readonly invocationLocks = new Map<string, Promise<void>>();
   private readonly executionJobs = new Map<string, Promise<EntryOutcome>>();
   private readonly rootByExecution = new Map<string, string>();
+  private readonly executionBudgets = new Map<
+    string,
+    () => ExecutionBudgetSnapshot
+  >();
+
+  getExecutionBudget(executionId: string): ExecutionBudgetSnapshot | undefined {
+    return this.executionBudgets.get(executionId)?.();
+  }
 
   constructor(private readonly options: SessionSubagentHostOptions) {
     this.createSubagentId = options.createSubagentId ?? defaultSubagentId;
@@ -274,30 +301,36 @@ export class SessionSubagentHost {
     let execution: SubagentExecutionRecord;
     try {
       this.assertRootOpen(root.rootRunId);
-      const prior = await this.options.executionStore.get(lookup);
+      const prior = await this.executionWrite(root.rootRunId, () =>
+        this.options.executionStore.get(lookup),
+      );
       const existing =
-        input.subagentId === undefined
+        input.subagentId === undefined || prior !== null
           ? undefined
           : await this.getExisting(input);
       const timeoutMs =
         requestedTimeout ??
         Math.min(
-          existing?.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS,
+          prior?.timeoutMs ??
+            existing?.timeoutMs ??
+            DEFAULT_SUBAGENT_TIMEOUT_MS,
           MAX_SUBAGENT_TIMEOUT_MS,
         );
       this.assertRootOpen(root.rootRunId);
-      const accepted = await this.options.executionStore.accept({
-        ...lookup,
-        ...root,
-        requesterRunId: input.requesterRunId,
-        requestId,
-        subagentId:
-          input.subagentId ?? prior?.subagentId ?? this.createSubagentId(),
-        mode: input.mode,
-        prompt: input.prompt,
-        timeoutMs,
-        createdAt: this.now(),
-      });
+      const accepted = await this.executionWrite(root.rootRunId, () =>
+        this.options.executionStore.accept({
+          ...lookup,
+          ...root,
+          requesterRunId: input.requesterRunId,
+          requestId,
+          subagentId:
+            input.subagentId ?? prior?.subagentId ?? this.createSubagentId(),
+          mode: input.mode,
+          prompt: input.prompt,
+          timeoutMs,
+          createdAt: this.now(),
+        }),
+      );
       execution = accepted.record;
       this.rootByExecution.set(executionId, root.rootRunId);
       if (this.sealedRoots.has(root.rootRunId)) {
@@ -327,13 +360,15 @@ export class SessionSubagentHost {
             this.assertRootOpen(root.rootRunId);
             if (this.closedSubagents.has(execution.subagentId))
               throw new Error("Subagent is closed");
-            await this.options.executionStore.bindChild(
-              lookup,
-              {
-                sessionId: record.sessionId,
-                contextScopeId: record.contextScopeId,
-              },
-              this.now(),
+            await this.executionWrite(root.rootRunId, () =>
+              this.options.executionStore.bindChild(
+                lookup,
+                {
+                  sessionId: record.sessionId,
+                  contextScopeId: record.contextScopeId,
+                },
+                this.now(),
+              ),
             );
             this.assertRootOpen(root.rootRunId);
             return await this.enqueueOrSchedule(
@@ -415,6 +450,21 @@ export class SessionSubagentHost {
       output: result.output ?? result.error,
       success: result.status === "completed",
     };
+  }
+
+  private async executionWrite<T>(
+    rootRunId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof SubagentExecutionConflictError) throw error;
+      this.sealedRoots.add(rootRunId);
+      const failure = new SubagentPersistenceError(errorMessage(error));
+      this.options.onFatal?.(failure, rootRunId);
+      throw failure;
+    }
   }
 
   private assertRootOpen(rootRunId: string): void {
@@ -503,7 +553,33 @@ export class SessionSubagentHost {
           subagentId: input.subagentId,
           limit: 20,
         });
-    return { items, executions };
+    const collectFacts = this.options.collectExecutionFacts;
+    const facts = collectFacts
+      ? await Promise.all(
+          executions.map((execution) => collectFacts(execution)),
+        )
+      : undefined;
+    if (input.executionId && this.options.ensureResultArtifact) {
+      for (const execution of executions) {
+        if (execution.status === "queued" || execution.status === "running")
+          continue;
+        await this.options.ensureResultArtifact(execution);
+      }
+      const refreshed = await Promise.all(
+        executions.map((execution) =>
+          this.options.executionStore.get(execution),
+        ),
+      );
+      return {
+        items,
+        facts,
+        executions: refreshed.filter(
+          (execution): execution is SubagentExecutionRecord =>
+            execution !== null,
+        ),
+      };
+    }
+    return { items, executions, ...(facts ? { facts } : {}) };
   }
 
   async close(input: SubagentLookupInput): Promise<SubagentCloseResult> {
@@ -1094,15 +1170,22 @@ export class SessionSubagentHost {
           ) {
             return;
           }
-          const queued = active.queue.shift();
+          let queued = active.queue.shift();
+          while (queued?.rootRunId && this.sealedRoots.has(queued.rootRunId)) {
+            queued.unbindQueueAbort?.();
+            queued.completion?.reject(new Error("Subagent root run is closed"));
+            queued = active.queue.shift();
+          }
           if (!queued) {
+            await this.options.store.update(record.subagentId, {
+              pendingQueue: this.serializeQueue(active.queue),
+              updatedAt: this.now(),
+            });
             active.stopping = true;
             return;
           }
           queued.unbindQueueAbort?.();
           queued.unbindQueueAbort = undefined;
-          if (queued.rootRunId && this.sealedRoots.has(queued.rootRunId))
-            return;
           active.currentExecution = queued;
           const timeout = normalizeTimeoutMs(
             queued.timeoutMs ?? record.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS,
@@ -1111,13 +1194,17 @@ export class SessionSubagentHost {
           const startedAt = this.now();
           if (!queued.executionId || !queued.rootRunId)
             throw new Error("Queued execution identity missing");
-          await this.options.executionStore.start(
-            {
-              executionId: queued.executionId,
-              parentSessionId: record.parentSessionId,
-            },
-            nextRunId,
-            startedAt,
+          const queuedExecutionId = queued.executionId;
+          const queuedRootRunId = queued.rootRunId;
+          await this.executionWrite(queuedRootRunId, () =>
+            this.options.executionStore.start(
+              {
+                executionId: queuedExecutionId,
+                parentSessionId: record.parentSessionId,
+              },
+              nextRunId,
+              startedAt,
+            ),
           );
           this.assertRootOpen(queued.rootRunId);
           const nextClaim = await this.options.store.claim(record.subagentId, {
@@ -1281,11 +1368,31 @@ export class SessionSubagentHost {
     const deadline =
       effectiveTimeoutMs === undefined
         ? undefined
-        : createDeadlineController({
+        : createApprovalAwareDeadline({
             parent: abortController.signal,
             reason: timeoutMessage(effectiveTimeoutMs),
             timeoutMs: effectiveTimeoutMs,
+            isApprovalBlocked: () =>
+              input.executionId
+                ? (this.options.isApprovalBlocked?.(
+                    input.executionId,
+                    record.parentSessionId,
+                  ) ?? Promise.resolve(false))
+                : Promise.resolve(false),
+            subscribe: (wake) =>
+              this.options.subscribeExecution?.(
+                record.sessionId,
+                runId,
+                wake,
+              ) ?? (() => undefined),
+            onFailure: (error) => {
+              if (input.rootRunId)
+                this.options.onFatal?.(error, input.rootRunId);
+            },
+            now: this.options.now,
           });
+    if (input.executionId && deadline)
+      this.executionBudgets.set(input.executionId, () => deadline.snapshot());
     const turnSignal = deadline?.signal ?? abortController.signal;
     const timedOut = (): boolean => deadline?.didTimeout() === true;
     const interrupted = (): boolean =>

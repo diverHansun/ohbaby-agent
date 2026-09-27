@@ -92,6 +92,7 @@ export interface SubagentStatusInput {
 }
 
 export interface SubagentStatusResult {
+  readonly facts?: readonly import("./execution-facts.js").ExecutionFactView[];
   readonly items: readonly SubagentInstanceRecord[];
   readonly executions: readonly SubagentExecutionRecord[];
 }

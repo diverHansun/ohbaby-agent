@@ -182,6 +182,7 @@ export class SessionViewOwner {
   }
 
   markUnavailable(sessionId: string, error: unknown): void {
+    if (this.disposed) return;
     const partition = this.partition(sessionId);
     partition.error = error instanceof Error ? error : new Error(String(error));
     if (partition.unavailableNotified === partition.generation) return;

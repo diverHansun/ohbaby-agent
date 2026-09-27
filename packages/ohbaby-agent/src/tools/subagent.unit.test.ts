@@ -80,6 +80,28 @@ const context = {
 };
 
 describe("subagent builtin tools", () => {
+  it("defaults new dispatches to background acceptance", async () => {
+    const { host, run } = createHost();
+    run.mockResolvedValueOnce({
+      execution: {
+        ...execution,
+        mode: "background",
+        status: "queued",
+        output: undefined,
+        completedAt: undefined,
+        delivery: { state: "none" },
+      },
+    });
+    const result = await getTool(
+      createBuiltinTools({ subagentHost: host }),
+      "subagent_run",
+    ).execute({ prompt: "inspect" }, context);
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "background" }),
+    );
+    expect(result.output).toContain("execution_1");
+    expect(result.output).not.toContain("<subagent_output>");
+  });
   it("registers only the new subagent tools when a subagent host is injected", () => {
     const { host } = createHost();
     const names = createBuiltinTools({ subagentHost: host }).map(

@@ -1,3 +1,4 @@
+import { renderExecutionFacts } from "../agents/subagents/execution-facts.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type {
   SessionSubagentHost,
@@ -58,7 +59,7 @@ function optionalPositiveInteger(
 function runMode(params: Record<string, unknown>): SubagentRunMode {
   const value = params.mode;
   if (value === undefined) {
-    return "foreground";
+    return "background";
   }
   if (value === "foreground" || value === "background") {
     return value;
@@ -81,6 +82,7 @@ function executionSummary(
     reason: record.reason?.slice(0, 512),
     mode: record.mode,
     resultStored: record.completedAt !== undefined,
+    artifact: record.artifact,
     sizeBytes: Buffer.byteLength(record.output ?? "", "utf8"),
   };
 }
@@ -136,13 +138,19 @@ function statusSummary(result: SubagentStatusResult): Record<string, unknown> {
       pendingInputs: item.pendingQueue.length,
     })),
     executions: result.executions.map(executionSummary),
+    omittedItems: Math.max(0, result.items.length - 20),
   };
 }
 
 function renderStatus(result: SubagentStatusResult): string {
   if (result.items.length === 0 && result.executions.length === 0)
     return "No subagents found.";
-  return JSON.stringify(statusSummary(result));
+  return (
+    JSON.stringify(statusSummary(result)) +
+    (result.facts
+      ? `\nExecution facts: ${renderExecutionFacts(result.facts)}`
+      : "")
+  );
 }
 
 function renderClose(result: SubagentCloseResult): string {
@@ -160,7 +168,7 @@ export function createSubagentTools(host: SubagentToolHost): readonly Tool[] {
   const run: Tool = {
     category: "subagent",
     description:
-      "Create or continue a subagent. Use mode foreground to wait for the result, or background to return a subagent_id immediately. Use subagent_id with prompt to continue an existing subagent.",
+      "Create or continue an independent subagent. Default background returns a durable execution receipt immediately; runtime automatically delivers its complete terminal result in this same task. Use foreground explicitly for a direct result. Use subagent_id with prompt to continue an existing instance. Do not poll status to wait; finish your progress response and runtime will wait up to 60 seconds, then 120 seconds on subsequent checks.",
     name: "subagent_run",
     parametersJsonSchema: {
       additionalProperties: false,

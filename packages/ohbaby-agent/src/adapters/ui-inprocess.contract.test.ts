@@ -1225,7 +1225,7 @@ function subagentRunToolCallEvent(input: {
 }): InterfaceProviderStreamEvent {
   const argumentsPayload: Record<string, unknown> = {
     description: input.description,
-    mode: input.mode,
+    mode: input.mode ?? "foreground",
     name: input.name,
     prompt: input.prompt,
     subagent_id: input.subagentId,
@@ -4322,7 +4322,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(childText).toContain("Use the configured child inspection rubric.");
   });
 
-  it("controls background subagents without leaking child transcripts into the parent", async () => {
+  it("delivers completed background results without copying child transcripts into the parent", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       createSubagentId: () => "subagent_1",
@@ -4355,7 +4355,7 @@ describe("createInProcessUiBackendClient", () => {
       sessionId: "session_1",
     });
 
-    expect(requests).toHaveLength(8);
+    expect(requests).toHaveLength(10);
     const childRequests = requests.filter((request) =>
       JSON.stringify(request.messages).includes("Task: explore"),
     );
@@ -4396,7 +4396,7 @@ describe("createInProcessUiBackendClient", () => {
       parentRequests.at(-1)?.messages,
     );
     expect(statusToolResultText).toContain("subagent_1");
-    expect(statusToolResultText).not.toContain("child follow-up output");
+    expect(statusToolResultText).toContain("child follow-up output");
     expect(statusToolResultText).toContain("resultStored");
   });
 
@@ -4424,7 +4424,9 @@ describe("createInProcessUiBackendClient", () => {
       sandboxManager,
     });
 
-    await client.submitPromptAndWait("Open a cancellable background explorer");
+    const running = client.submitPromptAndWait(
+      "Open a cancellable background explorer",
+    );
     const childSignal = await withTimeout(
       childStarted.promise,
       1_000,
@@ -4432,9 +4434,17 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(childSignal?.aborted).toBe(false);
 
-    await client.submitPromptAndWait("Close the background explorer", {
-      sessionId: "session_1",
+    const queued = await client.submitPromptAccepted(
+      "Close the background explorer",
+      { sessionId: "session_1", clientRequestId: "close-background" },
+    );
+    const receipt = await client.steerQueuedPrompt({
+      promptId: queued.promptId,
+      expectedRunId: "run_1",
+      clientRequestId: "steer-close-background",
     });
+    expect(receipt.acceptedTargetRunId).toBe("run_1");
+    await running;
 
     expect(childSignal?.aborted).toBe(true);
     // close updates the subagent record synchronously and schedules run-ledger
@@ -6972,7 +6982,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("keeps goal background work running when the next continuation turn starts", async () => {
+  it("keeps goal background work inside the original run until its result is handled", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const childStarted = createDeferred<AbortSignal | undefined>();
     const secondTurnStarted = createDeferred<AbortSignal | undefined>();
@@ -7012,11 +7022,17 @@ describe("createInProcessUiBackendClient", () => {
         1_000,
         "background child did not start in goal turn one",
       );
-      await withTimeout(
-        secondTurnStarted.promise,
-        1_000,
-        "goal continuation turn two did not start",
-      );
+      await vi.waitFor(() => {
+        expect(
+          requests.filter((request) => !isExploreSubagentRequest(request)),
+        ).toHaveLength(2);
+      });
+      let secondTurn = false;
+      void secondTurnStarted.promise.then(() => {
+        secondTurn = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(secondTurn).toBe(false);
 
       await vi.waitUntil(async () => {
         const records = await subagentStore.listByParent(sessionId ?? "");
@@ -10210,4 +10226,44 @@ it("steers an accepted queued message into its active run and releases its waite
     await client.dispose();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+it("keeps child sessions read-only for primary prompts, selection and direct cancellation", async () => {
+  const bus = createBus();
+  const messageManager = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+  });
+  const sessionManager = createSessionManager({
+    bus,
+    store: createInMemorySessionStore(),
+    messageCleaner: {
+      removeMessages: (id) => messageManager.removeMessages(id),
+    },
+    projectResolver: Project,
+  });
+  const root = await sessionManager.create(process.cwd(), { title: "Root" });
+  const child = await sessionManager.create(process.cwd(), {
+    title: "Child",
+    parentId: root.id,
+  });
+  const client = createInProcessUiBackendClient({
+    bus,
+    messageManager,
+    sessionManager,
+    llmClient: createFakeLLMClient([]),
+  });
+  await expect(
+    client.submitPromptAccepted("forged child message", {
+      sessionId: child.id,
+    }),
+  ).rejects.toThrow("subagent");
+  await expect(client.selectSession(child.id)).rejects.toThrow();
+  await expect(client.abortRun("child-run")).rejects.toMatchObject({
+    code: "SESSION_SCOPE_CHANGED",
+  });
+  await expect(
+    client.getSessionView({ sessionId: child.id }),
+  ).rejects.toThrow();
+  await client.dispose();
 });
