@@ -326,6 +326,28 @@ class BrowserDaemonClient implements UiBackendClient {
       ++this.scopeTicket;
       ++this.historyTicket;
       this.clearControl();
+    } else if (!fromHello) {
+      // Same scope (for example New session reusing the current empty session,
+      // or a prompt receipt): the live chat and approval subscriptions are
+      // still valid, so restarting them would only flash a recovery state.
+      const sync = this.sessionSync.getState();
+      if (this.transportLive && binding.rootSessionId) {
+        if (sync.status === "error") this.sessionSync.retry();
+        else if (sync.status === "idle")
+          this.sessionSync.begin(
+            this.currentScope(),
+            this.connectionGeneration,
+          );
+      }
+      if (
+        this.transportLive &&
+        this.permissionSync.getState().status === "error"
+      )
+        this.permissionSync.retry();
+      void this.refreshControl();
+      void this.retryUnknownPrompts();
+      this.refreshUnrelatedViews();
+      return;
     }
     if (this.transportLive)
       this.permissionSync.begin(binding, this.connectionGeneration);
@@ -871,7 +893,7 @@ class BrowserDaemonClient implements UiBackendClient {
     UiBackendClient["createSession"]
   > {
     const ticket = ++this.selectionTicket;
-    const response = await this.http.createSession();
+    const response = await this.http.createSession(true);
     if (!this.closed && ticket === this.selectionTicket)
       this.acceptBinding(response);
     this.refreshUnrelatedViews();

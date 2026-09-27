@@ -189,3 +189,167 @@ export async function abortForClient(
       "The requested run has already ended",
     );
 }
+
+/** A shared operation for REST, RPC and /new; index data stays separate from its outcome. */
+export function createOrReuseClientSession(
+  backend: Pick<UiBackendClient, "createSession">,
+  views: DaemonClientViewCoordinator,
+  clientId: string,
+  epoch: string,
+  options?: Parameters<UiBackendClient["createSession"]>[0],
+): Promise<{
+  session: Awaited<ReturnType<UiBackendClient["createSession"]>>;
+  binding: UiPermissionBinding;
+  changed: boolean;
+  created: boolean;
+}> {
+  const previous = views.binding(clientId, epoch);
+  if (
+    options?.reuseSessionId &&
+    options.reuseSessionId !== previous.rootSessionId
+  )
+    return Promise.reject(
+      permissionError(
+        "PERMISSION_SCOPE_CHANGED",
+        "Reuse is restricted to the selected root session",
+      ),
+    );
+  const key = JSON.stringify([clientId, previous, options ?? null]);
+  return views.shareSessionCreation(key, async () => {
+    const release = views.beginSessionOperation(clientId);
+    const reuse = Boolean(
+      options?.reuseSessionId ?? options?.reuseInactiveEmpty,
+    );
+    const excluded = new Set(
+      options?.reuseInactiveEmpty?.excludeSessionIds ?? [],
+    );
+    try {
+      for (let attempt = 0; attempt <= 3; attempt += 1) {
+        views.assertBinding(clientId, previous, epoch);
+        const protectedIds = views.protectedSessionIds();
+        const exclusions = new Set([
+          ...excluded,
+          ...views.sessionIdsBoundByOtherClients(clientId),
+          ...protectedIds,
+        ]);
+        const preferred =
+          previous.rootSessionId &&
+          !protectedIds.includes(previous.rootSessionId) &&
+          !excluded.has(previous.rootSessionId)
+            ? previous.rootSessionId
+            : undefined;
+        const revision = views.sessionAdmissionRevision;
+        const session = await backend.createSession(
+          reuse
+            ? {
+                ...(preferred ? { reuseSessionId: preferred } : {}),
+                ...(options?.reuseInactiveEmpty
+                  ? {
+                      reuseInactiveEmpty: {
+                        excludeSessionIds: [...exclusions],
+                      },
+                    }
+                  : {}),
+              }
+            : undefined,
+        );
+        views.assertBinding(clientId, previous, epoch);
+        const created = session.created;
+        if (reuse && typeof created !== "boolean")
+          throw Object.assign(
+            new Error(
+              "Backend must report whether a reused session was created",
+            ),
+            { code: "SESSION_CREATION_CONTRACT" },
+          );
+        if (reuse && session.id !== preferred && exclusions.has(session.id))
+          throw Object.assign(
+            new Error("Backend returned an excluded session"),
+            { code: "SESSION_CREATION_CONTRACT" },
+          );
+        const changed = session.id !== previous.rootSessionId;
+        if (
+          reuse &&
+          (revision !== views.sessionAdmissionRevision ||
+            views.protectedSessionIds().includes(session.id) ||
+            (changed &&
+              views
+                .sessionIdsBoundByOtherClients(clientId)
+                .includes(session.id)))
+        ) {
+          // Do not create a second row after a fresh result lost its admission window.
+          if (created) throw sessionCreationConflict();
+          // A started-and-finished admission can be absent from the pin set: re-read its persisted facts.
+          if (
+            views.sessionIdsBoundByOtherClients(clientId).includes(session.id)
+          )
+            excluded.add(session.id);
+          continue;
+        }
+        if (changed)
+          views.selectSession(clientId, session.id, previous.bindingGeneration);
+        return {
+          session,
+          binding: views.binding(clientId, epoch),
+          changed,
+          created: created ?? true,
+        };
+      }
+      throw sessionCreationConflict();
+    } finally {
+      release();
+    }
+  });
+}
+
+export function parseSessionCreationOptions(
+  value: unknown,
+): Parameters<UiBackendClient["createSession"]>[0] {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw Object.assign(new Error("Invalid session creation options"), {
+      code: "INVALID_SESSION_QUERY",
+    });
+  const input = value as Record<string, unknown>;
+  const inactive = input.reuseInactiveEmpty;
+  if (
+    input.reuseSessionId !== undefined &&
+    (typeof input.reuseSessionId !== "string" || !input.reuseSessionId)
+  )
+    throw Object.assign(new Error("Invalid preferred session"), {
+      code: "INVALID_SESSION_QUERY",
+    });
+  let excludeSessionIds: string[] | undefined;
+  if (inactive !== undefined) {
+    if (
+      !inactive ||
+      typeof inactive !== "object" ||
+      Array.isArray(inactive) ||
+      !("excludeSessionIds" in inactive) ||
+      !Array.isArray(inactive.excludeSessionIds) ||
+      !inactive.excludeSessionIds.every(
+        (id: unknown) => typeof id === "string" && id.length > 0,
+      )
+    )
+      throw Object.assign(new Error("Invalid session exclusions"), {
+        code: "INVALID_SESSION_QUERY",
+      });
+    excludeSessionIds = inactive.excludeSessionIds as string[];
+  }
+  return {
+    ...(typeof input.reuseSessionId === "string"
+      ? { reuseSessionId: input.reuseSessionId }
+      : {}),
+    ...(excludeSessionIds ? { reuseInactiveEmpty: { excludeSessionIds } } : {}),
+  };
+}
+
+function sessionCreationConflict(): Error {
+  return Object.assign(
+    new Error("Session changed during creation; retry the request"),
+    {
+      code: "SESSION_CREATION_CONFLICT",
+      retryable: true,
+    },
+  );
+}

@@ -94,24 +94,29 @@ export async function selectPermissionSession(
   epoch: string,
   expectedGeneration?: number,
 ): Promise<UiPermissionBinding> {
-  const previous = views.binding(clientId, epoch);
-  if (
-    expectedGeneration !== undefined &&
-    previous.bindingGeneration !== expectedGeneration
-  )
-    throw permissionError(
-      "PERMISSION_SCOPE_CHANGED",
-      "Session selection has changed",
-    );
-  await validateRoot(backend, rootSessionId);
-  views.assertBinding(clientId, previous, epoch);
-  views.selectSession(clientId, rootSessionId, previous.bindingGeneration);
-  const binding = views.binding(clientId, epoch);
-  if (binding.rootSessionId)
-    void backend
-      .initializeSession?.(binding.rootSessionId)
-      .catch(() => undefined);
-  return binding;
+  const finishOperation = views.beginSessionOperation(clientId, rootSessionId);
+  try {
+    const previous = views.binding(clientId, epoch);
+    if (
+      expectedGeneration !== undefined &&
+      previous.bindingGeneration !== expectedGeneration
+    )
+      throw permissionError(
+        "PERMISSION_SCOPE_CHANGED",
+        "Session selection has changed",
+      );
+    await validateRoot(backend, rootSessionId);
+    views.assertBinding(clientId, previous, epoch);
+    views.selectSession(clientId, rootSessionId, previous.bindingGeneration);
+    const binding = views.binding(clientId, epoch);
+    if (binding.rootSessionId)
+      void backend
+        .initializeSession?.(binding.rootSessionId)
+        .catch(() => undefined);
+    return binding;
+  } finally {
+    finishOperation();
+  }
 }
 
 export async function permissionSnapshotForClient(

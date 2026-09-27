@@ -175,7 +175,14 @@ class FakeBackend implements UiBackendClient {
   ): UiUnsubscribe {
     return () => undefined;
   }
-  createSession(): ReturnType<UiBackendClient["createSession"]> {
+  createSession(
+    input?: Parameters<UiBackendClient["createSession"]>[0],
+  ): ReturnType<UiBackendClient["createSession"]> {
+    const selected = this.snapshot.sessions.find(
+      (session) => session.id === input?.reuseSessionId,
+    );
+    if (selected?.messages.length === 0)
+      return Promise.resolve({ ...selected, created: false });
     const session = {
       id: `session_${String(this.snapshot.sessions.length + 1)}`,
       title: "New session",
@@ -190,7 +197,7 @@ class FakeBackend implements UiBackendClient {
       activeSessionId: session.id,
     };
     this.emit({ type: "session.updated", session });
-    return Promise.resolve(session);
+    return Promise.resolve({ ...session, created: true });
   }
   selectSession(sessionId: string): Promise<void> {
     this.snapshot = { ...this.snapshot, activeSessionId: sessionId };
@@ -993,6 +1000,8 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
 
       await runtime.createSession();
       await runtime.createSession();
+      expect(backend.createdSessionIds).toEqual(["session_1"]);
+      await backend.createSession();
       await runtime.selectSession("session_2");
 
       expect(backend.createdSessionIds).toEqual(["session_1", "session_2"]);

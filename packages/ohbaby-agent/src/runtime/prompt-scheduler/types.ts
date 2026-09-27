@@ -128,6 +128,8 @@ export interface PromptSubmissionStore {
   ): Promise<PromptSubmissionRecord>;
   listQueued(scopeKey: string): Promise<readonly PromptSubmissionRecord[]>;
   listVisible(scopeKey: string): Promise<readonly PromptSubmissionRecord[]>;
+  /** Durable receipt existence, including terminal history without message/run associations. */
+  hasForSession(scopeKey: string, sessionId: string): Promise<boolean>;
   listForSession(
     scopeKey: string,
     sessionId: string,

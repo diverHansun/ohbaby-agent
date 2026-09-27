@@ -593,6 +593,18 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       .map(rowToRecord);
   }
 
+  async hasForSession(scopeKey: string, sessionId: string): Promise<boolean> {
+    return (
+      this.db
+        .prepare<{
+          present: number;
+        }>(
+          `SELECT 1 AS present FROM ${this.tableName} WHERE scope_key = ? AND session_id = ? LIMIT 1`,
+        )
+        .get(scopeKey, sessionId) !== undefined
+    );
+  }
+
   async listForSession(
     scopeKey: string,
     sessionId: string,

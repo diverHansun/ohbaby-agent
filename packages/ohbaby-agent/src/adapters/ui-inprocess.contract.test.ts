@@ -4436,6 +4436,11 @@ describe("createInProcessUiBackendClient", () => {
     });
 
     expect(childSignal?.aborted).toBe(true);
+    // close updates the subagent record synchronously and schedules run-ledger
+    // cleanup through onClosed; observe that eventual terminal fact directly.
+    await vi.waitFor(async () => {
+      expect(await runLedger.get("run_2")).toMatchObject({ status: "cancelled" });
+    });
     const childRun = await runLedger.get("run_2");
     expect(childRun).toMatchObject({ status: "cancelled" });
     if (!childRun) {
@@ -8252,6 +8257,213 @@ describe("createInProcessUiBackendClient", () => {
         { id: "session_empty_current", messages: [] },
       ],
     });
+  });
+
+  it("reports the actual create outcome and keeps explicit creation fresh", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "empty",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "empty",
+            messages: [],
+            projectRoot: process.cwd(),
+            title: "Empty",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      projectDirectory: process.cwd(),
+    });
+
+    await expect(
+      client.createSession({ reuseSessionId: "empty" }),
+    ).resolves.toMatchObject({
+      id: "empty",
+      created: false,
+    });
+    await expect(client.createSession()).resolves.toMatchObject({
+      created: true,
+    });
+  });
+
+  it("does not reuse a core session with a persisted zero-part message", async () => {
+    let nextId = 1;
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => `session_${String(nextId++)}`,
+      messageCleaner: {
+        removeMessages: (id) => messageManager.removeMessages(id),
+      },
+      projectResolver: Project,
+      store: createInMemorySessionStore(),
+    });
+    const existing = await sessionManager.create(process.cwd(), {
+      title: "Empty looking",
+    });
+    await messageManager.createMessage({
+      agent: "test",
+      role: "user",
+      sessionId: existing.id,
+    });
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+      messageManager,
+      projectDirectory: process.cwd(),
+      sessionManager,
+    });
+
+    const created = await client.createSession({ reuseSessionId: existing.id });
+    expect(created).toMatchObject({ created: true, id: "session_2" });
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "new_after_zero_part",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+    expect((await client.getSnapshot()).activeSessionId).toBe("session_2");
+  });
+
+  it("waits for an accepting submit before deciding whether an empty session can be reused", async () => {
+    let nextId = 1;
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => `session_${String(nextId++)}`,
+      messageCleaner: {
+        removeMessages: (id) => messageManager.removeMessages(id),
+      },
+      projectResolver: Project,
+      store: createInMemorySessionStore(),
+    });
+    const existing = await sessionManager.create(process.cwd(), {
+      title: "Empty",
+    });
+    const admissionReached = createDeferred<undefined>();
+    const releaseAdmission = createDeferred<undefined>();
+    const promptSubmissionStore = new InMemoryPromptSubmissionStore();
+    const originalAssertCapacity = promptSubmissionStore.assertCapacity.bind(
+      promptSubmissionStore,
+    );
+    promptSubmissionStore.assertCapacity = async (
+      scope,
+      max,
+    ): Promise<void> => {
+      admissionReached.resolve(undefined);
+      await releaseAdmission.promise;
+      return originalAssertCapacity(scope, max);
+    };
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+      messageManager,
+      projectDirectory: process.cwd(),
+      promptSubmissionStore,
+      sessionManager,
+    });
+    const submit = client.submitPromptAccepted("Use empty", {
+      sessionId: existing.id,
+    });
+    await admissionReached.promise;
+    let newSettled = false;
+    const newSession = client
+      .createSession({ reuseSessionId: existing.id })
+      .then((result) => {
+        newSettled = true;
+        return result;
+      });
+    await Promise.resolve();
+    expect(newSettled).toBe(false);
+    releaseAdmission.resolve(undefined);
+    try {
+      await expect(submit).resolves.toMatchObject({ sessionId: existing.id });
+      await expect(newSession).resolves.toMatchObject({
+        created: true,
+        id: "session_2",
+      });
+    } finally {
+      releaseAdmission.resolve(undefined);
+    }
+  });
+
+  it("does not create or reuse when the authoritative prompt read fails", async () => {
+    const promptSubmissionStore = new InMemoryPromptSubmissionStore();
+    promptSubmissionStore.hasForSession = (): Promise<boolean> =>
+      Promise.reject(new Error("prompt storage unavailable"));
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "empty",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "empty",
+            messages: [],
+            projectRoot: process.cwd(),
+            title: "Empty",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      projectDirectory: process.cwd(),
+      promptSubmissionStore,
+    });
+    await expect(
+      client.createSession({ reuseSessionId: "empty" }),
+    ).rejects.toThrow("prompt storage unavailable");
+    await expect(client.getSessionIndex()).resolves.toHaveLength(1);
+  });
+
+  it("honors /new --no-reuse-empty-session with a current empty session", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "empty",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "empty",
+            messages: [],
+            projectRoot: process.cwd(),
+            title: "Empty",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      projectDirectory: process.cwd(),
+    });
+    await client.executeCommand({
+      argv: ["--no-reuse-empty-session"],
+      clientInvocationId: "force_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new --no-reuse-empty-session",
+      rawArgs: "--no-reuse-empty-session",
+      surface: "tui",
+    });
+    const selected = (await client.getSnapshot()).activeSessionId;
+    expect(selected).not.toBe("empty");
+    await expect(client.getSessionIndex()).resolves.toHaveLength(2);
   });
 
   it("does not reuse the active empty UI session when core metadata marks it as a subagent", async () => {

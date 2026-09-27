@@ -59,6 +59,7 @@ import type {
   UiNotice,
   UiPermissionResponse,
   UiSessionIndexEntry,
+  UiSessionCreationResult,
   UiPermissionUpdate,
   UiRun,
   UiRunStatus,
@@ -521,7 +522,56 @@ export function createInProcessUiBackendClient(
   const promptQueueOwnerClientId =
     options.promptQueueOwnerClientId ?? `inprocess_${randomUUID()}`;
   const activePromptsBySession = new Map<string, ActivePromptState>();
+  const pendingRuntimePromptsBySession = new Map<string, number>();
   const acceptedNewSessionIds = new Set<string>();
+  // Multiple submits may admit together, while New takes a short exclusive
+  // window through its authoritative empty check and candidate decision.
+  let admissionReaders = 0;
+  let admissionWriter = false;
+  const admissionQueue: {
+    readonly kind: "read" | "write";
+    readonly grant: (release: () => void) => void;
+  }[] = [];
+  function drainAdmissionQueue(): void {
+    if (admissionWriter) return;
+    if (admissionQueue[0]?.kind === "write") {
+      if (admissionReaders > 0) return;
+      const next = admissionQueue.shift();
+      if (!next) return;
+      admissionWriter = true;
+      next.grant(() => {
+        admissionWriter = false;
+        drainAdmissionQueue();
+      });
+      return;
+    }
+    const firstWriter = admissionQueue.findIndex((item) => item.kind === "write");
+    const readCount = firstWriter === -1 ? admissionQueue.length : firstWriter;
+    for (const next of admissionQueue.splice(0, readCount)) {
+      admissionReaders += 1;
+      next.grant(() => {
+        admissionReaders -= 1;
+        drainAdmissionQueue();
+      });
+    }
+  }
+  function withSessionAdmission<T>(
+    kind: "read" | "write",
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    // Enqueue synchronously, before either operation reaches its first await.
+    const admission = new Promise<() => void>((grant) => {
+      admissionQueue.push({ kind, grant });
+      drainAdmissionQueue();
+    });
+    return admission.then(async (release) => {
+      try {
+        return await operation();
+      } finally {
+        release();
+      }
+    });
+  }
   let implicitAdmissionSessionId: string | undefined;
   const promptIdleWaiters = new Map<string, Set<() => void>>();
   const promptRunReadyWaiters = new Map<string, Set<() => void>>();
@@ -832,6 +882,13 @@ export function createInProcessUiBackendClient(
     publishNotice,
     updateStatus,
   });
+  const promptSubmissionStore =
+    options.promptSubmissionStore ?? new InMemoryPromptSubmissionStore();
+  const promptScopeKey =
+    options.promptScopeKey ??
+    options.workdir ??
+    options.projectDirectory ??
+    process.cwd();
   const promptScheduler: WorkspacePromptScheduler =
     new WorkspacePromptScheduler({
       beforeSessionWrite: initializeSessionView,
@@ -844,13 +901,8 @@ export function createInProcessUiBackendClient(
       onProjectionError: (error, prompt): void => {
         sourceProjection.owner.markUnavailable(prompt.sessionId, error);
       },
-      scopeKey:
-        options.promptScopeKey ??
-        options.workdir ??
-        options.projectDirectory ??
-        process.cwd(),
-      store:
-        options.promptSubmissionStore ?? new InMemoryPromptSubmissionStore(),
+      scopeKey: promptScopeKey,
+      store: promptSubmissionStore,
       isBusyError: (error): boolean =>
         error instanceof SessionRunBusyError ||
         error instanceof RuntimeSwitchPendingError,
@@ -1001,7 +1053,16 @@ export function createInProcessUiBackendClient(
     return resolved.session.id;
   }
 
-  async function submitPromptAcceptedInternal(
+  function submitPromptAcceptedInternal(
+    text: string,
+    submitOptions?: SubmitPromptOptions,
+  ): Promise<UiPromptReceipt> {
+    return withSessionAdmission("read", () =>
+      submitPromptAcceptedWork(text, submitOptions),
+    );
+  }
+
+  async function submitPromptAcceptedWork(
     text: string,
     submitOptions?: SubmitPromptOptions,
   ): Promise<UiPromptReceipt> {
@@ -1653,11 +1714,121 @@ export function createInProcessUiBackendClient(
     });
   }
 
-  async function createSessionMetadata(): Promise<UiSessionIndexEntry> {
+  // The hot UI page can be empty even when storage contains messages.
+  // Require authoritative metadata and all message/run/prompt owners to agree.
+  async function isAuthoritativelyEmptySession(
+    candidate: CoreSession | UiSession | null | undefined,
+    projectRoot: string,
+  ): Promise<boolean> {
+    if (
+      !candidate ||
+      !sameSessionProjectRoot(candidate.projectRoot, projectRoot)
+    )
+      return false;
+    if ("stats" in candidate) {
+      if (
+        !isPrimarySession(candidate) ||
+        candidate.status !== "active" ||
+        candidate.stats.messageCount !== 0
+      )
+        return false;
+    } else if (candidate.messages.length !== 0) {
+      return false;
+    }
+    const hotView = await stateStore.getSession(candidate.id);
+    if (hotView?.messages.length) return false;
+    if ((pendingRuntimePromptsBySession.get(candidate.id) ?? 0) > 0)
+      return false;
+    const [page, runs, hasPrompt] = await Promise.all([
+      messageManager.listPageBySession(candidate.id, { limit: 1 }),
+      sourceLedger.listBySession(candidate.id, { limit: 1 }),
+      promptSubmissionStore.hasForSession(promptScopeKey, candidate.id),
+    ]);
+    return !page.messages.length && !page.hasMore && !runs.length && !hasPrompt;
+  }
+
+  async function isSessionIdAuthoritativelyEmpty(
+    sessionId: string,
+    projectRoot: string,
+  ): Promise<boolean> {
+    const candidate = options.sessionManager
+      ? await options.sessionManager.get(sessionId)
+      : await stateStore.getSession(sessionId);
+    return isAuthoritativelyEmptySession(candidate, projectRoot);
+  }
+
+  async function findReusableEmptySession(
+    input: Parameters<UiBackendClient["createSession"]>[0],
+    projectRoot: string,
+  ): Promise<CoreSession | UiSession | null> {
+    const sessionManager = options.sessionManager;
+    const reuseSessionId = input?.reuseSessionId;
+    if (reuseSessionId) {
+      const candidate = sessionManager
+        ? await sessionManager.get(reuseSessionId)
+        : await stateStore.getSession(reuseSessionId);
+      if (
+        candidate &&
+        (await isAuthoritativelyEmptySession(candidate, projectRoot))
+      )
+        return candidate;
+    }
+    const inactive = input?.reuseInactiveEmpty;
+    if (!inactive) return null;
+    const excluded = new Set(inactive.excludeSessionIds);
+    if (reuseSessionId) excluded.add(reuseSessionId);
+    const candidates = sessionManager
+      ? await sessionManager.listByProjectRoot(projectRoot, {
+          status: "active",
+        })
+      : (await stateStore.readSnapshot()).sessions;
+    for (const candidate of candidates) {
+      if (
+        excluded.has(candidate.id) ||
+        ("stats" in candidate &&
+          (!isPrimarySession(candidate) || candidate.stats.messageCount !== 0))
+      )
+        continue;
+      if (await isAuthoritativelyEmptySession(candidate, projectRoot))
+        return candidate;
+    }
+    return null;
+  }
+
+  function createSessionMetadata(
+    input?: Parameters<UiBackendClient["createSession"]>[0],
+  ): Promise<UiSessionCreationResult> {
+    return withSessionAdmission("write", () =>
+      createSessionMetadataWork(input),
+    );
+  }
+
+  async function createSessionMetadataWork(
+    input?: Parameters<UiBackendClient["createSession"]>[0],
+  ): Promise<UiSessionCreationResult> {
     await ready;
     const index = await getSessionIndex();
     for (const entry of index) sessionIds.reserve(entry.id);
     const projectRoot = await resolveProjectRoot();
+    const reusable = await findReusableEmptySession(input, projectRoot);
+    if (reusable) {
+      if (reusable.id !== input?.reuseSessionId)
+        await initializeSessionView(reusable.id);
+      return {
+        created: false,
+        id: reusable.id,
+        title: reusable.title,
+        projectRoot: reusable.projectRoot,
+        createdAt:
+          "stats" in reusable
+            ? new Date(reusable.createdAt).toISOString()
+            : reusable.createdAt,
+        updatedAt:
+          "stats" in reusable
+            ? new Date(reusable.updatedAt).toISOString()
+            : reusable.updatedAt,
+      };
+    }
     const createdAt = timestamp();
     const core = await options.sessionManager?.create(projectRoot, {
       agentName: options.agentManager?.getDefault() ?? "default",
@@ -1677,6 +1848,7 @@ export function createInProcessUiBackendClient(
     await upsertSession(session);
     publish({ type: "session.updated", session });
     return {
+      created: true,
       id: session.id,
       title: session.title,
       projectRoot: session.projectRoot,
@@ -2020,7 +2192,15 @@ export function createInProcessUiBackendClient(
     };
   }
 
-  async function createSessionFromCommand(input?: {
+  function createSessionFromCommand(input?: {
+    readonly reuseInactiveEmptySessions?: boolean;
+  }): Promise<CommandSessionSummary> {
+    return withSessionAdmission("write", () =>
+      createSessionFromCommandWork(input),
+    );
+  }
+
+  async function createSessionFromCommandWork(input?: {
     readonly reuseInactiveEmptySessions?: boolean;
   }): Promise<CommandSessionSummary> {
     await ready;
@@ -2049,6 +2229,8 @@ export function createInProcessUiBackendClient(
         };
       },
       getUiSession: (id) => stateStore.getSession(id),
+      isAuthoritativelyEmpty: (id) =>
+        isSessionIdAuthoritativelyEmpty(id, projectRoot),
       projectRoot,
       reuseInactiveEmptySessions: input?.reuseInactiveEmptySessions ?? true,
       sessionManager: options.sessionManager,
@@ -2439,7 +2621,28 @@ export function createInProcessUiBackendClient(
     return promptCacheUsage.get(input.sessionId);
   }
 
-  async function submitPromptInternal(
+  function submitPromptInternal(
+    text: string,
+    submitOptions?: InternalSubmitPromptOptions,
+  ): Promise<RunCompletion | undefined> {
+    const sessionId = submitOptions?.sessionId;
+    if (sessionId) {
+      pendingRuntimePromptsBySession.set(
+        sessionId,
+        (pendingRuntimePromptsBySession.get(sessionId) ?? 0) + 1,
+      );
+    }
+    return submitPromptWork(text, submitOptions).finally(() => {
+      if (!sessionId) return;
+      const remaining =
+        (pendingRuntimePromptsBySession.get(sessionId) ?? 1) - 1;
+      if (remaining > 0)
+        pendingRuntimePromptsBySession.set(sessionId, remaining);
+      else pendingRuntimePromptsBySession.delete(sessionId);
+    });
+  }
+
+  async function submitPromptWork(
     text: string,
     submitOptions?: InternalSubmitPromptOptions,
   ): Promise<RunCompletion | undefined> {

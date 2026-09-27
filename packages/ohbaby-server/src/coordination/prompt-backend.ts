@@ -116,37 +116,49 @@ export async function acceptDaemonPrompt(input: {
   readonly permissionRouter: PermissionRouter;
   readonly text: string;
 }): Promise<AcceptedDaemonPrompt> {
-  if (input.options?.sessionId !== undefined) {
-    const previous = input.clientViews.binding(input.clientId, "prompt");
-    const sessions = await input.backend.getSessionIndex();
-    const selected = sessions.find(
-      (session) => session.id === input.options?.sessionId,
-    );
-    if (!selected || selected.parentId || selected.isSubagent)
-      throw new Error("Prompt requires an available root session");
-    input.clientViews.assertBinding(input.clientId, previous, "prompt");
-  }
-  const started = beginPromptOwnership(input);
+  const target =
+    input.options?.sessionId ??
+    input.clientViews.binding(input.clientId, "prompt").rootSessionId ??
+    undefined;
+  const finishOperation = input.clientViews.beginSessionOperation(
+    input.clientId,
+    target,
+  );
   try {
-    const receipt = await input.backend.submitPromptAccepted(
-      input.text,
-      started.item.options,
-    );
-    started.finishAdmission(true);
-    const completion = input.backend
-      .waitForPrompt(receipt.promptId)
-      .finally(() => {
-        started.release();
-      });
-    // Accepted transports may intentionally not await completion. Attach a
-    // rejection observer so a disposal/network failure cannot become an
-    // unhandled rejection; submit-and-wait callers still receive the original
-    // rejecting promise.
-    void completion.catch(() => undefined);
-    return { completion, receipt };
-  } catch (error) {
-    started.finishAdmission(false);
-    started.release();
-    throw error;
+    if (input.options?.sessionId !== undefined) {
+      const previous = input.clientViews.binding(input.clientId, "prompt");
+      const sessions = await input.backend.getSessionIndex();
+      const selected = sessions.find(
+        (session) => session.id === input.options?.sessionId,
+      );
+      if (!selected || selected.parentId || selected.isSubagent)
+        throw new Error("Prompt requires an available root session");
+      input.clientViews.assertBinding(input.clientId, previous, "prompt");
+    }
+    const started = beginPromptOwnership(input);
+    try {
+      const receipt = await input.backend.submitPromptAccepted(
+        input.text,
+        started.item.options,
+      );
+      started.finishAdmission(true);
+      const completion = input.backend
+        .waitForPrompt(receipt.promptId)
+        .finally(() => {
+          started.release();
+        });
+      // Accepted transports may intentionally not await completion. Attach a
+      // rejection observer so a disposal/network failure cannot become an
+      // unhandled rejection; submit-and-wait callers still receive the original
+      // rejecting promise.
+      void completion.catch(() => undefined);
+      return { completion, receipt };
+    } catch (error) {
+      started.finishAdmission(false);
+      started.release();
+      throw error;
+    }
+  } finally {
+    finishOperation();
   }
 }

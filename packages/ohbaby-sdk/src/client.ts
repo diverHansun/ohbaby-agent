@@ -155,7 +155,18 @@ export interface UiPromptQueueCommandClient {
 
 export interface UiCommandClient
   extends UiPromptCommandClient, UiPromptQueueCommandClient {
-  createSession(): Promise<UiSessionIndexEntry>;
+  createSession(input?: {
+    /** Preferred primary session to reuse when it is authoritatively empty. */
+    readonly reuseSessionId?: string;
+    /**
+     * When present, any other authoritatively empty primary session in the
+     * current project may be reused, except the listed ones (for example
+     * sessions currently bound by other live clients).
+     */
+    readonly reuseInactiveEmpty?: {
+      readonly excludeSessionIds: readonly string[];
+    };
+  }): Promise<UiSessionCreationResult>;
   selectSession(sessionId: string): Promise<void>;
   compactSession(
     options?: UiCompactSessionOptions,
@@ -181,6 +192,11 @@ export interface UiCommandClient
     response: UiInteractionResponse,
   ): Promise<void>;
   abortRun(runId: string): Promise<void>;
+}
+
+/** Outcome of a create request; `created` is omitted by older backends. */
+export interface UiSessionCreationResult extends UiSessionIndexEntry {
+  readonly created?: boolean;
 }
 
 /**

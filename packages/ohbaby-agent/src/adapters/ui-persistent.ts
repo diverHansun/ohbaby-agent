@@ -252,9 +252,9 @@ function withStartupRecovery(
       await ready();
       return client.getSelectedSessionId();
     },
-    async createSession(): ReturnType<UiBackendClient["createSession"]> {
+    async createSession(input): ReturnType<UiBackendClient["createSession"]> {
       await ready();
-      return client.createSession();
+      return client.createSession(input);
     },
     async selectSession(
       sessionId,

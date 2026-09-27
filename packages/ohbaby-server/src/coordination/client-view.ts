@@ -331,12 +331,62 @@ export class DaemonClientViewCoordinator {
     ProvisionalPromptBinding
   >();
 
+  private readonly disconnectedClientIds = new Set<string>();
+  private readonly sessionOperations = new Set<{
+    clientId: string;
+    sessionId?: string;
+  }>();
+  private readonly sessionCreations = new Map<string, Promise<unknown>>();
+  private admissionRevision = 0;
+
+  get sessionAdmissionRevision(): number {
+    return this.admissionRevision;
+  }
+
+  beginSessionOperation(clientId: string, sessionId?: string): () => void {
+    const operation = { clientId, sessionId };
+    this.sessionOperations.add(operation);
+    if (sessionId) this.admissionRevision += 1;
+    return (): void => {
+      if (this.sessionOperations.delete(operation) && sessionId)
+        this.admissionRevision += 1;
+    };
+  }
+
+  hasPendingSessionOperation(clientId: string): boolean {
+    return [...this.sessionOperations].some(
+      (item) => item.clientId === clientId,
+    );
+  }
+
+  protectedSessionIds(): readonly string[] {
+    return [
+      ...new Set(
+        [...this.sessionOperations].flatMap((item) =>
+          item.sessionId ? [item.sessionId] : [],
+        ),
+      ),
+    ];
+  }
+
+  shareSessionCreation<T>(key: string, create: () => Promise<T>): Promise<T> {
+    const existing = this.sessionCreations.get(key);
+    if (existing) return existing as Promise<T>;
+    const result = create().finally(() => {
+      if (this.sessionCreations.get(key) === result)
+        this.sessionCreations.delete(key);
+    });
+    this.sessionCreations.set(key, result);
+    return result;
+  }
+
   initializeClient(
     clientId: string,
     snapshot: { readonly sessions: readonly UiSessionIndexEntry[] },
     intent: DaemonStartupIntent,
   ): void {
     const activeSessionId = resolveStartupActiveSessionId(snapshot, intent);
+    this.disconnectedClientIds.delete(clientId);
     this.provisionalPromptBindings.delete(clientId);
     this.clientViews.set(clientId, {
       bindingGeneration:
@@ -411,6 +461,28 @@ export class DaemonClientViewCoordinator {
     view.activeSessionId = sessionId;
     view.pendingSessionId = undefined;
     view.bindingGeneration += 1;
+  }
+
+  /** Root sessions currently bound (or being bound) by other live clients. */
+  sessionIdsBoundByOtherClients(clientId: string): readonly string[] {
+    const ids = new Set<string>();
+    for (const [otherId, view] of this.clientViews) {
+      if (
+        otherId === clientId ||
+        (this.disconnectedClientIds.has(otherId) &&
+          !this.hasPendingSessionOperation(otherId))
+      )
+        continue;
+      if (view.activeSessionId) ids.add(view.activeSessionId);
+      if (view.pendingSessionId) ids.add(view.pendingSessionId);
+    }
+    return [...ids];
+  }
+
+  /** Candidate occupancy ends before retained command/interaction routing does. */
+  setClientSessionOccupancy(clientId: string, occupied: boolean): void {
+    if (occupied) this.disconnectedClientIds.delete(clientId);
+    else this.disconnectedClientIds.add(clientId);
   }
 
   projectSnapshot(clientId: string, snapshot: UiSnapshot): UiSnapshot {
@@ -675,6 +747,7 @@ export class DaemonClientViewCoordinator {
   }
 
   disconnectClient(clientId: string): readonly string[] {
+    this.disconnectedClientIds.add(clientId);
     const interactionIds: string[] = [];
     for (const [invocationId, owner] of this.commandOwnersByInvocationId) {
       if (owner === clientId) {

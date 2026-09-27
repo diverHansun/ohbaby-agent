@@ -14,7 +14,6 @@ import type {
   UiPromptReceiptQuery,
   UiPermissionBinding,
   UiPermissionEvent,
-  UiSessionIndexEntry,
 } from "ohbaby-sdk";
 import { daemonAuthHeader } from "../../auth/token.js";
 import {
@@ -212,12 +211,16 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     await this.ensureInitialized();
     return this.permissionBinding?.rootSessionId ?? null;
   }
-  async createSession(): Promise<UiSessionIndexEntry> {
+  async createSession(
+    input?: Parameters<UiBackendClient["createSession"]>[0],
+  ): ReturnType<UiBackendClient["createSession"]> {
     await this.ensureInitialized();
     const epoch = this.permissionBinding?.permissionEpoch;
     const result = await this.rpc<
-      UiPermissionBinding & { session: UiSessionIndexEntry }
-    >("createSession", []);
+      UiPermissionBinding & {
+        session: Awaited<ReturnType<UiBackendClient["createSession"]>>;
+      }
+    >("createSession", input === undefined ? [] : [input]);
     this.adoptPermissionBinding(result, epoch);
     return result.session;
   }

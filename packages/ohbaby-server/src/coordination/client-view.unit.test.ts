@@ -804,3 +804,58 @@ it("preserves an in-flight provisional admission when invalid registration fails
   });
   expect(coordinator.isPromptBindingProvisional("client")).toBe(false);
 });
+
+describe("DaemonClientViewCoordinator sessionIdsBoundByOtherClients", () => {
+  it("lists other live clients' roots and forgets disconnected clients", () => {
+    const views = new DaemonClientViewCoordinator();
+    const intent = { startupSessionMode: { type: "fresh" } } as const;
+    views.initializeClient("a", { sessions: [] }, intent);
+    views.initializeClient("b", { sessions: [] }, intent);
+    views.selectSession(
+      "a",
+      "session_a",
+      views.binding("a", "e").bindingGeneration,
+    );
+    views.selectSession(
+      "b",
+      "session_b",
+      views.binding("b", "e").bindingGeneration,
+    );
+
+    expect(views.sessionIdsBoundByOtherClients("a")).toEqual(["session_b"]);
+    views.disconnectClient("b");
+    expect(views.sessionIdsBoundByOtherClients("a")).toEqual([]);
+    views.initializeClient("b", { sessions: [] }, intent);
+    views.selectSession(
+      "b",
+      "session_b",
+      views.binding("b", "e").bindingGeneration,
+    );
+    expect(views.sessionIdsBoundByOtherClients("a")).toEqual(["session_b"]);
+  });
+});
+
+describe("short session admissions", () => {
+  it("retains every in-flight target after SSE occupancy ends, including concurrent requests", () => {
+    const views = new DaemonClientViewCoordinator();
+    views.initializeClient("owner", { sessions: [] }, {});
+    const finishFirst = views.beginSessionOperation("owner", "target");
+    const finishSecond = views.beginSessionOperation("owner", "target");
+    views.setClientSessionOccupancy("owner", false);
+    expect(views.protectedSessionIds()).toEqual(["target"]);
+    finishSecond();
+    finishSecond();
+    expect(views.protectedSessionIds()).toEqual(["target"]);
+    expect(views.hasPendingSessionOperation("owner")).toBe(true);
+    finishFirst();
+    expect(views.protectedSessionIds()).toEqual([]);
+    expect(views.hasPendingSessionOperation("owner")).toBe(false);
+  });
+  it("invalidates an empty check even when an intervening admission has already settled", () => {
+    const views = new DaemonClientViewCoordinator();
+    const revision = views.sessionAdmissionRevision;
+    const finish = views.beginSessionOperation("owner", "target");
+    finish();
+    expect(views.sessionAdmissionRevision).toBeGreaterThan(revision);
+  });
+});

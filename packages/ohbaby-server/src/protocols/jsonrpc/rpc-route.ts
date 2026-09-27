@@ -1,4 +1,6 @@
 import {
+  createOrReuseClientSession,
+  parseSessionCreationOptions,
   abortForClient,
   parseSessionQuery,
   receiptForClient,
@@ -243,24 +245,16 @@ export async function callDaemonBackend(input: {
       };
     }
     case "createSession": {
-      const previous = clientViews.binding(
+      const { session, binding } = await createOrReuseClientSession(
+        backend,
+        clientViews,
         request.clientId,
         input.permissionEpoch,
-      );
-      const session = await backend.createSession();
-      clientViews.assertBinding(
-        request.clientId,
-        previous,
-        input.permissionEpoch,
-      );
-      clientViews.selectSession(
-        request.clientId,
-        session.id,
-        previous.bindingGeneration,
+        parseSessionCreationOptions(request.params[0]),
       );
       return {
         session,
-        ...clientViews.binding(request.clientId, input.permissionEpoch),
+        ...binding,
         ...sessionRecoveryCapability(backend, input.permissionEpoch),
       };
     }
@@ -431,25 +425,19 @@ export async function callDaemonBackend(input: {
             { type: "command.result.delivered" }
           >["output"];
           if (invocation.commandId === "new") {
-            const previous = clientViews.binding(
+            const { session, created } = await createOrReuseClientSession(
+              backend,
+              clientViews,
               request.clientId,
               input.permissionEpoch,
-            );
-            const session = await backend.createSession();
-            clientViews.assertBinding(
-              request.clientId,
-              previous,
-              input.permissionEpoch,
-            );
-            clientViews.selectSession(
-              request.clientId,
-              session.id,
-              previous.bindingGeneration,
+              invocation.argv.includes("--no-reuse-empty-session")
+                ? undefined
+                : { reuseInactiveEmpty: { excludeSessionIds: [] } },
             );
             selectedId = session.id;
             output = {
               kind: "data",
-              subject: "session.created",
+              subject: created ? "session.created" : "session.current",
               data: { session },
             };
           } else {

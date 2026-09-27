@@ -60,6 +60,7 @@ function snapshot(input: {
 }
 
 function createResolver(input: {
+  readonly isAuthoritativelyEmpty?: (id: string) => Promise<boolean>;
   readonly reuseInactiveEmptySessions?: boolean;
   readonly snapshot: UiSnapshot;
   readonly sessionManager?: InProcessSessionManager;
@@ -72,6 +73,7 @@ function createResolver(input: {
         input.snapshot.sessions.find((session) => session.id === id) ?? null,
       ),
     projectRoot: "D:/repo",
+    isAuthoritativelyEmpty: input.isAuthoritativelyEmpty,
     reuseInactiveEmptySessions: input.reuseInactiveEmptySessions,
     sessionManager: input.sessionManager,
     snapshot: input.snapshot,
@@ -201,6 +203,56 @@ describe("resolveSessionForNewPrompt", () => {
     ).resolves.toMatchObject({
       isNewSession: false,
       session: { id: core.id, title: "Core empty" },
+    });
+  });
+
+  it("rejects a hot empty candidate when authoritative storage says occupied", async () => {
+    const active = uiSession({ id: "hot_empty" });
+    await expect(
+      createResolver({
+        isAuthoritativelyEmpty: () => Promise.resolve(false),
+        snapshot: snapshot({ activeSessionId: active.id, sessions: [active] }),
+      }),
+    ).resolves.toMatchObject({
+      isNewSession: true,
+      session: { id: "session_created" },
+    });
+  });
+
+  it("finds a later cold core root after authority rejects the first metadata-empty candidate", async () => {
+    const occupied = coreSession({ id: "occupied_first" });
+    const empty = coreSession({ id: "cold_empty_second" });
+    const manager: InProcessSessionManager = {
+      create() {
+        throw new Error("should reuse cold root");
+      },
+      findReusableEmptyPrimary() {
+        return Promise.resolve(occupied);
+      },
+      get() {
+        return Promise.resolve(null);
+      },
+      listByProject() {
+        return Promise.resolve([]);
+      },
+      listByProjectRoot() {
+        return Promise.resolve([occupied, empty]);
+      },
+      update() {
+        throw new Error("update should not be called");
+      },
+    };
+
+    await expect(
+      createResolver({
+        isAuthoritativelyEmpty: (id) => Promise.resolve(id === empty.id),
+        reuseInactiveEmptySessions: true,
+        sessionManager: manager,
+        snapshot: snapshot({ sessions: [] }),
+      }),
+    ).resolves.toMatchObject({
+      isNewSession: false,
+      session: { id: "cold_empty_second" },
     });
   });
 

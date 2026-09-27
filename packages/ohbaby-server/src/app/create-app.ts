@@ -1,4 +1,5 @@
 import {
+  createOrReuseClientSession,
   abortForClient,
   parseSessionQuery,
   receiptForClient,
@@ -1130,6 +1131,17 @@ class DaemonServerAppRuntime {
   }
 
   private mountRoutes(): void {
+    this.app.use("/v1/*", async (context, next) => {
+      const clientId = this.clientIdFromRequest(context);
+      if (
+        clientId &&
+        !context.req.raw.signal.aborted &&
+        this.isAuthorized(context.req.header("authorization")) &&
+        this.clientViews.isRegistered(clientId)
+      )
+        this.touchClientActivity(clientId);
+      await next();
+    });
     this.app.onError((error, context) => {
       const code =
         isRecord(error) && typeof error.code === "string"
@@ -1147,7 +1159,8 @@ class DaemonServerAppRuntime {
             : code === "SESSION_VIEW_UNAVAILABLE" ||
                 code === "SESSION_CONTROL_UNAVAILABLE"
               ? 503
-              : code === "SESSION_SCOPE_CHANGED"
+              : code === "SESSION_SCOPE_CHANGED" ||
+                  code === "SESSION_CREATION_CONFLICT"
                 ? 409
                 : code === "INVALID_PERMISSION_CHOICE"
                   ? 400
@@ -1199,6 +1212,8 @@ class DaemonServerAppRuntime {
         return context.json(parsed.failure, 400);
       }
 
+      if (this.clientViews.isRegistered(parsed.request.clientId))
+        this.touchClientActivity(parsed.request.clientId);
       try {
         const controller = new AbortController();
         const abort = (): void => {
@@ -1234,6 +1249,7 @@ class DaemonServerAppRuntime {
           if (parsed.request.method === "initializeClient") {
             this.knownClientIds.add(parsed.request.clientId);
             this.registeredWebClientIds.add(parsed.request.clientId);
+            this.touchClientActivity(parsed.request.clientId);
           }
           return context.json(
             createDaemonRpcSuccessResponse(parsed.request, result),
@@ -1324,7 +1340,7 @@ class DaemonServerAppRuntime {
       );
       this.knownClientIds.add(clientId);
       this.registeredWebClientIds.add(clientId);
-      this.cancelClientRoutingCleanup(clientId);
+      this.touchClientActivity(clientId);
 
       return context.json({
         clientId,
@@ -1679,19 +1695,35 @@ class DaemonServerAppRuntime {
         return context.json(webErrorBody("client is not registered"), 409);
       }
 
-      const previous = this.clientViews.binding(clientId, this.permissionEpoch);
-      const session = await this.options.backend.createSession();
-      this.clientViews.assertBinding(clientId, previous, this.permissionEpoch);
-      this.clientViews.selectSession(
-        clientId,
-        session.id,
-        previous.bindingGeneration,
-      );
-      this.notifyBinding(clientId);
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok)
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      const body = parsed.value;
+      if (
+        !isRecord(body) ||
+        (body.reuseEmpty !== undefined && typeof body.reuseEmpty !== "boolean")
+      )
+        return context.json(webErrorBody("reuseEmpty must be a boolean"), 400);
+      const { session, binding, changed, created } =
+        await createOrReuseClientSession(
+          this.options.backend,
+          this.clientViews,
+          clientId,
+          this.permissionEpoch,
+          body.reuseEmpty === true
+            ? { reuseInactiveEmpty: { excludeSessionIds: [] } }
+            : undefined,
+        );
+      if (changed) this.notifyBinding(clientId);
+      this.clientViews.assertBinding(clientId, binding, this.permissionEpoch);
       return context.json({
         ok: true,
         session,
-        ...this.clientViews.binding(clientId, this.permissionEpoch),
+        created,
+        ...binding,
         ...sessionRecoveryCapability(
           this.options.backend,
           this.permissionEpoch,
@@ -2494,6 +2526,7 @@ class DaemonServerAppRuntime {
           },
         };
         this.clients.add(client);
+        this.clientViews.setClientSessionOccupancy(clientId, true);
         this.cancelClientRoutingCleanup(clientId);
         this.knownClientIds.add(clientId);
         this.options.onClientConnected?.(clientId);
@@ -2536,6 +2569,7 @@ class DaemonServerAppRuntime {
     }
     client.close();
     if (!this.hasConnectedClient(client.clientId)) {
+      this.clientViews.setClientSessionOccupancy(client.clientId, false);
       this.scheduleClientRoutingCleanup(client.clientId);
     }
     this.options.onClientDisconnected?.(client.clientId);
@@ -2559,11 +2593,22 @@ class DaemonServerAppRuntime {
     this.disconnectCleanupTimers.delete(clientId);
   }
 
+  private touchClientActivity(clientId: string): void {
+    this.knownClientIds.add(clientId);
+    this.clientViews.setClientSessionOccupancy(clientId, true);
+    if (!this.hasConnectedClient(clientId))
+      this.scheduleClientRoutingCleanup(clientId);
+  }
+
   private scheduleClientRoutingCleanup(clientId: string): void {
     this.cancelClientRoutingCleanup(clientId);
     const timer = setTimeout(() => {
+      if (this.disconnectCleanupTimers.get(clientId) !== timer) return;
       this.disconnectCleanupTimers.delete(clientId);
-      if (this.hasConnectedClient(clientId)) {
+      if (this.hasConnectedClient(clientId)) return;
+      this.clientViews.setClientSessionOccupancy(clientId, false);
+      if (this.clientViews.hasPendingSessionOperation(clientId)) {
+        this.scheduleClientRoutingCleanup(clientId);
         return;
       }
       const interactionIds = this.clientViews.disconnectClient(clientId);

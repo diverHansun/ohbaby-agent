@@ -1,4 +1,5 @@
 export type {
+  UiSessionCreationResult,
   SubmitPromptOptions,
   UiCommandClient,
   UiPromptCommandClient,

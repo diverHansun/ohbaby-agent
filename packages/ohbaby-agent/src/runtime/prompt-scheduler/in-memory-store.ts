@@ -372,6 +372,14 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       .map(clone);
   }
 
+  async hasForSession(scopeKey: string, sessionId: string): Promise<boolean> {
+    for (const record of this.records.values()) {
+      if (record.scopeKey === scopeKey && record.sessionId === sessionId)
+        return true;
+    }
+    return false;
+  }
+
   async listForSession(
     scopeKey: string,
     sessionId: string,

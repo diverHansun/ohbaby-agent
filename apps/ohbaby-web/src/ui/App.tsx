@@ -3,6 +3,7 @@ import {
   useExecutionDuration,
 } from "./execution-duration.js";
 import { useStopRequest } from "./use-stop-request.js";
+import { useSessionSyncBanner } from "./use-session-sync-banner.js";
 import {
   Archive,
   Brain,
@@ -468,6 +469,7 @@ function ConnectedOhbabyWebApp({
     () => runtime.store.getSnapshot(),
   );
   const view = useMemo(() => selectViewModel(storeSnapshot), [storeSnapshot]);
+  const sessionSyncBanner = useSessionSyncBanner(storeSnapshot.sessionSync);
   const workspace = useSyncExternalStore(
     (listener) => runtime.subscribeWorkspaces(listener),
     () => runtime.getWorkspaceSnapshot(),
@@ -858,15 +860,14 @@ function ConnectedOhbabyWebApp({
           }}
           permissions={view.pendingPermissions}
         />
-        {storeSnapshot.sessionSync.status === "syncing" ||
-        storeSnapshot.sessionSync.status === "error" ? (
+        {sessionSyncBanner ? (
           <div className="ohb-error-banner" role="status">
             <span>
-              {storeSnapshot.sessionSync.status === "syncing"
+              {sessionSyncBanner === "recovering"
                 ? "Recovering conversation… Your draft remains editable."
                 : `Conversation unavailable: ${storeSnapshot.sessionSync.error ?? "Recovery failed"}`}
             </span>
-            {storeSnapshot.sessionSync.status === "error" ? (
+            {sessionSyncBanner === "error" ? (
               <button
                 type="button"
                 onClick={() => {

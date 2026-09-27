@@ -219,10 +219,11 @@ export class DaemonHttpClient {
     });
   }
 
-  createSession(): Promise<
-    BindingResponse & { readonly session: UiSessionIndexEntry }
-  > {
+  createSession(
+    reuseEmpty = false,
+  ): Promise<BindingResponse & { readonly session: UiSessionIndexEntry }> {
     return this.request("/v1/sessions", {
+      body: { reuseEmpty },
       method: "POST",
     });
   }
