@@ -3,7 +3,7 @@ import {
   isNearBottom,
   scrollToBottom,
   STREAM_NEAR_BOTTOM_THRESHOLD_PX,
-} from "./conversation/streamScroll.js";
+} from "./streamScroll.js";
 
 describe("stream scroll helpers", () => {
   it("treats the configured threshold as the bottom boundary", () => {

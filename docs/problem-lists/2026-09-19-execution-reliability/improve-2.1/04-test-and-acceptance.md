@@ -55,7 +55,7 @@ pnpm build
 pnpm run test:e2e:compiled-web
 ```
 
-新增生命周期测试后显式运行 `pnpm exec vitest run tests/integration/web/new-session-lifecycle.integration.test.ts`，该路径为计划新增，不冒充现有文件。compiled runner需补接本轮浏览器场景和DB判据；现有runner退出成功并不自动证明T02/T16。CSS规范化忽略构建哈希/空白，不忽略cascade层、媒体条件、声明或规则顺序。
+新增生命周期测试后显式运行 `pnpm exec vitest run tests/integration/web/new-session-lifecycle.integration.test.ts`，该路径为计划新增，不冒充现有文件。compiled runner使用 `node --no-warnings scripts/run-compiled-web-e2e.mjs --new-session-regression` 补接本轮浏览器场景和SQLite判据；默认runner退出成功并不自动证明T02/T16。新模式仍需原生浏览器实际点击，最终传入A/B ID与六次复用观察；脚本只读核对数据库仅两条root、A已有持久内容、B的message/run/prompt全空。刷新后的5s时间窗口另由浏览器时序与精确网络集成共同取证，不把最终DB快照当成时序证明。CSS规范化忽略构建哈希/空白，不忽略cascade层、媒体条件、声明或规则顺序。
 
 本轮没有改变LLM协议，不为目录移动强制重跑付费模型请求；受控模型足以验证接线。若实施实际改变模型边界，必须重新评估范围并补相关真实请求验证，不能默默扩大本轮。
 

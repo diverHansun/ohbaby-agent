@@ -1,0 +1,255 @@
+/* Cross-feature responsive, reduced-motion and execution overrides must stay after the base feature rules. Keep their original order; splitting them by owner would change the cascade. */
+@media (max-width: 720px) {
+  .ohb-app-shell.ohb-app-main,
+  .ohb-app-shell.ohb-app-empty {
+    position: relative;
+  }
+
+  .ohb-project-rail {
+    flex-basis: 56px;
+    padding-left: 7px;
+    padding-right: 7px;
+    width: 56px;
+  }
+
+  .ohb-sidebar {
+    bottom: 0;
+    box-shadow: 18px 0 44px rgba(30, 34, 44, 0.14);
+    flex-basis: auto;
+    left: 56px;
+    position: absolute;
+    top: 0;
+    transition:
+      transform 200ms ease-out,
+      opacity 200ms ease-out;
+    width: min(300px, calc(100vw - 56px));
+  }
+
+  .ohb-sidebar.is-collapsed {
+    box-shadow: none;
+    flex-basis: auto;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-100%);
+    width: min(300px, calc(100vw - 56px));
+  }
+
+  .ohb-sidebar > * {
+    min-width: 0;
+  }
+
+  .ohb-statusbar {
+    align-items: flex-start;
+    gap: 14px;
+    padding: 8px 16px;
+  }
+
+  .ohb-statusbar-meta {
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+
+  .ohb-context-popover {
+    width: min(340px, calc(100vw - 88px));
+  }
+
+  .ohb-divider {
+    display: none;
+  }
+
+  .ohb-stream {
+    padding-bottom: 176px;
+  }
+
+  .ohb-message-user-bubble {
+    max-width: 92%;
+  }
+
+  .ohb-app-content-has-todos .ohb-stream {
+    padding-bottom: 370px;
+  }
+
+  .ohb-composer {
+    padding: 14px 14px 11px;
+  }
+
+  .ohb-composer-hero {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .ohb-composer-input,
+  .ohb-todo-dock {
+    max-width: none;
+  }
+
+  .ohb-slash-completion {
+    display: none;
+  }
+
+  .ohb-permission-layer {
+    bottom: 142px;
+    left: 14px;
+    right: 14px;
+  }
+
+  .ohb-permission-modal {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ohb-permission-actions {
+    justify-content: flex-end;
+  }
+
+  .ohb-structured-overlay {
+    padding: 18px;
+  }
+
+  .ohb-structured-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ohb-structured-actions {
+    flex-direction: column;
+  }
+
+  .ohb-wordmark {
+    align-self: center;
+    font-size: clamp(36px, 12vw, 50px);
+    max-width: 100%;
+  }
+
+  .ohb-empty-hero {
+    max-width: 100%;
+    padding: 0 14px;
+    width: 100%;
+  }
+
+  .ohb-empty-context {
+    font-size: 11px;
+    max-width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ohb-sidebar,
+  .ohb-sidebar.is-collapsed {
+    transition-duration: 0ms;
+  }
+}
+
+@media (max-width: 420px) {
+  .ohb-composer-input {
+    gap: 6px;
+  }
+
+  .ohb-reasoning-control select {
+    max-width: 82px;
+    padding-right: 18px;
+    text-overflow: ellipsis;
+  }
+
+  .ohb-reasoning-chevron {
+    right: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ohb-command-modal-layer {
+    padding: 18px;
+  }
+
+  .ohb-status-result > .ohb-status-context-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ohb-status-context-row > span:first-child {
+    width: auto;
+  }
+
+  .ohb-app-content-empty {
+    align-items: stretch;
+  }
+
+  .ohb-empty-hero {
+    align-items: stretch;
+  }
+
+  .ohb-wordmark {
+    align-self: flex-start;
+  }
+
+  .ohb-empty-context {
+    justify-content: flex-start;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ohb-status-running,
+  .ohb-status-connecting,
+  .ohb-status-reconnecting {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms;
+    animation-iteration-count: 1;
+    scroll-behavior: auto;
+    transition-duration: 0.001ms;
+  }
+}
+
+.ohb-tool-panel button span.ohb-tool-executing {
+  background: linear-gradient(
+    100deg,
+    currentColor 35%,
+    var(--text-primary, #fff) 50%,
+    currentColor 65%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ohb-tool-shimmer 2.4s linear infinite;
+}
+@keyframes ohb-tool-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+.ohb-tool-duration,
+.ohb-prompt-duration {
+  opacity: 0.6;
+  font-size: 0.85em;
+}
+.ohb-prompt-duration {
+  margin: 4px 0 16px;
+}
+.ohb-stop-pending {
+  animation: ohb-stop-spin 1.2s linear infinite;
+}
+@keyframes ohb-stop-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ohb-tool-panel button span.ohb-tool-executing {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+  .ohb-stop-pending {
+    animation: none;
+  }
+}

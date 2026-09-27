@@ -1,6 +1,6 @@
 import type { KeyboardEvent } from "react";
 import { describe, expect, it } from "vitest";
-import { isImeComposing } from "./composer/ime.js";
+import { isImeComposing } from "./ime.js";
 
 describe("isImeComposing", () => {
   it("recognizes the standard composing flag", () => {

@@ -1,6 +1,6 @@
 import type { UiRun } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useExecutionDuration } from "./execution-duration.js";
+import { useExecutionDuration } from "./use-execution-duration.js";
 
 export function ModelWaiting({
   run,

@@ -1,0 +1,240 @@
+.ohb-stream {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 32px 0 144px;
+}
+
+.ohb-stream::-webkit-scrollbar {
+  width: 10px;
+}
+
+.ohb-stream::-webkit-scrollbar-thumb {
+  background: #e4e4e4;
+  border: 3px solid #fafafa;
+  border-radius: 6px;
+}
+
+.ohb-stream-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  margin: 0 auto;
+  max-width: 800px;
+  padding: 0 24px;
+}
+
+.ohb-message {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.ohb-message-user {
+  align-items: flex-end;
+}
+
+.ohb-message-body {
+  color: #2b2d33;
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+.ohb-message-user-bubble {
+  background: #eaf4ff;
+  border-radius: 14px;
+  max-width: 76%;
+  padding: 11px 15px;
+  width: fit-content;
+}
+
+.ohb-message-assistant-bare {
+  width: 100%;
+}
+
+.ohb-message-body p {
+  margin: 0 0 12px;
+}
+
+.ohb-message-body > :last-child,
+.ohb-message-user-bubble p:last-child {
+  margin-bottom: 0;
+}
+
+.ohb-message-pending {
+  position: relative;
+}
+
+.ohb-message-pending-label {
+  color: #aeb2ba;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.ohb-message-prompt-error-text {
+  color: #a8554c;
+  display: block;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  margin: -10px 24px 0;
+}
+
+.ohb-markdown code {
+  background: #f1f1f2;
+  border-radius: 4px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  padding: 1px 5px;
+}
+
+.ohb-streaming-text,
+.ohb-reasoning,
+.ohb-tool-panel pre {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.ohb-reasoning {
+  color: #6b6d73;
+}
+
+.ohb-tool-panel {
+  background: transparent;
+  border: 0;
+  margin: 2px 0;
+  min-width: 0;
+}
+
+.ohb-tool-panel button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: #54565c;
+  display: flex;
+  gap: 10px;
+  padding: 3px 8px;
+  transition: background-color 140ms ease;
+  width: 100%;
+}
+
+.ohb-tool-panel button:hover {
+  background: rgba(76, 86, 104, 0.055);
+}
+
+.ohb-tool-panel button span:first-child {
+  background: transparent;
+  border: 0;
+  flex: none;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 0;
+}
+
+.ohb-tool-summary {
+  color: #73767d;
+  flex: 1;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-tool-chevron {
+  flex: none;
+  height: 14px;
+  opacity: 0;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  width: 14px;
+}
+
+.ohb-tool-panel button:hover .ohb-tool-chevron,
+.ohb-tool-panel button:focus-visible .ohb-tool-chevron,
+.ohb-tool-panel button[aria-expanded="true"] .ohb-tool-chevron {
+  opacity: 1;
+}
+
+.ohb-tool-details {
+  background: rgba(76, 86, 104, 0.045);
+  border-radius: 7px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 2px 8px 10px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.ohb-tool-details section {
+  min-width: 0;
+}
+
+.ohb-tool-details section > span {
+  color: #969aa3;
+  display: block;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.ohb-tool-details pre {
+  color: #64676f;
+  max-height: 420px;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  word-break: break-word;
+}
+
+.ohb-tool-input pre {
+  max-height: 220px;
+}
+
+.ohb-tool-details pre::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ohb-tool-details pre::-webkit-scrollbar-thumb {
+  background: rgba(76, 86, 104, 0.18);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
+}
+
+.ohb-tool-blue button span:first-child {
+  color: #5b6bb0;
+}
+
+.ohb-tool-gold button span:first-child {
+  color: #8f6d22;
+}
+
+.ohb-tool-green button span:first-child {
+  color: #3f7d5c;
+}
+
+.ohb-tool-red button span:first-child {
+  color: #c23d38;
+}
+
+.ohb-chevron-open {
+  transform: rotate(90deg);
+}
+

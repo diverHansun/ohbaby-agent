@@ -42,7 +42,7 @@ import {
   ConversationStream,
   type PromptProjectionModel,
 } from "../conversation/ConversationStream.js";
-import { DurationSampleContext } from "../conversation/execution-duration.js";
+import { DurationSampleContext } from "../conversation/use-execution-duration.js";
 import { PermissionModal } from "../permissions/PermissionModal.js";
 import { DirectoryPickerDialog } from "../workspace/directory-picker/DirectoryPickerDialog.js";
 import { ProjectRail } from "../workspace/ProjectRail.js";

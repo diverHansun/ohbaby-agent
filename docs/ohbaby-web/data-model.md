@@ -1,6 +1,6 @@
 # ohbaby-web · data-model（数据模型）
 
-> web 端的概念词典。只收**web 自己拥有的投影态与连接态**；领域类型（`UiSnapshot` / `UiEvent` / `UiMessage` / `UiRun` / `UiPermissionRequest` 等）是 `ohbaby-sdk` 的真相，web 只引用、不重定义（ND3/ND4）。
+> web 端的概念词典。只收**web 自己拥有的投影态、连接态与交互状态**；领域类型（`UiSnapshot` / `UiEvent` / `UiMessage` / `UiRun` / `UiPermissionRequest` 等）是 `ohbaby-sdk` 的真相，web 只引用、不重定义（ND3/ND4）。
 >
 > 前置：[`architecture.md`](./architecture.md) 已确认。
 
@@ -87,3 +87,23 @@
 - **归属**：store 持有以上易失投影，不持久化。backend 持有审批事实；web 仅持有普通事件游标、独立审批游标、绑定及连接态。
 
 > 概念变化需同步检查 [`dfd-interface.md`](./dfd-interface.md)（投影流）与 [`test.md`](./test.md)（投影/连接态场景）。
+
+### UI 局部状态与唯一 owner
+
+以下状态随功能拆分迁移，不形成第二套服务端状态层；`session/selectors.ts` 的 ViewModel 仍是现有 store 的派生视图。
+
+| 状态 / 数据 | 拥有方 | 生命周期与边界 |
+| --- | --- | --- |
+| workspace、记忆导航、client 生命周期 | `src/runtime.ts` | 切换/销毁使旧 client 失效；只有一个活动 client 和逻辑 SSE；导航由既有 helper 持久化 |
+| unknown prompt 恢复记录 | `api/daemon/client.ts` | 随 browser client 的现有恢复机制；不移入 React 或 runtime |
+| localPromptAttempts、receipt 接管、promptProjection | `ui/session/SessionScreen.tsx` | 按原 scope/clientRequestId 区分；正式消息接管后不能重复显示；不改写服务端 prompt 队列 |
+| Stop pending 与延迟提示、session sync banner | `ui/session/use-stop-request.ts`、`use-session-sync-banner.ts` | 分别按 session/run 与同步 scope 隔离；RPC 接受不等于 run 可靠终态 |
+| draft、pending requestId/text、队列编辑缓冲与续租 | `ui/composer/Composer.tsx` | `draft-storage.ts` 保持原存储键；切 scope、租约失败及卸载清理本地生命周期；后端仍裁定租约有效性 |
+| slash query/选中索引、IME/keydown、编辑 revision | `ui/composer/Composer.tsx` | query 从唯一 draft 派生；一次按键只触发一个动作；异步写回校验 scope 与编辑 revision |
+| 命令表单与 pending、结果展示 | `ui/commands/` | SessionScreen 组合打开/关闭与请求；commands 不拥有草稿副本；迟到结果不能改写另一 scope 或用户新稿 |
+| permission 确认、焦点、当前卡片选择 | `ui/permissions/` | 权限事实来自独立 permissionSync；局部确认不复制 registry，不用消息 live 代替审批 ready |
+| 阅读位置、工具展开、TodoDock 展开 | `ui/conversation/` | 按稳定消息/call/todo 身份保留；history 分页保护锚点，scope 切换按现有语义重置 |
+
+`ComposerPrefill` 定义于 Composer，携带 `scopeKey`、`editRevision`、`nonce` 和 `text`。nonce 区分回填请求；scope/revision 判定是否仍可应用，不能只比较草稿字符串。异步命令清空也受发起 scope 与编辑 revision 约束。这些 guard 只让过时的本地结果失效，不是新的服务端 revision 或全局 store。
+
+职责依据见 [Web improve-3](./improve-3/02-change-spec.md)；跨包行为与最终验收见 [中央 improve-2.1](../problem-lists/2026-09-19-execution-reliability/improve-2.1/README.md)。

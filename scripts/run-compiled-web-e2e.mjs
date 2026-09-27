@@ -12,6 +12,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 
 const TITLE_MARKER =
@@ -30,6 +31,20 @@ const UI_EVIDENCE_EXPECTED = Object.freeze({
   toolFinalAfterRefresh: 1,
   toolFinalBeforeRefresh: 1,
   toolPanelCompleted: true,
+});
+const newSessionRegression = process.argv.includes("--new-session-regression");
+if (process.argv.slice(2).some((arg) => arg !== "--new-session-regression")) {
+  throw new Error(
+    "Usage: node scripts/run-compiled-web-e2e.mjs [--new-session-regression]",
+  );
+}
+const NEW_SESSION_EVIDENCE_SCHEMA = Object.freeze({
+  usedSessionId: "A: session used for both E01-E05 prompts",
+  emptySessionId: "B: empty session created by New after A is used",
+  sequentialNewSessionIds:
+    "Exactly six IDs observed after six sequential New clicks; all B",
+  afterUsedSessionNewId: "B: select A, then click New",
+  afterRefreshNewId: "B: refresh, select A, then click New",
 });
 
 function writeSse(response, payload) {
@@ -481,7 +496,68 @@ function assertBrowserEvidence(value) {
       );
     }
   }
-  return UI_EVIDENCE_EXPECTED;
+  if (!newSessionRegression) {
+    return UI_EVIDENCE_EXPECTED;
+  }
+  const evidence = value.newSessionRegression;
+  if (
+    !evidence ||
+    typeof evidence.usedSessionId !== "string" ||
+    evidence.usedSessionId.length === 0 ||
+    typeof evidence.emptySessionId !== "string" ||
+    evidence.emptySessionId.length === 0 ||
+    evidence.usedSessionId === evidence.emptySessionId ||
+    !Array.isArray(evidence.sequentialNewSessionIds) ||
+    evidence.sequentialNewSessionIds.length !== 6 ||
+    !evidence.sequentialNewSessionIds.every(
+      (id) => id === evidence.emptySessionId,
+    ) ||
+    evidence.afterUsedSessionNewId !== evidence.emptySessionId ||
+    evidence.afterRefreshNewId !== evidence.emptySessionId
+  ) {
+    throw new Error(
+      "compiled Web New-session evidence must identify used A, distinct empty B, six sequential reuses of B, and reuse after selecting A and refreshing",
+    );
+  }
+  return { ...UI_EVIDENCE_EXPECTED, newSessionRegression: evidence };
+}
+
+function verifyNewSessionDatabase(databasePath, workspacePath, evidence) {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    // Count persisted rows, including archived sessions and terminal prompts.
+    // Final total catches duplicate empty rows without relying on sidebar counts.
+    const sessions = database.prepare(`
+      SELECT s.id, s.project_root AS projectRoot, s.parent_id AS parentId, s.status,
+        (SELECT COUNT(*) FROM message WHERE session_id = s.id) AS messageCount,
+        (SELECT COUNT(*) FROM run_ledger WHERE session_id = s.id) AS runCount,
+        (SELECT COUNT(*) FROM prompt_submission WHERE session_id = s.id) AS promptCount
+      FROM session s ORDER BY s.id
+    `).all();
+    const used = sessions.find(
+      (session) => session.id === evidence.usedSessionId,
+    );
+    const empty = sessions.find(
+      (session) => session.id === evidence.emptySessionId,
+    );
+    if (
+      sessions.length !== 2 ||
+      sessions.some(
+        (session) => session.parentId !== null ||
+          session.projectRoot !== workspacePath || session.status !== "active",
+      ) ||
+      !used || !empty ||
+      used.messageCount === 0 || used.runCount === 0 || used.promptCount === 0 ||
+      empty.messageCount !== 0 || empty.runCount !== 0 || empty.promptCount !== 0
+    ) {
+      throw new Error(
+        `compiled Web New-session database invariant failed: ${JSON.stringify(sessions)}`,
+      );
+    }
+    return { rootCount: sessions.length, childCount: 0, sessions };
+  } finally {
+    database.close();
+  }
 }
 
 async function verifyDiagnostics(logFilePath, output, forbiddenValues = []) {
@@ -796,8 +872,22 @@ try {
     "E2E_UI_PENDING Complete E01-E05 in the browser, then submit one JSON evidence line.",
   );
   console.log(`E2E_UI_EVIDENCE_SCHEMA ${JSON.stringify(UI_EVIDENCE_EXPECTED)}`);
+  if (newSessionRegression) {
+    console.log(
+      "E2E_NEW_SESSION_PENDING After using A, create B, click New six times sequentially, select A then New, refresh then select A and New. Do not archive/delete sessions. Return to A for any remaining E01-E05 checks.",
+    );
+    console.log(
+      `E2E_NEW_SESSION_EVIDENCE_SCHEMA ${JSON.stringify({ newSessionRegression: NEW_SESSION_EVIDENCE_SCHEMA })}`,
+    );
+  }
   const browserEvidence = await waitForBrowserEvidence();
   console.log(`E2E_UI_EVIDENCE_PASS ${JSON.stringify(browserEvidence)}`);
+  if (newSessionRegression) {
+    const databaseEvidence = verifyNewSessionDatabase(
+      dbPath, workspace, browserEvidence.newSessionRegression,
+    );
+    console.log(`E2E_NEW_SESSION_DATABASE_PASS ${JSON.stringify(databaseEvidence)}`);
+  }
 
   const backendEvidence = provider.assertEvidence();
   console.log(`E2E_BACKEND_PASS ${JSON.stringify(backendEvidence)}`);

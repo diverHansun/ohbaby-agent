@@ -7,7 +7,7 @@ import {
   INITIAL_LOAD_BANNER_DELAY_MS,
   isSessionRecovery,
   useSessionSyncBanner,
-} from "./session/use-session-sync-banner.js";
+} from "./use-session-sync-banner.js";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }

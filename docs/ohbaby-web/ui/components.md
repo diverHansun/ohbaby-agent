@@ -4,6 +4,22 @@
 
 ---
 
+当前实现入口为 `App.tsx → session/SessionScreen.tsx`。App 负责挂载及空工作区切换；SessionScreen 负责 store 订阅、提交投影、Stop/恢复和跨功能组合。组件职责与产品呈现规格分开：下面的外观/交互不因文件迁移改变。
+
+| 功能 | 当前实现落点 | 状态边界 |
+| --- | --- | --- |
+| 项目轨 / 目录选择 | `workspace/ProjectRail.tsx`、`workspace/directory-picker/DirectoryPickerDialog.tsx` | workspace 数据与导航由 runtime 提供 |
+| 会话侧栏 / 状态 | `session/SessionSidebar.tsx`、`session/SessionStatus.tsx` | 接收会话/状态数据及动作 |
+| 消息 / 工具 / 计时 / TodoDock | `conversation/ConversationStream.tsx`、`MessageRow.tsx`、`tool-card.tsx`、`ExecutionProgress.tsx`、`TodoDock.tsx` | 消息事实只读，局部滚动和展开留在 conversation |
+| 输入 / 队列编辑 / reasoning | `composer/Composer.tsx`、`draft-storage.ts`、`ReasoningControl.tsx` | 唯一草稿、租约生命周期和键盘链 |
+| slash / 结果 / 表单 | `commands/slashCommands.ts`、`SlashPalette.tsx`、`CommandResultModal.tsx`、`StructuredCommandOverlay.tsx` | 规则/展示/表单不复制 Composer draft；结果状态使用 commands 自己的窄类型 |
+| 审批 / 策略确认 | `permissions/PermissionModal.tsx`、`PermissionPolicyControl.tsx` | 独立审批同步与局部确认/焦点 |
+| 跨功能基础展示 | `shared/MarkdownBlock.tsx`、`ContextUsage.tsx` | 只读展示，不持有业务状态 |
+
+Composer 通过 `topContent` 接收 SessionScreen 装配的 TodoDock，通过 `permissionControl` 接收权限策略控件。TodoDock 仍位于 Composer section 顶部、消息滚动容器之外，保留原身份 key、展开状态与 DOM 顺序。组件接收具体 model/数据/能力，不接整个 runtime 或 ViewModel。样式由 `ui/styles.css` 按原顺序导入 14 个连续块，功能规则随所属目录放置。
+
+结构规格见 [Web improve-3](../improve-3/02-change-spec.md)，阶段行为与验收归[中央 improve-2.1](../../problem-lists/2026-09-19-execution-reliability/improve-2.1/README.md)。
+
 ## 0. ProjectRail / SessionSidebar（项目轨与会话侧栏）
 
 - 会话侧栏以宽度动画展开和收起，内容在动画中不重排。
@@ -45,6 +61,8 @@
 ---
 
 ## 3. Composer（输入区，底部 dock）
+
+Composer 保留唯一键盘链：先过滤 IME；候选打开时方向/Page、Tab、Enter、Esc 处理后当次结束；其后才处理发送、退出队列编辑、Shift+Tab 切 mode 和双 Esc Stop。鼠标和键盘走同一命令动作。同步补全直接更新本地 draft；异步清空及 skills 回填必须匹配发起 scope 与编辑 revision，失败保留草稿；prefill nonce 不能代替这两个校验。
 
 - **输入框**：最大宽约 800px，阅读列仍 720px；无装饰性 `>` 提示符。输入文字与占位约 14px / 22px 行高，1–7 个视觉行自适应，第 7 行后只在 textarea 内滚动；`↵` 发送、`⇧↵` 换行。输入框下缘距窗口底约 10–12px。
 - **slash 输入**：以 `/` 开头时不作为普通 prompt，而是走 `UiSlashCommand` 解析/执行。v0.1.6 做 web-safe 候选面板、分组、`↑/↓` 选择、`Tab` 补全、`Enter` 执行、`Esc` 关闭；解析失败要保留草稿并显示错误。详细规格见 [`slash-commands/`](./slash-commands/README.md)。

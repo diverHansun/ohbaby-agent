@@ -19,7 +19,7 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 
 ## 2. Data Flow Description（数据流描述）
 
-**① 引导流**：页面加载 → `bootstrap.ts` 读 `window.__OHBABY__`{token, clientId, baseUrl, directory}，再读取 URL fragment 中的一次性初始 selected hint → 构造 `OhbabyWebRuntime`。runtime 为选中的 workspace 创建一个 `BrowserDaemonClient`；没有可选 workspace 时 `runtime.client` 为 `null`。fragment 只在浏览器端消费，server 不接受 query/cwd fallback。
+**① 引导流**：页面加载 → `bootstrap.ts` 读 `window.__OHBABY__`{token, clientId, baseUrl, directory}，再读取 URL fragment 中的一次性初始 selected hint → 从 `src/runtime.ts` 构造 `OhbabyWebRuntime`。runtime 为选中的 workspace 创建一个 `BrowserDaemonClient`；没有可选 workspace 时 `runtime.client` 为 `null`。fragment 只在浏览器端消费，server 不接受 query/cwd fallback。
 
 **② 建连 / 首屏流（关键顺序，防漏拍/重复）**：
 
@@ -86,8 +86,19 @@ web 只与 daemon 的 `/v1` 面交互（同源）。
 ### 3.2 SDK client 与 runtime façade
 
 - `BrowserDaemonClient implements UiBackendClient`：公开 SDK 权威业务能力；`getSnapshot()` 异步返回 `UiSnapshot`，`subscribeEvents()` 注册本地 subscriber，三种 Prompt 方法、必选 queue/lease、permission/interaction/model/command 能力均使用 SDK 参数与返回值。
-- `OhbabyWebRuntime`：只负责编排 workspace/directory、client 生命周期、create/select/archive/abort session 和 slash 文本解析；`runtime.client` 的静态类型是 `UiBackendClient | null`，不是第二份业务接口。
+- `OhbabyWebRuntime`（`src/runtime.ts`）：只负责编排 workspace/directory、client 生命周期、create/select/archive/abort session 和 slash 文本解析；`runtime.client` 的静态类型是 `UiBackendClient | null`，不是第二份业务接口。
 - `DaemonHttpClient`：内部 wire helper，只返回 transport wrapper，不暴露给 UI，也不实现 `UiBackendClient`。
+
+### UI 内部接线
+
+- `App` 读取 workspace；存在活动 client 时进入 `session/SessionScreen`，否则装配空工作区与目录选择。功能组件不自行创建 runtime/client 或 SSE。
+- `SessionScreen` 订阅 store，经 `session/selectors.ts` 派生视图；向 conversation 提供消息、已计算 prompt rows、history/等待/计时事实与 `onLoadEarlier`，向 Composer 提供 `ComposerModel`、只读队列和所需能力。叶组件不接整个 ViewModel。
+- 用户发送经 Composer 的 `onSubmit` 进入 SessionScreen 的本地 attempt/receipt 投影，再调用既有 client；服务端事件继续经原 store 接管，不复制消息或队列事实。队列编辑/续租由 Composer 调用窄 client 能力，SessionScreen 不另设 timer 或编辑缓冲。
+- Composer 用 commands 的纯 slash 规则和 SlashPalette 展示候选，保持唯一 IME/keydown/索引态。结构化命令交 SessionScreen 打开 commands 表单；commands 按专用 model/search/compact/goal 能力执行。异步清空/skills 回填带发起 scope、Composer 编辑 revision；Composer 校验后走正常草稿修改与持久化路径，nonce 用于区分重复回填。
+- `CommandResultModal` 的 `view` 是 commands 定义的窄 `CommandStatusContext`，不是 session ViewModel；命令展示只消费需要的状态。
+- SessionScreen 装配 TodoDock 与 PermissionPolicyControl，分别通过 Composer 的 `topContent` 与 `permissionControl` 插入原位置；Composer 不依赖 conversation/permissions 实现。PermissionModal 独立消费审批就绪状态与 respond/retry 能力。
+
+模块接线依据见 [Web improve-3](./improve-3/02-change-spec.md)。New session 的出站意图及跨包语义由[中央 improve-2.1 方案](../problem-lists/2026-09-19-execution-reliability/improve-2.1/02-optimization-plan-and-change-scope.md)定义，本文不复制其状态机或验收编号。
 
 ### 3.3 store 接口
 

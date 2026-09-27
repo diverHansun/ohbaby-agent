@@ -1,10 +1,17 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(
-  new URL("./styles.css", import.meta.url),
-  "utf8",
-).replace(/\r\n?/gu, "\n");
+const css = readStylesheet(new URL("./styles.css", import.meta.url));
+
+// Follow the bootstrap entry's imports in order so assertions inspect the same
+// rule sequence as the bundled stylesheet.
+function readStylesheet(url: URL): string {
+  return readFileSync(url, "utf8")
+    .replace(/\r\n?/gu, "\n")
+    .replace(/^@import "([^"]+)";$/gmu, (_statement, path: string) =>
+      readStylesheet(new URL(path, url)),
+    );
+}
 
 describe("web app layout styles", () => {
   it("keeps the composer docked while only the transcript scrolls", () => {

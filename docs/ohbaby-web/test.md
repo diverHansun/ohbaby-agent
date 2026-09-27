@@ -104,3 +104,24 @@
 - **e2e 分两层**：先跑 deterministic（fake backend/app.fetch/headless browser），再跑 real-link（真 `ohbaby serve` + `.env` + Zhipu/Tavily）。使用 Playwright MCP 做真实浏览器检查；重型像素级视觉回归暂缓。
 
 > 关键场景与 [`use-case.md`](./use-case.md) §4 的失败点一一对应；§2 的"基线对齐"与"resync"依赖 server 的 S-A（snapshot 带 seqNum），契约测试应一并断言该字段存在。
+
+## 5. 功能拆分后的测试归属
+
+`src/ui/App.unit.test.tsx` 保留跨功能的真实用户流程：发送/队列/Stop、会话与 workspace 切换、slash/overlay/skills 回填、审批与恢复等。局部测试只迁移位置及 import/fixture 引用，不能因组件提取删除旧断言或放宽预期。下表是既有独立测试的迁移映射，路径相对于 `apps/ohbaby-web/src/ui/`：
+
+| 原路径 | 功能归属路径 |
+| --- | --- |
+| `selectors.unit.test.ts` | `session/selectors.unit.test.ts` |
+| `use-session-sync-banner.unit.test.tsx` | `session/use-session-sync-banner.unit.test.tsx` |
+| `TypewriterPlaceholder.unit.test.tsx` | `composer/TypewriterPlaceholder.unit.test.tsx` |
+| `ime.unit.test.ts` | `composer/ime.unit.test.ts` |
+| `streamScroll.unit.test.ts` | `conversation/streamScroll.unit.test.ts` |
+| `tool-card.unit.test.tsx` | `conversation/tool-card.unit.test.tsx` |
+| `slashCommands.unit.test.ts` | `commands/slashCommands.unit.test.ts` |
+| `ContextUsage.unit.test.tsx` | `shared/ContextUsage.unit.test.tsx` |
+
+`workspace/directory-picker/DirectoryPickerDialog.unit.test.tsx` 与组件相邻。`composer/Composer.unit.test.tsx` 增加局部 prefill 保护：用户编辑后即使文字改回原值也拒绝旧 revision；合法回填持久化且同一身份只消费一次；Tab 补全走同一更新路径，持久化并推进 revision。textarea 高度与实际输入交互继续由 App 流程保护，不虚设尚不存在的独立测试文件。
+
+`styles.unit.test.ts` 留在 UI 根目录并读取实际 CSS 入口/导入块。`ui/styles.css` 的 14 个连续块保持原级联顺序；静态样式断言不能代替构建与浏览器检查。runtime 独立后，既有 `api/daemon/` client/workspace/session/permission integration 测试继续覆盖实际连接链路；文件迁移不增加第二条连接或新的同步状态层。
+
+Web 测试与阶段验收的映射见 [improve-3/03](./improve-3/03-test-criteria.md)。跨包 New session 行为、唯一验收 ID 与最终结果只在[中央 improve-2.1](../problem-lists/2026-09-19-execution-reliability/improve-2.1/README.md)记录；本文列测试职责，不声明本轮运行通过。

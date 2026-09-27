@@ -16,7 +16,7 @@ web 端由 SDK client、浏览器 façade、store 与 UI 四个角色组成。�
   - `events` —— SSE over fetch-stream，含 `Last-Event-ID` 续传与 `resync-required` 处理。
   - `eventReducer` —— 纯函数 `(event, state) → state`：把 `UiEvent` 投影为 ViewState（含轻量 `CommandNotice`）。
   - `BrowserDaemonClient` —— 唯一浏览器 backend client，直接实现 SDK `UiBackendClient`；一个活动 workspace 只拥有一个实例和一条逻辑 SSE。
-  - `OhbabyWebRuntime` —— 浏览器应用 façade，只编排 workspace、导航、client 生命周期、session 选择和 slash 文本解析；它不复制整套 backend 方法。
+- **应用 façade `src/runtime.ts`**：`BrowserOhbabyWebRuntime` 实现 `OhbabyWebRuntime`，编排 workspace、导航、client 生命周期、session 选择和 slash 文本解析；它是既有 façade 的独立落点，不复制整套 backend 方法。`api/daemon/client.ts` 不反向依赖 runtime。
 - **状态层 `store/`**：持有投影后的 ViewState、ConnectionState 与独立 PermissionSyncState，喂给 React（`useSyncExternalStore`）。
 - **视图层 `ui/`**：会话流、输入框、权限弹窗、状态条等组件。
 
@@ -37,29 +37,41 @@ web 端由 SDK client、浏览器 façade、store 与 UI 四个角色组成。�
 
 ## 3. Module Structure & File Layout（模块结构与文件组织）
 
-```
+```text
 apps/ohbaby-web/
-  index.html            ← daemon 注入 window.__OHBABY__ 的位点（依赖 S-C）
+  index.html
   vite.config.ts
-  package.json          ← private: true，包名 ohbaby-web
+  package.json
   src/
-    bootstrap.ts        读注入 → 建 client → 挂载 React
-    main.tsx            React 根
+    bootstrap.ts        读注入 → 创建 runtime → 挂载 React；导入唯一 styles.css 入口
+    runtime.ts          浏览器 façade、workspace/导航与 client 生命周期
     api/daemon/
-      wire.ts           /v1 私有线类型（SDK DTO + transport wrapper）
+      wire.ts           /v1 线类型与现有浏览器投影类型
       http.ts           REST 命令封装
       events.ts         SSE over fetch-stream + Last-Event-ID/resync
       eventReducer.ts   UiEvent → ViewState（纯函数）
-      client.ts         BrowserDaemonClient + OhbabyWebRuntime façade
+      client.ts         BrowserDaemonClient，实现 SDK UiBackendClient
+      navigation-state.ts  导航持久化 helper，由 runtime 消费
     store/
-      store.ts          外部 store：subscribe/getSnapshot（喂 useSyncExternalStore）
+      store.ts          现有同步投影及 subscribe/getSnapshot
     ui/
-      ConversationStream.tsx   会话/消息流（流式渲染 + markdown 消毒 + 工具卡片）
-      Composer.tsx             输入框 + 发/中断 + mode(auto/plan) + 权限策略(default/full-access)
-      App.tsx                  权限模态（独立待处理列表，可选择非首项）
-      StatusBar.tsx            连接态 / run 状态 / 上下文用量（无诊断行）
-      CommandNotice.tsx         slash 命令结果/错误的轻量投影（非完整命令面板）
+      App.tsx           根挂载、空 workspace 与 SessionScreen 切换
+      workspace/        ProjectRail、directory-picker/DirectoryPickerDialog
+      session/          SessionScreen、SessionSidebar、SessionStatus、selectors、Stop/同步提示 hook
+      conversation/     ConversationStream、MessageRow、tool-card、TodoDock、滚动与执行计时
+      composer/         Composer、draft-storage、ReasoningControl、IME/textarea/placeholder
+      commands/         slashCommands、SlashPalette、结果 modal、connect/compact/goal overlay
+      permissions/      PermissionModal、PermissionPolicyControl（含 full-access 确认）
+      shared/           MarkdownBlock、ContextUsage
+      styles/           全局基础、布局及跨功能覆盖块
+      styles.css        固定顺序导入 14 个连续样式块；功能样式随功能目录放置
 ```
+
+根入口不再承载各功能实现。`SessionScreen` 订阅既有 store、计算提交投影并组合各功能；叶组件接收具体数据和 `Pick<UiBackendClient, ...>`/回调能力，不接收整个 runtime 或 ViewModel。Composer 独占草稿、队列编辑租约生命周期、slash 选中态及键盘链；commands 提供纯规则、候选展示和表单，permissions 提供策略控件。SessionScreen 将 `conversation/TodoDock` 通过 `topContent`、权限控件通过 `permissionControl` 传给 Composer；TodoDock 仍在 Composer section 顶部、消息滚动容器之外。
+
+依赖方向为 `bootstrap → runtime → api/daemon/client`、`App → workspace/session`、`session → conversation/composer/commands/permissions/shared`。Composer 只单向使用 commands 的 slash 规则与 SlashPalette；shared 不反向依赖功能层。样式入口按原级联顺序保留，不能按目录重新排序。
+
+本次结构落地对应 [Web improve-3](./improve-3/README.md)；跨包 New session 行为与最终验收归 [中央 improve-2.1](../problem-lists/2026-09-19-execution-reliability/improve-2.1/README.md)，验收编号不在本文重复定义。
 
 - **对外稳定面**：SDK `UiBackendClient` + `OhbabyWebRuntime` façade + store hooks。
 - **内部实现**：`wire` / `http` / `events` / `eventReducer` —— 可在不动 UI 的前提下替换。

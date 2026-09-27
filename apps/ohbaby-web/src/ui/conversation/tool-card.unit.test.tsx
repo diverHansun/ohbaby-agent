@@ -3,12 +3,12 @@ import type { UiMessagePart, UiToolCall, UiToolResult } from "ohbaby-sdk";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DurationSampleContext } from "./conversation/execution-duration.js";
+import { DurationSampleContext } from "./use-execution-duration.js";
 import {
   OrphanToolResultCard,
   pairToolParts,
   ToolCard,
-} from "./conversation/tool-card.js";
+} from "./tool-card.js";
 
 (
   globalThis as typeof globalThis & {
