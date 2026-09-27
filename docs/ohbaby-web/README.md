@@ -6,6 +6,8 @@
 >
 > **Web Phase 2 导航已实施**：OpenCode 风格“项目 rail → 按需展开的当前项目 sessions → 对话”、持久项目 registry、服务端目录弹窗、hide/reopen 与每项目 session 恢复，以 [`../problem-lists/2026-07-11-opencode-style-web-navigation/`](../problem-lists/2026-07-11-opencode-style-web-navigation/README.md) 为实现与验收记录。旧 workspace `<select>` 已删除。
 
+> **2026-09-27 模块优化规划：** [模块 improve-3](improve-3/README.md)对应[中央 improve-2.1](../problem-lists/2026-09-19-execution-reliability/improve-2.1/README.md)，说明功能拆分、状态归属与关键文件。用户已授权在 `codex/improve-2.2` 实施；本规划修订不代表已经验收。它不是中央 improve-3 的子代理功能阶段。当前文档中的历史结构将在实施完成时按实际代码同步。
+
 ## 一句话定位
 
 web 端是 daemon 会话状态的**投影与 adapter**，不持有独立事实源。它是与 CLI 并列的"又一个前端消费者"，共享同一个 `UiBackendClient`/`CoreApiHost` 契约，而非新搭一套架构。
