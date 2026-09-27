@@ -848,6 +848,108 @@ describe("runOhbabyCli", () => {
     expect(renderTerminalUi).not.toHaveBeenCalled();
   });
 
+  it("preserves cancellable subagent reads and root identity through the default TUI RPC host", async () => {
+    vi.resetModules();
+    const listSignal = new AbortController();
+    const viewSignal = new AbortController();
+    let viewReceived: AbortSignal | undefined;
+    const backendCancelled = vi.fn();
+    const list = vi.fn((input: import("ohbaby-sdk").UiSubagentQuery) => {
+      input.signal?.throwIfAborted();
+      expect(input).toMatchObject({
+        rootSessionId: "root-session",
+        before: "history-cursor",
+        bindingGeneration: 7,
+      });
+      expect(input.signal).toBe(listSignal.signal);
+      return Promise.resolve({
+        executions: [],
+        hasMore: false,
+        waiting: true,
+        approvalBlocked: false,
+        activeCount: 3,
+        completedCount: 0,
+      });
+    });
+    const view = vi.fn(
+      (
+        input: import("ohbaby-sdk").UiSubagentQuery & { executionId: string },
+      ): Promise<never> => {
+        viewReceived = input.signal;
+        input.signal?.throwIfAborted();
+        expect(input).toMatchObject({
+          rootSessionId: "root-session",
+          executionId: "child-execution",
+          bindingGeneration: 7,
+        });
+        return new Promise((_resolve, reject) => {
+          input.signal?.addEventListener(
+            "abort",
+            () => {
+              backendCancelled();
+              reject(new Error("Backend read cancelled"));
+            },
+            { once: true },
+          );
+        });
+      },
+    );
+    const core = Object.assign(createCore(), {
+      listSubagentExecutions: list,
+      getSubagentExecutionView: view,
+    });
+    const dispose = vi.fn(() => Promise.resolve());
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi: (options: {
+        client: CoreAPI;
+      }): { waitUntilExit(): Promise<void> } => ({
+        waitUntilExit: async (): Promise<void> => {
+          const listing = await options.client.listSubagentExecutions?.({
+            rootSessionId: "root-session",
+            before: "history-cursor",
+            bindingGeneration: 7,
+            signal: listSignal.signal,
+          });
+          expect(listing?.activeCount).toBe(3);
+          const pending = options.client.getSubagentExecutionView?.({
+            rootSessionId: "root-session",
+            executionId: "child-execution",
+            bindingGeneration: 7,
+            signal: viewSignal.signal,
+          });
+          const rejected = expect(pending).rejects.toMatchObject({
+            name: "AbortError",
+          });
+          await vi.waitFor(() => {
+            expect(viewReceived).toBe(viewSignal.signal);
+          });
+          viewSignal.abort();
+          await rejected;
+          expect(backendCancelled).toHaveBeenCalledOnce();
+        },
+      }),
+    }));
+    const { runOhbabyCli } = await import("./bin.js");
+    expect(
+      await runOhbabyCli(
+        ["node", "ohbaby"],
+        {},
+        {
+          loadRuntimeEnvIntoProcessEnv: () => Promise.resolve(),
+          createCoreHost: () => ({
+            core,
+            callbacks: { subscribeEvents: (): (() => void) => () => undefined },
+            dispose,
+          }),
+        },
+      ),
+    ).toBe(0);
+    expect(list).toHaveBeenCalledOnce();
+    expect(view).toHaveBeenCalledOnce();
+    expect(core.selectSession).not.toHaveBeenCalled();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
   it("leaves resume errors to the subscribed session recovery UI", async () => {
     vi.resetModules();
     const core = createCore();

@@ -7,5 +7,7 @@ export type { TerminalUiOptions };
 export function renderTerminalUi(options: TerminalUiOptions): Instance {
   return render(<OhbabyTerminalApp {...options} />, {
     incrementalRendering: true,
+    // Root Stop and read-only child views own cancellation; Ink must not exit first.
+    exitOnCtrlC: false,
   });
 }

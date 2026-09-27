@@ -19,6 +19,8 @@ const NESTED_SIGNAL_ARGUMENTS = new Map<PropertyKey, number>([
   ["getSessionHistory", 0],
   ["getSessionControl", 0],
   ["getPromptReceipt", 0],
+  ["listSubagentExecutions", 0],
+  ["getSubagentExecutionView", 0],
 ]);
 
 function boundaryDelay(): Promise<void> {

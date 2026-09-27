@@ -215,6 +215,8 @@ describe("createRPC", () => {
     "getSessionHistory",
     "getSessionControl",
     "getPromptReceipt",
+    "listSubagentExecutions",
+    "getSubagentExecutionView",
   ] as const)(
     "preserves %s cancellation across the JSON proxy boundary",
     async (method) => {

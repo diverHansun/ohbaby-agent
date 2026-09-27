@@ -20,6 +20,15 @@ import type { StreamBridge } from "../../runtime/stream-bridge/index.js";
 export type PublishUiEvent = (event: UiEvent) => void;
 
 export interface UiRuntimeComposition {
+  getSubagentWaitState(rootRunId: string): {
+    readonly waiting: boolean;
+    readonly approvalBlocked: boolean;
+  };
+  getSubagentExecutionBudget(
+    executionId: string,
+  ):
+    | import("../../agents/subagents/execution-budget.js").ExecutionBudgetSnapshot
+    | undefined;
   readonly agentManager: AgentManager;
   readonly goals: GoalService;
   readonly todos: TodoService;

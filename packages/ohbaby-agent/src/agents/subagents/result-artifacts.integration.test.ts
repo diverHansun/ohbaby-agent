@@ -68,6 +68,24 @@ async function setup(output: string, requesterScopeId = "scope") {
   return { rootDir, store, storage, artifacts, lookup };
 }
 describe("execution result artifacts", () => {
+  it.each([51199, 51200, 51201])(
+    "preserves the complete UTF-8 report at %i bytes",
+    async (size) => {
+      const output = "中".repeat(Math.floor(size / 3)) + "a".repeat(size % 3);
+      expect(Buffer.byteLength(output)).toBe(size);
+      const { artifacts, lookup } = await setup(output);
+      const result = await artifacts.prepare(lookup);
+      if (size <= 51200) {
+        expect(result.artifact).toBeUndefined();
+        expect(result.body.endsWith(output)).toBe(true);
+      } else {
+        expect(result.body).not.toContain(output.slice(0, 30));
+        if (result.artifact?.state !== "ready")
+          throw new Error("Missing complete artifact");
+        expect(await readFile(result.artifact.path, "utf8")).toBe(output);
+      }
+    },
+  );
   it("does not publish a file which Read rejects for a late NUL", async () => {
     const { artifacts, lookup } = await setup("a".repeat(5000) + "\0tail");
     expect(
