@@ -28,6 +28,8 @@ const INTERRUPTED_REASON = "process interrupted before run completed";
 const ORPHANED_OWNER_REASON = "process interrupted before owner exited";
 
 interface RunLedgerRow {
+  readonly inputs_closed_at: number | null;
+  readonly inputs_close_reason: string | null;
   readonly run_id: string;
   readonly session_id: string;
   readonly context_scope_id: string | null;
@@ -49,6 +51,8 @@ interface DatabaseRunLedgerOptions extends InMemoryRunLedgerOptions {
 function rowToRecord(row: RunLedgerRow): RunLedgerRecord {
   return {
     runId: row.run_id,
+    inputsClosedAt: row.inputs_closed_at ?? undefined,
+    inputsCloseReason: row.inputs_close_reason ?? undefined,
     sessionId: row.session_id,
     contextScopeId: row.context_scope_id ?? undefined,
     triggerSource: row.trigger,
@@ -275,10 +279,10 @@ export function createDatabaseRunLedger(
       const result = connection
         .prepare(
           `UPDATE ${schema.runLedger.tableName}
-           SET status = ?, ended_at = ?, error = ?
+           SET inputs_closed_at = COALESCE(inputs_closed_at, ?), inputs_close_reason = COALESCE(inputs_close_reason, 'interrupted'), status = ?, ended_at = ?, error = ?
            WHERE run_id = ? AND status IN ('pending', 'running')`,
         )
-        .run("interrupted", now(), ORPHANED_OWNER_REASON, row.run_id);
+        .run(now(), "interrupted", now(), ORPHANED_OWNER_REASON, row.run_id);
       updatedCount += result.changes;
     }
     return updatedCount;
@@ -302,12 +306,20 @@ export function createDatabaseRunLedger(
     if (!allowedFrom.includes(current.status)) {
       throw new InvalidRunTransitionError(runId, current.status, toStatus);
     }
-    const next = update(current);
+    const updated = update(current);
+    const next =
+      updated.status === "running" || updated.status === "pending"
+        ? updated
+        : {
+            ...updated,
+            inputsClosedAt: updated.inputsClosedAt ?? updated.endedAt ?? now(),
+            inputsCloseReason: updated.inputsCloseReason ?? updated.status,
+          };
     const allowedPlaceholders = allowedFrom.map(() => "?").join(", ");
     const result = db
       .prepare(
         `UPDATE ${schema.runLedger.tableName}
-       SET status = ?, started_at = ?, ended_at = ?, error = ?, error_data = ?
+       SET status = ?, started_at = ?, ended_at = ?, error = ?, error_data = ?, inputs_closed_at = ?, inputs_close_reason = ?
        WHERE run_id = ? AND status IN (${allowedPlaceholders})`,
       )
       .run(
@@ -316,6 +328,8 @@ export function createDatabaseRunLedger(
         next.endedAt ?? null,
         next.error ?? null,
         next.errorData === undefined ? null : JSON.stringify(next.errorData),
+        next.inputsClosedAt ?? null,
+        next.inputsCloseReason ?? null,
         runId,
         ...allowedFrom,
       );
@@ -435,10 +449,11 @@ export function createDatabaseRunLedger(
         const result = db
           .prepare(
             `UPDATE ${schema.runLedger.tableName}
-             SET status = ?, ended_at = ?, error = ?
+             SET inputs_closed_at = COALESCE(inputs_closed_at, ?), inputs_close_reason = COALESCE(inputs_close_reason, 'interrupted'), status = ?, ended_at = ?, error = ?
              WHERE status IN (${placeholders})`,
           )
           .run(
+            endedAt,
             "interrupted",
             endedAt,
             options.reason ?? INTERRUPTED_REASON,

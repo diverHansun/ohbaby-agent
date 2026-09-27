@@ -1006,6 +1006,7 @@ function createCore(): {
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
+  readonly steerQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly cancelQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly editQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
@@ -1045,6 +1046,7 @@ function createCore(): {
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
     archiveSession: vi.fn(() => Promise.resolve()),
+    steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     cancelQueuedPrompt: vi.fn(() => Promise.resolve(prompt)),
     compactSession: vi.fn(() => Promise.resolve()),
     connectModel: vi.fn(() =>

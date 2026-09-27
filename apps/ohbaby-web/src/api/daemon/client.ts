@@ -751,6 +751,18 @@ export class BrowserDaemonClient implements UiBackendClient {
     ).prompt;
   }
 
+  async steerQueuedPrompt(
+    input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return (
+      await this.http.steerQueuedPrompt(
+        input.promptId,
+        input.expectedRunId,
+        input.clientRequestId,
+      )
+    ).receipt;
+  }
+
   async cancelQueuedPrompt(
     input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {

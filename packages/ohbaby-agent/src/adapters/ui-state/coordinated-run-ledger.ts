@@ -45,6 +45,7 @@ export function createCoordinatedRunLedger(options: {
     });
   };
   return {
+    runtimeInputMemory: ledger.runtimeInputMemory,
     createPending: (input) =>
       coordinator.run(input.sessionId, async () => {
         const record = await ledger.createPending(input);

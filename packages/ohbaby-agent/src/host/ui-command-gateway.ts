@@ -30,6 +30,7 @@ const RECORDED_METHODS = new Set<UiCommandMethod>([
   "submitPromptAccepted",
   "editQueuedPrompt",
   "cancelQueuedPrompt",
+  "steerQueuedPrompt",
   "acquirePromptEditLease",
   "renewPromptEditLease",
   "releasePromptEditLease",
@@ -48,6 +49,7 @@ const RECORDED_METHODS = new Set<UiCommandMethod>([
 const TRUSTED_QUEUE_METHODS = new Map<PropertyKey, UiCommandMethod>([
   ["editQueuedPromptForOwner", "editQueuedPrompt"],
   ["cancelQueuedPromptForOwner", "cancelQueuedPrompt"],
+  ["steerQueuedPromptForOwner", "steerQueuedPrompt"],
   ["acquirePromptEditLeaseForOwner", "acquirePromptEditLease"],
   ["renewPromptEditLeaseForOwner", "renewPromptEditLease"],
   ["releasePromptEditLeaseForOwner", "releasePromptEditLease"],
@@ -92,6 +94,7 @@ function inputCorrelation(
     }
     case "editQueuedPrompt":
     case "cancelQueuedPrompt":
+    case "steerQueuedPrompt":
     case "acquirePromptEditLease":
     case "renewPromptEditLease":
     case "releasePromptEditLease":

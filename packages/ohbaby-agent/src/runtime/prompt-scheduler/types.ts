@@ -2,6 +2,7 @@ import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { UiPromptError } from "ohbaby-sdk";
 
 export type PromptSubmissionStatus =
+  | "steered"
   | "queued"
   | "starting"
   | "running"
@@ -11,6 +12,7 @@ export type PromptSubmissionStatus =
   | "interrupted";
 
 export interface PromptSubmissionRecord {
+  readonly steerReceipt?: import("./current-run-inputs.js").SteerQueuedPromptReceipt;
   readonly reasoning?: ReasoningConfig;
   readonly promptId: string;
   readonly clientRequestId: string;

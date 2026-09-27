@@ -132,6 +132,16 @@ export interface RunLifecycle {
 }
 
 export interface RunManagerDeps {
+  readonly currentRunInputs?: {
+    close(runId: string, reason: string): Promise<void>;
+  };
+  readonly createCurrentRunInputPort?: (identity: {
+    runId: string;
+    sessionId: string;
+    contextScopeId?: string;
+    isSubagent?: boolean;
+  }) => LifecycleSessionParams["currentRunInputs"];
+
   readonly revokePermissionsForRun?: (runId: string, reason: string) => void;
   readonly lifecycle: RunLifecycle;
   readonly runLedger: RunLedger;
@@ -153,6 +163,7 @@ export interface RunWorkerResult {
 }
 
 export interface RunWorkerDeps {
+  readonly currentRunInputs?: LifecycleSessionParams["currentRunInputs"];
   readonly getFatalError?: () => Error | undefined;
   readonly onStepUsage?: RunStepUsageObserver;
   readonly lifecycle: RunLifecycle;
@@ -172,6 +183,7 @@ export interface ManagedRunRecord extends RunRecord {
   sandboxLease?: SandboxLease;
   cancelReason?: string;
   fatalError?: Error;
+  inputClosure?: Promise<void>;
   status: RunStatus;
   startedAt?: number;
   endedAt?: number;

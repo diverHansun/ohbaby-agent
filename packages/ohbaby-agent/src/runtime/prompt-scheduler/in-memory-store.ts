@@ -46,6 +46,17 @@ function compareOrder(
 
 export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
   private readonly records = new Map<string, PromptSubmissionRecord>();
+  readonly runtimeInputMemory = {
+    get: (id: string): PromptSubmissionRecord | undefined => {
+      const r = this.records.get(id);
+      return r ? structuredClone(r) : undefined;
+    },
+    all: (): readonly PromptSubmissionRecord[] =>
+      [...this.records.values()].map((r) => structuredClone(r)),
+    put: (record: PromptSubmissionRecord): void => {
+      this.records.set(record.promptId, structuredClone(record));
+    },
+  };
   private readonly now: () => number;
   private lastCreatedAt = 0;
 

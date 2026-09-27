@@ -111,6 +111,7 @@ function toToolExecutionEnvironment(
   }
 
   return {
+    authorizeInternalRead: lease.authorizeInternalRead?.bind(lease),
     workdir: lease.workdir,
     scopeKey: lease.scopeKey,
     retain: lease.retain?.bind(lease),
@@ -263,6 +264,7 @@ export class RunWorker {
     }
 
     return {
+      currentRunInputs: this.deps.currentRunInputs,
       directory: this.context.directory,
       runId: this.context.runId,
       modelId: this.context.modelId,

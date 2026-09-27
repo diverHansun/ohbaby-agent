@@ -424,4 +424,41 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
         ON subagent_execution(parent_session_id, requester_scope_id, created_at, execution_id);
     `,
   },
+  {
+    version: "019_current_run_input",
+    sql: `
+      ALTER TABLE run_ledger ADD COLUMN inputs_closed_at INTEGER;
+      ALTER TABLE run_ledger ADD COLUMN inputs_close_reason TEXT;
+      CREATE TABLE prompt_submission_next (
+        prompt_id TEXT PRIMARY KEY, scope_key TEXT NOT NULL,
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        user_message_id TEXT NOT NULL UNIQUE, text TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('queued','starting','running','succeeded','failed','cancelled','interrupted','steered')),
+        run_id TEXT, owner_id TEXT, owner_pid INTEGER, error_data TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        started_at INTEGER, ended_at INTEGER, client_request_id TEXT NOT NULL DEFAULT '',
+        edit_lease_id TEXT, edit_lease_owner_id TEXT, edit_lease_expires_at INTEGER,
+        reasoning_data TEXT, steer_receipt TEXT
+      );
+      INSERT INTO prompt_submission_next
+        (prompt_id,scope_key,session_id,user_message_id,text,status,run_id,owner_id,owner_pid,error_data,created_at,updated_at,started_at,ended_at,client_request_id,edit_lease_id,edit_lease_owner_id,edit_lease_expires_at,reasoning_data)
+      SELECT prompt_id,scope_key,session_id,user_message_id,text,status,run_id,owner_id,owner_pid,error_data,created_at,updated_at,started_at,ended_at,client_request_id,edit_lease_id,edit_lease_owner_id,edit_lease_expires_at,reasoning_data FROM prompt_submission;
+      DROP TABLE prompt_submission;
+      ALTER TABLE prompt_submission_next RENAME TO prompt_submission;
+      CREATE INDEX idx_prompt_submission_scope_status_order ON prompt_submission(scope_key,status,created_at,prompt_id);
+      CREATE INDEX idx_prompt_submission_session_status_order ON prompt_submission(session_id,status,created_at,prompt_id);
+      CREATE UNIQUE INDEX idx_prompt_submission_scope_client_request ON prompt_submission(scope_key,client_request_id) WHERE client_request_id <> '';
+      CREATE UNIQUE INDEX idx_prompt_steer_request ON prompt_submission(scope_key,json_extract(steer_receipt,'$.clientRequestId')) WHERE steer_receipt IS NOT NULL;
+      CREATE TABLE current_run_input (
+        input_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES run_ledger(run_id),
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        source TEXT NOT NULL CHECK(source IN ('user-steer','subagent-result','subagent-status')),
+        source_id TEXT NOT NULL, message_id TEXT NOT NULL UNIQUE REFERENCES message(id) ON DELETE CASCADE,
+        accepted_at INTEGER NOT NULL, data TEXT NOT NULL,
+        UNIQUE(run_id,source,source_id)
+      );
+      CREATE INDEX idx_current_run_input_run ON current_run_input(run_id,accepted_at,input_id);
+    `,
+  },
 ];

@@ -41,6 +41,8 @@ export const schema = {
     data: "data",
   }),
   runLedger: table("run_ledger", {
+    inputsClosedAt: "inputs_closed_at",
+    inputsCloseReason: "inputs_close_reason",
     runId: "run_id",
     sessionId: "session_id",
     contextScopeId: "context_scope_id",
@@ -149,6 +151,7 @@ export const schema = {
     lastOpenedAt: "last_opened_at",
   }),
   promptSubmission: table("prompt_submission", {
+    steerReceipt: "steer_receipt",
     promptId: "prompt_id",
     clientRequestId: "client_request_id",
     scopeKey: "scope_key",
@@ -167,6 +170,16 @@ export const schema = {
     updatedAt: "updated_at",
     startedAt: "started_at",
     endedAt: "ended_at",
+  }),
+  currentRunInput: table("current_run_input", {
+    inputId: "input_id",
+    runId: "run_id",
+    sessionId: "session_id",
+    source: "source",
+    sourceId: "source_id",
+    messageId: "message_id",
+    acceptedAt: "accepted_at",
+    data: "data",
   }),
   migration: table("migration", {
     version: "version",

@@ -162,3 +162,11 @@ export async function acceptDaemonPrompt(input: {
     finishOperation();
   }
 }
+
+export function steerQueuedPromptForClient(
+  backend: UiBackendClient & UiPromptQueueExecutionPort,
+  input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+  trustedClientId: string,
+): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+  return backend.steerQueuedPromptForOwner(input, trustedClientId);
+}

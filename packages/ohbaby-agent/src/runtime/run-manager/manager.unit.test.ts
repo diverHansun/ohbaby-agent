@@ -773,6 +773,9 @@ function createManager(lifecycle: RunLifecycle): ManagerFixture {
 }
 
 function createManagerWithOverrides(input: {
+  readonly currentRunInputs?: {
+    close(runId: string, reason: string): Promise<void>;
+  };
   readonly lifecycle: RunLifecycle;
   readonly bridge?: StreamBridge;
   readonly hookExecutor?: HookExecutor;
@@ -783,6 +786,7 @@ function createManagerWithOverrides(input: {
   const fixture = createManager(input.lifecycle);
   const manager = new RunManager({
     lifecycle: input.lifecycle,
+    currentRunInputs: input.currentRunInputs,
     revokePermissionsForRun: input.revokePermissionsForRun,
     runLedger: fixture.ledger,
     streamBridge: input.bridge ?? fixture.bridge,
@@ -1909,4 +1913,32 @@ describe("run permission cleanup", () => {
     await manager.waitForCompletion(run.runId);
     expect(revoked.every((id) => id === run.runId)).toBe(true);
   });
+});
+
+it("seals input admission synchronously before cancellation and awaits durable closure before terminal", async () => {
+  const lifecycle = new AbortAwareLifecycle();
+  const persistence = createDeferred();
+  const closed: string[] = [];
+  const { manager, ledger } = createManagerWithOverrides({
+    lifecycle,
+    currentRunInputs: {
+      close(runId) {
+        closed.push(runId);
+        return persistence.promise;
+      },
+    },
+  });
+  const run = await manager.create({
+    directory: "/repo",
+    modelId: "fake-model",
+    sessionId: "session",
+    triggerSource: "user",
+  });
+  await lifecycle.started.promise;
+  manager.cancel(run.runId);
+  expect(closed).toEqual([run.runId]);
+  await Promise.resolve();
+  expect((await ledger.get(run.runId))?.status).toBe("running");
+  persistence.resolve();
+  expect((await manager.waitForCompletion(run.runId)).status).toBe("cancelled");
 });

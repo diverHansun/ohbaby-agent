@@ -32,6 +32,8 @@ export type {
   UiCommandRecorder,
 } from "./command-record.js";
 export type {
+  UiSteerQueuedPromptInput,
+  UiSteerQueuedPromptReceipt,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
   UiPromptCompletion,

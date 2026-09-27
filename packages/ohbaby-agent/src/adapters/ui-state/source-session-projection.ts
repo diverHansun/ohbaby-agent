@@ -223,6 +223,17 @@ export class SourceSessionProjection {
     };
   }
 
+  /** Called inside the existing session owner after an atomic runtime-input commit. */
+  acceptRuntimeInput(message: MessageWithParts): void {
+    this.commitMessages({
+      sessionId: message.info.sessionId,
+      createdMessageIds: [message.info.id],
+      messages: [message.info],
+      parts: message.parts,
+      removedMessageIds: [],
+    });
+  }
+
   private commitMessages(change: MessageCommittedChange): void {
     const records = this.messages.get(change.sessionId);
     if (!records)

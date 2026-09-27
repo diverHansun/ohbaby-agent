@@ -9,6 +9,8 @@ export type RunStatus =
 export type TriggerSource = "user";
 
 export interface RunLedgerRecord {
+  readonly inputsClosedAt?: number;
+  readonly inputsCloseReason?: string;
   readonly runId: string;
   readonly sessionId: string;
   readonly contextScopeId?: string;
@@ -48,6 +50,10 @@ export interface MarkInterruptedResult {
 }
 
 export interface RunLedger {
+  readonly runtimeInputMemory?: {
+    get(runId: string): RunLedgerRecord | undefined;
+    close(runId: string, reason: string, at: number): void;
+  };
   createPending(input: CreatePendingRunLedgerInput): Promise<RunLedgerRecord>;
   claimPendingRun(input: ClaimPendingRunLedgerInput): Promise<RunLedgerRecord>;
   markRunning(runId: string): Promise<RunLedgerRecord>;

@@ -17,6 +17,7 @@ export const DAEMON_RPC_METHODS = [
   "submitPromptAccepted",
   "editQueuedPrompt",
   "cancelQueuedPrompt",
+  "steerQueuedPrompt",
   "acquirePromptEditLease",
   "renewPromptEditLease",
   "releasePromptEditLease",

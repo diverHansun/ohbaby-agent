@@ -1,3 +1,7 @@
+import {
+  InMemoryCurrentRunInputStore,
+  type CurrentRunInputStore,
+} from "../runtime/prompt-scheduler/current-run-inputs.js";
 import { createCoordinatedRunLedger } from "./ui-state/coordinated-run-ledger.js";
 import { createInMemoryRunLedger } from "../runtime/run-ledger/index.js";
 import { SourceSessionProjection } from "./ui-state/source-session-projection.js";
@@ -33,6 +37,8 @@ import type {
   UiWaitForPromptOptions,
   UiBackendClient,
   UiAcquirePromptEditLeaseInput,
+  UiSteerQueuedPromptInput,
+  UiSteerQueuedPromptReceipt,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
   UiPromptCompletion,
@@ -269,6 +275,7 @@ export interface InProcessUiBackendOptions {
   readonly projectDirectory?: string;
   readonly promptScopeKey?: string;
   readonly promptSubmissionStore?: PromptSubmissionStore;
+  readonly currentRunInputStore?: CurrentRunInputStore;
   readonly promptQueueOwnerClientId?: string;
   readonly now?: () => Date;
   readonly runLedger?: RunLedger;
@@ -282,6 +289,10 @@ export interface InProcessUiBackendOptions {
 }
 
 export interface UiPromptQueueExecutionPort {
+  steerQueuedPromptForOwner(
+    input: UiSteerQueuedPromptInput,
+    trustedOwnerClientId: string,
+  ): Promise<UiSteerQueuedPromptReceipt>;
   editQueuedPromptForOwner(
     input: UiEditQueuedPromptInput,
     trustedOwnerClientId: string,
@@ -854,6 +865,7 @@ export function createInProcessUiBackendClient(
         onNotice: publishNotice,
         permissionManager: permission,
         permissionState,
+        currentRunInputStore,
         runLedger: coordinatedRunLedger,
         sandboxManager: options.sandboxManager,
         sessionManager: options.sessionManager,
@@ -888,6 +900,29 @@ export function createInProcessUiBackendClient(
   });
   const promptSubmissionStore =
     options.promptSubmissionStore ?? new InMemoryPromptSubmissionStore();
+  const currentRunInputStore =
+    options.currentRunInputStore ??
+    (promptSubmissionStore instanceof InMemoryPromptSubmissionStore &&
+    sourceLedger.runtimeInputMemory &&
+    messageManager.runtimeInputMemory
+      ? new InMemoryCurrentRunInputStore({
+          runLedger: sourceLedger,
+          promptStore: promptSubmissionStore,
+          messageManager,
+          now: (): number => now().getTime(),
+        })
+      : undefined);
+  currentRunInputStore?.setMessageCommitObserver((message): void => {
+    // Queue after any scheduler owner lane; never await that lane recursively.
+    void sourceProjection.owner
+      .run(message.info.sessionId, () => {
+        sourceProjection.acceptRuntimeInput(message);
+        return Promise.resolve();
+      })
+      .catch((error: unknown) => {
+        sourceProjection.owner.markUnavailable(message.info.sessionId, error);
+      });
+  });
   const promptScopeKey =
     options.promptScopeKey ??
     options.workdir ??
@@ -895,6 +930,8 @@ export function createInProcessUiBackendClient(
     process.cwd();
   const promptScheduler: WorkspacePromptScheduler =
     new WorkspacePromptScheduler({
+      currentRunInputs: currentRunInputStore,
+
       beforeSessionWrite: initializeSessionView,
       commitCoordinator: {
         runControl: (sessionId, operation) =>
@@ -3559,6 +3596,30 @@ export function createInProcessUiBackendClient(
       submitOptions?: SubmitPromptOptions,
     ): Promise<UiPromptReceipt> {
       return submitPromptAcceptedInternal(text, submitOptions);
+    },
+
+    async steerQueuedPrompt(
+      input: UiSteerQueuedPromptInput,
+    ): Promise<UiSteerQueuedPromptReceipt> {
+      return this.steerQueuedPromptForOwner(input, promptQueueOwnerClientId);
+    },
+    async steerQueuedPromptForOwner(
+      input: UiSteerQueuedPromptInput,
+      _trustedOwnerClientId: string,
+    ): Promise<UiSteerQueuedPromptReceipt> {
+      await ready;
+      const prompt = await promptScheduler.get(input.promptId);
+      if (!prompt)
+        throw Object.assign(new Error("Prompt not found"), {
+          code: "PROMPT_NOT_FOUND",
+        });
+      await validatePermissionRoot(prompt.sessionId);
+      const result = await promptScheduler.steerQueued({
+        ...input,
+        sessionId: prompt.sessionId,
+        scopeKey: promptScopeKey,
+      });
+      return result.receipt;
     },
 
     async editQueuedPrompt(

@@ -68,6 +68,21 @@ function validateInterruptibleStatuses(statuses: Iterable<RunStatus>): void {
 
 export class InMemoryRunLedger implements RunLedger {
   private readonly records = new Map<string, RunLedgerRecord>();
+  readonly runtimeInputMemory = {
+    get: (runId: string): RunLedgerRecord | undefined => {
+      const record = this.records.get(runId);
+      return record ? cloneRecord(record) : undefined;
+    },
+    close: (runId: string, reason: string, at: number): void => {
+      const record = this.records.get(runId);
+      if (record && record.inputsClosedAt === undefined)
+        this.records.set(runId, {
+          ...record,
+          inputsClosedAt: at,
+          inputsCloseReason: reason,
+        });
+    },
+  };
   private readonly isOwnerAlive: (pid: number) => boolean;
   private readonly now: () => number;
   private readonly ownerId?: string;
@@ -185,6 +200,8 @@ export class InMemoryRunLedger implements RunLedger {
           ...record,
           status: "interrupted",
           endedAt,
+          inputsClosedAt: record.inputsClosedAt ?? endedAt,
+          inputsCloseReason: record.inputsCloseReason ?? "interrupted",
           error: options.reason ?? INTERRUPTED_REASON,
         });
         updatedCount += 1;
@@ -258,7 +275,15 @@ export class InMemoryRunLedger implements RunLedger {
       throw new InvalidRunTransitionError(runId, current.status, toStatus);
     }
 
-    const next = update(current);
+    const updated = update(current);
+    const next = ACTIVE_STATUSES.has(updated.status)
+      ? updated
+      : {
+          ...updated,
+          inputsClosedAt:
+            updated.inputsClosedAt ?? updated.endedAt ?? this.now(),
+          inputsCloseReason: updated.inputsCloseReason ?? updated.status,
+        };
     this.records.set(runId, next);
     return next;
   }
@@ -312,6 +337,8 @@ export class InMemoryRunLedger implements RunLedger {
       ...record,
       status: "interrupted",
       endedAt: this.now(),
+      inputsClosedAt: record.inputsClosedAt ?? this.now(),
+      inputsCloseReason: record.inputsCloseReason ?? "interrupted",
       error: ORPHANED_OWNER_REASON,
     });
     return true;

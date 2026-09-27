@@ -4975,6 +4975,7 @@ function createFakeClient(
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
+  readonly steerQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly cancelQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
@@ -5182,6 +5183,7 @@ function createFakeClient(
         },
       }),
     ),
+    steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     cancelQueuedPrompt: vi.fn((input: { readonly promptId: string }) => {
       const prompt = initialSnapshot.prompts?.find(
         (candidate) => candidate.promptId === input.promptId,

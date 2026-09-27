@@ -38,6 +38,8 @@ import type {
   UiPermissionState,
 } from "./snapshot.js";
 import type {
+  UiSteerQueuedPromptInput,
+  UiSteerQueuedPromptReceipt,
   UiCancelQueuedPromptInput,
   UiAcquirePromptEditLeaseInput,
   UiEditQueuedPromptInput,
@@ -138,6 +140,9 @@ export interface UiPromptCommandClient {
 }
 
 export interface UiPromptQueueCommandClient {
+  steerQueuedPrompt(
+    input: UiSteerQueuedPromptInput,
+  ): Promise<UiSteerQueuedPromptReceipt>;
   editQueuedPrompt(input: UiEditQueuedPromptInput): Promise<UiPromptSubmission>;
   cancelQueuedPrompt(
     input: UiCancelQueuedPromptInput,

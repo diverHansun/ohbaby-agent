@@ -41,6 +41,7 @@ import {
   acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
   cancelQueuedPromptForClient,
+  steerQueuedPromptForClient,
   editQueuedPromptForClient,
   releasePromptEditLeaseForClient,
   renewPromptEditLeaseForClient,
@@ -299,6 +300,32 @@ export async function callDaemonBackend(input: {
         throw new DaemonForbiddenError("Prompt belongs to another session");
       }
       return editQueuedPromptForClient(backend, input, request.clientId);
+    }
+    case "steerQueuedPrompt": {
+      const input = request.params[0] as Parameters<
+        UiBackendClient["steerQueuedPrompt"]
+      >[0];
+      if (
+        !isRecord(input) ||
+        [input.promptId, input.expectedRunId, input.clientRequestId].some(
+          (value) => typeof value !== "string" || !value.trim(),
+        )
+      ) {
+        throw Object.assign(
+          new Error("promptId, expectedRunId and clientRequestId are required"),
+          { code: "INVALID_ARGUMENT" },
+        );
+      }
+      if (
+        !clientViews.canAccessPrompt(
+          request.clientId,
+          await backend.getSnapshot(),
+          input.promptId,
+        )
+      ) {
+        throw new DaemonForbiddenError("Prompt belongs to another session");
+      }
+      return steerQueuedPromptForClient(backend, input, request.clientId);
     }
     case "cancelQueuedPrompt": {
       const input = request.params[0] as UiCancelQueuedPromptInput;

@@ -156,6 +156,9 @@ describe("context window UI contract", () => {
       archiveSession(): ReturnType<CoreAPI["archiveSession"]> {
         return Promise.resolve();
       },
+      steerQueuedPrompt(): ReturnType<CoreAPI["steerQueuedPrompt"]> {
+        return Promise.reject(new Error("unused"));
+      },
       cancelQueuedPrompt(): ReturnType<CoreAPI["cancelQueuedPrompt"]> {
         return Promise.reject(new Error("No queued prompt"));
       },

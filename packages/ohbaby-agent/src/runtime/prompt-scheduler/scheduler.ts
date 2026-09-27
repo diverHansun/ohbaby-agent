@@ -1,3 +1,8 @@
+import type {
+  CurrentRunInputStore,
+  SteerQueuedPromptInput,
+  SteerQueuedPromptResult,
+} from "./current-run-inputs.js";
 import type { ReasoningConfig } from "../../config/llm/types.js";
 import { sameReasoning } from "./types.js";
 import { randomUUID } from "node:crypto";
@@ -19,6 +24,8 @@ import type {
 } from "./types.js";
 
 export interface WorkspacePromptSchedulerOptions {
+  readonly currentRunInputs?: CurrentRunInputStore;
+  readonly onSteered?: (result: SteerQueuedPromptResult) => void;
   readonly scopeKey: string;
   readonly store: PromptSubmissionStore;
   readonly execute: PromptSubmissionExecutor;
@@ -57,6 +64,7 @@ export interface AcceptWorkspacePromptInput {
 }
 
 const TERMINAL_STATUSES = new Set([
+  "steered",
   "succeeded",
   "failed",
   "cancelled",
@@ -232,6 +240,31 @@ export class WorkspacePromptScheduler {
     } finally {
       release();
     }
+  }
+
+  async steerQueued(
+    input: SteerQueuedPromptInput,
+  ): Promise<SteerQueuedPromptResult> {
+    this.assertOpen();
+    if (!this.options.currentRunInputs)
+      throw new Error("Current-run inputs are unavailable");
+    const inputs = this.options.currentRunInputs;
+    const result = await this.mutatePrompt(input.promptId, async () => {
+      const result = await inputs.steerQueued({
+        ...input,
+        scopeKey: this.options.scopeKey,
+      });
+      this.notify(result.prompt, this.options.onUpdated);
+      try {
+        this.options.onSteered?.(result);
+      } catch (error) {
+        this.options.onProjectionError?.(error, result.prompt);
+      }
+      return result;
+    });
+    this.resolveCompletion(result.prompt);
+    this.requestDrain();
+    return result;
   }
 
   async acquireEditLease(

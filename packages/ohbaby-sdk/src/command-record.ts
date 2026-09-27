@@ -1,6 +1,7 @@
 export type UiCommandMethod =
   | "submitPromptAccepted"
   | "editQueuedPrompt"
+  | "steerQueuedPrompt"
   | "cancelQueuedPrompt"
   | "acquirePromptEditLease"
   | "renewPromptEditLease"
@@ -191,6 +192,7 @@ export function buildUiCommandDetails(
     case "acquirePromptEditLease":
     case "archiveSession":
     case "updateSessionReasoning":
+    case "steerQueuedPrompt":
     case "cancelQueuedPrompt":
     case "releasePromptEditLease":
     case "renewPromptEditLease":

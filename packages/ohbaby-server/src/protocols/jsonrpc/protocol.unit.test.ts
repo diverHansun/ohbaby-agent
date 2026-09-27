@@ -165,6 +165,7 @@ describe("daemon protocol", () => {
       "submitPromptAccepted",
       "editQueuedPrompt",
       "cancelQueuedPrompt",
+      "steerQueuedPrompt",
       "acquirePromptEditLease",
       "renewPromptEditLease",
       "releasePromptEditLease",

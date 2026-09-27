@@ -63,6 +63,7 @@ import {
   acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
   cancelQueuedPromptForClient,
+  steerQueuedPromptForClient,
   editQueuedPromptForClient,
   releasePromptEditLeaseForClient,
   renewPromptEditLeaseForClient,
@@ -233,6 +234,7 @@ function promptMutationStatus(error: unknown): 400 | 404 | 409 | 429 {
     return 404;
   }
   if (
+    code === "CURRENT_RUN_INPUT_CONFLICT" ||
     code === "PROMPT_NOT_QUEUED" ||
     code === "PROMPT_VERSION_CONFLICT" ||
     code === "IDEMPOTENCY_CONFLICT" ||
@@ -800,6 +802,20 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
             },
           },
           summary: "Probe model context window without saving config",
+        },
+      },
+      "/v1/prompts/{id}/steer": {
+        post: {
+          summary:
+            "Convert a queued prompt into input for the expected active run",
+          responses: {
+            "200": { description: "Durable Steer receipt" },
+            "400": { description: "Invalid run or request identity" },
+            "403": { description: "Prompt belongs to another session" },
+            "409": {
+              description: "Prompt or target run is no longer eligible",
+            },
+          },
         },
       },
       "/v1/permissions/{id}": {
@@ -2041,6 +2057,59 @@ class DaemonServerAppRuntime {
           context.req.raw.signal,
         );
         return context.json({ completion, ok: true });
+      } catch (error) {
+        return context.json(
+          promptErrorBody(error),
+          promptMutationStatus(error),
+        );
+      }
+    });
+
+    this.app.post("/v1/prompts/:id/steer", async (context) => {
+      const authorization = this.authorizePromptMutation(context);
+      if ("response" in authorization) {
+        return authorization.response;
+      }
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok) {
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      }
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const expectedRunId = asNonEmptyString(body.expectedRunId);
+      const clientRequestId = asNonEmptyString(body.clientRequestId);
+      if (!expectedRunId || !clientRequestId)
+        return context.json(
+          webErrorBody("expectedRunId and clientRequestId are required"),
+          400,
+        );
+      try {
+        if (
+          !this.clientViews.canAccessPrompt(
+            authorization.clientId,
+            await this.options.backend.getSnapshot(),
+            context.req.param("id"),
+          )
+        ) {
+          return context.json(
+            webErrorBody("Prompt belongs to another session"),
+            403,
+          );
+        }
+        const receipt = await steerQueuedPromptForClient(
+          this.commandBackend("server-rest", {
+            clientId: authorization.clientId,
+          }),
+          {
+            expectedRunId,
+            clientRequestId,
+            promptId: context.req.param("id"),
+          },
+          authorization.clientId,
+        );
+        return context.json({ ok: true, receipt });
       } catch (error) {
         return context.json(
           promptErrorBody(error),

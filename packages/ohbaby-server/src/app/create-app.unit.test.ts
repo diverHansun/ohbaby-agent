@@ -440,6 +440,18 @@ class FakeBackend implements UiBackendClient {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
+  steerQueuedPrompt(
+    _input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return Promise.reject(new Error("unused"));
+  }
+  steerQueuedPromptForOwner(
+    input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+    _owner?: string,
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return this.steerQueuedPrompt(input);
+  }
+
   cancelQueuedPrompt(
     _input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
@@ -3254,6 +3266,112 @@ describe("createDaemonServerApp", () => {
       expect(backend.trustedQueueOwners).toEqual(
         Array.from({ length: 6 }, () => "client_web"),
       );
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("routes Steer with trusted ownership and preserves domain conflict status", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const steer = vi
+      .spyOn(backend, "steerQueuedPromptForOwner")
+      .mockResolvedValue({
+        promptId: "prompt_1",
+        userMessageId: "message_1",
+        inputId: "steer:prompt_1",
+        acceptedTargetRunId: "run-a",
+        acceptedAt: 1,
+        clientRequestId: "steer-1",
+      });
+    const handle = createApp(backend, {
+      createSessionId: () => "session_generated",
+    });
+    await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers,
+        method: "POST",
+      });
+      await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({ clientRequestId: "request_1", text: "queued" }),
+        headers,
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/prompts/prompt_1/steer", {
+        body: JSON.stringify({
+          expectedRunId: "run-a",
+          clientRequestId: "steer-1",
+          ownerClientId: "spoof",
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(response.status).toBe(200);
+      expect(steer).toHaveBeenLastCalledWith(
+        {
+          promptId: "prompt_1",
+          expectedRunId: "run-a",
+          clientRequestId: "steer-1",
+        },
+        "client_web",
+      );
+      expect(await response.json()).toMatchObject({
+        receipt: { acceptedTargetRunId: "run-a", userMessageId: "message_1" },
+      });
+      const rpcSteer = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          id: "steer-rpc",
+          clientId: "client_web",
+          method: "steerQueuedPrompt",
+          params: [
+            {
+              promptId: "prompt_1",
+              expectedRunId: "run-a",
+              clientRequestId: "steer-1",
+            },
+          ],
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(await rpcSteer.json()).toMatchObject({
+        ok: true,
+        result: { acceptedTargetRunId: "run-a" },
+      });
+      expect(steer).toHaveBeenLastCalledWith(
+        {
+          promptId: "prompt_1",
+          expectedRunId: "run-a",
+          clientRequestId: "steer-1",
+        },
+        "client_web",
+      );
+      steer.mockRejectedValue(
+        Object.assign(new Error("Target closed"), {
+          code: "CURRENT_RUN_INPUT_CONFLICT",
+        }),
+      );
+      const conflict = await handle.app.request("/v1/prompts/prompt_1/steer", {
+        body: JSON.stringify({
+          expectedRunId: "run-a",
+          clientRequestId: "steer-2",
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(conflict.status).toBe(409);
+      const invalid = await handle.app.request("/v1/prompts/prompt_1/steer", {
+        body: "{}",
+        headers,
+        method: "POST",
+      });
+      expect(invalid.status).toBe(400);
     } finally {
       await handle.dispose();
     }

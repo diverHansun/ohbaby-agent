@@ -320,6 +320,20 @@ export class DaemonHttpClient {
     });
   }
 
+  steerQueuedPrompt(
+    promptId: string,
+    expectedRunId: string,
+    clientRequestId: string,
+  ): Promise<{
+    ok: true;
+    receipt: import("ohbaby-sdk").UiSteerQueuedPromptReceipt;
+  }> {
+    return this.request(`/v1/prompts/${encodeURIComponent(promptId)}/steer`, {
+      body: { expectedRunId, clientRequestId },
+      method: "POST",
+    });
+  }
+
   cancelQueuedPrompt(
     promptId: string,
     editLeaseId?: string,

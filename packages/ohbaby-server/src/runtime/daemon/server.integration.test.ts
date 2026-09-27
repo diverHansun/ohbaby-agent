@@ -499,6 +499,18 @@ class FakeBackend implements UiBackendClient {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
+  steerQueuedPrompt(
+    _input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return Promise.reject(new Error("unused"));
+  }
+  steerQueuedPromptForOwner(
+    input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+    _owner?: string,
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return this.steerQueuedPrompt(input);
+  }
+
   cancelQueuedPrompt(): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }

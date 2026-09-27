@@ -30,7 +30,8 @@ import type {
   PromptSubmissionStore,
 } from "./types.js";
 
-interface PromptSubmissionRow {
+export interface PromptSubmissionRow {
+  readonly steer_receipt: string | null;
   readonly prompt_id: string;
   readonly client_request_id: string;
   readonly scope_key: string;
@@ -101,9 +102,16 @@ function parseError(value: string | null): UiPromptError | undefined {
   };
 }
 
-function rowToRecord(row: PromptSubmissionRow): PromptSubmissionRecord {
+export function promptSubmissionRowToRecord(
+  row: PromptSubmissionRow,
+): PromptSubmissionRecord {
   return {
     promptId: row.prompt_id,
+    steerReceipt: row.steer_receipt
+      ? (JSON.parse(
+          row.steer_receipt,
+        ) as PromptSubmissionRecord["steerReceipt"])
+      : undefined,
     clientRequestId: row.client_request_id,
     scopeKey: row.scope_key,
     sessionId: row.session_id,
@@ -577,7 +585,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
          ORDER BY created_at ASC, prompt_id ASC`,
       )
       .all(scopeKey)
-      .map(rowToRecord);
+      .map(promptSubmissionRowToRecord);
   }
 
   async listVisible(
@@ -590,7 +598,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
          ORDER BY created_at ASC, prompt_id ASC`,
       )
       .all(scopeKey)
-      .map(rowToRecord);
+      .map(promptSubmissionRowToRecord);
   }
 
   async hasForSession(scopeKey: string, sessionId: string): Promise<boolean> {
@@ -631,7 +639,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
        ORDER BY created_at ASC, prompt_id ASC`,
       )
       .all(...values)
-      .map(rowToRecord);
+      .map(promptSubmissionRowToRecord);
   }
 
   async listScopesWithQueued(): Promise<readonly string[]> {
@@ -724,7 +732,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         `SELECT * FROM ${this.tableName} WHERE prompt_id = ?`,
       )
       .get(promptId);
-    return row ? rowToRecord(row) : undefined;
+    return row ? promptSubmissionRowToRecord(row) : undefined;
   }
 
   private rowByClientRequestFrom(
@@ -738,7 +746,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
          WHERE scope_key = ? AND client_request_id = ?`,
       )
       .get(scopeKey, clientRequestId);
-    return row ? rowToRecord(row) : undefined;
+    return row ? promptSubmissionRowToRecord(row) : undefined;
   }
 
   private requireFrom(

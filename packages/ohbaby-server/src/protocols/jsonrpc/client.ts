@@ -372,6 +372,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("editQueuedPrompt", [input]);
   }
 
+  steerQueuedPrompt(
+    input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return this.rpc("steerQueuedPrompt", [input]);
+  }
+
   cancelQueuedPrompt(
     input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {

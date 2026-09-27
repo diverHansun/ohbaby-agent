@@ -169,6 +169,7 @@ export class RunManager {
     if (!record || !isActive(record) || record.abortController.signal.aborted)
       return;
     record.fatalError = error;
+    this.closeInputs(record, error.message);
     try {
       this.revokePermissionsForRun(runId, error.message);
     } finally {
@@ -186,11 +187,32 @@ export class RunManager {
     }
 
     record.cancelReason = reason;
+    this.closeInputs(record, reason);
     try {
       this.revokePermissionsForRun(runId, reason);
     } finally {
       record.abortController.abort(reason);
     }
+  }
+
+  private closeInputs(record: ManagedRunRecord, reason: string): void {
+    if (record.inputClosure || !this.deps.currentRunInputs) return;
+    try {
+      // close() seals its synchronous gate before returning its durable promise.
+      record.inputClosure = this.deps.currentRunInputs.close(
+        record.runId,
+        reason,
+      );
+    } catch (error) {
+      record.inputClosure = Promise.reject(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+    void record.inputClosure.catch(() => undefined);
+  }
+
+  async waitForInputClosure(runId: string): Promise<void> {
+    await this.recordsById.get(runId)?.inputClosure;
   }
 
   revokePermissionsForRun(runId: string, reason: string): void {
@@ -284,6 +306,7 @@ export class RunManager {
         tools: record.options.tools,
       };
       const worker = new RunWorker(context, {
+        currentRunInputs: this.deps.createCurrentRunInputPort?.(context),
         getFatalError: (): Error | undefined => record.fatalError,
         lifecycle: this.deps.lifecycle,
         streamBridge: this.deps.streamBridge,
@@ -338,6 +361,20 @@ export class RunManager {
     outcome: RunWorkerResult,
   ): Promise<RunCompletion> {
     const sandboxManager = this.deps.sandboxManager;
+    this.closeInputs(
+      record,
+      outcome.terminalReason ?? outcome.error ?? outcome.status,
+    );
+    try {
+      await record.inputClosure;
+    } catch (error) {
+      outcome = {
+        status: "failed",
+        error: errorToMessage(error),
+        errorData: normalizeRunError(error),
+        terminalReason: "model_state_persistence_failure",
+      };
+    }
     try {
       this.revokePermissionsForRun(
         record.runId,

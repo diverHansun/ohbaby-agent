@@ -23,7 +23,10 @@ import {
 } from "../services/session/index.js";
 import { createSqliteGoalPersistence } from "../goals/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
-import { DatabasePromptSubmissionStore } from "../runtime/prompt-scheduler/index.js";
+import {
+  DatabaseCurrentRunInputStore,
+  DatabasePromptSubmissionStore,
+} from "../runtime/prompt-scheduler/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import {
   createSnapshotHookExecutor,
@@ -320,6 +323,19 @@ function withStartupRecovery(
     ): ReturnType<UiPromptQueueExecutionPort["editQueuedPromptForOwner"]> {
       await ready();
       return client.editQueuedPromptForOwner(input, trustedOwnerClientId);
+    },
+    async steerQueuedPrompt(
+      input,
+    ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+      await ready();
+      return client.steerQueuedPrompt(input);
+    },
+    async steerQueuedPromptForOwner(
+      input,
+      trustedOwnerClientId,
+    ): ReturnType<UiPromptQueueExecutionPort["steerQueuedPromptForOwner"]> {
+      await ready();
+      return client.steerQueuedPromptForOwner(input, trustedOwnerClientId);
     },
     async cancelQueuedPrompt(
       input,
@@ -625,6 +641,7 @@ export function createPersistentUiBackendClient(
       projectDirectory: options.projectDirectory,
       promptScopeKey: path.resolve(persistentProjectDirectory(options)),
       promptQueueOwnerClientId: backendOwnerId,
+      currentRunInputStore: new DatabaseCurrentRunInputStore({ db, now }),
       promptSubmissionStore: new DatabasePromptSubmissionStore({
         db,
         now,

@@ -10157,3 +10157,57 @@ it("does not let late lightweight selection replace a newer root", async () => {
     await client.dispose();
   }
 });
+
+it("steers an accepted queued message into its active run and releases its waiter", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const directory = await mkdtemp(join(process.cwd(), ".tmp-ohbaby-steer-"));
+  const client = createInProcessUiBackendClient({
+    workdir: directory,
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [
+          writeToolCallEvent({
+            callId: "steer-write",
+            content: "blocked",
+            filePath: "steer.txt",
+          }),
+        ],
+      ],
+      requests,
+    ),
+  });
+  try {
+    const permission = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
+        event.type === "permission.requested",
+    );
+    const first = client.submitPromptAndWait("Begin work");
+    const approval = await permission;
+    const queued = await client.submitPromptAccepted("Change direction", {
+      sessionId: "session_1",
+      clientRequestId: "queued-steer",
+    });
+    const waiting = client.waitForPrompt(queued.promptId);
+    const receipt = await client.steerQueuedPrompt({
+      promptId: queued.promptId,
+      expectedRunId: approval.request.runId,
+      clientRequestId: "steer-once",
+    });
+    expect(receipt.userMessageId).toBe(queued.userMessageId);
+    expect(await waiting).toMatchObject({
+      prompt: { status: "steered", userMessageId: queued.userMessageId },
+    });
+    expect(
+      (await client.getSnapshot()).sessions
+        .find((s) => s.id === "session_1")
+        ?.messages.filter((m) => m.id === queued.userMessageId),
+    ).toHaveLength(1);
+    await client.abortRun(approval.request.runId);
+    await first;
+    expect(requests).toHaveLength(1);
+  } finally {
+    await client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

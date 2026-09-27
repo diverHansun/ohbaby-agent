@@ -4100,6 +4100,7 @@ function createFakeRuntime(input: {
     ),
     archiveSession: vi.fn(() => Promise.resolve()),
     compactSession,
+    steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     cancelQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     connectModel,
     executeCommand: vi.fn(() => Promise.resolve()),

@@ -35,6 +35,7 @@ export function promptRecordToUi(
 ): UiPromptSubmission {
   return {
     promptId: record.promptId,
+    steerReceipt: record.steerReceipt,
     clientRequestId: record.clientRequestId,
     scopeKey: record.scopeKey,
     sessionId: record.sessionId,
@@ -67,6 +68,7 @@ export function promptRecordToCompletion(
 ): UiCompletedPromptSubmission {
   const { endedAt, error, status, ...prompt } = promptRecordToUi(record);
   if (
+    status !== "steered" &&
     status !== "succeeded" &&
     status !== "failed" &&
     status !== "cancelled" &&
