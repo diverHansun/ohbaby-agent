@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type {
   UiConnectModelResult,
+  UiCurrentModelConfig,
+  UiProbeModelContextWindowResult,
   UiPromptCompletion,
   UiPromptReceipt,
   UiSnapshot,
@@ -76,6 +78,8 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
           contextWindowSource: string;
         }
       | undefined;
+    let resolved: UiCurrentModelConfig | undefined;
+    let contextProbe: UiProbeModelContextWindowResult | undefined;
     let sessionId: string | undefined;
 
     async function request<T>(
@@ -162,7 +166,7 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
         (item) => item.sessionId === sessionId,
       );
       expect(contextWindow?.contextWindowTokens).toBe(
-        saved?.contextWindowTokens,
+        resolved?.contextWindowTokens,
       );
       expect(contextWindow?.currentTokens).toBeGreaterThan(0);
       if (contextWindow)
@@ -217,6 +221,35 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
         protocol: profile.protocol,
         persistedProtocol: profile.protocol,
       });
+      // Known/seeded reasoning can be identified while metadata is still pending.
+      // Await the explicit public probe, whose result includes the actual source.
+      phase = "metadata-discovery";
+      const { probe } = await request<{
+        probe: UiProbeModelContextWindowResult;
+      }>("/v1/model/context-window-probe", "POST", {
+        provider: "zenmux",
+        model: profile.model,
+        interfaceProvider: profile.protocol,
+        baseUrl: profile.baseUrl,
+        apiKeyEnv: "ZENMUX_API_KEY",
+        contextWindowTokens: session.contextWindow.tokens,
+        maxOutputTokens: 4096,
+      });
+      contextProbe = probe;
+      expect(contextProbe.contextWindowSource).toBe("detected");
+      const current = await request<{ model: UiCurrentModelConfig }>(
+        "/v1/model",
+      );
+      resolved = current.model;
+      expect(resolved.contextWindowTokens).toBe(
+        contextProbe.contextWindowTokens,
+      );
+      expect(resolved?.contextWindowTokens).toBeGreaterThan(0);
+      expect(resolved).toMatchObject({
+        provider: "zenmux",
+        model: profile.model,
+        interfaceProvider: profile.protocol,
+      });
       phase = "first-read";
       const first = await submit(
         `Use the read tool exactly once on ${session.readFilePath}, with only the file_path argument. Report Project, Release and Owner exactly. Do not use shell commands or change any files.`,
@@ -249,6 +282,14 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
         commandRecorder: false,
       });
       await start();
+      const reopenedModel = await request<{ model: UiCurrentModelConfig }>(
+        "/v1/model",
+      );
+      expect(reopenedModel.model).toMatchObject({
+        model: resolved?.model,
+        interfaceProvider: resolved?.interfaceProvider,
+        contextWindowTokens: resolved?.contextWindowTokens,
+      });
       phase = "post-reopen";
       const continued = await submit(
         "Using the earlier conversation only, report the Project, Release and Owner fields again. Do not use any tools.",
@@ -316,9 +357,17 @@ describe.runIf(enabled)("Stage A: real public connect protocol", () => {
               maxHttpRequests: 20,
               seededVerifiedCapabilities: true,
               seededContextWindow: session.contextWindow,
-              contextWindowTokens: saved?.contextWindowTokens,
-              contextWindowSource: saved?.contextWindowSource,
+              contextWindowTokens: resolved?.contextWindowTokens,
               saved,
+              resolved: resolved && {
+                entry: "POST /v1/model/context-window-probe -> GET /v1/model",
+                contextWindowSource: contextProbe?.contextWindowSource,
+                provider: resolved.provider,
+                model: resolved.model,
+                interfaceProvider: resolved.interfaceProvider,
+                contextWindowTokens: resolved.contextWindowTokens,
+                reasoningStatus: resolved.reasoning?.status,
+              },
               visibleContextWindows,
               rest,
               completions,

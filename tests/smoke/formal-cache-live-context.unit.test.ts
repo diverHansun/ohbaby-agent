@@ -1,4 +1,14 @@
-import type { UiSnapshot } from "ohbaby-sdk";
+import type {
+  UiSnapshot,
+  UiConnectModelResult,
+  UiCurrentModelConfig,
+  UiProbeModelContextWindowResult,
+  UiPromptReceipt,
+  UiPromptCompletion,
+} from "ohbaby-sdk";
+import { randomUUID } from "node:crypto";
+import { currentDiscoveryState } from "../../packages/ohbaby-agent/src/config/llm/apply-active-model-config.js";
+import { createDaemonServerApp } from "../../packages/ohbaby-server/src/app/create-app.js";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -427,3 +437,161 @@ it.each([
   },
   30000,
 );
+
+it("awaits the public metadata probe when seeded reasoning is already identified before discovery finishes", async () => {
+  vi.stubEnv("ZENMUX_API_KEY", "fixture-only");
+  const metadataResponses: ((response: Response) => void)[] = [];
+  let generations = 0;
+  vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
+    if (init?.method === "GET")
+      return new Promise<Response>((resolve) =>
+        metadataResponses.push(resolve),
+      );
+    const frame = {
+      id: `fixture-${String(++generations)}`,
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "openai/gpt-5.6-luna",
+      choices: [
+        {
+          index: 0,
+          delta: { content: "Cedar release 17 belongs to Lin." },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 40, completion_tokens: 8, total_tokens: 48 },
+    };
+    return new Response(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`, {
+      headers: { "content-type": "text/event-stream" },
+    });
+  });
+  // Match the live protocol test exactly: GPT profile, seeded capabilities and
+  // 128000 fallback, public connect, then close/reopen the same SQLite database.
+  const session = await createFormalCacheSession("zenmux-gpt56-luna-chat", {
+    maxRequests: 20,
+  });
+  const authToken = randomUUID();
+  const clientId = randomUUID();
+  let handle = createDaemonServerApp({
+    backend: session.backend,
+    authToken,
+    commandRecorder: false,
+  });
+  let sessionId: string | undefined;
+  async function request<T>(
+    path: string,
+    method = "GET",
+    body?: unknown,
+  ): Promise<T> {
+    const response = await handle.app.request(path, {
+      method,
+      headers: {
+        authorization: `Bearer ${authToken}`,
+        "x-ohbaby-client-id": clientId,
+        "content-type": "application/json",
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    expect(response.ok).toBe(true);
+    return response.json() as Promise<T>;
+  }
+  async function start(): Promise<void> {
+    await handle.start();
+    await request("/v1/clients", "POST", {
+      clientId,
+      ...(sessionId ? { startupIntent: { resumeSessionId: sessionId } } : {}),
+    });
+  }
+  async function submit(): Promise<void> {
+    const receipt = await request<UiPromptReceipt>("/v1/prompts", "POST", {
+      text: "Report Project, Release and Owner. Do not use tools.",
+      clientRequestId: randomUUID(),
+      ...(sessionId ? { sessionId } : {}),
+    });
+    sessionId = receipt.sessionId;
+    const { completion } = await request<{ completion: UiPromptCompletion }>(
+      `/v1/prompts/${receipt.promptId}/completion`,
+    );
+    expect(completion.prompt.status).toBe("succeeded");
+    const { snapshot } = await request<{ snapshot: UiSnapshot }>(
+      "/v1/snapshot",
+    );
+    const usage = snapshot.contextWindowUsages?.find(
+      (item) => item.sessionId === sessionId,
+    );
+    expect(usage?.contextWindowTokens).toBe(1050000);
+    expect(usage?.currentTokens).toBeGreaterThan(0);
+  }
+  try {
+    await start();
+    const input = {
+      provider: "zenmux",
+      model: "openai/gpt-5.6-luna",
+      interfaceProvider: "openai-compatible",
+      baseUrl: "https://zenmux.ai/api/v1",
+      apiKeyEnv: "ZENMUX_API_KEY",
+      contextWindowTokens: 128000,
+      maxOutputTokens: 4096,
+    };
+    const { model: saved } = await request<{ model: UiConnectModelResult }>(
+      "/v1/model",
+      "POST",
+      input,
+    );
+    expect(saved).toMatchObject({
+      contextWindowTokens: 128000,
+      contextWindowSource: "user",
+    });
+    await vi.waitFor(() => expect(metadataResponses).toHaveLength(1));
+    const { model: initial } = await request<{ model: UiCurrentModelConfig }>(
+      "/v1/model",
+    );
+    expect(initial.reasoning?.status).toBe("identified");
+    expect(initial.contextWindowTokens).toBe(128000);
+    const pendingProbe = request<{ probe: UiProbeModelContextWindowResult }>(
+      "/v1/model/context-window-probe",
+      "POST",
+      input,
+    );
+    await vi.waitFor(() => expect(metadataResponses).toHaveLength(2));
+    for (const resolve of metadataResponses)
+      resolve(
+        Response.json({
+          data: [{ id: "openai/gpt-5.6-luna", context_length: 1050000 }],
+        }),
+      );
+    const { probe } = await pendingProbe;
+    expect(probe).toMatchObject({
+      contextWindowTokens: 1050000,
+      contextWindowSource: "detected",
+    });
+    const { model: current } = await request<{ model: UiCurrentModelConfig }>(
+      "/v1/model",
+    );
+    expect(current.contextWindowTokens).toBe(probe.contextWindowTokens);
+    await submit();
+    await handle.dispose();
+    await session.reopen();
+    handle = createDaemonServerApp({
+      backend: session.backend,
+      authToken,
+      commandRecorder: false,
+    });
+    await start();
+    const { model: reopened } = await request<{ model: UiCurrentModelConfig }>(
+      "/v1/model",
+    );
+    expect(reopened.contextWindowTokens).toBe(probe.contextWindowTokens);
+    await submit();
+  } finally {
+    // Resolve the controlled transport even if an assertion fails before probe.
+    for (const resolve of metadataResponses)
+      resolve(Response.json({ data: [] }));
+    await vi.waitFor(async () => {
+      expect((await currentDiscoveryState())?.status).not.toBe("detecting");
+    });
+    await handle.dispose();
+    await session.close();
+    await rm(session.root, { recursive: true, force: true });
+  }
+}, 30000);
