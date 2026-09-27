@@ -1053,3 +1053,52 @@ it.each([
     });
   },
 );
+
+it.each([
+  ["--no-reuse-empty-sesion"],
+  ["unexpected-value"],
+  ["--no-reuse-empty-session", "--unknown"],
+])(
+  "rejects unsupported remote /new arguments without mutating the session (%s)",
+  async (...argv) => {
+    const backend = new FakeBackend();
+    const createSession = vi.spyOn(backend, "createSession");
+    await withRemoteClient(backend, async (client) => {
+      await client.selectSession("session_1");
+      const events: UiEvent[] = [];
+      let connected = false;
+      const stop = client.subscribeEvents((event) => events.push(event));
+      const stopPermissions = client.subscribePermissionEvents((event) => {
+        if (event.type === "permission.resync-required") connected = true;
+      });
+      try {
+        await vi.waitUntil(() => connected);
+        await client.executeCommand({
+          commandId: "new",
+          path: ["new"],
+          argv,
+          raw: "/new",
+          rawArgs: argv.join(" "),
+          surface: "tui",
+          clientInvocationId: "invalid-new",
+        });
+        await vi.waitUntil(() =>
+          events.some((event) => event.type === "command.failed"),
+        );
+        expect(
+          events.find((event) => event.type === "command.failed"),
+        ).toMatchObject({
+          error: { code: "INVALID_ARGS", recoverable: true },
+        });
+        expect(createSession).not.toHaveBeenCalled();
+        expect(
+          events.some((event) => event.type === "command.result.delivered"),
+        ).toBe(false);
+        expect(await client.getSelectedSessionId()).toBe("session_1");
+      } finally {
+        stop();
+        stopPermissions();
+      }
+    });
+  },
+);

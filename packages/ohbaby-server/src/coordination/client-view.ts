@@ -337,19 +337,32 @@ export class DaemonClientViewCoordinator {
     sessionId?: string;
   }>();
   private readonly sessionCreations = new Map<string, Promise<unknown>>();
-  private admissionRevision = 0;
+  private readonly sessionAdmissionChecks = new Set<Set<string>>();
 
-  get sessionAdmissionRevision(): number {
-    return this.admissionRevision;
+  // Retain settled admissions only while an empty-candidate read is in flight.
+  // The returned candidate is unknown until that read completes.
+  beginSessionAdmissionCheck(): {
+    changedSessionIds: ReadonlySet<string>;
+    release: () => void;
+  } {
+    const changedSessionIds = new Set<string>();
+    this.sessionAdmissionChecks.add(changedSessionIds);
+    return {
+      changedSessionIds,
+      release: (): void => {
+        this.sessionAdmissionChecks.delete(changedSessionIds);
+      },
+    };
   }
 
   beginSessionOperation(clientId: string, sessionId?: string): () => void {
     const operation = { clientId, sessionId };
     this.sessionOperations.add(operation);
-    if (sessionId) this.admissionRevision += 1;
+    if (sessionId)
+      for (const check of this.sessionAdmissionChecks) check.add(sessionId);
     return (): void => {
       if (this.sessionOperations.delete(operation) && sessionId)
-        this.admissionRevision += 1;
+        for (const check of this.sessionAdmissionChecks) check.add(sessionId);
     };
   }
 

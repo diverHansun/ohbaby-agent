@@ -853,9 +853,14 @@ describe("short session admissions", () => {
   });
   it("invalidates an empty check even when an intervening admission has already settled", () => {
     const views = new DaemonClientViewCoordinator();
-    const revision = views.sessionAdmissionRevision;
+    const check = views.beginSessionAdmissionCheck();
     const finish = views.beginSessionOperation("owner", "target");
     finish();
-    expect(views.sessionAdmissionRevision).toBeGreaterThan(revision);
+    expect(check.changedSessionIds.has("target")).toBe(true);
+    expect(check.changedSessionIds.has("unrelated")).toBe(false);
+    check.release();
+    check.release();
+    views.beginSessionOperation("owner", "later")();
+    expect(check.changedSessionIds.has("later")).toBe(false);
   });
 });

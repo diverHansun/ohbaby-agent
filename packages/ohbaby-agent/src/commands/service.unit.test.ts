@@ -1623,6 +1623,31 @@ describe("CommandService", () => {
     });
   });
 
+  it.each([
+    ["--no-reuse-empty-sesion"],
+    ["unexpected-value"],
+    ["--no-reuse-empty-session", "--unknown"],
+  ])(
+    "rejects unsupported /new arguments before creating or selecting (%s)",
+    async (...argv) => {
+      const createSession = vi.fn(() =>
+        Promise.resolve({ id: "session_new", title: "New session" }),
+      );
+      const { events, service } = createServiceHarness({
+        sessions: { createSession, listSessions: () => [] },
+      });
+
+      await service.executeCommand(makeInvocation("new", ["new"], argv));
+
+      expect(createSession).not.toHaveBeenCalled();
+      expect(events.at(-1)).toMatchObject({
+        type: "failed",
+        error: { code: "INVALID_ARGS", recoverable: true },
+      });
+      expect(events.some((event) => event.type === "result")).toBe(false);
+    },
+  );
+
   it("selects a reused new session with a consistent current-session payload", async () => {
     const createSession = vi.fn<
       () => Promise<{ created: boolean; id: string; title: string }>

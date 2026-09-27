@@ -331,6 +331,99 @@ describe("New session real server lifecycle and SQLite", () => {
     }
   });
   it.each(["REST", "RPC"] as const)(
+    "allows %s activity after routing expiry without stealing another live client's empty root",
+    async (transport) => {
+      const f = await fixture();
+      let otherStream: ReadableStreamDefaultReader<Uint8Array> | undefined;
+      try {
+        const previous = await f.backend.createSession();
+        await f.backend.submitPromptAndWait("hello", {
+          sessionId: previous.id,
+        });
+        const empty = await f.backend.createSession();
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        await register(f, "returning", previous.id);
+        await vi.advanceTimersByTimeAsync(5001);
+        await register(f, "other");
+        expect(await withClock(create(f, "other"))).toMatchObject({
+          session: { id: empty.id },
+          created: false,
+        });
+        otherStream = await stream(f, "other");
+        const resumed = await f.server.app.request(
+          transport === "REST" ? "/v1/sessions/index" : "/api/rpc",
+          {
+            method: transport === "REST" ? "GET" : "POST",
+            headers: headers("returning"),
+            ...(transport === "RPC"
+              ? {
+                  body: JSON.stringify({
+                    id: "after-routing-expiry",
+                    clientId: "returning",
+                    method: "getSessionIndex",
+                    params: [],
+                  }),
+                }
+              : {}),
+          },
+        );
+        expect(resumed.status).toBe(200);
+        const created = await withClock(create(f, "returning"));
+        expect(created.created).toBe(true);
+        expect(created.session.id).not.toBe(empty.id);
+        expect(f.count()).toBe(3);
+        // Restoring the prior view does not release another viewer's occupancy.
+        expect(await withClock(create(f, "other"))).toMatchObject({
+          session: { id: empty.id },
+          created: false,
+        });
+      } finally {
+        await otherStream?.cancel();
+        vi.useRealTimers();
+        await f.dispose();
+      }
+    },
+  );
+  it.each(["REST", "RPC"] as const)(
+    "does not revive expired occupancy for an already-aborted %s request",
+    async (transport) => {
+      const f = await fixture();
+      try {
+        const empty = await f.backend.createSession();
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        await register(f, "stale", empty.id);
+        await vi.advanceTimersByTimeAsync(5001);
+        await f.server.app.request(
+          transport === "REST" ? "/v1/sessions/index" : "/api/rpc",
+          {
+            method: transport === "REST" ? "GET" : "POST",
+            headers: headers("stale"),
+            signal: AbortSignal.abort(),
+            ...(transport === "RPC"
+              ? {
+                  body: JSON.stringify({
+                    id: "aborted-after-expiry",
+                    clientId: "stale",
+                    method: "getSessionIndex",
+                    params: [],
+                  }),
+                }
+              : {}),
+          },
+        );
+        await register(f, "other");
+        expect(await withClock(create(f, "other"))).toMatchObject({
+          session: { id: empty.id },
+          created: false,
+        });
+        expect(f.count()).toBe(1);
+      } finally {
+        vi.useRealTimers();
+        await f.dispose();
+      }
+    },
+  );
+  it.each(["REST", "RPC"] as const)(
     "pins %s explicit submit before root validation, even without SSE",
     async (transport) => {
       const f = await fixture();

@@ -21,6 +21,82 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("New session real persistent REST regression", () => {
+  it("preserves explicit low-level creation while the New action requests reuse", async () => {
+    const f = await fixture();
+    try {
+      const client = f.runtime.client;
+      if (!client) throw new Error("Expected the ready workspace client");
+      const first = await client.createSession();
+      const second = await client.createSession();
+      expect(second.id).not.toBe(first.id);
+      expect(second.created).toBe(true);
+      await f.runtime.createSession();
+      expect(await client.getSelectedSessionId()).toBe(second.id);
+      expect(f.count()).toBe(2);
+    } finally {
+      await f.dispose();
+    }
+  });
+
+  it("forwards browser reuse exclusions and reports the actual creation outcome", async () => {
+    const f = await fixture();
+    try {
+      const client = f.runtime.client;
+      if (!client) throw new Error("Expected the ready workspace client");
+      const first = await client.createSession();
+      const second = await client.createSession({
+        reuseInactiveEmpty: { excludeSessionIds: [first.id] },
+      });
+      expect(second.id).not.toBe(first.id);
+      expect(second.created).toBe(true);
+      const reused = await client.createSession({
+        reuseInactiveEmpty: { excludeSessionIds: [] },
+      });
+      expect(reused.id).toBe(second.id);
+      expect(reused.created).toBe(false);
+      const preferred = await client.createSession({
+        reuseSessionId: second.id,
+      });
+      expect(preferred.id).toBe(second.id);
+      expect(preferred.created).toBe(false);
+      await expect(
+        client.createSession({
+          reuseSessionId: first.id,
+        }),
+      ).rejects.toThrow();
+      expect(f.count()).toBe(2);
+    } finally {
+      await f.dispose();
+    }
+  });
+
+  it.each([
+    { options: null },
+    { options: { reuseInactiveEmpty: { excludeSessionIds: [42] } } },
+    { options: {}, reuseEmpty: true },
+  ])(
+    "rejects malformed or ambiguous REST creation options before mutation: %j",
+    async (body) => {
+      const f = await fixture();
+      try {
+        const before = f.count();
+        const response = await f.server.app.request("/v1/sessions", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer fixture-token",
+            "x-ohbaby-client-id": "web-regression",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        expect(response.status).toBe(400);
+        expect(f.count()).toBe(before);
+      } finally {
+        await f.dispose();
+      }
+    },
+  );
+
   it("retrying New on the same scope recovers failed chat sync without replacing the session", async () => {
     const f = await fixture();
     try {

@@ -238,21 +238,26 @@ export function createOrReuseClientSession(
           !excluded.has(previous.rootSessionId)
             ? previous.rootSessionId
             : undefined;
-        const revision = views.sessionAdmissionRevision;
-        const session = await backend.createSession(
-          reuse
-            ? {
-                ...(preferred ? { reuseSessionId: preferred } : {}),
-                ...(options?.reuseInactiveEmpty
-                  ? {
-                      reuseInactiveEmpty: {
-                        excludeSessionIds: [...exclusions],
-                      },
-                    }
-                  : {}),
-              }
-            : undefined,
-        );
+        const admissionCheck = views.beginSessionAdmissionCheck();
+        let session: Awaited<ReturnType<UiBackendClient["createSession"]>>;
+        try {
+          session = await backend.createSession(
+            reuse
+              ? {
+                  ...(preferred ? { reuseSessionId: preferred } : {}),
+                  ...(options?.reuseInactiveEmpty
+                    ? {
+                        reuseInactiveEmpty: {
+                          excludeSessionIds: [...exclusions],
+                        },
+                      }
+                    : {}),
+                }
+              : undefined,
+          );
+        } finally {
+          admissionCheck.release();
+        }
         views.assertBinding(clientId, previous, epoch);
         const created = session.created;
         if (reuse && typeof created !== "boolean")
@@ -270,7 +275,7 @@ export function createOrReuseClientSession(
         const changed = session.id !== previous.rootSessionId;
         if (
           reuse &&
-          (revision !== views.sessionAdmissionRevision ||
+          (admissionCheck.changedSessionIds.has(session.id) ||
             views.protectedSessionIds().includes(session.id) ||
             (changed &&
               views

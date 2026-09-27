@@ -19,7 +19,10 @@ import type {
   UiReleasePromptEditLeaseInput,
   UiRenewPromptEditLeaseInput,
 } from "ohbaby-sdk";
-import type { UiPromptQueueExecutionPort } from "ohbaby-agent";
+import {
+  parseNewSessionCommandArgs,
+  type UiPromptQueueExecutionPort,
+} from "ohbaby-agent";
 import {
   DaemonForbiddenError,
   isDaemonForbiddenError,
@@ -404,6 +407,19 @@ export async function callDaemonBackend(input: {
               : { sessionId: invocation.sessionId }),
           },
         });
+        const newOptions =
+          invocation.commandId === "new"
+            ? parseNewSessionCommandArgs(invocation.argv)
+            : undefined;
+        if (newOptions !== undefined && "code" in newOptions) {
+          input.emitCommandEvent({
+            type: "command.failed",
+            ...identity,
+            timestamp: Date.now(),
+            error: newOptions,
+          });
+          return undefined;
+        }
         const sessionId = parseResumeSessionId(invocation.argv);
         if (invocation.commandId === "resume" && sessionId === undefined) {
           input.emitCommandEvent({
@@ -430,9 +446,9 @@ export async function callDaemonBackend(input: {
               clientViews,
               request.clientId,
               input.permissionEpoch,
-              invocation.argv.includes("--no-reuse-empty-session")
-                ? undefined
-                : { reuseInactiveEmpty: { excludeSessionIds: [] } },
+              newOptions?.reuseInactiveEmptySessions
+                ? { reuseInactiveEmpty: { excludeSessionIds: [] } }
+                : undefined,
             );
             selectedId = session.id;
             output = {

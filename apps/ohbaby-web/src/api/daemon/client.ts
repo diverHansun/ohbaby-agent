@@ -536,8 +536,15 @@ export class BrowserDaemonClient implements UiBackendClient {
     );
   }
 
-  createSession(): ReturnType<UiBackendClient["createSession"]> {
-    return this.createSessionForRuntime();
+  async createSession(
+    input?: Parameters<UiBackendClient["createSession"]>[0],
+  ): ReturnType<UiBackendClient["createSession"]> {
+    const ticket = ++this.selectionTicket;
+    const response = await this.http.createSession(input);
+    if (!this.closed && ticket === this.selectionTicket)
+      this.acceptBinding(response);
+    this.refreshUnrelatedViews();
+    return { ...response.session, created: response.created };
   }
 
   selectSession(
@@ -844,15 +851,10 @@ export class BrowserDaemonClient implements UiBackendClient {
     void this.refreshIndex();
   }
 
-  async createSessionForRuntime(): ReturnType<
-    UiBackendClient["createSession"]
-  > {
-    const ticket = ++this.selectionTicket;
-    const response = await this.http.createSession(true);
-    if (!this.closed && ticket === this.selectionTicket)
-      this.acceptBinding(response);
-    this.refreshUnrelatedViews();
-    return response.session;
+  createSessionForRuntime(): ReturnType<UiBackendClient["createSession"]> {
+    return this.createSession({
+      reuseInactiveEmpty: { excludeSessionIds: [] },
+    });
   }
 
   async selectSessionForRuntime(sessionId: string): Promise<void> {

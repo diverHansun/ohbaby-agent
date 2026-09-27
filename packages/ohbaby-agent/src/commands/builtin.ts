@@ -1,6 +1,7 @@
 import type {
   UiCommandAction,
   UiCommandCatalog,
+  UiCommandError,
   UiCommandInvocation,
   UiCommandOutput,
   UiCommandSpec,
@@ -467,11 +468,30 @@ async function handleSessionResume(
 
 const NO_REUSE_EMPTY_SESSION_ARG = "--no-reuse-empty-session";
 
+export function parseNewSessionCommandArgs(
+  argv: readonly string[],
+): { reuseInactiveEmptySessions: boolean } | UiCommandError {
+  if (argv.some((arg) => arg !== NO_REUSE_EMPTY_SESSION_ARG)) {
+    return {
+      code: "INVALID_ARGS",
+      message: "Use /new [--no-reuse-empty-session]",
+      recoverable: true,
+    };
+  }
+  return { reuseInactiveEmptySessions: argv.length === 0 };
+}
+
 async function handleSessionNew(
   options: CommandServiceOptions,
   invocation: UiCommandInvocation,
   context: CommandRunContext,
 ): Promise<void> {
+  const parsed = parseNewSessionCommandArgs(invocation.argv);
+  if ("code" in parsed) {
+    context.fail(parsed);
+    return;
+  }
+
   if (!options.sessions?.createSession) {
     context.fail({
       code: "SESSION_CREATE_UNAVAILABLE",
@@ -481,11 +501,7 @@ async function handleSessionNew(
     return;
   }
 
-  const session = await options.sessions.createSession({
-    reuseInactiveEmptySessions: !invocation.argv.includes(
-      NO_REUSE_EMPTY_SESSION_ARG,
-    ),
-  });
+  const session = await options.sessions.createSession(parsed);
   const reused = session.created === false;
   context.emitOutput(
     dataOutput(reused ? "session.current" : "session.created", {

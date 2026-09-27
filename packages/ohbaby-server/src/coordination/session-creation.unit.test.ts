@@ -44,6 +44,58 @@ describe("session creation operation", () => {
     );
     expect(result).toMatchObject({ created: false, changed: true });
   });
+  it("passes an explicitly preferred root only when it matches the client binding", async () => {
+    const views = setup();
+    views.selectSession(
+      "a",
+      "empty",
+      views.binding("a", "epoch").bindingGeneration,
+    );
+    const createSession = vi.fn(() => Promise.resolve(session("empty")));
+    const result = await createOrReuseClientSession(
+      { createSession },
+      views,
+      "a",
+      "epoch",
+      { reuseSessionId: "empty" },
+    );
+    expect(createSession).toHaveBeenCalledWith({ reuseSessionId: "empty" });
+    expect(result).toMatchObject({ created: false, changed: false });
+    await expect(
+      createOrReuseClientSession({ createSession }, views, "a", "epoch", {
+        reuseSessionId: "another-root",
+      }),
+    ).rejects.toMatchObject({ code: "PERMISSION_SCOPE_CHANGED" });
+    expect(createSession).toHaveBeenCalledTimes(1);
+  });
+  it("keeps explicit preferred reuse subject to caller exclusions and in-flight protection", async () => {
+    const views = setup();
+    views.selectSession(
+      "a",
+      "empty",
+      views.binding("a", "epoch").bindingGeneration,
+    );
+    const release = views.beginSessionOperation("b", "occupied");
+    const createSession = vi.fn(() => Promise.resolve(session("fresh", true)));
+    try {
+      const result = await createOrReuseClientSession(
+        { createSession },
+        views,
+        "a",
+        "epoch",
+        {
+          reuseSessionId: "empty",
+          reuseInactiveEmpty: { excludeSessionIds: ["empty"] },
+        },
+      );
+      expect(createSession).toHaveBeenCalledWith({
+        reuseInactiveEmpty: { excludeSessionIds: ["empty", "occupied"] },
+      });
+      expect(result).toMatchObject({ created: true, session: { id: "fresh" } });
+    } finally {
+      release();
+    }
+  });
   it("fails after an excluded candidate is returned instead of looping or creating again", async () => {
     const views = setup();
     views.initializeClient(
@@ -115,6 +167,35 @@ describe("session creation operation", () => {
     await settled;
   });
   it.each([false, true])(
+    "accepts a fresh row despite unrelated session admission (settled=%s)",
+    async (settled) => {
+      const views = setup();
+      let release: (() => void) | undefined;
+      const createSession = vi.fn(() => {
+        release = views.beginSessionOperation("b", "unrelated");
+        if (settled) release();
+        return Promise.resolve(session("fresh", true));
+      });
+      try {
+        const result = await createOrReuseClientSession(
+          { createSession },
+          views,
+          "a",
+          "epoch",
+          reuse,
+        );
+        expect(result).toMatchObject({
+          created: true,
+          session: { id: "fresh" },
+        });
+        expect(views.binding("a", "epoch").rootSessionId).toBe("fresh");
+        expect(createSession).toHaveBeenCalledTimes(1);
+      } finally {
+        release?.();
+      }
+    },
+  );
+  it.each([false, true])(
     "rejects a new row claimed while creation returns (settled=%s) without creating another row",
     async (settled) => {
       const views = setup();
@@ -162,5 +243,22 @@ describe("session creation operation", () => {
     );
     expect(result.session.id).toBe("fresh");
     expect(calls).toBe(2);
+  });
+  it("allows a rechecked empty candidate after its temporary admission has settled", async () => {
+    const views = setup();
+    const createSession = vi.fn(() => {
+      if (createSession.mock.calls.length === 1)
+        views.beginSessionOperation("b", "empty")();
+      return Promise.resolve(session("empty"));
+    });
+    const result = await createOrReuseClientSession(
+      { createSession },
+      views,
+      "a",
+      "epoch",
+      reuse,
+    );
+    expect(result).toMatchObject({ created: false, session: { id: "empty" } });
+    expect(createSession).toHaveBeenCalledTimes(2);
   });
 });

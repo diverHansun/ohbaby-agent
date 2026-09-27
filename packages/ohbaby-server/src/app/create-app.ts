@@ -2,6 +2,7 @@ import {
   createOrReuseClientSession,
   abortForClient,
   parseSessionQuery,
+  parseSessionCreationOptions,
   receiptForClient,
   sessionReadForClient,
   sessionRecoveryCapability,
@@ -1212,7 +1213,10 @@ class DaemonServerAppRuntime {
         return context.json(parsed.failure, 400);
       }
 
-      if (this.clientViews.isRegistered(parsed.request.clientId))
+      if (
+        !context.req.raw.signal.aborted &&
+        this.clientViews.isRegistered(parsed.request.clientId)
+      )
         this.touchClientActivity(parsed.request.clientId);
       try {
         const controller = new AbortController();
@@ -1707,15 +1711,32 @@ class DaemonServerAppRuntime {
         (body.reuseEmpty !== undefined && typeof body.reuseEmpty !== "boolean")
       )
         return context.json(webErrorBody("reuseEmpty must be a boolean"), 400);
+      if (body.options !== undefined && body.reuseEmpty !== undefined)
+        return context.json(
+          webErrorBody("Use either options or reuseEmpty, not both"),
+          400,
+        );
+      let options: Parameters<UiBackendClient["createSession"]>[0];
+      try {
+        options =
+          body.options !== undefined
+            ? parseSessionCreationOptions(body.options)
+            : body.reuseEmpty === true
+              ? { reuseInactiveEmpty: { excludeSessionIds: [] } }
+              : undefined;
+      } catch {
+        return context.json(
+          webErrorBody("Invalid session creation options"),
+          400,
+        );
+      }
       const { session, binding, changed, created } =
         await createOrReuseClientSession(
           this.options.backend,
           this.clientViews,
           clientId,
           this.permissionEpoch,
-          body.reuseEmpty === true
-            ? { reuseInactiveEmpty: { excludeSessionIds: [] } }
-            : undefined,
+          options,
         );
       if (changed) this.notifyBinding(clientId);
       this.clientViews.assertBinding(clientId, binding, this.permissionEpoch);

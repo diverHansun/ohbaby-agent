@@ -7,7 +7,7 @@ import type {
   UiPromptReceiptQuery,
   UiPromptReceiptResult,
   UiPermissionSnapshotQuery,
-  UiSessionIndexEntry,
+  UiSessionCreationResult,
 } from "ohbaby-sdk";
 import type {
   BindingResponse,
@@ -220,10 +220,15 @@ export class DaemonHttpClient {
   }
 
   createSession(
-    reuseEmpty = false,
-  ): Promise<BindingResponse & { readonly session: UiSessionIndexEntry }> {
+    options?: Parameters<UiBackendClient["createSession"]>[0],
+  ): Promise<
+    BindingResponse & {
+      readonly session: UiSessionCreationResult;
+      readonly created: boolean;
+    }
+  > {
     return this.request("/v1/sessions", {
-      body: { reuseEmpty },
+      body: options === undefined ? { reuseEmpty: false } : { options },
       method: "POST",
     });
   }
