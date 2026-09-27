@@ -504,6 +504,36 @@ describe("runAgent", () => {
     expect(messageManager.listBySession).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      status: "succeeded",
+      terminalReason: "max_steps_finalized",
+      finalResponse: "Partial findings",
+    },
+    {
+      status: "failed",
+      terminalReason: "provider_retry_exhausted",
+      error: "Provider unavailable",
+    },
+  ] as const)(
+    "preserves $terminalReason across the agent completion boundary",
+    async (completion) => {
+      const coordinator = createRunCoordinator(completion);
+      const result = await runAgent(
+        createDeps({ runCoordinator: coordinator.coordinator }),
+        baseInput(),
+      );
+      expect(result).toMatchObject({
+        runStatus: completion.status,
+        terminalReason: completion.terminalReason,
+        success: completion.status === "succeeded",
+        ...(completion.status === "succeeded"
+          ? { finalOutput: "Partial findings" }
+          : { error: "Provider unavailable" }),
+      });
+    },
+  );
+
   it("keeps a successful empty final body empty instead of reusing prior text", async () => {
     const messageManager = createMessageManager([assistantText("old answer")]);
     const runCoordinator = createRunCoordinator({

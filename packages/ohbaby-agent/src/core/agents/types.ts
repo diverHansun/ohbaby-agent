@@ -1,6 +1,9 @@
 import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
-import type { LifecycleEvent } from "../lifecycle/index.js";
+import type {
+  AgentTerminalReason,
+  LifecycleEvent,
+} from "../lifecycle/index.js";
 import type { ModelToolDefinition } from "../llm-client/index.js";
 import type { MessageManager } from "../message/index.js";
 import type {
@@ -47,6 +50,7 @@ export interface AgentRunInput {
 }
 
 interface AgentRunWaitResultBase {
+  readonly terminalReason?: AgentTerminalReason;
   readonly mode: "waitForCompletion";
   readonly sessionId: string;
   readonly runId?: string;
@@ -99,6 +103,7 @@ export interface AgentRunHandle {
 }
 
 export interface AgentRunCompletion {
+  readonly terminalReason?: AgentTerminalReason;
   readonly status: "succeeded" | "failed" | "cancelled" | "interrupted";
   readonly finalResponse?: string;
   readonly error?: string;

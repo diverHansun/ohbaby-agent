@@ -285,6 +285,9 @@ export async function runAgent(
       mode: "waitForCompletion" as const,
       runId: record.runId,
       runStatus: completion.status,
+      ...(completion.terminalReason === undefined
+        ? {}
+        : { terminalReason: completion.terminalReason }),
       sessionId: scope.sessionId,
       steps: 0,
       toolCalls: [] satisfies readonly AgentToolCallSummary[],
