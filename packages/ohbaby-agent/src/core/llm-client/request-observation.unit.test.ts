@@ -25,6 +25,100 @@ const owner = { runId: "run", step: 1, messageId: "message" };
 
 describe("request attempt observations", () => {
   afterEach(() => vi.restoreAllMocks());
+  it.each([false, true])(
+    "waits for durable attempt admission before provider I/O (cancel=%s)",
+    async (cancel) => {
+      const saved = deferred();
+      const entered = deferred();
+      const abort = new AbortController();
+      let calls = 0;
+      let admittedId: string | undefined;
+      const facts: ModelRequestObservation[] = [];
+      const client: LLMClientInstance = {
+        config,
+        provider: {
+          id: "test",
+          kind: "openai-compatible",
+          client: {},
+          async streamResponse() {
+            calls++;
+            return (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              yield { textDelta: "result" };
+              yield { finishReason: "stop" };
+            })();
+          },
+          isAbortError: () => false,
+        },
+      };
+      const consuming = (async (): Promise<void> => {
+        for await (const _ of streamResponse(client, [], {
+          signal: abort.signal,
+          requestOwner: owner,
+          beforeRequestAttempt: async (record) => {
+            admittedId = record.requestId;
+            entered.resolve();
+            await saved.promise;
+          },
+          onRequestObservation: async (fact) => {
+            facts.push(fact);
+          },
+        })) {
+          /* consume */
+        }
+      })();
+      try {
+        // Let a missing admission implementation reach I/O instead of hanging the test.
+        await Promise.race([entered.promise, consuming]);
+        expect(calls).toBe(0);
+        if (cancel) abort.abort("stopped before attempt admission completed");
+        else saved.resolve();
+        await consuming;
+        expect(calls).toBe(cancel ? 0 : 1);
+        expect(facts.map((fact) => fact.request.requestId)).toEqual(
+          cancel ? [] : [admittedId, admittedId, admittedId],
+        );
+      } finally {
+        saved.resolve();
+        await consuming;
+      }
+    },
+  );
+
+  it("does not retry provider I/O when durable attempt admission fails", async () => {
+    let calls = 0;
+    const client: LLMClientInstance = {
+      config,
+      provider: {
+        id: "test",
+        kind: "openai-compatible",
+        client: {},
+        async streamResponse() {
+          calls++;
+          return (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+            yield { finishReason: "stop" };
+          })();
+        },
+        isAbortError: () => false,
+      },
+    };
+    const consuming = async (): Promise<void> => {
+      for await (const _ of streamResponse(client, [], {
+        requestOwner: owner,
+        beforeRequestAttempt: async () => {
+          throw new Error("input ledger unavailable");
+        },
+      })) {
+        /* consume */
+      }
+    };
+    const result = consuming();
+    await expect(result).rejects.toHaveProperty(
+      "name",
+      "ModelObservationError",
+    );
+    await expect(result).rejects.toThrow("input ledger unavailable");
+    expect(calls).toBe(0);
+  });
   it("closes a late-opening iterator once after cancellation, observing close rejection", async () => {
     const opening = deferred<AsyncIterable<InterfaceProviderStreamEvent>>();
     const started = deferred();

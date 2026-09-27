@@ -262,6 +262,8 @@ export async function* streamResponse(
   messages: readonly ModelMessage[],
   options?: {
     requestOwner?: Pick<ModelRequestRecord, "runId" | "messageId" | "step">;
+    /** Persist input membership and recheck run eligibility before each attempt. */
+    beforeRequestAttempt?: (request: ModelRequestRecord) => Promise<void>;
     onRequestObservation?: (
       observation: ModelRequestObservation,
     ) => Promise<void>;
@@ -340,17 +342,18 @@ export async function* streamResponse(
     let reasoningTokens: number | undefined;
     let validatingProtocol = false;
 
+    const requestRecord: ModelRequestRecord | undefined = options?.requestOwner
+      ? {
+          ...options.requestOwner,
+          requestId: randomUUID(),
+          attempt: failedAttempts + 1,
+          purpose: purpose ?? "agent-step",
+          startedAt: 0,
+          outcome: "running",
+        }
+      : undefined;
     const observer = new RequestAttemptObserver(
-      options?.requestOwner
-        ? {
-            ...options.requestOwner,
-            requestId: randomUUID(),
-            attempt: failedAttempts + 1,
-            purpose: purpose ?? "agent-step",
-            startedAt: 0,
-            outcome: "running",
-          }
-        : undefined,
+      requestRecord,
       options?.onRequestObservation,
       signal,
     );
@@ -374,6 +377,24 @@ export async function* streamResponse(
         .catch(() => undefined);
     };
     try {
+      const beforeRequestAttempt = options?.beforeRequestAttempt;
+      if (beforeRequestAttempt) {
+        if (!requestRecord) {
+          throw new ModelObservationError(
+            new Error("Attempt admission requires a request owner"),
+          );
+        }
+        const admission = await observer.receive(
+          Promise.resolve()
+            .then(() => beforeRequestAttempt(requestRecord))
+            .catch((error: unknown) => ({ error })),
+        );
+        if (admission && "error" in admission) {
+          if (signal.aborted) throw signal.reason;
+          throw new ModelObservationError(admission.error);
+        }
+        if (signal.aborted) throw signal.reason;
+      }
       if (provider.streamStart !== "iterator") observer.start();
       const opening = provider.streamResponse({
         model: config.model,
