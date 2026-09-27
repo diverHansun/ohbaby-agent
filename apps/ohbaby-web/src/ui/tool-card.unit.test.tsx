@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
+import { DurationSampleContext } from "./execution-duration.js";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UiMessagePart, UiToolCall, UiToolResult } from "ohbaby-sdk";
 import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
 
@@ -61,6 +62,59 @@ describe("pairToolParts", () => {
 });
 
 describe("ToolCard", () => {
+  it("animates only real executing and freezes the execution duration at logical end", () => {
+    const execution = {
+      phase: "executing" as const,
+      phaseStartedAt: 1000,
+      createdAt: 0,
+      executionStartedAt: 1000,
+    };
+    const app = mountCard(toolCall({ execution }), undefined);
+    expect(
+      app.container.querySelector(".ohb-tool-executing")?.textContent,
+    ).toBe("bash");
+    renderCard(
+      app.root,
+      toolCall({
+        execution: {
+          ...execution,
+          phase: "queued",
+          waitReason: "resource",
+          executionStartedAt: undefined,
+        },
+      }),
+      undefined,
+    );
+    expect(app.container.querySelector(".ohb-tool-executing")).toBeNull();
+    expect(app.container.querySelector(".ohb-tool-duration")).toBeNull();
+    act(() => {
+      app.container.querySelector("button")?.click();
+    });
+    expect(app.container.textContent).toContain("resource");
+    renderCard(
+      app.root,
+      toolCall({
+        status: "failed",
+        execution: {
+          ...execution,
+          phase: "ended",
+          endedAt: 62000,
+          outcome: "cancelled",
+          cleanup: "in-progress",
+        },
+      }),
+      undefined,
+    );
+    expect(app.container.querySelector(".ohb-tool-executing")).toBeNull();
+    expect(
+      app.container.querySelector(".ohb-tool-duration")?.textContent,
+    ).toContain("1m 1s");
+    expect(
+      app.container.querySelector("button")?.getAttribute("aria-label"),
+    ).toContain("cancelled");
+    expect(app.container.textContent).toContain("⚠");
+  });
+
   it.each([
     ["read_file", "ohb-tool-gold"],
     ["write_file", "ohb-tool-green"],
@@ -229,3 +283,107 @@ function renderCard(
     root.render(<ToolCard call={call} result={result} />);
   });
 }
+
+it("uses independent server durations across rerenders, remounts, and logical completion", () => {
+  let now = 100;
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  const app = mountCard(toolCall(), undefined);
+  const sample = { serverNow: 5000, receivedAt: 100 };
+  const execution = {
+    phase: "executing" as const,
+    createdAt: 0,
+    phaseStartedAt: 1000,
+    executionStartedAt: 1000,
+  };
+  const draw = (endedAt?: number): void => {
+    act(() => {
+      app.root.render(
+        <DurationSampleContext.Provider value={sample}>
+          <ToolCard
+            call={toolCall({
+              execution: {
+                ...execution,
+                ...(endedAt === undefined
+                  ? {}
+                  : { phase: "ended", endedAt, outcome: "success" }),
+              },
+            })}
+            result={undefined}
+          />
+          <ToolCard
+            call={toolCall({
+              id: "second",
+              execution: { ...execution, executionStartedAt: 4000 },
+            })}
+            result={undefined}
+          />
+        </DurationSampleContext.Provider>,
+      );
+    });
+  };
+  try {
+    draw();
+    expect(
+      [...app.container.querySelectorAll(".ohb-tool-duration")].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["4s", "1s"]);
+    now = 3100;
+    draw();
+    expect(
+      [...app.container.querySelectorAll(".ohb-tool-duration")].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["7s", "4s"]);
+    act(() => {
+      app.root.render(null);
+    });
+    draw();
+    expect(app.container.querySelector(".ohb-tool-duration")?.textContent).toBe(
+      "7s",
+    );
+    draw(6000);
+    now = 100100;
+    draw(6000);
+    expect(app.container.querySelector(".ohb-tool-duration")?.textContent).toBe(
+      "5s",
+    );
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+it("reports an invalid clock once per anchor and never invents an active duration without a sample", () => {
+  const diagnostic = vi
+    .spyOn(console, "error")
+    .mockImplementation(() => undefined);
+  try {
+    const execution = {
+      phase: "executing" as const,
+      createdAt: 0,
+      phaseStartedAt: 5000,
+      executionStartedAt: 5000,
+    };
+    const app = mountCard(toolCall({ execution }), undefined);
+    expect(app.container.querySelector(".ohb-tool-duration")).toBeNull();
+    const sample = { serverNow: 1000, receivedAt: performance.now() };
+    const draw = (): void => {
+      act(() => {
+        app.root.render(
+          <DurationSampleContext.Provider value={sample}>
+            <ToolCard call={toolCall({ execution })} result={undefined} />
+          </DurationSampleContext.Provider>,
+        );
+      });
+    };
+    draw();
+    draw();
+    expect(app.container.querySelector(".ohb-tool-duration")?.textContent).toBe(
+      "0s",
+    );
+    expect(diagnostic).toHaveBeenCalledTimes(1);
+    expect(String(diagnostic.mock.calls[0][0])).toContain("duration-clock");
+  } finally {
+    diagnostic.mockRestore();
+  }
+});

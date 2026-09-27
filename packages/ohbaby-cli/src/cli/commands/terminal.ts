@@ -102,6 +102,7 @@ export function createTerminalCommand(
       });
       try {
         const instance = runtime.renderTerminalUi({
+          reportDurationClockAnomaly: host.reportDurationClockAnomaly,
           clearOnStart: resume === undefined && args.continue !== true,
           client: host.core,
           pendingPromptWorkspace: process.cwd(),

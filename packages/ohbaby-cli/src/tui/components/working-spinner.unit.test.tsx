@@ -1,3 +1,8 @@
+import type { ReactElement } from "react";
+import {
+  DurationDiagnosticContext,
+  DurationSampleContext,
+} from "./execution-duration.js";
 import { render } from "ink-testing-library";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,10 +36,33 @@ afterEach(() => {
   }
 });
 
+const request = {
+  requestId: "req",
+  runId: "run_1",
+  messageId: "m",
+  purpose: "agent-step",
+  step: 0,
+  attempt: 0,
+  startedAt: 1000,
+  outcome: "running" as const,
+};
+
 function frameOf(runtime: TuiRuntimeStatus): string {
   let app: ReturnType<typeof render> | undefined;
   act(() => {
-    app = render(<WorkingSpinner runtime={runtime} />);
+    app = render(
+      <WorkingSpinner
+        runtime={runtime}
+        modelActivity={{
+          ...request,
+          purpose:
+            runtime.kind === "running" && runtime.title
+              ? "compaction"
+              : "agent-step",
+          runId: runtime.kind === "running" ? runtime.runId : "run_1",
+        }}
+      />,
+    );
   });
   const frame = app?.lastFrame() ?? "";
   act(() => {
@@ -62,13 +90,13 @@ describe("WorkingSpinner", () => {
     expect(matchedPhrase(frame)).toBeDefined();
   });
 
-  it("uses the runtime title when one is provided", () => {
+  it("does not treat compaction as model waiting", () => {
     const frame = frameOf({
       kind: "running",
       runId: "command_compact",
       title: "Compacting...",
     });
-    expect(frame).toContain("Compacting...");
+    expect(frame).toBe("");
     expect(matchedPhrase(frame)).toBeUndefined();
   });
 
@@ -76,7 +104,10 @@ describe("WorkingSpinner", () => {
     let app: ReturnType<typeof render> | undefined;
     act(() => {
       app = render(
-        <WorkingSpinner runtime={{ kind: "running", runId: "run_1" }} />,
+        <WorkingSpinner
+          runtime={{ kind: "running", runId: "run_1" }}
+          modelActivity={request}
+        />,
       );
     });
     const phrase = matchedPhrase(app?.lastFrame() ?? "");
@@ -85,7 +116,10 @@ describe("WorkingSpinner", () => {
     act(() => {
       // New runtime object, same runId → same turn → same phrase.
       app?.rerender(
-        <WorkingSpinner runtime={{ kind: "running", runId: "run_1" }} />,
+        <WorkingSpinner
+          runtime={{ kind: "running", runId: "run_1" }}
+          modelActivity={request}
+        />,
       );
     });
     expect(app?.lastFrame()).toContain(phrase ?? "");
@@ -98,5 +132,55 @@ describe("WorkingSpinner", () => {
   it("picks a valid phrase for a new turn", () => {
     const frame = frameOf({ kind: "running", runId: "run_2" });
     expect(matchedPhrase(frame)).toBeDefined();
+  });
+});
+
+it("hides the heartbeat during startup and after first body text", () => {
+  let app!: ReturnType<typeof render>;
+  act(() => {
+    app = render(
+      <WorkingSpinner runtime={{ kind: "running", runId: "run_1" }} />,
+    );
+  });
+  expect(app.lastFrame()).toBe("");
+  act(() => {
+    app.rerender(
+      <WorkingSpinner
+        runtime={{ kind: "running", runId: "run_1" }}
+        modelActivity={{ ...request, firstTextAt: 2000 }}
+      />,
+    );
+  });
+  expect(app.lastFrame()).toBe("");
+  act(() => {
+    app.unmount();
+  });
+});
+
+it("routes a clock anomaly once to diagnostics without repeating it on ticks", () => {
+  const report = vi.fn();
+  const sample = { serverNow: 500, receivedAt: performance.now() };
+  let app!: ReturnType<typeof render>;
+  const view = (): ReactElement => (
+    <DurationDiagnosticContext.Provider value={report}>
+      <DurationSampleContext.Provider value={sample}>
+        <WorkingSpinner
+          runtime={{ kind: "running", runId: "run_1" }}
+          modelActivity={request}
+        />
+      </DurationSampleContext.Provider>
+    </DurationDiagnosticContext.Provider>
+  );
+  act(() => {
+    app = render(view());
+  });
+  expect(app.lastFrame()).toContain("0s");
+  act(() => {
+    app.rerender(view());
+  });
+  expect(report).toHaveBeenCalledTimes(1);
+  expect(report).toHaveBeenCalledWith("req");
+  act(() => {
+    app.unmount();
   });
 });

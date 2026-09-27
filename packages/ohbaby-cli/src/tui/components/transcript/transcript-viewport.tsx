@@ -1,5 +1,5 @@
 import { Box } from "ink";
-import type { UiMessage, UiNotice } from "ohbaby-sdk";
+import type { UiModelRequest, UiMessage, UiNotice } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import type {
   TuiCommandNotice,
@@ -20,6 +20,7 @@ export interface TranscriptViewportProps {
   readonly liveReasoning?: TuiReasoningViewState;
   readonly notices: readonly UiNotice[];
   readonly runtime: TuiRuntimeStatus;
+  readonly modelActivity?: UiModelRequest;
 }
 
 export function TranscriptViewport({
@@ -29,13 +30,14 @@ export function TranscriptViewport({
   liveReasoning,
   notices,
   runtime,
+  modelActivity,
 }: TranscriptViewportProps): ReactElement {
   return (
     <Box flexDirection="column">
       <CommittedTranscript items={committedItems} />
       <CommandNoticeLane commandNotices={commandNotices} />
       <LiveTail message={liveMessage} reasoning={liveReasoning} />
-      <WorkingSpinner runtime={runtime} />
+      <WorkingSpinner runtime={runtime} modelActivity={modelActivity} />
       <NoticeLane notices={notices} />
     </Box>
   );

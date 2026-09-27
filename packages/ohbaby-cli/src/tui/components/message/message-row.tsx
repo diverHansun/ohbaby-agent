@@ -1,3 +1,5 @@
+import type { UiToolExecution } from "ohbaby-sdk";
+import { useExecutionDuration } from "../execution-duration.js";
 import { Box, Text } from "ink";
 import type {
   UiMessage,
@@ -79,6 +81,12 @@ export function MessageParts({
           {part.kind === "spinner"
             ? renderSpinnerPart(part)
             : renderTextPart(message, part)}
+          {part.execution ? (
+            <ToolDuration
+              callId={part.callId ?? "tool"}
+              execution={part.execution}
+            />
+          ) : null}
         </Box>
       ))}
     </>
@@ -136,6 +144,8 @@ export interface RenderedMessagePart {
   readonly gutterColor?: string;
   readonly indent: number;
   readonly index: number;
+  readonly execution?: UiToolExecution;
+  readonly callId?: string;
   readonly kind: "text";
   readonly segments?: readonly RenderedTextSegment[];
   readonly text: string;
@@ -148,6 +158,8 @@ export interface RenderedTextSegment {
 }
 
 export interface RenderedSpinnerPart {
+  readonly execution?: UiToolExecution;
+  readonly callId?: string;
   readonly index: number;
   readonly kind: "spinner";
   readonly label: string;
@@ -180,11 +192,14 @@ export function renderMessageParts(
   for (const part of pairToolCallResult(message.parts)) {
     if (
       part.kind === "tool" &&
-      (part.call.status === "running" || part.call.status === "pending")
+      (part.result?.execution ?? part.call.execution)?.phase === "executing" &&
+      (part.result?.execution ?? part.call.execution)?.endedAt === undefined
     ) {
       rendered.push({
         index: part.index,
         kind: "spinner",
+        execution: part.result?.execution ?? part.call.execution,
+        callId: part.call.id,
         label: renderToolLabel(part.call, part.result),
         segments: renderToolLabelSegments(
           part.call,
@@ -220,6 +235,11 @@ export function renderMessageParts(
       indent,
       index: part.index,
       kind: "text",
+      execution:
+        part.kind === "tool"
+          ? (part.result?.execution ?? part.call.execution)
+          : undefined,
+      callId: part.kind === "tool" ? part.call.id : undefined,
       ...(renderedPart.segments === undefined
         ? {}
         : { segments: renderedPart.segments }),
@@ -459,4 +479,28 @@ function pairedPartColor(
     case "text":
       return undefined;
   }
+}
+
+function ToolDuration({
+  callId,
+  execution,
+}: {
+  readonly callId: string;
+  readonly execution: UiToolExecution;
+}): ReactElement {
+  const duration = useExecutionDuration(
+    callId,
+    execution.executionStartedAt,
+    execution.endedAt,
+  );
+  const abnormal =
+    execution.outcome && execution.outcome !== "success"
+      ? execution.outcome
+      : undefined;
+  return (
+    <Text dimColor>
+      {abnormal ? ` ⚠ ${abnormal}` : ""}
+      {duration === undefined ? "" : ` · ${duration}`}
+    </Text>
+  );
 }

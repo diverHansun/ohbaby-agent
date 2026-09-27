@@ -57,6 +57,7 @@ export interface CliGlobalOptions {
 }
 
 export interface CliCoreHost {
+  readonly reportDurationClockAnomaly?: (identity: string) => void;
   readonly core: CoreAPI;
   readonly callbacks: SDKAPI;
   readonly dispose: () => Promise<void>;
@@ -89,6 +90,7 @@ export interface CliCommandRuntime {
   readonly readDaemonStatus: () => Promise<CliDaemonState | undefined>;
   readonly readStdin: () => Promise<string>;
   readonly renderTerminalUi: (options: {
+    readonly reportDurationClockAnomaly?: (identity: string) => void;
     readonly pendingPromptWorkspace?: string;
     readonly clearOnStart?: boolean;
     readonly client: CoreAPI;

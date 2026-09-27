@@ -76,7 +76,14 @@ export function createOhbabyWebStore(): OhbabyWebStore {
   const listeners = new Set<StoreListener>();
 
   function publish(next: StoreSnapshot): void {
-    snapshot = next;
+    const serverNow = next.view.snapshot?.serverNow;
+    const durationSample =
+      serverNow === undefined
+        ? undefined
+        : snapshot.durationSample?.serverNow === serverNow
+          ? snapshot.durationSample
+          : { serverNow, receivedAt: performance.now() };
+    snapshot = { ...next, durationSample };
     let listenerFailed = false;
     for (const listener of Array.from(listeners)) {
       try {
@@ -96,7 +103,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     }
   }
 
-  function install(view: UiSessionView): StoreSnapshot["view"] {
+  function install(
+    view: UiSessionView,
+    serverNow = view.serverNow,
+  ): StoreSnapshot["view"] {
     const messages = new Map(loaded);
     for (const message of view.session.messages)
       messages.set(message.id, message);
@@ -123,7 +133,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         sessions: [{ ...view.session, messages: ordered }],
         activeSessionId: view.session.id,
         runs: view.runs,
-        serverNow: view.serverNow,
+        serverNow,
         prompts: [
           ...new Map([
             ...loadedPrompts,
@@ -192,7 +202,12 @@ export function createOhbabyWebStore(): OhbabyWebStore {
           : {}),
         ...(view
           ? {
-              view: install(view),
+              view: install(
+                view,
+                view === previous.view
+                  ? snapshot.view.snapshot?.serverNow
+                  : view.serverNow,
+              ),
               ...(!historyLoaded
                 ? {
                     historyBefore: view.history.before,
@@ -277,7 +292,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         historyStale: false,
         historyBefore: page.before,
         historyHasMore: page.hasMore,
-        view: install(view),
+        view: install(
+          view,
+          page.serverNow ?? snapshot.view.snapshot?.serverNow,
+        ),
       });
     },
     invalidateSessionHistory(event): void {
@@ -331,7 +349,15 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       }
       publish({
         ...snapshot,
-        view: nextView,
+        view:
+          "timestamp" in event &&
+          event.timestamp !== undefined &&
+          nextView.snapshot
+            ? {
+                ...nextView,
+                snapshot: { ...nextView.snapshot, serverNow: event.timestamp },
+              }
+            : nextView,
       });
       return true;
     },

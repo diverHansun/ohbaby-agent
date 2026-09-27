@@ -960,7 +960,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelector("textarea")?.textContent).toBe("");
     expect(textareaValue(app.container)).toBe("");
     expect(app.container.textContent).toContain("visible on the next frame");
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
     expect(
       app.container
         .querySelector('.ohb-send-button[title="Send message"]')
@@ -1338,7 +1338,7 @@ describe("OhbabyWebApp slash command interactions", () => {
         ?.getAttribute("data-user-message-id"),
     ).toBe("message_1");
     expect(app.container.textContent).toContain("accepted before navigation");
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
   });
 
   it("restores a rejected prompt only when the user has not typed a new draft", async () => {
@@ -1378,7 +1378,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelector(".ohb-thinking")).toBeNull();
   });
 
-  it("rebuilds a starting prompt and startup thinking from the server snapshot", () => {
+  it("rebuilds a starting prompt without fabricating model thinking", () => {
     const fake = createFakeRuntime({
       snapshot: {
         ...snapshotWithStatus({ kind: "idle" }),
@@ -1391,11 +1391,11 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
       1,
     );
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
-    expect(app.container.textContent).toContain("starting agent");
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
+    expect(app.container.textContent).not.toContain("starting agent");
   });
 
-  it("lets the formal message take over without ending startup thinking", () => {
+  it("lets the formal message take over without fabricating model thinking", () => {
     const snapshot = snapshotWithStatus({ kind: "idle" });
     const fake = createFakeRuntime({
       snapshot: {
@@ -1418,7 +1418,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
     expect(app.container.querySelectorAll(".ohb-message-user")).toHaveLength(1);
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
   });
 
   it("moves a busy starting projection back to the queue", async () => {
@@ -1700,7 +1700,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
       1,
     );
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
     expect(
       app.container
         .querySelector(".ohb-send-button")
@@ -1749,7 +1749,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
     expect(app.container.querySelectorAll(".ohb-message-user")).toHaveLength(1);
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
     expect(
       app.container
         .querySelector(".ohb-send-button")
@@ -1757,7 +1757,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toBe("true");
   });
 
-  it("shows one provisional row and one run thinking card when running precedes formal", async () => {
+  it("shows one provisional row without model thinking when running precedes formal", async () => {
     const initial = snapshotWithStatus({ kind: "idle" });
     const running: UiSnapshot = {
       ...initial,
@@ -1779,7 +1779,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
       1,
     );
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
     expect(app.container.textContent).not.toContain(
       "double click esc to interrupt",
     );
@@ -1808,7 +1808,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
     expect(app.container.querySelectorAll(".ohb-message-user")).toHaveLength(1);
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
   });
 
   it("keeps keyed consecutive submissions in conversation and queue placements", async () => {
@@ -1898,10 +1898,29 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(textareaValue(app.container)).toBe("");
   });
 
-  it("calculates thinking elapsed time from the persisted run start on mount", () => {
-    vi.spyOn(Date, "now").mockReturnValue(Date.parse(timestamp) + 12_000);
+  it("calculates thinking elapsed time from the actual model request and server sample", () => {
+    vi.spyOn(Date, "now").mockReturnValue(999999999999);
+    const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
     const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+      snapshot: {
+        ...initial,
+        serverNow: 13000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: {
+              requestId: "r",
+              runId: "run_1",
+              messageId: "m",
+              step: 1,
+              attempt: 1,
+              purpose: "agent-step",
+              startedAt: 1000,
+              outcome: "running",
+            },
+          },
+        ],
+      },
     });
     const app = mountApp(fake.runtime);
 
@@ -5259,6 +5278,380 @@ it.each([false, true])(
       );
     expect(errors.mock.calls.flat().map(String).join("\n")).not.toMatch(
       /ui\.observation\.failure|Maximum update depth/,
+    );
+  },
+);
+
+describe("execution progress facts", () => {
+  it("does not show model thinking merely because a run exists", () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    expect(
+      mountApp(fake.runtime).container.querySelector(".ohb-thinking"),
+    ).toBeNull();
+  });
+  it("keeps Stop pending after RPC acceptance and clears on the exact terminal prompt", async () => {
+    const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const app = mountApp(fake.runtime);
+    const stop = requiredStopButton(app.container);
+    await act(async () => {
+      stop.click();
+      await Promise.resolve();
+    });
+    expect(stop.disabled).toBe(true);
+    expect(stop.getAttribute("aria-label")).toBe("Stopping run");
+    await act(async () => {
+      stop.click();
+      await Promise.resolve();
+    });
+    expect(fake.abortSession).toHaveBeenCalledTimes(1);
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          status: { kind: "idle" },
+          runs: [],
+          prompts: [
+            {
+              promptId: "p",
+              clientRequestId: "c",
+              scopeKey: "s",
+              sessionId: "session_1",
+              runId: "run_1",
+              userMessageId: "message_1",
+              text: "hello",
+              status: "succeeded",
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              endedAt: "2026-06-12T00:00:05.000Z",
+            },
+          ],
+        },
+        2,
+      );
+    });
+    expect(
+      app.container.querySelector('[aria-label="Stopping run"]'),
+    ).toBeNull();
+    expect(app.container.querySelectorAll(".ohb-prompt-duration")).toHaveLength(
+      1,
+    );
+    expect(
+      app.container.querySelector(".ohb-prompt-duration")?.textContent,
+    ).toContain("5s");
+  });
+});
+
+it("finishes Stop before RPC settles and ignores its later transport failure", async () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const fake = createFakeRuntime({ snapshot: initial });
+  const rpc = deferred<undefined>();
+  fake.abortSession.mockImplementation(() => rpc.promise);
+  const app = mountApp(fake.runtime);
+  act(() => {
+    requiredStopButton(app.container).click();
+  });
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        status: { kind: "idle" },
+        runs: [{ ...initial.runs[0], status: { kind: "idle" } }],
+      },
+      2,
+    );
+  });
+  expect(app.container.querySelector('[aria-label="Stopping run"]')).toBeNull();
+  await act(async () => {
+    rpc.reject(new Error("late transport failure"));
+    await Promise.resolve();
+  });
+  expect(app.container.textContent).not.toContain("late transport failure");
+});
+
+it("keeps B pending when A fails late in the same session", async () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const fake = createFakeRuntime({ snapshot: initial });
+  const a = deferred<undefined>();
+  const b = deferred<undefined>();
+  fake.abortSession
+    .mockImplementationOnce(() => a.promise)
+    .mockImplementationOnce(() => b.promise);
+  const app = mountApp(fake.runtime);
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  act(() => {
+    fake.store.replaceSnapshot(
+      snapshotWithStatus({ kind: "running", runId: "run_2" }),
+      2,
+    );
+  });
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    a.reject(new Error("A failed late"));
+    await Promise.resolve();
+  });
+  expect(
+    app.container.querySelector<HTMLButtonElement>(".ohb-stop-button")
+      ?.disabled,
+  ).toBe(true);
+  expect(app.container.textContent).not.toContain("A failed late");
+  act(() => {
+    b.resolve(undefined);
+  });
+});
+
+it("keeps Stop uncertain across disconnect without repeating RPC and permits draft editing", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+  });
+  const rpc = deferred<undefined>();
+  fake.abortSession.mockImplementation(() => rpc.promise);
+  const app = mountApp(fake.runtime);
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  act(() => {
+    fake.store.setConnectionState("disconnected");
+  });
+  await act(async () => {
+    rpc.reject(new Error("offline"));
+    await Promise.resolve();
+  });
+  expect(
+    app.container.querySelector(".ohb-stop-button")?.getAttribute("aria-label"),
+  ).toContain("status unconfirmed");
+  await setTextareaValue(app.container, "next draft");
+  expect(textareaValue(app.container)).toBe("next draft");
+  act(() => {
+    fake.store.setConnectionState("live");
+  });
+  expect(fake.abortSession).toHaveBeenCalledTimes(1);
+  expect(
+    app.container.querySelector<HTMLButtonElement>(".ohb-stop-button")
+      ?.disabled,
+  ).toBe(true);
+  act(() => {
+    fake.store.replaceSnapshot(
+      snapshotWithStatus({ kind: "running", runId: "run_1" }),
+      2,
+    );
+  });
+  expect(app.container.querySelector('[aria-label="Stopping run"]')).toBeNull();
+  expect(app.container.textContent).toContain("offline");
+});
+
+it("hides model waiting permanently after first text and resets for the next attempt", () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const request = {
+    requestId: "r1",
+    runId: "run_1",
+    messageId: "m",
+    step: 1,
+    attempt: 1,
+    purpose: "agent-step",
+    startedAt: 1000,
+    outcome: "running" as const,
+  };
+  const fake = createFakeRuntime({
+    snapshot: {
+      ...initial,
+      serverNow: 4000,
+      runs: [{ ...initial.runs[0], modelActivity: request }],
+    },
+  });
+  const app = mountApp(fake.runtime);
+  expect(app.container.querySelector(".ohb-thinking")?.textContent).toContain(
+    "3s",
+  );
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 8000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: { ...request, firstTextAt: 4500 },
+          },
+        ],
+      },
+      2,
+    );
+  });
+  expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 10000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: { ...request, firstTextAt: 4500 },
+          },
+        ],
+      },
+      3,
+    );
+  });
+  expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 11000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: { ...request, requestId: "r2", startedAt: 11000 },
+          },
+        ],
+      },
+      4,
+    );
+  });
+  expect(app.container.querySelector(".ohb-thinking")?.textContent).toContain(
+    "0s",
+  );
+});
+
+it("does not resurrect A's unresolved Stop after B reaches a reliable terminal", async () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const fake = createFakeRuntime({ snapshot: initial });
+  const app = mountApp(fake.runtime);
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  act(() => {
+    fake.store.replaceSnapshot(
+      snapshotWithStatus({ kind: "running", runId: "run_2" }),
+      2,
+    );
+  });
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        status: { kind: "idle" },
+        runs: [{ ...initial.runs[0], id: "run_2", status: { kind: "idle" } }],
+      },
+      3,
+    );
+  });
+  expect(app.container.querySelector('[aria-label="Stopping run"]')).toBeNull();
+});
+
+function requiredStopButton(container: HTMLDivElement): HTMLButtonElement {
+  const button = container.querySelector<HTMLButtonElement>(".ohb-stop-button");
+  if (!button) throw new Error("Stop button missing");
+  return button;
+}
+
+it("changes only the Stop accessible hint after ten seconds and never resends", async () => {
+  vi.useFakeTimers();
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  try {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    const app = mountApp(fake.runtime);
+    await act(async () => {
+      requiredStopButton(app.container).click();
+      await Promise.resolve();
+    });
+    act(() => {
+      now = 10001;
+      vi.advanceTimersByTime(10001);
+    });
+    expect(requiredStopButton(app.container).getAttribute("aria-label")).toBe(
+      "Still stopping run",
+    );
+    expect(requiredStopButton(app.container).disabled).toBe(true);
+    expect(fake.abortSession).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each(["succeeded", "failed", "cancelled", "interrupted"] as const)(
+  "renders one %s total from its prompt ledger across snapshots",
+  (status) => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const prompt: UiPromptSubmission = {
+      promptId: "p",
+      clientRequestId: "c",
+      scopeKey: "s",
+      sessionId: "session_1",
+      runId: "r",
+      userMessageId: "u",
+      text: "question",
+      status,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      endedAt: "2026-06-12T00:01:01Z",
+    };
+    const snapshot: UiSnapshot = {
+      ...initial,
+      prompts: [prompt],
+      sessions: [
+        {
+          ...initial.sessions[0],
+          messages: [
+            {
+              id: "u",
+              role: "user",
+              createdAt: timestamp,
+              parts: [{ type: "text", text: "question" }],
+            },
+            ...(status === "succeeded"
+              ? [
+                  {
+                    id: "a",
+                    role: "assistant" as const,
+                    runId: "r",
+                    createdAt: timestamp,
+                    parts: [{ type: "text" as const, text: "final answer" }],
+                  },
+                ]
+              : []),
+          ],
+        },
+      ],
+    };
+    const fake = createFakeRuntime({ snapshot });
+    const app = mountApp(fake.runtime);
+    expect(app.container.querySelectorAll(".ohb-prompt-duration")).toHaveLength(
+      1,
+    );
+    expect(
+      app.container.querySelector(".ohb-prompt-duration")?.textContent,
+    ).toContain("Total 1m 1s");
+    if (status === "succeeded")
+      expect(
+        app.container
+          .querySelector(".ohb-prompt-duration")
+          ?.previousElementSibling?.textContent.trim(),
+      ).toBe("final answer");
+    act(() => {
+      fake.store.replaceSnapshot(snapshot, 2);
+    });
+    expect(app.container.querySelectorAll(".ohb-prompt-duration")).toHaveLength(
+      1,
     );
   },
 );

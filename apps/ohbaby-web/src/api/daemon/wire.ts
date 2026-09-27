@@ -132,6 +132,10 @@ export interface UnknownPromptRequest {
   readonly submitting?: boolean;
 }
 export interface StoreSnapshot {
+  readonly durationSample?: {
+    readonly serverNow: number;
+    readonly receivedAt: number;
+  };
   readonly sessionSync: SessionSyncState;
   readonly sessionControl: UiSessionControl | null;
   readonly historyState: "loading" | "ready" | "error";

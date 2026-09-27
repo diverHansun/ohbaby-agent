@@ -72,6 +72,10 @@ export interface TuiInteractionRequest {
 export type TerminalClient = CoreAPI & SDKAPI;
 
 export interface TuiStoreState {
+  readonly durationSample?: {
+    readonly serverNow: number;
+    readonly receivedAt: number;
+  };
   readonly snapshot: UiSnapshot;
   readonly activeSessionId: string | null;
   readonly sessions: readonly UiSession[];

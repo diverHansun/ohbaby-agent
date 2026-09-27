@@ -1,4 +1,4 @@
-import type { UiMessage } from "ohbaby-sdk";
+import type { UiMessage, UiPromptSubmission } from "ohbaby-sdk";
 import type { TuiRuntimeStatus } from "./snapshot.js";
 
 export interface TranscriptSplit {
@@ -13,6 +13,7 @@ export interface TranscriptSplit {
  * the rest of the message is still being generated.
  */
 export interface TranscriptItem {
+  readonly promptCompletion?: UiPromptSubmission;
   readonly id: string;
   readonly messageId: string;
   readonly message: UiMessage;
@@ -357,4 +358,56 @@ function hasPendingOrRunningTool(message: UiMessage): boolean {
       part.type === "tool-call" &&
       (part.call.status === "pending" || part.call.status === "running"),
   );
+}
+
+/** Terminal ledger markers are append-only during live use, just like message fragments. */
+export function appendPromptCompletions(
+  items: readonly TranscriptItem[],
+  prompts: readonly UiPromptSubmission[],
+  sessionId: string | null,
+  restoring = false,
+): readonly TranscriptItem[] {
+  const seen = new Set(
+    items.flatMap((item) =>
+      item.promptCompletion ? [item.promptCompletion.promptId] : [],
+    ),
+  );
+  const pending = prompts.filter(
+    (prompt) =>
+      prompt.sessionId === sessionId &&
+      !seen.has(prompt.promptId) &&
+      prompt.endedAt !== undefined &&
+      Number.isFinite(Date.parse(prompt.createdAt)) &&
+      Number.isFinite(Date.parse(prompt.endedAt)) &&
+      ["succeeded", "failed", "cancelled", "interrupted"].includes(
+        prompt.status,
+      ),
+  );
+  if (pending.length === 0) return items;
+  const next = [...items];
+  for (const prompt of pending) {
+    if (prompt.endedAt === undefined) continue;
+    const id = `prompt-completion:${prompt.promptId}`;
+    const item: TranscriptItem = {
+      id,
+      messageId: id,
+      spacing: true,
+      promptCompletion: prompt,
+      message: { id, role: "system", createdAt: prompt.endedAt, parts: [] },
+    };
+    if (restoring) {
+      const index = next.findLastIndex(
+        (item) =>
+          item.messageId === prompt.userMessageId ||
+          (prompt.runId !== undefined && item.message.runId === prompt.runId),
+      );
+      if (index >= 0) {
+        next.splice(index + 1, 0, item);
+        continue;
+      }
+    }
+    next.push(item);
+    seen.add(prompt.promptId);
+  }
+  return next;
 }

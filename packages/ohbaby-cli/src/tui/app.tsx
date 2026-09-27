@@ -1,3 +1,7 @@
+import {
+  DurationSampleContext,
+  DurationDiagnosticContext,
+} from "./components/execution-duration.js";
 import { Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
@@ -66,6 +70,7 @@ const EMPTY_INITIAL_NOTICES: readonly string[] = [];
 type TranscriptSurfaceResetReason = "new-session" | "switch-session";
 
 export interface TerminalUiOptions {
+  readonly reportDurationClockAnomaly?: (identity: string) => void;
   readonly pendingPromptWorkspace?: string;
   readonly clearOnStart?: boolean;
   readonly client: CoreAPI;
@@ -83,6 +88,7 @@ export function OhbabyTerminalApp({
   initialNotices = EMPTY_INITIAL_NOTICES,
   subscribeEvents,
   subscribeDiagnosticsUnavailable,
+  reportDurationClockAnomaly,
 }: TerminalUiOptions): ReactElement {
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
   const keyboardCommandSequenceRef = useRef(0);
@@ -714,7 +720,9 @@ export function OhbabyTerminalApp({
     <ThemeProvider>
       <AppShell key={screenGeneration}>
         <HeaderContainer store={store} />
-        <TranscriptViewportContainer store={store} />
+        <DurationDiagnosticContext.Provider value={reportDurationClockAnomaly}>
+          <TranscriptViewportContainer store={store} />
+        </DurationDiagnosticContext.Provider>
         <DialogManager
           client={client}
           interactions={interactions}
@@ -853,16 +861,30 @@ function TranscriptViewportContainer({
   const notices = useTuiStoreSelector(store, (state) => state.notices);
   const runtime = useTuiStoreSelector(store, (state) => state.runtime);
 
+  const sample = useTuiStoreSelector(store, (state) => state.durationSample);
+  const modelActivity = useTuiStoreSelector(
+    store,
+    (state) =>
+      state.runs.find(
+        (run) =>
+          run.sessionId === state.activeSessionId &&
+          state.runtime.kind === "running" &&
+          run.id === state.runtime.runId,
+      )?.modelActivity,
+  );
   return (
-    <TranscriptViewport
-      key={activeSessionId ?? "none"}
-      commandNotices={commandNotices}
-      committedItems={committedItems}
-      liveMessage={liveMessage}
-      liveReasoning={liveReasoning}
-      notices={notices}
-      runtime={runtime}
-    />
+    <DurationSampleContext.Provider value={sample}>
+      <TranscriptViewport
+        key={activeSessionId ?? "none"}
+        commandNotices={commandNotices}
+        committedItems={committedItems}
+        liveMessage={liveMessage}
+        liveReasoning={liveReasoning}
+        notices={notices}
+        runtime={runtime}
+        modelActivity={modelActivity}
+      />
+    </DurationSampleContext.Provider>
   );
 }
 

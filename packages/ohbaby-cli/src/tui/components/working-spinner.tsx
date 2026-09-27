@@ -1,3 +1,5 @@
+import type { UiModelRequest } from "ohbaby-sdk";
+import { useExecutionDuration } from "./execution-duration.js";
 import { Box, Text } from "ink";
 import { useRef } from "react";
 import type { ReactElement } from "react";
@@ -9,22 +11,34 @@ import { pickWorkingPhrase } from "./working-phrases.js";
 
 export interface WorkingSpinnerProps {
   readonly runtime: TuiRuntimeStatus;
+  readonly modelActivity?: UiModelRequest;
 }
 
 /**
- * Turn-level "agent is working" heartbeat for the main conversation. Visible only
- * while runtime.kind === "running": a rotating dot glyph (shared with tool rows,
- * tinted purple) plus a per-turn humorous phrase that shimmers left-to-right.
+ * Model waiting indicator for an owned agent-step attempt before its first text.
  */
 export function WorkingSpinner({
   runtime,
+  modelActivity,
 }: WorkingSpinnerProps): ReactElement | null {
   const theme = useTheme();
   // Call the hook unconditionally; an empty runId while idle keeps order stable.
   const runId = runtime.kind === "running" ? runtime.runId : "";
   const phrase = useTurnPhrase(runId);
 
-  if (runtime.kind !== "running") {
+  const duration = useExecutionDuration(
+    modelActivity?.requestId ?? "model",
+    modelActivity?.startedAt,
+    modelActivity?.endedAt,
+  );
+  if (
+    runtime.kind !== "running" ||
+    modelActivity?.runId !== runtime.runId ||
+    modelActivity.purpose !== "agent-step" ||
+    modelActivity.outcome !== "running" ||
+    modelActivity.endedAt !== undefined ||
+    modelActivity.firstTextAt !== undefined
+  ) {
     return null;
   }
   const text = runtime.title?.trim() ? runtime.title : phrase;
@@ -34,6 +48,7 @@ export function WorkingSpinner({
       <Spinner color={theme.workingSpinner.base} />
       <Text> </Text>
       <ShimmerText text={text} />
+      {duration === undefined ? null : <Text dimColor> · {duration}</Text>}
     </Box>
   );
 }

@@ -28,6 +28,7 @@ import type {
 import { renderStatusPanel } from "../render/status-panel.js";
 import {
   advanceTranscriptCommit,
+  appendPromptCompletions,
   type TranscriptCommitState,
 } from "./transcript.js";
 
@@ -46,6 +47,10 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
   );
 
   return {
+    durationSample:
+      snapshot.serverNow === undefined
+        ? undefined
+        : { serverNow: snapshot.serverNow, receivedAt: performance.now() },
     activeSessionId: snapshot.activeSessionId,
     catalog: null,
     catalogInvalidation: null,
@@ -57,7 +62,12 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     todos: snapshot.todos ?? [],
     resolvedPermissionIds: [],
     interactions: [],
-    committedItems: transcript.committedItems,
+    committedItems: appendPromptCompletions(
+      transcript.committedItems,
+      snapshot.prompts ?? [],
+      snapshot.activeSessionId,
+      true,
+    ),
     committedPartCounts: transcript.committedPartCounts,
     liveMessage: transcript.liveMessage,
     messages,
@@ -77,6 +87,19 @@ export function applyTuiEvent(
   state: TuiStoreState,
   event: UiEvent,
 ): TuiStoreState {
+  if (
+    "timestamp" in event &&
+    event.timestamp !== undefined &&
+    event.timestamp !== state.durationSample?.serverNow
+  ) {
+    state = {
+      ...state,
+      durationSample: {
+        serverNow: event.timestamp,
+        receivedAt: performance.now(),
+      },
+    };
+  }
   switch (event.type) {
     case "snapshot.replaced":
       return preserveLocalQueues(
@@ -423,6 +446,13 @@ export function createTuiStore(snapshot: UiSnapshot): TuiStore {
       notify();
     },
     installSessionView(view, older = [], resetTranscript = false): void {
+      state = {
+        ...state,
+        durationSample:
+          view.serverNow === undefined
+            ? undefined
+            : { serverNow: view.serverNow, receivedAt: performance.now() },
+      };
       const messages = new Map(
         [...older, ...view.session.messages].map((message) => [
           message.id,
@@ -571,7 +601,12 @@ function preserveLocalQueues(
     goals,
     todos,
     interactions: previous.interactions,
-    committedItems: transcript.committedItems,
+    committedItems: appendPromptCompletions(
+      transcript.committedItems,
+      next.prompts,
+      next.activeSessionId,
+      activeSessionChanged,
+    ),
     committedPartCounts: transcript.committedPartCounts,
     liveMessage: transcript.liveMessage,
     messages,
@@ -645,7 +680,13 @@ function rebuildFromCollections(
   return {
     ...state,
     activeSessionId,
-    committedItems: transcript.committedItems,
+    committedItems: appendPromptCompletions(
+      transcript.committedItems,
+      prompts,
+      activeSessionId,
+      state.activeSessionId !== activeSessionId ||
+        state.committedItems.length === 0,
+    ),
     committedPartCounts: transcript.committedPartCounts,
     contextWindowUsages,
     goals,

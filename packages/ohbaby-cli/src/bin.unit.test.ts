@@ -76,6 +76,7 @@ describe("runOhbabyCli", () => {
       }),
     );
     const logger = { emit: vi.fn() };
+    const clockAnomalyDefinition = {};
     const disposeDiagnostics = vi.fn(() => Promise.resolve());
     let diagnosticsUnavailable: (() => void) | undefined;
     const createProcessLogger = vi.fn(
@@ -93,10 +94,12 @@ describe("runOhbabyCli", () => {
     const activeNotice = vi.fn();
     const renderTerminalUi = vi.fn(
       (options: {
+        readonly reportDurationClockAnomaly?: (identity: string) => void;
         readonly subscribeDiagnosticsUnavailable?: (
           listener: () => void,
         ) => () => void;
       }) => {
+        options.reportDurationClockAnomaly?.("request-1");
         options.subscribeDiagnosticsUnavailable?.(activeNotice);
         diagnosticsUnavailable?.();
         return { waitUntilExit };
@@ -107,6 +110,7 @@ describe("runOhbabyCli", () => {
       buildCoreAPIImpl,
       createProcessLogger,
       dataMigrationCompleted: {},
+      durationClockAnomaly: clockAnomalyDefinition,
       loadRuntimeEnvIntoProcessEnv,
       migrateOhbabyData,
     }));
@@ -139,6 +143,9 @@ describe("runOhbabyCli", () => {
       logger,
     });
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
+    expect(logger.emit).toHaveBeenCalledWith(clockAnomalyDefinition, {
+      identity: "request-1",
+    });
     expect(
       renderTerminalUi.mock.calls[0]?.[0].subscribeDiagnosticsUnavailable,
     ).toBeTypeOf("function");

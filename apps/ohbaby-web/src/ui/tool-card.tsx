@@ -1,7 +1,13 @@
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { ReactElement } from "react";
-import type { UiMessagePart, UiToolCall, UiToolResult } from "ohbaby-sdk";
+import { useExecutionDuration } from "./execution-duration.js";
+import type {
+  UiToolExecution,
+  UiMessagePart,
+  UiToolCall,
+  UiToolResult,
+} from "ohbaby-sdk";
 
 export type PairedToolPart =
   | {
@@ -62,11 +68,24 @@ export function ToolCard(props: {
   readonly result: UiToolResult | undefined;
 }): ReactElement {
   const [open, setOpen] = useState(false);
+  const execution = props.result?.execution ?? props.call.execution;
+  const duration = useExecutionDuration(
+    props.call.id,
+    execution?.executionStartedAt,
+    execution?.endedAt,
+  );
+  const abnormal =
+    execution?.outcome && execution.outcome !== "success"
+      ? execution.outcome
+      : undefined;
   const failed =
     props.call.status === "failed" || props.result?.error !== undefined;
 
   return (
     <ToolPanel
+      execution={execution}
+      duration={duration}
+      abnormal={abnormal ?? (failed ? "error" : undefined)}
       accent={failed ? "red" : toolAccent(props.call.name)}
       input={JSON.stringify(props.call.input, null, 2)}
       onToggle={() => {
@@ -99,6 +118,9 @@ export function OrphanToolResultCard(props: {
 }
 
 function ToolPanel(props: {
+  readonly execution?: UiToolExecution;
+  readonly duration?: string;
+  readonly abnormal?: string;
   readonly accent: "blue" | "gold" | "green" | "red";
   readonly input?: string;
   readonly onToggle: () => void;
@@ -109,8 +131,26 @@ function ToolPanel(props: {
 }): ReactElement {
   return (
     <div className={`ohb-tool-panel ohb-tool-${props.accent}`}>
-      <button aria-expanded={props.open} onClick={props.onToggle} type="button">
-        <span>{props.title}</span>
+      <button
+        aria-expanded={props.open}
+        aria-label={`${props.title}${props.abnormal ? ` · ${props.abnormal}` : ""}`}
+        onClick={props.onToggle}
+        type="button"
+      >
+        <span
+          className={
+            props.execution?.phase === "executing" &&
+            props.execution.endedAt === undefined
+              ? "ohb-tool-executing"
+              : undefined
+          }
+        >
+          {props.title}
+        </span>
+        {props.abnormal ? <span aria-hidden="true">⚠</span> : null}
+        {props.duration !== undefined ? (
+          <span className="ohb-tool-duration">{props.duration}</span>
+        ) : null}
         <span className="ohb-tool-summary">{props.summary}</span>
         <ChevronRight
           aria-hidden="true"
@@ -121,6 +161,12 @@ function ToolPanel(props: {
       {props.open &&
       (props.input !== undefined || props.output !== undefined) ? (
         <div className="ohb-tool-details">
+          {props.execution ? (
+            <section>
+              <span>Execution</span>
+              <pre>{JSON.stringify(props.execution, null, 2)}</pre>
+            </section>
+          ) : null}
           {props.input !== undefined ? (
             <section className="ohb-tool-input">
               <span>Input</span>

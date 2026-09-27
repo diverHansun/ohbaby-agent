@@ -1,4 +1,9 @@
 import {
+  DurationSampleContext,
+  useExecutionDuration,
+} from "./execution-duration.js";
+import { useStopRequest } from "./use-stop-request.js";
+import {
   Archive,
   Brain,
   ChevronDown,
@@ -469,6 +474,12 @@ function ConnectedOhbabyWebApp({
     () => runtime.getWorkspaceSnapshot(),
   );
   const [actionError, setActionError] = useState<string | null>(null);
+  const stopRequest = useStopRequest(
+    runtime,
+    view.composer.activeSessionId,
+    view.composer.activeRunId,
+    setActionError,
+  );
   const [dismissedPromptErrorId, setDismissedPromptErrorId] = useState<
     string | null
   >(null);
@@ -916,16 +927,20 @@ function ConnectedOhbabyWebApp({
               message={errorBannerMessage}
               onDismiss={clearActionError}
             />
-            <ConversationStream
-              historyState={storeSnapshot.historyState}
-              historyHasMore={storeSnapshot.historyHasMore}
-              historyStale={storeSnapshot.historyStale}
-              historyError={storeSnapshot.historyError}
-              onLoadHistory={() => runtime.loadEarlierHistory()}
-              promptRows={promptProjection.rows}
-              startupThinkingAt={promptProjection.startupThinkingAt}
-              view={view}
-            />
+            <DurationSampleContext.Provider
+              value={storeSnapshot.durationSample}
+            >
+              <ConversationStream
+                historyState={storeSnapshot.historyState}
+                historyHasMore={storeSnapshot.historyHasMore}
+                historyStale={storeSnapshot.historyStale}
+                historyError={storeSnapshot.historyError}
+                onLoadHistory={() => runtime.loadEarlierHistory()}
+                promptRows={promptProjection.rows}
+                startupThinkingAt={promptProjection.startupThinkingAt}
+                view={view}
+              />
+            </DurationSampleContext.Provider>
             {commandModalNotice ? (
               <CommandResultModal
                 header={view.header}
@@ -978,16 +993,8 @@ function ConnectedOhbabyWebApp({
           }}
           onStructuredCommand={openStructuredCommand}
           onSubmit={submitText}
-          onStop={() => {
-            void runAction(() =>
-              view.composer.activeSessionId === undefined
-                ? Promise.resolve()
-                : runtime.abortSession(
-                    view.composer.activeSessionId,
-                    view.composer.activeRunId,
-                  ),
-            );
-          }}
+          onStop={stopRequest.stop}
+          stopLabel={stopRequest.label}
           view={view}
         />
         {structuredOverlay ? (
@@ -1517,6 +1524,35 @@ function ConversationStream(props: {
   const anchorRef = useRef<{ top: number; height: number } | null>(null);
   const messages = props.view.activeSession?.messages ?? [];
   const visibleMessages = filterTodoToolMessages(messages);
+  const terminalPrompts = (props.view.snapshot?.prompts ?? []).filter(
+    (prompt) =>
+      prompt.sessionId === props.view.activeSession?.id &&
+      prompt.endedAt !== undefined &&
+      Number.isFinite(Date.parse(prompt.createdAt)) &&
+      Number.isFinite(Date.parse(prompt.endedAt)) &&
+      ["succeeded", "failed", "cancelled", "interrupted"].includes(
+        prompt.status,
+      ),
+  );
+  const terminalAfter = new Map<string, typeof terminalPrompts>();
+  const unattached = terminalPrompts.filter((prompt) => {
+    const owner =
+      [...visibleMessages]
+        .reverse()
+        .find(
+          (message) =>
+            message.role === "assistant" &&
+            message.runId !== undefined &&
+            message.runId === prompt.runId,
+        ) ??
+      visibleMessages.find((message) => message.id === prompt.userMessageId);
+    if (!owner) return true;
+    terminalAfter.set(owner.id, [
+      ...(terminalAfter.get(owner.id) ?? []),
+      prompt,
+    ]);
+    return false;
+  });
   const timelineItems = [
     ...visibleMessages.map((message, index) => ({
       createdAt: message.createdAt,
@@ -1669,27 +1705,24 @@ function ConversationStream(props: {
         ) : null}
         {timelineItems.map((item) =>
           item.kind === "message" ? (
-            <MessageRow
-              key={`message:${item.message.id}`}
-              message={item.message}
-              reasoning={props.view.reasoningByMessageId[item.message.id]}
-            />
+            <div key={`message:${item.message.id}`}>
+              <MessageRow
+                message={item.message}
+                reasoning={props.view.reasoningByMessageId[item.message.id]}
+              />
+              {(terminalAfter.get(item.message.id) ?? []).map((prompt) => (
+                <PromptDuration key={prompt.promptId} prompt={prompt} />
+              ))}
+            </div>
           ) : (
             <PromptProjectionRow key={`prompt:${item.row.id}`} row={item.row} />
           ),
         )}
+        {unattached.map((prompt) => (
+          <PromptDuration key={prompt.promptId} prompt={prompt} />
+        ))}
         <CommandNoticeList notices={props.view.commandNotices} />
-        {props.view.composer.isRunning ? (
-          <ThinkingIndicator
-            canInterrupt
-            startedAt={props.view.composer.activeRunStartedAt}
-          />
-        ) : props.startupThinkingAt !== undefined ? (
-          <ThinkingIndicator
-            canInterrupt={false}
-            startedAt={props.startupThinkingAt}
-          />
-        ) : null}
+        <ModelWaiting view={props.view} />
       </div>
     </section>
   );
@@ -2256,39 +2289,59 @@ function MessagePart(props: {
   }
 }
 
-function thinkingElapsedSeconds(startedAt: string | undefined): number {
-  const parsed = startedAt === undefined ? Number.NaN : Date.parse(startedAt);
-  return Number.isFinite(parsed)
-    ? Math.max(0, Math.floor((Date.now() - parsed) / 1_000))
-    : 0;
-}
-
-function ThinkingIndicator(props: {
-  readonly canInterrupt: boolean;
-  readonly startedAt: string | undefined;
-}): ReactElement {
-  const [elapsedSeconds, setElapsedSeconds] = useState(() =>
-    thinkingElapsedSeconds(props.startedAt),
+function ModelWaiting({
+  view,
+}: {
+  readonly view: ViewModel;
+}): ReactElement | null {
+  const run = view.snapshot?.runs.find(
+    (run) =>
+      run.sessionId === view.composer.activeSessionId &&
+      run.id === view.composer.activeRunId,
   );
-  useEffect(() => {
-    setElapsedSeconds(thinkingElapsedSeconds(props.startedAt));
-    const timer = window.setInterval(() => {
-      setElapsedSeconds(thinkingElapsedSeconds(props.startedAt));
-    }, 1_000);
-    return (): void => {
-      window.clearInterval(timer);
-    };
-  }, [props.startedAt]);
+  const request = run?.modelActivity;
+  const duration = useExecutionDuration(
+    request?.requestId ?? "model",
+    request?.startedAt,
+    request?.endedAt,
+  );
+  if (
+    !request ||
+    run.status.kind !== "running" ||
+    request.runId !== run.id ||
+    request.purpose !== "agent-step" ||
+    request.outcome !== "running" ||
+    request.firstTextAt !== undefined ||
+    request.endedAt !== undefined
+  )
+    return null;
   return (
-    <div className="ohb-thinking">
+    <div className="ohb-thinking" role="status" aria-label="Thinking">
       <span aria-hidden="true">
         <span />
         <span />
         <span />
       </span>
       <span>Thinking</span>
-      <span>· {String(elapsedSeconds)}s</span>
-      {!props.canInterrupt ? <span>· starting agent</span> : null}
+      {duration === undefined ? null : <span>· {duration}</span>}
+    </div>
+  );
+}
+
+function PromptDuration({
+  prompt,
+}: {
+  readonly prompt: import("ohbaby-sdk").UiPromptSubmission;
+}): ReactElement {
+  const duration = useExecutionDuration(
+    prompt.promptId,
+    Date.parse(prompt.createdAt),
+    prompt.endedAt === undefined ? undefined : Date.parse(prompt.endedAt),
+  );
+  return (
+    <div className="ohb-prompt-duration">
+      {prompt.status !== "succeeded" ? `${prompt.status} · ` : ""}Total{" "}
+      {duration ?? "—"}
     </div>
   );
 }
@@ -2616,6 +2669,7 @@ function Composer(props: {
   }) => void;
   readonly onStructuredCommand: (request: StructuredCommandRequest) => void;
   readonly onStop: () => void;
+  readonly stopLabel?: string;
   readonly onSubmit: (
     text: string,
     clientRequestId?: string,
@@ -2664,10 +2718,11 @@ function Composer(props: {
     !isSubmitting &&
     !props.isPromptAdmitting;
   const showStop =
-    !queuedEdit &&
-    ((props.view.composer.isRunning && draft.trim().length === 0) ||
-      (props.view.composer.canStop &&
-        (!props.view.composer.canSend || draft.trim().length === 0)));
+    props.stopLabel !== undefined ||
+    (!queuedEdit &&
+      ((props.view.composer.isRunning && draft.trim().length === 0) ||
+        (props.view.composer.canStop &&
+          (!props.view.composer.canSend || draft.trim().length === 0))));
   const canUseSlash =
     props.view.composer.canSend && !isSubmitting && !props.isPromptAdmitting;
   const visibleQueuedPrompts = queueExpanded
@@ -3446,14 +3501,25 @@ function Composer(props: {
           />
           {showStop ? (
             <button
-              aria-label="Stop run"
+              aria-busy={props.stopLabel !== undefined}
+              aria-label={props.stopLabel ?? "Stop run"}
               className="ohb-stop-button"
-              disabled={!props.view.composer.canStop}
+              disabled={
+                props.stopLabel !== undefined || !props.view.composer.canStop
+              }
               onClick={props.onStop}
-              title="Stop run"
+              title={props.stopLabel ?? "Stop run"}
               type="button"
             >
-              <Square size={14} />
+              {props.stopLabel ? (
+                <LoaderCircle
+                  aria-hidden="true"
+                  className="ohb-stop-pending"
+                  size={14}
+                />
+              ) : (
+                <Square size={14} />
+              )}
             </button>
           ) : (
             <button

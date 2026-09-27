@@ -236,3 +236,58 @@ describe("session view store", () => {
     ).toBe(false);
   });
 });
+
+it("anchors live source timestamps on receipt and keeps that anchor through unrelated updates", () => {
+  let now = 10;
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  try {
+    const store = createOhbabyWebStore();
+    store.replaceSnapshot(
+      {
+        serverNow: 1000,
+        activeSessionId: "s",
+        sessions: [],
+        runs: [],
+        permissions: [],
+        status: { kind: "idle" },
+      },
+      1,
+    );
+    now = 100;
+    store.applyEvent(
+      { type: "runtime.updated", status: { kind: "idle" }, timestamp: 2000 },
+      2,
+    );
+    expect(store.getSnapshot().durationSample).toEqual({
+      serverNow: 2000,
+      receivedAt: 100,
+    });
+    now = 5000;
+    store.setError("unrelated");
+    expect(store.getSnapshot().durationSample).toEqual({
+      serverNow: 2000,
+      receivedAt: 100,
+    });
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+it("does not rewind the receipt anchor when loading history against a cached view", () => {
+  const store = createOhbabyWebStore();
+  const cached = { ...view(), serverNow: 1000 };
+  store.setSessionSync(ready(cached));
+  store.applyEvent(
+    { type: "runtime.updated", status: { kind: "idle" }, timestamp: 3000 },
+    1,
+  );
+  const received = store.getSnapshot().durationSample;
+  store.installSessionHistory({
+    version: cached.version,
+    messages: [],
+    prompts: [],
+    hasMore: false,
+    reasoningMissing: false,
+  });
+  expect(store.getSnapshot().durationSample).toBe(received);
+});

@@ -107,6 +107,7 @@ interface AgentRuntimeModule {
   readonly configMigrationCompleted?: unknown;
   readonly createProcessLogger?: unknown;
   readonly dataMigrationCompleted?: unknown;
+  readonly durationClockAnomaly?: unknown;
   readonly loadRuntimeEnvIntoProcessEnv?: unknown;
   readonly migrateOhbabyData?: unknown;
 }
@@ -170,6 +171,7 @@ function createRpcCoreHost(host: CliCoreHost): CliCoreHost {
   const rpc = createRPC<CoreAPI>();
   rpc.connectImpl(host.core);
   return {
+    reportDurationClockAnomaly: host.reportDurationClockAnomaly,
     callbacks: host.callbacks,
     core: rpc.createProxy(host.callbacks),
     dispose: host.dispose,
@@ -406,6 +408,15 @@ async function loadDefaultDependencies(
         });
         return {
           ...host,
+          reportDurationClockAnomaly: (identity: string): void => {
+            emitWithoutAffectingProduct(
+              handle.logger,
+              runtimeModule.durationClockAnomaly as DiagnosticEventDefinition<{
+                readonly identity: string;
+              }>,
+              { identity },
+            );
+          },
           ...(diagnosticsFilePath === undefined ? {} : { diagnosticsFilePath }),
           diagnosticsUnavailable: () =>
             diagnosticsUnavailable && !diagnosticsUnavailablePresented,

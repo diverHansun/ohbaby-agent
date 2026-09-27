@@ -14,6 +14,7 @@ export {
   configMigrationCompleted,
   dataMigrationCompleted,
   diagnosticsStarted,
+  durationClockAnomaly,
   interactionCleanupFailure,
   loggerEventsDropped,
   serverStartFailed,
