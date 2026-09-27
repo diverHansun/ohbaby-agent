@@ -5,7 +5,7 @@
 
 **2026-09-26 最新实施入口：** A/B、improve-1 与 improve-1.1 已包含在开发基线 `68b11ba2`。C1→C2→C3 的整项组合验收、补修和本地合并记录见 [C 阶段验收](pre/05-implementation-acceptance.md)。本次以 macOS 为通过范围，Windows/Linux 记后续；三条临时分支保留。后文早期“仅规划/尚未合回”描述保留其历史时点；准备进入 improve-2 时以各轮验收记录与开发分支实际接口为准。
 
-**2026-09-27 补充阶段：** improve-2 已完成本地实施与[验收](improve-2/05-implementation-acceptance.md)，暂未合并/push。用户指定在中央 improve-3 开发前加入 [improve-2.1：New session 回归与 Web 模块整理](improve-2.1/README.md)；规划路径保留，本次实施分支为 `codex/improve-2.2`，实施/验收尚未完成。对应的模块拆分规格位于 [ohbaby-web/improve-3](../../ohbaby-web/improve-3/README.md)，两个 improve-3 编号不可混淆。后续中央 improve-3 以本补充阶段的实际验收和接线为输入。
+**2026-09-27 补充阶段：** improve-2 已完成本地实施与[验收](improve-2/05-implementation-acceptance.md)，暂未合并/push。用户指定在中央 improve-3 开发前加入 [improve-2.1：New session 回归与 Web 模块整理](improve-2.1/README.md)；规划路径保留，本次实施分支为 `codex/improve-2.2`，本地实施与自动化/编译客户端验收已完成，见[本轮05及剩余限制](improve-2.1/05-implementation-acceptance.md)。对应的模块拆分规格位于 [ohbaby-web/improve-3](../../ohbaby-web/improve-3/README.md)，两个 improve-3 编号不可混淆。后续中央 improve-3 以本补充阶段的实际验收和接线为输入。
 
 ## 目标与固定边界
 
@@ -73,7 +73,7 @@
 
 ## 顺序实施与跨轮交付检查
 
-当前顺序（2026-09-27）：独立 A/B 前置 → improve-1 → improve-1.1 → improve-2 → improve-2.1 → improve-3 → improve-4。C 仍在 improve-2 前按 C1 → C2/C3 完成组合门；与 improve-1.1 的相对顺序不新增技术依赖。已完成阶段看各自05及实际分支，improve-2.1 已获实施授权、在 `codex/improve-2.2` 推进，尚无本轮05；任何后续轮次不能因文档齐全而视为完成。下方2026-09-24记录保留当日安排，其中 improve-2 到 improve-3 之间现已插入 improve-2.1。
+当前顺序（2026-09-27）：独立 A/B 前置 → improve-1 → improve-1.1 → improve-2 → improve-2.1 → improve-3 → improve-4。C 仍在 improve-2 前按 C1 → C2/C3 完成组合门；与 improve-1.1 的相对顺序不新增技术依赖。已完成阶段看各自05及实际分支，improve-2.1 已在 `codex/improve-2.2` 本地实施并分批提交，结果与 T14 人工仿真限制见[05](improve-2.1/05-implementation-acceptance.md)，等待用户审查；后续轮次以实际代码和验收边界为准。下方2026-09-24记录保留当日安排，其中 improve-2 到 improve-3 之间现已插入 improve-2.1。
 
 2026-09-24 全面审核后的推荐线性安排：A → B → improve-1 → improve-1.1 → C1 → C2/C3 → improve-2 → improve-3 → improve-4。用户已确认 C 的特殊合并门：C1 与 C2/C3 各用本地临时分支，后者从前者提交继续；组合验收通过后再依次合回开发分支，避免只有 C1 时旧 scheduler 的全局写槽长期阻挡其他调用。C1 独立锁层验收不代表整项 C 可用，详见 [C.2](pre/c-concurrency-and-resource-protection.md#c2-三阶段实施及最小交付)。本安排不新增 C 与 1.1 的技术依赖。
 

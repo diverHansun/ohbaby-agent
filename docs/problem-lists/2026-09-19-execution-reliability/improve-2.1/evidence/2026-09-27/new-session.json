@@ -1,0 +1,64 @@
+{
+  "usedSessionId": "session_1790484399036_awidpu1",
+  "emptySessionId": "session_1790484408960_itd3yk1",
+  "newSessionObservations": [
+    {
+      "click": 1,
+      "at": 1790484431384,
+      "sessionId": "session_1790484408960_itd3yk1",
+      "newEnabled": true
+    },
+    {
+      "click": 2,
+      "at": 1790484431444,
+      "sessionId": "session_1790484408960_itd3yk1",
+      "newEnabled": true
+    },
+    {
+      "click": 3,
+      "at": 1790484431499,
+      "sessionId": "session_1790484408960_itd3yk1",
+      "newEnabled": true
+    },
+    {
+      "click": 4,
+      "at": 1790484431550,
+      "sessionId": "session_1790484408960_itd3yk1",
+      "newEnabled": true
+    },
+    {
+      "click": 5,
+      "at": 1790484431598,
+      "sessionId": "session_1790484408960_itd3yk1",
+      "newEnabled": true
+    },
+    {
+      "click": 6,
+      "at": 1790484431649,
+      "sessionId": "session_1790484408960_itd3yk1",
+      "newEnabled": true
+    }
+  ],
+  "afterUsedSessionNewId": "session_1790484408960_itd3yk1",
+  "afterRefreshNewId": "session_1790484408960_itd3yk1",
+  "refreshReuses": [
+    {
+      "startedAt": 1790484446431,
+      "completedAt": 1790484447218,
+      "elapsedMs": 787,
+      "sessionId": "session_1790484408960_itd3yk1"
+    },
+    {
+      "startedAt": 1790484447218,
+      "completedAt": 1790484448001,
+      "elapsedMs": 783,
+      "sessionId": "session_1790484408960_itd3yk1"
+    },
+    {
+      "startedAt": 1790484448001,
+      "completedAt": 1790484448680,
+      "elapsedMs": 679,
+      "sessionId": "session_1790484408960_itd3yk1"
+    }
+  ]
+}

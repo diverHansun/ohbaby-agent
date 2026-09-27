@@ -1,0 +1,30 @@
+
+ RUN  v2.1.9 /Users/hansun025/Projects/code-cli/ohbaby-agent
+
+ ❯ apps/ohbaby-web/src/api/daemon/new-session-regression.integration.test.ts (27 tests | 1 failed | 26 skipped) 32ms
+   × New session real persistent REST regression > refreshing an empty session releases its old SSE occupancy before routing retention expires 32ms
+     → expected 'session_1790479539825_vslaxr2' to be 'session_1790479539819_nqwpke1' // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/ohbaby-web/src/api/daemon/new-session-regression.integration.test.ts > New session real persistent REST regression > refreshing an empty session releases its old SSE occupancy before routing retention expires
+AssertionError: expected 'session_1790479539825_vslaxr2' to be 'session_1790479539819_nqwpke1' // Object.is equality
+
+Expected: "session_1790479539819_nqwpke1"
+Received: "session_1790479539825_vslaxr2"
+
+ ❯ apps/ohbaby-web/src/api/daemon/new-session-regression.integration.test.ts:172:61
+    170|       await reloaded.ready;
+    171|       await reloaded.createSession();
+    172|       expect(await reloaded.client?.getSelectedSessionId()).toBe(empty…
+       |                                                             ^
+    173|       expect(f.count()).toBe(count);
+    174|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 26 skipped (27)
+   Start at  11:25:38
+   Duration  1.41s (transform 736ms, setup 8ms, collect 1.16s, tests 32ms, environment 0ms, prepare 33ms)
+

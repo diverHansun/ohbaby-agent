@@ -1,0 +1,75 @@
+{
+  "baselineStyle": [
+    {
+      "bg": "rgb(250, 250, 250)",
+      "borderRadius": "0px",
+      "className": "ohb-app ohb-app-shell ohb-app-main",
+      "color": "rgb(38, 40, 45)",
+      "display": "flex",
+      "font": "16px \"IBM Plex Sans\", -apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+      "padding": "0px",
+      "position": "static"
+    },
+    {
+      "bg": "rgba(0, 0, 0, 0)",
+      "borderRadius": "0px",
+      "className": "ohb-composer",
+      "color": "rgb(38, 40, 45)",
+      "display": "block",
+      "font": "16px \"IBM Plex Sans\", -apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+      "padding": "16px 24px 11px",
+      "position": "absolute"
+    },
+    {
+      "bg": "rgba(0, 0, 0, 0)",
+      "borderRadius": "0px",
+      "className": "",
+      "color": "rgb(38, 40, 45)",
+      "display": "block",
+      "font": "14px / 22px \"IBM Plex Mono\", ui-monospace, monospace",
+      "padding": "0px",
+      "position": "relative"
+    }
+  ],
+  "currentStyle": [
+    {
+      "bg": "rgb(250, 250, 250)",
+      "borderRadius": "0px",
+      "className": "ohb-app ohb-app-shell ohb-app-main",
+      "color": "rgb(38, 40, 45)",
+      "display": "flex",
+      "font": "16px \"IBM Plex Sans\", -apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+      "padding": "0px",
+      "position": "static"
+    },
+    {
+      "bg": "rgba(0, 0, 0, 0)",
+      "borderRadius": "0px",
+      "className": "ohb-composer",
+      "color": "rgb(38, 40, 45)",
+      "display": "block",
+      "font": "16px \"IBM Plex Sans\", -apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+      "padding": "16px 24px 11px",
+      "position": "absolute"
+    },
+    {
+      "bg": "rgba(0, 0, 0, 0)",
+      "borderRadius": "0px",
+      "className": "",
+      "color": "rgb(38, 40, 45)",
+      "display": "block",
+      "font": "14px / 22px \"IBM Plex Mono\", ui-monospace, monospace",
+      "padding": "0px",
+      "position": "relative"
+    }
+  ],
+  "beforeRefreshCounts": {
+    "tool": 1,
+    "followup": 1
+  },
+  "afterRefreshCounts": {
+    "tool": 1,
+    "followup": 1,
+    "user": 1
+  }
+}

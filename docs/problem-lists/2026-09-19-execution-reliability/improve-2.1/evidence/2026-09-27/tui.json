@@ -1,0 +1,32 @@
+{
+  "initialCount": 0,
+  "afterFirstNew": [
+    [
+      "session_1790484391388_rbglkw1",
+      0
+    ]
+  ],
+  "afterRepeatedNew": [
+    [
+      "session_1790484391388_rbglkw1",
+      0
+    ]
+  ],
+  "afterForceNew": [
+    [
+      "session_1790484391388_rbglkw1",
+      0
+    ],
+    [
+      "session_1790484459849_lprgwx2",
+      0
+    ]
+  ],
+  "emptyTables": {
+    "message": 0,
+    "run_ledger": 0,
+    "prompt_submission": 0
+  },
+  "mode": "default in-process compiled TUI",
+  "daemonStatePresent": false
+}
