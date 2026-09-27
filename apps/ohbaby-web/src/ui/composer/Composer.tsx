@@ -751,7 +751,7 @@ export function Composer(props: {
         if (event.key === "Tab" && !event.shiftKey) {
           event.preventDefault();
           if (selectedCommand) {
-            setDraft(selectedCommand.label);
+            updateDraft(selectedCommand.label);
             setSlashDismissedDraft(null);
           }
           return;
@@ -804,6 +804,7 @@ export function Composer(props: {
       send,
       slashItems.length,
       slashOpen,
+      updateDraft,
     ],
   );
 

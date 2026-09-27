@@ -51,7 +51,22 @@ function fixture(): {
     connectionKind: "live",
     draftScopeKey: "workspace:session",
     isPromptAdmitting: false,
-    onListCommands: vi.fn(),
+    onListCommands: vi.fn().mockResolvedValue({
+      version: "commands-v1",
+      commands: [
+        {
+          action: "executeCommand",
+          argumentMode: "argv",
+          category: "system",
+          description: "Show backend status",
+          executionKind: "passthrough",
+          id: "status",
+          path: ["status"],
+          source: "builtin",
+          surfaces: ["tui"],
+        },
+      ],
+    }),
     onSetPermission: vi.fn(),
     onStructuredCommand: vi.fn(),
     onStop: vi.fn(),
@@ -97,6 +112,34 @@ function fixture(): {
 }
 
 describe("Composer prefill ownership", () => {
+  it("persists Tab completion and advances the revision before accepting insertions", async () => {
+    const f = fixture();
+    await act(async () => {
+      f.type("/sta");
+      await Promise.resolve();
+    });
+    const revision = f.revision();
+    await act(async () => {
+      f.input().dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, key: "Tab" }),
+      );
+      await Promise.resolve();
+    });
+    expect(f.input().value).toBe("/status");
+    expect(
+      JSON.parse(
+        sessionStorage.getItem("ohbaby:composer:workspace:session") ?? "{}",
+      ),
+    ).toEqual({ text: "/status" });
+    expect(f.revision()).toBeGreaterThan(revision);
+    f.render({
+      nonce: 1,
+      scopeKey: "workspace:session",
+      editRevision: revision,
+      text: "stale insertion",
+    });
+    expect(f.input().value).toBe("/status");
+  });
   it("rejects an old insertion after a newer edit, even when the text is changed back", () => {
     const f = fixture();
     f.type("initial");
