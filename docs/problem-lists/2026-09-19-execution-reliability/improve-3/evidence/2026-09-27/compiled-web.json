@@ -1,0 +1,36 @@
+{
+  "kind": "compiled Web UI with scripted provider",
+  "revision": "a75d96f6ecfc3559882b79a93a4a8ab19be46da7",
+  "actualBrowserActions": [
+    "Send root",
+    "queue ordinary",
+    "queue and Steer",
+    "child read-only full reasoning",
+    "root refresh",
+    "second page refresh",
+    "terminal root and next task"
+  ],
+  "executions": [
+    {
+      "id": "subagent_execution_f130fae001d05dc837fad945411df3d5e9a21b10e6c2388b582f67e935514fa7",
+      "status": "completed",
+      "delivery": "processed",
+      "bytes": 13
+    },
+    {
+      "id": "subagent_execution_982bda003e75ad708da83badf83b0cc4fe99cf3863118c29da4531d66aafa846",
+      "status": "completed",
+      "delivery": "processed",
+      "bytes": 13
+    },
+    {
+      "id": "subagent_execution_72d4cc246b06ac5cec1d219d77115df23ec55ed7c6acf8bf286cf93c588fba53",
+      "status": "completed",
+      "delivery": "processed",
+      "bytes": 76027
+    }
+  ],
+  "daemonPidReleased": true,
+  "harnessCleanupCorrection": "Harness waited for an already-delivered child exit event; runner terminated after daemon exit and provider socket released; fix now checks signalCode as well.",
+  "daemonPortReleased": true
+}
