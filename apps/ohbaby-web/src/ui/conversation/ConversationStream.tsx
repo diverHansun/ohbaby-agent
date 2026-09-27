@@ -1,7 +1,9 @@
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { CommandNoticeList } from "../commands/CommandResultModal.js";
-import { type ViewModel } from "../session/selectors.js";
+
+import type { UiMessage, UiPromptSubmission, UiRun } from "ohbaby-sdk";
+import type { ReactNode } from "react";
+import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import { ModelWaiting, PromptDuration } from "./ExecutionProgress.js";
 import { filterTodoToolMessages, MessageRow } from "./MessageRow.js";
 import { isNearBottom, scrollToBottom } from "./streamScroll.js";
@@ -23,18 +25,24 @@ export function ConversationStream(props: {
   readonly onLoadHistory: () => Promise<void>;
   readonly promptRows: readonly PromptProjectionModel[];
   readonly startupThinkingAt?: string;
-  readonly view: ViewModel;
+  readonly messages: readonly UiMessage[];
+  readonly sessionId: string | null;
+  readonly prompts: readonly UiPromptSubmission[];
+  readonly activeRun: UiRun | undefined;
+  readonly isRunning: boolean;
+  readonly reasoningByMessageId: Readonly<Record<string, ReasoningViewState>>;
+  readonly commandNotices: ReactNode;
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const streamInnerRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const scheduledScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const anchorRef = useRef<{ top: number; height: number } | null>(null);
-  const messages = props.view.activeSession?.messages ?? [];
+  const messages = props.messages;
   const visibleMessages = filterTodoToolMessages(messages);
-  const terminalPrompts = (props.view.snapshot?.prompts ?? []).filter(
+  const terminalPrompts = props.prompts.filter(
     (prompt) =>
-      prompt.sessionId === props.view.activeSession?.id &&
+      prompt.sessionId === props.sessionId &&
       prompt.endedAt !== undefined &&
       Number.isFinite(Date.parse(prompt.createdAt)) &&
       Number.isFinite(Date.parse(prompt.endedAt)) &&
@@ -80,7 +88,7 @@ export function ConversationStream(props: {
     if (left.kind !== right.kind) return left.kind === "message" ? -1 : 1;
     return left.index - right.index;
   });
-  const activeSessionId = props.view.activeSession?.id ?? null;
+  const activeSessionId = props.sessionId ?? null;
   const lastMessage = visibleMessages.at(-1);
   const messagesSignature = [
     visibleMessages.length,
@@ -126,7 +134,7 @@ export function ConversationStream(props: {
     messagesSignature,
     props.promptRows.map((row) => `${row.id}:${row.label}`).join(","),
     props.startupThinkingAt,
-    props.view.composer.isRunning,
+    props.isRunning,
     scheduleStickScroll,
   ]);
 
@@ -216,7 +224,7 @@ export function ConversationStream(props: {
             <div key={`message:${item.message.id}`}>
               <MessageRow
                 message={item.message}
-                reasoning={props.view.reasoningByMessageId[item.message.id]}
+                reasoning={props.reasoningByMessageId[item.message.id]}
               />
               {(terminalAfter.get(item.message.id) ?? []).map((prompt) => (
                 <PromptDuration key={prompt.promptId} prompt={prompt} />
@@ -229,8 +237,8 @@ export function ConversationStream(props: {
         {unattached.map((prompt) => (
           <PromptDuration key={prompt.promptId} prompt={prompt} />
         ))}
-        <CommandNoticeList notices={props.view.commandNotices} />
-        <ModelWaiting view={props.view} />
+        {props.commandNotices}
+        <ModelWaiting run={props.activeRun} />
       </div>
     </section>
   );

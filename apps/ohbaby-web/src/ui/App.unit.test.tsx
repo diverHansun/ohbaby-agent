@@ -5655,3 +5655,294 @@ it.each(["succeeded", "failed", "cancelled", "interrupted"] as const)(
     );
   },
 );
+
+function snapshotForDraftScope(id: string): UiSnapshot {
+  const initial = snapshotWithStatus({ kind: "idle" });
+  return {
+    ...initial,
+    activeSessionId: id,
+    sessions: initial.sessions.map((session) => ({ ...session, id })),
+  };
+}
+
+describe("feature boundary late-result isolation", () => {
+  it("persists a successful slash clear instead of restoring the command after reload", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/status");
+    await waitFor(() => slashPaletteText(app.container).includes("/status"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.executeSlashCommand.mock.calls.length === 1);
+    expect(textareaValue(app.container)).toBe("");
+    expect(
+      JSON.parse(
+        sessionStorage.getItem("ohbaby:composer:/repo-a:session_1") ??
+          '{"text":""}',
+      ),
+    ).toMatchObject({ text: "" });
+  });
+  it("does not let a pending slash clear or disable a different session draft", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const pending = deferred<undefined>();
+    fake.executeSlashCommand.mockReturnValue(pending.promise);
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/status");
+    await waitFor(() => slashPaletteText(app.container).includes("/status"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.executeSlashCommand.mock.calls.length === 1);
+    act(() => {
+      fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
+    });
+    await setTextareaValue(app.container, "B draft");
+    const disabled = app.container.querySelector("textarea")?.disabled;
+    await act(async () => {
+      pending.resolve(undefined);
+      await pending.promise;
+    });
+    expect(disabled).toBe(false);
+    expect(textareaValue(app.container)).toBe("B draft");
+  });
+  it("does not replay a consumed skills insertion into another session or on return", async () => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const app = mountApp(fake.runtime);
+    await showSkillsModal(fake, ["review"]);
+    await pressWindowKey("Tab");
+    expect(textareaValue(app.container)).toBe("/review ");
+    await setTextareaValue(app.container, "A changed after insertion");
+    act(() => {
+      fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
+    });
+    expect(textareaValue(app.container)).toBe("");
+    await setTextareaValue(app.container, "B draft");
+    act(() => {
+      fake.store.replaceSnapshot(initial, 5);
+    });
+    expect(textareaValue(app.container)).toBe("A changed after insertion");
+  });
+  it("closes the old compact form when switching scope and ignores its late result", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["compact"]));
+    const pending =
+      deferred<Awaited<ReturnType<UiBackendClient["compactSession"]>>>();
+    fake.compactSession.mockReturnValue(pending.promise);
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/compact");
+    await waitFor(() => slashPaletteText(app.container).includes("/compact"));
+    await pressTextareaKey(app.container, "Enter");
+    await clickButton(app.container, "Compact session");
+    act(() => {
+      fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
+    });
+    await act(async () => {
+      pending.reject(new Error("A compact failed late"));
+      await pending.promise.catch(() => undefined);
+    });
+    expect(app.container.querySelector(".ohb-structured-overlay")).toBeNull();
+    expect(app.container.textContent).not.toContain("A compact failed late");
+  });
+  it("does not let old lease recovery failure clear the new scope's queued editor", async () => {
+    for (const id of ["session_1", "session_2"]) {
+      sessionStorage.setItem(
+        `ohbaby:composer-lease:/repo-a:${id}`,
+        JSON.stringify({
+          editLeaseId: `lease_${id}`,
+          editText: `editing ${id}`,
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          lastActivityAt: 1,
+          originalDraft: `draft ${id}`,
+          promptId: `prompt_${id}`,
+        }),
+      );
+    }
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const old = deferred<UiPromptEditLease>();
+    vi.spyOn(fake.client, "renewPromptEditLease").mockImplementation((input) =>
+      input.editLeaseId === "lease_session_1"
+        ? old.promise
+        : Promise.resolve({
+            ...input,
+            prompt: promptSubmission({ sessionId: "session_2" }),
+            ownerClientId: "web",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+          }),
+    );
+    const app = mountApp(fake.runtime);
+    act(() => {
+      fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
+    });
+    await act(async () => {
+      old.reject(new Error("old expired"));
+      await old.promise.catch(() => undefined);
+    });
+    expect(textareaValue(app.container)).toBe("editing session_2");
+    expect(app.container.querySelector(".ohb-queued-edit-hint")).not.toBeNull();
+    expect(app.container.textContent).not.toContain(
+      "Queued edit lease expired",
+    );
+  });
+});
+
+it("preserves an intentionally cleared new draft after a late admission rejection", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const pending =
+    deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+  fake.submitPromptAccepted.mockReturnValue(pending.promise);
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "old submission");
+  await pressTextareaKey(app.container, "Enter");
+  await setTextareaValue(app.container, "a newer edit");
+  await setTextareaValue(app.container, "");
+  await act(async () => {
+    pending.reject(new Error("old failure"));
+    await pending.promise.catch(() => undefined);
+  });
+  expect(textareaValue(app.container)).toBe("");
+});
+
+function storeEditLease(
+  sessionId: string,
+  editLeaseId: string,
+  text: string,
+): void {
+  sessionStorage.setItem(
+    `ohbaby:composer-lease:/repo-a:${sessionId}`,
+    JSON.stringify({
+      editLeaseId,
+      editText: text,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      lastActivityAt: 1,
+      originalDraft: "original draft",
+      promptId: "prompt_queued",
+    }),
+  );
+}
+
+describe("queued edit identity isolation", () => {
+  it("ignores an old A recovery failure after leaving and returning to A", async () => {
+    storeEditLease("session_1", "lease_A", "original edit");
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const old = deferred<UiPromptEditLease>();
+    vi.spyOn(fake.client, "renewPromptEditLease")
+      .mockImplementationOnce(() => old.promise)
+      .mockResolvedValue({
+        editLeaseId: "lease_new_A",
+        ownerClientId: "web",
+        prompt: promptSubmission(),
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      });
+    mountApp(fake.runtime);
+    act(() => {
+      fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
+    });
+    storeEditLease("session_1", "lease_new_A", "new A edit");
+    act(() => {
+      fake.store.replaceSnapshot(initial, 5);
+    });
+    await act(async () => {
+      old.reject(new Error("old A failure"));
+      await old.promise.catch(() => undefined);
+    });
+    expect(
+      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
+    ).toContain("lease_new_A");
+    expect(
+      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
+    ).toContain("new A edit");
+  });
+  it.each(["edit", "release"])(
+    "recovery success preserves a later %s of the same lease",
+    async (action) => {
+      storeEditLease("session_1", "lease_A", "original edit");
+      const fake = createFakeRuntime({
+        snapshot: snapshotWithStatus({ kind: "idle" }),
+      });
+      const pending = deferred<UiPromptEditLease>();
+      vi.spyOn(fake.client, "renewPromptEditLease").mockReturnValue(
+        pending.promise,
+      );
+      const app = mountApp(fake.runtime);
+      if (action === "edit") await setTextareaValue(app.container, "new edit");
+      else await pressTextareaKey(app.container, "Escape");
+      await act(async () => {
+        pending.resolve({
+          editLeaseId: "lease_A",
+          ownerClientId: "web",
+          prompt: promptSubmission(),
+          expiresAt: "2099-02-01T00:00:00.000Z",
+        });
+        await pending.promise;
+      });
+      const stored = sessionStorage.getItem(
+        "ohbaby:composer-lease:/repo-a:session_1",
+      );
+      if (action === "edit") expect(stored).toContain("new edit");
+      else expect(stored).toBeNull();
+    },
+  );
+  it("does not close Q2 when cancellation of the old Q1 editor completes", async () => {
+    const q1 = promptSubmission({
+      promptId: "q1",
+      text: "queued one",
+      status: "queued",
+    });
+    const q2 = promptSubmission({
+      promptId: "q2",
+      text: "queued two",
+      status: "queued",
+    });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+        prompts: [q1, q2],
+      },
+    });
+    vi.spyOn(fake.client, "acquirePromptEditLease").mockImplementation(
+      ({ promptId }) =>
+        Promise.resolve({
+          editLeaseId: `lease_${promptId}`,
+          ownerClientId: "web",
+          prompt: promptId === "q1" ? q1 : q2,
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        }),
+    );
+    const pending = deferred<UiPromptSubmission>();
+    vi.spyOn(fake.client, "cancelQueuedPrompt").mockReturnValue(
+      pending.promise,
+    );
+    const app = mountApp(fake.runtime);
+    const click = async (label: string): Promise<void> => {
+      const button = app.container.querySelector(`[aria-label="${label}"]`);
+      if (!(button instanceof HTMLButtonElement))
+        throw new Error(`missing ${label}`);
+      await act(async () => {
+        button.click();
+        await Promise.resolve();
+      });
+    };
+    await click("Edit queued prompt: queued one");
+    await click("Cancel queued prompt: queued one");
+    await pressTextareaKey(app.container, "Escape");
+    await click("Edit queued prompt: queued two");
+    await act(async () => {
+      pending.resolve({ ...q1, status: "cancelled" });
+      await pending.promise;
+    });
+    expect(textareaValue(app.container)).toBe("queued two");
+    expect(app.container.querySelector(".ohb-queued-edit-hint")).not.toBeNull();
+    expect(
+      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
+    ).toContain("lease_q2");
+  });
+});

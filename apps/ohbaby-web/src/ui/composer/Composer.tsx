@@ -1,12 +1,19 @@
-import { Hand, LoaderCircle, Send, ShieldAlert, Square, X } from "lucide-react";
+import { LoaderCircle, Send, Square, X } from "lucide-react";
 import type {
   UiBackendClient,
   UiPermissionLevel,
   UiPermissionMode,
+  UiPromptSubmission,
   UiReasoningConfig,
+  UiSession,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
-import type { ChangeEvent, KeyboardEvent, ReactElement } from "react";
+import type {
+  ChangeEvent,
+  KeyboardEvent,
+  ReactElement,
+  ReactNode,
+} from "react";
 import {
   useCallback,
   useEffect,
@@ -23,9 +30,7 @@ import {
 } from "../commands/slashCommands.js";
 import { SlashPalette } from "../commands/SlashPalette.js";
 import { type StructuredCommandRequest } from "../commands/StructuredCommandOverlay.js";
-import { TodoDock } from "../conversation/TodoDock.js";
-import { FullAccessConfirmDialog } from "../permissions/PermissionPolicyControl.js";
-import { type ViewModel } from "../session/selectors.js";
+
 import { fitComposerTextarea } from "./composerTextarea.js";
 import {
   composerDraftKey,
@@ -44,13 +49,37 @@ import {
   TypewriterPlaceholder,
 } from "./TypewriterPlaceholder.js";
 
+export interface ComposerModel {
+  readonly activeRunId?: string;
+  readonly activeRunStartedAt?: string;
+  readonly activeSessionId?: string;
+  readonly canSend: boolean;
+  readonly canStop: boolean;
+  readonly disabled: boolean;
+  readonly isRunning: boolean;
+  readonly mode: UiPermissionMode;
+  readonly permissionLevel: UiPermissionLevel;
+}
+
 export interface ComposerPrefill {
+  readonly scopeKey: string;
+  readonly editRevision: number;
   readonly nonce: number;
   readonly text: string;
 }
 
 export function Composer(props: {
-  readonly client: UiBackendClient;
+  readonly client: Pick<
+    UiBackendClient,
+    | "acquirePromptEditLease"
+    | "renewPromptEditLease"
+    | "releasePromptEditLease"
+    | "editQueuedPrompt"
+    | "cancelQueuedPrompt"
+    | "getCurrentModel"
+    | "subscribeEvents"
+    | "updateSessionReasoning"
+  >;
   readonly compact?: boolean;
   readonly draftScopeKey: string;
   readonly isPromptAdmitting: boolean;
@@ -68,12 +97,19 @@ export function Composer(props: {
     reasoning?: UiReasoningConfig,
   ) => Promise<boolean>;
   readonly prefill?: ComposerPrefill | null;
-  readonly view: ViewModel;
+  readonly onEditRevision: (revision: number) => void;
+  readonly model: ComposerModel;
+  readonly activeSession: UiSession | null;
+  readonly queuedPrompts: readonly UiPromptSubmission[];
+  readonly commandCatalogVersion: string | null;
+  readonly connectionKind: string;
+  readonly topContent: ReactNode;
+  readonly permissionControl: ReactNode;
 }): ReactElement {
   const selectedReasoning = useRef<UiReasoningConfig | undefined>(undefined);
   useEffect(() => {
     selectedReasoning.current = undefined;
-  }, [props.view.activeSession?.id, props.client]);
+  }, [props.activeSession?.id, props.client]);
   const [draft, setDraft] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
@@ -84,7 +120,6 @@ export function Composer(props: {
   const [queueExpanded, setQueueExpanded] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
-  const [fullAccessConfirmOpen, setFullAccessConfirmOpen] = useState(false);
   const [slashCatalog, setSlashCatalog] = useState<UiWebCommandCatalog | null>(
     null,
   );
@@ -95,31 +130,47 @@ export function Composer(props: {
   const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerInputRef = useRef<HTMLDivElement | null>(null);
-  const permissionButtonRef = useRef<HTMLButtonElement | null>(null);
-  const returnPermissionFocusRef = useRef(false);
   const draftRef = useRef("");
+  const queuedEditRef = useRef(queuedEdit);
+  useLayoutEffect(() => {
+    draftRef.current = draft;
+    queuedEditRef.current = queuedEdit;
+  }, [draft, queuedEdit]);
   const draftScopeGeneration = useRef(0);
+  const editRevision = useRef(0);
+  const consumedPrefillNonce = useRef(0);
+  const advanceEditRevision = useCallback((): void => {
+    editRevision.current += 1;
+    props.onEditRevision(editRevision.current);
+  }, [props.onEditRevision]);
+  useLayoutEffect(
+    () => (): void => {
+      draftScopeGeneration.current += 1;
+      queueAcquireGenerationRef.current += 1;
+    },
+    [],
+  );
   const lastEscapeAt = useRef(0);
   const lastLeaseRenewalAt = useRef(0);
   const leaseRenewalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queueAcquirePendingRef = useRef(false);
   const queueAcquireGenerationRef = useRef(0);
   const canSend =
-    props.view.composer.canSend &&
+    props.model.canSend &&
     draft.trim().length > 0 &&
     !isSubmitting &&
     !props.isPromptAdmitting;
   const showStop =
     props.stopLabel !== undefined ||
     (!queuedEdit &&
-      ((props.view.composer.isRunning && draft.trim().length === 0) ||
-        (props.view.composer.canStop &&
-          (!props.view.composer.canSend || draft.trim().length === 0))));
+      ((props.model.isRunning && draft.trim().length === 0) ||
+        (props.model.canStop &&
+          (!props.model.canSend || draft.trim().length === 0))));
   const canUseSlash =
-    props.view.composer.canSend && !isSubmitting && !props.isPromptAdmitting;
+    props.model.canSend && !isSubmitting && !props.isPromptAdmitting;
   const visibleQueuedPrompts = queueExpanded
-    ? props.view.queuedPrompts
-    : props.view.queuedPrompts.slice(0, 5);
+    ? props.queuedPrompts
+    : props.queuedPrompts.slice(0, 5);
   const slashItems = useMemo(
     () =>
       canUseSlash && slashCatalog && draft.startsWith("/")
@@ -134,16 +185,19 @@ export function Composer(props: {
     slashDismissedDraft !== draft &&
     slashItems.length > 0 &&
     canUseSlash &&
-    !props.view.composer.disabled;
+    !props.model.disabled;
   const showTypewriterPlaceholder =
     !isFocused &&
     draft.length === 0 &&
     !isSubmitting &&
-    !props.view.composer.disabled &&
-    !props.view.composer.isRunning;
+    !props.model.disabled &&
+    !props.model.isRunning;
 
   useLayoutEffect(() => {
     draftScopeGeneration.current += 1;
+    const generation = draftScopeGeneration.current;
+    advanceEditRevision();
+    setIsSubmitting(false);
     const stored = readSessionValue(
       composerDraftKey(props.draftScopeKey),
     ) as StoredComposerDraft | null;
@@ -174,23 +228,39 @@ export function Composer(props: {
         promptId: storedLease.promptId,
       })
       .then((lease) => {
+        const current = queuedEditRef.current;
+        if (
+          generation !== draftScopeGeneration.current ||
+          current?.editLeaseId !== storedLease.editLeaseId
+        )
+          return;
         lastLeaseRenewalAt.current = Date.now();
+        const storedNow = readSessionValue(
+          composerLeaseKey(props.draftScopeKey),
+        ) as StoredQueuedEdit | null;
         writeSessionValue(composerLeaseKey(props.draftScopeKey), {
-          ...storedLease,
+          ...current,
+          editText: draftRef.current,
           expiresAt: lease.expiresAt,
-        });
+          lastActivityAt: storedNow?.lastActivityAt ?? Date.now(),
+        } satisfies StoredQueuedEdit);
       })
       .catch(() => {
-        setQueuedEdit(null);
+        if (
+          generation !== draftScopeGeneration.current ||
+          queuedEditRef.current?.editLeaseId !== storedLease.editLeaseId
+        )
+          return;
         removeSessionValue(composerLeaseKey(props.draftScopeKey));
         writeSessionValue(composerDraftKey(props.draftScopeKey), {
-          text: storedLease.editText,
+          text: draftRef.current,
         } satisfies StoredComposerDraft);
+        setQueuedEdit(null);
         setQueueError(
           "Queued edit lease expired. Your text is preserved and can be sent as a new prompt.",
         );
       });
-  }, [props.client, props.draftScopeKey]);
+  }, [props.client, props.draftScopeKey, advanceEditRevision]);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -198,7 +268,7 @@ export function Composer(props: {
       return;
     }
     fitComposerTextarea(textarea, { lineHeight: 22, maxLines: 7 });
-  }, [draft, props.view.composer.disabled, slashOpen]);
+  }, [draft, props.model.disabled, slashOpen]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -224,25 +294,7 @@ export function Composer(props: {
   }, []);
 
   useEffect(() => {
-    if (!props.prefill) {
-      return;
-    }
-    setDraft(props.prefill.text);
-    writeSessionValue(composerDraftKey(props.draftScopeKey), {
-      text: props.prefill.text,
-    } satisfies StoredComposerDraft);
-    setSlashDismissedDraft(null);
-    setSlashError(null);
-    setSlashIndex(0);
-    textareaRef.current?.focus();
-  }, [props.draftScopeKey, props.prefill]);
-
-  useEffect(() => {
-    if (
-      !draft.startsWith("/") ||
-      !canUseSlash ||
-      props.view.composer.disabled
-    ) {
+    if (!draft.startsWith("/") || !canUseSlash || props.model.disabled) {
       return;
     }
     let cancelled = false;
@@ -269,8 +321,8 @@ export function Composer(props: {
     canUseSlash,
     draft,
     props.onListCommands,
-    props.view.commandCatalogVersion,
-    props.view.composer.disabled,
+    props.commandCatalogVersion,
+    props.model.disabled,
   ]);
 
   const persistDraft = useCallback(
@@ -286,6 +338,7 @@ export function Composer(props: {
 
   const updateDraft = useCallback(
     (nextDraft: string): void => {
+      advanceEditRevision();
       draftRef.current = nextDraft;
       setDraft(nextDraft);
       const keepPending =
@@ -309,6 +362,7 @@ export function Composer(props: {
       }
     },
     [
+      advanceEditRevision,
       pendingRequestId,
       pendingText,
       persistDraft,
@@ -318,7 +372,25 @@ export function Composer(props: {
   );
 
   useEffect(() => {
+    const prefill = props.prefill;
+    if (!prefill || prefill.nonce <= consumedPrefillNonce.current) return;
+    consumedPrefillNonce.current = prefill.nonce;
+    if (
+      prefill.scopeKey !== props.draftScopeKey ||
+      prefill.editRevision !== editRevision.current
+    )
+      return;
+    updateDraft(prefill.text);
+    setSlashDismissedDraft(null);
+    setSlashError(null);
+    setSlashIndex(0);
+    textareaRef.current?.focus();
+  }, [props.draftScopeKey, props.prefill, updateDraft]);
+
+  useEffect(() => {
     if (!queuedEdit || leaseActivityVersion === 0) return;
+    const generation = draftScopeGeneration.current;
+    let cancelled = false;
     if (leaseRenewalTimer.current !== null) {
       globalThis.clearTimeout(leaseRenewalTimer.current);
     }
@@ -334,6 +406,7 @@ export function Composer(props: {
           promptId: queuedEdit.promptId,
         })
         .then((lease) => {
+          if (cancelled || generation !== draftScopeGeneration.current) return;
           lastLeaseRenewalAt.current = Date.now();
           writeSessionValue(composerLeaseKey(props.draftScopeKey), {
             ...queuedEdit,
@@ -343,6 +416,7 @@ export function Composer(props: {
           } satisfies StoredQueuedEdit);
         })
         .catch(() => {
+          if (cancelled || generation !== draftScopeGeneration.current) return;
           setQueuedEdit(null);
           removeSessionValue(composerLeaseKey(props.draftScopeKey));
           persistDraft(draft);
@@ -352,6 +426,7 @@ export function Composer(props: {
         });
     }, delay);
     return (): void => {
+      cancelled = true;
       if (leaseRenewalTimer.current !== null) {
         globalThis.clearTimeout(leaseRenewalTimer.current);
         leaseRenewalTimer.current = null;
@@ -367,7 +442,7 @@ export function Composer(props: {
   ]);
 
   const beginQueuedEdit = useCallback(
-    (prompt: ViewModel["queuedPrompts"][number]): void => {
+    (prompt: UiPromptSubmission): void => {
       if (queuedEdit || queueAcquirePendingRef.current) {
         setQueueError("Finish or cancel the current queued edit first.");
         return;
@@ -440,6 +515,7 @@ export function Composer(props: {
 
   const finishQueuedEdit = useCallback((): void => {
     if (!queuedEdit || !draft.trim()) return;
+    const generation = draftScopeGeneration.current;
     setIsSubmitting(true);
     void props.client
       .editQueuedPrompt({
@@ -448,6 +524,11 @@ export function Composer(props: {
         text: draft.trim(),
       })
       .then(() => {
+        if (
+          generation !== draftScopeGeneration.current ||
+          queuedEditRef.current?.editLeaseId !== queuedEdit.editLeaseId
+        )
+          return;
         const restored = queuedEdit.originalDraft;
         setQueuedEdit(null);
         setDraft(restored);
@@ -461,10 +542,15 @@ export function Composer(props: {
         removeSessionValue(composerLeaseKey(props.draftScopeKey));
       })
       .catch((error: unknown) => {
+        if (
+          generation !== draftScopeGeneration.current ||
+          queuedEditRef.current?.editLeaseId !== queuedEdit.editLeaseId
+        )
+          return;
         setQueueError(error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
-        setIsSubmitting(false);
+        if (generation === draftScopeGeneration.current) setIsSubmitting(false);
       });
   }, [draft, persistDraft, props.client, props.draftScopeKey, queuedEdit]);
 
@@ -491,6 +577,7 @@ export function Composer(props: {
 
   const cancelQueuedPrompt = useCallback(
     (promptId: string): void => {
+      const generation = draftScopeGeneration.current;
       const editLeaseId =
         queuedEdit?.promptId === promptId ? queuedEdit.editLeaseId : undefined;
       void props.client
@@ -499,7 +586,11 @@ export function Composer(props: {
           promptId,
         })
         .then(() => {
-          if (queuedEdit?.promptId === promptId) {
+          if (generation !== draftScopeGeneration.current) return;
+          if (
+            queuedEdit?.promptId === promptId &&
+            queuedEditRef.current?.editLeaseId === editLeaseId
+          ) {
             setQueuedEdit(null);
             setDraft(queuedEdit.originalDraft);
             setPendingRequestId(queuedEdit.originalPendingRequestId ?? null);
@@ -513,6 +604,7 @@ export function Composer(props: {
           }
         })
         .catch((error: unknown) => {
+          if (generation !== draftScopeGeneration.current) return;
           setQueueError(error instanceof Error ? error.message : String(error));
         });
     },
@@ -529,6 +621,7 @@ export function Composer(props: {
       return;
     }
     const generation = draftScopeGeneration.current;
+    const revision = editRevision.current;
     const clientRequestId = pendingRequestId ?? globalThis.crypto.randomUUID();
     setPendingRequestId(clientRequestId);
     setPendingText(text);
@@ -561,7 +654,9 @@ export function Composer(props: {
           return;
         }
         const restored =
-          draftRef.current.length === 0 ? text : draftRef.current;
+          editRevision.current === revision && draftRef.current.length === 0
+            ? text
+            : draftRef.current;
         draftRef.current = restored;
         setDraft(restored);
         persistDraft(restored);
@@ -578,35 +673,9 @@ export function Composer(props: {
   ]);
 
   const cycleMode = useCallback(() => {
-    const mode = props.view.composer.mode === "auto" ? "plan" : "auto";
+    const mode = props.model.mode === "auto" ? "plan" : "auto";
     props.onSetPermission({ mode });
-  }, [props.onSetPermission, props.view.composer.mode]);
-
-  const cyclePermissionLevel = useCallback(() => {
-    if (props.view.composer.permissionLevel === "default") {
-      setFullAccessConfirmOpen(true);
-      return;
-    }
-    props.onSetPermission({ level: "default" });
-  }, [props.onSetPermission, props.view.composer.permissionLevel]);
-
-  const dismissFullAccessConfirm = useCallback((): void => {
-    returnPermissionFocusRef.current = true;
-    setFullAccessConfirmOpen(false);
-  }, []);
-
-  const confirmFullAccess = useCallback((): void => {
-    returnPermissionFocusRef.current = true;
-    setFullAccessConfirmOpen(false);
-    props.onSetPermission({ level: "full-access" });
-  }, [props.onSetPermission]);
-
-  useLayoutEffect(() => {
-    if (!fullAccessConfirmOpen && returnPermissionFocusRef.current) {
-      returnPermissionFocusRef.current = false;
-      permissionButtonRef.current?.focus();
-    }
-  }, [fullAccessConfirmOpen]);
+  }, [props.onSetPermission, props.model.mode]);
 
   const runSlashCommand = useCallback(
     (item: SlashPaletteItem | undefined) => {
@@ -619,25 +688,38 @@ export function Composer(props: {
       }
       if (item?.executionKind === "overlay") {
         props.onStructuredCommand({ item, text: draft.trim() || item.label });
-        setDraft("");
+        updateDraft("");
         setSlashDismissedDraft(null);
         setSlashError(null);
         return;
       }
+      const generation = draftScopeGeneration.current;
+      const revision = editRevision.current;
       setIsSubmitting(true);
       void props
         .onSubmit(commandText)
         .then((sent) => {
-          if (sent) {
-            setDraft("");
+          if (
+            sent &&
+            generation === draftScopeGeneration.current &&
+            revision === editRevision.current
+          ) {
+            updateDraft("");
             setSlashDismissedDraft(null);
           }
         })
         .finally(() => {
-          setIsSubmitting(false);
+          if (generation === draftScopeGeneration.current)
+            setIsSubmitting(false);
         });
     },
-    [canUseSlash, draft, props.onStructuredCommand, props.onSubmit],
+    [
+      canUseSlash,
+      draft,
+      props.onStructuredCommand,
+      props.onSubmit,
+      updateDraft,
+    ],
   );
 
   const onKeyDown = useCallback(
@@ -700,7 +782,7 @@ export function Composer(props: {
         cycleMode();
         return;
       }
-      if (event.key === "Escape" && props.view.composer.canStop) {
+      if (event.key === "Escape" && props.model.canStop) {
         const now = Date.now();
         if (now - lastEscapeAt.current < 650) {
           props.onStop();
@@ -712,10 +794,9 @@ export function Composer(props: {
     },
     [
       cycleMode,
-      cyclePermissionLevel,
       draft,
       props.onStop,
-      props.view.composer.canStop,
+      props.model.canStop,
       queuedEdit,
       releaseQueuedEdit,
       runSlashCommand,
@@ -732,15 +813,12 @@ export function Composer(props: {
         props.compact ? "ohb-composer ohb-composer-hero" : "ohb-composer"
       }
     >
-      <TodoDock
-        key={props.view.activeTodoList?.sessionId ?? "hidden"}
-        todoList={props.view.activeTodoList}
-      />
-      {props.view.queuedPrompts.length > 0 ? (
+      {props.topContent}
+      {props.queuedPrompts.length > 0 ? (
         <section className="ohb-prompt-queue" aria-label="Queued prompts">
           <div className="ohb-prompt-queue-header">
-            <span>Queued {String(props.view.queuedPrompts.length)}</span>
-            {props.view.queuedPrompts.length > 5 ? (
+            <span>Queued {String(props.queuedPrompts.length)}</span>
+            {props.queuedPrompts.length > 5 ? (
               <button
                 onClick={() => {
                   setQueueExpanded((expanded) => !expanded);
@@ -796,7 +874,7 @@ export function Composer(props: {
         </section>
       ) : null}
       <div
-        className={`ohb-composer-input${props.view.composer.mode === "plan" ? " is-plan" : ""}`}
+        className={`ohb-composer-input${props.model.mode === "plan" ? " is-plan" : ""}`}
         ref={composerInputRef}
       >
         {slashOpen ? (
@@ -816,8 +894,8 @@ export function Composer(props: {
             phrases={COMPOSER_PLACEHOLDER_PHRASES}
           />
           <textarea
-            aria-label={`Message, ${props.view.composer.mode} mode, ${props.view.composer.permissionLevel} permission`}
-            disabled={props.view.composer.disabled || isSubmitting}
+            aria-label={`Message, ${props.model.mode} mode, ${props.model.permissionLevel} permission`}
+            disabled={props.model.disabled || isSubmitting}
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
               const nextDraft = event.target.value;
               updateDraft(nextDraft);
@@ -833,7 +911,10 @@ export function Composer(props: {
               setIsFocused(true);
             }}
             onKeyDown={onKeyDown}
-            placeholder={composerPlaceholder(props.view)}
+            placeholder={composerPlaceholder(
+              props.connectionKind,
+              props.model.isRunning,
+            )}
             ref={textareaRef}
             rows={1}
             value={draft}
@@ -860,33 +941,11 @@ export function Composer(props: {
           </div>
         ) : null}
         <div className="ohb-composer-bar">
-          <button
-            aria-label={
-              props.view.composer.permissionLevel === "default"
-                ? "Permission policy: default. Ask before protected actions. Click to enable full-access without approval prompts."
-                : "Permission policy: full-access. Run without approval prompts. Click to return to default."
-            }
-            className={`ohb-permission-toggle ohb-permission-${props.view.composer.permissionLevel}`}
-            disabled={props.view.composer.disabled}
-            onClick={cyclePermissionLevel}
-            ref={permissionButtonRef}
-            title={
-              props.view.composer.permissionLevel === "default"
-                ? "Default: ask before protected actions. Click for full-access."
-                : "Full-access: run without approval prompts. Click for default."
-            }
-            type="button"
-          >
-            {props.view.composer.permissionLevel === "default" ? (
-              <Hand aria-hidden="true" size={17} />
-            ) : (
-              <ShieldAlert aria-hidden="true" size={17} />
-            )}
-          </button>
+          {props.permissionControl}
           <div className="ohb-composer-bar-spacer" />
           <ReasoningControl
             client={props.client}
-            session={props.view.activeSession}
+            session={props.activeSession}
             onChange={(reasoning) => {
               selectedReasoning.current = reasoning;
             }}
@@ -896,9 +955,7 @@ export function Composer(props: {
               aria-busy={props.stopLabel !== undefined}
               aria-label={props.stopLabel ?? "Stop run"}
               className="ohb-stop-button"
-              disabled={
-                props.stopLabel !== undefined || !props.view.composer.canStop
-              }
+              disabled={props.stopLabel !== undefined || !props.model.canStop}
               onClick={props.onStop}
               title={props.stopLabel ?? "Stop run"}
               type="button"
@@ -936,25 +993,22 @@ export function Composer(props: {
           )}
         </div>
       </div>
-      {fullAccessConfirmOpen ? (
-        <FullAccessConfirmDialog
-          onConfirm={confirmFullAccess}
-          onDismiss={dismissFullAccessConfirm}
-        />
-      ) : null}
     </section>
   );
 }
 
-function composerPlaceholder(view: ViewModel): string {
+function composerPlaceholder(
+  connectionKind: string,
+  isRunning: boolean,
+): string {
   if (
     ["connecting", "reconnecting", "resyncing", "disconnected"].includes(
-      view.header.connectionKind,
+      connectionKind,
     )
   ) {
     return "Draft while reconnecting…";
   }
-  if (view.composer.isRunning) {
+  if (isRunning) {
     return "run in progress";
   }
   return "";

@@ -4,6 +4,8 @@ import type {
   UiConnectModelResult,
   UiCurrentModelConfig,
   UiProbeModelContextWindowResult,
+  UiSetSearchApiKeyInput,
+  UiSetSearchApiKeyResult,
 } from "ohbaby-sdk";
 import {
   connectUrlPathWarning,
@@ -11,8 +13,8 @@ import {
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatTokenCount } from "./GoalControl.js";
 import {
+  formatTokenCount,
   OverlayResult,
   type OverlayStatus,
   OverlayStatusLine,
@@ -32,7 +34,10 @@ interface ConnectModelFormState {
 }
 
 export function ConnectModelOverlayBody(props: {
-  readonly client: UiBackendClient;
+  readonly client: Pick<
+    UiBackendClient,
+    "getCurrentModel" | "probeModelContextWindow" | "connectModel"
+  >;
 }): ReactElement {
   const [form, setForm] = useState<ConnectModelFormState>({
     apiKey: "",
@@ -391,11 +396,8 @@ function optionalIntegerValue(
   return parsed;
 }
 
-import type { UiSetSearchApiKeyResult } from "ohbaby-sdk";
-import type { SearchApiKeyRequest } from "../../api/daemon/wire.js";
-
 export function ConnectSearchOverlayBody(props: {
-  readonly client: UiBackendClient;
+  readonly client: Pick<UiBackendClient, "setSearchApiKey">;
 }): ReactElement {
   const [apiKeyEnv, setApiKeyEnv] = useState("TAVILY_API_KEY");
   const [apiKey, setApiKey] = useState("");
@@ -409,7 +411,7 @@ export function ConnectSearchOverlayBody(props: {
     void runOverlayAction(
       setStatus,
       async () => {
-        const input: SearchApiKeyRequest = {
+        const input: UiSetSearchApiKeyInput = {
           apiKeyEnv: trimmedOrUndefined(apiKeyEnv),
           apiKey: trimmedOrUndefined(apiKey),
           provider: "tavily",

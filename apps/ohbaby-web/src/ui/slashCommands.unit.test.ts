@@ -10,8 +10,9 @@ import {
   statusContextWindowUsage,
   statusPromptCacheUsage,
   statusRows,
+  type CommandStatusHeader,
+  type CommandStatusContext,
 } from "./commands/slashCommands.js";
-import type { HeaderModel, ViewModel } from "./session/selectors.js";
 
 function commandCatalog(): UiWebCommandCatalog {
   return {
@@ -101,41 +102,22 @@ function commandCatalog(): UiWebCommandCatalog {
 }
 
 function statusModels(): {
-  readonly header: HeaderModel;
-  readonly view: ViewModel;
+  readonly header: CommandStatusHeader;
+  readonly view: CommandStatusContext;
 } {
-  const header: HeaderModel = {
-    connectionKind: "idle",
-    contextLabel: "38k / 100k",
-    contextRatio: 0.38,
-    contextWindowUsage: null,
-    modelLabel: "model-a",
-    statusLabel: "Idle",
-  };
   return {
-    header,
+    header: {
+      connectionKind: "idle",
+      contextLabel: "38k / 100k",
+      contextWindowUsage: null,
+      modelLabel: "model-a",
+    },
     view: {
-      activeGoal: null,
       activeSession: null,
-      sessionIndex: [],
-      activeTodoList: null,
-      commandCatalogVersion: null,
-      commandNotices: [],
       composer: {
-        canSend: true,
-        canStop: false,
-        disabled: false,
-        isRunning: false,
         mode: "auto",
         permissionLevel: "default",
       },
-      error: null,
-      header,
-      isEmpty: true,
-      pendingPermissions: [],
-      queuedPrompts: [],
-      reasoningByMessageId: {},
-      snapshot: null,
     },
   };
 }

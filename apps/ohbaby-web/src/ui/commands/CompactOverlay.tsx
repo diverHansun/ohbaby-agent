@@ -5,9 +5,8 @@ import type {
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { type ViewModel } from "../session/selectors.js";
-import { formatTokenCount } from "./GoalControl.js";
 import {
+  formatTokenCount,
   OverlayResult,
   type OverlayStatus,
   OverlayStatusLine,
@@ -15,11 +14,13 @@ import {
 } from "./overlay-controls.js";
 
 export function CompactOverlayBody(props: {
-  readonly client: UiBackendClient;
-  readonly view: ViewModel;
+  readonly client: Pick<
+    UiBackendClient,
+    "getContextWindowUsage" | "compactSession"
+  >;
+  readonly sessionId: string | undefined;
 }): ReactElement {
-  const sessionId =
-    props.view.composer.activeSessionId ?? props.view.activeSession?.id;
+  const { sessionId } = props;
   const [force, setForce] = useState(true);
   const [usage, setUsage] = useState<UiContextWindowUsage | null>(null);
   const [result, setResult] = useState<UiCompactSessionResult | null>(null);

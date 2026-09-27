@@ -1,9 +1,10 @@
-import { ShieldAlert } from "lucide-react";
+import { Hand, ShieldAlert } from "lucide-react";
+import type { UiPermissionLevel } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useLayoutEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-export function FullAccessConfirmDialog(props: {
+function FullAccessConfirmDialog(props: {
   readonly onConfirm: () => void;
   readonly onDismiss: () => void;
 }): ReactElement {
@@ -97,5 +98,76 @@ export function FullAccessConfirmDialog(props: {
       </section>
     </div>,
     document.body,
+  );
+}
+
+export function PermissionPolicyControl(props: {
+  readonly level: UiPermissionLevel;
+  readonly disabled: boolean;
+  readonly onSetPermission: (input: {
+    readonly level: UiPermissionLevel;
+  }) => void;
+}): ReactElement {
+  const [fullAccessConfirmOpen, setFullAccessConfirmOpen] = useState(false);
+  const permissionButtonRef = useRef<HTMLButtonElement | null>(null);
+  const returnPermissionFocusRef = useRef(false);
+  const cyclePermissionLevel = useCallback(() => {
+    if (props.level === "default") {
+      setFullAccessConfirmOpen(true);
+      return;
+    }
+    props.onSetPermission({ level: "default" });
+  }, [props.onSetPermission, props.level]);
+
+  const dismissFullAccessConfirm = useCallback((): void => {
+    returnPermissionFocusRef.current = true;
+    setFullAccessConfirmOpen(false);
+  }, []);
+
+  const confirmFullAccess = useCallback((): void => {
+    returnPermissionFocusRef.current = true;
+    setFullAccessConfirmOpen(false);
+    props.onSetPermission({ level: "full-access" });
+  }, [props.onSetPermission]);
+
+  useLayoutEffect(() => {
+    if (!fullAccessConfirmOpen && returnPermissionFocusRef.current) {
+      returnPermissionFocusRef.current = false;
+      permissionButtonRef.current?.focus();
+    }
+  }, [fullAccessConfirmOpen]);
+
+  return (
+    <>
+      <button
+        aria-label={
+          props.level === "default"
+            ? "Permission policy: default. Ask before protected actions. Click to enable full-access without approval prompts."
+            : "Permission policy: full-access. Run without approval prompts. Click to return to default."
+        }
+        className={`ohb-permission-toggle ohb-permission-${props.level}`}
+        disabled={props.disabled}
+        onClick={cyclePermissionLevel}
+        ref={permissionButtonRef}
+        title={
+          props.level === "default"
+            ? "Default: ask before protected actions. Click for full-access."
+            : "Full-access: run without approval prompts. Click for default."
+        }
+        type="button"
+      >
+        {props.level === "default" ? (
+          <Hand aria-hidden="true" size={17} />
+        ) : (
+          <ShieldAlert aria-hidden="true" size={17} />
+        )}
+      </button>
+      {fullAccessConfirmOpen ? (
+        <FullAccessConfirmDialog
+          onConfirm={confirmFullAccess}
+          onDismiss={dismissFullAccessConfirm}
+        />
+      ) : null}
+    </>
   );
 }

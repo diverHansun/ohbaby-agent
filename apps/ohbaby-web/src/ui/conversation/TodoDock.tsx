@@ -1,11 +1,10 @@
 import { ChevronDown } from "lucide-react";
-import type { UiTodoStatus } from "ohbaby-sdk";
+import type { UiSessionTodoList, UiTodoStatus } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useState } from "react";
-import { type ViewModel } from "../session/selectors.js";
 
 export function TodoDock(props: {
-  readonly todoList: ViewModel["activeTodoList"];
+  readonly todoList: UiSessionTodoList | null;
 }): ReactElement | null {
   const [expanded, setExpanded] = useState(true);
 
@@ -76,7 +75,7 @@ export function TodoDock(props: {
 }
 
 function TodoDockItem(props: {
-  readonly todo: NonNullable<ViewModel["activeTodoList"]>["todos"][number];
+  readonly todo: NonNullable<UiSessionTodoList | null>["todos"][number];
 }): ReactElement {
   return (
     <div
@@ -93,8 +92,8 @@ function TodoDockItem(props: {
 }
 
 function selectTodoDockPreview(
-  todos: NonNullable<ViewModel["activeTodoList"]>["todos"],
-): NonNullable<ViewModel["activeTodoList"]>["todos"][number] | undefined {
+  todos: NonNullable<UiSessionTodoList | null>["todos"],
+): NonNullable<UiSessionTodoList | null>["todos"][number] | undefined {
   return (
     todos.find((todo) => todo.status === "in_progress") ??
     todos.find((todo) => todo.status === "pending") ??

@@ -1,13 +1,18 @@
+import type { UiGoal } from "ohbaby-sdk";
 import type { ChangeEvent, ReactElement } from "react";
 import { useCallback, useEffect, useState } from "react";
-import type { OhbabyWebRuntime } from "../../runtime.js";
-import { type ViewModel } from "../session/selectors.js";
 import {
   OverlayResult,
   type OverlayStatus,
   OverlayStatusLine,
   runOverlayAction,
 } from "./overlay-controls.js";
+
+export type ExecuteGoalCommand = (input: {
+  readonly allowOverlay: true;
+  readonly sessionId: string;
+  readonly text: string;
+}) => Promise<void>;
 
 type GoalPanelAction = "delete" | "pause" | "resume" | "save" | "view";
 
@@ -19,7 +24,7 @@ export interface GoalPanelIntent {
 export const DEFAULT_GOAL_PANEL_INTENT: GoalPanelIntent = { action: "view" };
 
 export function GoalStatusChip(props: {
-  readonly goal: ViewModel["activeGoal"];
+  readonly goal: UiGoal | null;
   readonly onOpen: (intent?: GoalPanelIntent) => void;
 }): ReactElement | null {
   if (!props.goal) {
@@ -42,12 +47,11 @@ export function GoalStatusChip(props: {
 
 export function GoalOverlayBody(props: {
   readonly intent: GoalPanelIntent;
-  readonly onExecuteSlashCommand: OhbabyWebRuntime["executeSlashCommand"];
-  readonly view: ViewModel;
+  readonly onExecuteSlashCommand: ExecuteGoalCommand;
+  readonly sessionId: string | undefined;
+  readonly activeGoal: UiGoal | null;
 }): ReactElement {
-  const sessionId =
-    props.view.composer.activeSessionId ?? props.view.activeSession?.id;
-  const activeGoal = props.view.activeGoal;
+  const { sessionId, activeGoal } = props;
   const [objective, setObjective] = useState(
     props.intent.objectiveDraft ?? activeGoal?.objective ?? "",
   );
@@ -233,8 +237,4 @@ function goalActionButtonClass(
   return intent.action === action
     ? `${baseClass} ohb-goal-action-highlight`
     : baseClass;
-}
-
-export function formatTokenCount(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
 }

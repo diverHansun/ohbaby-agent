@@ -35,17 +35,7 @@ export interface HeaderModel {
   readonly modelLabel: string;
 }
 
-export interface ComposerModel {
-  readonly activeRunId?: string;
-  readonly activeRunStartedAt?: string;
-  readonly activeSessionId?: string;
-  readonly canSend: boolean;
-  readonly canStop: boolean;
-  readonly disabled: boolean;
-  readonly isRunning: boolean;
-  readonly mode: UiPermissionMode;
-  readonly permissionLevel: UiPermissionLevel;
-}
+import type { ComposerModel } from "../composer/Composer.js";
 
 export interface ViewModel {
   readonly activeGoal: UiGoal | null;

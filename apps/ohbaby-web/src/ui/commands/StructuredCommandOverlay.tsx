@@ -1,9 +1,7 @@
 import { X } from "lucide-react";
-import type { UiBackendClient } from "ohbaby-sdk";
+import type { UiBackendClient, UiGoal } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useEffect, useRef } from "react";
-import type { OhbabyWebRuntime } from "../../runtime.js";
-import { type ViewModel } from "../session/selectors.js";
 import { CompactOverlayBody } from "./CompactOverlay.js";
 import {
   ConnectModelOverlayBody,
@@ -13,6 +11,7 @@ import {
   DEFAULT_GOAL_PANEL_INTENT,
   GoalOverlayBody,
   type GoalPanelIntent,
+  type ExecuteGoalCommand,
 } from "./GoalControl.js";
 import { type SlashPaletteItem } from "./slashCommands.js";
 
@@ -30,11 +29,20 @@ export interface StructuredOverlayState {
 }
 
 export function StructuredCommandOverlay(props: {
-  readonly client: UiBackendClient;
+  readonly client: Pick<
+    UiBackendClient,
+    | "getCurrentModel"
+    | "probeModelContextWindow"
+    | "connectModel"
+    | "setSearchApiKey"
+    | "getContextWindowUsage"
+    | "compactSession"
+  >;
   readonly onClose: () => void;
-  readonly onExecuteSlashCommand: OhbabyWebRuntime["executeSlashCommand"];
+  readonly onExecuteSlashCommand: ExecuteGoalCommand;
   readonly overlay: StructuredOverlayState;
-  readonly view: ViewModel;
+  readonly sessionId: string | undefined;
+  readonly activeGoal: UiGoal | null;
 }): ReactElement {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLElement | null>(null);
@@ -92,10 +100,14 @@ export function StructuredCommandOverlay(props: {
           <GoalOverlayBody
             intent={props.overlay.goalIntent ?? DEFAULT_GOAL_PANEL_INTENT}
             onExecuteSlashCommand={props.onExecuteSlashCommand}
-            view={props.view}
+            sessionId={props.sessionId}
+            activeGoal={props.activeGoal}
           />
         ) : (
-          <CompactOverlayBody client={props.client} view={props.view} />
+          <CompactOverlayBody
+            client={props.client}
+            sessionId={props.sessionId}
+          />
         )}
       </section>
     </div>

@@ -2,7 +2,6 @@ import { X } from "lucide-react";
 import type { ReactElement } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CommandNotice } from "../../api/daemon/wire.js";
-import { type HeaderModel, type ViewModel } from "../session/selectors.js";
 import { ContextUsageDetails } from "../shared/ContextUsage.js";
 import { MarkdownBlock } from "../shared/MarkdownBlock.js";
 import {
@@ -15,6 +14,8 @@ import {
   statusContextWindowUsage,
   statusRows,
   type CommandResultModel,
+  type CommandStatusHeader,
+  type CommandStatusContext,
 } from "./slashCommands.js";
 
 export function CommandNoticeList(props: {
@@ -53,11 +54,11 @@ export function CommandNoticeList(props: {
 }
 
 export function CommandResultModal(props: {
-  readonly header: HeaderModel;
+  readonly header: CommandStatusHeader;
   readonly notice: CommandNotice;
   readonly onClose: () => void;
   readonly onInsertSkill: (text: string) => void;
-  readonly view: ViewModel;
+  readonly view: CommandStatusContext;
 }): ReactElement | null {
   const model = createCommandResultModel(props.notice);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -118,11 +119,11 @@ export function CommandResultModal(props: {
 }
 
 function CommandResultBody(props: {
-  readonly header: HeaderModel;
+  readonly header: CommandStatusHeader;
   readonly notice: CommandNotice;
   readonly onInsertSkill: (text: string) => void;
   readonly variant: CommandResultModel["variant"];
-  readonly view: ViewModel;
+  readonly view: CommandStatusContext;
 }): ReactElement {
   const data = commandData(props.notice);
   switch (props.variant) {
@@ -152,8 +153,8 @@ function CommandResultBody(props: {
 
 function StatusCommandResult(props: {
   readonly data: Record<string, unknown> | null;
-  readonly header: HeaderModel;
-  readonly view: ViewModel;
+  readonly header: CommandStatusHeader;
+  readonly view: CommandStatusContext;
 }): ReactElement {
   const usage =
     statusContextWindowUsage(props.data) ?? props.header.contextWindowUsage;

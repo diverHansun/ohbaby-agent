@@ -75,3 +75,7 @@ export async function runOverlayAction(
     });
   }
 }
+
+export function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
+}

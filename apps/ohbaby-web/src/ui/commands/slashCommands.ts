@@ -1,4 +1,9 @@
-import type { UiContextWindowUsage, UiPromptCacheUsage } from "ohbaby-sdk";
+import type {
+  UiContextWindowUsage,
+  UiPromptCacheUsage,
+  UiPermissionMode,
+  UiPermissionLevel,
+} from "ohbaby-sdk";
 import {
   filterSlashCommandCatalog,
   isWebPassthroughCommandId,
@@ -7,7 +12,6 @@ import {
   type UiWebCommandSpec,
 } from "ohbaby-sdk";
 import type { CommandNotice } from "../../api/daemon/wire.js";
-import type { HeaderModel, ViewModel } from "../session/selectors.js";
 
 export interface SlashPaletteItem {
   readonly command: UiWebCommandSpec;
@@ -156,10 +160,26 @@ export function safeHelpCommands(
   );
 }
 
+export interface CommandStatusHeader {
+  readonly contextWindowUsage: UiContextWindowUsage | null;
+  readonly contextLabel: string;
+  readonly modelLabel: string;
+  readonly connectionKind: string;
+}
+
+export interface CommandStatusContext {
+  readonly activeSession: { readonly title: string } | null;
+  readonly composer: {
+    readonly activeSessionId?: string;
+    readonly mode: UiPermissionMode;
+    readonly permissionLevel: UiPermissionLevel;
+  };
+}
+
 export function statusRows(
   data: Record<string, unknown> | null,
-  header: HeaderModel,
-  view: ViewModel,
+  header: CommandStatusHeader,
+  view: CommandStatusContext,
 ): readonly { readonly label: string; readonly value: string }[] {
   const permission = isRecord(data?.permission) ? data.permission : undefined;
   const contextWindow = isRecord(data?.contextWindow)

@@ -1,17 +1,12 @@
+import type { UiRun } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { type ViewModel } from "../session/selectors.js";
 import { useExecutionDuration } from "./execution-duration.js";
 
 export function ModelWaiting({
-  view,
+  run,
 }: {
-  readonly view: ViewModel;
+  readonly run: UiRun | undefined;
 }): ReactElement | null {
-  const run = view.snapshot?.runs.find(
-    (run) =>
-      run.sessionId === view.composer.activeSessionId &&
-      run.id === view.composer.activeRunId,
-  );
   const request = run?.modelActivity;
   const duration = useExecutionDuration(
     request?.requestId ?? "model",

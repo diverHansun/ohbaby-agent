@@ -8,19 +8,24 @@ import type {
 import type { ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
 
+type ReasoningClient = Pick<
+  UiBackendClient,
+  "getCurrentModel" | "subscribeEvents" | "updateSessionReasoning"
+>;
+
 export function ReasoningControl(props: {
-  readonly client: UiBackendClient;
+  readonly client: ReasoningClient;
   readonly session: UiSession | null;
   readonly onChange: (reasoning: UiReasoningConfig | undefined) => void;
 }): ReactElement | null {
   const [modelView, setView] = useState<{
-    client: UiBackendClient;
+    client: ReasoningClient;
     view: UiReasoningCapabilityView | undefined;
   }>();
   const view = modelView?.client === props.client ? modelView.view : undefined;
   const localPreference = useRef<
     | {
-        client: UiBackendClient;
+        client: ReasoningClient;
         sessionId: string | undefined;
         reasoning: UiReasoningConfig;
       }

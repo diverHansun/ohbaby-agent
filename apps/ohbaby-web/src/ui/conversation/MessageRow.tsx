@@ -1,12 +1,12 @@
 import type { UiMessage, UiMessagePart } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { type ViewModel } from "../session/selectors.js";
+import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import { MarkdownBlock } from "../shared/MarkdownBlock.js";
 import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
 
 export function MessageRow(props: {
   readonly message: UiMessage;
-  readonly reasoning?: ViewModel["reasoningByMessageId"][string];
+  readonly reasoning?: ReasoningViewState;
 }): ReactElement | null {
   const isUser = props.message.role === "user";
   const visibleParts = filterTodoToolParts(props.message.parts);

@@ -1,3 +1,5 @@
+import { TodoDock } from "../conversation/TodoDock.js";
+import { PermissionPolicyControl } from "../permissions/PermissionPolicyControl.js";
 import type {
   UiBackendClient,
   UiPromptSubmission,
@@ -10,11 +12,16 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useLayoutEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import type { OhbabyWebRuntime } from "../../runtime.js";
-import { CommandResultModal } from "../commands/CommandResultModal.js";
+import {
+  CommandResultModal,
+  CommandNoticeList,
+} from "../commands/CommandResultModal.js";
 import {
   DEFAULT_GOAL_PANEL_INTENT,
   type GoalPanelIntent,
@@ -288,6 +295,13 @@ export function SessionScreen({
     () => runtime.getWorkspaceSnapshot(),
     () => runtime.getWorkspaceSnapshot(),
   );
+  const draftScopeKey = `${workspace.selectedDirectory ?? "workspace"}:${view.composer.activeSessionId ?? "new"}`;
+  const composerEditRevision = useRef(0);
+  const composerPrefillNonce = useRef(0);
+  const commandScopeGeneration = useRef(0);
+  const trackComposerRevision = useCallback((revision: number): void => {
+    composerEditRevision.current = revision;
+  }, []);
   const [actionError, setActionError] = useState<string | null>(null);
   const stopRequest = useStopRequest(
     runtime,
@@ -307,6 +321,14 @@ export function SessionScreen({
     useState<StructuredOverlayState | null>(null);
   const [composerPrefill, setComposerPrefill] =
     useState<ComposerPrefill | null>(null);
+  useLayoutEffect(() => {
+    commandScopeGeneration.current += 1;
+    setStructuredOverlay(null);
+    setComposerPrefill(null);
+    return (): void => {
+      commandScopeGeneration.current += 1;
+    };
+  }, [draftScopeKey, client]);
   const [localPromptAttempts, setLocalPromptAttempts] = useState<
     readonly LocalPromptAttempt[]
   >([]);
@@ -427,12 +449,14 @@ export function SessionScreen({
 
   const openOverlayForSlashText = useCallback(
     async (text: string): Promise<boolean> => {
+      const generation = commandScopeGeneration.current;
       let catalog: UiWebCommandCatalog;
       try {
         catalog = await runtime.listWebCommands();
       } catch {
         return false;
       }
+      if (generation !== commandScopeGeneration.current) return false;
       const resolved = resolveSlashCommand(
         catalog,
         parseSlashCommandInput(text),
@@ -468,18 +492,27 @@ export function SessionScreen({
       clientRequestId?: string,
       reasoning?: UiReasoningConfig,
     ): Promise<boolean> => {
-      if (text.startsWith("/") && (await openOverlayForSlashText(text))) {
-        return true;
-      }
       if (text.startsWith("/")) {
-        return runAction(() =>
-          runtime.executeSlashCommand({
+        const generation = commandScopeGeneration.current;
+        const opened = await openOverlayForSlashText(text);
+        if (generation !== commandScopeGeneration.current) return false;
+        if (opened) return true;
+        clearActionError();
+        try {
+          await runtime.executeSlashCommand({
             ...(view.composer.activeSessionId === undefined
               ? {}
               : { sessionId: view.composer.activeSessionId }),
             text,
-          }),
-        );
+          });
+          return true;
+        } catch (error) {
+          if (generation === commandScopeGeneration.current)
+            setActionError(
+              error instanceof Error ? error.message : String(error),
+            );
+          return false;
+        }
       }
       const requestId = clientRequestId ?? globalThis.crypto.randomUUID();
       const submittedSessionId = view.composer.activeSessionId;
@@ -752,7 +785,21 @@ export function SessionScreen({
                 onLoadHistory={() => runtime.loadEarlierHistory()}
                 promptRows={promptProjection.rows}
                 startupThinkingAt={promptProjection.startupThinkingAt}
-                view={view}
+                messages={view.activeSession?.messages ?? []}
+                sessionId={view.activeSession?.id ?? null}
+                prompts={(view.snapshot?.prompts ?? []).filter(
+                  (prompt) => prompt.sessionId === view.activeSession?.id,
+                )}
+                activeRun={view.snapshot?.runs.find(
+                  (run) =>
+                    run.sessionId === view.composer.activeSessionId &&
+                    run.id === view.composer.activeRunId,
+                )}
+                isRunning={view.composer.isRunning}
+                reasoningByMessageId={view.reasoningByMessageId}
+                commandNotices={
+                  <CommandNoticeList notices={view.commandNotices} />
+                }
               />
             </DurationSampleContext.Provider>
             {commandModalNotice ? (
@@ -766,16 +813,28 @@ export function SessionScreen({
                   ]);
                 }}
                 onInsertSkill={(text) => {
-                  setComposerPrefill((current) => ({
-                    nonce: (current?.nonce ?? 0) + 1,
+                  composerPrefillNonce.current += 1;
+                  setComposerPrefill({
+                    nonce: composerPrefillNonce.current,
+                    scopeKey: draftScopeKey,
+                    editRevision: composerEditRevision.current,
                     text,
-                  }));
+                  });
                   setClosedCommandModalIds((ids) => [
                     ...ids,
                     commandModalNotice.id,
                   ]);
                 }}
-                view={view}
+                view={{
+                  activeSession: view.activeSession
+                    ? { title: view.activeSession.title }
+                    : null,
+                  composer: {
+                    activeSessionId: view.composer.activeSessionId,
+                    mode: view.composer.mode,
+                    permissionLevel: view.composer.permissionLevel,
+                  },
+                }}
               />
             ) : null}
           </>
@@ -796,7 +855,8 @@ export function SessionScreen({
         <Composer
           client={client}
           compact={!showMain}
-          draftScopeKey={`${workspace.selectedDirectory ?? "workspace"}:${view.composer.activeSessionId ?? "new"}`}
+          draftScopeKey={draftScopeKey}
+          onEditRevision={trackComposerRevision}
           isPromptAdmitting={isPromptAdmitting}
           prefill={composerPrefill}
           onListCommands={listCommands}
@@ -809,10 +869,32 @@ export function SessionScreen({
           onSubmit={submitText}
           onStop={stopRequest.stop}
           stopLabel={stopRequest.label}
-          view={view}
+          model={view.composer}
+          activeSession={view.activeSession}
+          queuedPrompts={view.queuedPrompts}
+          commandCatalogVersion={view.commandCatalogVersion}
+          connectionKind={view.header.connectionKind}
+          topContent={
+            <TodoDock
+              key={view.activeTodoList?.sessionId ?? "hidden"}
+              todoList={view.activeTodoList}
+            />
+          }
+          permissionControl={
+            <PermissionPolicyControl
+              level={view.composer.permissionLevel}
+              disabled={view.composer.disabled}
+              onSetPermission={(input) => {
+                void runAction(async () => {
+                  await client.setPermission(input);
+                });
+              }}
+            />
+          }
         />
         {structuredOverlay ? (
           <StructuredCommandOverlay
+            key={draftScopeKey}
             client={client}
             onExecuteSlashCommand={(input) =>
               runtime.executeSlashCommand(input)
@@ -821,7 +903,8 @@ export function SessionScreen({
               setStructuredOverlay(null);
             }}
             overlay={structuredOverlay}
-            view={view}
+            sessionId={view.composer.activeSessionId ?? view.activeSession?.id}
+            activeGoal={view.activeGoal}
           />
         ) : null}
         {directoryPickerOpen ? (
