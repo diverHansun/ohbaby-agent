@@ -108,6 +108,8 @@ export interface ToolExecutionContext {
 }
 
 export interface ToolExecutionResult {
+  /** Actual invocation outcome supplied by a tool that owns its terminal lifecycle. */
+  readonly executionOutcome?: ToolExecutionObservation["outcome"];
   readonly output?: string;
   readonly metadata?: Record<string, unknown>;
 }
@@ -203,6 +205,7 @@ export interface BatchToolCallRequest {
 }
 
 export interface ToolCallResult {
+  readonly executionOutcome?: ToolExecutionObservation["outcome"];
   readonly callId: string;
   readonly status: FinalToolCallStatus;
   readonly output?: string;

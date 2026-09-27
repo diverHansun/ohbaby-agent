@@ -51,6 +51,7 @@ import type {
   ToolExecutionOwner,
   ToolExecutionFact,
   ToolExecutionResult,
+  ToolExecutionObservation,
   ToolRegistry,
   ToolScheduler,
   ToolSchedulerConfig,
@@ -698,6 +699,7 @@ export function createToolScheduler(
     status: FinalToolCallStatus,
     input: {
       readonly output?: string;
+      readonly executionOutcome?: ToolExecutionObservation["outcome"];
       readonly metadata?: Record<string, unknown>;
       readonly error?: ToolCallError;
     } = {},
@@ -706,6 +708,9 @@ export function createToolScheduler(
       callId: call.callId,
       status,
       output: input.output,
+      ...(input.executionOutcome !== undefined
+        ? { executionOutcome: input.executionOutcome }
+        : {}),
       metadata: input.metadata,
       error: input.error,
       duration: call.durationMs,

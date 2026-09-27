@@ -312,12 +312,19 @@ describe("Bash cleanup through scheduler", () => {
         f.request("after-timeout", { runId: "later-run" }),
       );
       await vi.advanceTimersByTimeAsync(30);
-      const query = await f.scheduler.execute(
-        f.request("query", {
-          toolName: "task_output",
-          params: { job_id: jobId },
-        }),
-      );
+      const [query] = await f.scheduler.executeBatch({
+        calls: [
+          f.request("query", {
+            toolName: "task_output",
+            params: { job_id: jobId },
+          }),
+        ],
+        observer: {
+          onCallState: () => Promise.resolve(),
+          onCallSettled: () => Promise.resolve(),
+        },
+      });
+      expect(query.execution?.outcome).toBe("success");
       expect(query.metadata).toMatchObject({
         status: "timed_out",
         cleanup: "in-progress",

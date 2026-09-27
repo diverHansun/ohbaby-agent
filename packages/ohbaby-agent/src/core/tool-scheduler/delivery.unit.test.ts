@@ -501,3 +501,25 @@ it("rechecks a revoked permission after a queued-state save before invoke", asyn
   expect((await batch)[0].status).toBe("rejected");
   expect(invoked).toBe(0);
 });
+
+it("does not treat MCP metadata about another job as this invocation outcome", async () => {
+  const scheduler = setup(() => Promise.resolve({ output: "query" }));
+  scheduler.register({
+    name: "remote_query",
+    description: "query",
+    source: "mcp",
+    isTrusted: true,
+    category: "readonly",
+    parametersJsonSchema: { type: "object" },
+    execute: () =>
+      Promise.resolve({
+        output: "old job timed out",
+        metadata: { status: "timed_out" },
+      }),
+  });
+  const [result] = await scheduler.executeBatch({
+    calls: [{ ...request("remote"), toolName: "remote_query" }],
+    observer: { onCallState: noop, onCallSettled: noop },
+  });
+  expect(result.execution?.outcome).toBe("success");
+});

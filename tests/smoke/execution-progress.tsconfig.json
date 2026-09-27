@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "composite": false, "rootDir": "../.." },
+  "include": ["execution-progress*.ts", "../integration/core/lifecycle-tool-scheduler.integration.test.ts", "../integration/core/projection-fairness.e2e.test.ts", "../integration/core/rollback-message-compatibility.e2e.test.ts"]
+}

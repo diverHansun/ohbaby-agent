@@ -387,3 +387,13 @@ it("reports an invalid clock once per anchor and never invents an active duratio
     diagnostic.mockRestore();
   }
 });
+
+it("explains missing historical execution stages only in expanded legacy details", () => {
+  const app = mountCard(toolCall({ status: "completed" }), undefined);
+  const note = "Execution stage history is unavailable for this tool.";
+  expect(app.container.textContent).not.toContain(note);
+  act(() => app.container.querySelector("button")?.click());
+  expect(app.container.textContent).toContain(note);
+  expect(app.container.querySelector(".ohb-tool-duration")).toBeNull();
+  expect(app.container.querySelector(".ohb-tool-executing")).toBeNull();
+});

@@ -1738,14 +1738,15 @@ export class Lifecycle {
       result?: ToolCallResult,
     ): Promise<void> => {
       const partId = input.toolParts.get(request.callId)?.id;
-      const messages = await this.deps.messageManager.listByIds(
-        request.sessionId,
-        [request.messageId],
-      );
-      const part = messages
-        .flatMap((message) => message.parts)
-        .find((part) => part.id === partId);
-      if (!part || !isToolPart(part))
+      const part = partId
+        ? await this.deps.messageManager.getPart(partId)
+        : undefined;
+      if (
+        !part ||
+        !isToolPart(part) ||
+        part.sessionId !== request.sessionId ||
+        part.messageId !== request.messageId
+      )
         throw new Error("Tool message part is missing");
       const previous = part.metadata?.execution;
       // Late cleanup belongs to this original row and never overwrites a result.

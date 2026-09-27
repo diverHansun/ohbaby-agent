@@ -99,6 +99,7 @@ function createMessageManager(
   );
   const removeMessage = vi.fn((): Promise<void> => Promise.resolve());
   const manager: MessageManager = {
+    getPart: vi.fn().mockResolvedValue(undefined),
     setCommitCoordinator: vi.fn(),
     saveReasoningPart: vi.fn(() =>
       Promise.reject(

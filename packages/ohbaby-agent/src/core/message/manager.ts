@@ -192,6 +192,7 @@ export function createMessageManager(
   }
 
   const manager: MessageManager = {
+    getPart: (partId) => options.store.getPart(partId),
     setCommitCoordinator(value) {
       coordinator = value;
     },

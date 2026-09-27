@@ -29,6 +29,63 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 describe("source session commit boundary", () => {
+  it("yields only between budgeted commits without delaying results or fatal errors", async () => {
+    vi.useFakeTimers({ toFake: ["setImmediate"] });
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const owner = new SessionViewOwner({
+      runtimeEpoch: "fair",
+      seed: (id): Promise<Omit<UiSessionView, "version">> =>
+        Promise.resolve(seed(id)),
+      publish: (): void => undefined,
+    });
+    try {
+      await owner.initialize("a");
+      await owner.run("a", () => {
+        owner.commit("a", { reasoningMissing: false });
+        return Promise.resolve();
+      });
+      expect(vi.getTimerCount()).toBe(0);
+      const first = owner.run("a", () => {
+        now = 20;
+        owner.commit("a", { reasoningMissing: true });
+        return Promise.resolve("committed");
+      });
+      let secondRan = false;
+      const second = owner.runControl("a", () => {
+        secondRan = true;
+        return Promise.reject(new Error("fatal"));
+      });
+      const caught = second.catch((error: unknown) => error);
+      expect(await first).toBe("committed");
+      await Promise.resolve();
+      expect(owner.read("a").reasoningMissing).toBe(true);
+      expect(secondRan).toBe(false);
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.runAllTimersAsync();
+      expect(await caught).toMatchObject({ message: "fatal" });
+      await owner.runControl("a", () => {
+        owner.commit("a", { reasoningMissing: false });
+        return Promise.resolve();
+      });
+      expect(owner.read("a").reasoningMissing).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+      // A failure that itself exhausts the budget reaches its caller before
+      // the queue's next turn; it is never converted into a successful write.
+      const failure = owner.runControl("a", () => {
+        now = 40;
+        return Promise.reject(new Error("save failed"));
+      });
+      await expect(failure).rejects.toThrow("save failed");
+      await Promise.resolve();
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.runAllTimersAsync();
+    } finally {
+      owner.dispose();
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
   it("seeds before writes, serializes database and projection, and leaves other sessions free", async () => {
     const blocked = deferred();
     const events: UiSessionChangedEvent[] = [];

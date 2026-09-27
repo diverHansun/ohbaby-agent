@@ -251,7 +251,18 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             context.sessionId,
             context.contextScopeId,
           );
-          return { metadata: result.metadata, output: result.output };
+          return {
+            metadata: result.metadata,
+            output: result.output,
+            executionOutcome:
+              result.status === "timed_out"
+                ? "timed-out"
+                : result.status === "cancelled"
+                  ? "cancelled"
+                  : result.status === "failed"
+                    ? "error"
+                    : "success",
+          };
         } finally {
           context.signal.removeEventListener("abort", abortHandler);
         }

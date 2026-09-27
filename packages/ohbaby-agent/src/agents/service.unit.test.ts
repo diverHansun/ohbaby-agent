@@ -114,6 +114,7 @@ function createMessageManager(): {
     appendPart,
     createMessage,
     manager: {
+      getPart: vi.fn().mockResolvedValue(undefined),
       setCommitCoordinator: vi.fn(),
       saveReasoningPart: vi.fn(() =>
         Promise.reject(

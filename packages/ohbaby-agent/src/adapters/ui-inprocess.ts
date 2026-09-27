@@ -2368,7 +2368,11 @@ export function createInProcessUiBackendClient(
         result.usageAfter,
       );
       if (usage) {
-        publish({ type: "context.window.updated", usage });
+        const event: UiEvent = { type: "context.window.updated", usage };
+        // A completed compact command includes its source context projection.
+        // The owner handles projection failure; do not publish the fact twice.
+        await sourceProjection.commitEvent(event);
+        eventRouter.publish(event);
       }
 
       return {

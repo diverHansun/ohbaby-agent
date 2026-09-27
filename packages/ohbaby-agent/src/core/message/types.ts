@@ -321,6 +321,7 @@ export interface MessageCommitCoordinator {
 }
 
 export interface MessageManager {
+  getPart(partId: string): Promise<Part | undefined>;
   setCommitCoordinator(coordinator: MessageCommitCoordinator | undefined): void;
   saveReasoningPart(
     input: SaveReasoningPartInput,

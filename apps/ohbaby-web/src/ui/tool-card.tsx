@@ -166,7 +166,9 @@ function ToolPanel(props: {
               <span>Execution</span>
               <pre>{JSON.stringify(props.execution, null, 2)}</pre>
             </section>
-          ) : null}
+          ) : (
+            <p>Execution stage history is unavailable for this tool.</p>
+          )}
           {props.input !== undefined ? (
             <section className="ohb-tool-input">
               <span>Input</span>

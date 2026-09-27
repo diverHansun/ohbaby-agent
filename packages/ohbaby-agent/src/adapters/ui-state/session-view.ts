@@ -13,6 +13,7 @@ type Change = Omit<
   "type" | "version" | "bindingGeneration"
 >;
 interface Partition {
+  lastYieldAt: number;
   ready?: Promise<void>;
   tail: Promise<unknown>;
   view?: UiSessionView;
@@ -46,6 +47,7 @@ export class SessionViewOwner {
     let partition = this.partitions.get(sessionId);
     if (!partition) {
       partition = {
+        lastYieldAt: performance.now(),
         tail: Promise.resolve(),
         initialized: false,
         generation: randomUUID(),
@@ -128,7 +130,19 @@ export class SessionViewOwner {
       await initialized;
       return operation();
     });
-    partition.tail = pending.catch(() => undefined);
+    // The caller receives its result/failure immediately. Only the next queued
+    // operation waits for fairness; never yield inside a transaction or commit.
+    partition.tail = pending
+      .catch(() => undefined)
+      .then(() => {
+        if (performance.now() - partition.lastYieldAt < 8) return;
+        return new Promise<void>((resolve) => {
+          setImmediate(() => {
+            partition.lastYieldAt = performance.now();
+            resolve();
+          });
+        });
+      });
     return pending;
   }
 

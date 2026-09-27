@@ -92,7 +92,9 @@ export class CallDelivery {
       endedAt: now,
       waitReason: undefined,
       outcome:
-        result.error?.type === "TimeoutError" ? "timed-out" : result.status,
+        result.error?.type === "TimeoutError"
+          ? "timed-out"
+          : (result.executionOutcome ?? result.status),
     };
     const delivered = { ...result, execution: this.state };
     return this.enqueue(
