@@ -22,7 +22,7 @@ import type {
   ContextUsage,
   PreparedTurn,
 } from "../context/index.js";
-import type { MessageManager } from "../message/index.js";
+import type { MessageManager, MessageWithParts } from "../message/index.js";
 import type {
   ToolCallResult,
   ToolDefinition,
@@ -61,6 +61,7 @@ export interface StepUsageObservation {
 }
 
 export interface LifecycleSessionParams {
+  readonly currentRunInputs?: LifecycleRunInputPort;
   readonly runId?: string;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   /** Final accepted model result, observed synchronously once before calibration. */
@@ -78,6 +79,17 @@ export interface LifecycleSessionParams {
   readonly environment?: ToolExecutionEnvironment;
   readonly isSubagent?: boolean;
   readonly maxSteps?: number;
+}
+
+/** Bound to one exact run; implementations persist before waking or admitting I/O. */
+export interface LifecycleRunInputPort {
+  beforeStep(signal?: AbortSignal): Promise<readonly MessageWithParts[]>;
+  beforeFinish(signal?: AbortSignal): Promise<"continue" | "finish">;
+  admitRequestAttempt(
+    request: ModelRequestRecord,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  confirmRequestSuccess(requestId: string): Promise<void>;
 }
 
 export interface TurnContext {

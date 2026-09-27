@@ -49,6 +49,11 @@ function assertTrustedLexical(
 }
 
 export function createSandboxLease(input: {
+  readonly authorizeInternalRead?: (input: {
+    readonly path: string;
+    readonly sessionId: string;
+    readonly contextScopeId?: string;
+  }) => Promise<boolean>;
   readonly context: InternalSandboxContext;
   readonly leaseId: string;
   readonly release: (leaseId: string) => Promise<void>;
@@ -57,12 +62,22 @@ export function createSandboxLease(input: {
   let released = false;
   let references = 1;
   const { context } = input;
+  function authorizeInternalRead(path: string): Promise<boolean> {
+    return (
+      input.authorizeInternalRead?.({
+        path,
+        sessionId: context.sessionId,
+        contextScopeId: context.contextScopeId,
+      }) ?? Promise.resolve(false)
+    );
+  }
   async function releaseReference(): Promise<void> {
     references -= 1;
     if (references === 0) await input.release(input.leaseId);
   }
 
   return {
+    authorizeInternalRead,
     adapterId: context.adapterId,
     capabilities: context.capabilities,
     contextId: context.contextId,
@@ -84,6 +99,7 @@ export function createSandboxLease(input: {
     async resolvePathForExisting(inputPath: string): Promise<string> {
       const target = resolveInputPath(context.workdir, inputPath);
       const resolvedPath = await fs.realpath(target);
+      if (await authorizeInternalRead(target)) return resolvedPath;
       return assertTrusted(context, inputPath, resolvedPath);
     },
 

@@ -325,8 +325,66 @@ it("preserves known scope predecessors while an earlier permission preparation i
   expect(entered).toEqual(["first", "second"]);
 });
 
+it("publishes necessary predecessor identities and clears them when execution starts", async () => {
+  const scheduler = fixture();
+  const gate = deferred();
+  const waiting = deferred();
+  const states: import("./types.js").ToolExecutionObservation[] = [];
+  scheduler.register(
+    withToolAdmission(
+      {
+        name: "scope_probe",
+        source: "builtin",
+        category: "write",
+        description: "scope probe",
+        parametersJsonSchema: { type: "object" },
+        execute: async (_params, context) => {
+          if (context.callId === "first") await gate.promise;
+          return { output: "ok" };
+        },
+      },
+      { plan: () => [{ kind: "scope", key: "shared", mode: "write" }] },
+    ),
+  );
+  const batch = scheduler.executeBatch({
+    calls: ["first", "second"].map((callId) => ({
+      callId,
+      runId: "same-run",
+      sessionId: "s",
+      messageId: "m",
+      toolName: "scope_probe",
+      params: {},
+    })),
+    observer: {
+      onCallState: (call, state) => {
+        if (call.callId === "second") {
+          states.push(state);
+          if (state.phase === "waiting-predecessor") waiting.resolve();
+        }
+        return Promise.resolve();
+      },
+      onCallSettled: () => Promise.resolve(),
+    },
+  });
+  try {
+    await waiting.promise;
+    expect(states.at(-1)).toMatchObject({
+      phase: "waiting-predecessor",
+      blockingCallIds: ["first"],
+      predecessorsKnown: true,
+    });
+  } finally {
+    gate.resolve();
+    await batch;
+  }
+  const running = states.find((state) => state.phase === "executing");
+  expect(running?.blockingCallIds).toBeUndefined();
+});
+
 it("waits only for a declared pending plan before deciding scope conflicts", async () => {
   const scheduler = fixture();
+  const waiting = deferred();
+  const observations: import("./types.js").ToolExecutionObservation[] = [];
   const planGate = deferred();
   const operationGate = deferred();
   const entered: string[] = [];
@@ -368,12 +426,36 @@ it("waits only for a declared pending plan before deciding scope conflicts", asy
       sessionId: "s",
       messageId: "m",
     })),
+    observer: {
+      onCallState: (_call, state) => {
+        if (
+          _call.callId === "second_scope" &&
+          state.phase === "waiting-predecessor"
+        ) {
+          observations.push(state);
+          waiting.resolve();
+        }
+        return Promise.resolve();
+      },
+      onCallSettled: () => Promise.resolve(),
+    },
   });
   try {
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waiting.promise;
     expect(entered).toEqual([]);
+    expect(observations.at(-1)).toMatchObject({
+      blockingCallIds: [],
+      predecessorsKnown: false,
+    });
     planGate.resolve();
     await expect.poll(() => entered).toEqual(["first_scope"]);
+    expect(observations.at(-1)).toMatchObject({
+      blockingCallIds: ["first_scope"],
+      predecessorsKnown: true,
+    });
+    expect(observations.at(-1)?.phaseStartedAt).toBe(
+      observations[0].phaseStartedAt,
+    );
   } finally {
     planGate.resolve();
     operationGate.resolve();

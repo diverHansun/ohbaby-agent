@@ -1,3 +1,4 @@
+import { getMessageOrigin } from "../message/origin.js";
 import type { ModelOrigin } from "../../services/interface-providers/native-state.js";
 import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 import { serializeHistoryMessages } from "./serializer.js";
@@ -175,7 +176,10 @@ export function findCutPoint(input: {
   const legalCutPoints = new Set<number>([0, history.length]);
   for (let index = 0; index < history.length; index += 1) {
     const role = history[index]?.info.role;
-    if (role === "user" || role === "assistant") {
+    if (
+      (role === "user" && getMessageOrigin(history[index]) === "user") ||
+      role === "assistant"
+    ) {
       legalCutPoints.add(index);
     }
   }
@@ -194,7 +198,7 @@ export function findCutPoint(input: {
   const turnPrefixMessages =
     firstKeptIndex > 0 &&
     history[firstKeptIndex]?.info.role === "assistant" &&
-    history[firstKeptIndex - 1]?.info.role === "user"
+    getMessageOrigin(history[firstKeptIndex - 1]) === "user"
       ? [history[firstKeptIndex - 1]]
       : [];
   const messagesToSummarizeEnd = firstKeptIndex - turnPrefixMessages.length;

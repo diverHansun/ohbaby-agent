@@ -64,7 +64,13 @@ export class CallDelivery {
       ? { ...this.state, cleanup: patch.cleanup }
       : {
           ...this.state,
-          ...(patch.phase !== undefined ? { waitReason: undefined } : {}),
+          ...(patch.phase !== undefined
+            ? {
+                waitReason: undefined,
+                blockingCallIds: undefined,
+                predecessorsKnown: undefined,
+              }
+            : {}),
           ...patch,
           phaseStartedAt: changedPhase
             ? (patch.phaseStartedAt ?? this.state.phaseStartedAt)
@@ -91,6 +97,8 @@ export class CallDelivery {
       phaseStartedAt: now,
       endedAt: now,
       waitReason: undefined,
+      blockingCallIds: undefined,
+      predecessorsKnown: undefined,
       outcome:
         result.error?.type === "TimeoutError"
           ? "timed-out"

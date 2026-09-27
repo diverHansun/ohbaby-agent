@@ -3,6 +3,7 @@ import { createBus } from "../../bus/index.js";
 import { createPermissionState } from "../../permission/index.js";
 import { createToolScheduler } from "./scheduler.js";
 import { withToolAdmission } from "./tool-admission.js";
+import { CallDelivery } from "./delivery.js";
 import type { BatchToolCallObserver, ToolCallRequest } from "./types.js";
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -49,6 +50,28 @@ function setup(
   return scheduler;
 }
 const noop = (): Promise<void> => Promise.resolve(undefined);
+it("clears predecessor facts when waiting ends in cancellation", async () => {
+  const delivery = new CallDelivery(
+    request("cancelled"),
+    0,
+    { onCallState: noop, onCallSettled: noop },
+    () => undefined,
+    1,
+  );
+  await delivery.update({
+    phase: "waiting-predecessor",
+    waitReason: "predecessor",
+    blockingCallIds: ["first"],
+    predecessorsKnown: true,
+  });
+  await delivery.settle({ callId: "cancelled", status: "cancelled" }, 2);
+  expect(delivery.state).toMatchObject({
+    phase: "ended",
+    outcome: "cancelled",
+  });
+  expect(delivery.state.blockingCallIds).toBeUndefined();
+  expect(delivery.state.predecessorsKnown).toBeUndefined();
+});
 describe("reliable batch delivery", () => {
   it("awaits settlement delivery but releases execution capacity before saving", async () => {
     const save = deferred<undefined>();

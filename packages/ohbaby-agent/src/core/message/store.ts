@@ -109,6 +109,42 @@ export function createInMemoryMessageStore(): MessageStore {
   }
 
   return {
+    runtimeInputMemory: {
+      get(messageId): MessageWithParts | undefined {
+        const info = messages.get(messageId);
+        return info
+          ? { info: clone(info), parts: listPartsForMessage(messageId) }
+          : undefined;
+      },
+      put(message): void {
+        const prepared = clone(message);
+        const existing = messages.get(prepared.info.id);
+        if (
+          existing &&
+          (existing.sessionId !== prepared.info.sessionId ||
+            existing.contextScopeId !== prepared.info.contextScopeId ||
+            existing.role !== prepared.info.role)
+        )
+          throw new Error("Runtime input message owner conflict");
+        const seen = new Set<string>();
+        for (const part of prepared.parts) {
+          if (
+            part.messageId !== prepared.info.id ||
+            part.sessionId !== prepared.info.sessionId ||
+            part.contextScopeId !== prepared.info.contextScopeId ||
+            seen.has(part.id) ||
+            (parts.has(part.id) &&
+              parts.get(part.id)?.messageId !== prepared.info.id)
+          )
+            throw new Error("Runtime input part owner conflict");
+          seen.add(part.id);
+        }
+        for (const [id, part] of parts)
+          if (part.messageId === prepared.info.id) parts.delete(id);
+        messages.set(prepared.info.id, prepared.info);
+        for (const part of prepared.parts) parts.set(part.id, part);
+      },
+    },
     async listPageBySession(sessionId, options): Promise<MessagePage> {
       await Promise.resolve();
       return listPage(sessionId, options);

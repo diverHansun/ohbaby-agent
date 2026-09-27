@@ -1,3 +1,4 @@
+import { isRuntimeInputSnapshotChanged } from "./runtime-input-error.js";
 import type { ModelRequestRecord } from "../llm-client/types.js";
 import { ModelObservationError } from "../llm-client/request-observation.js";
 import { ToolBatchEventQueue } from "./tool-event-queue.js";
@@ -83,6 +84,7 @@ interface StepResult {
 }
 
 interface ModelStepParams {
+  readonly currentRunInputs?: LifecycleSessionParams["currentRunInputs"];
   readonly runId?: string;
   readonly modelId: string;
   readonly reasoning?: LifecycleSessionParams["reasoning"];
@@ -499,6 +501,7 @@ export class Lifecycle {
     let finalResponse = "";
     const allToolCalls: ParsedToolCall[] = [];
     let turnStarted = false;
+    let staleInputRetries = 0;
     let promptSnapshot: AgentRunPromptSnapshot | undefined;
     const activeReasoningByMessageId = new Map<string, string>();
 
@@ -515,6 +518,9 @@ export class Lifecycle {
       }
 
       const isFinalStep = step === maxSteps;
+      const protectedInputs = await params.currentRunInputs?.beforeStep(
+        params.signal,
+      );
       const resolvedStepTools =
         (await this.deps.resolveTools?.({
           agentName: params.agent,
@@ -547,6 +553,8 @@ export class Lifecycle {
         ? [buildMaxStepsFinalizationMessage()]
         : undefined;
       let prepared = yield* this.prepareTurnWithProgress({
+        runId: params.runId,
+        protectedInputs,
         reasoning: mergeReasoningIntent(params.reasoning),
         ...(tailDirectives === undefined ? {} : { tailDirectives }),
         ...(activeReasoningByMessageId.size === 0
@@ -598,6 +606,7 @@ export class Lifecycle {
       });
 
       const runParams: ModelStepParams = {
+        currentRunInputs: params.currentRunInputs,
         runId: params.runId,
         modelId: params.modelId,
         reasoning: params.reasoning,
@@ -619,6 +628,10 @@ export class Lifecycle {
           step,
         });
       } catch (error) {
+        if (isRuntimeInputSnapshotChanged(error) && ++staleInputRetries <= 3) {
+          step -= 1;
+          continue;
+        }
         const failure = providerFailure(error);
         if (failure) {
           finalResponse = failure.finalResponse;
@@ -645,6 +658,8 @@ export class Lifecycle {
         }
 
         prepared = yield* this.prepareTurnWithProgress({
+          runId: params.runId,
+          protectedInputs,
           reasoning: mergeReasoningIntent(params.reasoning),
           ...(tailDirectives === undefined ? {} : { tailDirectives }),
           ...(activeReasoningByMessageId.size === 0
@@ -690,6 +705,13 @@ export class Lifecycle {
             step,
           });
         } catch (retryError) {
+          if (
+            isRuntimeInputSnapshotChanged(retryError) &&
+            ++staleInputRetries <= 3
+          ) {
+            step -= 1;
+            continue;
+          }
           const failure = providerFailure(retryError);
           if (failure) {
             finalResponse = failure.finalResponse;
@@ -736,6 +758,7 @@ export class Lifecycle {
         }
       }
       const { assistantMessage, finalEvent } = stepResult;
+      staleInputRetries = 0;
       finalResponse = stepResult.finalResponse;
       if (
         assistantMessage?.role === "assistant" &&
@@ -1044,6 +1067,15 @@ export class Lifecycle {
           sessionId: params.sessionId,
           step,
         });
+        if (
+          !isFinalStep &&
+          ((await params.currentRunInputs?.beforeFinish(params.signal)) ===
+            "continue" ||
+            params.signal?.aborted)
+        ) {
+          parentMessageId = assistantMessage?.id ?? parentMessageId;
+          continue;
+        }
         yield this.createTurnEndEvent(turn);
         return {
           success: true,
@@ -1226,6 +1258,12 @@ export class Lifecycle {
       }
 
       if (config.shouldStopAfterTurn?.(turn) === true) {
+        if (
+          (await params.currentRunInputs?.beforeFinish(params.signal)) ===
+            "continue" ||
+          params.signal?.aborted
+        )
+          continue;
         yield this.createTurnEndEvent(turn);
         return {
           success: true,
@@ -1251,6 +1289,7 @@ export class Lifecycle {
     readonly step: number;
   }): AsyncGenerator<LifecycleEvent, StepResult, void> {
     const { params, step } = input;
+    const currentRunInputs = params.currentRunInputs;
     const requestClient = {
       ...this.deps.llmClient,
       config: { ...this.deps.llmClient.config, model: params.modelId },
@@ -1325,6 +1364,15 @@ export class Lifecycle {
         [...input.request.messages],
         {
           purpose: "agent-step",
+          ...(currentRunInputs
+            ? {
+                beforeRequestAttempt: (request: ModelRequestRecord) =>
+                  currentRunInputs.admitRequestAttempt(
+                    { ...request, inputIds: input.request.inputIds ?? [] },
+                    params.signal,
+                  ),
+              }
+            : {}),
           ...(params.runId === undefined
             ? {}
             : {
@@ -1346,6 +1394,10 @@ export class Lifecycle {
                   });
                   try {
                     await saved;
+                    if (fact.request.outcome === "success")
+                      await params.currentRunInputs?.confirmRequestSuccess(
+                        fact.request.requestId,
+                      );
                   } catch (error) {
                     this.activeModelRequests.delete(fact.request.requestId);
                     throw error;

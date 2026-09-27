@@ -167,6 +167,7 @@ export class SandboxManager implements SandboxManagerPort {
 
     return Promise.resolve(
       createSandboxLease({
+        authorizeInternalRead: this.options.authorizeInternalRead,
         context,
         leaseId,
         release: (releasedLeaseId) => this.releaseById(releasedLeaseId),

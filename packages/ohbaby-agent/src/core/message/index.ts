@@ -17,6 +17,7 @@ export {
 } from "./token-usage-metadata.js";
 export type { MessageOrigin } from "./origin.js";
 export type {
+  RuntimeInputOrigin,
   MessagePageOptions,
   MessagePage,
   SaveReasoningPartInput,

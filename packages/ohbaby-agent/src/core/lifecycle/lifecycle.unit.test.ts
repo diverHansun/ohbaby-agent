@@ -1,6 +1,8 @@
+import { RuntimeInputSnapshotChangedError } from "./runtime-input-error.js";
 import { createPromptCacheUsageTracker } from "../../adapters/ui-inprocess/prompt-cache-usage.js";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import * as llmStreaming from "../llm-client/index.js";
+import type { ModelRequestRecord } from "../llm-client/types.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -4440,4 +4442,172 @@ it("preserves the complete protocol reasoning after the real 256-segment display
   } finally {
     owner.dispose();
   }
+});
+
+describe("same-run durable input continuation", () => {
+  it("continues in one lifecycle and confirms only the frozen provider attempt membership", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    let finishes = 0;
+    const admitted: ModelRequestRecord[] = [];
+    const confirmed: string[] = [];
+    const beforeStep = vi.fn().mockResolvedValue([]);
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(
+        () =>
+          Promise.resolve({
+            ...preparedTurn([{ role: "user", content: "protected" }]),
+            request: {
+              messages: [{ role: "user", content: "protected" }],
+              tools: undefined,
+              inputIds: ["frozen-a"],
+            },
+          }),
+        { assembleRequestFromInput: false },
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [{ textDelta: "Waiting", finishReason: "stop" }],
+          [{ textDelta: "Final", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const events: LifecycleEvent[] = [];
+    const loop = lifecycle.run({
+      runId: "root",
+      sessionId: "session",
+      directory: "/repo",
+      modelId: "fake-model",
+      maxSteps: 3,
+      currentRunInputs: {
+        beforeStep,
+        beforeFinish: () =>
+          Promise.resolve(++finishes === 1 ? "continue" : "finish"),
+        admitRequestAttempt: async (request) => {
+          admitted.push(request);
+          await messageManager.updateMessage(request.messageId, {
+            modelRequests: [request],
+          });
+        },
+        confirmRequestSuccess: (requestId) => {
+          confirmed.push(requestId);
+          return Promise.resolve();
+        },
+      },
+    });
+    for (;;) {
+      const next = await loop.next();
+      if (next.done) {
+        expect(next.value).toMatchObject({
+          success: true,
+          finalResponse: "Final",
+          terminalReason: "completed",
+        });
+        break;
+      }
+      events.push(next.value);
+    }
+    expect(requests).toHaveLength(2);
+    expect(events.filter((event) => event.type === "turn:start")).toHaveLength(
+      1,
+    );
+    expect(events.filter((event) => event.type === "turn:end")).toHaveLength(1);
+    expect(
+      admitted.map((record) => [record.runId, record.step, record.inputIds]),
+    ).toEqual([
+      ["root", 1, ["frozen-a"]],
+      ["root", 2, ["frozen-a"]],
+    ]);
+    expect(confirmed).toEqual(admitted.map((record) => record.requestId));
+    expect(beforeStep).toHaveBeenCalledTimes(2);
+  });
+  it("does not wait or award extra steps after the existing final step", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const beforeFinish = vi.fn().mockResolvedValue("continue");
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(() =>
+        Promise.resolve(preparedTurn([{ role: "user", content: "finalize" }])),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "Budget end", finishReason: "stop" }]],
+        requests,
+      ),
+      messageManager: createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+      }),
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        runId: "root",
+        sessionId: "session",
+        directory: "/repo",
+        modelId: "fake-model",
+        maxSteps: 1,
+        currentRunInputs: {
+          beforeStep: () => Promise.resolve([]),
+          beforeFinish,
+          admitRequestAttempt: () => Promise.resolve(),
+          confirmRequestSuccess: () => Promise.resolve(),
+        },
+      }),
+    );
+    expect(result.terminalReason).toBe("max_steps_finalized");
+    expect(beforeFinish).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+  });
+  it("reprepares a stale observation before provider launch without spending a model step", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const beforeStep = vi.fn().mockResolvedValue([]);
+    let attempts = 0;
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(() =>
+        Promise.resolve(preparedTurn([{ role: "user", content: "fresh" }])),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "Final", finishReason: "stop" }]],
+        requests,
+      ),
+      messageManager: createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+      }),
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        runId: "root",
+        sessionId: "session",
+        directory: "/repo",
+        modelId: "fake-model",
+        maxSteps: 1,
+        currentRunInputs: {
+          beforeStep,
+          beforeFinish: () => Promise.resolve("finish"),
+          admitRequestAttempt: () => {
+            if (++attempts === 1)
+              return Promise.reject(new RuntimeInputSnapshotChangedError());
+            return Promise.resolve();
+          },
+          confirmRequestSuccess: () => Promise.resolve(),
+        },
+      }),
+    );
+    expect(result.terminalReason).toBe("max_steps_finalized");
+    expect(beforeStep).toHaveBeenCalledTimes(2);
+    expect(requests).toHaveLength(1);
+  });
 });

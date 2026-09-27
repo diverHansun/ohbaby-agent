@@ -1,3 +1,4 @@
+import { getMessageOrigin } from "../message/origin.js";
 import { hasNativeDependencies } from "./native-context.js";
 import {
   MASK_EXEMPT_TOOL_PREFIXES,
@@ -221,7 +222,7 @@ function protectedMessageIndexes(input: {
 
 function findLatestUserIndex(history: readonly MessageWithParts[]): number {
   for (let index = history.length - 1; index >= 0; index -= 1) {
-    if (history[index]?.info.role === "user") {
+    if (getMessageOrigin(history[index]) === "user") {
       return index;
     }
   }

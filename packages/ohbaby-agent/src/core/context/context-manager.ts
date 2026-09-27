@@ -24,7 +24,7 @@ import { appendFileOpsSummary, extractFileOps } from "./file-ops.js";
 import { isActivePart } from "./filters.js";
 import { getCompletedToolOutput, serializeHistory } from "./serialization.js";
 import { createMaskConfig, reduceForModel } from "./projection.js";
-import { serializeForLlm } from "./serializer.js";
+import { serializeForLlm, serializeHistoryMessages } from "./serializer.js";
 import { createScopedExclusiveLane } from "./scoped-exclusive-lane.js";
 import { shrinkSummaryHistory } from "./summary-overflow.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
@@ -638,7 +638,7 @@ export function createContextManager(
           isSubagent: input.isSubagent,
           toolNames: input.toolNames,
         }),
-      options.messageManager.listBySession(sessionId, {
+      loadModelHistory(sessionId, {
         contextScopeId: input.contextScopeId,
       }),
     ]);
@@ -652,6 +652,20 @@ export function createContextManager(
       systemPrompt,
       isSubagent: input.isSubagent,
     });
+  }
+
+  async function loadModelHistory(
+    sessionId: string,
+    scope: { readonly contextScopeId: string | undefined },
+  ): Promise<readonly MessageWithParts[]> {
+    const history = await options.messageManager.listBySession(
+      sessionId,
+      scope,
+    );
+    // A missing runtime ledger cannot safely infer whether these messages were sent.
+    return options.filterModelHistory
+      ? options.filterModelHistory(history)
+      : history.filter((message) => message.info.runtimeInput === undefined);
   }
 
   async function createRunPromptSnapshot(
@@ -1139,10 +1153,9 @@ export function createContextManager(
     readonly context: AssembledContext;
     readonly usage: ContextUsage;
   }> {
-    const rawHistory = await options.messageManager.listBySession(
-      req.sessionId,
-      { contextScopeId: req.contextScopeId },
-    );
+    const rawHistory = await loadModelHistory(req.sessionId, {
+      contextScopeId: req.contextScopeId,
+    });
     const context = assembleFromRawHistory({
       modelOrigin: req.assembled.modelOrigin,
       assembledAt: now(),
@@ -1412,10 +1425,9 @@ export function createContextManager(
       sessionId: req.sessionId,
       usageBefore: req.usageBefore,
     });
-    const committedRawHistory = await options.messageManager.listBySession(
-      req.sessionId,
-      { contextScopeId: req.contextScopeId },
-    );
+    const committedRawHistory = await loadModelHistory(req.sessionId, {
+      contextScopeId: req.contextScopeId,
+    });
     const committedContext = assembleFromRawHistory({
       modelOrigin: req.assembled.modelOrigin,
       assembledAt: now(),
@@ -1684,21 +1696,65 @@ export function createContextManager(
     );
   }
 
-  function prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn> {
+  async function prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn> {
+    const protectedInputs = structuredClone(input.protectedInputs ?? []);
+    const inputIds: string[] = [];
+    const protectedProjection: ModelMessage[] = [];
+    for (const message of protectedInputs) {
+      const origin = message.info.runtimeInput;
+      if (
+        !origin ||
+        !input.runId ||
+        origin.targetRunId !== input.runId ||
+        message.info.sessionId !== input.sessionId ||
+        message.info.contextScopeId !== input.contextScopeId ||
+        message.info.role !== "user"
+      )
+        throw new Error("Protected input owner does not match this run");
+      const projected = serializeHistoryMessages(
+        [message],
+        undefined,
+        input.modelOrigin,
+      );
+      if (!projected.length || inputIds.includes(origin.inputId))
+        throw new Error(
+          "Protected input has empty or duplicate request membership",
+        );
+      inputIds.push(origin.inputId);
+      protectedProjection.push(...projected);
+    }
     const snapshot = {
       ...input,
+      // Reuse the measured request-tail pipeline, without making durable inputs
+      // part of compressible history or replacing their message/ledger identity.
+      tailDirectives: protectedProjection.length
+        ? [...protectedProjection, ...(input.tailDirectives ?? [])]
+        : input.tailDirectives,
       reasoning:
         input.reasoning === undefined
           ? undefined
           : deepFreeze(structuredClone(input.reasoning)),
     };
-    return mutationLane.run(
+    const prepared = await mutationLane.run(
       scopedSessionKey({
         contextScopeId: input.contextScopeId,
         sessionId: input.sessionId,
       }),
       () => prepareTurnUnlocked(snapshot),
     );
+    if (input.protectedInputs === undefined) return prepared;
+    if (
+      inputIds.length &&
+      prepared.usage.currentTokens >
+        (prepared.usage.inputBudgetTokens ?? prepared.usage.contextLimit)
+    )
+      throw new Error(
+        "Current-run input batch exceeds the model input budget after context preparation",
+      );
+    return {
+      ...prepared,
+      request: deepFreeze({ ...prepared.request, inputIds }),
+    };
   }
 
   return {

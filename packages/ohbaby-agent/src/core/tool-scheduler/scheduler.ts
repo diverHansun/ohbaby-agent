@@ -65,6 +65,13 @@ interface ScheduledCall {
   readonly category: ToolCategory;
 }
 
+interface BatchPredecessor {
+  readonly callId: string;
+  readonly completion: Promise<unknown>;
+  required: boolean | undefined;
+  onResolved?: () => void;
+}
+
 interface PreparedCall extends ScheduledCall {
   readonly call: ToolCall;
   readonly tool: Tool;
@@ -106,6 +113,7 @@ interface ToolPermissionContext {
   readonly externalRead: boolean;
   readonly externalReadAskPattern?: string;
   readonly externalReadPath?: string;
+  readonly internalRead?: boolean;
   readonly externalWrite: boolean;
   readonly externalWritePath?: string;
   readonly preflight?: PreflightResult;
@@ -637,6 +645,8 @@ export function createToolScheduler(
             fact.reason === "predecessor" ? "waiting-predecessor" : "queued",
           phaseStartedAt: record.timestamp,
           waitReason: fact.reason,
+          blockingCallIds: fact.blockingCallIds,
+          predecessorsKnown: fact.predecessorsKnown,
         });
       if (fact.phase === "started")
         void delivery?.update({
@@ -1411,6 +1421,7 @@ export function createToolScheduler(
     };
 
     async function trustExternalReadPath(): Promise<void> {
+      if (context.internalRead) return;
       await context.environment?.trustPath?.({
         kind: "external-write-approved",
         path: trustedRootFromExternalPath(externalPath),
@@ -1425,7 +1436,7 @@ export function createToolScheduler(
           evaluatePermission(
             {
               callId: call.callId,
-              category: "dangerous",
+              category: context.internalRead ? "readonly" : "dangerous",
               messageId: call.messageId,
               params,
               sessionId: call.sessionId,
@@ -1867,6 +1878,11 @@ export function createToolScheduler(
       return {
         environment: request.environment,
         externalRead,
+        internalRead:
+          externalRead &&
+          tool.name === "read" &&
+          (await request.environment.authorizeInternalRead?.(canonicalPath)) ===
+            true,
         externalReadAskPattern: externalRead
           ? await externalPermissionAskPattern(canonicalPath)
           : undefined,
@@ -1939,6 +1955,7 @@ export function createToolScheduler(
     if (
       environment &&
       prepared.permissionContext.externalRead &&
+      !prepared.permissionContext.internalRead &&
       externalReadPath
     ) {
       return createExternalReadEnvironment(environment, externalReadPath);
@@ -2132,7 +2149,7 @@ export function createToolScheduler(
 
   async function executePrepared(
     prepared: PreparedCall,
-    predecessors: readonly Promise<unknown>[] = [],
+    predecessors: readonly BatchPredecessor[] = [],
   ): Promise<ToolCallResult> {
     let publish = factPublisher(prepared.owner, deliveries.get(prepared.call));
     try {
@@ -2145,11 +2162,32 @@ export function createToolScheduler(
       publish = factPublisher(prepared.owner, deliveries.get(prepared.call));
       if (predecessors.length) {
         transition(prepared.call, "queued");
-        publish({ phase: "waiting", reason: "predecessor" });
-        await waitForAbortable(
-          () => Promise.all(predecessors),
-          prepared.controller.signal,
-        );
+        const timestamp = now();
+        const publishPredecessors = (): void => {
+          publish({
+            phase: "waiting",
+            reason: "predecessor",
+            timestamp,
+            blockingCallIds: predecessors
+              .filter((p) => p.required === true)
+              .map((p) => p.callId),
+            predecessorsKnown: predecessors.every(
+              (p) => p.required !== undefined,
+            ),
+          });
+        };
+        for (const predecessor of predecessors)
+          predecessor.onResolved = publishPredecessors;
+        publishPredecessors();
+        try {
+          await waitForAbortable(
+            () => Promise.all(predecessors.map((p) => p.completion)),
+            prepared.controller.signal,
+          );
+        } finally {
+          for (const predecessor of predecessors)
+            predecessor.onResolved = undefined;
+        }
       }
       if (isStopped(prepared.call, prepared.controller))
         return makeCancelledResult(prepared.call);
@@ -2386,13 +2424,21 @@ export function createToolScheduler(
                 !batchConflict(known ?? { tool: previousTool }, current)
               )
                 return [];
-              return [
-                previousPlan.then((previous) =>
-                  batchConflict(previous, current)
+              const predecessor: BatchPredecessor = {
+                callId: batchCalls[previousIndex].callId,
+                required:
+                  known === undefined
+                    ? undefined
+                    : batchConflict(known, current),
+                completion: previousPlan.then((previous) => {
+                  predecessor.required = batchConflict(previous, current);
+                  predecessor.onResolved?.();
+                  return predecessor.required
                     ? running[previousIndex]
-                    : undefined,
-                ),
-              ];
+                    : undefined;
+                }),
+              };
+              return [predecessor];
             });
           return executePrepared(item.prepared, predecessors);
         }),

@@ -66,6 +66,8 @@ export interface ToolCommandContextOptions {
 }
 
 export interface ToolExecutionEnvironment {
+  /** Exact, registered runtime artifacts; never grants directory or write trust. */
+  authorizeInternalRead?(absolutePath: string): Promise<boolean>;
   readonly scopeKey?: string;
   retain?(): () => void | Promise<void>;
   readonly workdir: string;
@@ -172,6 +174,9 @@ export interface ToolExecutionObservation {
   readonly executionStartedAt?: number;
   readonly endedAt?: number;
   readonly waitReason?: AdmissionWaitReason;
+  /** Only necessary earlier calls in this batch; unknown plans are not approval facts. */
+  readonly blockingCallIds?: readonly string[];
+  readonly predecessorsKnown?: boolean;
   readonly outcome?:
     | "success"
     | "error"
@@ -337,6 +342,8 @@ export type AdmissionWaitReason =
   | "resource"
   | "source-cleanup";
 export interface ToolExecutionFact {
+  readonly blockingCallIds?: readonly string[];
+  readonly predecessorsKnown?: boolean;
   readonly owner: ToolExecutionOwner;
   readonly phase: "waiting" | "started" | "settled" | "cleanup";
   readonly timestamp: number;

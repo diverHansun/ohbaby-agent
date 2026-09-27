@@ -347,6 +347,7 @@ export function createMessageManager(
     },
   };
   return {
+    runtimeInputMemory: options.store.runtimeInputMemory,
     ...manager,
     createMessage: (input) =>
       commit(input.sessionId, () => manager.createMessage(input)),

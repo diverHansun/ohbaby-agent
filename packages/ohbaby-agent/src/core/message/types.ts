@@ -15,7 +15,15 @@ export interface PartTime {
   readonly compacted?: number;
 }
 
+export interface RuntimeInputOrigin {
+  readonly kind: "user-steer" | "subagent-result" | "subagent-status";
+  readonly inputId: string;
+  readonly targetRunId: string;
+  readonly sourceId: string;
+}
+
 interface MessageBase {
+  readonly runtimeInput?: RuntimeInputOrigin;
   readonly runId?: string;
   readonly id: string;
   readonly sessionId: string;
@@ -155,6 +163,7 @@ export interface MessageWithParts {
 }
 
 export type CreateMessageInput = {
+  readonly runtimeInput?: RuntimeInputOrigin;
   readonly id?: string;
   readonly runId?: string;
 } & (
@@ -321,6 +330,7 @@ export interface MessageCommitCoordinator {
 }
 
 export interface MessageManager {
+  readonly runtimeInputMemory?: RuntimeInputMemoryParticipant;
   getPart(partId: string): Promise<Part | undefined>;
   setCommitCoordinator(coordinator: MessageCommitCoordinator | undefined): void;
   saveReasoningPart(
@@ -361,6 +371,7 @@ export interface MessageManager {
 }
 
 export interface MessageStore {
+  readonly runtimeInputMemory?: RuntimeInputMemoryParticipant;
   getPart(partId: string): Promise<Part | undefined>;
   saveReasoningPart(
     input: SaveReasoningPartInput & { readonly updatedAt: number },
@@ -408,4 +419,10 @@ export interface MessageStore {
   ): Promise<MessageWithParts[]>;
   deleteMessage(messageId: string): Promise<void>;
   deleteBySession(sessionId: string): Promise<void>;
+}
+
+/** Synchronous participant for the in-memory queue/input/message atomic commit. */
+export interface RuntimeInputMemoryParticipant {
+  get(messageId: string): MessageWithParts | undefined;
+  put(message: MessageWithParts): void;
 }
