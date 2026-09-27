@@ -164,6 +164,18 @@ export class RunManager {
     });
   }
 
+  fail(runId: string, error: Error): void {
+    const record = this.recordsById.get(runId);
+    if (!record || !isActive(record) || record.abortController.signal.aborted)
+      return;
+    record.fatalError = error;
+    try {
+      this.revokePermissionsForRun(runId, error.message);
+    } finally {
+      record.abortController.abort(error);
+    }
+  }
+
   cancel(runId: string, reason = "run cancelled"): void {
     const record = this.recordsById.get(runId);
     if (!record) {
@@ -272,6 +284,7 @@ export class RunManager {
         tools: record.options.tools,
       };
       const worker = new RunWorker(context, {
+        getFatalError: (): Error | undefined => record.fatalError,
         lifecycle: this.deps.lifecycle,
         streamBridge: this.deps.streamBridge,
         hookExecutor: this.deps.hookExecutor,
@@ -308,6 +321,15 @@ export class RunManager {
       };
     }
 
+    if (record.fatalError) {
+      outcome = {
+        ...outcome,
+        status: "failed",
+        error: record.fatalError.message,
+        errorData: normalizeRunError(record.fatalError),
+        terminalReason: "tool_persistence_failure",
+      };
+    }
     return this.finalizeRun(record, outcome);
   }
 

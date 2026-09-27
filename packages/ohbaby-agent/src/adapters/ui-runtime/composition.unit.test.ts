@@ -771,8 +771,8 @@ describe("createUiRuntimeComposition skill tools", () => {
   it("interrupts a parent subagent tree from durable run identity after manager eviction", async () => {
     const bus = createBus();
     const runLedger = createInMemoryRunLedger();
-    const interruptByParent = vi
-      .spyOn(SessionSubagentHost.prototype, "interruptByParent")
+    const interruptByRootRun = vi
+      .spyOn(SessionSubagentHost.prototype, "interruptByRootRun")
       .mockResolvedValue([]);
     const composition = await createUiRuntimeComposition({
       agentManager: new AgentManager(),
@@ -804,14 +804,14 @@ describe("createUiRuntimeComposition skill tools", () => {
       ).resolves.toBeUndefined();
 
       expect(cancelRun).not.toHaveBeenCalled();
-      expect(interruptByParent).toHaveBeenCalledWith(
-        "session_parent",
+      expect(interruptByRootRun).toHaveBeenCalledWith(
+        "run_evicted",
         "user cancelled",
       );
     } finally {
       getRun.mockRestore();
       cancelRun.mockRestore();
-      interruptByParent.mockRestore();
+      interruptByRootRun.mockRestore();
       await composition.dispose();
     }
   });

@@ -862,6 +862,29 @@ it("freezes accepted run reasoning and isolates sibling context scopes", async (
 });
 
 describe("RunManager", () => {
+  it("preserves fatal persistence failure instead of reporting an abort as user cancellation", async () => {
+    const lifecycle = new AbortAwareLifecycle();
+    const { manager, ledger, hooks } = createManager(lifecycle);
+    const record = await manager.create({
+      sessionId: "fatal_session",
+      triggerSource: "user",
+      directory: "/repo",
+      modelId: "test",
+    });
+    await lifecycle.started.promise;
+    manager.fail(record.runId, new Error("subagent database failed"));
+    manager.cancel(record.runId, "late user cancellation");
+    const completion = await manager.waitForCompletion(record.runId);
+    expect(completion).toMatchObject({
+      status: "failed",
+      error: "subagent database failed",
+    });
+    expect((await ledger.get(record.runId))?.status).toBe("failed");
+    expect(hooks.contexts.at(-1)).toMatchObject({
+      status: "failed",
+      error: "subagent database failed",
+    });
+  });
   it("passes the lifecycle's final body through this run's completion", async () => {
     const { manager } = createManager(new SessionLifecycle());
     const record = await manager.create({

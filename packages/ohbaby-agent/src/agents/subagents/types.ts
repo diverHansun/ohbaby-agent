@@ -1,4 +1,5 @@
 import type { ToolExecutionEnvironment } from "../../core/tool-scheduler/index.js";
+import type { SubagentExecutionRecord } from "./execution-store.js";
 import type { SubagentRole } from "../roles.js";
 
 export type SubagentInstanceStatus =
@@ -11,6 +12,11 @@ export type SubagentInstanceStatus =
   | "cancelled";
 
 export interface QueuedSubagentInput {
+  /** Absent only on legacy instance projections; never infer task ownership. */
+  readonly executionId?: string;
+  readonly rootRunId?: string;
+  readonly requesterRunId?: string;
+  readonly requesterScopeId?: string;
   readonly prompt: string;
   readonly timeoutMs?: number;
   readonly workdir?: string;
@@ -51,6 +57,9 @@ export interface SubagentLookupInput {
 export type SubagentRunMode = "foreground" | "background";
 
 export interface SubagentRunInput {
+  readonly requesterRunId: string;
+  readonly requesterMessageId: string;
+  readonly requestId: string;
   /** Internal invoking scope, supplied by tool execution context. */
   readonly parentContextScopeId?: string;
   readonly parentSessionId: string;
@@ -69,7 +78,8 @@ export interface SubagentRunInput {
 export interface SubagentRunResult {
   /** This input is retained in the queue and has not run. */
   readonly paused?: true;
-  readonly item: SubagentInstanceRecord;
+  readonly execution: SubagentExecutionRecord;
+  readonly item?: SubagentInstanceRecord;
   readonly output?: string;
   readonly success?: boolean;
 }
@@ -77,15 +87,19 @@ export interface SubagentRunResult {
 export interface SubagentStatusInput {
   readonly parentSessionId: string;
   readonly subagentId?: string;
+  readonly executionId?: string;
+  readonly parentContextScopeId?: string;
 }
 
 export interface SubagentStatusResult {
   readonly items: readonly SubagentInstanceRecord[];
+  readonly executions: readonly SubagentExecutionRecord[];
 }
 
 export interface SubagentCloseResult {
+  readonly subagentId: string;
   readonly reason?: string;
-  readonly item: SubagentInstanceRecord;
+  readonly item?: SubagentInstanceRecord;
   readonly previousStatus: SubagentInstanceStatus;
 }
 

@@ -153,6 +153,7 @@ export interface RunWorkerResult {
 }
 
 export interface RunWorkerDeps {
+  readonly getFatalError?: () => Error | undefined;
   readonly onStepUsage?: RunStepUsageObserver;
   readonly lifecycle: RunLifecycle;
   readonly streamBridge: StreamBridge;
@@ -170,6 +171,7 @@ export interface ManagedRunRecord extends RunRecord {
   completion?: Promise<RunCompletion>;
   sandboxLease?: SandboxLease;
   cancelReason?: string;
+  fatalError?: Error;
   status: RunStatus;
   startedAt?: number;
   endedAt?: number;

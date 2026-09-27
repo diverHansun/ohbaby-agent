@@ -51,6 +51,8 @@ import {
   AgentService,
   DEFAULT_SUBAGENT_ROLE,
   InMemorySubagentInstanceStore,
+  InMemorySubagentExecutionStore,
+  type SubagentExecutionStore,
   SessionSubagentHost,
   type StartSessionParams,
   SUBAGENT_ROLES,
@@ -177,6 +179,7 @@ export interface UiRuntimeCompositionOptions {
   readonly onGoalChange?: GoalServiceDeps["onChange"];
   readonly onTodoWrite?: (event: TodoWriteEvent) => void;
   readonly subagentInstanceStore?: SubagentInstanceStore;
+  readonly subagentExecutionStore?: SubagentExecutionStore;
   readonly subagentOwnerId?: string;
   readonly subagentOwnerPid?: number;
 }
@@ -282,6 +285,8 @@ export async function createUiRuntimeComposition(
       messageCleaner: options.messageManager,
       now: options.now,
     });
+  const subagentExecutionStore =
+    options.subagentExecutionStore ?? new InMemorySubagentExecutionStore();
   const subagentInstanceStore =
     options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
   const runtimeGeneration = randomUUID();
@@ -674,6 +679,33 @@ export async function createUiRuntimeComposition(
   };
 
   const subagentHost = new SessionSubagentHost({
+    executionStore: subagentExecutionStore,
+    async resolveRequester(
+      input,
+    ): Promise<{ rootRunId: string; rootSessionId: string }> {
+      const run = await runLedger.get(input.requesterRunId);
+      const session = await sessionManager.get(input.parentSessionId);
+      if (
+        run?.sessionId !== input.parentSessionId ||
+        run.contextScopeId !== input.parentContextScopeId ||
+        !["pending", "running"].includes(run.status) ||
+        !session ||
+        session.isSubagent ||
+        session.parentId !== undefined
+      ) {
+        throw new Error("Invalid or inactive primary subagent requester run");
+      }
+      return { rootRunId: run.runId, rootSessionId: run.sessionId };
+    },
+    onFatal(error, rootRunId): void {
+      runManager.fail(rootRunId, error);
+      options.onNotice?.({
+        key: `subagent:fatal:${rootRunId}`,
+        level: "error",
+        message: error.message,
+        title: "Subagent result persistence failed",
+      });
+    },
     getParentReasoning: (sessionId, contextScopeId): ReasoningIntent =>
       runManager.getActiveReasoning(sessionId, contextScopeId) ??
       mergeReasoningIntent(options.llmClient.config.reasoning),
@@ -697,19 +729,44 @@ export async function createUiRuntimeComposition(
     runId: string,
     reason?: string,
   ): Promise<void> => {
-    const run = runManager.get(runId);
-    const parentSessionId =
-      run?.sessionId ?? (await runLedger.get(runId))?.sessionId;
-    if (run) {
-      runManager.cancel(runId, reason);
+    const run = await runLedger.get(runId);
+    if (!run) return;
+    const session = await sessionManager.get(run.sessionId);
+    let rootRunId = runId;
+    if (session?.isSubagent && session.parentId) {
+      let before: { createdAt: number; executionId: string } | undefined;
+      let found = false;
+      for (;;) {
+        const executions = await subagentExecutionStore.list({
+          parentSessionId: session.parentId,
+          subagentId: run.contextScopeId,
+          limit: 200,
+          before,
+        });
+        const execution = executions.find(
+          (record) =>
+            record.childRunId === runId &&
+            record.childSessionId === run.sessionId &&
+            record.childScopeId === run.contextScopeId,
+        );
+        if (execution) {
+          rootRunId = execution.rootRunId;
+          found = true;
+          break;
+        }
+        if (executions.length < 200) break;
+        const last = executions[executions.length - 1];
+        before = { createdAt: last.createdAt, executionId: last.executionId };
+      }
+      if (!found) return;
     }
-    if (parentSessionId === undefined) {
-      return;
-    }
-    await subagentHost.interruptByParent(
-      parentSessionId,
+    // Calling the async method seals synchronously, before cancellation callbacks.
+    const interrupted = subagentHost.interruptByRootRun(
+      rootRunId,
       reason ?? "parent run interrupted",
     );
+    if (runManager.get(rootRunId)) runManager.cancel(rootRunId, reason);
+    await interrupted;
   };
 
   const unsubscribeSessionRemoved = options.bus.subscribe(
@@ -1066,10 +1123,13 @@ export async function createUiRuntimeComposition(
 
     interruptRunTree,
 
-    interruptSubagentsByParent(parentSessionId, reason): Promise<void> {
-      return subagentHost
-        .interruptByParent(parentSessionId, reason)
-        .then(() => undefined);
+    async interruptSubagentsByParent(parentSessionId, reason): Promise<void> {
+      const roots = await runLedger.getActiveRuns(parentSessionId);
+      await Promise.all(
+        roots
+          .filter((run) => run.contextScopeId === undefined)
+          .map((run) => subagentHost.interruptByRootRun(run.runId, reason)),
+      );
     },
 
     getActivityReasons(): readonly string[] {

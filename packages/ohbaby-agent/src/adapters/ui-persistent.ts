@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { UiBackendClient } from "ohbaby-sdk";
 import { createBus, type BusInstance } from "../bus/index.js";
-import { DatabaseSubagentInstanceStore } from "../agents/index.js";
+import {
+  DatabaseSubagentExecutionStore,
+  DatabaseSubagentInstanceStore,
+} from "../agents/index.js";
 import {
   createDatabaseMessageStore,
   createMessageManager,
@@ -569,6 +572,7 @@ export function createPersistentUiBackendClient(
     ownerPid: process.pid,
   });
   const subagentInstanceStore = new DatabaseSubagentInstanceStore({ db });
+  const subagentExecutionStore = new DatabaseSubagentExecutionStore({ db });
   const startupSessionMode = resolveStartupSessionMode(options);
   const projectRoot = resolvePersistentProjectRoot(options);
   const stateStore = createPersistentUiStateStore({
@@ -632,6 +636,7 @@ export function createPersistentUiBackendClient(
       stateStore,
       streamBridge: options.streamBridge,
       subagentInstanceStore,
+      subagentExecutionStore,
       subagentOwnerId: backendOwnerId,
       subagentOwnerPid: process.pid,
       workdir: options.workdir,

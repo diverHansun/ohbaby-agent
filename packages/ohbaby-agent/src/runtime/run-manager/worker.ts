@@ -156,18 +156,24 @@ export class RunWorker {
 
     try {
       const result = await this.consumeLifecycle();
-      const status = this.context.abortSignal.aborted
-        ? "cancelled"
-        : result.success
-          ? "succeeded"
-          : "failed";
+      const fatalError = this.deps.getFatalError?.();
+      const status = fatalError
+        ? "failed"
+        : this.context.abortSignal.aborted
+          ? "cancelled"
+          : result.success
+            ? "succeeded"
+            : "failed";
       const error =
-        status === "failed"
+        fatalError?.message ??
+        (status === "failed"
           ? result.finalResponse || "Lifecycle did not complete successfully"
           : status === "cancelled"
             ? abortReason(this.context.abortSignal)
-            : undefined;
-      const terminalReason = result.terminalReason;
+            : undefined);
+      const terminalReason = fatalError
+        ? "tool_persistence_failure"
+        : result.terminalReason;
 
       await this.executeHook(
         "post-run",
@@ -202,13 +208,17 @@ export class RunWorker {
         ...(terminalReason === undefined ? {} : { terminalReason }),
       };
     } catch (error) {
-      const status: RunStatus = this.context.abortSignal.aborted
-        ? "cancelled"
-        : "failed";
+      const fatalError = this.deps.getFatalError?.();
+      const status: RunStatus = fatalError
+        ? "failed"
+        : this.context.abortSignal.aborted
+          ? "cancelled"
+          : "failed";
       const message =
-        status === "cancelled"
+        fatalError?.message ??
+        (status === "cancelled"
           ? abortReason(this.context.abortSignal)
-          : errorToMessage(error);
+          : errorToMessage(error));
 
       await this.executeHook(
         "post-run",

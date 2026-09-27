@@ -275,6 +275,7 @@ export interface InProcessUiBackendOptions {
   readonly sandboxManager?: HostLocalSandboxManager;
   readonly streamBridge?: StreamBridge;
   readonly subagentInstanceStore?: SubagentInstanceStore;
+  readonly subagentExecutionStore?: import("../agents/index.js").SubagentExecutionStore;
   readonly subagentOwnerId?: string;
   readonly subagentOwnerPid?: number;
   readonly workdir?: string;
@@ -545,7 +546,9 @@ export function createInProcessUiBackendClient(
       });
       return;
     }
-    const firstWriter = admissionQueue.findIndex((item) => item.kind === "write");
+    const firstWriter = admissionQueue.findIndex(
+      (item) => item.kind === "write",
+    );
     const readCount = firstWriter === -1 ? admissionQueue.length : firstWriter;
     for (const next of admissionQueue.splice(0, readCount)) {
       admissionReaders += 1;
@@ -857,6 +860,7 @@ export function createInProcessUiBackendClient(
         skillRegistry,
         streamBridge: options.streamBridge,
         subagentInstanceStore: options.subagentInstanceStore,
+        subagentExecutionStore: options.subagentExecutionStore,
         subagentOwnerId: options.subagentOwnerId,
         subagentOwnerPid: options.subagentOwnerPid,
         workdir: baseProjectRoot,

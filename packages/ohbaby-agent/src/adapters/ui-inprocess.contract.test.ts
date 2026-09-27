@@ -4396,7 +4396,8 @@ describe("createInProcessUiBackendClient", () => {
       parentRequests.at(-1)?.messages,
     );
     expect(statusToolResultText).toContain("subagent_1");
-    expect(statusToolResultText).toContain("child follow-up output");
+    expect(statusToolResultText).not.toContain("child follow-up output");
+    expect(statusToolResultText).toContain("resultStored");
   });
 
   it("closes a running background subagent without aborting the parent run", async () => {
@@ -4439,7 +4440,9 @@ describe("createInProcessUiBackendClient", () => {
     // close updates the subagent record synchronously and schedules run-ledger
     // cleanup through onClosed; observe that eventual terminal fact directly.
     await vi.waitFor(async () => {
-      expect(await runLedger.get("run_2")).toMatchObject({ status: "cancelled" });
+      expect(await runLedger.get("run_2")).toMatchObject({
+        status: "cancelled",
+      });
     });
     const childRun = await runLedger.get("run_2");
     expect(childRun).toMatchObject({ status: "cancelled" });

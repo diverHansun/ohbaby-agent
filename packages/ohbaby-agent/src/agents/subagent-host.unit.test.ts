@@ -15,7 +15,10 @@ import { InMemorySubagentInstanceStore } from "./subagents/in-memory-store.js";
 import type {
   SubagentInstanceRecord,
   SubagentInstanceUpdate,
+  SubagentRunInput,
+  SubagentRunResult,
 } from "./subagents/types.js";
+import { InMemorySubagentExecutionStore } from "./subagents/execution-store.js";
 import { SessionSubagentHost } from "./subagent-host.js";
 import { createSubagentTools } from "../tools/subagent.js";
 import { formatToolResultContentForModel } from "../core/context/tool-metadata-projection.js";
@@ -101,6 +104,14 @@ function createHostFixture(
       } satisfies RuntimeAgent),
   );
   const host = new SessionSubagentHost({
+    executionStore: new InMemorySubagentExecutionStore(),
+    resolveRequester: (
+      input,
+    ): Promise<{ rootRunId: string; rootSessionId: string }> =>
+      Promise.resolve({
+        rootRunId: input.requesterRunId,
+        rootSessionId: input.parentSessionId,
+      }),
     getParentReasoning: options.getParentReasoning,
     agentManager: { getRuntimeAgent },
     createRunId: (() => {
@@ -166,6 +177,68 @@ function flushMicrotasks(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+let invocationSequence = 0;
+/** Old worker-behavior cases observe instance binding explicitly; acceptance itself is tested separately. */
+async function runAndObserve(
+  host: SessionSubagentHost,
+  input: Omit<
+    SubagentRunInput,
+    "requesterRunId" | "requesterMessageId" | "requestId"
+  >,
+): Promise<SubagentRunResult & { item: SubagentInstanceRecord }> {
+  const result = await host.run({
+    ...input,
+    requesterRunId: "parent_run",
+    requesterMessageId: "parent_message",
+    requestId: `call_${String(++invocationSequence)}`,
+  });
+  if (result.item) return { ...result, item: result.item };
+  for (let i = 0; i < 100; i++) {
+    const status = await host.status({
+      parentSessionId: input.parentSessionId,
+      subagentId: result.execution.subagentId,
+    });
+    const item = status.items.at(0);
+    const failed = status.executions.find(
+      (entry) =>
+        entry.executionId === result.execution.executionId &&
+        entry.status === "failed",
+    );
+    if (
+      failed &&
+      !item?.currentInput?.executionId?.includes(result.execution.executionId)
+    )
+      throw new Error(failed.error);
+    if (
+      item &&
+      (item.currentInput?.executionId === result.execution.executionId ||
+        item.pendingQueue.some(
+          (queued) => queued.executionId === result.execution.executionId,
+        ) ||
+        status.executions.some(
+          (entry) =>
+            entry.executionId === result.execution.executionId &&
+            !["queued", "running"].includes(entry.status),
+        )) &&
+      item.status !== "pending"
+    )
+      return { ...result, item };
+    const execution = status.executions.find(
+      (entry) => entry.executionId === result.execution.executionId,
+    );
+    if (execution?.status === "failed") throw new Error(execution.error);
+    await Promise.resolve();
+  }
+  const item = (
+    await host.status({
+      parentSessionId: input.parentSessionId,
+      subagentId: result.execution.subagentId,
+    })
+  ).items.at(0);
+  if (!item) throw new Error("Instance did not bind");
+  return { ...result, item };
+}
+
 describe("SessionSubagentHost", () => {
   it.each(["body", "empty", "failed", "interrupted", "timed_out"] as const)(
     "delivers the foreground %s result even with a later background input queued",
@@ -194,6 +267,7 @@ describe("SessionSubagentHost", () => {
           ...(outcome === "timed_out" ? { timeout_ms: 100 } : {}),
         },
         {
+          runId: "parent_run",
           callId: "first",
           messageId: "message",
           sessionId: "parent_1",
@@ -202,7 +276,7 @@ describe("SessionSubagentHost", () => {
       );
       await startedPromise;
       try {
-        await host.run({
+        await runAndObserve(host, {
           mode: "background",
           parentSessionId: "parent_1",
           subagentId: "subagent_1",
@@ -268,7 +342,7 @@ describe("SessionSubagentHost", () => {
             started();
           }),
       );
-      const first = await host.run({
+      const first = await runAndObserve(host, {
         mode: "background",
         parentSessionId: "parent_1",
         role: "explore",
@@ -284,6 +358,7 @@ describe("SessionSubagentHost", () => {
         const second = tool.execute(
           { subagent_id: first.item.subagentId, prompt: "second" },
           {
+            runId: "parent_run",
             callId: "second",
             messageId: "message",
             sessionId: "parent_1",
@@ -315,7 +390,7 @@ describe("SessionSubagentHost", () => {
         expect(
           (await host.status({ parentSessionId: "parent_1" })).items[0]
             ?.pendingQueue,
-        ).toEqual([{ prompt: "second" }]);
+        ).toMatchObject([{ prompt: "second" }]);
       } finally {
         release({
           mode: "waitForCompletion",
@@ -336,7 +411,7 @@ describe("SessionSubagentHost", () => {
       success: false,
       error: "old failure",
     });
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "first",
@@ -349,6 +424,7 @@ describe("SessionSubagentHost", () => {
     const result = await tool.execute(
       { subagent_id: first.item.subagentId },
       {
+        runId: "parent_run",
         callId: "close",
         messageId: "message",
         sessionId: "parent_1",
@@ -374,7 +450,7 @@ describe("SessionSubagentHost", () => {
           release = resolve;
         }),
     );
-    await host.run({
+    await runAndObserve(host, {
       parentSessionId: "parent_1",
       role: "explore",
       prompt: "background",
@@ -405,7 +481,7 @@ describe("SessionSubagentHost", () => {
       isSubagent: true,
       tools: {},
     });
-    await host.run({
+    await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       role: "explore",
@@ -426,7 +502,7 @@ describe("SessionSubagentHost", () => {
       error: "run cancelled by owner",
     });
 
-    const result = await host.run({
+    const result = await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       role: "explore",
@@ -437,7 +513,7 @@ describe("SessionSubagentHost", () => {
     expect(result.item.error).toBe("run cancelled by owner");
     expect(result.item.closedAt).toBeUndefined();
     await expect(
-      host.run({
+      runAndObserve(host, {
         mode: "foreground",
         parentSessionId: "parent_1",
         subagentId: result.item.subagentId,
@@ -453,7 +529,7 @@ describe("SessionSubagentHost", () => {
       ),
     );
     const { host, turn } = createHostFixture({ getParentReasoning });
-    await host.run({
+    await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       parentContextScopeId: "sibling-off",
@@ -476,7 +552,7 @@ describe("SessionSubagentHost", () => {
           finishFirst = resolve;
         }),
     );
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       role: "explore",
@@ -484,7 +560,7 @@ describe("SessionSubagentHost", () => {
     });
     await flushMicrotasks();
     parentReasoning = mergeReasoningIntent({ enabled: false, effort: "high" });
-    await host.run({
+    await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       subagentId: first.item.subagentId,
@@ -511,7 +587,7 @@ describe("SessionSubagentHost", () => {
         explicit: { enabled: true, effort: true },
       },
     ]);
-    await host.run({
+    await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       subagentId: first.item.subagentId,
@@ -527,7 +603,7 @@ describe("SessionSubagentHost", () => {
     });
 
     await expect(
-      host.run({
+      runAndObserve(host, {
         mode: "foreground",
         parentSessionId: "parent_1",
         prompt: "inspect",
@@ -543,7 +619,7 @@ describe("SessionSubagentHost", () => {
     });
 
     await expect(
-      host.run({
+      runAndObserve(host, {
         mode: "background",
         parentSessionId: "parent_1",
         prompt: "inspect",
@@ -572,7 +648,7 @@ describe("SessionSubagentHost", () => {
         }),
     );
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
@@ -581,7 +657,7 @@ describe("SessionSubagentHost", () => {
     await flushMicrotasks();
 
     await expect(
-      host.run({
+      runAndObserve(host, {
         mode: "background",
         parentSessionId: "parent_1",
         prompt: "must not become a ghost task",
@@ -621,7 +697,7 @@ describe("SessionSubagentHost", () => {
       );
     };
 
-    const result = await host.run({
+    const result = await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "must not start",
@@ -642,7 +718,7 @@ describe("SessionSubagentHost", () => {
 
     store.onClaim = undefined;
     await expect(
-      host.run({
+      runAndObserve(host, {
         mode: "foreground",
         parentSessionId: "parent_1",
         prompt: "resume after interruption",
@@ -665,7 +741,7 @@ describe("SessionSubagentHost", () => {
   it("runs foreground subagents through scoped AgentInstance identity", async () => {
     const { createInstance, host, turn } = createHostFixture();
 
-    const result = await host.run({
+    const result = await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "inspect",
@@ -719,7 +795,7 @@ describe("SessionSubagentHost", () => {
     });
 
     await expect(
-      host.run({
+      runAndObserve(host, {
         mode: "foreground",
         parentSessionId: "parent_1",
         prompt: "continue",
@@ -732,7 +808,7 @@ describe("SessionSubagentHost", () => {
   it("treats closed subagents as terminal and rejects later turns", async () => {
     const { host, turn } = createHostFixture();
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "inspect",
@@ -743,10 +819,10 @@ describe("SessionSubagentHost", () => {
       subagentId: first.item.subagentId,
     });
 
-    expect(typeof closed.item.closedAt).toBe("number");
-    expect(closed.item.status).toBe("cancelled");
+    expect(typeof closed.item?.closedAt).toBe("number");
+    expect(closed.item?.status).toBe("cancelled");
     await expect(
-      host.run({
+      runAndObserve(host, {
         mode: "foreground",
         parentSessionId: "parent_1",
         prompt: "try again",
@@ -773,7 +849,7 @@ describe("SessionSubagentHost", () => {
         }),
     );
 
-    const running = host.run({
+    const running = runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "slow",
@@ -793,6 +869,7 @@ describe("SessionSubagentHost", () => {
     const closed = await closeTool.execute(
       { subagent_id: subagentId },
       {
+        runId: "parent_run",
         callId: "close",
         messageId: "message",
         sessionId: "parent_1",
@@ -837,7 +914,7 @@ describe("SessionSubagentHost", () => {
         }),
     );
 
-    const running = host.run({
+    const running = runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "slow",
@@ -853,7 +930,7 @@ describe("SessionSubagentHost", () => {
     ).resolves.toMatchObject({
       items: [
         expect.objectContaining({
-          currentInput: { prompt: "slow" },
+          currentInput: expect.objectContaining({ prompt: "slow" }) as unknown,
           currentRunId: "run_1",
           status: "running",
         }),
@@ -877,7 +954,7 @@ describe("SessionSubagentHost", () => {
 
   it("keeps per-turn timeout overrides out of the instance default and reclaims owner", async () => {
     const { host, store, turn } = createHostFixture();
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "first",
@@ -903,7 +980,7 @@ describe("SessionSubagentHost", () => {
         }),
     );
 
-    const second = host.run({
+    const second = runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "second",
@@ -925,17 +1002,20 @@ describe("SessionSubagentHost", () => {
     ).resolves.toMatchObject({
       items: [
         expect.objectContaining({
-          currentInput: { prompt: "second", timeoutMs: 5_000 },
+          currentInput: expect.objectContaining({
+            prompt: "second",
+            timeoutMs: 5_000,
+          }) as unknown,
           ownerId: "owner_current",
           ownerPid: 101,
-          timeoutMs: 2 * 60 * 60 * 1_000,
+          timeoutMs: 30 * 60 * 1_000,
         }),
       ],
     });
 
     complete();
     await expect(second).resolves.toMatchObject({
-      item: { status: "completed", timeoutMs: 2 * 60 * 60 * 1_000 },
+      item: { status: "completed", timeoutMs: 30 * 60 * 1_000 },
     });
   });
 
@@ -975,7 +1055,7 @@ describe("SessionSubagentHost", () => {
       success: true,
     } satisfies AgentRunResult);
 
-    const created = await host.run({
+    const created = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "slow background",
@@ -1030,7 +1110,7 @@ describe("SessionSubagentHost", () => {
           }),
       );
 
-      const running = host.run({
+      const running = runAndObserve(host, {
         mode: "foreground",
         parentSessionId: "parent_1",
         prompt: "slow",
@@ -1066,7 +1146,7 @@ describe("SessionSubagentHost", () => {
           }),
       );
 
-      const running = host.run({
+      const running = runAndObserve(host, {
         mode: "foreground",
         parentSessionId: "parent_1",
         prompt: "ignore abort",
@@ -1110,13 +1190,16 @@ describe("SessionSubagentHost", () => {
         }),
     );
 
-    const running = host.run({
+    const running = runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "slow",
       role: "explore",
       signal: controller.signal,
       timeoutMs: 50,
+    });
+    await vi.waitFor(() => {
+      expect(turn).toHaveBeenCalledTimes(1);
     });
     controller.abort("Subagent timed out after 50ms");
     const result = await running;
@@ -1135,7 +1218,7 @@ describe("SessionSubagentHost", () => {
     const { host, sessionCreate, store, turn } = createHostFixture();
 
     await expect(
-      host.run({
+      runAndObserve(host, {
         mode: "background",
         parentSessionId: "parent_1",
         prompt: "bad timeout",
@@ -1149,14 +1232,14 @@ describe("SessionSubagentHost", () => {
     expect(turn).not.toHaveBeenCalled();
 
     await expect(
-      host.run({
+      runAndObserve(host, {
         mode: "background",
         parentSessionId: "parent_1",
         prompt: "too long",
         role: "explore",
         timeoutMs: 7_200_001,
       }),
-    ).rejects.toThrow("must not exceed 7200000ms");
+    ).rejects.toThrow("must not exceed 1800000ms");
   });
 
   it("lists status as items and marks restarted active subagents interrupted without auto-running", async () => {
@@ -1211,7 +1294,7 @@ describe("SessionSubagentHost", () => {
         }),
     );
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
@@ -1224,7 +1307,7 @@ describe("SessionSubagentHost", () => {
       });
       return status.items[0]?.status === "running";
     });
-    await host.run({
+    await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "second",
@@ -1241,14 +1324,14 @@ describe("SessionSubagentHost", () => {
     ).resolves.toMatchObject({
       items: [
         expect.objectContaining({
-          pendingQueue: [{ prompt: "second" }],
+          pendingQueue: [expect.objectContaining({ prompt: "second" })],
           status: "interrupted",
         }),
       ],
     });
     expect(turn).toHaveBeenCalledTimes(1);
     await expect(
-      host.run({
+      runAndObserve(host, {
         mode: "background",
         parentSessionId: "parent_1",
         prompt: "third",
@@ -1257,7 +1340,7 @@ describe("SessionSubagentHost", () => {
     ).rejects.toThrow("Subagent host is disposed");
   });
 
-  it("marks a record interrupted when disposal wins during creation admission", async () => {
+  it("retains interrupted execution without creating an instance when disposal wins admission", async () => {
     const { getRuntimeAgent, host, store } = createHostFixture();
     let releaseAgent!: (agent: RuntimeAgent) => void;
     getRuntimeAgent.mockImplementationOnce(
@@ -1266,28 +1349,32 @@ describe("SessionSubagentHost", () => {
           releaseAgent = resolve;
         }),
     );
-    const running = host.run({
+    const accepted = await host.run({
+      requesterRunId: "dispose_root",
+      requesterMessageId: "message",
+      requestId: "held_create",
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "created during dispose",
       role: "explore",
     });
     await flushMicrotasks();
-
     await host.dispose();
     releaseAgent({
       config: { maxSteps: 5, mode: "subagent", name: "explore" },
       isSubagent: true,
       tools: {},
     });
-
-    await expect(running).rejects.toThrow("Subagent host is disposed");
-    await expect(store.listByParent("parent_1")).resolves.toMatchObject([
-      {
-        pendingQueue: [{ prompt: "created during dispose" }],
-        status: "interrupted",
-      },
-    ]);
+    await flushMicrotasks();
+    expect(
+      (
+        await host.status({
+          parentSessionId: "parent_1",
+          executionId: accepted.execution.executionId,
+        })
+      ).executions[0].status,
+    ).toBe("interrupted");
+    expect(await store.listByParent("parent_1")).toEqual([]);
   });
 
   it("rejects cross-host input while another runtime owns the active run", async () => {
@@ -1299,7 +1386,7 @@ describe("SessionSubagentHost", () => {
           // The first runtime keeps ownership for this assertion.
         }),
     );
-    const first = await firstFixture.host.run({
+    const first = await runAndObserve(firstFixture.host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
@@ -1308,7 +1395,7 @@ describe("SessionSubagentHost", () => {
     const secondFixture = createHostFixture({ existingChild: child, store });
 
     await expect(
-      secondFixture.host.run({
+      runAndObserve(secondFixture.host, {
         mode: "background",
         parentSessionId: "parent_1",
         prompt: "must retry later",
@@ -1351,7 +1438,7 @@ describe("SessionSubagentHost", () => {
         } satisfies AgentRunResult),
       );
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
@@ -1359,7 +1446,7 @@ describe("SessionSubagentHost", () => {
     });
     await flushMicrotasks();
 
-    const second = host.run({
+    const second = runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "second",
@@ -1400,7 +1487,7 @@ describe("SessionSubagentHost", () => {
           };
         }),
     );
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
@@ -1408,7 +1495,7 @@ describe("SessionSubagentHost", () => {
     });
     await flushMicrotasks();
     const controller = new AbortController();
-    const queued = host.run({
+    const queued = runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "cancel me",
@@ -1462,19 +1549,19 @@ describe("SessionSubagentHost", () => {
         }),
     );
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first active",
       role: "explore",
     });
-    const second = await host.run({
+    const second = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "second active",
       role: "research",
     });
-    await host.run({
+    await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first queued",
@@ -1489,7 +1576,7 @@ describe("SessionSubagentHost", () => {
     expect(interrupted).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          pendingQueue: [{ prompt: "first queued" }],
+          pendingQueue: [expect.objectContaining({ prompt: "first queued" })],
           status: "interrupted",
           subagentId: first.item.subagentId,
         }),
@@ -1531,7 +1618,7 @@ describe("SessionSubagentHost", () => {
         }),
     );
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
@@ -1539,7 +1626,7 @@ describe("SessionSubagentHost", () => {
     });
     await flushMicrotasks();
 
-    const queued = host.run({
+    const queued = runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "second",
@@ -1574,20 +1661,20 @@ describe("SessionSubagentHost", () => {
       });
     });
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
     });
     await flushMicrotasks();
-    await host.run({
+    await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "second",
       subagentId: first.item.subagentId,
     });
-    await host.run({
+    await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "third",
@@ -1651,21 +1738,21 @@ describe("SessionSubagentHost", () => {
       } satisfies AgentRunResult);
     });
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
     });
     await flushMicrotasks();
-    await host.run({
+    await runAndObserve(host, {
       environment: { workdir: "/queued-workdir" } as ToolExecutionEnvironment,
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "second",
       subagentId: first.item.subagentId,
     });
-    await host.run({
+    await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "third",
@@ -1689,15 +1776,18 @@ describe("SessionSubagentHost", () => {
       items: [
         expect.objectContaining({
           pendingQueue: [
-            { prompt: "second", workdir: "/queued-workdir" },
-            { prompt: "third" },
+            expect.objectContaining({
+              prompt: "second",
+              workdir: "/queued-workdir",
+            }),
+            expect.objectContaining({ prompt: "third" }),
           ],
           status: "failed",
         }),
       ],
     });
 
-    const resumed = await host.run({
+    const resumed = await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "resume",
@@ -1745,14 +1835,14 @@ describe("SessionSubagentHost", () => {
         success: true,
       } satisfies AgentRunResult);
     });
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
     });
     await flushMicrotasks();
-    const queued = host.run({
+    const queued = runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "foreground queued",
@@ -1763,12 +1853,14 @@ describe("SessionSubagentHost", () => {
     failFirst();
     await expect(queued).resolves.toMatchObject({
       item: {
-        pendingQueue: [{ prompt: "foreground queued" }],
+        pendingQueue: [
+          expect.objectContaining({ prompt: "foreground queued" }),
+        ],
         status: "failed",
       },
       success: false,
     });
-    await host.run({
+    await runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "explicit resume",
@@ -1811,7 +1903,7 @@ describe("SessionSubagentHost", () => {
         } satisfies AgentRunResult);
       });
 
-      const first = await host.run({
+      const first = await runAndObserve(host, {
         mode: "background",
         parentSessionId: "parent_1",
         prompt: "first",
@@ -1819,7 +1911,7 @@ describe("SessionSubagentHost", () => {
         timeoutMs: 5,
       });
       await vi.advanceTimersByTimeAsync(0);
-      await host.run({
+      await runAndObserve(host, {
         mode: "background",
         parentSessionId: "parent_1",
         prompt: "second",
@@ -1843,13 +1935,13 @@ describe("SessionSubagentHost", () => {
       ).resolves.toMatchObject({
         items: [
           expect.objectContaining({
-            pendingQueue: [{ prompt: "second" }],
+            pendingQueue: [expect.objectContaining({ prompt: "second" })],
             status: "timed_out",
           }),
         ],
       });
 
-      const resumed = await host.run({
+      const resumed = await runAndObserve(host, {
         mode: "foreground",
         parentSessionId: "parent_1",
         prompt: "resume",
@@ -1898,20 +1990,20 @@ describe("SessionSubagentHost", () => {
       } satisfies AgentRunResult);
     });
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
     });
     await flushMicrotasks();
-    await host.run({
+    await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "second",
       subagentId: first.item.subagentId,
     });
-    await host.run({
+    await runAndObserve(host, {
       interrupt: true,
       mode: "background",
       parentSessionId: "parent_1",
@@ -1965,14 +2057,14 @@ describe("SessionSubagentHost", () => {
       } satisfies AgentRunResult);
     });
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
     });
     await flushMicrotasks();
-    await host.run({
+    await runAndObserve(host, {
       interrupt: true,
       mode: "background",
       parentSessionId: "parent_1",
@@ -1997,7 +2089,7 @@ describe("SessionSubagentHost", () => {
     ).resolves.toMatchObject({
       items: [
         expect.objectContaining({
-          pendingQueue: [{ prompt: "replacement" }],
+          pendingQueue: [expect.objectContaining({ prompt: "replacement" })],
           status: "interrupted",
         }),
       ],
@@ -2030,14 +2122,14 @@ describe("SessionSubagentHost", () => {
       } satisfies AgentRunResult);
     });
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
     });
     await flushMicrotasks();
-    await host.run({
+    await runAndObserve(host, {
       interrupt: true,
       mode: "background",
       parentSessionId: "parent_1",
@@ -2052,7 +2144,7 @@ describe("SessionSubagentHost", () => {
       return status.items[0]?.status === "interrupted";
     });
 
-    const resumed = await host.run({
+    const resumed = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "resume",
@@ -2060,7 +2152,10 @@ describe("SessionSubagentHost", () => {
     });
 
     expect(resumed.item).toMatchObject({
-      pendingQueue: [{ prompt: "replacement" }, { prompt: "resume" }],
+      pendingQueue: [
+        expect.objectContaining({ prompt: "replacement" }),
+        expect.objectContaining({ prompt: "resume" }),
+      ],
       status: "interrupted",
     });
     expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual(["first"]);
@@ -2095,14 +2190,14 @@ describe("SessionSubagentHost", () => {
         }),
     );
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
     });
     await flushMicrotasks();
-    await host.run({
+    await runAndObserve(host, {
       interrupt: true,
       mode: "background",
       parentSessionId: "parent_1",
@@ -2116,7 +2211,7 @@ describe("SessionSubagentHost", () => {
       });
       return status.items[0]?.status === "interrupted";
     });
-    await host.run({
+    await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "resume",
@@ -2127,7 +2222,10 @@ describe("SessionSubagentHost", () => {
       host.interruptByParent("parent_1", "parent stopped"),
     ).resolves.toEqual([
       expect.objectContaining({
-        pendingQueue: [{ prompt: "replacement" }, { prompt: "resume" }],
+        pendingQueue: [
+          expect.objectContaining({ prompt: "replacement" }),
+          expect.objectContaining({ prompt: "resume" }),
+        ],
         status: "interrupted",
         subagentId: first.item.subagentId,
       }),
@@ -2144,14 +2242,14 @@ describe("SessionSubagentHost", () => {
         }),
     );
 
-    const first = await host.run({
+    const first = await runAndObserve(host, {
       mode: "background",
       parentSessionId: "parent_1",
       prompt: "first",
       role: "explore",
     });
     await flushMicrotasks();
-    await host.run({
+    await runAndObserve(host, {
       interrupt: true,
       mode: "background",
       parentSessionId: "parent_1",
@@ -2166,7 +2264,7 @@ describe("SessionSubagentHost", () => {
       return status.items[0]?.status === "interrupted";
     });
 
-    const resumed = host.run({
+    const resumed = runAndObserve(host, {
       mode: "foreground",
       parentSessionId: "parent_1",
       prompt: "resume",
@@ -2197,13 +2295,13 @@ describe("SessionSubagentHost", () => {
     );
 
     const [first, second] = await Promise.all([
-      host.run({
+      runAndObserve(host, {
         mode: "foreground",
         parentSessionId: "parent_1",
         prompt: "first",
         role: "explore",
       }),
-      host.run({
+      runAndObserve(host, {
         mode: "foreground",
         parentSessionId: "parent_1",
         prompt: "second",
