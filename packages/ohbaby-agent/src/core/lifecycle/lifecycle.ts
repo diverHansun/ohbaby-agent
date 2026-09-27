@@ -1,3 +1,5 @@
+import { ToolBatchEventQueue } from "./tool-event-queue.js";
+import { ToolDeliveryError } from "../tool-scheduler/index.js";
 import { randomUUID } from "node:crypto";
 import {
   DisplayReasoningOwner,
@@ -35,6 +37,7 @@ import type {
 } from "../message/index.js";
 import type {
   ToolCallRequest,
+  ToolExecutionObservation,
   ToolCallResult,
 } from "../tool-scheduler/index.js";
 import type {
@@ -341,6 +344,94 @@ export class Lifecycle {
   async *run(
     params: LifecycleSessionParams,
     config: LifecycleConfig = {},
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    const controller = new AbortController();
+    const signal = params.signal
+      ? AbortSignal.any([params.signal, controller.signal])
+      : controller.signal;
+    let active = true;
+    let completed = false;
+    let failure: ToolDeliveryError | undefined;
+    let rejectFailure!: (error: ToolDeliveryError) => void;
+    const failed = new Promise<never>((_resolve, reject) => {
+      rejectFailure = reject;
+    });
+    void failed.catch(() => undefined);
+    const onDeliveryError = (error: Error): void => {
+      if (!active || failure) return;
+      failure =
+        error instanceof ToolDeliveryError
+          ? error
+          : new ToolDeliveryError(error);
+      controller.abort(failure);
+      rejectFailure(failure);
+    };
+    const throwIfDeliveryFailed = (): void => {
+      if (failure) throw failure;
+    };
+    const loop = this.runTurn({ ...params, signal }, config, onDeliveryError);
+    let latestContext:
+      | Extract<LifecycleEvent, { type: "context:prepared" | "turn:start" }>
+      | undefined;
+    let step = 0;
+    try {
+      for (;;) {
+        throwIfDeliveryFailed();
+        const next = await Promise.race([loop.next(), failed]);
+        throwIfDeliveryFailed();
+        if (next.done) {
+          completed = true;
+          return next.value;
+        }
+        const event = next.value;
+        if (event.type === "context:prepared" || event.type === "turn:start")
+          latestContext = event;
+        if ("step" in event && event.step !== undefined) step = event.step;
+        if (event.type === "turn:end") active = false;
+        yield event;
+      }
+    } catch (error) {
+      if (!failure) throw error;
+      active = false;
+      if (latestContext)
+        yield {
+          type: "turn:end",
+          runId: params.runId,
+          sessionId: params.sessionId,
+          contextScopeId: params.contextScopeId,
+          step,
+          timestamp: Date.now(),
+          usage: latestContext.usage,
+          finishReason: "error",
+        };
+      return {
+        success: false,
+        finishReason: "error",
+        finalResponse: "Tool observations could not be saved",
+        terminalReason: "tool_persistence_failure",
+        failureCause: failure,
+      };
+    } finally {
+      active = false;
+      if (!completed) {
+        controller.abort(failure);
+        // An uncooperative provider cannot delay fatal delivery. Its pending next
+        // remains observed by the race, and return closes it when it cooperates.
+        void loop
+          .return({
+            success: false,
+            finishReason: "error",
+            finalResponse: "Run interrupted",
+          })
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  private async *runTurn(
+    params: LifecycleSessionParams,
+    config: LifecycleConfig,
+    onDeliveryError: (error: Error) => void,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     params = {
       ...params,
@@ -986,10 +1077,6 @@ export class Lifecycle {
           step,
           toolName: toolCall.name,
         });
-        await this.updateToolPart(toolParts.get(toolCall.id), {
-          input: toolCall.arguments,
-          status: "running",
-        });
         yield {
           type: "tool:start",
           runId: params.runId,
@@ -1005,12 +1092,35 @@ export class Lifecycle {
         };
       }
 
-      const toolResults = await this.executeToolCalls({
-        assistantMessage,
-        params: runParams,
-        step,
-        toolCalls,
-      });
+      let toolResults: ToolCallResult[];
+      try {
+        toolResults = yield* this.executeToolCalls({
+          assistantMessage,
+          params: runParams,
+          step,
+          toolCalls,
+          toolParts,
+          onDeliveryError,
+        });
+      } catch (error) {
+        yield this.createTurnEndEvent({
+          contextScopeId: params.contextScopeId,
+          finalResponse: "Tool observations could not be saved",
+          finishReason: "error",
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse: "Tool observations could not be saved",
+          terminalReason: "tool_persistence_failure",
+          failureCause: error,
+          usage,
+          toolCalls: allToolCalls,
+        };
+      }
       const resultByCallId = new Map(
         toolResults.map((result) => [result.callId, result] as const),
       );
@@ -1020,10 +1130,6 @@ export class Lifecycle {
         if (!result) {
           continue;
         }
-        await this.updateToolPart(
-          toolParts.get(toolCall.id),
-          resultToToolState(result, toolCall.arguments),
-        );
         await config.afterToolCall?.({
           callId: result.callId,
           contextScopeId: params.contextScopeId,
@@ -1033,20 +1139,6 @@ export class Lifecycle {
           step,
           toolName: toolCall.name,
         });
-        yield {
-          type: "tool:result",
-          runId: params.runId,
-          messageId: assistantMessage?.id,
-          partId: toolParts.get(toolCall.id)?.id,
-          callId: result.callId,
-          contextScopeId: params.contextScopeId,
-          params: toolCall.arguments,
-          result,
-          sessionId: params.sessionId,
-          step,
-          timestamp: Date.now(),
-          toolName: toolCall.name,
-        };
       }
 
       yield {
@@ -1523,26 +1615,22 @@ export class Lifecycle {
     return toolParts;
   }
 
-  private async updateToolPart(
-    part: ToolPart | undefined,
-    state: ToolState,
-  ): Promise<void> {
-    if (!part) {
-      return;
-    }
-    await this.deps.messageManager.updatePart(part.id, { state });
-  }
-
-  private executeToolCalls(input: {
+  private async *executeToolCalls(input: {
     readonly assistantMessage?: CoreMessage;
     readonly params: ModelStepParams;
     readonly step: number;
     readonly toolCalls: readonly ResolvedToolCall[];
-  }): Promise<ToolCallResult[]> {
-    const messageId =
-      input.assistantMessage?.id ??
-      input.params.parentMessageId ??
-      `${input.params.sessionId}:assistant:${String(input.step)}`;
+    readonly toolParts: Map<string, ToolPart>;
+    readonly onDeliveryError: (error: Error) => void;
+  }): AsyncGenerator<LifecycleEvent, ToolCallResult[], void> {
+    const messageId = input.assistantMessage?.id;
+    if (!messageId || input.toolParts.size !== input.toolCalls.length)
+      throw new ToolDeliveryError(new Error("Missing tool message part"));
+    const controller = new AbortController();
+    const signal = input.params.signal
+      ? AbortSignal.any([input.params.signal, controller.signal])
+      : controller.signal;
+    const queue = new ToolBatchEventQueue();
     const requests: ToolCallRequest[] = input.toolCalls.map((toolCall) => ({
       callId: toolCall.id,
       runId: input.params.runId,
@@ -1553,21 +1641,95 @@ export class Lifecycle {
       messageId,
       params: toolCall.arguments,
       sessionId: input.params.sessionId,
-      signal: input.params.signal,
+      signal,
       toolName: toolCall.name,
     }));
-
-    return this.deps.toolScheduler
-      .executeBatch({ calls: requests })
-      .catch((error: unknown) =>
-        input.toolCalls.map((toolCall) => ({
-          callId: toolCall.id,
-          error: {
-            message: `Tool scheduler failed: ${getErrorMessage(error)}`,
-            type: "ExecutionError" as const,
-          },
-          status: "error" as const,
-        })),
+    const save = async (
+      request: ToolCallRequest,
+      execution: ToolExecutionObservation,
+      result?: ToolCallResult,
+    ): Promise<void> => {
+      const partId = input.toolParts.get(request.callId)?.id;
+      const messages = await this.deps.messageManager.listByIds(
+        request.sessionId,
+        [request.messageId],
       );
+      const part = messages
+        .flatMap((message) => message.parts)
+        .find((part) => part.id === partId);
+      if (!part || !isToolPart(part))
+        throw new Error("Tool message part is missing");
+      const previous = part.metadata?.execution;
+      // Late cleanup belongs to this original row and never overwrites a result.
+      const observation =
+        previous?.phase === "ended"
+          ? { ...previous, cleanup: execution.cleanup ?? previous.cleanup }
+          : { ...previous, ...execution };
+      await this.deps.messageManager.updatePart(part.id, {
+        metadata: { ...part.metadata, execution: observation },
+        ...(result
+          ? { state: resultToToolState(result, request.params) }
+          : execution.phase === "executing" && previous?.phase !== "ended"
+            ? { state: { status: "running" as const, input: request.params } }
+            : {}),
+      });
+    };
+    const eventBase = (
+      request: ToolCallRequest,
+    ): Omit<
+      Extract<LifecycleEvent, { type: "tool:state" }>,
+      "type" | "execution"
+    > => ({
+      runId: request.runId,
+      messageId: request.messageId,
+      partId: input.toolParts.get(request.callId)?.id,
+      callId: request.callId,
+      contextScopeId: request.contextScopeId,
+      params: request.params,
+      sessionId: request.sessionId,
+      step: input.step,
+      timestamp: Date.now(),
+      toolName: request.toolName,
+    });
+    const batch = this.deps.toolScheduler.executeBatch({
+      calls: requests,
+      observer: {
+        onDeliveryError: (_request, error) => {
+          input.onDeliveryError(error);
+        },
+        onCallState: async (request, execution) => {
+          await save(request, execution);
+          queue.push({
+            type: "tool:state",
+            ...eventBase(request),
+            execution,
+          });
+        },
+        onCallSettled: async (request, _index, result) => {
+          if (!result.execution)
+            throw new Error("Missing terminal tool observation");
+          await save(request, result.execution, result);
+          queue.push({ type: "tool:result", ...eventBase(request), result });
+        },
+      },
+    });
+    void batch.then(
+      () => {
+        queue.close();
+      },
+      (error: unknown) => {
+        queue.fail(error);
+      },
+    );
+    let completed = false;
+    try {
+      yield* queue.events();
+      const results = await batch;
+      completed = true;
+      return results;
+    } finally {
+      if (!completed) controller.abort();
+      queue.close();
+    }
   }
 }

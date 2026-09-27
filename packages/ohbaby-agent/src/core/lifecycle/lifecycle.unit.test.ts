@@ -22,7 +22,11 @@ import {
   type LLMClientInstance,
   type TokenUsage,
 } from "../llm-client/index.js";
-import type { ToolSchedulerInstance } from "../tool-scheduler/index.js";
+import type {
+  BatchToolCallRequest,
+  ToolCallResult,
+  ToolSchedulerInstance,
+} from "../tool-scheduler/index.js";
 import type {
   ContextManager,
   ContextUsage,
@@ -34,6 +38,27 @@ import type {
   LifecycleResult,
   LifecycleSessionParams,
 } from "./index.js";
+
+async function deliverFixtureResults(
+  batch: BatchToolCallRequest,
+  results: ToolCallResult[],
+): Promise<ToolCallResult[]> {
+  for (const [index, result] of results.entries()) {
+    const execution = {
+      runId: batch.calls[index].runId,
+      phase: "ended" as const,
+      createdAt: 1,
+      phaseStartedAt: 2,
+      endedAt: 2,
+      outcome: result.status,
+    };
+    await batch.observer?.onCallSettled(batch.calls[index], index, {
+      ...result,
+      execution,
+    });
+  }
+  return results;
+}
 
 interface FakeSdkClient {
   readonly kind: "fake";
@@ -425,14 +450,16 @@ describe("Lifecycle.run", () => {
     const toolScheduler = {
       executeBatch: vi
         .fn<ToolSchedulerInstance["executeBatch"]>()
-        .mockResolvedValue([
-          {
-            callId: "call_read",
-            metadata: { mtimeMs: 1_700_000_000_000 },
-            output: "README contents",
-            status: "success",
-          },
-        ]),
+        .mockImplementation((batch) =>
+          deliverFixtureResults(batch, [
+            {
+              callId: "call_read",
+              metadata: { mtimeMs: 1_700_000_000_000 },
+              output: "README contents",
+              status: "success",
+            },
+          ]),
+        ),
     } as unknown as ToolSchedulerInstance;
     const resetTurnCompactionCount =
       vi.fn<ContextManager["resetTurnCompactionCount"]>();
@@ -2435,7 +2462,10 @@ describe("Lifecycle.run", () => {
     );
 
     expect(prepareTurn).toHaveBeenCalledTimes(1);
-    expect(prepareTurn.mock.calls[0]?.[0].signal).toBe(abortController.signal);
+    expect(prepareTurn.mock.calls[0]?.[0].signal?.aborted).toBe(true);
+    expect(prepareTurn.mock.calls[0]?.[0].signal?.reason).toBe(
+      abortController.signal.reason,
+    );
     expect(requests).toHaveLength(0);
     expect(events).toEqual([]);
     expect(result).toMatchObject({
@@ -2481,13 +2511,15 @@ describe("Lifecycle.run", () => {
       toolScheduler: {
         executeBatch: vi
           .fn<ToolSchedulerInstance["executeBatch"]>()
-          .mockResolvedValue([
-            {
-              callId: "call_bash",
-              output: "partial stdout before abort",
-              status: "cancelled",
-            },
-          ]),
+          .mockImplementation((batch) =>
+            deliverFixtureResults(batch, [
+              {
+                callId: "call_bash",
+                output: "partial stdout before abort",
+                status: "cancelled",
+              },
+            ]),
+          ),
       } as unknown as ToolSchedulerInstance,
     });
 
@@ -4266,15 +4298,15 @@ it("preserves the complete protocol reasoning after the real 256-segment display
     protocolSnapshots.push(new Map(input.activeReasoningByMessageId));
     return Promise.resolve(preparedTurn([]));
   });
-  const executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>(
-    ({ calls }) =>
-      Promise.resolve(
-        calls.map((call) => ({
-          callId: call.callId,
-          output: "exact tool result",
-          status: "success" as const,
-        })),
-      ),
+  const executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>((batch) =>
+    deliverFixtureResults(
+      batch,
+      batch.calls.map((call) => ({
+        callId: call.callId,
+        output: "exact tool result",
+        status: "success",
+      })),
+    ),
   );
   const lifecycle = new Lifecycle({
     displayReasoning: owner,

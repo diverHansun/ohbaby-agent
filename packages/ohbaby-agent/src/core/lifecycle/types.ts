@@ -1,3 +1,4 @@
+import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
 import type {
   DisplayReasoningOwner,
   ReasoningEndReason,
@@ -126,7 +127,8 @@ export type AgentTerminalReason =
   | "context_overflow"
   | "output_length"
   | "content_filter"
-  | "model_state_persistence_failure";
+  | "model_state_persistence_failure"
+  | "tool_persistence_failure";
 
 export interface LifecycleSourceIdentity {
   readonly runId?: string;
@@ -240,6 +242,17 @@ export type LifecycleEvent = LifecycleSourceIdentity &
         readonly callId: string;
         readonly toolName: string;
         readonly params: Record<string, unknown>;
+      }
+    | {
+        readonly type: "tool:state";
+        readonly sessionId: string;
+        readonly contextScopeId?: string;
+        readonly step: number;
+        readonly timestamp: number;
+        readonly callId: string;
+        readonly toolName: string;
+        readonly params: Record<string, unknown>;
+        readonly execution: ToolExecutionObservation;
       }
     | {
         readonly type: "tool:result";

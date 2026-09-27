@@ -1,3 +1,4 @@
+import { CallDelivery, ToolDeliveryError } from "./delivery.js";
 import {
   getSourceCleanupState,
   SourceCleanupUnavailableError,
@@ -22,6 +23,7 @@ import {
 import { ConcurrencyController, type CapacityLease } from "./concurrency.js";
 import {
   acquireResources,
+  ResourceUnavailableError,
   resourcesConflict,
   wakeResourceWaiters,
   type ResourceAccess,
@@ -606,8 +608,21 @@ export function createToolScheduler(
   const now = options.now ?? Date.now;
   const calls = new Map<string, ToolCall>();
   const controllers = new Map<string, AbortController>();
+  const identity = (
+    call: Pick<ToolCallRequest, "sessionId" | "runId" | "messageId" | "callId">,
+  ): string =>
+    JSON.stringify([call.sessionId, call.runId, call.messageId, call.callId]);
+  const findCall = (callId: string): ToolCall | undefined =>
+    Array.from(calls.values())
+      .reverse()
+      .find((call) => call.callId === callId);
+  const deliveries = new WeakMap<ToolCall, CallDelivery>();
+  const requestDeliveries = new WeakMap<ToolCallRequest, CallDelivery>();
 
-  function factPublisher(owner: ToolExecutionOwner): (
+  function factPublisher(
+    owner: ToolExecutionOwner,
+    delivery?: CallDelivery,
+  ): (
     fact: Omit<ToolExecutionFact, "owner" | "timestamp"> & {
       readonly timestamp?: number;
     },
@@ -615,6 +630,21 @@ export function createToolScheduler(
     let pending = Promise.resolve();
     return (fact) => {
       const record = { ...fact, owner, timestamp: fact.timestamp ?? now() };
+      if (fact.phase === "waiting")
+        void delivery?.update({
+          phase:
+            fact.reason === "predecessor" ? "waiting-predecessor" : "queued",
+          phaseStartedAt: record.timestamp,
+          waitReason: fact.reason,
+        });
+      if (fact.phase === "started")
+        void delivery?.update({
+          phase: "executing",
+          phaseStartedAt: record.timestamp,
+          executionStartedAt: record.timestamp,
+        });
+      if (fact.phase === "cleanup" && fact.cleanup)
+        void delivery?.update({ cleanup: fact.cleanup });
       pending = pending
         .then(() => options.onExecutionFact?.(record))
         .catch((error: unknown) => {
@@ -633,6 +663,21 @@ export function createToolScheduler(
     }
     const previousStatus = call.status;
     call.status = status;
+    if (
+      status === "awaiting_approval" ||
+      status === "checking_permission" ||
+      status === "queued"
+    ) {
+      void deliveries.get(call)?.update({
+        phase:
+          status === "awaiting_approval"
+            ? "awaiting-approval"
+            : status === "queued"
+              ? "queued"
+              : "preparing",
+        phaseStartedAt: now(),
+      });
+    }
     if (isFinal(status)) {
       call.completedAt = now();
       if (call.startedAt !== undefined) {
@@ -686,7 +731,9 @@ export function createToolScheduler(
       status: "pending",
       createdAt: now(),
     } satisfies ToolCall;
-    calls.set(call.callId, call);
+    const delivery = requestDeliveries.get(request);
+    if (delivery) deliveries.set(call, delivery);
+    calls.set(identity(call), call);
     return call;
   }
 
@@ -705,7 +752,7 @@ export function createToolScheduler(
       return false;
     }
     concurrency.cancel(call.callId);
-    controllers.get(call.callId)?.abort();
+    controllers.get(identity(call))?.abort();
     transition(call, "cancelled");
     return true;
   }
@@ -776,6 +823,7 @@ export function createToolScheduler(
       controller.signal.throwIfAborted();
       checkAdmission();
     } catch (error) {
+      if (error instanceof ToolDeliveryError) throw error;
       if (releaseEnvironment) {
         try {
           await releaseEnvironment();
@@ -869,12 +917,14 @@ export function createToolScheduler(
         }),
       );
     } catch (error) {
+      if (error instanceof ToolDeliveryError) throw error;
       operation = Promise.reject(
         error instanceof Error
           ? error
           : new Error(errorMessage(error), { cause: error }),
       );
     }
+    transition(call, "executing");
     publish({ phase: "started", timestamp: call.startedAt, resources });
     startPublished = true;
     for (const cleanup of earlyCleanup) publish({ phase: "cleanup", cleanup });
@@ -946,13 +996,15 @@ export function createToolScheduler(
     if (!options.permission) {
       return "reject";
     }
-    const controller = controllers.get(call.callId);
+    const controller = controllers.get(identity(call));
     if (!controller || controller.signal.aborted) {
       throw new SchedulerAbortError("cancelled");
     }
     if (!call.runId) {
       throw new Error("Interactive tool approval requires an actual runId");
     }
+    await deliveries.get(call)?.flush();
+    controller.signal.throwIfAborted();
     return options.permission.ask({
       runId: call.runId,
       contextScopeId: call.contextScopeId,
@@ -974,7 +1026,7 @@ export function createToolScheduler(
     context: ToolPermissionContext,
   ): Promise<PermissionDecision | ToolCallResult> {
     transition(call, "checking_permission");
-    const controller = controllers.get(call.callId);
+    const controller = controllers.get(identity(call));
     if (!controller) {
       return makeCancelledResult(call);
     }
@@ -1002,6 +1054,7 @@ export function createToolScheduler(
         controller.signal,
       );
     } catch (error) {
+      if (error instanceof ToolDeliveryError) throw error;
       if (isSchedulerAbortError(error)) {
         return makeCancelledResult(call);
       }
@@ -1034,7 +1087,7 @@ export function createToolScheduler(
       readonly toolName?: string;
     } = {},
   ): Promise<ToolCallResult | null> {
-    const controller = controllers.get(call.callId);
+    const controller = controllers.get(identity(call));
     if (!controller) {
       return makeCancelledResult(call);
     }
@@ -1057,6 +1110,7 @@ export function createToolScheduler(
         controller.signal,
       );
     } catch (error) {
+      if (error instanceof ToolDeliveryError) throw error;
       if (isSchedulerAbortError(error)) {
         return makeCancelledResult(call);
       }
@@ -1180,7 +1234,7 @@ export function createToolScheduler(
       return denied;
     }
 
-    const controller = controllers.get(call.callId);
+    const controller = controllers.get(identity(call));
     if (!controller) {
       return makeCancelledResult(call);
     }
@@ -1221,6 +1275,7 @@ export function createToolScheduler(
           controller.signal,
         );
       } catch (error) {
+        if (error instanceof ToolDeliveryError) throw error;
         if (isSchedulerAbortError(error)) {
           return makeCancelledResult(call);
         }
@@ -1289,6 +1344,7 @@ export function createToolScheduler(
           controller.signal,
         );
       } catch (error) {
+        if (error instanceof ToolDeliveryError) throw error;
         if (isSchedulerAbortError(error)) {
           return makeCancelledResult(call);
         }
@@ -1329,7 +1385,7 @@ export function createToolScheduler(
     if (!context.externalRead || !context.externalReadPath) {
       return null;
     }
-    const controller = controllers.get(call.callId);
+    const controller = controllers.get(identity(call));
     if (!controller) {
       return makeCancelledResult(call);
     }
@@ -1375,6 +1431,7 @@ export function createToolScheduler(
         controller.signal,
       );
     } catch (error) {
+      if (error instanceof ToolDeliveryError) throw error;
       if (isSchedulerAbortError(error)) {
         return makeCancelledResult(call);
       }
@@ -1413,7 +1470,7 @@ export function createToolScheduler(
     if (!context.externalWrite || !context.externalWritePath) {
       return null;
     }
-    const controller = controllers.get(call.callId);
+    const controller = controllers.get(identity(call));
     if (!controller) {
       return makeCancelledResult(call);
     }
@@ -1458,6 +1515,7 @@ export function createToolScheduler(
         controller.signal,
       );
     } catch (error) {
+      if (error instanceof ToolDeliveryError) throw error;
       if (isSchedulerAbortError(error)) {
         return makeCancelledResult(call);
       }
@@ -1616,7 +1674,7 @@ export function createToolScheduler(
       )
         throw new AdmissionChangedError();
       if (sourceWait()) throw new AdmissionChangedError();
-      transition(call, "executing");
+      await deliveries.get(call)?.flush();
       if (isStopped(call, controller)) return makeCancelledResult(call);
       const output = await executeToolWithTimeout(
         prepared,
@@ -1629,13 +1687,21 @@ export function createToolScheduler(
           invoked = true;
         },
         () => {
-          if (sourceWait()) throw new AdmissionChangedError();
+          if (
+            sourceWait() ||
+            !permissionStillAuthorized(
+              prepared.permissionSnapshot,
+              permissionSnapshot(call.sessionId),
+            )
+          )
+            throw new AdmissionChangedError();
         },
       );
       if (isStopped(call, controller)) return makeCancelledResult(call);
       transition(call, "success");
       return makeResult(call, "success", output);
     } catch (error) {
+      if (error instanceof ToolDeliveryError) throw error;
       if (error instanceof AdmissionChangedError) throw error;
       if (isSchedulerAbortError(error) && error.kind === "timeout") {
         transition(call, "error");
@@ -1654,7 +1720,13 @@ export function createToolScheduler(
         return makeCancelledResult(call);
       transition(call, "error");
       return makeResult(call, "error", {
-        error: createError("ExecutionError", errorMessage(error), error),
+        error: createError(
+          "ExecutionError",
+          error instanceof ResourceUnavailableError
+            ? "Tool not executed: a previous operation has unconfirmed cleanup and related resources remain protected. Continue independent work; if blocked, explain the reason to the user; do not automatically retry, poll, or repeatedly kill."
+            : errorMessage(error),
+          error,
+        ),
       });
     } finally {
       // Ownership can be transferred synchronously by the invocation callback.
@@ -1681,7 +1753,7 @@ export function createToolScheduler(
     if (!request.callId.trim()) {
       return createError("ValidationError", "Tool callId must be non-empty");
     }
-    if (calls.has(request.callId)) {
+    if (calls.has(identity(request))) {
       return createError(
         "ValidationError",
         `Tool callId already exists: ${request.callId}`,
@@ -1746,6 +1818,7 @@ export function createToolScheduler(
           params: request.params,
         };
       } catch (error) {
+        if (error instanceof ToolDeliveryError) throw error;
         return {
           environment: request.environment,
           externalRead: false,
@@ -1881,6 +1954,7 @@ export function createToolScheduler(
   ): Promise<
     { readonly prepared: PreparedCall } | { readonly result: ToolCallResult }
   > {
+    await requestDeliveries.get(request)?.update({ phase: "preparing" });
     const basicError = validateBasicRequest(request);
     if (basicError)
       return { result: makeImmediateErrorResult(request, basicError) };
@@ -1889,11 +1963,11 @@ export function createToolScheduler(
     // Register identity and cancellation before any asynchronous policy lookup.
     const call = createCall(request, category);
     const controller = new AbortController();
-    controllers.set(call.callId, controller);
+    controllers.set(identity(call), controller);
     const unbind = bindRequestSignal(call, request.signal);
     const cleanup = (): void => {
       unbind();
-      controllers.delete(call.callId);
+      controllers.delete(identity(call));
     };
     let transferred = false;
     try {
@@ -1977,6 +2051,7 @@ export function createToolScheduler(
         },
       };
     } catch (error) {
+      if (error instanceof ToolDeliveryError) throw error;
       if (isStopped(call, controller) || isSchedulerAbortError(error))
         return { result: makeCancelledResult(call) };
       transition(call, "error");
@@ -2054,7 +2129,7 @@ export function createToolScheduler(
     prepared: PreparedCall,
     predecessors: readonly Promise<unknown>[] = [],
   ): Promise<ToolCallResult> {
-    let publish = factPublisher(prepared.owner);
+    let publish = factPublisher(prepared.owner, deliveries.get(prepared.call));
     try {
       const resolveOwner = options.resolveOwner;
       if (resolveOwner)
@@ -2062,7 +2137,7 @@ export function createToolScheduler(
           () => resolveOwner(prepared.request),
           prepared.controller.signal,
         );
-      publish = factPublisher(prepared.owner);
+      publish = factPublisher(prepared.owner, deliveries.get(prepared.call));
       if (predecessors.length) {
         transition(prepared.call, "queued");
         publish({ phase: "waiting", reason: "predecessor" });
@@ -2116,12 +2191,14 @@ export function createToolScheduler(
         try {
           return await runTool(prepared, publish);
         } catch (error) {
+          if (error instanceof ToolDeliveryError) throw error;
           if (!(error instanceof AdmissionChangedError)) throw error;
         }
         // Policy/target changed during admission. Locks and capacity have been
         // returned by runTool; permission preparation may safely ask again.
       }
     } catch (error) {
+      if (error instanceof ToolDeliveryError) throw error;
       if (
         isStopped(prepared.call, prepared.controller) ||
         isSchedulerAbortError(error)
@@ -2174,23 +2251,87 @@ export function createToolScheduler(
   async function executeBatch(
     request: BatchToolCallRequest,
   ): Promise<ToolCallResult[]> {
-    const preparations = request.calls.map((call, index) =>
+    const batchController = new AbortController();
+    let fatal: ToolDeliveryError | undefined;
+    let rejectFatal!: (error: ToolDeliveryError) => void;
+    const fatalPromise = new Promise<never>((_resolve, reject) => {
+      rejectFatal = reject;
+    });
+    void fatalPromise.catch(() => undefined);
+    const fail = (error: ToolDeliveryError): void => {
+      if (fatal) return;
+      fatal = error;
+      batchController.abort();
+      rejectFatal(error);
+    };
+    const batchCalls = request.calls.map((call, index) => {
+      const bound = {
+        ...call,
+        signal: call.signal
+          ? AbortSignal.any([call.signal, batchController.signal])
+          : batchController.signal,
+      };
+      if (request.observer)
+        requestDeliveries.set(
+          bound,
+          new CallDelivery(
+            call,
+            index,
+            request.observer,
+            (error, state) => {
+              fail(error);
+              // Report the original failed fact even when the batch race has already
+              // resolved. Never redirect a late failure to the session's newer run.
+              bus.publish(ToolSchedulerEvent.DeliveryFailed, {
+                sessionId: call.sessionId,
+                runId: call.runId,
+                messageId: call.messageId,
+                callId: call.callId,
+                timestamp: now(),
+                phase: state.phase,
+                cleanup: state.cleanup,
+                message: error.message,
+              });
+              const fact: ToolExecutionFact = {
+                owner: {
+                  sessionId: call.sessionId,
+                  runId: call.runId,
+                  messageId: call.messageId,
+                  callId: call.callId,
+                  contextScopeId: call.contextScopeId,
+                },
+                phase: state.cleanup
+                  ? "cleanup"
+                  : state.phase === "ended"
+                    ? "settled"
+                    : state.phase === "executing"
+                      ? "started"
+                      : "waiting",
+                timestamp: now(),
+                cleanup: state.cleanup,
+              };
+              void Promise.resolve()
+                .then(() => options.onExecutionFactError?.(error, fact))
+                .catch(() => undefined);
+              request.observer?.onDeliveryError?.(call, error, state);
+            },
+            now(),
+          ),
+        );
+      return bound;
+    });
+    const preparations = batchCalls.map((call, index) =>
       prepareCall(call, index),
     );
-    const plannedTools = request.calls.map((call) =>
-      registry.get(call.toolName),
-    );
+    const plannedTools = batchCalls.map((call) => registry.get(call.toolName));
     const resolvedPlans: (
       | { tool?: Tool; resources?: readonly ResourceAccess[] }
       | undefined
     )[] = [];
-    const plans = request.calls.map(async (call, index) => {
+    const plans = batchCalls.map(async (call, index) => {
       const tool = plannedTools[index];
       let resources: readonly ResourceAccess[] | undefined;
-      const signal =
-        controllers.get(call.callId)?.signal ??
-        call.signal ??
-        new AbortController().signal;
+      const signal = controllers.get(identity(call))?.signal ?? call.signal;
       try {
         resources = await waitForAbortable(
           () =>
@@ -2252,7 +2393,16 @@ export function createToolScheduler(
         }),
       );
     }
-    return Promise.all(running);
+    const delivered = running.map(async (operation, index) => {
+      const result = await operation;
+      const delivery = requestDeliveries.get(batchCalls[index]);
+      await delivery?.settle(
+        result,
+        calls.get(identity(batchCalls[index]))?.completedAt ?? now(),
+      );
+      return delivery ? { ...result, execution: delivery.state } : result;
+    });
+    return Promise.race([Promise.all(delivered), fatalPromise]);
   }
 
   return {
@@ -2290,7 +2440,7 @@ export function createToolScheduler(
     executeBatch,
 
     cancel(callId: string): boolean {
-      const call = calls.get(callId);
+      const call = findCall(callId);
       if (!call) {
         return false;
       }
@@ -2301,14 +2451,14 @@ export function createToolScheduler(
       concurrency.cancelAll();
       for (const call of calls.values()) {
         if (!isFinal(call.status)) {
-          controllers.get(call.callId)?.abort();
+          controllers.get(identity(call))?.abort();
           transition(call, "cancelled");
         }
       }
     },
 
     getStatus(callId: string): ToolCallStatus | null {
-      return calls.get(callId)?.status ?? null;
+      return findCall(callId)?.status ?? null;
     },
 
     getPendingCalls(): ToolCall[] {

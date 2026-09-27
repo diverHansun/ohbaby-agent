@@ -42,6 +42,19 @@ const ToolCallResultSchema = z.object({
 });
 
 export const ToolSchedulerEvent = {
+  DeliveryFailed: BusEvent.define(
+    "tool-scheduler.delivery-failed",
+    z.object({
+      sessionId: z.string(),
+      runId: z.string().optional(),
+      messageId: z.string(),
+      callId: z.string(),
+      timestamp: z.number(),
+      phase: z.string(),
+      cleanup: z.string().optional(),
+      message: z.string(),
+    }),
+  ),
   StatusChanged: BusEvent.define(
     "tool-scheduler.status-changed",
     z.object({

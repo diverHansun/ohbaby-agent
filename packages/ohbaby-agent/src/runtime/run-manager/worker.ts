@@ -80,6 +80,7 @@ function serializableToolResult(
   return withDefined({
     callId: result.callId,
     duration: result.duration,
+    execution: result.execution,
     error: result.error
       ? withDefined({
           details:
@@ -466,8 +467,21 @@ export class RunWorker {
         step: event.step,
         callId: event.callId,
         toolName: event.toolName,
-        status: "executing",
+        status: "pending",
         params: event.params,
+      });
+      return;
+    }
+
+    if (event.type === "tool:state") {
+      this.publish(scope, "run.tool.state", {
+        ...this.streamBase(event),
+        timestamp: event.timestamp,
+        step: event.step,
+        callId: event.callId,
+        toolName: event.toolName,
+        params: event.params,
+        execution: event.execution,
       });
       return;
     }

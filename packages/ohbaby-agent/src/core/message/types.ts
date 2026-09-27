@@ -1,3 +1,4 @@
+import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
 import type { ModelState } from "../../services/interface-providers/native-state.js";
 import type { ModelMessage, TokenUsage } from "../llm-client/index.js";
 
@@ -79,6 +80,7 @@ export interface PartBase {
 }
 
 export interface PartMetadata {
+  readonly execution?: ToolExecutionObservation;
   readonly tokenUsage?: TokenUsage;
   readonly [key: string]: unknown;
 }

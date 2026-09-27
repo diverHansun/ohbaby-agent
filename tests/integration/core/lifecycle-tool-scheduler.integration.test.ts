@@ -28,7 +28,10 @@ import type {
   MessageIdGenerator,
   Part,
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
-import { createToolScheduler } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
+import {
+  createToolScheduler,
+  ToolSchedulerEvent,
+} from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
 import type {
   Tool,
   ToolExecutionEnvironment,
@@ -1292,3 +1295,462 @@ describe("lifecycle tool scheduler integration", () => {
     expect(Object.isFrozen(requests[0]?.tools?.[0]?.function)).toBe(true);
   });
 });
+
+it("delivers a fast result while a sibling still runs and preserves model result order", async () => {
+  const bus = createBus();
+  const scheduler = createToolScheduler({
+    bus,
+    permissionState: createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    }),
+  });
+  let release!: () => void;
+  const slow = new Promise<void>((r) => {
+    release = r;
+  });
+  const { withToolAdmission } =
+    await import("../../../packages/ohbaby-agent/src/core/tool-scheduler/tool-admission.js");
+  scheduler.register(
+    withToolAdmission(
+      {
+        name: "independent",
+        source: "builtin",
+        category: "readonly",
+        description: "test",
+        parametersJsonSchema: { type: "object" },
+        execute: async (params) => {
+          if (params.slow) await slow;
+          return { output: params.slow ? "A" : "B" };
+        },
+      },
+      { plan: () => [] },
+    ),
+  );
+  const messageManager = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+    idGenerator: createDeterministicIds(),
+  });
+  const requests: ProviderRequest[] = [];
+  const lifecycle = new Lifecycle({
+    messageManager,
+    toolScheduler: scheduler,
+    contextManager: createContextManagerMock(async () =>
+      preparedTurn([{ role: "user", content: "work" }]),
+    ),
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [
+          {
+            toolCallDeltas: [
+              {
+                id: "a",
+                index: 0,
+                name: "independent",
+                argumentsDelta: '{"slow":true}',
+              },
+              { id: "b", index: 1, name: "independent", argumentsDelta: "{}" },
+            ],
+            finishReason: "tool_calls",
+          },
+        ],
+        [{ textDelta: "done", finishReason: "stop" }],
+      ],
+      requests,
+    ),
+  });
+  const loop = lifecycle.run({
+    sessionId: "session_1",
+    runId: "run_delivery",
+    directory: "/tmp",
+    modelId: "fake-model",
+  });
+  const seen: string[] = [];
+  const consume = (async () => {
+    for await (const event of loop) {
+      if (event.type === "tool:result") {
+        seen.push(event.callId);
+        if (event.callId === "b") {
+          expect(requests).toHaveLength(1);
+          const messages = await messageManager.listBySession("session_1");
+          const part = messages
+            .flatMap((m) => m.parts)
+            .find((p) => p.type === "tool" && p.callId === "b");
+          expect(part).toMatchObject({
+            state: { status: "completed", output: "B" },
+            metadata: {
+              execution: {
+                phase: "ended",
+                outcome: "success",
+                runId: "run_delivery",
+              },
+            },
+          });
+          release();
+        }
+      }
+      if (event.type === "step:complete" && event.toolResults)
+        expect(event.toolResults.map((r) => r.callId)).toEqual(["a", "b"]);
+    }
+  })();
+  try {
+    await Promise.race([
+      consume,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("fast result was withheld")), 500),
+      ),
+    ]);
+  } finally {
+    release();
+    await consume;
+  }
+  expect(seen).toEqual(["b", "a"]);
+  expect(requests).toHaveLength(2);
+});
+
+it.each(["preparing", "executing", "ended"])(
+  "stops the lifecycle on %s persistence failure without a next model request",
+  async (phase) => {
+    const bus = createBus();
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+    });
+    let invocations = 0;
+    scheduler.register({
+      name: "work",
+      description: "work",
+      source: "builtin",
+      category: "readonly",
+      parametersJsonSchema: { type: "object" },
+      execute: () => {
+        invocations++;
+        return { output: "ok" };
+      },
+    });
+    const manager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    const update = manager.updatePart.bind(manager);
+    manager.updatePart = async (id, patch) => {
+      if (patch.metadata?.execution?.phase === phase)
+        throw new Error("injected disk failure");
+      return update(id, patch);
+    };
+    const requests: ProviderRequest[] = [];
+    const lifecycle = new Lifecycle({
+      messageManager: manager,
+      toolScheduler: scheduler,
+      contextManager: createContextManagerMock(async () =>
+        preparedTurn([{ role: "user", content: "go" }]),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                { id: "call", name: "work", index: 0, argumentsDelta: "{}" },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "must not run", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+    const events = [];
+    const loop = lifecycle.run({
+      sessionId: "session_1",
+      runId: "failure",
+      directory: "/tmp",
+      modelId: "fake-model",
+    });
+    let next = await loop.next();
+    while (!next.done) {
+      events.push(next.value.type);
+      next = await loop.next();
+    }
+    expect(next.value).toMatchObject({
+      success: false,
+      finishReason: "error",
+      failureCause: { name: "ToolDeliveryError" },
+    });
+    expect(requests).toHaveLength(1);
+    expect(events).not.toContain("tool:result");
+    expect(invocations).toBe(phase === "preparing" ? 0 : 1);
+  },
+);
+
+it("persists late cleanup after the lifecycle has finished without changing its timeout result", async () => {
+  const bus = createBus();
+  const scheduler = createToolScheduler({
+    bus,
+    permissionState: createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    }),
+    config: { timeout: { defaultTimeout: 5 } },
+    cleanupObservationMs: 100,
+  });
+  let resolve!: (result: { output: string }) => void;
+  const pending = new Promise<{ output: string }>((r) => {
+    resolve = r;
+  });
+  scheduler.register({
+    name: "work",
+    description: "work",
+    source: "builtin",
+    category: "readonly",
+    parametersJsonSchema: { type: "object" },
+    execute: () => pending,
+  });
+  const manager = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+    idGenerator: createDeterministicIds(),
+  });
+  const requests: ProviderRequest[] = [];
+  const lifecycle = new Lifecycle({
+    messageManager: manager,
+    toolScheduler: scheduler,
+    contextManager: createContextManagerMock(async () =>
+      preparedTurn([{ role: "user", content: "go" }]),
+    ),
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [
+          {
+            toolCallDeltas: [
+              { id: "call", name: "work", index: 0, argumentsDelta: "{}" },
+            ],
+            finishReason: "tool_calls",
+          },
+        ],
+        [{ textDelta: "done", finishReason: "stop" }],
+      ],
+      requests,
+    ),
+  });
+  await consumeLifecycle(
+    lifecycle.run({
+      sessionId: "session_1",
+      runId: "late-owner",
+      directory: "/tmp",
+      modelId: "fake-model",
+    }),
+  );
+  const read = async () =>
+    (await manager.listBySession("session_1"))
+      .flatMap((m) => m.parts)
+      .find((p) => p.type === "tool");
+  const before = await read();
+  expect(before).toMatchObject({
+    metadata: {
+      execution: {
+        runId: "late-owner",
+        phase: "ended",
+        outcome: "timed-out",
+        cleanup: "in-progress",
+      },
+    },
+  });
+  resolve({ output: "late success" });
+  await vi.waitFor(async () => {
+    expect(await read()).toMatchObject({
+      metadata: {
+        execution: {
+          phase: "ended",
+          outcome: "timed-out",
+          cleanup: "confirmed",
+        },
+      },
+    });
+  });
+  expect((await read())?.type === "tool" && (await read())).toMatchObject({
+    state: (
+      before as import("../../../packages/ohbaby-agent/src/core/message/index.js").ToolPart
+    ).state,
+  });
+  expect(requests).toHaveLength(2);
+});
+
+it.each(["active", "finished"] as const)(
+  "routes a late cleanup save failure to its %s original turn",
+  async (originalState) => {
+    const bus = createBus();
+    const failedFacts: unknown[] = [];
+    bus.subscribe(ToolSchedulerEvent.DeliveryFailed, (fact) => {
+      failedFacts.push(fact);
+    });
+    const diagnostics: {
+      error: unknown;
+      fact: import("../../../packages/ohbaby-agent/src/core/tool-scheduler/types.js").ToolExecutionFact;
+    }[] = [];
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      config: { timeout: { defaultTimeout: 5 } },
+      cleanupObservationMs: 1000,
+      onExecutionFactError: (error, fact) => {
+        diagnostics.push({ error, fact });
+      },
+    });
+    let finishOperation!: (value: { output: string }) => void;
+    const operation = new Promise<{ output: string }>((resolve) => {
+      finishOperation = resolve;
+    });
+    scheduler.register({
+      name: "work",
+      description: "work",
+      source: "builtin",
+      category: "readonly",
+      parametersJsonSchema: { type: "object" },
+      execute: () => operation,
+    });
+    const manager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    const update = manager.updatePart.bind(manager);
+    let lateSaveAttempted = false;
+    manager.updatePart = async (id, patch) => {
+      if (patch.metadata?.execution?.cleanup === "confirmed") {
+        lateSaveAttempted = true;
+        throw new Error("late cleanup save failed");
+      }
+      return update(id, patch);
+    };
+    const requests: ProviderRequest[] = [];
+    const llm = createSequentialFakeLLMClient(
+      [
+        [
+          {
+            toolCallDeltas: [
+              { id: "old-call", name: "work", index: 0, argumentsDelta: "{}" },
+            ],
+            finishReason: "tool_calls",
+          },
+        ],
+        [{ textDelta: "done", finishReason: "stop" }],
+        [{ textDelta: "healthy", finishReason: "stop" }],
+      ],
+      requests,
+    );
+    const stream = llm.provider.streamResponse.bind(llm.provider);
+    let modelSignal: AbortSignal | undefined;
+    let releaseModel!: () => void;
+    let count = 0;
+    llm.provider.streamResponse = async (request) => {
+      count++;
+      if (count === (originalState === "active" ? 2 : 3)) {
+        modelSignal = request.signal;
+        await new Promise<void>((resolve) => {
+          releaseModel = resolve;
+        });
+      }
+      return stream(request);
+    };
+    const lifecycle = new Lifecycle({
+      messageManager: manager,
+      toolScheduler: scheduler,
+      contextManager: createContextManagerMock(async () =>
+        preparedTurn([{ role: "user", content: "go" }]),
+      ),
+      llmClient: llm,
+    });
+    let originalResult: unknown;
+    const original = consumeLifecycle(
+      lifecycle.run({
+        sessionId: "session_1",
+        runId: "old-run",
+        signal: new AbortController().signal,
+        directory: "/tmp",
+        modelId: "fake-model",
+      }),
+    ).then((result) => {
+      originalResult = result;
+      return result;
+    });
+    let healthy: ReturnType<typeof consumeLifecycle> | undefined;
+    if (originalState === "finished") {
+      await original;
+      healthy = consumeLifecycle(
+        lifecycle.run({
+          sessionId: "session_1",
+          runId: "new-run",
+          signal: new AbortController().signal,
+          directory: "/tmp",
+          modelId: "fake-model",
+        }),
+      );
+    }
+    await vi.waitFor(() => {
+      expect(modelSignal).toBeDefined();
+    });
+    finishOperation({ output: "late success" });
+    try {
+      await vi.waitFor(() => {
+        expect(lateSaveAttempted).toBe(true);
+        expect(diagnostics).toHaveLength(1);
+        expect(failedFacts).toHaveLength(1);
+      });
+      expect(failedFacts[0]).toMatchObject({
+        runId: "old-run",
+        callId: "old-call",
+        cleanup: "confirmed",
+      });
+      expect(diagnostics[0]).toMatchObject({
+        error: { name: "ToolDeliveryError" },
+        fact: {
+          owner: { runId: "old-run", callId: "old-call" },
+          phase: "cleanup",
+          cleanup: "confirmed",
+        },
+      });
+      if (originalState === "active") {
+        await vi.waitFor(() => {
+          expect(modelSignal?.aborted).toBe(true);
+        });
+        expect(await original).toMatchObject({
+          success: false,
+          terminalReason: "tool_persistence_failure",
+          failureCause: { name: "ToolDeliveryError" },
+        });
+        expect(count).toBe(2);
+      } else {
+        expect(modelSignal?.aborted).toBe(false);
+        expect(originalResult).toMatchObject({ success: true });
+        releaseModel();
+        expect(await healthy).toMatchObject({ success: true });
+      }
+      const part = (await manager.listBySession("session_1"))
+        .flatMap((m) => m.parts)
+        .find((p) => p.type === "tool");
+      expect(part).toMatchObject({
+        metadata: {
+          execution: {
+            runId: "old-run",
+            phase: "ended",
+            outcome: "timed-out",
+            cleanup: "in-progress",
+          },
+        },
+      });
+    } finally {
+      releaseModel();
+      await original;
+      await healthy;
+    }
+  },
+);

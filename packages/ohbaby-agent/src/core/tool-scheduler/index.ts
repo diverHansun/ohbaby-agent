@@ -1,3 +1,4 @@
+export { ToolDeliveryError } from "./delivery.js";
 import { ToolSchedulerEvent } from "./events.js";
 
 export {
@@ -13,6 +14,8 @@ export type {
   AgentToolConfig,
   AgentToolConfigProvider,
   BatchToolCallRequest,
+  BatchToolCallObserver,
+  ToolExecutionObservation,
   ConcurrencyConfig,
   FinalToolCallStatus,
   PermissionPort,

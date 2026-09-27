@@ -3360,10 +3360,10 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["slow_1", "write_2"]);
   });
 
-  it("releases acquired capacity when cancellation occurs at the pre-invoke executing transition", async () => {
+  it("releases acquired capacity when cancellation occurs during pre-invoke environment retention", async () => {
     const first = deferred<ToolExecutionResult>();
     const started: string[] = [];
-    const { bus, scheduler } = createScheduler({
+    const { scheduler } = createScheduler({
       config: { concurrency: { maxConcurrency: 1 } },
     });
     scheduler.register(
@@ -3378,16 +3378,13 @@ describe("ToolScheduler", () => {
         name: "edit",
       }),
     );
-    // This transition follows capacity acquisition and precedes invoke.
-    // Completion publication is deliberately not a barrier for the next call.
-    bus.subscribe(ToolSchedulerEvent.StatusChanged, (payload) => {
-      if (
-        payload.callId === "write_2" &&
-        payload.currentStatus === "executing"
-      ) {
+    const environment = {
+      ...createFakeEnvironment("/tmp"),
+      retain: (): (() => void) => {
         scheduler.cancel("write_2");
-      }
-    });
+        return () => undefined;
+      },
+    };
 
     const write1 = scheduler.execute({
       runId: "test_run",
@@ -3398,6 +3395,7 @@ describe("ToolScheduler", () => {
       toolName: "edit",
     });
     const write2 = scheduler.execute({
+      environment,
       runId: "test_run",
       callId: "write_2",
       messageId: "message_1",

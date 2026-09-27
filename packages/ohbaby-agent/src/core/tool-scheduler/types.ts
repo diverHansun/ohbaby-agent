@@ -156,7 +156,49 @@ export interface ToolCallRequest {
   readonly signal?: AbortSignal;
 }
 
+export interface ToolExecutionObservation {
+  readonly runId?: string;
+  readonly phase:
+    | "preparing"
+    | "awaiting-approval"
+    | "waiting-predecessor"
+    | "queued"
+    | "executing"
+    | "ended";
+  readonly phaseStartedAt: number;
+  readonly createdAt: number;
+  readonly executionStartedAt?: number;
+  readonly endedAt?: number;
+  readonly waitReason?: AdmissionWaitReason;
+  readonly outcome?:
+    | "success"
+    | "error"
+    | "rejected"
+    | "cancelled"
+    | "timed-out";
+  readonly cleanup?: "in-progress" | "confirmed" | "unconfirmed";
+}
+
+export interface BatchToolCallObserver {
+  /** Outlives batch completion for the original turn's cleanup owner. */
+  onDeliveryError?(
+    request: ToolCallRequest,
+    error: Error,
+    state: ToolExecutionObservation,
+  ): void;
+  onCallState(
+    request: ToolCallRequest,
+    state: ToolExecutionObservation,
+  ): Promise<void>;
+  onCallSettled(
+    request: ToolCallRequest,
+    index: number,
+    result: ToolCallResult,
+  ): Promise<void>;
+}
+
 export interface BatchToolCallRequest {
+  readonly observer?: BatchToolCallObserver;
   readonly calls: readonly ToolCallRequest[];
 }
 
@@ -167,6 +209,7 @@ export interface ToolCallResult {
   readonly metadata?: Record<string, unknown>;
   readonly error?: ToolCallError;
   readonly duration?: number;
+  readonly execution?: ToolExecutionObservation;
 }
 
 export interface ToolCall {

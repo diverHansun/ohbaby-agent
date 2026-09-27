@@ -381,7 +381,7 @@ it.each([
       },
     });
     bus.subscribe(ToolSchedulerEvent.StatusChanged, (event) => {
-      if (boundary === "status" && event.currentStatus === "executing")
+      if (boundary === "status" && event.currentStatus === "queued")
         establishCleanup();
     });
     scheduler.register({
@@ -418,7 +418,7 @@ it.each([
           );
         });
         expect(executions).toBe(0);
-        expect(releases).toBe(1);
+        expect(releases).toBe(boundary === "status" ? 0 : 1);
         expect(facts.some((fact) => fact.phase === "started")).toBe(false);
         cleanup?.confirm();
         expect((await result).status).toBe("success");
@@ -429,7 +429,7 @@ it.each([
           error: { type: "ExecutionError" },
         });
         expect(executions).toBe(0);
-        expect(releases).toBe(1);
+        expect(releases).toBe(boundary === "status" ? 0 : 1);
         expect(facts.some((fact) => fact.phase === "started")).toBe(false);
       }
     } finally {

@@ -1379,7 +1379,7 @@ describe("RunManager", () => {
         params: { location: "NYC" },
         runId: "run_1",
         sessionId: "session_1",
-        status: "executing",
+        status: "pending",
         step: 1,
         toolName: "get_weather",
       },
