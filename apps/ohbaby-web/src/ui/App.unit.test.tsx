@@ -5947,3 +5947,249 @@ describe("queued edit identity isolation", () => {
     ).toContain("lease_q2");
   });
 });
+
+it("temporarily hides the mounted composer and todo during root approval, retains Stop, then restores the draft and focus", async () => {
+  const fake = createFakeRuntime({
+    snapshot: {
+      ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+      todos: [
+        {
+          sessionId: "session_1",
+          visible: true,
+          todos: [{ content: "Keep task", status: "in_progress" }],
+        },
+      ],
+    },
+  });
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "Keep my draft");
+  await clickButton(app.container, "Collapse todo list");
+  const input = app.container.querySelector<HTMLTextAreaElement>("textarea");
+  act(() => {
+    input?.focus();
+  });
+  const todo = app.container.querySelector(".ohb-todo-dock");
+  const sync = fake.store.getSnapshot().permissionSync;
+  act(() => {
+    fake.store.setPermissionSync({
+      ...sync,
+      requests: [permissionRequest()],
+      permissionRevision: 1,
+    });
+  });
+  const wrapper =
+    app.container.querySelector<HTMLElement>(".ohb-root-composer");
+  expect(wrapper?.style.display).toBe("none");
+  expect(wrapper?.hasAttribute("inert")).toBe(true);
+  expect(app.container.querySelector("textarea")).toBe(input);
+  expect(input?.value).toBe("Keep my draft");
+  expect(app.container.querySelector(".ohb-todo-dock")).toBe(todo);
+  expect(
+    app.container
+      .querySelector(".ohb-todo-toggle")
+      ?.getAttribute("aria-expanded"),
+  ).toBe("false");
+  expect(document.activeElement).toBe(
+    app.container.querySelector(".ohb-permission-modal h2"),
+  );
+  const stop = app.container.querySelector<HTMLButtonElement>(
+    '.ohb-permission-modal [aria-label="Stop run"]',
+  );
+  expect(stop).not.toBeNull();
+  await act(async () => {
+    stop?.click();
+    await Promise.resolve();
+  });
+  expect(fake.abortSession).toHaveBeenCalledWith("session_1", "run_1");
+  act(() => {
+    fake.store.setPermissionSync({
+      ...sync,
+      requests: [],
+      permissionRevision: 2,
+    });
+  });
+  expect(wrapper?.style.display).toBe("contents");
+  expect(wrapper?.hasAttribute("inert")).toBe(false);
+  expect(input?.value).toBe("Keep my draft");
+  expect(document.activeElement).toBe(input);
+});
+
+it("keeps the composer visible for an approval sync error without an actual request", () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const app = mountApp(fake.runtime);
+  act(() => {
+    fake.store.setPermissionSync({
+      ...fake.store.getSnapshot().permissionSync,
+      status: "error",
+      error: "Retry approval sync",
+      requests: [],
+    });
+  });
+  expect(app.container.querySelector(".ohb-permission-modal")).toBeNull();
+  expect(
+    app.container.querySelector<HTMLElement>(".ohb-root-composer")?.style
+      .display,
+  ).toBe("contents");
+  expect(app.container.textContent).toContain("Retry approvals");
+});
+
+it("does not restore input focus after the user moved to another control before approval", () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+  });
+  const app = mountApp(fake.runtime);
+  const input = app.container.querySelector<HTMLTextAreaElement>("textarea");
+  const other = app.container.querySelector<HTMLButtonElement>(
+    ".ohb-permission-toggle",
+  );
+  act(() => {
+    input?.focus();
+    other?.focus();
+  });
+  const sync = fake.store.getSnapshot().permissionSync;
+  act(() => {
+    fake.store.setPermissionSync({ ...sync, requests: [permissionRequest()] });
+  });
+  act(() => {
+    fake.store.setPermissionSync({ ...sync, requests: [] });
+  });
+  expect(document.activeElement).not.toBe(input);
+});
+
+it("reserves the measured approval height and updates it when the card resizes", () => {
+  let resized: ResizeObserverCallback = () => undefined;
+  let height = 220;
+  const geometry = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      return new DOMRect(
+        0,
+        0,
+        700,
+        this.classList.contains("ohb-permission-modal") ? height : 0,
+      );
+    });
+  const original = globalThis.ResizeObserver;
+  class Observer {
+    constructor(callback: ResizeObserverCallback) {
+      resized = callback;
+    }
+    observe(): void {
+      /* Triggered explicitly by the test. */
+    }
+    unobserve(): void {
+      /* No resources in this observer fixture. */
+    }
+    disconnect(): void {
+      /* No resources in this observer fixture. */
+    }
+  }
+  globalThis.ResizeObserver = Observer;
+  try {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    const app = mountApp(fake.runtime);
+    const sync = fake.store.getSnapshot().permissionSync;
+    act(() => {
+      fake.store.setPermissionSync({
+        ...sync,
+        requests: [permissionRequest()],
+      });
+    });
+    const content =
+      app.container.querySelector<HTMLElement>(".ohb-app-content");
+    expect(content?.style.getPropertyValue("--approval-space")).toBe("244px");
+    act(() => {
+      height = 340;
+      resized([], new Observer(() => undefined));
+    });
+    expect(content?.style.getPropertyValue("--approval-space")).toBe("364px");
+    act(() => {
+      fake.store.setPermissionSync({ ...sync, requests: [] });
+    });
+    expect(content?.style.getPropertyValue("--approval-space")).toBe("");
+  } finally {
+    geometry.mockRestore();
+    globalThis.ResizeObserver = original;
+  }
+});
+
+it("keeps the child shell read-only and returns focus to pending approval when it closes", async () => {
+  const base = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const rootSession = base.sessions[0];
+  const fake = createFakeRuntime({
+    snapshot: {
+      ...base,
+      sessions: [
+        {
+          ...rootSession,
+          messages: [
+            {
+              id: "delegation",
+              role: "assistant",
+              createdAt: timestamp,
+              parts: [
+                {
+                  type: "tool-call",
+                  call: {
+                    id: "delegate",
+                    name: "subagent_run",
+                    input: { prompt: "Investigate" },
+                    status: "completed",
+                  },
+                },
+                {
+                  type: "tool-result",
+                  result: { callId: "delegate", output: "done" },
+                  metadata: {
+                    subagent: {
+                      execution: {
+                        executionId: "exec",
+                        subagentId: "worker",
+                        status: "completed",
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      permissions: [permissionRequest()],
+    },
+  });
+  fake.client.watchSubagentConversation = vi.fn(() =>
+    Promise.reject(new Error("fixture unavailable")),
+  );
+  const app = mountApp(fake.runtime);
+  const trigger = app.container.querySelector<HTMLButtonElement>(
+    ".ohb-delegation-row",
+  );
+  await act(async () => {
+    trigger?.click();
+    await Promise.resolve();
+  });
+  expect(app.container.querySelector(".ohb-permission-modal")).toBeNull();
+  expect(app.container.querySelector(".ohb-subagent-view")).not.toBeNull();
+  expect(
+    app.container.querySelector<HTMLElement>(".ohb-root-composer")?.style
+      .display,
+  ).toBe("contents");
+  expect(app.container.textContent).toContain("Read-only subagent");
+  await act(async () => {
+    app.container
+      .querySelector<HTMLButtonElement>(
+        '.ohb-subagent-view [aria-label="Close"]',
+      )
+      ?.click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  });
+  expect(document.activeElement).toBe(
+    app.container.querySelector(".ohb-permission-modal h2"),
+  );
+  expect(document.activeElement).not.toBe(trigger);
+});

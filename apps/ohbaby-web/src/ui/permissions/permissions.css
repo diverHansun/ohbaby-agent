@@ -1,8 +1,8 @@
 .ohb-permission-layer {
-  bottom: 108px;
+  bottom: 12px;
   left: 24px;
   pointer-events: none;
-  position: fixed;
+  position: absolute;
   right: 24px;
   z-index: 18;
 }
@@ -105,3 +105,17 @@
   background: rgba(196, 117, 107, 0.24);
 }
 
+.ohb-app-content.has-approval .ohb-root-conversation > .ohb-stream {
+  padding-bottom: var(--approval-space, 176px);
+}
+.ohb-permission-modal h2:focus {
+  outline: none;
+}
+.ohb-permission-modal {
+  box-sizing: border-box;
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+}
+.ohb-permission-actions {
+  flex-wrap: wrap;
+}

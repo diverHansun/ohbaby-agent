@@ -717,6 +717,8 @@ export function SessionScreen({
     [childReader],
   );
   const viewingSubagent = childState.selected !== undefined;
+  const approvalDialogVisible =
+    !viewingSubagent && view.pendingPermissions.length > 0;
   const [childExpanded, setChildExpanded] = useState(false);
   const [childTitle, setChildTitle] = useState("Subagent task");
   const [childAnchorToken, setChildAnchorToken] = useState(0);
@@ -726,6 +728,13 @@ export function SessionScreen({
     childReader.close();
     setChildExpanded(false);
     requestAnimationFrame(() => {
+      const approvalTitle = contentRef.current?.querySelector<HTMLElement>(
+        ".ohb-permission-modal h2",
+      );
+      if (approvalTitle) {
+        approvalTitle.focus({ preventScroll: true });
+        return;
+      }
       const target = childTrigger.current?.isConnected
         ? childTrigger.current
         : contentRef.current?.querySelector<HTMLElement>(
@@ -734,6 +743,58 @@ export function SessionScreen({
       target?.focus({ preventScroll: true });
     });
   }, [childReader]);
+  const composerFocusBeforeApproval = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const rememberComposerFocus = (event: FocusEvent): void => {
+      const target = event.target;
+      if (
+        !(target instanceof HTMLElement) ||
+        target.closest(".ohb-permission-modal")
+      )
+        return;
+      composerFocusBeforeApproval.current =
+        target instanceof HTMLTextAreaElement &&
+        target.closest(".ohb-root-composer")
+          ? target
+          : null;
+    };
+    document.addEventListener("focusin", rememberComposerFocus);
+    return (): void => {
+      document.removeEventListener("focusin", rememberComposerFocus);
+    };
+  }, []);
+  const previousApprovalVisible = useRef(false);
+  useLayoutEffect(() => {
+    const wasVisible = previousApprovalVisible.current;
+    previousApprovalVisible.current = approvalDialogVisible;
+    if (approvalDialogVisible || !wasVisible) return;
+    const restore = composerFocusBeforeApproval.current;
+    composerFocusBeforeApproval.current = null;
+    if (!viewingSubagent && restore?.isConnected)
+      restore.focus({ preventScroll: true });
+  }, [approvalDialogVisible, viewingSubagent]);
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content || !approvalDialogVisible) return;
+    const card = content.querySelector<HTMLElement>(".ohb-permission-modal");
+    if (!card) return;
+    const measure = (): void => {
+      content.style.setProperty(
+        "--approval-space",
+        `${String(card.getBoundingClientRect().height + 24)}px`,
+      );
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(measure);
+    observer?.observe(card);
+    return (): void => {
+      observer?.disconnect();
+      content.style.removeProperty("--approval-space");
+    };
+  }, [approvalDialogVisible]);
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content || !viewingSubagent || childExpanded) return;
@@ -790,24 +851,26 @@ export function SessionScreen({
         ref={contentRef}
         className={`ohb-app-content ${
           showMain ? "ohb-app-content-main" : "ohb-app-content-empty"
-        } ${view.activeTodoList ? "ohb-app-content-has-todos" : ""}`}
+        } ${view.activeTodoList ? "ohb-app-content-has-todos" : ""} ${approvalDialogVisible ? "has-approval" : ""}`}
       >
-        {!viewingSubagent && (
-          <PermissionModal
-            disabled={storeSnapshot.permissionSync.status !== "ready"}
-            error={storeSnapshot.permissionSync.error}
-            syncing={storeSnapshot.permissionSync.status === "syncing"}
-            onRetry={() => {
-              runtime.retryPermissions();
-            }}
-            onRespond={(request, choice) => {
-              void runAction(() =>
-                client.respondPermission(request.id, { choiceId: choice.id }),
-              );
-            }}
-            permissions={view.pendingPermissions}
-          />
-        )}
+        <PermissionModal
+          visible={!viewingSubagent}
+          disabled={storeSnapshot.permissionSync.status !== "ready"}
+          error={storeSnapshot.permissionSync.error}
+          syncing={storeSnapshot.permissionSync.status === "syncing"}
+          onRetry={() => {
+            runtime.retryPermissions();
+          }}
+          onRespond={(request, choice) =>
+            runAction(() =>
+              client.respondPermission(request.id, { choiceId: choice.id }),
+            )
+          }
+          onCancel={stopRequest.stop}
+          canCancel={view.composer.canStop}
+          cancelLabel={stopRequest.label}
+          permissions={view.pendingPermissions}
+        />
         {sessionSyncBanner ? (
           <div className="ohb-error-banner" role="status">
             <span>
@@ -996,12 +1059,16 @@ export function SessionScreen({
         )}
         <div
           className="ohb-root-composer"
+          inert={approvalDialogVisible}
           style={{
-            display: viewingSubagent && childExpanded ? "none" : "contents",
+            display:
+              approvalDialogVisible || (viewingSubagent && childExpanded)
+                ? "none"
+                : "contents",
           }}
         >
           <Composer
-            readOnly={viewingSubagent}
+            readOnly={viewingSubagent || approvalDialogVisible}
             client={client}
             compact={!showMain}
             draftScopeKey={draftScopeKey}
@@ -1020,7 +1087,10 @@ export function SessionScreen({
             stopLabel={stopRequest.label}
             model={{
               ...view.composer,
-              disabled: view.composer.disabled || viewingSubagent,
+              disabled:
+                view.composer.disabled ||
+                viewingSubagent ||
+                approvalDialogVisible,
             }}
             activeSession={view.activeSession}
             queuedPrompts={view.queuedPrompts}

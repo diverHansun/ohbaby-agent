@@ -67,15 +67,17 @@ export function StatusBar(props: {
         <span>ba</span>
         <span>by</span>
       </div>
-      {props.waitingSummary ? (
-        <p className="ohb-child-waiting" role="status">
-          {props.waitingSummary}
-        </p>
-      ) : null}
       <div className="ohb-statusbar-meta">
         <StatusPill
           kind={props.header.connectionKind}
-          label={props.header.statusLabel}
+          label={
+            props.waitingSummary &&
+            (props.header.connectionKind === "running" ||
+              props.header.connectionKind === "idle")
+              ? "Waiting"
+              : props.header.statusLabel
+          }
+          title={props.waitingSummary}
         />
         <span className="ohb-divider" />
         <span className="ohb-model">{props.header.modelLabel}</span>
@@ -96,9 +98,13 @@ export function StatusBar(props: {
 export function StatusPill(props: {
   readonly kind: HeaderModel["connectionKind"];
   readonly label?: string;
+  readonly title?: string;
 }): ReactElement {
   return (
-    <span className={`ohb-status-pill ohb-status-${props.kind}`}>
+    <span
+      className={`ohb-status-pill ohb-status-${props.kind}`}
+      title={props.title}
+    >
       {props.label ?? props.kind}
     </span>
   );
