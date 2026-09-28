@@ -7,6 +7,8 @@
 
 **2026-09-27 补充阶段：** improve-2 已完成本地实施与[验收](improve-2/05-implementation-acceptance.md)，暂未合并/push。用户指定在中央 improve-3 开发前加入 [improve-2.1：New session 回归与 Web 模块整理](improve-2.1/README.md)；规划路径保留，本次实施分支为 `codex/improve-2.2`，本地实施与自动化/编译客户端验收已完成，见[本轮05及剩余限制](improve-2.1/05-implementation-acceptance.md)。对应的模块拆分规格位于 [ohbaby-web/improve-3](../../ohbaby-web/improve-3/README.md)，两个 improve-3 编号不可混淆。后续中央 improve-3 以本补充阶段的实际验收和接线为输入。
 
+**2026-09-28 当前规划入口：** improve-3 已在本地 `codex/improve-3` 完成实施与[验收记录](improve-3/05-implementation-acceptance.md)，基线 `1a7018f1`，未 merge/push。用户在本地验收后追加 [improve-3.1：子代理连续会话与 Web 阅读体验](improve-3.1/README.md)，用于优化已实现子代理展示；规划已获实施授权，进入本地 `codex/improve-3.1` 分批实施；TUI 保留现有 Ctrl+G 内部详情。本补充阶段不提前承担 improve-4 的停止和恢复重构。
+
 ## 目标与固定边界
 
 先解决“任务等待用户批准，用户却找不到入口”，再补齐执行过程、子代理可见性和停止恢复。默认 TUI 永久 in-process；serve 为 Web 提供共享运行后端；两者可共享 SQLite，但不共享实时协调、审批或 prompt queue。不得借此改成 TUI 自动 attach daemon。
