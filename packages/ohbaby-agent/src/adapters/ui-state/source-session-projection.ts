@@ -23,8 +23,16 @@ import { messageToUiMessage } from "./persistent-store.js";
 import { SessionViewOwner } from "./session-view.js";
 import { messageCursor } from "../../core/message/pagination.js";
 
+export type SourceSessionChange =
+  | { readonly kind: "messages"; readonly change: MessageCommittedChange }
+  | { readonly kind: "reasoning"; readonly change: DisplayReasoningChange }
+  | { readonly kind: "run"; readonly run: UiRun };
+
 /** Bridges durable message facts and the independent display source into one application view. */
 export class SourceSessionProjection {
+  private readonly scopeListeners = new Set<
+    (change: SourceSessionChange) => void
+  >();
   readonly owner: SessionViewOwner;
   readonly reasoning: DisplayReasoningOwner;
   private readonly messages = new Map<string, Map<string, MessageWithParts>>();
@@ -90,6 +98,44 @@ export class SourceSessionProjection {
       onProjectionError: (id, error) => {
         this.owner.markUnavailable(id, error);
       },
+    });
+  }
+
+  commitScopeRun(run: UiRun): void {
+    this.notifyScopes({ kind: "run", run });
+  }
+
+  subscribeScopeChanges(
+    listener: (change: SourceSessionChange) => void,
+  ): () => void {
+    this.scopeListeners.add(listener);
+    return () => {
+      this.scopeListeners.delete(listener);
+    };
+  }
+
+  private notifyScopes(change: SourceSessionChange): void {
+    for (const listener of this.scopeListeners) {
+      // Read projections cannot invalidate a successfully committed model message.
+      try {
+        listener(change);
+      } catch {
+        /* The child reader owns its recovery. */
+      }
+    }
+  }
+
+  scopeMetadata(sessionId: string): Promise<Omit<UiSession, "messages">> {
+    return this.options.metadata(sessionId);
+  }
+
+  projectComplete(record: MessageWithParts): UiMessage | undefined {
+    return this.project({
+      ...record,
+      parts: record.parts.map((part) => ({
+        ...part,
+        time: { ...part.time, compacted: undefined },
+      })),
     });
   }
 
@@ -297,6 +343,7 @@ export class SourceSessionProjection {
       historyInvalidated,
     });
     this.trim(change.sessionId);
+    this.notifyScopes({ kind: "messages", change });
   }
 
   private commitReasoning(change: DisplayReasoningChange): void {
@@ -334,6 +381,7 @@ export class SourceSessionProjection {
     if (change.kind === "missing") this.acceptedReasoning.delete(part.partId);
     else this.acceptedReasoning.set(part.partId, part);
     this.releaseAcceptedSaves(part.sessionId);
+    this.notifyScopes({ kind: "reasoning", change });
   }
 
   private releaseAcceptedSaves(sessionId: string): void {
@@ -385,6 +433,7 @@ export class SourceSessionProjection {
         })),
       });
       this.trim(id);
+      this.notifyScopes({ kind: "run", run: event.run });
     } else if (
       event.type === "prompt.submitted" ||
       event.type === "prompt.updated"

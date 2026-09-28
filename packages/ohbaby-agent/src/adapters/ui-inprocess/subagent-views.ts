@@ -11,6 +11,35 @@ import type {
 } from "../../agents/subagents/execution-store.js";
 import type { SourceSessionProjection } from "../ui-state/source-session-projection.js";
 
+export const projectSubagentExecution = (
+  record: SubagentExecutionRecord,
+): UiSubagentExecution => ({
+  executionId: record.executionId,
+  subagentId: record.subagentId,
+  rootSessionId: record.rootSessionId,
+  rootRunId: record.rootRunId,
+  childSessionId: record.childSessionId,
+  childScopeId: record.childScopeId,
+  childRunId: record.childRunId,
+  status: record.status,
+  createdAt: record.createdAt,
+  startedAt: record.startedAt,
+  completedAt: record.completedAt,
+  updatedAt: record.updatedAt,
+  terminalReason: record.reason,
+  resultStored: record.completedAt !== undefined,
+  delivery: record.delivery.state,
+  processedRequestId: record.delivery.processedRequestId,
+  artifactPath:
+    record.artifact.state === "ready" ? record.artifact.path : undefined,
+  childUserMessageId: record.childUserMessageId,
+  delegationSequence: record.delegationSequence,
+  requestId: record.requestId,
+  requesterRunId: record.requesterRunId,
+  requesterScopeId: record.requesterScopeId,
+  parentSessionId: record.parentSessionId,
+});
+
 export function createSubagentViewReader(options: {
   readonly executions: SubagentExecutionStore;
   readonly source: SourceSessionProjection;
@@ -39,24 +68,7 @@ export function createSubagentViewReader(options: {
     return limit;
   };
   const project = (record: SubagentExecutionRecord): UiSubagentExecution => ({
-    executionId: record.executionId,
-    subagentId: record.subagentId,
-    rootSessionId: record.rootSessionId,
-    rootRunId: record.rootRunId,
-    childSessionId: record.childSessionId,
-    childScopeId: record.childScopeId,
-    childRunId: record.childRunId,
-    status: record.status,
-    createdAt: record.createdAt,
-    startedAt: record.startedAt,
-    completedAt: record.completedAt,
-    updatedAt: record.updatedAt,
-    terminalReason: record.reason,
-    resultStored: record.completedAt !== undefined,
-    delivery: record.delivery.state,
-    processedRequestId: record.delivery.processedRequestId,
-    artifactPath:
-      record.artifact.state === "ready" ? record.artifact.path : undefined,
+    ...projectSubagentExecution(record),
     budget: options.budget?.(record.executionId),
   });
   return {

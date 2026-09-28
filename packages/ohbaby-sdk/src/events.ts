@@ -1,4 +1,5 @@
 import type { UiPermissionEvent } from "./permission.js";
+import type { UiSubagentConversationEvent } from "./subagent.js";
 import type {
   UiSessionRecoveryEvent,
   UiSessionIndexInvalidatedEvent,
@@ -220,6 +221,7 @@ export interface UiSessionResyncRequiredEvent {
 }
 
 export type UiEvent =
+  | UiSubagentConversationEvent
   | UiSessionResyncRequiredEvent
   | UiSessionRecoveryEvent
   | UiSessionIndexInvalidatedEvent

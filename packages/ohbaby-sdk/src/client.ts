@@ -1,4 +1,8 @@
-import type { UiSubagentReadClient } from "./subagent.js";
+import type {
+  UiSubagentConversationQuery,
+  UiSubagentConversationUnwatchQuery,
+  UiSubagentReadClient,
+} from "./subagent.js";
 import type {
   UiPermissionEvent,
   UiPermissionSnapshot,
@@ -209,4 +213,12 @@ export interface UiSessionCreationResult extends UiSessionIndexEntry {
 /**
  * Complete production backend capability. Queue management is mandatory.
  */
-export interface UiBackendClient extends UiQueryClient, UiCommandClient {}
+export interface UiBackendClient extends UiQueryClient, UiCommandClient {
+  /** Internal source lifetime hooks; not exposed by daemon transport. */
+  retainSubagentConversation?(
+    input: UiSubagentConversationQuery & { readonly watchId: string },
+  ): Promise<void>;
+  releaseSubagentConversation?(
+    input: UiSubagentConversationUnwatchQuery,
+  ): Promise<void>;
+}

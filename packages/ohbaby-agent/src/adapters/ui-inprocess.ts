@@ -1,3 +1,4 @@
+import { SubagentConversationProjection } from "./ui-inprocess/subagent-conversation.js";
 import { InMemorySubagentExecutionStore } from "../agents/subagents/execution-store.js";
 import { createSubagentViewReader } from "./ui-inprocess/subagent-views.js";
 import {
@@ -327,6 +328,15 @@ export interface InProcessUiBackendClient
   >;
   getSubagentExecutionView: NonNullable<
     UiBackendClient["getSubagentExecutionView"]
+  >;
+  getSubagentConversationView: NonNullable<
+    UiBackendClient["getSubagentConversationView"]
+  >;
+  retainSubagentConversation: NonNullable<
+    UiBackendClient["retainSubagentConversation"]
+  >;
+  releaseSubagentConversation: NonNullable<
+    UiBackendClient["releaseSubagentConversation"]
   >;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
@@ -704,6 +714,24 @@ export function createInProcessUiBackendClient(
       },
     },
   );
+  const subagentConversations = new SubagentConversationProjection({
+    runtimeEpoch: permissionProjection.permissionEpoch,
+    source: sourceProjection,
+    messages: messageManager,
+    executions: subagentExecutionStore,
+    validateRoot: async (id): Promise<void> => {
+      await validatePermissionRoot(id);
+    },
+    runs: async (sessionId, scopeId): Promise<readonly UiRun[]> =>
+      (await sourceLedger.listBySession(sessionId, { limit: 50 }))
+        .filter(
+          (run) => scopeId !== undefined && run.contextScopeId === scopeId,
+        )
+        .map(runToUiRun),
+    publish: (event): void => {
+      eventRouter.publishRecovery(event);
+    },
+  });
   const coordinatedRunLedger = createCoordinatedRunLedger({
     ledger: sourceLedger,
     coordinator: {
@@ -715,6 +743,7 @@ export function createInProcessUiBackendClient(
             type: "run.updated",
             run: runToUiRun(record),
           });
+        else sourceProjection.commitScopeRun(runToUiRun(record));
       },
       onProjectionError: (sessionId, error): void => {
         sourceProjection.owner.markUnavailable(sessionId, error);
@@ -3480,6 +3509,10 @@ export function createInProcessUiBackendClient(
       await validatePermissionRoot(sessionId);
       await initializeSessionView(sessionId);
     },
+    getSubagentConversationView: (input) => subagentConversations.read(input),
+    retainSubagentConversation: (input) => subagentConversations.retain(input),
+    releaseSubagentConversation: (input) =>
+      subagentConversations.release(input),
     async listSubagentExecutions(input) {
       return (await subagentViews()).list(input);
     },
@@ -3576,6 +3609,7 @@ export function createInProcessUiBackendClient(
       promptCacheUsage.clear();
       retiredPromptCacheSessionIds.clear();
       await runtimeController.resetRuntime();
+      subagentConversations.dispose();
       sourceProjection.reasoning.dispose();
       sourceProjection.owner.dispose();
     },

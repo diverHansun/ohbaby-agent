@@ -78,6 +78,15 @@ export interface PersistentUiBackendClient
   getSubagentExecutionView: NonNullable<
     UiBackendClient["getSubagentExecutionView"]
   >;
+  getSubagentConversationView: NonNullable<
+    UiBackendClient["getSubagentConversationView"]
+  >;
+  retainSubagentConversation: NonNullable<
+    UiBackendClient["retainSubagentConversation"]
+  >;
+  releaseSubagentConversation: NonNullable<
+    UiBackendClient["releaseSubagentConversation"]
+  >;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
   dispose(): Promise<void> | void;
@@ -216,6 +225,18 @@ function withStartupRecovery(
     async getSubagentExecutionView(input) {
       await ready();
       return client.getSubagentExecutionView(input);
+    },
+    async getSubagentConversationView(input) {
+      await ready();
+      return client.getSubagentConversationView(input);
+    },
+    async retainSubagentConversation(input) {
+      await ready();
+      return client.retainSubagentConversation(input);
+    },
+    async releaseSubagentConversation(input) {
+      await ready();
+      return client.releaseSubagentConversation(input);
     },
     async getSessionView(
       input,

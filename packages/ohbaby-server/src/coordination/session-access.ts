@@ -2,6 +2,10 @@ import type {
   UiSubagentQuery,
   UiSubagentExecutionList,
   UiSubagentExecutionView,
+  UiSubagentConversationQuery,
+  UiSubagentConversationView,
+  UiSubagentConversationSelection,
+  UiSubagentConversationUnwatchQuery,
 } from "ohbaby-sdk";
 import type {
   UiBackendClient,
@@ -15,14 +19,21 @@ import type {
   UiSessionView,
 } from "ohbaby-sdk";
 import type { DaemonClientViewCoordinator } from "./client-view.js";
+import { randomUUID } from "node:crypto";
 import { permissionError, validateRoot } from "./permission-access.js";
 
 export function sessionRecoveryCapability(
   backend: UiBackendClient,
   epoch: string,
-): { runtimeEpoch: string; sessionRecoveryVersion: number } {
+): {
+  runtimeEpoch: string;
+  sessionRecoveryVersion: number;
+  subagentConversationVersion: number;
+} {
   return {
     runtimeEpoch: epoch,
+    subagentConversationVersion:
+      typeof backend.getSubagentConversationView === "function" ? 1 : 0,
     sessionRecoveryVersion: [
       backend.getSessionView,
       backend.getSessionHistory,
@@ -418,4 +429,107 @@ export async function subagentReadForClient(
   await validateRoot(backend, query.rootSessionId);
   recheck(input, binding);
   return result;
+}
+
+function validateConversationQuery(query: UiSubagentConversationQuery): void {
+  parseSessionQuery({ ...query, sessionId: query.rootSessionId });
+  if (
+    typeof query.subagentId !== "string" ||
+    query.subagentId.length === 0 ||
+    (query.after !== undefined &&
+      (typeof query.after !== "string" || query.after.length > 4096)) ||
+    (query.anchorExecutionId !== undefined &&
+      (typeof query.anchorExecutionId !== "string" ||
+        query.anchorExecutionId.length === 0))
+  )
+    throw Object.assign(new Error("Invalid subagent conversation query"), {
+      code: "INVALID_SESSION_QUERY",
+    });
+}
+
+export async function subagentConversationReadForClient(
+  input: Access & { readonly query: UiSubagentConversationQuery },
+): Promise<UiSubagentConversationView> {
+  const { query, backend } = input;
+  validateConversationQuery(query);
+  const binding = capture(input, query);
+  if (binding.rootSessionId !== query.rootSessionId)
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Conversation reads require the selected root session",
+    );
+  await validateRoot(backend, query.rootSessionId);
+  recheck(input, binding);
+  if (!backend.getSubagentConversationView)
+    throw Object.assign(new Error("Subagent conversations are unavailable"), {
+      code: "SESSION_RECOVERY_UNSUPPORTED",
+    });
+  const result = await backend.getSubagentConversationView(query);
+  recheck(input, binding);
+  if (
+    result.rootSessionId !== query.rootSessionId ||
+    result.subagentId !== query.subagentId ||
+    result.view.version.runtimeEpoch !== input.epoch ||
+    result.view.session.id !== result.view.version.sessionId ||
+    result.executions.some(
+      (execution) =>
+        execution.rootSessionId !== query.rootSessionId ||
+        execution.subagentId !== query.subagentId,
+    )
+  )
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Conversation scope mismatch",
+    );
+  await validateRoot(backend, query.rootSessionId);
+  recheck(input, binding);
+  return {
+    ...result,
+    view: { ...result.view, bindingGeneration: binding.bindingGeneration },
+  };
+}
+
+export async function watchSubagentConversationForClient(
+  input: Access & { readonly query: UiSubagentConversationQuery },
+): Promise<UiSubagentConversationSelection> {
+  // Resolve the logical child through the same authorized source as reads.
+  await subagentConversationReadForClient(input);
+  const binding = capture(input, input.query);
+  const watchId = randomUUID();
+  await input.backend.retainSubagentConversation?.({
+    ...input.query,
+    watchId,
+  });
+  try {
+    return input.views.watchSubagentConversation(
+      input.clientId,
+      binding,
+      input.epoch,
+      input.query.subagentId,
+      watchId,
+    );
+  } catch (error) {
+    await input.backend.releaseSubagentConversation?.({
+      ...input.query,
+      watchId,
+    });
+    throw error;
+  }
+}
+
+export function unwatchSubagentConversationForClient(
+  input: Access & { readonly query: UiSubagentConversationUnwatchQuery },
+): void {
+  validateConversationQuery(input.query);
+  if (typeof input.query.watchId !== "string" || !input.query.watchId)
+    throw Object.assign(new Error("Invalid subagent watch"), {
+      code: "INVALID_SESSION_QUERY",
+    });
+  const binding = capture(input, input.query);
+  if (binding.rootSessionId !== input.query.rootSessionId)
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Conversation watch requires the selected root session",
+    );
+  input.views.unwatchSubagentConversation(input.clientId, input.query.watchId);
 }

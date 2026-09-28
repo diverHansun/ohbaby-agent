@@ -1978,6 +1978,23 @@ describe("createPersistentUiBackendClient", () => {
       });
       expect(view.readOnly).toBe(true);
       expect(view.output).toBe("child transcript persisted");
+      expect(typeof client.getSubagentConversationView).toBe("function");
+      expect(typeof client.retainSubagentConversation).toBe("function");
+      expect(typeof client.releaseSubagentConversation).toBe("function");
+      const conversation = await restored.getSubagentConversationView({
+        rootSessionId: parentSessionId,
+        subagentId: executions.executions[0].subagentId,
+        anchorExecutionId: executions.executions[0].executionId,
+      });
+      expect(conversation.readOnly).toBe(true);
+      expect(conversation.anchorFound).toBe(true);
+      expect(conversation.messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+      ]);
+      expect(JSON.stringify(conversation.messages)).toContain(
+        "child transcript persisted",
+      );
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });

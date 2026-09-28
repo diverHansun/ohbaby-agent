@@ -2,6 +2,10 @@ import type {
   UiSubagentQuery,
   UiSubagentExecutionList,
   UiSubagentExecutionView,
+  UiSubagentConversationQuery,
+  UiSubagentConversationView,
+  UiSubagentConversationSelection,
+  UiSubagentConversationUnwatchQuery,
 } from "ohbaby-sdk";
 import {
   createPermissionSync,
@@ -53,6 +57,7 @@ export class BrowserDaemonClient implements UiBackendClient {
   private readonly permissionSync: PermissionSync;
   private readonly sessionSync: SessionSync;
   private recoverySupported = false;
+  private subagentConversationSupported = false;
   private scopeTicket = 0;
   private selectionTicket = 0;
   private modelTicket = 0;
@@ -172,6 +177,7 @@ export class BrowserDaemonClient implements UiBackendClient {
             this.permissionSync.disconnect();
             this.sessionSync.disconnect();
             this.clearControl();
+            this.notifyConversationResync(true);
           }
           this.store.setConnectionState(state);
         },
@@ -181,6 +187,7 @@ export class BrowserDaemonClient implements UiBackendClient {
           this.permissionSync.disconnect();
           this.sessionSync.disconnect();
           this.clearControl();
+          this.notifyConversationResync(true);
           this.store.setError(error.message);
         },
         onEvent: (event) => {
@@ -255,6 +262,7 @@ export class BrowserDaemonClient implements UiBackendClient {
     binding: UiPermissionBinding & {
       readonly runtimeEpoch?: string;
       readonly sessionRecoveryVersion?: number;
+      readonly subagentConversationVersion?: number;
     },
     fromHello = false,
   ): void {
@@ -316,6 +324,10 @@ export class BrowserDaemonClient implements UiBackendClient {
         binding.sessionRecoveryVersion === 1 &&
         binding.runtimeEpoch === binding.permissionEpoch;
     }
+    if (binding.subagentConversationVersion !== undefined || fromHello)
+      this.subagentConversationSupported =
+        binding.subagentConversationVersion === 1 &&
+        binding.runtimeEpoch === binding.permissionEpoch;
     if (!this.recoverySupported) {
       this.sessionSync.disconnect();
       this.store.setSessionSync({
@@ -331,6 +343,20 @@ export class BrowserDaemonClient implements UiBackendClient {
     void this.refreshControl();
     void this.retryUnknownPrompts();
     this.refreshUnrelatedViews();
+    if (fromHello) this.notifyConversationResync(false);
+  }
+
+  private notifyConversationResync(disconnected: boolean): void {
+    const binding = this.permissionSync.getState().binding;
+    if (!binding) return;
+    this.notifyUiEvent({
+      type: "session.resync-required",
+      runtimeEpoch: binding.permissionEpoch,
+      sessionId: binding.rootSessionId,
+      bindingGeneration: binding.bindingGeneration,
+      connectionGeneration: this.connectionGeneration,
+      disconnected,
+    });
   }
 
   private currentScope(): UiSessionScope | null {
@@ -461,6 +487,41 @@ export class BrowserDaemonClient implements UiBackendClient {
     if (binding !== this.permissionSync.getState().binding)
       throw new Error("Session binding changed during execution query");
     return result.result;
+  }
+  async getSubagentConversationView(
+    input: UiSubagentConversationQuery,
+  ): Promise<UiSubagentConversationView> {
+    if (!this.subagentConversationSupported)
+      throw new Error("Server does not support subagent conversations");
+    const binding = this.permissionSync.getState().binding;
+    const result = await this.http.getSubagentConversationView({
+      ...input,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.permissionSync.getState().binding)
+      throw new Error("Session binding changed during conversation query");
+    return result.result;
+  }
+  async watchSubagentConversation(
+    input: UiSubagentConversationQuery,
+  ): Promise<UiSubagentConversationSelection> {
+    if (!this.subagentConversationSupported)
+      throw new Error("Server does not support subagent conversations");
+    const binding = this.permissionSync.getState().binding;
+    const result = await this.http.watchSubagentConversation({
+      ...input,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.permissionSync.getState().binding)
+      throw new Error("Session binding changed during conversation watch");
+    return result.result;
+  }
+  async unwatchSubagentConversation(
+    input: UiSubagentConversationUnwatchQuery,
+  ): Promise<void> {
+    await this.http.unwatchSubagentConversation(input);
   }
   async getSessionView(input: UiSessionScope): Promise<UiSessionView> {
     return (await this.http.getSessionView(input)).view;
@@ -1017,6 +1078,7 @@ export class BrowserDaemonClient implements UiBackendClient {
       case "resync-required":
         this.permissionSync.resync();
         this.sessionSync.resync();
+        this.notifyConversationResync(false);
         return;
       case "ui.event": {
         if (
@@ -1068,6 +1130,23 @@ export class BrowserDaemonClient implements UiBackendClient {
         }
         if (event.event.type === "session.resync-required") {
           this.sessionSync.resync();
+          this.notifyUiEvent(event.event);
+          return;
+        }
+        if (
+          event.event.type === "subagent.conversation.changed" ||
+          event.event.type === "subagent.conversation.unavailable"
+        ) {
+          if (
+            seqNum === undefined ||
+            !Number.isSafeInteger(seqNum) ||
+            seqNum < 0
+          ) {
+            this.store.setError("Daemon event is missing a valid sequence id");
+            return;
+          }
+          this.notifyUiEvent(event.event);
+          this.events.setLastEventId(seqNum);
           return;
         }
         if (event.event.type === "snapshot.replaced") return;

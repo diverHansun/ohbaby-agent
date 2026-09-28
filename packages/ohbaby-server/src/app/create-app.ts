@@ -1,4 +1,9 @@
-import { subagentReadForClient } from "../coordination/session-access.js";
+import {
+  subagentReadForClient,
+  subagentConversationReadForClient,
+  watchSubagentConversationForClient,
+  unwatchSubagentConversationForClient,
+} from "../coordination/session-access.js";
 import {
   createOrReuseClientSession,
   abortForClient,
@@ -1023,6 +1028,11 @@ class DaemonServerAppRuntime {
   private permissionEpoch = "";
 
   constructor(private readonly options: DaemonServerAppOptions) {
+    this.clientViews.setSubagentUnwatchHandler((selection) => {
+      void this.options.backend
+        .releaseSubagentConversation?.({ ...selection })
+        .catch(() => undefined);
+    });
     this.authToken = requireAuthToken(options.authToken);
     this.clientDisconnectRetentionMs = normalizeClientDisconnectRetentionMs(
       options.clientDisconnectRetentionMs,
@@ -1435,6 +1445,75 @@ class DaemonServerAppRuntime {
         return context.json({ ok: true, result });
       });
     }
+    this.app.get(
+      "/v1/sessions/:id/subagents/:subagentId/conversation",
+      async (context) => {
+        const authorization = this.authorizePromptMutation(context);
+        if ("response" in authorization) return authorization.response;
+        const raw: Record<string, string | undefined> = context.req.query();
+        const result = await subagentConversationReadForClient({
+          backend: this.options.backend,
+          views: this.clientViews,
+          clientId: authorization.clientId,
+          epoch: this.permissionEpoch,
+          query: {
+            rootSessionId: context.req.param("id"),
+            subagentId: context.req.param("subagentId"),
+            runtimeEpoch: raw.runtimeEpoch,
+            bindingGeneration: Number(raw.bindingGeneration),
+            before: raw.before,
+            after: raw.after,
+            anchorExecutionId: raw.anchorExecutionId,
+            limit: raw.limit === undefined ? undefined : Number(raw.limit),
+            signal: context.req.raw.signal,
+          },
+        });
+        return context.json({ ok: true, result });
+      },
+    );
+    this.app.post(
+      "/v1/sessions/:id/subagents/:subagentId/conversation/watch",
+      async (context) => {
+        const authorization = this.authorizePromptMutation(context);
+        if ("response" in authorization) return authorization.response;
+        const raw: Record<string, unknown> = await context.req.json();
+        const result = await watchSubagentConversationForClient({
+          backend: this.options.backend,
+          views: this.clientViews,
+          clientId: authorization.clientId,
+          epoch: this.permissionEpoch,
+          query: {
+            rootSessionId: context.req.param("id"),
+            subagentId: context.req.param("subagentId"),
+            runtimeEpoch: raw.runtimeEpoch as string,
+            bindingGeneration: raw.bindingGeneration as number,
+          },
+        });
+        return context.json({ ok: true, result });
+      },
+    );
+    this.app.delete(
+      "/v1/sessions/:id/subagents/:subagentId/conversation/watch",
+      (context) => {
+        const authorization = this.authorizePromptMutation(context);
+        if ("response" in authorization) return authorization.response;
+        const raw: Record<string, string | undefined> = context.req.query();
+        unwatchSubagentConversationForClient({
+          backend: this.options.backend,
+          views: this.clientViews,
+          clientId: authorization.clientId,
+          epoch: this.permissionEpoch,
+          query: {
+            rootSessionId: context.req.param("id"),
+            subagentId: context.req.param("subagentId"),
+            runtimeEpoch: raw.runtimeEpoch,
+            bindingGeneration: Number(raw.bindingGeneration),
+            watchId: raw.watchId ?? "",
+          },
+        });
+        return context.json({ ok: true });
+      },
+    );
     this.app.get("/v1/prompts/receipt", async (context) => {
       const authorization = this.authorizePromptMutation(context);
       if ("response" in authorization) return authorization.response;
@@ -2939,6 +3018,24 @@ class DaemonServerAppRuntime {
     );
     if (!filtered || filtered.type === "snapshot.replaced") return undefined;
     if (
+      filtered.type === "subagent.conversation.changed" ||
+      filtered.type === "subagent.conversation.unavailable"
+    ) {
+      const bindingGeneration = this.clientViews.binding(
+        clientId,
+        this.permissionEpoch,
+      ).bindingGeneration;
+      return filtered.type === "subagent.conversation.changed"
+        ? {
+            ...filtered,
+            change: { ...filtered.change, bindingGeneration },
+          }
+        : {
+            ...filtered,
+            unavailable: { ...filtered.unavailable, bindingGeneration },
+          };
+    }
+    if (
       filtered.type === "session.changed" ||
       filtered.type === "session.unavailable"
     ) {
@@ -2986,6 +3083,13 @@ class DaemonServerAppRuntime {
     const routed = this.replayEventsBySeqNum
       .get(envelope.seqNum)
       ?.get(client.clientId);
+    if (
+      (routed?.type === "subagent.conversation.changed" ||
+        routed?.type === "subagent.conversation.unavailable") &&
+      routed.watchId !==
+        this.clientViews.currentSubagentWatchId(client.clientId)
+    )
+      return;
     if (routed) {
       client.write(
         {

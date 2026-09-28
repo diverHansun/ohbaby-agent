@@ -65,7 +65,7 @@ interface SetupResult {
   emit: (event: UiEvent) => void;
 }
 async function setup(
-  options: { unsupported?: boolean } = {},
+  options: { unsupported?: boolean; conversation?: boolean } = {},
 ): Promise<SetupResult> {
   const listeners = new Set<(event: UiEvent) => void>();
   const source: UiSessionRecoveryClient = {
@@ -102,6 +102,21 @@ async function setup(
   };
   const backend = {
     ...(options.unsupported ? {} : source),
+    ...(options.conversation
+      ? {
+          getSubagentConversationView: () =>
+            Promise.resolve({
+              rootSessionId: "root",
+              subagentId: "logical-child",
+              view: baseline("child"),
+              messages: [],
+              history: { hasMore: false, hasLater: false },
+              executions: [],
+              anchorFound: false,
+              readOnly: true as const,
+            }),
+        }
+      : {}),
     initializeSession: vi.fn(() =>
       Promise.reject(new Error("chat seed unavailable")),
     ),
@@ -689,6 +704,79 @@ describe("readonly execution transports", () => {
       (await request(`/v1/sessions/root/subagents?${query}&limit=201`)).status,
     ).toBe(400);
   });
+  it("authorizes one conversation watch and releases replaced or root-switched watches", async () => {
+    const { request, backend, binding } = await setup({ conversation: true });
+    expect(binding.subagentConversationVersion).toBe(1);
+    const execution = {
+      executionId: "execution",
+      subagentId: "logical-child",
+      rootSessionId: "root",
+      rootRunId: "root-run",
+      status: "running" as const,
+      createdAt: 1,
+      updatedAt: 1,
+      resultStored: false,
+      delivery: "none" as const,
+    };
+    backend.getSubagentConversationView = vi.fn(() =>
+      Promise.resolve({
+        rootSessionId: "root",
+        subagentId: "logical-child",
+        view: baseline("child"),
+        messages: [],
+        history: { hasMore: false, hasLater: false },
+        executions: [execution],
+        anchorFound: false,
+        readOnly: true as const,
+      }),
+    );
+    backend.retainSubagentConversation = vi.fn(() => Promise.resolve());
+    backend.releaseSubagentConversation = vi.fn(() => Promise.resolve());
+    const path = "/v1/sessions/root/subagents/logical-child/conversation";
+    const read = await request(`${path}?${query}`);
+    expect(read.status).toBe(200);
+    expect(await read.json()).toMatchObject({
+      result: { view: { bindingGeneration: 1 } },
+    });
+    const watch = async (): Promise<{ watchId: string }> => {
+      const response = await request(`${path}/watch`, {
+        method: "POST",
+        body: JSON.stringify({
+          runtimeEpoch: epoch,
+          bindingGeneration: 1,
+        }),
+      });
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { result: { watchId: string } })
+        .result;
+    };
+    const first = await watch();
+    const second = await watch();
+    expect(first.watchId).not.toBe(second.watchId);
+    expect(backend.retainSubagentConversation).toHaveBeenCalledTimes(2);
+    expect(backend.releaseSubagentConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ watchId: first.watchId }),
+    );
+    const staleClose = await request(
+      `${path}/watch?${query}&watchId=${first.watchId}`,
+      { method: "DELETE" },
+    );
+    expect(staleClose.status).toBe(200);
+    expect(backend.releaseSubagentConversation).toHaveBeenCalledTimes(1);
+    await request("/v1/sessions/other/select", { method: "PATCH" });
+    expect(backend.releaseSubagentConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ watchId: second.watchId }),
+    );
+    expect((await request(`${path}?${query}`)).status).toBe(409);
+    expect(
+      (
+        await request(
+          `/v1/sessions/other/subagents/logical-child/conversation?runtimeEpoch=${epoch}&bindingGeneration=2`,
+        )
+      ).status,
+    ).toBe(409);
+  });
+
   it("drops an execution response when the root binding changes during the read", async () => {
     const { request, backend } = await setup();
     let release: (

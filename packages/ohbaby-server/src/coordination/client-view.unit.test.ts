@@ -481,6 +481,75 @@ describe("DaemonClientViewCoordinator", () => {
     ).toBeUndefined();
   });
 
+  it("routes child changes only to the active watch and releases old tokens", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    const released: string[] = [];
+    coordinator.setSubagentUnwatchHandler((selection) => {
+      released.push(selection.watchId);
+    });
+    coordinator.initializeClient(
+      "client",
+      { sessions: [sessionWithMessages("root")] },
+      { resumeSessionId: "root" },
+    );
+    const binding = coordinator.binding("client", "epoch");
+    const childEvent: UiEvent = {
+      type: "subagent.conversation.changed",
+      rootSessionId: "root",
+      subagentId: "child",
+      change: {
+        type: "session.changed",
+        version: {
+          runtimeEpoch: "epoch",
+          sessionId: "real-child-session",
+          viewGeneration: "scope-generation",
+          sessionRevision: 1,
+        },
+      },
+    };
+    expect(
+      coordinator.routeEventForClient(childEvent, "client"),
+    ).toBeUndefined();
+    coordinator.watchSubagentConversation(
+      "client",
+      binding,
+      "epoch",
+      "child",
+      "watch-1",
+    );
+    expect(coordinator.routeEventForClient(childEvent, "client")).toMatchObject(
+      {
+        watchId: "watch-1",
+      },
+    );
+    coordinator.watchSubagentConversation(
+      "client",
+      binding,
+      "epoch",
+      "child",
+      "watch-2",
+    );
+    coordinator.unwatchSubagentConversation("client", "watch-1");
+    expect(coordinator.currentSubagentWatchId("client")).toBe("watch-2");
+    expect(released).toEqual(["watch-1"]);
+    coordinator.selectSession("client", null, binding.bindingGeneration);
+    expect(
+      coordinator.routeEventForClient(childEvent, "client"),
+    ).toBeUndefined();
+    expect(released).toEqual(["watch-1", "watch-2"]);
+    const nextBinding = coordinator.binding("client", "epoch");
+    coordinator.selectSession("client", "root", nextBinding.bindingGeneration);
+    coordinator.watchSubagentConversation(
+      "client",
+      coordinator.binding("client", "epoch"),
+      "epoch",
+      "child",
+      "watch-3",
+    );
+    coordinator.disconnectClient("client");
+    expect(released).toEqual(["watch-1", "watch-2", "watch-3"]);
+  });
+
   it("routes command events only to the invoking client", () => {
     const coordinator = new DaemonClientViewCoordinator();
 

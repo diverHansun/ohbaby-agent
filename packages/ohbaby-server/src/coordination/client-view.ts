@@ -6,6 +6,7 @@ import type {
   UiSnapshot,
   UiSessionIndexEntry,
   UiPermissionBinding,
+  UiSubagentConversationSelection,
 } from "ohbaby-sdk";
 import type { DaemonStartupIntent } from "../protocols/jsonrpc/protocol.js";
 import type { DaemonPromptItem } from "./prompt-backend.js";
@@ -15,6 +16,7 @@ interface ClientView {
   activeSessionId?: string | null;
   readonly initialPermission?: DaemonStartupIntent["initialPermission"];
   pendingSessionId?: string;
+  watchedSubagent?: UiSubagentConversationSelection;
 }
 
 type InteractionResponseState =
@@ -313,6 +315,9 @@ function sessionIdForEvent(event: UiEvent): string | undefined {
 }
 
 export class DaemonClientViewCoordinator {
+  private onSubagentUnwatch?: (
+    selection: UiSubagentConversationSelection,
+  ) => void;
   private readonly clientViews = new Map<string, ClientView>();
   private readonly commandOwnersByInvocationId = new Map<string, string>();
   private readonly commandBindingGenerations = new Map<string, number>();
@@ -338,6 +343,18 @@ export class DaemonClientViewCoordinator {
   }>();
   private readonly sessionCreations = new Map<string, Promise<unknown>>();
   private readonly sessionAdmissionChecks = new Set<Set<string>>();
+
+  setSubagentUnwatchHandler(
+    handler: (selection: UiSubagentConversationSelection) => void,
+  ): void {
+    this.onSubagentUnwatch = handler;
+  }
+
+  private clearSubagentWatch(view: ClientView): void {
+    const previous = view.watchedSubagent;
+    view.watchedSubagent = undefined;
+    if (previous) this.onSubagentUnwatch?.(previous);
+  }
 
   // Retain settled admissions only while an empty-candidate read is in flight.
   // The returned candidate is unknown until that read completes.
@@ -399,6 +416,8 @@ export class DaemonClientViewCoordinator {
     intent: DaemonStartupIntent,
   ): void {
     const activeSessionId = resolveStartupActiveSessionId(snapshot, intent);
+    const previous = this.clientViews.get(clientId);
+    if (previous) this.clearSubagentWatch(previous);
     this.disconnectedClientIds.delete(clientId);
     this.provisionalPromptBindings.delete(clientId);
     this.clientViews.set(clientId, {
@@ -472,6 +491,7 @@ export class DaemonClientViewCoordinator {
       );
     this.provisionalPromptBindings.delete(clientId);
     view.activeSessionId = sessionId;
+    this.clearSubagentWatch(view);
     view.pendingSessionId = undefined;
     view.bindingGeneration += 1;
   }
@@ -502,6 +522,40 @@ export class DaemonClientViewCoordinator {
     return projectSnapshotForClient(snapshot, this.clientViews.get(clientId));
   }
 
+  watchSubagentConversation(
+    clientId: string,
+    expected: UiPermissionBinding,
+    epoch: string,
+    subagentId: string,
+    watchId: string,
+  ): UiSubagentConversationSelection {
+    this.assertBinding(clientId, expected, epoch);
+    if (expected.rootSessionId === null)
+      throw new DaemonForbiddenError("No root session selected");
+    const selection: UiSubagentConversationSelection = {
+      rootSessionId: expected.rootSessionId,
+      subagentId,
+      runtimeEpoch: epoch,
+      bindingGeneration: expected.bindingGeneration,
+      watchId,
+    };
+    const view = this.clientViews.get(clientId);
+    if (!view) throw new DaemonForbiddenError("Client is not registered");
+    this.clearSubagentWatch(view);
+    view.watchedSubagent = selection;
+    return selection;
+  }
+
+  unwatchSubagentConversation(clientId: string, watchId: string): void {
+    const view = this.clientViews.get(clientId);
+    if (view?.watchedSubagent?.watchId === watchId)
+      this.clearSubagentWatch(view);
+  }
+
+  currentSubagentWatchId(clientId: string): string | undefined {
+    return this.clientViews.get(clientId)?.watchedSubagent?.watchId;
+  }
+
   canAccessPrompt(
     clientId: string,
     snapshot: UiSnapshot,
@@ -525,6 +579,7 @@ export class DaemonClientViewCoordinator {
     if (submitOptions?.sessionId !== undefined && view !== undefined) {
       if (view.activeSessionId !== submitOptions.sessionId) {
         this.provisionalPromptBindings.delete(clientId);
+        this.clearSubagentWatch(view);
         view.bindingGeneration += 1;
         view.pendingSessionId = undefined;
       }
@@ -535,6 +590,7 @@ export class DaemonClientViewCoordinator {
       const sessionId = createSessionId();
       submitOptions = { ...options, sessionId };
       view.activeSessionId = sessionId;
+      this.clearSubagentWatch(view);
       view.bindingGeneration += 1;
       view.pendingSessionId = sessionId;
       this.provisionalPromptBindings.set(clientId, {
@@ -566,6 +622,7 @@ export class DaemonClientViewCoordinator {
           return;
         if (!accepted) {
           provisional.view.activeSessionId = provisional.previousSessionId;
+          this.clearSubagentWatch(provisional.view);
           provisional.view.pendingSessionId =
             provisional.previousPendingSessionId;
         }
@@ -711,6 +768,20 @@ export class DaemonClientViewCoordinator {
   routeEventForClient(event: UiEvent, clientId: string): UiEvent | undefined {
     const view = this.clientViews.get(clientId);
 
+    if (
+      event.type === "subagent.conversation.changed" ||
+      event.type === "subagent.conversation.unavailable"
+    ) {
+      const watch = view?.watchedSubagent;
+      if (!view || !watch) return undefined;
+      return watch.rootSessionId === view.activeSessionId &&
+        watch.rootSessionId === event.rootSessionId &&
+        watch.subagentId === event.subagentId &&
+        watch.bindingGeneration === view.bindingGeneration
+        ? { ...event, watchId: watch.watchId }
+        : undefined;
+    }
+
     if (event.type === "snapshot.replaced") {
       return {
         ...event,
@@ -761,6 +832,8 @@ export class DaemonClientViewCoordinator {
 
   disconnectClient(clientId: string): readonly string[] {
     this.disconnectedClientIds.add(clientId);
+    const view = this.clientViews.get(clientId);
+    if (view) this.clearSubagentWatch(view);
     const interactionIds: string[] = [];
     for (const [invocationId, owner] of this.commandOwnersByInvocationId) {
       if (owner === clientId) {
@@ -955,6 +1028,7 @@ export class DaemonClientViewCoordinator {
     }
     this.provisionalPromptBindings.delete(clientId);
     view.activeSessionId = sessionId;
+    this.clearSubagentWatch(view);
     view.bindingGeneration += 1;
     view.pendingSessionId = undefined;
   }

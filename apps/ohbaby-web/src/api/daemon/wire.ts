@@ -168,6 +168,7 @@ export interface SessionIndexResponse {
 export interface BindingResponse extends UiPermissionBinding {
   readonly runtimeEpoch?: string;
   readonly sessionRecoveryVersion?: number;
+  readonly subagentConversationVersion?: number;
   readonly ok: true;
 }
 
@@ -266,6 +267,7 @@ export type WebSseEvent =
       readonly type: "hello";
       readonly runtimeEpoch?: string;
       readonly sessionRecoveryVersion?: number;
+      readonly subagentConversationVersion?: number;
       readonly permissionEpoch: string;
       readonly rootSessionId: string | null;
       readonly bindingGeneration: number;

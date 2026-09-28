@@ -1,4 +1,9 @@
-import { subagentReadForClient } from "../../coordination/session-access.js";
+import {
+  subagentReadForClient,
+  subagentConversationReadForClient,
+  watchSubagentConversationForClient,
+  unwatchSubagentConversationForClient,
+} from "../../coordination/session-access.js";
 import {
   createOrReuseClientSession,
   parseSessionCreationOptions,
@@ -174,6 +179,28 @@ export async function callDaemonBackend(input: {
     input;
 
   switch (request.method) {
+    case "getSubagentConversationView":
+    case "watchSubagentConversation":
+    case "unwatchSubagentConversation": {
+      const query = request.params[0] as
+        | import("ohbaby-sdk").UiSubagentConversationUnwatchQuery
+        | undefined;
+      if (!query || typeof query !== "object")
+        throw new Error("Invalid subagent conversation query");
+      const access = {
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        query: { ...query, signal: input.signal },
+      };
+      if (request.method === "getSubagentConversationView")
+        return subagentConversationReadForClient(access);
+      if (request.method === "watchSubagentConversation")
+        return watchSubagentConversationForClient(access);
+      unwatchSubagentConversationForClient(access);
+      return undefined;
+    }
     case "listSubagentExecutions":
     case "getSubagentExecutionView": {
       const raw = request.params[0] as

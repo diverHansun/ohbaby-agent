@@ -4,6 +4,9 @@ export const DAEMON_RPC_METHODS = [
   "getSnapshot",
   "listSubagentExecutions",
   "getSubagentExecutionView",
+  "getSubagentConversationView",
+  "watchSubagentConversation",
+  "unwatchSubagentConversation",
   "getSessionView",
   "getSessionHistory",
   "getSessionControl",
@@ -84,6 +87,7 @@ export type DaemonSseEvent =
       readonly type: "hello";
       readonly runtimeEpoch?: string;
       readonly sessionRecoveryVersion?: number;
+      readonly subagentConversationVersion?: number;
       readonly clientId: string;
       readonly permissionEpoch: string;
       readonly rootSessionId: string | null;

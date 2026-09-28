@@ -2,6 +2,10 @@ import type {
   UiSubagentQuery,
   UiSubagentExecutionList,
   UiSubagentExecutionView,
+  UiSubagentConversationQuery,
+  UiSubagentConversationView,
+  UiSubagentConversationSelection,
+  UiSubagentConversationUnwatchQuery,
 } from "ohbaby-sdk";
 import type {
   UiBackendClient,
@@ -139,6 +143,44 @@ export class DaemonHttpClient {
     input: UiSubagentQuery & { executionId: string },
   ): Promise<{ ok: true; result: UiSubagentExecutionView }> {
     return this.subagentRead(input, input.executionId);
+  }
+  getSubagentConversationView(
+    input: UiSubagentConversationQuery,
+  ): Promise<{ ok: true; result: UiSubagentConversationView }> {
+    const query = scopeQuery(input);
+    if (input.before !== undefined) query.set("before", input.before);
+    if (input.after !== undefined) query.set("after", input.after);
+    if (input.anchorExecutionId !== undefined)
+      query.set("anchorExecutionId", input.anchorExecutionId);
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    return this.request(`${this.subagentConversationPath(input)}?${query}`, {
+      signal: input.signal,
+    });
+  }
+  watchSubagentConversation(
+    input: UiSubagentConversationQuery,
+  ): Promise<{ ok: true; result: UiSubagentConversationSelection }> {
+    return this.request(`${this.subagentConversationPath(input)}/watch`, {
+      body: {
+        runtimeEpoch: input.runtimeEpoch,
+        bindingGeneration: input.bindingGeneration,
+      },
+      method: "POST",
+      signal: input.signal,
+    });
+  }
+  unwatchSubagentConversation(
+    input: UiSubagentConversationUnwatchQuery,
+  ): Promise<{ ok: true }> {
+    const query = scopeQuery(input);
+    query.set("watchId", input.watchId);
+    return this.request(
+      `${this.subagentConversationPath(input)}/watch?${query}`,
+      { method: "DELETE", signal: input.signal },
+    );
+  }
+  private subagentConversationPath(input: UiSubagentConversationQuery): string {
+    return `/v1/sessions/${encodeURIComponent(input.rootSessionId)}/subagents/${encodeURIComponent(input.subagentId)}/conversation`;
   }
   private subagentRead<T>(
     input: UiSubagentQuery,

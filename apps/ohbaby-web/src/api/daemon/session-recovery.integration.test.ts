@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { UiSessionView, UiBackendClient } from "ohbaby-sdk";
-import { createOhbabyWebRuntime, type OhbabyWebRuntime } from "../../runtime.js";
+import type { UiSessionView, UiBackendClient, UiEvent } from "ohbaby-sdk";
+import {
+  createOhbabyWebRuntime,
+  type OhbabyWebRuntime,
+} from "../../runtime.js";
 import type { WebSseEvent } from "./wire.js";
 const binding = {
   permissionEpoch: "epoch",
@@ -227,6 +230,51 @@ function requireClient(runtime: OhbabyWebRuntime): UiBackendClient {
   return client;
 }
 describe("browser session recovery", () => {
+  it("forwards child changes and reconnect notices through the shared event subscription", async () => {
+    const f = fixture();
+    await f.runtime.ready;
+    const received: UiEvent[] = [];
+    const unsubscribe = requireClient(f.runtime).subscribeEvents((event) => {
+      received.push(event);
+    });
+    f.emit(
+      {
+        type: "ui.event",
+        event: {
+          type: "subagent.conversation.changed",
+          rootSessionId: "root",
+          subagentId: "logical-child",
+          watchId: "watch-1",
+          change: {
+            type: "session.changed",
+            bindingGeneration: 1,
+            version: {
+              runtimeEpoch: "epoch",
+              sessionId: "real-child-session",
+              viewGeneration: "scope-generation",
+              sessionRevision: 1,
+            },
+          },
+        },
+      },
+      2,
+    );
+    await vi.waitFor(() => {
+      expect(
+        received.some(
+          (event) => event.type === "subagent.conversation.changed",
+        ),
+      ).toBe(true);
+    });
+    f.emit({ type: "resync-required", maxSeqNum: 2, minSeqNum: 1 });
+    await vi.waitFor(() => {
+      expect(
+        received.some((event) => event.type === "session.resync-required"),
+      ).toBe(true);
+    });
+    unsubscribe();
+  });
+
   it("joins buffered and live text appends once across the HTTP baseline and SSE boundary", async () => {
     const baseline = deferred<Response>();
     const f = fixture({ query: () => baseline.promise });

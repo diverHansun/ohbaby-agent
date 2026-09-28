@@ -244,7 +244,19 @@ export type {
   UiSubagentQuery,
   UiSubagentExecutionList,
   UiSubagentExecutionView,
+  UiSubagentConversationQuery,
+  UiSubagentConversationView,
+  UiSubagentConversationChangedEvent,
+  UiSubagentConversationUnavailableEvent,
+  UiSubagentConversationEvent,
+  UiSubagentConversationSelection,
+  UiSubagentConversationUnwatchQuery,
   UiSubagentReadClient,
 } from "./subagent.js";
 export { createSubagentReader } from "./subagent-reader.js";
 export type { UiSubagentReaderState } from "./subagent-reader.js";
+export {
+  compareSubagentMessages,
+  createSubagentConversationReader,
+} from "./subagent-conversation-reader.js";
+export type { UiSubagentConversationReaderState } from "./subagent-conversation-reader.js";

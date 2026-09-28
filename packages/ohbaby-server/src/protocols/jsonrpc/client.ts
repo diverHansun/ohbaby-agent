@@ -331,6 +331,21 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   ): ReturnType<UiSubagentReadClient["getSubagentExecutionView"]> {
     return this.subagentQuery("getSubagentExecutionView", input);
   }
+  getSubagentConversationView(
+    input: Parameters<UiSubagentReadClient["getSubagentConversationView"]>[0],
+  ): ReturnType<UiSubagentReadClient["getSubagentConversationView"]> {
+    return this.subagentQuery("getSubagentConversationView", input);
+  }
+  watchSubagentConversation(
+    input: Parameters<UiSubagentReadClient["watchSubagentConversation"]>[0],
+  ): ReturnType<UiSubagentReadClient["watchSubagentConversation"]> {
+    return this.subagentQuery("watchSubagentConversation", input);
+  }
+  unwatchSubagentConversation(
+    input: Parameters<UiSubagentReadClient["unwatchSubagentConversation"]>[0],
+  ): ReturnType<UiSubagentReadClient["unwatchSubagentConversation"]> {
+    return this.subagentQuery("unwatchSubagentConversation", input);
+  }
   getSessionView(
     input: UiSessionScope,
   ): ReturnType<UiSessionRecoveryClient["getSessionView"]> {
