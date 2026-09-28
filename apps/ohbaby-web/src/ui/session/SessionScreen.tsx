@@ -939,6 +939,14 @@ export function SessionScreen({
             }
           >
             <StatusBar
+              onOpenContextUsage={() => {
+                const sessionId = view.activeSession?.id;
+                if (sessionId) {
+                  void client
+                    .getContextWindowUsage({ sessionId })
+                    .catch(() => undefined);
+                }
+              }}
               waitingSummary={
                 subagentState.list?.waiting
                   ? `Waiting for subagents  ${String(subagentState.list.completedCount)} done  ${String(subagentState.list.activeCount)} open`

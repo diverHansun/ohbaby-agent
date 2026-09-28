@@ -2,7 +2,7 @@
 import type { UiContextWindowUsage } from "ohbaby-sdk";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextUsageControl } from "./ContextUsage.js";
 
 (
@@ -185,4 +185,46 @@ describe("ContextUsageControl", () => {
 
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
+});
+
+it("keeps the open popover when asynchronous context usage arrives", () => {
+  const container = render(null);
+  const root = roots.at(-1);
+  if (!root) throw new Error("root missing");
+  const trigger = container.querySelector(".ohb-context-ring-button");
+  if (!trigger) throw new Error("context trigger missing");
+  click(trigger);
+  act(() => {
+    root.render(
+      <ContextUsageControl sessionId="session_1" usage={usage(false)} />,
+    );
+  });
+  expect(container.querySelector('[role="dialog"]')?.textContent).toContain(
+    "~37K / 100K",
+  );
+});
+
+it("queries only on opening and keeps cache out of context details", () => {
+  const container = render(null);
+  const root = roots.at(-1);
+  if (!root) throw new Error("root missing");
+  const onOpen = vi.fn();
+  act(() => {
+    root.render(
+      <ContextUsageControl
+        sessionId="session_1"
+        usage={usage(true)}
+        onOpen={onOpen}
+      />,
+    );
+  });
+  const trigger = container.querySelector(".ohb-context-ring-button");
+  if (!trigger) throw new Error("context trigger missing");
+  click(trigger);
+  expect(onOpen).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('[role="dialog"]')?.textContent).not.toContain(
+    "Cache",
+  );
+  click(trigger);
+  expect(onOpen).toHaveBeenCalledTimes(1);
 });

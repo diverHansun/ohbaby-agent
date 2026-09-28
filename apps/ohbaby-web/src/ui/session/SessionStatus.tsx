@@ -54,6 +54,7 @@ export function EmptyState(props: {
 }
 
 export function StatusBar(props: {
+  readonly onOpenContextUsage?: () => void;
   readonly waitingSummary?: string;
   readonly activeGoal: ViewModel["activeGoal"];
   readonly header: HeaderModel;
@@ -83,6 +84,7 @@ export function StatusBar(props: {
         <span className="ohb-model">{props.header.modelLabel}</span>
         <span className="ohb-divider" />
         <ContextUsageControl
+          onOpen={props.onOpenContextUsage}
           sessionId={props.sessionId}
           usage={props.header.contextWindowUsage}
         />

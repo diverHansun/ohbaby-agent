@@ -98,11 +98,11 @@ OHBABY_RUN_REAL_SUBAGENT_CONVERSATION=1 pnpm exec vitest run --config tests/smok
 
 ## 2026-09-28 剩余三项补修（实施中）
 
-用户实机暴露并确认纳入：内部通知正文泄露到 Web、上下文统计恢复/同步缺口、缓存读取率恢复/展示缺口。此前“未改变存量 runtime 通知展示”现被本批范围取代。
+用户实机暴露并确认纳入：内部通知正文泄露到 Web、上下文统计查询/显示不同步、缓存读取率显示调查（保持原 /status 入口）。此前“未改变存量 runtime 通知展示”现被本批范围取代。
 
-调查证据：同一历史会话 /status 返回 21.1k / 1m 而圆环仍 unavailable；主 scope 持久化有 9 个有效 usage 样本，Σinput=117057、ΣcacheRead=74368（约63.5%），当前进程 /status 却显示 hit —。统计相关主体相对 1a7018f1 未改变，属于本轮用户验收发现的既有缺口。现有定点测试45项通过，但不代表新增恢复路径已验证。
+调查证据：同一历史会话 /status 返回 21.1k / 1m 而圆环仍 unavailable，确认投影同步缺口。主 scope 持久化虽有 9 个有效 usage 样本（Σinput=117057、ΣcacheRead=74368），这些不属于新进程内统计，不能用历史比例认定 hit — 错误。统计相关主体相对 1a7018f1 未改变。现有定点测试45项通过，但不代表新增接线路径已验证。
 
-SWE 约束：复用来源标记与现有投影、持久化事实和统计口径；不引入文本猜测过滤、通用可见性框架或额外统计面板。完成后在本节补充批次提交、测试、独立审查与浏览器结果。
+SWE 约束：复用来源标记与现有投影、原统计口径；不引入文本猜测过滤、通用可见性框架或额外统计面板。完成后在本节补充批次提交、测试、独立审查与浏览器结果。
 
 ### 第一批：内部消息显示边界
 
@@ -110,4 +110,36 @@ UiMessage 新增可选 runtimeInputKind，持久化和实时投影透传原分�
 
 ### 用户收紧范围与调查纠正
 
-重新查阅 [既有 cache 合同 K6](../../2026-09-11-llm-sdk-and-responses-migration/improve-5/00-discussion.md) 后确认：进程内生命周期、不跨重启恢复是明确设计，先前将数据库旧9条usage与当前 hit — 比较并认定恢复缺陷不成立。用户要求统计口径/基本算法不变。Last request 回退与历史 cache 重建均撤销（未提交），改为只修原统计的加载/投影/展示。上下文沿用 [improve-6 §5](../../2026-09-11-llm-sdk-and-responses-migration/improve-6/02-optimization-plan-and-change-scope.md) 的最近 prepare/compact 快照及未命中时 tools-aware 估算，不新增公式或统计持久化。Pi 正在独立核查该边界。
+重新查阅 [既有 cache 合同 K6](../../2026-09-11-llm-sdk-and-responses-migration/improve-5/00-discussion.md) 后确认：进程内生命周期、不跨重启恢复是明确设计，先前将数据库旧9条usage与当前 hit — 比较并认定恢复缺陷不成立。用户要求统计口径/基本算法不变。Last request 回退与历史 cache 重建均撤销（未提交），改为只修原统计的加载/投影/展示。上下文沿用 [improve-6 §5](../../2026-09-11-llm-sdk-and-responses-migration/improve-6/02-optimization-plan-and-change-scope.md) 的最近 prepare/compact 快照及未命中时 tools-aware 估算，不新增公式或统计持久化。Pi 已完成一轮边界核查；后续用户纠正与 Git 证据优先，见下文。
+
+### 第二批：沿用原统计的 UI 接线
+
+第一次 Pi 核查支持保留进程内缓存统计，但当时给 Pi 的 cold runtime 边界及 cache 展示位置假设不正确，不能据此验收。该轮曾实现 cache view 推送和 Context Usage 行，用户纠正后已全部撤销。Pi 把 4096 端口误读成 token 数量，该句也不作为证据。
+
+当前第二批仅修复上下文查询：合法主会话 cache miss 恢复原 getRuntime/getContextUsage，估算后发布现有 context 事件到 session view；Web 打开原 Context Usage 弹层触发查询，异步结果不会关掉弹层。不引入轮询、前端估算、cache 展示扩展或历史 usage 重建。
+
+### 用户纠正后的范围与回归证据
+
+此前把“修复 cache hit 显示”记为用户批准在 Context Usage 增加 cache 行，属于实施者误读，不是用户确认。8 月 27 日 session-cache-hit 的 03 明确排除顶栏圆环及 click/hover 详情，cache 只在 /status。现已撤销未提交的 cache 行、CSS、session view 字段和推送接线；上文第二批 cache 方案及对应测试数字仅为被撤销尝试，不代表当前验收。
+
+用户指出重启后应有上下文占用。Git 提交 ff3d2a1c4（9 月 25 日）把原 getRuntime 查询改成 getRuntimeIfStarted/null，导致冷历史查询无法估算。此前据此断言 cold null 是原设计不成立。当前修复恢复原初始化/估算链路并补齐视图投影，不改估算算法，也不调用 LLM。
+
+撤销前全量测试为 4952 通过、17 跳过，build/typecheck/lint 通过；范围纠正后需重新进行针对性验证，不能直接沿用旧结果宣称完成。
+
+### 上下文恢复定点验收
+
+- 后端合同 135/135 通过，新增冷查询、并发、零 provider 请求、视图同步和未知会话保护。
+- Web App/ContextUsage 161/161 通过；弹层异步更新保留，关闭不重新请求，详情不含 Cache。
+- 修正后全仓 build、typecheck、lint 通过（lint 81 项既有 warning，0 error）。
+- 原生浏览器真实重启隔离服务，读取已有 fixture 会话：首次点击 Context Usage 后显示 8% Full、~10.2K / 128K。模型 fixture 服务已关闭；没有依赖新的模型请求。冷估算仅总量，遵循原合同。
+- 同一历史会话的完成子任务仍能打开，父消息与后续委派、最终回答保留；主会话不再出现内部 Runtime subagent 通知。截图保存在本地 /tmp/improve31-ui/context-after-restart.png 与 child-after-restart.png。
+
+### 最终复核与限制
+
+Pi（github-copilot/claude-opus-5.5，medium）读取整体 diff 与截图后指出异步静态估算可能覆盖较新的实时占用。已先复现再修复：await 后优先保留 tracker 新值，不改公式。后端合同与初始化集成共 145 项通过。模型切换后旧 view.context 的清空及其与旧查询并发的问题属于另一个待核查点，本批未扩展修改。
+
+修正后的全仓运行得到 4939 通过、1 失败、17 跳过；唯一失败仍是 9 月 25 日引入的 cold null 断言。按更早实现恢复“静态总量无 composition”断言并增加零 provider 请求断言后，该集成文件 3/3 通过。未再次重复整仓运行。最终 build/typecheck/lint 通过（0 error，81 项 warning）。
+
+Pi 提出的 fixture 文本连在一起来自测试模型分块本身（controlled release. 后紧接 REPORT_A_FULL），前端不应自行补空格。旧窄屏截图中内部通知为修复前证据，不能当作当前通知隐藏验收；本批新桌面 fixture 验证超时 observation 和最终 result 均不显示，普通 assistant 进度/最终回答保留。
+
+原 /status 在运行后显示 cache hit 60%，重启后 hit —；Context Usage 中无 cache，沿用原展示位置及统计生命周期。

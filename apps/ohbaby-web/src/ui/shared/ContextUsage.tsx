@@ -33,6 +33,7 @@ const COMPOSITION_ROWS: readonly CompositionRow[] = [
 ];
 
 export function ContextUsageControl(props: {
+  readonly onOpen?: () => void;
   readonly sessionId: string | null;
   readonly usage: UiContextWindowUsage | null;
 }): ReactElement {
@@ -41,11 +42,10 @@ export function ContextUsageControl(props: {
   const tooltipId = useId();
   const dialogId = useId();
   const usage = props.usage;
-  const usageAvailable = usage !== null;
 
   useLayoutEffect(() => {
     setOpen(false);
-  }, [props.sessionId, usageAvailable]);
+  }, [props.sessionId]);
 
   useEffect(() => {
     if (!open) {
@@ -96,6 +96,7 @@ export function ContextUsageControl(props: {
         aria-label={ariaLabel}
         className="ohb-context-ring-button"
         onClick={() => {
+          if (!open) props.onOpen?.();
           setOpen((current) => !current);
         }}
         type="button"

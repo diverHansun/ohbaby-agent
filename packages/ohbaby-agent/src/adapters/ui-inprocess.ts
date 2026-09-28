@@ -2674,13 +2674,25 @@ export function createInProcessUiBackendClient(
       coreSession?.projectRoot ??
       (await resolveProjectRoot());
 
-    const runtime = await runtimeController.getRuntimeIfStarted();
-    if (!runtime) return null;
+    const runtime = await runtimeController.getRuntime();
     const usage = await runtime.getContextUsage({
       projectRoot,
       sessionId: input.sessionId,
     });
-    return contextWindowUsage.updateFromContextUsage(input.sessionId, usage);
+    // A live preparation or compact may have published newer context while
+    // this static read was awaiting assembly. Keep that committed value.
+    const newer = contextWindowUsage.get(input.sessionId);
+    if (newer) return newer;
+    const result = contextWindowUsage.updateFromContextUsage(
+      input.sessionId,
+      usage,
+    );
+    if (result) {
+      const event: UiEvent = { type: "context.window.updated", usage: result };
+      await sourceProjection.commitEvent(event);
+      eventRouter.publish(event);
+    }
+    return result;
   }
 
   async function getPromptCacheUsageInternal(input: {

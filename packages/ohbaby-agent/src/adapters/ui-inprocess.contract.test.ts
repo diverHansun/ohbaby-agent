@@ -2832,7 +2832,7 @@ describe("createInProcessUiBackendClient", () => {
     await prompt;
   });
 
-  it("leaves context usage unavailable before runtime startup", async () => {
+  it("surfaces context runtime startup failures for existing sessions", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-context-fail-"));
     const initialSnapshot: UiSnapshot = {
       activeSessionId: "session_1",
@@ -2860,7 +2860,7 @@ describe("createInProcessUiBackendClient", () => {
     try {
       await expect(
         client.getContextWindowUsage({ sessionId: "session_1" }),
-      ).resolves.toBeNull();
+      ).rejects.toThrow("token estimator unavailable");
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -2937,6 +2937,137 @@ describe("createInProcessUiBackendClient", () => {
     await expect(
       executeStatusData(client, "session_child", "inv_child_cache_status"),
     ).resolves.toMatchObject({ promptCacheUsage: null });
+  });
+
+  it("recomputes a restored primary session's context on cold query without a model request", async () => {
+    const clientModel = createFakeLLMClient([]);
+    const requests: InterfaceProviderRequest[] = [];
+    const originalStream = clientModel.provider.streamResponse.bind(
+      clientModel.provider,
+    );
+    clientModel.provider.streamResponse = (
+      request,
+    ): ReturnType<typeof originalStream> => {
+      requests.push(request);
+      return originalStream(request);
+    };
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        sessions: [
+          {
+            id: "session_1",
+            title: "Restored",
+            createdAt: "2026-09-01T00:00:00.000Z",
+            updatedAt: "2026-09-01T00:00:00.000Z",
+            messages: [],
+          },
+        ],
+        runs: [],
+        permissions: [],
+        status: { kind: "idle" },
+      },
+      llmClient: clientModel,
+    });
+    try {
+      expect(
+        (await client.getSessionView({ sessionId: "session_1" })).context
+          .status,
+      ).toBe("unavailable");
+      const [first, second] = await Promise.all([
+        client.getContextWindowUsage({ sessionId: "session_1" }),
+        client.getContextWindowUsage({ sessionId: "session_1" }),
+      ]);
+      expect(first).toMatchObject({
+        sessionId: "session_1",
+        modelId: "fake-model",
+      });
+      expect(second).toMatchObject({
+        sessionId: "session_1",
+        modelId: "fake-model",
+        currentTokens: first?.currentTokens,
+      });
+      expect(
+        (await client.getSessionView({ sessionId: "session_1" })).context,
+      ).toEqual({
+        status: "ready",
+        value: second,
+      });
+      expect(requests).toEqual([]);
+      await expect(
+        client.getContextWindowUsage({ sessionId: "missing" }),
+      ).resolves.toBeNull();
+      expect(requests).toEqual([]);
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it("does not replace a newer live context update with an older static query", async () => {
+    const assembling = createDeferred<undefined>();
+    const releaseStatic = createDeferred<undefined>();
+    const createContext = contextModule.createContextManager;
+    let firstAssemble = true;
+    const factory = vi
+      .spyOn(contextModule, "createContextManager")
+      .mockImplementation((options) => {
+        const manager = createContext(options);
+        const assemble = manager.assemble.bind(manager);
+        vi.spyOn(manager, "assemble").mockImplementation(async (...args) => {
+          if (firstAssemble) {
+            firstAssemble = false;
+            assembling.resolve(undefined);
+            await releaseStatic.promise;
+          }
+          return assemble(...args);
+        });
+        return manager;
+      });
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        sessions: [
+          {
+            id: "session_1",
+            title: "Existing",
+            createdAt: "2026-09-01T00:00:00.000Z",
+            updatedAt: "2026-09-01T00:00:00.000Z",
+            messages: [],
+          },
+        ],
+        runs: [],
+        permissions: [],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([
+        { finishReason: "stop", textDelta: "done" },
+      ]),
+    });
+    try {
+      const staticQuery = client.getContextWindowUsage({
+        sessionId: "session_1",
+      });
+      await assembling.promise;
+      await client.submitPromptAndWait("live update", {
+        sessionId: "session_1",
+      });
+      const live = await client.getContextWindowUsage({
+        sessionId: "session_1",
+      });
+      expect(live).not.toBeNull();
+      releaseStatic.resolve(undefined);
+      expect(await staticQuery).toEqual(live);
+      expect(
+        (await client.getSessionView({ sessionId: "session_1" })).context,
+      ).toEqual({
+        status: "ready",
+        value: live,
+      });
+    } finally {
+      releaseStatic.resolve(undefined);
+      await client.dispose();
+      factory.mockRestore();
+    }
   });
 
   it("prepends a runtime system prompt to model requests without storing it in UI history", async () => {

@@ -117,7 +117,7 @@ flowchart LR
 本次在既有 improve-3.1 内完成三个小批次，不新建规划轮次：
 
 1. UI 消息保留已有 runtimeInput.kind；Web 共用 ConversationStream 在组装时间线前排除 subagent-status/subagent-result。模型角色、内部消息持久化、结果交付以及 TUI 不变；用户 Steer、普通系统提示及 assistant 输出保留。
-2. 上下文统计复用原 tracker 和 runtime.getContextUsage，查询/补算后更新现有 session view。维持历史阅读不启动重型模型 runtime 的边界；不修改既有上下文组装、tools-aware 估算、校准、分母或压缩算法。冷进程尚无 runtime/快照时保持 unavailable，不新增 Last request 或其他替代算法。
-3. 缓存统计直接消费原进程内 tracker，限定主 scope、可信 Step，跨 Run 累计但不做跨进程恢复。口径仍为有效报告样本的 ΣcacheRead/ΣinputTokens；未报告显示 —，明确零显示 0%。现有 Context Usage 弹层与 /status 同源，不另加顶栏按钮。不读历史 usage 重建，不改 tracker 或纳入时机。
+2. 上下文统计复用原 tracker 和 runtime.getContextUsage，查询/补算后更新现有 session view。合法主会话在重启后恢复原 getRuntime 按需初始化与静态估算路径；不发起 LLM 请求，不修改上下文组装、tools-aware 估算、校准、分母或压缩算法。不新增 Last request 或其他替代算法。
+3. 缓存统计保持既有 /status 入口，不进入 Context Usage、顶栏圆环或会话 view。原进程内 tracker、主 scope 可信 Step、跨 Run 累计及不跨重启恢复均不变；本批不新增 cache 推送字段。
 
 关键范围：SDK UI 消息/会话统计合同、agent 的 UI 统计投影、Web 共享消息流/会话 store/ContextUsage 组件。实施中记录具体取舍与证据，不维护逐行任务表。

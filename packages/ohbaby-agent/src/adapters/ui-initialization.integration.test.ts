@@ -269,7 +269,7 @@ describe("backend explicit initialization", () => {
       await client.dispose();
     }
   });
-  it("normalizes a selected goal without a page and never repeats recovery on reads", async () => {
+  it("keeps ordinary reads lazy and initializes runtime only for an explicit context query", async () => {
     const persistence = new InMemoryGoalPersistence();
     await persistence.append("root", {
       actor: "user",
@@ -296,12 +296,14 @@ describe("backend explicit initialization", () => {
           "paused",
         );
         await client.getSessionIndex();
-        expect(
-          await client.getContextWindowUsage({ sessionId: "root" }),
-        ).toBeNull();
       }
       expect(list).toHaveBeenCalledTimes(1);
       expect(createLLMClient).not.toHaveBeenCalled();
+      await expect(
+        client.getContextWindowUsage({ sessionId: "root" }),
+      ).rejects.toThrow("Runtime must remain lazy");
+      expect(createLLMClient).toHaveBeenCalledTimes(1);
+      expect(list).toHaveBeenCalledTimes(1);
     } finally {
       await client.dispose();
     }

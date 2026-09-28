@@ -72,6 +72,6 @@
 
 ## 2026-09-28 用户验收补充确认
 
-用户确认本轮继续完成三项：Web 隐藏内部 subagent-status/subagent-result 通知，保留主代理正常自然语言输出；修复上下文占用与会话视图同步；接线既有缓存读取统计，在现有 Context Usage 弹层简洁显示 Cache hit。统计读取不得触发真实模型请求，未知不冒充 0%，当前上下文不能用累计输入 tokens 代替。TUI/Ctrl+G 保持现有交互。继续分批测试、子代理审查、Pi 整体及视觉审查、浏览器验收和本地 commit，不 merge/push。Pi 以建议为主，允许范围内少量视觉微调。
+用户确认本轮继续完成三项：Web 隐藏内部 subagent-status/subagent-result 通知，保留主代理正常自然语言输出；修复上下文占用与会话视图同步；核查既有缓存读取统计，保持原 /status 展示位置。统计读取不得触发真实模型请求，未知不冒充 0%，当前上下文不能用累计输入 tokens 代替。TUI/Ctrl+G 保持现有交互。继续分批测试、子代理审查、Pi 整体及视觉审查、浏览器验收和本地 commit，不 merge/push。Pi 以建议为主，允许范围内少量视觉微调。
 
-用户随后再次明确：本批不改既有后端上下文计算算法，也不能改变 cache hit 口径和统计生命周期。原 improve-5 K6 已明确进程内累计、不做跨重启恢复；本轮撤销先前拟议的历史 usage 重建和 Last request fallback。保留模型未启动时统计可 unavailable 的原有 lazy-runtime 合同；只处理现有统计读入/投影/显示，不为显示启动模型。
+用户随后再次明确：本批不改既有后端上下文计算算法，也不能改变 cache hit 口径和统计生命周期。原 improve-5 K6 已明确进程内累计、不做跨重启恢复；本轮撤销先前拟议的历史 usage 重建和 Last request fallback。重启后打开历史会话也应恢复上下文占用，沿用原有估算方法，不发起模型请求。此前将 cold runtime 返回 null 当作原设计的判断错误，已由 Git 历史纠正。
