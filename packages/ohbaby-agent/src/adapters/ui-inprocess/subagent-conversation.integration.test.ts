@@ -75,6 +75,35 @@ function fixture() {
 }
 
 describe("continuous subagent live projection", () => {
+  it("exposes stored output only for the selected execution without a child run", async () => {
+    const f = fixture();
+    const a = await f.accept("stored-a");
+    const b = await f.accept("stored-b", "b");
+    await f.executions.finish(a, {
+      status: "completed",
+      output: "Stored answer A",
+      completedAt: 3,
+    });
+    await f.executions.finish(b, {
+      status: "completed",
+      output: "Private answer B",
+      completedAt: 3,
+    });
+    const selected = await f.conversations.read({
+      rootSessionId: "root",
+      subagentId: "a",
+      anchorExecutionId: a.executionId,
+    });
+    expect(selected.storedResult).toBe("Stored answer A");
+    expect(JSON.stringify(selected)).not.toContain("Private answer B");
+    const latest = await f.conversations.read({
+      rootSessionId: "root",
+      subagentId: "a",
+    });
+    expect(latest.storedResult).toBeUndefined();
+    f.conversations.dispose();
+  });
+
   it("keeps accepted prompts display-only, streams scoped messages and reasoning", async () => {
     const f = fixture();
     const a = await f.accept("a1");

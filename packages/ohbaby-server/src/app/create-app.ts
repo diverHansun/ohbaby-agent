@@ -1482,11 +1482,14 @@ class DaemonServerAppRuntime {
           views: this.clientViews,
           clientId: authorization.clientId,
           epoch: this.permissionEpoch,
+          signal: context.req.raw.signal,
           query: {
             rootSessionId: context.req.param("id"),
             subagentId: context.req.param("subagentId"),
             runtimeEpoch: raw.runtimeEpoch as string,
             bindingGeneration: raw.bindingGeneration as number,
+            watchId: raw.watchId as string | undefined,
+            watchSequence: raw.watchSequence as number | undefined,
           },
         });
         return context.json({ ok: true, result });

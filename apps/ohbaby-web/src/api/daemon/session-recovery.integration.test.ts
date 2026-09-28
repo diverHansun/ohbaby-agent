@@ -9,6 +9,7 @@ const binding = {
   permissionEpoch: "epoch",
   runtimeEpoch: "epoch",
   sessionRecoveryVersion: 1,
+  subagentConversationVersion: 1,
   rootSessionId: "root",
   bindingGeneration: 1,
 };
@@ -74,7 +75,7 @@ function fixture(
 ): {
   runtime: OhbabyWebRuntime;
   calls: URL[];
-  requests: { url: URL; body?: string }[];
+  requests: { url: URL; body?: string; method?: string }[];
   emit: (event: WebSseEvent, id?: number) => void;
 } {
   let stream!: ReadableStreamDefaultController<Uint8Array>;
@@ -82,7 +83,7 @@ function fixture(
     rootSessionId: string | null;
   } = { ...binding, ...options.initialBinding };
   const calls: URL[] = [];
-  const requests: { url: URL; body?: string }[] = [];
+  const requests: { url: URL; body?: string; method?: string }[] = [];
   const emit = (event: WebSseEvent, id = 1): void => {
     stream.enqueue(
       new TextEncoder().encode(
@@ -110,6 +111,7 @@ function fixture(
         requests.push({
           url,
           body: typeof init.body === "string" ? init.body : undefined,
+          method: init.method,
         });
         if (url.pathname === "/v1/scopes")
           return Response.json({
@@ -217,6 +219,22 @@ function fixture(
             options.submit?.() ?? Promise.reject(new Error("response lost"))
           );
         if (url.pathname.endsWith("/abort")) return Response.json({ ok: true });
+        if (url.pathname.endsWith("/conversation/watch")) {
+          if (init.method === "DELETE") return Response.json({ ok: true });
+          if (typeof init.body !== "string")
+            throw new Error("Missing watch body");
+          const body = JSON.parse(init.body) as { watchId: string };
+          return Response.json({
+            ok: true,
+            result: {
+              rootSessionId: "root",
+              subagentId: "logical-child",
+              runtimeEpoch: "epoch",
+              bindingGeneration: selected.bindingGeneration,
+              watchId: body.watchId,
+            },
+          });
+        }
         throw new Error(`unexpected request ${url.pathname}`);
       },
     },
@@ -230,6 +248,42 @@ function requireClient(runtime: OhbabyWebRuntime): UiBackendClient {
   return client;
 }
 describe("browser session recovery", () => {
+  it("sends the preallocated watch ID and binding for explicit pending cancellation", async () => {
+    const f = fixture();
+    await f.runtime.ready;
+    const client = requireClient(f.runtime);
+    if (
+      !client.watchSubagentConversation ||
+      !client.unwatchSubagentConversation
+    )
+      throw new Error("Missing conversation commands");
+    const selection = await client.watchSubagentConversation({
+      rootSessionId: "root",
+      subagentId: "logical-child",
+      watchId: "preallocated-watch",
+    });
+    expect(selection.watchId).toBe("preallocated-watch");
+    await client.unwatchSubagentConversation({
+      rootSessionId: "root",
+      subagentId: "logical-child",
+      watchId: "preallocated-watch",
+    });
+    const calls = f.requests.filter((request) =>
+      request.url.pathname.endsWith("/conversation/watch"),
+    );
+    expect(calls.map((call) => call.method)).toEqual(["POST", "DELETE"]);
+    expect(
+      JSON.parse(calls[0].body ?? "{}") as Record<string, unknown>,
+    ).toMatchObject({
+      watchId: "preallocated-watch",
+      watchSequence: 1,
+      runtimeEpoch: "epoch",
+      bindingGeneration: 1,
+    });
+    expect(calls[1].url.searchParams.get("watchId")).toBe("preallocated-watch");
+    expect(calls[1].url.searchParams.get("runtimeEpoch")).toBe("epoch");
+    expect(calls[1].url.searchParams.get("bindingGeneration")).toBe("1");
+  });
   it("forwards child changes and reconnect notices through the shared event subscription", async () => {
     const f = fixture();
     await f.runtime.ready;

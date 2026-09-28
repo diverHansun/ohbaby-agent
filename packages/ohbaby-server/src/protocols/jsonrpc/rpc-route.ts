@@ -197,7 +197,10 @@ export async function callDaemonBackend(input: {
       if (request.method === "getSubagentConversationView")
         return subagentConversationReadForClient(access);
       if (request.method === "watchSubagentConversation")
-        return watchSubagentConversationForClient(access);
+        return watchSubagentConversationForClient({
+          ...access,
+          signal: input.signal,
+        });
       unwatchSubagentConversationForClient(access);
       return undefined;
     }

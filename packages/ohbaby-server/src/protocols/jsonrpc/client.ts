@@ -167,6 +167,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   private permissionBinding: UiPermissionBinding | undefined;
   private connectionGeneration = 0;
   private sessionRecoveryVersion = 0;
+  private subagentWatchSequence = 0;
   private permissionConnectionLive = false;
   private abortController: AbortController | undefined;
   private initializePromise: Promise<void> | undefined;
@@ -339,7 +340,10 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   watchSubagentConversation(
     input: Parameters<UiSubagentReadClient["watchSubagentConversation"]>[0],
   ): ReturnType<UiSubagentReadClient["watchSubagentConversation"]> {
-    return this.subagentQuery("watchSubagentConversation", input);
+    return this.subagentQuery("watchSubagentConversation", {
+      ...input,
+      watchSequence: ++this.subagentWatchSequence,
+    });
   }
   unwatchSubagentConversation(
     input: Parameters<UiSubagentReadClient["unwatchSubagentConversation"]>[0],

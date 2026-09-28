@@ -13,9 +13,17 @@ import type { DaemonPromptItem } from "./prompt-backend.js";
 
 interface ClientView {
   bindingGeneration: number;
+  subagentWatchAdmission: number;
+  subagentWatchSequence: number;
+  explicitSubagentWatchSequence: boolean;
+  readonly cancelledSubagentWatchIds: Set<string>;
   activeSessionId?: string | null;
   readonly initialPermission?: DaemonStartupIntent["initialPermission"];
   pendingSessionId?: string;
+  pendingSubagentWatch?: {
+    readonly watchId: string;
+    readonly subagentId: string;
+  };
   watchedSubagent?: UiSubagentConversationSelection;
 }
 
@@ -356,6 +364,62 @@ export class DaemonClientViewCoordinator {
     if (previous) this.onSubagentUnwatch?.(previous);
   }
 
+  beginSubagentWatchAdmission(
+    clientId: string,
+    subagentId: string,
+    watchId: string,
+    watchSequence?: number,
+  ): {
+    assertCurrent: () => void;
+    invalidate: () => void;
+    complete: () => void;
+  } {
+    const view = this.clientViews.get(clientId);
+    if (!view || this.disconnectedClientIds.has(clientId))
+      throw new DaemonForbiddenError("Client is not connected");
+    if (view.cancelledSubagentWatchIds.has(watchId))
+      throw Object.assign(
+        new DaemonForbiddenError("Subagent watch was cancelled"),
+        { code: "SESSION_SCOPE_CHANGED" },
+      );
+    if (
+      (watchSequence === undefined && view.explicitSubagentWatchSequence) ||
+      (watchSequence !== undefined &&
+        watchSequence <= view.subagentWatchSequence)
+    )
+      throw Object.assign(
+        new DaemonForbiddenError("Subagent watch was superseded"),
+        { code: "SESSION_SCOPE_CHANGED" },
+      );
+    view.subagentWatchSequence =
+      watchSequence ?? view.subagentWatchSequence + 1;
+    if (watchSequence !== undefined) view.explicitSubagentWatchSequence = true;
+    const admission = ++view.subagentWatchAdmission;
+    view.pendingSubagentWatch = { subagentId, watchId };
+    const current = (): boolean =>
+      this.clientViews.get(clientId) === view &&
+      !this.disconnectedClientIds.has(clientId) &&
+      view.subagentWatchAdmission === admission;
+    return {
+      assertCurrent: (): void => {
+        if (!current())
+          throw Object.assign(
+            new DaemonForbiddenError("Subagent watch was superseded"),
+            { code: "SESSION_SCOPE_CHANGED" },
+          );
+      },
+      invalidate: (): void => {
+        if (current()) {
+          view.subagentWatchAdmission += 1;
+          view.pendingSubagentWatch = undefined;
+        }
+      },
+      complete: (): void => {
+        if (current()) view.pendingSubagentWatch = undefined;
+      },
+    };
+  }
+
   // Retain settled admissions only while an empty-candidate read is in flight.
   // The returned candidate is unknown until that read completes.
   beginSessionAdmissionCheck(): {
@@ -423,6 +487,10 @@ export class DaemonClientViewCoordinator {
     this.clientViews.set(clientId, {
       bindingGeneration:
         (this.clientViews.get(clientId)?.bindingGeneration ?? 0) + 1,
+      subagentWatchAdmission: 0,
+      subagentWatchSequence: 0,
+      explicitSubagentWatchSequence: false,
+      cancelledSubagentWatchIds: new Set(),
       activeSessionId,
       ...(intent.initialPermission === undefined
         ? {}
@@ -491,6 +559,11 @@ export class DaemonClientViewCoordinator {
       );
     this.provisionalPromptBindings.delete(clientId);
     view.activeSessionId = sessionId;
+    view.subagentWatchAdmission += 1;
+    view.subagentWatchSequence = 0;
+    view.explicitSubagentWatchSequence = false;
+    view.pendingSubagentWatch = undefined;
+    view.cancelledSubagentWatchIds.clear();
     this.clearSubagentWatch(view);
     view.pendingSessionId = undefined;
     view.bindingGeneration += 1;
@@ -546,10 +619,34 @@ export class DaemonClientViewCoordinator {
     return selection;
   }
 
-  unwatchSubagentConversation(clientId: string, watchId: string): void {
+  unwatchSubagentConversation(
+    clientId: string,
+    watchId: string,
+    subagentId?: string,
+  ): void {
     const view = this.clientViews.get(clientId);
-    if (view?.watchedSubagent?.watchId === watchId)
+    if (view) {
+      view.cancelledSubagentWatchIds.add(watchId);
+      if (view.cancelledSubagentWatchIds.size > 64) {
+        const oldest = view.cancelledSubagentWatchIds.values().next().value;
+        if (oldest !== undefined) view.cancelledSubagentWatchIds.delete(oldest);
+      }
+    }
+    if (
+      view?.pendingSubagentWatch?.watchId === watchId &&
+      (subagentId === undefined ||
+        view.pendingSubagentWatch.subagentId === subagentId)
+    ) {
+      view.subagentWatchAdmission += 1;
+      view.pendingSubagentWatch = undefined;
+    }
+    if (
+      view?.watchedSubagent?.watchId === watchId &&
+      (subagentId === undefined ||
+        view.watchedSubagent.subagentId === subagentId)
+    ) {
       this.clearSubagentWatch(view);
+    }
   }
 
   currentSubagentWatchId(clientId: string): string | undefined {
@@ -833,7 +930,12 @@ export class DaemonClientViewCoordinator {
   disconnectClient(clientId: string): readonly string[] {
     this.disconnectedClientIds.add(clientId);
     const view = this.clientViews.get(clientId);
-    if (view) this.clearSubagentWatch(view);
+    if (view) {
+      view.subagentWatchAdmission += 1;
+      view.pendingSubagentWatch = undefined;
+      view.cancelledSubagentWatchIds.clear();
+      this.clearSubagentWatch(view);
+    }
     const interactionIds: string[] = [];
     for (const [invocationId, owner] of this.commandOwnersByInvocationId) {
       if (owner === clientId) {

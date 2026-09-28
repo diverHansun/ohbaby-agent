@@ -164,6 +164,8 @@ export class DaemonHttpClient {
       body: {
         runtimeEpoch: input.runtimeEpoch,
         bindingGeneration: input.bindingGeneration,
+        watchId: input.watchId,
+        watchSequence: input.watchSequence,
       },
       method: "POST",
       signal: input.signal,

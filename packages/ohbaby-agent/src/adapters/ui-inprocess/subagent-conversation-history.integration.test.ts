@@ -396,6 +396,13 @@ describe("subagent conversation history", () => {
     expect(latest.messages).toEqual([]);
     expect(latest.messages.some((m) => m.role === "user")).toBe(false);
     expect(latest.history.hasMore).toBe(false);
+    const anchored = await reader.read({
+      rootSessionId: "root",
+      subagentId: "a",
+      anchorExecutionId: accepted.executionId,
+    });
+    expect(anchored.anchorMessageId).toBeUndefined();
+    expect(anchored.anchorFound).toBe(false);
   });
 
   it("walks past an empty legacy execution between populated segments", async () => {

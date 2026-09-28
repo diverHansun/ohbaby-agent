@@ -6,6 +6,8 @@ import type {
   UiEvent,
   UiSessionView,
   UiSessionRecoveryClient,
+  UiSubagentConversationQuery,
+  UiSubagentConversationUnwatchQuery,
 } from "ohbaby-sdk";
 import { createDaemonHttpServer } from "../runtime/daemon/server.js";
 import { createRemoteUiBackendClient } from "../protocols/jsonrpc/client.js";
@@ -775,6 +777,183 @@ describe("readonly execution transports", () => {
         )
       ).status,
     ).toBe(409);
+  });
+
+  it("keeps the newer HTTP watch when an older retain finishes late", async () => {
+    const { request, backend } = await setup({ conversation: true });
+    let enteredA = (): void => undefined;
+    let releaseA = (): void => undefined;
+    const entered = new Promise<void>((resolve) => {
+      enteredA = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const releases: string[] = [];
+    backend.getSubagentConversationView = vi.fn(
+      (input: UiSubagentConversationQuery) =>
+        Promise.resolve({
+          rootSessionId: "root",
+          subagentId: input.subagentId,
+          view: baseline("child"),
+          messages: [],
+          history: { hasMore: false, hasLater: false },
+          executions: [],
+          anchorFound: false,
+          readOnly: true as const,
+        }),
+    );
+    backend.retainSubagentConversation = vi.fn(
+      async (input: UiSubagentConversationQuery & { watchId: string }) => {
+        if (input.subagentId === "a") {
+          enteredA();
+          await held;
+        }
+      },
+    );
+    backend.releaseSubagentConversation = vi.fn(
+      (input: UiSubagentConversationUnwatchQuery) => {
+        releases.push(input.watchId);
+        return Promise.resolve();
+      },
+    );
+    const watch = (child: string): Promise<Response> =>
+      request(`/v1/sessions/root/subagents/${child}/conversation/watch`, {
+        method: "POST",
+        body: JSON.stringify({ runtimeEpoch: epoch, bindingGeneration: 1 }),
+      });
+    const pendingA = watch("a");
+    await entered;
+    const responseB = await watch("b");
+    expect(responseB.status).toBe(200);
+    const b = (await responseB.json()) as { result: { watchId: string } };
+    releaseA();
+    const responseA = await pendingA;
+    expect(responseA.status).toBe(409);
+    expect(releases).toHaveLength(1);
+    expect(releases[0]).not.toBe(b.result.watchId);
+    const closeB = await request(
+      `/v1/sessions/root/subagents/b/conversation/watch?${query}&watchId=${b.result.watchId}`,
+      { method: "DELETE" },
+    );
+    expect(closeB.status).toBe(200);
+    expect(releases).toContain(b.result.watchId);
+  });
+
+  it("releases a retained watch when its HTTP request is explicitly cancelled", async () => {
+    const { request, backend } = await setup({ conversation: true });
+    let entered = (): void => undefined;
+    let release = (): void => undefined;
+    const retaining = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    backend.retainSubagentConversation = vi.fn(async () => {
+      entered();
+      await held;
+    });
+    backend.releaseSubagentConversation = vi.fn(() => Promise.resolve());
+    const watchId = "pending-watch";
+    const pending = request(
+      "/v1/sessions/root/subagents/logical-child/conversation/watch",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          runtimeEpoch: epoch,
+          bindingGeneration: 1,
+          watchId,
+        }),
+      },
+    );
+    await retaining;
+    const cancelled = await request(
+      `/v1/sessions/root/subagents/logical-child/conversation/watch?${query}&watchId=${watchId}`,
+      { method: "DELETE" },
+    );
+    expect(cancelled.status).toBe(200);
+    release();
+    expect((await pending).status).toBe(409);
+    await vi.waitFor(() => {
+      expect(backend.releaseSubagentConversation).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("rejects a watch whose cancellation arrives before admission", async () => {
+    const { request, backend } = await setup({ conversation: true });
+    const watchId = "cancel-before-post";
+    backend.retainSubagentConversation = vi.fn(() => Promise.resolve());
+    const cancelled = await request(
+      `/v1/sessions/root/subagents/logical-child/conversation/watch?${query}&watchId=${watchId}`,
+      { method: "DELETE" },
+    );
+    expect(cancelled.status).toBe(200);
+    const response = await request(
+      "/v1/sessions/root/subagents/logical-child/conversation/watch",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          runtimeEpoch: epoch,
+          bindingGeneration: 1,
+          watchId,
+        }),
+      },
+    );
+    expect(response.status).toBe(409);
+    expect(backend.retainSubagentConversation).not.toHaveBeenCalled();
+  });
+
+  it("preserves a newer watch when its POST arrives before an older POST and DELETE", async () => {
+    const { request, backend } = await setup({ conversation: true });
+    backend.getSubagentConversationView = vi.fn(
+      (input: UiSubagentConversationQuery) =>
+        Promise.resolve({
+          rootSessionId: "root",
+          subagentId: input.subagentId,
+          view: baseline("child"),
+          messages: [],
+          history: { hasMore: false, hasLater: false },
+          executions: [],
+          anchorFound: false,
+          readOnly: true as const,
+        }),
+    );
+    backend.retainSubagentConversation = vi.fn(() => Promise.resolve());
+    backend.releaseSubagentConversation = vi.fn(() => Promise.resolve());
+    const watch = (
+      child: string,
+      watchId: string,
+      watchSequence?: number,
+    ): Promise<Response> =>
+      request(`/v1/sessions/root/subagents/${child}/conversation/watch`, {
+        method: "POST",
+        body: JSON.stringify({
+          runtimeEpoch: epoch,
+          bindingGeneration: 1,
+          watchId,
+          ...(watchSequence === undefined ? {} : { watchSequence }),
+        }),
+      });
+    const b = await watch("b", "newer", 2);
+    expect(b.status).toBe(200);
+    expect((await watch("a", "older", 1)).status).toBe(409);
+    expect((await watch("a", "legacy-without-sequence")).status).toBe(409);
+    expect(backend.retainSubagentConversation).toHaveBeenCalledTimes(1);
+    const staleDelete = await request(
+      `/v1/sessions/root/subagents/a/conversation/watch?${query}&watchId=older`,
+      { method: "DELETE" },
+    );
+    expect(staleDelete.status).toBe(200);
+    expect(backend.releaseSubagentConversation).not.toHaveBeenCalled();
+    const closeB = await request(
+      `/v1/sessions/root/subagents/b/conversation/watch?${query}&watchId=newer`,
+      { method: "DELETE" },
+    );
+    expect(closeB.status).toBe(200);
+    expect(backend.releaseSubagentConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ watchId: "newer" }),
+    );
   });
 
   it("drops an execution response when the root binding changes during the read", async () => {

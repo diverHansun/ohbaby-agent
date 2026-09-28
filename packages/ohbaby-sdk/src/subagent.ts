@@ -80,6 +80,10 @@ export interface UiSubagentExecutionView {
 /** The logical subagent is resolved to its session and scope by the backend. */
 export interface UiSubagentConversationQuery extends UiSubagentQuery {
   readonly subagentId: string;
+  /** Client-generated admission ID when watching; ignored by conversation reads. */
+  readonly watchId?: string;
+  /** Monotonic client watch call order within one registered client. */
+  readonly watchSequence?: number;
   readonly after?: string;
   readonly anchorExecutionId?: string;
 }

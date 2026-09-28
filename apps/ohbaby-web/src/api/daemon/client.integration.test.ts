@@ -934,7 +934,8 @@ describe("ohbaby-web daemon client", () => {
       "timed out waiting for invalid sequence diagnostic",
     );
 
-    expect(delivered).toEqual([]);
+    // A new hello exposes the scoped recovery signal, never raw transport frames.
+    expect(delivered).toEqual(["session.resync-required"]);
     expect(runtime.store.getSnapshot().view.lastAppliedSeqNum).toBe(0);
 
     sseController?.enqueue(
@@ -944,7 +945,10 @@ describe("ohbaby-web daemon client", () => {
       () => snapshotRequests >= 2,
       "timed out waiting for the local resync barrier",
     );
-    expect(delivered).toEqual([]);
+    expect(delivered).toEqual([
+      "session.resync-required",
+      "session.resync-required",
+    ]);
     expect(runtime.store.getSnapshot().view.lastAppliedSeqNum).toBe(0);
 
     sseController?.close();

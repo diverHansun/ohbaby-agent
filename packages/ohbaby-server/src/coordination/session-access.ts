@@ -440,7 +440,13 @@ function validateConversationQuery(query: UiSubagentConversationQuery): void {
       (typeof query.after !== "string" || query.after.length > 4096)) ||
     (query.anchorExecutionId !== undefined &&
       (typeof query.anchorExecutionId !== "string" ||
-        query.anchorExecutionId.length === 0))
+        query.anchorExecutionId.length === 0)) ||
+    (query.watchId !== undefined &&
+      (typeof query.watchId !== "string" ||
+        query.watchId.length === 0 ||
+        query.watchId.length > 128)) ||
+    (query.watchSequence !== undefined &&
+      (!Number.isSafeInteger(query.watchSequence) || query.watchSequence < 1))
   )
     throw Object.assign(new Error("Invalid subagent conversation query"), {
       code: "INVALID_SESSION_QUERY",
@@ -490,30 +496,63 @@ export async function subagentConversationReadForClient(
 }
 
 export async function watchSubagentConversationForClient(
-  input: Access & { readonly query: UiSubagentConversationQuery },
+  input: Access & {
+    readonly query: UiSubagentConversationQuery;
+    readonly signal?: AbortSignal;
+  },
 ): Promise<UiSubagentConversationSelection> {
-  // Resolve the logical child through the same authorized source as reads.
-  await subagentConversationReadForClient(input);
-  const binding = capture(input, input.query);
-  const watchId = randomUUID();
-  await input.backend.retainSubagentConversation?.({
-    ...input.query,
+  validateConversationQuery(input.query);
+  const initialBinding = capture(input, input.query);
+  if (initialBinding.rootSessionId !== input.query.rootSessionId)
+    throw permissionError(
+      "SESSION_SCOPE_CHANGED",
+      "Conversation watch requires the selected root session",
+    );
+  const watchId = input.query.watchId ?? randomUUID();
+  const admission = input.views.beginSubagentWatchAdmission(
+    input.clientId,
+    input.query.subagentId,
     watchId,
-  });
+    input.query.watchSequence,
+  );
+  const onAbort = (): void => {
+    admission.invalidate();
+  };
+  input.signal?.addEventListener("abort", onAbort, { once: true });
+  if (input.signal?.aborted) onAbort();
+  let retained = false;
   try {
-    return input.views.watchSubagentConversation(
+    admission.assertCurrent();
+    // Resolve the logical child through the same authorized source as reads.
+    await subagentConversationReadForClient(input);
+    admission.assertCurrent();
+    const binding = capture(input, input.query);
+    await input.backend.retainSubagentConversation?.({
+      ...input.query,
+      watchId,
+    });
+    retained = true;
+    admission.assertCurrent();
+    recheck(input, binding);
+    const selection = input.views.watchSubagentConversation(
       input.clientId,
       binding,
       input.epoch,
       input.query.subagentId,
       watchId,
     );
+    admission.complete();
+    return selection;
   } catch (error) {
-    await input.backend.releaseSubagentConversation?.({
-      ...input.query,
-      watchId,
-    });
+    admission.invalidate();
+    if (retained)
+      await input.backend.releaseSubagentConversation?.({
+        ...input.query,
+        watchId,
+      });
     throw error;
+  } finally {
+    input.signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -531,5 +570,9 @@ export function unwatchSubagentConversationForClient(
       "SESSION_SCOPE_CHANGED",
       "Conversation watch requires the selected root session",
     );
-  input.views.unwatchSubagentConversation(input.clientId, input.query.watchId);
+  input.views.unwatchSubagentConversation(
+    input.clientId,
+    input.query.watchId,
+    input.query.subagentId,
+  );
 }

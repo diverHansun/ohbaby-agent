@@ -452,7 +452,7 @@ export function createSubagentConversationHistory(options: {
         },
         executions: [...records.values()],
         anchorMessageId: anchor?.childUserMessageId,
-        anchorFound: anchor !== undefined,
+        anchorFound: anchor?.childUserMessageId !== undefined,
       };
     },
   };

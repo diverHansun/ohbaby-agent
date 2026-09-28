@@ -58,6 +58,7 @@ export class BrowserDaemonClient implements UiBackendClient {
   private readonly sessionSync: SessionSync;
   private recoverySupported = false;
   private subagentConversationSupported = false;
+  private subagentWatchSequence = 0;
   private scopeTicket = 0;
   private selectionTicket = 0;
   private modelTicket = 0;
@@ -506,11 +507,13 @@ export class BrowserDaemonClient implements UiBackendClient {
   async watchSubagentConversation(
     input: UiSubagentConversationQuery,
   ): Promise<UiSubagentConversationSelection> {
+    const watchSequence = ++this.subagentWatchSequence;
     if (!this.subagentConversationSupported)
       throw new Error("Server does not support subagent conversations");
     const binding = this.permissionSync.getState().binding;
     const result = await this.http.watchSubagentConversation({
       ...input,
+      watchSequence,
       runtimeEpoch: binding?.permissionEpoch,
       bindingGeneration: binding?.bindingGeneration,
     });
@@ -521,7 +524,12 @@ export class BrowserDaemonClient implements UiBackendClient {
   async unwatchSubagentConversation(
     input: UiSubagentConversationUnwatchQuery,
   ): Promise<void> {
-    await this.http.unwatchSubagentConversation(input);
+    const binding = this.permissionSync.getState().binding;
+    await this.http.unwatchSubagentConversation({
+      ...input,
+      runtimeEpoch: input.runtimeEpoch ?? binding?.permissionEpoch,
+      bindingGeneration: input.bindingGeneration ?? binding?.bindingGeneration,
+    });
   }
   async getSessionView(input: UiSessionScope): Promise<UiSessionView> {
     return (await this.http.getSessionView(input)).view;

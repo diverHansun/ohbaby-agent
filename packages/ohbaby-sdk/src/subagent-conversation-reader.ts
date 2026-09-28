@@ -6,6 +6,7 @@ import type {
   UiSubagentConversationChangedEvent,
   UiSubagentConversationQuery,
   UiSubagentConversationSelection,
+  UiSubagentConversationUnwatchQuery,
   UiSubagentConversationView,
   UiSubagentExecution,
 } from "./subagent.js";
@@ -126,6 +127,52 @@ function mergePage(
   };
 }
 
+function preserveReadingWindow(
+  previous: UiSubagentConversationView | undefined,
+  next: UiSubagentConversationView,
+): UiSubagentConversationView {
+  if (
+    !previous?.messages.length ||
+    !sameSessionGeneration(previous.view.version, next.view.version)
+  )
+    return next;
+  const executions = mergeExecutions(previous.executions, next.executions);
+  const previousIds = new Set(previous.messages.map((message) => message.id));
+  // Only join windows when their overlap proves there is no unread gap.
+  const joinsTail =
+    !previous.history.hasLater &&
+    next.messages.some((message) => previousIds.has(message.id));
+  const messages = new Map(
+    previous.messages.map((message) => [message.id, message]),
+  );
+  if (joinsTail) {
+    const first = previous.messages[0];
+    for (const message of next.messages)
+      if (
+        compareSubagentMessages([first, message], executions)[0].id === first.id
+      )
+        messages.set(message.id, message);
+  }
+  return {
+    ...next,
+    messages: compareSubagentMessages(
+      replaceMatchingMessages(
+        [...messages.values()],
+        next.view.session.messages,
+      ),
+      executions,
+    ),
+    executions,
+    anchorMessageId: previous.anchorMessageId,
+    anchorFound: previous.anchorFound,
+    history: {
+      ...previous.history,
+      after: joinsTail ? next.history.after : previous.history.after,
+      hasLater: joinsTail ? next.history.hasLater : true,
+    },
+  };
+}
+
 /** One selected logical child, using the client's existing event subscription. */
 export function createSubagentConversationReader(
   client: Partial<UiBackendClient>,
@@ -139,6 +186,7 @@ export function createSubagentConversationReader(
   let ticket = 0;
   let controller: AbortController | undefined;
   let watch: UiSubagentConversationSelection | undefined;
+  let pendingWatch: UiSubagentConversationUnwatchQuery | undefined;
   let readingBaseline = false;
   let buffer: UiSubagentConversationChangedEvent[] = [];
   let bufferedBytes = 0;
@@ -148,7 +196,7 @@ export function createSubagentConversationReader(
     for (const listener of listeners) listener();
   };
   const release = (
-    selection: UiSubagentConversationSelection | undefined,
+    selection: UiSubagentConversationUnwatchQuery | undefined,
   ): void => {
     if (!selection) return;
     void client
@@ -160,6 +208,8 @@ export function createSubagentConversationReader(
   };
   const cancel = (): number => {
     ++ticket;
+    release(pendingWatch);
+    pendingWatch = undefined;
     controller?.abort();
     controller = undefined;
     buffer = [];
@@ -296,6 +346,12 @@ export function createSubagentConversationReader(
     const active = new AbortController();
     controller = active;
     readingBaseline = true;
+    const requestedWatch = {
+      rootSessionId,
+      subagentId: selected.subagentId,
+      watchId: globalThis.crypto.randomUUID(),
+    };
+    pendingWatch = requestedWatch;
     publish({
       selected,
       loading: true,
@@ -309,8 +365,7 @@ export function createSubagentConversationReader(
     let acquired: UiSubagentConversationSelection | undefined;
     try {
       acquired = await client.watchSubagentConversation({
-        rootSessionId,
-        subagentId: selected.subagentId,
+        ...requestedWatch,
         signal: active.signal,
       });
       if (!isCurrent(current, active.signal)) {
@@ -323,35 +378,14 @@ export function createSubagentConversationReader(
       )
         throw new Error("Invalid subagent watch identity");
       watch = acquired;
+      if (pendingWatch === requestedWatch) pendingWatch = undefined;
       const result = await query(selected, active.signal, {
         ...(locate ? { anchorExecutionId: selected.executionId } : {}),
       });
       if (!isCurrent(current, active.signal)) return;
       let next = install(result, acquired);
-      const previous = state.conversation;
-      if (
-        preserveWindow &&
-        previous &&
-        sameSessionGeneration(previous.view.version, next.view.version) &&
-        previous.history.hasLater
-      ) {
-        const executions = mergeExecutions(
-          previous.executions,
-          next.executions,
-        );
-        next = {
-          ...next,
-          messages: compareSubagentMessages(
-            replaceMatchingMessages(
-              previous.messages,
-              next.view.session.messages,
-            ),
-            executions,
-          ),
-          history: previous.history,
-          executions,
-        };
-      }
+      if (preserveWindow)
+        next = preserveReadingWindow(state.conversation, next);
       publish({
         conversation: next,
         loading: false,
@@ -359,6 +393,12 @@ export function createSubagentConversationReader(
         reconnecting: false,
       });
     } catch (error) {
+      // The server may have installed the watch even when its response was lost.
+      if (pendingWatch === requestedWatch) {
+        release(pendingWatch);
+        pendingWatch = undefined;
+      }
+      if (acquired && watch !== acquired) release(acquired);
       if (current === ticket && !disposed && !active.signal.aborted) {
         publish({ loading: false, locating: false, error: errorText(error) });
       }
@@ -380,26 +420,10 @@ export function createSubagentConversationReader(
     try {
       const result = await query(selected, active.signal);
       if (current !== ticket || disposed || active.signal.aborted) return;
-      let next = install(result, selection);
-      const previous = state.conversation;
-      if (
-        previous &&
-        sameSessionGeneration(previous.view.version, next.view.version) &&
-        previous.history.hasLater
-      ) {
-        next = {
-          ...next,
-          messages: compareSubagentMessages(
-            replaceMatchingMessages(
-              previous.messages,
-              next.view.session.messages,
-            ),
-            mergeExecutions(previous.executions, next.executions),
-          ),
-          history: previous.history,
-          executions: mergeExecutions(previous.executions, next.executions),
-        };
-      }
+      const next = preserveReadingWindow(
+        state.conversation,
+        install(result, selection),
+      );
       publish({ conversation: next, loading: false, reconnecting: false });
     } catch (error) {
       if (current === ticket && !disposed && !active.signal.aborted)

@@ -550,6 +550,39 @@ describe("DaemonClientViewCoordinator", () => {
     expect(released).toEqual(["watch-1", "watch-2", "watch-3"]);
   });
 
+  it("invalidates pending watch admissions on a newer watch, root switch, and disconnect", () => {
+    const views = new DaemonClientViewCoordinator();
+    views.initializeClient(
+      "client",
+      { sessions: [sessionWithMessages("root")] },
+      { resumeSessionId: "root" },
+    );
+    const a = views.beginSubagentWatchAdmission("client", "a", "watch-a");
+    const b = views.beginSubagentWatchAdmission("client", "b", "watch-b");
+    expect(a.assertCurrent).toThrow("superseded");
+    expect(b.assertCurrent).not.toThrow();
+    a.invalidate();
+    expect(b.assertCurrent).not.toThrow();
+    views.watchSubagentConversation(
+      "client",
+      views.binding("client", "epoch"),
+      "epoch",
+      "old",
+      "watch-old",
+    );
+    views.unwatchSubagentConversation("client", "watch-old", "old");
+    expect(b.assertCurrent).not.toThrow();
+    views.selectSession(
+      "client",
+      null,
+      views.binding("client", "epoch").bindingGeneration,
+    );
+    expect(b.assertCurrent).toThrow("superseded");
+    const c = views.beginSubagentWatchAdmission("client", "c", "watch-c");
+    views.disconnectClient("client");
+    expect(c.assertCurrent).toThrow("superseded");
+  });
+
   it("routes command events only to the invoking client", () => {
     const coordinator = new DaemonClientViewCoordinator();
 

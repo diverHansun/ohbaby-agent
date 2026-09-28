@@ -92,6 +92,195 @@ function selection(watchId: string): UiSubagentConversationSelection {
 }
 
 describe("subagent conversation reader", () => {
+  it("cancels an in-flight watch by its preallocated ID before its response arrives", async () => {
+    let finish: (selection: UiSubagentConversationSelection) => void = () =>
+      undefined;
+    let requested:
+      | { rootSessionId: string; subagentId: string; watchId?: string }
+      | undefined;
+    const released: string[] = [];
+    const reader = createSubagentConversationReader(
+      {
+        watchSubagentConversation: (query) => {
+          requested = query;
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        },
+        unwatchSubagentConversation: (query) => {
+          released.push(query.watchId);
+          return Promise.resolve();
+        },
+        getSubagentConversationView: () => Promise.resolve(conversation()),
+      },
+      "root",
+    );
+    const pending = reader.select(execution("a"));
+    reader.close();
+    expect(requested?.watchId).toEqual(expect.any(String));
+    expect(released).toContain(requested?.watchId);
+    finish(selection(requested?.watchId ?? "missing"));
+    await pending;
+    expect(reader.getSnapshot().selected).toBeUndefined();
+    reader.dispose();
+  });
+
+  it("cancels a watch whose response was lost and never releases the next pending ID", async () => {
+    const ids: string[] = [];
+    const released: string[] = [];
+    const reader = createSubagentConversationReader(
+      {
+        watchSubagentConversation: (query) => {
+          const watchId = (query as { watchId?: string }).watchId ?? "missing";
+          ids.push(watchId);
+          if (ids.length === 1)
+            return Promise.reject(new Error("Response lost"));
+          return Promise.resolve(selection(watchId));
+        },
+        unwatchSubagentConversation: (query) => {
+          released.push(query.watchId);
+          return Promise.resolve();
+        },
+        getSubagentConversationView: () => Promise.resolve(conversation()),
+      },
+      "root",
+    );
+    await reader.select(execution("a"));
+    expect(reader.getSnapshot().error).toBe("Response lost");
+    expect(released).toContain(ids[0]);
+    await reader.select(execution("a"));
+    expect(ids[1]).not.toBe(ids[0]);
+    expect(released).not.toContain(ids[1]);
+    reader.dispose();
+  });
+
+  it.each(["refresh", "reconnect"] as const)(
+    "preserves loaded earlier history during %s and updates overlapping live content",
+    async (kind) => {
+      let receive: (event: UiEvent) => void = () => undefined;
+      let latest = conversation();
+      const reader = createSubagentConversationReader(
+        {
+          subscribeEvents: (handler) => {
+            receive = handler;
+            return () => undefined;
+          },
+          watchSubagentConversation: () => Promise.resolve(selection("w")),
+          unwatchSubagentConversation: () => Promise.resolve(),
+          getSubagentConversationView: (query) =>
+            Promise.resolve(
+              query.before
+                ? {
+                    ...conversation([message("earlier", "earlier")]),
+                    history: {
+                      before: "start",
+                      hasMore: false,
+                      hasLater: false,
+                    },
+                  }
+                : latest,
+            ),
+        },
+        "root",
+      );
+      await reader.select(execution("a"));
+      await reader.loadEarlier();
+      latest = conversation(
+        [message("live", "updated"), message("new", "new")],
+        2,
+      );
+      latest = {
+        ...latest,
+        view: {
+          ...latest.view,
+          session: { ...latest.view.session, messages: latest.messages },
+        },
+        history: {
+          before: "tail-start",
+          after: "tail-end",
+          hasMore: true,
+          hasLater: false,
+        },
+      };
+      if (kind === "refresh") await reader.refresh();
+      else {
+        receive({
+          type: "session.resync-required",
+          runtimeEpoch: "epoch",
+          sessionId: "root",
+        });
+        await vi.waitFor(() => {
+          expect(reader.getSnapshot().loading).toBe(false);
+        });
+      }
+      const result = reader.getSnapshot().conversation;
+      expect(result?.messages.map((item) => item.id)).toEqual([
+        "earlier",
+        "live",
+        "new",
+      ]);
+      expect(result?.messages[1].parts[0]).toMatchObject({ text: "updated" });
+      expect(result?.history).toEqual({
+        before: "start",
+        after: "tail-end",
+        hasMore: false,
+        hasLater: false,
+      });
+      reader.dispose();
+    },
+  );
+
+  it("keeps a gap when the recovered tail no longer overlaps the reading window", async () => {
+    let latest = {
+      ...conversation([message("old", "old")]),
+      history: {
+        before: "old-start",
+        after: "old-end",
+        hasMore: false,
+        hasLater: false,
+      },
+    };
+    const reader = createSubagentConversationReader(
+      {
+        watchSubagentConversation: () => Promise.resolve(selection("w")),
+        unwatchSubagentConversation: () => Promise.resolve(),
+        getSubagentConversationView: () => Promise.resolve(latest),
+      },
+      "root",
+    );
+    await reader.select(execution("a"));
+    latest = {
+      ...conversation([message("new", "new")], 2),
+      history: {
+        before: "new-start",
+        after: "new-end",
+        hasMore: true,
+        hasLater: false,
+      },
+    };
+    await reader.refresh();
+    expect(
+      reader.getSnapshot().conversation?.messages.map((item) => item.id),
+    ).toEqual(["old"]);
+    expect(reader.getSnapshot().conversation?.history).toMatchObject({
+      after: "old-end",
+      hasLater: true,
+    });
+    latest = {
+      ...latest,
+      view: {
+        ...latest.view,
+        version: { ...latest.view.version, viewGeneration: "rebuilt" },
+      },
+    };
+    await reader.refresh();
+    expect(
+      reader.getSnapshot().conversation?.messages.map((item) => item.id),
+    ).toEqual(["new"]);
+    expect(reader.getSnapshot().conversation?.history).toEqual(latest.history);
+    reader.dispose();
+  });
+
   it("buffers scoped changes across watch and snapshot installation", async () => {
     let receive: (event: UiEvent) => void = () => undefined;
     let resolveSnapshot: (value: UiSubagentConversationView) => void = () =>
