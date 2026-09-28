@@ -143,3 +143,10 @@ Pi（github-copilot/claude-opus-5.5，medium）读取整体 diff 与截图后指
 Pi 提出的 fixture 文本连在一起来自测试模型分块本身（controlled release. 后紧接 REPORT_A_FULL），前端不应自行补空格。旧窄屏截图中内部通知为修复前证据，不能当作当前通知隐藏验收；本批新桌面 fixture 验证超时 observation 和最终 result 均不显示，普通 assistant 进度/最终回答保留。
 
 原 /status 在运行后显示 cache hit 60%，重启后 hit —；Context Usage 中无 cache，沿用原展示位置及统计生命周期。
+
+### 小范围视觉修复与本地提交
+
+- `9bd74aea`：恢复历史上下文查询、保留较新实时占用、更新前端同步及纠正后的文档/回归测试。
+- 审批卡片只增加 `overflow-wrap: anywhere`，不改尺寸、按钮或颜色。最终编译资产经浏览器验证：copy 的 clientWidth/scrollWidth 都为 349px（修改前为 349/448），composer 隐藏，长路径不覆盖操作按钮。新截图 `/tmp/improve31-ui/approval-wrap-final.png`。本轮未重新拍摄窄屏图，不以旧图宣称当前窄屏验收。
+- fixture 的显式 `--usage` 选项仅为测试返回已知 60% 样本，默认行为不变，不影响生产计量。
+- Pi 只读审查，修复由主代理与原生子代理完成；已清理本轮隔离服务，未重启用户 4096 服务，未 merge/push。

@@ -73,6 +73,16 @@ function chunk(response, delta, finish = null) {
         created: 0,
         model: "fixture",
         choices: [{ index: 0, delta, finish_reason: finish }],
+        ...(finish && process.argv.includes("--usage")
+          ? {
+              usage: {
+                prompt_tokens: 1000,
+                completion_tokens: 100,
+                total_tokens: 1100,
+                prompt_tokens_details: { cached_tokens: 600 },
+              },
+            }
+          : {}),
       }) +
       "\n\n",
   );
