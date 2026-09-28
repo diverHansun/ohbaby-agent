@@ -141,3 +141,34 @@ it("renders accepted timeouts as a readable task status with an active conversat
     container.remove();
   }
 });
+
+it("keeps completed legacy delegation input and saved result readable without an execution record", () => {
+  (
+    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    act(() => {
+      root.render(
+        createElement(DelegationRow, {
+          call,
+          result: { callId: call.id, output: "Legacy stored answer" },
+          onOpen: vi.fn(),
+        }),
+      );
+    });
+    expect(container.textContent).not.toContain("Connecting");
+    const button = container.querySelector<HTMLButtonElement>("button");
+    expect(button?.disabled).toBe(false);
+    act(() => button?.click());
+    expect(container.textContent).toContain("Legacy stored answer");
+    expect(container.textContent).toContain("Input");
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  }
+});

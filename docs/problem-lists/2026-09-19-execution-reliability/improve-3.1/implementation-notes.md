@@ -87,3 +87,11 @@ OHBABY_RUN_REAL_SUBAGENT_CONVERSATION=1 pnpm exec vitest run --config tests/smok
 ```
 
 浏览器 fixture 输入 `I3_START`。终端可用 JSON 命令 `progress` / `release` 指定 A、B、C，`release` 的 `approval` gate 控制审批到达时机；`check` 检查 waiting/terminal，`quit` 清理服务。完整测试中的编译进程会更新 dist，build/typecheck 应在测试完成后顺序运行。
+
+## 用户审查补修：旧委派永久 Connecting
+
+用户截图中的早期记录经本机数据库只读检查确认：工具已 completed，结果在 `state.metadata.subagent.item`，没有对应 execution 记录；子 scope 的消息仍存在。新任务行缺 execution 时误显示 Connecting 并禁用，导致原本可展开的工具结果消失。
+
+补修分两层：无 execution 的已结束调用/已有结果恢复原 ToolCard，允许展开当时保存的输入输出；带 execution 的较新历史，其身份位于 `ToolState.metadata`，持久化 UI 投影此前只透传 Part metadata，现单独保留 subagent execution 身份，防止超出列表首屏后入口失效。不复制旧 item、不伪造 execution、不改用户数据库。
+
+早期 `subagent.item` 完整子会话尚未接入新查看器，仍是明确兼容边界；此次恢复原结果可读，不宣称完整迁移。新格式已完成子代理仍可重开阅读。两个回归先 RED 再 GREEN（23 项定点通过）；受影响 Web/投影/SDK/历史回归 43 文件、522 项通过；独立子代理复审无阻断。

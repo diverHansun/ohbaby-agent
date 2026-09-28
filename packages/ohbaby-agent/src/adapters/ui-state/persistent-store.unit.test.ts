@@ -193,6 +193,35 @@ describe("messageToUiMessage", () => {
     },
   );
 
+  it("preserves stored subagent execution identity on the UI result while keeping scheduler metadata", () => {
+    const execution = {
+      executionId: "historical-execution",
+      subagentId: "worker",
+      status: "completed",
+    };
+    const base = messageWithToolState({
+      input: {},
+      status: "completed",
+      output: "answer",
+      metadata: { subagent: { execution }, internalDebug: "not for UI" },
+    });
+    const message: MessageWithParts = {
+      ...base,
+      parts: base.parts.map((part) =>
+        part.type === "tool"
+          ? { ...part, tool: "subagent_run", metadata: { sourceOrder: 2 } }
+          : part,
+      ),
+    };
+    const result = messageToUiMessage(message)?.parts.find(
+      (part) => part.type === "tool-result",
+    );
+    expect(result?.metadata).toEqual({
+      sourceOrder: 2,
+      subagent: { execution },
+    });
+  });
+
   it("preserves partial output for an aborted tool", () => {
     const message = messageWithToolState({
       error: "Tool execution aborted by user",

@@ -89,7 +89,12 @@ export function DelegationRow({
     execution?.startedAt,
     execution?.completedAt,
   );
-  if (!execution && (call.status === "failed" || result?.error !== undefined)) {
+  if (
+    !execution &&
+    (call.status === "completed" ||
+      call.status === "failed" ||
+      result !== undefined)
+  ) {
     return <ToolCard call={call} result={result} />;
   }
   return (

@@ -91,9 +91,18 @@ function toolResultPart(part: ToolPart): UiMessagePart | undefined {
       : part.state.status === "aborted"
         ? (part.state.output ?? "")
         : "";
+  // Tool result metadata is stored on state, separately from scheduler metadata.
+  const subagent =
+    part.tool === "subagent_run" ? part.state.metadata?.subagent : undefined;
+  const execution =
+    typeof subagent === "object" && subagent !== null && "execution" in subagent
+      ? subagent.execution
+      : undefined;
   return {
     id: part.id,
-    metadata: part.metadata,
+    metadata: execution
+      ? { ...part.metadata, subagent: { execution } }
+      : part.metadata,
     result: {
       callId: part.callId,
       execution: projectToolExecution(part.metadata?.execution),
