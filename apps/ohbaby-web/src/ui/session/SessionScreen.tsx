@@ -2,13 +2,14 @@ import {
   createSubagentReader,
   createSubagentConversationReader,
 } from "ohbaby-sdk";
-import { SubagentView } from "./SubagentView.js";
+import { SubagentView, type SubagentReadingCache } from "./SubagentView.js";
 import { ConversationPresentation } from "../conversation/ConversationPresentation.js";
 import {
   DelegationRow,
   delegationExecution,
   delegationTitle,
 } from "./DelegationRow.js";
+import { subagentSheetGeometry } from "./subagent-layout.js";
 import { TodoDock } from "../conversation/TodoDock.js";
 import { PermissionPolicyControl } from "../permissions/PermissionPolicyControl.js";
 import type {
@@ -698,6 +699,10 @@ export function SessionScreen({
       createSubagentConversationReader(client, view.activeSession?.id ?? ""),
     [client, view.activeSession?.id],
   );
+  const childReadingCache = useMemo<SubagentReadingCache>(
+    () => new Map(),
+    [childReader],
+  );
   const childState = useSyncExternalStore(
     useCallback(
       (listener: () => void) => childReader.subscribe(listener),
@@ -735,20 +740,16 @@ export function SessionScreen({
     const composer = content.querySelector<HTMLElement>(".ohb-composer-input");
     const header = content.querySelector<HTMLElement>(".ohb-statusbar");
     const measure = (): void => {
+      if (!composer) return;
       const rect = content.getBoundingClientRect();
-      const bottom = composer?.getBoundingClientRect().top ?? rect.bottom;
-      const available = Math.max(
-        0,
-        bottom - (header?.getBoundingClientRect().bottom ?? rect.top) - 10,
+      const geometry = subagentSheetGeometry(
+        rect,
+        composer.getBoundingClientRect(),
+        header?.getBoundingClientRect().bottom ?? rect.top,
+        window.innerWidth <= 720,
       );
-      content.style.setProperty(
-        "--child-bottom",
-        `${String(Math.max(0, rect.bottom - bottom) + 10)}px`,
-      );
-      content.style.setProperty(
-        "--child-height",
-        `${String(Math.min(680, available * 0.64))}px`,
-      );
+      for (const [key, value] of Object.entries(geometry))
+        content.style.setProperty(`--child-${key}`, `${String(value)}px`);
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
@@ -875,6 +876,11 @@ export function SessionScreen({
             }
           >
             <StatusBar
+              waitingSummary={
+                subagentState.list?.waiting
+                  ? `Waiting for subagents  ${String(subagentState.list.completedCount)} done  ${String(subagentState.list.activeCount)} open`
+                  : undefined
+              }
               activeGoal={view.activeGoal}
               header={view.header}
               onOpenGoalPanel={openGoalPanel}
@@ -889,10 +895,11 @@ export function SessionScreen({
             >
               <ConversationPresentation.Provider
                 value={{
-                  renderTool: (message, call) =>
+                  renderTool: (message, call, result) =>
                     call.name === "subagent_run" ? (
                       <DelegationRow
                         call={call}
+                        result={result}
                         execution={delegationExecution(
                           message,
                           call,
@@ -937,13 +944,6 @@ export function SessionScreen({
                 />
               </ConversationPresentation.Provider>
             </DurationSampleContext.Provider>
-            {subagentState.list?.waiting ? (
-              <p className="ohb-child-waiting" role="status">
-                <span>Waiting for subagents</span>
-                <span>{subagentState.list.completedCount} done</span>
-                <span>{subagentState.list.activeCount} open</span>
-              </p>
-            ) : null}
             {!viewingSubagent && commandModalNotice ? (
               <CommandResultModal
                 header={view.header}
@@ -1048,6 +1048,7 @@ export function SessionScreen({
         {viewingSubagent ? (
           <SubagentView
             reader={childReader}
+            readingCache={childReadingCache}
             state={childState}
             rootTitle={view.activeSession?.title ?? "Main conversation"}
             title={childTitle}

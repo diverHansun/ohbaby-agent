@@ -54,6 +54,7 @@ export function EmptyState(props: {
 }
 
 export function StatusBar(props: {
+  readonly waitingSummary?: string;
   readonly activeGoal: ViewModel["activeGoal"];
   readonly header: HeaderModel;
   readonly onOpenGoalPanel: (intent?: GoalPanelIntent) => void;
@@ -66,6 +67,11 @@ export function StatusBar(props: {
         <span>ba</span>
         <span>by</span>
       </div>
+      {props.waitingSummary ? (
+        <p className="ohb-child-waiting" role="status">
+          {props.waitingSummary}
+        </p>
+      ) : null}
       <div className="ohb-statusbar-meta">
         <StatusPill
           kind={props.header.connectionKind}

@@ -1,6 +1,9 @@
-import { expect, it } from "vitest";
+// @vitest-environment jsdom
+import { expect, it, vi } from "vitest";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import type { UiMessage, UiSubagentExecution, UiToolCall } from "ohbaby-sdk";
-import { delegationExecution } from "./DelegationRow.js";
+import { DelegationRow, delegationExecution } from "./DelegationRow.js";
 const call: UiToolCall = {
   id: "tool",
   name: "subagent_run",
@@ -61,4 +64,80 @@ it("opens legacy result metadata without inventing a parent anchor", () => {
   const result = delegationExecution(legacy, call, [], "root");
   expect(result?.executionId).toBe("old");
   expect(result?.childUserMessageId).toBeUndefined();
+});
+
+it("keeps input and error output accessible when delegation failed before acceptance", () => {
+  (
+    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const onOpen = vi.fn();
+  try {
+    act(() => {
+      root.render(
+        createElement(DelegationRow, {
+          call: { ...call, status: "failed" },
+          result: {
+            callId: call.id,
+            output: "admission failed",
+            error: "invalid subagent",
+          },
+          onOpen,
+        }),
+      );
+    });
+    const button = container.querySelector<HTMLButtonElement>("button");
+    expect(button?.disabled).toBe(false);
+    expect(button?.getAttribute("aria-expanded")).toBe("false");
+    act(() => {
+      button?.click();
+    });
+    expect(container.textContent).toContain("Input");
+    expect(container.textContent).toContain("Output");
+    expect(container.textContent).toContain("invalid subagent");
+    expect(container.textContent).toContain("task");
+    expect(onOpen).not.toHaveBeenCalled();
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  }
+});
+
+it("renders accepted timeouts as a readable task status with an active conversation entry", () => {
+  (
+    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const onOpen = vi.fn();
+  const timedOut = { ...execution, status: "timed_out" as const };
+  try {
+    act(() => {
+      root.render(
+        createElement(DelegationRow, {
+          call: { ...call, status: "failed" },
+          execution: timedOut,
+          onOpen,
+        }),
+      );
+    });
+    expect(container.textContent).toContain("Timed out");
+    expect(container.textContent).not.toContain("timed_out");
+    const button = container.querySelector<HTMLButtonElement>("button");
+    expect(button?.disabled).toBe(false);
+    act(() => {
+      button?.click();
+    });
+    expect(onOpen).toHaveBeenCalledWith(timedOut, button);
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  }
 });

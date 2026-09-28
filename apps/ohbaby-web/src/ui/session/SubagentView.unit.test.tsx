@@ -7,7 +7,7 @@ import {
   type UiSubagentConversationReaderState,
   type UiSubagentExecution,
 } from "ohbaby-sdk";
-import { SubagentView } from "./SubagentView.js";
+import { SubagentView, type SubagentReadingCache } from "./SubagentView.js";
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -100,6 +100,7 @@ it("keeps the same child transcript and open tools when expanding, with parent l
   document.body.append(element);
   const root = createRoot(element);
   const reader = createSubagentConversationReader({}, "root");
+  const readingCache: SubagentReadingCache = new Map();
   const onClose = vi.fn();
   const onExpandedChange = vi.fn();
   const data = state();
@@ -108,9 +109,11 @@ it("keeps the same child transcript and open tools when expanding, with parent l
       root.render(
         <SubagentView
           reader={reader}
+          readingCache={readingCache}
           state={data}
           rootTitle="Main task"
           title="Investigate issue"
+          approvalRequired
           expanded={expanded}
           onExpandedChange={onExpandedChange}
           onClose={onClose}
@@ -129,6 +132,8 @@ it("keeps the same child transcript and open tools when expanding, with parent l
   expect(element.querySelector('[role="dialog"]')).not.toBeNull();
   expect(element.textContent).toContain("From parent");
   expect(element.textContent).toContain("Queued");
+  expect(element.textContent).toContain("Approval required");
+  expect(element.textContent).not.toContain("Return to parent");
   expect(
     [...element.querySelectorAll("[data-message-id]")].map((row) =>
       row.getAttribute("data-message-id"),
@@ -163,6 +168,7 @@ it("handles Escape by collapsing first and closing a sheet, while ignoring IME c
   document.body.append(element);
   const root = createRoot(element);
   const reader = createSubagentConversationReader({}, "root");
+  const readingCache: SubagentReadingCache = new Map();
   const onClose = vi.fn();
   const onExpandedChange = vi.fn();
   mounted.push(() => {
@@ -177,6 +183,7 @@ it("handles Escape by collapsing first and closing a sheet, while ignoring IME c
       root.render(
         <SubagentView
           reader={reader}
+          readingCache={readingCache}
           state={state()}
           rootTitle="Main"
           title="Worker"
@@ -223,6 +230,7 @@ it("retains each logical child's tool expansion and updates the existing streami
   document.body.append(element);
   const root = createRoot(element);
   const reader = createSubagentConversationReader({}, "root");
+  const readingCache: SubagentReadingCache = new Map();
   mounted.push(() => {
     act(() => {
       root.unmount();
@@ -243,6 +251,7 @@ it("retains each logical child's tool expansion and updates the existing streami
       root.render(
         <SubagentView
           reader={reader}
+          readingCache={readingCache}
           state={data}
           rootTitle="Main"
           title="Task"
@@ -312,6 +321,7 @@ it("keeps keyboard focus inside the child and only loads later history after use
   document.body.append(element);
   const root = createRoot(element);
   const reader = createSubagentConversationReader({}, "root");
+  const readingCache: SubagentReadingCache = new Map();
   const loadLater = vi.spyOn(reader, "loadLater").mockResolvedValue();
   const data = state();
   const anchored = {
@@ -331,6 +341,7 @@ it("keeps keyboard focus inside the child and only loads later history after use
     root.render(
       <SubagentView
         reader={reader}
+        readingCache={readingCache}
         state={anchored}
         rootTitle="Main"
         title="Worker"
@@ -380,11 +391,13 @@ it("keeps an explicit parent anchor even when it is within the auto-follow thres
   document.body.append(element);
   const root = createRoot(element);
   const reader = createSubagentConversationReader({}, "root");
+  const readingCache: SubagentReadingCache = new Map();
   try {
     act(() => {
       root.render(
         <SubagentView
           reader={reader}
+          readingCache={readingCache}
           state={state()}
           rootTitle="Main"
           title="Worker"
@@ -409,4 +422,89 @@ it("keeps an explicit parent anchor even when it is within the auto-follow thres
     vi.restoreAllMocks();
     vi.useRealTimers();
   }
+});
+
+it("retains expanded tools after closing and reopening through the root-owned cache", () => {
+  const element = document.createElement("div");
+  document.body.append(element);
+  const root = createRoot(element);
+  const reader = createSubagentConversationReader({}, "root");
+  const readingCache: SubagentReadingCache = new Map();
+  mounted.push(() => {
+    act(() => {
+      root.unmount();
+    });
+    reader.dispose();
+    element.remove();
+  });
+  const render = (): void => {
+    act(() => {
+      root.render(
+        <SubagentView
+          reader={reader}
+          readingCache={readingCache}
+          state={state()}
+          rootTitle="Main"
+          title="Worker"
+          expanded={false}
+          onExpandedChange={() => undefined}
+          onClose={() => undefined}
+        />,
+      );
+    });
+  };
+  render();
+  act(() => {
+    element.querySelector<HTMLButtonElement>("button[aria-expanded]")?.click();
+  });
+  expect(element.querySelector('button[aria-expanded="true"]')).not.toBeNull();
+  act(() => {
+    root.render(null);
+  });
+  render();
+  expect(element.querySelector('button[aria-expanded="true"]')).not.toBeNull();
+});
+
+it("shows available-history guidance when the delegation has no exact parent anchor", () => {
+  const element = document.createElement("div");
+  document.body.append(element);
+  const root = createRoot(element);
+  const reader = createSubagentConversationReader({}, "root");
+  const readingCache: SubagentReadingCache = new Map();
+  const current = state();
+  const legacy = {
+    ...current,
+    conversation: current.conversation
+      ? {
+          ...current.conversation,
+          anchorFound: false,
+          anchorMessageId: undefined,
+        }
+      : undefined,
+  };
+  mounted.push(() => {
+    act(() => {
+      root.unmount();
+    });
+    reader.dispose();
+    element.remove();
+  });
+  act(() => {
+    root.render(
+      <SubagentView
+        reader={reader}
+        readingCache={readingCache}
+        state={legacy}
+        rootTitle="Main"
+        title="Worker"
+        expanded={false}
+        onExpandedChange={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+  });
+  expect(element.textContent).toContain(
+    "This delegation’s original message is unavailable. Showing available conversation history.",
+  );
+  expect(element.textContent).toContain("Investigate the issue");
 });

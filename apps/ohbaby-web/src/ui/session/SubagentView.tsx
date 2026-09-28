@@ -10,9 +10,19 @@ import {
 } from "../conversation/ConversationStream.js";
 import { ConversationPresentation } from "../conversation/ConversationPresentation.js";
 
+import { subagentStatusLabel } from "./DelegationRow.js";
+
 type Reader = ReturnType<typeof createSubagentConversationReader>;
+export type SubagentReadingCache = Map<
+  string,
+  {
+    position: ConversationReadingPosition;
+    tools: Map<string, boolean>;
+  }
+>;
 export function SubagentView({
   reader,
+  readingCache,
   state,
   rootTitle,
   title,
@@ -23,6 +33,7 @@ export function SubagentView({
   anchorToken,
 }: {
   readonly reader: Reader;
+  readonly readingCache: SubagentReadingCache;
   readonly state: UiSubagentConversationReaderState;
   readonly rootTitle: string;
   readonly title: string;
@@ -36,16 +47,10 @@ export function SubagentView({
   const conversation = state.conversation;
   const selected = state.selected;
   const identity = `${selected?.rootSessionId ?? ""}:${selected?.subagentId ?? ""}`;
-  const memories = useRef(
-    new Map<
-      string,
-      { position: ConversationReadingPosition; tools: Map<string, boolean> }
-    >(),
-  );
-  let memory = memories.current.get(identity);
+  let memory = readingCache.get(identity);
   if (!memory) {
     memory = { position: { top: 0, sticky: false }, tools: new Map() };
-    memories.current.set(identity, memory);
+    readingCache.set(identity, memory);
   }
   const heading = useRef<HTMLHeadingElement>(null);
   useLayoutEffect(() => {
@@ -104,7 +109,7 @@ export function SubagentView({
             {title}
           </h2>
           <span className="ohb-subagent-status" role="status">
-            {execution?.status}
+            {execution ? subagentStatusLabel(execution.status) : undefined}
           </span>
         </div>
         <button
@@ -151,12 +156,7 @@ export function SubagentView({
         </p>
       ) : null}
       {approvalRequired ? (
-        <p className="ohb-child-notice">
-          Approval required{" "}
-          <button type="button" onClick={onClose}>
-            Return to parent
-          </button>
-        </p>
+        <p className="ohb-child-notice">Approval required</p>
       ) : null}
       {conversation?.view.reasoningMissing ? (
         <p className="ohb-child-notice">
