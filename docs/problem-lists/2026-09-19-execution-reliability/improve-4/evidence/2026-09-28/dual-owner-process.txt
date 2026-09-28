@@ -1,0 +1,9 @@
+
+ RUN  v2.1.9 /Users/hansun025/Projects/code-cli/ohbaby-agent
+
+ ✓ packages/ohbaby-agent/src/runtime/run-ledger/dual-writer-process.integration.test.ts (2 tests) 382ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  18:53:00
+   Duration  680ms (transform 59ms, setup 8ms, collect 66ms, tests 382ms, environment 0ms, prepare 28ms)

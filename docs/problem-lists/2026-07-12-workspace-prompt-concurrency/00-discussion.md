@@ -1,5 +1,8 @@
 # 讨论记录与已确认要点
 
+> 2026-09-28 后继实施：停止、owner 隔离、retained 与恢复以 [improve-4 验收](../2026-09-19-execution-reliability/improve-4/05-implementation-acceptance.md) 及其 02 契约为准；下文保留原阶段设计记录。
+
+
 > 2026-07-12 与用户讨论定稿。本文件只保存已确认结论；技术证据见 01，正式方案见 02–04。
 
 ## 1. 背景与动机

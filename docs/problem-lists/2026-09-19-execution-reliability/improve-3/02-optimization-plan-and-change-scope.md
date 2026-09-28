@@ -1,5 +1,8 @@
 # 2. 优化方案与改动面
 
+> 2026-09-28 后继实施：停止、owner 隔离、retained 与恢复以 [improve-4 验收](../improve-4/05-implementation-acceptance.md) 及其 02 契约为准；下文保留原阶段设计记录。
+
+
 > 规划基线，未实施。产品约束来自 [00](00-discussion.md)，现状基线来自 [01](01-problem-analysis-and-current-state.md)。Stage 0 以独立前置修复及前两轮验收后的实际代码复核本契约。下文接口/状态名称为建议命名，不声称现有 API 已具备。
 
 ## 2.1 总体方案与责任分配

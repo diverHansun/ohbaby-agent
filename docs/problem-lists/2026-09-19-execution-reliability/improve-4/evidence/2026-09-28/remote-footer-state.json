@@ -1,0 +1,508 @@
+{
+  "binding": {
+    "permissionEpoch": "19414e32-97cf-4edd-8bb9-313a73ff3f29",
+    "rootSessionId": "session_1790597032252_4sa5fy2",
+    "bindingGeneration": 2,
+    "runtimeEpoch": "19414e32-97cf-4edd-8bb9-313a73ff3f29",
+    "subagentConversationVersion": 1,
+    "sessionRecoveryVersion": 1
+  },
+  "snapshot": {
+    "serverNow": 1790597460643,
+    "sessions": [
+      {
+        "createdAt": "2026-09-28T12:03:52.252Z",
+        "id": "session_1790597032252_4sa5fy2",
+        "messages": [
+          {
+            "createdAt": "2026-09-28T12:03:52.263Z",
+            "id": "message_0f38d67e-b1e2-47e7-8e07-9a36b6685dc1",
+            "parts": [
+              {
+                "id": "part_1790597032265_z325b4",
+                "text": "I4_TUI_HOLD",
+                "type": "text"
+              }
+            ],
+            "role": "user"
+          },
+          {
+            "createdAt": "2026-09-28T12:03:52.277Z",
+            "id": "message_1790597032277_8teya0",
+            "parts": [
+              {
+                "id": "part_1790597032284_ast5d6",
+                "text": "I4_TUI_HOLD_STARTED",
+                "type": "text",
+                "metadata": {
+                  "sourceOrder": 2
+                }
+              }
+            ],
+            "role": "assistant",
+            "runId": "run_34487576-debd-4f7f-a542-f1962dd183fa",
+            "modelRequests": [
+              {
+                "runId": "run_34487576-debd-4f7f-a542-f1962dd183fa",
+                "messageId": "message_1790597032277_8teya0",
+                "step": 1,
+                "requestId": "3934a81a-017c-49de-a240-90b7817ce1c4",
+                "attempt": 1,
+                "purpose": "agent-step",
+                "startedAt": 1790597032280,
+                "outcome": "aborted",
+                "inputIds": [],
+                "firstTextAt": 1790597032283,
+                "endedAt": 1790597050425,
+                "endTimeSource": "recovery"
+              }
+            ]
+          },
+          {
+            "createdAt": "2026-09-28T12:08:00.956Z",
+            "id": "message_e824b7a9-21c5-45cc-beeb-361e95c2321e",
+            "parts": [
+              {
+                "id": "part_1790597280956_mgd111",
+                "text": "I4_TUI_RESPONSE_LOST",
+                "type": "text"
+              }
+            ],
+            "role": "user"
+          },
+          {
+            "createdAt": "2026-09-28T12:08:00.969Z",
+            "id": "message_1790597280969_cmgjxp",
+            "parts": [
+              {
+                "id": "part_1790597280976_5d533w",
+                "text": "I4_TUI_RESPONSE_LOST_OK",
+                "type": "text",
+                "metadata": {
+                  "sourceOrder": 2
+                }
+              }
+            ],
+            "role": "assistant",
+            "runId": "run_058abc96-46a9-42ef-8db7-bfe9402837fd",
+            "modelRequests": [
+              {
+                "runId": "run_058abc96-46a9-42ef-8db7-bfe9402837fd",
+                "messageId": "message_1790597280969_cmgjxp",
+                "step": 1,
+                "requestId": "8c46c6a6-fdf7-4a89-b9c3-9577dfc8a9cc",
+                "attempt": 1,
+                "purpose": "agent-step",
+                "startedAt": 1790597280971,
+                "outcome": "success",
+                "inputIds": [],
+                "firstTextAt": 1790597280974,
+                "endedAt": 1790597280977
+              }
+            ],
+            "finishReason": "stop",
+            "status": "completed"
+          }
+        ],
+        "projectRoot": "<fixture>/workspace",
+        "title": "I4 TUI fixture",
+        "updatedAt": "2026-09-28T12:08:00.986Z"
+      },
+      {
+        "createdAt": "2026-09-28T12:03:52.159Z",
+        "id": "session_1790597032159_6zy8tb1",
+        "messages": [],
+        "projectRoot": "<fixture>/workspace",
+        "title": "I4 Web fixture",
+        "updatedAt": "2026-09-28T12:06:24.280Z"
+      }
+    ],
+    "activeSessionId": "session_1790597032252_4sa5fy2",
+    "runs": [
+      {
+        "id": "run_058abc96-46a9-42ef-8db7-bfe9402837fd",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "inputsCloseReason": "completed",
+        "endedAt": "2026-09-28T12:08:00.982Z",
+        "startedAt": "2026-09-28T12:08:00.961Z",
+        "status": {
+          "kind": "idle"
+        },
+        "updatedAt": "2026-09-28T12:08:00.982Z"
+      },
+      {
+        "id": "run_34487576-debd-4f7f-a542-f1962dd183fa",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "inputsCloseReason": "process-interrupted",
+        "endedAt": "2026-09-28T12:04:10.417Z",
+        "endTimeSource": "recovery",
+        "startedAt": "2026-09-28T12:03:52.271Z",
+        "status": {
+          "kind": "error",
+          "message": "process interrupted before owner exited",
+          "recoverable": true
+        },
+        "updatedAt": "2026-09-28T12:04:10.417Z"
+      }
+    ],
+    "permissions": [],
+    "status": {
+      "kind": "idle"
+    },
+    "contextWindowUsages": [
+      {
+        "contextWindowRatio": 0.063109375,
+        "contextWindowTokens": 128000,
+        "currentTokens": 8078,
+        "composition": {
+          "system-prompt": 4347,
+          "builtin-tools": 3381,
+          "mcp": 139,
+          "skills": 192,
+          "conversation": 36,
+          "summarized-conversation": 0,
+          "subagent-exchanges": 0
+        },
+        "estimatedAt": "2026-09-28T12:08:00.969Z",
+        "modelId": "fixture",
+        "sessionId": "session_1790597032252_4sa5fy2"
+      }
+    ],
+    "prompts": [
+      {
+        "promptId": "prompt_b5a3f347-ffd0-442c-8587-90784a5e9006",
+        "clientRequestId": "ceaa3c1b-779d-40fb-afd6-f63fea62a417",
+        "scopeKey": "<fixture>/workspace",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "userMessageId": "message_0f38d67e-b1e2-47e7-8e07-9a36b6685dc1",
+        "text": "I4_TUI_HOLD",
+        "status": "interrupted",
+        "runId": "run_34487576-debd-4f7f-a542-f1962dd183fa",
+        "error": {
+          "code": "PROCESS_INTERRUPTED",
+          "message": "Process interrupted before prompt completed",
+          "source": "runtime",
+          "retryable": true
+        },
+        "createdAt": "2026-09-28T12:03:52.259Z",
+        "acceptedAt": "2026-09-28T12:03:52.259Z",
+        "admissionOrder": 5,
+        "endTimeSource": "recovery",
+        "updatedAt": "2026-09-28T12:04:10.420Z",
+        "startedAt": "2026-09-28T12:03:52.261Z",
+        "endedAt": "2026-09-28T12:04:10.420Z"
+      },
+      {
+        "promptId": "prompt_8f89a396-1bbe-469e-8550-a462a77f5db1",
+        "clientRequestId": "bd5d26b6-f3ad-41e4-b1ec-d960de0ad7c4",
+        "scopeKey": "<fixture>/workspace",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "userMessageId": "message_e824b7a9-21c5-45cc-beeb-361e95c2321e",
+        "text": "I4_TUI_RESPONSE_LOST",
+        "status": "succeeded",
+        "runId": "run_058abc96-46a9-42ef-8db7-bfe9402837fd",
+        "createdAt": "2026-09-28T12:03:52.296Z",
+        "acceptedAt": "2026-09-28T12:08:00.951Z",
+        "admissionOrder": 10,
+        "updatedAt": "2026-09-28T12:08:00.988Z",
+        "startedAt": "2026-09-28T12:08:00.953Z",
+        "endedAt": "2026-09-28T12:08:00.982Z"
+      },
+      {
+        "promptId": "prompt_3a364bcc-41cb-412d-83b1-a82c8cc19b62",
+        "clientRequestId": "0db6c2d8-996b-4540-93a2-972b98f1baff",
+        "scopeKey": "<fixture>/workspace",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "userMessageId": "message_680edc6e-030b-4498-a88a-449353c8064f",
+        "text": "I4_TUI_C",
+        "status": "retained",
+        "createdAt": "2026-09-28T12:03:52.301Z",
+        "acceptedAt": "2026-09-28T12:03:52.301Z",
+        "admissionOrder": 7,
+        "updatedAt": "2026-09-28T12:04:10.420Z"
+      },
+      {
+        "promptId": "prompt_9e53ecdd-c117-420d-a14e-00715280c933",
+        "clientRequestId": "879328b7-2e75-4c03-9ed6-a349cad42417",
+        "scopeKey": "<fixture>/workspace",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "userMessageId": "message_c388ab4b-74fc-45a6-9de7-a14bfcc3e664",
+        "text": "I4_TUI_E",
+        "status": "retained",
+        "createdAt": "2026-09-28T12:03:52.306Z",
+        "acceptedAt": "2026-09-28T12:03:52.306Z",
+        "admissionOrder": 8,
+        "updatedAt": "2026-09-28T12:04:10.420Z"
+      }
+    ],
+    "todos": [
+      {
+        "sessionId": "session_1790597032159_6zy8tb1",
+        "todos": [],
+        "visible": false
+      },
+      {
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "todos": [],
+        "visible": false
+      }
+    ],
+    "permission": {
+      "level": "default",
+      "mode": "auto",
+      "sessionRules": []
+    }
+  },
+  "control": {
+    "runtimeEpoch": "19414e32-97cf-4edd-8bb9-313a73ff3f29",
+    "sessionId": "session_1790597032252_4sa5fy2",
+    "rootSessionId": "session_1790597032252_4sa5fy2",
+    "executionRecovery": {
+      "status": "ready"
+    },
+    "runId": null,
+    "driver": null,
+    "bindingGeneration": 2
+  },
+  "view": {
+    "session": {
+      "createdAt": "2026-09-28T12:03:52.252Z",
+      "id": "session_1790597032252_4sa5fy2",
+      "messages": [
+        {
+          "createdAt": "2026-09-28T12:03:52.263Z",
+          "id": "message_0f38d67e-b1e2-47e7-8e07-9a36b6685dc1",
+          "parts": [
+            {
+              "id": "part_1790597032265_z325b4",
+              "text": "I4_TUI_HOLD",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "createdAt": "2026-09-28T12:03:52.277Z",
+          "id": "message_1790597032277_8teya0",
+          "parts": [
+            {
+              "id": "part_1790597032284_ast5d6",
+              "text": "I4_TUI_HOLD_STARTED",
+              "type": "text",
+              "metadata": {
+                "sourceOrder": 2
+              }
+            }
+          ],
+          "role": "assistant",
+          "runId": "run_34487576-debd-4f7f-a542-f1962dd183fa",
+          "modelRequests": [
+            {
+              "runId": "run_34487576-debd-4f7f-a542-f1962dd183fa",
+              "messageId": "message_1790597032277_8teya0",
+              "step": 1,
+              "requestId": "3934a81a-017c-49de-a240-90b7817ce1c4",
+              "attempt": 1,
+              "purpose": "agent-step",
+              "startedAt": 1790597032280,
+              "outcome": "aborted",
+              "inputIds": [],
+              "firstTextAt": 1790597032283,
+              "endedAt": 1790597050425,
+              "endTimeSource": "recovery"
+            }
+          ]
+        },
+        {
+          "createdAt": "2026-09-28T12:08:00.956Z",
+          "id": "message_e824b7a9-21c5-45cc-beeb-361e95c2321e",
+          "parts": [
+            {
+              "id": "part_1790597280956_mgd111",
+              "text": "I4_TUI_RESPONSE_LOST",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "createdAt": "2026-09-28T12:08:00.969Z",
+          "id": "message_1790597280969_cmgjxp",
+          "parts": [
+            {
+              "id": "part_1790597280976_5d533w",
+              "text": "I4_TUI_RESPONSE_LOST_OK",
+              "type": "text",
+              "metadata": {
+                "sourceOrder": 2
+              }
+            }
+          ],
+          "role": "assistant",
+          "runId": "run_058abc96-46a9-42ef-8db7-bfe9402837fd",
+          "modelRequests": [
+            {
+              "runId": "run_058abc96-46a9-42ef-8db7-bfe9402837fd",
+              "messageId": "message_1790597280969_cmgjxp",
+              "step": 1,
+              "requestId": "8c46c6a6-fdf7-4a89-b9c3-9577dfc8a9cc",
+              "attempt": 1,
+              "purpose": "agent-step",
+              "startedAt": 1790597280971,
+              "outcome": "success",
+              "inputIds": [],
+              "firstTextAt": 1790597280974,
+              "endedAt": 1790597280977
+            }
+          ],
+          "finishReason": "stop",
+          "status": "completed"
+        }
+      ],
+      "projectRoot": "<fixture>/workspace",
+      "title": "I4 TUI fixture",
+      "updatedAt": "2026-09-28T12:08:00.986Z"
+    },
+    "runs": [
+      {
+        "id": "run_058abc96-46a9-42ef-8db7-bfe9402837fd",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "inputsCloseReason": "completed",
+        "endedAt": "2026-09-28T12:08:00.982Z",
+        "startedAt": "2026-09-28T12:08:00.961Z",
+        "status": {
+          "kind": "idle"
+        },
+        "updatedAt": "2026-09-28T12:08:00.982Z"
+      },
+      {
+        "id": "run_34487576-debd-4f7f-a542-f1962dd183fa",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "inputsCloseReason": "process-interrupted",
+        "endedAt": "2026-09-28T12:04:10.417Z",
+        "endTimeSource": "recovery",
+        "startedAt": "2026-09-28T12:03:52.271Z",
+        "status": {
+          "kind": "error",
+          "message": "process interrupted before owner exited",
+          "recoverable": true
+        },
+        "updatedAt": "2026-09-28T12:04:10.417Z"
+      }
+    ],
+    "prompts": [
+      {
+        "promptId": "prompt_b5a3f347-ffd0-442c-8587-90784a5e9006",
+        "clientRequestId": "ceaa3c1b-779d-40fb-afd6-f63fea62a417",
+        "scopeKey": "<fixture>/workspace",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "userMessageId": "message_0f38d67e-b1e2-47e7-8e07-9a36b6685dc1",
+        "text": "I4_TUI_HOLD",
+        "status": "interrupted",
+        "runId": "run_34487576-debd-4f7f-a542-f1962dd183fa",
+        "error": {
+          "code": "PROCESS_INTERRUPTED",
+          "message": "Process interrupted before prompt completed",
+          "source": "runtime",
+          "retryable": true
+        },
+        "createdAt": "2026-09-28T12:03:52.259Z",
+        "acceptedAt": "2026-09-28T12:03:52.259Z",
+        "admissionOrder": 5,
+        "endTimeSource": "recovery",
+        "updatedAt": "2026-09-28T12:04:10.420Z",
+        "startedAt": "2026-09-28T12:03:52.261Z",
+        "endedAt": "2026-09-28T12:04:10.420Z"
+      },
+      {
+        "promptId": "prompt_8f89a396-1bbe-469e-8550-a462a77f5db1",
+        "clientRequestId": "bd5d26b6-f3ad-41e4-b1ec-d960de0ad7c4",
+        "scopeKey": "<fixture>/workspace",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "userMessageId": "message_e824b7a9-21c5-45cc-beeb-361e95c2321e",
+        "text": "I4_TUI_RESPONSE_LOST",
+        "status": "succeeded",
+        "runId": "run_058abc96-46a9-42ef-8db7-bfe9402837fd",
+        "createdAt": "2026-09-28T12:03:52.296Z",
+        "acceptedAt": "2026-09-28T12:08:00.951Z",
+        "admissionOrder": 10,
+        "updatedAt": "2026-09-28T12:08:00.988Z",
+        "startedAt": "2026-09-28T12:08:00.953Z",
+        "endedAt": "2026-09-28T12:08:00.982Z"
+      },
+      {
+        "promptId": "prompt_3a364bcc-41cb-412d-83b1-a82c8cc19b62",
+        "clientRequestId": "0db6c2d8-996b-4540-93a2-972b98f1baff",
+        "scopeKey": "<fixture>/workspace",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "userMessageId": "message_680edc6e-030b-4498-a88a-449353c8064f",
+        "text": "I4_TUI_C",
+        "status": "retained",
+        "createdAt": "2026-09-28T12:03:52.301Z",
+        "acceptedAt": "2026-09-28T12:03:52.301Z",
+        "admissionOrder": 7,
+        "updatedAt": "2026-09-28T12:04:10.420Z"
+      },
+      {
+        "promptId": "prompt_9e53ecdd-c117-420d-a14e-00715280c933",
+        "clientRequestId": "879328b7-2e75-4c03-9ed6-a349cad42417",
+        "scopeKey": "<fixture>/workspace",
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "userMessageId": "message_c388ab4b-74fc-45a6-9de7-a14bfcc3e664",
+        "text": "I4_TUI_E",
+        "status": "retained",
+        "createdAt": "2026-09-28T12:03:52.306Z",
+        "acceptedAt": "2026-09-28T12:03:52.306Z",
+        "admissionOrder": 8,
+        "updatedAt": "2026-09-28T12:04:10.420Z"
+      }
+    ],
+    "history": {
+      "hasMore": false
+    },
+    "reasoningMissing": false,
+    "todo": {
+      "status": "ready",
+      "value": {
+        "sessionId": "session_1790597032252_4sa5fy2",
+        "todos": [],
+        "visible": false
+      }
+    },
+    "goal": {
+      "status": "ready",
+      "value": null
+    },
+    "context": {
+      "status": "ready",
+      "value": {
+        "contextWindowRatio": 0.063109375,
+        "contextWindowTokens": 128000,
+        "currentTokens": 8078,
+        "composition": {
+          "system-prompt": 4347,
+          "builtin-tools": 3381,
+          "mcp": 139,
+          "skills": 192,
+          "conversation": 36,
+          "summarized-conversation": 0,
+          "subagent-exchanges": 0
+        },
+        "estimatedAt": "2026-09-28T12:08:00.969Z",
+        "modelId": "fixture",
+        "sessionId": "session_1790597032252_4sa5fy2"
+      }
+    },
+    "executionRecovery": {
+      "status": "ready"
+    },
+    "version": {
+      "runtimeEpoch": "19414e32-97cf-4edd-8bb9-313a73ff3f29",
+      "sessionId": "session_1790597032252_4sa5fy2",
+      "viewGeneration": "007949c7-381d-44eb-8136-77934b71a0c0",
+      "sessionRevision": 0
+    },
+    "serverNow": 1790597460656,
+    "bindingGeneration": 2
+  }
+}

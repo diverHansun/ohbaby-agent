@@ -1,5 +1,8 @@
 # 02 · 实施方案与改动面（agents 服务层视角）
 
+> 2026-09-28 后继实施：停止、owner 隔离、retained 与恢复以 [improve-4 验收](../../problem-lists/2026-09-19-execution-reliability/improve-4/05-implementation-acceptance.md) 及其 02 契约为准；下文保留原阶段设计记录。
+
+
 本文给出 `agents` 服务层的目标结构、`SessionSubagentHost` 设计、持久化方案，以及实施前的文件级改动面。当前决策是：完成 subagent context/instance 化与工具面收敛；primary `startSession` 已接入 `AgentInstance.turn(stream)`，但 primary 物理 `contextScopeId` 后续单独实施。
 
 ---

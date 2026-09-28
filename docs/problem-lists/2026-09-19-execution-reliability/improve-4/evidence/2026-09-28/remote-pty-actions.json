@@ -1,0 +1,228 @@
+[
+  {
+    "action": "launch queued",
+    "output": "\u001b[?25l     ██████╗ ██╗  ██╗██████╗  █████╗ ██████╗ ██╗   ██╗\r\n    ██╔═══██╗██║  ██║██╔══██╗██╔══██╗██╔══██╗╚██╗ ██╔╝\r\n    ██║   ██║███████║██████╔╝███████║██████╔╝ ╚████╔╝\r\n    ██║   ██║██╔══██║██╔══██╗██╔══██║██╔══██╗  ╚██╔╝\r\n    ╚██████╔╝██║  ██║██████╔╝██║  ██║██████╔╝   ██║\r\n     ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚═════╝    ╚═╝\r\n\r\n    Ctrl+G subagents · 0 executions\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ >                                                                    │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    Syncing session… draft kept · auto · default\r\n\u001b[?25l\u001b[12A\u001b[1G    Ctrl+G subagents · 0 executions\u001b[K\r\n\u001b[1G    | I4_TUI_HOLD\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    I4TUIHOLD_STARTED\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G     Queued 3\u001b[K\r\n\u001b[1G     › I4_TUI_B · Steer\u001b[K\r\n\u001b[1G     ↳ I4_TUI_C · Steer\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Steer\u001b[K\r\n\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[1G    ╭──────────────────────────────────────────────────────────────────────╮\u001b[K\r\n\u001b[1G    │ >                                                                    │\u001b[K\r\n\u001b[1G    ╰──────────────────────────────────────────────────────────────────────╯\u001b[K\r\n\u001b[1G    Queued 3 · auto · default · session_1790593213422_lljwe42 8K / 128K (6%)\u001b[K\r\n"
+  },
+  {
+    "action": "I4 TUI original draft",
+    "output": "\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    │ > I4 TUI original draft                                              │\u001b[K\r\n\u001b[E\u001b[E"
+  },
+  {
+    "action": "\u001b[1;3A",
+    "output": "\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     ↳ I4_TUI_B · Steer\u001b[K\r\n\u001b[E\u001b[1G     › I4_TUI_E · Steer\u001b[K\r\n\u001b[1G     ↑/↓ select · Enter edit · Ctrl+D Delete · Esc back to draft\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E"
+  },
+  {
+    "action": "\u001b[A",
+    "output": "\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_C · Steer\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Steer\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E"
+  },
+  {
+    "action": "\u001b[B",
+    "output": "\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     ↳ I4_TUI_C · Steer\u001b[K\r\n\u001b[1G     › I4_TUI_E · Steer\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E"
+  },
+  {
+    "action": "\u001b[A",
+    "output": "\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_C · Steer\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Steer\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E"
+  },
+  {
+    "action": "\r",
+    "output": "\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_B · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_C · editing · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Steer unavailable\u001b[K\r\n\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[E\u001b[1G    │ > I4_TUI_C                                                           │\u001b[K\r\n\u001b[E\u001b[1G    Enter save · Esc restore draft\u001b[K\r\n\u001b[1G    Queued 3 · auto · default · session_1790593213422_lljwe42 8K / 128K (6%)\u001b[K\r\n"
+  },
+  {
+    "action": "_SAVED",
+    "output": "\u001b[15A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    │ > I4_TUI_C_SAVED                                                     │\u001b[K\r\n\u001b[E\u001b[E\u001b[E"
+  },
+  {
+    "action": "\r",
+    "output": "\u001b[15A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    Updating queued prompt…\u001b[K\r\n\u001b[E\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_B · Steer\u001b[K\r\n\u001b[1G     ↳ I4_TUI_C_SAVED · Steer\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Steer\u001b[K\r\n\u001b[E\u001b[E\u001b[1G    │ > I4 TUI original draft                                              │\u001b[K\r\n\u001b[E\u001b[1G    Queued 3 · auto · default · session_1790593213422_lljwe42 8K / 128K (6%)\u001b[K\r\n"
+  },
+  {
+    "action": "\u001b[1;3A",
+    "output": "\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     ↳ I4_TUI_B · Steer\u001b[K\r\n\u001b[E\u001b[1G     › I4_TUI_E · Steer\u001b[K\r\n\u001b[1G     ↑/↓ select · Enter edit · Ctrl+D Delete · Esc back to draft\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E"
+  },
+  {
+    "action": "\u001b[A",
+    "output": "\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_C_SAVED · Steer\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Steer\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E"
+  },
+  {
+    "action": "\r",
+    "output": "\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_B · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_C_SAVED · editing · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Steer unavailable\u001b[K\r\n\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[E\u001b[1G    │ > I4_TUI_C_SAVED                                                     │\u001b[K\r\n\u001b[E\u001b[1G    Enter save · Esc restore draft\u001b[K\r\n\u001b[1G    Queued 3 · auto · default · session_1790593213422_lljwe42 8K / 128K (6%)\u001b[K\r\n"
+  },
+  {
+    "action": "\u0004",
+    "output": ""
+  },
+  {
+    "action": "\u001b",
+    "output": "\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_B · Steer\u001b[K\r\n\u001b[1G     ↳ I4_TUI_C_SAVED · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Steer\u001b[K\r\n\u001b[E\u001b[E\u001b[1G    │ > I4 TUI original draft                                              │\u001b[K\r\n\u001b[E\u001b[1G    Queued 3 · auto · default · session_1790593213422_lljwe42 8K / 128K (6%)\u001b[K\r\n\u001b[14A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     ↳ I4_TUI_C_SAVED · Steer\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E"
+  },
+  {
+    "action": "cold TUI launch",
+    "result": {
+      "chunk_id": "8923e1",
+      "wall_time_seconds": 1.002157125,
+      "session_id": 3972,
+      "original_token_count": 844,
+      "output": "\u001b[?25l     ██████╗ ██╗  ██╗██████╗  █████╗ ██████╗ ██╗   ██╗\r\n    ██╔═══██╗██║  ██║██╔══██╗██╔══██╗██╔══██╗╚██╗ ██╔╝\r\n    ██║   ██║███████║██████╔╝███████║██████╔╝ ╚████╔╝\r\n    ██║   ██║██╔══██║██╔══██╗██╔══██║██╔══██╗  ╚██╔╝\r\n    ╚██████╔╝██║  ██║██████╔╝██║  ██║██████╔╝   ██║\r\n     ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚═════╝    ╚═╝\r\n\r\n    Ctrl+G subagents · 0 executions\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ >                                                                    │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    Syncing session… draft kept · auto · default\r\n\u001b[?25l\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[6A\u001b[1G    Ctrl+G subagents · 0 executions\u001b[K\r\n\u001b[1G    ╭──────────────────────────────────────────────────────────────────────╮\u001b[K\r\n\u001b[1G    │ >                                                                    │\u001b[K\r\n\u001b[1G    ╰──────────────────────────────────────────────────────────────────────╯\u001b[K\r\n\u001b[1G    Syncing session… draft kept · auto · default ·            8K / 128K (6%)\u001b[K\r\n\u001b[1G    session_1790593213422_lljwe42\u001b[K\r\n\u001b[6A\u001b[E\u001b[1G    | I4_TUI_HOLD\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    I4TUIHOLD_STARTED\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    interrupted · End time unknown (recovered)\u001b[K\r\n\u001b[E\u001b[1G     Queued 3\u001b[K\r\n\u001b[1G     › I4_TUI_B · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_C_SAVED · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[1G    ╭──────────────────────────────────────────────────────────────────────╮\u001b[K\r\n\u001b[1G    │ >                                                                    │\u001b[K\r\n\u001b[1G    ╰──────────────────────────────────────────────────────────────────────╯\u001b[K\r\n\u001b[1G    error: process interrupted before owner exited · Queued 3 ·8K / 128K\u001b[K\r\n\u001b[1G    auto · default · session_1790593213422_lljwe42             (6%)\u001b[K\r\n"
+    }
+  },
+  {
+    "action": "retained draft",
+    "result": {
+      "chunk_id": "eb4348",
+      "wall_time_seconds": 0.251784666,
+      "session_id": 3972,
+      "original_token_count": 36,
+      "output": "\u001b[17A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    │ > I4 TUI retained draft                                              │\u001b[K\r\n\u001b[E\u001b[E\u001b[E"
+    }
+  },
+  {
+    "action": "AltUp",
+    "result": {
+      "chunk_id": "c9cf73",
+      "wall_time_seconds": 0.252094083,
+      "session_id": 3972,
+      "original_token_count": 62,
+      "output": "\u001b[17A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     ↳ I4_TUI_B · Retained · Steer unavailable\u001b[K\r\n\u001b[E\u001b[1G     › I4_TUI_E · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↑/↓ select · Enter edit · Ctrl+D Delete · Esc back to draft\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E"
+    }
+  },
+  {
+    "action": "Up",
+    "result": {
+      "chunk_id": "5babea",
+      "wall_time_seconds": 0.251979917,
+      "session_id": 3972,
+      "original_token_count": 44,
+      "output": "\u001b[17A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_C_SAVED · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Retained · Steer unavailable\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E"
+    }
+  },
+  {
+    "action": "Enter edit",
+    "result": {
+      "chunk_id": "d0b9a3",
+      "wall_time_seconds": 0.252737375,
+      "session_id": 3972,
+      "original_token_count": 137,
+      "output": "\u001b[17A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_B · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_C_SAVED · editing · Retained · Steer unavailable\u001b[K\r\n\u001b[E\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[E\u001b[1G    │ > I4_TUI_C_SAVED                                                     │\u001b[K\r\n\u001b[E\u001b[1G    Enter send · Esc restore draft\u001b[K\r\n\u001b[1G    error: process interrupted before owner exited · Queued 3 ·8K / 128K\u001b[K\r\n\u001b[1G    auto · default · session_1790593213422_lljwe42             (6%)\u001b[K\r\n"
+    }
+  },
+  {
+    "action": "retained edit",
+    "result": {
+      "chunk_id": "8505f5",
+      "wall_time_seconds": 0.301325042,
+      "session_id": 3972,
+      "original_token_count": 37,
+      "output": "\u001b[18A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    │ > I4_TUI_C_SAVED_RESENT                                              │\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E"
+    }
+  },
+  {
+    "action": "retained Send",
+    "result": {
+      "chunk_id": "09553f",
+      "wall_time_seconds": 0.301940958,
+      "session_id": 3972,
+      "original_token_count": 1723,
+      "output": "\u001b[18A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    Updating queued prompt…\u001b[K\r\n\u001b[E\u001b[E\u001b[18A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    | I4_TUI_C_SAVED_RESENT\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G     Queued 2\u001b[K\r\n\u001b[1G     › I4_TUI_B · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[1G    ╭──────────────────────────────────────────────────────────────────────╮\u001b[K\r\n\u001b[1G    │ > I4 TUI retained draft                                              │\u001b[K\r\n\u001b[1G    ╰──────────────────────────────────────────────────────────────────────╯\u001b[K\r\n\u001b[1G    error: process interrupted before owner exited · Queued 2 8.1K / 128K\u001b[K\r\n\u001b[1G    · auto · default · session_1790593213422_lljwe42          (6%)\u001b[K\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[2J\u001b[3J\u001b[H    Ctrl+G subagents · 0 executions\r\n    | I4_TUI_HOLD\r\n\r\n    I4TUIHOLD_STARTED\r\n\r\n    interrupted · End time unknown (recovered)\r\n\r\n    | I4_TUI_C_SAVED_RESENT\r\n\r\n     Queued 2\r\n     › I4_TUI_B · Retained · Steer unavailable\r\n     ↳ I4_TUI_E · Retained · Steer unavailable\r\n     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ > I4 TUI retained draft                                              │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    error: process interrupted before owner exited · Queued 2 8.1K / 128K\r\n    · auto · default · session_1790593213422_lljwe42          (6%)\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[2J\u001b[3J\u001b[H    Ctrl+G subagents · 0 executions\r\n    | I4_TUI_HOLD\r\n\r\n    I4TUIHOLD_STARTED\r\n\r\n    interrupted · End time unknown (recovered)\r\n\r\n    | I4_TUI_C_SAVED_RESENT\r\n\r\n     Queued 2\r\n     › I4_TUI_B · Retained · Steer unavailable\r\n     ↳ I4_TUI_E · Retained · Steer unavailable\r\n     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ > I4 TUI retained draft                                              │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    error: process interrupted before owner exited · Queued 2 8.1K / 128K\r\n    · auto · default · session_1790593213422_lljwe42          (6%)\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[2J\u001b[3J\u001b[H    Ctrl+G subagents · 0 executions\r\n    | I4_TUI_HOLD\r\n\r\n    I4TUIHOLD_STARTED\r\n\r\n    interrupted · End time unknown (recovered)\r\n\r\n    | I4_TUI_C_SAVED_RESENT\r\n\r\n     Queued 2\r\n     › I4_TUI_B · Retained · Steer unavailable\r\n     ↳ I4_TUI_E · Retained · Steer unavailable\r\n     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ > I4 TUI retained draft                                              │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    error: process interrupted before owner exited · Queued 2 8.1K / 128K\r\n    · auto · default · session_1790593213422_lljwe42          (6%)\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[2J\u001b[3J\u001b[H    Ctrl+G subagents · 0 executions\r\n    | I4_TUI_HOLD\r\n\r\n    I4TUIHOLD_STARTED\r\n\r\n    interrupted · End time unknown (recovered)\r\n\r\n    | I4_TUI_C_SAVED_RESENT\r\n\r\n     Queued 2\r\n     › I4_TUI_B · Retained · Steer unavailable\r\n     ↳ I4_TUI_E · Retained · Steer unavailable\r\n     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ > I4 TUI retained draft                                              │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    error: process interrupted before owner exited · Queued 2 8.1K / 128K\r\n    · auto · default · session_1790593213422_lljwe42          (6%)\r\n\u001b[18A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    I4TUICSAVEDRESENT_OK\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    Total 0s\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G     Queued 2\u001b[K\r\n\u001b[1G     › I4_TUI_B · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[1G    ╭──────────────────────────────────────────────────────────────────────╮\u001b[K\r\n\u001b[1G    │ >                                                                    │\u001b[K\r\n\u001b[1G    ╰──────────────────────────────────────────────────────────────────────╯\u001b[K\r\n\u001b[1G    error: process interrupted before owner exited · Queued 2 8.1K / 128K\u001b[K\r\n\u001b[1G    · auto · default · session_1790593213422_lljwe42          (6%)\u001b[K\r\n"
+    }
+  },
+  {
+    "action": "close pre-fix TUI",
+    "result": {
+      "chunk_id": "1b1c41",
+      "wall_time_seconds": 0.000045208,
+      "exit_code": 0,
+      "original_token_count": 5,
+      "output": "\u001b[?25h\u001b[?25h\u001b[?25h"
+    }
+  },
+  {
+    "action": "post-fix TUI launch",
+    "result": {
+      "chunk_id": "d7d68d",
+      "wall_time_seconds": 1.002090708,
+      "session_id": 5382,
+      "original_token_count": 670,
+      "output": "\u001b[?25l     ██████╗ ██╗  ██╗██████╗  █████╗ ██████╗ ██╗   ██╗\r\n    ██╔═══██╗██║  ██║██╔══██╗██╔══██╗██╔══██╗╚██╗ ██╔╝\r\n    ██║   ██║███████║██████╔╝███████║██████╔╝ ╚████╔╝\r\n    ██║   ██║██╔══██║██╔══██╗██╔══██║██╔══██╗  ╚██╔╝\r\n    ╚██████╔╝██║  ██║██████╔╝██║  ██║██████╔╝   ██║\r\n     ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚═════╝    ╚═╝\r\n\r\n    Ctrl+G subagents · 0 executions\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ >                                                                    │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    Syncing session… draft kept · auto · default\r\n\u001b[?25l\u001b[12A\u001b[1G    Ctrl+G subagents · 0 executions\u001b[K\r\n\u001b[1G    | I4_TUI_HOLD\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    I4TUIHOLD_STARTED\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    interrupted · End time unknown (recovered)\u001b[K\r\n\u001b[E\u001b[1G    | I4_TUI_C_SAVED_RESENT\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    I4TUICSAVEDRESENT_OK\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    Total 0s\u001b[K\r\n\u001b[E\u001b[1G     Queued 2\u001b[K\r\n\u001b[1G     › I4_TUI_B · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[1G    ╭──────────────────────────────────────────────────────────────────────╮\u001b[K\r\n\u001b[1G    │ >                                                                    │\u001b[K\r\n\u001b[1G    ╰──────────────────────────────────────────────────────────────────────╯\u001b[K\r\n\u001b[1G    error: process interrupted before owner exited · Queued 2 8.1K / 128K\u001b[K\r\n\u001b[1G    · auto · default · session_1790593213422_lljwe42          (6%)\u001b[K\r\n"
+    }
+  },
+  {
+    "action": "post-fix original draft",
+    "result": {
+      "chunk_id": "965152",
+      "wall_time_seconds": 0.251656875,
+      "session_id": 5382,
+      "original_token_count": 40,
+      "output": "\u001b[22A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    │ > I4 TUI final draft                                                 │\u001b[K\r\n\u001b[E\u001b[E\u001b[E"
+    }
+  },
+  {
+    "action": "AltUp E",
+    "result": {
+      "chunk_id": "b680ac",
+      "wall_time_seconds": 0.251542,
+      "session_id": 5382,
+      "original_token_count": 65,
+      "output": "\u001b[22A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     ↳ I4_TUI_B · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     › I4_TUI_E · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↑/↓ select · Enter edit · Ctrl+D Delete · Esc back to draft\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E"
+    }
+  },
+  {
+    "action": "Up B",
+    "result": {
+      "chunk_id": "0b428d",
+      "wall_time_seconds": 0.252233416,
+      "session_id": 5382,
+      "original_token_count": 46,
+      "output": "\u001b[22A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_B · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Retained · Steer unavailable\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E"
+    }
+  },
+  {
+    "action": "stale selection CtrlD",
+    "result": {
+      "chunk_id": "a1234e",
+      "wall_time_seconds": 0.251922416,
+      "session_id": 5382,
+      "original_token_count": 389,
+      "output": "\u001b[22A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    Checking execution records… · Queued 2 · auto · default 8.1K / 128K (6%)\u001b[K\r\n\u001b[1G    · session_1790593213422_lljwe42\u001b[K\r\n\u001b[22A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    error: process interrupted before owner exited · Queued 2 8.1K / 128K\u001b[K\r\n\u001b[1G    · auto · default · session_1790593213422_lljwe42          (6%)\u001b[K\r\n\u001b[22A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    Syncing session… draft kept · Queued 2 · auto · default 8.1K / 128K (6%)\u001b[K\r\n\u001b[1G    · session_1790593213422_lljwe42\u001b[K\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[21A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     Queued 1\u001b[K\r\n\u001b[1G     › I4_TUI_E · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[1G    ╭──────────────────────────────────────────────────────────────────────╮\u001b[K\r\n\u001b[1G    │ > I4 TUI final draft                                                 │\u001b[K\r\n\u001b[1G    ╰──────────────────────────────────────────────────────────────────────╯\u001b[K\r\n\u001b[1G    error: process interrupted before owner exited · Queued · 8.1K / 128K\u001b[K\r\n\u001b[1G    auto · default · session_1790593213422_lljwe42            (6%)\u001b[K\r\n"
+    }
+  },
+  {
+    "action": "select E",
+    "result": {
+      "chunk_id": "08046f",
+      "wall_time_seconds": 0.252532041,
+      "session_id": 5382,
+      "original_token_count": 37,
+      "output": "\u001b[21A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     ↑/↓ select · Enter edit · Ctrl+D Delete · Esc back to draft\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E"
+    }
+  },
+  {
+    "action": "edit E",
+    "result": {
+      "chunk_id": "486cb5",
+      "wall_time_seconds": 0.252056167,
+      "session_id": 5382,
+      "original_token_count": 124,
+      "output": "\u001b[21A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G     › I4_TUI_E · editing · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[E\u001b[1G    │ > I4_TUI_E                                                           │\u001b[K\r\n\u001b[E\u001b[1G    Enter send · Esc restore draft\u001b[K\r\n\u001b[1G    error: process interrupted before owner exited · Queued · 8.1K / 128K\u001b[K\r\n\u001b[1G    auto · default · session_1790593213422_lljwe42            (6%)\u001b[K\r\n"
+    }
+  },
+  {
+    "action": "edit retained E text",
+    "result": {
+      "chunk_id": "b913b7",
+      "wall_time_seconds": 0.251560708,
+      "session_id": 5382,
+      "original_token_count": 40,
+      "output": "\u001b[22A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    │ > I4_TUI_E_RESENT                                                    │\u001b[K\r\n\u001b[E\u001b[E\u001b[E\u001b[E"
+    }
+  },
+  {
+    "action": "send E",
+    "result": {
+      "chunk_id": "306515",
+      "wall_time_seconds": 0.251221667,
+      "session_id": 5382,
+      "original_token_count": 1416,
+      "output": "\u001b[22A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    Updating queued prompt…\u001b[K\r\n\u001b[E\u001b[E\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[21A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    | I4_TUI_E_RESENT\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[E\u001b[1G    │ > I4 TUI final draft                                                 │\u001b[K\r\n\u001b[E\u001b[1G    error: process interrupted before owner exited · auto ·  8.2K / 128K\u001b[K\r\n\u001b[1G    default · session_1790593213422_lljwe42                  (6%)\u001b[K\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[2J\u001b[3J\u001b[H    Ctrl+G subagents · 0 executions\r\n    | I4_TUI_HOLD\r\n\r\n    I4TUIHOLD_STARTED\r\n\r\n    interrupted · End time unknown (recovered)\r\n\r\n    | I4_TUI_C_SAVED_RESENT\r\n\r\n    I4TUICSAVEDRESENT_OK\r\n\r\n    Total 0s\r\n\r\n    | I4_TUI_E_RESENT\r\n\r\n\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ > I4 TUI final draft                                                 │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    error: process interrupted before owner exited · auto ·  8.2K / 128K\r\r\n    default · session_1790593213422_lljwe42                  (6%)\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[2J\u001b[3J\u001b[H    Ctrl+G subagents · 0 executions\r\n    | I4_TUI_HOLD\r\n\r\n    I4TUIHOLD_STARTED\r\n\r\n    interrupted · End time unknown (recovered)\r\n\r\n    | I4_TUI_C_SAVED_RESENT\r\n\r\n    I4TUICSAVEDRESENT_OK\r\n\r\n    Total 0s\r\n\r\n    | I4_TUI_E_RESENT\r\n\r\n\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ > I4 TUI final draft                                                 │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    error: process interrupted before owner exited · auto ·  8.2K / 128K\r\n    default · session_1790593213422_lljwe42                  (6%)\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[2J\u001b[3J\u001b[H    Ctrl+G subagents · 0 executions\r\n    | I4_TUI_HOLD\r\n\r\n    I4TUIHOLD_STARTED\r\n\r\n    interrupted · End time unknown (recovered)\r\n\r\n    | I4_TUI_C_SAVED_RESENT\r\n\r\n    I4TUICSAVEDRESENT_OK\r\n\r\n    Total 0s\r\n\r\n    | I4_TUI_E_RESENT\r\n\r\n\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ > I4 TUI final draft                                                 │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    error: process interrupted before owner exited · auto ·  8.2K / 128K\r\n    default · session_1790593213422_lljwe42                  (6%)\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[2J\u001b[3J\u001b[H    Ctrl+G subagents · 0 executions\r\n    | I4_TUI_HOLD\r\n\r\n    I4TUIHOLD_STARTED\r\n\r\n    interrupted · End time unknown (recovered)\r\n\r\n    | I4_TUI_C_SAVED_RESENT\r\n\r\n    I4TUICSAVEDRESENT_OK\r\n\r\n    Total 0s\r\n\r\n    | I4_TUI_E_RESENT\r\n\r\n\r\n    ╭──────────────────────────────────────────────────────────────────────╮\r\n    │ > I4 TUI final draft                                                 │\r\n    ╰──────────────────────────────────────────────────────────────────────╯\r\n    error: process interrupted before owner exited · auto ·  8.2K / 128K\r\r\n    default · session_1790593213422_lljwe42                  (6%)\r\n\u001b[21A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    I4TUIERESENTOK\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    Total 0s\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    ╭──────────────────────────────────────────────────────────────────────╮\u001b[K\r\n\u001b[1G    │ > I4 TUI final draft                                                 │\u001b[K\r\n\u001b[1G    ╰──────────────────────────────────────────────────────────────────────╯\u001b[K\r\n\u001b[1G    error: process interrupted before owner exited · auto ·  8.2K / 128K\u001b[K\r\n\u001b[1G    default · session_1790593213422_lljwe42                  (6%)\u001b[K\r\n"
+    }
+  }
+]
