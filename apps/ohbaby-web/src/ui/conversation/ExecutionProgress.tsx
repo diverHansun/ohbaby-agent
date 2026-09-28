@@ -43,9 +43,17 @@ export function PromptDuration({
 }): ReactElement {
   const duration = useExecutionDuration(
     prompt.promptId,
-    Date.parse(prompt.createdAt),
+    prompt.endTimeSource === "recovery"
+      ? undefined
+      : Date.parse(prompt.acceptedAt ?? prompt.createdAt),
     prompt.endedAt === undefined ? undefined : Date.parse(prompt.endedAt),
   );
+  if (prompt.endTimeSource === "recovery")
+    return (
+      <div className="ohb-prompt-duration">
+        {prompt.status} · End time unknown (recovered)
+      </div>
+    );
   return (
     <div className="ohb-prompt-duration">
       {prompt.status !== "succeeded" ? `${prompt.status} · ` : ""}Total{" "}

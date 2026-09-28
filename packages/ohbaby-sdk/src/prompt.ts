@@ -2,6 +2,7 @@ import type { UiReasoningConfig } from "./connect-model.js";
 export type UiPromptSubmissionStatus =
   | "steered"
   | "queued"
+  | "retained"
   | "starting"
   | "running"
   | "succeeded"
@@ -36,6 +37,9 @@ export interface UiPromptSubmission {
   readonly editLeaseOwnerId?: string;
   readonly editLeaseExpiresAt?: string;
   readonly createdAt: string;
+  readonly acceptedAt?: string;
+  readonly admissionOrder?: number;
+  readonly endTimeSource?: "recovery";
   readonly updatedAt: string;
   readonly startedAt?: string;
   readonly endedAt?: string;
@@ -92,6 +96,18 @@ export interface UiEditQueuedPromptInput {
   readonly promptId: string;
   readonly text: string;
   readonly editLeaseId: string;
+}
+
+export interface UiResubmitRetainedPromptInput extends UiEditQueuedPromptInput {
+  readonly operationId: string;
+}
+
+export interface UiPromptResubmissionReceipt {
+  readonly operationId: string;
+  readonly promptId: string;
+  readonly userMessageId: string;
+  readonly sessionId: string;
+  readonly acceptedAt: number;
 }
 
 export interface UiCancelQueuedPromptInput {

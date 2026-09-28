@@ -36,6 +36,11 @@ export interface ExecutionLookup {
   readonly parentSessionId: string;
   readonly requesterScopeId?: string;
 }
+export interface ChildRunLookup {
+  readonly sessionId: string;
+  readonly contextScopeId: string;
+  readonly runId: string;
+}
 export type ExecutionHistory = (
   | { readonly parentSessionId: string; readonly rootSessionId?: string }
   | { readonly parentSessionId?: string; readonly rootSessionId: string }
@@ -113,6 +118,7 @@ export interface SubagentExecutionStore {
     input: AcceptSubagentExecution,
   ): Promise<{ record: SubagentExecutionRecord; created: boolean }>;
   get(input: ExecutionLookup): Promise<SubagentExecutionRecord | null>;
+  getByChildRun(input: ChildRunLookup): Promise<SubagentExecutionRecord | null>;
   list(input: ExecutionHistory): Promise<readonly SubagentExecutionRecord[]>;
   getForRoot(
     executionId: string,
@@ -249,6 +255,9 @@ abstract class ExecutionStore implements SubagentExecutionStore {
   }
   private transactionChanges?: SubagentExecutionRecord[];
   protected abstract read(executionId: string): SubagentExecutionRecord | null;
+  protected abstract childRunRecords(
+    input: ChildRunLookup,
+  ): readonly SubagentExecutionRecord[];
   protected abstract findInvocation(
     requesterRunId: string,
     requestId: string,
@@ -298,6 +307,19 @@ abstract class ExecutionStore implements SubagentExecutionStore {
   async get(input: ExecutionLookup): Promise<SubagentExecutionRecord | null> {
     await Promise.resolve();
     return this.scoped(input);
+  }
+  async getByChildRun(
+    input: ChildRunLookup,
+  ): Promise<SubagentExecutionRecord | null> {
+    for (const identity of [input.sessionId, input.contextScopeId, input.runId])
+      required(identity);
+    await Promise.resolve();
+    const records = this.childRunRecords(input);
+    if (records.length > 1)
+      throw new SubagentExecutionConflictError(
+        "Ambiguous child run execution ownership",
+      );
+    return records[0] ?? null;
   }
   async getForRoot(
     executionId: string,
@@ -574,6 +596,19 @@ abstract class ExecutionStore implements SubagentExecutionStore {
 }
 export class InMemorySubagentExecutionStore extends ExecutionStore {
   private readonly records = new Map<string, SubagentExecutionRecord>();
+  protected childRunRecords(
+    input: ChildRunLookup,
+  ): readonly SubagentExecutionRecord[] {
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.childRunId === input.runId &&
+          record.childSessionId === input.sessionId &&
+          record.childScopeId === input.contextScopeId,
+      )
+      .slice(0, 2)
+      .map((record) => structuredClone(record));
+  }
   protected sessionRecords(
     sessionId: string,
   ): readonly SubagentExecutionRecord[] {
@@ -729,6 +764,17 @@ export class DatabaseSubagentExecutionStore extends ExecutionStore {
   constructor(options: { db?: DatabaseConnection } = {}) {
     super();
     this.db = options.db ?? getDatabase();
+  }
+  protected childRunRecords(
+    input: ChildRunLookup,
+  ): readonly SubagentExecutionRecord[] {
+    return this.db
+      .prepare<Row>(
+        `SELECT * FROM ${schema.subagentExecution.tableName}
+         WHERE child_run_id = ? AND child_session_id = ? AND child_scope_id = ? LIMIT 2`,
+      )
+      .all(input.runId, input.sessionId, input.contextScopeId)
+      .map(fromRow);
   }
   /** Recovery never schedules work or delivers results into a replacement run. */
   async interruptTerminalRootExecutions(at: number): Promise<void> {

@@ -155,7 +155,9 @@ async function setup(
     port: 0,
   });
   await server.start();
-  cleanups.push(() => server.stop());
+  cleanups.push(async () => {
+    await server.stop();
+  });
   const headers = {
     authorization: "Bearer recovery-token",
     "content-type": "application/json",

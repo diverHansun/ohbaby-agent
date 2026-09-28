@@ -189,7 +189,9 @@ function isTerminal(status: ShellJobStatus): boolean {
 }
 
 export class ShellJobRegistry {
+  private admissionClosed = false;
   private readonly jobs = new Map<string, ShellJob>();
+  private readonly sealedRoots = new Set<string>();
   private readonly terminalJobIds: string[] = [];
   private readonly createJobId: () => string;
   private readonly killTree: ShellJobRegistryOptions["killTree"];
@@ -204,6 +206,13 @@ export class ShellJobRegistry {
     const jobId = this.createJobId();
     if (this.jobs.has(jobId))
       throw new Error("Shell job identity already exists.");
+    if (
+      typeof input.child === "function" &&
+      (this.admissionClosed ||
+        (input.owner?.rootRunId !== undefined &&
+          this.sealedRoots.has(input.owner.rootRunId)))
+    )
+      throw new Error("Shell root run is closed.");
     const child =
       typeof input.child === "function" ? input.child() : input.child;
     let resolveTerminal!: () => void;
@@ -289,6 +298,14 @@ export class ShellJobRegistry {
       job.error = error instanceof Error ? error.message : String(error);
       this.terminate(job, "cancelled");
     }
+    // A caller can supply an already launched process, or Stop can run inside spawn.
+    // Register its cleanup owner before terminating it; never abandon the process.
+    if (
+      this.admissionClosed ||
+      (job.owner?.rootRunId !== undefined &&
+        this.sealedRoots.has(job.owner.rootRunId))
+    )
+      this.terminate(job, "cancelled");
     return this.snapshot(job);
   }
 
@@ -300,10 +317,27 @@ export class ShellJobRegistry {
     return this.snapshot(this.getOwnedJob(jobId, sessionId, contextScopeId));
   }
 
-  hasActiveWork(): boolean {
+  hasActiveWork(rootRunId?: string): boolean {
     return [...this.jobs.values()].some(
-      (job) => job.status === "running" || job.cleanup !== "confirmed",
+      (job) =>
+        (rootRunId === undefined || job.owner?.rootRunId === rootRunId) &&
+        (job.status === "running" || job.cleanup !== "confirmed"),
     );
+  }
+
+  /** Signal cancellation immediately; the registry retains each job's cleanup task and lease. */
+  sealRootRun(rootRunId: string): void {
+    this.sealedRoots.add(rootRunId);
+  }
+
+  cancelByRootRun(rootRunId: string): readonly ShellJobSnapshot[] {
+    this.sealedRoots.add(rootRunId);
+    const jobs = [...this.jobs.values()].filter(
+      (job) => job.owner?.rootRunId === rootRunId,
+    );
+    for (const job of jobs)
+      if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
+    return jobs.map((job) => this.snapshot(job));
   }
 
   async waitForTerminal(
@@ -405,13 +439,22 @@ export class ShellJobRegistry {
     }
   }
 
+  closeAdmission(): void {
+    this.admissionClosed = true;
+    for (const job of this.jobs.values())
+      if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
+  }
+
   async dispose(): Promise<void> {
+    this.closeAdmission();
     await Promise.all(
       [...this.jobs.values()].map(async (job) => {
         if (job.cleanup !== "confirmed") this.terminate(job, "cancelled");
         await job.cleanupTask;
       }),
     );
+    if ([...this.jobs.values()].some((job) => job.cleanup !== "confirmed"))
+      throw new Error("Shell process cleanup is unconfirmed");
   }
 
   private getOwnedJob(

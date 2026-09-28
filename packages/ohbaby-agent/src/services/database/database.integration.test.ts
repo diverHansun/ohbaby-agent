@@ -104,6 +104,7 @@ describe("services/database", () => {
       { version: "019_current_run_input" },
       { version: "020_final_step_steer_admission" },
       { version: "021_subagent_delegation_identity" },
+      { version: "022_retained_prompt_admission" },
     ]);
   });
 
@@ -153,8 +154,8 @@ describe("services/database", () => {
     const legacyInsert = getDatabase().prepare(
       `INSERT INTO prompt_submission
         (prompt_id, scope_key, session_id, user_message_id, text, status,
-         created_at, updated_at)
-       VALUES (?, '/repo', 'session_legacy', ?, ?, 'queued', ?, ?)`,
+         created_at, updated_at, accepted_at, admission_order)
+       VALUES (?, '/repo', 'session_legacy', ?, ?, 'queued', ?, ?, 4, 4)`,
     );
     expect(() => {
       legacyInsert.run(

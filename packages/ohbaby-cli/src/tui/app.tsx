@@ -1,3 +1,7 @@
+import {
+  compareUiPromptQueueOrder,
+  hasUnsentSteerAfterLatestStop,
+} from "ohbaby-sdk";
 import { createSubagentReader } from "ohbaby-sdk";
 import {
   SubagentBrowser,
@@ -104,6 +108,7 @@ export function OhbabyTerminalApp({
 }: TerminalUiOptions): ReactElement {
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
   const keyboardCommandSequenceRef = useRef(0);
+  const [queueInputMode, setQueueInputMode] = useState(false);
   const catalogRequestSequenceRef = useRef(0);
   const contextRefreshSequenceRef = useRef(0);
   const contextNoticeSequenceRef = useRef(0);
@@ -186,17 +191,26 @@ export function OhbabyTerminalApp({
     (request) => request.rootSessionId === activeSessionId,
   );
   const prompts = useTuiStoreSelector(store, (state) => state.prompts);
+  const runs = useTuiStoreSelector(store, (state) => state.runs);
   const latestPrompt = prompts
     .filter((prompt) => prompt.sessionId === activeSessionId)
     .reduce<
       (typeof prompts)[number] | null
-    >((current, prompt) => (current === null || prompt.createdAt >= current.createdAt ? prompt : current), null);
+    >((current, prompt) => (current === null || compareUiPromptQueueOrder(prompt, current) >= 0 ? prompt : current), null);
+  const latestRun = runs
+    .filter((run) => run.sessionId === activeSessionId)
+    .reduce<
+      (typeof runs)[number] | null
+    >((current, run) => (current === null || run.startedAt > current.startedAt ? run : current), null);
   const queuedPrompts = useMemo(
     () =>
-      prompts.filter(
-        (prompt) =>
-          prompt.sessionId === activeSessionId && prompt.status === "queued",
-      ),
+      prompts
+        .filter(
+          (prompt) =>
+            prompt.sessionId === activeSessionId &&
+            (prompt.status === "queued" || prompt.status === "retained"),
+        )
+        .sort(compareUiPromptQueueOrder),
     [activeSessionId, prompts],
   );
   const runtime = useTuiStoreSelector(store, (state) => state.runtime);
@@ -288,6 +302,22 @@ export function OhbabyTerminalApp({
     [],
   );
   const effectiveRuntime = resolveEffectiveRuntime(permissions, runtime);
+  const executionRecovery =
+    (recoveryState.sync.status === "ready" &&
+    recoveryState.sync.view?.version.sessionId === activeSessionId &&
+    recoveryState.sync.view.version.runtimeEpoch === recoveryState.runtimeEpoch
+      ? recoveryState.sync.view.executionRecovery
+      : undefined) ??
+    (recoveryState.control?.rootSessionId === activeSessionId &&
+    recoveryState.control.runtimeEpoch === recoveryState.runtimeEpoch
+      ? recoveryState.control.executionRecovery
+      : undefined);
+  const executionRecoveryLabel =
+    executionRecovery?.status === "recovering"
+      ? "Checking execution records…"
+      : executionRecovery?.status === "blocked"
+        ? executionRecovery.message
+        : undefined;
   const runtimeStatusLabel =
     recoveryState.control?.runId &&
     escInterruptArmedRunId === recoveryState.control.runId
@@ -295,6 +325,18 @@ export function OhbabyTerminalApp({
       : effectiveRuntime.kind === "error"
         ? formatRuntimeLabel(permissions, runtime)
         : runtime.kind === "idle" &&
+            !(
+              recoveryState.control?.rootSessionId === activeSessionId &&
+              recoveryState.control.sessionId === activeSessionId &&
+              recoveryState.control.runtimeEpoch ===
+                recoveryState.runtimeEpoch &&
+              recoveryState.control.runId === null &&
+              latestRun?.status.kind === "idle" &&
+              latestRun.id !== latestPrompt?.runId &&
+              latestPrompt !== null &&
+              Date.parse(latestRun.startedAt) >=
+                Date.parse(latestPrompt.acceptedAt ?? latestPrompt.createdAt)
+            ) &&
             (latestPrompt?.status === "failed" ||
               latestPrompt?.status === "interrupted")
           ? `error: ${formatError(latestPrompt.error)}`
@@ -517,6 +559,10 @@ export function OhbabyTerminalApp({
         return;
       }
       if (key.escape) {
+        if (queueInputMode) {
+          disarmEscInterrupt();
+          return;
+        }
         const stopRunId = recoveryState.control?.runId;
         if (permissions.length > 0 || !stopRunId) {
           disarmEscInterrupt();
@@ -756,7 +802,7 @@ export function OhbabyTerminalApp({
 
   return (
     <ThemeProvider>
-      <AppShell key={screenGeneration}>
+      <AppShell>
         <HeaderContainer store={store} />
         {subagentBrowserOpen ? (
           <SubagentBrowser
@@ -785,6 +831,7 @@ export function OhbabyTerminalApp({
               value={reportDurationClockAnomaly}
             >
               <TranscriptViewportContainer
+                key={screenGeneration}
                 store={store}
                 waitingForSubagents={subagentState.list?.waiting}
               />
@@ -835,6 +882,7 @@ export function OhbabyTerminalApp({
           flexDirection="column"
         >
           <Prompt
+            onQueueModeChange={setQueueInputMode}
             activeSessionId={activeSessionId}
             activeRunId={recoveryState.control?.runId ?? undefined}
             pendingReasoning={pendingReasoning}
@@ -871,12 +919,14 @@ export function OhbabyTerminalApp({
             onCommandPanelOpen={openCommandPanel}
             permission={permission}
             queuedPrompts={queuedPrompts}
+            unsentSteer={hasUnsentSteerAfterLatestStop(runs, activeSessionId)}
             contextWindowUsage={contextWindowUsageLabel}
             runtimeStatusLabel={
               escInterruptArmedRunId !== null
                 ? ESC_INTERRUPT_HINT
                 : (catalogError ??
                   recoveryState.error ??
+                  executionRecoveryLabel ??
                   (recoveryState.sync.status === "error"
                     ? `Sync failed: ${recoveryState.sync.error ?? "unknown"} · Ctrl+R retry`
                     : !recoveryState.initialized ||

@@ -1,3 +1,4 @@
+import { compareUiPromptQueueOrder } from "ohbaby-sdk";
 import type {
   UiContextWindowUsage,
   UiGoal,
@@ -79,6 +80,18 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     control.runtimeEpoch === snapshot.sessionSync.scope?.runtimeEpoch &&
     control.bindingGeneration === snapshot.sessionSync.scope.bindingGeneration;
   const activeRunId = controlMatches ? (control.runId ?? undefined) : undefined;
+  const sessionView = snapshot.sessionSync.view;
+  const viewMatches =
+    snapshot.sessionSync.status === "ready" &&
+    sessionView !== undefined &&
+    sessionView.version.sessionId === activeSessionId &&
+    sessionView.version.runtimeEpoch ===
+      snapshot.sessionSync.scope?.runtimeEpoch &&
+    sessionView.bindingGeneration ===
+      snapshot.sessionSync.scope.bindingGeneration;
+  const executionRecovery =
+    (viewMatches ? sessionView.executionRecovery : undefined) ??
+    (controlMatches ? control.executionRecovery : undefined);
   const coreReady =
     snapshot.sessionSync.status === "ready" ||
     (snapshot.sessionSync.status === "idle" && !activeSessionId);
@@ -137,15 +150,22 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
       mode: permission?.mode ?? DEFAULT_MODE,
       permissionLevel: permission?.level ?? DEFAULT_PERMISSION_LEVEL,
     },
-    error: snapshot.error,
+    error:
+      snapshot.error ??
+      (executionRecovery?.status === "blocked"
+        ? executionRecovery.message
+        : null),
     header: {
       connectionKind: selectConnectionKind(headerConnection, attentionStatus),
       statusLabel:
-        snapshot.connectionState === "live" && runStateUnknown
-          ? snapshot.sessionSync.status === "syncing"
-            ? "syncing"
-            : "unknown"
-          : selectStatusLabel(snapshot.connectionState, attentionStatus),
+        snapshot.connectionState === "live" &&
+        executionRecovery?.status === "recovering"
+          ? "Checking execution records…"
+          : snapshot.connectionState === "live" && runStateUnknown
+            ? snapshot.sessionSync.status === "syncing"
+              ? "syncing"
+              : "unknown"
+            : selectStatusLabel(snapshot.connectionState, attentionStatus),
       ...selectContextModel(
         daemonSnapshot,
         activeSessionId,
@@ -180,13 +200,11 @@ function selectQueuedPrompts(
   if (!snapshot || !sessionId) return [];
   return (snapshot.prompts ?? [])
     .filter(
-      (prompt) => prompt.sessionId === sessionId && prompt.status === "queued",
+      (prompt) =>
+        prompt.sessionId === sessionId &&
+        (prompt.status === "queued" || prompt.status === "retained"),
     )
-    .sort(
-      (left, right) =>
-        Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
-        left.promptId.localeCompare(right.promptId),
-    );
+    .sort(compareUiPromptQueueOrder);
 }
 
 function selectActiveGoal(

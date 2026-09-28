@@ -36,6 +36,8 @@ export type {
   UiSteerQueuedPromptReceipt,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
+  UiResubmitRetainedPromptInput,
+  UiPromptResubmissionReceipt,
   UiPromptCompletion,
   UiCompletedPromptSubmission,
   UiPromptError,
@@ -260,3 +262,6 @@ export {
   createSubagentConversationReader,
 } from "./subagent-conversation-reader.js";
 export type { UiSubagentConversationReaderState } from "./subagent-conversation-reader.js";
+
+export { hasUnsentSteerAfterLatestStop } from "./run-inputs.js";
+export { compareUiPromptQueueOrder } from "./prompt-queue-order.js";

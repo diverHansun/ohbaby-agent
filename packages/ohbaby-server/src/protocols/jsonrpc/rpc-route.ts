@@ -22,6 +22,7 @@ import type {
   UiEvent,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
+  UiResubmitRetainedPromptInput,
   UiReleasePromptEditLeaseInput,
   UiRenewPromptEditLeaseInput,
 } from "ohbaby-sdk";
@@ -49,6 +50,7 @@ import {
   cancelQueuedPromptForClient,
   steerQueuedPromptForClient,
   editQueuedPromptForClient,
+  resubmitRetainedPromptForClient,
   releasePromptEditLeaseForClient,
   renewPromptEditLeaseForClient,
 } from "../../coordination/prompt-backend.js";
@@ -360,6 +362,40 @@ export async function callDaemonBackend(input: {
         throw new DaemonForbiddenError("Prompt belongs to another session");
       }
       return editQueuedPromptForClient(backend, input, request.clientId);
+    }
+    case "resubmitRetainedPrompt": {
+      const input = request.params[0] as UiResubmitRetainedPromptInput;
+      if (
+        !isRecord(input) ||
+        [input.promptId, input.editLeaseId, input.operationId, input.text].some(
+          (value) => typeof value !== "string" || !value.trim(),
+        )
+      ) {
+        throw Object.assign(
+          new Error("promptId, editLeaseId, operationId and text are required"),
+          { code: "INVALID_ARGUMENT" },
+        );
+      }
+      if (
+        !clientViews.canAccessPrompt(
+          request.clientId,
+          await backend.getSnapshot(),
+          input.promptId,
+        )
+      ) {
+        throw new DaemonForbiddenError("Prompt belongs to another session");
+      }
+      return resubmitRetainedPromptForClient(
+        backend,
+        {
+          promptId: input.promptId,
+          editLeaseId: input.editLeaseId,
+          operationId: input.operationId,
+          text: input.text,
+        },
+        request.clientId,
+        clientViews,
+      );
     }
     case "steerQueuedPrompt": {
       const input = request.params[0] as Parameters<

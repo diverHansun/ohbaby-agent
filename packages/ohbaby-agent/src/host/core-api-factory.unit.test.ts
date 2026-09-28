@@ -2,6 +2,37 @@ import { describe, expect, it, vi } from "vitest";
 import { createRPC, type CoreAPI, type UiCommandRecord } from "ohbaby-sdk";
 
 describe("buildCoreAPIImpl", () => {
+  it("closes admission synchronously and bounds backend cleanup with the caller deadline", async () => {
+    vi.resetModules();
+    const closeAdmission = vi.fn();
+    const dispose = vi.fn(() => new Promise<void>(() => undefined));
+    const closeDatabase = vi.fn();
+    vi.doMock("../adapters/ui-persistent.js", () => ({
+      closePersistentUiBackendDatabase: closeDatabase,
+      createPersistentUiBackendClient: (): ReturnType<
+        typeof createPersistentClientMock
+      > & { closeAdmission(): void } => ({
+        ...createPersistentClientMock(),
+        closeAdmission,
+        dispose,
+      }),
+    }));
+    vi.doMock("../mcp/index.js", () => ({
+      McpManager: { disposeAll: (): Promise<void> => Promise.resolve() },
+    }));
+    const { buildCoreAPIImpl } = await import("./core-api-factory.js");
+    const host = await buildCoreAPIImpl();
+    const options = {
+      deadlineAt: Date.now() + 30,
+      signal: AbortSignal.timeout(30),
+    };
+    const stopped = host.dispose(options);
+    expect(closeAdmission).toHaveBeenCalledOnce();
+    await expect(stopped).rejects.toThrow("shutdown deadline exceeded");
+    expect(dispose).toHaveBeenCalledWith(options);
+    expect(closeDatabase).toHaveBeenCalledOnce();
+  });
+
   it("builds CoreAPI and callback adapters from the persistent backend", async () => {
     vi.resetModules();
     const unsubscribe = vi.fn();

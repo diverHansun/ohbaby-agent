@@ -1,3 +1,4 @@
+import { isValidOwnerPid } from "../../utils/process-owner.js";
 import {
   InvalidRunTransitionError,
   RunLedgerNotFoundError,
@@ -9,6 +10,8 @@ import type {
   InMemoryRunLedgerOptions,
   ListRunLedgerOptions,
   MarkInterruptedOptions,
+  MarkRunTerminalOptions,
+  RecoverOrphanedRunsOptions,
   MarkInterruptedResult,
   RunLedger,
   RunLedgerRecord,
@@ -136,13 +139,16 @@ export class InMemoryRunLedger implements RunLedger {
     );
   }
 
-  markSucceeded(runId: string): Promise<RunLedgerRecord> {
+  markSucceeded(
+    runId: string,
+    options: MarkRunTerminalOptions = {},
+  ): Promise<RunLedgerRecord> {
     return this.withAsyncBoundary(() =>
       cloneRecord(
         this.transition(runId, "succeeded", ["running"], (record) => ({
           ...record,
           status: "succeeded",
-          endedAt: this.now(),
+          endedAt: options.endedAt ?? this.now(),
           error: undefined,
           errorData: undefined,
         })),
@@ -154,13 +160,14 @@ export class InMemoryRunLedger implements RunLedger {
     runId: string,
     error: unknown,
     errorData?: RunLedgerRecord["errorData"],
+    options: MarkRunTerminalOptions = {},
   ): Promise<RunLedgerRecord> {
     return this.withAsyncBoundary(() =>
       cloneRecord(
         this.transition(runId, "failed", ["pending", "running"], (record) => ({
           ...record,
           status: "failed",
-          endedAt: this.now(),
+          endedAt: options.endedAt ?? this.now(),
           error: errorToMessage(error),
           errorData,
         })),
@@ -168,7 +175,11 @@ export class InMemoryRunLedger implements RunLedger {
     );
   }
 
-  markCancelled(runId: string, reason?: string): Promise<RunLedgerRecord> {
+  markCancelled(
+    runId: string,
+    reason?: string,
+    options: MarkRunTerminalOptions = {},
+  ): Promise<RunLedgerRecord> {
     return this.withAsyncBoundary(() =>
       cloneRecord(
         this.transition(
@@ -178,13 +189,41 @@ export class InMemoryRunLedger implements RunLedger {
           (record) => ({
             ...record,
             status: "cancelled",
-            endedAt: this.now(),
+            endedAt: options.endedAt ?? this.now(),
             error: reason,
             errorData: undefined,
           }),
         ),
       ),
     );
+  }
+
+  markRunInterrupted(
+    runId: string,
+    reason?: string,
+    options: MarkRunTerminalOptions = {},
+  ): Promise<RunLedgerRecord> {
+    return this.withAsyncBoundary(() => {
+      const current = this.records.get(runId);
+      if (!current) throw new RunLedgerNotFoundError(runId);
+      if (!ACTIVE_STATUSES.has(current.status)) return cloneRecord(current);
+      return cloneRecord(
+        this.transition(
+          runId,
+          "interrupted",
+          ["pending", "running"],
+          (record) => ({
+            ...record,
+            status: "interrupted",
+            endedAt: options.endedAt ?? this.now(),
+            error: reason,
+            errorData: undefined,
+            inputsCloseReason:
+              record.inputsCloseReason ?? reason ?? "interrupted",
+          }),
+        ),
+      );
+    });
   }
 
   markInterrupted(
@@ -197,7 +236,12 @@ export class InMemoryRunLedger implements RunLedger {
       let updatedCount = 0;
 
       for (const [runId, record] of this.records) {
-        if (!statuses.has(record.status)) {
+        if (
+          !statuses.has(record.status) ||
+          (options.sessionId !== undefined &&
+            record.sessionId !== options.sessionId) ||
+          !this.isOrphaned(record, options.recoverUnknownOwner ?? false)
+        ) {
           continue;
         }
 
@@ -205,8 +249,9 @@ export class InMemoryRunLedger implements RunLedger {
           ...record,
           status: "interrupted",
           endedAt,
+          endTimeSource: "recovery",
           inputsClosedAt: record.inputsClosedAt ?? endedAt,
-          inputsCloseReason: record.inputsCloseReason ?? "interrupted",
+          inputsCloseReason: record.inputsCloseReason ?? "process-interrupted",
           error: options.reason ?? INTERRUPTED_REASON,
         });
         updatedCount += 1;
@@ -216,11 +261,17 @@ export class InMemoryRunLedger implements RunLedger {
     });
   }
 
-  recoverOrphanedRuns(): Promise<MarkInterruptedResult> {
+  recoverOrphanedRuns(
+    options: RecoverOrphanedRunsOptions = {},
+  ): Promise<MarkInterruptedResult> {
     return this.withAsyncBoundary(() => {
       let updatedCount = 0;
       for (const record of this.records.values()) {
-        if (this.recoverIfOrphaned(record, true)) {
+        if (
+          (options.sessionId === undefined ||
+            record.sessionId === options.sessionId) &&
+          this.recoverIfOrphaned(record, options.recoverUnknownOwner ?? false)
+        ) {
           updatedCount += 1;
         }
       }
@@ -325,7 +376,7 @@ export class InMemoryRunLedger implements RunLedger {
     if (!ACTIVE_STATUSES.has(record.status)) {
       return false;
     }
-    if (record.ownerPid === undefined) {
+    if (!isValidOwnerPid(record.ownerPid)) {
       return recoverUnknownOwner;
     }
     return !this.isOwnerAlive(record.ownerPid);
@@ -341,9 +392,10 @@ export class InMemoryRunLedger implements RunLedger {
     this.records.set(record.runId, {
       ...record,
       status: "interrupted",
+      endTimeSource: "recovery",
       endedAt: this.now(),
       inputsClosedAt: record.inputsClosedAt ?? this.now(),
-      inputsCloseReason: record.inputsCloseReason ?? "interrupted",
+      inputsCloseReason: record.inputsCloseReason ?? "process-interrupted",
       error: ORPHANED_OWNER_REASON,
     });
     return true;

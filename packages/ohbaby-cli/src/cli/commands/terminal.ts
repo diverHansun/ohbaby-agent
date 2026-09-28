@@ -1,5 +1,6 @@
 import type { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
 import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
+import { createCliHostShutdown } from "../host-shutdown.js";
 
 interface TerminalArgs extends CliGlobalOptions {
   readonly continue?: boolean;
@@ -100,6 +101,10 @@ export function createTerminalCommand(
             }),
         ...(resume === undefined ? {} : { resume }),
       });
+      let unmount: (() => void) | undefined;
+      const shutdown = createCliHostShutdown(host, () => {
+        unmount?.();
+      });
       try {
         const instance = runtime.renderTerminalUi({
           reportDurationClockAnomaly: host.reportDurationClockAnomaly,
@@ -115,9 +120,14 @@ export function createTerminalCommand(
                   host.subscribeDiagnosticsUnavailable,
               }),
         });
-        await instance.waitUntilExit?.();
+        unmount = instance.unmount;
+        await Promise.race([instance.waitUntilExit?.(), shutdown.interrupted]);
       } finally {
-        await host.dispose();
+        try {
+          await shutdown.dispose();
+        } finally {
+          runtime.onHostShutdownComplete?.();
+        }
         if (host.diagnosticsUnavailable?.() === true) {
           runtime.stderr.write(
             "Diagnostics file logging became unavailable; the session continued without it.\n",

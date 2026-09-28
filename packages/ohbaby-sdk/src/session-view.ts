@@ -28,7 +28,15 @@ export interface UiHistoryBoundary {
   readonly before?: string;
   readonly hasMore: boolean;
 }
+export type UiExecutionRecovery =
+  | { readonly status: "ready" }
+  | {
+      readonly status: "recovering" | "blocked";
+      readonly message: string;
+      readonly promptId?: string;
+    };
 export interface UiSessionView {
+  readonly executionRecovery?: UiExecutionRecovery;
   readonly serverNow?: number;
   readonly version: UiSessionVersion;
   readonly bindingGeneration?: number;
@@ -50,6 +58,7 @@ export interface UiSessionHistory extends UiHistoryBoundary {
   readonly reasoningMissing: boolean;
 }
 export interface UiSessionControl {
+  readonly executionRecovery?: UiExecutionRecovery;
   readonly runtimeEpoch: string;
   readonly sessionId: string;
   readonly rootSessionId: string;
@@ -78,6 +87,7 @@ export interface UiSessionTextAppend {
   readonly text: string;
 }
 export interface UiSessionChangedEvent {
+  readonly executionRecovery?: UiExecutionRecovery;
   readonly serverNow?: number;
   readonly type: "session.changed";
   readonly version: UiSessionVersion;
@@ -189,6 +199,7 @@ export function applySessionChange(
     ...view,
     version: event.version,
     serverNow: event.serverNow ?? view.serverNow,
+    executionRecovery: event.executionRecovery ?? view.executionRecovery,
     session: {
       ...view.session,
       ...event.session,

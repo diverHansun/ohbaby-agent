@@ -417,7 +417,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(toolNames).not.toContain("agent_close");
   });
 
-  it("marks only owned persisted subagents interrupted when runtime starts", async () => {
+  it("leaves persisted subagents for the owner-aware session recovery gate", async () => {
     const bus = createBus();
     const store = new InMemorySubagentInstanceStore();
     const owned: SubagentInstanceRecord = {
@@ -471,7 +471,7 @@ describe("createUiRuntimeComposition skill tools", () => {
         parentSessionId: "session_parent",
         subagentId: "subagent_1",
       }),
-    ).resolves.toMatchObject({ status: "interrupted" });
+    ).resolves.toMatchObject({ status: "running" });
     await expect(
       store.get({
         parentSessionId: "session_parent",

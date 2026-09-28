@@ -1,4 +1,6 @@
 import { DatabaseSubagentExecutionStore } from "../agents/subagents/execution-store.js";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -778,6 +780,67 @@ afterEach(() => {
 });
 
 describe("createPersistentUiBackendClient", () => {
+  it.each(["snapshot", "dispose"] as const)(
+    "observes an eager startup rejection before a delayed first %s without hiding its failure",
+    async (firstOperation) => {
+      const directory = await tempDir("ohbaby-persistent-delayed-startup-");
+      const original = uiInProcess.createInProcessUiBackendClient;
+      let recovery: Promise<unknown> | undefined;
+      const factory = vi
+        .spyOn(uiInProcess, "createInProcessUiBackendClient")
+        .mockImplementation((options) => {
+          recovery =
+            options && "startupReady" in options
+              ? options.startupReady
+              : undefined;
+          return original(options);
+        });
+      const unhandled = vi.fn();
+      process.on("unhandledRejection", unhandled);
+      let client: PersistentUiBackendClient | undefined;
+      try {
+        client = createPersistentUiBackendClient({
+          dbPath: join(directory, "agent.db"),
+          llmClient: createFakeLLMClient([]),
+          resumeSessionId: "missing-delayed-session",
+          workdir: join(directory, "workspace"),
+        });
+        if (!recovery) throw new Error("Missing startup recovery promise");
+        // Observe the source promise, leaving the wrapper's derived startup
+        // promise unread until Node has had a turn to report orphan rejections.
+        await expect(recovery).rejects.toThrow(
+          "Session not found: missing-delayed-session",
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(unhandled).not.toHaveBeenCalled();
+        if (firstOperation === "snapshot") {
+          await expect(client.getSnapshot()).rejects.toThrow(
+            "Session not found: missing-delayed-session",
+          );
+          await expect(client.dispose()).resolves.toMatchObject({
+            status: "confirmed",
+            errors: [],
+          });
+        } else {
+          await expect(client.dispose()).resolves.toMatchObject({
+            status: "unconfirmed",
+            errors: [
+              expect.stringContaining(
+                "Session not found: missing-delayed-session",
+              ),
+            ],
+          });
+        }
+      } finally {
+        await client?.dispose();
+        process.off("unhandledRejection", unhandled);
+        factory.mockRestore();
+        closeDatabase();
+        await rm(directory, { force: true, recursive: true });
+      }
+    },
+  );
+
   it("does not hide disposal errors after a reported startup failure", async () => {
     const directory = await tempDir("ohbaby-persistent-dispose-failure-");
     const original = uiInProcess.createInProcessUiBackendClient;
@@ -787,7 +850,7 @@ describe("createPersistentUiBackendClient", () => {
         const backend = original(options);
         return {
           ...backend,
-          async dispose(): Promise<void> {
+          async dispose(): Promise<never> {
             await backend.dispose();
             throw new Error("fixture disposal failed");
           },
@@ -801,7 +864,10 @@ describe("createPersistentUiBackendClient", () => {
         workdir: join(directory, "workspace"),
       });
       await expect(client.getSnapshot()).rejects.toThrow("Session not found");
-      await expect(client.dispose()).rejects.toThrow("fixture disposal failed");
+      await expect(client.dispose()).resolves.toMatchObject({
+        status: "unconfirmed",
+        errors: [expect.stringContaining("fixture disposal failed")],
+      });
     } finally {
       factory.mockRestore();
       closeDatabase();
@@ -1190,7 +1256,7 @@ describe("createPersistentUiBackendClient", () => {
       await client.abortRun(running.runId);
       await expect(client.waitForPrompt(first.promptId)).resolves.toMatchObject(
         {
-          prompt: { status: "cancelled" },
+          prompt: { status: "interrupted" },
         },
       );
       await vi.waitFor(() => {
@@ -1254,7 +1320,7 @@ describe("createPersistentUiBackendClient", () => {
       settleAbortedRun.resolve(undefined);
       await abort;
       await expect(client.waitForPrompt(first.promptId)).resolves.toMatchObject(
-        { prompt: { status: "cancelled" } },
+        { prompt: { status: "interrupted" } },
       );
       await expect(
         client.waitForPrompt(second.promptId),
@@ -1592,9 +1658,10 @@ describe("createPersistentUiBackendClient", () => {
         workdir: currentWorkdir,
       });
       // Disposal drains startup and must not hide an unobserved failure.
-      await expect(unread.dispose()).rejects.toThrow(
-        /current project|Session not found/u,
-      );
+      await expect(unread.dispose()).resolves.toMatchObject({
+        status: "unconfirmed",
+        errors: [expect.stringMatching(/current project|Session not found/u)],
+      });
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
@@ -1835,26 +1902,31 @@ describe("createPersistentUiBackendClient", () => {
 
   it("fails the first snapshot when the requested startup resume session is missing", async () => {
     const directory = await tempDir("ohbaby-persistent-resume-missing-");
+    let client: PersistentUiBackendClient | undefined;
     try {
       const dbPath = join(directory, "agent.db");
       const workdir = join(directory, "workspace");
-      createPersistentUiBackendClient({
+      client = createPersistentUiBackendClient({
         dbPath,
         llmClient: createFakeLLMClient([]),
         workdir,
       });
+      await client.initialize();
+      await client.dispose();
+      client = undefined;
 
-      const restored = createPersistentUiBackendClient({
+      client = createPersistentUiBackendClient({
         dbPath,
         llmClient: createFakeLLMClient([]),
         resumeSessionId: "missing",
         workdir,
       });
 
-      await expect(restored.getSnapshot()).rejects.toThrow(
+      await expect(client.getSnapshot()).rejects.toThrow(
         "Session not found: missing",
       );
     } finally {
+      await client?.dispose();
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
@@ -2139,7 +2211,10 @@ describe("createPersistentUiBackendClient", () => {
       if (!sessionId) throw new Error("expected seed session");
       await client.dispose();
       client = undefined;
-      const ledger = createDatabaseRunLedger();
+      const ledger = createDatabaseRunLedger({
+        ownerId: "dead-owner",
+        ownerPid: 2147483647,
+      });
       await ledger.createPending({
         runId: "orphan-root",
         sessionId,
@@ -2171,6 +2246,20 @@ describe("createPersistentUiBackendClient", () => {
             { sessionId: "child-" + id, contextScopeId: "child" },
             2,
           );
+          // The recovery contract validates the full child Run identity.
+          getDatabase()
+            .prepare(
+              `INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) SELECT ?,project_id,project_root,'child','active',1,1,'{}' FROM session WHERE id=?`,
+            )
+            .run("child-" + id, sessionId);
+          await ledger.createPending({
+            runId: "child-run-" + id,
+            sessionId: "child-" + id,
+            contextScopeId: "child",
+            triggerSource: "user",
+          });
+          await ledger.markRunning("child-run-" + id);
+          if (id === "completed") await ledger.markSucceeded("child-run-" + id);
           await store.start(lookup, "child-run-" + id, 3);
         }
         if (id === "completed")
@@ -2224,13 +2313,13 @@ describe("createPersistentUiBackendClient", () => {
         completed,
       );
       expect(await reopened.getForRoot("ended-root", sessionId)).toMatchObject({
-        status: "interrupted",
+        status: "queued",
       });
       expect(await reopened.getForRoot("live-root", sessionId)).toMatchObject({
         status: "queued",
       });
       const recovered = await reopened.listByRootRun("orphan-root");
-      await reopened.interruptTerminalRootExecutions(Date.now() + 1000);
+      await client.initializeSession(sessionId);
       expect(await reopened.listByRootRun("orphan-root")).toEqual(recovered);
       expect(await reopened.listByRootRun("orphan-root")).toHaveLength(3);
       expect(requests).not.toHaveBeenCalled();
@@ -2270,7 +2359,11 @@ describe("createPersistentUiBackendClient", () => {
         throw new Error("expected seeded prompt to create an active session");
       }
 
-      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      const runLedger = createDatabaseRunLedger({
+        now: () => 42_000,
+        ownerId: "dead-owner",
+        ownerPid: 2147483647,
+      });
       await runLedger.createPending({
         runId: "run_stale_pending",
         sessionId,
@@ -2306,7 +2399,7 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
-  it("recovers legacy ownerless runs during startup", async () => {
+  it("preserves online ownerless runs and blocks execution until ownership can be established", async () => {
     const directory = await tempDir("ohbaby-persistent-daemon-recovery-");
     try {
       const dbPath = join(directory, "agent.db");
@@ -2340,11 +2433,11 @@ describe("createPersistentUiBackendClient", () => {
       const snapshot = await restored.getSnapshot();
       const staleRun = requireRun(snapshot.runs, "run_daemon_stale");
 
-      expect(snapshot.status).toEqual({ kind: "idle" });
-      expect(staleRun.status.kind).toBe("error");
-      expect(
-        staleRun.status.kind === "error" ? staleRun.status.message : "",
-      ).toContain("interrupted");
+      expect(staleRun.status.kind).toBe("running");
+      await expect(
+        restored.submitPromptAccepted("must not run", { sessionId }),
+      ).rejects.toThrow(/owner/);
+      expect((await runLedger.get("run_daemon_stale"))?.status).toBe("running");
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
@@ -2593,10 +2686,7 @@ describe("createPersistentUiBackendClient", () => {
 
       expect(earlyResult).toBe("pending");
 
-      await runLedger.markInterrupted({
-        reason: "owner interrupted",
-        statuses: ["running"],
-      });
+      await runLedger.markRunInterrupted("run_owner_active", "user-stop");
       await withTimeout(
         queuedPrompt,
         1_000,
@@ -2631,10 +2721,22 @@ describe("createPersistentUiBackendClient", () => {
         throw new Error("expected seeded prompt to create an active session");
       }
 
+      const exitedOwner = spawn(process.execPath, ["-e", "process.exit(0)"], {
+        stdio: "ignore",
+      });
+      await once(exitedOwner, "exit");
+      if (!exitedOwner.pid) throw new Error("Missing exited fixture owner PID");
+      let observation: unknown;
+      try {
+        process.kill(exitedOwner.pid, 0);
+      } catch (error) {
+        observation = error;
+      }
+      expect(observation).toMatchObject({ code: "ESRCH" });
       const runLedger = createDatabaseRunLedger({
         now: () => 42_000,
         ownerId: "backend_dead_owner",
-        ownerPid: -1,
+        ownerPid: exitedOwner.pid,
       });
       await runLedger.createPending({
         runId: "run_owner_stale",

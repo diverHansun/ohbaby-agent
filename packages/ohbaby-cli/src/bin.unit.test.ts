@@ -59,7 +59,11 @@ describe("runOhbabyCli", () => {
   it("starts the default terminal through ohbaby-agent without loading ohbaby-server", async () => {
     vi.resetModules();
     const core = createCore();
-    const dispose = vi.fn(() => Promise.resolve());
+    const cleanupOrder: string[] = [];
+    const dispose = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      cleanupOrder.push("host.finished");
+    });
     const subscribeEvents = vi.fn((): (() => void) => () => undefined);
     const buildCoreAPIImpl = vi.fn(() => ({
       callbacks: { subscribeEvents },
@@ -77,7 +81,10 @@ describe("runOhbabyCli", () => {
     );
     const logger = { emit: vi.fn() };
     const clockAnomalyDefinition = {};
-    const disposeDiagnostics = vi.fn(() => Promise.resolve());
+    const disposeDiagnostics = vi.fn(() => {
+      cleanupOrder.push("diagnostics.closed");
+      return Promise.resolve();
+    });
     let diagnosticsUnavailable: (() => void) | undefined;
     const createProcessLogger = vi.fn(
       (options: { readonly onUnavailable?: () => void }) => {
@@ -106,7 +113,8 @@ describe("runOhbabyCli", () => {
       },
     );
     const stderr: string[] = [];
-    vi.doMock("ohbaby-agent", () => ({
+    vi.doMock("ohbaby-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ohbaby-agent")>()),
       buildCoreAPIImpl,
       createProcessLogger,
       dataMigrationCompleted: {},
@@ -151,6 +159,7 @@ describe("runOhbabyCli", () => {
     ).toBeTypeOf("function");
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(disposeDiagnostics).toHaveBeenCalledTimes(1);
+    expect(cleanupOrder).toEqual(["host.finished", "diagnostics.closed"]);
     expect(activeNotice).toHaveBeenCalledOnce();
     expect(stderr).toEqual([]);
   });
@@ -1110,6 +1119,7 @@ function createCore(): {
   readonly connectModel: ReturnType<typeof vi.fn>;
   readonly steerQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly cancelQueuedPrompt: ReturnType<typeof vi.fn>;
+  readonly resubmitRetainedPrompt: ReturnType<typeof vi.fn>;
   readonly editQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
@@ -1172,6 +1182,9 @@ function createCore(): {
       } as const),
     ),
     executeCommand: vi.fn(() => Promise.resolve()),
+    resubmitRetainedPrompt: vi.fn(() =>
+      Promise.reject(new Error("Unused retained resubmission stub")),
+    ),
     editQueuedPrompt: vi.fn(() => Promise.resolve(prompt)),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
     getCurrentModel: vi.fn(() => Promise.resolve(null)),

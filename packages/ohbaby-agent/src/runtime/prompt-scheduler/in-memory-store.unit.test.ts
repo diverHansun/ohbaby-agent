@@ -34,7 +34,10 @@ describe("InMemoryPromptSubmissionStore", () => {
         await store.claim("receipt");
         if (status === "running") await store.markRunning("receipt", "run_1");
         else if (status === "interrupted")
-          await store.recoverInterrupted("/workspace");
+          await store.recoverAllInterrupted({
+            scopeKey: "/workspace",
+            includeCurrentOwner: true,
+          });
         else if (status === "succeeded")
           await store.finish("receipt", { status });
         else if (status === "failed")
@@ -87,7 +90,7 @@ describe("InMemoryPromptSubmissionStore", () => {
     expect(await store.listQueued("/workspace")).toHaveLength(100);
   });
 
-  it("marks active records interrupted while preserving queued records", async () => {
+  it("explicitly seals stopped owner active records and retains queued records", async () => {
     let now = 0;
     const store = new InMemoryPromptSubmissionStore({
       now: (): number => ++now,
@@ -113,12 +116,17 @@ describe("InMemoryPromptSubmissionStore", () => {
       userMessageId: "message_queued",
     });
 
-    expect(await store.recoverInterrupted("/workspace")).toBe(1);
+    expect(
+      await store.recoverAllInterrupted({
+        scopeKey: "/workspace",
+        includeCurrentOwner: true,
+      }),
+    ).toBe(2);
     expect(await store.get("prompt_active")).toMatchObject({
       status: "interrupted",
     });
     expect(await store.get("prompt_queued")).toMatchObject({
-      status: "queued",
+      status: "retained",
     });
   });
 

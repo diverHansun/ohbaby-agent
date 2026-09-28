@@ -411,7 +411,7 @@ describe("New session real persistent REST regression", () => {
     },
   );
 
-  it.each(["queued", "starting", "running"])(
+  it.each(["queued", "retained", "starting", "running"])(
     "does not reuse a session with a %s prompt before any message or run exists",
     async (status) => {
       const f = await fixture();
@@ -419,11 +419,27 @@ describe("New session real persistent REST regression", () => {
         await f.runtime.createSession();
         const id = await f.runtime.client?.getSelectedSessionId();
         if (!id) throw new Error("missing selected session");
-        getDatabase()
-          .prepare(
-            "INSERT INTO prompt_submission (prompt_id,client_request_id,scope_key,session_id,user_message_id,text,status,created_at,updated_at) VALUES ('queued','request',?,?,'future-message','hello',?,1,1)",
-          )
-          .run(f.workdir, id, status);
+        // A distinct live admission owner prevents this fixture from being
+        // claimed or recovered by the UI backend while testing session reuse.
+        const store = new DatabasePromptSubmissionStore({
+          ownerId: "fixture-live-admission-owner",
+          ownerPid: process.pid,
+        });
+        await store.accept({
+          promptId: "queued",
+          clientRequestId: "request",
+          scopeKey: f.workdir,
+          sessionId: id,
+          userMessageId: "future-message",
+          text: "hello",
+          maxQueuedPrompts: 100,
+        });
+        if (status === "retained") await store.retainOwnedQueued(f.workdir);
+        if (status === "starting" || status === "running")
+          await store.claim("queued");
+        if (status === "running")
+          await store.markRunning("queued", "not-yet-created-run");
+        expect((await store.get("queued"))?.status).toBe(status);
         await f.runtime.createSession();
         expect(await f.runtime.client?.getSelectedSessionId()).not.toBe(id);
         expect(f.count()).toBe(2);
@@ -455,7 +471,17 @@ describe("New session real persistent REST regression", () => {
           await f.backend.cancelQueuedPrompt({ promptId: "before-execution" });
         } else {
           await store.claim("before-execution");
-          await store.recoverInterrupted(f.workdir);
+          // This admission never had an executor. Seal this exact fixture's
+          // current owner explicitly; a scope-only recovery may not take it.
+          await store.finish("before-execution", {
+            status: "interrupted",
+            error: {
+              code: "RUN_INTERRUPTED",
+              message: "fixture stopped before execution",
+              source: "runtime",
+              retryable: false,
+            },
+          });
         }
         expect((await store.get("before-execution"))?.status).toBe(terminal);
         expect(await store.listForSession(f.workdir, id)).toEqual([]);

@@ -851,6 +851,12 @@ export class BrowserDaemonClient implements UiBackendClient {
     ).prompt;
   }
 
+  async resubmitRetainedPrompt(
+    input: Parameters<UiBackendClient["resubmitRetainedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["resubmitRetainedPrompt"]> {
+    return (await this.http.resubmitRetainedPrompt(input)).receipt;
+  }
+
   async steerQueuedPrompt(
     input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {

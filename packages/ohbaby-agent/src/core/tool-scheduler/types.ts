@@ -161,6 +161,7 @@ export interface ToolCallRequest {
 }
 
 export interface ToolExecutionObservation {
+  readonly endTimeSource?: "recovery";
   readonly runId?: string;
   readonly phase:
     | "preparing"
@@ -329,6 +330,10 @@ export interface ToolExecutionOwner {
   readonly workspaceKey?: string;
   readonly sessionId: string;
   readonly runId?: string;
+  /** Root task identity, resolved from the invoking run rather than the reusable scope. */
+  readonly rootRunId?: string;
+  /** Present for a tool invoked by a particular subagent delegation. */
+  readonly executionId?: string;
   readonly messageId: string;
   readonly callId: string;
   readonly contextScopeId?: string;

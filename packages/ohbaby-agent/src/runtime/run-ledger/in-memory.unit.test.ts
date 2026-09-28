@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   createInMemoryRunLedger,
   InvalidRunTransitionError,
@@ -17,6 +17,34 @@ function createClock(startAt = 1_000): () => number {
     return value;
   };
 }
+
+it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+  "preserves invalid owner PID %s before probing or claiming",
+  async (ownerPid) => {
+    const probe = vi.fn(() => false);
+    const ledger = createInMemoryRunLedger({ isOwnerAlive: probe });
+    await ledger.createPending({
+      runId: "unknown",
+      sessionId: "s",
+      triggerSource: "user",
+      ownerId: "old",
+      ownerPid,
+    });
+    expect(await ledger.recoverOrphanedRuns()).toEqual({ updatedCount: 0 });
+    expect(await ledger.markInterrupted()).toEqual({ updatedCount: 0 });
+    await expect(
+      ledger.claimPendingRun({
+        runId: "new",
+        sessionId: "s",
+        triggerSource: "user",
+      }),
+    ).rejects.toBeInstanceOf(SessionRunBusyError);
+    expect(probe).not.toHaveBeenCalled();
+    expect(
+      await ledger.recoverOrphanedRuns({ recoverUnknownOwner: true }),
+    ).toEqual({ updatedCount: 1 });
+  },
+);
 
 function createLedger(startAt?: number): RunLedger {
   return createInMemoryRunLedger({ now: createClock(startAt) });
@@ -289,7 +317,9 @@ describe("InMemoryRunLedger", () => {
     await ledger.markRunning("done_run");
     await ledger.markSucceeded("done_run");
 
-    await expect(ledger.markInterrupted()).resolves.toEqual({
+    await expect(
+      ledger.markInterrupted({ recoverUnknownOwner: true }),
+    ).resolves.toEqual({
       updatedCount: 2,
     });
     await expect(ledger.markInterrupted()).resolves.toEqual({
@@ -369,4 +399,133 @@ describe("InMemoryRunLedger", () => {
       { runId: "active_pending" },
     ]);
   });
+});
+
+it("records a single interruption with the original end time and preserves committed terminals", async () => {
+  const ledger = createInMemoryRunLedger({
+    now: () => 100,
+    isOwnerAlive: () => true,
+  });
+  await ledger.createPending({
+    runId: "interrupt_one",
+    sessionId: "session_1",
+    triggerSource: "user",
+  });
+  await expect(
+    ledger.markRunInterrupted("interrupt_one", "user stop", { endedAt: 42 }),
+  ).resolves.toMatchObject({
+    status: "interrupted",
+    endedAt: 42,
+    inputsCloseReason: "user stop",
+  });
+  await expect(
+    ledger.markRunInterrupted("interrupt_one", "late", { endedAt: 90 }),
+  ).resolves.toMatchObject({
+    status: "interrupted",
+    endedAt: 42,
+    error: "user stop",
+  });
+  await ledger.createPending({
+    runId: "success_one",
+    sessionId: "session_2",
+    triggerSource: "user",
+  });
+  await ledger.markRunning("success_one");
+  await ledger.markSucceeded("success_one", { endedAt: 66 });
+  await expect(
+    ledger.markRunInterrupted("success_one", "late stop"),
+  ).resolves.toMatchObject({ status: "succeeded", endedAt: 66 });
+});
+
+it("bulk interruption does not touch another live owner", async () => {
+  const ledger = createInMemoryRunLedger({
+    isOwnerAlive: (pid) => pid === 123,
+  });
+  await ledger.createPending({
+    runId: "live_owner",
+    sessionId: "session_1",
+    triggerSource: "user",
+    ownerId: "live",
+    ownerPid: 123,
+  });
+  await ledger.createPending({
+    runId: "dead_owner",
+    sessionId: "session_2",
+    triggerSource: "user",
+    ownerId: "dead",
+    ownerPid: 456,
+  });
+  await expect(ledger.markInterrupted()).resolves.toEqual({ updatedCount: 1 });
+  expect((await ledger.get("live_owner"))?.status).toBe("pending");
+  expect(await ledger.get("dead_owner")).toMatchObject({
+    status: "interrupted",
+    endTimeSource: "recovery",
+  });
+});
+
+it("labels orphaned end times as recovery without rewriting a saved terminal", async () => {
+  const ledger = createInMemoryRunLedger({
+    now: () => 500,
+    isOwnerAlive: () => false,
+  });
+  await ledger.createPending({
+    runId: "orphan_time",
+    sessionId: "session_1",
+    triggerSource: "user",
+    ownerPid: 456,
+  });
+  await ledger.createPending({
+    runId: "finished_time",
+    sessionId: "session_2",
+    triggerSource: "user",
+    ownerPid: 456,
+  });
+  await ledger.markRunInterrupted("finished_time", "service-shutdown", {
+    endedAt: 200,
+  });
+  await expect(ledger.recoverOrphanedRuns()).resolves.toEqual({
+    updatedCount: 1,
+  });
+  expect(await ledger.get("orphan_time")).toMatchObject({
+    status: "interrupted",
+    endTimeSource: "recovery",
+    endedAt: 500,
+  });
+  expect(await ledger.get("finished_time")).toMatchObject({
+    status: "interrupted",
+    endedAt: 200,
+  });
+  expect((await ledger.get("finished_time"))?.endTimeSource).toBeUndefined();
+});
+
+it("scopes cold recovery and requires explicit offline permission for unknown owners", async () => {
+  const ledger = createInMemoryRunLedger({ isOwnerAlive: () => false });
+  await ledger.createPending({
+    runId: "unknown_owner",
+    sessionId: "session_1",
+    triggerSource: "user",
+  });
+  await ledger.createPending({
+    runId: "other_orphan",
+    sessionId: "session_2",
+    triggerSource: "user",
+    ownerPid: 456,
+  });
+  await expect(
+    ledger.recoverOrphanedRuns({ sessionId: "session_1" }),
+  ).resolves.toEqual({ updatedCount: 0 });
+  await expect(
+    ledger.markInterrupted({ sessionId: "session_1" }),
+  ).resolves.toEqual({ updatedCount: 0 });
+  expect((await ledger.get("other_orphan"))?.status).toBe("pending");
+  await expect(
+    ledger.recoverOrphanedRuns({
+      sessionId: "session_1",
+      recoverUnknownOwner: true,
+    }),
+  ).resolves.toEqual({ updatedCount: 1 });
+  expect((await ledger.get("other_orphan"))?.status).toBe("pending");
+  await expect(
+    ledger.markInterrupted({ sessionId: "session_2" }),
+  ).resolves.toEqual({ updatedCount: 1 });
 });

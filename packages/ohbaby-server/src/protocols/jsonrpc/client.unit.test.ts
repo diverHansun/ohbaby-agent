@@ -183,6 +183,12 @@ describe("createRemoteUiBackendClient", () => {
       promptId: receipt.promptId,
       text: "edited",
     });
+    await client.resubmitRetainedPrompt({
+      editLeaseId: "lease_1",
+      promptId: receipt.promptId,
+      text: "send retained",
+      operationId: "resubmit_1",
+    });
     await client.cancelQueuedPrompt({
       promptId: receipt.promptId,
     });
@@ -207,6 +213,7 @@ describe("createRemoteUiBackendClient", () => {
       "releasePromptEditLease",
       "acquirePromptEditLease",
       "editQueuedPrompt",
+      "resubmitRetainedPrompt",
       "cancelQueuedPrompt",
       "waitForPrompt",
       "submitPromptAccepted",

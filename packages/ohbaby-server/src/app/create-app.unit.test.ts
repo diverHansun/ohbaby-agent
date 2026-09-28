@@ -440,6 +440,18 @@ class FakeBackend implements UiBackendClient {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
+  resubmitRetainedPrompt(
+    _input: Parameters<UiBackendClient["resubmitRetainedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["resubmitRetainedPrompt"]> {
+    return Promise.reject(new Error("No retained prompt in fake backend"));
+  }
+  resubmitRetainedPromptForOwner(
+    input: Parameters<UiBackendClient["resubmitRetainedPrompt"]>[0],
+    _owner: string,
+  ): ReturnType<UiBackendClient["resubmitRetainedPrompt"]> {
+    return this.resubmitRetainedPrompt(input);
+  }
+
   steerQueuedPrompt(
     _input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
@@ -3266,6 +3278,160 @@ describe("createDaemonServerApp", () => {
       expect(backend.trustedQueueOwners).toEqual(
         Array.from({ length: 6 }, () => "client_web"),
       );
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("routes retained resubmission with trusted ownership and preserves domain conflict status", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const steer = vi
+      .spyOn(backend, "resubmitRetainedPromptForOwner")
+      .mockResolvedValue({
+        promptId: "prompt_1",
+        userMessageId: "message_1",
+
+        sessionId: "session_generated",
+        acceptedAt: 1,
+        operationId: "resubmit-1",
+      });
+    const handle = createApp(backend, {
+      createSessionId: () => "session_generated",
+    });
+    await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers,
+        method: "POST",
+      });
+      await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({ clientRequestId: "request_1", text: "queued" }),
+        headers,
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/prompts/prompt_1/resubmit",
+        {
+          body: JSON.stringify({
+            editLeaseId: "lease-1",
+            text: "retained edit",
+            operationId: "resubmit-1",
+            ownerClientId: "spoof",
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+      expect(response.status).toBe(200);
+      expect(steer).toHaveBeenLastCalledWith(
+        {
+          promptId: "prompt_1",
+          editLeaseId: "lease-1",
+          text: "retained edit",
+          operationId: "resubmit-1",
+        },
+        "client_web",
+      );
+      expect(await response.json()).toMatchObject({
+        receipt: { sessionId: "session_generated", userMessageId: "message_1" },
+      });
+      const rpcSteer = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          id: "steer-rpc",
+          clientId: "client_web",
+          method: "resubmitRetainedPrompt",
+          params: [
+            {
+              promptId: "prompt_1",
+              editLeaseId: "lease-1",
+              text: "retained edit",
+              operationId: "resubmit-1",
+            },
+          ],
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(await rpcSteer.json()).toMatchObject({
+        ok: true,
+        result: { sessionId: "session_generated" },
+      });
+      expect(steer).toHaveBeenLastCalledWith(
+        {
+          promptId: "prompt_1",
+          editLeaseId: "lease-1",
+          text: "retained edit",
+          operationId: "resubmit-1",
+        },
+        "client_web",
+      );
+      steer.mockRejectedValue(
+        Object.assign(new Error("Target closed"), {
+          code: "PROMPT_VERSION_CONFLICT",
+        }),
+      );
+      const conflict = await handle.app.request(
+        "/v1/prompts/prompt_1/resubmit",
+        {
+          body: JSON.stringify({
+            editLeaseId: "lease-1",
+            text: "retained edit",
+            operationId: "resubmit-2",
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+      expect(conflict.status).toBe(409);
+      const invalid = await handle.app.request(
+        "/v1/prompts/prompt_1/resubmit",
+        {
+          body: "{}",
+          headers,
+          method: "POST",
+        },
+      );
+      expect(invalid.status).toBe(400);
+      const calls = steer.mock.calls.length;
+      const forbidden = await handle.app.request(
+        "/v1/prompts/other-session-prompt/resubmit",
+        {
+          body: JSON.stringify({
+            editLeaseId: "lease",
+            operationId: "resubmit-3",
+            text: "hidden",
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+      expect(forbidden.status).toBe(403);
+      const rpcForbidden = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          id: "forbidden-resubmit",
+          clientId: "client_web",
+          method: "resubmitRetainedPrompt",
+          params: [
+            {
+              promptId: "other-session-prompt",
+              editLeaseId: "lease",
+              operationId: "resubmit-3",
+              text: "hidden",
+              ownerClientId: "spoofed",
+            },
+          ],
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(rpcForbidden.status).toBe(403);
+      expect(steer).toHaveBeenCalledTimes(calls);
     } finally {
       await handle.dispose();
     }

@@ -2,6 +2,7 @@ export {
   ConcurrencyRejectedError,
   RunDefaultsPolicyError,
   RunManagerNotFoundError,
+  RunFinalizationError,
 } from "./errors.js";
 export { RunManager } from "./manager.js";
 export { mergeRunDefaults } from "./policy.js";
@@ -19,6 +20,7 @@ export type {
   RunHookContext,
   RunLifecycle,
   RunManagerDeps,
+  RunWorkerResult,
   RunRecord,
   RunStatus,
   SandboxLease,

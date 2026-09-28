@@ -1,6 +1,7 @@
 export type UiCommandMethod =
   | "submitPromptAccepted"
   | "editQueuedPrompt"
+  | "resubmitRetainedPrompt"
   | "steerQueuedPrompt"
   | "cancelQueuedPrompt"
   | "acquirePromptEditLease"
@@ -134,6 +135,7 @@ export function buildUiCommandDetails(
         textLength: text.length,
       });
     }
+    case "resubmitRetainedPrompt":
     case "editQueuedPrompt": {
       const input = objectAt(args, 0);
       return redactedDetails({

@@ -114,7 +114,12 @@ function toUiRunStatus(record: StreamRunRecord): UiRunStatus {
   if (record.status === "pending" || record.status === "running") {
     return { kind: "running", runId: record.runId };
   }
-  if (record.status === "succeeded" || record.status === "cancelled") {
+  if (
+    record.status === "succeeded" ||
+    record.status === "cancelled" ||
+    (record.status === "interrupted" &&
+      (record.error === "user-stop" || record.error === "service-shutdown"))
+  ) {
     return { kind: "idle" };
   }
   return {
@@ -410,7 +415,7 @@ export function startRunStreamProjection(
       record.status === "failed" ? "error" : "completed",
       record.status,
     );
-    if (record.status === "cancelled") {
+    if (record.status === "cancelled" || record.status === "interrupted") {
       options.publish({
         type: "run.interrupted",
         runId: options.runId,

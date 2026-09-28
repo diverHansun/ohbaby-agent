@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
+import { InMemorySubagentExecutionStore } from "../../agents/subagents/execution-store.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import {
   createInMemoryMessageStore,
@@ -78,10 +79,35 @@ describe("composition resource admission across real sessions", () => {
       agentName: "build",
     });
     const sandbox = createHostLocalSandboxManager(root);
+    const executions = new InMemorySubagentExecutionStore();
+    await executions.accept({
+      executionId: "child-execution",
+      rootRunId: "run-primary",
+      rootSessionId: primary.id,
+      requestId: "delegate-child",
+      requesterRunId: "run-primary",
+      requesterScopeId: "primary",
+      parentSessionId: primary.id,
+      subagentId: "child-scope",
+      mode: "background",
+      prompt: "read after write",
+      createdAt: 1,
+    });
+    const childExecution = {
+      executionId: "child-execution",
+      parentSessionId: primary.id,
+    };
+    await executions.bindChild(
+      childExecution,
+      { sessionId: child.id, contextScopeId: "child-scope" },
+      2,
+    );
+    await executions.start(childExecution, "run-child", 3);
     const composition = await createUiRuntimeComposition({
       bus,
       messageManager,
       sessionManager: sessions,
+      subagentExecutionStore: executions,
       sandboxManager: sandbox,
       workdir: root,
       llmClient: unusedLlmClient(),
@@ -229,6 +255,8 @@ describe("composition resource admission across real sessions", () => {
       expect(childResult.output).toContain("after");
       expect(owners.get("read-child")).toMatchObject({
         sessionId: child.id,
+        rootRunId: "run-primary",
+        executionId: "child-execution",
         rootSessionId: primary.id,
         contextScopeId: "child-scope",
         scopeKey: childLease.scopeKey,

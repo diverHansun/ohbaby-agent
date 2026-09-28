@@ -141,8 +141,12 @@ describe("coordinated run source", () => {
     expect(seen).toEqual(["orphan:interrupted", "new:pending"]);
   });
   it("keeps read queries and explicit startup recovery independent from view initialization", async () => {
-    const source = createInMemoryRunLedger();
-    await source.createPending(input("old"));
+    const source = createInMemoryRunLedger({ isOwnerAlive: () => false });
+    await source.createPending({
+      ...input("old"),
+      ownerId: "dead",
+      ownerPid: 2147483647,
+    });
     const ledger = createCoordinatedRunLedger({
       ledger: source,
       coordinator: {

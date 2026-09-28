@@ -199,7 +199,9 @@ export function applyTuiEvent(
       const isActiveSession = event.run.sessionId === state.activeSessionId;
       const next = rebuildFromCollections(state, {
         runs: upsertById(state.runs, event.run),
-        ...(isActiveSession ? { runtime: event.run.status } : {}),
+        ...(isActiveSession
+          ? { runtime: event.run.status, runtimeErrorRunId: event.run.id }
+          : {}),
       });
       if (!isActiveSession) {
         return next;
@@ -467,14 +469,21 @@ export function createTuiStore(snapshot: UiSnapshot): TuiStore {
         ),
       };
       const runs = view.runs;
-      const activeRun = [...runs]
-        .reverse()
-        .find(
-          (run) =>
-            run.status.kind === "running" ||
-            run.status.kind === "waiting-for-permission" ||
-            run.status.kind === "error",
-        );
+      const latestRuns = [...runs].sort(
+        (a, b) =>
+          Date.parse(b.startedAt) - Date.parse(a.startedAt) ||
+          Date.parse(b.updatedAt) - Date.parse(a.updatedAt) ||
+          b.id.localeCompare(a.id),
+      );
+      const activeRun = latestRuns.find(
+        (run) =>
+          run.status.kind === "running" ||
+          run.status.kind === "waiting-for-permission",
+      );
+      const independentError =
+        state.runtime.kind === "error" && state.runtimeErrorRunId === undefined;
+      const runtimeRun =
+        activeRun ?? (independentError ? undefined : latestRuns.at(0));
       const previous = resetTranscript
         ? {
             ...state,
@@ -489,8 +498,12 @@ export function createTuiStore(snapshot: UiSnapshot): TuiStore {
         runs,
         prompts: view.prompts,
         runtime:
-          activeRun?.status ??
+          runtimeRun?.status ??
           (state.runtime.kind === "error" ? state.runtime : { kind: "idle" }),
+        runtimeErrorRunId:
+          runtimeRun?.status.kind === "error"
+            ? runtimeRun.id
+            : state.runtimeErrorRunId,
         goals:
           view.goal.status === "ready"
             ? [
@@ -621,6 +634,8 @@ function preserveLocalQueues(
     resolvedPermissionIds: previous.resolvedPermissionIds,
     runs,
     runtime,
+    runtimeErrorRunId:
+      runtime.kind === "error" ? next.runtimeErrorRunId : undefined,
     sessions,
     snapshot,
   };
@@ -636,6 +651,7 @@ function rebuildFromCollections(
     readonly permission?: UiPermissionState;
     readonly prompts?: readonly UiPromptSubmission[];
     readonly runtime?: TuiRuntimeStatus;
+    readonly runtimeErrorRunId?: string;
     readonly contextWindowUsages?: readonly UiContextWindowUsage[];
     readonly goals?: readonly UiSessionGoal[];
     readonly todos?: readonly UiSessionTodoList[];
@@ -698,6 +714,12 @@ function rebuildFromCollections(
     prompts,
     runs,
     runtime,
+    runtimeErrorRunId:
+      runtime.kind !== "error"
+        ? undefined
+        : patch.runtime === undefined
+          ? state.runtimeErrorRunId
+          : patch.runtimeErrorRunId,
     sessions,
     snapshot,
   };

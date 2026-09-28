@@ -48,6 +48,8 @@ import type {
   UiCancelQueuedPromptInput,
   UiAcquirePromptEditLeaseInput,
   UiEditQueuedPromptInput,
+  UiResubmitRetainedPromptInput,
+  UiPromptResubmissionReceipt,
   UiPromptCompletion,
   UiPromptReceipt,
   UiPromptEditLease,
@@ -146,6 +148,9 @@ export interface UiPromptCommandClient {
 }
 
 export interface UiPromptQueueCommandClient {
+  resubmitRetainedPrompt(
+    input: UiResubmitRetainedPromptInput,
+  ): Promise<UiPromptResubmissionReceipt>;
   steerQueuedPrompt(
     input: UiSteerQueuedPromptInput,
   ): Promise<UiSteerQueuedPromptReceipt>;

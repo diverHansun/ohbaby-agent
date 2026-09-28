@@ -1,6 +1,10 @@
 import { resolve } from "node:path";
 import {
   NOOP_LOGGER,
+  collectCleanup,
+  createShutdownOptions,
+  withinShutdown,
+  type CleanupResult,
   serverStopFailed,
   serverStopped,
   type Logger,
@@ -69,13 +73,7 @@ export class Supervisor {
   private readonly activeClients = new Set<string>();
 
   private readonly signalHandler = (): void => {
-    void this.stopWithTimeout("signal")
-      .then(() => {
-        this.exit(0);
-      })
-      .catch(() => {
-        this.exit(1);
-      });
+    void this.stopAndExit("signal");
   };
 
   constructor(private readonly options: SupervisorOptions) {
@@ -109,6 +107,7 @@ export class Supervisor {
       return;
     }
 
+    this.stopPromise = undefined;
     try {
       this.pidLock = await this.pidFile.acquire();
       this.startedAt = this.now();
@@ -169,101 +168,108 @@ export class Supervisor {
     await this.stop();
   }
 
-  private async stopInternal(): Promise<void> {
-    this.clearIdleTimer();
-    this.activeClients.clear();
-    this.unregisterSignals();
-
-    if (!this.runtime && !this.pidLock) {
-      this.stopPromise = undefined;
-      return;
-    }
-
-    let pendingError: unknown;
-    let runtimeStopped = false;
-
+  async stopAndExit(reason: DaemonStopReason = "requested"): Promise<void> {
     try {
-      await this.writeState("stopping");
-    } catch (error) {
-      pendingError = error;
-    }
-
-    try {
-      await this.runtime?.stop();
-      runtimeStopped = true;
-    } catch (error) {
-      pendingError ??= error;
-    }
-
-    if (runtimeStopped) {
-      try {
-        await this.writeState("stopped");
-      } catch (error) {
-        pendingError ??= error;
-      }
-    } else {
-      try {
-        await this.writeState(
-          "crashed",
-          errorToMessage(pendingError ?? new Error("daemon stop failed")),
-        );
-      } catch (error) {
-        pendingError ??= error;
-      }
-    }
-
-    try {
-      await this.releasePidLock();
-    } catch (error) {
-      pendingError ??= error;
-    } finally {
-      this.runtime = undefined;
-      this.startedAt = undefined;
-    }
-
-    if (this.logger !== NOOP_LOGGER) {
-      if (pendingError === undefined) {
-        emitDiagnosticSafely(this.logger, serverStopped, {
-          reason: this.stopReason,
-        });
-      } else {
-        emitDiagnosticSafely(this.logger, serverStopFailed, {
-          error: pendingError,
-          reason: this.stopReason,
-        });
-      }
-    }
-
-    try {
-      await this.options.disposeDiagnostics?.();
+      await this.stop(reason);
+      this.exit(0);
     } catch {
-      // Diagnostics teardown is observational and cannot change daemon outcome.
-    } finally {
-      this.stopPromise = undefined;
-    }
-
-    if (pendingError !== undefined) {
-      throw toError(pendingError, "daemon stop failed");
+      this.exit(1);
     }
   }
 
-  private async stopWithTimeout(reason: DaemonStopReason): Promise<void> {
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-
+  private async stopInternal(): Promise<void> {
+    const options = createShutdownOptions(this.shutdownTimeoutMs);
+    // Reserve part of the same budget for final state and the token-scoped report.
+    const cleanupOptions = {
+      ...options,
+      deadlineAt:
+        options.deadlineAt - Math.min(100, this.shutdownTimeoutMs / 4),
+    };
+    const identity = this.pidLock?.record;
+    const errors: string[] = [];
     try {
-      await Promise.race([
-        this.stop(reason),
-        new Promise<never>((_resolve, reject) => {
-          timeout = setTimeout(() => {
-            reject(new Error("daemon shutdown timed out"));
-          }, this.shutdownTimeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
+      this.runtime?.closeAdmission?.();
+    } catch (error) {
+      errors.push(errorToMessage(error));
     }
+    this.clearIdleTimer();
+    this.activeClients.clear();
+    if (!this.runtime && !this.pidLock) return;
+
+    const stopping = withinShutdown(cleanupOptions, "state.stopping", () =>
+      this.writeState("stopping"),
+    );
+    const runtime = collectCleanup(cleanupOptions, {
+      runtime: () => this.runtime?.stop(cleanupOptions),
+    });
+    try {
+      await stopping;
+    } catch (error) {
+      errors.push(errorToMessage(error));
+    }
+    const runtimeResult = await runtime;
+    errors.push(...runtimeResult.errors);
+    try {
+      await withinShutdown(options, "state.final", () =>
+        this.writeState(
+          runtimeResult.status === "confirmed" ? "stopped" : "crashed",
+          runtimeResult.errors.at(0),
+        ),
+      );
+    } catch (error) {
+      errors.push(errorToMessage(error));
+    }
+    // Emit while the sink still accepts events; its disposal flushes this record.
+    if (this.logger !== NOOP_LOGGER) {
+      if (!errors.length)
+        emitDiagnosticSafely(this.logger, serverStopped, {
+          reason: this.stopReason,
+        });
+      else
+        emitDiagnosticSafely(this.logger, serverStopFailed, {
+          error: new Error(errors.join("; ")),
+          reason: this.stopReason,
+        });
+    }
+    const diagnostics = await collectCleanup(options, {
+      diagnostics: async () => {
+        try {
+          await this.options.disposeDiagnostics?.();
+        } catch {
+          /* Ordinary logging errors are observational. */
+        }
+      },
+    });
+    errors.push(...diagnostics.errors);
+    const finalCleanup = await collectCleanup(options, {
+      "pid.release": () => this.releasePidLock(),
+    });
+    errors.push(...finalCleanup.errors);
+    const cleanup: CleanupResult = {
+      status: errors.length ? "unconfirmed" : "confirmed",
+      errors,
+    };
+    try {
+      if (identity && this.stateFile.writeShutdownReport) {
+        await withinShutdown(
+          options,
+          "shutdown-report",
+          () =>
+            this.stateFile.writeShutdownReport?.({
+              pid: identity.pid,
+              pidToken: identity.token,
+              recordedAt: this.now(),
+              cleanup,
+            }) ?? Promise.resolve(),
+        );
+      }
+    } catch (error) {
+      errors.push(errorToMessage(error));
+    }
+    this.unregisterSignals();
+    this.runtime = undefined;
+    this.startedAt = undefined;
+    if (errors.length) throw new Error(errors.join("; "));
   }
 
   private scheduleIdleStop(): void {
@@ -315,6 +321,8 @@ export class Supervisor {
 
     this.signalTarget.on("SIGTERM", this.signalHandler);
     this.signalTarget.on("SIGINT", this.signalHandler);
+    if (process.platform !== "win32")
+      this.signalTarget.on("SIGHUP", this.signalHandler);
     this.signalsRegistered = true;
   }
 
@@ -325,6 +333,8 @@ export class Supervisor {
 
     this.signalTarget.off("SIGTERM", this.signalHandler);
     this.signalTarget.off("SIGINT", this.signalHandler);
+    if (process.platform !== "win32")
+      this.signalTarget.off("SIGHUP", this.signalHandler);
     this.signalsRegistered = false;
   }
 

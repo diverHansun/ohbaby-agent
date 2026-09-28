@@ -27,6 +27,7 @@ import type {
   TextPart,
   UpdateMessagePatch,
   UpdatePartPatch,
+  UpdatePartCondition,
   StoreCompactionInput,
 } from "./types.js";
 import { isModelContextPart, MODEL_CONTEXT_RUNTIME_KIND } from "./origin.js";
@@ -486,6 +487,7 @@ export function createDatabaseMessageStore(
       partId: string,
       patch: Omit<UpdatePartPatch, "delta">,
       updatedAt: number,
+      condition?: UpdatePartCondition,
     ): Promise<Part> {
       return withImmediateTransaction(() => {
         const row = db
@@ -496,7 +498,15 @@ export function createDatabaseMessageStore(
         if (!row) {
           throw new Error(`Part not found: ${partId}`);
         }
-        const updated = { ...rowToPart(row), ...patch } as Part;
+        const existing = rowToPart(row);
+        if (
+          condition?.ifToolUnfinished &&
+          (existing.type !== "tool" ||
+            (existing.state.status !== "pending" &&
+              existing.state.status !== "running"))
+        )
+          return clone(existing);
+        const updated = { ...existing, ...patch } as Part;
         db.prepare(
           `UPDATE ${schema.part.tableName}
            SET type = ?, order_index = ?, updated_at = ?, data = ?

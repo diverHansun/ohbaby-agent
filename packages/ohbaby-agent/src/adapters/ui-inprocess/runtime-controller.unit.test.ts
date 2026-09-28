@@ -107,7 +107,7 @@ describe("InProcessRuntimeController", () => {
     await expect(controller.abortPromptRun("run_other")).resolves.toBe(false);
     await expect(controller.abortPromptRun("run_active")).resolves.toBe(true);
 
-    expect(cancelled).toEqual([{ reason: "run aborted", runId: "run_active" }]);
+    expect(cancelled).toEqual([{ reason: "user-stop", runId: "run_active" }]);
     expect(cleared).toEqual(["run_active"]);
   });
 

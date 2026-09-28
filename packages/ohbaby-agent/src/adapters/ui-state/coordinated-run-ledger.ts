@@ -77,17 +77,23 @@ export function createCoordinatedRunLedger(options: {
         return claimed;
       }),
     markRunning: (runId) => transition(runId, () => ledger.markRunning(runId)),
-    markSucceeded: (runId) =>
-      transition(runId, () => ledger.markSucceeded(runId)),
-    markFailed: (runId, error, errorData) =>
-      transition(runId, () => ledger.markFailed(runId, error, errorData)),
-    markCancelled: (runId, reason) =>
-      transition(runId, () => ledger.markCancelled(runId, reason)),
+    markSucceeded: (runId, terminal) =>
+      transition(runId, () => ledger.markSucceeded(runId, terminal)),
+    markFailed: (runId, error, errorData, terminal) =>
+      transition(runId, () =>
+        ledger.markFailed(runId, error, errorData, terminal),
+      ),
+    markCancelled: (runId, reason, terminal) =>
+      transition(runId, () => ledger.markCancelled(runId, reason, terminal)),
+    markRunInterrupted: (runId, reason, terminal) =>
+      transition(runId, () =>
+        ledger.markRunInterrupted(runId, reason, terminal),
+      ),
     // Explicit startup recovery precedes session view initialization. These
     // existing global operations are deliberately not runtime mutation APIs:
     // they cannot claim a per-session cut after changing every session at once.
     markInterrupted: (input) => ledger.markInterrupted(input),
-    recoverOrphanedRuns: () => ledger.recoverOrphanedRuns(),
+    recoverOrphanedRuns: (options) => ledger.recoverOrphanedRuns(options),
     get: (runId) => ledger.get(runId),
     listBySession: (sessionId, input) => ledger.listBySession(sessionId, input),
     getActiveRuns: (sessionId) => ledger.getActiveRuns(sessionId),

@@ -148,7 +148,64 @@ export interface MarkSubagentsInterruptedInput {
   readonly recoverUnknownOwner?: boolean;
 }
 
+export interface RecoverSubagentExecutionInputsInput {
+  readonly subagentId: string;
+  readonly executionIds: readonly string[];
+  readonly rootRunIds: readonly string[];
+  /** Undefined is an expected missing value, not a wildcard. */
+  readonly expectedOwnerId?: string;
+  readonly expectedOwnerPid?: number;
+  readonly expectedCurrentRunId?: string;
+  readonly at: number;
+}
+
+/** Build the repair from the latest record inside the store's write boundary. */
+export function recoveryExecutionInputsUpdate(
+  record: SubagentInstanceRecord,
+  input: RecoverSubagentExecutionInputsInput,
+): SubagentInstanceUpdate | undefined {
+  const executions = new Set(input.executionIds);
+  const roots = new Set(input.rootRunIds);
+  const belongs = (entry: QueuedSubagentInput | undefined): boolean =>
+    entry !== undefined &&
+    ((entry.executionId !== undefined && executions.has(entry.executionId)) ||
+      (entry.rootRunId !== undefined && roots.has(entry.rootRunId)));
+  const interruptCurrent =
+    (record.status === "pending" || record.status === "running") &&
+    belongs(record.currentInput);
+  if (
+    interruptCurrent &&
+    (record.ownerId !== input.expectedOwnerId ||
+      record.ownerPid !== input.expectedOwnerPid ||
+      record.currentRunId !== input.expectedCurrentRunId)
+  ) {
+    throw new Error(
+      `Subagent recovery ownership conflict: ${input.subagentId}`,
+    );
+  }
+  const pendingQueue = record.pendingQueue.filter((entry) => !belongs(entry));
+  if (!interruptCurrent && pendingQueue.length === record.pendingQueue.length)
+    return undefined;
+  return {
+    pendingQueue,
+    updatedAt: Math.max(record.updatedAt, input.at),
+    ...(interruptCurrent
+      ? {
+          status: "interrupted",
+          currentInput: undefined,
+          currentRunId: undefined,
+          lastRunId: record.currentRunId ?? record.lastRunId,
+          interruptedAt: input.at,
+          completedAt: input.at,
+        }
+      : {}),
+  };
+}
+
 export interface SubagentInstanceStore {
+  recoverExecutionInputs(
+    input: RecoverSubagentExecutionInputsInput,
+  ): Promise<SubagentInstanceRecord>;
   /**
    * Append one recoverable input without replacing the current durable queue.
    * Returns null when the instance has reached its terminal close state.

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
+import { hasUnsentSteerAfterLatestStop } from "ohbaby-sdk";
 import type {
   UiBackendClient,
   UiCommandRecord,
@@ -1919,6 +1920,13 @@ class RecordingRunLedger implements RunLedger {
   markCancelled(runId: string, reason?: string): Promise<RunLedgerRecord> {
     this.calls.push("markCancelled");
     return this.inner.markCancelled(runId, reason);
+  }
+
+  markRunInterrupted(
+    ...args: Parameters<RunLedger["markRunInterrupted"]>
+  ): Promise<RunLedgerRecord> {
+    this.calls.push("markRunInterrupted");
+    return this.inner.markRunInterrupted(...args);
   }
 
   markInterrupted(
@@ -4697,9 +4705,9 @@ describe("createInProcessUiBackendClient", () => {
     expect(childSignal?.aborted).toBe(true);
     await expect(
       withTimeout(run, 1_000, "parent did not abort"),
-    ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
+    ).resolves.toMatchObject({ prompt: { status: "interrupted" } });
     const childRun = await runLedger.get("run_2");
-    expect(childRun).toMatchObject({ status: "cancelled" });
+    expect(childRun).toMatchObject({ status: "interrupted" });
     expect(childRun?.sessionId).toMatch(/^session_/);
   });
 
@@ -4744,9 +4752,9 @@ describe("createInProcessUiBackendClient", () => {
     expect(childSignal?.aborted).toBe(true);
     await expect(
       withTimeout(run, 1_000, "parent did not abort"),
-    ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
+    ).resolves.toMatchObject({ prompt: { status: "interrupted" } });
     await expect(runLedger.get("run_2")).resolves.toMatchObject({
-      status: "cancelled",
+      status: "interrupted",
     });
     await expect(subagentStore.listByParent("session_1")).resolves.toEqual([
       expect.objectContaining({
@@ -5111,7 +5119,7 @@ describe("createInProcessUiBackendClient", () => {
       await client.abortRun(permissionEvent.request.runId);
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
-      ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
+      ).resolves.toMatchObject({ prompt: { status: "interrupted" } });
 
       let snapshot = await client.getSnapshot();
       expect(snapshot.permissions).toEqual([]);
@@ -5183,7 +5191,7 @@ describe("createInProcessUiBackendClient", () => {
       await client.abortRun(permissionEvent.request.runId);
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
-      ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
+      ).resolves.toMatchObject({ prompt: { status: "interrupted" } });
       await expect(
         withTimeout(queuedRun, 1_000, "queued run did not continue"),
       ).resolves.toMatchObject({ prompt: { status: "succeeded" } });
@@ -6344,7 +6352,7 @@ describe("createInProcessUiBackendClient", () => {
     await expect(completion).rejects.toBe(storageError);
     await expect(
       runLedger.get("run_persistence_failure"),
-    ).resolves.toMatchObject({ status: "cancelled" });
+    ).resolves.toMatchObject({ status: "interrupted" });
     expect(providerSignal?.aborted ?? true).toBe(true);
     await client.dispose();
   });
@@ -10805,3 +10813,411 @@ it("rejects a late Steer while the actual final provider step is in flight and k
     await client.dispose();
   }
 });
+
+describe("improve-4 durable Stop handoff", () => {
+  it.each(["entry", "shutdown"] as const)(
+    "blocks B on root terminal write failure and %s repairs without rerunning A",
+    async (repair) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const childStarted = createDeferred<AbortSignal | undefined>();
+      const ledger = createInMemoryRunLedger();
+      const original = ledger.markRunInterrupted.bind(ledger);
+      let writable = false;
+      ledger.markRunInterrupted = (runId, reason, terminal) => {
+        if (runId === "run_1" && !writable)
+          return Promise.reject(new Error("root terminal unavailable"));
+        return original(runId, reason, terminal);
+      };
+      let runNumber = 0;
+      const llm = createAbortableSubagentLLMClient(requests, childStarted);
+      const provider = llm.provider.streamResponse.bind(llm.provider);
+      llm.provider.streamResponse = (request) => {
+        if (requests.length >= 2 && !isTitleGenerationRequest(request)) {
+          requests.push(request);
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "B completed", finishReason: "stop" },
+            ]),
+          );
+        }
+        return provider(request);
+      };
+      const client = createInProcessUiBackendClient({
+        runLedger: ledger,
+        createRunId: () => `run_${String(++runNumber)}`,
+        llmClient: llm,
+      });
+      try {
+        const a = await client.submitPromptAccepted("Delegate long work", {
+          clientRequestId: "stop-a",
+        });
+        await withTimeout(childStarted.promise, 1000, "child did not start");
+        const b = await client.submitPromptAccepted("B", {
+          sessionId: a.sessionId,
+          clientRequestId: "stop-b",
+        });
+        const completed = client
+          .waitForPrompt(a.promptId)
+          .catch((error: unknown) => error);
+        await client.abortRun("run_1").catch(() => undefined);
+        const failed = await withTimeout(
+          completed,
+          1000,
+          "Stop must expose persistence failure",
+        );
+        expect(failed).toBeInstanceOf(Error);
+        expect(requests).toHaveLength(2);
+        expect(
+          (await client.getSnapshot()).prompts?.find(
+            (prompt) => prompt.promptId === b.promptId,
+          )?.status,
+        ).toBe("queued");
+        writable = true;
+        if (repair === "shutdown") {
+          expect(await client.dispose()).toEqual({
+            status: "confirmed",
+            errors: [],
+          });
+          expect(await ledger.get("run_1")).toMatchObject({
+            status: "interrupted",
+          });
+          expect(requests).toHaveLength(2);
+          return;
+        }
+        await client.initializeSession(a.sessionId);
+        const result = await withTimeout(
+          client.waitForPrompt(b.promptId),
+          1000,
+          "B did not resume",
+        );
+        expect(result.prompt.status).toBe("succeeded");
+        expect(requests).toHaveLength(3);
+        expect(await ledger.get("run_1")).toMatchObject({
+          status: "interrupted",
+        });
+      } finally {
+        writable = true;
+        await client.dispose().catch(() => undefined);
+      }
+    },
+  );
+});
+
+describe("improve-4 measured handoff", () => {
+  it.each(["normal", "slow-cleanup-stop", "long-history"] as const)(
+    "starts B after durable A during %s",
+    async (scenario) => {
+      const bus = createBus();
+      const messageManager = createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      });
+      if (scenario === "long-history")
+        for (let index = 0; index < 200; index++)
+          await addCoreTextMessage(messageManager, {
+            sessionId: "session_1",
+            role: index % 2 ? "assistant" : "user",
+            text: `Historical entry ${String(index)} ${"context ".repeat(12)}`,
+          });
+      const startedA = createDeferred<undefined>();
+      const releaseA = createDeferred<undefined>();
+      const startedB = createDeferred<number>();
+      const releaseCleanup = createDeferred<undefined>();
+      const cleanupStarted = createDeferred<undefined>();
+      let cleanupFinished = false;
+      const sandbox = createHostLocalSandboxManager(process.cwd());
+      const release = sandbox.release.bind(sandbox);
+      if (scenario === "slow-cleanup-stop")
+        vi.spyOn(sandbox, "release").mockImplementationOnce(async (lease) => {
+          cleanupStarted.resolve(undefined);
+          await releaseCleanup.promise;
+          await release(lease);
+          cleanupFinished = true;
+        });
+      const llm = createFakeLLMClient([]);
+      const titleResponse = llm.provider.streamResponse.bind(llm.provider);
+      let mainRequests = 0;
+      llm.provider.streamResponse = (request) => {
+        if (isTitleGenerationRequest(request)) return titleResponse(request);
+        if (++mainRequests === 1) {
+          startedA.resolve(undefined);
+          if (scenario === "slow-cleanup-stop")
+            return Promise.resolve(
+              createAbortableProviderStream(request.signal),
+            );
+          return Promise.resolve(
+            (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              await releaseA.promise;
+              yield { textDelta: "A complete", finishReason: "stop" };
+            })(),
+          );
+        }
+        startedB.resolve(performance.now());
+        return Promise.resolve(
+          createProviderStream([
+            { textDelta: "B complete", finishReason: "stop" },
+          ]),
+        );
+      };
+      const ledger = createInMemoryRunLedger();
+      const client = createInProcessUiBackendClient({
+        bus,
+        messageManager,
+        sandboxManager: sandbox,
+        llmClient: llm,
+        runLedger: ledger,
+      });
+      try {
+        const a = await client.submitPromptAccepted("A");
+        await withTimeout(startedA.promise, 1000, "A missing");
+        const b = await client.submitPromptAccepted("B", {
+          sessionId: a.sessionId,
+        });
+        const runId = (await client.getSnapshot()).prompts?.find(
+          (prompt) => prompt.promptId === a.promptId,
+        )?.runId;
+        if (!runId) throw new Error("A has no run");
+        const transitionAt = performance.now();
+        if (scenario === "slow-cleanup-stop") await client.abortRun(runId);
+        else releaseA.resolve(undefined);
+        const bAt = await withTimeout(
+          startedB.promise,
+          2000,
+          "B waited for old physical cleanup",
+        );
+        const aDone = await client.waitForPrompt(a.promptId);
+        expect(aDone.prompt.status).toBe(
+          scenario === "slow-cleanup-stop" ? "interrupted" : "succeeded",
+        );
+        expect(await ledger.get(runId)).toMatchObject({
+          status: aDone.prompt.status,
+        });
+        if (scenario === "slow-cleanup-stop") {
+          await cleanupStarted.promise;
+          expect(cleanupFinished).toBe(false);
+        }
+        const bDone = await client.waitForPrompt(b.promptId);
+        expect(bDone.prompt.status).toBe("succeeded");
+        expect(bDone.prompt.runId).not.toBe(runId);
+        expect(mainRequests).toBe(2);
+        const releaseAt = performance.now();
+        releaseCleanup.resolve(undefined);
+        expect(await client.dispose()).toEqual({
+          status: "confirmed",
+          errors: [],
+        });
+        // eslint-disable-next-line no-console -- Acceptance diagnostic; assertions above carry the gate.
+        console.info(
+          "HANDOFF_SAMPLE",
+          JSON.stringify({
+            scenario,
+            historyMessages: scenario === "long-history" ? 200 : 0,
+            handoffMs: Number((bAt - transitionAt).toFixed(2)),
+            oldCleanupHeldUntilMs: Number(
+              (releaseAt - transitionAt).toFixed(2),
+            ),
+            cleanupReleasedAfterB: scenario === "slow-cleanup-stop",
+          }),
+        );
+      } finally {
+        releaseA.resolve(undefined);
+        releaseCleanup.resolve(undefined);
+        await client.dispose();
+      }
+    },
+  );
+});
+
+it("keeps user Stop idle and scopes the unsent Steer notice to the latest stopped run", async () => {
+  const llm = createFakeLLMClient([]);
+  const titleResponse = llm.provider.streamResponse.bind(llm.provider);
+  const starts: string[] = [];
+  llm.provider.streamResponse = (request) => {
+    if (isTitleGenerationRequest(request)) return titleResponse(request);
+    starts.push("request");
+    return Promise.resolve(createAbortableProviderStream(request.signal));
+  };
+  const client = createInProcessUiBackendClient({ llmClient: llm });
+  try {
+    const a = await client.submitPromptAccepted("A");
+    await vi.waitFor(() => {
+      expect(starts).toHaveLength(1);
+    });
+    const steer = await client.submitPromptAccepted("unsent guidance", {
+      sessionId: a.sessionId,
+    });
+    const run = (await client.getSnapshot()).prompts?.find(
+      (prompt) => prompt.promptId === a.promptId,
+    )?.runId;
+    if (!run) throw new Error("Missing A");
+    await client.steerQueuedPrompt({
+      promptId: steer.promptId,
+      expectedRunId: run,
+      clientRequestId: "steer-then-stop",
+    });
+    await client.abortRun(run);
+    expect((await client.waitForPrompt(a.promptId)).prompt.status).toBe(
+      "interrupted",
+    );
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.runs.find((item) => item.id === run)?.status).toEqual({
+      kind: "idle",
+    });
+    expect(hasUnsentSteerAfterLatestStop(snapshot.runs, a.sessionId)).toBe(
+      true,
+    );
+    expect(
+      hasUnsentSteerAfterLatestStop(
+        (await client.getSessionView({ sessionId: a.sessionId })).runs,
+        a.sessionId,
+      ),
+    ).toBe(true);
+    expect(starts).toHaveLength(1);
+    const b = await client.submitPromptAccepted("B", {
+      sessionId: a.sessionId,
+    });
+    await vi.waitFor(() => {
+      expect(starts).toHaveLength(2);
+    });
+    const bRun = (await client.getSnapshot()).prompts?.find(
+      (prompt) => prompt.promptId === b.promptId,
+    )?.runId;
+    if (!bRun) throw new Error("Missing B");
+    await client.abortRun(bRun);
+    await client.waitForPrompt(b.promptId);
+    expect(
+      hasUnsentSteerAfterLatestStop(
+        (await client.getSnapshot()).runs,
+        a.sessionId,
+      ),
+    ).toBe(false);
+    expect(starts).toHaveLength(2);
+  } finally {
+    await client.dispose();
+  }
+});
+
+it.each(["entry", "shutdown"] as const)(
+  "blocks a failed goal finalization and %s repairs its original Run before queued B",
+  async (repair) => {
+    const ledger = createInMemoryRunLedger();
+    const store = new InMemoryPromptSubmissionStore();
+    const original = ledger.markSucceeded.bind(ledger);
+    let writable = false;
+    let finalizationWrites = 0;
+    ledger.markSucceeded = (runId, terminal): Promise<RunLedgerRecord> => {
+      if (runId === "goal_run_1") {
+        finalizationWrites++;
+        if (!writable)
+          return Promise.reject(new Error("goal terminal unavailable"));
+      }
+      return original(runId, terminal);
+    };
+    let runNumber = 0;
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      runLedger: ledger,
+      promptSubmissionStore: store,
+      createRunId: () => `goal_run_${String(++runNumber)}`,
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [{ textDelta: "Goal turn settled", finishReason: "stop" }],
+          [{ textDelta: "B settled", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+    try {
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "goal-recovery-new",
+        commandId: "new",
+        path: ["new"],
+        raw: "/new",
+        rawArgs: "",
+        surface: "tui",
+      });
+      await client.executeCommand({
+        argv: ["recover", "goal"],
+        clientInvocationId: "goal-recovery-start",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal recover goal",
+        rawArgs: "recover goal",
+        surface: "tui",
+      });
+      await vi.waitFor(() => {
+        expect(finalizationWrites).toBe(1);
+      });
+      await vi.waitFor(async () => {
+        expect(
+          (await client.getSessionControl({ sessionId: "session_1" }))
+            .executionRecovery,
+        ).toMatchObject({ status: "blocked" });
+      });
+      // An already admitted B must stay queued while the goal owner's save is unresolved.
+      const b = (
+        await store.accept({
+          promptId: "goal-recovery-b",
+          clientRequestId: "goal-recovery-b",
+          scopeKey: process.cwd(),
+          sessionId: "session_1",
+          text: "B",
+          userMessageId: "goal-recovery-b-message",
+          maxQueuedPrompts: 100,
+        })
+      ).record;
+      await expect(client.initializeSession("session_1")).rejects.toThrow(
+        "goal terminal unavailable",
+      );
+      const failedWrites = finalizationWrites;
+      await client.getSnapshot();
+      await client.getSessionControl({ sessionId: "session_1" });
+      await client.getSessionView({ sessionId: "session_1" });
+      expect(finalizationWrites).toBe(failedWrites);
+      expect(await store.get(b.promptId)).toMatchObject({ status: "queued" });
+      expect(requests).toHaveLength(1);
+      writable = true;
+      if (repair === "shutdown") {
+        expect(await client.dispose()).toEqual({
+          status: "confirmed",
+          errors: [],
+        });
+        expect(await ledger.get("goal_run_1")).toMatchObject({
+          status: "succeeded",
+        });
+        expect(await store.get(b.promptId)).toMatchObject({
+          status: "retained",
+        });
+        expect(finalizationWrites).toBe(failedWrites + 1);
+        expect(requests).toHaveLength(1);
+        return;
+      }
+      await Promise.all([
+        client.initializeSession("session_1"),
+        client.initializeSession("session_1"),
+      ]);
+      const done = await withTimeout(
+        client.waitForPrompt(b.promptId),
+        2000,
+        "B did not start after goal finalization repair",
+      );
+      expect(done.prompt).toMatchObject({
+        status: "succeeded",
+        runId: "goal_run_2",
+      });
+      expect(await ledger.get("goal_run_1")).toMatchObject({
+        status: "succeeded",
+      });
+      expect(finalizationWrites).toBe(failedWrites + 1);
+      expect(requests).toHaveLength(2);
+      expect(
+        (await client.getSessionControl({ sessionId: "session_1" }))
+          .executionRecovery,
+      ).toEqual({ status: "ready" });
+    } finally {
+      writable = true;
+      await client.dispose();
+    }
+  },
+);

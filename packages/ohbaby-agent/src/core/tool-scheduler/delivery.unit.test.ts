@@ -409,6 +409,8 @@ it("does not cancel another run that reused the same callId", async () => {
 it("delivers a resource-blocked error saying the new call did not execute", async () => {
   const bus = createBus();
   const stalled = deferred<{ output: string }>();
+  const started = deferred<undefined>();
+  const cancellation = new AbortController();
   let count = 0;
   const scheduler = createToolScheduler({
     bus,
@@ -416,7 +418,7 @@ it("delivers a resource-blocked error saying the new call did not execute", asyn
       bus,
       initialLevel: "full-access",
     }),
-    config: { timeout: { defaultTimeout: 5 } },
+    config: { timeout: { defaultTimeout: 1000 } },
     cleanupObservationMs: 5,
   });
   const resources = [
@@ -437,6 +439,7 @@ it("delivers a resource-blocked error saying the new call did not execute", asyn
         parametersJsonSchema: { type: "object" },
         execute: () => {
           count++;
+          started.resolve(undefined);
           return stalled.promise;
         },
       },
@@ -444,7 +447,13 @@ it("delivers a resource-blocked error saying the new call did not execute", asyn
     ),
   );
   const observer = { onCallState: noop, onCallSettled: noop };
-  await scheduler.executeBatch({ calls: [request("old")], observer });
+  const first = scheduler.executeBatch({
+    calls: [{ ...request("old"), signal: cancellation.signal }],
+    observer,
+  });
+  await started.promise;
+  cancellation.abort("user-stop");
+  await first;
   const result = await scheduler.executeBatch({
     calls: [request("blocked")],
     observer,

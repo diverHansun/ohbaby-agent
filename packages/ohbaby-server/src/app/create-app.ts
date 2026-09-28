@@ -71,6 +71,7 @@ import {
   cancelQueuedPromptForClient,
   steerQueuedPromptForClient,
   editQueuedPromptForClient,
+  resubmitRetainedPromptForClient,
   releasePromptEditLeaseForClient,
   renewPromptEditLeaseForClient,
 } from "../coordination/prompt-backend.js";
@@ -2166,6 +2167,54 @@ class DaemonServerAppRuntime {
           context.req.raw.signal,
         );
         return context.json({ completion, ok: true });
+      } catch (error) {
+        return context.json(
+          promptErrorBody(error),
+          promptMutationStatus(error),
+        );
+      }
+    });
+
+    this.app.post("/v1/prompts/:id/resubmit", async (context) => {
+      const authorization = this.authorizePromptMutation(context);
+      if ("response" in authorization) return authorization.response;
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok)
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      const body = isRecord(parsed.value) ? parsed.value : {};
+      const text = asNonEmptyString(body.text);
+      const editLeaseId = asNonEmptyString(body.editLeaseId);
+      const operationId = asNonEmptyString(body.operationId);
+      if (!text || !editLeaseId || !operationId)
+        return context.json(
+          webErrorBody("text, editLeaseId and operationId are required"),
+          400,
+        );
+      try {
+        if (
+          !this.clientViews.canAccessPrompt(
+            authorization.clientId,
+            await this.options.backend.getSnapshot(),
+            context.req.param("id"),
+          )
+        ) {
+          return context.json(
+            webErrorBody("Prompt belongs to another session"),
+            403,
+          );
+        }
+        const receipt = await resubmitRetainedPromptForClient(
+          this.commandBackend("server-rest", {
+            clientId: authorization.clientId,
+          }),
+          { promptId: context.req.param("id"), text, editLeaseId, operationId },
+          authorization.clientId,
+          this.clientViews,
+        );
+        return context.json({ ok: true, receipt });
       } catch (error) {
         return context.json(
           promptErrorBody(error),

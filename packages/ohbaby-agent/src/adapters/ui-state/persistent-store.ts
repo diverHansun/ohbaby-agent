@@ -284,7 +284,12 @@ function runStatusToUiStatus(record: RunLedgerRecord): UiRunStatus {
   if (record.status === "pending" || record.status === "running") {
     return { kind: "running", runId: record.runId };
   }
-  if (record.status === "succeeded" || record.status === "cancelled") {
+  if (
+    record.status === "succeeded" ||
+    record.status === "cancelled" ||
+    (record.status === "interrupted" &&
+      (record.error === "user-stop" || record.error === "service-shutdown"))
+  ) {
     return { kind: "idle" };
   }
   return {
@@ -298,6 +303,10 @@ export function runToUiRun(record: RunLedgerRecord): UiRun {
   return {
     id: record.runId,
     sessionId: record.sessionId,
+    inputsCloseReason: record.inputsCloseReason,
+    endedAt:
+      record.endedAt === undefined ? undefined : toIsoString(record.endedAt),
+    endTimeSource: record.endTimeSource,
     startedAt: toIsoString(record.startedAt ?? record.createdAt),
     status: runStatusToUiStatus(record),
     updatedAt: toIsoString(

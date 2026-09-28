@@ -7,6 +7,34 @@ import {
 } from "../../../ohbaby-agent/src/core/message/index.js";
 import { createDaemonHttpServer } from "../runtime/daemon/server.js";
 
+async function readUntil(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  matches: (text: string) => boolean,
+): Promise<{ readonly done: boolean; readonly text: string }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const reading = async (): Promise<{ done: boolean; text: string }> => {
+    const decoder = new TextDecoder();
+    let text = "";
+    for (;;) {
+      const chunk = await reader.read();
+      text += decoder.decode(chunk.value, { stream: !chunk.done });
+      if (chunk.done || matches(text)) return { done: chunk.done, text };
+    }
+  };
+  try {
+    return await Promise.race([
+      reading(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error("SSE observation timed out"));
+        }, 2000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 describe("SSE notification fault boundary", () => {
   it("closes only the failing real HTTP stream after a committed message and continues healthy delivery", async () => {
     const bus = createBus();
@@ -83,6 +111,13 @@ describe("SSE notification fault boundary", () => {
         readers.push(reader);
       }
       expect(failing).toBeDefined();
+      // Bytes already queued before the writer fails remain readable after close.
+      await messages.createMessage({
+        id: "buffered-before-socket-failure",
+        sessionId: session.id,
+        role: "assistant",
+        agent: "test",
+      });
       fail = true;
       const committed = await messages.createMessage({
         id: "committed-after-socket-failure",
@@ -96,9 +131,11 @@ describe("SSE notification fault boundary", () => {
       const healthyReader = readers.at(1);
       if (!brokenReader || !healthyReader)
         throw new Error("missing connected readers");
-      expect(await brokenReader.read()).toMatchObject({ done: true });
-      const received = new TextDecoder().decode(
-        (await healthyReader.read()).value,
+      const closed = await readUntil(brokenReader, () => false);
+      expect(closed.done).toBe(true);
+      expect(closed.text).not.toContain(committed.id);
+      const { text: received } = await readUntil(healthyReader, (text) =>
+        text.includes(committed.id),
       );
       expect(received).toContain('"session.changed"');
       expect(received).toContain(committed.id);
@@ -106,7 +143,9 @@ describe("SSE notification fault boundary", () => {
         type: "text",
         text: "still committed",
       });
-      const next = new TextDecoder().decode((await healthyReader.read()).value);
+      const { text: next } = await readUntil(healthyReader, (text) =>
+        text.includes("still committed"),
+      );
       expect(next).toContain("still committed");
       expect(
         (

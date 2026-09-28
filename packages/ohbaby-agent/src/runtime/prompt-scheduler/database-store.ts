@@ -2,6 +2,7 @@ import { sameReasoning } from "./types.js";
 /* eslint-disable @typescript-eslint/require-await -- SQLite operations are synchronous behind the shared async store contract. */
 import { randomUUID } from "node:crypto";
 import type { UiPromptError } from "ohbaby-sdk";
+import { isValidOwnerPid } from "../../utils/process-owner.js";
 import {
   getDatabase,
   runWriteTransaction,
@@ -28,6 +29,10 @@ import type {
   PromptHistoryWindow,
   PromptSubmissionStatus,
   PromptSubmissionStore,
+  PromptResubmissionReceipt,
+  ResubmitRetainedPromptInput,
+  ResubmitRetainedPromptResult,
+  RecoverPromptSubmissionsOptions,
 } from "./types.js";
 
 export interface PromptSubmissionRow {
@@ -47,6 +52,9 @@ export interface PromptSubmissionRow {
   readonly edit_lease_owner_id: string | null;
   readonly edit_lease_expires_at: number | null;
   readonly error_data: string | null;
+  readonly accepted_at: number;
+  readonly admission_order: number;
+  readonly end_time_source: "recovery" | null;
   readonly created_at: number;
   readonly updated_at: number;
   readonly started_at: number | null;
@@ -62,8 +70,8 @@ export interface DatabasePromptSubmissionStoreOptions {
 }
 
 function defaultIsOwnerAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
+  if (!isValidOwnerPid(pid)) {
+    return true;
   }
   try {
     process.kill(pid, 0);
@@ -128,6 +136,9 @@ export function promptSubmissionRowToRecord(
     editLeaseOwnerId: row.edit_lease_owner_id ?? undefined,
     editLeaseExpiresAt: row.edit_lease_expires_at ?? undefined,
     error: parseError(row.error_data),
+    acceptedAt: row.accepted_at,
+    admissionOrder: row.admission_order,
+    endTimeSource: row.end_time_source ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at ?? undefined,
@@ -139,16 +150,16 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   private readonly db: DatabaseConnection;
   private readonly now: () => number;
   private readonly isOwnerAlive: (pid: number) => boolean;
-  private readonly ownerId: string | undefined;
-  private readonly ownerPid: number | undefined;
+  private readonly ownerId: string;
+  private readonly ownerPid: number;
   private readonly tableName = schema.promptSubmission.tableName;
 
   constructor(options: DatabasePromptSubmissionStoreOptions = {}) {
     this.db = options.db ?? getDatabase();
     this.now = options.now ?? Date.now;
     this.isOwnerAlive = options.isOwnerAlive ?? defaultIsOwnerAlive;
-    this.ownerId = options.ownerId;
-    this.ownerPid = options.ownerPid;
+    this.ownerId = options.ownerId ?? `owner_${randomUUID()}`;
+    this.ownerPid = options.ownerPid ?? process.pid;
   }
 
   async assertCapacity(
@@ -214,13 +225,17 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
            WHERE scope_key = ?`,
         )
         .get(input.scopeKey)?.created_at;
-      const at = Math.max(this.now(), (latestCreatedAt ?? 0) + 1);
+      const at = Math.max(
+        this.now(),
+        (latestCreatedAt ?? 0) + 1,
+        this.latestAcceptedAt(db, input.scopeKey),
+      );
       db.prepare(
         `INSERT INTO ${this.tableName}
           (prompt_id, client_request_id, scope_key, session_id,
            user_message_id, text, reasoning_data, status,
-           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+           created_at, updated_at, owner_id, owner_pid, accepted_at, admission_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
       ).run(
         input.promptId,
         input.clientRequestId,
@@ -231,6 +246,10 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         input.reasoning ? JSON.stringify(input.reasoning) : null,
         at,
         at,
+        this.ownerId,
+        this.ownerPid,
+        at,
+        this.nextAdmissionOrder(db, input.scopeKey),
       );
       return { record: this.requireFrom(db, input.promptId), inserted: true };
     });
@@ -269,7 +288,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
           `UPDATE ${this.tableName}
            SET edit_lease_id = ?, edit_lease_owner_id = ?,
                edit_lease_expires_at = ?, updated_at = ?
-           WHERE prompt_id = ? AND status = 'queued'
+           WHERE prompt_id = ? AND status IN ('queued', 'retained')
              AND (edit_lease_id IS NULL OR edit_lease_expires_at <= ?)`,
         )
         .run(
@@ -307,7 +326,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
           `UPDATE ${this.tableName}
            SET edit_lease_owner_id = ?, edit_lease_expires_at = ?,
                updated_at = ?
-           WHERE prompt_id = ? AND status = 'queued'
+           WHERE prompt_id = ? AND status IN ('queued', 'retained')
              AND edit_lease_id = ? AND edit_lease_owner_id = ?
              AND edit_lease_expires_at > ?`,
         )
@@ -349,7 +368,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
            SET text = ?, edit_lease_id = NULL,
                edit_lease_owner_id = NULL, edit_lease_expires_at = NULL,
                updated_at = ?
-           WHERE prompt_id = ? AND status = 'queued'
+           WHERE prompt_id = ? AND status IN ('queued', 'retained')
              AND edit_lease_id = ? AND edit_lease_expires_at > ?
              AND (? IS NULL OR edit_lease_owner_id = ?)`,
           )
@@ -384,7 +403,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
             `UPDATE ${this.tableName}
            SET edit_lease_id = NULL, edit_lease_owner_id = NULL,
                edit_lease_expires_at = NULL, updated_at = ?
-           WHERE prompt_id = ? AND status = 'queued'
+           WHERE prompt_id = ? AND status IN ('queued', 'retained')
              AND edit_lease_id = ? AND edit_lease_expires_at > ?
              AND (? IS NULL OR edit_lease_owner_id = ?)`,
           )
@@ -425,7 +444,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
            SET status = 'cancelled', updated_at = ?, ended_at = ?,
                edit_lease_id = NULL, edit_lease_owner_id = NULL,
                edit_lease_expires_at = NULL
-           WHERE prompt_id = ? AND status = 'queued'
+           WHERE prompt_id = ? AND status IN ('queued', 'retained')
              AND (edit_lease_id IS NULL OR edit_lease_expires_at <= ?
                   OR (edit_lease_id = ?
                       AND (? IS NULL OR edit_lease_owner_id = ?)))`,
@@ -449,7 +468,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   async claim(promptId: string): Promise<PromptSubmissionRecord | null> {
     return this.transaction((db) => {
       const current = this.rowFrom(db, promptId);
-      if (current?.status !== "queued") {
+      if (current?.status !== "queued" || !this.owns(current)) {
         return null;
       }
       const now = this.now();
@@ -461,19 +480,13 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         .prepare(
           `UPDATE ${this.tableName}
            SET status = 'starting', updated_at = ?, started_at = ?,
-               owner_id = ?, owner_pid = ?, edit_lease_id = NULL,
+               edit_lease_id = NULL,
                edit_lease_owner_id = NULL, edit_lease_expires_at = NULL
            WHERE prompt_id = ? AND status = 'queued'
+             AND owner_id = ? AND owner_pid = ?
              AND (edit_lease_id IS NULL OR edit_lease_expires_at <= ?)`,
         )
-        .run(
-          at,
-          at,
-          this.ownerId ?? null,
-          this.ownerPid ?? null,
-          promptId,
-          now,
-        );
+        .run(at, at, promptId, this.ownerId, this.ownerPid, now);
       return result.changes === 1 ? this.requireFrom(db, promptId) : null;
     });
   }
@@ -484,6 +497,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   ): Promise<PromptSubmissionRecord> {
     return this.transaction((db) => {
       const current = this.requireFrom(db, promptId);
+      this.assertOwned(current);
       if (current.status !== "starting") {
         throw new InvalidPromptTransitionError(
           promptId,
@@ -509,6 +523,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   async requeueBusy(promptId: string): Promise<PromptSubmissionRecord> {
     return this.transaction((db) => {
       const current = this.requireFrom(db, promptId);
+      this.assertOwned(current);
       if (current.status !== "starting" || current.runId !== undefined) {
         throw new InvalidPromptTransitionError(
           promptId,
@@ -519,8 +534,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       const result = db
         .prepare(
           `UPDATE ${this.tableName}
-           SET status = 'queued', updated_at = ?, started_at = NULL,
-               owner_id = NULL, owner_pid = NULL
+           SET status = 'queued', updated_at = ?, started_at = NULL
            WHERE prompt_id = ? AND status = 'starting' AND run_id IS NULL`,
         )
         .run(this.nextTime(current), promptId);
@@ -537,40 +551,44 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   ): Promise<PromptSubmissionRecord> {
     return this.transaction((db) => {
       const current = this.requireFrom(db, promptId);
-      if (current.status !== "starting" && current.status !== "running") {
+      this.assertOwned(current);
+      if (
+        input.expectedRunId !== undefined &&
+        current.runId !== input.expectedRunId
+      )
+        throw new PromptVersionConflictError(promptId);
+      if (
+        ["succeeded", "failed", "cancelled", "interrupted"].includes(
+          current.status,
+        )
+      )
+        return current;
+      if (current.status !== "starting" && current.status !== "running")
         throw new InvalidPromptTransitionError(
           promptId,
           current.status,
           input.status,
         );
-      }
-      if (
-        input.expectedRunId !== undefined &&
-        current.runId !== input.expectedRunId
-      ) {
-        throw new PromptVersionConflictError(promptId);
-      }
       const at = this.nextTime(current);
       const result = db
         .prepare(
           `UPDATE ${this.tableName}
-           SET status = ?, error_data = ?, updated_at = ?, ended_at = ?
-           WHERE prompt_id = ?
-             AND status IN ('starting', 'running')
-             AND ((? IS NULL AND run_id IS NULL) OR run_id = ?)`,
+        SET status = ?, error_data = ?, updated_at = ?, ended_at = ?, end_time_source = ?
+        WHERE prompt_id = ? AND status IN ('starting', 'running')
+          AND owner_id = ? AND owner_pid = ? AND run_id IS ?`,
         )
         .run(
           input.status,
           input.error ? JSON.stringify(input.error) : null,
           at,
-          at,
+          input.endedAt ?? at,
+          input.endTimeSource ?? null,
           promptId,
-          input.expectedRunId ?? null,
-          input.expectedRunId ?? null,
+          this.ownerId,
+          this.ownerPid,
+          current.runId ?? null,
         );
-      if (result.changes !== 1) {
-        throw new PromptVersionConflictError(promptId);
-      }
+      if (result.changes !== 1) throw new PromptVersionConflictError(promptId);
       return this.requireFrom(db, promptId);
     });
   }
@@ -581,10 +599,10 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     return this.db
       .prepare<PromptSubmissionRow>(
         `SELECT * FROM ${this.tableName}
-         WHERE scope_key = ? AND status = 'queued'
-         ORDER BY created_at ASC, prompt_id ASC`,
+         WHERE scope_key = ? AND status = 'queued' AND owner_id = ? AND owner_pid = ?
+         ORDER BY accepted_at ASC, admission_order ASC, prompt_id ASC`,
       )
-      .all(scopeKey)
+      .all(scopeKey, this.ownerId, this.ownerPid)
       .map(promptSubmissionRowToRecord);
   }
 
@@ -620,7 +638,9 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   ): Promise<readonly PromptSubmissionRecord[]> {
     const messageIds = [...new Set(window.messageIds ?? [])];
     const runIds = [...new Set(window.runIds ?? [])];
-    const associations = ["status IN ('queued', 'starting', 'running')"];
+    const associations = [
+      "status IN ('queued', 'retained', 'starting', 'running')",
+    ];
     const values: string[] = [scopeKey, sessionId];
     if (messageIds.length > 0) {
       associations.push(
@@ -646,60 +666,198 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
     return this.db
       .prepare<{ readonly scope_key: string }>(
         `SELECT DISTINCT scope_key FROM ${this.tableName}
-         WHERE status = 'queued' ORDER BY scope_key ASC`,
+         WHERE status = 'queued' AND owner_id = ? AND owner_pid = ? ORDER BY scope_key ASC`,
       )
-      .all()
+      .all(this.ownerId, this.ownerPid)
       .map((row) => row.scope_key);
   }
 
-  async recoverInterrupted(scopeKey: string): Promise<number> {
+  async resubmitRetained(
+    input: ResubmitRetainedPromptInput,
+  ): Promise<ResubmitRetainedPromptResult> {
+    if (!input.operationId.trim() || input.operationId.startsWith("legacy:"))
+      throw new InvalidPromptClientRequestIdError(input.operationId);
     return this.transaction((db) => {
-      const at = this.now();
-      const error: UiPromptError = {
-        code: "PROCESS_INTERRUPTED",
-        message: "Process interrupted before prompt completed",
-        source: "runtime",
-        retryable: true,
-      };
-      return db
-        .prepare(
-          `UPDATE ${this.tableName}
-           SET status = 'interrupted', error_data = ?, updated_at = ?, ended_at = ?
-           WHERE scope_key = ? AND status IN ('starting', 'running')`,
+      const previous = db
+        .prepare<{
+          prompt_id: string;
+          text: string;
+          receipt: string;
+        }>(
+          "SELECT prompt_id,text,receipt FROM prompt_resubmission WHERE scope_key=? AND operation_id=?",
         )
-        .run(JSON.stringify(error), at, at, scopeKey).changes;
+        .get(input.scopeKey, input.operationId);
+      if (previous) {
+        if (
+          previous.prompt_id !== input.promptId ||
+          previous.text !== input.text
+        )
+          throw new PromptIdempotencyConflictError(input.operationId);
+        return {
+          record: this.requireFrom(db, input.promptId),
+          receipt: JSON.parse(previous.receipt) as PromptResubmissionReceipt,
+          inserted: false,
+        };
+      }
+      const current = this.requireFrom(db, input.promptId);
+      if (current.scopeKey !== input.scopeKey || current.status !== "retained")
+        throw new PromptVersionConflictError(input.promptId);
+      this.assertLease(current, input.editLeaseId, input.ownerClientId);
+      if (!input.text.trim()) throw new Error("Prompt text must not be empty");
+      const count =
+        db
+          .prepare<{
+            count: number;
+          }>(
+            `SELECT COUNT(*) AS count FROM ${this.tableName} WHERE scope_key=? AND status='queued'`,
+          )
+          .get(input.scopeKey)?.count ?? 0;
+      if (count >= input.maxQueuedPrompts)
+        throw new PromptQueueFullError(input.scopeKey, input.maxQueuedPrompts);
+      const acceptedAt = Math.max(
+        this.now(),
+        this.latestAcceptedAt(db, input.scopeKey),
+      );
+      const order = this.nextAdmissionOrder(db, input.scopeKey);
+      const result = db
+        .prepare(
+          `UPDATE ${this.tableName} SET text=?, status='queued', owner_id=?, owner_pid=?,
+        accepted_at=?, admission_order=?, updated_at=?, run_id=NULL, started_at=NULL, ended_at=NULL,
+        end_time_source=NULL, error_data=NULL, edit_lease_id=NULL, edit_lease_owner_id=NULL, edit_lease_expires_at=NULL
+        WHERE prompt_id=? AND status='retained' AND edit_lease_id=? AND edit_lease_expires_at>?
+          AND (? IS NULL OR edit_lease_owner_id=?)`,
+        )
+        .run(
+          input.text,
+          this.ownerId,
+          this.ownerPid,
+          acceptedAt,
+          order,
+          this.nextTime(current),
+          input.promptId,
+          input.editLeaseId,
+          this.now(),
+          input.ownerClientId ?? null,
+          input.ownerClientId ?? null,
+        );
+      if (result.changes !== 1)
+        throw new PromptEditLeaseLostError(input.promptId);
+      const receipt: PromptResubmissionReceipt = {
+        operationId: input.operationId,
+        promptId: current.promptId,
+        sessionId: current.sessionId,
+        userMessageId: current.userMessageId,
+        acceptedAt,
+      };
+      db.prepare(
+        "INSERT INTO prompt_resubmission(scope_key,operation_id,prompt_id,text,receipt) VALUES(?,?,?,?,?)",
+      ).run(
+        input.scopeKey,
+        input.operationId,
+        input.promptId,
+        input.text,
+        JSON.stringify(receipt),
+      );
+      return {
+        record: this.requireFrom(db, input.promptId),
+        receipt,
+        inserted: true,
+      };
     });
   }
 
-  async recoverAllInterrupted(): Promise<number> {
+  async getResubmissionReceipt(
+    scopeKey: string,
+    operationId: string,
+  ): Promise<PromptResubmissionReceipt | undefined> {
+    const row = this.db
+      .prepare<{
+        receipt: string;
+      }>(
+        "SELECT receipt FROM prompt_resubmission WHERE scope_key=? AND operation_id=?",
+      )
+      .get(scopeKey, operationId);
+    return row
+      ? (JSON.parse(row.receipt) as PromptResubmissionReceipt)
+      : undefined;
+  }
+
+  async retainOwnedQueued(scopeKey?: string): Promise<number> {
+    return this.transaction(
+      (db) =>
+        db
+          .prepare(
+            `UPDATE ${this.tableName} SET status='retained', updated_at=?, ended_at=NULL,
+      edit_lease_id=NULL, edit_lease_owner_id=NULL, edit_lease_expires_at=NULL
+      WHERE status='queued' AND owner_id=? AND owner_pid=? AND (? IS NULL OR scope_key=?)`,
+          )
+          .run(
+            this.now(),
+            this.ownerId,
+            this.ownerPid,
+            scopeKey ?? null,
+            scopeKey ?? null,
+          ).changes,
+    );
+  }
+
+  async recoverInterrupted(scopeKey: string): Promise<number> {
+    return this.recoverAllInterrupted({ scopeKey });
+  }
+
+  async recoverAllInterrupted(
+    options: RecoverPromptSubmissionsOptions = {},
+  ): Promise<number> {
     return this.transaction((db) => {
-      const at = this.now();
-      const error: UiPromptError = {
-        code: "PROCESS_INTERRUPTED",
-        message: "Process interrupted before prompt completed",
-        source: "runtime",
-        retryable: true,
-      };
-      const active = db
+      const rows = db
         .prepare<PromptSubmissionRow>(
           `SELECT * FROM ${this.tableName}
-           WHERE status IN ('starting', 'running')`,
+        WHERE status IN ('queued','starting','running') AND (? IS NULL OR scope_key=?) AND (? IS NULL OR session_id=?)`,
         )
-        .all();
-      let updatedCount = 0;
-      for (const row of active) {
-        if (row.owner_pid !== null && this.isOwnerAlive(row.owner_pid)) {
-          continue;
-        }
-        updatedCount += db
+        .all(
+          options.scopeKey ?? null,
+          options.scopeKey ?? null,
+          options.sessionId ?? null,
+          options.sessionId ?? null,
+        );
+      let count = 0;
+      for (const row of rows) {
+        const owned =
+          row.owner_id === this.ownerId && row.owner_pid === this.ownerPid;
+        const unknown = !row.owner_id || !isValidOwnerPid(row.owner_pid);
+        const recover = unknown
+          ? options.recoverUnknownOwner === true
+          : owned
+            ? options.includeCurrentOwner === true
+            : !this.isOwnerAlive(row.owner_pid);
+        if (!recover) continue;
+        const retained = row.status === "queued";
+        const at = Math.max(this.now(), row.updated_at + 1);
+        const error: UiPromptError = {
+          code: "PROCESS_INTERRUPTED",
+          message: "Process interrupted before prompt completed",
+          source: "runtime",
+          retryable: true,
+        };
+        count += db
           .prepare(
-            `UPDATE ${this.tableName}
-             SET status = 'interrupted', error_data = ?, updated_at = ?, ended_at = ?
-             WHERE prompt_id = ? AND status IN ('starting', 'running')`,
+            `UPDATE ${this.tableName} SET status=?, error_data=?, updated_at=?, ended_at=?, end_time_source=?,
+          edit_lease_id=NULL, edit_lease_owner_id=NULL, edit_lease_expires_at=NULL
+          WHERE prompt_id=? AND status=? AND owner_id IS ? AND owner_pid IS ?`,
           )
-          .run(JSON.stringify(error), at, at, row.prompt_id).changes;
+          .run(
+            retained ? "retained" : "interrupted",
+            retained ? null : JSON.stringify(error),
+            at,
+            retained ? null : at,
+            retained ? null : "recovery",
+            row.prompt_id,
+            row.status,
+            row.owner_id,
+            row.owner_pid,
+          ).changes;
       }
-      return updatedCount;
+      return count;
     });
   }
 
@@ -713,10 +871,47 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         .prepare(
           `UPDATE ${this.tableName}
            SET status = 'failed', error_data = ?, updated_at = ?, ended_at = ?
-           WHERE scope_key = ? AND status = 'queued'`,
+           WHERE scope_key = ? AND status = 'queued' AND owner_id = ? AND owner_pid = ?`,
         )
-        .run(JSON.stringify(error), at, at, scopeKey).changes;
+        .run(
+          JSON.stringify(error),
+          at,
+          at,
+          scopeKey,
+          this.ownerId,
+          this.ownerPid,
+        ).changes;
     });
+  }
+
+  private owns(record: PromptSubmissionRecord): boolean {
+    return record.ownerId === this.ownerId && record.ownerPid === this.ownerPid;
+  }
+  private assertOwned(record: PromptSubmissionRecord): void {
+    if (!this.owns(record))
+      throw new PromptVersionConflictError(record.promptId);
+  }
+  private nextAdmissionOrder(db: DatabaseConnection, scopeKey: string): number {
+    return (
+      db
+        .prepare<{
+          value: number;
+        }>(
+          `SELECT COALESCE(MAX(admission_order),0)+1 AS value FROM ${this.tableName} WHERE scope_key=?`,
+        )
+        .get(scopeKey)?.value ?? 1
+    );
+  }
+  private latestAcceptedAt(db: DatabaseConnection, scopeKey: string): number {
+    return (
+      db
+        .prepare<{
+          value: number;
+        }>(
+          `SELECT COALESCE(MAX(accepted_at),0) AS value FROM ${this.tableName} WHERE scope_key=?`,
+        )
+        .get(scopeKey)?.value ?? 0
+    );
   }
 
   private row(promptId: string): PromptSubmissionRecord | undefined {
@@ -761,7 +956,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
   }
 
   private assertQueued(record: PromptSubmissionRecord): void {
-    if (record.status !== "queued") {
+    if (record.status !== "queued" && record.status !== "retained") {
       throw new PromptNotQueuedError(record.promptId);
     }
   }

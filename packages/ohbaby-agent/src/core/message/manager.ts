@@ -23,6 +23,7 @@ import type {
   TextPart,
   UpdateMessagePatch,
   UpdatePartPatch,
+  UpdatePartCondition,
 } from "./types.js";
 import type { ModelMessage } from "../llm-client/index.js";
 
@@ -175,9 +176,15 @@ export function createMessageManager(
   async function updatePart(
     partId: string,
     patch: UpdatePartPatch,
+    condition?: UpdatePartCondition,
   ): Promise<Part> {
     const { delta, ...storePatch } = patch;
-    const part = await options.store.updatePart(partId, storePatch, now());
+    const part = await options.store.updatePart(
+      partId,
+      storePatch,
+      now(),
+      condition,
+    );
     const payload = delta === undefined ? { part } : { part, delta };
     if (part.type !== "model-state") publish(MessageEvent.PartUpdated, payload);
     return part;
@@ -357,10 +364,12 @@ export function createMessageManager(
       commitMessage(id, () => manager.appendPart(id, input)),
     appendModelContextPart: (id, text) =>
       commitMessage(id, () => manager.appendModelContextPart(id, text)),
-    async updatePart(id, patch): Promise<Part> {
+    async updatePart(id, patch, condition): Promise<Part> {
       const part = await options.store.getPart(id);
       if (part === undefined) throw new Error(`Part not found: ${id}`);
-      return commit(part.sessionId, () => manager.updatePart(id, patch));
+      return commit(part.sessionId, () =>
+        manager.updatePart(id, patch, condition),
+      );
     },
     commitModelStep: (input) =>
       commitMessage(input.assistantMessageId, () =>

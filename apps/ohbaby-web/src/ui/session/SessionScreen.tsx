@@ -1,3 +1,4 @@
+import { hasUnsentSteerAfterLatestStop } from "ohbaby-sdk";
 import {
   createSubagentReader,
   createSubagentConversationReader,
@@ -1103,6 +1104,10 @@ export function SessionScreen({
             }}
             activeSession={view.activeSession}
             queuedPrompts={view.queuedPrompts}
+            unsentSteer={hasUnsentSteerAfterLatestStop(
+              view.snapshot?.runs ?? [],
+              view.composer.activeSessionId,
+            )}
             commandCatalogVersion={view.commandCatalogVersion}
             connectionKind={view.header.connectionKind}
             topContent={

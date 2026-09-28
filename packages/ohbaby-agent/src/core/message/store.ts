@@ -28,6 +28,7 @@ import type {
   CommitCompactionResult,
   UpdateMessagePatch,
   UpdatePartPatch,
+  UpdatePartCondition,
   StoreCompactionInput,
   TextPart,
 } from "./types.js";
@@ -326,11 +327,19 @@ export function createInMemoryMessageStore(): MessageStore {
       partId: string,
       patch: Omit<UpdatePartPatch, "delta">,
       updatedAt: number,
+      condition?: UpdatePartCondition,
     ): Promise<Part> {
       const existing = parts.get(partId);
       if (!existing) {
         return Promise.reject(new Error(`Part not found: ${partId}`));
       }
+      if (
+        condition?.ifToolUnfinished &&
+        (existing.type !== "tool" ||
+          (existing.state.status !== "pending" &&
+            existing.state.status !== "running"))
+      )
+        return Promise.resolve(clone(existing));
       const updated = { ...existing, ...patch } as Part;
       parts.set(partId, clone(updated));
       touchMessage(existing.messageId, updatedAt);

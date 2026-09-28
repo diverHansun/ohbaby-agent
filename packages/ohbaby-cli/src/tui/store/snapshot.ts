@@ -85,6 +85,8 @@ export interface TuiStoreState {
   readonly permission: UiPermissionState | undefined;
   readonly prompts: readonly UiPromptSubmission[];
   readonly runtime: TuiRuntimeStatus;
+  /** Set only when a Run projection supplied the current error. */
+  readonly runtimeErrorRunId?: string;
   readonly interactions: readonly TuiInteractionRequest[];
   readonly notices: readonly UiNotice[];
   readonly commandNotices: readonly TuiCommandNotice[];

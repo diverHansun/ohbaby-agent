@@ -2068,7 +2068,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     vi.spyOn(fake.client, "acquirePromptEditLease").mockResolvedValue({
       editLeaseId: "lease_1",
-      expiresAt: "2026-07-12T00:01:00.000Z",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
       ownerClientId: "client_web",
       prompt: queuedPrompt,
     });
@@ -2087,7 +2087,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     const app = mountApp(fake.runtime);
     const editButton = app.container.querySelector(
-      '[aria-label="Edit queued prompt: queued text"]',
+      '[aria-label="Edit prompt: queued text"]',
     );
     if (!(editButton instanceof HTMLButtonElement)) {
       throw new Error("queued edit button not found");
@@ -2145,7 +2145,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     vi.spyOn(fake.client, "acquirePromptEditLease").mockResolvedValue({
       editLeaseId: "lease_1",
-      expiresAt: "2026-07-12T00:01:00.000Z",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
       ownerClientId: "client_web",
       prompt: queuedPrompt,
     });
@@ -2155,7 +2155,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
     const editButton = app.container.querySelector(
-      '[aria-label="Edit queued prompt: queued text"]',
+      '[aria-label="Edit prompt: queued text"]',
     );
     if (!(editButton instanceof HTMLButtonElement)) {
       throw new Error("queued edit button not found");
@@ -2213,14 +2213,14 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     vi.spyOn(fake.client, "acquirePromptEditLease").mockResolvedValue({
       editLeaseId: "lease_failure",
-      expiresAt: "2026-07-12T00:01:00.000Z",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
       ownerClientId: "client_web",
       prompt: queuedPrompt,
     });
     fake.editQueuedPrompt.mockRejectedValue(new Error("save failed"));
     const app = mountApp(fake.runtime);
     const editButton = app.container.querySelector(
-      '[aria-label="Edit queued prompt: queued text"]',
+      '[aria-label="Edit prompt: queued text"]',
     );
     if (!(editButton instanceof HTMLButtonElement)) {
       throw new Error("queued edit button not found");
@@ -2251,7 +2251,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
   });
 
-  it("persists the edit buffer as a draft when reload renewal loses the lease", async () => {
+  it("preserves expired editing separately from the original draft and blocks implicit submission", async () => {
     globalThis.sessionStorage.setItem(
       "ohbaby:composer:/repo-a:session_1",
       JSON.stringify({ text: "older draft" }),
@@ -2273,15 +2273,23 @@ describe("OhbabyWebApp slash command interactions", () => {
     vi.spyOn(fake.client, "renewPromptEditLease").mockRejectedValue(
       new Error("lease expired"),
     );
-    mountApp(fake.runtime);
-
+    const app = mountApp(fake.runtime);
     await waitFor(() =>
-      Boolean(
-        globalThis.sessionStorage
-          .getItem("ohbaby:composer:/repo-a:session_1")
-          ?.includes("preserve edited buffer"),
-      ),
+      app.container.textContent.includes("Edit lease expired"),
     );
+    expect(textareaValue(app.container)).toBe("preserve edited buffer");
+    expect(
+      globalThis.sessionStorage.getItem("ohbaby:composer:/repo-a:session_1"),
+    ).toContain("older draft");
+    expect(
+      globalThis.sessionStorage.getItem(
+        "ohbaby:composer-lease:/repo-a:session_1",
+      ),
+    ).toContain("preserve edited buffer");
+    await pressTextareaKey(app.container, "Enter");
+    expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
+    await pressTextareaKey(app.container, "Escape");
+    expect(textareaValue(app.container)).toBe("older draft");
   });
 
   it("does not acquire a second lease while another queued edit is active", async () => {
@@ -2306,16 +2314,16 @@ describe("OhbabyWebApp slash command interactions", () => {
       .mockReturnValue(pendingLease.promise);
     const lease = {
       editLeaseId: "lease_one",
-      expiresAt: "2026-07-12T00:01:00.000Z",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
       ownerClientId: "client_web",
       prompt: firstPrompt,
     } satisfies UiPromptEditLease;
     const app = mountApp(fake.runtime);
     const editOne = app.container.querySelector(
-      '[aria-label="Edit queued prompt: one"]',
+      '[aria-label="Edit prompt: one"]',
     );
     const editTwo = app.container.querySelector(
-      '[aria-label="Edit queued prompt: two"]',
+      '[aria-label="Edit prompt: two"]',
     );
     if (
       !(editOne instanceof HTMLButtonElement) ||
@@ -4188,6 +4196,9 @@ function createFakeRuntime(input: {
     connectModel,
     executeCommand: vi.fn(() => Promise.resolve()),
     editQueuedPrompt,
+    resubmitRetainedPrompt: vi.fn(() =>
+      Promise.reject(new Error("Unused retained resubmission stub")),
+    ),
     getContextWindowUsage: vi.fn(() =>
       Promise.resolve({
         contextWindowRatio: 0.125,
@@ -6015,10 +6026,10 @@ describe("queued edit identity isolation", () => {
         await Promise.resolve();
       });
     };
-    await click("Edit queued prompt: queued one");
-    await click("Cancel queued prompt: queued one");
+    await click("Edit prompt: queued one");
+    await click("Delete prompt: queued one");
     await pressTextareaKey(app.container, "Escape");
-    await click("Edit queued prompt: queued two");
+    await click("Edit prompt: queued two");
     await act(async () => {
       pending.resolve({ ...q1, status: "cancelled" });
       await pending.promise;

@@ -195,6 +195,9 @@ describe("context window UI contract", () => {
       executeCommand(): ReturnType<CoreAPI["executeCommand"]> {
         return Promise.resolve();
       },
+      resubmitRetainedPrompt(): Promise<never> {
+        return Promise.reject(new Error("Unused retained resubmission stub"));
+      },
       editQueuedPrompt(): ReturnType<CoreAPI["editQueuedPrompt"]> {
         return Promise.reject(new Error("No queued prompt"));
       },

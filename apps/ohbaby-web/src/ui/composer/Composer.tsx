@@ -1,5 +1,5 @@
 import { SteerButton } from "./SteerButton.js";
-import { LoaderCircle, Send, Square, X } from "lucide-react";
+import { LoaderCircle, Pencil, Send, Square, Trash2 } from "lucide-react";
 import type {
   UiBackendClient,
   UiPermissionLevel,
@@ -76,6 +76,7 @@ export function Composer(props: {
     | "renewPromptEditLease"
     | "releasePromptEditLease"
     | "editQueuedPrompt"
+    | "resubmitRetainedPrompt"
     | "cancelQueuedPrompt"
     | "steerQueuedPrompt"
     | "getCurrentModel"
@@ -83,6 +84,7 @@ export function Composer(props: {
     | "updateSessionReasoning"
   >;
   readonly compact?: boolean;
+  readonly unsentSteer?: boolean;
   readonly readOnly?: boolean;
   readonly draftScopeKey: string;
   readonly isPromptAdmitting: boolean;
@@ -139,17 +141,23 @@ export function Composer(props: {
   const composerInputRef = useRef<HTMLDivElement | null>(null);
   const draftRef = useRef("");
   const queuedEditRef = useRef(queuedEdit);
+  const queuedPromptsRef = useRef(props.queuedPrompts);
   useLayoutEffect(() => {
+    queuedPromptsRef.current = props.queuedPrompts;
     draftRef.current = draft;
     queuedEditRef.current = queuedEdit;
-  }, [draft, queuedEdit]);
+  }, [draft, queuedEdit, props.queuedPrompts]);
   const draftScopeGeneration = useRef(0);
   const editRevision = useRef(0);
   const consumedPrefillNonce = useRef(0);
+  const onEditRevisionRef = useRef(props.onEditRevision);
+  useLayoutEffect(() => {
+    onEditRevisionRef.current = props.onEditRevision;
+  }, [props.onEditRevision]);
   const advanceEditRevision = useCallback((): void => {
     editRevision.current += 1;
-    props.onEditRevision(editRevision.current);
-  }, [props.onEditRevision]);
+    onEditRevisionRef.current(editRevision.current);
+  }, []);
   useLayoutEffect(
     () => (): void => {
       draftScopeGeneration.current += 1;
@@ -164,6 +172,7 @@ export function Composer(props: {
   const queueAcquireGenerationRef = useRef(0);
   const canSend =
     props.model.canSend &&
+    (!queuedEdit?.leaseLost || queuedEdit.retainedSendText !== undefined) &&
     draft.trim().length > 0 &&
     !isSubmitting &&
     !props.isPromptAdmitting;
@@ -174,7 +183,10 @@ export function Composer(props: {
         (props.model.canStop &&
           (!props.model.canSend || draft.trim().length === 0))));
   const canUseSlash =
-    props.model.canSend && !isSubmitting && !props.isPromptAdmitting;
+    props.model.canSend &&
+    !queuedEdit &&
+    !isSubmitting &&
+    !props.isPromptAdmitting;
   const visibleQueuedPrompts = queueExpanded
     ? props.queuedPrompts
     : props.queuedPrompts.slice(0, 5);
@@ -228,7 +240,13 @@ export function Composer(props: {
     }
     draftRef.current = storedLease.editText;
     setDraft(storedLease.editText);
-    setQueuedEdit(storedLease);
+    setQueuedEdit({ ...storedLease, leaseLost: true });
+    if (storedLease.retainedSendText !== undefined) {
+      setQueueError(
+        "Send outcome unknown. Retry the same send to recover its receipt. Esc restores your draft.",
+      );
+      return;
+    }
     void props.client
       .renewPromptEditLease({
         editLeaseId: storedLease.editLeaseId,
@@ -241,6 +259,12 @@ export function Composer(props: {
           current?.editLeaseId !== storedLease.editLeaseId
         )
           return;
+        setQueuedEdit({
+          ...current,
+          status: lease.prompt.status === "retained" ? "retained" : "queued",
+          expiresAt: lease.expiresAt,
+          leaseLost: false,
+        });
         lastLeaseRenewalAt.current = Date.now();
         const storedNow = readSessionValue(
           composerLeaseKey(props.draftScopeKey),
@@ -258,13 +282,11 @@ export function Composer(props: {
           queuedEditRef.current?.editLeaseId !== storedLease.editLeaseId
         )
           return;
-        removeSessionValue(composerLeaseKey(props.draftScopeKey));
-        writeSessionValue(composerDraftKey(props.draftScopeKey), {
-          text: draftRef.current,
-        } satisfies StoredComposerDraft);
-        setQueuedEdit(null);
+        setQueuedEdit((current) =>
+          current ? { ...current, leaseLost: true } : current,
+        );
         setQueueError(
-          "Queued edit lease expired. Your text is preserved and can be sent as a new prompt.",
+          "Edit lease expired. Your edited text is preserved. Esc restores your draft.",
         );
       });
   }, [props.client, props.draftScopeKey, advanceEditRevision]);
@@ -345,6 +367,7 @@ export function Composer(props: {
 
   const updateDraft = useCallback(
     (nextDraft: string): void => {
+      if (queuedEdit?.retainedSendText !== undefined) return;
       advanceEditRevision();
       draftRef.current = nextDraft;
       setDraft(nextDraft);
@@ -354,11 +377,12 @@ export function Composer(props: {
         setPendingRequestId(null);
         setPendingText(null);
       }
-      persistDraft(
-        nextDraft,
-        keepPending ? pendingRequestId : undefined,
-        keepPending ? pendingText : undefined,
-      );
+      if (!queuedEdit)
+        persistDraft(
+          nextDraft,
+          keepPending ? pendingRequestId : undefined,
+          keepPending ? pendingText : undefined,
+        );
       if (queuedEdit) {
         setLeaseActivityVersion((version) => version + 1);
         writeSessionValue(composerLeaseKey(props.draftScopeKey), {
@@ -395,7 +419,12 @@ export function Composer(props: {
   }, [props.draftScopeKey, props.prefill, updateDraft]);
 
   useEffect(() => {
-    if (!queuedEdit || leaseActivityVersion === 0) return;
+    if (
+      !queuedEdit ||
+      queuedEdit.retainedSendText !== undefined ||
+      leaseActivityVersion === 0
+    )
+      return;
     const generation = draftScopeGeneration.current;
     let cancelled = false;
     if (leaseRenewalTimer.current !== null) {
@@ -413,8 +442,18 @@ export function Composer(props: {
           promptId: queuedEdit.promptId,
         })
         .then((lease) => {
-          if (cancelled || generation !== draftScopeGeneration.current) return;
+          if (
+            cancelled ||
+            generation !== draftScopeGeneration.current ||
+            queuedEditRef.current?.retainedSendText !== undefined
+          )
+            return;
           lastLeaseRenewalAt.current = Date.now();
+          setQueuedEdit((current) =>
+            current?.editLeaseId === queuedEdit.editLeaseId
+              ? { ...current, expiresAt: lease.expiresAt, leaseLost: false }
+              : current,
+          );
           writeSessionValue(composerLeaseKey(props.draftScopeKey), {
             ...queuedEdit,
             editText: draft,
@@ -423,12 +462,19 @@ export function Composer(props: {
           } satisfies StoredQueuedEdit);
         })
         .catch(() => {
-          if (cancelled || generation !== draftScopeGeneration.current) return;
-          setQueuedEdit(null);
-          removeSessionValue(composerLeaseKey(props.draftScopeKey));
-          persistDraft(draft);
+          if (
+            cancelled ||
+            generation !== draftScopeGeneration.current ||
+            queuedEditRef.current?.retainedSendText !== undefined
+          )
+            return;
+          setQueuedEdit((current) =>
+            current?.editLeaseId === queuedEdit.editLeaseId
+              ? { ...current, leaseLost: true }
+              : current,
+          );
           setQueueError(
-            "Queued edit lease expired. Your text is preserved and can be sent as a new prompt.",
+            "Edit lease expired. Your edited text is preserved. Esc restores your draft.",
           );
         });
     }, delay);
@@ -448,6 +494,47 @@ export function Composer(props: {
     queuedEdit,
   ]);
 
+  useEffect(() => {
+    if (
+      !queuedEdit ||
+      queuedEdit.retainedSendText !== undefined ||
+      queuedEdit.leaseLost ||
+      isSubmitting
+    )
+      return;
+    const prompt = props.queuedPrompts.find(
+      (item) => item.promptId === queuedEdit.promptId,
+    );
+    const invalidate = (): void => {
+      setQueuedEdit((current) =>
+        current?.editLeaseId === queuedEdit.editLeaseId
+          ? { ...current, leaseLost: true }
+          : current,
+      );
+      setQueueError(
+        "This edit is no longer available. Your text is preserved. Esc restores your draft.",
+      );
+    };
+    if (!prompt || (queuedEdit.status && prompt.status !== queuedEdit.status)) {
+      invalidate();
+      return;
+    }
+    const delay = Date.parse(queuedEdit.expiresAt) - Date.now();
+    if (delay <= 0) {
+      invalidate();
+      return;
+    }
+    const timer = globalThis.setTimeout(
+      () => {
+        if (Date.now() >= Date.parse(queuedEdit.expiresAt)) invalidate();
+      },
+      Math.min(delay, 2_147_483_647),
+    );
+    return (): void => {
+      globalThis.clearTimeout(timer);
+    };
+  }, [queuedEdit, props.queuedPrompts, isSubmitting]);
+
   const beginQueuedEdit = useCallback(
     (prompt: UiPromptSubmission): void => {
       if (queuedEdit || queueAcquirePendingRef.current) {
@@ -462,7 +549,14 @@ export function Composer(props: {
       void props.client
         .acquirePromptEditLease({ promptId: prompt.promptId })
         .then((lease) => {
-          if (queueAcquireGenerationRef.current !== acquireGeneration) {
+          if (
+            queueAcquireGenerationRef.current !== acquireGeneration ||
+            !queuedPromptsRef.current.some(
+              (item) =>
+                item.promptId === prompt.promptId &&
+                item.status === lease.prompt.status,
+            )
+          ) {
             void props.client
               .releasePromptEditLease({
                 editLeaseId: lease.editLeaseId,
@@ -474,7 +568,9 @@ export function Composer(props: {
           const next: QueuedEditState = {
             editLeaseId: lease.editLeaseId,
             expiresAt: lease.expiresAt,
-            originalDraft: draft,
+            status: lease.prompt.status === "retained" ? "retained" : "queued",
+            operationId: globalThis.crypto.randomUUID(),
+            originalDraft: draftRef.current,
             ...(pendingRequestId === null
               ? {}
               : { originalPendingRequestId: pendingRequestId }),
@@ -486,12 +582,12 @@ export function Composer(props: {
           lastLeaseRenewalAt.current = Date.now();
           setLeaseActivityVersion(0);
           setQueuedEdit(next);
-          setDraft(prompt.text);
+          setDraft(lease.prompt.text);
           setPendingRequestId(null);
           setPendingText(null);
           writeSessionValue(composerLeaseKey(props.draftScopeKey), {
             ...next,
-            editText: prompt.text,
+            editText: lease.prompt.text,
             lastActivityAt: Date.now(),
           } satisfies StoredQueuedEdit);
           textareaRef.current?.focus();
@@ -521,15 +617,48 @@ export function Composer(props: {
   );
 
   const finishQueuedEdit = useCallback((): void => {
-    if (!queuedEdit || !draft.trim()) return;
+    if (
+      !queuedEdit ||
+      (queuedEdit.leaseLost && queuedEdit.retainedSendText === undefined) ||
+      !draft.trim() ||
+      isSubmitting
+    )
+      return;
     const generation = draftScopeGeneration.current;
     setIsSubmitting(true);
-    void props.client
-      .editQueuedPrompt({
-        editLeaseId: queuedEdit.editLeaseId,
-        promptId: queuedEdit.promptId,
-        text: draft.trim(),
-      })
+    setQueueError(null);
+    const input = {
+      editLeaseId: queuedEdit.editLeaseId,
+      promptId: queuedEdit.promptId,
+      text: queuedEdit.retainedSendText ?? draft.trim(),
+    };
+    const operationId =
+      queuedEdit.operationId ?? globalThis.crypto.randomUUID();
+    if (
+      !queuedEdit.operationId ||
+      (queuedEdit.status === "retained" &&
+        queuedEdit.retainedSendText === undefined)
+    ) {
+      const next = {
+        ...queuedEdit,
+        operationId,
+        ...(queuedEdit.status === "retained"
+          ? { retainedSendText: input.text }
+          : {}),
+      };
+      queuedEditRef.current = next;
+      setQueuedEdit(next);
+      writeSessionValue(composerLeaseKey(props.draftScopeKey), {
+        ...next,
+        editText: draft,
+        lastActivityAt: Date.now(),
+      } satisfies StoredQueuedEdit);
+    }
+    const mutation =
+      queuedEdit.status === "retained"
+        ? props.client.resubmitRetainedPrompt({ ...input, operationId })
+        : props.client.editQueuedPrompt(input);
+    void mutation
       .then(() => {
         if (
           generation !== draftScopeGeneration.current ||
@@ -554,12 +683,24 @@ export function Composer(props: {
           queuedEditRef.current?.editLeaseId !== queuedEdit.editLeaseId
         )
           return;
-        setQueueError(error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        setQueueError(
+          queuedEdit.status === "retained"
+            ? `Send outcome unknown. Retry the same send to recover its receipt. ${message}. Esc restores your draft.`
+            : message,
+        );
       })
       .finally(() => {
         if (generation === draftScopeGeneration.current) setIsSubmitting(false);
       });
-  }, [draft, persistDraft, props.client, props.draftScopeKey, queuedEdit]);
+  }, [
+    draft,
+    isSubmitting,
+    persistDraft,
+    props.client,
+    props.draftScopeKey,
+    queuedEdit,
+  ]);
 
   const releaseQueuedEdit = useCallback((): void => {
     if (!queuedEdit) return;
@@ -837,6 +978,11 @@ export function Composer(props: {
         }}
       >
         {props.topContent}
+        {props.unsentSteer ? (
+          <p className="ohb-unsent-steer" role="status">
+            Task stopped before your steer message was sent.
+          </p>
+        ) : null}
         {steerNotice ? (
           <p role="status">
             Steer accepted · waiting for the active run’s next safe boundary
@@ -870,19 +1016,14 @@ export function Composer(props: {
                     className={`ohb-prompt-queue-item ${editing ? "is-editing" : ""}`}
                     key={prompt.promptId}
                   >
-                    <button
-                      aria-label={`Edit queued prompt: ${prompt.text}`}
-                      className="ohb-prompt-queue-edit"
-                      disabled={isSubmitting || queueAcquirePending}
-                      onClick={() => {
-                        beginQueuedEdit(prompt);
-                      }}
-                      type="button"
-                    >
-                      <span aria-hidden="true">↳</span>
-                      <span>{prompt.text.replaceAll("\n", " ")}</span>
-                      {editing ? <small>editing</small> : null}
-                    </button>
+                    <span className="ohb-prompt-queue-text">
+                      <span aria-hidden="true">↳ </span>
+                      <span>{prompt.text}</span>
+                      {prompt.status === "retained" ? (
+                        <small> · Retained</small>
+                      ) : null}
+                      {editing ? <small> · editing</small> : null}
+                    </span>
                     <SteerButton
                       prompt={prompt}
                       runId={props.model.activeRunId}
@@ -898,16 +1039,28 @@ export function Composer(props: {
                       }}
                     />
                     <button
-                      aria-label={`Cancel queued prompt: ${prompt.text}`}
+                      aria-label={`Edit prompt: ${prompt.text}`}
+                      title="Edit prompt"
+                      className="ohb-prompt-queue-edit"
+                      disabled={isSubmitting || queueAcquirePending}
+                      onClick={() => {
+                        beginQueuedEdit(prompt);
+                      }}
+                      type="button"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      aria-label={`Delete prompt: ${prompt.text}`}
                       className="ohb-prompt-queue-cancel"
                       disabled={isSubmitting || queueAcquirePending}
                       onClick={() => {
                         cancelQueuedPrompt(prompt.promptId);
                       }}
-                      title="Cancel queued prompt"
+                      title="Delete prompt"
                       type="button"
                     >
-                      <X size={13} />
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 );
@@ -938,6 +1091,7 @@ export function Composer(props: {
             <textarea
               aria-label={`Message, ${props.model.mode} mode, ${props.model.permissionLevel} permission`}
               disabled={props.model.disabled || isSubmitting}
+              readOnly={queuedEdit?.retainedSendText !== undefined}
               onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
                 const nextDraft = event.target.value;
                 updateDraft(nextDraft);
@@ -977,7 +1131,12 @@ export function Composer(props: {
               ) : null}
               {queuedEdit ? (
                 <span className="ohb-composer-hint ohb-queued-edit-hint">
-                  Editing queued prompt · Enter save · Esc keep original
+                  {queuedEdit.retainedSendText !== undefined
+                    ? "Retained send · Enter retry the same send"
+                    : queuedEdit.status === "retained"
+                      ? "Editing retained prompt · Enter send"
+                      : "Editing queued prompt · Enter save"}{" "}
+                  · Esc restore draft
                 </span>
               ) : null}
             </div>
@@ -1015,11 +1174,27 @@ export function Composer(props: {
             ) : (
               <button
                 aria-busy={props.isPromptAdmitting}
-                aria-label={queuedEdit ? "Save queued prompt" : "Send message"}
+                aria-label={
+                  queuedEdit
+                    ? queuedEdit.retainedSendText !== undefined
+                      ? "Retry retained send"
+                      : queuedEdit.status === "retained"
+                        ? "Send retained prompt"
+                        : "Save queued prompt"
+                    : "Send message"
+                }
                 className="ohb-send-button"
                 disabled={!canSend}
                 onClick={send}
-                title={queuedEdit ? "Save queued prompt" : "Send message"}
+                title={
+                  queuedEdit
+                    ? queuedEdit.retainedSendText !== undefined
+                      ? "Retry retained send"
+                      : queuedEdit.status === "retained"
+                        ? "Send retained prompt"
+                        : "Save queued prompt"
+                    : "Send message"
+                }
                 type="button"
               >
                 {props.isPromptAdmitting ? (

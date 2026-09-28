@@ -1,3 +1,7 @@
+import {
+  createDatabaseWriteBudget,
+  withDatabaseWriteBudget,
+} from "../../services/database/write-budget.js";
 import type {
   CurrentRunInputStore,
   SteerQueuedPromptInput,
@@ -17,10 +21,13 @@ import {
 } from "./errors.js";
 import type {
   PromptSubmissionExecutor,
+  PromptExecutionResult,
   PromptEditLease,
   PromptSubmissionRecord,
   PromptHistoryWindow,
   PromptSubmissionStore,
+  ResubmitRetainedPromptInput,
+  PromptResubmissionReceipt,
 } from "./types.js";
 
 export interface WorkspacePromptSchedulerOptions {
@@ -29,6 +36,23 @@ export interface WorkspacePromptSchedulerOptions {
   readonly scopeKey: string;
   readonly store: PromptSubmissionStore;
   readonly execute: PromptSubmissionExecutor;
+  /** Repairs execution facts only; it must never invoke the executor again. */
+  readonly recoverExecution?: (
+    prompt: PromptSubmissionRecord,
+    error: unknown,
+    runId?: string,
+  ) => Promise<PromptExecutionResult>;
+  readonly withFinalizationWriteBudget?: <T>(
+    runId: string,
+    operation: () => Promise<T>,
+  ) => Promise<T>;
+  readonly isExecutionPersistenceError?: (error: unknown) => boolean;
+  readonly beforeExecution?: (sessionId: string) => Promise<void>;
+  readonly onRecoveryChanged?: (
+    sessionId: string,
+    state: PromptRecoveryState,
+  ) => void;
+  readonly now?: () => number;
   readonly maxActiveSessions?: number;
   readonly maxQueuedPrompts?: number;
   readonly createPromptId?: () => string;
@@ -71,6 +95,21 @@ const TERMINAL_STATUSES = new Set([
   "interrupted",
 ]);
 
+export type PromptRecoveryState =
+  | { readonly status: "ready" }
+  | {
+      readonly status: "recovering" | "blocked";
+      readonly promptId: string;
+      readonly message: string;
+    };
+
+interface PendingFinalization {
+  readonly prompt?: PromptSubmissionRecord;
+  readonly persist: () => Promise<PromptSubmissionRecord> | Promise<void>;
+  error: Error;
+  recovery?: Promise<void>;
+}
+
 interface CompletionWaiter {
   readonly reject: (error: Error) => void;
   readonly resolve: (prompt: PromptSubmissionRecord) => void;
@@ -100,12 +139,19 @@ function runtimeError(error: unknown): UiPromptError {
 export class WorkspacePromptScheduler {
   private readonly sessionSeeds = new Map<string, Promise<void>>();
   private readonly readySessions = new Set<string>();
+  private readonly pendingFinalizations = new Map<
+    string,
+    PendingFinalization
+  >();
   private readonly startingControllers = new Map<string, AbortController>();
   private readonly activeBySession = new Map<string, string>();
   private readonly completionWaiters = new Map<string, Set<CompletionWaiter>>();
   private readonly busySessionsUntil = new Map<string, number>();
   private readonly maxActiveSessions: number;
   private readonly maxQueuedPrompts: number;
+  private readonly entryFailures = new Map<string, Error>();
+  private readonly entryAttempts = new Map<string, Promise<void>>();
+  private readonly executions = new Set<Promise<void>>();
   private closed = false;
   private terminalError: Error | undefined;
   private draining = false;
@@ -206,12 +252,18 @@ export class WorkspacePromptScheduler {
       // Session initialization is independent of the workspace admission lane.
       // Release it before waiting so an unavailable session cannot block others.
       release();
+      await this.recoverSession(sessionId);
+      this.assertOpen();
       const reasoning =
         typeof input.reasoning === "function"
           ? await input.reasoning(sessionId)
           : input.reasoning;
       const prompt = await this.commit(sessionId, async () => {
         this.assertOpen();
+        const blocked =
+          this.pendingFinalizations.get(sessionId)?.error ??
+          this.entryFailures.get(sessionId);
+        if (blocked) throw blocked;
         knownUnaccepted = false;
         const accepted = await this.options.store.accept({
           clientRequestId,
@@ -242,6 +294,46 @@ export class WorkspacePromptScheduler {
     }
   }
 
+  async resubmitRetained(
+    input: Omit<ResubmitRetainedPromptInput, "scopeKey" | "maxQueuedPrompts">,
+  ): Promise<PromptResubmissionReceipt> {
+    this.assertOpen();
+    // Historical successful operations remain authoritative even after capacity changes.
+    const receipt = await this.options.store.getResubmissionReceipt(
+      this.options.scopeKey,
+      input.operationId,
+    );
+    if (receipt && receipt.promptId !== input.promptId)
+      throw new PromptIdempotencyConflictError(input.operationId);
+    const prompt = await this.options.store.get(input.promptId);
+    if (prompt?.scopeKey !== this.options.scopeKey)
+      throw new PromptSubmissionNotFoundError(input.promptId);
+    if (!receipt) await this.recoverSession(prompt.sessionId);
+    const result = await this.commit(prompt.sessionId, async () => {
+      this.assertOpen();
+      const committedReceipt =
+        receipt ??
+        (await this.options.store.getResubmissionReceipt(
+          this.options.scopeKey,
+          input.operationId,
+        ));
+      if (!committedReceipt) {
+        const blocked =
+          this.pendingFinalizations.get(prompt.sessionId)?.error ??
+          this.entryFailures.get(prompt.sessionId);
+        if (blocked) throw blocked;
+      }
+      return this.options.store.resubmitRetained({
+        ...input,
+        scopeKey: this.options.scopeKey,
+        maxQueuedPrompts: this.maxQueuedPrompts,
+      });
+    });
+    if (result.inserted) this.notify(result.record, this.options.onUpdated);
+    this.requestDrain();
+    return result.receipt;
+  }
+
   async steerQueued(
     input: SteerQueuedPromptInput,
   ): Promise<SteerQueuedPromptResult> {
@@ -249,6 +341,10 @@ export class WorkspacePromptScheduler {
     if (!this.options.currentRunInputs)
       throw new Error("Current-run inputs are unavailable");
     const inputs = this.options.currentRunInputs;
+    const source = await this.options.store.get(input.promptId);
+    if (!source) throw new PromptSubmissionNotFoundError(input.promptId);
+    await this.recoverSession(source.sessionId);
+    this.assertOpen();
     const result = await this.mutatePrompt(input.promptId, async () => {
       const result = await inputs.steerQueued({
         ...input,
@@ -451,6 +547,13 @@ export class WorkspacePromptScheduler {
       void this.options.store
         .get(promptId)
         .then((current) => {
+          if (current) {
+            const pending = this.pendingFinalizations.get(current.sessionId);
+            if (pending?.prompt?.promptId === promptId) {
+              this.rejectCompletionWaiter(promptId, waiter, pending.error);
+              return;
+            }
+          }
           if (waiter.settled) {
             return;
           }
@@ -476,12 +579,165 @@ export class WorkspacePromptScheduler {
     });
   }
 
+  getRecoveryState(sessionId: string): PromptRecoveryState {
+    const pending = this.pendingFinalizations.get(sessionId);
+    const entryError = this.entryFailures.get(sessionId);
+    if (this.entryAttempts.has(sessionId))
+      return {
+        status: "recovering",
+        promptId: pending?.prompt?.promptId ?? "",
+        message: entryError?.message ?? "Checking execution records",
+      };
+    if (entryError)
+      return {
+        status: this.entryAttempts.has(sessionId) ? "recovering" : "blocked",
+        promptId: pending?.prompt?.promptId ?? "",
+        message: entryError.message,
+      };
+    return pending
+      ? {
+          status: pending.recovery ? "recovering" : "blocked",
+          promptId: pending.prompt?.promptId ?? "",
+          message: pending.error.message,
+        }
+      : { status: "ready" };
+  }
+
+  /** Explicit reconnect/enter/execute recovery. Ordinary reads never call this. */
+  recoverSession(sessionId: string): Promise<void> {
+    this.assertOpen();
+    const existing = this.entryAttempts.get(sessionId);
+    if (existing) return existing;
+    const attempt = Promise.resolve().then(async () => {
+      try {
+        await this.recoverFinalization(sessionId);
+        await this.options.beforeExecution?.(sessionId);
+        await this.seedSession(sessionId);
+        this.entryFailures.delete(sessionId);
+        this.requestDrain();
+      } catch (error) {
+        this.entryFailures.set(
+          sessionId,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        throw error;
+      } finally {
+        this.entryAttempts.delete(sessionId);
+        this.publishRecovery(sessionId);
+      }
+    });
+    this.entryAttempts.set(sessionId, attempt);
+    this.publishRecovery(sessionId);
+    return attempt;
+  }
+
+  private recoverFinalization(sessionId: string): Promise<void> {
+    const pending = this.pendingFinalizations.get(sessionId);
+    if (!pending) return Promise.resolve();
+    if (pending.recovery) return pending.recovery;
+    const recovery = Promise.resolve().then(async () => {
+      try {
+        const record = await withDatabaseWriteBudget(
+          createDatabaseWriteBudget(),
+          pending.persist,
+        );
+        if (this.pendingFinalizations.get(sessionId) === pending) {
+          this.pendingFinalizations.delete(sessionId);
+          if (record) this.resolveCompletion(record);
+        }
+      } catch (error) {
+        pending.error =
+          error instanceof Error ? error : new Error(String(error));
+        throw pending.error;
+      } finally {
+        pending.recovery = undefined;
+        this.publishRecovery(sessionId);
+      }
+      // Re-read the queue in drain: edits/deletions and shutdown can win recovery.
+      this.requestDrain();
+    });
+    pending.recovery = recovery;
+    this.publishRecovery(sessionId);
+    return recovery;
+  }
+
+  private publishRecovery(sessionId: string): void {
+    try {
+      this.options.onRecoveryChanged?.(
+        sessionId,
+        this.getRecoveryState(sessionId),
+      );
+    } catch {
+      /* Projection observers cannot change durable execution facts. */
+    }
+  }
+
+  /** A goal-owned Run has no queued prompt, but shares the same session gate. */
+  blockExecutionFinalization(
+    sessionId: string,
+    error: Error,
+    persist: () => Promise<void>,
+  ): void {
+    this.pendingFinalizations.set(sessionId, { error, persist });
+    this.publishRecovery(sessionId);
+  }
+
+  private blockFinalization(
+    prompt: PromptSubmissionRecord,
+    error: unknown,
+    persist: PendingFinalization["persist"],
+  ): void {
+    const normalized =
+      error instanceof Error ? error : new Error(String(error));
+    this.pendingFinalizations.set(prompt.sessionId, {
+      prompt,
+      error: normalized,
+      persist,
+    });
+    for (const waiter of this.completionWaiters.get(prompt.promptId) ?? []) {
+      this.rejectCompletionWaiter(prompt.promptId, waiter, normalized);
+    }
+    this.publishRecovery(prompt.sessionId);
+  }
+
+  private async persistResult(
+    prompt: PromptSubmissionRecord,
+    result: PromptExecutionResult,
+    runId?: string,
+  ): Promise<PromptSubmissionRecord> {
+    const persist = (): Promise<PromptSubmissionRecord> =>
+      this.commit(prompt.sessionId, async () => {
+        // A committed result may have lost its acknowledgement. Re-read before retry.
+        const current = await this.options.store.get(prompt.promptId);
+        if (current && TERMINAL_STATUSES.has(current.status)) {
+          if (runId !== undefined && current.runId !== runId)
+            throw new Error(
+              `Prompt ${prompt.promptId} terminal belongs to another run`,
+            );
+          this.notify(current, this.options.onUpdated);
+          return current;
+        }
+        const record = await this.options.store.finish(prompt.promptId, {
+          ...result,
+          expectedRunId: runId,
+        });
+        this.notify(record, this.options.onUpdated);
+        return record;
+      });
+    return runId && this.options.withFinalizationWriteBudget
+      ? this.options.withFinalizationWriteBudget(runId, persist)
+      : persist();
+  }
+
   activeCount(): number {
     return this.activeBySession.size;
   }
 
   async hasPendingSession(sessionId: string): Promise<boolean> {
-    if (this.activeBySession.has(sessionId)) {
+    if (
+      this.activeBySession.has(sessionId) ||
+      this.pendingFinalizations.has(sessionId)
+    ) {
       return true;
     }
     return (await this.options.store.listQueued(this.options.scopeKey)).some(
@@ -501,6 +757,25 @@ export class WorkspacePromptScheduler {
     this.rejectAllCompletionWaiters(error);
   }
 
+  async settleShutdown(): Promise<void> {
+    this.close();
+    await this.options.store.retainOwnedQueued(this.options.scopeKey);
+    await Promise.all([...this.executions]);
+    const pending = [...this.pendingFinalizations.keys()];
+    const results = await Promise.allSettled(
+      pending.map((sessionId) => this.recoverFinalization(sessionId)),
+    );
+    const errors = results.flatMap((result): unknown[] =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (errors.length)
+      throw new AggregateError(errors, "Prompt finalization is unconfirmed");
+    await this.options.store.recoverAllInterrupted({
+      scopeKey: this.options.scopeKey,
+      includeCurrentOwner: true,
+    });
+  }
+
   private seedSession(sessionId: string): Promise<void> {
     const existing = this.sessionSeeds.get(sessionId);
     if (existing) return existing;
@@ -513,9 +788,9 @@ export class WorkspacePromptScheduler {
         },
         (error: unknown) => {
           this.sessionSeeds.delete(sessionId);
-          this.busySessionsUntil.set(
+          this.entryFailures.set(
             sessionId,
-            Date.now() + Math.max(1, this.options.busyRetryDelayMs ?? 250),
+            error instanceof Error ? error : new Error(String(error)),
           );
           try {
             this.options.onSessionInitializationError?.(error, sessionId);
@@ -579,7 +854,7 @@ export class WorkspacePromptScheduler {
   }
 
   private requestDrain(delayMs = 0): void {
-    if (this.closed) {
+    if (this.closed || !this.initialized) {
       return;
     }
     if (delayMs > 0) {
@@ -629,6 +904,9 @@ export class WorkspacePromptScheduler {
         const candidate = [...laneHeads.values()].find(
           (prompt) =>
             !this.activeBySession.has(prompt.sessionId) &&
+            !this.pendingFinalizations.has(prompt.sessionId) &&
+            !this.entryFailures.has(prompt.sessionId) &&
+            !this.entryAttempts.has(prompt.sessionId) &&
             !this.busySessionsUntil.has(prompt.sessionId) &&
             (!this.sessionSeeds.has(prompt.sessionId) ||
               this.readySessions.has(prompt.sessionId)) &&
@@ -637,6 +915,11 @@ export class WorkspacePromptScheduler {
         if (!candidate) {
           const nextRetryAt = Math.min(
             ...[...laneHeads.values()].flatMap((prompt) => {
+              if (
+                this.pendingFinalizations.has(prompt.sessionId) ||
+                this.entryFailures.has(prompt.sessionId)
+              )
+                return [];
               const blockedUntil = this.busySessionsUntil.get(prompt.sessionId);
               const leaseExpiresAt = prompt.editLeaseExpiresAt;
               return [
@@ -653,7 +936,7 @@ export class WorkspacePromptScheduler {
           break;
         }
         if (!this.readySessions.has(candidate.sessionId)) {
-          void this.seedSession(candidate.sessionId).then(
+          void this.recoverSession(candidate.sessionId).then(
             () => {
               this.requestDrain();
             },
@@ -686,7 +969,13 @@ export class WorkspacePromptScheduler {
           break;
         }
         this.activeBySession.set(claimed.sessionId, claimed.promptId);
-        void this.executeClaimed(claimed);
+        const execution = this.executeClaimed(claimed);
+        this.executions.add(execution);
+        void execution
+          .finally(() => this.executions.delete(execution))
+          .catch((error: unknown) => {
+            this.fault(error);
+          });
       }
     } finally {
       this.draining = false;
@@ -714,6 +1003,7 @@ export class WorkspacePromptScheduler {
           markRunning: async (nextRunId): Promise<void> => {
             starting.signal.throwIfAborted();
             this.startingControllers.delete(prompt.promptId);
+            runId = nextRunId;
             try {
               await this.commit(prompt.sessionId, async () => {
                 const running = await this.options.store.markRunning(
@@ -733,7 +1023,37 @@ export class WorkspacePromptScheduler {
       } catch (error) {
         if (isStartingCancelled()) return;
         if (runningPersistenceError) {
-          this.fault(runningPersistenceError);
+          const failure = runningPersistenceError;
+          const targetRunId = runId;
+          this.blockFinalization(prompt, failure, async () => {
+            if (!targetRunId || !this.options.recoverExecution) throw failure;
+            const result = await this.options.recoverExecution(
+              prompt,
+              failure,
+              targetRunId,
+            );
+            const current = await this.options.store.get(prompt.promptId);
+            if (current?.status === "starting")
+              await this.commit(prompt.sessionId, () =>
+                this.options.store.markRunning(prompt.promptId, targetRunId),
+              );
+            return this.persistResult(prompt, result, targetRunId);
+          });
+          return;
+        }
+        // A different owner can fail while this claimed prompt waits for its
+        // runtime slot. Preserve this prompt; it does not own that Run's outcome.
+        if (
+          runId === undefined &&
+          (this.pendingFinalizations.has(prompt.sessionId) ||
+            this.entryFailures.has(prompt.sessionId))
+        ) {
+          await this.commit(prompt.sessionId, async () => {
+            const queued = await this.options.store.requeueBusy(
+              prompt.promptId,
+            );
+            this.notify(queued, this.options.onUpdated);
+          });
           return;
         }
         if (this.options.isBusyError?.(error) && runId === undefined) {
@@ -755,36 +1075,51 @@ export class WorkspacePromptScheduler {
           return;
         }
         this.busySessionsUntil.delete(prompt.sessionId);
-        try {
-          const failed = await this.commit(prompt.sessionId, async () => {
-            const result = await this.options.store.finish(prompt.promptId, {
-              status: "failed",
-              expectedRunId: runId,
-              error: runtimeError(error),
-            });
-            this.notify(result, this.options.onUpdated);
-            return result;
+        if (this.options.isExecutionPersistenceError?.(error)) {
+          this.blockFinalization(prompt, error, async () => {
+            if (!this.options.recoverExecution) throw error;
+            const recovered = await this.options.recoverExecution(
+              prompt,
+              error,
+            );
+            return this.persistResult(prompt, recovered, runId);
           });
-          this.resolveCompletion(failed);
+          return;
+        }
+        const failure: PromptExecutionResult = {
+          status: "failed",
+          error: runtimeError(error),
+          endedAt: this.options.now?.() ?? Date.now(),
+        };
+        const persist = (): Promise<PromptSubmissionRecord> =>
+          this.persistResult(prompt, failure, runId);
+        try {
+          this.resolveCompletion(await persist());
         } catch (storageError) {
-          this.fault(storageError);
+          this.blockFinalization(prompt, storageError, persist);
         }
         return;
       }
 
       if (isStartingCancelled()) return;
+      const settledAt = result.endedAt ?? this.options.now?.();
+      const terminal = {
+        ...result,
+        ...(settledAt === undefined ? {} : { endedAt: settledAt }),
+      };
+      const persist = (): Promise<PromptSubmissionRecord> =>
+        this.persistResult(prompt, terminal, runId);
       try {
-        const finished = await this.commit(prompt.sessionId, async () => {
-          const record = await this.options.store.finish(prompt.promptId, {
-            ...result,
-            expectedRunId: runId,
-          });
-          this.notify(record, this.options.onUpdated);
-          return record;
-        });
-        this.resolveCompletion(finished);
+        this.resolveCompletion(await persist());
       } catch (storageError) {
-        this.fault(storageError);
+        const originalEnd = terminal.endedAt ?? Date.now();
+        this.blockFinalization(prompt, storageError, () =>
+          this.persistResult(
+            prompt,
+            { ...terminal, endedAt: originalEnd },
+            runId,
+          ),
+        );
       }
     } finally {
       this.startingControllers.delete(prompt.promptId);

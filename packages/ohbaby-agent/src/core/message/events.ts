@@ -78,6 +78,7 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
           startedAt: z.number(),
           firstTextAt: z.number().optional(),
           endedAt: z.number().optional(),
+          endTimeSource: z.literal("recovery").optional(),
           outcome: z.enum(["running", "success", "error", "aborted"]),
         }),
       )

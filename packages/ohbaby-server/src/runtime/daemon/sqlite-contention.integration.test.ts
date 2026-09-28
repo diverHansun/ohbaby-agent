@@ -120,7 +120,7 @@ it.each([
         this: AbortController,
         reason,
       ) {
-        if (reason === "run aborted")
+        if (reason === "user-stop")
           this.signal.addEventListener(
             "abort",
             () => {
@@ -493,7 +493,7 @@ it.each([
       if (holdMs < 5000) {
         const outcome = await backend.waitForPrompt(first.result.promptId);
         expect(outcome.prompt.status).toBe(
-          mode !== "deadline" ? "cancelled" : "succeeded",
+          mode !== "deadline" ? "interrupted" : "succeeded",
         );
       } else {
         const outcome = await within(

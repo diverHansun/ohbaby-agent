@@ -5,6 +5,7 @@ import type {
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import type { createStdoutRenderer } from "../stdout-renderer.js";
+import type { ShutdownOptions } from "ohbaby-agent";
 
 export type CliDaemonStatus = "running" | "stopping" | "stopped" | "crashed";
 
@@ -60,7 +61,8 @@ export interface CliCoreHost {
   readonly reportDurationClockAnomaly?: (identity: string) => void;
   readonly core: CoreAPI;
   readonly callbacks: SDKAPI;
-  readonly dispose: () => Promise<void>;
+  readonly closeAdmission?: () => void;
+  readonly dispose: (options?: ShutdownOptions) => Promise<void>;
   readonly diagnosticsFilePath?: string;
   readonly diagnosticsUnavailable?: () => boolean;
   readonly subscribeDiagnosticsUnavailable?: (
@@ -76,9 +78,11 @@ export interface CliWritable {
 
 export interface TerminalUiLifecycle {
   readonly waitUntilExit?: () => Promise<void>;
+  readonly unmount?: () => void;
 }
 
 export interface CliCommandRuntime {
+  readonly onHostShutdownComplete?: () => void;
   readonly createCoreHost: (options: CliGlobalOptions) => CliCoreHostResult;
   readonly createStdoutRenderer: typeof createStdoutRenderer;
   readonly failUsage: (message: string) => never;
@@ -108,5 +112,9 @@ export interface CliCommandRuntime {
   ) => Promise<CliRunningDaemonServer>;
   readonly stderr: CliWritable;
   readonly stdout: CliWritable;
-  readonly stopDaemonFromState: () => Promise<"stopped" | "not-running">;
+  readonly stopDaemonFromState: () => Promise<{
+    readonly processExit: "confirmed" | "not-running" | "unconfirmed";
+    readonly cleanup: "confirmed" | "unconfirmed" | "unknown";
+    readonly reason?: string;
+  }>;
 }

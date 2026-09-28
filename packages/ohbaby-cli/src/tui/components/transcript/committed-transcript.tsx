@@ -88,14 +88,18 @@ function PromptCompletion({
 }): ReactElement {
   const duration = useExecutionDuration(
     prompt.promptId,
-    Date.parse(prompt.createdAt),
+    prompt.endTimeSource === "recovery"
+      ? undefined
+      : Date.parse(prompt.acceptedAt ?? prompt.createdAt),
     prompt.endedAt === undefined ? undefined : Date.parse(prompt.endedAt),
   );
   return (
     <Box marginBottom={1}>
       <Text dimColor>
-        {prompt.status === "succeeded" ? "" : `${prompt.status} · `}Total{" "}
-        {duration}
+        {prompt.status === "succeeded" ? "" : `${prompt.status} · `}
+        {prompt.endTimeSource === "recovery"
+          ? "End time unknown (recovered)"
+          : `Total ${duration ?? "—"}`}
       </Text>
     </Box>
   );

@@ -193,3 +193,37 @@ it("places recovered historical totals below their own replies when opening a se
     app.unmount();
   });
 });
+
+it("uses acceptedAt after retained Send and labels recovery end evidence without a calendar duration", () => {
+  const original = snapshot("interrupted");
+  const ended = {
+    ...prompt,
+    status: "interrupted" as const,
+    acceptedAt: "2026-01-01T00:01:00Z",
+  };
+  const store = createTuiStore({ ...original, prompts: [ended] });
+  let app!: ReturnType<typeof render>;
+  act(() => {
+    app = render(
+      <CommittedTranscript items={store.getState().committedItems} />,
+    );
+  });
+  expect(app.lastFrame()).toContain("Total 1s");
+  act(() => {
+    app.unmount();
+  });
+  const recovered = createTuiStore({
+    ...original,
+    prompts: [{ ...ended, endTimeSource: "recovery" }],
+  });
+  act(() => {
+    app = render(
+      <CommittedTranscript items={recovered.getState().committedItems} />,
+    );
+  });
+  expect(app.lastFrame()).toContain("End time unknown");
+  expect(app.lastFrame()).not.toContain("Total");
+  act(() => {
+    app.unmount();
+  });
+});

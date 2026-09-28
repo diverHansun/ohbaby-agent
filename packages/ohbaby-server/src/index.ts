@@ -37,6 +37,8 @@ export type {
   ListDaemonConnectionsOptions,
   RunningDaemonServer,
   StartDaemonServerOptions,
+  StopDaemonFromStateOptions,
+  StopDaemonResult,
 } from "./runtime/daemon/main.js";
 export type { DaemonState } from "./runtime/daemon/types.js";
 export type { CoreApiHost } from "ohbaby-agent";

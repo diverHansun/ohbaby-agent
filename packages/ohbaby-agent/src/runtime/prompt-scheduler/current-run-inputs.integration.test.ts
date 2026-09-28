@@ -95,6 +95,64 @@ for (const backend of ["memory", "sqlite"] as const)
       };
       return { ledger, queue, messages, messageStore, inputs, steer };
     }
+    it("reads closed never-attempted Steer facts without mutating records or waking execution", async () => {
+      const f = await fixture();
+      const { receipt } = await f.inputs.steerQueued(f.steer);
+      expect(await f.inputs.hasUnsentSteer("run-a")).toBe(false);
+      const wake = vi.fn();
+      const unsubscribe = f.inputs.subscribe("run-a", wake);
+      await f.inputs.close("run-a", "user-stop");
+      wake.mockClear();
+      const before = await f.inputs.getInput(receipt.inputId);
+      const reader =
+        backend === "sqlite"
+          ? new DatabaseCurrentRunInputStore({ db: getDatabase() })
+          : f.inputs;
+      expect(await reader.hasUnsentSteer("run-a")).toBe(true);
+      expect(await reader.hasUnsentSteer("run-b")).toBe(false);
+      expect(await reader.hasUnsentSteer("run-a")).toBe(true);
+      expect(await reader.getInput(receipt.inputId)).toEqual(before);
+      expect(wake).not.toHaveBeenCalled();
+      unsubscribe();
+    });
+    it.each(["error", "aborted"] as const)(
+      "does not call attempted Steer unsent after a request ended with %s",
+      async (outcome) => {
+        const f = await fixture();
+        const { receipt } = await f.inputs.steerQueued(f.steer);
+        await f.messages.createMessage({
+          id: "assistant-unsent",
+          role: "assistant",
+          agent: "default",
+          runId: "run-a",
+          sessionId: "session",
+        });
+        const request = {
+          requestId: "failed-transport",
+          runId: "run-a",
+          messageId: "assistant-unsent",
+          step: 1,
+          attempt: 1,
+          purpose: "agent-step",
+          startedAt: 1,
+          outcome: "running" as const,
+          inputIds: [receipt.inputId],
+        };
+        await f.inputs.admitRequestAttempt(request);
+        await f.messages.updateMessage("assistant-unsent", {
+          modelRequests: [{ ...request, outcome, endedAt: 2 }],
+        });
+        await f.inputs.close("run-a", "user-stop");
+        expect(
+          (await f.inputs.getInput(receipt.inputId))?.processedRequestId,
+        ).toBeUndefined();
+        expect(
+          (await f.inputs.getInput(receipt.inputId))?.firstAttemptRequestId,
+        ).toBe(request.requestId);
+        expect(await f.inputs.hasUnsentSteer("run-a")).toBe(false);
+      },
+    );
+
     it("atomically converts the queued receipt with original message identity and idempotent receipt", async () => {
       const f = await fixture();
       const first = await f.inputs.steerQueued(f.steer);
@@ -430,10 +488,10 @@ for (const backend of ["memory", "sqlite"] as const)
           userMessageId: "reserved-message",
         });
         expect(execute).not.toHaveBeenCalled();
-        await f.ledger.markInterrupted();
+        await f.ledger.markInterrupted({ recoverUnknownOwner: true });
         expect(await f.inputs.listPending("run-a")).toEqual([]);
         expect(await f.inputs.getInput("steer:queued")).toMatchObject({
-          closeReason: "interrupted",
+          closeReason: "process-interrupted",
         });
         expect(
           await f.inputs.filterModelHistory(

@@ -67,7 +67,10 @@ describe("DatabasePromptSubmissionStore", () => {
         await store.claim("receipt");
         if (status === "running") await store.markRunning("receipt", "run_1");
         else if (status === "interrupted")
-          await store.recoverInterrupted("/workspace");
+          await store.recoverAllInterrupted({
+            scopeKey: "/workspace",
+            includeCurrentOwner: true,
+          });
         else if (status === "succeeded")
           await store.finish("receipt", { status });
         else if (status === "failed")
@@ -177,7 +180,12 @@ describe("DatabasePromptSubmissionStore", () => {
     ).rejects.toBeInstanceOf(PromptNotQueuedError);
     await store.markRunning(first.record.promptId, "run_1");
 
-    expect(await store.recoverInterrupted("/workspace")).toBe(1);
+    expect(
+      await store.recoverAllInterrupted({
+        scopeKey: "/workspace",
+        includeCurrentOwner: true,
+      }),
+    ).toBe(1);
     expect(await store.get(first.record.promptId)).toMatchObject({
       runId: "run_1",
       status: "interrupted",
@@ -234,7 +242,7 @@ describe("DatabasePromptSubmissionStore", () => {
     });
     await liveStore.claim(live.record.promptId);
 
-    expect(await liveStore.recoverAllInterrupted()).toBe(1);
+    expect(await liveStore.recoverAllInterrupted()).toBe(2);
     expect(await store.get(running.record.promptId)).toMatchObject({
       status: "interrupted",
     });
@@ -243,9 +251,10 @@ describe("DatabasePromptSubmissionStore", () => {
       ownerPid: 42,
       status: "starting",
     });
-    await expect(store.listScopesWithQueued()).resolves.toEqual([
-      "/workspace-2",
-    ]);
+    expect(await store.get("prompt_queued")).toMatchObject({
+      status: "retained",
+    });
+    await expect(store.listScopesWithQueued()).resolves.toEqual([]);
   });
 
   it("enforces the durable queued-record limit inside the acceptance transaction", async () => {

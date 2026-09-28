@@ -68,7 +68,7 @@ function createRuntime(): CreatedRuntime {
     }),
   );
   const stopDaemonFromState = vi.fn<CliCommandRuntime["stopDaemonFromState"]>(
-    () => Promise.resolve("stopped"),
+    () => Promise.resolve({ processExit: "confirmed", cleanup: "confirmed" }),
   );
   const openUrl = vi.fn<CliCommandRuntime["openUrl"]>(() => Promise.resolve());
   const listDaemonConnections = vi.fn<
@@ -294,10 +294,31 @@ describe("createServeCommand", () => {
 
   it("exits cleanly when no daemon is running during stop", async () => {
     const { runtime, stdout, stopDaemonFromState } = createRuntime();
-    stopDaemonFromState.mockResolvedValueOnce("not-running");
+    stopDaemonFromState.mockResolvedValueOnce({
+      processExit: "not-running",
+      cleanup: "unknown",
+    });
 
     await runServe(["serve", "stop"], runtime);
 
     expect(stdout.join("")).toContain("not-running");
   });
 });
+
+it.each([
+  { processExit: "confirmed", cleanup: "confirmed", code: 0 },
+  { processExit: "confirmed", cleanup: "unconfirmed", code: 1 },
+  { processExit: "confirmed", cleanup: "unknown", code: 1 },
+  { processExit: "not-running", cleanup: "unknown", code: 0 },
+  { processExit: "unconfirmed", cleanup: "unknown", code: 1 },
+] as const)(
+  "uses exit $code for $processExit process / $cleanup cleanup",
+  async ({ processExit, cleanup, code }) => {
+    const { runtime, stopDaemonFromState, stdout } = createRuntime();
+    stopDaemonFromState.mockResolvedValueOnce({ processExit, cleanup });
+    await runServe(["serve", "stop"], runtime);
+    expect(runtime.setExitCode).toHaveBeenCalledWith(code);
+    if (processExit === "unconfirmed")
+      expect(stdout.join("")).not.toContain("daemon stopped");
+  },
+);

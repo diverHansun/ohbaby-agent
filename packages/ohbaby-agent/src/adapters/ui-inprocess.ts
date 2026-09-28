@@ -1,3 +1,10 @@
+import {
+  collectCleanup,
+  createShutdownOptions,
+  type ShutdownOptions,
+  type CleanupResult,
+} from "../runtime/shutdown.js";
+import { RunFinalizationError } from "../runtime/run-manager/errors.js";
 import { SubagentConversationProjection } from "./ui-inprocess/subagent-conversation.js";
 import { InMemorySubagentExecutionStore } from "../agents/subagents/execution-store.js";
 import { createSubagentViewReader } from "./ui-inprocess/subagent-views.js";
@@ -44,6 +51,8 @@ import type {
   UiSteerQueuedPromptReceipt,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
+  UiResubmitRetainedPromptInput,
+  UiPromptResubmissionReceipt,
   UiPromptCompletion,
   UiPromptCacheUsage,
   UiPromptEditLease,
@@ -266,6 +275,7 @@ export interface InProcessUiBackendOptions {
   readonly hookExecutor?: HookExecutor;
   readonly initialSnapshot?: UiSnapshot;
   readonly startupReady?: Promise<unknown>;
+  readonly recoverExecutionSession?: (sessionId: string) => Promise<void>;
   readonly llmClient?: LLMClientInstance;
   readonly logger?: Logger;
   readonly diagnosticsFilePath?: string;
@@ -292,6 +302,10 @@ export interface InProcessUiBackendOptions {
 }
 
 export interface UiPromptQueueExecutionPort {
+  resubmitRetainedPromptForOwner(
+    input: UiResubmitRetainedPromptInput,
+    trustedOwnerClientId: string,
+  ): Promise<UiPromptResubmissionReceipt>;
   steerQueuedPromptForOwner(
     input: UiSteerQueuedPromptInput,
     trustedOwnerClientId: string,
@@ -340,7 +354,8 @@ export interface InProcessUiBackendClient
   >;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
-  dispose(): Promise<void>;
+  closeAdmission(): void;
+  dispose(options?: ShutdownOptions): Promise<CleanupResult>;
 }
 
 function isSnapshot(
@@ -629,6 +644,20 @@ export function createInProcessUiBackendClient(
     options.subagentExecutionStore ?? new InMemorySubagentExecutionStore();
   const sourceLedger =
     options.runLedger ?? stateStore.runLedger ?? createInMemoryRunLedger();
+  async function projectRunRecord(
+    record: import("../runtime/run-ledger/index.js").RunLedgerRecord,
+  ): Promise<UiRun> {
+    return {
+      ...runToUiRun(record),
+      ...(record.inputsCloseReason === "user-stop"
+        ? {
+            unsentSteer:
+              (await currentRunInputStore?.hasUnsentSteer(record.runId)) ??
+              false,
+          }
+        : {}),
+    };
+  }
   const sourceProjection: SourceSessionProjection = new SourceSessionProjection(
     {
       runtimeEpoch: permissionProjection.permissionEpoch,
@@ -646,11 +675,11 @@ export function createInProcessUiBackendClient(
         return session;
       },
       runs: async (sessionId): Promise<readonly UiRun[]> => {
-        const stored = (
-          await sourceLedger.listBySession(sessionId, { limit: 50 })
-        )
-          .filter((run) => run.contextScopeId === undefined)
-          .map(runToUiRun);
+        const stored = await Promise.all(
+          (await sourceLedger.listBySession(sessionId, { limit: 50 }))
+            .filter((run) => run.contextScopeId === undefined)
+            .map(projectRunRecord),
+        );
         return stored.length
           ? stored
           : initialSnapshot.runs.filter((run) => run.sessionId === sessionId);
@@ -678,12 +707,15 @@ export function createInProcessUiBackendClient(
       },
       subviews: (
         sessionId,
-      ): Partial<Pick<UiSessionView, "goal" | "todo" | "context">> => {
+      ): Partial<
+        Pick<UiSessionView, "goal" | "todo" | "context" | "executionRecovery">
+      > => {
         const goal = sharedGoalService.peekSnapshot(sessionId);
         const todo = uiTodosBySession.get(sessionId);
         const context = contextWindowUsage.get(sessionId);
         const failures = sessionSubviewFailures.get(sessionId);
         return {
+          executionRecovery: promptScheduler.getRecoveryState(sessionId),
           ...(goal === undefined
             ? {}
             : {
@@ -739,10 +771,13 @@ export function createInProcessUiBackendClient(
         sourceProjection.owner.run(sessionId, operation),
       onCommitted: (record) => {
         if (record.contextScopeId === undefined)
-          void sourceProjection.commitEvent({
-            type: "run.updated",
-            run: runToUiRun(record),
-          });
+          void projectRunRecord(record)
+            .then((run) =>
+              sourceProjection.commitEvent({ type: "run.updated", run }),
+            )
+            .catch((error: unknown) => {
+              sourceProjection.owner.markUnavailable(record.sessionId, error);
+            });
         else sourceProjection.commitScopeRun(runToUiRun(record));
       },
       onProjectionError: (sessionId, error): void => {
@@ -970,7 +1005,50 @@ export function createInProcessUiBackendClient(
   const promptScheduler: WorkspacePromptScheduler =
     new WorkspacePromptScheduler({
       currentRunInputs: currentRunInputStore,
-
+      now: () => now().getTime(),
+      isExecutionPersistenceError: (error) =>
+        error instanceof RunFinalizationError,
+      async withFinalizationWriteBudget(runId, operation) {
+        const runtime = await (runtimeController.getRuntimeIfStarted() ??
+          closingRuntime);
+        return runtime
+          ? runtime.runManager.withFinalizationWriteBudget(runId, operation)
+          : operation();
+      },
+      async recoverExecution(_prompt, error, runId) {
+        const targetRunId =
+          error instanceof RunFinalizationError ? error.runId : runId;
+        if (!targetRunId) throw error;
+        const runtime = await (runtimeController.getRuntimeIfStarted() ??
+          closingRuntime);
+        if (!runtime) throw error;
+        const completion =
+          await runtime.runManager.retryFinalization(targetRunId);
+        await reconcileRuntimeStatus();
+        return {
+          ...runCompletionToPromptExecutionResult(completion),
+          endedAt: runtime.runManager.get(targetRunId)?.endedAt,
+        };
+      },
+      onRecoveryChanged(sessionId, state) {
+        if (sourceProjection.owner.hasViewOrPendingSeed(sessionId))
+          void sourceProjection.owner
+            .runControl(sessionId, async () => {
+              await sourceProjection.owner.ready(sessionId);
+              sourceProjection.owner.commit(sessionId, {
+                executionRecovery: state,
+              });
+            })
+            .catch(() => undefined);
+        if (state.status === "blocked")
+          publishNotice({
+            key: `execution:recovery:${sessionId}`,
+            level: "error",
+            title: "Execution record could not be saved",
+            message: state.message,
+          });
+      },
+      beforeExecution: options.recoverExecutionSession,
       beforeSessionWrite: initializeSessionView,
       commitCoordinator: {
         runControl: (sessionId, operation) =>
@@ -1001,15 +1079,25 @@ export function createInProcessUiBackendClient(
         });
       },
       async execute(prompt, controls): Promise<PromptExecutionResult> {
+        let executedRunId: string | undefined;
         const completion = await submitPromptInternal(prompt.text, {
           owner: "user",
           signal: controls.signal,
           sessionId: prompt.sessionId,
           reservedUserMessageId: prompt.userMessageId,
           reasoning: prompt.reasoning,
-          onRunStarted: (runId) => controls.markRunning(runId),
+          onRunStarted: (runId) => {
+            executedRunId = runId;
+            return controls.markRunning(runId);
+          },
         });
-        return runCompletionToPromptExecutionResult(completion);
+        const run = executedRunId
+          ? await sourceLedger.get(executedRunId)
+          : undefined;
+        return {
+          ...runCompletionToPromptExecutionResult(completion),
+          endedAt: run?.endedAt,
+        };
       },
     });
 
@@ -1719,6 +1807,12 @@ export function createInProcessUiBackendClient(
     return {
       ...snapshot,
       sessions,
+      runs: await Promise.all(
+        snapshot.runs.map(async (run) => {
+          const record = await sourceLedger.get(run.id);
+          return record ? { ...run, ...(await projectRunRecord(record)) } : run;
+        }),
+      ),
       ...(contextWindowUsages.length > 0 ? { contextWindowUsages } : {}),
       ...(goals.length > 0 || snapshot.goals !== undefined ? { goals } : {}),
       ...(prompts.length > 0 || snapshot.prompts !== undefined
@@ -1775,14 +1869,17 @@ export function createInProcessUiBackendClient(
     const generation = ++selectionGeneration;
     await ready;
     await validatePermissionRoot(sessionId);
-    void initializeSessionView(sessionId).catch((error: unknown) => {
-      publishNotice({
-        key: `session:initialize:${sessionId}`,
-        level: "error",
-        title: "Session unavailable",
-        message: getErrorMessage(error),
+    void promptScheduler
+      .recoverSession(sessionId)
+      .then(() => initializeSessionView(sessionId))
+      .catch((error: unknown) => {
+        publishNotice({
+          key: `session:initialize:${sessionId}`,
+          level: "error",
+          title: "Session unavailable",
+          message: getErrorMessage(error),
+        });
       });
-    });
     if (generation !== selectionGeneration)
       throw permissionError(
         "PERMISSION_SCOPE_CHANGED",
@@ -2758,8 +2855,15 @@ export function createInProcessUiBackendClient(
     await waitForPromptSlot(owner, promptSessionId);
     assertStateStoreWritable();
     await ready;
-    if (submitOptions?.sessionId)
+    if (submitOptions?.sessionId) {
+      const recovery = promptScheduler.getRecoveryState(
+        submitOptions.sessionId,
+      );
+      if (submitOptions.reservedUserMessageId && recovery.status === "blocked")
+        throw new Error(recovery.message);
+      await promptScheduler.recoverSession(submitOptions.sessionId);
       await initializeSessionView(submitOptions.sessionId);
+    }
     await options.beforePromptSubmit?.();
     let activePrompt: ActivePromptState = {
       owner,
@@ -2988,7 +3092,18 @@ export function createInProcessUiBackendClient(
         }
         return completion;
       } catch (error) {
-        await projection.done.catch(() => undefined);
+        if (owner === "goal" && error instanceof RunFinalizationError) {
+          promptScheduler.blockExecutionFinalization(
+            session.id,
+            error,
+            async () => {
+              await runtime.runManager.retryFinalization(error.runId);
+              await reconcileRuntimeStatus();
+            },
+          );
+        }
+        if (error instanceof RunFinalizationError) await projection.stop();
+        else await projection.done.catch(() => undefined);
         const errorStatus = {
           ...(IrisError.isInstance(error) ? { code: error.code } : {}),
           kind: "error" as const,
@@ -3324,6 +3439,7 @@ export function createInProcessUiBackendClient(
     if (explicitSessionId) {
       await ready;
       await assertCanUseAsPrimarySession(explicitSessionId);
+      await promptScheduler.recoverSession(explicitSessionId);
       await initializeSessionView(explicitSessionId);
       return explicitSessionId;
     }
@@ -3332,6 +3448,7 @@ export function createInProcessUiBackendClient(
       return undefined;
     }
     await assertCanUseAsPrimarySession(snapshot.activeSessionId);
+    await promptScheduler.recoverSession(snapshot.activeSessionId);
     await initializeSessionView(snapshot.activeSessionId);
     return snapshot.activeSessionId;
   }
@@ -3497,19 +3614,33 @@ export function createInProcessUiBackendClient(
       budget: (id) => runtime?.getSubagentExecutionBudget(id),
     });
   }
+  let closingRuntime: Promise<UiRuntimeComposition> | undefined;
   let disposed = false;
+  let disposal: Promise<CleanupResult> | undefined;
+  function closeAdmission(): void {
+    if (disposed) return;
+    disposed = true;
+    acceptsPromptCacheUsage = false;
+    closingRuntime = runtimeController.getRuntimeIfStarted();
+    runtimeController.close();
+    promptScheduler.close();
+    interactionBroker.abortAll("service-shutdown");
+  }
   const ready = Promise.resolve(options.startupReady).then(async () => {
     if (disposed) return;
     const selected = await stateStore.getActiveSessionId();
     if (selected)
-      void initializeSessionView(selected).catch((error: unknown) => {
-        publishNotice({
-          key: `session:initialize:${selected}`,
-          level: "error",
-          title: "Session unavailable",
-          message: getErrorMessage(error),
+      void promptScheduler
+        .recoverSession(selected)
+        .then(() => initializeSessionView(selected))
+        .catch((error: unknown) => {
+          publishNotice({
+            key: `session:initialize:${selected}`,
+            level: "error",
+            title: "Session unavailable",
+            message: getErrorMessage(error),
+          });
         });
-      });
     await promptScheduler.init();
   });
   // The eager startup promise remains observable through initialize and writes.
@@ -3519,7 +3650,9 @@ export function createInProcessUiBackendClient(
     async initializeSession(sessionId): Promise<void> {
       await ready;
       await validatePermissionRoot(sessionId);
+      await promptScheduler.recoverSession(sessionId);
       await initializeSessionView(sessionId);
+      await sourceProjection.owner.rebuild(sessionId);
     },
     getSubagentConversationView: (input) => subagentConversations.read(input),
     retainSubagentConversation: (input) => subagentConversations.retain(input),
@@ -3564,12 +3697,24 @@ export function createInProcessUiBackendClient(
           "Session execution control has not initialized",
         );
       const active = activePromptsBySession.get(input.sessionId);
+      const indexedRunId = runtimeController.getActiveRunId(input.sessionId);
+      const runtime = await runtimeController.getRuntimeIfStarted();
+      const run = indexedRunId
+        ? runtime?.runManager.get(indexedRunId)
+        : undefined;
+      // Terminal publication can precede the adapter's finally/index cleanup.
+      // Control reads follow the Run's current fact, not that stale index.
+      const activeRunId =
+        run && (run.status === "pending" || run.status === "running")
+          ? indexedRunId
+          : undefined;
       return {
         runtimeEpoch: permissionProjection.permissionEpoch,
         sessionId: input.sessionId,
         rootSessionId: input.sessionId,
-        runId: runtimeController.getActiveRunId(input.sessionId) ?? null,
-        driver: active?.owner ?? null,
+        executionRecovery: promptScheduler.getRecoveryState(input.sessionId),
+        runId: activeRunId ?? null,
+        driver: activeRunId ? (active?.owner ?? null) : null,
       };
     },
     async getPromptReceipt(input): Promise<UiPromptReceiptResult> {
@@ -3609,21 +3754,27 @@ export function createInProcessUiBackendClient(
           : null,
       };
     },
-    async dispose(): Promise<void> {
-      disposed = true;
-      acceptsPromptCacheUsage = false;
+    closeAdmission,
+    dispose(
+      shutdown: ShutdownOptions = createShutdownOptions(),
+    ): Promise<CleanupResult> {
+      closeAdmission();
+      if (disposal) return disposal;
       permission.dispose();
-      runtimeController.close();
-      promptScheduler.close();
-      interactionBroker.abortAll("daemon-stopping");
-      eventRouter.dispose();
-      unsubscribePromptCacheUsageSessionRemoved();
-      promptCacheUsage.clear();
-      retiredPromptCacheSessionIds.clear();
-      await runtimeController.resetRuntime();
-      subagentConversations.dispose();
-      sourceProjection.reasoning.dispose();
-      sourceProjection.owner.dispose();
+      disposal = collectCleanup(shutdown, {
+        runtime: () => runtimeController.resetRuntime(shutdown),
+        prompts: () => promptScheduler.settleShutdown(),
+      }).then((result) => {
+        eventRouter.dispose();
+        unsubscribePromptCacheUsageSessionRemoved();
+        promptCacheUsage.clear();
+        retiredPromptCacheSessionIds.clear();
+        subagentConversations.dispose();
+        sourceProjection.reasoning.dispose();
+        sourceProjection.owner.dispose();
+        return result;
+      });
+      return disposal;
     },
 
     getSessionIndex,
@@ -3703,6 +3854,29 @@ export function createInProcessUiBackendClient(
         scopeKey: promptScopeKey,
       });
       return result.receipt;
+    },
+
+    resubmitRetainedPrompt(input): Promise<UiPromptResubmissionReceipt> {
+      return this.resubmitRetainedPromptForOwner(
+        input,
+        promptQueueOwnerClientId,
+      );
+    },
+    async resubmitRetainedPromptForOwner(
+      input,
+      trustedOwnerClientId,
+    ): Promise<UiPromptResubmissionReceipt> {
+      await ready;
+      const prompt = await promptScheduler.get(input.promptId);
+      if (!prompt)
+        throw Object.assign(new Error("Prompt not found"), {
+          code: "PROMPT_NOT_FOUND",
+        });
+      await validatePermissionRoot(prompt.sessionId);
+      return promptScheduler.resubmitRetained({
+        ...input,
+        ownerClientId: trustedOwnerClientId,
+      });
     },
 
     async editQueuedPrompt(

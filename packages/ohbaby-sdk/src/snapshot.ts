@@ -96,6 +96,10 @@ export interface UiSession {
 }
 
 export interface UiRun {
+  readonly inputsCloseReason?: string;
+  readonly endedAt?: string;
+  readonly endTimeSource?: "recovery";
+  readonly unsentSteer?: boolean;
   readonly modelActivity?: UiModelRequest;
   readonly id: string;
   readonly sessionId: string;

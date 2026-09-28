@@ -156,6 +156,8 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
         },
       }),
     ),
+    resubmitRetainedPrompt: () =>
+      Promise.reject(new Error("Unused retained resubmission stub")),
     editQueuedPrompt: vi.fn(() =>
       Promise.reject(new Error("No queued prompt in fake backend")),
     ),
@@ -277,7 +279,8 @@ describe("startDaemonServer", () => {
   it("uses the agent package version for daemon discovery metadata by default", async () => {
     vi.resetModules();
     let capturedPackageVersion: string | undefined;
-    vi.doMock("ohbaby-agent", () => ({
+    vi.doMock("ohbaby-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ohbaby-agent")>()),
       closePersistentUiBackendDatabase: vi.fn(),
       createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient: vi.fn(() =>
@@ -331,7 +334,8 @@ describe("startDaemonServer", () => {
     const createPersistentUiBackendClient = vi.fn(() =>
       createFakeBackend(vi.fn(() => Promise.resolve())),
     );
-    vi.doMock("ohbaby-agent", () => ({
+    vi.doMock("ohbaby-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ohbaby-agent")>()),
       closePersistentUiBackendDatabase,
       createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient,
@@ -402,7 +406,8 @@ describe("startDaemonServer", () => {
     const createPersistentUiBackendClient = vi.fn(() =>
       createFakeBackend(vi.fn(() => Promise.resolve())),
     );
-    vi.doMock("ohbaby-agent", () => ({
+    vi.doMock("ohbaby-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ohbaby-agent")>()),
       closePersistentUiBackendDatabase,
       createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient,
@@ -631,7 +636,8 @@ describe("startDaemonServer", () => {
     const createPersistentUiBackendClient = vi.fn(() =>
       createFakeBackend(vi.fn(() => Promise.resolve())),
     );
-    vi.doMock("ohbaby-agent", () => ({
+    vi.doMock("ohbaby-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ohbaby-agent")>()),
       closePersistentUiBackendDatabase,
       createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient,
@@ -678,7 +684,8 @@ describe("startDaemonServer", () => {
     const createPersistentUiBackendClient = vi.fn(() =>
       createFakeBackend(vi.fn(() => Promise.resolve())),
     );
-    vi.doMock("ohbaby-agent", () => ({
+    vi.doMock("ohbaby-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ohbaby-agent")>()),
       closePersistentUiBackendDatabase,
       createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient,
@@ -937,7 +944,8 @@ describe("startDaemonServer", () => {
     const createPersistentUiBackendClient = vi.fn(() =>
       createFakeBackend(vi.fn(() => Promise.resolve())),
     );
-    vi.doMock("ohbaby-agent", () => ({
+    vi.doMock("ohbaby-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ohbaby-agent")>()),
       closePersistentUiBackendDatabase,
       createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient,
@@ -979,7 +987,8 @@ describe("startDaemonServer", () => {
     const createPersistentUiBackendClient = vi.fn(() =>
       createFakeBackend(vi.fn(() => Promise.resolve())),
     );
-    vi.doMock("ohbaby-agent", () => ({
+    vi.doMock("ohbaby-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ohbaby-agent")>()),
       closePersistentUiBackendDatabase,
       createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient,
@@ -1167,9 +1176,16 @@ describe("startDaemonServer", () => {
         stopDaemonFromState({
           homeDirectory: tempDir,
           kill,
+          observeProcess: vi
+            .fn()
+            .mockReturnValueOnce("alive")
+            .mockReturnValue("dead"),
           workdir: repoA,
         }),
-      ).resolves.toBe("stopped");
+      ).resolves.toMatchObject({
+        processExit: "confirmed",
+        cleanup: "unknown",
+      });
       expect(kill).toHaveBeenCalledTimes(1);
       expect(kill).toHaveBeenCalledWith(111, "SIGTERM");
     } finally {
@@ -1208,8 +1224,13 @@ describe("startDaemonServer", () => {
     try {
       const { stopDaemonFromState } = await import("./main.js");
       await expect(
-        stopDaemonFromState({ homeDirectory: tempDir, kill, workdir: repo }),
-      ).rejects.toThrow(/refusing to stop/i);
+        stopDaemonFromState({
+          homeDirectory: tempDir,
+          kill,
+          workdir: repo,
+          observeProcess: () => "alive",
+        }),
+      ).resolves.toMatchObject({ processExit: "unconfirmed" });
       expect(kill).not.toHaveBeenCalled();
     } finally {
       await rm(tempDir, { force: true, recursive: true });
@@ -1313,7 +1334,8 @@ describe("startDaemonServer", () => {
     const createPersistentUiBackendClient = vi.fn(() =>
       createFakeBackend(disposeBackend),
     );
-    vi.doMock("ohbaby-agent", () => ({
+    vi.doMock("ohbaby-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ohbaby-agent")>()),
       closePersistentUiBackendDatabase,
       createSessionIdGenerator: (): (() => string) => () => "session_test",
       createPersistentUiBackendClient,

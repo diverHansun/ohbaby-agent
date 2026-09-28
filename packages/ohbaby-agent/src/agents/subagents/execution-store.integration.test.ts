@@ -187,6 +187,82 @@ for (const backend of ["memory", "sqlite"] as const)
         await s.get({ ...lookup, requesterScopeId: "foreign" }),
       ).toBeNull();
     });
+    it("resolves the exact child run across roots reusing one instance without inferring queued ownership", async () => {
+      const s = await store();
+      const first = (await s.accept(input())).record;
+      const second = (
+        await s.accept(
+          input({
+            executionId: "exec-B",
+            requestId: "call-B",
+            rootRunId: "root-B",
+          }),
+        )
+      ).record;
+      expect(first).toMatchObject({
+        executionId: "exec-1",
+        rootRunId: "root-run",
+        status: "queued",
+      });
+      expect(second).toMatchObject({
+        executionId: "exec-B",
+        rootRunId: "root-B",
+        status: "queued",
+      });
+      expect(first.childRunId).toBeUndefined();
+      expect(second.childRunId).toBeUndefined();
+      const child = { sessionId: "child", contextScopeId: "scope" };
+      expect(await s.getByChildRun({ ...child, runId: "child-A" })).toBeNull();
+      await s.bindChild(lookup, child, 2);
+      await s.start(lookup, "child-A", 3);
+      await s.bindChild({ ...lookup, executionId: "exec-B" }, child, 4);
+      await s.start({ ...lookup, executionId: "exec-B" }, "child-B", 5);
+      await s.finish(lookup, { status: "interrupted", completedAt: 6 });
+      expect(
+        await s.getByChildRun({ ...child, runId: "child-A" }),
+      ).toMatchObject({
+        executionId: "exec-1",
+        rootRunId: "root-run",
+        status: "interrupted",
+      });
+      expect(
+        await s.getByChildRun({ ...child, runId: "child-B" }),
+      ).toMatchObject({
+        executionId: "exec-B",
+        rootRunId: "root-B",
+        status: "running",
+      });
+      expect(
+        await s.getByChildRun({
+          ...child,
+          sessionId: "other",
+          runId: "child-A",
+        }),
+      ).toBeNull();
+      expect(
+        await s.getByChildRun({
+          ...child,
+          contextScopeId: "other",
+          runId: "child-A",
+        }),
+      ).toBeNull();
+      expect(await s.getByChildRun({ ...child, runId: "missing" })).toBeNull();
+      await expect(s.getByChildRun({ ...child, runId: " " })).rejects.toThrow(
+        /identity/i,
+      );
+    });
+    it("rejects ambiguous child-run membership instead of choosing another execution", async () => {
+      const s = await store();
+      const child = { sessionId: "child", contextScopeId: "scope" };
+      for (const executionId of ["first", "second"]) {
+        await s.accept(input({ executionId, requestId: executionId }));
+        await s.bindChild({ ...lookup, executionId }, child, 2);
+        await s.start({ ...lookup, executionId }, "same-run", 3);
+      }
+      await expect(
+        s.getByChildRun({ ...child, runId: "same-run" }),
+      ).rejects.toThrow(/ambiguous/i);
+    });
     it("binds identity once, claims terminal once, retains full output through artifact failure and records delivery separately", async () => {
       const s = await store();
       await s.accept(input());

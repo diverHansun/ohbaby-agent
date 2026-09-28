@@ -255,6 +255,7 @@ export interface StreamingResponse {
 
 /** One observable adapter invocation; provider-internal retries are not counted. */
 export interface ModelRequestRecord {
+  readonly endTimeSource?: "recovery";
   /** Immutable current-run input membership of this exact prepared request. */
   readonly inputIds?: readonly string[];
   readonly requestId: string;

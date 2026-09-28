@@ -5,6 +5,11 @@ export interface StoredComposerDraft {
 }
 
 export interface QueuedEditState {
+  readonly status?: "queued" | "retained";
+  readonly operationId?: string;
+  /** Frozen once sent: an ambiguous result must replay the identical request. */
+  readonly retainedSendText?: string;
+  readonly leaseLost?: boolean;
   readonly editLeaseId: string;
   readonly expiresAt: string;
   readonly originalDraft: string;

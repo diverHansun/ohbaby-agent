@@ -1,3 +1,7 @@
+import type {
+  ShutdownOptions,
+  CleanupTaskResult,
+} from "../../runtime/shutdown.js";
 import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { UiEvent } from "ohbaby-sdk";
 import type {
@@ -66,5 +70,6 @@ export interface UiRuntimeComposition {
     reason?: string,
   ): Promise<void>;
   getActivityReasons(): readonly string[];
-  dispose(): Promise<void>;
+  closeAdmission?(): void;
+  dispose(options?: ShutdownOptions): Promise<CleanupTaskResult>;
 }

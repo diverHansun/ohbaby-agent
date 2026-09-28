@@ -1,6 +1,11 @@
 import type { UiSubagentReadClient } from "ohbaby-sdk";
 import { randomUUID } from "node:crypto";
-import type { CoreApiHost } from "ohbaby-agent";
+import {
+  createShutdownOptions,
+  withinShutdown,
+  type CoreApiHost,
+  type ShutdownOptions,
+} from "ohbaby-agent";
 import {
   submitPromptAndWait as composeSubmitPromptAndWait,
   workspaceDirectoryHeaders,
@@ -43,6 +48,7 @@ export interface RemoteDaemonClientOptions {
 
 type RemoteUiBackendClient = UiBackendClient &
   UiSessionRecoveryClient & {
+    closeAdmission(): void;
     dispose(): Promise<void>;
   };
 
@@ -153,6 +159,10 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 class RemoteDaemonClient implements RemoteUiBackendClient {
+  private closing = false;
+  private assertOpen(): void {
+    if (this.closing) throw new Error("Remote client is closing");
+  }
   private readonly baseUrl: string;
   private readonly authToken: string | undefined;
   private readonly clientId: string;
@@ -427,6 +437,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("editQueuedPrompt", [input]);
   }
 
+  resubmitRetainedPrompt(
+    input: Parameters<UiBackendClient["resubmitRetainedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["resubmitRetainedPrompt"]> {
+    return this.rpc("resubmitRetainedPrompt", [input]);
+  }
+
   steerQueuedPrompt(
     input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
@@ -550,7 +566,12 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     ]);
   }
 
+  closeAdmission(): void {
+    this.closing = true;
+  }
+
   async dispose(): Promise<void> {
+    this.closeAdmission();
     this.handlers.clear();
     this.permissionHandlers.clear();
     const pendingLoop = this.sseLoop;
@@ -568,9 +589,11 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
       readonly skipInitialize?: boolean;
     } = {},
   ): Promise<T> {
+    this.assertOpen();
     if (options.skipInitialize !== true) {
       await this.ensureInitialized();
     }
+    this.assertOpen();
     const request = createDaemonRpcRequest({
       clientId: this.clientId,
       id: randomUUID(),
@@ -636,6 +659,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   }
 
   private ensureSseLoop(): void {
+    this.assertOpen();
     if (this.sseLoop) {
       return;
     }
@@ -888,8 +912,12 @@ export function createRemoteCoreApiHost(
       },
     },
     core: client,
-    dispose(): Promise<void> {
-      return client.dispose();
+    closeAdmission(): void {
+      client.closeAdmission();
+    },
+    dispose(options: ShutdownOptions = createShutdownOptions()): Promise<void> {
+      client.closeAdmission();
+      return withinShutdown(options, "remote-client", () => client.dispose());
     },
   };
 }

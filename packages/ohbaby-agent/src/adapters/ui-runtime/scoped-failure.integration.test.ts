@@ -265,7 +265,7 @@ describe("failed child scope and primary run handoff", () => {
         });
         const child = await runManager.waitForCompletion("child-run");
         expect(child.status).toBe(
-          failure === "cancel" ? "cancelled" : "failed",
+          failure === "cancel" ? "interrupted" : "failed",
         );
         expect(child.terminalReason).toBe(
           failure === "cancel" ? "cancelled" : "provider_stream_interrupted",

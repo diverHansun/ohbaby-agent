@@ -1,3 +1,10 @@
+import {
+  collectCleanup,
+  createShutdownOptions,
+  type ShutdownOptions,
+  type CleanupResult,
+} from "../runtime/shutdown.js";
+import { createSessionExecutionRecovery } from "../runtime/execution-recovery/session.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { UiBackendClient } from "ohbaby-sdk";
@@ -89,7 +96,8 @@ export interface PersistentUiBackendClient
   >;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
-  dispose(): Promise<void> | void;
+  closeAdmission(): void;
+  dispose(options?: ShutdownOptions): Promise<CleanupResult>;
 }
 
 function numericNow(now?: () => Date): () => number {
@@ -208,6 +216,9 @@ function withStartupRecovery(
   const startup = recovery.then(() => {
     recovered = true;
   });
+  // Eager startup may fail before the first API call; keep its rejection for
+  // ready()/dispose() while observing it immediately to avoid an orphan promise.
+  void startup.catch(() => undefined);
   async function ready(): Promise<void> {
     try {
       await startup;
@@ -270,18 +281,23 @@ function withStartupRecovery(
       await ready();
       await client.initialize();
     },
-    async dispose(): Promise<void> {
-      // Startup owns durable recovery writes even if no public read was made.
-      // Drain that owner before callers are allowed to close its database.
-      try {
-        await startup;
-      } catch (error) {
-        // Preserve disposal after a failed public initialization/read, while
-        // still surfacing startup failures that no caller has observed yet.
-        if (!startupFailureReported) throw error;
-      } finally {
-        await client.dispose();
-      }
+    closeAdmission: () => {
+      client.closeAdmission();
+    },
+    dispose(
+      shutdown: ShutdownOptions = createShutdownOptions(),
+    ): Promise<CleanupResult> {
+      client.closeAdmission();
+      return collectCleanup(shutdown, {
+        startup: async () => {
+          try {
+            await startup;
+          } catch (error) {
+            if (!startupFailureReported) throw error;
+          }
+        },
+        backend: () => client.dispose(shutdown),
+      });
     },
     async getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
       await ready();
@@ -345,6 +361,14 @@ function withStartupRecovery(
     ): ReturnType<UiBackendClient["submitPromptAndWait"]> {
       await ready();
       return client.submitPromptAndWait(text, submitOptions);
+    },
+    async resubmitRetainedPrompt(input) {
+      await ready();
+      return client.resubmitRetainedPrompt(input);
+    },
+    async resubmitRetainedPromptForOwner(input, trustedOwnerClientId) {
+      await ready();
+      return client.resubmitRetainedPromptForOwner(input, trustedOwnerClientId);
     },
     async editQueuedPrompt(
       input,
@@ -644,9 +668,35 @@ export function createPersistentUiBackendClient(
       storageRoot: options.storageRoot,
     }),
   ]);
-  const startupRecovery = runLedger.recoverOrphanedRuns();
-  const startupReady = startupRecovery.then(async () => {
-    await subagentExecutionStore.interruptTerminalRootExecutions(now());
+  const promptScopeKey = path.resolve(persistentProjectDirectory(options));
+  const currentRunInputStore = new DatabaseCurrentRunInputStore({ db, now });
+  const promptSubmissionStore = new DatabasePromptSubmissionStore({
+    db,
+    now,
+    ownerId: backendOwnerId,
+    ownerPid: process.pid,
+  });
+  const recoverExecutionSession = createSessionExecutionRecovery({
+    runs: runLedger,
+    prompts: promptSubmissionStore,
+    inputs: currentRunInputStore,
+    executions: subagentExecutionStore,
+    instances: subagentInstanceStore,
+    messages: messageManager,
+    scopeKey: promptScopeKey,
+    ownerId: backendOwnerId,
+    now,
+  });
+  const startupReady = Promise.resolve().then(async () => {
+    const sessions = await sessionManager.listByProjectRoot(await projectRoot, {
+      status: "active",
+    });
+    // Recover roots independently. Explicit entry retries failed scopes; reads stay pure.
+    await Promise.allSettled(
+      sessions
+        .filter((session) => !session.isSubagent)
+        .map((session) => recoverExecutionSession(session.id)),
+    );
     await resolvePersistentStartupSession({
       mode: startupSessionMode,
       projectRoot: await projectRoot,
@@ -675,15 +725,11 @@ export function createPersistentUiBackendClient(
       messageManager,
       now: options.now,
       projectDirectory: options.projectDirectory,
-      promptScopeKey: path.resolve(persistentProjectDirectory(options)),
+      promptScopeKey,
+      recoverExecutionSession,
       promptQueueOwnerClientId: backendOwnerId,
-      currentRunInputStore: new DatabaseCurrentRunInputStore({ db, now }),
-      promptSubmissionStore: new DatabasePromptSubmissionStore({
-        db,
-        now,
-        ownerId: backendOwnerId,
-        ownerPid: process.pid,
-      }),
+      currentRunInputStore,
+      promptSubmissionStore,
       runLedger,
       sessionManager,
       stateStore,

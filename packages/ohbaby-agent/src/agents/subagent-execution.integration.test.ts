@@ -111,6 +111,130 @@ function fixture(): {
 }
 
 describe("accepted subagent execution host", () => {
+  it("withdraws persisted root inputs outside the active map and retries after queue persistence fails", async () => {
+    const f = fixture();
+    const completed = await f.host.run(f.input("completed"));
+    await vi.waitFor(() => {
+      expect(f.host.hasActiveWork()).toBe(false);
+    });
+    for (const [executionId, rootRunId, parentSessionId, subagentId] of [
+      ["queued-A", "root_A", "parent", completed.execution.subagentId],
+      ["queued-B", "root_B", "parent", completed.execution.subagentId],
+      ["nested-A", "root_A", "child-requester", "nested-instance"],
+    ]) {
+      await f.executionStore.accept({
+        executionId,
+        rootRunId,
+        parentSessionId,
+        subagentId,
+        rootSessionId: "parent",
+        requesterRunId: `requester-${executionId}`,
+        requestId: executionId,
+        requesterScopeId: "scope",
+        mode: "background",
+        prompt: executionId,
+        createdAt: 1,
+      });
+      if (subagentId === "nested-instance") {
+        await f.store.create({
+          subagentId,
+          parentSessionId,
+          sessionId: "nested-child",
+          contextScopeId: subagentId,
+          role: "explore",
+          initialPrompt: executionId,
+          status: "interrupted",
+          pendingQueue: [],
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      }
+      await f.store.appendPendingQueue(
+        subagentId,
+        { executionId, rootRunId, prompt: executionId },
+        2,
+      );
+    }
+    expect(f.host.hasActiveWork()).toBe(false);
+    const originalUpdate = f.store.update.bind(f.store);
+    const failedSave = vi
+      .spyOn(f.store, "update")
+      .mockRejectedValueOnce(new Error("queue disk failure"));
+    await expect(
+      f.host.interruptByRootRun("root_A", "stopped"),
+    ).rejects.toThrow("queue disk failure");
+    failedSave.mockImplementation(originalUpdate);
+    await f.host.interruptByRootRun("root_A", "stopped");
+    expect(
+      (
+        await f.store.get({
+          parentSessionId: "parent",
+          subagentId: completed.execution.subagentId,
+        })
+      )?.pendingQueue,
+    ).toEqual([
+      { executionId: "queued-B", rootRunId: "root_B", prompt: "queued-B" },
+    ]);
+    expect(
+      (
+        await f.store.get({
+          parentSessionId: "child-requester",
+          subagentId: "nested-instance",
+        })
+      )?.pendingQueue,
+    ).toEqual([]);
+    expect(
+      Object.fromEntries(
+        (await f.executionStore.listByRootRun("root_A")).map((record) => [
+          record.executionId,
+          record.status,
+        ]),
+      ),
+    ).toEqual({
+      [completed.execution.executionId]: "completed",
+      "queued-A": "interrupted",
+      "nested-A": "interrupted",
+    });
+    expect((await f.executionStore.listByRootRun("root_B"))[0].status).toBe(
+      "queued",
+    );
+    expect(f.turn).toHaveBeenCalledTimes(1);
+  });
+  it("aborts every current child synchronously before a root interruption save can fail", async () => {
+    const f = fixture();
+    const signals: AbortSignal[] = [];
+    const finish = deferred<Awaited<ReturnType<AgentInstance["turn"]>>>();
+    f.turn.mockImplementation((input) => {
+      if (input.signal) signals.push(input.signal);
+      return finish.promise;
+    });
+    await f.host.run(f.input("one", { mode: "background" }));
+    await f.host.run(f.input("two", { mode: "background" }));
+    await vi.waitFor(() => {
+      expect(signals).toHaveLength(2);
+    });
+    const failure = vi
+      .spyOn(f.executionStore, "interruptRoot")
+      .mockRejectedValue(new Error("root disk failure"));
+    try {
+      const stopped = f.host.interruptByRootRun("root_A", "stopped");
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+      await expect(stopped).rejects.toThrow("root disk failure");
+      await expect(
+        f.host.run(f.input("late", { mode: "background" })),
+      ).rejects.toThrow(/closed/);
+    } finally {
+      failure.mockRestore();
+      finish.resolve({
+        mode: "waitForCompletion",
+        sessionId: "child",
+        success: false,
+        error: "stopped",
+        runStatus: "interrupted",
+      });
+      await f.host.dispose();
+    }
+  });
   it("withdraws old root queued inputs while a new root can reuse the instance", async () => {
     const f = fixture();
     const started = deferred<undefined>();

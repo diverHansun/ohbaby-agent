@@ -111,3 +111,16 @@ export {
 export * from "./services/workspace-registry/index.js";
 export * from "./skill/index.js";
 export * from "./utils/index.js";
+
+export {
+  collectCleanup,
+  createShutdownOptions,
+  withinShutdown,
+  type CleanupResult,
+  type CleanupTaskResult,
+  type ShutdownOptions,
+} from "./runtime/shutdown.js";
+export {
+  beginDatabaseShutdown,
+  DatabaseShutdownError,
+} from "./services/database/index.js";

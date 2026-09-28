@@ -1,3 +1,7 @@
+import type {
+  ShutdownOptions,
+  CleanupTaskResult,
+} from "../../runtime/shutdown.js";
 import type { UiRunStatus } from "ohbaby-sdk";
 import {
   startRunStreamProjection,
@@ -36,6 +40,7 @@ export class InProcessRuntimeController {
 
   close(): void {
     this.closed = true;
+    this.resolvedRuntime?.closeAdmission?.();
   }
   private runtimeVersion: string | undefined;
 
@@ -51,12 +56,12 @@ export class InProcessRuntimeController {
     await previous;
     try {
       for (;;) {
-        if (this.closed) throw new Error("Runtime is shutting down");
+        if (this.isClosed()) throw new Error("Runtime is shutting down");
         // Runtime initialization/disposal may need the configuration lock themselves.
         // Never await those operations while holding publication coordination.
         const runtime = await this.getRuntimeForPrompt();
         const admitted = await this.coordinate(async () => {
-          if (this.closed) throw new Error("Runtime is shutting down");
+          if (this.isClosed()) throw new Error("Runtime is shutting down");
           const version = useCurrent
             ? this.runtimeVersion
             : await this.options.getConfigVersion?.();
@@ -107,6 +112,7 @@ export class InProcessRuntimeController {
   private readonly activeRunBySession = new Map<string, string>();
   private resetBarrier: Promise<void> = Promise.resolve();
   private runtimePromise: Promise<UiRuntimeComposition> | undefined;
+  private resolvedRuntime: UiRuntimeComposition | undefined;
 
   constructor(private readonly options: InProcessRuntimeControllerOptions) {}
 
@@ -155,15 +161,26 @@ export class InProcessRuntimeController {
     return this.activeRunSessionById.has(runId);
   }
 
+  private isClosed(): boolean {
+    return this.closed;
+  }
+
   getRuntime(): Promise<UiRuntimeComposition> {
+    if (this.closed)
+      return Promise.reject(new Error("Runtime is shutting down"));
     if (this.runtimePromise) {
       return this.runtimePromise;
     }
     const creation = this.resetBarrier
       .then(() =>
         this.coordinate(async () => {
+          if (this.isClosed()) throw new Error("Runtime is shutting down");
           this.runtimeVersion = await this.options.getConfigVersion?.();
-          return this.options.createRuntime();
+          if (this.isClosed()) throw new Error("Runtime is shutting down");
+          const runtime = await this.options.createRuntime();
+          this.resolvedRuntime = runtime;
+          if (this.isClosed()) runtime.closeAdmission?.();
+          return runtime;
         }),
       )
       .catch((error: unknown) => {
@@ -180,7 +197,7 @@ export class InProcessRuntimeController {
     return this.runtimePromise;
   }
 
-  resetRuntime(): Promise<void> {
+  resetRuntime(shutdown?: ShutdownOptions): Promise<CleanupTaskResult> {
     const runtimePromise = this.runtimePromise;
     this.runtimePromise = undefined;
     const operation = this.resetBarrier.then(async () => {
@@ -188,9 +205,14 @@ export class InProcessRuntimeController {
         return;
       }
       const runtime = await runtimePromise;
-      await runtime.dispose();
+      const result = await runtime.dispose(shutdown);
+      if (this.resolvedRuntime === runtime) this.resolvedRuntime = undefined;
+      return result;
     });
-    this.resetBarrier = operation.catch(() => undefined);
+    this.resetBarrier = operation.then(
+      () => undefined,
+      () => undefined,
+    );
     return operation;
   }
 
@@ -218,7 +240,7 @@ export class InProcessRuntimeController {
   async cancelPromptRun(runId: string): Promise<void> {
     try {
       const runtime = await this.getRuntime();
-      await runtime.interruptRunTree(runId, "run aborted");
+      await runtime.interruptRunTree(runId, "user-stop");
     } finally {
       await this.options.clearPendingPermissionsForRun(runId);
     }

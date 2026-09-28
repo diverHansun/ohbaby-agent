@@ -1,4 +1,5 @@
 import { runWriteTransaction } from "../../services/database/index.js";
+import { isValidOwnerPid } from "../../utils/process-owner.js";
 import {
   getDatabase,
   schema,
@@ -8,8 +9,10 @@ import {
 import type { SubagentRole } from "../roles.js";
 import {
   assertSubagentInstanceUpdate,
+  recoveryExecutionInputsUpdate,
   type QueuedSubagentInput,
   type MarkSubagentsInterruptedInput,
+  type RecoverSubagentExecutionInputsInput,
   type SubagentInstanceRecord,
   type SubagentInstanceStatus,
   type SubagentInstanceStore,
@@ -102,8 +105,8 @@ function rowToRecord(row: SubagentInstanceRow): SubagentInstanceRecord {
 }
 
 function defaultIsOwnerAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
+  if (!isValidOwnerPid(pid)) {
+    return true;
   }
   try {
     process.kill(pid, 0);
@@ -118,11 +121,11 @@ function shouldInterruptActiveOwner(
   input: MarkSubagentsInterruptedInput,
   isOwnerAlive: (pid: number) => boolean,
 ): boolean {
+  if (!isValidOwnerPid(row.owner_pid)) {
+    return input.recoverUnknownOwner === true;
+  }
   if (input.ownerId !== undefined && row.owner_id === input.ownerId) {
     return true;
-  }
-  if (row.owner_pid === null) {
-    return input.recoverUnknownOwner === true;
   }
   return !isOwnerAlive(row.owner_pid);
 }
@@ -181,6 +184,37 @@ export class DatabaseSubagentInstanceStore implements SubagentInstanceStore {
   constructor(options: DatabaseSubagentInstanceStoreOptions = {}) {
     this.db = options.db ?? getDatabase();
     this.isOwnerAlive = options.isOwnerAlive ?? defaultIsOwnerAlive;
+  }
+
+  async recoverExecutionInputs(
+    input: RecoverSubagentExecutionInputsInput,
+  ): Promise<SubagentInstanceRecord> {
+    return runWriteTransaction(this.db, () => {
+      const current = this.getById(input.subagentId);
+      const update = recoveryExecutionInputsUpdate(current, input);
+      if (!update) return current;
+      const { assignments, values } = updateColumns(update);
+      const row = this.db
+        .prepare<SubagentInstanceRow>(
+          `UPDATE ${schema.subagentInstance.tableName}
+           SET ${assignments.join(", ")}
+           WHERE subagent_id = ?
+             AND owner_id IS ? AND owner_pid IS ? AND current_run_id IS ?
+           RETURNING *`,
+        )
+        .get(
+          ...values,
+          input.subagentId,
+          current.ownerId ?? null,
+          current.ownerPid ?? null,
+          current.currentRunId ?? null,
+        );
+      if (!row)
+        throw new Error(
+          `Subagent recovery ownership conflict: ${input.subagentId}`,
+        );
+      return rowToRecord(row);
+    });
   }
 
   async appendPendingQueue(

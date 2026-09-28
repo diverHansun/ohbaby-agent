@@ -1,6 +1,10 @@
 import { dirname } from "node:path";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import type { DaemonState, DaemonStateFile } from "./types.js";
+import type {
+  DaemonState,
+  DaemonStateFile,
+  DaemonShutdownReport,
+} from "./types.js";
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
@@ -59,8 +63,20 @@ function parseDaemonState(raw: string): DaemonState | undefined {
   };
 }
 
+export function shutdownReportPath(statePath: string, token: string): string {
+  return `${statePath}.shutdown-${encodeURIComponent(token)}.json`;
+}
+
 export class JsonDaemonStateFile implements DaemonStateFile {
   constructor(private readonly path: string) {}
+
+  async writeShutdownReport(report: DaemonShutdownReport): Promise<void> {
+    const path = shutdownReportPath(this.path, report.pidToken);
+    await writeFile(path, `${JSON.stringify(report)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  }
 
   async read(): Promise<DaemonState | undefined> {
     try {

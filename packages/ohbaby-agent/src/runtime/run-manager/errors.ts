@@ -25,3 +25,21 @@ export class RunDefaultsPolicyError extends Error {
     this.name = "RunDefaultsPolicyError";
   }
 }
+
+export class RunFinalizationError extends Error {
+  constructor(
+    readonly runId: string,
+    readonly stage:
+      | "input-closure"
+      | "permissions"
+      | "execution-history"
+      | "run-terminal",
+    cause: unknown,
+  ) {
+    super(
+      `Run ${runId} could not persist ${stage}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+    this.name = "RunFinalizationError";
+  }
+}

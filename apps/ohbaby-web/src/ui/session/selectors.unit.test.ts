@@ -1,4 +1,4 @@
-import type { UiMessage, UiSnapshot } from "ohbaby-sdk";
+import type { UiMessage, UiSessionView, UiSnapshot } from "ohbaby-sdk";
 import { describe, expect, it } from "vitest";
 import type { StoreSnapshot } from "../../api/daemon/wire.js";
 import { createOhbabyWebStore } from "../../store/store.js";
@@ -95,6 +95,101 @@ function baseSnapshot(): UiSnapshot {
 }
 
 describe("ohbaby-web ui selectors", () => {
+  it("orders the queue by admission including a retained resubmission in the same millisecond", () => {
+    const original = {
+      clientRequestId: "b",
+      promptId: "a-old-b",
+      userMessageId: "m-b",
+      scopeKey: "/repo",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: "B resent",
+      createdAt: "2026-01-01T00:00:00Z",
+      acceptedAt: timestamp,
+      admissionOrder: 12,
+      updatedAt: timestamp,
+    };
+    const d = {
+      ...original,
+      promptId: "z-new-d",
+      text: "D already accepted",
+      createdAt: timestamp,
+      admissionOrder: 11,
+    };
+    expect(
+      selectViewModel(
+        store({ ...baseSnapshot(), prompts: [original, d] }),
+      ).queuedPrompts.map((p) => p.promptId),
+    ).toEqual(["z-new-d", "a-old-b"]);
+  });
+
+  it("shows execution recovery from the current view and leaves blocked retry editable", () => {
+    const base = baseSnapshot();
+    const state = store(base);
+    const sessionView: UiSessionView = {
+      version: {
+        runtimeEpoch: "epoch",
+        sessionId: "session_1",
+        viewGeneration: "view",
+        sessionRevision: 1,
+      },
+      session: base.sessions[0],
+      runs: [],
+      prompts: [],
+      history: { hasMore: false },
+      reasoningMissing: false,
+      goal: { status: "ready", value: null },
+      todo: { status: "ready", value: null },
+      context: { status: "ready", value: null },
+      executionRecovery: { status: "recovering", message: "internal detail" },
+    };
+    const withView = {
+      ...state,
+      sessionSync: { ...state.sessionSync, view: sessionView },
+    };
+    expect(selectViewModel(withView).header.statusLabel).toBe(
+      "Checking execution records…",
+    );
+    const blocked = selectViewModel({
+      ...withView,
+      sessionSync: {
+        ...withView.sessionSync,
+        view: {
+          ...sessionView,
+          executionRecovery: {
+            status: "blocked",
+            message: "Could not repair prompt p1; send again to retry.",
+          },
+        },
+      },
+    });
+    expect(blocked.error).toBe(
+      "Could not repair prompt p1; send again to retry.",
+    );
+    expect(blocked.composer).toMatchObject({ canSend: true, disabled: false });
+    expect(
+      selectViewModel({
+        ...withView,
+        sessionSync: {
+          ...withView.sessionSync,
+          view: { ...sessionView, executionRecovery: { status: "ready" } },
+        },
+      }).header.statusLabel,
+    ).toBe("idle");
+    expect(
+      selectViewModel({
+        ...withView,
+        sessionSync: {
+          ...withView.sessionSync,
+          view: {
+            ...sessionView,
+            version: { ...sessionView.version, sessionId: "other-session" },
+          },
+        },
+      }).header.statusLabel,
+    ).toBe("idle");
+  });
+
   it("selects only queued prompts for the active session", () => {
     const prompt = {
       clientRequestId: "request_1",

@@ -495,6 +495,18 @@ class FakeBackend implements UiBackendClient {
     ]);
   }
 
+  resubmitRetainedPrompt(): ReturnType<
+    UiBackendClient["resubmitRetainedPrompt"]
+  > {
+    return Promise.reject(new Error("Unused retained resubmission stub"));
+  }
+  resubmitRetainedPromptForOwner(
+    _input: Parameters<UiBackendClient["resubmitRetainedPrompt"]>[0],
+    _owner: string,
+  ): ReturnType<UiBackendClient["resubmitRetainedPrompt"]> {
+    return this.resubmitRetainedPrompt();
+  }
+
   editQueuedPrompt(): ReturnType<UiBackendClient["editQueuedPrompt"]> {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
@@ -1001,7 +1013,9 @@ describe("createDaemonHttpServer", () => {
       authToken,
       backend,
       host: "127.0.0.1",
-      onShutdown: () => server.stop(),
+      onShutdown: async () => {
+        await server.stop();
+      },
       port: 0,
     });
     await server.start();

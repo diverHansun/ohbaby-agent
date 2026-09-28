@@ -1,3 +1,4 @@
+import { isValidOwnerPid } from "../../utils/process-owner.js";
 import {
   getDatabase,
   runWriteTransaction,
@@ -15,6 +16,8 @@ import type {
   InMemoryRunLedgerOptions,
   ListRunLedgerOptions,
   MarkInterruptedOptions,
+  MarkRunTerminalOptions,
+  RecoverOrphanedRunsOptions,
   MarkInterruptedResult,
   RunLedger,
   RunLedgerRecord,
@@ -39,6 +42,7 @@ interface RunLedgerRow {
   readonly created_at: number;
   readonly started_at: number | null;
   readonly ended_at: number | null;
+  readonly end_time_source: "recovery" | null;
   readonly error: string | null;
   readonly error_data: string | null;
   readonly owner_id: string | null;
@@ -62,6 +66,7 @@ function rowToRecord(row: RunLedgerRow): RunLedgerRecord {
     createdAt: row.created_at,
     startedAt: row.started_at ?? undefined,
     endedAt: row.ended_at ?? undefined,
+    endTimeSource: row.end_time_source ?? undefined,
     error: row.error ?? undefined,
     errorData: parseErrorData(row.error_data),
     ownerId: row.owner_id ?? undefined,
@@ -133,8 +138,8 @@ function validateInterruptibleStatuses(statuses: Iterable<RunStatus>): void {
 }
 
 function defaultIsOwnerAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
+  if (!isValidOwnerPid(pid)) {
+    return true;
   }
   try {
     process.kill(pid, 0);
@@ -262,7 +267,7 @@ export function createDatabaseRunLedger(
     if (!ACTIVE_STATUSES.has(row.status)) {
       return false;
     }
-    if (row.owner_pid === null) {
+    if (!isValidOwnerPid(row.owner_pid)) {
       return recoverUnknownOwner;
     }
     return !isOwnerAlive(row.owner_pid);
@@ -281,7 +286,7 @@ export function createDatabaseRunLedger(
       const result = connection
         .prepare(
           `UPDATE ${schema.runLedger.tableName}
-           SET inputs_closed_at = COALESCE(inputs_closed_at, ?), inputs_close_reason = COALESCE(inputs_close_reason, 'interrupted'), status = ?, ended_at = ?, error = ?
+           SET inputs_closed_at = COALESCE(inputs_closed_at, ?), inputs_close_reason = COALESCE(inputs_close_reason, 'process-interrupted'), status = ?, ended_at = ?, end_time_source = 'recovery', error = ?
            WHERE run_id = ? AND status IN ('pending', 'running')`,
         )
         .run(now(), "interrupted", now(), ORPHANED_OWNER_REASON, row.run_id);
@@ -389,13 +394,16 @@ export function createDatabaseRunLedger(
       );
     },
 
-    markSucceeded(runId: string): Promise<RunLedgerRecord> {
+    markSucceeded(
+      runId: string,
+      options: MarkRunTerminalOptions = {},
+    ): Promise<RunLedgerRecord> {
       return withImmediateTransaction(() =>
         cloneRecord(
           transition(runId, "succeeded", ["running"], (record) => ({
             ...record,
             status: "succeeded",
-            endedAt: now(),
+            endedAt: options.endedAt ?? now(),
             error: undefined,
             errorData: undefined,
           })),
@@ -407,13 +415,14 @@ export function createDatabaseRunLedger(
       runId: string,
       error: unknown,
       errorData?: RunLedgerRecord["errorData"],
+      options: MarkRunTerminalOptions = {},
     ): Promise<RunLedgerRecord> {
       return withImmediateTransaction(() =>
         cloneRecord(
           transition(runId, "failed", ["pending", "running"], (record) => ({
             ...record,
             status: "failed",
-            endedAt: now(),
+            endedAt: options.endedAt ?? now(),
             error: errorToMessage(error),
             errorData,
           })),
@@ -421,18 +430,50 @@ export function createDatabaseRunLedger(
       );
     },
 
-    markCancelled(runId: string, reason?: string): Promise<RunLedgerRecord> {
+    markCancelled(
+      runId: string,
+      reason?: string,
+      options: MarkRunTerminalOptions = {},
+    ): Promise<RunLedgerRecord> {
       return withImmediateTransaction(() =>
         cloneRecord(
           transition(runId, "cancelled", ["pending", "running"], (record) => ({
             ...record,
             status: "cancelled",
-            endedAt: now(),
+            endedAt: options.endedAt ?? now(),
             error: reason,
             errorData: undefined,
           })),
         ),
       );
+    },
+
+    markRunInterrupted(
+      runId: string,
+      reason?: string,
+      options: MarkRunTerminalOptions = {},
+    ): Promise<RunLedgerRecord> {
+      return withImmediateTransaction(() => {
+        const current = getRow(runId);
+        if (!current) throw new RunLedgerNotFoundError(runId);
+        if (!ACTIVE_STATUSES.has(current.status)) return rowToRecord(current);
+        return cloneRecord(
+          transition(
+            runId,
+            "interrupted",
+            ["pending", "running"],
+            (record) => ({
+              ...record,
+              status: "interrupted",
+              endedAt: options.endedAt ?? now(),
+              error: reason,
+              errorData: undefined,
+              inputsCloseReason:
+                record.inputsCloseReason ?? reason ?? "interrupted",
+            }),
+          ),
+        );
+      });
     },
 
     markInterrupted(
@@ -447,27 +488,48 @@ export function createDatabaseRunLedger(
           return { updatedCount: 0 };
         }
         const endedAt = now();
-        const placeholders = statuses.map(() => "?").join(", ");
-        const result = db
-          .prepare(
-            `UPDATE ${schema.runLedger.tableName}
-             SET inputs_closed_at = COALESCE(inputs_closed_at, ?), inputs_close_reason = COALESCE(inputs_close_reason, 'interrupted'), status = ?, ended_at = ?, error = ?
-             WHERE status IN (${placeholders})`,
+        let updatedCount = 0;
+        for (const row of getActiveRows(db)) {
+          if (
+            !statuses.includes(row.status) ||
+            (options.sessionId !== undefined &&
+              row.session_id !== options.sessionId) ||
+            !isOrphaned(row, options.recoverUnknownOwner ?? false)
           )
-          .run(
-            endedAt,
-            "interrupted",
-            endedAt,
-            options.reason ?? INTERRUPTED_REASON,
-            ...statuses,
-          );
-        return { updatedCount: result.changes };
+            continue;
+          const result = db
+            .prepare(
+              `UPDATE ${schema.runLedger.tableName}
+             SET inputs_closed_at = COALESCE(inputs_closed_at, ?), inputs_close_reason = COALESCE(inputs_close_reason, 'process-interrupted'), status = ?, ended_at = ?, end_time_source = 'recovery', error = ?
+             WHERE run_id = ? AND status IN ('pending', 'running')`,
+            )
+            .run(
+              endedAt,
+              "interrupted",
+              endedAt,
+              options.reason ?? INTERRUPTED_REASON,
+              row.run_id,
+            );
+          updatedCount += result.changes;
+        }
+        return { updatedCount };
       });
     },
 
-    recoverOrphanedRuns(): Promise<MarkInterruptedResult> {
+    recoverOrphanedRuns(
+      options: RecoverOrphanedRunsOptions = {},
+    ): Promise<MarkInterruptedResult> {
       return withImmediateTransaction(() => {
-        const updatedCount = recoverOrphanedRows(db, getActiveRows(db), true);
+        const rows = getActiveRows(db).filter(
+          (row) =>
+            options.sessionId === undefined ||
+            row.session_id === options.sessionId,
+        );
+        const updatedCount = recoverOrphanedRows(
+          db,
+          rows,
+          options.recoverUnknownOwner ?? false,
+        );
         return { updatedCount };
       });
     },

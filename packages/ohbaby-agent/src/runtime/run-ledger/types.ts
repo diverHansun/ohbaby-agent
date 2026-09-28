@@ -20,6 +20,7 @@ export interface RunLedgerRecord {
   readonly createdAt: number;
   readonly startedAt?: number;
   readonly endedAt?: number;
+  readonly endTimeSource?: "recovery";
   readonly error?: string;
   readonly errorData?: UiPromptError;
   readonly ownerId?: string;
@@ -41,7 +42,17 @@ export interface ListRunLedgerOptions {
   readonly limit?: number;
 }
 
-export interface MarkInterruptedOptions {
+export interface MarkRunTerminalOptions {
+  readonly endedAt?: number;
+}
+
+export interface RecoverOrphanedRunsOptions {
+  readonly sessionId?: string;
+  /** Only an explicitly validated offline migration may recover legacy owners. */
+  readonly recoverUnknownOwner?: boolean;
+}
+
+export interface MarkInterruptedOptions extends RecoverOrphanedRunsOptions {
   readonly statuses?: readonly RunStatus[];
   readonly reason?: string;
 }
@@ -59,17 +70,32 @@ export interface RunLedger {
   createPending(input: CreatePendingRunLedgerInput): Promise<RunLedgerRecord>;
   claimPendingRun(input: ClaimPendingRunLedgerInput): Promise<RunLedgerRecord>;
   markRunning(runId: string): Promise<RunLedgerRecord>;
-  markSucceeded(runId: string): Promise<RunLedgerRecord>;
+  markSucceeded(
+    runId: string,
+    options?: MarkRunTerminalOptions,
+  ): Promise<RunLedgerRecord>;
   markFailed(
     runId: string,
     error: unknown,
     errorData?: UiPromptError,
+    options?: MarkRunTerminalOptions,
   ): Promise<RunLedgerRecord>;
-  markCancelled(runId: string, reason?: string): Promise<RunLedgerRecord>;
+  markCancelled(
+    runId: string,
+    reason?: string,
+    options?: MarkRunTerminalOptions,
+  ): Promise<RunLedgerRecord>;
+  markRunInterrupted(
+    runId: string,
+    reason?: string,
+    options?: MarkRunTerminalOptions,
+  ): Promise<RunLedgerRecord>;
   markInterrupted(
     options?: MarkInterruptedOptions,
   ): Promise<MarkInterruptedResult>;
-  recoverOrphanedRuns(): Promise<MarkInterruptedResult>;
+  recoverOrphanedRuns(
+    options?: RecoverOrphanedRunsOptions,
+  ): Promise<MarkInterruptedResult>;
   get(runId: string): Promise<RunLedgerRecord | undefined>;
   listBySession(
     sessionId: string,

@@ -7,6 +7,11 @@ import {
 } from "ohbaby-sdk";
 import {
   createSessionIdGenerator,
+  createShutdownOptions,
+  collectCleanup,
+  type CleanupResult,
+  type CleanupTaskResult,
+  type ShutdownOptions,
   type Logger,
   type UiPromptQueueExecutionPort,
   type WorkspaceRegistryStore,
@@ -65,7 +70,10 @@ export interface DaemonHttpServerOptions {
 
 export type WorkspaceBackend = UiBackendClient &
   UiPromptQueueExecutionPort & {
-    dispose?(): Promise<void> | void;
+    closeAdmission?(): void;
+    dispose?(
+      options?: ShutdownOptions,
+    ): Promise<CleanupTaskResult> | CleanupTaskResult;
   };
 
 export interface DaemonHttpServerHandle {
@@ -73,7 +81,8 @@ export interface DaemonHttpServerHandle {
   readonly port: number;
   readonly url: string;
   start(): Promise<void>;
-  stop(): Promise<void>;
+  closeAdmission?(): void;
+  stop(options?: ShutdownOptions): Promise<CleanupTaskResult>;
   loadWorkspaceScopes?(scopeKeys: readonly string[]): Promise<void>;
 }
 
@@ -96,10 +105,14 @@ type NormalizedDaemonHttpServerOptions = Omit<
 
 interface WorkspaceAppInstance {
   readonly appHandle: DaemonServerAppHandle;
-  dispose(): Promise<void>;
+  closeAdmission(): void;
+  dispose(options?: ShutdownOptions): Promise<void>;
 }
 
 class DaemonHttpServer implements DaemonHttpServerHandle {
+  private assertOpen(): void {
+    if (this.closing) throw new Error("Daemon server is closing");
+  }
   private readonly app = new Hono();
   private readonly appHandle: DaemonServerAppHandle;
   private readonly instanceStore:
@@ -109,6 +122,8 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     string,
     ActiveDaemonConnection & { readonly count: number }
   >();
+  private closing = false;
+  private stopPromise?: Promise<CleanupResult>;
   private nodeServer: NodeListenHandle | undefined;
 
   constructor(private readonly options: NormalizedDaemonHttpServerOptions) {
@@ -176,7 +191,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       ? this.appHandle
       : this.createApp(backend, scopeKey);
     try {
-      await appHandle.start();
+      if (!this.closing) await appHandle.start();
     } catch (error) {
       await appHandle.dispose().catch(() => undefined);
       if (!isInitialScope) {
@@ -186,16 +201,36 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     }
     return {
       appHandle,
-      async dispose(): Promise<void> {
-        await appHandle.dispose();
-        if (!isInitialScope) {
-          await backend.dispose?.();
-        }
+      closeAdmission(): void {
+        backend.closeAdmission?.();
+      },
+      async dispose(options = createShutdownOptions()): Promise<void> {
+        backend.closeAdmission?.();
+        const result = await collectCleanup(options, {
+          app: () => appHandle.dispose(),
+          ...(isInitialScope
+            ? {}
+            : {
+                backend: (): Promise<CleanupTaskResult> | CleanupTaskResult =>
+                  backend.dispose?.(options),
+              }),
+        });
+        if (result.status === "unconfirmed")
+          throw new Error(result.errors.join("; "));
       },
     };
   }
 
   private mountRoutes(): void {
+    this.app.use("*", async (context, next) => {
+      if (this.closing)
+        return context.json(
+          { ok: false, error: { message: "Daemon server is closing" } },
+          503,
+        );
+      await next();
+      return;
+    });
     if (!this.instanceStore) {
       this.app.all("*", (context) => this.appHandle.app.fetch(context.req.raw));
       return;
@@ -571,6 +606,7 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
   }
 
   async start(): Promise<void> {
+    this.assertOpen();
     if (this.nodeServer) {
       return;
     }
@@ -581,11 +617,13 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
       port: this.options.port,
     });
     try {
+      this.assertOpen();
       if (this.instanceStore && this.options.scopeRoot) {
         await this.instanceStore.loadScope(this.options.scopeRoot);
       } else {
         await this.appHandle.start();
       }
+      this.assertOpen();
     } catch (error) {
       await nodeServer.stop();
       throw error;
@@ -603,19 +641,27 @@ class DaemonHttpServer implements DaemonHttpServerHandle {
     }
   }
 
-  async stop(): Promise<void> {
-    try {
-      if (this.instanceStore) {
-        await this.instanceStore.disposeAll();
-      } else {
-        await this.appHandle.dispose();
-      }
-    } finally {
-      this.connections.clear();
-      const nodeServer = this.nodeServer;
-      this.nodeServer = undefined;
-      await nodeServer?.stop();
-    }
+  closeAdmission(): void {
+    if (this.closing) return;
+    this.closing = true;
+    this.options.backend.closeAdmission?.();
+    this.instanceStore?.closeAdmission();
+  }
+
+  stop(options = createShutdownOptions()): Promise<CleanupResult> {
+    if (this.stopPromise) return this.stopPromise;
+    this.closeAdmission();
+    const nodeServer = this.nodeServer;
+    this.nodeServer = undefined;
+    this.connections.clear();
+    this.stopPromise = collectCleanup(options, {
+      workspaces: () =>
+        this.instanceStore
+          ? this.instanceStore.disposeAll(options)
+          : this.appHandle.dispose(),
+      transport: () => nodeServer?.stop(),
+    });
+    return this.stopPromise;
   }
 }
 

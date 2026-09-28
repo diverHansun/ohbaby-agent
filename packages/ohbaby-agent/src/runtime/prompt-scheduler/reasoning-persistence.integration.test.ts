@@ -121,7 +121,7 @@ it("migrates pre-reasoning submissions and reads legacy sessions without prefere
   expect(await new DatabasePromptSubmissionStore().get("p")).toMatchObject({
     text: "legacy",
     reasoning: undefined,
-    status: "queued",
+    status: "retained",
   });
   expect(
     (await createDatabaseSessionStore().get("s"))?.reasoning,

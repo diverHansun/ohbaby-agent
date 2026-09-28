@@ -58,7 +58,9 @@ export class SourceSessionProjection {
       readonly publish: (event: UiSessionRecoveryEvent) => void;
       readonly subviews?: (
         sessionId: string,
-      ) => Partial<Pick<UiSessionView, "todo" | "goal" | "context">>;
+      ) => Partial<
+        Pick<UiSessionView, "todo" | "goal" | "context" | "executionRecovery">
+      >;
       readonly onNotificationFailure?: (
         sessionId: string,
         error: unknown,
@@ -423,7 +425,10 @@ export class SourceSessionProjection {
       if (event.run.status.kind === "running")
         this.currentRuns.set(id, event.run.id);
       const runs = [
-        event.run,
+        {
+          ...current.runs.find((run) => run.id === event.run.id),
+          ...event.run,
+        },
         ...current.runs.filter((run) => run.id !== event.run.id),
       ].slice(0, 50);
       this.owner.commit(id, {
@@ -452,6 +457,7 @@ export class SourceSessionProjection {
       ].filter(
         (prompt) =>
           prompt.status === "queued" ||
+          prompt.status === "retained" ||
           prompt.status === "starting" ||
           prompt.status === "running" ||
           messageIds.has(prompt.userMessageId) ||

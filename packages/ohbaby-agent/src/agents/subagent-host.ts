@@ -530,18 +530,61 @@ export class SessionSubagentHost {
       reason,
       this.now(),
     );
+    // Include prior terminals so a retry can finish a failed instance-queue write.
+    // Instances may no longer be present in this host's active map.
+    const executions =
+      await this.options.executionStore.listByRootRun(rootRunId);
+    const targets = new Map<
+      string,
+      { parentSessionId: string; executionIds: Set<string> }
+    >();
+    for (const execution of executions) {
+      let target = targets.get(execution.subagentId);
+      if (!target) {
+        target = {
+          parentSessionId: execution.parentSessionId,
+          executionIds: new Set(),
+        };
+        targets.set(execution.subagentId, target);
+      }
+      target.executionIds.add(execution.executionId);
+    }
     for (const [subagentId, active] of this.active) {
-      await this.withSubagentLock(subagentId, async () => {
-        const removed = active.queue.filter(
-          (entry) => entry.rootRunId === rootRunId,
-        );
-        active.queue = active.queue.filter(
-          (entry) => entry.rootRunId !== rootRunId,
-        );
-        const item = await this.options.store.update(subagentId, {
-          pendingQueue: this.serializeQueue(active.queue),
-          updatedAt: this.now(),
+      if (
+        !targets.has(subagentId) &&
+        (active.currentExecution?.rootRunId === rootRunId ||
+          active.queue.some((entry) => entry.rootRunId === rootRunId))
+      )
+        targets.set(subagentId, {
+          parentSessionId: active.parentSessionId,
+          executionIds: new Set(),
         });
+    }
+    for (const [subagentId, target] of targets) {
+      await this.withSubagentLock(subagentId, async () => {
+        const record = await this.options.store.get({
+          subagentId,
+          parentSessionId: target.parentSessionId,
+        });
+        if (!record) return; // An accepted child can still be awaiting creation.
+        const belongsToRoot = (entry: QueuedSubagentInput): boolean =>
+          entry.rootRunId === rootRunId ||
+          (entry.executionId !== undefined &&
+            target.executionIds.has(entry.executionId));
+        const pendingQueue = record.pendingQueue.filter(
+          (entry) => !belongsToRoot(entry),
+        );
+        const active = this.active.get(subagentId);
+        const removed = active?.queue.filter(belongsToRoot) ?? [];
+        const item =
+          pendingQueue.length === record.pendingQueue.length
+            ? record
+            : await this.options.store.update(subagentId, {
+                pendingQueue,
+                updatedAt: this.now(),
+              });
+        if (active)
+          active.queue = active.queue.filter((entry) => !belongsToRoot(entry));
         this.resolveQueuedCompletions(removed, item);
       });
     }
@@ -756,32 +799,46 @@ export class SessionSubagentHost {
     );
   }
 
-  async dispose(): Promise<void> {
-    if (this.disposed) {
-      return;
-    }
+  private disposal: Promise<void> | undefined;
+
+  closeAdmission(): void {
     this.disposed = true;
-    for (const rootRunId of this.rootByExecution.values()) {
+    for (const rootRunId of this.rootByExecution.values())
       this.sealedRoots.add(rootRunId);
-      await this.options.executionStore.interruptRoot(
-        rootRunId,
-        "subagent host disposed",
-        this.now(),
-      );
-    }
-    const activeStates = [...this.active.values()];
-    for (const active of activeStates) {
+    for (const active of this.active.values()) {
       active.drainAfterInterrupt = false;
       active.stopping = true;
-      active.pauseController.abort("subagent host disposed");
-      active.abortController?.abort("subagent host disposed");
+      active.pauseController.abort("service-shutdown");
+      active.abortController?.abort("service-shutdown");
     }
-    await this.markOwnedInterrupted();
-    await Promise.all(
-      activeStates.map(async (active) => {
-        await active.drainPromise?.catch(() => undefined);
-      }),
-    );
+  }
+
+  dispose(): Promise<void> {
+    this.closeAdmission();
+    if (this.disposal) return this.disposal;
+    this.disposal = (async () => {
+      const operations = [
+        ...[...this.rootByExecution.values()].map((rootRunId) =>
+          this.interruptByRootRun(rootRunId, "service-shutdown"),
+        ),
+        this.markOwnedInterrupted(),
+        ...[...this.active.values()].flatMap((active) =>
+          active.drainPromise ? [active.drainPromise] : [],
+        ),
+        ...this.settlingTurns.values(),
+      ];
+      const results = await Promise.allSettled(operations);
+      const failures = results.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      if (failures.length)
+        throw new AggregateError(
+          failures.map((result): unknown => result.reason),
+          "Subagent cleanup failed",
+        );
+    })();
+    return this.disposal;
   }
 
   private async createRecord(

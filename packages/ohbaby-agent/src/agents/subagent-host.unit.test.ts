@@ -1665,7 +1665,7 @@ describe("SessionSubagentHost", () => {
     ).resolves.toMatchObject({
       items: [
         expect.objectContaining({
-          pendingQueue: [expect.objectContaining({ prompt: "second" })],
+          pendingQueue: [],
           status: "interrupted",
         }),
       ],

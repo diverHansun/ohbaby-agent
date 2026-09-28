@@ -1,6 +1,7 @@
 import type { UiMessage, UiRun, UiToolCall } from "./snapshot.js";
 
 export interface UiModelRequest {
+  readonly endTimeSource?: "recovery";
   readonly requestId: string;
   readonly runId: string;
   readonly messageId: string;

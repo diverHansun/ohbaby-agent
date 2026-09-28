@@ -10,7 +10,7 @@ import type {
   UiPromptSubmission,
   UiReasoningConfig,
 } from "ohbaby-sdk";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   getSlashCompletion,
@@ -44,6 +44,8 @@ type SubmitPrompt = (
 ) => Promise<import("ohbaby-sdk").UiPromptReceipt>;
 export interface PromptProps {
   readonly canSubmit?: boolean;
+  readonly unsentSteer?: boolean;
+  readonly onQueueModeChange?: (active: boolean) => void;
   readonly submitPrompt?: SubmitPrompt;
   readonly onLoadHistory?: () => void;
   readonly activeSessionId: string | null;
@@ -74,6 +76,8 @@ export function Prompt({
   activeSessionId,
   activeRunId,
   canSubmit = true,
+  unsentSteer = false,
+  onQueueModeChange,
   submitPrompt,
   onLoadHistory,
   pendingReasoning,
@@ -89,6 +93,12 @@ export function Prompt({
   runtimeStatusLabel,
 }: PromptProps): ReactElement {
   const [steerSelection, setSteerSelection] = useState(0);
+  const [queueSelectionId, setQueueSelectionId] = useState<string | null>(null);
+  const queueSelectionRef = useRef<string | null>(null);
+  const selectQueue = (id: string | null): void => {
+    queueSelectionRef.current = id;
+    setQueueSelectionId(id);
+  };
   const [steerNotice, setSteerNotice] = useState<string>();
   const steerAttempts = useRef(
     new Map<string, import("ohbaby-sdk").UiSteerQueuedPromptInput>(),
@@ -104,6 +114,12 @@ export function Prompt({
   const [error, setError] = useState<string | null>(null);
   const [queuedEdit, setQueuedEdit] = useState<{
     readonly editLeaseId: string;
+    readonly status: "queued" | "retained";
+    readonly operationId: string;
+    /** Receipt recovery must replay the original request, including its text. */
+    readonly retainedSendText?: string;
+    readonly expiresAt: string;
+    readonly leaseLost?: boolean;
     readonly originalInput: string;
     readonly promptId: string;
   } | null>(null);
@@ -111,6 +127,11 @@ export function Prompt({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const editorRef = useRef(editor);
   const queuedEditRef = useRef(queuedEdit);
+  const draftSessionRef = useRef(activeSessionId);
+  const draftGeneration = useRef(0);
+  const sessionDrafts = useRef(
+    new Map<string | null, { editor: EditorState; edit: typeof queuedEdit }>(),
+  );
   const queuedMutationPendingRef = useRef(false);
   const lastLeaseRenewalAtRef = useRef(0);
   const selectedIndexRef = useRef(0);
@@ -157,6 +178,69 @@ export function Prompt({
     setQueuedEdit(next);
   };
 
+  useLayoutEffect(() => {
+    if (draftSessionRef.current === activeSessionId) return;
+    sessionDrafts.current.set(draftSessionRef.current, {
+      editor: editorRef.current,
+      edit: queuedEditRef.current,
+    });
+    draftGeneration.current += 1;
+    draftSessionRef.current = activeSessionId;
+    const stored = sessionDrafts.current.get(activeSessionId);
+    replaceEditor(stored?.editor ?? createEditorState());
+    replaceQueuedEdit(stored?.edit ?? null);
+    selectQueue(null);
+    replaceQueuedMutationPending(false);
+    setError(null);
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    onQueueModeChange?.(queueSelectionId !== null || queuedEdit !== null);
+  }, [onQueueModeChange, queueSelectionId, queuedEdit]);
+
+  useEffect(() => {
+    if (
+      queueSelectionId &&
+      !queuedPrompts.some((prompt) => prompt.promptId === queueSelectionId)
+    )
+      selectQueue(null);
+    if (
+      !queuedEdit ||
+      queuedEdit.retainedSendText !== undefined ||
+      queuedEdit.leaseLost ||
+      queuedMutationPending
+    )
+      return;
+    const prompt = queuedPrompts.find(
+      (item) => item.promptId === queuedEdit.promptId,
+    );
+    const invalidate = (): void => {
+      if (queuedEditRef.current?.editLeaseId !== queuedEdit.editLeaseId) return;
+      replaceQueuedEdit({ ...queuedEditRef.current, leaseLost: true });
+      setError(
+        "This edit is no longer available. Edited text is preserved; Esc restores your draft.",
+      );
+    };
+    if (prompt?.status !== queuedEdit.status) {
+      invalidate();
+      return;
+    }
+    const delay = Date.parse(queuedEdit.expiresAt) - Date.now();
+    if (delay <= 0) {
+      invalidate();
+      return;
+    }
+    const timer = setTimeout(
+      () => {
+        if (Date.now() >= Date.parse(queuedEdit.expiresAt)) invalidate();
+      },
+      Math.min(delay, 2_147_483_647),
+    );
+    return (): void => {
+      clearTimeout(timer);
+    };
+  }, [queuedEdit, queuedPrompts, queueSelectionId, queuedMutationPending]);
+
   const replaceQueuedMutationPending = (next: boolean): void => {
     queuedMutationPendingRef.current = next;
     setQueuedMutationPending(next);
@@ -167,11 +251,13 @@ export function Prompt({
     if (!current) return;
     replaceInput(current.originalInput);
     replaceQueuedEdit(null);
+    setError(null);
   };
 
   const renewQueuedEditLease = (): void => {
     const current = queuedEditRef.current;
-    if (!current) return;
+    if (!current || current.retainedSendText !== undefined) return;
+    const generation = draftGeneration.current;
     const now = Date.now();
     if (now - lastLeaseRenewalAtRef.current < 20_000) return;
     lastLeaseRenewalAtRef.current = now;
@@ -180,10 +266,29 @@ export function Prompt({
         editLeaseId: current.editLeaseId,
         promptId: current.promptId,
       })
+      .then((lease) => {
+        if (
+          generation !== draftGeneration.current ||
+          queuedEditRef.current?.editLeaseId !== current.editLeaseId ||
+          queuedEditRef.current.retainedSendText !== undefined
+        )
+          return;
+        replaceQueuedEdit({
+          ...queuedEditRef.current,
+          expiresAt: lease.expiresAt,
+          leaseLost: false,
+        });
+      })
       .catch((caught: unknown) => {
-        replaceQueuedEdit(null);
+        if (
+          generation !== draftGeneration.current ||
+          queuedEditRef.current?.editLeaseId !== current.editLeaseId ||
+          queuedEditRef.current.retainedSendText !== undefined
+        )
+          return;
+        replaceQueuedEdit({ ...queuedEditRef.current, leaseLost: true });
         setError(
-          `${formatError(caught)}. Edited text was preserved and can be sent as a new prompt.`,
+          `${formatError(caught)}. Edited text is preserved; Esc restores your draft.`,
         );
       });
   };
@@ -191,6 +296,7 @@ export function Prompt({
   useInput(
     (value, key) => {
       if (queuedMutationPendingRef.current) return;
+      const generation = draftGeneration.current;
       if (key.ctrl && (key.upArrow || key.downArrow)) {
         setSteerSelection((current) =>
           Math.max(
@@ -204,9 +310,13 @@ export function Prompt({
         return;
       }
       if (key.ctrl && (value === "s" || value === "\x13")) {
-        const prompt = queuedPrompts.at(
-          Math.min(steerSelection, queuedPrompts.length - 1),
-        );
+        const prompt = queueSelectionRef.current
+          ? queuedPrompts.find(
+              (item) => item.promptId === queueSelectionRef.current,
+            )
+          : queuedPrompts.at(
+              Math.min(steerSelection, queuedPrompts.length - 1),
+            );
         if (
           !prompt ||
           !activeRunId ||
@@ -234,18 +344,21 @@ export function Prompt({
           .steerQueuedPrompt(input)
           .then(
             () => {
+              if (generation !== draftGeneration.current) return;
               setSteerNotice(
                 "Steer accepted · waiting for the active run’s next safe boundary",
               );
             },
             (caught: unknown) => {
+              if (generation !== draftGeneration.current) return;
               setError(
                 `${formatError(caught)} · retry keeps the original target`,
               );
             },
           )
           .finally(() => {
-            replaceQueuedMutationPending(false);
+            if (generation === draftGeneration.current)
+              replaceQueuedMutationPending(false);
           });
         return;
       }
@@ -254,54 +367,104 @@ export function Prompt({
 
       if (key.meta && key.upArrow) {
         if (queuedEditRef.current) return;
-        const prompt = queuedPrompts.at(-1);
-        if (!prompt) return;
-        setError(null);
-        replaceQueuedMutationPending(true);
-        void client
-          .acquirePromptEditLease({
-            promptId: prompt.promptId,
-          })
-          .then((lease) => {
-            replaceQueuedEdit({
-              editLeaseId: lease.editLeaseId,
-              originalInput: currentInput,
-              promptId: prompt.promptId,
+        selectQueue(queuedPrompts.at(-1)?.promptId ?? null);
+        return;
+      }
+
+      const selectedPromptId = queueSelectionRef.current;
+      if (selectedPromptId !== null) {
+        const index = queuedPrompts.findIndex(
+          (prompt) => prompt.promptId === selectedPromptId,
+        );
+        const prompt = queuedPrompts.find(
+          (item) => item.promptId === selectedPromptId,
+        );
+        if (key.escape) {
+          selectQueue(null);
+          return;
+        }
+        if (!prompt) {
+          selectQueue(null);
+          return;
+        }
+        if (key.upArrow || key.downArrow) {
+          selectQueue(
+            queuedPrompts[
+              Math.max(
+                0,
+                Math.min(
+                  queuedPrompts.length - 1,
+                  index + (key.downArrow ? 1 : -1),
+                ),
+              )
+            ]?.promptId ?? null,
+          );
+          return;
+        }
+        if (key.ctrl && (value === "d" || value === "\x04")) {
+          replaceQueuedMutationPending(true);
+          void client
+            .cancelQueuedPrompt({ promptId: prompt.promptId })
+            .then(() => {
+              if (generation !== draftGeneration.current) return;
+              selectQueue(null);
+              setError(null);
+            })
+            .catch((caught: unknown) => {
+              if (generation === draftGeneration.current)
+                setError(formatError(caught));
+            })
+            .finally(() => {
+              if (generation === draftGeneration.current)
+                replaceQueuedMutationPending(false);
             });
-            lastLeaseRenewalAtRef.current = Date.now();
-            replaceInput(prompt.text);
-          })
-          .catch((caught: unknown) => {
-            setError(formatError(caught));
-          })
-          .finally(() => {
-            replaceQueuedMutationPending(false);
-          });
+          return;
+        }
+        if (key.return) {
+          setError(null);
+          replaceQueuedMutationPending(true);
+          void client
+            .acquirePromptEditLease({ promptId: prompt.promptId })
+            .then((lease) => {
+              if (
+                generation !== draftGeneration.current ||
+                queueSelectionRef.current !== prompt.promptId
+              ) {
+                void client
+                  .releasePromptEditLease({
+                    promptId: prompt.promptId,
+                    editLeaseId: lease.editLeaseId,
+                  })
+                  .catch(() => undefined);
+                return;
+              }
+              replaceQueuedEdit({
+                editLeaseId: lease.editLeaseId,
+                expiresAt: lease.expiresAt,
+                status:
+                  lease.prompt.status === "retained" ? "retained" : "queued",
+                operationId: randomUUID(),
+                originalInput: editorText(editorRef.current),
+                promptId: prompt.promptId,
+              });
+              selectQueue(null);
+              lastLeaseRenewalAtRef.current = Date.now();
+              replaceInput(lease.prompt.text);
+            })
+            .catch((caught: unknown) => {
+              if (generation === draftGeneration.current)
+                setError(formatError(caught));
+            })
+            .finally(() => {
+              if (generation === draftGeneration.current)
+                replaceQueuedMutationPending(false);
+            });
+          return;
+        }
         return;
       }
 
       const currentQueuedEdit = queuedEditRef.current;
-      if (
-        currentQueuedEdit &&
-        key.ctrl &&
-        (value === "d" || value === "\x04")
-      ) {
-        replaceQueuedMutationPending(true);
-        void client
-          .cancelQueuedPrompt({
-            editLeaseId: currentQueuedEdit.editLeaseId,
-            promptId: currentQueuedEdit.promptId,
-          })
-          .then(restoreQueuedEditInput)
-          .catch((caught: unknown) => {
-            setError(formatError(caught));
-          })
-          .finally(() => {
-            replaceQueuedMutationPending(false);
-          });
-        return;
-      }
-
       if (currentQueuedEdit && key.escape) {
         void client
           .releasePromptEditLease({
@@ -315,6 +478,7 @@ export function Prompt({
 
       if (key.return) {
         if (key.shift) {
+          if (currentQueuedEdit?.retainedSendText !== undefined) return;
           if (currentQueuedEdit) renewQueuedEditLease();
           applyEditor({ type: "newline" });
           return;
@@ -325,20 +489,54 @@ export function Prompt({
           return;
         }
         if (currentQueuedEdit) {
-          if (currentInput.trim() === "") return;
+          if (
+            currentInput.trim() === "" ||
+            (currentQueuedEdit.leaseLost &&
+              currentQueuedEdit.retainedSendText === undefined)
+          )
+            return;
           replaceQueuedMutationPending(true);
-          void client
-            .editQueuedPrompt({
-              editLeaseId: currentQueuedEdit.editLeaseId,
-              promptId: currentQueuedEdit.promptId,
-              text: currentInput.trim(),
+          setError(null);
+          const input = {
+            editLeaseId: currentQueuedEdit.editLeaseId,
+            promptId: currentQueuedEdit.promptId,
+            text: currentQueuedEdit.retainedSendText ?? currentInput.trim(),
+          };
+          if (
+            currentQueuedEdit.status === "retained" &&
+            currentQueuedEdit.retainedSendText === undefined
+          )
+            replaceQueuedEdit({
+              ...currentQueuedEdit,
+              retainedSendText: input.text,
+            });
+          const mutation =
+            currentQueuedEdit.status === "retained"
+              ? client.resubmitRetainedPrompt({
+                  ...input,
+                  operationId: currentQueuedEdit.operationId,
+                })
+              : client.editQueuedPrompt(input);
+          void mutation
+            .then(() => {
+              if (
+                generation === draftGeneration.current &&
+                queuedEditRef.current?.editLeaseId ===
+                  currentQueuedEdit.editLeaseId
+              )
+                restoreQueuedEditInput();
             })
-            .then(restoreQueuedEditInput)
             .catch((caught: unknown) => {
-              setError(formatError(caught));
+              if (generation === draftGeneration.current)
+                setError(
+                  currentQueuedEdit.status === "retained"
+                    ? `Send outcome unknown. Retry the same send to recover its receipt. ${formatError(caught)}. Esc restores your draft.`
+                    : formatError(caught),
+                );
             })
             .finally(() => {
-              replaceQueuedMutationPending(false);
+              if (generation === draftGeneration.current)
+                replaceQueuedMutationPending(false);
             });
           return;
         }
@@ -397,6 +595,7 @@ export function Prompt({
         return;
       }
 
+      if (currentQueuedEdit?.retainedSendText !== undefined) return;
       if (currentQueuedEdit) renewQueuedEditLease();
 
       if (currentInput.startsWith("/") && candidates.length > 0) {
@@ -512,6 +711,9 @@ export function Prompt({
 
   return (
     <Box flexDirection="column">
+      {unsentSteer ? (
+        <Text dimColor>Task stopped before your steer message was sent.</Text>
+      ) : null}
       {steerNotice ? <Text>{steerNotice}</Text> : null}
       {queuedPrompts.length === 0 ? null : (
         <Box flexDirection="column" paddingX={1} width={layout.contentWidth}>
@@ -521,19 +723,28 @@ export function Prompt({
               dimColor={queuedEdit?.promptId !== prompt.promptId}
               key={prompt.promptId}
             >
-              {index === Math.min(steerSelection, queuedPrompts.length - 1)
+              {(
+                queueSelectionId
+                  ? prompt.promptId === queueSelectionId
+                  : index === Math.min(steerSelection, queuedPrompts.length - 1)
+              )
                 ? "›"
                 : "↳"}{" "}
               {prompt.text.replace(/\s+/gu, " ").trim()}
               {queuedEdit?.promptId === prompt.promptId ? " · editing" : ""}
-              {activeRunId && !prompt.editLeaseOwnerId && !queuedEdit
+              {prompt.status === "retained" ? " · Retained" : ""}
+              {prompt.status === "queued" &&
+              activeRunId &&
+              !prompt.editLeaseOwnerId &&
+              !queuedEdit
                 ? " · Steer"
                 : " · Steer unavailable"}
             </Text>
           ))}
           <Text dimColor>
-            Ctrl+↑/↓ select queue row · Ctrl+S Steer · Alt+↑ edit latest ·
-            Ctrl+D cancel while editing
+            {queueSelectionId
+              ? "↑/↓ select · Enter edit · Ctrl+D Delete · Esc back to draft"
+              : "Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer"}
           </Text>
         </Box>
       )}
@@ -550,7 +761,13 @@ export function Prompt({
         <Text dimColor>
           {queuedMutationPending
             ? "Updating queued prompt…"
-            : "Enter save · Ctrl+D cancel prompt · Esc keep original"}
+            : queuedEdit.retainedSendText !== undefined
+              ? "Enter retry the same send · Esc restore draft"
+              : queuedEdit.leaseLost
+                ? "Edit unavailable · Esc restore draft"
+                : queuedEdit.status === "retained"
+                  ? "Enter send · Esc restore draft"
+                  : "Enter save · Esc restore draft"}
         </Text>
       ) : null}
       {dockStatus === "" &&

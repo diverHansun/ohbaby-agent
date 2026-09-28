@@ -7,6 +7,8 @@ import type {
   UiPromptReceipt,
   UiRenewPromptEditLeaseInput,
   UiEditQueuedPromptInput,
+  UiResubmitRetainedPromptInput,
+  UiPromptResubmissionReceipt,
   UiCancelQueuedPromptInput,
   UiReleasePromptEditLeaseInput,
   UiPromptSubmission,
@@ -44,6 +46,48 @@ export function editQueuedPromptForClient(
   trustedClientId: string,
 ): Promise<UiPromptSubmission> {
   return backend.editQueuedPromptForOwner(input, trustedClientId);
+}
+
+export async function resubmitRetainedPromptForClient(
+  backend: Pick<UiBackendClient, "getSnapshot" | "waitForPrompt"> &
+    Pick<UiPromptQueueExecutionPort, "resubmitRetainedPromptForOwner">,
+  input: UiResubmitRetainedPromptInput,
+  trustedClientId: string,
+  clientViews: Pick<
+    DaemonClientViewCoordinator,
+    "promptStarted" | "promptSettled"
+  >,
+): Promise<UiPromptResubmissionReceipt> {
+  const prompt = (await backend.getSnapshot()).prompts?.find(
+    (item) => item.promptId === input.promptId,
+  );
+  if (!prompt)
+    throw Object.assign(new Error("Prompt not found"), {
+      code: "PROMPT_NOT_FOUND",
+    });
+  const item: DaemonPromptItem = {
+    clientId: trustedClientId,
+    sessionId: prompt.sessionId,
+    text: input.text,
+  };
+  // A re-admitted prompt can emit its first run event before returning a receipt.
+  clientViews.promptStarted(item);
+  try {
+    const receipt = await backend.resubmitRetainedPromptForOwner(
+      input,
+      trustedClientId,
+    );
+    void backend
+      .waitForPrompt(receipt.promptId)
+      .finally(() => {
+        clientViews.promptSettled(item);
+      })
+      .catch(() => undefined);
+    return receipt;
+  } catch (error) {
+    clientViews.promptSettled(item);
+    throw error;
+  }
 }
 
 export function cancelQueuedPromptForClient(

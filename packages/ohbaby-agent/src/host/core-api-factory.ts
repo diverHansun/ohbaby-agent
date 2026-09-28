@@ -11,6 +11,15 @@ import {
 import { McpManager } from "../mcp/index.js";
 import { createUiCommandGateway } from "./ui-command-gateway.js";
 import type { Logger } from "../observability/index.js";
+import {
+  beginDatabaseShutdown,
+  DatabaseNotInitializedError,
+} from "../services/database/index.js";
+import {
+  collectCleanup,
+  createShutdownOptions,
+  type ShutdownOptions,
+} from "../runtime/shutdown.js";
 
 export interface CoreApiFactoryOptions {
   readonly commandRecorder?: UiCommandRecorder | false;
@@ -41,7 +50,8 @@ function commandRecorderFromOptions(
 export interface CoreApiHost {
   readonly core: CoreAPI;
   readonly callbacks: SDKAPI;
-  readonly dispose: () => Promise<void>;
+  readonly closeAdmission: () => void;
+  readonly dispose: (options?: ShutdownOptions) => Promise<void>;
 }
 
 function initialSnapshotFromOptions(
@@ -92,6 +102,11 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
     entryPoint: "agent-host",
     recorder: commandRecorderFromOptions(options),
   });
+  let disposePromise: Promise<void> | undefined;
+  const admission: { closeAdmission?(): void } = rawClient;
+  const closeAdmission = (): void => {
+    admission.closeAdmission?.();
+  };
 
   return {
     callbacks: {
@@ -100,16 +115,27 @@ function createCoreAPIHost(options: CoreApiFactoryOptions): CoreApiHost {
       },
     },
     core: client,
-    async dispose(): Promise<void> {
+    closeAdmission,
+    dispose(options = createShutdownOptions()): Promise<void> {
+      if (disposePromise) return disposePromise;
+      closeAdmission();
       try {
-        try {
-          await rawClient.dispose();
-        } finally {
-          await McpManager.disposeAll();
-        }
-      } finally {
-        closePersistentUiBackendDatabase();
+        beginDatabaseShutdown(options.deadlineAt);
+      } catch (error) {
+        if (!(error instanceof DatabaseNotInitializedError)) throw error;
       }
+      disposePromise = collectCleanup(options, {
+        backend: () => rawClient.dispose(options),
+        mcp: () => McpManager.disposeAll(),
+      })
+        .then((result) => {
+          if (result.status === "unconfirmed")
+            throw new Error(result.errors.join("; "));
+        })
+        .finally(() => {
+          closePersistentUiBackendDatabase();
+        });
+      return disposePromise;
     },
   };
 }

@@ -2,6 +2,7 @@ import type { ArgumentsCamelCase, Argv, CommandModule } from "yargs";
 import type { UiPromptCompletion } from "ohbaby-sdk";
 import { EXIT_CODES } from "../exit-codes.js";
 import type { CliCommandRuntime, CliGlobalOptions } from "./types.js";
+import { createCliHostShutdown } from "../host-shutdown.js";
 
 interface RunArgs extends CliGlobalOptions {
   readonly prompt?: readonly string[] | string;
@@ -77,16 +78,26 @@ export function createRunCommand(
         permission: args.permission,
       });
       const renderer = runtime.createStdoutRenderer();
+      const shutdown = createCliHostShutdown(host, () => {
+        runtime.setExitCode(EXIT_CODES.interrupted);
+      });
       const unsubscribe = host.callbacks.subscribeEvents((event) => {
         renderer.handle(event);
       });
 
       try {
-        const completion = await host.core.submitPromptAndWait(prompt);
-        applyCompletionExitPolicy(completion, runtime);
+        const completion = await Promise.race([
+          host.core.submitPromptAndWait(prompt),
+          shutdown.interrupted,
+        ]);
+        if (completion) applyCompletionExitPolicy(completion, runtime);
       } finally {
         unsubscribe();
-        await host.dispose();
+        try {
+          await shutdown.dispose();
+        } finally {
+          runtime.onHostShutdownComplete?.();
+        }
       }
     },
   };

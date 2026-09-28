@@ -7,6 +7,10 @@ import {
   listKnownSessionProjectRoots,
   McpManager,
   NOOP_LOGGER,
+  beginDatabaseShutdown,
+  createShutdownOptions,
+  collectCleanup,
+  type CleanupResult,
   resolveOhbabyHome,
   serverStartFailed,
   serverStarted,
@@ -126,13 +130,11 @@ export interface ListDaemonConnectionsOptions extends ReadDaemonStatusOptions {
   readonly packageVersion?: string;
 }
 
-type DaemonKill = (pid: number, signal: NodeJS.Signals) => unknown;
-
-export interface StopDaemonFromStateOptions {
-  readonly homeDirectory?: string;
-  readonly kill?: DaemonKill;
-  readonly workdir?: string;
-}
+export {
+  stopDaemonFromState,
+  type StopDaemonFromStateOptions,
+  type StopDaemonResult,
+} from "./stop.js";
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
@@ -201,20 +203,31 @@ function createServerRuntime(input: {
         }
       }
     },
-    async stop(): Promise<void> {
-      try {
-        await input.server.stop();
-      } finally {
+    closeAdmission(): void {
+      input.server.closeAdmission?.();
+      (input.backend as { closeAdmission?(): void }).closeAdmission?.();
+    },
+    async stop(options = createShutdownOptions()): Promise<CleanupResult> {
+      input.server.closeAdmission?.();
+      (input.backend as { closeAdmission?(): void }).closeAdmission?.();
+      if (activeLocalDaemonDatabases === 1) {
         try {
-          try {
-            await input.backend.dispose();
-          } finally {
-            await McpManager.disposeAll();
-          }
-        } finally {
-          input.releaseDatabase();
+          beginDatabaseShutdown(options.deadlineAt);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            error.name !== "DatabaseNotInitializedError"
+          )
+            throw error;
         }
       }
+      const result = await collectCleanup(options, {
+        server: () => input.server.stop(options),
+        backend: () => input.backend.dispose(options),
+        mcp: () => McpManager.disposeAll(),
+      });
+      input.releaseDatabase();
+      return result;
     },
   };
 }
@@ -512,7 +525,7 @@ async function startFreshDaemon(input: {
         onClientDisconnected: (clientId) => {
           supervisor.clientDisconnected(clientId);
         },
-        onShutdown: () => supervisor.stop(),
+        onShutdown: () => supervisor.stopAndExit("requested"),
         packageVersion: input.packageVersion,
         port: input.port,
         scopeRoot: input.scopeRoot,
@@ -769,59 +782,4 @@ export async function listDaemonConnections(
     throw new Error("ohbaby server returned an invalid connections response");
   }
   return body.connections;
-}
-
-function stateOwnsPidRecord(
-  state: DaemonState,
-  pidRecord: Awaited<ReturnType<FilePidFile["read"]>>,
-): boolean {
-  return (
-    state.pid !== undefined &&
-    state.pidToken !== undefined &&
-    pidRecord?.pid === state.pid &&
-    pidRecord.token === state.pidToken
-  );
-}
-
-export async function stopDaemonFromState(
-  options: StopDaemonFromStateOptions = {},
-): Promise<"stopped" | "not-running"> {
-  const scope = await resolveDaemonScope({
-    homeDirectory: options.homeDirectory,
-    workdir: options.workdir,
-  });
-  const globalState = await new JsonDaemonStateFile(scope.stateFilePath).read();
-  const useLegacyState = globalState === undefined;
-  const state =
-    globalState ??
-    (await new JsonDaemonStateFile(scope.legacyStateFilePath).read());
-  if (
-    state?.pid === undefined ||
-    (state.status !== "running" && state.status !== "stopping")
-  ) {
-    return "not-running";
-  }
-
-  const pidFilePath = useLegacyState
-    ? scope.legacyPidFilePath
-    : scope.pidFilePath;
-  const pidRecord = await new FilePidFile(pidFilePath).read();
-  if (!stateOwnsPidRecord(state, pidRecord)) {
-    if (pidRecord === undefined) {
-      return "not-running";
-    }
-    throw new Error(
-      `Refusing to stop ${useLegacyState ? "legacy project" : "global"} daemon: daemon state does not match the pid lock.`,
-    );
-  }
-
-  try {
-    (options.kill ?? process.kill)(state.pid, "SIGTERM");
-    return "stopped";
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ESRCH") {
-      return "not-running";
-    }
-    throw error;
-  }
 }

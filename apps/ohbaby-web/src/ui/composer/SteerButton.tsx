@@ -28,7 +28,7 @@ export function SteerButton(props: {
     (attempt.current !== undefined &&
       attempt.current.expectedRunId !== props.runId);
   return (
-    <span>
+    <span className="ohb-prompt-queue-steer">
       <button
         type="button"
         disabled={disabled}

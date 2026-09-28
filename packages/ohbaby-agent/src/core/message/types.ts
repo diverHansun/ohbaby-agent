@@ -330,6 +330,11 @@ export interface MessageCommitCoordinator {
   onProjectionError(sessionId: string, error: unknown): void;
 }
 
+export interface UpdatePartCondition {
+  /** Check inside the store write transaction; a terminal tool is returned unchanged. */
+  readonly ifToolUnfinished?: boolean;
+}
+
 export interface MessageManager {
   readonly runtimeInputMemory?: RuntimeInputMemoryParticipant;
   getPart(partId: string): Promise<Part | undefined>;
@@ -355,7 +360,11 @@ export interface MessageManager {
   updateMessage(messageId: string, patch: UpdateMessagePatch): Promise<Message>;
   appendPart(messageId: string, input: CreatePartInput): Promise<Part>;
   appendModelContextPart(messageId: string, text: string): Promise<TextPart>;
-  updatePart(partId: string, patch: UpdatePartPatch): Promise<Part>;
+  updatePart(
+    partId: string,
+    patch: UpdatePartPatch,
+    condition?: UpdatePartCondition,
+  ): Promise<Part>;
   commitCompaction(
     input: CommitCompactionInput,
   ): Promise<CommitCompactionResult | undefined>;
@@ -410,6 +419,7 @@ export interface MessageStore {
     partId: string,
     patch: Omit<UpdatePartPatch, "delta">,
     updatedAt: number,
+    condition?: UpdatePartCondition,
   ): Promise<Part>;
   commitCompaction(
     input: StoreCompactionInput,

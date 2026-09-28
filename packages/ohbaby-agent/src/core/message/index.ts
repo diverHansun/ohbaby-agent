@@ -45,6 +45,7 @@ export type {
   ToolState,
   UpdateMessagePatch,
   UpdatePartPatch,
+  UpdatePartCondition,
   UserMessage,
 } from "./types.js";
 

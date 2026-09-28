@@ -51,6 +51,12 @@ export function promptRecordToUi(
         ? undefined
         : new Date(record.editLeaseExpiresAt).toISOString(),
     createdAt: new Date(record.createdAt).toISOString(),
+    acceptedAt:
+      record.acceptedAt === undefined
+        ? undefined
+        : new Date(record.acceptedAt).toISOString(),
+    admissionOrder: record.admissionOrder,
+    endTimeSource: record.endTimeSource,
     updatedAt: new Date(record.updatedAt).toISOString(),
     startedAt:
       record.startedAt === undefined

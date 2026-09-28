@@ -16,6 +16,8 @@ import {
 import { createUiRuntimeComposition } from "../../../packages/ohbaby-agent/src/adapters/ui-runtime/composition.js";
 import type { InterfaceProviderStreamEvent } from "../../../packages/ohbaby-agent/src/services/interface-providers/index.js";
 import { SkillRegistry } from "../../../packages/ohbaby-agent/src/skill/index.js";
+import { ToolSchedulerEvent } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/events.js";
+import type { ToolCallResult } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/types.js";
 
 function tool(
   name: string,
@@ -220,7 +222,7 @@ it("pauses a real child quota during pure approval waiting but still obeys root 
     ).toBe("revoked");
     expect(f.permission.state.getSessionRules(request.sessionId)).toEqual([]);
     expect(f.composition.runManager.get(request.runId)?.status).toBe(
-      "cancelled",
+      "interrupted",
     );
   } finally {
     await f.composition.dispose();
@@ -259,7 +261,7 @@ it("cancels and revokes the actual run when the coordinator returns an unexpecte
     expect(request.runId).toBe("unexpected_actual_run");
     await f.composition.runManager.waitForCompletion(request.runId);
     expect(f.composition.runManager.get(request.runId)?.status).toBe(
-      "cancelled",
+      "interrupted",
     );
     expect(f.permission.listPending()).toEqual([]);
     expect(
@@ -271,13 +273,21 @@ it("cancels and revokes the actual run when the coordinator returns an unexpecte
   }
 });
 
-it("closes a foreground child wait and revokes its approval after an identity mismatch", async () => {
+it("closes a foreground child wait before approval or execution when child run ownership mismatches", async () => {
   const f = await fixture(true);
-  let receive!: (info: PermissionInfo) => void;
-  const requested = new Promise<PermissionInfo>((resolve) => {
-    receive = resolve;
+  const requests: PermissionInfo[] = [];
+  const started = vi.fn();
+  let rejectCall!: (result: ToolCallResult) => void;
+  const rejected = new Promise<ToolCallResult>((resolve) => {
+    rejectCall = resolve;
   });
-  f.bus.subscribe(PermissionEvent.Updated, ({ info }) => receive(info));
+  f.bus.subscribe(PermissionEvent.Updated, ({ info }) => requests.push(info));
+  f.bus.subscribe(ToolSchedulerEvent.ExecutionStarted, (event) => {
+    if (event.toolName === "bash") started();
+  });
+  f.bus.subscribe(ToolSchedulerEvent.ExecutionCompleted, (event) => {
+    if (event.callId === "child_call") rejectCall(event.result);
+  });
   const create = f.composition.runManager.create.bind(f.composition.runManager);
   vi.spyOn(f.composition.runManager, "create").mockImplementation(
     async (options) => {
@@ -286,7 +296,8 @@ it("closes a foreground child wait and revokes its approval after an identity mi
         ...options,
         runId: "unexpected_child_run",
       });
-      await requested;
+      // Unknown child-run ownership is rejected before approval can be requested.
+      await rejected;
       return actual;
     },
   );
@@ -297,25 +308,22 @@ it("closes a foreground child wait and revokes its approval after an identity mi
       sessionId: "root",
       prompt: "Run the permission test",
     });
-    const request = await requested;
-    await f.composition.runManager.waitForCompletion(parent.runId);
-    await f.composition.runManager.waitForCompletion(request.runId);
-    expect(request).toMatchObject({
-      sessionId: "child",
-      rootSessionId: "root",
-      runId: "unexpected_child_run",
+    expect(await rejected).toMatchObject({
+      status: "error",
+      error: { message: expect.stringContaining("execution ownership") },
     });
-    expect(f.composition.runManager.get(request.runId)?.status).toBe(
-      "cancelled",
+    await f.composition.runManager.waitForCompletion(parent.runId);
+    await f.composition.runManager.waitForCompletion("unexpected_child_run");
+    expect(f.composition.runManager.get("unexpected_child_run")?.status).toBe(
+      "interrupted",
     );
     expect(
       JSON.stringify(await f.messageManager.listBySession("root")),
     ).toContain("unexpected run id");
+    expect(requests).toEqual([]);
+    expect(started).not.toHaveBeenCalled();
     expect(f.permission.listPending()).toEqual([]);
-    expect(
-      f.permission.respond(request.sessionId, request.id, { type: "always" }),
-    ).toBe("revoked");
-    expect(f.permission.state.getSessionRules(request.sessionId)).toEqual([]);
+    expect(f.permission.state.getSessionRules("child")).toEqual([]);
   } finally {
     await f.composition.dispose();
   }

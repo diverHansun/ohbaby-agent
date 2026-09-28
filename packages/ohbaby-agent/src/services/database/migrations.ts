@@ -486,4 +486,139 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
         ON subagent_execution(root_session_id, subagent_id, delegation_sequence);
     `,
   },
+  {
+    version: "022_retained_prompt_admission",
+    requiresOfflineBackup: true,
+    sql: `
+      ALTER TABLE run_ledger ADD COLUMN end_time_source TEXT
+        CHECK (end_time_source IS NULL OR end_time_source = 'recovery');
+      UPDATE run_ledger
+      SET status = 'interrupted', end_time_source = 'recovery',
+          ended_at = COALESCE(ended_at, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
+          inputs_closed_at = COALESCE(inputs_closed_at, ended_at, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
+          inputs_close_reason = COALESCE(inputs_close_reason, 'process-interrupted'),
+          error = COALESCE(error, 'Process interrupted during offline database upgrade')
+      WHERE status IN ('pending', 'running');
+      CREATE TABLE prompt_submission_next (
+        prompt_id TEXT PRIMARY KEY, scope_key TEXT NOT NULL,
+        session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+        user_message_id TEXT NOT NULL UNIQUE, text TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('queued','retained','starting','running','succeeded','failed','cancelled','interrupted','steered')),
+        run_id TEXT, owner_id TEXT, owner_pid INTEGER, error_data TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        started_at INTEGER, ended_at INTEGER, client_request_id TEXT NOT NULL DEFAULT '',
+        edit_lease_id TEXT, edit_lease_owner_id TEXT, edit_lease_expires_at INTEGER,
+        reasoning_data TEXT, steer_receipt TEXT,
+        accepted_at INTEGER NOT NULL, admission_order INTEGER NOT NULL,
+        end_time_source TEXT CHECK(end_time_source IS NULL OR end_time_source = 'recovery')
+      );
+      INSERT INTO prompt_submission_next
+        (prompt_id,scope_key,session_id,user_message_id,text,status,run_id,owner_id,owner_pid,error_data,created_at,updated_at,started_at,ended_at,client_request_id,edit_lease_id,edit_lease_owner_id,edit_lease_expires_at,reasoning_data,steer_receipt,accepted_at,admission_order)
+      SELECT prompt_id,scope_key,session_id,user_message_id,text,
+        CASE WHEN status = 'queued' THEN 'retained' ELSE status END,
+        run_id,owner_id,owner_pid,error_data,created_at,updated_at,started_at,ended_at,client_request_id,
+        edit_lease_id,edit_lease_owner_id,edit_lease_expires_at,reasoning_data,steer_receipt,created_at,
+        ROW_NUMBER() OVER (PARTITION BY scope_key ORDER BY created_at,prompt_id)
+      FROM prompt_submission;
+      DROP TABLE prompt_submission;
+      ALTER TABLE prompt_submission_next RENAME TO prompt_submission;
+      UPDATE prompt_submission
+      SET status = 'interrupted', end_time_source = 'recovery',
+          ended_at = COALESCE(ended_at, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
+          updated_at = MAX(updated_at, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
+          error_data = json_object('code', 'PROCESS_INTERRUPTED',
+            'message', 'Process interrupted during offline database upgrade',
+            'source', 'runtime', 'retryable', json('true'))
+      WHERE status IN ('starting', 'running');
+      CREATE INDEX idx_prompt_submission_scope_status_order ON prompt_submission(scope_key,status,accepted_at,admission_order);
+      CREATE INDEX idx_prompt_submission_session_status_order ON prompt_submission(session_id,status,accepted_at,admission_order);
+      CREATE INDEX idx_prompt_submission_owner_queue ON prompt_submission(owner_id,owner_pid,status,scope_key,accepted_at,admission_order);
+      CREATE UNIQUE INDEX idx_prompt_submission_scope_client_request ON prompt_submission(scope_key,client_request_id) WHERE client_request_id <> '';
+      CREATE UNIQUE INDEX idx_prompt_steer_request ON prompt_submission(scope_key,json_extract(steer_receipt,'$.clientRequestId')) WHERE steer_receipt IS NOT NULL;
+      CREATE TABLE prompt_resubmission (
+        scope_key TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        prompt_id TEXT NOT NULL REFERENCES prompt_submission(prompt_id) ON DELETE CASCADE,
+        text TEXT NOT NULL,
+        receipt TEXT NOT NULL,
+        PRIMARY KEY(scope_key, operation_id)
+      );
+      CREATE INDEX idx_subagent_execution_child_run
+        ON subagent_execution(child_run_id, child_session_id, child_scope_id);
+
+      -- Offline ownership permits retiring old child eligibility, including
+      -- ownerless rows. Keep the execution records as the authoritative audit.
+      CREATE TEMP TABLE migration_022_child_execution AS
+      SELECT e.execution_id, e.subagent_id, e.root_run_id
+      FROM subagent_execution e
+      WHERE e.status IN ('queued', 'running') OR EXISTS (
+        SELECT 1 FROM run_ledger r WHERE r.end_time_source = 'recovery' AND (
+          (r.run_id = e.root_run_id AND r.session_id = e.root_session_id AND r.context_scope_id IS NULL) OR
+          (r.run_id = e.child_run_id AND r.session_id = e.child_session_id AND r.context_scope_id = e.child_scope_id)
+        )
+      );
+      CREATE TEMP TABLE migration_022_child_current AS
+      SELECT i.subagent_id FROM subagent_instance i
+      WHERE CASE WHEN json_valid(i.current_input) THEN EXISTS (
+        SELECT 1 FROM migration_022_child_execution e
+        WHERE e.subagent_id = i.subagent_id AND (
+          e.execution_id = json_extract(i.current_input, '$.executionId') OR
+          e.root_run_id = json_extract(i.current_input, '$.rootRunId')
+        )
+      ) ELSE 0 END OR (i.current_input IS NULL OR json_valid(i.current_input)) AND EXISTS (
+        SELECT 1 FROM run_ledger r
+        WHERE r.run_id = i.current_run_id AND r.session_id = i.session_id
+          AND r.context_scope_id = i.context_scope_id AND r.end_time_source = 'recovery'
+      );
+      CREATE TEMP TABLE migration_022_child_pending AS
+      SELECT i.subagent_id, (
+        SELECT json_group_array(CASE entry.type
+          WHEN 'object' THEN json(entry.value) WHEN 'array' THEN json(entry.value)
+          WHEN 'true' THEN json('true') WHEN 'false' THEN json('false') ELSE entry.value END)
+        FROM json_each(i.pending_queue) entry
+        WHERE CASE WHEN entry.type = 'object' THEN NOT EXISTS (
+          SELECT 1 FROM migration_022_child_execution e
+          WHERE e.subagent_id = i.subagent_id AND (
+            e.execution_id = json_extract(entry.value, '$.executionId') OR
+            e.root_run_id = json_extract(entry.value, '$.rootRunId')
+          )
+        ) ELSE 1 END
+      ) AS pending_queue
+      FROM subagent_instance i
+      WHERE CASE WHEN json_valid(i.pending_queue) THEN
+        json_type(i.pending_queue) = 'array' AND EXISTS (
+          SELECT 1 FROM json_each(i.pending_queue) entry
+          WHERE CASE WHEN entry.type = 'object' THEN EXISTS (
+            SELECT 1 FROM migration_022_child_execution e
+            WHERE e.subagent_id = i.subagent_id AND (
+              e.execution_id = json_extract(entry.value, '$.executionId') OR
+              e.root_run_id = json_extract(entry.value, '$.rootRunId')
+            )
+          ) ELSE 0 END
+        ) ELSE 0 END;
+      UPDATE subagent_instance SET
+        status = CASE WHEN status IN ('pending', 'running') THEN 'interrupted' ELSE status END,
+        completed_at = CASE WHEN status IN ('pending', 'running') THEN COALESCE(completed_at, CAST(unixepoch('subsec') * 1000 AS INTEGER)) ELSE completed_at END,
+        interrupted_at = CASE WHEN status IN ('pending', 'running') THEN COALESCE(interrupted_at, CAST(unixepoch('subsec') * 1000 AS INTEGER)) ELSE interrupted_at END,
+        last_run_id = COALESCE(current_run_id, last_run_id), current_run_id = NULL, current_input = NULL,
+        updated_at = MAX(updated_at, CAST(unixepoch('subsec') * 1000 AS INTEGER))
+      WHERE subagent_id IN (SELECT subagent_id FROM migration_022_child_current);
+      UPDATE subagent_instance SET
+        pending_queue = (SELECT pending_queue FROM migration_022_child_pending p WHERE p.subagent_id = subagent_instance.subagent_id),
+        updated_at = MAX(updated_at, CAST(unixepoch('subsec') * 1000 AS INTEGER))
+      WHERE subagent_id IN (SELECT subagent_id FROM migration_022_child_pending);
+      UPDATE subagent_instance SET status = 'interrupted',
+        completed_at = COALESCE(completed_at, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
+        interrupted_at = COALESCE(interrupted_at, CAST(unixepoch('subsec') * 1000 AS INTEGER))
+      WHERE subagent_id IN (SELECT subagent_id FROM migration_022_child_pending)
+        AND status = 'pending' AND current_input IS NULL AND current_run_id IS NULL AND pending_queue = '[]';
+      UPDATE subagent_execution SET status = 'interrupted', reason = 'process-interrupted',
+        completed_at = COALESCE(completed_at, CAST(unixepoch('subsec') * 1000 AS INTEGER)),
+        updated_at = MAX(updated_at, CAST(unixepoch('subsec') * 1000 AS INTEGER))
+      WHERE status IN ('queued', 'running');
+      DROP TABLE migration_022_child_pending;
+      DROP TABLE migration_022_child_current;
+      DROP TABLE migration_022_child_execution;
+    `,
+  },
 ];

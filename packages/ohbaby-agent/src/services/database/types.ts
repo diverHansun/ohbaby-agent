@@ -22,11 +22,16 @@ export interface DatabaseConnection {
 export interface MigrationDefinition {
   readonly version: string;
   readonly sql: string;
+  readonly requiresOfflineBackup?: boolean;
 }
 
 export interface InitDatabaseOptions {
   readonly dbPath?: string;
   readonly migrations?: readonly MigrationDefinition[];
+  readonly migrationBackupPath?: string;
+  readonly onMigrationBackup?: (path: string) => void;
+  /** Additional trusted host identities; never a process scan. */
+  readonly knownWriterPids?: readonly number[];
   readonly now?: () => number;
 }
 

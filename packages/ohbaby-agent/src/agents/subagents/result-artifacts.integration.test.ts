@@ -20,8 +20,20 @@ import {
   SandboxManager,
   SandboxBoundaryError,
 } from "../../sandbox/index.js";
-import { createStorage } from "../../services/storage/index.js";
-import { InMemorySubagentExecutionStore } from "./execution-store.js";
+import {
+  createStorage,
+  type StorageKey,
+} from "../../services/storage/index.js";
+import {
+  closeDatabase,
+  getDatabase,
+  initDatabase,
+} from "../../services/database/index.js";
+import {
+  DatabaseSubagentExecutionStore,
+  InMemorySubagentExecutionStore,
+  type ExecutionLookup,
+} from "./execution-store.js";
 import { createSubagentResultArtifacts } from "./result-artifacts.js";
 
 const directories: string[] = [];
@@ -357,5 +369,159 @@ describe("execution result artifacts", () => {
       "code",
       "ENOENT",
     );
+  });
+
+  it("reconciles unfinished exports and durable deletion intents after SQLite reopens without changing terminal executions", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "recovered-artifacts-"));
+    directories.push(rootDir);
+    const dbPath = join(rootDir, "agent.db");
+    const storage = createStorage({ rootDir });
+    const body = "complete terminal report\n".repeat(3000);
+    const lookupFor = (executionId: string): Required<ExecutionLookup> => ({
+      executionId,
+      parentSessionId: "parent",
+      requesterScopeId: "scope",
+    });
+    const keyFor = (executionId: string): StorageKey => [
+      "subagent-results",
+      "parent",
+      `child-${executionId}`,
+      `${executionId}.output`,
+    ];
+    try {
+      initDatabase({ dbPath });
+      const store = new DatabaseSubagentExecutionStore({ db: getDatabase() });
+      for (const executionId of ["unfinished", "revoked"]) {
+        const lookup = lookupFor(executionId);
+        await store.accept({
+          ...lookup,
+          requestId: `call-${executionId}`,
+          requesterRunId: "requester-run",
+          rootSessionId: "parent",
+          rootRunId: "old-root-run",
+          rootPromptId: "old-prompt",
+          subagentId: `child-${executionId}`,
+          mode: "background",
+          prompt: "original task",
+          createdAt: 1,
+        });
+        await store.bindChild(
+          lookup,
+          {
+            sessionId: `session-${executionId}`,
+            contextScopeId: `scope-${executionId}`,
+          },
+          2,
+        );
+        await store.start(lookup, `run-${executionId}`, 3);
+        await store.finish(lookup, {
+          status: "completed",
+          output: body,
+          completedAt: 4,
+        });
+        await storage.writeText(keyFor(executionId), "partial stale file");
+      }
+      await store.updateArtifact(
+        lookupFor("unfinished"),
+        { state: "preparing" },
+        5,
+      );
+      // Simulate interruption after durable revocation and before file cleanup.
+      await store.revokeSessionArtifacts("session-revoked", 5);
+      const before = await store.list({ parentSessionId: "parent" });
+      expect(
+        before.find((record) => record.executionId === "revoked")?.artifact,
+      ).toEqual({ state: "deleted", cleanupPending: true });
+      expect(
+        before.every((record) => record.delivery.state === "pending"),
+      ).toBe(true);
+
+      closeDatabase();
+      initDatabase({ dbPath });
+      const reopened = new DatabaseSubagentExecutionStore({
+        db: getDatabase(),
+      });
+      expect(await reopened.list({ parentSessionId: "parent" })).toEqual(
+        before,
+      );
+      const artifacts = createSubagentResultArtifacts({
+        store: reopened,
+        storage,
+        rootDir,
+        sessionExists: () => Promise.resolve(true),
+        now: () => 10,
+      });
+      await expect(
+        artifacts.prepare({
+          ...lookupFor("unfinished"),
+          requesterScopeId: "other",
+        }),
+      ).rejects.toThrow("requester scope");
+      expect(
+        await readFile(join(rootDir, ...keyFor("unfinished")), "utf8"),
+      ).toBe("partial stale file");
+      const result = await artifacts.prepare(lookupFor("unfinished"));
+      if (result.artifact?.state !== "ready")
+        throw new Error("Missing recovered artifact");
+      expect(await readFile(result.artifact.path, "utf8")).toBe(body);
+      expect(await artifacts.prepare(lookupFor("unfinished"))).toEqual(result);
+      expect(
+        await artifacts.authorizeRead({
+          path: result.artifact.path,
+          sessionId: "parent",
+          contextScopeId: "scope",
+          operation: "read",
+        }),
+      ).toBe(true);
+      expect(
+        await artifacts.authorizeRead({
+          path: result.artifact.path,
+          sessionId: "parent",
+          contextScopeId: "other",
+          operation: "read",
+        }),
+      ).toBe(false);
+      expect(
+        await artifacts.authorizeRead({
+          path: result.artifact.path,
+          sessionId: "parent",
+          contextScopeId: "scope",
+          operation: "write",
+        }),
+      ).toBe(false);
+
+      const deleted = await artifacts.prepare(lookupFor("revoked"));
+      expect(deleted.artifact).toEqual({
+        state: "deleted",
+        cleanupPending: false,
+      });
+      expect(await artifacts.prepare(lookupFor("revoked"))).toEqual(deleted);
+      await expect(
+        readFile(join(rootDir, ...keyFor("revoked"))),
+      ).rejects.toHaveProperty("code", "ENOENT");
+      const after = await reopened.list({ parentSessionId: "parent" });
+      expect(after).toHaveLength(2);
+      for (const original of before) {
+        expect(
+          after.find((record) => record.executionId === original.executionId),
+        ).toEqual({
+          ...original,
+          updatedAt: 10,
+          artifact:
+            original.executionId === "unfinished"
+              ? result.artifact
+              : deleted.artifact,
+        });
+      }
+      closeDatabase();
+      initDatabase({ dbPath });
+      expect(
+        await new DatabaseSubagentExecutionStore({ db: getDatabase() }).list({
+          parentSessionId: "parent",
+        }),
+      ).toEqual(after);
+    } finally {
+      closeDatabase();
+    }
   });
 });

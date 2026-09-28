@@ -391,6 +391,25 @@ export class DaemonHttpClient {
     });
   }
 
+  resubmitRetainedPrompt(
+    input: import("ohbaby-sdk").UiResubmitRetainedPromptInput,
+  ): Promise<{
+    ok: true;
+    receipt: import("ohbaby-sdk").UiPromptResubmissionReceipt;
+  }> {
+    return this.request(
+      `/v1/prompts/${encodeURIComponent(input.promptId)}/resubmit`,
+      {
+        body: {
+          editLeaseId: input.editLeaseId,
+          operationId: input.operationId,
+          text: input.text,
+        },
+        method: "POST",
+      },
+    );
+  }
+
   steerQueuedPrompt(
     promptId: string,
     expectedRunId: string,

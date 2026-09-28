@@ -78,6 +78,8 @@ export interface SteerQueuedPromptResult {
   readonly message: MessageWithParts;
 }
 export interface CurrentRunInputStore {
+  /** Pure fact query. The caller selects the latest user-stopped root run. */
+  hasUnsentSteer(runId: string): Promise<boolean>;
   sealSteer(runId: string): Promise<void>;
   acceptRuntimeInput(input: AcceptRuntimeInput): Promise<CurrentRunInputRecord>;
   steerQueued(input: SteerQueuedPromptInput): Promise<SteerQueuedPromptResult>;
@@ -407,6 +409,16 @@ abstract class CurrentInputs implements CurrentRunInputStore {
   }
   async getInput(inputId: string): Promise<CurrentRunInputRecord | undefined> {
     return this.readInput(inputId);
+  }
+  async hasUnsentSteer(runId: string): Promise<boolean> {
+    return this.inputs(runId).some(
+      (record) =>
+        record.source === "user-steer" &&
+        record.closedAt !== undefined &&
+        record.firstAttemptRequestId === undefined &&
+        record.firstAttemptAt === undefined &&
+        record.processedRequestId === undefined,
+    );
   }
   async listPending(runId: string): Promise<readonly CurrentRunInputRecord[]> {
     return this.inputs(runId).filter(pending);

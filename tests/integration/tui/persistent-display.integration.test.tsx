@@ -180,7 +180,11 @@ describe("TUI persistent backend display", () => {
       throw new Error("expected active session");
     }
 
-    const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+    const runLedger = createDatabaseRunLedger({
+      now: () => 42_000,
+      ownerId: "dead-owner",
+      ownerPid: 2147483647,
+    });
     await runLedger.createPending({
       runId: "run_stale",
       sessionId,

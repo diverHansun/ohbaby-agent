@@ -30,6 +30,9 @@ import type {
   Logger,
   OhbabyMigrationReport,
   ProcessLoggerHandle,
+  ShutdownOptions,
+  collectCleanup,
+  createShutdownOptions,
 } from "ohbaby-agent";
 import { StartupNoticeBuffer } from "./cli/startup-notice-buffer.js";
 
@@ -71,6 +74,7 @@ export interface RunOhbabyCliIo {
 }
 
 export interface RunOhbabyCliDependencies {
+  readonly onHostShutdownComplete?: () => void;
   readonly createCoreHost?: (options: CliGlobalOptions) => CliCoreHostResult;
   readonly listDaemonConnections?: NonNullable<
     CliCommandRuntime["listDaemonConnections"]
@@ -103,6 +107,8 @@ interface RemoteDaemonClientOptions {
 }
 
 interface AgentRuntimeModule {
+  readonly collectCleanup?: typeof collectCleanup;
+  readonly createShutdownOptions?: typeof createShutdownOptions;
   readonly buildCoreAPIImpl?: unknown;
   readonly configMigrationCompleted?: unknown;
   readonly createProcessLogger?: unknown;
@@ -175,6 +181,7 @@ function createRpcCoreHost(host: CliCoreHost): CliCoreHost {
     callbacks: host.callbacks,
     core: rpc.createProxy(host.callbacks),
     dispose: host.dispose,
+    closeAdmission: host.closeAdmission,
     ...(host.diagnosticsFilePath === undefined
       ? {}
       : { diagnosticsFilePath: host.diagnosticsFilePath }),
@@ -431,12 +438,25 @@ async function loadDefaultDependencies(
               diagnosticsUnavailableListeners.delete(listener);
             };
           },
-          async dispose(): Promise<void> {
-            try {
-              await host.dispose();
-            } finally {
-              await handle.dispose();
-            }
+          async dispose(options?: ShutdownOptions): Promise<void> {
+            const sharedOptions =
+              options ?? runtimeModule.createShutdownOptions?.();
+            if (!sharedOptions || !runtimeModule.collectCleanup)
+              throw new Error(
+                "Agent runtime is missing shared shutdown support",
+              );
+            host.closeAdmission?.();
+            const result = await runtimeModule.collectCleanup(sharedOptions, {
+              host: () => host.dispose(sharedOptions),
+            });
+            const diagnostics = await runtimeModule.collectCleanup(
+              sharedOptions,
+              {
+                diagnostics: () => handle.dispose(),
+              },
+            );
+            const errors = [...result.errors, ...diagnostics.errors];
+            if (errors.length) throw new Error(errors.join("; "));
           },
         };
       } catch (error) {
@@ -574,6 +594,7 @@ export async function runOhbabyCli(
 
   let exitCode: number = EXIT_CODES.ok;
   const runtime: CliCommandRuntime = {
+    onHostShutdownComplete: dependencies.onHostShutdownComplete,
     async createCoreHost(options) {
       return createRpcCoreHost(await createCoreHost(options));
     },
@@ -679,14 +700,25 @@ export async function runOhbabyCli(
 }
 
 if (isDirectCliInvocation(import.meta.url, process.argv[1])) {
-  runOhbabyCli()
+  let hostShutdownComplete = false;
+  runOhbabyCli(
+    process.argv,
+    {},
+    {
+      onHostShutdownComplete: () => {
+        hostShutdownComplete = true;
+      },
+    },
+  )
     .then((code) => {
+      if (hostShutdownComplete) process.exit(code);
       process.exitCode = code;
     })
     .catch((error: unknown) => {
       process.stderr.write(
         `${error instanceof Error ? error.message : String(error)}\n`,
       );
+      if (hostShutdownComplete) process.exit(EXIT_CODES.failure);
       process.exitCode = EXIT_CODES.failure;
     });
 }

@@ -291,7 +291,7 @@ describe("final step cache accounting through the in-process runtime", () => {
         cacheReadShare: 0.8,
       });
       await f.client.abortRun("run_1");
-      expect((await completion).prompt.status).toBe("cancelled");
+      expect((await completion).prompt.status).toBe("interrupted");
       expect(await f.cache()).toEqual({
         sessionId: "session_1",
         // A provider terminal is still provisional while its stream waits for EOF.

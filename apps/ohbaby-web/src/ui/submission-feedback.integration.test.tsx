@@ -60,6 +60,10 @@ describe("submission feedback through the real daemon client", () => {
         "AbortController",
         transferableAbortController().constructor,
       );
+      vi.stubGlobal(
+        "AbortSignal",
+        transferableAbortController().signal.constructor,
+      );
       const values = new Map<string, string>();
       const storage: Storage = {
         get length() {
@@ -136,13 +140,24 @@ describe("submission feedback through the real daemon client", () => {
           await runtime.createSession();
           const sessionId = await runtime.client?.getSelectedSessionId();
           if (!sessionId) throw new Error("Expected an existing session");
-          await f.backend.submitPromptAndWait("earlier conversation", {
-            sessionId,
-          });
+          const previous = await f.backend.submitPromptAndWait(
+            "earlier conversation",
+            {
+              sessionId,
+            },
+          );
+          expect(previous.prompt.status).toBe("succeeded");
           await vi.waitFor(() => {
-            expect(runtime.store.getSnapshot().sessionSync.status).toBe(
-              "ready",
-            );
+            const snapshot = runtime.store.getSnapshot();
+            expect(snapshot.sessionSync.status).toBe("ready");
+            // Backend completion precedes delivery of its final SSE/control events.
+            // Start the next submission only after the browser has observed them.
+            expect(
+              snapshot.sessionSync.view?.runs.find(
+                (run) => run.id === previous.prompt.runId,
+              )?.status.kind,
+            ).toBe("idle");
+            expect(snapshot.sessionControl?.runId).toBeNull();
           });
         }
         await act(async () => {

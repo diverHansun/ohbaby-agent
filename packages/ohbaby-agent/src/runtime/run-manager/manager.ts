@@ -4,7 +4,11 @@ import {
 } from "../../services/interface-providers/reasoning.js";
 import type { RunLedgerRecord } from "../run-ledger/index.js";
 import { scopedSessionKey } from "../../utils/scoped-session.js";
-import { ConcurrencyRejectedError, RunManagerNotFoundError } from "./errors.js";
+import {
+  ConcurrencyRejectedError,
+  RunManagerNotFoundError,
+  RunFinalizationError,
+} from "./errors.js";
 import { mergeRunDefaults } from "./policy.js";
 import type {
   CreateRunOptions,
@@ -18,6 +22,11 @@ import type {
 } from "./types.js";
 import { RunWorker } from "./worker.js";
 import { normalizeRunError } from "./error-detail.js";
+import {
+  createDatabaseWriteBudget,
+  getDatabaseWriteBudget,
+  withDatabaseWriteBudget,
+} from "../../services/database/write-budget.js";
 
 const ACTIVE_STATUSES = new Set<RunStatus>(["pending", "running"]);
 
@@ -89,6 +98,8 @@ function completionFromResult(result: RunWorkerResult): RunCompletion {
 export class RunManager {
   private readonly recordsById = new Map<string, ManagedRunRecord>();
   private readonly activeBySession = new Map<string, Set<string>>();
+  private readonly pendingSandboxReleases = new Set<Promise<void>>();
+  private readonly failedSandboxReleases: unknown[] = [];
   private readonly sessionLocks = new Map<string, Promise<void>>();
   private readonly now: () => number;
   private readonly createRunId: () => string;
@@ -99,11 +110,10 @@ export class RunManager {
   }
 
   async init(): Promise<{ readonly updatedCount: number }> {
-    this.recordsById.clear();
-    this.activeBySession.clear();
-    return this.deps.runLedger.markInterrupted({
-      statuses: ["pending", "running"],
-    });
+    const active = Array.from(this.recordsById.values()).find(isActive);
+    if (active)
+      throw new ConcurrencyRejectedError(active.sessionId, [active.runId]);
+    return this.deps.runLedger.recoverOrphanedRuns();
   }
 
   async create(options: CreateRunOptions): Promise<RunRecord> {
@@ -159,6 +169,8 @@ export class RunManager {
       this.publishRunUpdated(record);
 
       record.completion = this.startRun(record);
+      // Creation is fire-and-forget; callers observe failures through wait/retry.
+      void record.completion.catch(() => undefined);
 
       return cloneRunRecord(record);
     });
@@ -166,7 +178,12 @@ export class RunManager {
 
   fail(runId: string, error: Error): void {
     const record = this.recordsById.get(runId);
-    if (!record || !isActive(record) || record.abortController.signal.aborted)
+    if (
+      !record ||
+      !isActive(record) ||
+      record.finalization ||
+      record.abortController.signal.aborted
+    )
       return;
     record.fatalError = error;
     this.closeInputs(record, error.message);
@@ -178,15 +195,34 @@ export class RunManager {
   }
 
   cancel(runId: string, reason = "run cancelled"): void {
+    this.cancelRun(
+      runId,
+      reason,
+      reason === "subagent closed" || reason === "session removed"
+        ? "cancelled"
+        : "interrupted",
+    );
+  }
+
+  private cancelRun(
+    runId: string,
+    reason: string,
+    status: "cancelled" | "interrupted",
+  ): void {
     const record = this.recordsById.get(runId);
     if (!record) {
       throw new RunManagerNotFoundError(runId);
     }
-    if (!isActive(record)) {
+    if (
+      !isActive(record) ||
+      record.finalization ||
+      record.abortController.signal.aborted
+    ) {
       return;
     }
 
     record.cancelReason = reason;
+    record.cancelStatus = status;
     this.closeInputs(record, reason);
     try {
       this.revokePermissionsForRun(runId, reason);
@@ -196,12 +232,13 @@ export class RunManager {
   }
 
   private closeInputs(record: ManagedRunRecord, reason: string): void {
-    if (record.inputClosure || !this.deps.currentRunInputs) return;
+    const inputs = this.deps.currentRunInputs;
+    if (record.inputClosure || !inputs) return;
+    record.inputCloseReason ??= reason;
     try {
       // close() seals its synchronous gate before returning its durable promise.
-      record.inputClosure = this.deps.currentRunInputs.close(
-        record.runId,
-        reason,
+      record.inputClosure = this.withFinalizationWriteBudget(record.runId, () =>
+        inputs.close(record.runId, record.inputCloseReason ?? reason),
       );
     } catch (error) {
       record.inputClosure = Promise.reject(
@@ -220,7 +257,21 @@ export class RunManager {
   }
 
   hasActiveWork(): boolean {
-    return this.activeBySession.size > 0;
+    return (
+      this.activeBySession.size > 0 ||
+      this.pendingSandboxReleases.size > 0 ||
+      this.failedSandboxReleases.length > 0
+    );
+  }
+
+  async waitForCleanup(): Promise<void> {
+    await Promise.allSettled([...this.pendingSandboxReleases]);
+    if (this.failedSandboxReleases.length) {
+      throw new AggregateError(
+        this.failedSandboxReleases,
+        `Sandbox release remains unconfirmed: ${this.failedSandboxReleases.map(errorToMessage).join("; ")}`,
+      );
+    }
   }
 
   async cancelAll(reason = "run manager shutting down"): Promise<void> {
@@ -228,15 +279,28 @@ export class RunManager {
       isActive,
     );
     for (const record of activeRecords) {
-      this.cancel(record.runId, reason);
+      try {
+        this.cancel(record.runId, reason);
+      } catch {
+        // Signal delivery is in finally; one failed revocation must not prevent
+        // stopping the other runs. Finalization reports/retries that failure.
+      }
     }
     const completions = activeRecords
-      .map((record) => record.completion)
+      .map((record) =>
+        record.finalizationError
+          ? this.retryFinalization(record.runId)
+          : record.completion,
+      )
       .filter(
         (completion): completion is Promise<RunCompletion> =>
           completion !== undefined,
       );
-    await Promise.all(completions);
+    try {
+      await Promise.all(completions);
+    } finally {
+      await this.waitForCleanup();
+    }
   }
 
   getActiveReasoning(
@@ -327,14 +391,16 @@ export class RunManager {
       if (record.abortController.signal.aborted) {
         outcome = {
           ...outcome,
-          status: "cancelled",
+          status: record.cancelStatus ?? "cancelled",
           error: record.cancelReason ?? "run cancelled",
           terminalReason: "cancelled",
         };
       }
     } catch (error) {
       outcome = {
-        status: record.abortController.signal.aborted ? "cancelled" : "failed",
+        status: record.abortController.signal.aborted
+          ? (record.cancelStatus ?? "cancelled")
+          : "failed",
         error: record.abortController.signal.aborted
           ? (record.cancelReason ?? "run cancelled")
           : errorToMessage(error),
@@ -353,14 +419,82 @@ export class RunManager {
         terminalReason: "tool_persistence_failure",
       };
     }
-    return this.finalizeRun(record, outcome);
+    record.finalization = { outcome, endedAt: this.now() };
+    // Raw tool operations retain their own sandbox operation lease. Releasing
+    // this logical run lease must neither wait for them nor destroy the context.
+    if (record.sandboxLease) {
+      try {
+        record.sandboxRelease = this.deps.sandboxManager.release(
+          record.sandboxLease,
+        );
+        const release = record.sandboxRelease;
+        this.pendingSandboxReleases.add(release);
+        void release.then(
+          () => {
+            this.pendingSandboxReleases.delete(release);
+          },
+          (error: unknown) => {
+            this.pendingSandboxReleases.delete(release);
+            this.failedSandboxReleases.push(error);
+          },
+        );
+      } catch (error) {
+        this.failedSandboxReleases.push(error);
+      }
+    }
+    return this.retryFinalization(record.runId);
+  }
+
+  retryFinalization(runId: string): Promise<RunCompletion> {
+    const record = this.recordsById.get(runId);
+    if (!record) return Promise.reject(new RunManagerNotFoundError(runId));
+    if (!record.finalization || !isActive(record))
+      return this.waitForCompletion(runId);
+    if (record.finalizationAttempt) return record.finalizationAttempt;
+    if (record.finalizationError?.stage === "input-closure")
+      record.inputClosure = undefined;
+    const outcome = record.finalization.outcome;
+    const attempt = this.withFinalizationWriteBudget(
+      runId,
+      () => this.finalizeRun(record, outcome),
+      { retry: record.finalizationError !== undefined },
+    );
+    record.finalizationAttempt = attempt;
+    record.completion = attempt;
+    void attempt.then(
+      () => {
+        record.finalizationAttempt = undefined;
+        record.finalizationError = undefined;
+      },
+      (error: unknown) => {
+        record.finalizationAttempt = undefined;
+        if (error instanceof RunFinalizationError)
+          record.finalizationError = error;
+      },
+    );
+    return attempt;
+  }
+
+  /** Also wraps tree input closure and the prompt save following this Run. */
+  withFinalizationWriteBudget<T>(
+    runId: string,
+    operation: () => T,
+    options?: { readonly retry?: boolean },
+  ): T {
+    const record = this.recordsById.get(runId);
+    const inherited = getDatabaseWriteBudget();
+    const budget =
+      inherited ??
+      (options?.retry ? undefined : record?.finalizationWriteBudget) ??
+      createDatabaseWriteBudget();
+    if (record) record.finalizationWriteBudget = budget;
+    return withDatabaseWriteBudget(budget, operation);
   }
 
   private async finalizeRun(
     record: ManagedRunRecord,
     outcome: RunWorkerResult,
   ): Promise<RunCompletion> {
-    const sandboxManager = this.deps.sandboxManager;
     this.closeInputs(
       record,
       outcome.terminalReason ?? outcome.error ?? outcome.status,
@@ -368,12 +502,7 @@ export class RunManager {
     try {
       await record.inputClosure;
     } catch (error) {
-      outcome = {
-        status: "failed",
-        error: errorToMessage(error),
-        errorData: normalizeRunError(error),
-        terminalReason: "model_state_persistence_failure",
-      };
+      throw new RunFinalizationError(record.runId, "input-closure", error);
     }
     try {
       this.revokePermissionsForRun(
@@ -381,39 +510,53 @@ export class RunManager {
         outcome.error ?? `Run ${outcome.status}`,
       );
     } catch (error) {
-      outcome = {
-        status: "failed",
-        error: errorToMessage(error),
-        errorData: normalizeRunError(error),
-      };
+      throw new RunFinalizationError(record.runId, "permissions", error);
     }
-    const completion = completionFromResult(outcome);
 
     try {
-      const ledgerRecord = await this.markLedgerTerminal(record, outcome);
-      this.applyLedgerProjection(record, ledgerRecord);
-      record.terminalReason =
-        outcome.terminalReason ?? outcome.result?.terminalReason;
+      await this.deps.beforeFinalize?.(record.runId, outcome);
     } catch (error) {
-      record.status = outcome.status;
-      record.endedAt = this.now();
-      record.error = outcome.error ?? errorToMessage(error);
-      record.errorData = outcome.errorData;
-      record.terminalReason =
-        outcome.terminalReason ?? outcome.result?.terminalReason;
-    } finally {
-      if (record.sandboxLease) {
-        try {
-          await sandboxManager.release(record.sandboxLease);
-        } catch {
-          // Resource cleanup must not break the run completion contract.
-        }
-      }
-      this.publishRunUpdated(record);
-      this.endStream(record);
-      this.removeActive(record);
+      throw new RunFinalizationError(record.runId, "execution-history", error);
     }
 
+    let ledgerRecord: RunLedgerRecord;
+    try {
+      // Reconcile first: a previous attempt may have committed but lost its reply.
+      const current = await this.deps.runLedger.get(record.runId);
+      ledgerRecord =
+        current && !ACTIVE_STATUSES.has(current.status)
+          ? current
+          : await this.markLedgerTerminal(record, outcome);
+    } catch (error) {
+      try {
+        const committed = await this.deps.runLedger.get(record.runId);
+        if (!committed || ACTIVE_STATUSES.has(committed.status)) throw error;
+        ledgerRecord = committed;
+      } catch {
+        throw new RunFinalizationError(record.runId, "run-terminal", error);
+      }
+    }
+    this.applyLedgerProjection(record, ledgerRecord);
+    const sameOutcome =
+      ledgerRecord.status === outcome.status &&
+      ledgerRecord.error === outcome.error;
+    record.terminalReason = sameOutcome
+      ? (outcome.terminalReason ?? outcome.result?.terminalReason)
+      : undefined;
+    const completion = sameOutcome
+      ? completionFromResult({
+          ...outcome,
+          error: ledgerRecord.error,
+          errorData: ledgerRecord.errorData,
+        })
+      : {
+          status: ledgerRecord.status as RunCompletion["status"],
+          error: ledgerRecord.error,
+          errorData: ledgerRecord.errorData,
+        };
+    this.publishRunUpdated(record);
+    this.endStream(record);
+    this.removeActive(record);
     return completion;
   }
 
@@ -421,13 +564,22 @@ export class RunManager {
     record: ManagedRunRecord,
     outcome: RunWorkerResult,
   ): Promise<RunLedgerRecord> {
+    const options = { endedAt: record.finalization?.endedAt };
     if (outcome.status === "succeeded") {
-      return this.deps.runLedger.markSucceeded(record.runId);
+      return this.deps.runLedger.markSucceeded(record.runId, options);
     }
     if (outcome.status === "cancelled") {
       return this.deps.runLedger.markCancelled(
         record.runId,
         outcome.error ?? record.cancelReason,
+        options,
+      );
+    }
+    if (outcome.status === "interrupted") {
+      return this.deps.runLedger.markRunInterrupted(
+        record.runId,
+        outcome.error ?? record.cancelReason,
+        options,
       );
     }
 
@@ -435,6 +587,7 @@ export class RunManager {
       record.runId,
       outcome.error ?? "run failed",
       outcome.errorData,
+      options,
     );
   }
 
@@ -476,7 +629,7 @@ export class RunManager {
         continue;
       }
 
-      this.cancel(runId, "interrupted by replacement run");
+      this.cancelRun(runId, "interrupted by replacement run", "cancelled");
       completions.push(record.completion);
     }
 
