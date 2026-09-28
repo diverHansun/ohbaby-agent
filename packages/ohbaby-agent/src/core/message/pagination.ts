@@ -20,18 +20,27 @@ export function decodeMessagePage(
   sessionId: string,
   options: MessagePageOptions,
   runId?: string,
-): { limit: number; cursor?: Cursor } {
+): { limit: number; cursor?: Cursor; direction: "before" | "after" } {
   const limit = options.limit ?? 50;
   if (!Number.isInteger(limit) || limit < 1 || limit > 200)
     throw Object.assign(
       new Error("Message page limit must be between 1 and 200"),
       { code: "INVALID_SESSION_QUERY" },
     );
-  if (options.before === undefined) return { limit };
+  if (options.before !== undefined && options.after !== undefined)
+    throw Object.assign(
+      new Error("Message page cursors are mutually exclusive"),
+      {
+        code: "INVALID_SESSION_QUERY",
+      },
+    );
+  const direction = options.after === undefined ? "before" : "after";
+  const encoded = options.after ?? options.before;
+  if (encoded === undefined) return { limit, direction };
   try {
-    if (options.before.length > 4096) throw new Error();
+    if (encoded.length > 4096) throw new Error();
     const value = JSON.parse(
-      Buffer.from(options.before, "base64url").toString("utf8"),
+      Buffer.from(encoded, "base64url").toString("utf8"),
     ) as Record<string, unknown>;
     if (
       value.version !== 1 ||
@@ -44,7 +53,11 @@ export function decodeMessagePage(
       value.id.length === 0
     )
       throw new Error();
-    return { limit, cursor: { createdAt: value.createdAt, id: value.id } };
+    return {
+      limit,
+      direction,
+      cursor: { createdAt: value.createdAt, id: value.id },
+    };
   } catch {
     throw Object.assign(new Error("Invalid message page cursor"), {
       code: "INVALID_SESSION_QUERY",
@@ -62,22 +75,29 @@ export function compareMessages(left: Message, right: Message): number {
 export function makeMessagePage(
   sessionId: string,
   options: MessagePageOptions,
-  descending: MessageWithParts[],
+  ordered: MessageWithParts[],
   limit: number,
   runId?: string,
 ): MessagePage {
-  const hasMore = descending.length > limit;
-  const messages = descending.slice(0, limit).reverse();
+  const hasMore = ordered.length > limit;
+  const messages = ordered.slice(0, limit);
+  if (options.after === undefined) messages.reverse();
   const first = messages.at(0)?.info;
+  const last = messages.at(-1)?.info;
   return {
     messages,
     hasMore,
     ...(first === undefined
       ? {}
       : { firstMessageId: first.id, lastMessageId: messages.at(-1)?.info.id }),
-    ...(hasMore && first !== undefined
+    ...(hasMore && first !== undefined && last !== undefined
       ? {
-          nextCursor: messageCursor(sessionId, first, options, runId),
+          nextCursor: messageCursor(
+            sessionId,
+            options.after === undefined ? first : last,
+            options,
+            runId,
+          ),
         }
       : {}),
   };

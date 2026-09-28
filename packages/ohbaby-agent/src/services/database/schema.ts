@@ -106,6 +106,8 @@ export const schema = {
     childSessionId: "child_session_id",
     childScopeId: "child_scope_id",
     childRunId: "child_run_id",
+    childUserMessageId: "child_user_message_id",
+    delegationSequence: "delegation_sequence",
     startedAt: "started_at",
     completedAt: "completed_at",
     updatedAt: "updated_at",

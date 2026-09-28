@@ -16,6 +16,7 @@ import {
   type StatementRunResult,
 } from "../../services/database/index.js";
 import { createDatabaseMessageStore } from "./database-store.js";
+import { messageCursor } from "./pagination.js";
 import { serializeHistoryMessages } from "../context/serializer.js";
 import {
   createTokenUsageMetadata,
@@ -75,6 +76,82 @@ afterEach(async () => {
 });
 
 describe("createDatabaseMessageStore", () => {
+  it("pages forward across equal timestamps and enforces session, scope and run cursor binding", async () => {
+    const store = createDatabaseMessageStore();
+    for (const id of ["a", "b", "c", "d", "e"])
+      await store.insertMessage({
+        ...userMessage(id),
+        runId: "run_a",
+        contextScopeId: "scope_a",
+      });
+    await store.insertMessage({
+      ...userMessage("foreign_run"),
+      runId: "run_b",
+      contextScopeId: "scope_a",
+    });
+    await store.insertMessage({
+      ...userMessage("foreign_scope"),
+      runId: "run_a",
+      contextScopeId: "scope_b",
+    });
+    const scope = { contextScopeId: "scope_a" };
+    const after = messageCursor(
+      "session_1",
+      { ...userMessage("a"), runId: "run_a" },
+      { scope },
+      "run_a",
+    );
+    const first = await store.listPageByRun("session_1", "run_a", {
+      scope,
+      after,
+      limit: 2,
+    });
+    expect(first.messages.map(({ info }) => info.id)).toEqual(["b", "c"]);
+    expect(first.hasMore).toBe(true);
+    const backward = await store.listPageByRun("session_1", "run_a", {
+      scope,
+      before: first.nextCursor,
+      limit: 2,
+    });
+    expect(backward.messages.map(({ info }) => info.id)).toEqual(["a", "b"]);
+    expect(backward.hasMore).toBe(false);
+    const second = await store.listPageByRun("session_1", "run_a", {
+      scope,
+      after: first.nextCursor,
+      limit: 2,
+    });
+    expect(second.messages.map(({ info }) => info.id)).toEqual(["d", "e"]);
+    expect(second.hasMore).toBe(false);
+    expect(second.nextCursor).toBeUndefined();
+    await expect(
+      store.listPageByRun("session_1", "run_a", {
+        scope,
+        after,
+        before: after,
+      }),
+    ).rejects.toThrow(/cursor/i);
+    await expect(
+      store.listPageByRun("session_1", "run_a", { scope, after: "invalid" }),
+    ).rejects.toThrow(/cursor/i);
+    await expect(
+      store.listPageByRun("session_1", "run_b", { scope, after }),
+    ).rejects.toThrow(/cursor/i);
+    await expect(
+      store.listPageByRun("session_1", "run_a", {
+        scope: { contextScopeId: "scope_b" },
+        after,
+      }),
+    ).rejects.toThrow(/cursor/i);
+    const plan = getDatabase()
+      .prepare<{ detail: string }>(
+        "EXPLAIN QUERY PLAN SELECT * FROM message WHERE session_id = ? AND json_extract(data, '$.runId') = ? AND (created_at, id) > (?, ?) ORDER BY created_at ASC, id ASC LIMIT ?",
+      )
+      .all("session_1", "run_a", 1000, "a", 3)
+      .map((row) => row.detail)
+      .join("\n");
+    expect(plan).toContain("idx_message_session_run_page");
+    expect(plan).not.toMatch(/TEMP B-TREE/);
+  });
   it("merges request observations into current JSON and keeps terminal records across reopen", async () => {
     let store = createDatabaseMessageStore();
     await store.insertMessage({

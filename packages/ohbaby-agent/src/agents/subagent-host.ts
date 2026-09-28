@@ -245,6 +245,8 @@ export class SessionSubagentHost {
   private readonly sealedRoots = new Set<string>();
   private readonly closedSubagents = new Set<string>();
   private readonly invocationLocks = new Map<string, Promise<void>>();
+  /** Orders acceptance through queue admission without waiting for child turns. */
+  private readonly admissionTails = new Map<string, Promise<void>>();
   private readonly executionJobs = new Map<string, Promise<EntryOutcome>>();
   private readonly rootByExecution = new Map<string, string>();
   private readonly executionBudgets = new Map<
@@ -342,11 +344,26 @@ export class SessionSubagentHost {
         throw new Error("Subagent root run is closed");
       }
       if (accepted.created) {
+        const previousAdmission = this.admissionTails.get(execution.subagentId);
+        let resolveAdmission!: () => void;
+        const admission = new Promise<void>((resolve) => {
+          resolveAdmission = resolve;
+        });
+        this.admissionTails.set(execution.subagentId, admission);
+        let admitted = false;
+        const releaseAdmission = (): void => {
+          if (admitted) return;
+          admitted = true;
+          resolveAdmission();
+          if (this.admissionTails.get(execution.subagentId) === admission)
+            this.admissionTails.delete(execution.subagentId);
+        };
         const inherited = this.options.getParentReasoning?.(
           input.parentSessionId,
           input.parentContextScopeId,
         );
         const job = Promise.resolve().then(async () => {
+          await previousAdmission;
           try {
             this.assertRootOpen(root.rootRunId);
             const record =
@@ -384,8 +401,10 @@ export class SessionSubagentHost {
                 ? undefined
                 : mergeReasoningIntent(inherited),
               execution,
+              releaseAdmission,
             );
           } catch (error) {
+            releaseAdmission();
             if (
               !(error instanceof SubagentPersistenceError) &&
               !(
@@ -404,6 +423,8 @@ export class SessionSubagentHost {
               });
             }
             throw error;
+          } finally {
+            releaseAdmission();
           }
         });
         this.executionJobs.set(executionId, job);
@@ -963,6 +984,7 @@ export class SessionSubagentHost {
     entryAlreadyQueued = false,
     reasoning?: ReasoningIntent,
     execution?: SubagentExecutionRecord,
+    onAdmitted?: () => void,
   ): Promise<EntryOutcome> {
     if (this.disposed) {
       await this.markOwnedInterrupted(record.parentSessionId);
@@ -1080,6 +1102,7 @@ export class SessionSubagentHost {
         };
       },
     );
+    onAdmitted?.();
     if (scheduled.alreadyActive) {
       return await this.awaitCompletionOrGet(
         record.parentSessionId,
@@ -1479,6 +1502,12 @@ export class SessionSubagentHost {
         sessionId: record.sessionId,
         type: "sub",
       });
+      const execution = input.executionId
+        ? await this.options.executionStore.get({
+            executionId: input.executionId,
+            parentSessionId: record.parentSessionId,
+          })
+        : null;
       if (input.rootRunId) this.assertRootOpen(input.rootRunId);
       if (turnSignal.aborted) return await markInterrupted();
       active.lastRunSettled = false;
@@ -1490,6 +1519,9 @@ export class SessionSubagentHost {
             : { reasoning: input.reasoning }),
           environment: input.environment,
           prompt: input.prompt,
+          ...(execution?.childUserMessageId === undefined
+            ? {}
+            : { initialUserMessageId: execution.childUserMessageId }),
           runId,
           signal: turnSignal,
           waitMode: "waitForCompletion",

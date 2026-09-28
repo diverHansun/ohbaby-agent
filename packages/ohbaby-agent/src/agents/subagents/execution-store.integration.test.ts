@@ -59,6 +59,70 @@ for (const backend of ["memory", "sqlite"] as const)
       await database();
       return new DatabaseSubagentExecutionStore({ db: getDatabase() });
     }
+    it("reserves stable child message identity and acceptance order, including same-millisecond nested calls", async () => {
+      const s = await store();
+      const first = (await s.accept(input({ createdAt: 7 }))).record;
+      const second = (
+        await s.accept(
+          input({
+            executionId: "aaa",
+            requestId: "second",
+            requesterRunId: "child-run",
+            parentSessionId: "child",
+            createdAt: 7,
+          }),
+        )
+      ).record;
+      expect(first.childUserMessageId).toEqual(expect.any(String));
+      expect(first.childUserMessageId).not.toBe(second.childUserMessageId);
+      expect([first.delegationSequence, second.delegationSequence]).toEqual([
+        1, 2,
+      ]);
+      expect(
+        (await s.accept(input({ executionId: "retry", createdAt: 99 }))).record,
+      ).toEqual(first);
+      expect(
+        (await s.get({ executionId: "aaa", parentSessionId: "child" }))
+          ?.delegationSequence,
+      ).toBe(2);
+      expect(
+        (await s.list({ rootSessionId: "parent", subagentId: "agent" })).map(
+          (r) => r.executionId,
+        ),
+      ).toEqual(["aaa", "exec-1"]);
+      expect(
+        (
+          await s.list({
+            rootSessionId: "parent",
+            subagentId: "agent",
+            afterSequence: 1,
+            ascending: true,
+          })
+        ).map((r) => r.executionId),
+      ).toEqual(["aaa"]);
+      expect(
+        (
+          await s.list({
+            rootSessionId: "parent",
+            subagentId: "agent",
+            beforeSequence: 2,
+            ascending: true,
+          })
+        ).map((r) => r.executionId),
+      ).toEqual(["exec-1"]);
+    });
+    it("publishes accepted and terminal records after a successful transaction", async () => {
+      const s = await store();
+      const seen: string[] = [];
+      const unsubscribe = s.subscribe((record) =>
+        seen.push(`${record.executionId}:${record.status}`),
+      );
+      await s.accept(input());
+      await expect(s.accept(input({ prompt: "conflict" }))).rejects.toThrow();
+      await s.finish(lookup, { status: "completed", completedAt: 3 });
+      unsubscribe();
+      expect(seen).toEqual(["exec-1:queued", "exec-1:completed"]);
+    });
     it("pages existing descendants by root and never grants a different root access", async () => {
       const s = await store();
       await s.accept(input());
@@ -307,8 +371,12 @@ it("reopens SQLite with full terminal result, pending intent and explicit accept
   closeDatabase();
   initDatabase({ dbPath: path });
   const reopened = new DatabaseSubagentExecutionStore({ db: getDatabase() });
+  expect((await reopened.get(lookup))?.childUserMessageId).toEqual(
+    expect.any(String),
+  );
   expect(await reopened.get(lookup)).toMatchObject({
     executionId: "exec-1",
+    delegationSequence: 1,
     requesterRunId: "request-run",
     rootRunId: "root-run",
     output: "full original",
@@ -319,4 +387,24 @@ it("reopens SQLite with full terminal result, pending intent and explicit accept
   expect((await reopened.accept(input({ executionId: "retry" }))).created).toBe(
     false,
   );
+});
+it("reserves an ID when a legacy queued execution starts without changing completed history", async () => {
+  await database();
+  const s = new DatabaseSubagentExecutionStore({ db: getDatabase() });
+  await s.accept(input());
+  getDatabase()
+    .prepare(
+      "UPDATE subagent_execution SET child_user_message_id = NULL, delegation_sequence = NULL WHERE execution_id = ?",
+    )
+    .run("exec-1");
+  expect((await s.get(lookup))?.childUserMessageId).toBeUndefined();
+  await s.bindChild(lookup, { sessionId: "child", contextScopeId: "scope" }, 2);
+  const started = await s.start(lookup, "child-run", 3);
+  expect(started.childUserMessageId).toEqual(expect.any(String));
+  expect((await s.get(lookup))?.childUserMessageId).toBe(
+    started.childUserMessageId,
+  );
+  expect(started.delegationSequence).toBeUndefined();
+  await s.finish(lookup, { status: "completed", completedAt: 4 });
+  expect((await s.get(lookup))?.delegationSequence).toBeUndefined();
 });

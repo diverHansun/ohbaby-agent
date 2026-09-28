@@ -5,6 +5,7 @@ import {
   type DatabaseConnection,
   type SqliteValue,
 } from "../../services/database/index.js";
+import { randomUUID } from "node:crypto";
 
 export class SubagentExecutionConflictError extends Error {}
 
@@ -42,8 +43,18 @@ export type ExecutionHistory = (
   readonly requesterScopeId?: string;
   readonly subagentId?: string;
   readonly rootRunId?: string;
+  /** Exclusive bounds on acceptance order; legacy rows without a sequence are omitted. */
+  readonly afterSequence?: number;
+  readonly beforeSequence?: number;
+  /** Legacy rows without a sequence, ordered by the original acceptance key. */
+  readonly legacyOnly?: boolean;
+  readonly ascending?: boolean;
   readonly limit?: number;
   readonly before?: {
+    readonly createdAt: number;
+    readonly executionId: string;
+  };
+  readonly after?: {
     readonly createdAt: number;
     readonly executionId: string;
   };
@@ -77,6 +88,10 @@ export interface ExecutionDelivery {
   readonly processedAt?: number;
 }
 export interface SubagentExecutionRecord extends AcceptSubagentExecution {
+  /** Reserved on acceptance; absent only for legacy persisted executions. */
+  readonly childUserMessageId?: string;
+  /** Acceptance order within a root session and logical subagent. */
+  readonly delegationSequence?: number;
   readonly status: "queued" | "running" | ExecutionTerminalStatus;
   readonly childSessionId?: string;
   readonly childScopeId?: string;
@@ -93,6 +108,7 @@ export interface SubagentExecutionRecord extends AcceptSubagentExecution {
   readonly lateResult?: ExecutionTerminalResult;
 }
 export interface SubagentExecutionStore {
+  subscribe(listener: (record: SubagentExecutionRecord) => void): () => void;
   accept(
     input: AcceptSubagentExecution,
   ): Promise<{ record: SubagentExecutionRecord; created: boolean }>;
@@ -173,6 +189,14 @@ function limitFor(input: ExecutionHistory): number {
     );
   return limit;
 }
+function sequenceOrdered(input: ExecutionHistory): boolean {
+  return (
+    (!input.legacyOnly && input.ascending === true) ||
+    input.afterSequence !== undefined ||
+    input.beforeSequence !== undefined ||
+    (input.rootSessionId !== undefined && input.subagentId !== undefined)
+  );
+}
 function finishRecord(
   r: SubagentExecutionRecord,
   result: ExecutionTerminalResult,
@@ -192,13 +216,52 @@ function finishRecord(
 }
 /** Shared transitions run synchronously inside each backend's write transaction. */
 abstract class ExecutionStore implements SubagentExecutionStore {
-  protected abstract transaction<T>(operation: () => T): Promise<T>;
+  private readonly listeners = new Set<
+    (record: SubagentExecutionRecord) => void
+  >();
+  subscribe(listener: (record: SubagentExecutionRecord) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  protected abstract writeTransaction<T>(operation: () => T): Promise<T>;
+  protected async transaction<T>(operation: () => T): Promise<T> {
+    const changed: SubagentExecutionRecord[] = [];
+    const result = await this.writeTransaction(() => {
+      const previous = this.transactionChanges;
+      this.transactionChanges = changed;
+      try {
+        return operation();
+      } finally {
+        this.transactionChanges = previous;
+      }
+    });
+    for (const record of changed)
+      for (const listener of this.listeners) {
+        try {
+          listener(structuredClone(record));
+        } catch {
+          /* Subscribers cannot undo a committed write. */
+        }
+      }
+    return result;
+  }
+  private transactionChanges?: SubagentExecutionRecord[];
   protected abstract read(executionId: string): SubagentExecutionRecord | null;
   protected abstract findInvocation(
     requesterRunId: string,
     requestId: string,
   ): SubagentExecutionRecord | null;
-  protected abstract save(record: SubagentExecutionRecord): void;
+  protected abstract persist(record: SubagentExecutionRecord): void;
+  protected save(record: SubagentExecutionRecord): void {
+    this.persist(record);
+    this.transactionChanges?.push(structuredClone(record));
+  }
+  protected abstract nextSequence(
+    rootSessionId: string,
+    subagentId: string,
+  ): number;
   protected abstract history(
     input: ExecutionHistory,
   ): readonly SubagentExecutionRecord[];
@@ -294,6 +357,11 @@ abstract class ExecutionStore implements SubagentExecutionStore {
         throw new SubagentExecutionConflictError("Execution ID conflict");
       const record: SubagentExecutionRecord = {
         ...input,
+        childUserMessageId: randomUUID(),
+        delegationSequence: this.nextSequence(
+          input.rootSessionId,
+          input.subagentId,
+        ),
         status: "queued",
         updatedAt: input.createdAt,
         artifact: { state: "none" },
@@ -372,6 +440,9 @@ abstract class ExecutionStore implements SubagentExecutionStore {
       }
       return {
         ...r,
+        // Legacy queued rows reserve only when they actually start. Running legacy
+        // rows are left untouched because their model history may already exist.
+        childUserMessageId: r.childUserMessageId ?? randomUUID(),
         childRunId,
         status: "running",
         startedAt: at,
@@ -515,7 +586,7 @@ export class InMemorySubagentExecutionStore extends ExecutionStore {
       )
       .map((r) => structuredClone(r));
   }
-  protected async transaction<T>(operation: () => T): Promise<T> {
+  protected async writeTransaction<T>(operation: () => T): Promise<T> {
     await Promise.resolve();
     return operation();
   }
@@ -532,8 +603,18 @@ export class InMemorySubagentExecutionStore extends ExecutionStore {
     );
     return r ? structuredClone(r) : null;
   }
-  protected save(r: SubagentExecutionRecord): void {
+  protected persist(r: SubagentExecutionRecord): void {
     this.records.set(r.executionId, structuredClone(r));
+  }
+  protected nextSequence(rootSessionId: string, subagentId: string): number {
+    let last = 0;
+    for (const record of this.records.values())
+      if (
+        record.rootSessionId === rootSessionId &&
+        record.subagentId === subagentId
+      )
+        last = Math.max(last, record.delegationSequence ?? 0);
+    return last + 1;
   }
   protected history(
     input: ExecutionHistory,
@@ -550,19 +631,51 @@ export class InMemorySubagentExecutionStore extends ExecutionStore {
           (input.subagentId === undefined ||
             r.subagentId === input.subagentId) &&
           (input.rootRunId === undefined || r.rootRunId === input.rootRunId) &&
+          (!input.legacyOnly || r.delegationSequence === undefined) &&
+          (input.afterSequence === undefined ||
+            (r.delegationSequence !== undefined &&
+              r.delegationSequence > input.afterSequence)) &&
+          (input.beforeSequence === undefined ||
+            (r.delegationSequence !== undefined &&
+              r.delegationSequence < input.beforeSequence)) &&
           (!input.before ||
             r.createdAt < input.before.createdAt ||
             (r.createdAt === input.before.createdAt &&
-              r.executionId < input.before.executionId)),
+              r.executionId < input.before.executionId)) &&
+          (!input.after ||
+            r.createdAt > input.after.createdAt ||
+            (r.createdAt === input.after.createdAt &&
+              r.executionId > input.after.executionId)),
       )
       .sort(
-        (a, b) =>
-          b.createdAt - a.createdAt ||
-          (a.executionId < b.executionId
-            ? 1
-            : a.executionId > b.executionId
-              ? -1
-              : 0),
+        input.legacyOnly
+          ? (a: SubagentExecutionRecord, b: SubagentExecutionRecord): number =>
+              (input.ascending ? 1 : -1) *
+              (a.createdAt - b.createdAt ||
+                (a.executionId < b.executionId
+                  ? -1
+                  : a.executionId > b.executionId
+                    ? 1
+                    : 0))
+          : sequenceOrdered(input)
+            ? (
+                a: SubagentExecutionRecord,
+                b: SubagentExecutionRecord,
+              ): number =>
+                (input.ascending ? 1 : -1) *
+                  ((a.delegationSequence ?? 0) - (b.delegationSequence ?? 0)) ||
+                b.createdAt - a.createdAt ||
+                b.executionId.localeCompare(a.executionId)
+            : (
+                a: SubagentExecutionRecord,
+                b: SubagentExecutionRecord,
+              ): number =>
+                b.createdAt - a.createdAt ||
+                (a.executionId < b.executionId
+                  ? 1
+                  : a.executionId > b.executionId
+                    ? -1
+                    : 0),
       )
       .slice(0, limitFor(input))
       .map((r) => structuredClone(r));
@@ -640,7 +753,7 @@ export class DatabaseSubagentExecutionStore extends ExecutionStore {
         );
     });
   }
-  protected transaction<T>(operation: () => T): Promise<T> {
+  protected writeTransaction<T>(operation: () => T): Promise<T> {
     return runWriteTransaction(this.db, operation);
   }
   protected sessionRecords(
@@ -672,7 +785,7 @@ export class DatabaseSubagentExecutionStore extends ExecutionStore {
       .get(run, request);
     return row ? fromRow(row) : null;
   }
-  protected save(record: SubagentExecutionRecord): void {
+  protected persist(record: SubagentExecutionRecord): void {
     const row = toRow(record);
     const names = Object.keys(row);
     this.db
@@ -683,6 +796,16 @@ export class DatabaseSubagentExecutionStore extends ExecutionStore {
           .join(", ")}`,
       )
       .run(...Object.values(row));
+  }
+  protected nextSequence(rootSessionId: string, subagentId: string): number {
+    const row = this.db
+      .prepare<{
+        next: number;
+      }>(
+        `SELECT COALESCE(MAX(delegation_sequence), 0) + 1 AS next FROM ${schema.subagentExecution.tableName} WHERE root_session_id = ? AND subagent_id = ?`,
+      )
+      .get(rootSessionId, subagentId);
+    return row?.next ?? 1;
   }
   protected history(
     input: ExecutionHistory,
@@ -708,9 +831,26 @@ export class DatabaseSubagentExecutionStore extends ExecutionStore {
         input.before.executionId,
       );
     }
+    if (input.after) {
+      where.push("(created_at > ? OR (created_at = ? AND execution_id > ?))");
+      values.push(
+        input.after.createdAt,
+        input.after.createdAt,
+        input.after.executionId,
+      );
+    }
+    if (input.legacyOnly) where.push("delegation_sequence IS NULL");
+    if (input.afterSequence !== undefined) {
+      where.push("delegation_sequence > ?");
+      values.push(input.afterSequence);
+    }
+    if (input.beforeSequence !== undefined) {
+      where.push("delegation_sequence < ?");
+      values.push(input.beforeSequence);
+    }
     return this.db
       .prepare<Row>(
-        `SELECT * FROM ${schema.subagentExecution.tableName} WHERE ${where.join(" AND ")} ORDER BY created_at DESC, execution_id DESC LIMIT ?`,
+        `SELECT * FROM ${schema.subagentExecution.tableName} WHERE ${where.join(" AND ")} ORDER BY ${sequenceOrdered(input) ? `delegation_sequence ${input.ascending ? "ASC" : "DESC"}, ` : ""}created_at ${input.legacyOnly && input.ascending ? "ASC" : "DESC"}, execution_id ${input.legacyOnly && input.ascending ? "ASC" : "DESC"} LIMIT ?`,
       )
       .all(...values, limitFor(input))
       .map(fromRow);

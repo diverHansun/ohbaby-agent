@@ -103,6 +103,7 @@ describe("services/database", () => {
       { version: "018_subagent_execution" },
       { version: "019_current_run_input" },
       { version: "020_final_step_steer_admission" },
+      { version: "021_subagent_delegation_identity" },
     ]);
   });
 

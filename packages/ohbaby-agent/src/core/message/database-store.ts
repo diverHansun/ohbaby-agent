@@ -186,7 +186,11 @@ export function createDatabaseMessageStore(
     runId?: string,
   ): Promise<MessagePage> {
     return withAsyncBoundary(() => {
-      const { limit, cursor } = decodeMessagePage(sessionId, options, runId);
+      const { limit, cursor, direction } = decodeMessagePage(
+        sessionId,
+        options,
+        runId,
+      );
       const clauses = ["session_id = ?"];
       const params: (string | number)[] = [sessionId];
       if (options.scope !== undefined) {
@@ -202,12 +206,14 @@ export function createDatabaseMessageStore(
         params.push(runId);
       }
       if (cursor !== undefined) {
-        clauses.push("(created_at, id) < (?, ?)");
+        clauses.push(
+          `(created_at, id) ${direction === "before" ? "<" : ">"} (?, ?)`,
+        );
         params.push(cursor.createdAt, cursor.id);
       }
       const rows = db
         .prepare<MessageRow>(
-          `SELECT * FROM ${schema.message.tableName} WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC, id DESC LIMIT ?`,
+          `SELECT * FROM ${schema.message.tableName} WHERE ${clauses.join(" AND ")} ORDER BY created_at ${direction === "before" ? "DESC" : "ASC"}, id ${direction === "before" ? "DESC" : "ASC"} LIMIT ?`,
         )
         .all(...params, limit + 1);
       const hydrated = hydrateRows(rows.slice(0, limit));

@@ -293,6 +293,7 @@ export interface StoreModelStepInput extends CommitModelStepInput {
 export interface MessagePageOptions {
   readonly limit?: number;
   readonly before?: string;
+  readonly after?: string;
   readonly scope?: MessageScopeFilter;
 }
 

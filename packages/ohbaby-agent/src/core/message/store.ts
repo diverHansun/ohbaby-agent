@@ -86,7 +86,11 @@ export function createInMemoryMessageStore(): MessageStore {
     options: MessagePageOptions = {},
     runId?: string,
   ): MessagePage {
-    const { limit, cursor } = decodeMessagePage(sessionId, options, runId);
+    const { limit, cursor, direction } = decodeMessagePage(
+      sessionId,
+      options,
+      runId,
+    );
     const entries = [...messages.values()]
       .filter(
         (message) =>
@@ -95,11 +99,17 @@ export function createInMemoryMessageStore(): MessageStore {
             message.contextScopeId === options.scope.contextScopeId) &&
           (runId === undefined || message.runId === runId) &&
           (cursor === undefined ||
-            message.time.created < cursor.createdAt ||
-            (message.time.created === cursor.createdAt &&
-              message.id < cursor.id)),
+            (direction === "before"
+              ? message.time.created < cursor.createdAt ||
+                (message.time.created === cursor.createdAt &&
+                  message.id < cursor.id)
+              : message.time.created > cursor.createdAt ||
+                (message.time.created === cursor.createdAt &&
+                  message.id > cursor.id))),
       )
-      .sort((a, b) => compareMessages(b, a))
+      .sort((a, b) =>
+        direction === "before" ? compareMessages(b, a) : compareMessages(a, b),
+      )
       .slice(0, limit + 1)
       .map((message) => ({
         info: clone(message),

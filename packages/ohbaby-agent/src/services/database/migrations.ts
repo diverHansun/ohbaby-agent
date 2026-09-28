@@ -475,4 +475,15 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       WHERE json_extract(request.value,'$.requestId') IS NOT NULL;
     `,
   },
+  {
+    version: "021_subagent_delegation_identity",
+    sql: `
+      ALTER TABLE subagent_execution ADD COLUMN child_user_message_id TEXT;
+      ALTER TABLE subagent_execution ADD COLUMN delegation_sequence INTEGER;
+      CREATE UNIQUE INDEX idx_subagent_execution_child_user_message
+        ON subagent_execution(child_user_message_id);
+      CREATE UNIQUE INDEX idx_subagent_execution_delegation_order
+        ON subagent_execution(root_session_id, subagent_id, delegation_sequence);
+    `,
+  },
 ];

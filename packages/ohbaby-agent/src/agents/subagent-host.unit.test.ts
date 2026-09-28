@@ -308,6 +308,184 @@ describe("SessionSubagentHost", () => {
     );
     expect(turn).toHaveBeenCalledTimes(2);
   });
+  it("keeps a queued prompt out of turn history until start and uses its reserved message ID", async () => {
+    const { host, turn } = createHostFixture();
+    let finishFirst!: (value: AgentRunResult) => void;
+    turn.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFirst = resolve;
+        }),
+    );
+    const base = {
+      requesterRunId: "root",
+      requesterMessageId: "message",
+      parentSessionId: "parent_1",
+      mode: "background" as const,
+    };
+    const first = await host.run({
+      ...base,
+      requestId: "first",
+      prompt: "first",
+      role: "explore",
+    });
+    await vi.waitFor(() => {
+      expect(turn).toHaveBeenCalledTimes(1);
+    });
+    const second = await host.run({
+      ...base,
+      requestId: "second",
+      prompt: "second",
+      subagentId: first.execution.subagentId,
+    });
+    expect(second.execution.status).toBe("queued");
+    expect(second.execution.childUserMessageId).toEqual(expect.any(String));
+    expect(turn).toHaveBeenCalledTimes(1);
+    expect(turn.mock.calls[0]?.[0].initialUserMessageId).toBe(
+      first.execution.childUserMessageId,
+    );
+    finishFirst({
+      finalOutput: "first done",
+      mode: "waitForCompletion",
+      sessionId: "child_1",
+      success: true,
+    });
+    await vi.waitFor(() => {
+      expect(turn).toHaveBeenCalledTimes(2);
+    });
+    expect(turn.mock.calls[1]?.[0]).toMatchObject({
+      prompt: "second",
+      initialUserMessageId: second.execution.childUserMessageId,
+    });
+  });
+  it("does not start a child turn when Stop wins during the execution identity read", async () => {
+    const executionStore = new InMemorySubagentExecutionStore();
+    const originalGet = executionStore.get.bind(executionStore);
+    let releaseRead!: () => void;
+    let enterRead!: () => void;
+    const enteredRead = new Promise<void>((resolve) => {
+      enterRead = resolve;
+    });
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    vi.spyOn(executionStore, "get").mockImplementation(async (lookup) => {
+      const record = await originalGet(lookup);
+      if (record?.status === "running") {
+        enterRead();
+        await readGate;
+      }
+      return record;
+    });
+    const { host, turn } = createHostFixture({ executionStore });
+    const accepted = await host.run({
+      requesterRunId: "root",
+      requesterMessageId: "message",
+      requestId: "first",
+      parentSessionId: "parent_1",
+      prompt: "must not start",
+      role: "explore",
+      mode: "background",
+    });
+    await enteredRead;
+    await host.interruptByRootRun("root", "stopped");
+    releaseRead();
+    await vi.waitFor(async () => {
+      expect(
+        (
+          await executionStore.get({
+            executionId: accepted.execution.executionId,
+            parentSessionId: "parent_1",
+          })
+        )?.status,
+      ).toBe("interrupted");
+    });
+    expect(turn).not.toHaveBeenCalled();
+  });
+  it("admits accepted continuations in sequence when the earlier child bind stalls", async () => {
+    const executionStore = new InMemorySubagentExecutionStore();
+    const { host, turn } = createHostFixture({ executionStore });
+    let finishInitial!: (result: AgentRunResult) => void;
+    turn.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishInitial = resolve;
+        }),
+    );
+    const base = {
+      requesterRunId: "root",
+      requesterMessageId: "message",
+      parentSessionId: "parent_1",
+      mode: "background" as const,
+    };
+    const initial = await host.run({
+      ...base,
+      requestId: "initial",
+      prompt: "initial",
+      role: "explore",
+    });
+    await vi.waitFor(() => {
+      expect(turn).toHaveBeenCalledTimes(1);
+    });
+    const originalBind = executionStore.bindChild.bind(executionStore);
+    let releaseBind!: () => void;
+    let enterBind!: () => void;
+    const enteredBind = new Promise<void>((resolve) => {
+      enterBind = resolve;
+    });
+    const bindGate = new Promise<void>((resolve) => {
+      releaseBind = resolve;
+    });
+    let delayed = false;
+    vi.spyOn(executionStore, "bindChild").mockImplementation(
+      async (lookup, childIdentity, at) => {
+        if (!delayed) {
+          delayed = true;
+          enterBind();
+          await bindGate;
+        }
+        return originalBind(lookup, childIdentity, at);
+      },
+    );
+    const first = await host.run({
+      ...base,
+      requestId: "first",
+      prompt: "first",
+      subagentId: initial.execution.subagentId,
+    });
+    await enteredBind;
+    const second = await host.run({
+      ...base,
+      requestId: "second",
+      prompt: "second",
+      subagentId: initial.execution.subagentId,
+    });
+    expect([
+      first.execution.delegationSequence,
+      second.execution.delegationSequence,
+    ]).toEqual([2, 3]);
+    releaseBind();
+    await vi.waitFor(async () => {
+      expect(
+        (await host.status({ parentSessionId: "parent_1" })).items[0]
+          ?.pendingQueue,
+      ).toHaveLength(2);
+    });
+    finishInitial({
+      finalOutput: "done",
+      mode: "waitForCompletion",
+      sessionId: "child_1",
+      success: true,
+    });
+    await vi.waitFor(() => {
+      expect(turn).toHaveBeenCalledTimes(3);
+    });
+    expect(turn.mock.calls.map(([input]) => input.prompt)).toEqual([
+      "initial",
+      "first",
+      "second",
+    ]);
+  });
   it("skips a sealed root queue entry without stranding the next root", async () => {
     const executionStore = new InMemorySubagentExecutionStore();
     const { host, turn } = createHostFixture({ executionStore });
