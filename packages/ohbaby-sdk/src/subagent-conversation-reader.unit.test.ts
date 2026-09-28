@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { UiMessage } from "./snapshot.js";
 import type { UiEvent } from "./events.js";
 import {
   compareSubagentMessages,
@@ -38,7 +39,7 @@ function message(id: string, text: string, runId = "run-a") {
 }
 
 function conversation(
-  displayed = [message("live", "one")],
+  displayed: readonly UiMessage[] = [message("live", "one")],
   revision = 1,
   hasLater = false,
 ): UiSubagentConversationView {
@@ -481,6 +482,47 @@ describe("subagent conversation reader", () => {
     expect(
       reader.getSnapshot().conversation?.messages.map((message) => message.id),
     ).toContain("old");
+    reader.dispose();
+  });
+  it("does not prepend updates from an older run ahead of a selected queued anchor", async () => {
+    let receive: (event: UiEvent) => void = () => undefined;
+    const queued = { ...execution("b", 2), status: "queued" as const };
+    const parent = {
+      ...message("parent-b", "queued", "run-b"),
+      role: "user" as const,
+    };
+    const initial = {
+      ...conversation([parent]),
+      executions: [execution("a"), queued],
+    };
+    const reader = createSubagentConversationReader(
+      {
+        subscribeEvents: (handler) => {
+          receive = handler;
+          return () => undefined;
+        },
+        watchSubagentConversation: () => Promise.resolve(selection("w")),
+        unwatchSubagentConversation: () => Promise.resolve(),
+        getSubagentConversationView: () => Promise.resolve(initial),
+      },
+      "root",
+    );
+    await reader.select(queued);
+    receive({
+      type: "subagent.conversation.changed",
+      rootSessionId: "root",
+      subagentId: "child",
+      watchId: "w",
+      change: {
+        type: "session.changed",
+        bindingGeneration: 1,
+        version: { ...initial.view.version, sessionRevision: 2 },
+        messages: [message("live", "finished first run")],
+      },
+    });
+    expect(
+      reader.getSnapshot().conversation?.messages.map((message) => message.id),
+    ).toEqual(["parent-b"]);
     reader.dispose();
   });
 });

@@ -17,7 +17,20 @@ export interface PromptProjectionModel {
   readonly text: string;
 }
 
+export interface ConversationReadingPosition {
+  top: number;
+  sticky: boolean;
+  messageId?: string;
+  offset?: number;
+}
+
 export function ConversationStream(props: {
+  readonly preserveMessageOrder?: boolean;
+  readonly readingPosition?: ConversationReadingPosition;
+  readonly anchorMessageId?: string;
+  readonly anchorToken?: string;
+  readonly latestToken?: number;
+  readonly onNearEnd?: () => void;
   readonly historyState: "loading" | "ready" | "error";
   readonly historyHasMore: boolean;
   readonly historyStale: boolean;
@@ -83,6 +96,7 @@ export function ConversationStream(props: {
       row,
     })),
   ].sort((left, right) => {
+    if (props.preserveMessageOrder) return 0;
     const createdAtOrder = left.createdAt.localeCompare(right.createdAt);
     if (createdAtOrder !== 0) return createdAtOrder;
     if (left.kind !== right.kind) return left.kind === "message" ? -1 : 1;
@@ -124,9 +138,39 @@ export function ConversationStream(props: {
 
   useLayoutEffect(() => {
     anchorRef.current = null;
-    stickToBottomRef.current = true;
+    stickToBottomRef.current = props.readingPosition?.sticky ?? true;
+    if (streamRef.current && props.readingPosition)
+      streamRef.current.scrollTop = props.readingPosition.top;
     scheduleStickScroll();
   }, [activeSessionId, scheduleStickScroll]);
+
+  useLayoutEffect(() => {
+    if (!props.anchorMessageId) return;
+    const element = streamRef.current;
+    const target = [
+      ...(element?.querySelectorAll<HTMLElement>("[data-message-id]") ?? []),
+    ].find((node) => node.dataset.messageId === props.anchorMessageId);
+    if (element && target) {
+      stickToBottomRef.current = false;
+      element.scrollTop +=
+        target.getBoundingClientRect().top -
+        element.getBoundingClientRect().top -
+        12;
+      // Explicit delegation anchors take precedence over the near-bottom heuristic.
+      if (props.readingPosition) {
+        props.readingPosition.top = element.scrollTop;
+        props.readingPosition.sticky = stickToBottomRef.current;
+        props.readingPosition.messageId = props.anchorMessageId;
+        props.readingPosition.offset = 12;
+      }
+    }
+  }, [props.anchorMessageId, props.anchorToken]);
+
+  useLayoutEffect(() => {
+    if (!props.latestToken) return;
+    stickToBottomRef.current = true;
+    scheduleStickScroll();
+  }, [props.latestToken, scheduleStickScroll]);
 
   useLayoutEffect(() => {
     scheduleStickScroll();
@@ -152,14 +196,43 @@ export function ConversationStream(props: {
     if (!element) {
       return;
     }
+    let userScroll = false;
+    const markUserScroll = (): void => {
+      userScroll = true;
+    };
     const onScroll = (): void => {
-      stickToBottomRef.current = isNearBottom(element);
+      if (!props.readingPosition || userScroll)
+        stickToBottomRef.current = isNearBottom(element);
+      if (props.readingPosition) {
+        props.readingPosition.top = element.scrollTop;
+        props.readingPosition.sticky = stickToBottomRef.current;
+        const top = element.getBoundingClientRect().top;
+        const row = [
+          ...element.querySelectorAll<HTMLElement>("[data-message-id]"),
+        ].find((node) => node.getBoundingClientRect().bottom > top);
+        props.readingPosition.messageId = row?.dataset.messageId;
+        props.readingPosition.offset = row
+          ? row.getBoundingClientRect().top - top
+          : undefined;
+      }
+      if (userScroll && stickToBottomRef.current) {
+        props.onNearEnd?.();
+      }
+      userScroll = false;
     };
     element.addEventListener("scroll", onScroll);
+    element.addEventListener("wheel", markUserScroll, { passive: true });
+    element.addEventListener("touchmove", markUserScroll, { passive: true });
+    element.addEventListener("pointerdown", markUserScroll);
+    element.addEventListener("keydown", markUserScroll);
     return (): void => {
       element.removeEventListener("scroll", onScroll);
+      element.removeEventListener("wheel", markUserScroll);
+      element.removeEventListener("touchmove", markUserScroll);
+      element.removeEventListener("pointerdown", markUserScroll);
+      element.removeEventListener("keydown", markUserScroll);
     };
-  }, []);
+  }, [props.readingPosition, props.onNearEnd]);
 
   useEffect(() => {
     const inner = streamInnerRef.current;
@@ -167,13 +240,31 @@ export function ConversationStream(props: {
       return;
     }
     const observer = new ResizeObserver(() => {
+      const position = props.readingPosition;
+      const element = streamRef.current;
+      if (
+        position &&
+        element &&
+        !stickToBottomRef.current &&
+        position.messageId
+      ) {
+        const row = [
+          ...element.querySelectorAll<HTMLElement>("[data-message-id]"),
+        ].find((node) => node.dataset.messageId === position.messageId);
+        if (row)
+          element.scrollTop +=
+            row.getBoundingClientRect().top -
+            element.getBoundingClientRect().top -
+            (position.offset ?? 0);
+      }
       scheduleStickScroll();
     });
     observer.observe(inner);
+    if (streamRef.current) observer.observe(streamRef.current);
     return (): void => {
       observer.disconnect();
     };
-  }, [scheduleStickScroll]);
+  }, [scheduleStickScroll, props.readingPosition]);
 
   useEffect(() => {
     return (): void => {
@@ -221,7 +312,10 @@ export function ConversationStream(props: {
         ) : null}
         {timelineItems.map((item) =>
           item.kind === "message" ? (
-            <div key={`message:${item.message.id}`}>
+            <div
+              key={`message:${item.message.id}`}
+              data-message-id={item.message.id}
+            >
               <MessageRow
                 message={item.message}
                 reasoning={props.reasoningByMessageId[item.message.id]}

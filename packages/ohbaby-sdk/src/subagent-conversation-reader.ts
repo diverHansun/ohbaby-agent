@@ -204,6 +204,9 @@ export function createSubagentConversationReader(
     // Duplicate revisions cannot replace newer execution state with old Queued metadata.
     if (nextView === conversation.view) return conversation;
     const live = nextView.session.messages;
+    const executions = event.executions
+      ? mergeExecutions(conversation.executions, event.executions)
+      : conversation.executions;
     const knownIds = new Set(conversation.messages.map((item) => item.id));
     const removed = new Set(event.change.removedMessageIds ?? []);
     const messages = replaceMatchingMessages(
@@ -214,7 +217,18 @@ export function createSubagentConversationReader(
       for (const message of event.change.messages ?? []) {
         if (!knownIds.has(message.id)) {
           const current = live.find((item) => item.id === message.id);
-          messages.push(current ?? message);
+          const incoming = current ?? message;
+          const first = conversation.messages.at(0);
+          // An update outside an anchored window belongs in the live baseline,
+          // not before the reader's selected delegation.
+          if (
+            conversation.history.hasMore &&
+            first &&
+            compareSubagentMessages([first, incoming], executions)[0].id !==
+              first.id
+          )
+            continue;
+          messages.push(incoming);
           knownIds.add(message.id);
         }
       }
@@ -222,15 +236,8 @@ export function createSubagentConversationReader(
     return {
       ...conversation,
       view: nextView,
-      messages: compareSubagentMessages(
-        messages,
-        event.executions
-          ? mergeExecutions(conversation.executions, event.executions)
-          : conversation.executions,
-      ),
-      executions: event.executions
-        ? mergeExecutions(conversation.executions, event.executions)
-        : conversation.executions,
+      messages: compareSubagentMessages(messages, executions),
+      executions,
       ...(event.change.history === undefined
         ? {}
         : {

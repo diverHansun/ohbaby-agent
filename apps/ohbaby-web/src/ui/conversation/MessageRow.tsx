@@ -1,5 +1,6 @@
 import type { UiMessage, UiMessagePart } from "ohbaby-sdk";
-import type { ReactElement } from "react";
+import { useContext, type ReactElement } from "react";
+import { ConversationPresentation } from "./ConversationPresentation.js";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import { MarkdownBlock } from "../shared/MarkdownBlock.js";
 import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
@@ -8,6 +9,10 @@ export function MessageRow(props: {
   readonly message: UiMessage;
   readonly reasoning?: ReasoningViewState;
 }): ReactElement | null {
+  const presentation = useContext(ConversationPresentation);
+  const delegation = presentation.executions?.find(
+    (item) => item.childUserMessageId === props.message.id,
+  );
   const isUser = props.message.role === "user";
   const visibleParts = filterTodoToolParts(props.message.parts);
   const pairedParts = pairToolParts(visibleParts);
@@ -28,6 +33,12 @@ export function MessageRow(props: {
           isUser ? "ohb-message-user-bubble" : "ohb-message-assistant-bare"
         }`}
       >
+        {isUser && presentation.fromParent ? (
+          <div className="ohb-parent-source">
+            From parent
+            {delegation?.status === "queued" ? <span>Queued</span> : null}
+          </div>
+        ) : null}
         {props.reasoning ? (
           <details className="ohb-reasoning" open={!props.reasoning.folded}>
             <summary>Thought</summary>
@@ -36,6 +47,17 @@ export function MessageRow(props: {
         ) : null}
         {pairedParts.map((entry) => {
           if (entry.kind === "tool") {
+            const custom = presentation.renderTool?.(
+              props.message,
+              entry.call,
+              entry.result,
+            );
+            if (custom !== undefined)
+              return (
+                <div key={`${props.message.id}-tool-${entry.call.id}`}>
+                  {custom}
+                </div>
+              );
             return (
               <ToolCard
                 call={entry.call}

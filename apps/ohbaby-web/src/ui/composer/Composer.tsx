@@ -83,6 +83,7 @@ export function Composer(props: {
     | "updateSessionReasoning"
   >;
   readonly compact?: boolean;
+  readonly readOnly?: boolean;
   readonly draftScopeKey: string;
   readonly isPromptAdmitting: boolean;
   readonly onListCommands: () => Promise<UiWebCommandCatalog>;
@@ -619,7 +620,7 @@ export function Composer(props: {
 
   const send = useCallback(() => {
     const text = draft.trim();
-    if (!text || !canSend) {
+    if (props.readOnly || !text || !canSend) {
       return;
     }
     if (queuedEdit) {
@@ -816,209 +817,228 @@ export function Composer(props: {
 
   return (
     <section
-      className={
-        props.compact ? "ohb-composer ohb-composer-hero" : "ohb-composer"
-      }
+      className={`${props.compact ? "ohb-composer ohb-composer-hero" : "ohb-composer"}${props.readOnly ? " is-readonly" : ""}`}
     >
-      {props.topContent}
-      {steerNotice ? (
-        <p role="status">
-          Steer accepted · waiting for the active run’s next safe boundary
-        </p>
-      ) : null}
-      {props.queuedPrompts.length > 0 ? (
-        <section className="ohb-prompt-queue" aria-label="Queued prompts">
-          <div className="ohb-prompt-queue-header">
-            <span>Queued {String(props.queuedPrompts.length)}</span>
-            {props.queuedPrompts.length > 5 ? (
-              <button
-                onClick={() => {
-                  setQueueExpanded((expanded) => !expanded);
-                }}
-                title={
-                  queueExpanded
-                    ? "Collapse queued prompts"
-                    : "Show all queued prompts"
+      <div
+        className="ohb-composer-content"
+        inert={props.readOnly}
+        aria-hidden={props.readOnly ? true : undefined}
+        onClickCapture={(event) => {
+          if (props.readOnly) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+        onKeyDownCapture={(event) => {
+          if (props.readOnly) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
+        {props.topContent}
+        {steerNotice ? (
+          <p role="status">
+            Steer accepted · waiting for the active run’s next safe boundary
+          </p>
+        ) : null}
+        {props.queuedPrompts.length > 0 ? (
+          <section className="ohb-prompt-queue" aria-label="Queued prompts">
+            <div className="ohb-prompt-queue-header">
+              <span>Queued {String(props.queuedPrompts.length)}</span>
+              {props.queuedPrompts.length > 5 ? (
+                <button
+                  onClick={() => {
+                    setQueueExpanded((expanded) => !expanded);
+                  }}
+                  title={
+                    queueExpanded
+                      ? "Collapse queued prompts"
+                      : "Show all queued prompts"
+                  }
+                  type="button"
+                >
+                  {queueExpanded ? "Show less" : "Show all"}
+                </button>
+              ) : null}
+            </div>
+            <div className="ohb-prompt-queue-items">
+              {visibleQueuedPrompts.map((prompt) => {
+                const editing = queuedEdit?.promptId === prompt.promptId;
+                return (
+                  <div
+                    className={`ohb-prompt-queue-item ${editing ? "is-editing" : ""}`}
+                    key={prompt.promptId}
+                  >
+                    <button
+                      aria-label={`Edit queued prompt: ${prompt.text}`}
+                      className="ohb-prompt-queue-edit"
+                      disabled={isSubmitting || queueAcquirePending}
+                      onClick={() => {
+                        beginQueuedEdit(prompt);
+                      }}
+                      type="button"
+                    >
+                      <span aria-hidden="true">↳</span>
+                      <span>{prompt.text.replaceAll("\n", " ")}</span>
+                      {editing ? <small>editing</small> : null}
+                    </button>
+                    <SteerButton
+                      prompt={prompt}
+                      runId={props.model.activeRunId}
+                      disabled={
+                        isSubmitting ||
+                        queueAcquirePending ||
+                        editing ||
+                        props.model.disabled
+                      }
+                      steer={(input) => props.client.steerQueuedPrompt(input)}
+                      onAccepted={() => {
+                        setSteerNotice(true);
+                      }}
+                    />
+                    <button
+                      aria-label={`Cancel queued prompt: ${prompt.text}`}
+                      className="ohb-prompt-queue-cancel"
+                      disabled={isSubmitting || queueAcquirePending}
+                      onClick={() => {
+                        cancelQueuedPrompt(prompt.promptId);
+                      }}
+                      title="Cancel queued prompt"
+                      type="button"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+        <div
+          className={`ohb-composer-input${props.model.mode === "plan" ? " is-plan" : ""}`}
+          ref={composerInputRef}
+        >
+          {slashOpen ? (
+            <SlashPalette
+              items={slashItems}
+              onHover={setSlashIndex}
+              onRun={(item) => {
+                runSlashCommand(item);
+              }}
+              placement={props.compact ? "down" : "up"}
+              selectedIndex={slashIndex}
+            />
+          ) : null}
+          <div className="ohb-composer-text">
+            <TypewriterPlaceholder
+              active={showTypewriterPlaceholder}
+              phrases={COMPOSER_PLACEHOLDER_PHRASES}
+            />
+            <textarea
+              aria-label={`Message, ${props.model.mode} mode, ${props.model.permissionLevel} permission`}
+              disabled={props.model.disabled || isSubmitting}
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+                const nextDraft = event.target.value;
+                updateDraft(nextDraft);
+                setSlashIndex(0);
+                if (nextDraft !== slashDismissedDraft) {
+                  setSlashDismissedDraft(null);
                 }
+              }}
+              onBlur={() => {
+                setIsFocused(false);
+              }}
+              onFocus={() => {
+                setIsFocused(true);
+              }}
+              onKeyDown={onKeyDown}
+              placeholder={composerPlaceholder(
+                props.connectionKind,
+                props.model.isRunning,
+              )}
+              ref={textareaRef}
+              rows={1}
+              value={draft}
+            />
+          </div>
+          {completionSuffix && selectedCommand ? (
+            <span className="ohb-slash-completion" aria-hidden="true">
+              <span>⇥ {selectedCommand.label}</span>
+            </span>
+          ) : null}
+          {slashError || queueError || queuedEdit ? (
+            <div className="ohb-composer-feedback">
+              {slashError ? (
+                <span className="ohb-slash-error">{slashError}</span>
+              ) : null}
+              {queueError ? (
+                <span className="ohb-slash-error">{queueError}</span>
+              ) : null}
+              {queuedEdit ? (
+                <span className="ohb-composer-hint ohb-queued-edit-hint">
+                  Editing queued prompt · Enter save · Esc keep original
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="ohb-composer-bar">
+            {props.permissionControl}
+            <div className="ohb-composer-bar-spacer" />
+            <ReasoningControl
+              client={props.client}
+              session={props.activeSession}
+              onChange={(reasoning) => {
+                selectedReasoning.current = reasoning;
+              }}
+            />
+            {showStop ? (
+              <button
+                aria-busy={props.stopLabel !== undefined}
+                aria-label={props.stopLabel ?? "Stop run"}
+                className="ohb-stop-button"
+                disabled={props.stopLabel !== undefined || !props.model.canStop}
+                onClick={props.onStop}
+                title={props.stopLabel ?? "Stop run"}
                 type="button"
               >
-                {queueExpanded ? "Show less" : "Show all"}
-              </button>
-            ) : null}
-          </div>
-          <div className="ohb-prompt-queue-items">
-            {visibleQueuedPrompts.map((prompt) => {
-              const editing = queuedEdit?.promptId === prompt.promptId;
-              return (
-                <div
-                  className={`ohb-prompt-queue-item ${editing ? "is-editing" : ""}`}
-                  key={prompt.promptId}
-                >
-                  <button
-                    aria-label={`Edit queued prompt: ${prompt.text}`}
-                    className="ohb-prompt-queue-edit"
-                    disabled={isSubmitting || queueAcquirePending}
-                    onClick={() => {
-                      beginQueuedEdit(prompt);
-                    }}
-                    type="button"
-                  >
-                    <span aria-hidden="true">↳</span>
-                    <span>{prompt.text.replaceAll("\n", " ")}</span>
-                    {editing ? <small>editing</small> : null}
-                  </button>
-                  <SteerButton
-                    prompt={prompt}
-                    runId={props.model.activeRunId}
-                    disabled={
-                      isSubmitting ||
-                      queueAcquirePending ||
-                      editing ||
-                      props.model.disabled
-                    }
-                    steer={(input) => props.client.steerQueuedPrompt(input)}
-                    onAccepted={() => {
-                      setSteerNotice(true);
-                    }}
+                {props.stopLabel ? (
+                  <LoaderCircle
+                    aria-hidden="true"
+                    className="ohb-stop-pending"
+                    size={14}
                   />
-                  <button
-                    aria-label={`Cancel queued prompt: ${prompt.text}`}
-                    className="ohb-prompt-queue-cancel"
-                    disabled={isSubmitting || queueAcquirePending}
-                    onClick={() => {
-                      cancelQueuedPrompt(prompt.promptId);
-                    }}
-                    title="Cancel queued prompt"
-                    type="button"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-      <div
-        className={`ohb-composer-input${props.model.mode === "plan" ? " is-plan" : ""}`}
-        ref={composerInputRef}
-      >
-        {slashOpen ? (
-          <SlashPalette
-            items={slashItems}
-            onHover={setSlashIndex}
-            onRun={(item) => {
-              runSlashCommand(item);
-            }}
-            placement={props.compact ? "down" : "up"}
-            selectedIndex={slashIndex}
-          />
-        ) : null}
-        <div className="ohb-composer-text">
-          <TypewriterPlaceholder
-            active={showTypewriterPlaceholder}
-            phrases={COMPOSER_PLACEHOLDER_PHRASES}
-          />
-          <textarea
-            aria-label={`Message, ${props.model.mode} mode, ${props.model.permissionLevel} permission`}
-            disabled={props.model.disabled || isSubmitting}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-              const nextDraft = event.target.value;
-              updateDraft(nextDraft);
-              setSlashIndex(0);
-              if (nextDraft !== slashDismissedDraft) {
-                setSlashDismissedDraft(null);
-              }
-            }}
-            onBlur={() => {
-              setIsFocused(false);
-            }}
-            onFocus={() => {
-              setIsFocused(true);
-            }}
-            onKeyDown={onKeyDown}
-            placeholder={composerPlaceholder(
-              props.connectionKind,
-              props.model.isRunning,
+                ) : (
+                  <Square size={14} />
+                )}
+              </button>
+            ) : (
+              <button
+                aria-busy={props.isPromptAdmitting}
+                aria-label={queuedEdit ? "Save queued prompt" : "Send message"}
+                className="ohb-send-button"
+                disabled={!canSend}
+                onClick={send}
+                title={queuedEdit ? "Save queued prompt" : "Send message"}
+                type="button"
+              >
+                {props.isPromptAdmitting ? (
+                  <LoaderCircle
+                    aria-hidden="true"
+                    className="ohb-send-spinner"
+                    size={14}
+                  />
+                ) : (
+                  <Send size={14} />
+                )}
+              </button>
             )}
-            ref={textareaRef}
-            rows={1}
-            value={draft}
-          />
-        </div>
-        {completionSuffix && selectedCommand ? (
-          <span className="ohb-slash-completion" aria-hidden="true">
-            <span>⇥ {selectedCommand.label}</span>
-          </span>
-        ) : null}
-        {slashError || queueError || queuedEdit ? (
-          <div className="ohb-composer-feedback">
-            {slashError ? (
-              <span className="ohb-slash-error">{slashError}</span>
-            ) : null}
-            {queueError ? (
-              <span className="ohb-slash-error">{queueError}</span>
-            ) : null}
-            {queuedEdit ? (
-              <span className="ohb-composer-hint ohb-queued-edit-hint">
-                Editing queued prompt · Enter save · Esc keep original
-              </span>
-            ) : null}
           </div>
-        ) : null}
-        <div className="ohb-composer-bar">
-          {props.permissionControl}
-          <div className="ohb-composer-bar-spacer" />
-          <ReasoningControl
-            client={props.client}
-            session={props.activeSession}
-            onChange={(reasoning) => {
-              selectedReasoning.current = reasoning;
-            }}
-          />
-          {showStop ? (
-            <button
-              aria-busy={props.stopLabel !== undefined}
-              aria-label={props.stopLabel ?? "Stop run"}
-              className="ohb-stop-button"
-              disabled={props.stopLabel !== undefined || !props.model.canStop}
-              onClick={props.onStop}
-              title={props.stopLabel ?? "Stop run"}
-              type="button"
-            >
-              {props.stopLabel ? (
-                <LoaderCircle
-                  aria-hidden="true"
-                  className="ohb-stop-pending"
-                  size={14}
-                />
-              ) : (
-                <Square size={14} />
-              )}
-            </button>
-          ) : (
-            <button
-              aria-busy={props.isPromptAdmitting}
-              aria-label={queuedEdit ? "Save queued prompt" : "Send message"}
-              className="ohb-send-button"
-              disabled={!canSend}
-              onClick={send}
-              title={queuedEdit ? "Save queued prompt" : "Send message"}
-              type="button"
-            >
-              {props.isPromptAdmitting ? (
-                <LoaderCircle
-                  aria-hidden="true"
-                  className="ohb-send-spinner"
-                  size={14}
-                />
-              ) : (
-                <Send size={14} />
-              )}
-            </button>
-          )}
         </div>
       </div>
+      {props.readOnly ? (
+        <div className="ohb-composer-readonly-label">Read-only subagent</div>
+      ) : null}
     </section>
   );
 }

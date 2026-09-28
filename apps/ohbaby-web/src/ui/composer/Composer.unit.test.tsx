@@ -15,11 +15,12 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
-function fixture(): {
+function fixture(overrides: Partial<ComponentProps<typeof Composer>> = {}): {
   readonly input: () => HTMLTextAreaElement;
   readonly type: (text: string) => void;
   readonly render: (
     prefill: ComponentProps<typeof Composer>["prefill"],
+    readOnly?: boolean,
   ) => void;
   readonly revision: () => number;
 } {
@@ -78,14 +79,20 @@ function fixture(): {
     queuedPrompts: [],
     topContent: null,
     permissionControl: null,
+    ...overrides,
   };
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   const render = (
     prefill: ComponentProps<typeof Composer>["prefill"],
+    readOnly?: boolean,
   ): void => {
-    act(() => root?.render(<Composer {...props} prefill={prefill} />));
+    act(() =>
+      root?.render(
+        <Composer {...props} prefill={prefill} readOnly={readOnly} />,
+      ),
+    );
   };
   const input = (): HTMLTextAreaElement => {
     const element = container.querySelector("textarea");
@@ -175,4 +182,27 @@ describe("Composer prefill ownership", () => {
     f.render({ ...prefill, editRevision: f.revision() });
     expect(f.input().value).toBe("user changed it");
   });
+});
+
+it("keeps the draft and composer DOM while read-only mode blocks input actions", () => {
+  const onSubmit = vi.fn();
+  const onStop = vi.fn();
+  const f = fixture({ onSubmit, onStop });
+  f.type("draft to preserve");
+  const input = f.input();
+  f.render(null, true);
+  expect(f.input()).toBe(input);
+  expect(input.value).toBe("draft to preserve");
+  expect(input.closest("[inert]")).not.toBeNull();
+  expect(document.body.textContent).toContain("Read-only subagent");
+  void act(() =>
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    ),
+  );
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(onStop).not.toHaveBeenCalled();
+  f.render(null, false);
+  expect(f.input()).toBe(input);
+  expect(input.value).toBe("draft to preserve");
 });

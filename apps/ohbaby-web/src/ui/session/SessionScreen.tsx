@@ -1,5 +1,14 @@
-import { createSubagentReader } from "ohbaby-sdk";
-import { SubagentTree, SubagentView } from "./SubagentView.js";
+import {
+  createSubagentReader,
+  createSubagentConversationReader,
+} from "ohbaby-sdk";
+import { SubagentView } from "./SubagentView.js";
+import { ConversationPresentation } from "../conversation/ConversationPresentation.js";
+import {
+  DelegationRow,
+  delegationExecution,
+  delegationTitle,
+} from "./DelegationRow.js";
 import { TodoDock } from "../conversation/TodoDock.js";
 import { PermissionPolicyControl } from "../permissions/PermissionPolicyControl.js";
 import type {
@@ -679,12 +688,78 @@ export function SessionScreen({
     const timer = setInterval(() => {
       void subagents.refresh();
     }, 1000);
-    return () => {
+    return (): void => {
       clearInterval(timer);
       subagents.dispose();
     };
   }, [subagents, view.activeSession?.id]);
-  const viewingSubagent = subagentState.selectedId !== undefined;
+  const childReader = useMemo(
+    () =>
+      createSubagentConversationReader(client, view.activeSession?.id ?? ""),
+    [client, view.activeSession?.id],
+  );
+  const childState = useSyncExternalStore(
+    useCallback(
+      (listener: () => void) => childReader.subscribe(listener),
+      [childReader],
+    ),
+    childReader.getSnapshot,
+  );
+  useEffect(
+    () => (): void => {
+      childReader.dispose();
+    },
+    [childReader],
+  );
+  const viewingSubagent = childState.selected !== undefined;
+  const [childExpanded, setChildExpanded] = useState(false);
+  const [childTitle, setChildTitle] = useState("Subagent task");
+  const [childAnchorToken, setChildAnchorToken] = useState(0);
+  const childTrigger = useRef<HTMLButtonElement | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const closeChild = useCallback(() => {
+    childReader.close();
+    setChildExpanded(false);
+    requestAnimationFrame(() => {
+      const target = childTrigger.current?.isConnected
+        ? childTrigger.current
+        : contentRef.current?.querySelector<HTMLElement>(
+            ".ohb-root-conversation",
+          );
+      target?.focus({ preventScroll: true });
+    });
+  }, [childReader]);
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content || !viewingSubagent || childExpanded) return;
+    const composer = content.querySelector<HTMLElement>(".ohb-composer-input");
+    const header = content.querySelector<HTMLElement>(".ohb-statusbar");
+    const measure = (): void => {
+      const rect = content.getBoundingClientRect();
+      const bottom = composer?.getBoundingClientRect().top ?? rect.bottom;
+      const available = Math.max(
+        0,
+        bottom - (header?.getBoundingClientRect().bottom ?? rect.top) - 10,
+      );
+      content.style.setProperty(
+        "--child-bottom",
+        `${String(Math.max(0, rect.bottom - bottom) + 10)}px`,
+      );
+      content.style.setProperty(
+        "--child-height",
+        `${String(Math.min(680, available * 0.64))}px`,
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    if (composer) observer.observe(composer);
+    if (header) observer.observe(header);
+    return (): void => {
+      observer.disconnect();
+    };
+  }, [viewingSubagent, childExpanded]);
 
   return (
     <main
@@ -711,6 +786,7 @@ export function SessionScreen({
         workspace={workspace}
       />
       <div
+        ref={contentRef}
         className={`ohb-app-content ${
           showMain ? "ohb-app-content-main" : "ohb-app-content-empty"
         } ${view.activeTodoList ? "ohb-app-content-has-todos" : ""}`}
@@ -787,21 +863,17 @@ export function SessionScreen({
             Some thinking could not be saved and is no longer available.
           </div>
         ) : null}
-        {view.activeSession && client.listSubagentExecutions ? (
-          <DurationSampleContext.Provider value={storeSnapshot.durationSample}>
-            <SubagentTree
-              reader={subagents}
-              state={subagentState}
-              run={view.snapshot?.runs.find(
-                (run) => run.id === view.composer.activeRunId,
-              )}
-            />
-          </DurationSampleContext.Provider>
-        ) : null}
-        {viewingSubagent ? (
-          <SubagentView reader={subagents} state={subagentState} />
-        ) : showMain ? (
-          <>
+        {showMain ? (
+          <div
+            className="ohb-root-conversation"
+            tabIndex={-1}
+            inert={viewingSubagent && childExpanded}
+            style={
+              viewingSubagent && childExpanded
+                ? { visibility: "hidden" }
+                : undefined
+            }
+          >
             <StatusBar
               activeGoal={view.activeGoal}
               header={view.header}
@@ -815,34 +887,64 @@ export function SessionScreen({
             <DurationSampleContext.Provider
               value={storeSnapshot.durationSample}
             >
-              <ConversationStream
-                historyState={storeSnapshot.historyState}
-                historyHasMore={storeSnapshot.historyHasMore}
-                historyStale={storeSnapshot.historyStale}
-                historyError={storeSnapshot.historyError}
-                onLoadHistory={() => runtime.loadEarlierHistory()}
-                promptRows={promptProjection.rows}
-                startupThinkingAt={promptProjection.startupThinkingAt}
-                messages={view.activeSession?.messages ?? []}
-                sessionId={view.activeSession?.id ?? null}
-                prompts={(view.snapshot?.prompts ?? []).filter(
-                  (prompt) => prompt.sessionId === view.activeSession?.id,
-                )}
-                activeRun={view.snapshot?.runs.find(
-                  (run) =>
-                    run.sessionId === view.composer.activeSessionId &&
-                    run.id === view.composer.activeRunId,
-                )}
-                isRunning={
-                  view.composer.isRunning && !subagentState.list?.waiting
-                }
-                reasoningByMessageId={view.reasoningByMessageId}
-                commandNotices={
-                  <CommandNoticeList notices={view.commandNotices} />
-                }
-              />
+              <ConversationPresentation.Provider
+                value={{
+                  renderTool: (message, call) =>
+                    call.name === "subagent_run" ? (
+                      <DelegationRow
+                        call={call}
+                        execution={delegationExecution(
+                          message,
+                          call,
+                          subagentState.list?.executions ?? [],
+                          view.activeSession?.id ?? "",
+                        )}
+                        onOpen={(execution, trigger) => {
+                          childTrigger.current = trigger;
+                          setChildTitle(delegationTitle(call));
+                          setChildAnchorToken((value) => value + 1);
+                          void childReader.select(execution);
+                        }}
+                      />
+                    ) : undefined,
+                }}
+              >
+                <ConversationStream
+                  historyState={storeSnapshot.historyState}
+                  historyHasMore={storeSnapshot.historyHasMore}
+                  historyStale={storeSnapshot.historyStale}
+                  historyError={storeSnapshot.historyError}
+                  onLoadHistory={() => runtime.loadEarlierHistory()}
+                  promptRows={promptProjection.rows}
+                  startupThinkingAt={promptProjection.startupThinkingAt}
+                  messages={view.activeSession?.messages ?? []}
+                  sessionId={view.activeSession?.id ?? null}
+                  prompts={(view.snapshot?.prompts ?? []).filter(
+                    (prompt) => prompt.sessionId === view.activeSession?.id,
+                  )}
+                  activeRun={view.snapshot?.runs.find(
+                    (run) =>
+                      run.sessionId === view.composer.activeSessionId &&
+                      run.id === view.composer.activeRunId,
+                  )}
+                  isRunning={
+                    view.composer.isRunning && !subagentState.list?.waiting
+                  }
+                  reasoningByMessageId={view.reasoningByMessageId}
+                  commandNotices={
+                    <CommandNoticeList notices={view.commandNotices} />
+                  }
+                />
+              </ConversationPresentation.Provider>
             </DurationSampleContext.Provider>
-            {commandModalNotice ? (
+            {subagentState.list?.waiting ? (
+              <p className="ohb-child-waiting" role="status">
+                <span>Waiting for subagents</span>
+                <span>{subagentState.list.completedCount} done</span>
+                <span>{subagentState.list.activeCount} open</span>
+              </p>
+            ) : null}
+            {!viewingSubagent && commandModalNotice ? (
               <CommandResultModal
                 header={view.header}
                 notice={commandModalNotice}
@@ -877,7 +979,7 @@ export function SessionScreen({
                 }}
               />
             ) : null}
-          </>
+          </div>
         ) : (
           <>
             <ErrorBanner
@@ -893,10 +995,13 @@ export function SessionScreen({
           </>
         )}
         <div
-          style={{ display: viewingSubagent ? "none" : "contents" }}
-          inert={viewingSubagent}
+          className="ohb-root-composer"
+          style={{
+            display: viewingSubagent && childExpanded ? "none" : "contents",
+          }}
         >
           <Composer
+            readOnly={viewingSubagent}
             client={client}
             compact={!showMain}
             draftScopeKey={draftScopeKey}
@@ -940,6 +1045,19 @@ export function SessionScreen({
             }
           />
         </div>
+        {viewingSubagent ? (
+          <SubagentView
+            reader={childReader}
+            state={childState}
+            rootTitle={view.activeSession?.title ?? "Main conversation"}
+            title={childTitle}
+            expanded={childExpanded}
+            onExpandedChange={setChildExpanded}
+            onClose={closeChild}
+            approvalRequired={view.pendingPermissions.length > 0}
+            anchorToken={String(childAnchorToken)}
+          />
+        ) : null}
         {!viewingSubagent && structuredOverlay ? (
           <StructuredCommandOverlay
             key={draftScopeKey}

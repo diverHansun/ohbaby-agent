@@ -6,7 +6,8 @@ import type {
   UiToolResult,
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useState } from "react";
+import { useContext, useState } from "react";
+import { ConversationPresentation } from "./ConversationPresentation.js";
 import { useExecutionDuration } from "./use-execution-duration.js";
 
 export type PairedToolPart =
@@ -67,7 +68,10 @@ export function ToolCard(props: {
   readonly call: UiToolCall;
   readonly result: UiToolResult | undefined;
 }): ReactElement {
-  const [open, setOpen] = useState(false);
+  const [localOpen, setOpen] = useState(false);
+  const { tools } = useContext(ConversationPresentation);
+  const toolKey = props.call.id;
+  const open = tools ? (tools.get(toolKey) ?? false) : localOpen;
   const execution = props.result?.execution ?? props.call.execution;
   const duration = useExecutionDuration(
     props.call.id,
@@ -89,6 +93,7 @@ export function ToolCard(props: {
       accent={failed ? "red" : toolAccent(props.call.name)}
       input={JSON.stringify(props.call.input, null, 2)}
       onToggle={() => {
+        tools?.set(toolKey, !open);
         setOpen((value) => !value);
       }}
       open={open}
@@ -102,11 +107,15 @@ export function ToolCard(props: {
 export function OrphanToolResultCard(props: {
   readonly result: UiToolResult;
 }): ReactElement {
-  const [open, setOpen] = useState(false);
+  const [localOpen, setOpen] = useState(false);
+  const { tools } = useContext(ConversationPresentation);
+  const toolKey = props.result.callId;
+  const open = tools ? (tools.get(toolKey) ?? false) : localOpen;
   return (
     <ToolPanel
       accent={props.result.error === undefined ? "green" : "red"}
       onToggle={() => {
+        tools?.set(toolKey, !open);
         setOpen((value) => !value);
       }}
       open={open}
