@@ -91,6 +91,80 @@ interface FakeRuntime {
 
 const mountedApps: MountedApp[] = [];
 
+it("keeps in-flight submissions out of recovery reminders without enabling resends", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  fake.store.setUnknownPromptRequests([
+    {
+      directory: "/repo-a",
+      runtimeEpoch: "epoch",
+      clientRequestId: "in-flight",
+      sessionId: "session_1",
+      status: "unknown",
+      submitting: true,
+    },
+  ]);
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "another prompt");
+  expect(app.container.textContent).not.toContain(
+    "Submission result is unknown",
+  );
+  expect(app.container.textContent).not.toContain("Check submission");
+  expect(app.container.textContent).not.toContain("Forget pending submission");
+  expect(
+    app.container.querySelector(".ohb-send-button")?.hasAttribute("disabled"),
+  ).toBe(true);
+});
+
+it("shows only unresolved reminders while another submission is in flight", () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const request = {
+    directory: "/repo-a",
+    runtimeEpoch: "epoch",
+    sessionId: "session_1",
+    status: "unknown" as const,
+  };
+  fake.store.setUnknownPromptRequests([
+    { ...request, clientRequestId: "in-flight", submitting: true },
+    { ...request, sessionId: "other-session", clientRequestId: "unresolved" },
+  ]);
+  const forget = vi.spyOn(fake.runtime, "forgetUnknownPrompt");
+  const app = mountApp(fake.runtime);
+  const buttons = [...app.container.querySelectorAll("button")].filter(
+    (button) => button.textContent === "Forget pending submission",
+  );
+  expect(buttons).toHaveLength(1);
+  act(() => {
+    buttons[0]?.click();
+  });
+  expect(forget).toHaveBeenCalledWith("unresolved");
+});
+
+it("keeps a confirmed backend restart visible even before the POST settles", () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  fake.store.setUnknownPromptRequests([
+    {
+      directory: "/repo-a",
+      runtimeEpoch: "old-epoch",
+      clientRequestId: "restarted",
+      sessionId: "session_1",
+      status: "epoch-changed",
+      submitting: true,
+    },
+  ]);
+  const app = mountApp(fake.runtime);
+  expect(app.container.textContent).toContain("The backend restarted");
+  const forget = [...app.container.querySelectorAll("button")].find(
+    (button) => button.textContent === "Forget pending submission",
+  );
+  expect(forget?.disabled).toBe(true);
+});
+
 it("offers explicit forgetting without resubmitting or cancelling an unknown prompt", () => {
   const fake = createFakeRuntime({
     snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -960,6 +1034,9 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelector("textarea")?.textContent).toBe("");
     expect(textareaValue(app.container)).toBe("");
     expect(app.container.textContent).toContain("visible on the next frame");
+    expect(
+      app.container.querySelector(".ohb-message-pending-label"),
+    ).toBeNull();
     expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
     expect(
       app.container
@@ -1338,6 +1415,9 @@ describe("OhbabyWebApp slash command interactions", () => {
         ?.getAttribute("data-user-message-id"),
     ).toBe("message_1");
     expect(app.container.textContent).toContain("accepted before navigation");
+    expect(
+      app.container.querySelector(".ohb-message-pending-label"),
+    ).toBeNull();
     expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
   });
 
@@ -1393,6 +1473,9 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
     expect(app.container.textContent).not.toContain("starting agent");
+    expect(
+      app.container.querySelector(".ohb-message-pending-label"),
+    ).toBeNull();
   });
 
   it("lets the formal message take over without fabricating model thinking", () => {

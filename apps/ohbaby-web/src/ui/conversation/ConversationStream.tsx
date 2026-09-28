@@ -13,7 +13,7 @@ export interface PromptProjectionModel {
   readonly createdAt: string;
   readonly error?: string;
   readonly id: string;
-  readonly label: string;
+  readonly label?: string;
   readonly text: string;
 }
 
@@ -182,7 +182,7 @@ export function ConversationStream(props: {
     scheduleStickScroll();
   }, [
     messagesSignature,
-    props.promptRows.map((row) => `${row.id}:${row.label}`).join(","),
+    props.promptRows.map((row) => `${row.id}:${row.label ?? ""}`).join(","),
     props.startupThinkingAt,
     props.isRunning,
     scheduleStickScroll,
@@ -363,7 +363,9 @@ function PromptProjectionRow(props: {
           role: "user",
         }}
       />
-      <span className="ohb-message-pending-label">{props.row.label}</span>
+      {props.row.label === undefined ? null : (
+        <span className="ohb-message-pending-label">{props.row.label}</span>
+      )}
       {props.row.error === undefined ? null : (
         <span className="ohb-message-prompt-error-text" role="alert">
           {props.row.error}

@@ -150,3 +150,25 @@ Pi 提出的 fixture 文本连在一起来自测试模型分块本身（controll
 - 审批卡片只增加 `overflow-wrap: anywhere`，不改尺寸、按钮或颜色。最终编译资产经浏览器验证：copy 的 clientWidth/scrollWidth 都为 349px（修改前为 349/448），composer 隐藏，长路径不覆盖操作按钮。新截图 `/tmp/improve31-ui/approval-wrap-final.png`。本轮未重新拍摄窄屏图，不以旧图宣称当前窄屏验收。
 - fixture 的显式 `--usage` 选项仅为测试返回已知 60% 样本，默认行为不变，不影响生产计量。
 - Pi 只读审查，修复由主代理与原生子代理完成；已清理本轮隔离服务，未重启用户 4096 服务，未 merge/push。
+
+## 2026-09-28 发送反馈收尾
+
+用户确认：正常发送不显示 unknown 提醒，删除正常气泡的 Sending/Starting 标签，保持发送按钮与 Thinking 原规则。
+
+根因是 BrowserDaemonClient 在 POST 前持久保存未确认的请求身份，并以 `submitting: true` 发布；SessionScreen 只判断记录列表非空就显示 unknown。正常等待回执与真正结果未知因而混在同一提示中。已有组件测试模拟了提交函数，没有经过客户端发布记录的路径。
+
+修复仅涉及展示：SessionScreen 使用 `epoch-changed || !submitting` 筛选恢复提醒，提示及其按钮使用同一列表；完整记录仍供防重发和刷新恢复使用。正常 prompt 投影不再提供 label，ConversationStream 按需渲染 label，失败/中断信息保留。没有改客户端协议、持久化、提交控制、发送 spinner、Thinking 或 CSS。
+
+验证证据：
+
+- 单元回归先得到 5 项目标失败，覆盖误报警、混合记录和两种 Starting/Sending 来源；后端重启期间的提示继续保留。
+- 新增 `submission-feedback.integration.test.tsx`，复用真实持久化 daemon、SQLite、REST/SSE、BrowserDaemonClient 和 App，仅在 fetch 边界控制时序。新/旧会话各验证成功及回执丢失；确认等待期间记录仍持久化、收到回执后移除、未知时查原回执且不重发。目标断言先失败，修复后 4/4 通过。
+- 完整 Web 单元/集成回归 33 文件、416 项通过；可选 label 的滚动签名补齐后，App、共享流和新集成 162 项再次通过。全仓 build、typecheck 通过；四个修改的 TS/TSX 文件 ESLint、Prettier 通过。
+- 独立子代理审查未发现阻断，另跑 178 项定点测试通过。
+- 运行 `node scripts/run-compiled-web-e2e.mjs`，使用本次编译 Web、隔离 profile/数据库、动态端口 55781 的生产 CLI/daemon，以及本地 scripted provider。Playwright 延迟新会话和旧会话的 POST；持续 DOM 观察未出现 unknown 或正常标签，按钮保持 busy，Thinking 不提前。真实 read 工具执行、同会话追加、刷新后的消息唯一性全部通过。额外中断一个未到达服务端的 POST，确认 unknown、查询/忘记入口和草稿恢复仍可用。
+- 桌面 1280×900、窄屏 390×844 检查发送态。窄屏截图需等待侧栏响应式过渡结束，最初过渡帧不作验收图；稳定证据为 `/tmp/improve31-existing-sending-mobile-stable.png`，桌面为 `/tmp/improve31-new-sending-desktop.png` 和 `/tmp/improve31-existing-sending-desktop.png`。长 fixture 标识符的既有换行表现不属于本次布局改动。正常路径控制台无错误、无框架异常页；故障注入的 ERR_FAILED 和停止服务后的 SSE 连接拒绝为预期测试现象。
+- compiled runner 输出 UI、backend、diagnostics 和 cleanup 全部 PASS；实际 3 次 agent-step、1 次标题请求均由本地 provider 完成。隔离服务已 stopped，PID 和端口释放，未操作用户 4096 服务。
+
+Pi 使用用户指定的 `opencode-go/qwen3.8-max`、max 完成只读样式审查；首轮未发现阻断，建议补拍窄屏稳定帧。补拍后沿同一 Pi 会话再次核对截图及已有集成断言，确认三项范围无阻断。Pi 只审查代码/截图，未代替主代理执行测试。此前调查调用的 DeepSeek 因 provider 区域限制失败，不计为审查通过。
+
+本批代码、回归测试与记录合为一个本地提交，不 merge/push。本节只验收用户确认的三项发送反馈，不替代上文整轮真实 provider 和系统设置验证的既有限制。

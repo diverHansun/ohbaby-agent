@@ -154,7 +154,6 @@ function selectPromptProjection(input: {
           clientRequestId: prompt.clientRequestId,
           createdAt: prompt.createdAt,
           id: prompt.userMessageId,
-          label: "Starting…",
           text: prompt.text,
         },
       ];
@@ -208,7 +207,6 @@ function selectPromptProjection(input: {
           clientRequestId: attempt.clientRequestId,
           createdAt: attempt.createdAt,
           id: attempt.userMessageId ?? `pending:${attempt.clientRequestId}`,
-          label: attempt.userMessageId === undefined ? "Sending…" : "Starting…",
           text: attempt.text,
         },
       ];
@@ -301,6 +299,9 @@ export function SessionScreen({
     () => runtime.store.getSnapshot(),
   );
   const view = useMemo(() => selectViewModel(storeSnapshot), [storeSnapshot]);
+  const promptRecoveryReminders = storeSnapshot.unknownPromptRequests.filter(
+    (request) => request.status === "epoch-changed" || !request.submitting,
+  );
   const sessionSyncBanner = useSessionSyncBanner(storeSnapshot.sessionSync);
   const workspace = useSyncExternalStore(
     (listener) => runtime.subscribeWorkspaces(listener),
@@ -890,10 +891,10 @@ export function SessionScreen({
             ) : null}
           </div>
         ) : null}
-        {storeSnapshot.unknownPromptRequests.length > 0 ? (
+        {promptRecoveryReminders.length > 0 ? (
           <div className="ohb-error-banner" role="status">
             <span>
-              {storeSnapshot.unknownPromptRequests.some(
+              {promptRecoveryReminders.some(
                 (request) => request.status === "epoch-changed",
               )
                 ? "The backend restarted. A previous submission could not be confirmed; check its original conversation before sending again."
@@ -907,7 +908,7 @@ export function SessionScreen({
             >
               Check submission
             </button>
-            {storeSnapshot.unknownPromptRequests.map((request) => (
+            {promptRecoveryReminders.map((request) => (
               <button
                 key={request.clientRequestId}
                 type="button"
