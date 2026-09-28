@@ -52,7 +52,13 @@ export function ConversationStream(props: {
   const scheduledScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const anchorRef = useRef<{ top: number; height: number } | null>(null);
   const messages = props.messages;
-  const visibleMessages = filterTodoToolMessages(messages);
+  const visibleMessages = filterTodoToolMessages(
+    messages.filter(
+      (message) =>
+        message.runtimeInputKind !== "subagent-status" &&
+        message.runtimeInputKind !== "subagent-result",
+    ),
+  );
   const terminalPrompts = props.prompts.filter(
     (prompt) =>
       prompt.sessionId === props.sessionId &&

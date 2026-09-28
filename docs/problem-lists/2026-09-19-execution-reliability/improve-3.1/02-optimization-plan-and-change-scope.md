@@ -111,3 +111,13 @@ flowchart LR
 选择共享渲染、单个 child store/视图和已有传输，是为避免两套消息行为与连接生命周期。scope 投影虽增加少量协议工作，但能正确处理共享 childSession、排队气泡和流式恢复；放宽根 API 或全量轮询不能满足这些约束。
 
 不单独创建通用窗口系统、全量设计 token 工程或新的消息存储。像素与动画默认值可在浏览器验收时微调；身份、授权、无重复消息和只读边界不可用视觉调整绕过。TUI 按用户最终答复保持现有详情和交互。
+
+## 用户验收补修：通知显示与统计恢复
+
+本次在既有 improve-3.1 内完成三个小批次，不新建规划轮次：
+
+1. UI 消息保留已有 runtimeInput.kind；Web 共用 ConversationStream 在组装时间线前排除 subagent-status/subagent-result。模型角色、内部消息持久化、结果交付以及 TUI 不变；用户 Steer、普通系统提示及 assistant 输出保留。
+2. 上下文统计复用原 tracker 和 runtime.getContextUsage，查询/补算后更新现有 session view。维持历史阅读不启动重型模型 runtime 的边界；不修改既有上下文组装、tools-aware 估算、校准、分母或压缩算法。冷进程尚无 runtime/快照时保持 unavailable，不新增 Last request 或其他替代算法。
+3. 缓存统计直接消费原进程内 tracker，限定主 scope、可信 Step，跨 Run 累计但不做跨进程恢复。口径仍为有效报告样本的 ΣcacheRead/ΣinputTokens；未报告显示 —，明确零显示 0%。现有 Context Usage 弹层与 /status 同源，不另加顶栏按钮。不读历史 usage 重建，不改 tracker 或纳入时机。
+
+关键范围：SDK UI 消息/会话统计合同、agent 的 UI 统计投影、Web 共享消息流/会话 store/ContextUsage 组件。实施中记录具体取舍与证据，不维护逐行任务表。

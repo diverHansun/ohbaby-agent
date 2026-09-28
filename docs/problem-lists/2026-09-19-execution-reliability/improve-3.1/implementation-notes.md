@@ -95,3 +95,19 @@ OHBABY_RUN_REAL_SUBAGENT_CONVERSATION=1 pnpm exec vitest run --config tests/smok
 补修分两层：无 execution 的已结束调用/已有结果恢复原 ToolCard，允许展开当时保存的输入输出；带 execution 的较新历史，其身份位于 `ToolState.metadata`，持久化 UI 投影此前只透传 Part metadata，现单独保留 subagent execution 身份，防止超出列表首屏后入口失效。不复制旧 item、不伪造 execution、不改用户数据库。
 
 早期 `subagent.item` 完整子会话尚未接入新查看器，仍是明确兼容边界；此次恢复原结果可读，不宣称完整迁移。新格式已完成子代理仍可重开阅读。两个回归先 RED 再 GREEN（23 项定点通过）；受影响 Web/投影/SDK/历史回归 43 文件、522 项通过；独立子代理复审无阻断。
+
+## 2026-09-28 剩余三项补修（实施中）
+
+用户实机暴露并确认纳入：内部通知正文泄露到 Web、上下文统计恢复/同步缺口、缓存读取率恢复/展示缺口。此前“未改变存量 runtime 通知展示”现被本批范围取代。
+
+调查证据：同一历史会话 /status 返回 21.1k / 1m 而圆环仍 unavailable；主 scope 持久化有 9 个有效 usage 样本，Σinput=117057、ΣcacheRead=74368（约63.5%），当前进程 /status 却显示 hit —。统计相关主体相对 1a7018f1 未改变，属于本轮用户验收发现的既有缺口。现有定点测试45项通过，但不代表新增恢复路径已验证。
+
+SWE 约束：复用来源标记与现有投影、持久化事实和统计口径；不引入文本猜测过滤、通用可见性框架或额外统计面板。完成后在本节补充批次提交、测试、独立审查与浏览器结果。
+
+### 第一批：内部消息显示边界
+
+UiMessage 新增可选 runtimeInputKind，持久化和实时投影透传原分类；Web 共用 ConversationStream 在排列和滚动计算之前排除 subagent-status/subagent-result。role 与实际模型请求不变，无正文匹配或全局 system 过滤。新增5项断言先失败，随后主/子共享流、投影以及三种 runtime 输入的模型保留合同共29项通过，独立子代理审查无阻断。
+
+### 用户收紧范围与调查纠正
+
+重新查阅 [既有 cache 合同 K6](../../2026-09-11-llm-sdk-and-responses-migration/improve-5/00-discussion.md) 后确认：进程内生命周期、不跨重启恢复是明确设计，先前将数据库旧9条usage与当前 hit — 比较并认定恢复缺陷不成立。用户要求统计口径/基本算法不变。Last request 回退与历史 cache 重建均撤销（未提交），改为只修原统计的加载/投影/展示。上下文沿用 [improve-6 §5](../../2026-09-11-llm-sdk-and-responses-migration/improve-6/02-optimization-plan-and-change-scope.md) 的最近 prepare/compact 快照及未命中时 tools-aware 估算，不新增公式或统计持久化。Pi 正在独立核查该边界。

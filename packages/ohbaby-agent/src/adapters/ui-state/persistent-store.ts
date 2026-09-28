@@ -219,6 +219,9 @@ export function messageToUiMessage(
     createdAt: toIsoString(message.info.time.created),
     id: message.info.id,
     parts,
+    ...(message.info.runtimeInput
+      ? { runtimeInputKind: message.info.runtimeInput.kind }
+      : {}),
     role:
       message.info.runtimeInput &&
       message.info.runtimeInput.kind !== "user-steer"

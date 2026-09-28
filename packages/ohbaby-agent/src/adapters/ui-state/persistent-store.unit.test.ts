@@ -395,3 +395,30 @@ it("projects automatic runtime input as a system fact while preserving user Stee
     })?.role,
   ).toBe("user");
 });
+
+it.each(["subagent-status", "subagent-result", "user-steer"] as const)(
+  "preserves %s provenance without changing the durable input",
+  (kind) => {
+    const message: MessageWithParts = {
+      ...assistantMessage({ time: { created: 1 } }),
+      info: {
+        id: "input",
+        sessionId: "root",
+        role: "user",
+        agent: "main",
+        time: { created: 1 },
+        runtimeInput: {
+          kind,
+          inputId: "input",
+          targetRunId: "run",
+          sourceId: "source",
+        },
+      },
+    };
+    expect(messageToUiMessage(message)).toMatchObject({
+      runtimeInputKind: kind,
+    });
+    expect(message.info.role).toBe("user");
+    expect(message.parts).toHaveLength(1);
+  },
+);

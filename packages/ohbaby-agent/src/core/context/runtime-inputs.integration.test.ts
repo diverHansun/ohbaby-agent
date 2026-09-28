@@ -11,7 +11,10 @@ import {
 import { createContextManager } from "./context-manager.js";
 import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 
-async function setup(limit = 10000) {
+async function setup(
+  limit = 10000,
+  kind: "user-steer" | "subagent-status" | "subagent-result" = "user-steer",
+) {
   const messages = createMessageManager({
     bus: createBus(),
     store: createInMemoryMessageStore(),
@@ -35,7 +38,7 @@ async function setup(limit = 10000) {
     role: "user",
     agent: "primary",
     runtimeInput: {
-      kind: "user-steer",
+      kind,
       inputId: "input-a",
       targetRunId: "run-a",
       sourceId: "prompt",
@@ -84,24 +87,36 @@ const prepare = {
   tools: undefined,
 };
 describe("durable inputs in prepared context", () => {
-  it("preserves actual input body through compaction and measures exactly what it sends", async () => {
-    const { context, protectedInput, collected, counter } = await setup();
-    const prepared = await context.prepareTurn({
-      ...prepare,
-      force: true,
-      protectedInputs: [protectedInput],
-    });
-    expect(prepared.request.inputIds).toEqual(["input-a"]);
-    expect(
-      JSON.stringify(prepared.request.messages).match(/UNSENT-STEER-ORIGINAL/g),
-    ).toHaveLength(1);
-    expect(collected.length).toBeGreaterThan(0);
-    expect(JSON.stringify(collected)).not.toContain("UNSENT-STEER-ORIGINAL");
-    expect(prepared.sentHeuristic).toBe(
-      estimatePreparedRequestHeuristic(prepared.request, counter),
-    );
-    expect(prepared.composition).toBeDefined();
-  });
+  it.each(["user-steer", "subagent-status", "subagent-result"] as const)(
+    "preserves %s input through compaction and measures exactly what it sends",
+    async (kind) => {
+      const { context, protectedInput, collected, counter } = await setup(
+        10000,
+        kind,
+      );
+      const prepared = await context.prepareTurn({
+        ...prepare,
+        force: true,
+        protectedInputs: [protectedInput],
+      });
+      expect(prepared.request.inputIds).toEqual(["input-a"]);
+      expect(prepared.request.messages).toContainEqual({
+        role: "user",
+        content: "UNSENT-STEER-ORIGINAL",
+      });
+      expect(
+        JSON.stringify(prepared.request.messages).match(
+          /UNSENT-STEER-ORIGINAL/g,
+        ),
+      ).toHaveLength(1);
+      expect(collected.length).toBeGreaterThan(0);
+      expect(JSON.stringify(collected)).not.toContain("UNSENT-STEER-ORIGINAL");
+      expect(prepared.sentHeuristic).toBe(
+        estimatePreparedRequestHeuristic(prepared.request, counter),
+      );
+      expect(prepared.composition).toBeDefined();
+    },
+  );
   it("never replays an unsent old-run input into another run or its summary", async () => {
     const { context, collected } = await setup();
     const prepared = await context.prepareTurn({

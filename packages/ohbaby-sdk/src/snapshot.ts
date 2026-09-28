@@ -106,6 +106,11 @@ export interface UiRun {
 }
 
 export interface UiMessage {
+  /** Preserves runtime provenance independently of the presentation role. */
+  readonly runtimeInputKind?:
+    | "user-steer"
+    | "subagent-result"
+    | "subagent-status";
   readonly modelRequests?: readonly UiModelRequest[];
   readonly runId?: string;
   readonly id: string;
