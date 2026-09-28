@@ -17,6 +17,7 @@
 - 单一事件数据流：多个 SDK subscriber 共享一个 fetch-stream；store 先更新、subscriber 后观察，任一 listener 异常不阻断其余观察者。
 - slash web 闭环：`GET /v1/commands?surface=web` / `POST /v1/commands`、browser resolve、候选面板/Tab 补全 helper、`command.*` 事件投影为 CommandNotice/结构化只读 modal。
 - 结构化 overlay 闭环：`/connect`、`/connect-search`、`/compact` 从 slash palette 打开 overlay，但提交分别走 model/search/compact REST；覆盖只读 context-window probe、敏感字段不回显、compact usage/result。
+- 子会话阅读：根委派精确关联、只读输入边界、同一消息流在浮层/放大页间切换、阅读缓存与缺失锚点降级。
 - 起站冒烟：`dist` 能被伺服、页面能起、核心闭环走通。
 - workspace 选择纵切：bootstrap directory / fragment 初始 hint、所有 HTTP+SSE header 一致，以及切换时 client/store/SSE generation 隔离。
 
@@ -58,7 +59,7 @@
 | 审批独立恢复                      | 全量 snapshot 慢/失败仍可用独立审批 snapshot；hello 前禁用；gap/超时/溢出按共享 SDK 有界恢复，超限显示 Retry                                                                                                                                                                                                                                           |
 | 审批 binding 隔离                 | 重连、epoch 变化、会话/workspace 切换后，旧请求、旧响应与旧 unavailable 均不得改写新绑定                                                                                                                                                                                                                                                               |
 | 同根审批并发                      | 两页同 root 看见同一列表；第二页回复已经处理的 id 得到稳定 stale 错误并重同步，不误答下一项                                                                                                                                                                                                                                                            |
-| 审批列表交互                      | 可选择非首项；来源标签和实际来源 session 正确；没有 Cancel run；只在审批 ready 时允许回复                                                                                                                                                                                                                                                              |
+| 审批列表交互                      | 可选择非首项；来源标签和实际来源 session 正确；实际审批时隐藏输入区/Todo、保留停止图标；只在审批 ready 时允许回复，响应中防止重复应答                                                                                                                                                                                                                                                              |
 | 子代理独立审批                    | primary run 已结束仍显示后台 child 的待处理项，不依赖主 run 状态；client 断开不撤销 pending                                                                                                                                                                                                                                                            |
 | 审批 scope 错误                   | `PERMISSION_SCOPE_CHANGED` 可见并触发重同步；HTTP 成功不直接乐观移除请求                                                                                                                                                                                                                                                                               |
 | prompt 202 后断线                 | 不自动重复提交；已有 `promptId` 可在恢复后查询终态                                                                                                                                                                                                                                                                                                     |
@@ -125,3 +126,15 @@
 `styles.unit.test.ts` 留在 UI 根目录并读取实际 CSS 入口/导入块。`ui/styles.css` 的 14 个连续块保持原级联顺序；静态样式断言不能代替构建与浏览器检查。runtime 独立后，既有 `api/daemon/` client/workspace/session/permission integration 测试继续覆盖实际连接链路；文件迁移不增加第二条连接或新的同步状态层。
 
 Web 测试与阶段验收的映射见 [improve-3/03](./improve-3/03-test-criteria.md)。跨包 New session 行为、唯一验收 ID 与最终结果只在[中央 improve-2.1](../problem-lists/2026-09-19-execution-reliability/improve-2.1/README.md)记录；本文列测试职责，不声明本轮运行通过。
+
+## 6. 子会话交互回归
+
+已有组件回归覆盖以下边界，测试关注用户行为，不按组件文件数衡量覆盖率：
+
+- 根任务入口以当前根及 message/call 身份精确关联 execution；旧结果元数据可提供入口，但不能据此编造父消息锚点。接受前失败保留可展开的工具错误，已接受的超时仍可进入子会话。
+- 子流保留服务端顺序、显示 `From parent` / `Queued`，文字增量更新已有消息节点；浮层与放大页共享 DOM 和工具展开状态。
+- A/B/A 子会话切换，以及关闭后重开，保留各自工具展开；明确锚点优先于自动跟随。靠近底部的锚点也不能被定时滚底覆盖。
+- 根 Composer 在只读模式保留 DOM 与草稿，阻断输入动作，退出后恢复；实际样式的 computed style 验证空态保留文流定位、主态及只读输入区正确锚定主内容列，几何契约验证浮层对齐、主列边界和 10px 间距。Tab 焦点循环、Escape 层级和 IME 边界分别断言。
+- 后续历史自动加载只由用户滚动触发，程序滚动不造成连续加载；无精确父消息锚点时展示可用历史说明。
+
+SDK 与 transport 的快照、增量、范围版本和重连恢复由对应层测试负责，Web 不另写一套同步引擎。浏览器仍需检查真实浮层尺寸、输入框间距、首条父气泡完整可见、放大/关闭后滚动与焦点，以及根审批入口。组件测试不能替代真实同一子代理多次委派的连续历史验证，也不能替代前端视觉审查；这些结果在阶段记录中单独保留，本文不声明 improve-3.1 已完成全部验收。

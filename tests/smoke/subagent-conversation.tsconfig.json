@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "composite": false, "rootDir": "../.." },
+  "include": ["subagent-conversation.real.e2e.test.ts", "subagent-continuation.real.e2e.test.ts"]
+}

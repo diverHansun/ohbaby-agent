@@ -25,6 +25,7 @@ if (process.argv[2] === "--attach-tui") {
   process.exit(code ?? 1);
 }
 const tui = process.argv.includes("--tui");
+const conversationUi = process.argv.includes("--conversation-ui");
 const root = await mkdtemp(join(tmpdir(), "ohbaby-subagents-e2e-"));
 const alive = (pid) => {
   try {
@@ -38,6 +39,7 @@ const workspace = join(root, "workspace");
 const profile = join(root, "profile");
 const dbPath = join(root, "fixture.db");
 const gates = new Map();
+const childStreams = new Map();
 const events = [];
 const failures = [];
 let scenario;
@@ -100,6 +102,14 @@ const provider = createServer(async (request, response) => {
       .map((m) =>
         typeof m.content === "string" ? m.content : JSON.stringify(m.content),
       );
+    if (conversationUi && user.at(-1)?.startsWith("I31_FOLLOWUP_A")) {
+      chunk(response, {
+        reasoning_content:
+          "Continue the same child after its queued instruction.",
+      });
+      finish(response, "FOLLOWUP_A_COMPLETE");
+      return;
+    }
     const childSide = ["A", "B", "C"].find((side) =>
       user.some((text) => text.startsWith(`I3_CHILD_${side}`)),
     );
@@ -112,6 +122,7 @@ const provider = createServer(async (request, response) => {
           (m) => m.role === "tool" && m.tool_call_id === "i3_child_write",
         )
       ) {
+        if (conversationUi) await gate("approval").promise;
         const file = join(workspace, "a.txt");
         chunk(response, {
           tool_calls: [
@@ -137,7 +148,19 @@ const provider = createServer(async (request, response) => {
       chunk(response, {
         reasoning_content: `Full reasoning for child ${childSide}`,
       });
+      if (conversationUi) {
+        for (const text of [
+          `Child ${childSide} is `,
+          "reading the task. ",
+          "Waiting for the controlled release.",
+        ]) {
+          chunk(response, { content: text });
+          await delay(150);
+        }
+      }
+      childStreams.set(childSide, response);
       await gate(childSide).promise;
+      childStreams.delete(childSide);
       if (!response.destroyed)
         finish(
           response,
@@ -173,8 +196,32 @@ const provider = createServer(async (request, response) => {
       response.end("data: [DONE]\n\n");
     };
     if (!calls.some((call) => call.function.name === "subagent_run")) {
-      if (!body.tools.some((tool) => tool.function.name === "subagent_run")) {
-        sendTools([["select_tools", { tools: ["subagent_run"] }]]);
+      const requiredTools = conversationUi
+        ? ["subagent_run", "todo_write"]
+        : ["subagent_run"];
+      if (
+        requiredTools.some(
+          (name) => !body.tools.some((tool) => tool.function.name === name),
+        )
+      ) {
+        sendTools([["select_tools", { tools: requiredTools }]]);
+        return;
+      }
+      if (
+        conversationUi &&
+        !calls.some((call) => call.function.name === "todo_write")
+      ) {
+        sendTools([
+          [
+            "todo_write",
+            {
+              todos: [
+                { content: "Inspect child A progress", status: "in_progress" },
+                { content: "Review queued child follow-up", status: "pending" },
+              ],
+            },
+          ],
+        ]);
         return;
       }
       sendTools(
@@ -189,10 +236,32 @@ const provider = createServer(async (request, response) => {
       );
       return;
     }
+    if (
+      conversationUi &&
+      !calls.some((call) => call.function.arguments?.includes("I31_FOLLOWUP_A"))
+    ) {
+      const first = readDb().executions.find(
+        (execution) => execution.prompt === "I3_CHILD_A",
+      );
+      if (!first) throw new Error("First child missing before continuation");
+      sendTools([
+        [
+          "subagent_run",
+          {
+            subagent_id: first.subagent_id,
+            prompt:
+              "I31_FOLLOWUP_A Please continue with one concise final answer.",
+            description: "Child A follow-up",
+            mode: "background",
+          },
+        ],
+      ]);
+      return;
+    }
     const input = user.join("\n");
     const all = readDb().executions;
     if (
-      all.length === 3 &&
+      all.length === (conversationUi ? 4 : 3) &&
       all.every((e) => e.status === "completed") &&
       input.includes("Complete result:")
     ) {
@@ -437,9 +506,72 @@ try {
       if (input.command === "release") {
         gate(input.name).release();
         record("released", { name: input.name });
+      } else if (input.command === "progress") {
+        const stream = childStreams.get(input.name);
+        assert.ok(stream, "Child stream must be active");
+        chunk(stream, { reasoning_content: " Additional live thought." });
+        chunk(stream, { content: " LIVE_PROGRESS_" + input.name });
+        record("progress", { name: input.name });
       } else if (input.command === "check") {
         const db = readDb();
         assert.deepEqual(failures, []);
+        if (conversationUi) {
+          assert.ok(
+            db.parts.some(
+              (part) =>
+                part.tool === "todo_write" && part.state.status === "completed",
+            ),
+          );
+          assert.equal(db.executions.length, 4);
+          const a = db.executions.filter(
+            (execution) =>
+              execution.prompt.startsWith("I3_CHILD_A") ||
+              execution.prompt.startsWith("I31_FOLLOWUP_A"),
+          );
+          assert.equal(
+            new Set(a.map((execution) => execution.subagent_id)).size,
+            1,
+          );
+          assert.equal(
+            new Set(a.map((execution) => execution.child_user_message_id)).size,
+            2,
+          );
+          assert.deepEqual(
+            a.map((execution) => execution.delegation_sequence).sort(),
+            [1, 2],
+          );
+          if (input.stage === "waiting") {
+            assert.equal(
+              db.executions.filter((e) => e.status === "running").length,
+              3,
+            );
+            assert.equal(
+              db.executions.filter((e) => e.status === "queued").length,
+              1,
+            );
+            assert.equal(db.prompts[0].status, "running");
+          } else if (input.stage === "terminal") {
+            assert.ok(
+              db.executions.every(
+                (e) =>
+                  e.status === "completed" && e.delivery.state === "processed",
+              ),
+            );
+            assert.equal(
+              db.prompts.filter((prompt) => prompt.status === "succeeded")
+                .length,
+              2,
+            );
+            assert.ok(
+              db.parts.some(
+                (part) =>
+                  part.tool === "read" && part.state.status === "completed",
+              ),
+            );
+          } else throw new Error("Unknown stage");
+          record("conversation-identity-checked", { stage: input.stage });
+          continue;
+        }
         assert.equal(db.executions.length, 3);
         assert.ok(db.executions.every((e) => e.mode === "background"));
         if (input.stage === "waiting") {

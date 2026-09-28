@@ -303,7 +303,10 @@ function fakeLlmClient(
             ]),
           );
         }
-        if (messages.includes("<subagent_error>")) {
+        if (
+          messages.includes("<subagent_error>") ||
+          messages.includes("status: interrupted")
+        ) {
           return Promise.resolve(
             createProviderStream([
               { finishReason: "stop", textDelta: "parent saw child failure" },
@@ -315,7 +318,11 @@ function fakeLlmClient(
             createProviderStream([
               toolCallEvent(
                 "subagent_run",
-                { prompt: "Find the failing target", role: "explore" },
+                {
+                  prompt: "Find the failing target",
+                  role: "explore",
+                  mode: "foreground",
+                },
                 "call_failing_subagent",
               ),
             ]),
@@ -329,6 +336,7 @@ function fakeLlmClient(
                 {
                   prompt: "Find the cancelled target",
                   role: "explore",
+                  mode: "foreground",
                   ...(options.exploreTimeoutMs === undefined
                     ? {}
                     : { timeout_ms: options.exploreTimeoutMs }),
@@ -343,7 +351,11 @@ function fakeLlmClient(
             createProviderStream([
               toolCallEvent(
                 "subagent_run",
-                { prompt: "Find the empty target", role: "explore" },
+                {
+                  prompt: "Find the empty target",
+                  role: "explore",
+                  mode: "foreground",
+                },
                 "call_empty_subagent",
               ),
             ]),
@@ -730,7 +742,9 @@ describe("subagent runtime e2e", () => {
               ? "test child cancellation"
               : "test child interruption",
         );
-        expect(parentText).toContain("<subagent_error>");
+        // Root interruption is an execution receipt, not a child output body.
+        if (terminalStatus !== "interrupted")
+          expect(parentText).toContain("<subagent_error>");
         expect(parentText).not.toContain("<subagent_output>");
         expect(parentText).not.toContain("partial child report");
       } finally {

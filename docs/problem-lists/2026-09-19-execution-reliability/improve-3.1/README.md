@@ -1,6 +1,6 @@
 # improve-3.1 子代理连续会话与 Web 阅读体验
 
-开启日期：2026-09-28。调查基线：本地 `codex/improve-3`，`1a7018f1`。状态：**规划已确认，进入分批实施**。
+开启日期：2026-09-28。调查基线：本地 `codex/improve-3`，`1a7018f1`。状态：**已在 `codex/improve-3.1` 分批实施，组合验收仍有外部验证缺口，等待用户审查**。
 
 本轮由用户在 improve-3 本地实施验收后提出：用主会话里的轻量任务行打开子会话浮层，替换顶部 Subagents 区域；子会话提供与主会话一致的流式阅读体验。沿用 [improve-3 的实际验收与限制](../improve-3/05-implementation-acceptance.md)，不重做执行调度、结果交付、审批或停止机制。improve-4 的职责不提前纳入。
 
@@ -21,7 +21,7 @@
 | [数据映射](frontend/06-data-api-and-state.md) / [质量约束](frontend/07-quality-constraints.md) | 读取协议、同步、性能与无障碍 |
 | [前端验收](frontend/08-test-and-acceptance.md) | 可直接演示的用户路径 |
 
-`05-implementation-acceptance.md` 仅在本轮实施完成后创建。本文档不把规划审查视为代码验收。
+实际交付、测试证据和未覆盖项见 [实施与验证记录](implementation-notes.md)。`05-implementation-acceptance.md` 在验收门通过或用户明确接受限制后创建；本文档不把规划审查视为代码验收。
 
 总方案 02 是跨模块契约；frontend 03/04 是视觉和交互细则；04 与 frontend 08 是实施验收门。文档列出关键代码的粗略范围，不维护逐文件任务表、逐行清单或实施进度勾选。
 

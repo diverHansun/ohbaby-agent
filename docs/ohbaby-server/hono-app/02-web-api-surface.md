@@ -51,6 +51,12 @@
 
 `POST /v1/model` 与 `POST /v1/model/context-window-probe` 的 JSON body 共用协议字段 `interfaceProvider`，只接受 `openai-compatible`、`openai-responses`、`anthropic`。显式合法值优先于 `baseUrl` 推断；缺字段时保留 URL 推断，OpenAI 形状地址默认 Chat Completions。空字符串、`null` 或其他非法显式值返回 `400`。更新 key、窗口或输出上限时应继续传递原协议。
 
+### 子代理只读会话
+
+`GET /v1/sessions/:id/subagents/:subagentId/conversation` 对应 `getSubagentConversationView`，支持有界 before/after 分页及 `anchorExecutionId`。返回历史窗口、实时投影基线和相关执行状态；旧记录缺少消息锚点时明确返回定位不可用，不根据 prompt 文本猜测消息。
+
+同路径的 `/watch` 通过 POST/DELETE 对应 `watchSubagentConversation` / `unwatchSubagentConversation`。每个 client 同时订阅一个逻辑子代理，仍使用现有 SSE。coordination 校验 root、绑定代际和 scope，客户端同步分配单调 `watchSequence`，coordination 在异步读取前拒绝低序请求，避免网络倒序覆盖新选择；客户端预分配 ID 让未收到响应的请求也可以取消。释放旧 ID 不影响后来的选择；根绑定改变时释放订阅。以上三个能力在 JSON-RPC 中具有同义方法。
+
 ### prompt 的异步语义（对齐 SDK）
 
 - `POST /v1/prompts` **不**同步等 run 完成；持久接单后返回 `202 Accepted` + receipt。调用方可只看 SSE，也可携 `promptId` 调 completion route。

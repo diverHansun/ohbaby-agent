@@ -9,6 +9,7 @@ import type {
   UiPromptReceipt,
   UiPromptCompletion,
   UiSteerQueuedPromptReceipt,
+  UiSubagentConversationChangedEvent,
 } from "ohbaby-sdk";
 import {
   collectFormalCleanupErrors,
@@ -88,6 +89,8 @@ it.runIf(process.env.OHBABY_RUN_REAL_SUBAGENT_CONTINUATION === "1")(
       | undefined;
     let server: ReturnType<typeof createDaemonHttpServer> | undefined;
     let off = (): void => undefined;
+    let offConversation = (): void => undefined;
+    const conversationEvents: UiSubagentConversationChangedEvent[] = [];
     const pending = new Set<Promise<void>>();
     const permissionErrors: string[] = [];
     const startedAt = new Date().toISOString();
@@ -284,6 +287,39 @@ it.runIf(process.env.OHBABY_RUN_REAL_SUBAGENT_CONTINUATION === "1")(
           return [execution.executionId, side];
         }),
       );
+      // A real provider run must be observable through the same scoped reader
+      // used by the Web sheet; observing it must not change model history.
+      offConversation = backend.subscribeEvents((event) => {
+        if (event.type === "subagent.conversation.changed")
+          conversationEvents.push(event);
+      });
+      for (const execution of executions) {
+        const query = {
+          rootSessionId: receipt.sessionId,
+          subagentId: execution.subagentId,
+        };
+        await backend.retainSubagentConversation({
+          ...query,
+          watchId: execution.executionId,
+        });
+        const child = await backend.getSubagentConversationView({
+          ...query,
+          anchorExecutionId: execution.executionId,
+        });
+        expect(child.anchorMessageId).toBe(execution.childUserMessageId);
+        expect(child.messages[0]?.id).toBe(execution.childUserMessageId);
+        expect(child.readOnly).toBe(true);
+        expect(
+          child.executions.every(
+            (item) => item.subagentId === execution.subagentId,
+          ),
+        ).toBe(true);
+        expect(
+          child.messages.some((message) =>
+            message.parts.some((part) => part.type === "tool-call"),
+          ),
+        ).toBe(true);
+      }
       phase = "steer-and-partial-completion";
       const inputs = (): CurrentRunInputRecord[] =>
         getDatabase()
@@ -431,6 +467,49 @@ it.runIf(process.env.OHBABY_RUN_REAL_SUBAGENT_CONTINUATION === "1")(
           (e) => e.status === "completed" && e.delivery.state === "processed",
         ),
       ).toBe(true);
+      const childProofs = [];
+      for (const execution of allExecutions) {
+        const query = {
+          rootSessionId: receipt.sessionId,
+          subagentId: execution.subagentId,
+        };
+        const child = await backend.getSubagentConversationView({
+          ...query,
+          anchorExecutionId: execution.executionId,
+        });
+        const side = sides.get(execution.executionId);
+        const serialized = JSON.stringify(child.messages);
+        expect(serialized).toContain(`REPORT_${side}_COMPLETE_7261`);
+        expect(serialized).not.toContain(
+          `REPORT_${side === "A" ? "B" : "A"}_COMPLETE_7261`,
+        );
+        expect(
+          child.messages.filter(
+            (message) => message.id === execution.childUserMessageId,
+          ),
+        ).toHaveLength(1);
+        expect(
+          conversationEvents.some(
+            (event) =>
+              event.subagentId === execution.subagentId &&
+              event.change.textAppends?.some(
+                (append) => append.text.length > 0,
+              ),
+          ),
+        ).toBe(true);
+        childProofs.push({
+          subagentId: execution.subagentId,
+          anchored: true,
+          streamed: true,
+          finalRetained: true,
+          isolated: true,
+        });
+        await backend.releaseSubagentConversation({
+          ...query,
+          watchId: execution.executionId,
+        });
+      }
+      evidence.childConversations = childProofs;
       expect(completion.prompt.runId).toBe(rootRunId);
       const ordinaryRunId = next.completion.prompt.runId;
       expect(ordinaryRunId).toBeDefined();
@@ -605,16 +684,49 @@ it.runIf(process.env.OHBABY_RUN_REAL_SUBAGENT_CONTINUATION === "1")(
         error instanceof Error && error.name === "AssertionError"
           ? "ASSERTION_FAILED"
           : "REAL_CONTINUATION_FAILED";
-      Object.assign(evidence, { error: { phase, code }, permissionErrors });
+      const setupFailure = getFormalSetupFailureEvidence(error);
+      const rawCauseCode =
+        error instanceof Error &&
+        typeof error.cause === "object" &&
+        error.cause !== null &&
+        "code" in error.cause
+          ? error.cause.code
+          : undefined;
+      const causeCode =
+        typeof rawCauseCode === "string" &&
+        /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(rawCauseCode)
+          ? rawCauseCode
+          : undefined;
+      const knownSetupCode =
+        error instanceof Error &&
+        error.message ===
+          "A detected context window is required for live context E2E"
+          ? "CONTEXT_WINDOW_NOT_DETECTED"
+          : error instanceof Error &&
+              error.message === "Missing ZenMux credential"
+            ? "MISSING_ZENMUX_CREDENTIAL"
+            : undefined;
+      Object.assign(evidence, {
+        error: {
+          phase,
+          code,
+          name: error instanceof Error ? error.name : undefined,
+          causeCode,
+          knownSetupCode,
+          setupCleanupErrors: setupFailure?.cleanupErrors,
+          setupWireCount: setupFailure?.wire.length,
+        },
+        permissionErrors,
+      });
       failureCode = code;
-      sessionDirectory ??=
-        getFormalSetupFailureEvidence(error)?.diagnosticWorkspace;
+      sessionDirectory ??= setupFailure?.diagnosticWorkspace;
     } finally {
       const cleanupErrors = await collectFormalCleanupErrors([
         {
           code: "UNSUBSCRIBE_FAILED",
           run: (): void => {
             off();
+            offConversation();
           },
         },
         {
