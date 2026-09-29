@@ -123,6 +123,14 @@ export function OrphanToolResultCard(props: {
   return (
     <ToolPanel
       execution={execution}
+      abnormal={
+        execution?.outcome && execution.outcome !== "success"
+          ? execution.outcome
+          : props.result.error !== undefined
+            ? "error"
+            : undefined
+      }
+      showAbnormalDecoration={false}
       duration={duration}
       accent={
         props.result.error === undefined &&

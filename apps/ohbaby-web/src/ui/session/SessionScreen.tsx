@@ -129,6 +129,25 @@ function localAttemptSessionMatches(
   );
 }
 
+function isExpectedPromptInterruption(
+  prompt: UiPromptSubmission,
+  view: ViewModel,
+): boolean {
+  if (prompt.status !== "interrupted" || prompt.error?.source !== "runtime")
+    return false;
+  const run = view.snapshot?.runs.find(
+    (candidate) =>
+      candidate.id === prompt.runId && candidate.sessionId === prompt.sessionId,
+  );
+  const reason =
+    prompt.error.terminalReason ??
+    run?.terminalReason ??
+    (prompt.error.code === "RUN_INTERRUPTED"
+      ? prompt.error.message
+      : undefined);
+  return reason === "user-stop" || reason === "service-shutdown";
+}
+
 function selectPromptProjection(input: {
   readonly attempts: readonly LocalPromptAttempt[];
   readonly view: ViewModel;
@@ -165,11 +184,12 @@ function selectPromptProjection(input: {
         {
           clientRequestId: prompt.clientRequestId,
           createdAt: prompt.createdAt,
-          error:
-            prompt.error?.message ??
-            (prompt.status === "failed"
-              ? "Prompt failed before the run started."
-              : "Prompt was interrupted before completion."),
+          error: isExpectedPromptInterruption(prompt, input.view)
+            ? undefined
+            : (prompt.error?.message ??
+              (prompt.status === "failed"
+                ? "Prompt failed before the run started."
+                : "Prompt was interrupted before completion.")),
           id: prompt.userMessageId,
           label: prompt.status === "failed" ? "Failed" : "Interrupted",
           text: prompt.text,
@@ -271,6 +291,7 @@ function selectPersistedPromptError(view: ViewModel): {
     );
   if (
     !latest ||
+    isExpectedPromptInterruption(latest, view) ||
     (latest.status !== "failed" && latest.status !== "interrupted") ||
     !view.activeSession?.messages.some(
       (message) => message.id === latest.userMessageId,
@@ -1082,24 +1103,6 @@ export function SessionScreen({
                 : "contents",
           }}
         >
-          <ErrorBanner
-            message={
-              commandInputError?.scopeKey === draftScopeKey
-                ? commandInputError.message
-                : null
-            }
-            onDismiss={() => {
-              setCommandInputError(null);
-            }}
-          />
-          <CommandNoticeList
-            notices={view.commandNotices.filter(
-              (notice) => notice.kind === "error",
-            )}
-            onClose={(id) => {
-              runtime.store.consumeCommand(id);
-            }}
-          />
           <Composer
             readOnly={viewingSubagent || approvalDialogVisible}
             client={client}
@@ -1134,10 +1137,30 @@ export function SessionScreen({
             commandCatalogVersion={view.commandCatalogVersion}
             connectionKind={view.header.connectionKind}
             topContent={
-              <TodoDock
-                key={view.activeTodoList?.sessionId ?? "hidden"}
-                todoList={view.activeTodoList}
-              />
+              <>
+                <ErrorBanner
+                  message={
+                    commandInputError?.scopeKey === draftScopeKey
+                      ? commandInputError.message
+                      : null
+                  }
+                  onDismiss={() => {
+                    setCommandInputError(null);
+                  }}
+                />
+                <CommandNoticeList
+                  notices={view.commandNotices.filter(
+                    (notice) => notice.kind === "error",
+                  )}
+                  onClose={(id) => {
+                    runtime.store.consumeCommand(id);
+                  }}
+                />
+                <TodoDock
+                  key={view.activeTodoList?.sessionId ?? "hidden"}
+                  todoList={view.activeTodoList}
+                />
+              </>
             }
             permissionControl={
               <PermissionPolicyControl

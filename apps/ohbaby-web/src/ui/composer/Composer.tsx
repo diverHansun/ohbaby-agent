@@ -115,9 +115,13 @@ export function Composer(props: {
   useEffect(() => {
     selectedReasoning.current = undefined;
   }, [props.activeSession?.id, props.client]);
-  const [steerNotice, setSteerNotice] = useState(false);
+  const [steerNoticeRunId, setSteerNoticeRunId] = useState<string>();
+  const currentSteerTarget = useRef(props.model);
+  useLayoutEffect(() => {
+    currentSteerTarget.current = props.model;
+  }, [props.model]);
   useEffect(() => {
-    setSteerNotice(false);
+    setSteerNoticeRunId(undefined);
   }, [props.model.activeSessionId, props.model.activeRunId]);
   const [draft, setDraft] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -156,6 +160,7 @@ export function Composer(props: {
   }, [props.onEditRevision]);
   const advanceEditRevision = useCallback((): void => {
     editRevision.current += 1;
+    setSteerNoticeRunId(undefined);
     onEditRevisionRef.current(editRevision.current);
   }, []);
   useLayoutEffect(
@@ -983,7 +988,7 @@ export function Composer(props: {
             Task stopped before your steer message was sent.
           </p>
         ) : null}
-        {steerNotice ? (
+        {steerNoticeRunId && steerNoticeRunId === props.model.activeRunId ? (
           <p role="status">
             Steer accepted · waiting for the active run’s next safe boundary
           </p>
@@ -1035,7 +1040,13 @@ export function Composer(props: {
                       }
                       steer={(input) => props.client.steerQueuedPrompt(input)}
                       onAccepted={() => {
-                        setSteerNotice(true);
+                        if (
+                          currentSteerTarget.current.activeRunId ===
+                            props.model.activeRunId &&
+                          currentSteerTarget.current.activeSessionId ===
+                            props.model.activeSessionId
+                        )
+                          setSteerNoticeRunId(props.model.activeRunId);
                       }}
                     />
                     <button

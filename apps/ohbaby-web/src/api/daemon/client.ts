@@ -1084,7 +1084,7 @@ export class BrowserDaemonClient implements UiBackendClient {
       const message = error instanceof Error ? error.message : String(error);
       const unconfirmed = `Command result is unconfirmed: ${message}`;
       const detail = feedback?.error
-        ? `${feedback.error.message}. ${unconfirmed}`
+        ? `${feedback.error.message} — ${unconfirmed}`
         : unconfirmed;
       if (!this.closed && scopeTicket === this.scopeTicket)
         this.store.failCommand(invocation.clientInvocationId, detail);

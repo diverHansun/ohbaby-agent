@@ -99,13 +99,19 @@ export function Prompt({
     queueSelectionRef.current = id;
     setQueueSelectionId(id);
   };
-  const [steerNotice, setSteerNotice] = useState<string>();
+  const [steerNoticeRunId, setSteerNoticeRunId] = useState<string>();
+  const currentSteerTarget = useRef(activeRunId);
+  const steerNoticeRevision = useRef(0);
+  useLayoutEffect(() => {
+    currentSteerTarget.current = activeRunId;
+    setSteerNoticeRunId(undefined);
+  }, [activeSessionId, activeRunId]);
   const steerAttempts = useRef(
     new Map<string, import("ohbaby-sdk").UiSteerQueuedPromptInput>(),
   );
   useEffect(() => {
     steerAttempts.current.clear();
-    setSteerNotice(undefined);
+    setSteerNoticeRunId(undefined);
     setSteerSelection(0);
   }, [activeSessionId]);
   const theme = useTheme();
@@ -147,6 +153,10 @@ export function Prompt({
   }, [activeSessionId]);
 
   const replaceEditor = (nextEditor: EditorState): void => {
+    if (editorText(editorRef.current) !== editorText(nextEditor)) {
+      steerNoticeRevision.current += 1;
+      setSteerNoticeRunId(undefined);
+    }
     editorRef.current = nextEditor;
     setEditor(nextEditor);
   };
@@ -340,14 +350,18 @@ export function Prompt({
         steerAttempts.current.set(prompt.promptId, input);
         replaceQueuedMutationPending(true);
         setError(null);
+        const noticeRevision = steerNoticeRevision.current;
         void client
           .steerQueuedPrompt(input)
           .then(
             () => {
-              if (generation !== draftGeneration.current) return;
-              setSteerNotice(
-                "Steer accepted · waiting for the active run’s next safe boundary",
-              );
+              if (
+                generation !== draftGeneration.current ||
+                currentSteerTarget.current !== input.expectedRunId ||
+                noticeRevision !== steerNoticeRevision.current
+              )
+                return;
+              setSteerNoticeRunId(input.expectedRunId);
             },
             (caught: unknown) => {
               if (generation !== draftGeneration.current) return;
@@ -714,7 +728,11 @@ export function Prompt({
       {unsentSteer ? (
         <Text dimColor>Task stopped before your steer message was sent.</Text>
       ) : null}
-      {steerNotice ? <Text>{steerNotice}</Text> : null}
+      {steerNoticeRunId && steerNoticeRunId === activeRunId ? (
+        <Text>
+          Steer accepted · waiting for the active run’s next safe boundary
+        </Text>
+      ) : null}
       {queuedPrompts.length === 0 ? null : (
         <Box flexDirection="column" paddingX={1} width={layout.contentWidth}>
           <Text dimColor>Queued {queuedPrompts.length}</Text>

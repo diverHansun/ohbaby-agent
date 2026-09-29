@@ -586,3 +586,67 @@ it("does not revive an item deleted while its edit lease response was in flight"
   expect(release).toHaveBeenCalledWith({ editLeaseId: "late", promptId: "p" });
   expect(document.body.textContent).not.toContain("Editing retained");
 });
+
+it.each(["before", "after"])(
+  "expires Steer acceptance when its target ends %s acknowledgement",
+  async (timing) => {
+    let accept!: (receipt: { acceptedTargetRunId: string }) => void;
+    const acknowledgement = new Promise<{ acceptedTargetRunId: string }>(
+      (resolve) => {
+        accept = resolve;
+      },
+    );
+    const model = {
+      canSend: true,
+      canStop: true,
+      disabled: false,
+      isRunning: true,
+      mode: "auto" as const,
+      permissionLevel: "default" as const,
+      activeSessionId: "session",
+      activeRunId: "run-1",
+    };
+    const f = fixture({
+      model,
+      queuedPrompts: [queuedPrompt("queued")],
+      client: {
+        steerQueuedPrompt: () => acknowledgement,
+        getCurrentModel: () => Promise.resolve(null),
+        subscribeEvents: (): (() => void) => (): void => undefined,
+      } as unknown as UiBackendClient,
+    });
+    await flushAction(() =>
+      document
+        .querySelector<HTMLButtonElement>(
+          '[aria-label="Steer queued prompt: body p"]',
+        )
+        ?.click(),
+    );
+    if (timing === "after") {
+      await flushAction(() => {
+        accept({ acceptedTargetRunId: "run-1" });
+      });
+      expect(document.body.textContent).toContain("Steer accepted");
+    }
+    f.update({
+      model: {
+        ...model,
+        activeRunId: undefined,
+        isRunning: false,
+        canStop: false,
+      },
+      unsentSteer: true,
+    });
+    if (timing === "before")
+      await flushAction(() => {
+        accept({ acceptedTargetRunId: "run-1" });
+      });
+    expect(document.body.textContent).toContain(
+      "Task stopped before your steer message was sent.",
+    );
+    expect(document.body.textContent).not.toContain("Steer accepted");
+    f.update({ model: { ...model, activeRunId: "run-2" }, unsentSteer: false });
+    f.type("next prompt");
+    expect(document.body.textContent).not.toContain("Steer accepted");
+  },
+);

@@ -261,41 +261,56 @@ describe("ToolCard", () => {
     expect(output).toContain("exit code 1");
   });
 
-  it("renders an orphan result with its own execution without exposing its call id", () => {
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    mounted.push({ container, root });
+  it.each(["error", "cancelled", "timed-out", undefined] as const)(
+    "renders an orphan result with accessible %s outcome without exposing its call id",
+    (outcome) => {
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      mounted.push({ container, root });
 
-    act(() => {
-      root.render(
-        <OrphanToolResultCard
-          result={{
-            callId: "internal_call_id",
-            error: "failed internally",
-            output: "visible output",
-            execution: {
-              phase: "ended",
-              createdAt: 1000,
-              phaseStartedAt: 3000,
-              executionStartedAt: 1000,
-              endedAt: 3000,
-              outcome: "error",
-            },
-          }}
-        />,
-      );
-    });
+      act(() => {
+        root.render(
+          <OrphanToolResultCard
+            result={{
+              callId: "internal_call_id",
+              error: "failed internally",
+              output: "visible output",
+              execution:
+                outcome === undefined
+                  ? undefined
+                  : {
+                      phase: "ended",
+                      createdAt: 1000,
+                      phaseStartedAt: 3000,
+                      executionStartedAt: 1000,
+                      endedAt: 3000,
+                      outcome,
+                    },
+            }}
+          />,
+        );
+      });
 
-    expect(container.textContent).toContain("tool result");
-    expect(container.textContent).not.toContain("internal_call_id");
-    expect(container.textContent).not.toContain("failed internally");
-    act(() => container.querySelector("button")?.click());
-    expect(container.textContent).toContain('"outcome": "error"');
-    expect(container.querySelector(".ohb-tool-duration")?.textContent).toBe(
-      "2s",
-    );
-  });
+      expect(container.textContent).toContain("tool result");
+      expect(container.textContent).not.toContain("internal_call_id");
+      expect(container.textContent).not.toContain("failed internally");
+      expect(
+        container.querySelector("button")?.getAttribute("aria-label"),
+      ).toContain(outcome ?? "error");
+      expect(container.textContent).not.toContain("⚠");
+      act(() => container.querySelector("button")?.click());
+      expect(container.textContent).toContain("failed internally");
+      if (outcome !== undefined) {
+        expect(container.textContent).toContain(`"outcome": "${outcome}"`);
+        expect(container.querySelector(".ohb-tool-duration")?.textContent).toBe(
+          "2s",
+        );
+      } else {
+        expect(container.textContent).not.toContain('"phase"');
+      }
+    },
+  );
 
   it.each(["error", "cancelled", "timed-out"] as const)(
     "keeps Bash %s details without the warning decoration",

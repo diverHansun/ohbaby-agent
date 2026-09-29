@@ -5776,6 +5776,106 @@ it("Steers a selected queued row with a stable request after an uncertain respon
   expect(client.abortRun).not.toHaveBeenCalled();
 });
 
+it.each(["before", "after"])(
+  "expires TUI Steer notice when target ends %s acknowledgement",
+  async (timing) => {
+    const prompt = {
+      clientRequestId: "queued-request",
+      createdAt: "2026-05-14T00:00:04Z",
+      promptId: "queued-steer",
+      scopeKey: "/repo",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: "steer this row",
+      updatedAt: "2026-05-14T00:00:04Z",
+      userMessageId: "queued-message",
+    };
+    const client = createFakeClient({
+      ...snapshot(),
+      prompts: [prompt],
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: "2026-05-14T00:00:03Z",
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: "2026-05-14T00:00:03Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    client.listSubagentExecutions = (): Promise<
+      import("ohbaby-sdk").UiSubagentExecutionList
+    > =>
+      Promise.resolve({
+        executions: [],
+        hasMore: false,
+        waiting: false,
+        approvalBlocked: false,
+        activeCount: 0,
+        completedCount: 0,
+      });
+    client.getSubagentExecutionView = (): Promise<
+      import("ohbaby-sdk").UiSubagentExecutionView
+    > => Promise.reject(new Error("No selection"));
+    let accept!: (receipt: { acceptedTargetRunId: string }) => void;
+    client.steerQueuedPrompt.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          accept = resolve;
+        }),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Steer"));
+    await flush();
+    app.stdin.write("\u0013");
+    await flush();
+    if (timing === "after") {
+      accept({ acceptedTargetRunId: "run_1" });
+      await waitForFrame(app, (frame) => frame.includes("Steer accepted"));
+    }
+    client.emit({
+      type: "run.updated",
+      run: {
+        id: "run_1",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:03Z",
+        updatedAt: "2026-05-14T00:00:05Z",
+        endedAt: "2026-05-14T00:00:05Z",
+        status: { kind: "idle" },
+        terminalReason: "user-stop",
+        inputsCloseReason: "user-stop",
+        unsentSteer: true,
+      },
+    });
+    await waitForFrame(app, (frame) =>
+      frame.includes("Task stopped before your steer message was sent."),
+    );
+    if (timing === "before") accept({ acceptedTargetRunId: "run_1" });
+    await flush();
+    expect(app.lastFrame()).not.toContain("Steer accepted");
+    client.emit({
+      type: "run.updated",
+      run: {
+        id: "run_2",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:06Z",
+        updatedAt: "2026-05-14T00:00:06Z",
+        status: { kind: "running", runId: "run_2" },
+      },
+    });
+    await flush();
+    app.stdin.write("next prompt");
+    await flush();
+    expect(app.lastFrame()).not.toContain("Steer accepted");
+  },
+);
+
 it("opens execution reads without rebinding root or exposing child stop and approval controls", async () => {
   const client = createFakeClient({
     ...snapshot(),

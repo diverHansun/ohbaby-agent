@@ -238,7 +238,8 @@
 }
 
 .ohb-status-result > div {
-  align-items: center;
+  align-items: flex-start;
+  min-width: 0;
   border-bottom: 1px solid #f1f1f1;
   display: flex;
   gap: 14px;
@@ -258,6 +259,9 @@
 }
 
 .ohb-status-result > div > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: #26282d;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 13px;
@@ -269,6 +273,7 @@
 
 .ohb-status-context-row > .ohb-context-details {
   flex: 1;
+  min-width: 0;
   padding: 1px 0 4px;
 }
 
@@ -435,3 +440,16 @@ button.ohb-list-row:hover,
   margin-left: auto;
 }
 
+@media (max-width: 520px) {
+  .ohb-status-result > div {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .ohb-status-result > div > span:first-child {
+    width: auto;
+  }
+  .ohb-status-result > div > span:nth-child(2),
+  .ohb-status-context-row > .ohb-context-details {
+    max-width: 100%;
+  }
+}

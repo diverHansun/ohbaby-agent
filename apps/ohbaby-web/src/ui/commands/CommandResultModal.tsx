@@ -39,6 +39,8 @@ export function CommandNoticeList(props: {
             <button
               type="button"
               title="Dismiss command result"
+              aria-label="Dismiss command result"
+              className="ohb-command-notice-close"
               onClick={() => props.onClose?.(notice.id)}
             >
               <X size={14} />

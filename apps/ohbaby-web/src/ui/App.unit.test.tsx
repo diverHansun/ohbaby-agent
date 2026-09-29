@@ -6399,7 +6399,7 @@ it("keeps slash parse failures beside input and clears only that error on editin
   await waitFor(() =>
     app.container.textContent.includes('Unknown command "/does-not-exist"'),
   );
-  const inputArea = app.container.querySelector(".ohb-root-composer");
+  const inputArea = app.container.querySelector(".ohb-composer-content");
   expect(inputArea?.textContent).toContain('Unknown command "/does-not-exist"');
   expect(app.container.textContent).toContain("unrelated transport error");
   await setTextareaValue(app.container, "/corrected");
@@ -6408,3 +6408,142 @@ it("keeps slash parse failures beside input and clears only that error on editin
   );
   expect(app.container.textContent).toContain("unrelated transport error");
 });
+
+it.each([
+  ["user-stop", "typed", false],
+  ["service-shutdown", "typed", false],
+  ["user-stop", "run", false],
+  ["user-stop", "legacy", false],
+  ["process-interrupted", "typed", true],
+  ["cancelled", "typed", true],
+] as const)(
+  "projects persisted interruption %s (%s) correctly after reload and session return",
+  (reason, source, isError) => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const stopped: UiSnapshot = {
+      ...initial,
+      prompts: [
+        promptSubmission({
+          status: "interrupted",
+          runId: "stopped-run",
+          error: {
+            code: "RUN_INTERRUPTED",
+            source: "runtime",
+            retryable: true,
+            message: source === "legacy" ? reason : "runtime interrupted",
+            ...(source === "typed" ? { terminalReason: reason } : {}),
+          },
+        }),
+      ],
+      runs: [
+        {
+          id: "stopped-run",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          updatedAt: timestamp,
+          endedAt: timestamp,
+          status: { kind: "idle" },
+          ...(source === "run" ? { terminalReason: reason } : {}),
+        },
+      ],
+      sessions: initial.sessions.map((session) => ({
+        ...session,
+        messages: [
+          {
+            id: "message_projected",
+            createdAt: timestamp,
+            role: "user" as const,
+            parts: [{ type: "text" as const, text: "server projected prompt" }],
+          },
+        ],
+      })),
+    };
+    const fake = createFakeRuntime({ snapshot: stopped });
+    const app = mountApp(fake.runtime);
+    const assertPresentation = (): void => {
+      expect(Boolean(app.container.querySelector('[role="alert"]'))).toBe(
+        isError,
+      );
+      expect(app.container.textContent).toContain("server projected prompt");
+    };
+    assertPresentation();
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          activeSessionId: "other",
+          prompts: [],
+          runs: [],
+          sessions: [
+            ...initial.sessions,
+            { ...initial.sessions[0], id: "other", messages: [] },
+          ],
+        },
+        2,
+      );
+    });
+    act(() => {
+      fake.store.replaceSnapshot(stopped, 3);
+    });
+    assertPresentation();
+  },
+);
+
+it("keeps failed command feedback inside the composer and dismisses it accessibly", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const app = mountApp(fake.runtime);
+  act(() => {
+    fake.store.beginCommand({
+      clientInvocationId: "failed-input",
+      commandId: "custom",
+      path: ["custom"],
+      raw: "/custom",
+      rawArgs: "",
+      argv: [],
+      surface: "tui",
+      sessionId: "session_1",
+    });
+    fake.store.failCommand("failed-input", "Known command failure");
+  });
+  expect(
+    app.container.querySelector(".ohb-composer-content .ohb-command-notice")
+      ?.textContent,
+  ).toContain("Known command failure");
+  const dismiss = app.container.querySelector<HTMLButtonElement>(
+    '[aria-label="Dismiss command result"]',
+  );
+  expect(dismiss).not.toBeNull();
+  act(() => dismiss?.click());
+  expect(app.container.textContent).not.toContain("Known command failure");
+  await setTextareaValue(app.container, "next draft");
+  expect(app.container.querySelector("textarea")?.value).toBe("next draft");
+});
+
+it.each(["user-stop", "service-shutdown"])(
+  "keeps an expected %s prompt readable without inline failure before formal message arrives",
+  (reason) => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        prompts: [
+          promptSubmission({
+            status: "interrupted",
+            error: {
+              code: "RUN_INTERRUPTED",
+              source: "runtime",
+              retryable: true,
+              message: reason,
+              terminalReason: reason,
+            },
+          }),
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+    expect(app.container.textContent).toContain("server projected prompt");
+    expect(app.container.textContent).toContain("Interrupted");
+    expect(app.container.querySelector('[role="alert"]')).toBeNull();
+  },
+);

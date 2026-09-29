@@ -1042,7 +1042,7 @@ it.each(["response loss", "timeout"])(
           timestamp: 1,
           error: {
             code: "UNAVAILABLE",
-            message: "budget subcommand unavailable",
+            message: "budget subcommand unavailable.",
           },
         },
         1,
@@ -1090,6 +1090,7 @@ it.each(["response loss", "timeout"])(
       expect(error.message).toMatch(
         /budget subcommand unavailable.*unconfirmed/s,
       );
+      expect(error.message).not.toContain("..");
       expect(store.getSnapshot().view.commandNotices).toEqual([]);
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(() => {
