@@ -66,7 +66,7 @@ Composer 通过 `topContent` 接收 SessionScreen 装配的 TodoDock，通过 `p
 
 `Total {time}` 是整轮过程顶部的固定入口，时间和箭头组成同一个按钮。收起时正文在入口下方；展开时过程向下显示，顺序为 Total → 过程 → 最终正文。入口不随过程被推到底部，手动切换不触发底部跟随，保留入口在视口中的位置。没有过程时仅在正文前显示耗时。既有失败文案、acceptedAt/createdAt 口径和恢复时的未知耗时保持不变。手动展开在当前挂载期间保留，刷新页面可恢复默认收起。
 
-Thought 使用 12px 线条箭头并常显，整轮使用 16px，均与文字间隔 8px。耗时箭头在 hover/focus-visible 时显示，无 hover 设备常显；隐藏时保留空间。原生 summary/button 支持键盘操作，按钮通过 aria-expanded/aria-controls 描述状态。隐藏过程不卸载工具卡，保留局部展开状态；显式定位先展开，过程中的焦点和阅读锚点迁移到可见入口。
+Thought 使用 12px 线条箭头并常显，整轮使用 16px，均与文字间隔 8px。耗时箭头在 hover/focus-visible 时显示，无 hover 设备常显；隐藏时保留空间。Total 控制行下方有贯穿阅读列的 1px 淡灰分割线：文字按钮下留 8px，分割线后留 12px；避免叠加消息列表的默认间隔。原生 summary/button 支持键盘操作，按钮通过 aria-expanded/aria-controls 描述状态。隐藏过程不卸载工具卡，保留局部展开状态；显式定位先展开，过程中的焦点和阅读锚点迁移到可见入口。
 
 方案与验收：[Web 运行过程折叠 improve-1](../../problem-lists/2026-09-29-web-run-process-collapse/README.md)。
 

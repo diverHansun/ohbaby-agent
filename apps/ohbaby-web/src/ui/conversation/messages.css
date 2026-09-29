@@ -262,6 +262,17 @@
   flex: none;
 }
 
+.ohb-run-header {
+  border-bottom: 1px solid rgb(43 45 51 / 9%);
+  padding-bottom: 8px;
+  /* Leave 12px after the line within the stream's shared 26px gap. */
+  margin: 4px 0 -14px;
+}
+
+.ohb-run-header > .ohb-prompt-duration {
+  margin: 0;
+}
+
 .ohb-run-disclosure {
   background: transparent;
   border: 0;

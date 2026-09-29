@@ -61,17 +61,23 @@ export function PromptDuration({
       ? `${prompt.status} · End time unknown (recovered)`
       : `${prompt.status !== "succeeded" ? `${prompt.status} · ` : ""}Total ${duration ?? "—"}`;
   return disclosure ? (
-    <button
-      type="button"
-      className="ohb-prompt-duration ohb-run-disclosure"
-      id={disclosure.id}
-      aria-expanded={disclosure.open}
-      aria-controls={disclosure.controls}
-      onClick={disclosure.onToggle}
-    >
-      <span>{label}</span>
-      <ChevronRight size={16} className="ohb-run-chevron" aria-hidden="true" />
-    </button>
+    <div className="ohb-run-header">
+      <button
+        type="button"
+        className="ohb-prompt-duration ohb-run-disclosure"
+        id={disclosure.id}
+        aria-expanded={disclosure.open}
+        aria-controls={disclosure.controls}
+        onClick={disclosure.onToggle}
+      >
+        <span>{label}</span>
+        <ChevronRight
+          size={16}
+          className="ohb-run-chevron"
+          aria-hidden="true"
+        />
+      </button>
+    </div>
   ) : (
     <div className="ohb-prompt-duration">{label}</div>
   );
