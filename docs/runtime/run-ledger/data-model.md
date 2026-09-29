@@ -1,5 +1,8 @@
 # run-ledger 模块 data-model.md
 
+> 2026-09-28 后继实施：停止、owner 隔离、retained 与恢复以 [improve-4 验收](../../problem-lists/2026-09-19-execution-reliability/improve-4/05-implementation-acceptance.md) 及其 02 契约为准；下文保留原阶段设计记录。
+
+
 本文档定义 `runtime/run-ledger` 模块的核心概念与数据模型。
 
 ---

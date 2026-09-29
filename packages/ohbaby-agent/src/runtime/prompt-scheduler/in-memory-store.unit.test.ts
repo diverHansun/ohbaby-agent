@@ -7,6 +7,59 @@ import {
 import { InMemoryPromptSubmissionStore } from "./in-memory-store.js";
 
 describe("InMemoryPromptSubmissionStore", () => {
+  it.each([
+    "queued",
+    "starting",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "interrupted",
+  ] as const)(
+    "detects %s receipt existence only in its exact scope and session",
+    async (status) => {
+      const store = new InMemoryPromptSubmissionStore();
+      expect(await store.hasForSession("/workspace", "session_1")).toBe(false);
+      await store.accept({
+        promptId: "receipt",
+        clientRequestId: "receipt-request",
+        scopeKey: "/workspace",
+        sessionId: "session_1",
+        userMessageId: "future-message",
+        text: "hello",
+        maxQueuedPrompts: 100,
+      });
+      if (status === "cancelled") await store.cancelQueued("receipt");
+      else if (status !== "queued") {
+        await store.claim("receipt");
+        if (status === "running") await store.markRunning("receipt", "run_1");
+        else if (status === "interrupted")
+          await store.recoverAllInterrupted({
+            scopeKey: "/workspace",
+            includeCurrentOwner: true,
+          });
+        else if (status === "succeeded")
+          await store.finish("receipt", { status });
+        else if (status === "failed")
+          await store.finish("receipt", {
+            status,
+            error: {
+              code: "FIXTURE",
+              message: "failed",
+              source: "runtime",
+              retryable: false,
+            },
+          });
+      }
+      expect((await store.get("receipt"))?.status).toBe(status);
+      expect(await store.hasForSession("/workspace", "session_1")).toBe(true);
+      expect(await store.hasForSession("/other", "session_1")).toBe(false);
+      expect(await store.hasForSession("/workspace", "other-session")).toBe(
+        false,
+      );
+    },
+  );
+
   it("rejects the 101st queued prompt without changing the queue", async () => {
     let now = 0;
     const store = new InMemoryPromptSubmissionStore({
@@ -37,7 +90,7 @@ describe("InMemoryPromptSubmissionStore", () => {
     expect(await store.listQueued("/workspace")).toHaveLength(100);
   });
 
-  it("marks active records interrupted while preserving queued records", async () => {
+  it("explicitly seals stopped owner active records and retains queued records", async () => {
     let now = 0;
     const store = new InMemoryPromptSubmissionStore({
       now: (): number => ++now,
@@ -63,12 +116,17 @@ describe("InMemoryPromptSubmissionStore", () => {
       userMessageId: "message_queued",
     });
 
-    expect(await store.recoverInterrupted("/workspace")).toBe(1);
+    expect(
+      await store.recoverAllInterrupted({
+        scopeKey: "/workspace",
+        includeCurrentOwner: true,
+      }),
+    ).toBe(2);
     expect(await store.get("prompt_active")).toMatchObject({
       status: "interrupted",
     });
     expect(await store.get("prompt_queued")).toMatchObject({
-      status: "queued",
+      status: "retained",
     });
   });
 

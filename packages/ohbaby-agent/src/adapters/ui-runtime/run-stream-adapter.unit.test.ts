@@ -6,6 +6,102 @@ import { createInMemoryUiStateStore } from "../ui-state/index.js";
 import { startRunStreamProjection } from "./run-stream-adapter.js";
 
 describe("startRunStreamProjection", () => {
+  it("projects saved execution facts and ignores child or late model activity", async () => {
+    const bridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const store = createInMemoryUiStateStore({
+      activeSessionId: "s",
+      sessions: [
+        {
+          id: "s",
+          title: "s",
+          createdAt: "2026",
+          updatedAt: "2026",
+          messages: [],
+        },
+      ],
+      runs: [
+        {
+          id: "run",
+          sessionId: "s",
+          startedAt: "2026",
+          updatedAt: "2026",
+          status: { kind: "running", runId: "run" },
+        },
+      ],
+      permissions: [],
+      status: { kind: "running", runId: "run" },
+    });
+    const projection = startRunStreamProjection({
+      streamBridge: bridge,
+      stateStore: store,
+      runId: "run",
+      sessionId: "s",
+      nextMessageId: () => "synthetic",
+      timestamp: () => "2026",
+      publish: () => {
+        /* no external subscriber */
+      },
+      autoStart: false,
+    });
+    const request = {
+      requestId: "r",
+      runId: "run",
+      messageId: "m",
+      step: 1,
+      attempt: 1,
+      purpose: "agent-step",
+      startedAt: 100,
+      outcome: "running",
+    };
+    const base = {
+      runId: "run",
+      sessionId: "s",
+      messageId: "m",
+      step: 1,
+      timestamp: 100,
+    };
+    const execution = {
+      runId: "run",
+      phase: "queued",
+      createdAt: 100,
+      phaseStartedAt: 200,
+      waitReason: "resource",
+    };
+    bridge.publish("run/run", "run.llm.request-started", { ...base, request });
+    bridge.publish("run/run", "run.llm.request-ended", {
+      ...base,
+      request: { ...request, outcome: "success", endedAt: 200 },
+    });
+    bridge.publish("run/run", "run.llm.first-text", {
+      ...base,
+      request: { ...request, firstTextAt: 300 },
+    });
+    bridge.publish("run/run", "run.llm.request-started", {
+      ...base,
+      runId: "child",
+      request: { ...request, requestId: "child-r", runId: "child" },
+    });
+    bridge.publish("run/run", "run.tool.state", {
+      ...base,
+      execution,
+      callId: "c",
+      toolName: "bash",
+      params: {},
+    });
+    bridge.end("run/run");
+    projection.start();
+    await projection.done;
+    const snapshot = await store.readSnapshot();
+    expect(snapshot.runs[0].modelActivity).toBeUndefined();
+    expect(snapshot.sessions[0].messages).toMatchObject([
+      {
+        id: "m",
+        modelRequests: [{ requestId: "r", outcome: "success", endedAt: 200 }],
+        parts: [{ call: { execution, status: "pending" } }],
+      },
+    ]);
+    expect(snapshot.sessions[0].messages[0].modelRequests).toHaveLength(1);
+  });
   it("shows automatic compaction progress until context preparation completes", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({

@@ -1,3 +1,6 @@
+import { DatabaseSubagentExecutionStore } from "../agents/subagents/execution-store.js";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -22,6 +25,8 @@ import {
   type PersistentUiBackendClient,
 } from "./ui-persistent.js";
 
+import * as uiInProcess from "./ui-inprocess.js";
+
 interface FakeSdkClient {
   readonly kind: "fake";
 }
@@ -33,7 +38,7 @@ interface Deferred<T> {
 }
 
 const TITLE_GENERATION_PROMPT_MARKER =
-  "Generate a concise title for a coding-agent chat session.";
+  "Write a short conversation title that identifies the user's task.";
 
 function createDeferred<T>(): Deferred<T> {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -440,9 +445,7 @@ function createPermissionSlotLLMClient(input: {
           );
         }
         if (
-          lastPersistentRequestMessageText(request).includes(
-            "permission prompt 1",
-          )
+          lastPersistentRequestMessageText(request) === "permission prompt 1"
         ) {
           return Promise.resolve(
             createProviderStream([
@@ -726,14 +729,7 @@ function titleTextForSessionTitleRequest(
   );
   const content =
     typeof userMessage?.content === "string" ? userMessage.content : "";
-  const marker = "First user message:\n";
-  const markerIndex = content.indexOf(marker);
-  if (markerIndex < 0) {
-    return "Fake session title";
-  }
-  return createTemporarySessionTitle(
-    content.slice(markerIndex + marker.length),
-  );
+  return createTemporarySessionTitle(content);
 }
 
 function requireRun(runs: readonly UiRun[], id: string): UiRun {
@@ -777,6 +773,101 @@ afterEach(() => {
 });
 
 describe("createPersistentUiBackendClient", () => {
+  it.each(["snapshot", "dispose"] as const)(
+    "observes an eager startup rejection before a delayed first %s without hiding its failure",
+    async (firstOperation) => {
+      const directory = await tempDir("ohbaby-persistent-delayed-startup-");
+      const original = uiInProcess.createInProcessUiBackendClient;
+      let recovery: Promise<unknown> | undefined;
+      const factory = vi
+        .spyOn(uiInProcess, "createInProcessUiBackendClient")
+        .mockImplementation((options) => {
+          recovery =
+            options && "startupReady" in options
+              ? options.startupReady
+              : undefined;
+          return original(options);
+        });
+      const unhandled = vi.fn();
+      process.on("unhandledRejection", unhandled);
+      let client: PersistentUiBackendClient | undefined;
+      try {
+        client = createPersistentUiBackendClient({
+          dbPath: join(directory, "agent.db"),
+          llmClient: createFakeLLMClient([]),
+          resumeSessionId: "missing-delayed-session",
+          workdir: join(directory, "workspace"),
+        });
+        if (!recovery) throw new Error("Missing startup recovery promise");
+        // Observe the source promise, leaving the wrapper's derived startup
+        // promise unread until Node has had a turn to report orphan rejections.
+        await expect(recovery).rejects.toThrow(
+          "Session not found: missing-delayed-session",
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(unhandled).not.toHaveBeenCalled();
+        if (firstOperation === "snapshot") {
+          await expect(client.getSnapshot()).rejects.toThrow(
+            "Session not found: missing-delayed-session",
+          );
+          await expect(client.dispose()).resolves.toMatchObject({
+            status: "confirmed",
+            errors: [],
+          });
+        } else {
+          await expect(client.dispose()).resolves.toMatchObject({
+            status: "unconfirmed",
+            errors: [
+              expect.stringContaining(
+                "Session not found: missing-delayed-session",
+              ),
+            ],
+          });
+        }
+      } finally {
+        await client?.dispose();
+        process.off("unhandledRejection", unhandled);
+        factory.mockRestore();
+        closeDatabase();
+        await rm(directory, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it("does not hide disposal errors after a reported startup failure", async () => {
+    const directory = await tempDir("ohbaby-persistent-dispose-failure-");
+    const original = uiInProcess.createInProcessUiBackendClient;
+    const factory = vi
+      .spyOn(uiInProcess, "createInProcessUiBackendClient")
+      .mockImplementation((options) => {
+        const backend = original(options);
+        return {
+          ...backend,
+          async dispose(): Promise<never> {
+            await backend.dispose();
+            throw new Error("fixture disposal failed");
+          },
+        };
+      });
+    try {
+      const client = createPersistentUiBackendClient({
+        dbPath: join(directory, "agent.db"),
+        llmClient: createFakeLLMClient([]),
+        resumeSessionId: "missing-session",
+        workdir: join(directory, "workspace"),
+      });
+      await expect(client.getSnapshot()).rejects.toThrow("Session not found");
+      await expect(client.dispose()).resolves.toMatchObject({
+        status: "unconfirmed",
+        errors: [expect.stringContaining("fixture disposal failed")],
+      });
+    } finally {
+      factory.mockRestore();
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("runs ten sessions through the real backend and admits the eleventh as queued", async () => {
     const directory = await tempDir("ohbaby-persistent-concurrency-");
     const release = createDeferred<undefined>();
@@ -996,7 +1087,7 @@ describe("createPersistentUiBackendClient", () => {
         promptId: eleventh.promptId,
       });
       const permission = snapshot.permissions[0];
-      await client.respondPermission(permission.id, { choiceId: "cancel" });
+      await client.abortRun(permission.runId);
       releaseBlocked.resolve(undefined);
       await Promise.all(
         receipts.map((receipt) => client.waitForPrompt(receipt.promptId)),
@@ -1158,7 +1249,7 @@ describe("createPersistentUiBackendClient", () => {
       await client.abortRun(running.runId);
       await expect(client.waitForPrompt(first.promptId)).resolves.toMatchObject(
         {
-          prompt: { status: "cancelled" },
+          prompt: { status: "interrupted" },
         },
       );
       await vi.waitFor(() => {
@@ -1222,7 +1313,7 @@ describe("createPersistentUiBackendClient", () => {
       settleAbortedRun.resolve(undefined);
       await abort;
       await expect(client.waitForPrompt(first.promptId)).resolves.toMatchObject(
-        { prompt: { status: "cancelled" } },
+        { prompt: { status: "interrupted" } },
       );
       await expect(
         client.waitForPrompt(second.promptId),
@@ -1282,10 +1373,10 @@ describe("createPersistentUiBackendClient", () => {
       expect(
         snapshot.sessions[0].messages.map((message) => message.role),
       ).toEqual(["user", "assistant"]);
-      expect(snapshot.sessions[0].messages[0].parts).toEqual([
+      expect(snapshot.sessions[0].messages[0].parts).toMatchObject([
         { type: "text", text: "Remember this" },
       ]);
-      expect(snapshot.sessions[0].messages[1].parts).toEqual([
+      expect(snapshot.sessions[0].messages[1].parts).toMatchObject([
         { type: "text", text: "Persisted" },
       ]);
       expect(snapshot.runs).toHaveLength(1);
@@ -1384,7 +1475,7 @@ describe("createPersistentUiBackendClient", () => {
         "user",
         "assistant",
       ]);
-      expect(transcript?.at(-1)?.parts).toEqual([
+      expect(transcript?.at(-1)?.parts).toMatchObject([
         { type: "text", text: "Persisted continued reply" },
       ]);
       expect(readParts()).toEqual(storedBeforeClose);
@@ -1553,6 +1644,17 @@ describe("createPersistentUiBackendClient", () => {
         /current project|Session not found/u,
       );
       await restored.dispose();
+      const unread = createPersistentUiBackendClient({
+        dbPath,
+        llmClient: createFakeLLMClient([]),
+        resumeSessionId: otherSessionId ?? undefined,
+        workdir: currentWorkdir,
+      });
+      // Disposal drains startup and must not hide an unobserved failure.
+      await expect(unread.dispose()).resolves.toMatchObject({
+        status: "unconfirmed",
+        errors: [expect.stringMatching(/current project|Session not found/u)],
+      });
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
@@ -1793,26 +1895,31 @@ describe("createPersistentUiBackendClient", () => {
 
   it("fails the first snapshot when the requested startup resume session is missing", async () => {
     const directory = await tempDir("ohbaby-persistent-resume-missing-");
+    let client: PersistentUiBackendClient | undefined;
     try {
       const dbPath = join(directory, "agent.db");
       const workdir = join(directory, "workspace");
-      createPersistentUiBackendClient({
+      client = createPersistentUiBackendClient({
         dbPath,
         llmClient: createFakeLLMClient([]),
         workdir,
       });
+      await client.initialize();
+      await client.dispose();
+      client = undefined;
 
-      const restored = createPersistentUiBackendClient({
+      client = createPersistentUiBackendClient({
         dbPath,
         llmClient: createFakeLLMClient([]),
         resumeSessionId: "missing",
         workdir,
       });
 
-      await expect(restored.getSnapshot()).rejects.toThrow(
+      await expect(client.getSnapshot()).rejects.toThrow(
         "Session not found: missing",
       );
     } finally {
+      await client?.dispose();
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
@@ -1832,6 +1939,7 @@ describe("createPersistentUiBackendClient", () => {
               createProviderSubagentRunEvent({
                 callId: "call_subagent_run",
                 prompt: "Inspect persistent child files",
+                mode: "foreground",
               }),
             ],
             [{ textDelta: "child transcript persisted", finishReason: "stop" }],
@@ -1925,6 +2033,33 @@ describe("createPersistentUiBackendClient", () => {
       const childTranscript = JSON.stringify(childParts);
       expect(childTranscript).toContain("Inspect persistent child files");
       expect(childTranscript).toContain("child transcript persisted");
+      const executions = await client.listSubagentExecutions({
+        rootSessionId: parentSessionId,
+      });
+      expect(executions.executions).toHaveLength(1);
+      const view = await client.getSubagentExecutionView({
+        rootSessionId: parentSessionId,
+        executionId: executions.executions[0].executionId,
+      });
+      expect(view.readOnly).toBe(true);
+      expect(view.output).toBe("child transcript persisted");
+      expect(typeof client.getSubagentConversationView).toBe("function");
+      expect(typeof client.retainSubagentConversation).toBe("function");
+      expect(typeof client.releaseSubagentConversation).toBe("function");
+      const conversation = await restored.getSubagentConversationView({
+        rootSessionId: parentSessionId,
+        subagentId: executions.executions[0].subagentId,
+        anchorExecutionId: executions.executions[0].executionId,
+      });
+      expect(conversation.readOnly).toBe(true);
+      expect(conversation.anchorFound).toBe(true);
+      expect(conversation.messages.map((message) => message.role)).toEqual([
+        "user",
+        "assistant",
+      ]);
+      expect(JSON.stringify(conversation.messages)).toContain(
+        "child transcript persisted",
+      );
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
@@ -2044,8 +2179,154 @@ describe("createPersistentUiBackendClient", () => {
         .all(parentSessionId);
       const parentTranscript = JSON.stringify(parentParts);
       expect(parentTranscript).toContain("subagent_persistent_1");
-      expect(parentTranscript).not.toContain("background child persisted");
+      expect(parentTranscript).toContain("background child persisted");
     } finally {
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("closes unfinished executions of terminal roots on SQLite reopen without replaying completed results", async () => {
+    const directory = await tempDir("ohbaby-execution-recovery-");
+    const dbPath = join(directory, "agent.db");
+    const workdir = join(directory, "workspace");
+    let client: PersistentUiBackendClient | undefined;
+    try {
+      client = createPersistentUiBackendClient({
+        dbPath,
+        workdir,
+        llmClient: createFakeLLMClient([
+          { textDelta: "seed", finishReason: "stop" },
+        ]),
+      });
+      await client.submitPromptAndWait("seed");
+      const sessionId = (await client.getSnapshot()).activeSessionId;
+      if (!sessionId) throw new Error("expected seed session");
+      await client.dispose();
+      client = undefined;
+      const ledger = createDatabaseRunLedger({
+        ownerId: "dead-owner",
+        ownerPid: 2147483647,
+      });
+      await ledger.createPending({
+        runId: "orphan-root",
+        sessionId,
+        triggerSource: "user",
+      });
+      await ledger.markRunning("orphan-root");
+      const store = new DatabaseSubagentExecutionStore();
+      for (const id of ["queued", "running", "completed"]) {
+        const lookup = {
+          executionId: id,
+          parentSessionId: sessionId,
+          requesterScopeId: "primary",
+        };
+        await store.accept({
+          ...lookup,
+          requestId: id,
+          requesterRunId: "orphan-root",
+          rootRunId: "orphan-root",
+          rootSessionId: sessionId,
+          subagentId: id,
+          mode: "background",
+          prompt: "never replay",
+          timeoutMs: 1000,
+          createdAt: 1,
+        });
+        if (id !== "queued") {
+          await store.bindChild(
+            lookup,
+            { sessionId: "child-" + id, contextScopeId: "child" },
+            2,
+          );
+          // The recovery contract validates the full child Run identity.
+          getDatabase()
+            .prepare(
+              `INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) SELECT ?,project_id,project_root,'child','active',1,1,'{}' FROM session WHERE id=?`,
+            )
+            .run("child-" + id, sessionId);
+          await ledger.createPending({
+            runId: "child-run-" + id,
+            sessionId: "child-" + id,
+            contextScopeId: "child",
+            triggerSource: "user",
+          });
+          await ledger.markRunning("child-run-" + id);
+          if (id === "completed") await ledger.markSucceeded("child-run-" + id);
+          await store.start(lookup, "child-run-" + id, 3);
+        }
+        if (id === "completed")
+          await store.finish(lookup, {
+            status: "completed",
+            output: "complete original output",
+            completedAt: 4,
+          });
+      }
+      const completed = await store.getForRoot("completed", sessionId);
+      for (const root of ["live-root", "ended-root"]) {
+        await ledger.createPending({
+          runId: root,
+          sessionId,
+          triggerSource: "user",
+          ownerId: "live-owner",
+          ownerPid: process.pid,
+        });
+        await ledger.markRunning(root);
+        if (root === "ended-root") await ledger.markSucceeded(root);
+        await store.accept({
+          executionId: root,
+          requestId: root,
+          parentSessionId: sessionId,
+          requesterScopeId: "primary",
+          requesterRunId: root,
+          rootRunId: root,
+          rootSessionId: sessionId,
+          subagentId: root,
+          mode: "background",
+          prompt: "never replay",
+          timeoutMs: 1000,
+          createdAt: 1,
+        });
+      }
+      closeDatabase();
+      const llm = createFakeLLMClient([]);
+      const requests = vi.spyOn(llm.provider, "streamResponse");
+      client = createPersistentUiBackendClient({
+        dbPath,
+        workdir,
+        llmClient: llm,
+      });
+      await client.getSnapshot();
+      const reopened = new DatabaseSubagentExecutionStore();
+      for (const id of ["queued", "running"])
+        expect(await reopened.getForRoot(id, sessionId)).toMatchObject({
+          status: "interrupted",
+        });
+      expect(await reopened.getForRoot("completed", sessionId)).toEqual(
+        completed,
+      );
+      expect(await reopened.getForRoot("ended-root", sessionId)).toMatchObject({
+        status: "queued",
+      });
+      expect(await reopened.getForRoot("live-root", sessionId)).toMatchObject({
+        status: "queued",
+      });
+      const recovered = await reopened.listByRootRun("orphan-root");
+      await client.initializeSession(sessionId);
+      expect(await reopened.listByRootRun("orphan-root")).toEqual(recovered);
+      expect(await reopened.listByRootRun("orphan-root")).toHaveLength(3);
+      expect(requests).not.toHaveBeenCalled();
+      expect(
+        getDatabase()
+          .prepare<{
+            count: number;
+          }>(
+            `SELECT COUNT(*) AS count FROM ${schema.currentRunInput.tableName}`,
+          )
+          .get()?.count,
+      ).toBe(0);
+    } finally {
+      await client?.dispose();
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
     }
@@ -2071,7 +2352,11 @@ describe("createPersistentUiBackendClient", () => {
         throw new Error("expected seeded prompt to create an active session");
       }
 
-      const runLedger = createDatabaseRunLedger({ now: () => 42_000 });
+      const runLedger = createDatabaseRunLedger({
+        now: () => 42_000,
+        ownerId: "dead-owner",
+        ownerPid: 2147483647,
+      });
       await runLedger.createPending({
         runId: "run_stale_pending",
         sessionId,
@@ -2107,7 +2392,7 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 
-  it("recovers legacy ownerless runs during startup", async () => {
+  it("preserves online ownerless runs and blocks execution until ownership can be established", async () => {
     const directory = await tempDir("ohbaby-persistent-daemon-recovery-");
     try {
       const dbPath = join(directory, "agent.db");
@@ -2141,11 +2426,11 @@ describe("createPersistentUiBackendClient", () => {
       const snapshot = await restored.getSnapshot();
       const staleRun = requireRun(snapshot.runs, "run_daemon_stale");
 
-      expect(snapshot.status).toEqual({ kind: "idle" });
-      expect(staleRun.status.kind).toBe("error");
-      expect(
-        staleRun.status.kind === "error" ? staleRun.status.message : "",
-      ).toContain("interrupted");
+      expect(staleRun.status.kind).toBe("running");
+      await expect(
+        restored.submitPromptAccepted("must not run", { sessionId }),
+      ).rejects.toThrow(/owner/);
+      expect((await runLedger.get("run_daemon_stale"))?.status).toBe("running");
     } finally {
       closeDatabase();
       await rm(directory, { force: true, recursive: true });
@@ -2394,10 +2679,7 @@ describe("createPersistentUiBackendClient", () => {
 
       expect(earlyResult).toBe("pending");
 
-      await runLedger.markInterrupted({
-        reason: "owner interrupted",
-        statuses: ["running"],
-      });
+      await runLedger.markRunInterrupted("run_owner_active", "user-stop");
       await withTimeout(
         queuedPrompt,
         1_000,
@@ -2432,10 +2714,22 @@ describe("createPersistentUiBackendClient", () => {
         throw new Error("expected seeded prompt to create an active session");
       }
 
+      const exitedOwner = spawn(process.execPath, ["-e", "process.exit(0)"], {
+        stdio: "ignore",
+      });
+      await once(exitedOwner, "exit");
+      if (!exitedOwner.pid) throw new Error("Missing exited fixture owner PID");
+      let observation: unknown;
+      try {
+        process.kill(exitedOwner.pid, 0);
+      } catch (error) {
+        observation = error;
+      }
+      expect(observation).toMatchObject({ code: "ESRCH" });
       const runLedger = createDatabaseRunLedger({
         now: () => 42_000,
         ownerId: "backend_dead_owner",
-        ownerPid: -1,
+        ownerPid: exitedOwner.pid,
       });
       await runLedger.createPending({
         runId: "run_owner_stale",
@@ -2554,4 +2848,77 @@ describe("createPersistentUiBackendClient", () => {
       await rm(directory, { force: true, recursive: true });
     }
   });
+});
+
+it("refreshes a seeded SQLite view only after actual orphan repair and leaves retained work unsent", async () => {
+  const directory = await tempDir("ohbaby-entry-repair-");
+  let client: PersistentUiBackendClient | undefined;
+  try {
+    const workdir = join(directory, "workspace");
+    const llm = createFakeLLMClient([
+      { textDelta: "seed", finishReason: "stop" },
+    ]);
+    const execute = vi.spyOn(llm.provider, "streamResponse");
+    client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      workdir,
+      llmClient: llm,
+    });
+    await client.submitPromptAndWait("seed");
+    const sessionId = (await client.getSnapshot()).activeSessionId;
+    if (!sessionId) throw new Error("Missing session");
+    await client.initializeSession(sessionId);
+    if (!client.getSessionView || !client.getSessionControl)
+      throw new Error("Missing recovery API");
+    const before = await client.getSessionView({ sessionId });
+    const executions = execute.mock.calls.length;
+    const ledger = createDatabaseRunLedger({
+      ownerId: "dead",
+      ownerPid: 2147483647,
+    });
+    await ledger.createPending({
+      runId: "late-orphan",
+      sessionId,
+      triggerSource: "user",
+    });
+    await ledger.markRunning("late-orphan");
+    const { DatabasePromptSubmissionStore } =
+      await import("../runtime/prompt-scheduler/database-store.js");
+    const prompts = new DatabasePromptSubmissionStore({
+      ownerId: "dead",
+      ownerPid: 2147483647,
+    });
+    await prompts.accept({
+      promptId: "late-queued",
+      clientRequestId: "late-queued",
+      scopeKey: workdir,
+      sessionId,
+      text: "do not auto-send",
+      userMessageId: "late-user",
+      maxQueuedPrompts: 100,
+    });
+    await client.initializeSession(sessionId);
+    const repaired = await client.getSessionView({ sessionId });
+    expect(repaired.version.viewGeneration).not.toBe(
+      before.version.viewGeneration,
+    );
+    expect(
+      repaired.runs.find((run) => run.id === "late-orphan")?.status.kind,
+    ).toBe("error");
+    expect(
+      repaired.prompts.find((prompt) => prompt.promptId === "late-queued")
+        ?.status,
+    ).toBe("retained");
+    expect(repaired.executionRecovery).toEqual({ status: "ready" });
+    expect((await client.getSessionControl({ sessionId })).runId).toBeNull();
+    await client.initializeSession(sessionId);
+    expect((await client.getSessionView({ sessionId })).version).toEqual(
+      repaired.version,
+    );
+    expect(execute.mock.calls.length).toBe(executions);
+  } finally {
+    await client?.dispose();
+    closeDatabase();
+    await rm(directory, { force: true, recursive: true });
+  }
 });

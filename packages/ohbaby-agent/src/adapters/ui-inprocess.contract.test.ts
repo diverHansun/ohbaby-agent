@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
+import { hasUnsentSteerAfterLatestStop } from "ohbaby-sdk";
 import type {
   UiBackendClient,
   UiCommandRecord,
@@ -45,6 +46,7 @@ import {
   AgentManager,
   AgentRegistry,
   InMemorySubagentInstanceStore,
+  InMemorySubagentExecutionStore,
 } from "../agents/index.js";
 import type { AgentsConfig, SubagentRole } from "../agents/index.js";
 import { InMemoryGoalPersistence } from "../goals/index.js";
@@ -58,7 +60,10 @@ import {
 } from "../runtime/run-ledger/index.js";
 import { PermissionEvent } from "../permission/index.js";
 import { Project } from "../project/index.js";
-import { InMemoryPromptSubmissionStore } from "../runtime/prompt-scheduler/index.js";
+import {
+  InMemoryPromptSubmissionStore,
+  DatabasePromptSubmissionStore,
+} from "../runtime/prompt-scheduler/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import { createHostLocalSandboxManager } from "./ui-runtime/host-local-environment.js";
 import { reloadLLMConfig } from "../config/index.js";
@@ -224,7 +229,7 @@ function createControlledTitleLLMClient(title: string): {
 
 function isTitleGenerationRequest(request: InterfaceProviderRequest): boolean {
   return JSON.stringify(request.messages).includes(
-    "Generate a concise title for a coding-agent chat session.",
+    "Write a short conversation title that identifies the user's task.",
   );
 }
 
@@ -236,14 +241,7 @@ function titleTextForSessionTitleRequest(
   );
   const content =
     typeof userMessage?.content === "string" ? userMessage.content : "";
-  const marker = "First user message:\n";
-  const markerIndex = content.indexOf(marker);
-  if (markerIndex < 0) {
-    return "Fake session title";
-  }
-  return createTemporarySessionTitle(
-    content.slice(markerIndex + marker.length),
-  );
+  return createTemporarySessionTitle(content);
 }
 
 function createTitleProviderStream(
@@ -1225,7 +1223,7 @@ function subagentRunToolCallEvent(input: {
 }): InterfaceProviderStreamEvent {
   const argumentsPayload: Record<string, unknown> = {
     description: input.description,
-    mode: input.mode,
+    mode: input.mode ?? "foreground",
     name: input.name,
     prompt: input.prompt,
     subagent_id: input.subagentId,
@@ -1640,7 +1638,7 @@ function selectSessionThroughResumeCommand(
   client: UiBackendClient,
   sessionId: string,
   clientInvocationId: string,
-): Promise<void> {
+): ReturnType<UiBackendClient["executeCommand"]> {
   return client.executeCommand({
     argv: ["--session_id", sessionId],
     clientInvocationId,
@@ -1920,6 +1918,13 @@ class RecordingRunLedger implements RunLedger {
     return this.inner.markCancelled(runId, reason);
   }
 
+  markRunInterrupted(
+    ...args: Parameters<RunLedger["markRunInterrupted"]>
+  ): Promise<RunLedgerRecord> {
+    this.calls.push("markRunInterrupted");
+    return this.inner.markRunInterrupted(...args);
+  }
+
   markInterrupted(
     options?: MarkInterruptedOptions,
   ): Promise<MarkInterruptedResult> {
@@ -2000,55 +2005,32 @@ describe("createInProcessUiBackendClient", () => {
 
     await client.submitPromptAndWait("Say hello");
 
-    expect(
-      events
-        .filter((event) => event.type !== "notice.emitted")
-        .map((event) => event.type),
-    ).toEqual([
-      "session.updated",
-      "prompt.submitted",
-      "prompt.updated",
-      "prompt.updated",
-      "session.updated",
-      "message.appended",
-      "runtime.updated",
-      "run.updated",
-      "context.window.updated",
-      "message.appended",
-      "message.part.delta",
-      "message.part.delta",
-      "run.updated",
-      "message.updated",
-      "runtime.updated",
-      "prompt.updated",
-    ]);
-
-    const assistantUpdates = events.filter(
-      (event): event is Extract<UiEvent, { type: "message.updated" }> =>
-        event.type === "message.updated",
+    const changes = events.filter(
+      (event): event is Extract<UiEvent, { type: "session.changed" }> =>
+        event.type === "session.changed",
     );
-
-    expect(assistantUpdates.map((event) => event.message.parts)).toEqual([
-      [{ type: "text", text: "Hello world" }],
-    ]);
-    expect(assistantUpdates.at(-1)?.message).toMatchObject({
-      finishReason: "succeeded",
+    expect(changes.length).toBeGreaterThan(2);
+    expect(changes.map((event) => event.version.sessionRevision)).toEqual(
+      changes.map((_, index) => index + 1),
+    );
+    const assistantUpdates = changes
+      .flatMap((event) => event.messages ?? [])
+      .filter((message) => message.role === "assistant");
+    expect(
+      assistantUpdates.some((message) =>
+        message.parts.some(
+          (part) => part.type === "text" && part.text === "Hello",
+        ),
+      ),
+    ).toBe(true);
+    expect(assistantUpdates.at(-1)).toMatchObject({
       status: "completed",
+      parts: [{ type: "text", text: "Hello world" }],
     });
-    const assistantDeltas = events.filter(
-      (event): event is Extract<UiEvent, { type: "message.part.delta" }> =>
-        event.type === "message.part.delta",
+    expect(new Set(assistantUpdates.map((message) => message.id)).size).toBe(1);
+    expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
+      false,
     );
-
-    expect(
-      assistantDeltas.map((event) => ({
-        content: event.content,
-        delta: event.delta,
-      })),
-    ).toEqual([
-      { content: "Hello", delta: "Hello" },
-      { content: "Hello world", delta: " world" },
-    ]);
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
@@ -2066,7 +2048,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(
       snapshot.sessions[0].messages.map((message) => message.role),
     ).toEqual(["user", "assistant"]);
-    expect(snapshot.sessions[0].messages[1].parts).toEqual([
+    expect(snapshot.sessions[0].messages[1].parts).toMatchObject([
       { type: "text", text: "Hello world" },
     ]);
   });
@@ -2221,7 +2203,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("streams reasoning through UI events without persisting it as message parts", async () => {
+  it("streams cumulative reasoning with stable identity and persists display parts", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-reasoning-db-"));
     const bus = createBus();
 
@@ -2274,40 +2256,37 @@ describe("createInProcessUiBackendClient", () => {
 
       await client.submitPromptAndWait("Show reasoning transiently");
 
-      const reasoningTextDeltas = events.filter(
-        (
-          event,
-        ): event is Extract<UiEvent, { type: "message.reasoning.delta" }> =>
-          event.type === "message.reasoning.delta",
+      const changes = events.filter(
+        (event): event is Extract<UiEvent, { type: "session.changed" }> =>
+          event.type === "session.changed",
       );
+      const reasoning = changes
+        .flatMap((event) => event.messages ?? [])
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "reasoning");
+      expect(reasoning.some((part) => part.text === "Checking")).toBe(true);
       expect(
-        reasoningTextDeltas.map((event) => ({
-          content: event.content,
-          delta: event.delta,
-        })),
-      ).toEqual([
-        { content: "Checking", delta: "Checking" },
-        { content: "Checking context", delta: " context" },
-      ]);
-      expect(
-        events.find(
-          (
-            event,
-          ): event is Extract<UiEvent, { type: "message.reasoning.end" }> =>
-            event.type === "message.reasoning.end",
+        reasoning.some(
+          (part) =>
+            part.text === "Checking context" && part.endReason === "normal",
         ),
-      ).toMatchObject({
-        content: "Checking context",
-        type: "message.reasoning.end",
-      });
-
+      ).toBe(true);
+      expect(new Set(reasoning.map((part) => part.id)).size).toBe(1);
       const snapshot = await client.getSnapshot();
       const assistant = snapshot.sessions[0].messages.find(
         (message) => message.role === "assistant",
       );
-      expect(assistant?.parts).toEqual([
+      expect(assistant?.parts).toMatchObject([
+        { type: "reasoning", text: "Checking context" },
         { type: "text", text: "Visible answer" },
       ]);
+      await vi.waitFor(async () => {
+        expect(
+          (await messageManager.listBySession(snapshot.sessions[0].id))
+            .flatMap((message) => message.parts)
+            .some((part) => part.type === "reasoning"),
+        ).toBe(true);
+      });
 
       const persistedMessages = await messageManager.listBySession(
         snapshot.sessions[0].id,
@@ -2317,7 +2296,7 @@ describe("createInProcessUiBackendClient", () => {
       );
       expect(persistedParts.some(isModelContextPart)).toBe(true);
       expect(persistedParts.some((part) => part.type === "reasoning")).toBe(
-        false,
+        true,
       );
     } finally {
       closeDatabase();
@@ -2418,7 +2397,7 @@ describe("createInProcessUiBackendClient", () => {
           projectDirectory: projectRoot,
         }),
       ).resolves.toMatchObject({ promptCache: "disabled" });
-      expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
+      expect(events.some((event) => event.type === "model.invalidated")).toBe(
         true,
       );
     } finally {
@@ -2857,7 +2836,7 @@ describe("createInProcessUiBackendClient", () => {
     await prompt;
   });
 
-  it("rejects context window usage refresh failures for existing sessions", async () => {
+  it("surfaces context runtime startup failures for existing sessions", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-context-fail-"));
     const initialSnapshot: UiSnapshot = {
       activeSessionId: "session_1",
@@ -2948,6 +2927,9 @@ describe("createInProcessUiBackendClient", () => {
       },
     });
 
+    await client.submitPromptAndWait("Initialize the primary context", {
+      sessionId: "session_child",
+    });
     await expect(
       client.getContextWindowUsage({ sessionId: "session_child" }),
     ).resolves.not.toBeNull();
@@ -2959,6 +2941,137 @@ describe("createInProcessUiBackendClient", () => {
     await expect(
       executeStatusData(client, "session_child", "inv_child_cache_status"),
     ).resolves.toMatchObject({ promptCacheUsage: null });
+  });
+
+  it("recomputes a restored primary session's context on cold query without a model request", async () => {
+    const clientModel = createFakeLLMClient([]);
+    const requests: InterfaceProviderRequest[] = [];
+    const originalStream = clientModel.provider.streamResponse.bind(
+      clientModel.provider,
+    );
+    clientModel.provider.streamResponse = (
+      request,
+    ): ReturnType<typeof originalStream> => {
+      requests.push(request);
+      return originalStream(request);
+    };
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        sessions: [
+          {
+            id: "session_1",
+            title: "Restored",
+            createdAt: "2026-09-01T00:00:00.000Z",
+            updatedAt: "2026-09-01T00:00:00.000Z",
+            messages: [],
+          },
+        ],
+        runs: [],
+        permissions: [],
+        status: { kind: "idle" },
+      },
+      llmClient: clientModel,
+    });
+    try {
+      expect(
+        (await client.getSessionView({ sessionId: "session_1" })).context
+          .status,
+      ).toBe("unavailable");
+      const [first, second] = await Promise.all([
+        client.getContextWindowUsage({ sessionId: "session_1" }),
+        client.getContextWindowUsage({ sessionId: "session_1" }),
+      ]);
+      expect(first).toMatchObject({
+        sessionId: "session_1",
+        modelId: "fake-model",
+      });
+      expect(second).toMatchObject({
+        sessionId: "session_1",
+        modelId: "fake-model",
+        currentTokens: first?.currentTokens,
+      });
+      expect(
+        (await client.getSessionView({ sessionId: "session_1" })).context,
+      ).toEqual({
+        status: "ready",
+        value: second,
+      });
+      expect(requests).toEqual([]);
+      await expect(
+        client.getContextWindowUsage({ sessionId: "missing" }),
+      ).resolves.toBeNull();
+      expect(requests).toEqual([]);
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it("does not replace a newer live context update with an older static query", async () => {
+    const assembling = createDeferred<undefined>();
+    const releaseStatic = createDeferred<undefined>();
+    const createContext = contextModule.createContextManager;
+    let firstAssemble = true;
+    const factory = vi
+      .spyOn(contextModule, "createContextManager")
+      .mockImplementation((options) => {
+        const manager = createContext(options);
+        const assemble = manager.assemble.bind(manager);
+        vi.spyOn(manager, "assemble").mockImplementation(async (...args) => {
+          if (firstAssemble) {
+            firstAssemble = false;
+            assembling.resolve(undefined);
+            await releaseStatic.promise;
+          }
+          return assemble(...args);
+        });
+        return manager;
+      });
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        sessions: [
+          {
+            id: "session_1",
+            title: "Existing",
+            createdAt: "2026-09-01T00:00:00.000Z",
+            updatedAt: "2026-09-01T00:00:00.000Z",
+            messages: [],
+          },
+        ],
+        runs: [],
+        permissions: [],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([
+        { finishReason: "stop", textDelta: "done" },
+      ]),
+    });
+    try {
+      const staticQuery = client.getContextWindowUsage({
+        sessionId: "session_1",
+      });
+      await assembling.promise;
+      await client.submitPromptAndWait("live update", {
+        sessionId: "session_1",
+      });
+      const live = await client.getContextWindowUsage({
+        sessionId: "session_1",
+      });
+      expect(live).not.toBeNull();
+      releaseStatic.resolve(undefined);
+      expect(await staticQuery).toEqual(live);
+      expect(
+        (await client.getSessionView({ sessionId: "session_1" })).context,
+      ).toEqual({
+        status: "ready",
+        value: live,
+      });
+    } finally {
+      releaseStatic.resolve(undefined);
+      await client.dispose();
+      factory.mockRestore();
+    }
   });
 
   it("prepends a runtime system prompt to model requests without storing it in UI history", async () => {
@@ -3291,6 +3404,19 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(manualWindowEvents).toHaveLength(1);
     expect(manualWindowEvents[0]?.usage).toMatchObject(expectedWindowUsage);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "session.changed" && event.context?.status === "ready",
+      ),
+    ).toBe(true);
+    expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
+      false,
+    );
+    expect(
+      (await client.getSessionView({ sessionId: "session_1" })).context,
+    ).toMatchObject({ status: "ready", value: expectedWindowUsage });
+
     await expect(messageManager.listBySession("session_1")).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -3399,6 +3525,15 @@ describe("createInProcessUiBackendClient", () => {
         event.type === "context.window.updated",
     );
     expect(windowEvents).toHaveLength(1);
+    expect(events.some((event) => event.type === "snapshot.replaced")).toBe(
+      false,
+    );
+    expect(
+      events.some(
+        (event) =>
+          event.type === "session.changed" && event.context?.status === "ready",
+      ),
+    ).toBe(true);
 
     await client.executeCommand({
       argv: [],
@@ -3613,8 +3748,10 @@ describe("createInProcessUiBackendClient", () => {
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
-    const parts = snapshot.sessions[0].messages[1].parts;
-    expect(parts[0]).toEqual({
+    const parts = snapshot.sessions[0].messages
+      .filter((message) => message.role === "assistant")
+      .flatMap((message) => message.parts);
+    expect(parts[0]).toMatchObject({
       type: "tool-call",
       call: {
         id: "call_list",
@@ -3630,7 +3767,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(
       parts[1]?.type === "tool-result" ? parts[1].result.output : "",
     ).toContain("builtin.ts");
-    expect(parts[2]).toEqual({ type: "text", text: "Listed." });
+    expect(parts[2]).toMatchObject({ type: "text", text: "Listed." });
   });
 
   it("keeps completed todos visible through the run and hides them at run end", async () => {
@@ -4196,6 +4333,16 @@ describe("createInProcessUiBackendClient", () => {
     expect(childText).not.toContain("AI Events Researcher");
     expect(childText).not.toContain("events-scout");
     expect(requests.filter(isGenericSubagentRequest)).toHaveLength(1);
+    const executions = await client.listSubagentExecutions({
+      rootSessionId: "session_1",
+    });
+    const subagentId = executions.executions[0]?.subagentId;
+    expect(subagentId).toBeDefined();
+    const child = await client.getSubagentConversationView({
+      rootSessionId: "session_1",
+      subagentId,
+    });
+    expect(child.displayName).toBe("events-scout");
 
     const parentToolMessageContent = requests[2]?.messages.at(-1)?.content;
     const parentToolContent =
@@ -4245,7 +4392,9 @@ describe("createInProcessUiBackendClient", () => {
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.sessions).toHaveLength(1);
-    const parts = snapshot.sessions[0].messages.at(-1)?.parts ?? [];
+    const parts = snapshot.sessions[0].messages
+      .filter((message) => message.role === "assistant")
+      .flatMap((message) => message.parts);
     expect(parts).toHaveLength(3);
     expect(parts[0]?.type).toBe("tool-call");
     if (parts[0]?.type !== "tool-call") {
@@ -4264,7 +4413,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(parts[1].result.error).toContain(
       "Subagent not found: subagent_missing_child",
     );
-    expect(parts[2]).toEqual({
+    expect(parts[2]).toMatchObject({
       text: "parent saw invalid resume",
       type: "text",
     });
@@ -4319,7 +4468,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(childText).toContain("Use the configured child inspection rubric.");
   });
 
-  it("controls background subagents without leaking child transcripts into the parent", async () => {
+  it("delivers completed background results without copying child transcripts into the parent", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
       createSubagentId: () => "subagent_1",
@@ -4352,7 +4501,7 @@ describe("createInProcessUiBackendClient", () => {
       sessionId: "session_1",
     });
 
-    expect(requests).toHaveLength(8);
+    expect(requests).toHaveLength(10);
     const childRequests = requests.filter((request) =>
       JSON.stringify(request.messages).includes("Task: explore"),
     );
@@ -4394,6 +4543,7 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(statusToolResultText).toContain("subagent_1");
     expect(statusToolResultText).toContain("child follow-up output");
+    expect(statusToolResultText).toContain("resultStored");
   });
 
   it("closes a running background subagent without aborting the parent run", async () => {
@@ -4420,7 +4570,9 @@ describe("createInProcessUiBackendClient", () => {
       sandboxManager,
     });
 
-    await client.submitPromptAndWait("Open a cancellable background explorer");
+    const running = client.submitPromptAndWait(
+      "Open a cancellable background explorer",
+    );
     const childSignal = await withTimeout(
       childStarted.promise,
       1_000,
@@ -4428,11 +4580,26 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(childSignal?.aborted).toBe(false);
 
-    await client.submitPromptAndWait("Close the background explorer", {
-      sessionId: "session_1",
+    const queued = await client.submitPromptAccepted(
+      "Close the background explorer",
+      { sessionId: "session_1", clientRequestId: "close-background" },
+    );
+    const receipt = await client.steerQueuedPrompt({
+      promptId: queued.promptId,
+      expectedRunId: "run_1",
+      clientRequestId: "steer-close-background",
     });
+    expect(receipt.acceptedTargetRunId).toBe("run_1");
+    await running;
 
     expect(childSignal?.aborted).toBe(true);
+    // close updates the subagent record synchronously and schedules run-ledger
+    // cleanup through onClosed; observe that eventual terminal fact directly.
+    await vi.waitFor(async () => {
+      expect(await runLedger.get("run_2")).toMatchObject({
+        status: "cancelled",
+      });
+    });
     const childRun = await runLedger.get("run_2");
     expect(childRun).toMatchObject({ status: "cancelled" });
     if (!childRun) {
@@ -4544,9 +4711,9 @@ describe("createInProcessUiBackendClient", () => {
     expect(childSignal?.aborted).toBe(true);
     await expect(
       withTimeout(run, 1_000, "parent did not abort"),
-    ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
+    ).resolves.toMatchObject({ prompt: { status: "interrupted" } });
     const childRun = await runLedger.get("run_2");
-    expect(childRun).toMatchObject({ status: "cancelled" });
+    expect(childRun).toMatchObject({ status: "interrupted" });
     expect(childRun?.sessionId).toMatch(/^session_/);
   });
 
@@ -4591,9 +4758,9 @@ describe("createInProcessUiBackendClient", () => {
     expect(childSignal?.aborted).toBe(true);
     await expect(
       withTimeout(run, 1_000, "parent did not abort"),
-    ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
+    ).resolves.toMatchObject({ prompt: { status: "interrupted" } });
     await expect(runLedger.get("run_2")).resolves.toMatchObject({
-      status: "cancelled",
+      status: "interrupted",
     });
     await expect(subagentStore.listByParent("session_1")).resolves.toEqual([
       expect.objectContaining({
@@ -4672,8 +4839,10 @@ describe("createInProcessUiBackendClient", () => {
       const snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
       expect(snapshot.permissions).toEqual([]);
-      const parts = snapshot.sessions[0].messages[1].parts;
-      expect(parts[0]).toEqual({
+      const parts = snapshot.sessions[0].messages
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.parts);
+      expect(parts[0]).toMatchObject({
         type: "tool-call",
         call: {
           id: "call_write_once",
@@ -4691,7 +4860,7 @@ describe("createInProcessUiBackendClient", () => {
       }
       expect(parts[1].result.callId).toBe("call_write_once");
       expect(parts[1].result.output).toContain("Wrote");
-      expect(parts[2]).toEqual({ type: "text", text: "Write complete." });
+      expect(parts[2]).toMatchObject({ type: "text", text: "Write complete." });
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -4747,7 +4916,9 @@ describe("createInProcessUiBackendClient", () => {
       const snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
       expect(snapshot.permissions).toEqual([]);
-      const parts = snapshot.sessions[0].messages[1].parts;
+      const parts = snapshot.sessions[0].messages
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.parts);
       expect(parts[0]).toMatchObject({
         call: {
           id: "call_write_reject",
@@ -4762,7 +4933,7 @@ describe("createInProcessUiBackendClient", () => {
       }
       expect(parts[1].result.callId).toBe("call_write_reject");
       expect(parts[1].result.error).toContain("Tool rejected by user");
-      expect(parts[2]).toEqual({
+      expect(parts[2]).toMatchObject({
         type: "text",
         text: "I could not write it.",
       });
@@ -4824,14 +4995,16 @@ describe("createInProcessUiBackendClient", () => {
       ).toHaveLength(1);
       expect(requests).toHaveLength(3);
       const snapshot = await client.getSnapshot();
-      const parts = snapshot.sessions[0].messages[1].parts;
+      const parts = snapshot.sessions[0].messages
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => message.parts);
       expect(
         parts.filter(
           (part) =>
             part.type === "tool-call" && part.call.status === "completed",
         ),
       ).toHaveLength(2);
-      expect(parts.at(-1)).toEqual({
+      expect(parts.at(-1)).toMatchObject({
         type: "text",
         text: "Both writes complete.",
       });
@@ -4840,7 +5013,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("offers always approval for full-access external write confirmations", async () => {
+  it("performs full-access external writes without interactive approval", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-external-write-"),
@@ -4887,22 +5060,11 @@ describe("createInProcessUiBackendClient", () => {
         workdir: directory,
       });
 
-      const permission = waitForUiEvent(
-        client,
-        (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
-          event.type === "permission.requested",
-      );
-      const run = client.submitPromptAndWait("Write outside the workspace");
-      const permissionEvent = await permission;
-
-      expect(
-        permissionEvent.request.choices.map((choice) => choice.id),
-      ).toEqual(["allow_once", "allow_always", "reject", "cancel"]);
-
-      await client.respondPermission(permissionEvent.request.id, {
-        choiceId: "allow_always",
-      });
-      await run;
+      const approvalEvents: UiEvent[] = [];
+      client.subscribePermissionEvents((event) => approvalEvents.push(event));
+      await client.submitPromptAndWait("Write outside the workspace");
+      expect(approvalEvents).toEqual([]);
+      expect((await client.getSnapshot()).permission?.sessionRules).toEqual([]);
       await expect(readFile(outsidePath, "utf8")).resolves.toBe("external");
       await expect(readFile(secondOutsidePath, "utf8")).resolves.toBe(
         "external-2",
@@ -4913,7 +5075,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("treats permission cancel as aborting the whole run and clearing pending permission", async () => {
+  it("rejects legacy permission cancel without consuming the request; Stop stays separate", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(
       join(process.cwd(), ".tmp-ohbaby-ui-permission-cancel-"),
@@ -4948,12 +5110,22 @@ describe("createInProcessUiBackendClient", () => {
       const run = client.submitPromptAndWait("Cancel this write");
       const permissionEvent = await permission;
 
-      await client.respondPermission(permissionEvent.request.id, {
-        choiceId: "cancel",
-      });
+      await expect(
+        client.respondPermission(permissionEvent.request.id, {
+          choiceId: "cancel",
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_PERMISSION_CHOICE" });
+      expect(
+        (
+          await client.getPermissionSnapshot({
+            rootSessionId: permissionEvent.request.rootSessionId,
+          })
+        ).requests,
+      ).toHaveLength(1);
+      await client.abortRun(permissionEvent.request.runId);
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
-      ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
+      ).resolves.toMatchObject({ prompt: { status: "interrupted" } });
 
       let snapshot = await client.getSnapshot();
       expect(snapshot.permissions).toEqual([]);
@@ -4973,7 +5145,7 @@ describe("createInProcessUiBackendClient", () => {
 
       snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
-      expect(snapshot.sessions[0].messages.at(-1)?.parts).toEqual([
+      expect(snapshot.sessions[0].messages.at(-1)?.parts).toMatchObject([
         { type: "text", text: "Next answer." },
       ]);
     } finally {
@@ -5025,7 +5197,7 @@ describe("createInProcessUiBackendClient", () => {
       await client.abortRun(permissionEvent.request.runId);
       await expect(
         withTimeout(run, 1_000, "run did not abort"),
-      ).resolves.toMatchObject({ prompt: { status: "cancelled" } });
+      ).resolves.toMatchObject({ prompt: { status: "interrupted" } });
       await expect(
         withTimeout(queuedRun, 1_000, "queued run did not continue"),
       ).resolves.toMatchObject({ prompt: { status: "succeeded" } });
@@ -5048,13 +5220,15 @@ describe("createInProcessUiBackendClient", () => {
         ),
       ).toBe(true);
 
-      await client.respondPermission(permissionEvent.request.id, {
-        choiceId: "allow_once",
-      });
+      await expect(
+        client.respondPermission(permissionEvent.request.id, {
+          choiceId: "allow_once",
+        }),
+      ).rejects.toMatchObject({ code: "PERMISSION_NOT_PENDING" });
 
       snapshot = await client.getSnapshot();
       expect(snapshot.status).toEqual({ kind: "idle" });
-      expect(snapshot.sessions[0].messages.at(-1)?.parts).toEqual([
+      expect(snapshot.sessions[0].messages.at(-1)?.parts).toMatchObject([
         { type: "text", text: "After abort." },
       ]);
     } finally {
@@ -5195,7 +5369,9 @@ describe("createInProcessUiBackendClient", () => {
         : "",
     ).toContain("Tool not available for agent: bash");
     const snapshot = await client.getSnapshot();
-    const parts = snapshot.sessions[0].messages[1].parts;
+    const parts = snapshot.sessions[0].messages
+      .filter((message) => message.role === "assistant")
+      .flatMap((message) => message.parts);
     expect(parts[0]).toMatchObject({
       call: {
         id: "call_bash",
@@ -5227,7 +5403,7 @@ describe("createInProcessUiBackendClient", () => {
     ).toEqual(["user", "assistant", "user", "assistant"]);
     expect(
       snapshot.sessions[0].messages.map((message) => message.parts),
-    ).toEqual([
+    ).toMatchObject([
       [{ type: "text", text: "First" }],
       [{ type: "text", text: "First answer" }],
       [{ type: "text", text: "Second" }],
@@ -5540,7 +5716,7 @@ describe("createInProcessUiBackendClient", () => {
     });
   });
 
-  it("publishes a visible notice when async permission projection fails", async () => {
+  it("does not let ordinary bus notifications create authoritative approval state", async () => {
     const bus = createBus();
     const baseStateStore = createInMemoryUiStateStore({
       activeSessionId: null,
@@ -5560,15 +5736,15 @@ describe("createInProcessUiBackendClient", () => {
       llmClient: createFakeLLMClient([]),
       stateStore,
     });
-    const notice = waitForUiEvent(
-      client,
-      (event): event is Extract<UiEvent, { type: "notice.emitted" }> =>
-        event.type === "notice.emitted" && event.notice.level === "error",
-    );
+    const events: UiEvent[] = [];
+    client.subscribePermissionEvents((event) => events.push(event));
 
     expect(() => {
       bus.publish(PermissionEvent.Updated, {
         info: {
+          runId: "run_1",
+          rootSessionId: "session_1",
+          ancestorSessionIds: [],
           callId: "call_permission_projection",
           id: "permission_projection_failure",
           messageId: "message_1",
@@ -5583,17 +5759,11 @@ describe("createInProcessUiBackendClient", () => {
       });
     }).not.toThrow();
 
-    const noticeEvent = await notice;
-    expect(noticeEvent).toMatchObject({
-      notice: {
-        level: "error",
-        title: "Permission update failed",
-      },
-      type: "notice.emitted",
-    });
-    expect(noticeEvent.notice.message).toContain(
-      "Permission event projection failed: permission store unavailable",
-    );
+    expect(events).toEqual([]);
+    expect(
+      (await client.getPermissionSnapshot({ rootSessionId: null })).requests,
+    ).toEqual([]);
+    await client.dispose();
   });
 
   it("activates an existing session when submitting to it", async () => {
@@ -5758,7 +5928,14 @@ describe("createInProcessUiBackendClient", () => {
       snapshot.sessions.flatMap((session) =>
         session.messages.map((message) => message.id),
       ),
-    ).toEqual(["message_2", "message_3", "message_4"]);
+    ).toEqual(["message_2", "message_3", expect.any(String)]);
+    expect(
+      new Set(
+        snapshot.sessions.flatMap((session) =>
+          session.messages.map((message) => message.id),
+        ),
+      ).size,
+    ).toBe(3);
     expect(snapshot.runs.map((run) => run.id)).toEqual(["run_2", "run_3"]);
   });
 
@@ -5822,6 +5999,467 @@ describe("createInProcessUiBackendClient", () => {
         parts: [{ id: "part_3", type: "text", text: "Core" }],
       },
     ]);
+  });
+
+  it.each([false, true])(
+    "keeps a manual rename after provisional CAS through persistent UI and message upserts (rejected=%s)",
+    async (rejectCas) => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "ohbaby-title-projection-"),
+      );
+      initDatabase({ dbPath: join(directory, "test.db") });
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      });
+      const sessionManager = createSessionManager({
+        bus: createBus(),
+        store: createDatabaseSessionStore(),
+        projectResolver: {
+          fromDirectory: (rootPath) => ({ id: "project", rootPath }),
+        },
+        messageCleaner: { removeMessages: () => Promise.resolve() },
+      });
+      await sessionManager.create(directory, {
+        id: "target",
+        title: "New session",
+      });
+      const runLedger = createInMemoryRunLedger();
+      const controlled = createControlledTitleLLMClient("Late generated title");
+      const client = createInProcessUiBackendClient({
+        llmClient: controlled.client,
+        sessionManager,
+        messageManager,
+        runLedger,
+        workdir: directory,
+        stateStore: createPersistentUiStateStore({
+          sessionManager,
+          messageManager,
+          runLedger,
+          projectRoot: directory,
+        }),
+      });
+      const update = sessionManager.update.bind(sessionManager);
+      let crossed = false;
+      vi.spyOn(sessionManager, "update").mockImplementation(
+        async (id, patch, condition) => {
+          if (
+            !crossed &&
+            rejectCas &&
+            condition &&
+            patch.title === "Target task"
+          )
+            await update(id, { title: "Manual before CAS" });
+          const result = await update(id, patch, condition);
+          if (!crossed && condition && patch.title === "Target task") {
+            crossed = true;
+            await update(id, { title: "Manual after CAS" });
+          }
+          return result;
+        },
+      );
+      try {
+        await client.submitPromptAndWait("Target task", {
+          sessionId: "target",
+        });
+        expect(crossed).toBe(true);
+        expect((await sessionManager.get("target"))?.title).toBe(
+          "Manual after CAS",
+        );
+        controlled.releaseTitle();
+        await vi.waitFor(async () => {
+          expect(
+            (await client.getSnapshot()).sessions.find((s) => s.id === "target")
+              ?.title,
+          ).toBe("Manual after CAS");
+        });
+      } finally {
+        controlled.releaseTitle();
+        await client.dispose();
+        closeDatabase();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "names the first actual turn after cancelling its first queued admission (restart=%s)",
+    async (restart) => {
+      const directory = await mkdtemp(join(tmpdir(), "ohbaby-cancel-title-"));
+      const dbPath = join(directory, "test.db");
+      initDatabase({ dbPath });
+      const gate = createDeferred<undefined>();
+      let waiting = 0;
+      const requests: InterfaceProviderRequest[] = [];
+      const base = createFakeLLMClient([
+        { textDelta: "Done", finishReason: "stop" },
+      ]);
+      const llmClient = {
+        ...base,
+        provider: {
+          ...base.provider,
+          streamResponse(
+            request: InterfaceProviderRequest,
+          ): ReturnType<typeof base.provider.streamResponse> {
+            requests.push(request);
+            return base.provider.streamResponse(request);
+          },
+        },
+      };
+      const create = (
+        block: boolean,
+      ): ReturnType<typeof createInProcessUiBackendClient> => {
+        const sessionManager = createSessionManager({
+          bus: createBus(),
+          store: createDatabaseSessionStore(),
+          projectResolver: {
+            fromDirectory: (rootPath) => ({ id: "project", rootPath }),
+          },
+          messageCleaner: { removeMessages: () => Promise.resolve() },
+        });
+        const messageManager = createMessageManager({
+          bus: createBus(),
+          store: createDatabaseMessageStore(),
+        });
+        const runLedger = createInMemoryRunLedger();
+        return createInProcessUiBackendClient({
+          llmClient,
+          sessionManager,
+          messageManager,
+          runLedger,
+          promptSubmissionStore: new DatabasePromptSubmissionStore(),
+          workdir: directory,
+          beforePromptSubmit: async () => {
+            if (block && waiting++ < 10) await gate.promise;
+          },
+          stateStore: createPersistentUiStateStore({
+            sessionManager,
+            messageManager,
+            runLedger,
+            projectRoot: directory,
+          }),
+        });
+      };
+      let client = create(true);
+      try {
+        for (let i = 0; i < 10; i++)
+          await client.submitPromptAccepted("Blocking turn", {
+            sessionId: `block-${String(i)}`,
+          });
+        await vi.waitFor(() => {
+          expect(waiting).toBe(10);
+        });
+        const first = await client.submitPromptAccepted("Cancelled task", {
+          sessionId: "target",
+        });
+        const second = await client.submitPromptAccepted("Real task", {
+          sessionId: "target",
+        });
+        expect(first.status).toBe("queued");
+        expect(second.status).toBe("queued");
+        await client.cancelQueuedPrompt({ promptId: first.promptId });
+        if (restart) {
+          const closing = client.dispose();
+          gate.resolve(undefined);
+          await closing;
+          closeDatabase();
+          initDatabase({ dbPath });
+          client = create(false);
+          await client.getSnapshot();
+          const lease = await client.acquirePromptEditLease({
+            promptId: second.promptId,
+          });
+          await client.resubmitRetainedPrompt({
+            promptId: second.promptId,
+            operationId: "resend",
+            editLeaseId: lease.editLeaseId,
+            text: "Real task",
+          });
+        } else gate.resolve(undefined);
+        await client.waitForPrompt(second.promptId);
+        await vi.waitFor(() => {
+          expect(
+            requests.filter(
+              (r) => r.purpose === "session-title" && r.sessionId === "target",
+            ),
+          ).toHaveLength(1);
+        });
+        expect(
+          (await client.getSnapshot()).sessions.find((s) => s.id === "target")
+            ?.title,
+        ).toBe("Real task");
+      } finally {
+        gate.resolve(undefined);
+        await client.dispose();
+        closeDatabase();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(["unchanged", "edited", "manual"] as const)(
+    "names a persisted retained first prompt after restart: %s",
+    async (scenario) => {
+      const projectRoot = await mkdtemp(
+        join(tmpdir(), "ohbaby-retained-title-"),
+      );
+      const dbPath = join(projectRoot, "fixture.db");
+      const controlled = createControlledTitleLLMClient(
+        "Generated retained title",
+      );
+      const namingSource = { skillName: "review", request: "Original task" };
+      const text = "Long expanded execution instructions ".repeat(100);
+      const manager = (): ReturnType<typeof createSessionManager> =>
+        createSessionManager({
+          bus: createBus(),
+          store: createDatabaseSessionStore(),
+          projectResolver: {
+            fromDirectory: (directory) => ({
+              id: "project",
+              rootPath: directory,
+            }),
+          },
+          messageCleaner: { removeMessages: () => Promise.resolve() },
+        });
+      initDatabase({ dbPath });
+      await manager().create(projectRoot, {
+        id: "retained-session",
+        title: "Original task",
+      });
+      const initialStore = new DatabasePromptSubmissionStore();
+      await initialStore.accept({
+        promptId: "retained-first",
+        clientRequestId: "retained-first",
+        userMessageId: "retained-message",
+        scopeKey: projectRoot,
+        sessionId: "retained-session",
+        text,
+        namingSource,
+        titleExpected: "Original task",
+        maxQueuedPrompts: 100,
+      });
+      await initialStore.retainOwnedQueued();
+      closeDatabase();
+      initDatabase({ dbPath });
+      const sessionManager = manager();
+      if (scenario === "manual")
+        await sessionManager.update("retained-session", {
+          title: "Manual title",
+        });
+      const prompts = new DatabasePromptSubmissionStore();
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      });
+      const runLedger = createInMemoryRunLedger();
+      const client = createInProcessUiBackendClient({
+        llmClient: controlled.client,
+        sessionManager,
+        promptSubmissionStore: prompts,
+        messageManager,
+        runLedger,
+        workdir: projectRoot,
+        stateStore: createPersistentUiStateStore({
+          sessionManager,
+          messageManager,
+          runLedger,
+          projectRoot,
+          initialActiveSessionId: "retained-session",
+        }),
+      });
+      try {
+        await client.getSnapshot();
+        expect(controlled.requests).toHaveLength(0);
+        expect((await prompts.get("retained-first"))?.status).toBe("retained");
+        const lease = await client.acquirePromptEditLease({
+          promptId: "retained-first",
+        });
+        await client.resubmitRetainedPrompt({
+          promptId: "retained-first",
+          operationId: "manual-resend",
+          editLeaseId: lease.editLeaseId,
+          text: scenario === "edited" ? "New task after edit" : text,
+        });
+        await client.waitForPrompt("retained-first");
+        if (scenario === "manual") {
+          expect(
+            controlled.requests.filter(isTitleGenerationRequest),
+          ).toHaveLength(0);
+          expect((await sessionManager.get("retained-session"))?.title).toBe(
+            "Manual title",
+          );
+        } else {
+          await withTimeout(
+            controlled.titleStarted.promise,
+            1000,
+            "Retained title did not start",
+          );
+          expect((await sessionManager.get("retained-session"))?.title).toBe(
+            scenario === "edited" ? "New task after edit" : "Original task",
+          );
+          const titleRequests = controlled.requests.filter(
+            isTitleGenerationRequest,
+          );
+          expect(titleRequests).toHaveLength(1);
+          expect(titleRequests[0]?.messages[1]?.content).toBe(
+            scenario === "edited"
+              ? "New task after edit"
+              : "Skill: review\nRequest: Original task",
+          );
+          const named = waitForUiEvent(
+            client,
+            (event): event is Extract<UiEvent, { type: "session.updated" }> =>
+              event.type === "session.updated" &&
+              event.session.title === "Generated retained title",
+          );
+          controlled.releaseTitle();
+          await named;
+        }
+      } finally {
+        controlled.releaseTitle();
+        await client.dispose();
+        closeDatabase();
+        await rm(projectRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("carries raw skill intent from command acceptance to naming without changing execution", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-title-"));
+    const controlled = createControlledTitleLLMClient("修复会话切换提示");
+    const prompts = new InMemoryPromptSubmissionStore();
+    const client = createInProcessUiBackendClient({
+      llmClient: controlled.client,
+      promptSubmissionStore: prompts,
+      workdir: projectRoot,
+    });
+    try {
+      const skillDir = join(projectRoot, ".ohbaby", "skill", "review-session");
+      await mkdir(skillDir, { recursive: true });
+      const body =
+        "Inspect execution files and internal tool instructions. ".repeat(100);
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        `---\nname: review-session\ndescription: Review sessions\n---\n${body}`,
+      );
+      await client.listCommands({ surface: "web" });
+      const request = "修复切换会话时的恢复横幅";
+      const commandCompletion = await client.executeCommand({
+        argv: [request],
+        clientInvocationId: "skill-title",
+        commandId: "skill.review-session",
+        path: ["review-session"],
+        raw: `/review-session ${request}`,
+        rawArgs: request,
+        surface: "web",
+      });
+      await withTimeout(
+        controlled.titleStarted.promise,
+        1000,
+        "Title did not start",
+      );
+      const snapshot = await client.getSnapshot();
+      expect(snapshot.sessions[0]?.title).toBe(request);
+      const accepted = await prompts.listVisible(projectRoot);
+      expect(accepted[0]?.namingSource).toEqual({
+        skillName: "review-session",
+        request,
+      });
+      expect(accepted[0]?.titleExpected).toBe(request);
+      expect(accepted[0]?.text).toContain(body.trim());
+      expect(accepted[0]?.text).toContain(`User request:\n${request}`);
+      const titleRequests = controlled.requests.filter(
+        isTitleGenerationRequest,
+      );
+      expect(titleRequests).toHaveLength(1);
+      expect(titleRequests[0]?.messages[1]).toMatchObject({
+        role: "user",
+        content: `Skill: review-session\nRequest: ${request}`,
+      });
+      expect(titleRequests[0]?.tools ?? []).toHaveLength(0);
+      if (!commandCompletion.promptReceipt)
+        throw new Error("Missing skill receipt");
+      await client.waitForPrompt(commandCompletion.promptReceipt.promptId);
+      const mainRequests = controlled.requests.filter(
+        (r) => !isTitleGenerationRequest(r),
+      );
+      expect(JSON.stringify(mainRequests)).toContain(body.trim());
+      expect(JSON.stringify(mainRequests)).toContain(request);
+      const named = waitForUiEvent(
+        client,
+        (event): event is Extract<UiEvent, { type: "session.updated" }> =>
+          event.type === "session.updated" &&
+          event.session.title === "修复会话切换提示",
+      );
+      controlled.releaseTitle();
+      await named;
+      const sessionId = snapshot.sessions[0]?.id;
+      if (!sessionId) throw new Error("Expected the admitted session");
+      await client.submitPromptAndWait("Follow up without renaming", {
+        sessionId,
+      });
+      expect(controlled.requests.filter(isTitleGenerationRequest)).toHaveLength(
+        1,
+      );
+      expect((await client.getSnapshot()).sessions[0]?.title).toBe(
+        "修复会话切换提示",
+      );
+    } finally {
+      controlled.releaseTitle();
+      await client.dispose();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a manual title written between automatic naming read and write", async () => {
+    const store = createInMemorySessionStore();
+    const manager = createSessionManager({
+      bus: createBus(),
+      store,
+      createSessionId: () => "session_1",
+      projectResolver: {
+        fromDirectory: (directory: string) => ({
+          id: "title-project",
+          rootPath: directory,
+        }),
+      },
+      messageCleaner: { removeMessages: () => Promise.resolve() },
+    });
+    const controlled = createControlledTitleLLMClient("Late AI title");
+    const client = createInProcessUiBackendClient({
+      llmClient: controlled.client,
+      sessionManager: manager,
+    });
+    await client.submitPromptAndWait("Temporary task");
+    await controlled.titleStarted.promise;
+    const originalGet = manager.get.bind(manager);
+    let crossed = false;
+    const updated = createDeferred<undefined>();
+    vi.spyOn(manager, "get").mockImplementation(async (id) => {
+      const old = await originalGet(id);
+      if (!crossed && old?.title === "Temporary task") {
+        crossed = true;
+        await manager.update(id, { title: "Manual wins" });
+      }
+      return old;
+    });
+    const originalUpdate = manager.update.bind(manager);
+    vi.spyOn(manager, "update").mockImplementation(
+      async (id, patch, condition) => {
+        const result = await originalUpdate(id, patch, condition);
+        if (patch.title === "Late AI title") updated.resolve(undefined);
+        return result;
+      },
+    );
+    controlled.releaseTitle();
+    await withTimeout(
+      updated.promise,
+      1000,
+      "Automatic write was not attempted",
+    );
+    expect(crossed).toBe(true);
+    expect((await originalGet("session_1"))?.title).toBe("Manual wins");
+    await client.dispose();
   });
 
   it("writes a temporary first-message title then applies an async AI title", async () => {
@@ -5888,7 +6526,7 @@ describe("createInProcessUiBackendClient", () => {
       title: "Sessions backend naming",
     });
     expect(titleRequest).toMatchObject({
-      maxTokens: 128,
+      maxTokens: 200,
       model: "fake-model",
       purpose: "session-title",
       sessionId: "session_1",
@@ -6181,7 +6819,7 @@ describe("createInProcessUiBackendClient", () => {
     await expect(completion).rejects.toBe(storageError);
     await expect(
       runLedger.get("run_persistence_failure"),
-    ).resolves.toMatchObject({ status: "cancelled" });
+    ).resolves.toMatchObject({ status: "interrupted" });
     expect(providerSignal?.aborted ?? true).toBe(true);
     await client.dispose();
   });
@@ -6200,7 +6838,7 @@ describe("createInProcessUiBackendClient", () => {
 
     const snapshot = await client.getSnapshot();
     expect(snapshot.status).toEqual({ kind: "idle" });
-    expect(snapshot.sessions[0].messages[1].parts).toEqual([
+    expect(snapshot.sessions[0].messages[1].parts).toMatchObject([
       { type: "text", text: "Still works" },
     ]);
   });
@@ -6267,7 +6905,7 @@ describe("createInProcessUiBackendClient", () => {
         parts: message.parts,
         role: message.role,
       })),
-    ).toEqual([
+    ).toMatchObject([
       { role: "user", parts: [{ type: "text", text: "First" }] },
       { role: "assistant", parts: [{ type: "text", text: "Done 1" }] },
       { role: "user", parts: [{ type: "text", text: "Second" }] },
@@ -6951,7 +7589,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("keeps goal background work running when the next continuation turn starts", async () => {
+  it("keeps goal background work inside the original run until its result is handled", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const childStarted = createDeferred<AbortSignal | undefined>();
     const secondTurnStarted = createDeferred<AbortSignal | undefined>();
@@ -6991,11 +7629,17 @@ describe("createInProcessUiBackendClient", () => {
         1_000,
         "background child did not start in goal turn one",
       );
-      await withTimeout(
-        secondTurnStarted.promise,
-        1_000,
-        "goal continuation turn two did not start",
-      );
+      await vi.waitFor(() => {
+        expect(
+          requests.filter((request) => !isExploreSubagentRequest(request)),
+        ).toHaveLength(2);
+      });
+      let secondTurn = false;
+      void secondTurnStarted.promise.then(() => {
+        secondTurn = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(secondTurn).toBe(false);
 
       await vi.waitUntil(async () => {
         const records = await subagentStore.listByParent(sessionId ?? "");
@@ -7554,7 +8198,7 @@ describe("createInProcessUiBackendClient", () => {
         recorder: { record: (record) => records.push(record) },
       });
 
-      await client.executeCommand({
+      const commandCompletion = await client.executeCommand({
         argv: ["check", "src/app.ts"],
         clientInvocationId: "cmd_skill_1",
         commandId: "skill.code-review",
@@ -7564,6 +8208,9 @@ describe("createInProcessUiBackendClient", () => {
         surface: "tui",
       });
 
+      if (!commandCompletion.promptReceipt)
+        throw new Error("Missing skill receipt");
+      await rawClient.waitForPrompt(commandCompletion.promptReceipt.promptId);
       const promptText = JSON.stringify(requests[0]?.messages);
       expect(promptText).toContain("# Code Review");
       expect(promptText).toContain("Check behavior and tests.");
@@ -7605,10 +8252,12 @@ describe("createInProcessUiBackendClient", () => {
       const answerParts = snapshot.sessions.flatMap((session) =>
         session.messages.flatMap((message) => message.parts),
       );
-      expect(answerParts).toContainEqual({
-        text: "fail-open answer",
-        type: "text",
-      });
+      expect(answerParts).toContainEqual(
+        expect.objectContaining({
+          text: "fail-open answer",
+          type: "text",
+        }),
+      );
     } finally {
       await rawClient.dispose();
     }
@@ -7966,8 +8615,10 @@ describe("createInProcessUiBackendClient", () => {
       ],
     });
     const snapshotEvent = events.find(
-      (event): event is Extract<UiEvent, { type: "snapshot.replaced" }> =>
-        event.type === "snapshot.replaced",
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "session.index.invalidated" }> =>
+        event.type === "session.index.invalidated",
     );
     const selectedEvent = events.find(
       (
@@ -7976,7 +8627,7 @@ describe("createInProcessUiBackendClient", () => {
         event.type === "command.result.delivered" &&
         event.action?.kind === "session.selected",
     );
-    expect(snapshotEvent?.snapshot.activeSessionId).toBe("session_2");
+    expect(snapshotEvent?.selectedSessionId).toBe("session_2");
     expect(selectedEvent?.action).toEqual({
       data: { choiceId: "session_2" },
       kind: "session.selected",
@@ -8035,8 +8686,8 @@ describe("createInProcessUiBackendClient", () => {
     expect(
       events.some(
         (event) =>
-          event.type === "snapshot.replaced" &&
-          event.snapshot.activeSessionId === "session_2",
+          event.type === "session.index.invalidated" &&
+          event.selectedSessionId === "session_2",
       ),
     ).toBe(true);
     const createdEvent = events.find(
@@ -8235,6 +8886,213 @@ describe("createInProcessUiBackendClient", () => {
         { id: "session_empty_current", messages: [] },
       ],
     });
+  });
+
+  it("reports the actual create outcome and keeps explicit creation fresh", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "empty",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "empty",
+            messages: [],
+            projectRoot: process.cwd(),
+            title: "Empty",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      projectDirectory: process.cwd(),
+    });
+
+    await expect(
+      client.createSession({ reuseSessionId: "empty" }),
+    ).resolves.toMatchObject({
+      id: "empty",
+      created: false,
+    });
+    await expect(client.createSession()).resolves.toMatchObject({
+      created: true,
+    });
+  });
+
+  it("does not reuse a core session with a persisted zero-part message", async () => {
+    let nextId = 1;
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => `session_${String(nextId++)}`,
+      messageCleaner: {
+        removeMessages: (id) => messageManager.removeMessages(id),
+      },
+      projectResolver: Project,
+      store: createInMemorySessionStore(),
+    });
+    const existing = await sessionManager.create(process.cwd(), {
+      title: "Empty looking",
+    });
+    await messageManager.createMessage({
+      agent: "test",
+      role: "user",
+      sessionId: existing.id,
+    });
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+      messageManager,
+      projectDirectory: process.cwd(),
+      sessionManager,
+    });
+
+    const created = await client.createSession({ reuseSessionId: existing.id });
+    expect(created).toMatchObject({ created: true, id: "session_2" });
+    await client.executeCommand({
+      argv: [],
+      clientInvocationId: "new_after_zero_part",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new",
+      rawArgs: "",
+      surface: "tui",
+    });
+    expect((await client.getSnapshot()).activeSessionId).toBe("session_2");
+  });
+
+  it("waits for an accepting submit before deciding whether an empty session can be reused", async () => {
+    let nextId = 1;
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const sessionManager = createSessionManager({
+      bus: createBus(),
+      createSessionId: () => `session_${String(nextId++)}`,
+      messageCleaner: {
+        removeMessages: (id) => messageManager.removeMessages(id),
+      },
+      projectResolver: Project,
+      store: createInMemorySessionStore(),
+    });
+    const existing = await sessionManager.create(process.cwd(), {
+      title: "Empty",
+    });
+    const admissionReached = createDeferred<undefined>();
+    const releaseAdmission = createDeferred<undefined>();
+    const promptSubmissionStore = new InMemoryPromptSubmissionStore();
+    const originalAssertCapacity = promptSubmissionStore.assertCapacity.bind(
+      promptSubmissionStore,
+    );
+    promptSubmissionStore.assertCapacity = async (
+      scope,
+      max,
+    ): Promise<void> => {
+      admissionReached.resolve(undefined);
+      await releaseAdmission.promise;
+      return originalAssertCapacity(scope, max);
+    };
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+      messageManager,
+      projectDirectory: process.cwd(),
+      promptSubmissionStore,
+      sessionManager,
+    });
+    const submit = client.submitPromptAccepted("Use empty", {
+      sessionId: existing.id,
+    });
+    await admissionReached.promise;
+    let newSettled = false;
+    const newSession = client
+      .createSession({ reuseSessionId: existing.id })
+      .then((result) => {
+        newSettled = true;
+        return result;
+      });
+    await Promise.resolve();
+    expect(newSettled).toBe(false);
+    releaseAdmission.resolve(undefined);
+    try {
+      await expect(submit).resolves.toMatchObject({ sessionId: existing.id });
+      await expect(newSession).resolves.toMatchObject({
+        created: true,
+        id: "session_2",
+      });
+    } finally {
+      releaseAdmission.resolve(undefined);
+    }
+  });
+
+  it("does not create or reuse when the authoritative prompt read fails", async () => {
+    const promptSubmissionStore = new InMemoryPromptSubmissionStore();
+    promptSubmissionStore.hasForSession = (): Promise<boolean> =>
+      Promise.reject(new Error("prompt storage unavailable"));
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "empty",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "empty",
+            messages: [],
+            projectRoot: process.cwd(),
+            title: "Empty",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      projectDirectory: process.cwd(),
+      promptSubmissionStore,
+    });
+    await expect(
+      client.createSession({ reuseSessionId: "empty" }),
+    ).rejects.toThrow("prompt storage unavailable");
+    await expect(client.getSessionIndex()).resolves.toHaveLength(1);
+  });
+
+  it("honors /new --no-reuse-empty-session with a current empty session", async () => {
+    const client = createInProcessUiBackendClient({
+      initialSnapshot: {
+        activeSessionId: "empty",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "empty",
+            messages: [],
+            projectRoot: process.cwd(),
+            title: "Empty",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createFakeLLMClient([]),
+      projectDirectory: process.cwd(),
+    });
+    await client.executeCommand({
+      argv: ["--no-reuse-empty-session"],
+      clientInvocationId: "force_new",
+      commandId: "new",
+      path: ["new"],
+      raw: "/new --no-reuse-empty-session",
+      rawArgs: "--no-reuse-empty-session",
+      surface: "tui",
+    });
+    const selected = (await client.getSnapshot()).activeSessionId;
+    expect(selected).not.toBe("empty");
+    await expect(client.getSessionIndex()).resolves.toHaveLength(2);
   });
 
   it("does not reuse the active empty UI session when core metadata marks it as a subagent", async () => {
@@ -8513,13 +9371,12 @@ describe("createInProcessUiBackendClient", () => {
       sessions: [{ id: "session_2", title: "Remaining" }],
     });
     const snapshotEvent = events.find(
-      (event): event is Extract<UiEvent, { type: "snapshot.replaced" }> =>
-        event.type === "snapshot.replaced",
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "session.index.invalidated" }> =>
+        event.type === "session.index.invalidated",
     );
-    expect(snapshotEvent?.snapshot).toMatchObject({
-      activeSessionId: "session_2",
-      sessions: [{ id: "session_2" }],
-    });
+    expect(snapshotEvent).toMatchObject({ selectedSessionId: "session_2" });
   });
 
   it("archives the only active persistent session and clears the active session", async () => {
@@ -9387,10 +10244,12 @@ describe("createInProcessUiBackendClient", () => {
       ]),
     );
     const snapshotEvent = events.find(
-      (event): event is Extract<UiEvent, { type: "snapshot.replaced" }> =>
-        event.type === "snapshot.replaced",
+      (
+        event,
+      ): event is Extract<UiEvent, { type: "session.index.invalidated" }> =>
+        event.type === "session.index.invalidated",
     );
-    expect(snapshotEvent?.snapshot.activeSessionId).toBe("session_2");
+    expect(snapshotEvent?.selectedSessionId).toBe("session_2");
   });
 
   it("does not interpret a command run id as a prompt run id", async () => {
@@ -9421,7 +10280,9 @@ describe("createInProcessUiBackendClient", () => {
     });
     await interaction;
 
-    await client.abortRun("command_1");
+    await expect(client.abortRun("command_1")).rejects.toMatchObject({
+      code: "SESSION_SCOPE_CHANGED",
+    });
     expect(events).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -9488,7 +10349,7 @@ describe("createInProcessUiBackendClient", () => {
 
     await expect(
       withTimeout(execution, 250, "command interaction remained pending"),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ status: "completed", outputCount: 0 });
     await expect(resolved).resolves.toMatchObject({
       status: "cancelled",
       type: "interaction.resolved",
@@ -9847,6 +10708,1144 @@ it("preserves unknown session preference while the request uses service default"
       )?.reasoning,
     ).toEqual({ enabled: false, effort: "high" });
   } finally {
+    await client.dispose();
+  }
+});
+
+it("loads approval metadata and a baseline while full history fails", async () => {
+  const stateStore = createInMemoryUiStateStore({
+    activeSessionId: "root",
+    sessions: [
+      {
+        id: "root",
+        title: "Root",
+        createdAt: "2026-09-24",
+        updatedAt: "2026-09-24",
+        messages: [],
+      },
+    ],
+    runs: [],
+    permissions: [],
+    status: { kind: "idle" },
+  });
+  vi.spyOn(stateStore, "readSnapshot").mockRejectedValue(
+    new Error("History unavailable"),
+  );
+  const client = createInProcessUiBackendClient({ stateStore });
+  try {
+    expect(await client.getSessionIndex()).toEqual([
+      expect.objectContaining({ id: "root", title: "Root" }),
+    ]);
+    const approval = await client.getPermissionSnapshot({
+      rootSessionId: "root",
+    });
+    expect(approval).toMatchObject({
+      rootSessionId: "root",
+      permissionRevision: 0,
+      requests: [],
+    });
+    expect(approval.permissionEpoch).toBeTruthy();
+    await expect(client.getSnapshot()).rejects.toThrow("History unavailable");
+    expect(
+      await client.getPermissionSnapshot({ rootSessionId: "root" }),
+    ).toEqual(approval);
+  } finally {
+    await client.dispose();
+  }
+});
+
+it("does not let late lightweight selection replace a newer root", async () => {
+  const snapshot = createInitialSnapshotWithTwoSessions();
+  const stateStore = createInMemoryUiStateStore(snapshot);
+  const originalIndex = stateStore.getSessionIndex.bind(stateStore);
+  const paused = createDeferred<Awaited<ReturnType<typeof originalIndex>>>();
+  let calls = 0;
+  const client = createInProcessUiBackendClient({ stateStore });
+  await client.initialize();
+  await client.initializeSession("session_1");
+  vi.spyOn(stateStore, "getSessionIndex").mockImplementation(() => {
+    calls += 1;
+    return calls === 1 ? paused.promise : originalIndex();
+  });
+  try {
+    const first = client.selectSession("session_1");
+    const rejected = expect(first).rejects.toMatchObject({
+      code: "PERMISSION_SCOPE_CHANGED",
+    });
+    await vi.waitFor(() => {
+      expect(calls).toBe(1);
+    });
+    await client.selectSession("session_2");
+    paused.resolve(await originalIndex());
+    await rejected;
+    expect(await client.getSelectedSessionId()).toBe("session_2");
+  } finally {
+    await client.dispose();
+  }
+});
+
+it("steers an accepted queued message into its active run and releases its waiter", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const directory = await mkdtemp(join(process.cwd(), ".tmp-ohbaby-steer-"));
+  const client = createInProcessUiBackendClient({
+    workdir: directory,
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [
+          writeToolCallEvent({
+            callId: "steer-write",
+            content: "blocked",
+            filePath: "steer.txt",
+          }),
+        ],
+      ],
+      requests,
+    ),
+  });
+  try {
+    const permission = waitForUiEvent(
+      client,
+      (event): event is Extract<UiEvent, { type: "permission.requested" }> =>
+        event.type === "permission.requested",
+    );
+    const first = client.submitPromptAndWait("Begin work");
+    const approval = await permission;
+    const queued = await client.submitPromptAccepted("Change direction", {
+      sessionId: "session_1",
+      clientRequestId: "queued-steer",
+    });
+    const waiting = client.waitForPrompt(queued.promptId);
+    const receipt = await client.steerQueuedPrompt({
+      promptId: queued.promptId,
+      expectedRunId: approval.request.runId,
+      clientRequestId: "steer-once",
+    });
+    expect(receipt.userMessageId).toBe(queued.userMessageId);
+    expect(await waiting).toMatchObject({
+      prompt: { status: "steered", userMessageId: queued.userMessageId },
+    });
+    expect(
+      (await client.getSnapshot()).sessions
+        .find((s) => s.id === "session_1")
+        ?.messages.filter((m) => m.id === queued.userMessageId),
+    ).toHaveLength(1);
+    await client.abortRun(approval.request.runId);
+    await first;
+    expect(requests).toHaveLength(1);
+  } finally {
+    await client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("keeps child sessions read-only for primary prompts, selection and direct cancellation", async () => {
+  const bus = createBus();
+  const messageManager = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+  });
+  const sessionManager = createSessionManager({
+    bus,
+    store: createInMemorySessionStore(),
+    messageCleaner: {
+      removeMessages: (id) => messageManager.removeMessages(id),
+    },
+    projectResolver: Project,
+  });
+  const root = await sessionManager.create(process.cwd(), { title: "Root" });
+  const child = await sessionManager.create(process.cwd(), {
+    title: "Child",
+    parentId: root.id,
+  });
+  const client = createInProcessUiBackendClient({
+    bus,
+    messageManager,
+    sessionManager,
+    llmClient: createFakeLLMClient([]),
+  });
+  await expect(
+    client.submitPromptAccepted("forged child message", {
+      sessionId: child.id,
+    }),
+  ).rejects.toThrow("subagent");
+  await expect(client.selectSession(child.id)).rejects.toThrow();
+  await expect(client.abortRun("child-run")).rejects.toMatchObject({
+    code: "SESSION_SCOPE_CHANGED",
+  });
+  await expect(
+    client.getSessionView({ sessionId: child.id }),
+  ).rejects.toThrow();
+  await client.dispose();
+});
+
+it.each([false, true])(
+  "saves the complete parent tool wave before consuming a child result (with Steer: %s)",
+  async (withSteer) => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-input-wave-"));
+    const childRelease = createDeferred<undefined>();
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const persistedToolStates: { callId: string; status: string }[][] = [];
+    const parentRequests: InterfaceProviderRequest[] = [];
+    const executions = new InMemorySubagentExecutionStore();
+    const permissions: Extract<UiEvent, { type: "permission.requested" }>[] =
+      [];
+    const base = createFakeLLMClient([]);
+    const client = createInProcessUiBackendClient({
+      workdir: directory,
+      bus,
+      messageManager,
+      subagentExecutionStore: executions,
+      llmClient: {
+        ...base,
+        provider: {
+          ...base.provider,
+          async streamResponse(request) {
+            if (isTitleGenerationRequest(request))
+              return createTitleProviderStream(request);
+            if (isExploreSubagentRequest(request)) {
+              await childRelease.promise;
+              return createProviderStream([
+                { textDelta: "WAVE-CHILD-COMPLETE", finishReason: "stop" },
+              ]);
+            }
+            parentRequests.push(request);
+            if (parentRequests.length === 1) {
+              const calls = [
+                subagentRunToolCallEvent({
+                  callId: "wave-child",
+                  mode: "background",
+                  prompt: "Return the wave finding",
+                }),
+                writeToolCallEvent({
+                  callId: "wave-write-a",
+                  filePath: "a.txt",
+                  content: "first saved",
+                }),
+                writeToolCallEvent({
+                  callId: "wave-write-b",
+                  filePath: "b.txt",
+                  content: "second saved",
+                }),
+              ];
+              return createProviderStream([
+                {
+                  toolCallDeltas: calls.flatMap((event, index) =>
+                    (event.toolCallDeltas ?? []).map((call) => ({
+                      ...call,
+                      index,
+                    })),
+                  ),
+                  finishReason: "tool_calls",
+                },
+              ]);
+            }
+            persistedToolStates.push(
+              (await messageManager.listBySession("session_1"))
+                .flatMap((message) => message.parts)
+                .filter((part) => part.type === "tool")
+                .map((part) => ({
+                  callId: part.callId,
+                  status: part.state.status,
+                })),
+            );
+            return createProviderStream([
+              {
+                textDelta: "Parent consumed complete wave",
+                finishReason: "stop",
+              },
+            ]);
+          },
+        },
+      },
+    });
+    client.subscribeEvents((event) => {
+      if (event.type === "permission.requested") permissions.push(event);
+    });
+    try {
+      const run = client
+        .submitPromptAndWait("Delegate and write both files in one wave")
+        .then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        );
+      await vi.waitFor(() => {
+        expect(permissions).toHaveLength(2);
+      });
+      const first = permissions.at(0);
+      const second = permissions.at(1);
+      if (!first || !second) throw new Error("Missing write permissions");
+      childRelease.resolve(undefined);
+      await vi.waitFor(async () => {
+        expect(
+          await executions.list({ rootSessionId: "session_1" }),
+        ).toMatchObject([
+          { status: "completed", output: "WAVE-CHILD-COMPLETE" },
+        ]);
+      });
+      if (withSteer) {
+        const queued = await client.submitPromptAccepted(
+          "WAVE-STEER-KEEP-ALL-RESULTS",
+          {
+            sessionId: "session_1",
+            clientRequestId: "wave-queued",
+          },
+        );
+        const receipt = await client.steerQueuedPrompt({
+          promptId: queued.promptId,
+          expectedRunId: first.request.runId,
+          clientRequestId: "wave-steer",
+        });
+        expect(receipt.userMessageId).toBe(queued.userMessageId);
+      }
+      expect(parentRequests).toHaveLength(1);
+      await client.respondPermission(first.request.id, {
+        choiceId: "allow_once",
+      });
+      await vi.waitFor(async () => {
+        const firstFile =
+          first.request.callId === "wave-write-a" ? "a.txt" : "b.txt";
+        expect(await readFile(join(directory, firstFile), "utf8")).toBe(
+          firstFile === "a.txt" ? "first saved" : "second saved",
+        );
+      });
+      const secondFile =
+        second.request.callId === "wave-write-a" ? "a.txt" : "b.txt";
+      await expect(
+        readFile(join(directory, secondFile), "utf8"),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      // The second tool is still awaiting approval: the result/Steer cannot cut the wave short.
+      expect(parentRequests).toHaveLength(1);
+      await client.respondPermission(second.request.id, {
+        choiceId: "allow_once",
+      });
+      expect(
+        await withTimeout(run, 5000, "parent wave did not finish"),
+      ).toHaveProperty("result");
+      expect(await readFile(join(directory, "a.txt"), "utf8")).toBe(
+        "first saved",
+      );
+      expect(await readFile(join(directory, "b.txt"), "utf8")).toBe(
+        "second saved",
+      );
+      expect(parentRequests).toHaveLength(2);
+      expect(persistedToolStates).toEqual([
+        [
+          { callId: "wave-child", status: "completed" },
+          { callId: "wave-write-a", status: "completed" },
+          { callId: "wave-write-b", status: "completed" },
+        ],
+      ]);
+      const next = parentRequests.at(1);
+      if (!next) throw new Error("Missing continuation request");
+      const toolResults = next.messages.filter(
+        (message) => message.role === "tool",
+      );
+      expect(toolResults.map((message) => message.callId)).toEqual([
+        "wave-child",
+        "wave-write-a",
+        "wave-write-b",
+      ]);
+      const toolCalls = next.messages.flatMap((message) =>
+        message.role === "assistant" ? (message.toolCalls ?? []) : [],
+      );
+      expect(toolCalls.map((call) => call.callId)).toEqual(
+        toolResults.map((message) => message.callId),
+      );
+      expect(JSON.stringify(next.messages)).toContain("WAVE-CHILD-COMPLETE");
+      if (withSteer)
+        expect(JSON.stringify(next.messages)).toContain(
+          "WAVE-STEER-KEEP-ALL-RESULTS",
+        );
+      expect(
+        await executions.list({ rootSessionId: "session_1" }),
+      ).toMatchObject([
+        { status: "completed", delivery: { state: "processed" } },
+      ]);
+    } finally {
+      childRelease.resolve(undefined);
+      await client.dispose();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it.each([false, true])(
+  "preserves the actual one-step child terminal reason through parent notification and readonly UI (requests tools: %s)",
+  async (requestsTools) => {
+    const directory = await mkdtemp(join(tmpdir(), "ohbaby-child-terminal-"));
+    const executions = new InMemorySubagentExecutionStore();
+    const parentRequests: InterfaceProviderRequest[] = [];
+    const childRequests: InterfaceProviderRequest[] = [];
+    const registry = new AgentRegistry({
+      builtinAgents: [
+        {
+          default: true,
+          description: "Primary",
+          mode: "primary",
+          name: "main",
+          tools: { include: ["subagent_run"] },
+        },
+        {
+          description: "Bounded child",
+          maxSteps: 1,
+          mode: "subagent",
+          name: "generic",
+          tools: { include: ["list"] },
+        },
+      ],
+      configLoader: (): AgentsConfig => ({ agents: {} }),
+    });
+    const base = createFakeLLMClient([]);
+    const client = createInProcessUiBackendClient({
+      workdir: directory,
+      agentManager: new AgentManager({ registry }),
+      subagentExecutionStore: executions,
+      llmClient: {
+        ...base,
+        provider: {
+          ...base.provider,
+          streamResponse(request) {
+            if (isTitleGenerationRequest(request))
+              return Promise.resolve(createTitleProviderStream(request));
+            if (isGenericSubagentRequest(request)) {
+              childRequests.push(request);
+              return Promise.resolve(
+                createProviderStream(
+                  requestsTools
+                    ? [
+                        listToolCallEvent({
+                          callId: "beyond-child-budget",
+                          path: directory,
+                        }),
+                      ]
+                    : [
+                        {
+                          textDelta: "BOUNDED-CHILD-FINAL-BODY",
+                          finishReason: "stop",
+                        },
+                      ],
+                ),
+              );
+            }
+            parentRequests.push(request);
+            return Promise.resolve(
+              createProviderStream(
+                parentRequests.length === 1
+                  ? [
+                      subagentRunToolCallEvent({
+                        callId: "bounded-child",
+                        mode: "background",
+                        role: "generic",
+                        prompt: "Finish within one step",
+                      }),
+                    ]
+                  : [
+                      {
+                        textDelta: "Parent handled bounded outcome",
+                        finishReason: "stop",
+                      },
+                    ],
+              ),
+            );
+          },
+        },
+      },
+    });
+    try {
+      await client.submitPromptAndWait("Delegate a bounded background task");
+      expect(childRequests).toHaveLength(1);
+      expect(childRequests[0]?.tools).toEqual([]);
+      expect(JSON.stringify(childRequests[0]?.messages)).toContain(
+        "Maximum lifecycle steps reached",
+      );
+      const records = await executions.list({ rootSessionId: "session_1" });
+      expect(records).toHaveLength(1);
+      const record = records.at(0);
+      if (!record) throw new Error("Missing bounded execution");
+      const reason = requestsTools
+        ? "max_steps_finalization_requested_tool"
+        : "max_steps_finalized";
+      expect(record).toMatchObject({
+        status: requestsTools ? "failed" : "completed",
+        reason,
+        delivery: { state: "processed" },
+      });
+      const notification = parentRequests
+        .flatMap((request) => request.messages)
+        .find(
+          (message) =>
+            message.role === "user" &&
+            JSON.stringify(message.content).includes("Runtime subagent result"),
+        );
+      expect(JSON.stringify(notification?.content)).toContain(
+        `reason: ${reason}`,
+      );
+      if (!requestsTools) {
+        expect(record.output).toBe("BOUNDED-CHILD-FINAL-BODY");
+        expect(JSON.stringify(notification?.content)).toContain(
+          "BOUNDED-CHILD-FINAL-BODY",
+        );
+      }
+      const view = await client.getSubagentExecutionView({
+        rootSessionId: "session_1",
+        executionId: record.executionId,
+      });
+      expect(view.execution.terminalReason).toBe(reason);
+      expect(view.readOnly).toBe(true);
+      expect(
+        view.messages
+          .flatMap((message) => message.parts)
+          .filter((part) => part.type === "tool-result"),
+      ).toEqual([]);
+    } finally {
+      await client.dispose();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it("rejects a late Steer while the actual final provider step is in flight and keeps it queued", async () => {
+  const runLedger = createInMemoryRunLedger();
+  const entered = createDeferred<undefined>();
+  const release = createDeferred<undefined>();
+  const requests: InterfaceProviderRequest[] = [];
+  const base = createFakeLLMClient([]);
+  const client = createInProcessUiBackendClient({
+    runLedger,
+    agentManager: new AgentManager({
+      registry: new AgentRegistry({
+        builtinAgents: [
+          {
+            default: true,
+            description: "One step",
+            mode: "primary",
+            name: "main",
+            maxSteps: 1,
+          },
+        ],
+        configLoader: (): AgentsConfig => ({ agents: {} }),
+      }),
+    }),
+    llmClient: {
+      ...base,
+      provider: {
+        ...base.provider,
+        async streamResponse(request) {
+          if (isTitleGenerationRequest(request))
+            return createTitleProviderStream(request);
+          requests.push(request);
+          if (requests.length === 1) {
+            entered.resolve(undefined);
+            await release.promise;
+          }
+          return createProviderStream([
+            { textDelta: "Done", finishReason: "stop" },
+          ]);
+        },
+      },
+    },
+  });
+  try {
+    const first = client.submitPromptAndWait("Finish in one step");
+    await entered.promise;
+    const [run] = await runLedger.getActiveRuns("session_1");
+    expect(run.steerClosedAt).toEqual(expect.any(Number));
+    const queued = await client.submitPromptAccepted(
+      "Next task remains queued",
+      { sessionId: "session_1", clientRequestId: "late-final-submit" },
+    );
+    await expect(
+      client.steerQueuedPrompt({
+        promptId: queued.promptId,
+        expectedRunId: run.runId,
+        clientRequestId: "late-final-steer",
+      }),
+    ).rejects.toThrow(/final step/i);
+    expect(requests).toHaveLength(1);
+    release.resolve(undefined);
+    await first;
+    const next = await client.waitForPrompt(queued.promptId);
+    expect(next.prompt.status).toBe("succeeded");
+    expect(next.prompt.runId).not.toBe(run.runId);
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[0].messages)).not.toContain(
+      "Next task remains queued",
+    );
+    expect(JSON.stringify(requests[1].messages)).toContain(
+      "Next task remains queued",
+    );
+  } finally {
+    release.resolve(undefined);
+    await client.dispose();
+  }
+});
+
+describe("improve-4 durable Stop handoff", () => {
+  it.each(["entry", "shutdown"] as const)(
+    "blocks B on root terminal write failure and %s repairs without rerunning A",
+    async (repair) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const childStarted = createDeferred<AbortSignal | undefined>();
+      const ledger = createInMemoryRunLedger();
+      const original = ledger.markRunInterrupted.bind(ledger);
+      let writable = false;
+      ledger.markRunInterrupted = (runId, reason, terminal) => {
+        if (runId === "run_1" && !writable)
+          return Promise.reject(new Error("root terminal unavailable"));
+        return original(runId, reason, terminal);
+      };
+      let runNumber = 0;
+      const llm = createAbortableSubagentLLMClient(requests, childStarted);
+      const provider = llm.provider.streamResponse.bind(llm.provider);
+      llm.provider.streamResponse = (request) => {
+        if (requests.length >= 2 && !isTitleGenerationRequest(request)) {
+          requests.push(request);
+          return Promise.resolve(
+            createProviderStream([
+              { textDelta: "B completed", finishReason: "stop" },
+            ]),
+          );
+        }
+        return provider(request);
+      };
+      const client = createInProcessUiBackendClient({
+        runLedger: ledger,
+        createRunId: () => `run_${String(++runNumber)}`,
+        llmClient: llm,
+      });
+      try {
+        const a = await client.submitPromptAccepted("Delegate long work", {
+          clientRequestId: "stop-a",
+        });
+        await withTimeout(childStarted.promise, 1000, "child did not start");
+        const b = await client.submitPromptAccepted("B", {
+          sessionId: a.sessionId,
+          clientRequestId: "stop-b",
+        });
+        const completed = client
+          .waitForPrompt(a.promptId)
+          .catch((error: unknown) => error);
+        await client.abortRun("run_1").catch(() => undefined);
+        const failed = await withTimeout(
+          completed,
+          1000,
+          "Stop must expose persistence failure",
+        );
+        expect(failed).toBeInstanceOf(Error);
+        expect(requests).toHaveLength(2);
+        expect(
+          (await client.getSnapshot()).prompts?.find(
+            (prompt) => prompt.promptId === b.promptId,
+          )?.status,
+        ).toBe("queued");
+        writable = true;
+        if (repair === "shutdown") {
+          expect(await client.dispose()).toEqual({
+            status: "confirmed",
+            errors: [],
+          });
+          expect(await ledger.get("run_1")).toMatchObject({
+            status: "interrupted",
+          });
+          expect(requests).toHaveLength(2);
+          return;
+        }
+        await client.initializeSession(a.sessionId);
+        const result = await withTimeout(
+          client.waitForPrompt(b.promptId),
+          1000,
+          "B did not resume",
+        );
+        expect(result.prompt.status).toBe("succeeded");
+        expect(requests).toHaveLength(3);
+        expect(await ledger.get("run_1")).toMatchObject({
+          status: "interrupted",
+        });
+      } finally {
+        writable = true;
+        await client.dispose().catch(() => undefined);
+      }
+    },
+  );
+});
+
+describe("improve-4 measured handoff", () => {
+  it.each(["normal", "slow-cleanup-stop", "long-history"] as const)(
+    "starts B after durable A during %s",
+    async (scenario) => {
+      const bus = createBus();
+      const messageManager = createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      });
+      if (scenario === "long-history")
+        for (let index = 0; index < 200; index++)
+          await addCoreTextMessage(messageManager, {
+            sessionId: "session_1",
+            role: index % 2 ? "assistant" : "user",
+            text: `Historical entry ${String(index)} ${"context ".repeat(12)}`,
+          });
+      const startedA = createDeferred<undefined>();
+      const releaseA = createDeferred<undefined>();
+      const startedB = createDeferred<number>();
+      const releaseCleanup = createDeferred<undefined>();
+      const cleanupStarted = createDeferred<undefined>();
+      let cleanupFinished = false;
+      const sandbox = createHostLocalSandboxManager(process.cwd());
+      const release = sandbox.release.bind(sandbox);
+      if (scenario === "slow-cleanup-stop")
+        vi.spyOn(sandbox, "release").mockImplementationOnce(async (lease) => {
+          cleanupStarted.resolve(undefined);
+          await releaseCleanup.promise;
+          await release(lease);
+          cleanupFinished = true;
+        });
+      const llm = createFakeLLMClient([]);
+      const titleResponse = llm.provider.streamResponse.bind(llm.provider);
+      let mainRequests = 0;
+      llm.provider.streamResponse = (request) => {
+        if (isTitleGenerationRequest(request)) return titleResponse(request);
+        if (++mainRequests === 1) {
+          startedA.resolve(undefined);
+          if (scenario === "slow-cleanup-stop")
+            return Promise.resolve(
+              createAbortableProviderStream(request.signal),
+            );
+          return Promise.resolve(
+            (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              await releaseA.promise;
+              yield { textDelta: "A complete", finishReason: "stop" };
+            })(),
+          );
+        }
+        startedB.resolve(performance.now());
+        return Promise.resolve(
+          createProviderStream([
+            { textDelta: "B complete", finishReason: "stop" },
+          ]),
+        );
+      };
+      const ledger = createInMemoryRunLedger();
+      const client = createInProcessUiBackendClient({
+        bus,
+        messageManager,
+        sandboxManager: sandbox,
+        llmClient: llm,
+        runLedger: ledger,
+      });
+      try {
+        const a = await client.submitPromptAccepted("A");
+        await withTimeout(startedA.promise, 1000, "A missing");
+        const b = await client.submitPromptAccepted("B", {
+          sessionId: a.sessionId,
+        });
+        const runId = (await client.getSnapshot()).prompts?.find(
+          (prompt) => prompt.promptId === a.promptId,
+        )?.runId;
+        if (!runId) throw new Error("A has no run");
+        const transitionAt = performance.now();
+        if (scenario === "slow-cleanup-stop") await client.abortRun(runId);
+        else releaseA.resolve(undefined);
+        const bAt = await withTimeout(
+          startedB.promise,
+          2000,
+          "B waited for old physical cleanup",
+        );
+        const aDone = await client.waitForPrompt(a.promptId);
+        expect(aDone.prompt.status).toBe(
+          scenario === "slow-cleanup-stop" ? "interrupted" : "succeeded",
+        );
+        expect(await ledger.get(runId)).toMatchObject({
+          status: aDone.prompt.status,
+        });
+        if (scenario === "slow-cleanup-stop") {
+          await cleanupStarted.promise;
+          expect(cleanupFinished).toBe(false);
+        }
+        const bDone = await client.waitForPrompt(b.promptId);
+        expect(bDone.prompt.status).toBe("succeeded");
+        expect(bDone.prompt.runId).not.toBe(runId);
+        expect(mainRequests).toBe(2);
+        const releaseAt = performance.now();
+        releaseCleanup.resolve(undefined);
+        expect(await client.dispose()).toEqual({
+          status: "confirmed",
+          errors: [],
+        });
+        // eslint-disable-next-line no-console -- Acceptance diagnostic; assertions above carry the gate.
+        console.info(
+          "HANDOFF_SAMPLE",
+          JSON.stringify({
+            scenario,
+            historyMessages: scenario === "long-history" ? 200 : 0,
+            handoffMs: Number((bAt - transitionAt).toFixed(2)),
+            oldCleanupHeldUntilMs: Number(
+              (releaseAt - transitionAt).toFixed(2),
+            ),
+            cleanupReleasedAfterB: scenario === "slow-cleanup-stop",
+          }),
+        );
+      } finally {
+        releaseA.resolve(undefined);
+        releaseCleanup.resolve(undefined);
+        await client.dispose();
+      }
+    },
+  );
+});
+
+it("keeps user Stop idle and scopes the unsent Steer notice to the latest stopped run", async () => {
+  const llm = createFakeLLMClient([]);
+  const titleResponse = llm.provider.streamResponse.bind(llm.provider);
+  const starts: string[] = [];
+  llm.provider.streamResponse = (request) => {
+    if (isTitleGenerationRequest(request)) return titleResponse(request);
+    starts.push("request");
+    return Promise.resolve(createAbortableProviderStream(request.signal));
+  };
+  const client = createInProcessUiBackendClient({ llmClient: llm });
+  try {
+    const a = await client.submitPromptAccepted("A");
+    await vi.waitFor(() => {
+      expect(starts).toHaveLength(1);
+    });
+    const steer = await client.submitPromptAccepted("unsent guidance", {
+      sessionId: a.sessionId,
+    });
+    const run = (await client.getSnapshot()).prompts?.find(
+      (prompt) => prompt.promptId === a.promptId,
+    )?.runId;
+    if (!run) throw new Error("Missing A");
+    await client.steerQueuedPrompt({
+      promptId: steer.promptId,
+      expectedRunId: run,
+      clientRequestId: "steer-then-stop",
+    });
+    await client.abortRun(run);
+    expect((await client.waitForPrompt(a.promptId)).prompt.status).toBe(
+      "interrupted",
+    );
+    const snapshot = await client.getSnapshot();
+    expect(snapshot.runs.find((item) => item.id === run)?.status).toEqual({
+      kind: "idle",
+    });
+    expect(hasUnsentSteerAfterLatestStop(snapshot.runs, a.sessionId)).toBe(
+      true,
+    );
+    expect(
+      hasUnsentSteerAfterLatestStop(
+        (await client.getSessionView({ sessionId: a.sessionId })).runs,
+        a.sessionId,
+      ),
+    ).toBe(true);
+    expect(starts).toHaveLength(1);
+    const b = await client.submitPromptAccepted("B", {
+      sessionId: a.sessionId,
+    });
+    await vi.waitFor(() => {
+      expect(starts).toHaveLength(2);
+    });
+    const bRun = (await client.getSnapshot()).prompts?.find(
+      (prompt) => prompt.promptId === b.promptId,
+    )?.runId;
+    if (!bRun) throw new Error("Missing B");
+    await client.abortRun(bRun);
+    await client.waitForPrompt(b.promptId);
+    expect(
+      hasUnsentSteerAfterLatestStop(
+        (await client.getSnapshot()).runs,
+        a.sessionId,
+      ),
+    ).toBe(false);
+    expect(starts).toHaveLength(2);
+  } finally {
+    await client.dispose();
+  }
+});
+
+it.each(["entry", "shutdown"] as const)(
+  "blocks a failed goal finalization and %s repairs its original Run before queued B",
+  async (repair) => {
+    const ledger = createInMemoryRunLedger();
+    const store = new InMemoryPromptSubmissionStore();
+    const original = ledger.markSucceeded.bind(ledger);
+    let writable = false;
+    let finalizationWrites = 0;
+    ledger.markSucceeded = (runId, terminal): Promise<RunLedgerRecord> => {
+      if (runId === "goal_run_1") {
+        finalizationWrites++;
+        if (!writable)
+          return Promise.reject(new Error("goal terminal unavailable"));
+      }
+      return original(runId, terminal);
+    };
+    let runNumber = 0;
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createInProcessUiBackendClient({
+      runLedger: ledger,
+      promptSubmissionStore: store,
+      createRunId: () => `goal_run_${String(++runNumber)}`,
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [{ textDelta: "Goal turn settled", finishReason: "stop" }],
+          [{ textDelta: "B settled", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+    try {
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "goal-recovery-new",
+        commandId: "new",
+        path: ["new"],
+        raw: "/new",
+        rawArgs: "",
+        surface: "tui",
+      });
+      await client.executeCommand({
+        argv: ["recover", "goal"],
+        clientInvocationId: "goal-recovery-start",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal recover goal",
+        rawArgs: "recover goal",
+        surface: "tui",
+      });
+      await vi.waitFor(() => {
+        expect(finalizationWrites).toBe(1);
+      });
+      await vi.waitFor(async () => {
+        expect(
+          (await client.getSessionControl({ sessionId: "session_1" }))
+            .executionRecovery,
+        ).toMatchObject({ status: "blocked" });
+      });
+      // An already admitted B must stay queued while the goal owner's save is unresolved.
+      const b = (
+        await store.accept({
+          promptId: "goal-recovery-b",
+          clientRequestId: "goal-recovery-b",
+          scopeKey: process.cwd(),
+          sessionId: "session_1",
+          text: "B",
+          userMessageId: "goal-recovery-b-message",
+          maxQueuedPrompts: 100,
+        })
+      ).record;
+      await expect(client.initializeSession("session_1")).rejects.toThrow(
+        "goal terminal unavailable",
+      );
+      const failedWrites = finalizationWrites;
+      await client.getSnapshot();
+      await client.getSessionControl({ sessionId: "session_1" });
+      await client.getSessionView({ sessionId: "session_1" });
+      expect(finalizationWrites).toBe(failedWrites);
+      expect(await store.get(b.promptId)).toMatchObject({ status: "queued" });
+      expect(requests).toHaveLength(1);
+      writable = true;
+      if (repair === "shutdown") {
+        expect(await client.dispose()).toEqual({
+          status: "confirmed",
+          errors: [],
+        });
+        expect(await ledger.get("goal_run_1")).toMatchObject({
+          status: "succeeded",
+        });
+        expect(await store.get(b.promptId)).toMatchObject({
+          status: "retained",
+        });
+        expect(finalizationWrites).toBe(failedWrites + 1);
+        expect(requests).toHaveLength(1);
+        return;
+      }
+      await Promise.all([
+        client.initializeSession("session_1"),
+        client.initializeSession("session_1"),
+      ]);
+      const done = await withTimeout(
+        client.waitForPrompt(b.promptId),
+        2000,
+        "B did not start after goal finalization repair",
+      );
+      expect(done.prompt).toMatchObject({
+        status: "succeeded",
+        runId: "goal_run_2",
+      });
+      expect(await ledger.get("goal_run_1")).toMatchObject({
+        status: "succeeded",
+      });
+      expect(finalizationWrites).toBe(failedWrites + 1);
+      expect(requests).toHaveLength(2);
+      expect(
+        (await client.getSessionControl({ sessionId: "session_1" }))
+          .executionRecovery,
+      ).toEqual({ status: "ready" });
+    } finally {
+      writable = true;
+      await client.dispose();
+    }
+  },
+);
+
+it("keeps healthy entry generation and revision stable while checking every entry", async () => {
+  const recover = vi.fn((): Promise<void> => Promise.resolve());
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: createInitialSnapshotWithTwoSessions(),
+    recoverExecutionSession: recover,
+  });
+  const events: UiEvent[] = [];
+  const unsubscribe = client.subscribeEvents((event) => events.push(event));
+  try {
+    await client.initializeSession("session_1");
+    const first = await client.getSessionView({ sessionId: "session_1" });
+    const checks = recover.mock.calls.length;
+    await client.initializeSession("session_2");
+    await client.initializeSession("session_1");
+    await client.initializeSession("session_1");
+    expect(recover.mock.calls.length).toBe(checks + 3);
+    expect(
+      (await client.getSessionView({ sessionId: "session_1" })).version,
+    ).toEqual(first.version);
+    expect(
+      events.filter((event) => event.type === "session.unavailable"),
+    ).toHaveLength(0);
+  } finally {
+    unsubscribe();
+    await client.dispose();
+  }
+});
+
+it("joins first reads to explicit initialization and preserves readable blocked history", async () => {
+  const gate = createDeferred<undefined>();
+  const entered = createDeferred<undefined>();
+  const recover = vi.fn(async (sessionId: string) => {
+    if (sessionId !== "session_2") return;
+    entered.resolve(undefined);
+    await gate.promise;
+    throw new Error("original recovery failure");
+  });
+  const messageManager = createMessageManager({
+    bus: createBus(),
+    store: createInMemoryMessageStore(),
+  });
+  await addCoreTextMessage(messageManager, {
+    sessionId: "session_2",
+    role: "user",
+    text: "saved history",
+  });
+  const goalPersistence = new InMemoryGoalPersistence();
+  const goalReads = vi.spyOn(goalPersistence, "list");
+  const client = createInProcessUiBackendClient({
+    goalPersistence,
+    messageManager,
+    initialSnapshot: createInitialSnapshotWithTwoSessions(),
+    recoverExecutionSession: recover,
+  });
+  try {
+    await client.initializeSession("session_1");
+    const entry = client.initializeSession("session_2");
+    const failure = expect(entry).rejects.toThrow("original recovery failure");
+    await entered.promise;
+    let settled = false;
+    const read = client
+      .getSessionView({ sessionId: "session_2" })
+      .finally(() => {
+        settled = true;
+      });
+    void read.catch(() => undefined);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    gate.resolve(undefined);
+    await failure;
+    const blocked = await read;
+    expect(blocked.session.id).toBe("session_2");
+    expect(blocked.session.messages[0]?.parts).toContainEqual(
+      expect.objectContaining({ type: "text", text: "saved history" }),
+    );
+    expect(blocked.executionRecovery).toMatchObject({
+      status: "blocked",
+      message: "original recovery failure",
+    });
+    expect(
+      (await client.getSessionControl({ sessionId: "session_2" }))
+        .executionRecovery,
+    ).toMatchObject({
+      status: "blocked",
+      message: "original recovery failure",
+    });
+    expect(
+      goalReads.mock.calls.some(([sessionId]) => sessionId === "session_2"),
+    ).toBe(false);
+    const checks = recover.mock.calls.length;
+    await client.getSessionView({ sessionId: "session_2" });
+    expect(recover.mock.calls.length).toBe(checks);
+    await client.initializeSession("session_1");
+  } finally {
+    gate.resolve(undefined);
+    await client.dispose();
+  }
+});
+
+it("coalesces cold entry while first view and control reads wait outside the owner queue", async () => {
+  const gate = createDeferred<undefined>();
+  const entered = createDeferred<undefined>();
+  const recover = vi.fn(async () => {
+    entered.resolve(undefined);
+    await gate.promise;
+  });
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: {
+      ...createInitialSnapshotWithTwoSessions(),
+      activeSessionId: null,
+    },
+    recoverExecutionSession: recover,
+  });
+  const events: UiEvent[] = [];
+  const unsubscribe = client.subscribeEvents((event) => events.push(event));
+  try {
+    const one = client.initializeSession("session_2");
+    const two = client.initializeSession("session_2");
+    await entered.promise;
+    let settled = 0;
+    const view = client
+      .getSessionView({ sessionId: "session_2" })
+      .then((value) => {
+        settled++;
+        return value;
+      });
+    const control = client
+      .getSessionControl({ sessionId: "session_2" })
+      .then((value) => {
+        settled++;
+        return value;
+      });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(0);
+    gate.resolve(undefined);
+    await withTimeout(
+      Promise.all([one, two, view, control]),
+      1000,
+      "Entry and reads deadlocked",
+    );
+    expect(recover).toHaveBeenCalledTimes(1);
+    expect(await control).toMatchObject({
+      sessionId: "session_2",
+      executionRecovery: { status: "ready" },
+    });
+    expect((await view).version).toEqual(
+      (await client.getSessionView({ sessionId: "session_2" })).version,
+    );
+    expect(
+      events.filter((event) => event.type === "session.unavailable"),
+    ).toEqual([]);
+  } finally {
+    gate.resolve(undefined);
+    unsubscribe();
     await client.dispose();
   }
 });

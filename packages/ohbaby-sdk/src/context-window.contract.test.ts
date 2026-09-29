@@ -94,6 +94,36 @@ describe("context window UI contract", () => {
     };
 
     const core = {
+      getSessionIndex(): ReturnType<CoreAPI["getSessionIndex"]> {
+        return Promise.resolve([]);
+      },
+      getSelectedSessionId(): ReturnType<CoreAPI["getSelectedSessionId"]> {
+        return Promise.resolve(null);
+      },
+      getPermissionSnapshot(): ReturnType<CoreAPI["getPermissionSnapshot"]> {
+        return Promise.resolve({
+          permissionEpoch: "test",
+          rootSessionId: null,
+          permissionRevision: 0,
+          requests: [],
+        });
+      },
+      subscribePermissionEvents(): ReturnType<
+        CoreAPI["subscribePermissionEvents"]
+      > {
+        return (): void => undefined;
+      },
+      createSession(): ReturnType<CoreAPI["createSession"]> {
+        return Promise.resolve({
+          id: "session_1",
+          title: "Test",
+          createdAt: "2026-09-24",
+          updatedAt: "2026-09-24",
+        });
+      },
+      selectSession(): ReturnType<CoreAPI["selectSession"]> {
+        return Promise.resolve();
+      },
       acquirePromptEditLease(): ReturnType<CoreAPI["acquirePromptEditLease"]> {
         return Promise.reject(new Error("No queued prompt"));
       },
@@ -125,6 +155,9 @@ describe("context window UI contract", () => {
       },
       archiveSession(): ReturnType<CoreAPI["archiveSession"]> {
         return Promise.resolve();
+      },
+      steerQueuedPrompt(): ReturnType<CoreAPI["steerQueuedPrompt"]> {
+        return Promise.reject(new Error("unused"));
       },
       cancelQueuedPrompt(): ReturnType<CoreAPI["cancelQueuedPrompt"]> {
         return Promise.reject(new Error("No queued prompt"));
@@ -160,7 +193,16 @@ describe("context window UI contract", () => {
         } as const);
       },
       executeCommand(): ReturnType<CoreAPI["executeCommand"]> {
-        return Promise.resolve();
+        return Promise.resolve({
+          status: "completed" as const,
+          commandRunId: "command_1",
+          clientInvocationId: "invoke_1",
+          outputCount: 0,
+          eventCount: 0,
+        });
+      },
+      resubmitRetainedPrompt(): Promise<never> {
+        return Promise.reject(new Error("Unused retained resubmission stub"));
       },
       editQueuedPrompt(): ReturnType<CoreAPI["editQueuedPrompt"]> {
         return Promise.reject(new Error("No queued prompt"));

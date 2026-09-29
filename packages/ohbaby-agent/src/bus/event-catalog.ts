@@ -332,6 +332,17 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
       "Internal projection telemetry; contextScopeId is omitted only for primary.",
   },
   {
+    event: ToolSchedulerEvent.DeliveryFailed,
+    owner: "ToolScheduler",
+    scope: "run",
+    audience: ["domain", "tests"],
+    frequency: "low",
+    requiredContext: ["sessionId", "messageId", "callId", "timestamp"],
+    contextStatus: "complete",
+    uiVisible: "no",
+    decision: "Routes durable delivery failures to the owning lifecycle run.",
+  },
+  {
     event: ToolSchedulerEvent.StatusChanged,
     owner: "ToolScheduler",
     scope: "run",

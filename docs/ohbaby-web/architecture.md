@@ -16,8 +16,8 @@ web 端由 SDK client、浏览器 façade、store 与 UI 四个角色组成。�
   - `events` —— SSE over fetch-stream，含 `Last-Event-ID` 续传与 `resync-required` 处理。
   - `eventReducer` —— 纯函数 `(event, state) → state`：把 `UiEvent` 投影为 ViewState（含轻量 `CommandNotice`）。
   - `BrowserDaemonClient` —— 唯一浏览器 backend client，直接实现 SDK `UiBackendClient`；一个活动 workspace 只拥有一个实例和一条逻辑 SSE。
-  - `OhbabyWebRuntime` —— 浏览器应用 façade，只编排 workspace、导航、client 生命周期、session 选择和 slash 文本解析；它不复制整套 backend 方法。
-- **状态层 `store/`**：持有投影后的 ViewState 与 ConnectionState，喂给 React（`useSyncExternalStore`）。
+- **应用 façade `src/runtime.ts`**：`BrowserOhbabyWebRuntime` 实现 `OhbabyWebRuntime`，编排 workspace、导航、client 生命周期、session 选择和 slash 文本解析；它是既有 façade 的独立落点，不复制整套 backend 方法。`api/daemon/client.ts` 不反向依赖 runtime。
+- **状态层 `store/`**：持有投影后的 ViewState、ConnectionState 与独立 PermissionSyncState，喂给 React（`useSyncExternalStore`）。
 - **视图层 `ui/`**：会话流、输入框、权限弹窗、状态条等组件。
 
 纯逻辑（`wire` / `events` / `eventReducer`）**不 import React**，可无头单测（落 G2）。
@@ -27,7 +27,7 @@ web 端由 SDK client、浏览器 façade、store 与 UI 四个角色组成。�
 ## 2. Design Pattern & Rationale（设计模式与理由）
 
 - **单向数据流（Flux 式）**：用户命令经 `http` 出站；会话真相只经 SSE 事件 → `eventReducer` → store → view 回来。**不对会话真相做乐观本地改写**（落 G1）。
-  - 理由：daemon 是唯一事实源。乐观更新会引入"本地态 vs 真相"分叉，而 resync 时要丢弃本地态重建——单向流让 resync 退化为"清空 ViewState + 重拉 snapshot"，最简单可靠。
+  - 理由：daemon 是唯一事实源。乐观更新会引入"本地态 vs 真相"分叉，而 resync 时要丢弃本地态重建——单向流让 普通事件 resync 退化为"清空 ViewState + 重拉 snapshot"；审批使用独立 snapshot 与 revision 恢复，最简单可靠。
 - **端口适配器 `BrowserDaemonClient`**：把 `http` + `events` + `eventReducer` 适配为 SDK `UiBackendClient`。UI 的业务调用走 `runtime.client`，浏览器编排走 `OhbabyWebRuntime`；二者不是两套 client。
 - **应用 façade `OhbabyWebRuntime`**：负责选择/切换 workspace，并保证旧 client 失效后才启用新 client。无活动 workspace 时 `client` 明确为 `null`，不靠 getter 抛错伪装可用。
 - **Reducer 模式 `eventReducer`**：纯 `(event, state) → state`，框架无关，是最易出错逻辑（流式累积、顺序、resync）的可单测内核。
@@ -37,29 +37,41 @@ web 端由 SDK client、浏览器 façade、store 与 UI 四个角色组成。�
 
 ## 3. Module Structure & File Layout（模块结构与文件组织）
 
-```
+```text
 apps/ohbaby-web/
-  index.html            ← daemon 注入 window.__OHBABY__ 的位点（依赖 S-C）
+  index.html
   vite.config.ts
-  package.json          ← private: true，包名 ohbaby-web
+  package.json
   src/
-    bootstrap.ts        读注入 → 建 client → 挂载 React
-    main.tsx            React 根
+    bootstrap.ts        读注入 → 创建 runtime → 挂载 React；导入唯一 styles.css 入口
+    runtime.ts          浏览器 façade、workspace/导航与 client 生命周期
     api/daemon/
-      wire.ts           /v1 私有线类型（SDK DTO + transport wrapper）
+      wire.ts           /v1 线类型与现有浏览器投影类型
       http.ts           REST 命令封装
       events.ts         SSE over fetch-stream + Last-Event-ID/resync
       eventReducer.ts   UiEvent → ViewState（纯函数）
-      client.ts         BrowserDaemonClient + OhbabyWebRuntime façade
+      client.ts         BrowserDaemonClient，实现 SDK UiBackendClient
+      navigation-state.ts  导航持久化 helper，由 runtime 消费
     store/
-      store.ts          外部 store：subscribe/getSnapshot（喂 useSyncExternalStore）
+      store.ts          现有同步投影及 subscribe/getSnapshot
     ui/
-      ConversationStream.tsx   会话/消息流（流式渲染 + markdown 消毒 + 工具卡片）
-      Composer.tsx             输入框 + 发/中断 + mode(auto/plan) + 权限策略(default/full-access)
-      PermissionModal.tsx      权限模态（slide-up，队列驱动）
-      StatusBar.tsx            连接态 / run 状态 / 上下文用量（无诊断行）
-      CommandNotice.tsx         slash 命令结果/错误的轻量投影（非完整命令面板）
+      App.tsx           根挂载、空 workspace 与 SessionScreen 切换
+      workspace/        ProjectRail、directory-picker/DirectoryPickerDialog
+      session/          SessionScreen、SessionSidebar、SessionStatus、selectors、Stop/同步提示 hook
+      conversation/     ConversationStream、MessageRow、tool-card、TodoDock、滚动与执行计时
+      composer/         Composer、draft-storage、ReasoningControl、IME/textarea/placeholder
+      commands/         slashCommands、SlashPalette、结果 modal、connect/compact/goal overlay
+      permissions/      PermissionModal、PermissionPolicyControl（含 full-access 确认）
+      shared/           MarkdownBlock、ContextUsage
+      styles/           全局基础、布局及跨功能覆盖块
+      styles.css        固定顺序导入 14 个连续样式块；功能样式随功能目录放置
 ```
+
+根入口不再承载各功能实现。`SessionScreen` 订阅既有 store、计算提交投影并组合各功能；叶组件接收具体数据和 `Pick<UiBackendClient, ...>`/回调能力，不接收整个 runtime 或 ViewModel。Composer 独占草稿、队列编辑租约生命周期、slash 选中态及键盘链；commands 提供纯规则、候选展示和表单，permissions 提供策略控件。SessionScreen 将 `conversation/TodoDock` 通过 `topContent`、权限控件通过 `permissionControl` 传给 Composer；TodoDock 仍在 Composer section 顶部、消息滚动容器之外。
+
+依赖方向为 `bootstrap → runtime → api/daemon/client`、`App → workspace/session`、`session → conversation/composer/commands/permissions/shared`。Composer 只单向使用 commands 的 slash 规则与 SlashPalette；shared 不反向依赖功能层。样式入口按原级联顺序保留，不能按目录重新排序。
+
+本次结构落地对应 [Web improve-3](./improve-3/README.md)；跨包 New session 行为与最终验收归 [中央 improve-2.1](../problem-lists/2026-09-19-execution-reliability/improve-2.1/README.md)，验收编号不在本文重复定义。
 
 - **对外稳定面**：SDK `UiBackendClient` + `OhbabyWebRuntime` façade + store hooks。
 - **内部实现**：`wire` / `http` / `events` / `eventReducer` —— 可在不动 UI 的前提下替换。
@@ -79,6 +91,27 @@ apps/ohbaby-web/
 
 ### 单一事件数据流
 
-`FetchDaemonEventStream` 只负责一个物理 fetch-stream 的连接、重连和 frame 解析。有效 `ui.event` 进入 `BrowserDaemonClient.dispatchUiEvent` 后，先由 store 做 sequence 校验和投影，再通知所有 SDK subscriber；重复、过期或无效序号不会通知 subscriber。subscriber 或 store listener 抛错均被隔离。首屏和 resync 以本地 `snapshot.replaced` barrier 进入同一分发点，只有实际应用成功后才推进 `Last-Event-ID`。
+`FetchDaemonEventStream` 只负责一个物理 fetch-stream 的连接、重连和 frame 解析。普通有效 `ui.event` 进入 `BrowserDaemonClient.dispatchUiEvent` 后，先由 store 做 sequence 校验和投影，再通知所有 SDK subscriber；重复、过期或无效序号不会通知 subscriber。subscriber 或 store listener 抛错均被隔离。首屏和 resync 以本地 `snapshot.replaced` barrier 进入同一分发点，只有实际应用成功后才推进 `Last-Event-ID`。
 
 > 以上取舍都为后续维护者标注"为什么不能随意改"：尤其单向流 + 非乐观更新是 resync 正确性的结构前提，改动需回到本文与 dfd 重新评估。
+
+### 只读子会话
+
+子代理入口位于主会话中的委派行，不另设顶部 Subagents 栏。根会话继续持有自己的消息和输入状态；选中的子会话通过 SDK conversation reader 读取有界历史窗口并订阅增量，复用浏览器已有的逻辑 SSE。轻量 execution 列表仍用于根委派行状态刷新，不承担子会话正文的实时同步。
+
+阅读对象是当前根下的逻辑子代理，不能仅用可能复用的物理 child session ID 区分。再次委派打开同一连续子会话；execution 只负责把入口定位到该次父消息。子流保留服务端的委派顺序，根流维持原有排序。历史窗口与实时尾部有间隔时明确显示更多历史，不把最新内容直接拼到旧窗口。
+
+浮层和放大页使用同一 reader、同一消息 DOM，只切换布局。根会话拥有按逻辑子代理保存的小型阅读缓存，记录阅读位置和工具展开；关闭浮层不会丢弃，切换根会话或 client 后重建。缓存只保存展示状态，明确点击委派时仍以该次父消息锚点优先，不能被自动滚底覆盖。
+
+子会话只提供阅读、定位和导航。浮层保留根 Composer 的形状、DOM 与草稿，但隐藏并阻断输入操作；放大页隐藏根阅读区和 Composer，关闭后恢复。Send、Steer、Stop 和审批均在根会话操作，子会话不复制写入口或审批同步状态。
+
+### 独立审批数据流
+
+审批事件在普通 seq 检查之前分流给 SDK `createPermissionSync`，不进入普通 replay 或 ViewState reducer。连接先安装订阅，再由 `hello` 确认 epoch、root 和 bindingGeneration；独立 `GET /v1/permissions` 提供基线。共享引擎负责有界查询、增量缓冲、gap 恢复和旧 generation 隔离，Web store 只保存其输出。全量 snapshot 慢或失败不阻塞审批恢复；消息的连接态 `live` 也不能使未完成基线同步的审批按钮可用。
+
+记忆会话恢复使用轻量 session index，不等待历史或 model 查询。恢复期间的旧快照不能覆盖记忆目标；显式 startup resume/fresh、后续手动选择及 new/resume 命令优先。metadata 暂时失败保留记忆偏好和现有连接，只有确认不存在或属于 child 时才跳过目标。导航持久化优先采用当前 transport binding；历史查询期间绑定改变则重新读取当前视图，避免迟到历史覆盖新选择。
+
+
+### 委派摘要与子会话名称（2026-09-29）
+
+主流委派行以本次 call 的 description、name、prompt 首行为摘要。只读子会话面板使用后端 `UiSubagentConversationView.displayName`：在已校验的 `(rootSessionId, subagentId)` 执行归属下查实例，优先实例 name，其次首次 description，缺失时显示 `Subagent`。名称合并多行空白并限制 80 字符，不从点击 call 或共享物理 Session.title 取值，也不新增模型请求。关闭重开、切换委派锚点及根会话后重新读取都采用同一实例来源。旧服务端缺少字段时前端统一回退 `Subagent`。

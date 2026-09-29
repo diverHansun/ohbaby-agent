@@ -46,7 +46,17 @@ function createHarness(spawn: SpawnCommand = vi.fn()) {
   const bus = createBus();
   const permissionState = createPermissionState({ bus });
   const permission = createPermissionManager({ bus, state: permissionState });
-  const scheduler = createToolScheduler({ bus, permission, permissionState });
+  const scheduler = createToolScheduler({
+    bus,
+    permissionState,
+    permission: {
+      ask: (input) =>
+        permission.ask({
+          ...input,
+          source: { rootSessionId: input.sessionId, ancestorSessionIds: [] },
+        }),
+    },
+  });
   const permissionUpdates: string[] = [];
 
   scheduler.register(
@@ -72,6 +82,7 @@ function request(
 ): Parameters<ReturnType<typeof createToolScheduler>["execute"]>[0] {
   return {
     callId,
+    runId: "bash_test_run",
     environment: createHostLocalEnvironment(workspace),
     messageId: "message_1",
     params: { command },
@@ -192,7 +203,17 @@ describe("bash tool scheduler integration", () => {
     const bus = createBus();
     const permissionState = createPermissionState({ bus });
     const permission = createPermissionManager({ bus, state: permissionState });
-    const scheduler = createToolScheduler({ bus, permission, permissionState });
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState,
+      permission: {
+        ask: (input) =>
+          permission.ask({
+            ...input,
+            source: { rootSessionId: input.sessionId, ancestorSessionIds: [] },
+          }),
+      },
+    });
     const permissionUpdates: PermissionInfo[] = [];
     const sandboxManager = createHostLocalSandboxManager(workspace);
     const lease = await sandboxManager.acquire("session_1");
@@ -214,6 +235,7 @@ describe("bash tool scheduler integration", () => {
     try {
       await expect(
         scheduler.execute({
+          runId: "bash_test_run",
           callId: "bash_external",
           environment: lease,
           messageId: "message_1",

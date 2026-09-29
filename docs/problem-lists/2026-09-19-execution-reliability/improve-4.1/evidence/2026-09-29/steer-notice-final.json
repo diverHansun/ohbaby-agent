@@ -1,0 +1,216 @@
+{
+  "events": [
+    {
+      "type": "ready",
+      "at": "2026-09-29T05:40:22.238Z",
+      "root": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve4-inprocess-hPIux8",
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve4-inprocess-hPIux8/manifest.json"
+    },
+    {
+      "type": "provider-failure",
+      "at": "2026-09-29T05:41:04.975Z",
+      "message": "AssertionError [ERR_ASSERTION]: Expected an actual local fixture user message"
+    },
+    {
+      "type": "provider-failure",
+      "at": "2026-09-29T05:41:05.406Z",
+      "message": "AssertionError [ERR_ASSERTION]: Expected an actual local fixture user message"
+    },
+    {
+      "type": "provider-failure",
+      "at": "2026-09-29T05:41:06.217Z",
+      "message": "AssertionError [ERR_ASSERTION]: Expected an actual local fixture user message"
+    },
+    {
+      "type": "before-steer",
+      "at": "2026-09-29T05:41:19.889Z",
+      "prompts": [
+        {
+          "id": "prompt_5f96b831-f54a-4523-a3e4-6af6b4f0cf68",
+          "text": "I4 LOCAL A_HOLD",
+          "status": "failed",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "userMessageId": "message_d13cf5cb-da67-4991-8a2d-2e690444c795",
+          "runId": "run_ba6105ae-07bd-40f0-9a90-0e81c1cc3a82",
+          "ownerPid": 41991,
+          "acceptedAt": 1790660464897
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_ba6105ae-07bd-40f0-9a90-0e81c1cc3a82",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "status": "failed",
+          "ownerPid": 41991
+        }
+      ]
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-29T05:43:00.886Z",
+      "marker": "I4_LOCAL_A_HOLD"
+    },
+    {
+      "type": "before-steer",
+      "at": "2026-09-29T05:43:13.178Z",
+      "prompts": [
+        {
+          "id": "prompt_5f96b831-f54a-4523-a3e4-6af6b4f0cf68",
+          "text": "I4 LOCAL A_HOLD",
+          "status": "failed",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "userMessageId": "message_d13cf5cb-da67-4991-8a2d-2e690444c795",
+          "runId": "run_ba6105ae-07bd-40f0-9a90-0e81c1cc3a82",
+          "ownerPid": 41991,
+          "acceptedAt": 1790660464897
+        },
+        {
+          "id": "prompt_31e9c7aa-8271-41c5-ba95-fb4192089a3e",
+          "text": "I4_LOCAL_A_HOLD",
+          "status": "running",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "userMessageId": "message_35bd06b3-436c-438c-ab7d-f3ff19855902",
+          "runId": "run_ae2c923c-b05a-4a3d-9a11-3c5de300c07c",
+          "ownerPid": 41991,
+          "acceptedAt": 1790660580852
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_ba6105ae-07bd-40f0-9a90-0e81c1cc3a82",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "status": "failed",
+          "ownerPid": 41991
+        },
+        {
+          "id": "run_ae2c923c-b05a-4a3d-9a11-3c5de300c07c",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "status": "running",
+          "ownerPid": 41991
+        }
+      ]
+    },
+    {
+      "type": "database",
+      "at": "2026-09-29T05:44:03.760Z",
+      "prompts": [
+        {
+          "id": "prompt_5f96b831-f54a-4523-a3e4-6af6b4f0cf68",
+          "text": "I4 LOCAL A_HOLD",
+          "status": "failed",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "userMessageId": "message_d13cf5cb-da67-4991-8a2d-2e690444c795",
+          "runId": "run_ba6105ae-07bd-40f0-9a90-0e81c1cc3a82",
+          "ownerPid": 41991,
+          "acceptedAt": 1790660464897
+        },
+        {
+          "id": "prompt_31e9c7aa-8271-41c5-ba95-fb4192089a3e",
+          "text": "I4_LOCAL_A_HOLD",
+          "status": "running",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "userMessageId": "message_35bd06b3-436c-438c-ab7d-f3ff19855902",
+          "runId": "run_ae2c923c-b05a-4a3d-9a11-3c5de300c07c",
+          "ownerPid": 41991,
+          "acceptedAt": 1790660580852
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_ba6105ae-07bd-40f0-9a90-0e81c1cc3a82",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "status": "failed",
+          "ownerPid": 41991
+        },
+        {
+          "id": "run_ae2c923c-b05a-4a3d-9a11-3c5de300c07c",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "status": "running",
+          "ownerPid": 41991
+        }
+      ],
+      "counts": {
+        "I4_LOCAL_A_HOLD": 1
+      }
+    },
+    {
+      "type": "steer-proof",
+      "at": "2026-09-29T05:44:48.571Z",
+      "rootRunIdUnchanged": true,
+      "providerStillOpen": true,
+      "prompts": [
+        {
+          "id": "prompt_5f96b831-f54a-4523-a3e4-6af6b4f0cf68",
+          "text": "I4 LOCAL A_HOLD",
+          "status": "failed",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "userMessageId": "message_d13cf5cb-da67-4991-8a2d-2e690444c795",
+          "runId": "run_ba6105ae-07bd-40f0-9a90-0e81c1cc3a82",
+          "ownerPid": 41991,
+          "acceptedAt": 1790660464897
+        },
+        {
+          "id": "prompt_31e9c7aa-8271-41c5-ba95-fb4192089a3e",
+          "text": "I4_LOCAL_A_HOLD",
+          "status": "running",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "userMessageId": "message_35bd06b3-436c-438c-ab7d-f3ff19855902",
+          "runId": "run_ae2c923c-b05a-4a3d-9a11-3c5de300c07c",
+          "ownerPid": 41991,
+          "acceptedAt": 1790660580852
+        },
+        {
+          "id": "prompt_36570a28-acdf-40e5-8b0f-2e30152aa682",
+          "text": "I4_LOCAL_STEER",
+          "status": "steered",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "userMessageId": "message_8fbdf44c-afe4-47f0-a3e8-751490a423e9",
+          "runId": null,
+          "ownerPid": 41991,
+          "acceptedAt": 1790660660739
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_ba6105ae-07bd-40f0-9a90-0e81c1cc3a82",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "status": "failed",
+          "ownerPid": 41991
+        },
+        {
+          "id": "run_ae2c923c-b05a-4a3d-9a11-3c5de300c07c",
+          "sessionId": "session_1790660464889_f6s7ng1",
+          "status": "running",
+          "ownerPid": 41991
+        }
+      ]
+    },
+    {
+      "type": "provider-closed",
+      "at": "2026-09-29T05:44:49.689Z",
+      "marker": "I4_LOCAL_A_HOLD"
+    },
+    {
+      "type": "ui-evidence",
+      "at": "2026-09-29T05:45:39.594Z",
+      "acceptedNoticeVisibleBeforeStop": true,
+      "acceptedNoticeGoneAfterStop": true,
+      "acceptedNoticeDoesNotReturnOnNewDraft": true
+    },
+    {
+      "type": "cleanup-pass",
+      "at": "2026-09-29T05:45:51.115Z",
+      "root": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve4-inprocess-hPIux8"
+    }
+  ],
+  "requests": [
+    "I4_LOCAL_A_HOLD"
+  ],
+  "failures": [
+    "AssertionError [ERR_ASSERTION]: Expected an actual local fixture user message",
+    "AssertionError [ERR_ASSERTION]: Expected an actual local fixture user message",
+    "AssertionError [ERR_ASSERTION]: Expected an actual local fixture user message"
+  ],
+  "scope": "Focused final Steer presentation recheck at compiled 0ff1374a (TUI unchanged through 47605aaa), not a repeat of the complete clean default-inprocess-pty.json run.",
+  "controllerError": "Initially typed I4 LOCAL A_HOLD instead of required I4_LOCAL_A_HOLD; fixture rejected 3 retries. Correct input thereafter: steer-proof passed with same active run, provider still open, one model request; actual Stop removed accepted notice and new draft did not restore it. TUI exited 0, controller exited 1 due initial operator errors; cleanup passed. No claim of all-green fixture."
+}

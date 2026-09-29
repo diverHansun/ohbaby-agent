@@ -121,12 +121,23 @@ export function createInMemorySessionStore(): SessionStore {
       return Promise.resolve(items);
     },
 
-    update(sessionId: string, patch: Partial<Session>): Promise<Session> {
+    update(
+      sessionId: string,
+      patch: Partial<Session>,
+      condition?: { readonly expectedTitle: string },
+    ): Promise<Session> {
       const existing = sessions.get(sessionId);
       if (!existing) {
         return Promise.reject(new SessionNotFoundError(sessionId));
       }
 
+      if (
+        condition &&
+        (existing.title !== condition.expectedTitle ||
+          existing.status !== "active")
+      ) {
+        return Promise.resolve(cloneSession(existing));
+      }
       const updated = {
         ...existing,
         ...patch,

@@ -12,6 +12,10 @@ export function createMessage(input: {
   readonly now: () => number;
 }): Message {
   const base = {
+    ...(input.data.runtimeInput === undefined
+      ? {}
+      : { runtimeInput: input.data.runtimeInput }),
+    ...(input.data.runId === undefined ? {} : { runId: input.data.runId }),
     contextScopeId: input.data.contextScopeId,
     id: input.data.id ?? input.idGenerator.messageId(),
     sessionId: input.data.sessionId,
@@ -33,6 +37,7 @@ export function createMessage(input: {
     return {
       ...base,
       role: "assistant",
+      modelRequests: input.data.modelRequests,
       agent: input.data.agent,
       parentId: input.data.parentId,
       providerId: input.data.providerId,

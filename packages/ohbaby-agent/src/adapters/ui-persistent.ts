@@ -1,8 +1,18 @@
+import {
+  collectCleanup,
+  createShutdownOptions,
+  type ShutdownOptions,
+  type CleanupResult,
+} from "../runtime/shutdown.js";
+import { createSessionExecutionRecovery } from "../runtime/execution-recovery/session.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { UiBackendClient } from "ohbaby-sdk";
 import { createBus, type BusInstance } from "../bus/index.js";
-import { DatabaseSubagentInstanceStore } from "../agents/index.js";
+import {
+  DatabaseSubagentExecutionStore,
+  DatabaseSubagentInstanceStore,
+} from "../agents/index.js";
 import {
   createDatabaseMessageStore,
   createMessageManager,
@@ -20,7 +30,10 @@ import {
 } from "../services/session/index.js";
 import { createSqliteGoalPersistence } from "../goals/index.js";
 import { createDatabaseRunLedger } from "../runtime/run-ledger/index.js";
-import { DatabasePromptSubmissionStore } from "../runtime/prompt-scheduler/index.js";
+import {
+  DatabaseCurrentRunInputStore,
+  DatabasePromptSubmissionStore,
+} from "../runtime/prompt-scheduler/index.js";
 import type { HookExecutor } from "../runtime/run-manager/index.js";
 import {
   createSnapshotHookExecutor,
@@ -66,7 +79,25 @@ export interface PersistentUiBackendOptions extends Omit<
 
 export interface PersistentUiBackendClient
   extends UiBackendClient, UiPromptQueueExecutionPort {
-  dispose(): Promise<void> | void;
+  listSubagentExecutions: NonNullable<
+    UiBackendClient["listSubagentExecutions"]
+  >;
+  getSubagentExecutionView: NonNullable<
+    UiBackendClient["getSubagentExecutionView"]
+  >;
+  getSubagentConversationView: NonNullable<
+    UiBackendClient["getSubagentConversationView"]
+  >;
+  retainSubagentConversation: NonNullable<
+    UiBackendClient["retainSubagentConversation"]
+  >;
+  releaseSubagentConversation: NonNullable<
+    UiBackendClient["releaseSubagentConversation"]
+  >;
+  initialize(): Promise<void>;
+  initializeSession(sessionId: string): Promise<void>;
+  closeAdmission(): void;
+  dispose(options?: ShutdownOptions): Promise<CleanupResult>;
 }
 
 function numericNow(now?: () => Date): () => number {
@@ -180,13 +211,125 @@ function withStartupRecovery(
   client: InProcessUiBackendClient,
   recovery: Promise<unknown>,
 ): PersistentUiBackendClient {
+  let recovered = false;
+  let startupFailureReported = false;
+  const startup = recovery.then(() => {
+    recovered = true;
+  });
+  // Eager startup may fail before the first API call; keep its rejection for
+  // ready()/dispose() while observing it immediately to avoid an orphan promise.
+  void startup.catch(() => undefined);
   async function ready(): Promise<void> {
-    await recovery;
+    try {
+      await startup;
+    } catch (error) {
+      startupFailureReported = true;
+      throw error;
+    }
   }
 
   return {
-    dispose(): ReturnType<InProcessUiBackendClient["dispose"]> {
-      return client.dispose();
+    async listSubagentExecutions(input) {
+      await ready();
+      return client.listSubagentExecutions(input);
+    },
+    async getSubagentExecutionView(input) {
+      await ready();
+      return client.getSubagentExecutionView(input);
+    },
+    async getSubagentConversationView(input) {
+      await ready();
+      return client.getSubagentConversationView(input);
+    },
+    async retainSubagentConversation(input) {
+      await ready();
+      return client.retainSubagentConversation(input);
+    },
+    async releaseSubagentConversation(input) {
+      await ready();
+      return client.releaseSubagentConversation(input);
+    },
+    async getSessionView(
+      input,
+    ): ReturnType<InProcessUiBackendClient["getSessionView"]> {
+      await ready();
+      return client.getSessionView(input);
+    },
+    async getSessionHistory(
+      input,
+    ): ReturnType<InProcessUiBackendClient["getSessionHistory"]> {
+      await ready();
+      return client.getSessionHistory(input);
+    },
+    async getSessionControl(
+      input,
+    ): ReturnType<InProcessUiBackendClient["getSessionControl"]> {
+      await ready();
+      return client.getSessionControl(input);
+    },
+    async getPromptReceipt(
+      input,
+    ): ReturnType<InProcessUiBackendClient["getPromptReceipt"]> {
+      await ready();
+      return client.getPromptReceipt(input);
+    },
+    async initializeSession(sessionId): Promise<void> {
+      await ready();
+      await client.initializeSession(sessionId);
+    },
+    async initialize(): Promise<void> {
+      await ready();
+      await client.initialize();
+    },
+    closeAdmission: () => {
+      client.closeAdmission();
+    },
+    dispose(
+      shutdown: ShutdownOptions = createShutdownOptions(),
+    ): Promise<CleanupResult> {
+      client.closeAdmission();
+      return collectCleanup(shutdown, {
+        startup: async () => {
+          try {
+            await startup;
+          } catch (error) {
+            if (!startupFailureReported) throw error;
+          }
+        },
+        backend: () => client.dispose(shutdown),
+      });
+    },
+    async getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+      await ready();
+      return client.getSessionIndex();
+    },
+    async getSelectedSessionId(): ReturnType<
+      UiBackendClient["getSelectedSessionId"]
+    > {
+      await ready();
+      return client.getSelectedSessionId();
+    },
+    async createSession(input): ReturnType<UiBackendClient["createSession"]> {
+      await ready();
+      return client.createSession(input);
+    },
+    async selectSession(
+      sessionId,
+    ): ReturnType<UiBackendClient["selectSession"]> {
+      await ready();
+      return client.selectSession(sessionId);
+    },
+    async getPermissionSnapshot(
+      input,
+    ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+      await ready();
+      return client.getPermissionSnapshot(input);
+    },
+    subscribePermissionEvents(
+      handler,
+      onError,
+    ): ReturnType<UiBackendClient["subscribePermissionEvents"]> {
+      return client.subscribePermissionEvents(handler, onError);
     },
     async getSnapshot(): ReturnType<UiBackendClient["getSnapshot"]> {
       await ready();
@@ -219,6 +362,14 @@ function withStartupRecovery(
       await ready();
       return client.submitPromptAndWait(text, submitOptions);
     },
+    async resubmitRetainedPrompt(input) {
+      await ready();
+      return client.resubmitRetainedPrompt(input);
+    },
+    async resubmitRetainedPromptForOwner(input, trustedOwnerClientId) {
+      await ready();
+      return client.resubmitRetainedPromptForOwner(input, trustedOwnerClientId);
+    },
     async editQueuedPrompt(
       input,
     ): ReturnType<UiBackendClient["editQueuedPrompt"]> {
@@ -231,6 +382,19 @@ function withStartupRecovery(
     ): ReturnType<UiPromptQueueExecutionPort["editQueuedPromptForOwner"]> {
       await ready();
       return client.editQueuedPromptForOwner(input, trustedOwnerClientId);
+    },
+    async steerQueuedPrompt(
+      input,
+    ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+      await ready();
+      return client.steerQueuedPrompt(input);
+    },
+    async steerQueuedPromptForOwner(
+      input,
+      trustedOwnerClientId,
+    ): ReturnType<UiPromptQueueExecutionPort["steerQueuedPromptForOwner"]> {
+      await ready();
+      return client.steerQueuedPromptForOwner(input, trustedOwnerClientId);
     },
     async cancelQueuedPrompt(
       input,
@@ -341,12 +505,16 @@ function withStartupRecovery(
       await ready();
       return client.executeCommand(invocation);
     },
-    async respondPermission(
+    respondPermission(
       requestId,
       response,
+      context,
     ): ReturnType<UiBackendClient["respondPermission"]> {
-      await ready();
-      return client.respondPermission(requestId, response);
+      return recovered
+        ? client.respondPermission(requestId, response, context)
+        : ready().then(() =>
+            client.respondPermission(requestId, response, context),
+          );
     },
     async respondInteraction(
       interactionId,
@@ -425,7 +593,9 @@ async function resolvePersistentStartupSession(input: {
   if (sessionId === null) {
     return;
   }
-  const session = await input.stateStore.getSession(sessionId);
+  const session = (await input.stateStore.getSessionIndex()).find(
+    (item) => item.id === sessionId,
+  );
   if (!session) {
     throw new Error(`Session not found: ${sessionId} in current project`);
   }
@@ -477,6 +647,7 @@ export function createPersistentUiBackendClient(
     ownerPid: process.pid,
   });
   const subagentInstanceStore = new DatabaseSubagentInstanceStore({ db });
+  const subagentExecutionStore = new DatabaseSubagentExecutionStore({ db });
   const startupSessionMode = resolveStartupSessionMode(options);
   const projectRoot = resolvePersistentProjectRoot(options);
   const stateStore = createPersistentUiStateStore({
@@ -497,8 +668,35 @@ export function createPersistentUiBackendClient(
       storageRoot: options.storageRoot,
     }),
   ]);
-  const startupRecovery = runLedger.recoverOrphanedRuns();
-  const startupReady = startupRecovery.then(async () => {
+  const promptScopeKey = path.resolve(persistentProjectDirectory(options));
+  const currentRunInputStore = new DatabaseCurrentRunInputStore({ db, now });
+  const promptSubmissionStore = new DatabasePromptSubmissionStore({
+    db,
+    now,
+    ownerId: backendOwnerId,
+    ownerPid: process.pid,
+  });
+  const recoverExecutionSession = createSessionExecutionRecovery({
+    runs: runLedger,
+    prompts: promptSubmissionStore,
+    inputs: currentRunInputStore,
+    executions: subagentExecutionStore,
+    instances: subagentInstanceStore,
+    messages: messageManager,
+    scopeKey: promptScopeKey,
+    ownerId: backendOwnerId,
+    now,
+  });
+  const startupReady = Promise.resolve().then(async () => {
+    const sessions = await sessionManager.listByProjectRoot(await projectRoot, {
+      status: "active",
+    });
+    // Recover roots independently. Explicit entry retries failed scopes; reads stay pure.
+    await Promise.allSettled(
+      sessions
+        .filter((session) => !session.isSubagent)
+        .map((session) => recoverExecutionSession(session.id)),
+    );
     await resolvePersistentStartupSession({
       mode: startupSessionMode,
       projectRoot: await projectRoot,
@@ -520,25 +718,24 @@ export function createPersistentUiBackendClient(
       goalPersistence: createSqliteGoalPersistence(db, now),
       hookExecutor,
       initialSnapshot: options.initialSnapshot,
+      startupReady,
       llmClient: options.llmClient,
       logger: options.logger,
       diagnosticsFilePath: options.diagnosticsFilePath,
       messageManager,
       now: options.now,
       projectDirectory: options.projectDirectory,
-      promptScopeKey: path.resolve(persistentProjectDirectory(options)),
+      promptScopeKey,
+      recoverExecutionSession,
       promptQueueOwnerClientId: backendOwnerId,
-      promptSubmissionStore: new DatabasePromptSubmissionStore({
-        db,
-        now,
-        ownerId: backendOwnerId,
-        ownerPid: process.pid,
-      }),
+      currentRunInputStore,
+      promptSubmissionStore,
       runLedger,
       sessionManager,
       stateStore,
       streamBridge: options.streamBridge,
       subagentInstanceStore,
+      subagentExecutionStore,
       subagentOwnerId: backendOwnerId,
       subagentOwnerPid: process.pid,
       workdir: options.workdir,

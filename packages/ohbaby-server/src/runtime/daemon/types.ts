@@ -1,3 +1,8 @@
+import type {
+  CleanupResult,
+  CleanupTaskResult,
+  ShutdownOptions,
+} from "ohbaby-agent";
 export type DaemonStatus = "running" | "stopping" | "stopped" | "crashed";
 
 export interface DaemonState {
@@ -15,7 +20,15 @@ export interface DaemonState {
   readonly scopeRoot?: string;
 }
 
+export interface DaemonShutdownReport {
+  readonly pid: number;
+  readonly pidToken: string;
+  readonly recordedAt: number;
+  readonly cleanup: CleanupResult;
+}
+
 export interface DaemonStateFile {
+  writeShutdownReport?(report: DaemonShutdownReport): Promise<void>;
   read?(): Promise<DaemonState | undefined>;
   write(state: DaemonState): Promise<void>;
 }
@@ -45,7 +58,8 @@ export interface DaemonRuntimeHandle {
     readonly scopeRoot?: string;
   };
   start(): Promise<void>;
-  stop(): Promise<void>;
+  closeAdmission?(): void;
+  stop(options?: ShutdownOptions): Promise<CleanupTaskResult>;
 }
 
 export interface DaemonSignalTarget {

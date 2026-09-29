@@ -1,0 +1,47 @@
+{
+  "usedUrl": "http://127.0.0.1:57024/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-improve22-live-web-kFPzPU%2Fworkspace&session=session_1790488604182_1s24nw1",
+  "emptyUrl": "http://127.0.0.1:57024/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-improve22-live-web-kFPzPU%2Fworkspace&session=session_1790488663382_zzb6mo1",
+  "reuseChecks": [
+    {
+      "iteration": 1,
+      "url": "http://127.0.0.1:57024/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-improve22-live-web-kFPzPU%2Fworkspace&session=session_1790488663382_zzb6mo1",
+      "twoSessions": true
+    },
+    {
+      "iteration": 2,
+      "url": "http://127.0.0.1:57024/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-improve22-live-web-kFPzPU%2Fworkspace&session=session_1790488663382_zzb6mo1",
+      "twoSessions": true
+    },
+    {
+      "iteration": 3,
+      "url": "http://127.0.0.1:57024/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-improve22-live-web-kFPzPU%2Fworkspace&session=session_1790488663382_zzb6mo1",
+      "twoSessions": true
+    },
+    {
+      "iteration": 4,
+      "url": "http://127.0.0.1:57024/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-improve22-live-web-kFPzPU%2Fworkspace&session=session_1790488663382_zzb6mo1",
+      "twoSessions": true
+    },
+    {
+      "iteration": 5,
+      "url": "http://127.0.0.1:57024/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-improve22-live-web-kFPzPU%2Fworkspace&session=session_1790488663382_zzb6mo1",
+      "twoSessions": true
+    },
+    {
+      "iteration": 6,
+      "url": "http://127.0.0.1:57024/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-improve22-live-web-kFPzPU%2Fworkspace&session=session_1790488663382_zzb6mo1",
+      "twoSessions": true
+    }
+  ],
+  "fastRefresh": {
+    "elapsedMs": 511,
+    "url": "http://127.0.0.1:57024/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-improve22-live-web-kFPzPU%2Fworkspace&session=session_1790488663382_zzb6mo1"
+  },
+  "invalidCommand": {
+    "message": "Unknown command \"/new --no-reuse\"",
+    "layer": "browser command routing",
+    "url": "http://127.0.0.1:57024/#directory=%2Fprivate%2Fvar%2Ffolders%2Fmd%2F0szgsv_x3bsdgk_fzj9qb6lh0000gn%2FT%2Fohbaby-improve22-live-web-kFPzPU%2Fworkspace&session=session_1790488663382_zzb6mo1"
+  },
+  "consoleErrors": [],
+  "finalSnapshot": "- main:\n  - navigation \"Projects\":\n    - button \"Collapse sessions\" [expanded]:\n    - button \"Open workspace\": W\n    - button \"Project actions for workspace\":\n    - button \"Open project\":\n  - complementary:\n    - strong: workspace\n    - generic \"/private/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve22-live-web-kFPzPU/workspace\"\n    - button \"New session\":\n      - generic: New session\n    - generic: Recent sessions\n    - button \"New session Sep 27\":\n      - strong: New session\n      - generic: Sep 27\n    - button \"Archive New session\":\n    - button \"Read fixture.txt and Report Project Release Owner Sep 27\" [active]:\n      - strong: Read fixture.txt and Report Project Release Owner\n      - generic: Sep 27\n    - button \"Archive Read fixture.txt and Report Project Release Owner\":\n    - generic: 2 sessions\n  - generic \"ohbaby\":\n    - generic: oh\n    - generic: ba\n    - generic: by\n  - generic: idle\n  - generic: openai/gpt-5.6-luna\n  - button \"5% context used, approximately 6.3K of 128K tokens\":\n  - article \"User message\":\n    - paragraph: Use the read tool exactly once to read fixture.txt in the current workspace. Report Project, Release and Owner exactly. Do not use shell commands or modify files.\n  - article \"Assistant message\":\n    - button \"read\":\n      - generic: read\n      - generic: 0s\n      - generic: fixture.txt\n  - article \"Assistant message\":\n    - paragraph:\n      - text: \"Project: Cedar\"\n      - text: \"Release: 17\"\n      - text: \"Owner: Lin\"\n  - generic: Total 5s\n  - article \"User message\":\n    - paragraph: Using only the previous conversation, report the same three fields again. Do not use tools.\n  - article \"Assistant message\":\n    - paragraph:\n      - text: \"Project: Cedar\"\n      - text: \"Release: 17\"\n      - text: \"Owner: Lin\"\n  - generic: Total 3s\n  - textbox \"Message, auto mode, default permission\":\n    - /placeholder: \"\"\n  - 'button \"Permission policy: default. Ask before protected actions. Click to enable full-access without approval prompts.\"':\n  - generic \"Reasoning effort\":\n    - combobox \"Reasoning effort\":\n      - option \"low\"\n      - option \"medium\" [selected]\n      - option \"high\"\n      - option \"xhigh\"\n      - option \"max\"\n  - button \"Send message\" [disabled]:"
+}

@@ -35,6 +35,7 @@ function completedPrompt(
   switch (status) {
     case "succeeded":
     case "cancelled":
+    case "steered":
       return { ...base, status };
     case "failed":
     case "interrupted":

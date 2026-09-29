@@ -161,6 +161,25 @@ describe("command catalog", () => {
     });
   });
 
+  it.each(["tui", "stdout", "headless"] as const)(
+    "resolves /new with the force-create flag on %s",
+    (surface) => {
+      const resolved = resolveSlashCommand(
+        filterCommandCatalogBySurface(buildCommandCatalog(), surface),
+        parseSlashCommandInput("/new --no-reuse-empty-session"),
+        { surface },
+      );
+
+      expect(resolved).toMatchObject({
+        ok: true,
+        command: { id: "new" },
+        path: ["new"],
+        argv: ["--no-reuse-empty-session"],
+        rawArgs: "--no-reuse-empty-session",
+      });
+    },
+  );
+
   it("rejects duplicate command paths and aliases", () => {
     const catalog = buildCommandCatalog();
     expect(() => {

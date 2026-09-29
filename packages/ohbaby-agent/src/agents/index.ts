@@ -22,6 +22,10 @@ export {
   type SubagentRole,
 } from "./roles.js";
 export {
+  DatabaseSubagentExecutionStore,
+  InMemorySubagentExecutionStore,
+  type SubagentExecutionStore,
+  type SubagentExecutionRecord,
   DatabaseSubagentInstanceStore,
   InMemorySubagentInstanceStore,
   type MarkSubagentsInterruptedInput,

@@ -1,3 +1,5 @@
+import type { ModelRequestRecord } from "../llm-client/types.js";
+import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
 import type { ModelState } from "../../services/interface-providers/native-state.js";
 import type { ModelMessage, TokenUsage } from "../llm-client/index.js";
 
@@ -13,7 +15,16 @@ export interface PartTime {
   readonly compacted?: number;
 }
 
+export interface RuntimeInputOrigin {
+  readonly kind: "user-steer" | "subagent-result" | "subagent-status";
+  readonly inputId: string;
+  readonly targetRunId: string;
+  readonly sourceId: string;
+}
+
 interface MessageBase {
+  readonly runtimeInput?: RuntimeInputOrigin;
+  readonly runId?: string;
   readonly id: string;
   readonly sessionId: string;
   readonly contextScopeId?: string;
@@ -33,6 +44,7 @@ export interface UserMessage extends MessageBase {
 }
 
 export interface AssistantMessage extends MessageBase {
+  readonly modelRequests?: readonly ModelRequestRecord[];
   readonly role: "assistant";
   readonly agent: string;
   readonly parentId?: string;
@@ -78,6 +90,7 @@ export interface PartBase {
 }
 
 export interface PartMetadata {
+  readonly execution?: ToolExecutionObservation;
   readonly tokenUsage?: TokenUsage;
   readonly [key: string]: unknown;
 }
@@ -92,6 +105,7 @@ export interface TextPart extends PartBase {
 
 export interface ReasoningPart extends PartBase {
   readonly type: "reasoning";
+  readonly endReason?: "normal" | "interrupted" | "failed";
   readonly text: string;
   readonly metadata?: PartMetadata;
 }
@@ -148,7 +162,11 @@ export interface MessageWithParts {
   readonly parts: readonly Part[];
 }
 
-export type CreateMessageInput = { readonly id?: string } & (
+export type CreateMessageInput = {
+  readonly runtimeInput?: RuntimeInputOrigin;
+  readonly id?: string;
+  readonly runId?: string;
+} & (
   | {
       readonly sessionId: string;
       readonly contextScopeId?: string;
@@ -162,6 +180,7 @@ export type CreateMessageInput = { readonly id?: string } & (
       readonly sessionId: string;
       readonly contextScopeId?: string;
       readonly role: "assistant";
+      readonly modelRequests?: readonly ModelRequestRecord[];
       readonly agent: string;
       readonly parentId?: string;
       readonly providerId?: string;
@@ -177,7 +196,7 @@ export type CreateMessageInput = { readonly id?: string } & (
 );
 
 export type UpdateMessagePatch = Partial<
-  Pick<AssistantMessage, "finish" | "error"> & {
+  Pick<AssistantMessage, "finish" | "error" | "modelRequests"> & {
     readonly time: MessageTime;
   }
 >;
@@ -251,6 +270,7 @@ export interface CommitModelStepInput {
     readonly name: string;
     readonly arguments: Record<string, unknown>;
     readonly argumentsJson: string;
+    readonly metadata?: PartMetadata;
   }[];
   readonly tokenUsage?: TokenUsage;
   readonly finishReason: string;
@@ -270,13 +290,81 @@ export interface StoreModelStepInput extends CommitModelStepInput {
   readonly toolPartIds: readonly string[];
 }
 
+export interface MessagePageOptions {
+  readonly limit?: number;
+  readonly before?: string;
+  readonly after?: string;
+  readonly scope?: MessageScopeFilter;
+}
+
+export interface MessagePage {
+  readonly messages: MessageWithParts[];
+  readonly hasMore: boolean;
+  readonly nextCursor?: string;
+  readonly firstMessageId?: string;
+  readonly lastMessageId?: string;
+}
+
+export interface SaveReasoningPartInput {
+  readonly sessionId?: string;
+  readonly runId?: string;
+  readonly messageId: string;
+  readonly partId: string;
+  readonly text: string;
+  readonly endReason?: ReasoningPart["endReason"];
+  readonly metadata?: PartMetadata;
+}
+
+export interface MessageCommittedChange {
+  readonly createdMessageIds?: readonly string[];
+  readonly sessionId: string;
+  readonly messages?: readonly Message[];
+  readonly parts?: readonly Part[];
+  readonly removedMessageIds?: readonly string[];
+}
+
+/** Application owner serializes DB writes and projection acceptance per session. */
+export interface MessageCommitCoordinator {
+  run<T>(sessionId: string, operation: () => Promise<T>): Promise<T>;
+  onCommitted(change: MessageCommittedChange): void;
+  onProjectionError(sessionId: string, error: unknown): void;
+}
+
+export interface UpdatePartCondition {
+  /** Check inside the store write transaction; a terminal tool is returned unchanged. */
+  readonly ifToolUnfinished?: boolean;
+}
+
 export interface MessageManager {
+  readonly runtimeInputMemory?: RuntimeInputMemoryParticipant;
+  getPart(partId: string): Promise<Part | undefined>;
+  setCommitCoordinator(coordinator: MessageCommitCoordinator | undefined): void;
+  saveReasoningPart(
+    input: SaveReasoningPartInput,
+  ): Promise<ReasoningPart | undefined>;
+  listPageBySession(
+    sessionId: string,
+    options?: MessagePageOptions,
+  ): Promise<MessagePage>;
+  listPageByRun(
+    sessionId: string,
+    runId: string,
+    options?: MessagePageOptions,
+  ): Promise<MessagePage>;
+  listByIds(
+    sessionId: string,
+    messageIds: readonly string[],
+  ): Promise<MessageWithParts[]>;
   commitModelStep(input: CommitModelStepInput): Promise<CommitModelStepResult>;
   createMessage(input: CreateMessageInput): Promise<Message>;
   updateMessage(messageId: string, patch: UpdateMessagePatch): Promise<Message>;
   appendPart(messageId: string, input: CreatePartInput): Promise<Part>;
   appendModelContextPart(messageId: string, text: string): Promise<TextPart>;
-  updatePart(partId: string, patch: UpdatePartPatch): Promise<Part>;
+  updatePart(
+    partId: string,
+    patch: UpdatePartPatch,
+    condition?: UpdatePartCondition,
+  ): Promise<Part>;
   commitCompaction(
     input: CommitCompactionInput,
   ): Promise<CommitCompactionResult | undefined>;
@@ -293,6 +381,24 @@ export interface MessageManager {
 }
 
 export interface MessageStore {
+  readonly runtimeInputMemory?: RuntimeInputMemoryParticipant;
+  getPart(partId: string): Promise<Part | undefined>;
+  saveReasoningPart(
+    input: SaveReasoningPartInput & { readonly updatedAt: number },
+  ): Promise<ReasoningPart | undefined>;
+  listPageBySession(
+    sessionId: string,
+    options?: MessagePageOptions,
+  ): Promise<MessagePage>;
+  listPageByRun(
+    sessionId: string,
+    runId: string,
+    options?: MessagePageOptions,
+  ): Promise<MessagePage>;
+  listByIds(
+    sessionId: string,
+    messageIds: readonly string[],
+  ): Promise<MessageWithParts[]>;
   commitModelStep(input: StoreModelStepInput): Promise<CommitModelStepResult>;
   insertMessage(message: Message): Promise<void>;
   getMessage(messageId: string): Promise<Message | undefined>;
@@ -313,6 +419,7 @@ export interface MessageStore {
     partId: string,
     patch: Omit<UpdatePartPatch, "delta">,
     updatedAt: number,
+    condition?: UpdatePartCondition,
   ): Promise<Part>;
   commitCompaction(
     input: StoreCompactionInput,
@@ -323,4 +430,10 @@ export interface MessageStore {
   ): Promise<MessageWithParts[]>;
   deleteMessage(messageId: string): Promise<void>;
   deleteBySession(sessionId: string): Promise<void>;
+}
+
+/** Synchronous participant for the in-memory queue/input/message atomic commit. */
+export interface RuntimeInputMemoryParticipant {
+  get(messageId: string): MessageWithParts | undefined;
+  put(message: MessageWithParts): void;
 }

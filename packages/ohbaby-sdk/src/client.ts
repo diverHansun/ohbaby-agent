@@ -1,6 +1,20 @@
+import type {
+  UiSubagentConversationQuery,
+  UiSubagentConversationUnwatchQuery,
+  UiSubagentReadClient,
+} from "./subagent.js";
+import type {
+  UiPermissionEvent,
+  UiPermissionSnapshot,
+  UiPermissionSnapshotQuery,
+  UiPermissionResponseContext,
+  UiSessionIndexEntry,
+} from "./permission.js";
 import type { UiReasoningConfig } from "./connect-model.js";
+import type { UiSessionRecoveryClient } from "./session-view.js";
 import type { UiSession } from "./snapshot.js";
 import type {
+  UiCommandCompletion,
   UiSlashCommandCatalog,
   UiSlashCommandInvocation,
   UiSlashCommandSurface,
@@ -30,9 +44,13 @@ import type {
   UiPermissionState,
 } from "./snapshot.js";
 import type {
+  UiSteerQueuedPromptInput,
+  UiSteerQueuedPromptReceipt,
   UiCancelQueuedPromptInput,
   UiAcquirePromptEditLeaseInput,
   UiEditQueuedPromptInput,
+  UiResubmitRetainedPromptInput,
+  UiPromptResubmissionReceipt,
   UiPromptCompletion,
   UiPromptReceipt,
   UiPromptEditLease,
@@ -42,6 +60,7 @@ import type {
 } from "./prompt.js";
 
 export interface SubmitPromptOptions {
+  readonly namingSource?: import("./prompt.js").UiPromptNamingSource;
   readonly reasoning?: UiReasoningConfig;
   readonly clientRequestId?: string;
   readonly sessionId?: string;
@@ -90,7 +109,19 @@ export interface UiListCommandsQuery {
 export type UiEventHandler = (event: UiEvent) => void;
 export type UiUnsubscribe = () => void;
 
-export interface UiQueryClient {
+export interface UiQueryClient
+  extends Partial<UiSessionRecoveryClient>, Partial<UiSubagentReadClient> {
+  /** Explicit selection/startup barrier; never called by read endpoints. */
+  initializeSession?(sessionId: string): Promise<void>;
+  getSelectedSessionId(): Promise<string | null>;
+  getSessionIndex(): Promise<readonly UiSessionIndexEntry[]>;
+  getPermissionSnapshot(
+    input: UiPermissionSnapshotQuery,
+  ): Promise<UiPermissionSnapshot>;
+  subscribePermissionEvents(
+    handler: (event: UiPermissionEvent) => void,
+    onError?: (error: unknown) => void,
+  ): UiUnsubscribe;
   getSnapshot(): Promise<UiSnapshot>;
   getContextWindowUsage(input: {
     readonly sessionId: string;
@@ -119,6 +150,12 @@ export interface UiPromptCommandClient {
 }
 
 export interface UiPromptQueueCommandClient {
+  resubmitRetainedPrompt(
+    input: UiResubmitRetainedPromptInput,
+  ): Promise<UiPromptResubmissionReceipt>;
+  steerQueuedPrompt(
+    input: UiSteerQueuedPromptInput,
+  ): Promise<UiSteerQueuedPromptReceipt>;
   editQueuedPrompt(input: UiEditQueuedPromptInput): Promise<UiPromptSubmission>;
   cancelQueuedPrompt(
     input: UiCancelQueuedPromptInput,
@@ -136,6 +173,19 @@ export interface UiPromptQueueCommandClient {
 
 export interface UiCommandClient
   extends UiPromptCommandClient, UiPromptQueueCommandClient {
+  createSession(input?: {
+    /** Preferred primary session to reuse when it is authoritatively empty. */
+    readonly reuseSessionId?: string;
+    /**
+     * When present, any other authoritatively empty primary session in the
+     * current project may be reused, except the listed ones (for example
+     * sessions currently bound by other live clients).
+     */
+    readonly reuseInactiveEmpty?: {
+      readonly excludeSessionIds: readonly string[];
+    };
+  }): Promise<UiSessionCreationResult>;
+  selectSession(sessionId: string): Promise<void>;
   compactSession(
     options?: UiCompactSessionOptions,
   ): Promise<UiCompactSessionResult>;
@@ -149,10 +199,13 @@ export interface UiCommandClient
     input: UiSetSearchApiKeyInput,
   ): Promise<UiSetSearchApiKeyResult>;
   setPermission(input: UiPermissionUpdate): Promise<UiPermissionState>;
-  executeCommand(invocation: UiSlashCommandInvocation): Promise<void>;
+  executeCommand(
+    invocation: UiSlashCommandInvocation,
+  ): Promise<UiCommandCompletion>;
   respondPermission(
     requestId: string,
     response: UiPermissionResponse,
+    context?: UiPermissionResponseContext,
   ): Promise<void>;
   respondInteraction(
     interactionId: string,
@@ -161,7 +214,20 @@ export interface UiCommandClient
   abortRun(runId: string): Promise<void>;
 }
 
+/** Outcome of a create request; `created` is omitted by older backends. */
+export interface UiSessionCreationResult extends UiSessionIndexEntry {
+  readonly created?: boolean;
+}
+
 /**
  * Complete production backend capability. Queue management is mandatory.
  */
-export interface UiBackendClient extends UiQueryClient, UiCommandClient {}
+export interface UiBackendClient extends UiQueryClient, UiCommandClient {
+  /** Internal source lifetime hooks; not exposed by daemon transport. */
+  retainSubagentConversation?(
+    input: UiSubagentConversationQuery & { readonly watchId: string },
+  ): Promise<void>;
+  releaseSubagentConversation?(
+    input: UiSubagentConversationUnwatchQuery,
+  ): Promise<void>;
+}

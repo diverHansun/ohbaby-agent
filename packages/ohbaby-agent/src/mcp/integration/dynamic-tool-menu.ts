@@ -1,3 +1,8 @@
+import {
+  withToolAdmission,
+  independentToolAdmission,
+  trustedToolAdmission,
+} from "../../core/tool-scheduler/tool-admission.js";
 import { scanPromptLikeContent } from "../../core/system-prompt/security/index.js";
 import type {
   Tool,
@@ -158,19 +163,22 @@ function admitMcpToolUnchecked(tool: Tool): McpToolAdmissionResult {
     return reject(tool, "unsafe-schema");
   }
 
+  const admitted: Tool = {
+    ...tool,
+    category:
+      tool.isTrusted === true && tool.annotations?.readOnlyHint === true
+        ? "readonly"
+        : "write",
+    description: FIXED_MCP_TOOL_DESCRIPTION,
+    requireExplicitApproval:
+      tool.isTrusted !== true || tool.requireExplicitApproval === true,
+  };
+  // Sanitization copies the implementation object; preserve only this trusted
+  // cancellation fact capability, never claims in serialized tool metadata.
+  if (trustedToolAdmission(tool)?.settlementConfirmsCleanup === false)
+    withToolAdmission(admitted, { settlementConfirmsCleanup: false });
   return {
-    accepted: [
-      {
-        ...tool,
-        category:
-          tool.isTrusted === true && tool.annotations?.readOnlyHint === true
-            ? "readonly"
-            : "write",
-        description: FIXED_MCP_TOOL_DESCRIPTION,
-        requireExplicitApproval:
-          tool.isTrusted !== true || tool.requireExplicitApproval === true,
-      },
-    ],
+    accepted: [admitted],
     rejected: [],
   };
 }
@@ -391,77 +399,80 @@ function selectionOutput(selection: McpToolSelection): string {
 }
 
 export function createSelectToolsTool(menu: McpToolMenu): Tool {
-  return {
-    annotations: { readOnlyHint: true },
-    category: "readonly",
-    description: SELECT_TOOLS_DESCRIPTION,
-    name: "select_tools",
-    parametersJsonSchema: {
-      additionalProperties: false,
-      properties: {
-        tools: {
-          items: { type: "string" },
-          maxItems: MAX_MCP_TOOLS_PER_SELECTION,
-          minItems: 1,
-          type: "array",
+  return withToolAdmission(
+    {
+      annotations: { readOnlyHint: true },
+      category: "readonly",
+      description: SELECT_TOOLS_DESCRIPTION,
+      name: "select_tools",
+      parametersJsonSchema: {
+        additionalProperties: false,
+        properties: {
+          tools: {
+            items: { type: "string" },
+            maxItems: MAX_MCP_TOOLS_PER_SELECTION,
+            minItems: 1,
+            type: "array",
+          },
+          query: { minLength: 1, type: "string" },
+          limit: {
+            maximum: MAX_MCP_TOOLS_PER_SELECTION,
+            minimum: 1,
+            type: "integer",
+          },
+          load: { type: "boolean" },
         },
-        query: { minLength: 1, type: "string" },
-        limit: {
-          maximum: MAX_MCP_TOOLS_PER_SELECTION,
-          minimum: 1,
-          type: "integer",
-        },
-        load: { type: "boolean" },
+        type: "object",
       },
-      type: "object",
-    },
-    source: "builtin",
-    execute(
-      params: Record<string, unknown>,
-      context: ToolExecutionContext,
-    ): ToolExecutionResult {
-      const request = selectToolsRequest(params);
-      const scope = {
-        contextScopeId: context.contextScopeId,
-        sessionId: context.sessionId,
-      };
-      const candidates =
-        request.kind === "query"
-          ? menu.search(request.query, request.limit)
-          : [];
-      const selection =
-        request.kind === "exact"
-          ? menu.select(scope, request.tools)
-          : request.load
-            ? menu.select(
-                scope,
-                candidates.map((candidate) => candidate.name),
-              )
-            : emptySelection();
-      const candidateOutput =
-        request.kind !== "query"
-          ? ""
-          : candidates.length === 0
-            ? "No matching MCP tools found."
-            : `MCP tool candidates: ${candidates
-                .map(
-                  (candidate) =>
-                    `${candidate.name} (${candidate.score.toFixed(4)})`,
+      source: "builtin",
+      execute(
+        params: Record<string, unknown>,
+        context: ToolExecutionContext,
+      ): ToolExecutionResult {
+        const request = selectToolsRequest(params);
+        const scope = {
+          contextScopeId: context.contextScopeId,
+          sessionId: context.sessionId,
+        };
+        const candidates =
+          request.kind === "query"
+            ? menu.search(request.query, request.limit)
+            : [];
+        const selection =
+          request.kind === "exact"
+            ? menu.select(scope, request.tools)
+            : request.load
+              ? menu.select(
+                  scope,
+                  candidates.map((candidate) => candidate.name),
                 )
-                .join(", ")}.`;
-      const selectionSummary =
-        request.kind === "exact" || request.load
-          ? selectionOutput(selection)
-          : "";
-      const output = [candidateOutput, selectionSummary]
-        .filter((line) => line !== "")
-        .join("\n");
-      return {
-        metadata: {
-          mcpSelection: { candidates, ...selection },
-        },
-        output,
-      };
+              : emptySelection();
+        const candidateOutput =
+          request.kind !== "query"
+            ? ""
+            : candidates.length === 0
+              ? "No matching MCP tools found."
+              : `MCP tool candidates: ${candidates
+                  .map(
+                    (candidate) =>
+                      `${candidate.name} (${candidate.score.toFixed(4)})`,
+                  )
+                  .join(", ")}.`;
+        const selectionSummary =
+          request.kind === "exact" || request.load
+            ? selectionOutput(selection)
+            : "";
+        const output = [candidateOutput, selectionSummary]
+          .filter((line) => line !== "")
+          .join("\n");
+        return {
+          metadata: {
+            mcpSelection: { candidates, ...selection },
+          },
+          output,
+        };
+      },
     },
-  };
+    independentToolAdmission,
+  );
 }

@@ -1,305 +1,350 @@
-import { describe, expect, it, vi, type Mock } from "vitest";
-import type { UiEvent, UiPermissionRequest, UiRunStatus } from "ohbaby-sdk";
+import { describe, expect, it } from "vitest";
+import type { UiPermissionEvent } from "ohbaby-sdk";
 import { createBus } from "../../bus/index.js";
 import {
+  createPermissionManager,
   PermissionEvent,
-  type PermissionInfo,
 } from "../../permission/index.js";
-import { startPermissionEventProjection } from "./permission-projection.js";
+import type {
+  PermissionCommit,
+  PermissionInfo,
+} from "../../permission/index.js";
+import {
+  createPermissionProjection,
+  startPermissionEventProjection,
+  toUiPermissionRequest,
+} from "./permission-projection.js";
 
-interface PermissionProjectionHarness {
-  readonly asyncErrors: unknown[];
-  readonly bus: ReturnType<typeof createBus>;
-  readonly events: UiEvent[];
-  readonly pendingPermissionSessions: Map<string, string>;
-  readonly reconcileRuntimeStatus: Mock<() => Promise<UiRunStatus>>;
-  readonly stateStore: {
-    readonly upsertPermission: Mock<
-      (request: UiPermissionRequest) => Promise<void>
-    >;
-    readonly removePermission: Mock<(requestId: string) => Promise<void>>;
-  };
-}
-
-function createPermissionInfo(
-  overrides: Partial<PermissionInfo> = {},
-): PermissionInfo {
+function info(overrides: Partial<PermissionInfo> = {}): PermissionInfo {
   return {
-    callId: "call_1",
-    id: "perm_1",
-    messageId: "message_1",
+    id: "p1",
+    sessionId: "child",
+    runId: "run-child",
+    callId: "call-child",
+    messageId: "message-child",
+    rootSessionId: "root",
+    ancestorSessionIds: ["root"],
+    sourceLabel: "Child agent",
+    title: "Edit file",
+    type: "tool",
+    name: "edit",
+    pattern: "edit(src/**)",
     metadata: {},
-    name: "shell",
-    pattern: "bash:echo hello",
-    sessionId: "session_1",
     time: { created: 100 },
-    title: "Run shell command",
-    type: "bash",
     ...overrides,
   };
 }
-
-function createHarness(
-  options: {
-    readonly activeRunId?: string;
-    readonly currentStatus?: UiRunStatus;
-    readonly upsertPermission?: (request: UiPermissionRequest) => Promise<void>;
-    readonly removePermission?: (requestId: string) => Promise<void>;
-  } = {},
-): PermissionProjectionHarness {
-  const bus = createBus();
-  const events: UiEvent[] = [];
-  const pendingPermissionSessions = new Map<string, string>();
-  const runtimeStatus: UiRunStatus = options.currentStatus ?? { kind: "idle" };
-  const reconcileRuntimeStatus = vi.fn((): Promise<UiRunStatus> => {
-    return Promise.resolve(runtimeStatus);
-  });
-  const stateStore = {
-    upsertPermission: vi.fn((request: UiPermissionRequest): Promise<void> => {
-      return options.upsertPermission?.(request) ?? Promise.resolve();
-    }),
-    removePermission: vi.fn((requestId: string): Promise<void> => {
-      return options.removePermission?.(requestId) ?? Promise.resolve();
-    }),
-  };
-  const asyncErrors: unknown[] = [];
-
-  startPermissionEventProjection({
-    bus,
-    currentPermissionState: () => ({
-      level: "default",
-      mode: "auto",
-      sessionRules: [
-        {
-          rules: [
-            {
-              decision: "allow",
-              pattern: "bash:*",
-              scope: "session",
-              tool: "bash",
-            },
-          ],
-          sessionId: "session_1",
-        },
-      ],
-    }),
-    getActiveRunId: () => options.activeRunId,
-    now: () => 1234,
-    onAsyncError: (error) => {
-      asyncErrors.push(error);
-    },
-    pendingPermissionSessions,
-    publish: (event) => {
-      events.push(event);
-    },
-    reconcileRuntimeStatus,
-    stateStore,
-  });
-
+function requested(overrides: Partial<PermissionInfo> = {}): PermissionCommit {
+  return { type: "requested", info: info(overrides) };
+}
+function resolved(overrides: Partial<PermissionInfo> = {}): PermissionCommit {
+  const source = info(overrides);
   return {
-    asyncErrors,
-    bus,
-    events,
-    pendingPermissionSessions,
-    reconcileRuntimeStatus,
-    stateStore,
+    type: "resolved",
+    identity: {
+      id: source.id,
+      sessionId: source.sessionId,
+      rootSessionId: source.rootSessionId,
+      ancestorSessionIds: source.ancestorSessionIds,
+      runId: source.runId,
+      callId: source.callId,
+      messageId: source.messageId,
+      status: "resolved",
+      reason: "once",
+    },
+    response: { type: "once" },
   };
 }
 
-async function flushAsyncProjection(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-}
-
-describe("startPermissionEventProjection", () => {
-  it("publishes permission.updated for mode, level, and rule changes", () => {
-    const { bus, events } = createHarness();
-
-    bus.publish(PermissionEvent.ModeChanged, {
-      current: "plan",
-      previous: "auto",
-    });
-    bus.publish(PermissionEvent.LevelChanged, {
-      current: "full-access",
-      previous: "default",
-    });
-    bus.publish(PermissionEvent.RuleAdded, {
-      rule: {
-        decision: "allow",
-        pattern: "bash:*",
-        scope: "session",
-        tool: "bash",
-      },
-      sessionId: "session_1",
-    });
-
-    expect(events).toEqual([
-      {
-        permission: {
-          level: "default",
-          mode: "auto",
-          sessionRules: [
-            {
-              rules: [
-                {
-                  decision: "allow",
-                  pattern: "bash:*",
-                  scope: "session",
-                  tool: "bash",
-                },
-              ],
-              sessionId: "session_1",
-            },
-          ],
-        },
-        timestamp: 1234,
-        type: "permission.updated",
-      },
-      {
-        permission: {
-          level: "default",
-          mode: "auto",
-          sessionRules: [
-            {
-              rules: [
-                {
-                  decision: "allow",
-                  pattern: "bash:*",
-                  scope: "session",
-                  tool: "bash",
-                },
-              ],
-              sessionId: "session_1",
-            },
-          ],
-        },
-        timestamp: 1234,
-        type: "permission.updated",
-      },
-      {
-        permission: {
-          level: "default",
-          mode: "auto",
-          sessionRules: [
-            {
-              rules: [
-                {
-                  decision: "allow",
-                  pattern: "bash:*",
-                  scope: "session",
-                  tool: "bash",
-                },
-              ],
-              sessionId: "session_1",
-            },
-          ],
-        },
-        timestamp: 1234,
-        type: "permission.updated",
-      },
-    ]);
-  });
-
-  it("projects PermissionEvent.Updated into permission.requested state and runtime updates", async () => {
-    const {
-      bus,
-      events,
-      pendingPermissionSessions,
-      reconcileRuntimeStatus,
-      stateStore,
-    } = createHarness({ activeRunId: "run_1" });
-    const info = createPermissionInfo({ id: "perm_2", sessionId: "session_2" });
-
-    bus.publish(PermissionEvent.Updated, { info });
-    await flushAsyncProjection();
-
-    const request: UiPermissionRequest = {
+describe("approval projection", () => {
+  it("preserves real execution/source identity and offers only valid approval actions", () => {
+    expect(toUiPermissionRequest({ info: info() })).toEqual({
+      id: "p1",
+      sessionId: "child",
+      runId: "run-child",
+      callId: "call-child",
+      messageId: "message-child",
+      rootSessionId: "root",
+      sourceLabel: "Child agent",
+      contextScopeId: undefined,
+      createdAt: 100,
+      title: "Edit file",
+      description: "edit(src/**)",
       choices: [
-        { id: "allow_once", intent: "allow", label: "Allow once" },
-        { id: "reject", intent: "deny", label: "Reject" },
-        { id: "cancel", intent: "abort", label: "Cancel run" },
+        { id: "allow_once", label: "Allow once", intent: "allow" },
+        { id: "allow_always", label: "Always allow", intent: "allow" },
+        { id: "reject", label: "Reject", intent: "deny" },
       ],
-      description: "bash:echo hello",
-      id: "perm_2",
-      runId: "run_1",
-      title: "Run shell command",
-    };
-    expect(pendingPermissionSessions.get("perm_2")).toBe("session_2");
-    expect(stateStore.upsertPermission).toHaveBeenCalledWith(request);
-    expect(reconcileRuntimeStatus).toHaveBeenCalledTimes(1);
-    expect(events).toEqual([
-      {
-        request,
-        timestamp: 1234,
-        type: "permission.requested",
-      },
-    ]);
-  });
-
-  it("keeps the legacy no-active-run callId fallback only as the request runId", async () => {
-    const { bus, events, pendingPermissionSessions } = createHarness();
-    const info = createPermissionInfo({
-      callId: "call_legacy",
-      id: "perm_legacy",
-      sessionId: "session_real",
     });
-
-    bus.publish(PermissionEvent.Updated, { info });
-    await flushAsyncProjection();
-
     expect(
-      events.find((event) => event.type === "permission.requested"),
-    ).toMatchObject({
-      request: {
-        id: "perm_legacy",
-        runId: "call_legacy",
-      },
-      type: "permission.requested",
-    });
-    expect(pendingPermissionSessions.get("perm_legacy")).toBe("session_real");
-    expect(pendingPermissionSessions.has("call_legacy")).toBe(false);
+      toUiPermissionRequest({
+        info: info({ metadata: { rememberable: false } }),
+      }).choices.map((choice) => choice.id),
+    ).toEqual(["allow_once", "reject"]);
   });
 
-  it("projects PermissionEvent.Replied into permission.resolved state and runtime updates", async () => {
-    const {
-      bus,
-      events,
-      pendingPermissionSessions,
-      reconcileRuntimeStatus,
-      stateStore,
-    } = createHarness();
-    pendingPermissionSessions.set("perm_1", "session_1");
-
-    bus.publish(PermissionEvent.Replied, {
-      callId: "call_1",
-      permissionId: "perm_1",
-      response: { type: "once" },
-      sessionId: "session_1",
+  it("captures immutable per-root baselines synchronously and delivers only after commit", () => {
+    const projection = createPermissionProjection({ permissionEpoch: "epoch" });
+    const events: UiPermissionEvent[] = [];
+    projection.subscribe((event) => {
+      events.push(event);
     });
-    await flushAsyncProjection();
-
-    expect(pendingPermissionSessions.has("perm_1")).toBe(false);
-    expect(stateStore.removePermission).toHaveBeenCalledWith("perm_1");
-    expect(events).toEqual([
-      {
-        requestId: "perm_1",
-        timestamp: 1234,
-        type: "permission.resolved",
-      },
-    ]);
-    expect(reconcileRuntimeStatus).toHaveBeenCalledTimes(1);
-  });
-
-  it("passes asynchronous projection errors to onAsyncError", async () => {
-    const error = new Error("store failed");
-    const { asyncErrors, bus, events } = createHarness({
-      upsertPermission: vi.fn(() => Promise.reject(error)),
-    });
-
-    bus.publish(PermissionEvent.Updated, { info: createPermissionInfo() });
-    await flushAsyncProjection();
-
-    expect(asyncErrors).toEqual([error]);
+    const first = requested();
+    projection.criticalCommit(first);
+    const baseline = projection.getSnapshot("root");
     expect(events).toEqual([]);
+    expect(baseline).toMatchObject({
+      permissionEpoch: "epoch",
+      rootSessionId: "root",
+      permissionRevision: 1,
+      requests: [{ id: "p1" }],
+    });
+    projection.notifyCommitted(first);
+    const other = requested({
+      id: "p2",
+      rootSessionId: "other",
+      sessionId: "other",
+      ancestorSessionIds: [],
+    });
+    projection.criticalCommit(other);
+    projection.notifyCommitted(other);
+    expect(projection.getSnapshot("root")).toBe(baseline);
+    const end = resolved();
+    projection.criticalCommit(end);
+    projection.notifyCommitted(end);
+    expect(projection.getSnapshot("root")).toMatchObject({
+      permissionRevision: 2,
+      requests: [],
+    });
+    expect(baseline.requests).toHaveLength(1);
+    expect(Object.isFrozen(baseline.requests)).toBe(true);
+    expect(Object.isFrozen(baseline.requests[0]?.choices)).toBe(true);
+    expect(
+      events.map((event) =>
+        event.type === "permission.unavailable" ||
+        event.type === "permission.resync-required"
+          ? undefined
+          : event.permissionRevision,
+      ),
+    ).toEqual([1, 1, 2]);
+    expect(events[2]).toMatchObject({
+      type: "permission.resolved",
+      requestId: "p1",
+      sessionId: "child",
+      rootSessionId: "root",
+      reason: "once",
+    });
+    expect(projection.getSnapshot(null)).toMatchObject({
+      rootSessionId: null,
+      permissionRevision: 0,
+      requests: [],
+    });
+  });
+
+  it("does not partially commit candidate construction failures", () => {
+    const projection = createPermissionProjection({ permissionEpoch: "epoch" });
+    projection.criticalCommit(requested());
+    const baseline = projection.getSnapshot("root");
+    const broken = info({ id: "p2" });
+    Object.defineProperty(broken, "title", {
+      get() {
+        throw new Error("candidate failed");
+      },
+    });
+    expect(() => {
+      projection.criticalCommit({ type: "requested", info: broken });
+    }).toThrow("candidate failed");
+    expect(projection.getSnapshot("root")).toBe(baseline);
+    expect(() => {
+      projection.criticalCommit(resolved({ sessionId: "wrong" }));
+    }).toThrow();
+    expect(projection.getSnapshot("root")).toBe(baseline);
+  });
+
+  it("rejects conflicting identities and unknown terminals before changing root revision", () => {
+    const projection = createPermissionProjection();
+    projection.criticalCommit(requested());
+    expect(() => {
+      projection.criticalCommit(requested({ rootSessionId: "other" }));
+    }).toThrow();
+    expect(() => {
+      projection.criticalCommit(resolved({ id: "missing" }));
+    }).toThrow();
+    expect(projection.getSnapshot("root").permissionRevision).toBe(1);
+    expect(projection.getSnapshot("other").permissionRevision).toBe(0);
+  });
+
+  it("isolates the last-event subscriber failure and notifies its error handler immediately", () => {
+    const projection = createPermissionProjection();
+    const errors: unknown[] = [];
+    const healthy: UiPermissionEvent[] = [];
+    projection.subscribe(
+      (event) => {
+        if (event.type === "permission.resolved")
+          throw new Error("socket failed");
+      },
+      (error) => {
+        errors.push(error);
+      },
+    );
+    projection.subscribe((event) => {
+      healthy.push(event);
+    });
+    const start = requested();
+    projection.criticalCommit(start);
+    projection.notifyCommitted(start);
+    const end = resolved();
+    projection.criticalCommit(end);
+    projection.notifyCommitted(end);
+    expect(errors).toHaveLength(1);
+    expect(healthy.map((event) => event.type)).toEqual([
+      "permission.requested",
+      "permission.resolved",
+    ]);
+    expect(projection.getSnapshot("root")).toMatchObject({
+      permissionRevision: 2,
+      requests: [],
+    });
+    projection.notifyCommitted(end);
+    expect(healthy).toHaveLength(2);
+  });
+
+  it("isolates unhealthy roots and exposes explicit unavailability even if notification fails", () => {
+    const projection = createPermissionProjection({ permissionEpoch: "epoch" });
+    projection.criticalCommit(requested());
+    const errors: unknown[] = [];
+    projection.subscribe(
+      () => {
+        throw new Error("delivery failed");
+      },
+      (error) => {
+        errors.push(error);
+      },
+    );
+    projection.markUnavailable("root", new Error("projection failed"));
+    expect(errors).toHaveLength(1);
+    expect(() => projection.getSnapshot("root")).toThrow(
+      "PERMISSION_UNAVAILABLE",
+    );
+    expect(() => {
+      projection.criticalCommit(requested({ id: "p2" }));
+    }).toThrow("PERMISSION_UNAVAILABLE");
+    expect(projection.getSnapshot("other").requests).toEqual([]);
+    projection.markUnavailable(undefined, new Error("shared failure"));
+    expect(() => projection.getSnapshot("other")).toThrow(
+      "PERMISSION_UNAVAILABLE",
+    );
+  });
+
+  it("connects the real manager so stored-rule fast paths never advance approval revision", async () => {
+    const projection = createPermissionProjection({ permissionEpoch: "epoch" });
+    let id = 0;
+    const manager = createPermissionManager({
+      bus: createBus(),
+      generateId: () => `p${String(++id)}`,
+      criticalCommit: projection.criticalCommit,
+      onCommitted: projection.notifyCommitted,
+      onUnavailable: projection.markUnavailable,
+    });
+    const ask = {
+      sessionId: "child",
+      runId: "run-child",
+      callId: "call-child",
+      messageId: "message-child",
+      source: { rootSessionId: "root", ancestorSessionIds: ["root"] },
+      signal: new AbortController().signal,
+      category: "write" as const,
+      toolName: "edit",
+      params: { file_path: "src/a.ts" },
+    };
+    const first = manager.ask(ask);
+    const second = manager.ask(ask);
+    manager.respond("child", "p2", { type: "always" });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      "always",
+      "always",
+    ]);
+    expect(projection.getSnapshot("root")).toMatchObject({
+      permissionRevision: 4,
+      requests: [],
+    });
+    await expect(manager.ask(ask)).resolves.toBe("always");
+    expect(projection.getSnapshot("root").permissionRevision).toBe(4);
+  });
+
+  it("keeps ordinary mode and rule updates separate from authoritative approval transitions", () => {
+    const bus = createBus();
+    const events: unknown[] = [];
+    const stop = startPermissionEventProjection({
+      bus,
+      currentPermissionState: () => ({
+        mode: "auto",
+        level: "default",
+        sessionRules: [],
+      }),
+      publish: (event) => {
+        events.push(event);
+      },
+    });
+    bus.publish(PermissionEvent.Updated, { info: info() });
+    expect(events).toEqual([]);
+    bus.publish(PermissionEvent.LevelChanged, {
+      previous: "default",
+      current: "full-access",
+    });
+    expect(events).toMatchObject([{ type: "permission.updated" }]);
+    stop();
+    bus.publish(PermissionEvent.ModeChanged, {
+      previous: "auto",
+      current: "plan",
+    });
+    expect(events).toHaveLength(1);
+  });
+  it("preserves event order for every subscriber when an observer answers synchronously", async () => {
+    const projection = createPermissionProjection();
+    const manager = createPermissionManager({
+      bus: createBus(),
+      generateId: () => "p1",
+      criticalCommit: projection.criticalCommit,
+      onCommitted: projection.notifyCommitted,
+    });
+    const observed: number[] = [];
+    projection.subscribe((event) => {
+      if (event.type === "permission.requested")
+        manager.respond("child", event.request.id, { type: "once" });
+    });
+    projection.subscribe((event) => {
+      if (
+        event.type !== "permission.unavailable" &&
+        event.type !== "permission.resync-required"
+      )
+        observed.push(event.permissionRevision);
+    });
+    await expect(
+      manager.ask({
+        sessionId: "child",
+        runId: "run",
+        callId: "call",
+        messageId: "message",
+        source: { rootSessionId: "root", ancestorSessionIds: ["root"] },
+        signal: new AbortController().signal,
+        category: "write",
+        toolName: "edit",
+        params: { file_path: "src/a.ts" },
+      }),
+    ).resolves.toBe("once");
+    expect(observed).toEqual([1, 2]);
+  });
+
+  it("rejects changed frozen ancestry even when the visible root and source are unchanged", () => {
+    const projection = createPermissionProjection();
+    projection.criticalCommit(requested());
+    const baseline = projection.getSnapshot("root");
+    expect(() => {
+      projection.criticalCommit(
+        resolved({ ancestorSessionIds: ["different", "root"] }),
+      );
+    }).toThrow();
+    expect(projection.getSnapshot("root")).toBe(baseline);
   });
 });

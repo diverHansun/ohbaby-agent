@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiBackendClient,
   UiCompactSessionUsage,
+  UiEvent,
   UiPermissionRequest,
   UiPromptEditLease,
   UiPromptSubmission,
@@ -12,9 +10,13 @@ import type {
   UiSnapshot,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
-import type { OhbabyWebRuntime } from "../api/daemon/client.js";
-import { createOhbabyWebStore } from "../store/store.js";
+import { createSessionSync, type UiSessionView } from "ohbaby-sdk";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { OhbabyWebRuntime } from "../runtime.js";
 import type { OhbabyWebStore } from "../store/store.js";
+import { createOhbabyWebStore } from "../store/store.js";
 import { OhbabyWebApp } from "./App.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
@@ -88,6 +90,106 @@ interface FakeRuntime {
 }
 
 const mountedApps: MountedApp[] = [];
+
+it("keeps in-flight submissions out of recovery reminders without enabling resends", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  fake.store.setUnknownPromptRequests([
+    {
+      directory: "/repo-a",
+      runtimeEpoch: "epoch",
+      clientRequestId: "in-flight",
+      sessionId: "session_1",
+      status: "unknown",
+      submitting: true,
+    },
+  ]);
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "another prompt");
+  expect(app.container.textContent).not.toContain(
+    "Submission result is unknown",
+  );
+  expect(app.container.textContent).not.toContain("Check submission");
+  expect(app.container.textContent).not.toContain("Forget pending submission");
+  expect(
+    app.container.querySelector(".ohb-send-button")?.hasAttribute("disabled"),
+  ).toBe(true);
+});
+
+it("shows only unresolved reminders while another submission is in flight", () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const request = {
+    directory: "/repo-a",
+    runtimeEpoch: "epoch",
+    sessionId: "session_1",
+    status: "unknown" as const,
+  };
+  fake.store.setUnknownPromptRequests([
+    { ...request, clientRequestId: "in-flight", submitting: true },
+    { ...request, sessionId: "other-session", clientRequestId: "unresolved" },
+  ]);
+  const forget = vi.spyOn(fake.runtime, "forgetUnknownPrompt");
+  const app = mountApp(fake.runtime);
+  const buttons = [...app.container.querySelectorAll("button")].filter(
+    (button) => button.textContent === "Forget pending submission",
+  );
+  expect(buttons).toHaveLength(1);
+  act(() => {
+    buttons[0]?.click();
+  });
+  expect(forget).toHaveBeenCalledWith("unresolved");
+});
+
+it("keeps a confirmed backend restart visible even before the POST settles", () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  fake.store.setUnknownPromptRequests([
+    {
+      directory: "/repo-a",
+      runtimeEpoch: "old-epoch",
+      clientRequestId: "restarted",
+      sessionId: "session_1",
+      status: "epoch-changed",
+      submitting: true,
+    },
+  ]);
+  const app = mountApp(fake.runtime);
+  expect(app.container.textContent).toContain("The backend restarted");
+  const forget = [...app.container.querySelectorAll("button")].find(
+    (button) => button.textContent === "Forget pending submission",
+  );
+  expect(forget?.disabled).toBe(true);
+});
+
+it("offers explicit forgetting without resubmitting or cancelling an unknown prompt", () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const forget = vi.spyOn(fake.runtime, "forgetUnknownPrompt");
+  const submit = vi.spyOn(fake.client, "submitPromptAccepted");
+  fake.runtime.store.setUnknownPromptRequests([
+    {
+      directory: "/repo-a",
+      runtimeEpoch: "epoch",
+      clientRequestId: "pending-one",
+      sessionId: "session_1",
+      status: "unknown",
+    },
+  ]);
+  const app = mountApp(fake.runtime);
+  const button = [...app.container.querySelectorAll("button")].find(
+    (item) => item.textContent === "Forget pending submission",
+  );
+  expect(button).toBeDefined();
+  act(() => button?.click());
+  expect(forget).toHaveBeenCalledWith("pending-one");
+  expect(submit).not.toHaveBeenCalled();
+  expect(fake.abortSession).not.toHaveBeenCalled();
+});
 
 it.each(["session", "empty project"] as const)(
   "renders the %s composer without a decorative prompt marker",
@@ -186,6 +288,77 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(stream.scrollTop).toBe(1_400);
   });
 
+  it("keeps the scroll anchor after scrolling up while a pending prompt is still visible", async () => {
+    const admission =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const initial = {
+      ...snapshotWithStatus({ kind: "running", runId: "old-run" }),
+      status: { kind: "idle" as const },
+      runs: [],
+    };
+    const fake = createFakeRuntime({ snapshot: initial });
+    fake.submitPromptAccepted.mockReturnValue(admission.promise);
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "pending");
+    await pressTextareaKey(app.container, "Enter");
+    const stream = app.container.querySelector<HTMLElement>(".ohb-stream");
+    if (!stream) throw new Error("missing stream");
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1000,
+      scrollTop: 0,
+    });
+    await flushTimers();
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1000,
+      scrollTop: 400,
+    });
+    act(() => {
+      stream.dispatchEvent(new Event("scroll"));
+    });
+    setScrollMetrics(stream, {
+      clientHeight: 400,
+      scrollHeight: 1200,
+      scrollTop: 400,
+    });
+    act(() => {
+      fake.store.replaceSnapshot(
+        snapshotWithMessageText(initial, "new live content"),
+        2,
+      );
+    });
+    await flushTimers();
+    expect(stream.scrollTop).toBe(400);
+  });
+  it("does not restore a late rejected submission into a different session draft", async () => {
+    const admission =
+      deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+    const initial = {
+      ...snapshotWithStatus({ kind: "idle" }),
+      activeSessionId: null,
+    };
+    const fake = createFakeRuntime({ snapshot: initial });
+    fake.submitPromptAccepted.mockReturnValue(admission.promise);
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "original new-session prompt");
+    await pressTextareaKey(app.container, "Enter");
+    act(() => {
+      fake.store.replaceSnapshot(
+        { ...initial, activeSessionId: "session_1" },
+        2,
+      );
+    });
+    await act(async () => {
+      admission.reject(new Error("response lost"));
+      await admission.promise.catch(() => undefined);
+    });
+    expect(textareaValue(app.container)).toBe("");
+    act(() => {
+      fake.store.replaceSnapshot(initial, 3);
+    });
+    expect(textareaValue(app.container)).toBe("original new-session prompt");
+  });
   it("resets stick-to-bottom when the active session changes", async () => {
     const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
     const fake = createFakeRuntime({ snapshot: initial });
@@ -352,7 +525,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const unavailableTextarea =
       unavailableApp.container.querySelector("textarea");
     expect(unavailableTextarea?.getAttribute("placeholder")).toBe(
-      "daemon unavailable",
+      "Draft while reconnecting…",
     );
     expect(
       unavailableApp.container.querySelector(".ohb-composer-typewriter"),
@@ -861,7 +1034,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelector("textarea")?.textContent).toBe("");
     expect(textareaValue(app.container)).toBe("");
     expect(app.container.textContent).toContain("visible on the next frame");
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(
+      app.container.querySelector(".ohb-message-pending-label"),
+    ).toBeNull();
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
     expect(
       app.container
         .querySelector('.ohb-send-button[title="Send message"]')
@@ -985,7 +1161,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     expect(
       app.container.querySelector("textarea")?.hasAttribute("disabled"),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       app.container.querySelector(".ohb-send-button")?.hasAttribute("disabled"),
     ).toBe(true);
@@ -1239,7 +1415,10 @@ describe("OhbabyWebApp slash command interactions", () => {
         ?.getAttribute("data-user-message-id"),
     ).toBe("message_1");
     expect(app.container.textContent).toContain("accepted before navigation");
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(
+      app.container.querySelector(".ohb-message-pending-label"),
+    ).toBeNull();
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
   });
 
   it("restores a rejected prompt only when the user has not typed a new draft", async () => {
@@ -1279,7 +1458,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelector(".ohb-thinking")).toBeNull();
   });
 
-  it("rebuilds a starting prompt and startup thinking from the server snapshot", () => {
+  it("rebuilds a starting prompt without fabricating model thinking", () => {
     const fake = createFakeRuntime({
       snapshot: {
         ...snapshotWithStatus({ kind: "idle" }),
@@ -1292,11 +1471,14 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
       1,
     );
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
-    expect(app.container.textContent).toContain("starting agent");
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
+    expect(app.container.textContent).not.toContain("starting agent");
+    expect(
+      app.container.querySelector(".ohb-message-pending-label"),
+    ).toBeNull();
   });
 
-  it("lets the formal message take over without ending startup thinking", () => {
+  it("lets the formal message take over without fabricating model thinking", () => {
     const snapshot = snapshotWithStatus({ kind: "idle" });
     const fake = createFakeRuntime({
       snapshot: {
@@ -1319,7 +1501,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
     expect(app.container.querySelectorAll(".ohb-message-user")).toHaveLength(1);
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
   });
 
   it("moves a busy starting projection back to the queue", async () => {
@@ -1601,7 +1783,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
       1,
     );
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
     expect(
       app.container
         .querySelector(".ohb-send-button")
@@ -1650,7 +1832,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
     expect(app.container.querySelectorAll(".ohb-message-user")).toHaveLength(1);
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
     expect(
       app.container
         .querySelector(".ohb-send-button")
@@ -1658,7 +1840,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toBe("true");
   });
 
-  it("shows one provisional row and one run thinking card when running precedes formal", async () => {
+  it("shows one provisional row without model thinking when running precedes formal", async () => {
     const initial = snapshotWithStatus({ kind: "idle" });
     const running: UiSnapshot = {
       ...initial,
@@ -1680,7 +1862,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelectorAll(".ohb-message-pending")).toHaveLength(
       1,
     );
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
     expect(app.container.textContent).not.toContain(
       "double click esc to interrupt",
     );
@@ -1709,7 +1891,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(app.container.querySelector(".ohb-message-pending")).toBeNull();
     expect(app.container.querySelectorAll(".ohb-message-user")).toHaveLength(1);
-    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(1);
+    expect(app.container.querySelectorAll(".ohb-thinking")).toHaveLength(0);
   });
 
   it("keeps keyed consecutive submissions in conversation and queue placements", async () => {
@@ -1799,10 +1981,29 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(textareaValue(app.container)).toBe("");
   });
 
-  it("calculates thinking elapsed time from the persisted run start on mount", () => {
-    vi.spyOn(Date, "now").mockReturnValue(Date.parse(timestamp) + 12_000);
+  it("calculates thinking elapsed time from the actual model request and server sample", () => {
+    vi.spyOn(Date, "now").mockReturnValue(999999999999);
+    const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
     const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+      snapshot: {
+        ...initial,
+        serverNow: 13000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: {
+              requestId: "r",
+              runId: "run_1",
+              messageId: "m",
+              step: 1,
+              attempt: 1,
+              purpose: "agent-step",
+              startedAt: 1000,
+              outcome: "running",
+            },
+          },
+        ],
+      },
     });
     const app = mountApp(fake.runtime);
 
@@ -1867,7 +2068,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     vi.spyOn(fake.client, "acquirePromptEditLease").mockResolvedValue({
       editLeaseId: "lease_1",
-      expiresAt: "2026-07-12T00:01:00.000Z",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
       ownerClientId: "client_web",
       prompt: queuedPrompt,
     });
@@ -1886,7 +2087,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
     const app = mountApp(fake.runtime);
     const editButton = app.container.querySelector(
-      '[aria-label="Edit queued prompt: queued text"]',
+      '[aria-label="Edit prompt: queued text"]',
     );
     if (!(editButton instanceof HTMLButtonElement)) {
       throw new Error("queued edit button not found");
@@ -1944,7 +2145,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     vi.spyOn(fake.client, "acquirePromptEditLease").mockResolvedValue({
       editLeaseId: "lease_1",
-      expiresAt: "2026-07-12T00:01:00.000Z",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
       ownerClientId: "client_web",
       prompt: queuedPrompt,
     });
@@ -1954,7 +2155,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
     const editButton = app.container.querySelector(
-      '[aria-label="Edit queued prompt: queued text"]',
+      '[aria-label="Edit prompt: queued text"]',
     );
     if (!(editButton instanceof HTMLButtonElement)) {
       throw new Error("queued edit button not found");
@@ -2012,14 +2213,14 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     vi.spyOn(fake.client, "acquirePromptEditLease").mockResolvedValue({
       editLeaseId: "lease_failure",
-      expiresAt: "2026-07-12T00:01:00.000Z",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
       ownerClientId: "client_web",
       prompt: queuedPrompt,
     });
     fake.editQueuedPrompt.mockRejectedValue(new Error("save failed"));
     const app = mountApp(fake.runtime);
     const editButton = app.container.querySelector(
-      '[aria-label="Edit queued prompt: queued text"]',
+      '[aria-label="Edit prompt: queued text"]',
     );
     if (!(editButton instanceof HTMLButtonElement)) {
       throw new Error("queued edit button not found");
@@ -2050,7 +2251,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
   });
 
-  it("persists the edit buffer as a draft when reload renewal loses the lease", async () => {
+  it("preserves expired editing separately from the original draft and blocks implicit submission", async () => {
     globalThis.sessionStorage.setItem(
       "ohbaby:composer:/repo-a:session_1",
       JSON.stringify({ text: "older draft" }),
@@ -2072,15 +2273,23 @@ describe("OhbabyWebApp slash command interactions", () => {
     vi.spyOn(fake.client, "renewPromptEditLease").mockRejectedValue(
       new Error("lease expired"),
     );
-    mountApp(fake.runtime);
-
+    const app = mountApp(fake.runtime);
     await waitFor(() =>
-      Boolean(
-        globalThis.sessionStorage
-          .getItem("ohbaby:composer:/repo-a:session_1")
-          ?.includes("preserve edited buffer"),
-      ),
+      app.container.textContent.includes("Edit lease expired"),
     );
+    expect(textareaValue(app.container)).toBe("preserve edited buffer");
+    expect(
+      globalThis.sessionStorage.getItem("ohbaby:composer:/repo-a:session_1"),
+    ).toContain("older draft");
+    expect(
+      globalThis.sessionStorage.getItem(
+        "ohbaby:composer-lease:/repo-a:session_1",
+      ),
+    ).toContain("preserve edited buffer");
+    await pressTextareaKey(app.container, "Enter");
+    expect(fake.submitPromptAccepted).not.toHaveBeenCalled();
+    await pressTextareaKey(app.container, "Escape");
+    expect(textareaValue(app.container)).toBe("older draft");
   });
 
   it("does not acquire a second lease while another queued edit is active", async () => {
@@ -2105,16 +2314,16 @@ describe("OhbabyWebApp slash command interactions", () => {
       .mockReturnValue(pendingLease.promise);
     const lease = {
       editLeaseId: "lease_one",
-      expiresAt: "2026-07-12T00:01:00.000Z",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
       ownerClientId: "client_web",
       prompt: firstPrompt,
     } satisfies UiPromptEditLease;
     const app = mountApp(fake.runtime);
     const editOne = app.container.querySelector(
-      '[aria-label="Edit queued prompt: one"]',
+      '[aria-label="Edit prompt: one"]',
     );
     const editTwo = app.container.querySelector(
-      '[aria-label="Edit queued prompt: two"]',
+      '[aria-label="Edit prompt: two"]',
     );
     if (
       !(editOne instanceof HTMLButtonElement) ||
@@ -2755,6 +2964,58 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
+  it("shows independent approvals without a chat snapshot and lets the user choose another request", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.store.reset();
+    const first = { ...permissionRequest(), sourceLabel: "Researcher" };
+    const second = {
+      ...first,
+      id: "permission_2",
+      sourceLabel: "Editor",
+      title: "Edit file?",
+    };
+    fake.store.setPermissionSync({
+      status: "ready",
+      binding: {
+        permissionEpoch: "epoch",
+        rootSessionId: "session_1",
+        bindingGeneration: 1,
+      },
+      requests: [first, second],
+      permissionRevision: 2,
+      attempts: 1,
+    });
+    const respond = vi.spyOn(fake.client, "respondPermission");
+    const app = mountApp(fake.runtime);
+    expect(app.container.textContent).toContain("Researcher");
+    expect(permissionAction(app.container, "Allow once").disabled).toBe(false);
+    const next = app.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Next approval"]',
+    );
+    await act(async () => {
+      next?.click();
+      await Promise.resolve();
+    });
+    expect(app.container.textContent).toContain("Editor");
+    await act(async () => {
+      permissionAction(app.container, "Allow once").click();
+      await Promise.resolve();
+    });
+    expect(respond).toHaveBeenCalledWith("permission_2", {
+      choiceId: "allow_once",
+    });
+    expect(app.container.textContent).not.toContain("Cancel run");
+    act(() => {
+      fake.store.setPermissionSync({
+        ...fake.store.getSnapshot().permissionSync,
+        status: "syncing",
+      });
+    });
+    expect(permissionAction(app.container, "Allow once").disabled).toBe(true);
+  });
+
   it("styles permission choices by their consequence", () => {
     const fake = createFakeRuntime({
       snapshot: {
@@ -2773,11 +3034,64 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(permissionAction(app.container, "Reject").className).toBe(
       "ohb-perm-btn ohb-perm-deny",
     );
-    expect(permissionAction(app.container, "Cancel run").className).toBe(
-      "ohb-perm-btn ohb-perm-abort",
-    );
+    expect(app.container.textContent).not.toContain("Cancel run");
   });
 
+  it("shows and navigates the independent session index before core history is available", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        activeSessionId: null,
+        sessions: [],
+      },
+    });
+    act(() => {
+      fake.store.setSessionIndex(
+        ["one", "two"].map((id) => ({
+          id,
+          title: `Saved ${id}`,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+      );
+      fake.store.setSessionSync({
+        status: "syncing",
+        scope: { sessionId: "one", runtimeEpoch: "epoch" },
+        attempts: 1,
+      });
+    });
+    const app = mountApp(fake.runtime);
+    expect(
+      app.container.querySelector('button[title="Select Saved one"]'),
+    ).not.toBeNull();
+    expect(
+      app.container.querySelector('button[title="Select Saved two"]'),
+    ).not.toBeNull();
+    await clickButton(app.container, "Select Saved two");
+    expect(fake.selectSession).toHaveBeenCalledWith("two");
+  });
+  it("shows verified Stop while history is pending and a draft is being edited", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    act(() => {
+      fake.store.setSessionSync({
+        status: "syncing",
+        scope: { sessionId: "session_1", runtimeEpoch: "epoch" },
+        attempts: 1,
+      });
+      fake.store.setSessionControl({
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        runtimeEpoch: "epoch",
+        runId: "verified",
+        driver: "user",
+      });
+    });
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "keep this draft");
+    expect(app.container.querySelector(".ohb-stop-button")).not.toBeNull();
+  });
   it("creates and selects sessions from the sidebar", async () => {
     const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
     const fake = createFakeRuntime({
@@ -3590,6 +3904,52 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
+  it.each(["completed failure", "lost response"])(
+    "shows a business failure in the originating goal overlay without claiming success: %s",
+    async (outcome) => {
+      const fake = createFakeRuntime({
+        snapshot: snapshotWithStatus({ kind: "idle" }),
+      });
+      fake.listCommands.mockResolvedValue(catalog(["goal"]));
+      fake.executeSlashCommand.mockResolvedValue({
+        status: "failed",
+        commandRunId: "r",
+        clientInvocationId: "i",
+        outputCount: 0,
+        eventCount: 1,
+        error: {
+          code: "UNAVAILABLE",
+          message: "budget subcommand unavailable",
+        },
+      });
+      if (outcome === "lost response")
+        fake.executeSlashCommand.mockRejectedValue(
+          new Error(
+            "budget subcommand unavailable. Command result is unconfirmed: response lost",
+          ),
+        );
+      const app = mountApp(fake.runtime);
+      await setTextareaValue(app.container, "/goal budget 100");
+      await pressTextareaKey(app.container, "Enter");
+      await waitFor(() =>
+        Boolean(app.container.querySelector(".ohb-structured-overlay")),
+      );
+      await clickButton(app.container, "Save goal");
+      await waitFor(() =>
+        Boolean(app.container.querySelector(".ohb-structured-error")),
+      );
+      expect(
+        app.container.querySelector(".ohb-structured-error")?.textContent,
+      ).toContain("budget subcommand unavailable");
+      if (outcome === "lost response")
+        expect(
+          app.container.querySelector(".ohb-structured-error")?.textContent,
+        ).toContain("unconfirmed");
+      expect(app.container.querySelector(".ohb-structured-success")).toBeNull();
+      expect(app.container.querySelector(".ohb-command-notice")).toBeNull();
+    },
+  );
+
   it("executes goal panel actions through the overlay allowance", async () => {
     const fake = createFakeRuntime({
       snapshot: {
@@ -3712,13 +4072,71 @@ function createFakeRuntime(input: {
   readonly snapshot: UiSnapshot;
 }): FakeRuntime {
   const store = createOhbabyWebStore();
+  const replaceFixture = store.replaceSnapshot.bind(store);
+  store.replaceSnapshot = (snapshot, seq): void => {
+    store.setSessionIndex(
+      snapshot.sessions.map(({ messages: _messages, ...session }) => session),
+    );
+    store.setSessionSync({
+      status: snapshot.activeSessionId ? "ready" : "idle",
+      scope: snapshot.activeSessionId
+        ? { sessionId: snapshot.activeSessionId, runtimeEpoch: "epoch" }
+        : null,
+      attempts: 1,
+    });
+    store.setSessionControl(
+      snapshot.activeSessionId
+        ? {
+            sessionId: snapshot.activeSessionId,
+            rootSessionId: snapshot.activeSessionId,
+            runtimeEpoch: "epoch",
+            runId:
+              snapshot.status.kind === "running"
+                ? snapshot.status.runId
+                : (snapshot.permissions.find(
+                    (request) => request.sessionId === snapshot.activeSessionId,
+                  )?.runId ?? null),
+            driver: "user",
+          }
+        : null,
+    );
+    const permissions = store.getSnapshot().permissionSync;
+    store.setPermissionSync({
+      ...permissions,
+      binding: {
+        permissionEpoch: "epoch",
+        rootSessionId: snapshot.activeSessionId,
+        bindingGeneration: (permissions.binding?.bindingGeneration ?? 0) + 1,
+      },
+      requests: snapshot.permissions,
+    });
+    replaceFixture(snapshot, seq);
+  };
   store.replaceSnapshot(input.snapshot, 1);
+  store.setPermissionSync({
+    status: "ready",
+    binding: {
+      permissionEpoch: "epoch",
+      rootSessionId: input.snapshot.activeSessionId,
+      bindingGeneration: 1,
+    },
+    requests: input.snapshot.permissions,
+    permissionRevision: 0,
+    attempts: 1,
+  });
   store.setConnectionState("live");
   const abortSession = vi.fn<OhbabyWebRuntime["abortSession"]>(() =>
     Promise.resolve(),
   );
   const executeSlashCommand = vi.fn<OhbabyWebRuntime["executeSlashCommand"]>(
-    () => Promise.resolve(),
+    () =>
+      Promise.resolve({
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      }),
   );
   const editQueuedPrompt = vi.fn<UiBackendClient["editQueuedPrompt"]>(() =>
     Promise.reject(new Error("unused")),
@@ -3836,10 +4254,22 @@ function createFakeRuntime(input: {
     ),
     archiveSession: vi.fn(() => Promise.resolve()),
     compactSession,
+    steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     cancelQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     connectModel,
-    executeCommand: vi.fn(() => Promise.resolve()),
+    executeCommand: vi.fn(() =>
+      Promise.resolve({
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      }),
+    ),
     editQueuedPrompt,
+    resubmitRetainedPrompt: vi.fn(() =>
+      Promise.reject(new Error("Unused retained resubmission stub")),
+    ),
     getContextWindowUsage: vi.fn(() =>
       Promise.resolve({
         contextWindowRatio: 0.125,
@@ -3882,6 +4312,18 @@ function createFakeRuntime(input: {
         },
       }),
     ),
+    getSelectedSessionId: () => Promise.resolve(input.snapshot.activeSessionId),
+    createSession: () => Promise.reject(new Error("unused")),
+    selectSession: () => Promise.resolve(),
+    getSessionIndex: () => Promise.resolve([]),
+    getPermissionSnapshot: () =>
+      Promise.resolve({
+        permissionEpoch: "epoch",
+        rootSessionId: null,
+        permissionRevision: 0,
+        requests: [],
+      }),
+    subscribePermissionEvents: () => () => undefined,
     subscribeEvents: () => () => undefined,
     waitForPrompt: vi.fn<UiBackendClient["waitForPrompt"]>(() =>
       Promise.resolve({
@@ -3915,6 +4357,11 @@ function createFakeRuntime(input: {
     listDirectoryPicker,
     openWorkspace,
     runtime: {
+      retryPermissions: vi.fn(),
+      retrySession: vi.fn(),
+      loadEarlierHistory: vi.fn(() => Promise.resolve()),
+      retryUnknownPrompts: vi.fn(() => Promise.resolve()),
+      forgetUnknownPrompt: vi.fn(),
       abortSession,
       archiveSession,
       client,
@@ -4054,6 +4501,11 @@ function permissionRequest(): UiPermissionRequest {
     ],
     description: "Run shell command",
     id: "permission_1",
+    sessionId: "child",
+    rootSessionId: "session_1",
+    callId: "call",
+    messageId: "message",
+    createdAt: 1,
     runId: "run_1",
     title: "Permission required",
   };
@@ -4189,6 +4641,16 @@ async function showSkillsModal(
   const clientInvocationId = `invoke_skills${suffix}`;
   const commandRunId = `command_skills${suffix}`;
   await act(async () => {
+    fake.store.beginCommand({
+      clientInvocationId,
+      commandId: "skills",
+      path: ["skills"],
+      raw: "/skills",
+      rawArgs: "",
+      argv: [],
+      surface: "tui",
+      sessionId: "session_1",
+    });
     fake.store.applyEvent(
       {
         command: {
@@ -4237,6 +4699,16 @@ async function showSkillsModal(
 
 async function showStatusModal(fake: FakeRuntime): Promise<void> {
   await act(async () => {
+    fake.store.beginCommand({
+      clientInvocationId: "invoke_status",
+      commandId: "status",
+      path: ["status"],
+      raw: "/status",
+      rawArgs: "",
+      argv: [],
+      surface: "tui",
+      sessionId: "session_1",
+    });
     fake.store.applyEvent(
       {
         command: {
@@ -4480,6 +4952,63 @@ function deferred<T>(): {
 }
 
 /* eslint-disable @typescript-eslint/unbound-method -- These client methods are Vitest mocks. */
+it("does not reload model metadata for streaming tokens or session preference changes", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const handlers = new Set<(event: UiEvent) => void>();
+  vi.spyOn(fake.client, "subscribeEvents").mockImplementation((handler) => {
+    handlers.add(handler);
+    return (): void => {
+      handlers.delete(handler);
+    };
+  });
+  mountApp(fake.runtime);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const initial = vi.mocked(fake.client.getCurrentModel).mock.calls.length;
+  expect(initial).toBeGreaterThan(0);
+  act(() => {
+    for (let revision = 1; revision <= 100; revision++) {
+      for (const handler of handlers)
+        handler({
+          type: "session.changed",
+          version: {
+            runtimeEpoch: "epoch",
+            sessionId: "session_1",
+            viewGeneration: "view",
+            sessionRevision: revision,
+          },
+          textAppends: [
+            { messageId: "m", partId: "p", offset: revision - 1, text: "x" },
+          ],
+        });
+    }
+    for (const handler of handlers)
+      handler({
+        type: "session.changed",
+        version: {
+          runtimeEpoch: "epoch",
+          sessionId: "session_1",
+          viewGeneration: "view",
+          sessionRevision: 101,
+        },
+        session: {
+          id: "session_1",
+          title: "renamed",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          reasoning: { enabled: true, effort: "high" },
+        },
+      });
+  });
+  expect(fake.client.getCurrentModel).toHaveBeenCalledTimes(initial);
+  act(() => {
+    for (const handler of handlers) handler({ type: "model.invalidated" });
+  });
+  expect(fake.client.getCurrentModel).toHaveBeenCalledTimes(initial + 1);
+});
 it("shows raw reasoning labels inside the input and persists session preference", async () => {
   const fake = createFakeRuntime({
     snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -4842,5 +5371,1188 @@ it.each(["pending", "acknowledged"])(
       await Promise.resolve();
     });
     expect(select.value).toBe("high");
+  },
+);
+
+it.each([false, true])(
+  "keeps React external-store updates healthy through 400 microtask source appends (pending admission=%s)",
+  async (pendingAdmission) => {
+    const initial = snapshotWithStatus({
+      kind: "running",
+      runId: "run-stream",
+    });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const baseline: UiSessionView = {
+      version: {
+        runtimeEpoch: "epoch",
+        sessionId: "session_1",
+        viewGeneration: "stream-view",
+        sessionRevision: 0,
+      },
+      session: {
+        ...initial.sessions[0],
+        messages: [
+          {
+            id: "streamed",
+            role: "assistant",
+            status: "streaming",
+            createdAt: timestamp,
+            parts: [{ id: "part", type: "text", text: "" }],
+          },
+        ],
+      },
+      runs: [],
+      prompts: [],
+      history: { hasMore: false },
+      reasoningMissing: false,
+      todo: { status: "ready", value: null },
+      goal: { status: "ready", value: null },
+      context: { status: "ready", value: null },
+    };
+    const sync = createSessionSync({
+      query: () => Promise.resolve(baseline),
+      onChange: (state) => {
+        fake.store.setSessionSync(state);
+      },
+    });
+    if (pendingAdmission)
+      fake.submitPromptAccepted.mockImplementation(
+        () => new Promise(() => undefined),
+      );
+    const app = mountApp(fake.runtime);
+    await act(async () => {
+      sync.begin({ sessionId: "session_1", runtimeEpoch: "epoch" }, 1);
+      await Promise.resolve();
+    });
+    if (pendingAdmission) {
+      await setTextareaValue(app.container, "concurrent admission retained");
+      await pressTextareaKey(app.container, "Enter");
+      expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
+    }
+    const errors = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const environment = globalThis as typeof globalThis & {
+      IS_REACT_ACT_ENVIRONMENT?: boolean;
+    };
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      // A real SSE chunk awaits each frame; act() would batch away this scheduling boundary.
+      for (let offset = 0; offset < 400; offset++) {
+        sync.receive({
+          type: "session.changed",
+          version: { ...baseline.version, sessionRevision: offset + 1 },
+          textAppends: [
+            { messageId: "streamed", partId: "part", offset, text: "x" },
+          ],
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      environment.IS_REACT_ACT_ENVIRONMENT = true;
+      sync.dispose();
+    }
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(app.container.textContent).toContain("x".repeat(400));
+    if (pendingAdmission)
+      expect(app.container.textContent).toContain(
+        "concurrent admission retained",
+      );
+    expect(errors.mock.calls.flat().map(String).join("\n")).not.toMatch(
+      /ui\.observation\.failure|Maximum update depth/,
+    );
+  },
+);
+
+describe("execution progress facts", () => {
+  it("does not show model thinking merely because a run exists", () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    expect(
+      mountApp(fake.runtime).container.querySelector(".ohb-thinking"),
+    ).toBeNull();
+  });
+  it("keeps Stop pending after RPC acceptance and clears on the exact terminal prompt", async () => {
+    const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const app = mountApp(fake.runtime);
+    const stop = requiredStopButton(app.container);
+    await act(async () => {
+      stop.click();
+      await Promise.resolve();
+    });
+    expect(stop.disabled).toBe(true);
+    expect(stop.getAttribute("aria-label")).toBe("Stopping run");
+    await act(async () => {
+      stop.click();
+      await Promise.resolve();
+    });
+    expect(fake.abortSession).toHaveBeenCalledTimes(1);
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          status: { kind: "idle" },
+          runs: [],
+          prompts: [
+            {
+              promptId: "p",
+              clientRequestId: "c",
+              scopeKey: "s",
+              sessionId: "session_1",
+              runId: "run_1",
+              userMessageId: "message_1",
+              text: "hello",
+              status: "succeeded",
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              endedAt: "2026-06-12T00:00:05.000Z",
+            },
+          ],
+        },
+        2,
+      );
+    });
+    expect(
+      app.container.querySelector('[aria-label="Stopping run"]'),
+    ).toBeNull();
+    expect(app.container.querySelectorAll(".ohb-prompt-duration")).toHaveLength(
+      1,
+    );
+    expect(
+      app.container.querySelector(".ohb-prompt-duration")?.textContent,
+    ).toContain("5s");
+  });
+});
+
+it("finishes Stop before RPC settles and ignores its later transport failure", async () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const fake = createFakeRuntime({ snapshot: initial });
+  const rpc = deferred<undefined>();
+  fake.abortSession.mockImplementation(() => rpc.promise);
+  const app = mountApp(fake.runtime);
+  act(() => {
+    requiredStopButton(app.container).click();
+  });
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        status: { kind: "idle" },
+        runs: [{ ...initial.runs[0], status: { kind: "idle" } }],
+      },
+      2,
+    );
+  });
+  expect(app.container.querySelector('[aria-label="Stopping run"]')).toBeNull();
+  await act(async () => {
+    rpc.reject(new Error("late transport failure"));
+    await Promise.resolve();
+  });
+  expect(app.container.textContent).not.toContain("late transport failure");
+});
+
+it("keeps B pending when A fails late in the same session", async () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const fake = createFakeRuntime({ snapshot: initial });
+  const a = deferred<undefined>();
+  const b = deferred<undefined>();
+  fake.abortSession
+    .mockImplementationOnce(() => a.promise)
+    .mockImplementationOnce(() => b.promise);
+  const app = mountApp(fake.runtime);
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  act(() => {
+    fake.store.replaceSnapshot(
+      snapshotWithStatus({ kind: "running", runId: "run_2" }),
+      2,
+    );
+  });
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    a.reject(new Error("A failed late"));
+    await Promise.resolve();
+  });
+  expect(
+    app.container.querySelector<HTMLButtonElement>(".ohb-stop-button")
+      ?.disabled,
+  ).toBe(true);
+  expect(app.container.textContent).not.toContain("A failed late");
+  act(() => {
+    b.resolve(undefined);
+  });
+});
+
+it("keeps Stop uncertain across disconnect without repeating RPC and permits draft editing", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+  });
+  const rpc = deferred<undefined>();
+  fake.abortSession.mockImplementation(() => rpc.promise);
+  const app = mountApp(fake.runtime);
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  act(() => {
+    fake.store.setConnectionState("disconnected");
+  });
+  await act(async () => {
+    rpc.reject(new Error("offline"));
+    await Promise.resolve();
+  });
+  expect(
+    app.container.querySelector(".ohb-stop-button")?.getAttribute("aria-label"),
+  ).toContain("status unconfirmed");
+  await setTextareaValue(app.container, "next draft");
+  expect(textareaValue(app.container)).toBe("next draft");
+  act(() => {
+    fake.store.setConnectionState("live");
+  });
+  expect(fake.abortSession).toHaveBeenCalledTimes(1);
+  expect(
+    app.container.querySelector<HTMLButtonElement>(".ohb-stop-button")
+      ?.disabled,
+  ).toBe(true);
+  act(() => {
+    fake.store.replaceSnapshot(
+      snapshotWithStatus({ kind: "running", runId: "run_1" }),
+      2,
+    );
+  });
+  expect(app.container.querySelector('[aria-label="Stopping run"]')).toBeNull();
+  expect(app.container.textContent).toContain("offline");
+});
+
+it("hides model waiting permanently after first text and resets for the next attempt", () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const request = {
+    requestId: "r1",
+    runId: "run_1",
+    messageId: "m",
+    step: 1,
+    attempt: 1,
+    purpose: "agent-step",
+    startedAt: 1000,
+    outcome: "running" as const,
+  };
+  const fake = createFakeRuntime({
+    snapshot: {
+      ...initial,
+      serverNow: 4000,
+      runs: [{ ...initial.runs[0], modelActivity: request }],
+    },
+  });
+  const app = mountApp(fake.runtime);
+  expect(app.container.querySelector(".ohb-thinking")?.textContent).toContain(
+    "3s",
+  );
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 8000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: { ...request, firstTextAt: 4500 },
+          },
+        ],
+      },
+      2,
+    );
+  });
+  expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 10000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: { ...request, firstTextAt: 4500 },
+          },
+        ],
+      },
+      3,
+    );
+  });
+  expect(app.container.querySelector(".ohb-thinking")).toBeNull();
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        serverNow: 11000,
+        runs: [
+          {
+            ...initial.runs[0],
+            modelActivity: { ...request, requestId: "r2", startedAt: 11000 },
+          },
+        ],
+      },
+      4,
+    );
+  });
+  expect(app.container.querySelector(".ohb-thinking")?.textContent).toContain(
+    "0s",
+  );
+});
+
+it("does not resurrect A's unresolved Stop after B reaches a reliable terminal", async () => {
+  const initial = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const fake = createFakeRuntime({ snapshot: initial });
+  const app = mountApp(fake.runtime);
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  act(() => {
+    fake.store.replaceSnapshot(
+      snapshotWithStatus({ kind: "running", runId: "run_2" }),
+      2,
+    );
+  });
+  await act(async () => {
+    requiredStopButton(app.container).click();
+    await Promise.resolve();
+  });
+  act(() => {
+    fake.store.replaceSnapshot(
+      {
+        ...initial,
+        status: { kind: "idle" },
+        runs: [{ ...initial.runs[0], id: "run_2", status: { kind: "idle" } }],
+      },
+      3,
+    );
+  });
+  expect(app.container.querySelector('[aria-label="Stopping run"]')).toBeNull();
+});
+
+function requiredStopButton(container: HTMLDivElement): HTMLButtonElement {
+  const button = container.querySelector<HTMLButtonElement>(".ohb-stop-button");
+  if (!button) throw new Error("Stop button missing");
+  return button;
+}
+
+it("changes only the Stop accessible hint after ten seconds and never resends", async () => {
+  vi.useFakeTimers();
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  try {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    const app = mountApp(fake.runtime);
+    await act(async () => {
+      requiredStopButton(app.container).click();
+      await Promise.resolve();
+    });
+    act(() => {
+      now = 10001;
+      vi.advanceTimersByTime(10001);
+    });
+    expect(requiredStopButton(app.container).getAttribute("aria-label")).toBe(
+      "Still stopping run",
+    );
+    expect(requiredStopButton(app.container).disabled).toBe(true);
+    expect(fake.abortSession).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each(["succeeded", "failed", "cancelled", "interrupted"] as const)(
+  "renders one %s total from its prompt ledger across snapshots",
+  (status) => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const prompt: UiPromptSubmission = {
+      promptId: "p",
+      clientRequestId: "c",
+      scopeKey: "s",
+      sessionId: "session_1",
+      runId: "r",
+      userMessageId: "u",
+      text: "question",
+      status,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      endedAt: "2026-06-12T00:01:01Z",
+    };
+    const snapshot: UiSnapshot = {
+      ...initial,
+      prompts: [prompt],
+      sessions: [
+        {
+          ...initial.sessions[0],
+          messages: [
+            {
+              id: "u",
+              role: "user",
+              createdAt: timestamp,
+              parts: [{ type: "text", text: "question" }],
+            },
+            ...(status === "succeeded"
+              ? [
+                  {
+                    id: "a",
+                    role: "assistant" as const,
+                    runId: "r",
+                    createdAt: timestamp,
+                    parts: [{ type: "text" as const, text: "final answer" }],
+                  },
+                ]
+              : []),
+          ],
+        },
+      ],
+    };
+    const fake = createFakeRuntime({ snapshot });
+    const app = mountApp(fake.runtime);
+    expect(app.container.querySelectorAll(".ohb-prompt-duration")).toHaveLength(
+      1,
+    );
+    expect(
+      app.container.querySelector(".ohb-prompt-duration")?.textContent,
+    ).toContain("Total 1m 1s");
+    if (status === "succeeded")
+      expect(
+        app.container
+          .querySelector(".ohb-prompt-duration")
+          ?.previousElementSibling?.textContent.trim(),
+      ).toBe("final answer");
+    act(() => {
+      fake.store.replaceSnapshot(snapshot, 2);
+    });
+    expect(app.container.querySelectorAll(".ohb-prompt-duration")).toHaveLength(
+      1,
+    );
+  },
+);
+
+function snapshotForDraftScope(id: string): UiSnapshot {
+  const initial = snapshotWithStatus({ kind: "idle" });
+  return {
+    ...initial,
+    activeSessionId: id,
+    sessions: initial.sessions.map((session) => ({ ...session, id })),
+  };
+}
+
+describe("feature boundary late-result isolation", () => {
+  it("persists a successful slash clear instead of restoring the command after reload", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/status");
+    await waitFor(() => slashPaletteText(app.container).includes("/status"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.executeSlashCommand.mock.calls.length === 1);
+    expect(textareaValue(app.container)).toBe("");
+    expect(
+      JSON.parse(
+        sessionStorage.getItem("ohbaby:composer:/repo-a:session_1") ??
+          '{"text":""}',
+      ),
+    ).toMatchObject({ text: "" });
+  });
+  it("does not let a pending slash clear or disable a different session draft", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const pending = deferred<import("ohbaby-sdk").UiCommandCompletion>();
+    fake.executeSlashCommand.mockReturnValue(pending.promise);
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/status");
+    await waitFor(() => slashPaletteText(app.container).includes("/status"));
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() => fake.executeSlashCommand.mock.calls.length === 1);
+    act(() => {
+      fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
+    });
+    await setTextareaValue(app.container, "B draft");
+    const disabled = app.container.querySelector("textarea")?.disabled;
+    await act(async () => {
+      pending.resolve({
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      });
+      await pending.promise;
+    });
+    expect(disabled).toBe(false);
+    expect(textareaValue(app.container)).toBe("B draft");
+  });
+  it("does not replay a consumed skills insertion into another session or on return", async () => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const app = mountApp(fake.runtime);
+    await showSkillsModal(fake, ["review"]);
+    await pressWindowKey("Tab");
+    expect(textareaValue(app.container)).toBe("/review ");
+    await setTextareaValue(app.container, "A changed after insertion");
+    act(() => {
+      fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
+    });
+    expect(textareaValue(app.container)).toBe("");
+    await setTextareaValue(app.container, "B draft");
+    act(() => {
+      fake.store.replaceSnapshot(initial, 5);
+    });
+    expect(textareaValue(app.container)).toBe("A changed after insertion");
+  });
+  it("closes the old compact form when switching scope and ignores its late result", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["compact"]));
+    const pending =
+      deferred<Awaited<ReturnType<UiBackendClient["compactSession"]>>>();
+    fake.compactSession.mockReturnValue(pending.promise);
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/compact");
+    await waitFor(() => slashPaletteText(app.container).includes("/compact"));
+    await pressTextareaKey(app.container, "Enter");
+    await clickButton(app.container, "Compact session");
+    act(() => {
+      fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
+    });
+    await act(async () => {
+      pending.reject(new Error("A compact failed late"));
+      await pending.promise.catch(() => undefined);
+    });
+    expect(app.container.querySelector(".ohb-structured-overlay")).toBeNull();
+    expect(app.container.textContent).not.toContain("A compact failed late");
+  });
+  it("does not let old lease recovery failure clear the new scope's queued editor", async () => {
+    for (const id of ["session_1", "session_2"]) {
+      sessionStorage.setItem(
+        `ohbaby:composer-lease:/repo-a:${id}`,
+        JSON.stringify({
+          editLeaseId: `lease_${id}`,
+          editText: `editing ${id}`,
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          lastActivityAt: 1,
+          originalDraft: `draft ${id}`,
+          promptId: `prompt_${id}`,
+        }),
+      );
+    }
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    const old = deferred<UiPromptEditLease>();
+    vi.spyOn(fake.client, "renewPromptEditLease").mockImplementation((input) =>
+      input.editLeaseId === "lease_session_1"
+        ? old.promise
+        : Promise.resolve({
+            ...input,
+            prompt: promptSubmission({ sessionId: "session_2" }),
+            ownerClientId: "web",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+          }),
+    );
+    const app = mountApp(fake.runtime);
+    act(() => {
+      fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
+    });
+    await act(async () => {
+      old.reject(new Error("old expired"));
+      await old.promise.catch(() => undefined);
+    });
+    expect(textareaValue(app.container)).toBe("editing session_2");
+    expect(app.container.querySelector(".ohb-queued-edit-hint")).not.toBeNull();
+    expect(app.container.textContent).not.toContain(
+      "Queued edit lease expired",
+    );
+  });
+});
+
+it("preserves an intentionally cleared new draft after a late admission rejection", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const pending =
+    deferred<Awaited<ReturnType<UiBackendClient["submitPromptAccepted"]>>>();
+  fake.submitPromptAccepted.mockReturnValue(pending.promise);
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "old submission");
+  await pressTextareaKey(app.container, "Enter");
+  await setTextareaValue(app.container, "a newer edit");
+  await setTextareaValue(app.container, "");
+  await act(async () => {
+    pending.reject(new Error("old failure"));
+    await pending.promise.catch(() => undefined);
+  });
+  expect(textareaValue(app.container)).toBe("");
+});
+
+function storeEditLease(
+  sessionId: string,
+  editLeaseId: string,
+  text: string,
+): void {
+  sessionStorage.setItem(
+    `ohbaby:composer-lease:/repo-a:${sessionId}`,
+    JSON.stringify({
+      editLeaseId,
+      editText: text,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      lastActivityAt: 1,
+      originalDraft: "original draft",
+      promptId: "prompt_queued",
+    }),
+  );
+}
+
+describe("queued edit identity isolation", () => {
+  it("ignores an old A recovery failure after leaving and returning to A", async () => {
+    storeEditLease("session_1", "lease_A", "original edit");
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const fake = createFakeRuntime({ snapshot: initial });
+    const old = deferred<UiPromptEditLease>();
+    vi.spyOn(fake.client, "renewPromptEditLease")
+      .mockImplementationOnce(() => old.promise)
+      .mockResolvedValue({
+        editLeaseId: "lease_new_A",
+        ownerClientId: "web",
+        prompt: promptSubmission(),
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      });
+    mountApp(fake.runtime);
+    act(() => {
+      fake.store.replaceSnapshot(snapshotForDraftScope("session_2"), 4);
+    });
+    storeEditLease("session_1", "lease_new_A", "new A edit");
+    act(() => {
+      fake.store.replaceSnapshot(initial, 5);
+    });
+    await act(async () => {
+      old.reject(new Error("old A failure"));
+      await old.promise.catch(() => undefined);
+    });
+    expect(
+      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
+    ).toContain("lease_new_A");
+    expect(
+      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
+    ).toContain("new A edit");
+  });
+  it.each(["edit", "release"])(
+    "recovery success preserves a later %s of the same lease",
+    async (action) => {
+      storeEditLease("session_1", "lease_A", "original edit");
+      const fake = createFakeRuntime({
+        snapshot: snapshotWithStatus({ kind: "idle" }),
+      });
+      const pending = deferred<UiPromptEditLease>();
+      vi.spyOn(fake.client, "renewPromptEditLease").mockReturnValue(
+        pending.promise,
+      );
+      const app = mountApp(fake.runtime);
+      if (action === "edit") await setTextareaValue(app.container, "new edit");
+      else await pressTextareaKey(app.container, "Escape");
+      await act(async () => {
+        pending.resolve({
+          editLeaseId: "lease_A",
+          ownerClientId: "web",
+          prompt: promptSubmission(),
+          expiresAt: "2099-02-01T00:00:00.000Z",
+        });
+        await pending.promise;
+      });
+      const stored = sessionStorage.getItem(
+        "ohbaby:composer-lease:/repo-a:session_1",
+      );
+      if (action === "edit") expect(stored).toContain("new edit");
+      else expect(stored).toBeNull();
+    },
+  );
+  it("does not close Q2 when cancellation of the old Q1 editor completes", async () => {
+    const q1 = promptSubmission({
+      promptId: "q1",
+      text: "queued one",
+      status: "queued",
+    });
+    const q2 = promptSubmission({
+      promptId: "q2",
+      text: "queued two",
+      status: "queued",
+    });
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+        prompts: [q1, q2],
+      },
+    });
+    vi.spyOn(fake.client, "acquirePromptEditLease").mockImplementation(
+      ({ promptId }) =>
+        Promise.resolve({
+          editLeaseId: `lease_${promptId}`,
+          ownerClientId: "web",
+          prompt: promptId === "q1" ? q1 : q2,
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        }),
+    );
+    const pending = deferred<UiPromptSubmission>();
+    vi.spyOn(fake.client, "cancelQueuedPrompt").mockReturnValue(
+      pending.promise,
+    );
+    const app = mountApp(fake.runtime);
+    const click = async (label: string): Promise<void> => {
+      const button = app.container.querySelector(`[aria-label="${label}"]`);
+      if (!(button instanceof HTMLButtonElement))
+        throw new Error(`missing ${label}`);
+      await act(async () => {
+        button.click();
+        await Promise.resolve();
+      });
+    };
+    await click("Edit prompt: queued one");
+    await click("Delete prompt: queued one");
+    await pressTextareaKey(app.container, "Escape");
+    await click("Edit prompt: queued two");
+    await act(async () => {
+      pending.resolve({ ...q1, status: "cancelled" });
+      await pending.promise;
+    });
+    expect(textareaValue(app.container)).toBe("queued two");
+    expect(app.container.querySelector(".ohb-queued-edit-hint")).not.toBeNull();
+    expect(
+      sessionStorage.getItem("ohbaby:composer-lease:/repo-a:session_1"),
+    ).toContain("lease_q2");
+  });
+});
+
+it("temporarily hides the mounted composer and todo during root approval, retains Stop, then restores the draft and focus", async () => {
+  const fake = createFakeRuntime({
+    snapshot: {
+      ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+      todos: [
+        {
+          sessionId: "session_1",
+          visible: true,
+          todos: [{ content: "Keep task", status: "in_progress" }],
+        },
+      ],
+    },
+  });
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "Keep my draft");
+  await clickButton(app.container, "Collapse todo list");
+  const input = app.container.querySelector<HTMLTextAreaElement>("textarea");
+  act(() => {
+    input?.focus();
+  });
+  const todo = app.container.querySelector(".ohb-todo-dock");
+  const sync = fake.store.getSnapshot().permissionSync;
+  act(() => {
+    fake.store.setPermissionSync({
+      ...sync,
+      requests: [permissionRequest()],
+      permissionRevision: 1,
+    });
+  });
+  const wrapper =
+    app.container.querySelector<HTMLElement>(".ohb-root-composer");
+  expect(wrapper?.style.display).toBe("none");
+  expect(wrapper?.hasAttribute("inert")).toBe(true);
+  expect(app.container.querySelector("textarea")).toBe(input);
+  expect(input?.value).toBe("Keep my draft");
+  expect(app.container.querySelector(".ohb-todo-dock")).toBe(todo);
+  expect(
+    app.container
+      .querySelector(".ohb-todo-toggle")
+      ?.getAttribute("aria-expanded"),
+  ).toBe("false");
+  expect(document.activeElement).toBe(
+    app.container.querySelector(".ohb-permission-modal h2"),
+  );
+  const stop = app.container.querySelector<HTMLButtonElement>(
+    '.ohb-permission-modal [aria-label="Stop run"]',
+  );
+  expect(stop).not.toBeNull();
+  await act(async () => {
+    stop?.click();
+    await Promise.resolve();
+  });
+  expect(fake.abortSession).toHaveBeenCalledWith("session_1", "run_1");
+  act(() => {
+    fake.store.setPermissionSync({
+      ...sync,
+      requests: [],
+      permissionRevision: 2,
+    });
+  });
+  expect(wrapper?.style.display).toBe("contents");
+  expect(wrapper?.hasAttribute("inert")).toBe(false);
+  expect(input?.value).toBe("Keep my draft");
+  expect(document.activeElement).toBe(input);
+});
+
+it("keeps the composer visible for an approval sync error without an actual request", () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const app = mountApp(fake.runtime);
+  act(() => {
+    fake.store.setPermissionSync({
+      ...fake.store.getSnapshot().permissionSync,
+      status: "error",
+      error: "Retry approval sync",
+      requests: [],
+    });
+  });
+  expect(app.container.querySelector(".ohb-permission-modal")).toBeNull();
+  expect(
+    app.container.querySelector<HTMLElement>(".ohb-root-composer")?.style
+      .display,
+  ).toBe("contents");
+  expect(app.container.textContent).toContain("Retry approvals");
+});
+
+it("does not restore input focus after the user moved to another control before approval", () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+  });
+  const app = mountApp(fake.runtime);
+  const input = app.container.querySelector<HTMLTextAreaElement>("textarea");
+  const other = app.container.querySelector<HTMLButtonElement>(
+    ".ohb-permission-toggle",
+  );
+  act(() => {
+    input?.focus();
+    other?.focus();
+  });
+  const sync = fake.store.getSnapshot().permissionSync;
+  act(() => {
+    fake.store.setPermissionSync({ ...sync, requests: [permissionRequest()] });
+  });
+  act(() => {
+    fake.store.setPermissionSync({ ...sync, requests: [] });
+  });
+  expect(document.activeElement).not.toBe(input);
+});
+
+it("reserves the measured approval height and updates it when the card resizes", () => {
+  let resized: ResizeObserverCallback = () => undefined;
+  let height = 220;
+  const geometry = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      return new DOMRect(
+        0,
+        0,
+        700,
+        this.classList.contains("ohb-permission-modal") ? height : 0,
+      );
+    });
+  const original = globalThis.ResizeObserver;
+  class Observer {
+    constructor(callback: ResizeObserverCallback) {
+      resized = callback;
+    }
+    observe(): void {
+      /* Triggered explicitly by the test. */
+    }
+    unobserve(): void {
+      /* No resources in this observer fixture. */
+    }
+    disconnect(): void {
+      /* No resources in this observer fixture. */
+    }
+  }
+  globalThis.ResizeObserver = Observer;
+  try {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "running", runId: "run_1" }),
+    });
+    const app = mountApp(fake.runtime);
+    const sync = fake.store.getSnapshot().permissionSync;
+    act(() => {
+      fake.store.setPermissionSync({
+        ...sync,
+        requests: [permissionRequest()],
+      });
+    });
+    const content =
+      app.container.querySelector<HTMLElement>(".ohb-app-content");
+    expect(content?.style.getPropertyValue("--approval-space")).toBe("244px");
+    act(() => {
+      height = 340;
+      resized([], new Observer(() => undefined));
+    });
+    expect(content?.style.getPropertyValue("--approval-space")).toBe("364px");
+    act(() => {
+      fake.store.setPermissionSync({ ...sync, requests: [] });
+    });
+    expect(content?.style.getPropertyValue("--approval-space")).toBe("");
+  } finally {
+    geometry.mockRestore();
+    globalThis.ResizeObserver = original;
+  }
+});
+
+it("keeps the child shell read-only and returns focus to pending approval when it closes", async () => {
+  const base = snapshotWithStatus({ kind: "running", runId: "run_1" });
+  const rootSession = base.sessions[0];
+  const fake = createFakeRuntime({
+    snapshot: {
+      ...base,
+      sessions: [
+        {
+          ...rootSession,
+          messages: [
+            {
+              id: "delegation",
+              role: "assistant",
+              createdAt: timestamp,
+              parts: [
+                {
+                  type: "tool-call",
+                  call: {
+                    id: "delegate",
+                    name: "subagent_run",
+                    input: { prompt: "Investigate" },
+                    status: "completed",
+                  },
+                },
+                {
+                  type: "tool-result",
+                  result: { callId: "delegate", output: "done" },
+                  metadata: {
+                    subagent: {
+                      execution: {
+                        executionId: "exec",
+                        subagentId: "worker",
+                        status: "completed",
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      permissions: [permissionRequest()],
+    },
+  });
+  fake.client.watchSubagentConversation = vi.fn(() =>
+    Promise.reject(new Error("fixture unavailable")),
+  );
+  const app = mountApp(fake.runtime);
+  const trigger = app.container.querySelector<HTMLButtonElement>(
+    ".ohb-delegation-row",
+  );
+  await act(async () => {
+    trigger?.click();
+    await Promise.resolve();
+  });
+  expect(app.container.querySelector(".ohb-permission-modal")).toBeNull();
+  expect(app.container.querySelector(".ohb-subagent-view")).not.toBeNull();
+  expect(
+    app.container.querySelector<HTMLElement>(".ohb-root-composer")?.style
+      .display,
+  ).toBe("contents");
+  expect(app.container.textContent).toContain("Read-only subagent");
+  await act(async () => {
+    app.container
+      .querySelector<HTMLButtonElement>(
+        '.ohb-subagent-view [aria-label="Close"]',
+      )
+      ?.click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  });
+  expect(document.activeElement).toBe(
+    app.container.querySelector(".ohb-permission-modal h2"),
+  );
+  expect(document.activeElement).not.toBe(trigger);
+});
+
+it("keeps slash parse failures beside input and clears only that error on editing", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  fake.executeSlashCommand.mockRejectedValue(
+    new Error('Unknown command "/does-not-exist"'),
+  );
+  fake.store.setError("unrelated transport error");
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "/does-not-exist");
+  await pressTextareaKey(app.container, "Enter");
+  await waitFor(() =>
+    app.container.textContent.includes('Unknown command "/does-not-exist"'),
+  );
+  const inputArea = app.container.querySelector(".ohb-composer-content");
+  expect(inputArea?.textContent).toContain('Unknown command "/does-not-exist"');
+  expect(app.container.textContent).toContain("unrelated transport error");
+  await setTextareaValue(app.container, "/corrected");
+  expect(app.container.textContent).not.toContain(
+    'Unknown command "/does-not-exist"',
+  );
+  expect(app.container.textContent).toContain("unrelated transport error");
+});
+
+it.each([
+  ["user-stop", "typed", false],
+  ["service-shutdown", "typed", false],
+  ["user-stop", "run", false],
+  ["user-stop", "legacy", false],
+  ["process-interrupted", "typed", true],
+  ["cancelled", "typed", true],
+  ["user-stop", "abort", false],
+  ["service-shutdown", "abort", false],
+  ["runtime interrupted", "abort", true],
+  ["process-interrupted", "abort", true],
+] as const)(
+  "projects persisted interruption %s (%s) correctly after reload and session return",
+  (reason, source, isError) => {
+    const initial = snapshotWithStatus({ kind: "idle" });
+    const stopped: UiSnapshot = {
+      ...initial,
+      prompts: [
+        promptSubmission({
+          status: "interrupted",
+          runId: "stopped-run",
+          error: {
+            code: "RUN_INTERRUPTED",
+            source: "runtime",
+            retryable: true,
+            message:
+              source === "legacy" || source === "abort"
+                ? reason
+                : "runtime interrupted",
+            ...(source === "typed" ? { terminalReason: reason } : {}),
+            ...(source === "abort" ? { terminalReason: "cancelled" } : {}),
+          },
+        }),
+      ],
+      runs: [
+        {
+          id: "stopped-run",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          updatedAt: timestamp,
+          endedAt: timestamp,
+          status: { kind: "idle" },
+          ...(source === "run" ? { terminalReason: reason } : {}),
+          ...(source === "abort" ? { terminalReason: "cancelled" } : {}),
+        },
+      ],
+      sessions: initial.sessions.map((session) => ({
+        ...session,
+        messages: [
+          {
+            id: "message_projected",
+            createdAt: timestamp,
+            role: "user" as const,
+            parts: [{ type: "text" as const, text: "server projected prompt" }],
+          },
+        ],
+      })),
+    };
+    const fake = createFakeRuntime({ snapshot: stopped });
+    const app = mountApp(fake.runtime);
+    const assertPresentation = (): void => {
+      expect(Boolean(app.container.querySelector('[role="alert"]'))).toBe(
+        isError,
+      );
+      expect(app.container.textContent).toContain("server projected prompt");
+    };
+    assertPresentation();
+    act(() => {
+      fake.store.replaceSnapshot(
+        {
+          ...initial,
+          activeSessionId: "other",
+          prompts: [],
+          runs: [],
+          sessions: [
+            ...initial.sessions,
+            { ...initial.sessions[0], id: "other", messages: [] },
+          ],
+        },
+        2,
+      );
+    });
+    act(() => {
+      fake.store.replaceSnapshot(stopped, 3);
+    });
+    assertPresentation();
+  },
+);
+
+it("keeps failed command feedback inside the composer and dismisses it accessibly", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  const app = mountApp(fake.runtime);
+  act(() => {
+    fake.store.beginCommand({
+      clientInvocationId: "failed-input",
+      commandId: "custom",
+      path: ["custom"],
+      raw: "/custom",
+      rawArgs: "",
+      argv: [],
+      surface: "tui",
+      sessionId: "session_1",
+    });
+    fake.store.failCommand("failed-input", "Known command failure");
+  });
+  expect(
+    app.container.querySelector(".ohb-composer-content .ohb-command-notice")
+      ?.textContent,
+  ).toContain("Known command failure");
+  const dismiss = app.container.querySelector<HTMLButtonElement>(
+    '[aria-label="Dismiss command result"]',
+  );
+  expect(dismiss).not.toBeNull();
+  act(() => dismiss?.click());
+  expect(app.container.textContent).not.toContain("Known command failure");
+  await setTextareaValue(app.container, "next draft");
+  expect(app.container.querySelector("textarea")?.value).toBe("next draft");
+});
+
+it.each(["user-stop", "service-shutdown"])(
+  "keeps an expected %s prompt readable without inline failure before formal message arrives",
+  (reason) => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        prompts: [
+          promptSubmission({
+            status: "interrupted",
+            error: {
+              code: "RUN_INTERRUPTED",
+              source: "runtime",
+              retryable: true,
+              message: reason,
+              terminalReason: "cancelled",
+            },
+          }),
+        ],
+      },
+    });
+    const app = mountApp(fake.runtime);
+    expect(app.container.textContent).toContain("server projected prompt");
+    expect(app.container.textContent).toContain("Interrupted");
+    expect(app.container.querySelector('[role="alert"]')).toBeNull();
   },
 );

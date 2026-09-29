@@ -11,6 +11,8 @@ export type {
   InMemoryRunLedgerOptions,
   ListRunLedgerOptions,
   MarkInterruptedOptions,
+  MarkRunTerminalOptions,
+  RecoverOrphanedRunsOptions,
   MarkInterruptedResult,
   RunLedger,
   RunLedgerRecord,

@@ -167,15 +167,18 @@ export class FetchDaemonEventStream implements DaemonEventStream {
   ): Promise<void> {
     let firstAttempt = true;
     let reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
-    while (!signal.aborted) {
+    const isClosed = (): boolean => signal.aborted;
+    while (!isClosed()) {
       callbacks.onConnectionState?.(
         firstAttempt ? "connecting" : "reconnecting",
       );
       try {
         await this.openOnce(callbacks, signal, ready);
+        if (signal.aborted) return;
+        callbacks.onConnectionState?.("reconnecting");
         reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
       } catch (error) {
-        if (isAbortError(error)) {
+        if (signal.aborted || isAbortError(error)) {
           return;
         }
         const normalized =
@@ -226,7 +229,20 @@ export class FetchDaemonEventStream implements DaemonEventStream {
       throw new Error("Daemon SSE response body is missing");
     }
 
-    await this.readFrames(reader, callbacks, signal, ready);
+    // Fetch implementations may not propagate signal abort to a Response reader.
+    // Cancel explicitly so a silent SSE cannot keep close() waiting forever.
+    const cancel = (): void => {
+      void reader.cancel().catch(() => undefined);
+    };
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) cancel();
+    try {
+      await this.readFrames(reader, callbacks, signal, ready);
+    } finally {
+      signal.removeEventListener("abort", cancel);
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
   }
 
   private async readFrames(

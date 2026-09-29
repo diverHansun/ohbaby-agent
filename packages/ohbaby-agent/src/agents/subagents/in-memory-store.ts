@@ -1,6 +1,9 @@
+import { isValidOwnerPid } from "../../utils/process-owner.js";
 import {
   assertSubagentInstanceUpdate,
+  recoveryExecutionInputsUpdate,
   type MarkSubagentsInterruptedInput,
+  type RecoverSubagentExecutionInputsInput,
   type SubagentInstanceRecord,
   type SubagentInstanceStore,
   type SubagentInstanceUpdate,
@@ -16,8 +19,8 @@ function clone<T>(value: T): T {
 }
 
 function defaultIsOwnerAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
+  if (!isValidOwnerPid(pid)) {
+    return true;
   }
   try {
     process.kill(pid, 0);
@@ -32,11 +35,11 @@ function shouldInterruptActiveOwner(
   input: MarkSubagentsInterruptedInput,
   isOwnerAlive: (pid: number) => boolean,
 ): boolean {
+  if (!isValidOwnerPid(record.ownerPid)) {
+    return input.recoverUnknownOwner === true;
+  }
   if (input.ownerId !== undefined && record.ownerId === input.ownerId) {
     return true;
-  }
-  if (record.ownerPid === undefined) {
-    return input.recoverUnknownOwner === true;
   }
   return !isOwnerAlive(record.ownerPid);
 }
@@ -49,6 +52,19 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     this.isOwnerAlive = options.isOwnerAlive ?? defaultIsOwnerAlive;
   }
 
+  async recoverExecutionInputs(
+    input: RecoverSubagentExecutionInputsInput,
+  ): Promise<SubagentInstanceRecord> {
+    await Promise.resolve();
+    const existing = this.records.get(input.subagentId);
+    if (!existing) throw new Error(`Subagent not found: ${input.subagentId}`);
+    const update = recoveryExecutionInputsUpdate(existing, input);
+    if (!update) return clone(existing);
+    const recovered = { ...existing, ...update };
+    this.records.set(input.subagentId, clone(recovered));
+    return clone(recovered);
+  }
+
   appendPendingQueue(
     subagentId: string,
     input: SubagentInstanceRecord["pendingQueue"][number],
@@ -58,7 +74,7 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     if (!existing) {
       return Promise.reject(new Error(`Subagent not found: ${subagentId}`));
     }
-    if (existing.closedAt !== undefined || existing.status === "cancelled") {
+    if (existing.closedAt !== undefined) {
       return Promise.resolve(null);
     }
     const updated: SubagentInstanceRecord = {
@@ -109,11 +125,7 @@ export class InMemorySubagentInstanceStore implements SubagentInstanceStore {
     if (!existing) {
       return Promise.reject(new Error(`Subagent not found: ${subagentId}`));
     }
-    if (
-      existing.closedAt !== undefined ||
-      existing.status === "running" ||
-      existing.status === "cancelled"
-    ) {
+    if (existing.closedAt !== undefined || existing.status === "running") {
       return Promise.resolve(null);
     }
     const claimed = { ...existing, ...update };

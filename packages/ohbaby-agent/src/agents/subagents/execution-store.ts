@@ -1,0 +1,912 @@
+import {
+  getDatabase,
+  runWriteTransaction,
+  schema,
+  type DatabaseConnection,
+  type SqliteValue,
+} from "../../services/database/index.js";
+import { randomUUID } from "node:crypto";
+
+export class SubagentExecutionConflictError extends Error {}
+
+export type ExecutionTerminalStatus =
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted"
+  | "timed_out";
+export interface AcceptSubagentExecution {
+  readonly executionId: string;
+  /** Stable tool call ID or caller supplied request ID within requesterRunId. */
+  readonly requestId: string;
+  readonly parentSessionId: string;
+  readonly requesterScopeId: string;
+  readonly requesterRunId: string;
+  readonly rootSessionId: string;
+  readonly rootRunId: string;
+  readonly rootPromptId?: string;
+  readonly subagentId: string;
+  readonly mode: "foreground" | "background";
+  readonly prompt: string;
+  readonly timeoutMs?: number;
+  readonly createdAt: number;
+}
+export interface ExecutionLookup {
+  readonly executionId: string;
+  readonly parentSessionId: string;
+  readonly requesterScopeId?: string;
+}
+export interface ChildRunLookup {
+  readonly sessionId: string;
+  readonly contextScopeId: string;
+  readonly runId: string;
+}
+export type ExecutionHistory = (
+  | { readonly parentSessionId: string; readonly rootSessionId?: string }
+  | { readonly parentSessionId?: string; readonly rootSessionId: string }
+) & {
+  readonly requesterScopeId?: string;
+  readonly subagentId?: string;
+  readonly rootRunId?: string;
+  /** Exclusive bounds on acceptance order; legacy rows without a sequence are omitted. */
+  readonly afterSequence?: number;
+  readonly beforeSequence?: number;
+  /** Legacy rows without a sequence, ordered by the original acceptance key. */
+  readonly legacyOnly?: boolean;
+  readonly ascending?: boolean;
+  readonly limit?: number;
+  readonly before?: {
+    readonly createdAt: number;
+    readonly executionId: string;
+  };
+  readonly after?: {
+    readonly createdAt: number;
+    readonly executionId: string;
+  };
+};
+export type ExecutionArtifact =
+  | {
+      readonly state: "deleted";
+      readonly cleanupPending: boolean;
+      readonly error?: string;
+    }
+  | { readonly state: "none" | "preparing" }
+  | {
+      readonly state: "ready";
+      readonly path: string;
+      readonly sizeBytes: number;
+    }
+  | { readonly state: "error"; readonly error: string; readonly path?: string };
+export interface ExecutionTerminalResult {
+  readonly status: ExecutionTerminalStatus;
+  readonly reason?: string;
+  readonly output?: string;
+  readonly error?: string;
+  readonly completedAt: number;
+}
+export interface ExecutionDelivery {
+  readonly state: "none" | "foreground" | "pending" | "delivered" | "processed";
+  readonly notificationId?: string;
+  readonly inputId?: string;
+  readonly deliveredAt?: number;
+  readonly processedRequestId?: string;
+  readonly processedAt?: number;
+}
+export interface SubagentExecutionRecord extends AcceptSubagentExecution {
+  /** Reserved on acceptance; absent only for legacy persisted executions. */
+  readonly childUserMessageId?: string;
+  /** Acceptance order within a root session and logical subagent. */
+  readonly delegationSequence?: number;
+  readonly status: "queued" | "running" | ExecutionTerminalStatus;
+  readonly childSessionId?: string;
+  readonly childScopeId?: string;
+  readonly childRunId?: string;
+  readonly startedAt?: number;
+  readonly completedAt?: number;
+  readonly updatedAt: number;
+  readonly reason?: string;
+  readonly output?: string;
+  readonly error?: string;
+  readonly artifact: ExecutionArtifact;
+  readonly delivery: ExecutionDelivery;
+  /** First late result after interruption; never changes the authoritative terminal. */
+  readonly lateResult?: ExecutionTerminalResult;
+}
+export interface SubagentExecutionStore {
+  subscribe(listener: (record: SubagentExecutionRecord) => void): () => void;
+  accept(
+    input: AcceptSubagentExecution,
+  ): Promise<{ record: SubagentExecutionRecord; created: boolean }>;
+  get(input: ExecutionLookup): Promise<SubagentExecutionRecord | null>;
+  getByChildRun(input: ChildRunLookup): Promise<SubagentExecutionRecord | null>;
+  list(input: ExecutionHistory): Promise<readonly SubagentExecutionRecord[]>;
+  getForRoot(
+    executionId: string,
+    rootSessionId: string,
+  ): Promise<SubagentExecutionRecord | null>;
+  listByRootRun(rootRunId: string): Promise<readonly SubagentExecutionRecord[]>;
+  revokeSessionArtifacts(
+    sessionId: string,
+    at: number,
+  ): Promise<readonly SubagentExecutionRecord[]>;
+  bindChild(
+    input: ExecutionLookup,
+    child: { sessionId: string; contextScopeId: string },
+    at: number,
+  ): Promise<SubagentExecutionRecord>;
+  start(
+    input: ExecutionLookup,
+    childRunId: string,
+    at: number,
+  ): Promise<SubagentExecutionRecord>;
+  finish(
+    input: ExecutionLookup,
+    result: ExecutionTerminalResult,
+  ): Promise<{ record: SubagentExecutionRecord; claimed: boolean }>;
+  updateArtifact(
+    input: ExecutionLookup,
+    artifact: ExecutionArtifact,
+    at: number,
+  ): Promise<SubagentExecutionRecord>;
+  markDelivered(
+    input: ExecutionLookup,
+    inputId: string,
+    at: number,
+  ): Promise<SubagentExecutionRecord>;
+  markProcessed(
+    input: ExecutionLookup,
+    requestId: string,
+    at: number,
+  ): Promise<SubagentExecutionRecord>;
+  interruptRoot(
+    rootRunId: string,
+    reason: string,
+    at: number,
+  ): Promise<readonly SubagentExecutionRecord[]>;
+}
+const terminal = (r: SubagentExecutionRecord): boolean =>
+  r.status !== "queued" && r.status !== "running";
+function required(value: string): void {
+  if (!value.trim())
+    throw new SubagentExecutionConflictError(
+      "Execution identity must not be empty",
+    );
+}
+function receiptIdentity(r: AcceptSubagentExecution): string {
+  return JSON.stringify([
+    r.requestId,
+    r.parentSessionId,
+    r.requesterScopeId,
+    r.requesterRunId,
+    r.rootSessionId,
+    r.rootRunId,
+    r.rootPromptId ?? null,
+    r.subagentId,
+    r.mode,
+    r.prompt,
+    r.timeoutMs ?? null,
+  ]);
+}
+function limitFor(input: ExecutionHistory): number {
+  const limit = input.limit ?? 50;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200)
+    throw new SubagentExecutionConflictError(
+      "History limit must be between 1 and 200",
+    );
+  return limit;
+}
+function sequenceOrdered(input: ExecutionHistory): boolean {
+  return (
+    (!input.legacyOnly && input.ascending === true) ||
+    input.afterSequence !== undefined ||
+    input.beforeSequence !== undefined ||
+    (input.rootSessionId !== undefined && input.subagentId !== undefined)
+  );
+}
+function finishRecord(
+  r: SubagentExecutionRecord,
+  result: ExecutionTerminalResult,
+): SubagentExecutionRecord {
+  return {
+    ...r,
+    ...result,
+    updatedAt: result.completedAt,
+    delivery:
+      r.mode === "foreground"
+        ? { state: "foreground" }
+        : {
+            state: "pending",
+            notificationId: `subagent-result:${r.executionId}`,
+          },
+  };
+}
+/** Shared transitions run synchronously inside each backend's write transaction. */
+abstract class ExecutionStore implements SubagentExecutionStore {
+  private readonly listeners = new Set<
+    (record: SubagentExecutionRecord) => void
+  >();
+  subscribe(listener: (record: SubagentExecutionRecord) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  protected abstract writeTransaction<T>(operation: () => T): Promise<T>;
+  protected async transaction<T>(operation: () => T): Promise<T> {
+    const changed: SubagentExecutionRecord[] = [];
+    const result = await this.writeTransaction(() => {
+      const previous = this.transactionChanges;
+      this.transactionChanges = changed;
+      try {
+        return operation();
+      } finally {
+        this.transactionChanges = previous;
+      }
+    });
+    for (const record of changed)
+      for (const listener of this.listeners) {
+        try {
+          listener(structuredClone(record));
+        } catch {
+          /* Subscribers cannot undo a committed write. */
+        }
+      }
+    return result;
+  }
+  private transactionChanges?: SubagentExecutionRecord[];
+  protected abstract read(executionId: string): SubagentExecutionRecord | null;
+  protected abstract childRunRecords(
+    input: ChildRunLookup,
+  ): readonly SubagentExecutionRecord[];
+  protected abstract findInvocation(
+    requesterRunId: string,
+    requestId: string,
+  ): SubagentExecutionRecord | null;
+  protected abstract persist(record: SubagentExecutionRecord): void;
+  protected save(record: SubagentExecutionRecord): void {
+    this.persist(record);
+    this.transactionChanges?.push(structuredClone(record));
+  }
+  protected abstract nextSequence(
+    rootSessionId: string,
+    subagentId: string,
+  ): number;
+  protected abstract history(
+    input: ExecutionHistory,
+  ): readonly SubagentExecutionRecord[];
+  protected abstract rootRecords(
+    rootRunId: string,
+  ): readonly SubagentExecutionRecord[];
+  protected abstract sessionRecords(
+    sessionId: string,
+  ): readonly SubagentExecutionRecord[];
+  revokeSessionArtifacts(
+    sessionId: string,
+    at: number,
+  ): Promise<readonly SubagentExecutionRecord[]> {
+    return this.transaction(() =>
+      this.sessionRecords(sessionId).map((record) => {
+        const next: SubagentExecutionRecord = {
+          ...record,
+          artifact: { state: "deleted", cleanupPending: true },
+          updatedAt: at,
+        };
+        this.save(next);
+        return next;
+      }),
+    );
+  }
+  private scoped(input: ExecutionLookup): SubagentExecutionRecord | null {
+    const r = this.read(input.executionId);
+    return r?.parentSessionId === input.parentSessionId &&
+      (input.requesterScopeId === undefined ||
+        input.requesterScopeId === r.requesterScopeId)
+      ? r
+      : null;
+  }
+  async get(input: ExecutionLookup): Promise<SubagentExecutionRecord | null> {
+    await Promise.resolve();
+    return this.scoped(input);
+  }
+  async getByChildRun(
+    input: ChildRunLookup,
+  ): Promise<SubagentExecutionRecord | null> {
+    for (const identity of [input.sessionId, input.contextScopeId, input.runId])
+      required(identity);
+    await Promise.resolve();
+    const records = this.childRunRecords(input);
+    if (records.length > 1)
+      throw new SubagentExecutionConflictError(
+        "Ambiguous child run execution ownership",
+      );
+    return records[0] ?? null;
+  }
+  async getForRoot(
+    executionId: string,
+    rootSessionId: string,
+  ): Promise<SubagentExecutionRecord | null> {
+    required(rootSessionId);
+    await Promise.resolve();
+    const record = this.read(executionId);
+    return record?.rootSessionId === rootSessionId ? record : null;
+  }
+  async list(
+    input: ExecutionHistory,
+  ): Promise<readonly SubagentExecutionRecord[]> {
+    await Promise.resolve();
+    limitFor(input);
+    return this.history(input);
+  }
+  async listByRootRun(
+    rootRunId: string,
+  ): Promise<readonly SubagentExecutionRecord[]> {
+    await Promise.resolve();
+    required(rootRunId);
+    return this.rootRecords(rootRunId);
+  }
+  async accept(
+    input: AcceptSubagentExecution,
+  ): Promise<{ record: SubagentExecutionRecord; created: boolean }> {
+    for (const id of [
+      input.executionId,
+      input.requestId,
+      input.parentSessionId,
+      input.requesterScopeId,
+      input.requesterRunId,
+      input.rootSessionId,
+      input.rootRunId,
+      input.subagentId,
+    ])
+      required(id);
+    if (
+      input.timeoutMs !== undefined &&
+      (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0)
+    )
+      throw new SubagentExecutionConflictError("Invalid timeout");
+    return this.transaction(() => {
+      const previous = this.findInvocation(
+        input.requesterRunId,
+        input.requestId,
+      );
+      if (previous) {
+        if (receiptIdentity(previous) !== receiptIdentity(input))
+          throw new SubagentExecutionConflictError(
+            "Execution acceptance conflict",
+          );
+        return { record: previous, created: false };
+      }
+      if (this.read(input.executionId))
+        throw new SubagentExecutionConflictError("Execution ID conflict");
+      const record: SubagentExecutionRecord = {
+        ...input,
+        childUserMessageId: randomUUID(),
+        delegationSequence: this.nextSequence(
+          input.rootSessionId,
+          input.subagentId,
+        ),
+        status: "queued",
+        updatedAt: input.createdAt,
+        artifact: { state: "none" },
+        delivery: {
+          state: input.mode === "foreground" ? "foreground" : "none",
+        },
+      };
+      this.save(record);
+      return { record, created: true };
+    });
+  }
+  private mutate(
+    input: ExecutionLookup,
+    change: (r: SubagentExecutionRecord) => SubagentExecutionRecord,
+  ): Promise<SubagentExecutionRecord> {
+    return this.transaction(() => {
+      const r = this.scoped(input);
+      if (!r)
+        throw new SubagentExecutionConflictError(
+          "Execution not found in requester scope",
+        );
+      const next = change(r);
+      this.save(next);
+      return next;
+    });
+  }
+  bindChild(
+    input: ExecutionLookup,
+    child: { sessionId: string; contextScopeId: string },
+    at: number,
+  ): Promise<SubagentExecutionRecord> {
+    required(child.sessionId);
+    required(child.contextScopeId);
+    return this.mutate(input, (r) => {
+      if (terminal(r))
+        throw new SubagentExecutionConflictError(
+          "Cannot bind terminal execution",
+        );
+      if (r.childSessionId !== undefined) {
+        if (
+          r.childSessionId !== child.sessionId ||
+          r.childScopeId !== child.contextScopeId
+        )
+          throw new SubagentExecutionConflictError("Child identity conflict");
+        return r;
+      }
+      return {
+        ...r,
+        childSessionId: child.sessionId,
+        childScopeId: child.contextScopeId,
+        updatedAt: at,
+      };
+    });
+  }
+  start(
+    input: ExecutionLookup,
+    childRunId: string,
+    at: number,
+  ): Promise<SubagentExecutionRecord> {
+    required(childRunId);
+    return this.mutate(input, (r) => {
+      if (terminal(r))
+        throw new SubagentExecutionConflictError(
+          "Cannot start terminal execution",
+        );
+      if (!r.childSessionId || !r.childScopeId)
+        throw new SubagentExecutionConflictError(
+          "Child must be bound before start",
+        );
+      if (r.childRunId) {
+        if (r.childRunId !== childRunId)
+          throw new SubagentExecutionConflictError(
+            "Child run identity conflict",
+          );
+        return r;
+      }
+      return {
+        ...r,
+        // Legacy queued rows reserve only when they actually start. Running legacy
+        // rows are left untouched because their model history may already exist.
+        childUserMessageId: r.childUserMessageId ?? randomUUID(),
+        childRunId,
+        status: "running",
+        startedAt: at,
+        updatedAt: at,
+      };
+    });
+  }
+  async finish(
+    input: ExecutionLookup,
+    result: ExecutionTerminalResult,
+  ): Promise<{ record: SubagentExecutionRecord; claimed: boolean }> {
+    let claimed = false;
+    const record = await this.mutate(input, (r) => {
+      if (terminal(r))
+        return r.status === "interrupted" &&
+          result.status !== "interrupted" &&
+          !r.lateResult
+          ? {
+              ...r,
+              lateResult: result,
+              updatedAt: Math.max(r.updatedAt, result.completedAt),
+            }
+          : r;
+      claimed = true;
+      return finishRecord(r, result);
+    });
+    return { record, claimed };
+  }
+  updateArtifact(
+    input: ExecutionLookup,
+    artifact: ExecutionArtifact,
+    at: number,
+  ): Promise<SubagentExecutionRecord> {
+    if (
+      artifact.state === "ready" &&
+      (!artifact.path ||
+        !Number.isSafeInteger(artifact.sizeBytes) ||
+        artifact.sizeBytes < 0)
+    )
+      throw new SubagentExecutionConflictError("Invalid ready artifact");
+    return this.mutate(input, (r) => {
+      if (r.artifact.state === "deleted" && artifact.state !== "deleted")
+        throw new SubagentExecutionConflictError("Result artifact was deleted");
+      if (!terminal(r) && artifact.state !== "deleted")
+        throw new SubagentExecutionConflictError(
+          "Artifact requires terminal result",
+        );
+      return { ...r, artifact, updatedAt: at };
+    });
+  }
+  markDelivered(
+    input: ExecutionLookup,
+    inputId: string,
+    at: number,
+  ): Promise<SubagentExecutionRecord> {
+    required(inputId);
+    return this.mutate(input, (r) => {
+      if (!terminal(r) || r.mode === "foreground")
+        throw new SubagentExecutionConflictError(
+          "No background delivery intent",
+        );
+      if (r.delivery.inputId) {
+        if (r.delivery.inputId !== inputId)
+          throw new SubagentExecutionConflictError("Delivered input conflict");
+        return r;
+      }
+      return {
+        ...r,
+        updatedAt: at,
+        delivery: {
+          ...r.delivery,
+          state: "delivered",
+          inputId,
+          deliveredAt: at,
+        },
+      };
+    });
+  }
+  markProcessed(
+    input: ExecutionLookup,
+    requestId: string,
+    at: number,
+  ): Promise<SubagentExecutionRecord> {
+    required(requestId);
+    return this.mutate(input, (r) => {
+      if (!r.delivery.inputId)
+        throw new SubagentExecutionConflictError(
+          "Delivery must be recorded before processing opportunity",
+        );
+      if (r.delivery.processedRequestId) {
+        if (r.delivery.processedRequestId !== requestId)
+          throw new SubagentExecutionConflictError(
+            "Processed request conflict",
+          );
+        return r;
+      }
+      return {
+        ...r,
+        updatedAt: at,
+        delivery: {
+          ...r.delivery,
+          state: "processed",
+          processedRequestId: requestId,
+          processedAt: at,
+        },
+      };
+    });
+  }
+  interruptRoot(
+    rootRunId: string,
+    reason: string,
+    at: number,
+  ): Promise<readonly SubagentExecutionRecord[]> {
+    required(rootRunId);
+    return this.transaction(() =>
+      this.rootRecords(rootRunId)
+        .filter((r) => !terminal(r))
+        .map((r) => {
+          const next = finishRecord(r, {
+            status: "interrupted",
+            reason,
+            completedAt: at,
+          });
+          this.save(next);
+          return next;
+        }),
+    );
+  }
+}
+export class InMemorySubagentExecutionStore extends ExecutionStore {
+  private readonly records = new Map<string, SubagentExecutionRecord>();
+  protected childRunRecords(
+    input: ChildRunLookup,
+  ): readonly SubagentExecutionRecord[] {
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.childRunId === input.runId &&
+          record.childSessionId === input.sessionId &&
+          record.childScopeId === input.contextScopeId,
+      )
+      .slice(0, 2)
+      .map((record) => structuredClone(record));
+  }
+  protected sessionRecords(
+    sessionId: string,
+  ): readonly SubagentExecutionRecord[] {
+    return [...this.records.values()]
+      .filter(
+        (r) =>
+          r.parentSessionId === sessionId ||
+          r.rootSessionId === sessionId ||
+          r.childSessionId === sessionId,
+      )
+      .map((r) => structuredClone(r));
+  }
+  protected async writeTransaction<T>(operation: () => T): Promise<T> {
+    await Promise.resolve();
+    return operation();
+  }
+  protected read(id: string): SubagentExecutionRecord | null {
+    const r = this.records.get(id);
+    return r ? structuredClone(r) : null;
+  }
+  protected findInvocation(
+    run: string,
+    request: string,
+  ): SubagentExecutionRecord | null {
+    const r = [...this.records.values()].find(
+      (r) => r.requesterRunId === run && r.requestId === request,
+    );
+    return r ? structuredClone(r) : null;
+  }
+  protected persist(r: SubagentExecutionRecord): void {
+    this.records.set(r.executionId, structuredClone(r));
+  }
+  protected nextSequence(rootSessionId: string, subagentId: string): number {
+    let last = 0;
+    for (const record of this.records.values())
+      if (
+        record.rootSessionId === rootSessionId &&
+        record.subagentId === subagentId
+      )
+        last = Math.max(last, record.delegationSequence ?? 0);
+    return last + 1;
+  }
+  protected history(
+    input: ExecutionHistory,
+  ): readonly SubagentExecutionRecord[] {
+    return [...this.records.values()]
+      .filter(
+        (r) =>
+          (input.parentSessionId === undefined ||
+            r.parentSessionId === input.parentSessionId) &&
+          (input.rootSessionId === undefined ||
+            r.rootSessionId === input.rootSessionId) &&
+          (input.requesterScopeId === undefined ||
+            r.requesterScopeId === input.requesterScopeId) &&
+          (input.subagentId === undefined ||
+            r.subagentId === input.subagentId) &&
+          (input.rootRunId === undefined || r.rootRunId === input.rootRunId) &&
+          (!input.legacyOnly || r.delegationSequence === undefined) &&
+          (input.afterSequence === undefined ||
+            (r.delegationSequence !== undefined &&
+              r.delegationSequence > input.afterSequence)) &&
+          (input.beforeSequence === undefined ||
+            (r.delegationSequence !== undefined &&
+              r.delegationSequence < input.beforeSequence)) &&
+          (!input.before ||
+            r.createdAt < input.before.createdAt ||
+            (r.createdAt === input.before.createdAt &&
+              r.executionId < input.before.executionId)) &&
+          (!input.after ||
+            r.createdAt > input.after.createdAt ||
+            (r.createdAt === input.after.createdAt &&
+              r.executionId > input.after.executionId)),
+      )
+      .sort(
+        input.legacyOnly
+          ? (a: SubagentExecutionRecord, b: SubagentExecutionRecord): number =>
+              (input.ascending ? 1 : -1) *
+              (a.createdAt - b.createdAt ||
+                (a.executionId < b.executionId
+                  ? -1
+                  : a.executionId > b.executionId
+                    ? 1
+                    : 0))
+          : sequenceOrdered(input)
+            ? (
+                a: SubagentExecutionRecord,
+                b: SubagentExecutionRecord,
+              ): number =>
+                (input.ascending ? 1 : -1) *
+                  ((a.delegationSequence ?? 0) - (b.delegationSequence ?? 0)) ||
+                b.createdAt - a.createdAt ||
+                b.executionId.localeCompare(a.executionId)
+            : (
+                a: SubagentExecutionRecord,
+                b: SubagentExecutionRecord,
+              ): number =>
+                b.createdAt - a.createdAt ||
+                (a.executionId < b.executionId
+                  ? 1
+                  : a.executionId > b.executionId
+                    ? -1
+                    : 0),
+      )
+      .slice(0, limitFor(input))
+      .map((r) => structuredClone(r));
+  }
+  protected rootRecords(root: string): readonly SubagentExecutionRecord[] {
+    return [...this.records.values()]
+      .filter((r) => r.rootRunId === root)
+      .sort(
+        (a, b) =>
+          a.createdAt - b.createdAt ||
+          (a.executionId < b.executionId
+            ? -1
+            : a.executionId > b.executionId
+              ? 1
+              : 0),
+      )
+      .map((r) => structuredClone(r));
+  }
+}
+
+const columns = schema.subagentExecution.columns;
+type Row = Record<string, SqliteValue>;
+function toRow(record: SubagentExecutionRecord): Row {
+  const row: Row = {};
+  for (const [key, column] of Object.entries(columns)) {
+    const value = record[key as keyof SubagentExecutionRecord];
+    row[column] =
+      value === undefined
+        ? null
+        : typeof value === "object"
+          ? JSON.stringify(value)
+          : value;
+  }
+  return row;
+}
+function fromRow(row: Row): SubagentExecutionRecord {
+  const record: Record<string, unknown> = {};
+  for (const [key, column] of Object.entries(columns)) {
+    const value = row[column];
+    record[key] =
+      value === null
+        ? undefined
+        : ["artifact", "delivery", "lateResult"].includes(key)
+          ? JSON.parse(value as string)
+          : value;
+  }
+  return record as unknown as SubagentExecutionRecord;
+}
+export class DatabaseSubagentExecutionStore extends ExecutionStore {
+  private readonly db: DatabaseConnection;
+  constructor(options: { db?: DatabaseConnection } = {}) {
+    super();
+    this.db = options.db ?? getDatabase();
+  }
+  protected childRunRecords(
+    input: ChildRunLookup,
+  ): readonly SubagentExecutionRecord[] {
+    return this.db
+      .prepare<Row>(
+        `SELECT * FROM ${schema.subagentExecution.tableName}
+         WHERE child_run_id = ? AND child_session_id = ? AND child_scope_id = ? LIMIT 2`,
+      )
+      .all(input.runId, input.sessionId, input.contextScopeId)
+      .map(fromRow);
+  }
+  /** Recovery never schedules work or delivers results into a replacement run. */
+  async interruptTerminalRootExecutions(at: number): Promise<void> {
+    await this.transaction(() => {
+      const records = this.db
+        .prepare<Row>(
+          `SELECT execution.* FROM ${schema.subagentExecution.tableName} execution
+         JOIN ${schema.runLedger.tableName} root ON root.run_id = execution.root_run_id
+         WHERE execution.status IN ('queued', 'running')
+           AND root.status IN ('succeeded', 'failed', 'cancelled', 'interrupted')`,
+        )
+        .all()
+        .map(fromRow);
+      for (const record of records)
+        this.save(
+          finishRecord(record, {
+            status: "interrupted",
+            reason:
+              "Root run ended before execution completed (startup recovery)",
+            completedAt: at,
+          }),
+        );
+    });
+  }
+  protected writeTransaction<T>(operation: () => T): Promise<T> {
+    return runWriteTransaction(this.db, operation);
+  }
+  protected sessionRecords(
+    sessionId: string,
+  ): readonly SubagentExecutionRecord[] {
+    return this.db
+      .prepare<Row>(
+        `SELECT * FROM ${schema.subagentExecution.tableName} WHERE parent_session_id = ? OR root_session_id = ? OR child_session_id = ?`,
+      )
+      .all(sessionId, sessionId, sessionId)
+      .map(fromRow);
+  }
+  protected read(id: string): SubagentExecutionRecord | null {
+    const row = this.db
+      .prepare<Row>(
+        `SELECT * FROM ${schema.subagentExecution.tableName} WHERE execution_id = ?`,
+      )
+      .get(id);
+    return row ? fromRow(row) : null;
+  }
+  protected findInvocation(
+    run: string,
+    request: string,
+  ): SubagentExecutionRecord | null {
+    const row = this.db
+      .prepare<Row>(
+        `SELECT * FROM ${schema.subagentExecution.tableName} WHERE requester_run_id = ? AND request_id = ?`,
+      )
+      .get(run, request);
+    return row ? fromRow(row) : null;
+  }
+  protected persist(record: SubagentExecutionRecord): void {
+    const row = toRow(record);
+    const names = Object.keys(row);
+    this.db
+      .prepare(
+        `INSERT INTO ${schema.subagentExecution.tableName} (${names.join(", ")}) VALUES (${names.map(() => "?").join(", ")}) ON CONFLICT(execution_id) DO UPDATE SET ${names
+          .filter((n) => n !== "execution_id")
+          .map((n) => `${n} = excluded.${n}`)
+          .join(", ")}`,
+      )
+      .run(...Object.values(row));
+  }
+  protected nextSequence(rootSessionId: string, subagentId: string): number {
+    const row = this.db
+      .prepare<{
+        next: number;
+      }>(
+        `SELECT COALESCE(MAX(delegation_sequence), 0) + 1 AS next FROM ${schema.subagentExecution.tableName} WHERE root_session_id = ? AND subagent_id = ?`,
+      )
+      .get(rootSessionId, subagentId);
+    return row?.next ?? 1;
+  }
+  protected history(
+    input: ExecutionHistory,
+  ): readonly SubagentExecutionRecord[] {
+    const where: string[] = [];
+    const values: SqliteValue[] = [];
+    for (const [column, value] of [
+      ["parent_session_id", input.parentSessionId],
+      ["root_session_id", input.rootSessionId],
+      ["requester_scope_id", input.requesterScopeId],
+      ["subagent_id", input.subagentId],
+      ["root_run_id", input.rootRunId],
+    ] as const)
+      if (value !== undefined) {
+        where.push(`${column} = ?`);
+        values.push(value);
+      }
+    if (input.before) {
+      where.push("(created_at < ? OR (created_at = ? AND execution_id < ?))");
+      values.push(
+        input.before.createdAt,
+        input.before.createdAt,
+        input.before.executionId,
+      );
+    }
+    if (input.after) {
+      where.push("(created_at > ? OR (created_at = ? AND execution_id > ?))");
+      values.push(
+        input.after.createdAt,
+        input.after.createdAt,
+        input.after.executionId,
+      );
+    }
+    if (input.legacyOnly) where.push("delegation_sequence IS NULL");
+    if (input.afterSequence !== undefined) {
+      where.push("delegation_sequence > ?");
+      values.push(input.afterSequence);
+    }
+    if (input.beforeSequence !== undefined) {
+      where.push("delegation_sequence < ?");
+      values.push(input.beforeSequence);
+    }
+    return this.db
+      .prepare<Row>(
+        `SELECT * FROM ${schema.subagentExecution.tableName} WHERE ${where.join(" AND ")} ORDER BY ${sequenceOrdered(input) ? `delegation_sequence ${input.ascending ? "ASC" : "DESC"}, ` : ""}created_at ${input.legacyOnly && input.ascending ? "ASC" : "DESC"}, execution_id ${input.legacyOnly && input.ascending ? "ASC" : "DESC"} LIMIT ?`,
+      )
+      .all(...values, limitFor(input))
+      .map(fromRow);
+  }
+  protected rootRecords(root: string): readonly SubagentExecutionRecord[] {
+    return this.db
+      .prepare<Row>(
+        `SELECT * FROM ${schema.subagentExecution.tableName} WHERE root_run_id = ? ORDER BY created_at ASC, execution_id ASC`,
+      )
+      .all(root)
+      .map(fromRow);
+  }
+}

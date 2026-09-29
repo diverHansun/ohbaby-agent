@@ -7,10 +7,16 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createHostLocalEnvironment } from "../../adapters/ui-runtime/host-local-environment.js";
+import {
+  createHostLocalEnvironment,
+  createHostLocalSandboxManager,
+} from "../../adapters/ui-runtime/host-local-environment.js";
 import { createBus, type BusInstance } from "../../bus/index.js";
 import type { SpawnCommand } from "../../tools/bash.js";
 import { createBuiltinTools } from "../../tools/index.js";
+import type { ResourceAccess } from "./resources.js";
+import { withToolAdmission, type ToolAdmission } from "./tool-admission.js";
+import { DEFAULT_TOOL_SCHEDULER_CONFIG } from "./constants.js";
 import {
   createTaskOutputTool,
   ShellJobRegistry,
@@ -131,6 +137,16 @@ interface SchedulerFixture {
   readonly statuses: ToolCallStatus[];
 }
 
+function resourceAdmission(
+  resourcePath: string,
+  mode: "read" | "write",
+): ToolAdmission {
+  const resources: ResourceAccess[] = [
+    { kind: "file", path: resourcePath, scope: "file", mode },
+  ];
+  return { plan: () => resources, resolve: () => ({ resources }) };
+}
+
 function createTool(input: {
   readonly name: string;
   readonly category?: Tool["category"];
@@ -140,8 +156,9 @@ function createTool(input: {
   readonly requireExplicitApproval?: Tool["requireExplicitApproval"];
   readonly source?: Tool["source"];
   readonly timeoutOwner?: Tool["timeoutOwner"];
+  readonly admission?: ToolAdmission;
 }): Tool {
-  return {
+  const tool: Tool = {
     category: input.category,
     description: `${input.name} description`,
     execute:
@@ -155,6 +172,7 @@ function createTool(input: {
     source: input.source ?? "builtin",
     timeoutOwner: input.timeoutOwner,
   };
+  return input.admission ? withToolAdmission(tool, input.admission) : tool;
 }
 
 function createScheduler(
@@ -201,6 +219,68 @@ function createScheduler(
 }
 
 describe("ToolScheduler", () => {
+  it("binds approval to the actual run, scope and original call controller", async () => {
+    const requested = deferred<Parameters<PermissionPort["ask"]>[0]>();
+    const response = deferred<"once">();
+    const { scheduler } = createScheduler({
+      permissionState: createPermissionState({ bus: createBus() }),
+      permission: {
+        ask: (input) => {
+          requested.resolve(input);
+          return response.promise;
+        },
+      },
+    });
+    const execute = vi.fn(() => ({ output: "done" }));
+    scheduler.register(
+      createTool({ name: "edit", category: "write", execute }),
+    );
+    const running = scheduler.execute({
+      callId: "identity_call",
+      runId: "actual_child_run",
+      contextScopeId: "child_scope",
+      sessionId: "child_session",
+      messageId: "child_message",
+      toolName: "edit",
+      params: { file_path: "src/file.ts" },
+    });
+    const ask = await requested.promise;
+    expect(ask).toMatchObject({
+      runId: "actual_child_run",
+      contextScopeId: "child_scope",
+      callId: "identity_call",
+      sessionId: "child_session",
+      messageId: "child_message",
+    });
+    expect(scheduler.getPendingCalls()[0]).toMatchObject({
+      runId: "actual_child_run",
+    });
+    scheduler.cancel("identity_call");
+    expect(ask.signal.aborted).toBe(true);
+    response.resolve("once");
+    expect(await running).toMatchObject({ status: "cancelled" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("fails an interactive standalone call without inventing a run id", async () => {
+    const ask = vi.fn(() => "once" as const);
+    const { scheduler } = createScheduler({
+      permission: { ask },
+      permissionState: createPermissionState({ bus: createBus() }),
+    });
+    scheduler.register(createTool({ name: "edit", category: "write" }));
+    const result = await scheduler.execute({
+      callId: "standalone",
+      sessionId: "session_1",
+      messageId: "message_1",
+      toolName: "edit",
+      params: { file_path: "src/file.ts" },
+    });
+    expect(result.status).toBe("error");
+    expect(result.error?.message).toContain("runId");
+    expect(ask).not.toHaveBeenCalled();
+  });
+
   it("rejects access-guarded calls before tool execution", async () => {
     const execute = vi.fn(() => Promise.resolve({ output: "should not run" }));
     const { scheduler } = createScheduler({
@@ -213,6 +293,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "guarded_1",
         messageId: "message_1",
         params: {},
@@ -230,6 +311,12 @@ describe("ToolScheduler", () => {
   });
 
   it("resolves per-tool scheduler timeout overrides", () => {
+    expect(timeoutForTool(DEFAULT_TOOL_SCHEDULER_CONFIG.timeout, "grep")).toBe(
+      30_000,
+    );
+    expect(timeoutForTool(DEFAULT_TOOL_SCHEDULER_CONFIG.timeout, "read")).toBe(
+      120_000,
+    );
     expect(
       timeoutForTool(
         {
@@ -268,6 +355,7 @@ describe("ToolScheduler", () => {
       );
 
       const result = scheduler.execute({
+        runId: "test_run",
         callId: "subagent_run_1",
         messageId: "message_1",
         params: {},
@@ -306,6 +394,7 @@ describe("ToolScheduler", () => {
       );
 
       const result = scheduler.execute({
+        runId: "test_run",
         callId: "subagent_status_1",
         messageId: "message_1",
         params: {},
@@ -397,6 +486,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "call_1",
         messageId: "message_1",
         params: { path: "README.md" },
@@ -461,6 +551,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "call_1",
         environment,
         messageId: "message_1",
@@ -501,6 +592,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       deny.scheduler.execute({
+        runId: "test_run",
         callId: "missing",
         messageId: "message_1",
         params: {},
@@ -513,6 +605,7 @@ describe("ToolScheduler", () => {
     });
     await expect(
       deny.scheduler.execute({
+        runId: "test_run",
         callId: "denied",
         messageId: "message_1",
         params: {},
@@ -525,6 +618,7 @@ describe("ToolScheduler", () => {
     });
     await expect(
       askReject.scheduler.execute({
+        runId: "test_run",
         callId: "rejected",
         messageId: "message_1",
         params: {},
@@ -556,6 +650,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "write_full_access",
         messageId: "message_1",
         params: { file_path: "src/file.ts" },
@@ -573,7 +668,10 @@ describe("ToolScheduler", () => {
     const permission = {
       ask: vi.fn(() => Promise.resolve("once" as const)),
     };
-    const { scheduler } = createScheduler({ permission });
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ bus: createBus() }),
+    });
     const execute = vi.fn(() => ({ output: "remote result" }));
     scheduler.register(
       createTool({
@@ -585,6 +683,7 @@ describe("ToolScheduler", () => {
     );
 
     const result = await scheduler.execute({
+      runId: "test_run",
       callId: "explicit_approval",
       messageId: "message_1",
       params: {},
@@ -607,7 +706,10 @@ describe("ToolScheduler", () => {
     const permission = {
       ask: vi.fn(() => Promise.resolve("once" as const)),
     };
-    const { scheduler } = createScheduler({ permission });
+    const { scheduler } = createScheduler({
+      permission,
+      permissionState: createPermissionState({ bus: createBus() }),
+    });
     const execute = vi.fn(() => ({ output: "mcp result" }));
     scheduler.register(
       createTool({
@@ -620,6 +722,7 @@ describe("ToolScheduler", () => {
     );
 
     const result = await scheduler.execute({
+      runId: "test_run",
       callId: "untrusted_mcp",
       messageId: "message_1",
       params: {},
@@ -655,6 +758,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "trusted_mcp",
         messageId: "message_1",
         params: {},
@@ -669,7 +773,7 @@ describe("ToolScheduler", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("asks external and explicit approval for full-access external writes when the tool requires it", async () => {
+  it("skips external and explicit approval for full-access external writes", async () => {
     const tempRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "ohbaby-scheduler-explicit-external-"),
     );
@@ -707,6 +811,7 @@ describe("ToolScheduler", () => {
     try {
       await expect(
         scheduler.execute({
+          runId: "test_run",
           callId: "explicit_external",
           environment: createFakeEnvironment(workspace),
           messageId: "message_1",
@@ -719,13 +824,7 @@ describe("ToolScheduler", () => {
         status: "success",
       });
 
-      expect(permissionRequests.map((request) => request.reason)).toEqual([
-        expect.stringContaining("External write path access"),
-        "explicit-approval-required",
-      ]);
-      expect(permissionRequests.map((request) => request.rememberable)).toEqual(
-        [undefined, false],
-      );
+      expect(permissionRequests).toEqual([]);
       expect(execute).toHaveBeenCalledTimes(1);
     } finally {
       await fs.rm(tempRoot, { force: true, recursive: true });
@@ -772,6 +871,7 @@ describe("ToolScheduler", () => {
     try {
       await expect(
         scheduler.execute({
+          runId: "test_run",
           callId: "internal_write",
           environment: createFakeEnvironment(realWorkspace),
           messageId: "message_1",
@@ -810,6 +910,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "external_then_bash",
         environment: createFakeEnvironmentWithPreflight(
           "D:/workspace",
@@ -868,6 +969,7 @@ describe("ToolScheduler", () => {
     try {
       await expect(
         scheduler.execute({
+          runId: "test_run",
           callId: "external_always",
           environment: {
             ...createFakeEnvironmentWithPreflight(
@@ -918,6 +1020,7 @@ describe("ToolScheduler", () => {
     scheduler.register(createTool({ execute, name: "bash" }));
 
     await scheduler.execute({
+      runId: "test_run",
       callId: "external_once",
       environment: {
         ...createFakeEnvironmentWithPreflight(
@@ -943,23 +1046,29 @@ describe("ToolScheduler", () => {
     expect(trustPath).not.toHaveBeenCalled();
   });
 
-  it("records auto-approved external directories as trusted read roots", async () => {
+  it("records explicit session allow rules as trusted read roots", async () => {
     const trustPath = vi.fn();
     const permission = {
       ask: vi.fn(() => Promise.resolve("once" as const)),
     } satisfies PermissionPort;
     const execute = vi.fn(() => ({ output: "auto" }));
-    const { scheduler } = createScheduler({
-      permission,
-      permissionState: createPermissionState({
-        bus: createBus(),
-        initialLevel: "full-access",
-      }),
+    const permissionState = createPermissionState({ bus: createBus() });
+    permissionState.addSessionRule("session_1", {
+      tool: "external_directory",
+      decision: "allow",
+      scope: "session",
     });
+    permissionState.addSessionRule("session_1", {
+      tool: "bash",
+      decision: "allow",
+      scope: "session",
+    });
+    const { scheduler } = createScheduler({ permission, permissionState });
     scheduler.register(createTool({ execute, name: "bash" }));
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "external_auto",
         environment: {
           ...createFakeEnvironmentWithPreflight(
@@ -994,7 +1103,7 @@ describe("ToolScheduler", () => {
     });
   });
 
-  it("does not treat read-approved external roots as write approval", async () => {
+  it("allows full-access writes after an external read without asking", async () => {
     const tempRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "ohbaby-scheduler-read-trust-write-"),
     );
@@ -1052,6 +1161,7 @@ describe("ToolScheduler", () => {
     try {
       await expect(
         scheduler.execute({
+          runId: "test_run",
           callId: "read_external_auto",
           environment,
           messageId: "message_1",
@@ -1060,16 +1170,11 @@ describe("ToolScheduler", () => {
           toolName: "bash",
         }),
       ).resolves.toMatchObject({ status: "success" });
-      expect(trustedRoots).toEqual([
-        {
-          kind: "external-approved",
-          path: path.resolve(outside),
-          source: "external_directory",
-        },
-      ]);
+      expect(trustedRoots).toEqual([]);
 
       await expect(
         scheduler.execute({
+          runId: "test_run",
           callId: "write_after_read_trust",
           environment,
           messageId: "message_2",
@@ -1079,11 +1184,7 @@ describe("ToolScheduler", () => {
         }),
       ).resolves.toMatchObject({ status: "success" });
 
-      expect(permissionRequests).toHaveLength(1);
-      expect(permissionRequests[0]).toMatchObject({
-        toolName: "external_directory",
-      });
-      expect(permissionRequests[0]?.reason).toContain("External write path");
+      expect(permissionRequests).toEqual([]);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
@@ -1132,6 +1233,7 @@ describe("ToolScheduler", () => {
     try {
       await expect(
         scheduler.execute({
+          runId: "test_run",
           callId: "trusted_write",
           environment: {
             ...createFakeEnvironment(workspace),
@@ -1203,6 +1305,7 @@ describe("ToolScheduler", () => {
 
     try {
       const resultPromise = scheduler.execute({
+        runId: "test_run",
         callId: "external_bash_real",
         environment: createFakeEnvironmentWithPreflight(
           workspace,
@@ -1261,6 +1364,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "denylisted",
         environment: createFakeEnvironmentWithPreflight(
           "D:/workspace",
@@ -1305,6 +1409,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "sensitive_external",
         environment: createFakeEnvironmentWithPreflight(
           "D:/workspace",
@@ -1353,7 +1458,7 @@ describe("ToolScheduler", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("asks sensitive path permissions even in full access", async () => {
+  it("skips sensitive path approval in full access", async () => {
     const permissionRequests: Parameters<PermissionPort["ask"]>[0][] = [];
     const permission = {
       ask: vi.fn((input: Parameters<PermissionPort["ask"]>[0]) => {
@@ -1373,6 +1478,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "sensitive_full_access",
         environment: createFakeEnvironmentWithPreflight(
           "D:/workspace",
@@ -1397,9 +1503,7 @@ describe("ToolScheduler", () => {
       status: "success",
     });
 
-    expect(permissionRequests.map((request) => request.toolName)).toEqual([
-      "sensitive_path",
-    ]);
+    expect(permissionRequests).toEqual([]);
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
@@ -1412,6 +1516,7 @@ describe("ToolScheduler", () => {
     scheduler.register(createTool({ execute, name: "bash" }));
 
     const result = await scheduler.execute({
+      runId: "test_run",
       callId: "preflight_failure",
       environment: {
         ...createFakeEnvironment("D:/workspace"),
@@ -1452,6 +1557,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "",
         messageId: "message_1",
         params: { path: "README.md" },
@@ -1464,6 +1570,7 @@ describe("ToolScheduler", () => {
     });
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "invalid_params",
         messageId: "message_1",
         params: {},
@@ -1476,6 +1583,7 @@ describe("ToolScheduler", () => {
     });
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "valid_params",
         messageId: "message_1",
         params: { path: "README.md" },
@@ -1506,6 +1614,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "permission_error",
         messageId: "message_1",
         params: {},
@@ -1519,7 +1628,7 @@ describe("ToolScheduler", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("queues write calls behind read calls and releases them afterward", async () => {
+  it("queues writes behind reads of the same declared resource and releases them afterward", async () => {
     const readBlocker = deferred<{ readonly output: string }>();
     const started: string[] = [];
     const { scheduler } = createScheduler();
@@ -1529,6 +1638,7 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return readBlocker.promise;
         },
+        admission: resourceAdmission("/scheduler-unit-resource-0", "read"),
         name: "read",
       }),
     );
@@ -1538,11 +1648,13 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return Promise.resolve({ output: "written" });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-0", "write"),
         name: "edit",
       }),
     );
 
     const readPromise = scheduler.execute({
+      runId: "test_run",
       callId: "read_1",
       messageId: "message_1",
       params: {},
@@ -1550,6 +1662,7 @@ describe("ToolScheduler", () => {
       toolName: "read",
     });
     const writePromise = scheduler.execute({
+      runId: "test_run",
       callId: "write_1",
       messageId: "message_1",
       params: {},
@@ -1568,7 +1681,7 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["read_1", "write_1"]);
   });
 
-  it("keeps a cancelled non-cooperative write slot until the tool settles", async () => {
+  it("keeps a cancelled non-cooperative write resource protected until the tool settles", async () => {
     const firstBlocker = deferred<{ readonly output: string }>();
     const started: string[] = [];
     const { scheduler } = createScheduler();
@@ -1581,11 +1694,13 @@ describe("ToolScheduler", () => {
             ? firstBlocker.promise
             : Promise.resolve({ output: "second done" });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-1", "write"),
         name: "edit",
       }),
     );
 
     const first = scheduler.execute({
+      runId: "test_run",
       callId: "write_1",
       messageId: "message_1",
       params: {},
@@ -1593,6 +1708,7 @@ describe("ToolScheduler", () => {
       toolName: "edit",
     });
     const second = scheduler.execute({
+      runId: "test_run",
       callId: "write_2",
       messageId: "message_1",
       params: {},
@@ -1613,7 +1729,7 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["write_1", "write_2"]);
   });
 
-  it("lets memory tools bypass read/write locks and limits subagent concurrency", async () => {
+  it("runs independent memory work without a category lock and limits trusted dispatch concurrency", async () => {
     const blockers = [
       deferred<{ readonly output: string }>(),
       deferred<{ readonly output: string }>(),
@@ -1649,10 +1765,12 @@ describe("ToolScheduler", () => {
           return blockers[1].promise;
         },
         name: "subagent_run",
+        admission: { capacity: "dispatch", plan: () => [] },
       }),
     );
 
     const write = scheduler.execute({
+      runId: "test_run",
       callId: "write_1",
       messageId: "message_1",
       params: {},
@@ -1660,6 +1778,7 @@ describe("ToolScheduler", () => {
       toolName: "edit",
     });
     const memory = scheduler.execute({
+      runId: "test_run",
       callId: "memory_1",
       messageId: "message_1",
       params: {},
@@ -1667,6 +1786,7 @@ describe("ToolScheduler", () => {
       toolName: "goal_update",
     });
     const subagent1 = scheduler.execute({
+      runId: "test_run",
       callId: "subagent_1",
       messageId: "message_1",
       params: {},
@@ -1674,6 +1794,7 @@ describe("ToolScheduler", () => {
       toolName: "subagent_run",
     });
     const subagent2 = scheduler.execute({
+      runId: "test_run",
       callId: "subagent_2",
       messageId: "message_1",
       params: {},
@@ -1707,6 +1828,7 @@ describe("ToolScheduler", () => {
         category: "subagent",
         execute: () => blocker.promise,
         name: "subagent_run",
+        admission: { capacity: "dispatch", plan: () => [] },
       }),
     );
     scheduler.register(
@@ -1714,10 +1836,12 @@ describe("ToolScheduler", () => {
         category: "subagent-control",
         execute: () => Promise.resolve({ output: "closed" }),
         name: "subagent_close",
+        admission: { capacity: "control", plan: () => [] },
       }),
     );
 
     const run = scheduler.execute({
+      runId: "test_run",
       callId: "subagent_run_1",
       messageId: "message_1",
       params: {},
@@ -1729,6 +1853,7 @@ describe("ToolScheduler", () => {
     });
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "subagent_close_1",
         messageId: "message_1",
         params: {},
@@ -1741,7 +1866,7 @@ describe("ToolScheduler", () => {
     await expect(run).resolves.toMatchObject({ status: "success" });
   });
 
-  it("lets task_output bypass the file-read concurrency limit", async () => {
+  it("lets trusted task_output bypass the ordinary concurrency limit", async () => {
     const child = new FakeChildProcess();
     const registry = new ShellJobRegistry({
       createJobId: (): string => "job_1",
@@ -1771,6 +1896,7 @@ describe("ToolScheduler", () => {
     ).resolves.toContain("task_output");
 
     const output = scheduler.execute({
+      runId: "test_run",
       callId: "task_output_1",
       messageId: "message_1",
       params: { block: true, job_id: job.jobId, wait_ms: 600_000 },
@@ -1781,6 +1907,7 @@ describe("ToolScheduler", () => {
       expect(scheduler.getStatus("task_output_1")).toBe("executing");
     });
     const read = scheduler.execute({
+      runId: "test_run",
       callId: "read_1",
       messageId: "message_1",
       params: {},
@@ -1820,6 +1947,7 @@ describe("ToolScheduler", () => {
       scheduler.executeBatch({
         calls: [
           {
+            runId: "test_run",
             callId: "read_1",
             messageId: "message_1",
             params: {},
@@ -1827,6 +1955,7 @@ describe("ToolScheduler", () => {
             toolName: "read",
           },
           {
+            runId: "test_run",
             callId: "write_1",
             messageId: "message_1",
             params: {},
@@ -1834,6 +1963,7 @@ describe("ToolScheduler", () => {
             toolName: "edit",
           },
           {
+            runId: "test_run",
             callId: "memory_1",
             messageId: "message_1",
             params: {},
@@ -1893,6 +2023,7 @@ describe("ToolScheduler", () => {
       scheduler.executeBatch({
         calls: [
           {
+            runId: "test_run",
             callId: "read_1",
             environment: makeEnvironment("D:/workspace/read"),
             messageId: "message_1",
@@ -1901,6 +2032,7 @@ describe("ToolScheduler", () => {
             toolName: "read",
           },
           {
+            runId: "test_run",
             callId: "write_1",
             environment: makeEnvironment("D:/workspace/write"),
             messageId: "message_1",
@@ -1909,6 +2041,7 @@ describe("ToolScheduler", () => {
             toolName: "edit",
           },
           {
+            runId: "test_run",
             callId: "memory_1",
             environment: makeEnvironment("D:/workspace/memory"),
             messageId: "message_1",
@@ -1917,6 +2050,7 @@ describe("ToolScheduler", () => {
             toolName: "goal_update",
           },
           {
+            runId: "test_run",
             callId: "subagent_1",
             environment: makeEnvironment("D:/workspace/subagent"),
             messageId: "message_1",
@@ -1974,6 +2108,7 @@ describe("ToolScheduler", () => {
       const results = await scheduler.executeBatch({
         calls: [
           {
+            runId: "test_run",
             callId: "read_notes",
             environment,
             messageId: "message_1",
@@ -1982,6 +2117,7 @@ describe("ToolScheduler", () => {
             toolName: "read",
           },
           {
+            runId: "test_run",
             callId: "list_root",
             environment,
             messageId: "message_1",
@@ -1990,6 +2126,7 @@ describe("ToolScheduler", () => {
             toolName: "list",
           },
           {
+            runId: "test_run",
             callId: "run_bash",
             environment,
             messageId: "message_1",
@@ -2047,6 +2184,7 @@ describe("ToolScheduler", () => {
 
     try {
       const result = await scheduler.execute({
+        runId: "test_run",
         callId: "read_external_default",
         environment: createFakeEnvironment(workspace),
         messageId: "message_1",
@@ -2097,6 +2235,7 @@ describe("ToolScheduler", () => {
 
     try {
       const result = await scheduler.execute({
+        runId: "test_run",
         callId: "read_external_full",
         environment: createFakeEnvironment(workspace),
         messageId: "message_1",
@@ -2141,6 +2280,7 @@ describe("ToolScheduler", () => {
 
     try {
       const result = await scheduler.execute({
+        runId: "test_run",
         callId: "read_relative_external",
         environment: createFakeEnvironment(workspace),
         messageId: "message_1",
@@ -2236,6 +2376,7 @@ describe("ToolScheduler", () => {
 
     try {
       const result = await scheduler.execute({
+        runId: "test_run",
         callId: "custom_read_external",
         environment,
         messageId: "message_1",
@@ -2327,6 +2468,7 @@ describe("ToolScheduler", () => {
 
     try {
       const result = await scheduler.execute({
+        runId: "test_run",
         callId: "custom_read_external_directory",
         environment,
         messageId: "message_1",
@@ -2374,6 +2516,7 @@ describe("ToolScheduler", () => {
 
     try {
       const result = await scheduler.execute({
+        runId: "test_run",
         callId: "read_dotdot_prefix",
         environment: createHostLocalEnvironment(workspace),
         messageId: "message_1",
@@ -2423,6 +2566,7 @@ describe("ToolScheduler", () => {
 
     try {
       const result = await scheduler.execute({
+        runId: "test_run",
         callId: "glob_external_default",
         environment: createFakeEnvironment(workspace),
         messageId: "message_1",
@@ -2473,6 +2617,7 @@ describe("ToolScheduler", () => {
 
     try {
       const result = await scheduler.execute({
+        runId: "test_run",
         callId: "grep_external_full",
         environment: createFakeEnvironment(workspace),
         messageId: "message_1",
@@ -2489,7 +2634,7 @@ describe("ToolScheduler", () => {
     }
   });
 
-  it("asks before external absolute writes in full access", async () => {
+  it("allows external absolute writes in full access without asking", async () => {
     const tempRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "ohbaby-scheduler-external-write-"),
     );
@@ -2520,6 +2665,7 @@ describe("ToolScheduler", () => {
 
     try {
       const result = await scheduler.execute({
+        runId: "test_run",
         callId: "write_external",
         environment: createFakeEnvironment(workspace),
         messageId: "message_1",
@@ -2530,16 +2676,102 @@ describe("ToolScheduler", () => {
 
       expect(result).toMatchObject({ status: "success" });
       expect(await fs.readFile(externalFile, "utf8")).toBe("external");
-      expect(permissionRequests).toHaveLength(1);
-      expect(permissionRequests[0]).toMatchObject({
-        rememberable: undefined,
-        toolName: "external_directory",
-      });
-      expect(permissionRequests[0]?.reason).toContain("External write path");
+      expect(permissionRequests).toEqual([]);
     } finally {
       await fs.rm(tempRoot, { force: true, recursive: true });
     }
   });
+
+  it.each(["write", "bash"] as const)(
+    "does not retain FullAccess %s directory trust after returning to default",
+    async (toolName) => {
+      const tempRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), "ohbaby-fullaccess-transient-"),
+      );
+      const workspace = path.join(tempRoot, "workspace");
+      const outside = path.join(tempRoot, "outside");
+      const externalFile = path.join(outside, "output.txt");
+      await fs.mkdir(workspace);
+      await fs.mkdir(outside);
+      const sandbox = createHostLocalSandboxManager(workspace);
+      const environment = await sandbox.acquire("session_1");
+      const permissionState = createPermissionState({
+        bus: createBus(),
+        initialLevel: "full-access",
+      });
+      const requests: string[] = [];
+      const { scheduler } = createScheduler({
+        permissionState,
+        permission: {
+          ask: (input) => {
+            requests.push(input.toolName);
+            return Promise.resolve("reject");
+          },
+        },
+      });
+      for (const tool of createBuiltinTools()) {
+        if (["write", "read", "bash"].includes(tool.name)) {
+          scheduler.register(tool);
+        }
+      }
+      const params =
+        toolName === "write"
+          ? { file_path: externalFile, content: "full access" }
+          : { command: `printf 'full access' > "${externalFile}"` };
+      const call = {
+        runId: "test_run",
+        environment,
+        messageId: "message_1",
+        sessionId: "session_1",
+      };
+      try {
+        await expect(
+          scheduler.execute({
+            ...call,
+            callId: "full_access",
+            params,
+            toolName,
+          }),
+        ).resolves.toMatchObject({ status: "success" });
+        expect(await fs.readFile(externalFile, "utf8")).toBe("full access");
+        expect(requests).toEqual([]);
+
+        permissionState.setLevel("default");
+        await expect(
+          scheduler.execute({
+            ...call,
+            callId: "default_read",
+            toolName: "read",
+            params: { file_path: externalFile },
+          }),
+        ).resolves.toMatchObject({ status: "rejected" });
+        await expect(
+          scheduler.execute({
+            ...call,
+            callId: "default_write",
+            toolName: "write",
+            params: {
+              file_path: path.join(outside, "after-default.txt"),
+              content: "must not write",
+            },
+          }),
+        ).resolves.toMatchObject({ status: "rejected" });
+        expect(requests).toEqual(["external_directory", "write"]);
+        expect(await fs.readFile(externalFile, "utf8")).toBe("full access");
+        await expect(
+          fs.stat(path.join(outside, "after-default.txt")),
+        ).rejects.toMatchObject({ code: "ENOENT" });
+        expect(environment.trustedRoots()).toEqual([
+          { kind: "workspace", path: await fs.realpath(workspace) },
+        ]);
+        expect(permissionState.getSessionRules("session_1")).toEqual([]);
+      } finally {
+        await environment.release();
+        await sandbox.dispose();
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("does not grant sibling or ancestor writes after approving an external file", async () => {
     const tempRoot = await fs.mkdtemp(
@@ -2598,6 +2830,7 @@ describe("ToolScheduler", () => {
 
     try {
       const result = await scheduler.execute({
+        runId: "test_run",
         callId: "custom_write_external",
         environment: createFakeEnvironment(workspace),
         messageId: "message_1",
@@ -2616,7 +2849,7 @@ describe("ToolScheduler", () => {
     }
   });
 
-  it("preflights every batch call before starting tools and confirms asks serially", async () => {
+  it("checks each conflicting batch call permission before its execution in input order", async () => {
     const executionOrder: string[] = [];
     const permissionOrder: string[] = [];
     const bus = createBus();
@@ -2633,7 +2866,12 @@ describe("ToolScheduler", () => {
       scheduler.register(
         createTool({
           execute: (_params, context) => {
-            expect(permissionOrder).toEqual(["edit", "bash"]);
+            if (context.callId === "write_1") {
+              expect(permissionOrder).toContain("edit");
+            }
+            if (context.callId === "danger_1") {
+              expect(permissionOrder).toContain("bash");
+            }
             executionOrder.push(context.callId);
             return Promise.resolve({ output: context.callId });
           },
@@ -2646,6 +2884,7 @@ describe("ToolScheduler", () => {
       scheduler.executeBatch({
         calls: [
           {
+            runId: "test_run",
             callId: "read_1",
             messageId: "message_1",
             params: {},
@@ -2653,6 +2892,7 @@ describe("ToolScheduler", () => {
             toolName: "read",
           },
           {
+            runId: "test_run",
             callId: "write_1",
             messageId: "message_1",
             params: {},
@@ -2660,6 +2900,7 @@ describe("ToolScheduler", () => {
             toolName: "edit",
           },
           {
+            runId: "test_run",
             callId: "danger_1",
             messageId: "message_1",
             params: {},
@@ -2675,6 +2916,61 @@ describe("ToolScheduler", () => {
     ]);
     expect(permissionOrder).toEqual(["edit", "bash"]);
     expect(executionOrder).toEqual(["read_1", "write_1", "danger_1"]);
+  });
+
+  it("starts an independent batch read while an earlier unrelated write awaits approval", async () => {
+    const approval = deferred<"once">();
+    const permissionBus = createBus();
+    const { scheduler, started } = createScheduler({
+      permissionState: createPermissionState({ bus: permissionBus }),
+      permission: { ask: () => approval.promise },
+    });
+    scheduler.register(
+      createTool({
+        name: "edit",
+        admission: resourceAdmission("/scheduler-unit-approval", "write"),
+      }),
+    );
+    scheduler.register(
+      createTool({ name: "read", admission: { plan: () => [] } }),
+    );
+    const running = scheduler.executeBatch({
+      calls: [
+        {
+          runId: "test_run",
+          callId: "waiting-write",
+          messageId: "message_1",
+          params: {},
+          sessionId: "session_1",
+          toolName: "edit",
+        },
+        {
+          runId: "test_run",
+          callId: "independent-read",
+          messageId: "message_1",
+          params: {},
+          sessionId: "session_1",
+          toolName: "read",
+        },
+      ],
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(scheduler.getStatus("waiting-write")).toBe("awaiting_approval");
+        expect(scheduler.getStatus("independent-read")).toBe("success");
+      });
+      expect(started).toEqual(["independent-read"]);
+      approval.resolve("once");
+      await expect(running).resolves.toMatchObject([
+        { status: "success" },
+        { status: "success" },
+      ]);
+      expect(started).toEqual(["independent-read", "waiting-write"]);
+    } finally {
+      approval.resolve("once");
+      scheduler.cancelAll();
+      await running;
+    }
   });
 
   it("does not run batch permission side effects for already cancelled calls", async () => {
@@ -2702,6 +2998,7 @@ describe("ToolScheduler", () => {
       scheduler.executeBatch({
         calls: [
           {
+            runId: "test_run",
             callId: "pre_aborted",
             messageId: "message_1",
             params: {},
@@ -2710,6 +3007,7 @@ describe("ToolScheduler", () => {
             toolName: "read",
           },
           {
+            runId: "test_run",
             callId: "write_1",
             messageId: "message_1",
             params: {},
@@ -2717,6 +3015,7 @@ describe("ToolScheduler", () => {
             toolName: "edit",
           },
           {
+            runId: "test_run",
             callId: "danger_1",
             messageId: "message_1",
             params: {},
@@ -2747,6 +3046,7 @@ describe("ToolScheduler", () => {
           }
           return Promise.resolve({ output: context.callId });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-2", "read"),
         name: "read",
       }),
     );
@@ -2756,11 +3056,13 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return writeBlocker.promise;
         },
+        admission: resourceAdmission("/scheduler-unit-resource-2", "write"),
         name: "edit",
       }),
     );
 
     const read1 = scheduler.execute({
+      runId: "test_run",
       callId: "read_1",
       messageId: "message_1",
       params: {},
@@ -2768,6 +3070,7 @@ describe("ToolScheduler", () => {
       toolName: "read",
     });
     const write1 = scheduler.execute({
+      runId: "test_run",
       callId: "write_1",
       messageId: "message_1",
       params: {},
@@ -2778,6 +3081,7 @@ describe("ToolScheduler", () => {
       expect(scheduler.getStatus("write_1")).toBe("queued");
     });
     const read2 = scheduler.execute({
+      runId: "test_run",
       callId: "read_2",
       messageId: "message_1",
       params: {},
@@ -2812,12 +3116,19 @@ describe("ToolScheduler", () => {
           }
           return Promise.resolve({ output: context.callId });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-3", "read"),
         name: "read",
       }),
     );
-    scheduler.register(createTool({ name: "edit" }));
+    scheduler.register(
+      createTool({
+        admission: resourceAdmission("/scheduler-unit-resource-3", "write"),
+        name: "edit",
+      }),
+    );
 
     const read1 = scheduler.execute({
+      runId: "test_run",
       callId: "read_1",
       messageId: "message_1",
       params: {},
@@ -2825,6 +3136,7 @@ describe("ToolScheduler", () => {
       toolName: "read",
     });
     const write1 = scheduler.execute({
+      runId: "test_run",
       callId: "write_1",
       messageId: "message_1",
       params: {},
@@ -2835,6 +3147,7 @@ describe("ToolScheduler", () => {
       expect(scheduler.getStatus("write_1")).toBe("queued");
     });
     const read2 = scheduler.execute({
+      runId: "test_run",
       callId: "read_2",
       messageId: "message_1",
       params: {},
@@ -2856,7 +3169,9 @@ describe("ToolScheduler", () => {
   it("cancels queued calls and aborts executing calls", async () => {
     const running = deferred<{ readonly output: string }>();
     let executingSignal: AbortSignal | undefined;
-    const { scheduler } = createScheduler();
+    const { scheduler } = createScheduler({
+      config: { concurrency: { maxConcurrency: 1 } },
+    });
     scheduler.register(
       createTool({
         execute: (_params, context: ToolExecutionContext) => {
@@ -2868,6 +3183,7 @@ describe("ToolScheduler", () => {
     );
 
     const executing = scheduler.execute({
+      runId: "test_run",
       callId: "write_1",
       messageId: "message_1",
       params: {},
@@ -2875,6 +3191,7 @@ describe("ToolScheduler", () => {
       toolName: "edit",
     });
     const queued = scheduler.execute({
+      runId: "test_run",
       callId: "write_2",
       messageId: "message_1",
       params: {},
@@ -2894,11 +3211,14 @@ describe("ToolScheduler", () => {
     await expect(executing).resolves.toMatchObject({ status: "cancelled" });
   });
 
-  it("times out non-cooperative tools but retains their slot until settlement", async () => {
+  it("returns timed-out tool capacity while retaining its resource until settlement", async () => {
     const started: string[] = [];
     const slow = deferred<ToolExecutionResult>();
     const { scheduler } = createScheduler({
-      config: { timeout: { defaultTimeout: 10 } },
+      config: {
+        concurrency: { maxConcurrency: 1 },
+        timeout: { defaultTimeout: 10 },
+      },
     });
     scheduler.register(
       createTool({
@@ -2906,6 +3226,7 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return slow.promise;
         },
+        admission: resourceAdmission("/scheduler-unit-resource-4", "write"),
         name: "slow_write",
       }),
     );
@@ -2915,12 +3236,14 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return Promise.resolve({ output: "after timeout" });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-4", "write"),
         name: "edit",
       }),
     );
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "slow_1",
         messageId: "message_1",
         params: {},
@@ -2933,6 +3256,7 @@ describe("ToolScheduler", () => {
     });
 
     const second = scheduler.execute({
+      runId: "test_run",
       callId: "write_2",
       messageId: "message_1",
       params: {},
@@ -2942,6 +3266,19 @@ describe("ToolScheduler", () => {
     await vi.waitFor(() => {
       expect(scheduler.getStatus("write_2")).toBe("queued");
     });
+    scheduler.register(
+      createTool({ name: "independent", admission: { plan: () => [] } }),
+    );
+    await expect(
+      scheduler.execute({
+        runId: "test_run",
+        callId: "independent",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "independent",
+      }),
+    ).resolves.toMatchObject({ status: "success" });
     slow.resolve({ output: "late slow" });
     await expect(second).resolves.toMatchObject({
       output: "after timeout",
@@ -2950,16 +3287,19 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["slow_1", "write_2"]);
   });
 
-  it("cancels non-cooperative tools but retains their slot until settlement", async () => {
+  it("returns cancelled tool capacity while retaining its resource until settlement", async () => {
     const started: string[] = [];
     const slow = deferred<ToolExecutionResult>();
-    const { scheduler } = createScheduler();
+    const { scheduler } = createScheduler({
+      config: { concurrency: { maxConcurrency: 1 } },
+    });
     scheduler.register(
       createTool({
         execute: (_params, context) => {
           started.push(context.callId);
           return slow.promise;
         },
+        admission: resourceAdmission("/scheduler-unit-resource-5", "write"),
         name: "slow_write",
       }),
     );
@@ -2969,11 +3309,13 @@ describe("ToolScheduler", () => {
           started.push(context.callId);
           return Promise.resolve({ output: "after cancel" });
         },
+        admission: resourceAdmission("/scheduler-unit-resource-5", "write"),
         name: "edit",
       }),
     );
 
     const running = scheduler.execute({
+      runId: "test_run",
       callId: "slow_1",
       messageId: "message_1",
       params: {},
@@ -2987,6 +3329,7 @@ describe("ToolScheduler", () => {
     expect(scheduler.cancel("slow_1")).toBe(true);
     await expect(running).resolves.toMatchObject({ status: "cancelled" });
     const second = scheduler.execute({
+      runId: "test_run",
       callId: "write_2",
       messageId: "message_1",
       params: {},
@@ -2996,6 +3339,19 @@ describe("ToolScheduler", () => {
     await vi.waitFor(() => {
       expect(scheduler.getStatus("write_2")).toBe("queued");
     });
+    scheduler.register(
+      createTool({ name: "independent", admission: { plan: () => [] } }),
+    );
+    await expect(
+      scheduler.execute({
+        runId: "test_run",
+        callId: "independent",
+        messageId: "message_1",
+        params: {},
+        sessionId: "session_1",
+        toolName: "independent",
+      }),
+    ).resolves.toMatchObject({ status: "success" });
     slow.resolve({ output: "late slow" });
     await expect(second).resolves.toMatchObject({
       output: "after cancel",
@@ -3004,10 +3360,12 @@ describe("ToolScheduler", () => {
     expect(started).toEqual(["slow_1", "write_2"]);
   });
 
-  it("releases a granted slot when a queued call is cancelled before it resumes", async () => {
+  it("releases acquired capacity when cancellation occurs during pre-invoke environment retention", async () => {
     const first = deferred<ToolExecutionResult>();
     const started: string[] = [];
-    const { bus, scheduler } = createScheduler();
+    const { scheduler } = createScheduler({
+      config: { concurrency: { maxConcurrency: 1 } },
+    });
     scheduler.register(
       createTool({
         execute: (_params, context) => {
@@ -3020,13 +3378,16 @@ describe("ToolScheduler", () => {
         name: "edit",
       }),
     );
-    bus.subscribe(ToolSchedulerEvent.ExecutionCompleted, (payload) => {
-      if (payload.callId === "write_1") {
+    const environment = {
+      ...createFakeEnvironment("/tmp"),
+      retain: (): (() => void) => {
         scheduler.cancel("write_2");
-      }
-    });
+        return () => undefined;
+      },
+    };
 
     const write1 = scheduler.execute({
+      runId: "test_run",
       callId: "write_1",
       messageId: "message_1",
       params: {},
@@ -3034,6 +3395,8 @@ describe("ToolScheduler", () => {
       toolName: "edit",
     });
     const write2 = scheduler.execute({
+      environment,
+      runId: "test_run",
       callId: "write_2",
       messageId: "message_1",
       params: {},
@@ -3041,6 +3404,7 @@ describe("ToolScheduler", () => {
       toolName: "edit",
     });
     const write3 = scheduler.execute({
+      runId: "test_run",
       callId: "write_3",
       messageId: "message_1",
       params: {},
@@ -3048,22 +3412,29 @@ describe("ToolScheduler", () => {
       toolName: "edit",
     });
 
-    await vi.waitFor(() => {
-      expect(scheduler.getStatus("write_2")).toBe("queued");
-    });
-    first.resolve({ output: "first" });
-
-    await expect(write1).resolves.toMatchObject({ status: "success" });
-    await expect(write2).resolves.toMatchObject({ status: "cancelled" });
-    await expect(write3).resolves.toMatchObject({
-      output: "write_3",
-      status: "success",
-    });
-    expect(started).toEqual(["write_1", "write_3"]);
+    try {
+      await vi.waitFor(() => {
+        expect(scheduler.getStatus("write_2")).toBe("queued");
+      });
+      first.resolve({ output: "first" });
+      await expect(write1).resolves.toMatchObject({ status: "success" });
+      await expect(write2).resolves.toMatchObject({ status: "cancelled" });
+      await expect(write3).resolves.toMatchObject({
+        output: "write_3",
+        status: "success",
+      });
+      expect(started).toEqual(["write_1", "write_3"]);
+    } finally {
+      first.resolve({ output: "first" });
+      scheduler.cancelAll();
+      await Promise.all([write1, write2, write3]);
+    }
   });
 
-  it("does not execute a tool after execution-started subscribers cancel it", async () => {
-    const execute = vi.fn().mockResolvedValue({ output: "should not run" });
+  it("publishes execution-started after invoke and propagates subscriber cancellation", async () => {
+    const execute = vi
+      .fn<Tool["execute"]>()
+      .mockResolvedValue({ output: "already invoked" });
     const { bus, scheduler } = createScheduler();
     scheduler.register(createTool({ execute, name: "edit" }));
     bus.subscribe(ToolSchedulerEvent.ExecutionStarted, (payload) => {
@@ -3074,6 +3445,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "write_1",
         messageId: "message_1",
         params: {},
@@ -3083,7 +3455,8 @@ describe("ToolScheduler", () => {
     ).resolves.toMatchObject({
       status: "cancelled",
     });
-    expect(execute).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[1].signal.aborted).toBe(true);
   });
 
   it("passes the context scope through to tool execution", async () => {
@@ -3096,6 +3469,7 @@ describe("ToolScheduler", () => {
 
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "scoped_1",
         contextScopeId: "subagent_1",
         messageId: "message_1",
@@ -3118,13 +3492,16 @@ describe("ToolScheduler", () => {
       }
       return Promise.resolve({ output: context.callId });
     });
-    const { scheduler } = createScheduler();
+    const { scheduler, started } = createScheduler({
+      config: { concurrency: { maxConcurrency: 1 } },
+    });
     scheduler.register(createTool({ execute, name: "edit" }));
 
     const preAborted = new AbortController();
     preAborted.abort();
     await expect(
       scheduler.execute({
+        runId: "test_run",
         callId: "pre_aborted",
         messageId: "message_1",
         params: {},
@@ -3140,6 +3517,7 @@ describe("ToolScheduler", () => {
 
     const queuedAbort = new AbortController();
     const write1 = scheduler.execute({
+      runId: "test_run",
       callId: "write_1",
       messageId: "message_1",
       params: {},
@@ -3147,6 +3525,7 @@ describe("ToolScheduler", () => {
       toolName: "edit",
     });
     const write2 = scheduler.execute({
+      runId: "test_run",
       callId: "write_2",
       messageId: "message_1",
       params: {},
@@ -3163,5 +3542,6 @@ describe("ToolScheduler", () => {
     blocker.resolve({ output: "write_1" });
     await expect(write1).resolves.toMatchObject({ status: "success" });
     expect(execute).toHaveBeenCalledTimes(1);
+    expect(started).toEqual(["write_1"]);
   });
 });

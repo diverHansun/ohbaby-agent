@@ -1,3 +1,7 @@
+import {
+  withToolAdmission,
+  independentToolAdmission,
+} from "../core/tool-scheduler/tool-admission.js";
 import type {
   Tool,
   ToolExecutionResult,
@@ -296,5 +300,5 @@ export function createGoalTools(backend: GoalToolBackend): Tool[] {
     createUpdateGoalTool(backend),
     createGetGoalTool(backend),
     createSetGoalBudgetTool(backend),
-  ];
+  ].map((tool) => withToolAdmission(tool, independentToolAdmission));
 }

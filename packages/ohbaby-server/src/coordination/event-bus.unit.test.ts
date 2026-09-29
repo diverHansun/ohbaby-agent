@@ -18,6 +18,28 @@ function notice(id: string): UiEvent {
 }
 
 describe("EventBus", () => {
+  it("bounds retained bytes independently of event count and asks old cursors to resync", () => {
+    const event = notice("long".repeat(100));
+    const size = Buffer.byteLength(JSON.stringify({ event, seqNum: 1 }));
+    const bus = new EventBus({ capacity: 1000, maxBytes: size + 1 });
+    bus.publish(event);
+    bus.publish(event);
+    expect(bus.replayAfter(0).kind).toBe("resync-required");
+    expect(bus.replayAfter(1)).toMatchObject({
+      kind: "ok",
+      envelopes: [{ seqNum: 2 }],
+    });
+  });
+  it("delivers oversized live events without retaining them or claiming a complete replay", () => {
+    const bus = new EventBus({ maxBytes: 1 });
+    const received = vi.fn();
+    bus.subscribe(received);
+    bus.publish(notice("oversized"));
+    expect(received).toHaveBeenCalledOnce();
+    expect(bus.replayAfter(0).kind).toBe("resync-required");
+    expect(bus.replayAfter(1)).toEqual({ kind: "ok", envelopes: [] });
+    expect(bus.minSeqNum).toBeUndefined();
+  });
   it("assigns monotonic sequence numbers to published events", () => {
     const bus = new EventBus({ capacity: 10 });
 

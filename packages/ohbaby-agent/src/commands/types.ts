@@ -1,4 +1,6 @@
 import type {
+  UiCommandCompletion,
+  UiPromptReceipt,
   UiCommandAction,
   UiCommandCatalog,
   UiCommandError,
@@ -11,7 +13,6 @@ import type {
   UiConnectModelResult,
   UiContextWindowUsage,
   UiInteractionResponse,
-  UiPromptCompletion,
   UiPromptCacheUsage,
   UiSetSearchApiKeyInput,
   UiSetSearchApiKeyResult,
@@ -191,10 +192,14 @@ export interface CommandServiceOptions {
   readonly skills?: CommandSkillProvider;
   readonly mcps?: CommandMcpProvider;
   readonly permission?: CommandPermissionProvider;
-  readonly submitPromptAndWait?: (
+  readonly submitPromptAccepted?: (
     text: string,
-    options?: { readonly sessionId?: string },
-  ) => Promise<UiPromptCompletion> | UiPromptCompletion;
+    options?: {
+      readonly sessionId?: string;
+      readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
+      readonly clientRequestId?: string;
+    },
+  ) => Promise<UiPromptReceipt> | UiPromptReceipt;
   readonly connectModel?: (
     input: UiConnectModelInput,
   ) => Promise<UiConnectModelResult> | UiConnectModelResult;
@@ -222,7 +227,7 @@ export interface CommandService {
   listCommands(query: {
     readonly surface?: UiCommandSurface;
   }): Promise<UiCommandCatalog>;
-  executeCommand(invocation: UiCommandInvocation): Promise<void>;
+  executeCommand(invocation: UiCommandInvocation): Promise<UiCommandCompletion>;
   abortCommandRun(commandRunId: string, reason?: string): number;
 }
 

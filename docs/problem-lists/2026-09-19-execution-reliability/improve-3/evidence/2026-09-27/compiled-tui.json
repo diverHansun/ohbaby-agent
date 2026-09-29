@@ -1,0 +1,210 @@
+{
+  "events": [
+    {
+      "type": "ready",
+      "at": 62.0115,
+      "mode": "compiled-default-tui",
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-subagents-e2e-dZ8uSR/manifest.json",
+      "launch": "node scripts/run-subagent-continuation-e2e.mjs --attach-tui /var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-subagents-e2e-dZ8uSR/manifest.json"
+    },
+    {
+      "type": "parent-request",
+      "at": 15482.654708,
+      "request": 1
+    },
+    {
+      "type": "parent-request",
+      "at": 15567.843,
+      "request": 2
+    },
+    {
+      "type": "child-request",
+      "at": 15598.109125,
+      "side": "A"
+    },
+    {
+      "type": "child-request",
+      "at": 15601.881667,
+      "side": "B"
+    },
+    {
+      "type": "child-request",
+      "at": 15604.531333,
+      "side": "C"
+    },
+    {
+      "type": "child-request",
+      "at": 26276.949792,
+      "side": "C"
+    },
+    {
+      "type": "parent-request",
+      "at": 29905.993292,
+      "request": 3
+    },
+    {
+      "type": "checkpoint-pass",
+      "at": 30476.068542,
+      "stage": "waiting",
+      "requests": 3,
+      "executions": [
+        {
+          "executionId": "subagent_execution_1a99997c5337bd678f32ef7c1e8e8c714c5a8b44754095cc9d7475c440b99f2b",
+          "status": "running",
+          "delivery": "none"
+        },
+        {
+          "executionId": "subagent_execution_a60e85269ca317938c191f20e18651cf9ffcf214a88275649634351a940502c7",
+          "status": "running",
+          "delivery": "none"
+        },
+        {
+          "executionId": "subagent_execution_6b795bae89724921820c506ce7f2b8077faf3a1dcb49a511f11531fcbc08accc",
+          "status": "running",
+          "delivery": "none"
+        }
+      ],
+      "prompts": [
+        {
+          "status": "running",
+          "runId": "run_b8f71401-3b1f-4d1d-abcf-c117ecc47f28"
+        },
+        {
+          "status": "queued",
+          "runId": null
+        },
+        {
+          "status": "steered",
+          "runId": null
+        }
+      ]
+    },
+    {
+      "type": "released",
+      "at": 30476.355583,
+      "name": "A"
+    },
+    {
+      "type": "parent-request",
+      "at": 30527.292292,
+      "request": 4
+    },
+    {
+      "type": "checkpoint-pass",
+      "at": 41736.9835,
+      "stage": "partial",
+      "requests": 4,
+      "executions": [
+        {
+          "executionId": "subagent_execution_1a99997c5337bd678f32ef7c1e8e8c714c5a8b44754095cc9d7475c440b99f2b",
+          "status": "completed",
+          "delivery": "processed"
+        },
+        {
+          "executionId": "subagent_execution_a60e85269ca317938c191f20e18651cf9ffcf214a88275649634351a940502c7",
+          "status": "running",
+          "delivery": "none"
+        },
+        {
+          "executionId": "subagent_execution_6b795bae89724921820c506ce7f2b8077faf3a1dcb49a511f11531fcbc08accc",
+          "status": "running",
+          "delivery": "none"
+        }
+      ],
+      "prompts": [
+        {
+          "status": "running",
+          "runId": "run_b8f71401-3b1f-4d1d-abcf-c117ecc47f28"
+        },
+        {
+          "status": "queued",
+          "runId": null
+        },
+        {
+          "status": "steered",
+          "runId": null
+        }
+      ]
+    },
+    {
+      "type": "released",
+      "at": 41737.6485,
+      "name": "B"
+    },
+    {
+      "type": "released",
+      "at": 41738.421167,
+      "name": "C"
+    },
+    {
+      "type": "parent-request",
+      "at": 41839.297,
+      "request": 5
+    },
+    {
+      "type": "parent-request",
+      "at": 41908.606917,
+      "request": 6
+    },
+    {
+      "type": "ordinary-request",
+      "at": 42001.267292
+    },
+    {
+      "type": "checkpoint-pass",
+      "at": 50420.1825,
+      "stage": "terminal",
+      "requests": 6,
+      "executions": [
+        {
+          "executionId": "subagent_execution_1a99997c5337bd678f32ef7c1e8e8c714c5a8b44754095cc9d7475c440b99f2b",
+          "status": "completed",
+          "delivery": "processed"
+        },
+        {
+          "executionId": "subagent_execution_a60e85269ca317938c191f20e18651cf9ffcf214a88275649634351a940502c7",
+          "status": "completed",
+          "delivery": "processed"
+        },
+        {
+          "executionId": "subagent_execution_6b795bae89724921820c506ce7f2b8077faf3a1dcb49a511f11531fcbc08accc",
+          "status": "completed",
+          "delivery": "processed"
+        }
+      ],
+      "prompts": [
+        {
+          "status": "succeeded",
+          "runId": "run_b8f71401-3b1f-4d1d-abcf-c117ecc47f28"
+        },
+        {
+          "status": "succeeded",
+          "runId": "run_b2eb6950-4716-41a1-a091-78b28860af27"
+        },
+        {
+          "status": "steered",
+          "runId": null
+        }
+      ]
+    }
+  ],
+  "failures": [],
+  "kind": "compiled default TUI in-process; scripted provider",
+  "actualTerminalActions": [
+    "root child C approval; Ctrl+G opens read-only child view",
+    "Ctrl+C in child view did not abort root or exit CLI",
+    "return to root and allow exact child write once",
+    "queue ordinary Send then queue and Steer another row",
+    "A delivered while B/C running and ordinary queued",
+    "DRAFT_KEEP preserved after child view with full reasoning and write result",
+    "B/C completed; 76027 UTF-8 bytes artifact read; root final then ordinary task",
+    "idle root Ctrl+C exit code 0; harness quit verified owned process shutdown"
+  ],
+  "cleanup": {
+    "tuiExitCode": 0,
+    "harnessExitCode": 0,
+    "ownedProcessesReleased": true
+  },
+  "revision": "a240eaa71da42852371288566374b9bff6e5e719",
+  "passed": true
+}

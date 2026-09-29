@@ -65,6 +65,7 @@ export interface RunRecord {
 
 export interface RunCompletion {
   readonly status: TerminalRunStatus;
+  readonly finalResponse?: string;
   readonly error?: string;
   readonly errorData?: UiPromptError;
   readonly terminalReason?: LifecycleResult["terminalReason"];
@@ -131,6 +132,22 @@ export interface RunLifecycle {
 }
 
 export interface RunManagerDeps {
+  /** Persist task-tree and model history facts after main logic has settled. */
+  readonly beforeFinalize?: (
+    runId: string,
+    outcome: RunWorkerResult,
+  ) => Promise<void>;
+  readonly currentRunInputs?: {
+    close(runId: string, reason: string): Promise<void>;
+  };
+  readonly createCurrentRunInputPort?: (identity: {
+    runId: string;
+    sessionId: string;
+    contextScopeId?: string;
+    isSubagent?: boolean;
+  }) => LifecycleSessionParams["currentRunInputs"];
+
+  readonly revokePermissionsForRun?: (runId: string, reason: string) => void;
   readonly lifecycle: RunLifecycle;
   readonly runLedger: RunLedger;
   readonly streamBridge: StreamBridge;
@@ -143,7 +160,7 @@ export interface RunManagerDeps {
 }
 
 export interface RunWorkerResult {
-  readonly status: "succeeded" | "failed" | "cancelled";
+  readonly status: "succeeded" | "failed" | "cancelled" | "interrupted";
   readonly result?: LifecycleResult;
   readonly error?: string;
   readonly errorData?: UiPromptError;
@@ -151,6 +168,8 @@ export interface RunWorkerResult {
 }
 
 export interface RunWorkerDeps {
+  readonly currentRunInputs?: LifecycleSessionParams["currentRunInputs"];
+  readonly getFatalError?: () => Error | undefined;
   readonly onStepUsage?: RunStepUsageObserver;
   readonly lifecycle: RunLifecycle;
   readonly streamBridge: StreamBridge;
@@ -163,11 +182,23 @@ export interface RunWorkerStartOptions {
 }
 
 export interface ManagedRunRecord extends RunRecord {
+  finalizationWriteBudget?: import("../../services/database/write-budget.js").DatabaseWriteBudget;
   readonly abortController: AbortController;
   readonly options: CreateRunOptions;
   completion?: Promise<RunCompletion>;
   sandboxLease?: SandboxLease;
   cancelReason?: string;
+  cancelStatus?: "cancelled" | "interrupted";
+  finalization?: {
+    readonly outcome: RunWorkerResult;
+    readonly endedAt: number;
+  };
+  finalizationAttempt?: Promise<RunCompletion>;
+  finalizationError?: import("./errors.js").RunFinalizationError;
+  sandboxRelease?: Promise<void>;
+  inputCloseReason?: string;
+  fatalError?: Error;
+  inputClosure?: Promise<void>;
   status: RunStatus;
   startedAt?: number;
   endedAt?: number;

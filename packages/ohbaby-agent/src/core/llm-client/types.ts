@@ -161,6 +161,7 @@ export interface LLMClientInstance<TClient = unknown> {
  * 3. Inspect parsed tool calls before the execution boundary validates them
  */
 export interface StreamingResponse {
+  readonly requestObservation?: ModelRequestObservation;
   /** Private replay state, available only after normal stream exhaustion. */
   modelState?: ModelState;
   /**
@@ -250,4 +251,25 @@ export interface StreamingResponse {
    * Note: May not be present if stream was interrupted by user.
    */
   tokenUsage?: StreamingTokenUsage;
+}
+
+/** One observable adapter invocation; provider-internal retries are not counted. */
+export interface ModelRequestRecord {
+  readonly endTimeSource?: "recovery";
+  /** Immutable current-run input membership of this exact prepared request. */
+  readonly inputIds?: readonly string[];
+  readonly requestId: string;
+  readonly runId: string;
+  readonly messageId: string;
+  readonly step: number;
+  readonly attempt: number;
+  readonly purpose: string;
+  readonly startedAt: number;
+  readonly firstTextAt?: number;
+  readonly endedAt?: number;
+  readonly outcome: "running" | "success" | "error" | "aborted";
+}
+export interface ModelRequestObservation {
+  readonly type: "request-started" | "first-text" | "request-ended";
+  readonly request: ModelRequestRecord;
 }

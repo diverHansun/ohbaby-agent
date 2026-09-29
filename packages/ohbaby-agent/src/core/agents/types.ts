@@ -1,6 +1,9 @@
 import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
-import type { LifecycleEvent } from "../lifecycle/index.js";
+import type {
+  AgentTerminalReason,
+  LifecycleEvent,
+} from "../lifecycle/index.js";
 import type { ModelToolDefinition } from "../llm-client/index.js";
 import type { MessageManager } from "../message/index.js";
 import type {
@@ -35,6 +38,8 @@ export interface AgentRunInput {
   readonly modelId: string;
   readonly runId?: string;
   readonly initialUserMessageId?: string;
+  /** Original user text when model input includes execution-only context. */
+  readonly displayUserText?: string;
   readonly initialUserPrompt?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
@@ -45,9 +50,11 @@ export interface AgentRunInput {
 }
 
 interface AgentRunWaitResultBase {
+  readonly terminalReason?: AgentTerminalReason;
   readonly mode: "waitForCompletion";
   readonly sessionId: string;
   readonly runId?: string;
+  readonly runStatus?: AgentRunCompletion["status"];
   readonly finishReason?: AgentRunFinishReason;
   readonly steps?: number;
   readonly toolCalls?: readonly AgentToolCallSummary[];
@@ -96,13 +103,16 @@ export interface AgentRunHandle {
 }
 
 export interface AgentRunCompletion {
+  readonly terminalReason?: AgentTerminalReason;
   readonly status: "succeeded" | "failed" | "cancelled" | "interrupted";
+  readonly finalResponse?: string;
   readonly error?: string;
 }
 
 export interface AgentRunCoordinator {
   create(options: AgentRunCreateOptions): Promise<AgentRunHandle>;
   cancel(runId: string, reason?: string): void;
+  revokePermissionsForRun?(runId: string, reason: string): void;
   waitForCompletion(runId: string): Promise<AgentRunCompletion>;
 }
 
@@ -160,6 +170,8 @@ export interface AgentContextScope {
 export interface AgentTurnInput {
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly initialUserMessageId?: string;
+  /** Original user text when model input includes execution-only context. */
+  readonly displayUserText?: string;
   readonly prompt: string;
   readonly waitMode: AgentWaitMode;
   readonly signal?: AbortSignal;

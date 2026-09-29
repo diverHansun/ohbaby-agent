@@ -13,7 +13,7 @@ function sleepBlocking(delayMs: number): void {
   Atomics.wait(new Int32Array(waitBuffer), 0, 0, delayMs);
 }
 
-function isSqliteBusy(error: unknown): boolean {
+export function isSqliteBusy(error: unknown): boolean {
   const maybeError = error as {
     readonly code?: unknown;
     readonly message?: unknown;

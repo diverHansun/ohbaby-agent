@@ -1,0 +1,25 @@
+2026-09-28 macOS, codex/improve-4, final source after two Pi reviews and incremental subagent review
+
+pnpm test (exit 0)
+Test Files  472 passed | 6 skipped (478)
+      Tests  5208 passed | 17 skipped (5225)
+   Start at  20:45:16
+   Duration  267.76s (transform 10.31s, setup 2.02s, collect 67.49s, tests 602.86s, environment 4.14s, prepare 17.49s)
+No unhandled rejection/error summary. Includes CLI builds and packed CLI installation smoke.
+
+pnpm run typecheck (exit 0; run sequentially after test build)
+pnpm run lint (exit 0): 0 errors, 93 warnings
+pnpm exec prettier --check: all 168 changed ts/tsx/mjs/css files passed
+git diff --check: exit 0
+
+Real LLM final verification: root 5/18 requests, 14.899s; two children 8/24 requests, 31.985s.
+All observed HTTP headers 200; interrupted A in two-child case has one response_stream capture error (incomplete body preserved in evidence).
+B/C execution identities and complete tool pair protocol checks passed; no permission or cleanup errors.
+Compiled Web + remote PTY: controller exit 0; exact 6 scripted requests; cleanup confirmed.
+Default compiled inprocess PTY: controller and both CLI processes exit 0; exact 4 scripted requests; cleanup confirmed.
+Compiled response-loss proxy: Web refreshed Retry and TUI Enter replay exact operation and receipt; only 2 receipt rows and 2 resubmitted model executions; 4 total scripted requests; cleanup confirmed.
+Remote footer source regressions: 206 tests passed; independent runtime errors preserved; latest compiled remote PTY recheck passed: no old error footer, zero model requests, retained preserved, helper/TUI exit 0, daemon/provider/credential cleanup confirmed.
+Pi opencode/claude-opus-5-5: two reviews, all six findings resolved or accepted conservative boundary; final static review found no new blocking defects.
+
+Source/test commit: b436843315accee92e943462d9b8f95944dae2ae
+Local branch retained; no merge or push.

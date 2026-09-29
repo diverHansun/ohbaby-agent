@@ -1,0 +1,1138 @@
+{
+  "events": [
+    {
+      "type": "ready",
+      "at": "2026-09-28T11:00:13.310Z",
+      "url": "http://127.0.0.1:60551",
+      "pid": 61374,
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve4-ui-e2e-2zqDFe/manifest.json"
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-28T11:00:13.379Z",
+      "marker": "I4_WEB_HOLD",
+      "number": 1
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-28T11:00:13.453Z",
+      "marker": "I4_TUI_HOLD",
+      "number": 2
+    },
+    {
+      "type": "seeded",
+      "at": "2026-09-28T11:00:13.486Z",
+      "sessions": {
+        "web": "session_1790593213319_t41v3a1",
+        "tui": "session_1790593213422_lljwe42"
+      },
+      "prompts": [
+        {
+          "id": "prompt_7bc25127-6211-442b-8be4-528a09794ff1",
+          "text": "I4_WEB_HOLD",
+          "status": "running",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_7850c9cd-72ea-4bd6-b69e-2dc60da3b6d0",
+          "runId": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "createdAt": 1790593213331,
+          "acceptedAt": 1790593213331,
+          "admissionOrder": 1,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_bc5ad439-4e95-4553-8faf-f27013ea5578",
+          "text": "I4_WEB_B",
+          "status": "queued",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_8bfe9493-47f8-4e53-9bcd-eb20dcc469d7",
+          "runId": null,
+          "createdAt": 1790593213401,
+          "acceptedAt": 1790593213401,
+          "admissionOrder": 2,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_414c1391-ffcf-4337-92d3-f222ce4d22b7",
+          "text": "I4_WEB_C",
+          "status": "queued",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_21b995e3-c7da-4bda-a80e-033b4fcb9b3e",
+          "runId": null,
+          "createdAt": 1790593213409,
+          "acceptedAt": 1790593213409,
+          "admissionOrder": 3,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_8370e66c-5301-4338-b0ba-d0f0a0741c4f",
+          "text": "I4_WEB_E",
+          "status": "queued",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_f89268a4-e078-417e-be6d-4c0d60361dc3",
+          "runId": null,
+          "createdAt": 1790593213417,
+          "acceptedAt": 1790593213417,
+          "admissionOrder": 4,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_f470dbf1-ee23-4616-ae8f-1afe0509e74f",
+          "text": "I4_TUI_HOLD",
+          "status": "running",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_27fe857a-aac2-45ff-a356-6fcc5ff1876f",
+          "runId": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "createdAt": 1790593213430,
+          "acceptedAt": 1790593213430,
+          "admissionOrder": 5,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_acfc5c95-425e-4856-aca9-6fce86073f4b",
+          "text": "I4_TUI_B",
+          "status": "queued",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_bab7b014-3ccb-4b86-b645-08c717bb2642",
+          "runId": null,
+          "createdAt": 1790593213469,
+          "acceptedAt": 1790593213469,
+          "admissionOrder": 6,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_1985b88e-1f22-45d2-9f23-45d0653f3f99",
+          "text": "I4_TUI_C",
+          "status": "queued",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_c7b40f34-4704-4b4e-ad4c-10d615a3b38a",
+          "runId": null,
+          "createdAt": 1790593213477,
+          "acceptedAt": 1790593213477,
+          "admissionOrder": 7,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_afe36a5d-8a4a-482e-8f28-054cfbcb6ea7",
+          "text": "I4_TUI_E",
+          "status": "queued",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_a0b93839-b9de-4807-a97c-0937d4e8dd50",
+          "runId": null,
+          "createdAt": 1790593213484,
+          "acceptedAt": 1790593213484,
+          "admissionOrder": 8,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "status": "running",
+          "sessionId": "session_1790593213319_t41v3a1"
+        },
+        {
+          "id": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "status": "running",
+          "sessionId": "session_1790593213422_lljwe42"
+        }
+      ],
+      "requests": [
+        "I4_WEB_HOLD",
+        "I4_TUI_HOLD"
+      ]
+    },
+    {
+      "type": "assert-pass",
+      "at": "2026-09-28T11:00:59.914Z",
+      "assertions": {
+        "command": "assert",
+        "statuses": {
+          "I4_WEB_HOLD": "running",
+          "I4_WEB_B_SAVED": "queued",
+          "I4_WEB_C": "queued",
+          "I4_WEB_E": "cancelled",
+          "I4_TUI_HOLD": "running",
+          "I4_TUI_B": "queued",
+          "I4_TUI_C_SAVED": "queued",
+          "I4_TUI_E": "queued"
+        },
+        "requests": {
+          "I4_WEB_HOLD": 1,
+          "I4_TUI_HOLD": 1
+        }
+      },
+      "prompts": [
+        {
+          "id": "prompt_7bc25127-6211-442b-8be4-528a09794ff1",
+          "text": "I4_WEB_HOLD",
+          "status": "running",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_7850c9cd-72ea-4bd6-b69e-2dc60da3b6d0",
+          "runId": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "createdAt": 1790593213331,
+          "acceptedAt": 1790593213331,
+          "admissionOrder": 1,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_bc5ad439-4e95-4553-8faf-f27013ea5578",
+          "text": "I4_WEB_B_SAVED",
+          "status": "queued",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_8bfe9493-47f8-4e53-9bcd-eb20dcc469d7",
+          "runId": null,
+          "createdAt": 1790593213401,
+          "acceptedAt": 1790593213401,
+          "admissionOrder": 2,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_414c1391-ffcf-4337-92d3-f222ce4d22b7",
+          "text": "I4_WEB_C",
+          "status": "queued",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_21b995e3-c7da-4bda-a80e-033b4fcb9b3e",
+          "runId": null,
+          "createdAt": 1790593213409,
+          "acceptedAt": 1790593213409,
+          "admissionOrder": 3,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_8370e66c-5301-4338-b0ba-d0f0a0741c4f",
+          "text": "I4_WEB_E",
+          "status": "cancelled",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_f89268a4-e078-417e-be6d-4c0d60361dc3",
+          "runId": null,
+          "createdAt": 1790593213417,
+          "acceptedAt": 1790593213417,
+          "admissionOrder": 4,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_f470dbf1-ee23-4616-ae8f-1afe0509e74f",
+          "text": "I4_TUI_HOLD",
+          "status": "running",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_27fe857a-aac2-45ff-a356-6fcc5ff1876f",
+          "runId": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "createdAt": 1790593213430,
+          "acceptedAt": 1790593213430,
+          "admissionOrder": 5,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_acfc5c95-425e-4856-aca9-6fce86073f4b",
+          "text": "I4_TUI_B",
+          "status": "queued",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_bab7b014-3ccb-4b86-b645-08c717bb2642",
+          "runId": null,
+          "createdAt": 1790593213469,
+          "acceptedAt": 1790593213469,
+          "admissionOrder": 6,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_1985b88e-1f22-45d2-9f23-45d0653f3f99",
+          "text": "I4_TUI_C_SAVED",
+          "status": "queued",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_c7b40f34-4704-4b4e-ad4c-10d615a3b38a",
+          "runId": null,
+          "createdAt": 1790593213477,
+          "acceptedAt": 1790593213477,
+          "admissionOrder": 7,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_afe36a5d-8a4a-482e-8f28-054cfbcb6ea7",
+          "text": "I4_TUI_E",
+          "status": "queued",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_a0b93839-b9de-4807-a97c-0937d4e8dd50",
+          "runId": null,
+          "createdAt": 1790593213484,
+          "acceptedAt": 1790593213484,
+          "admissionOrder": 8,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "status": "running",
+          "sessionId": "session_1790593213319_t41v3a1"
+        },
+        {
+          "id": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "status": "running",
+          "sessionId": "session_1790593213422_lljwe42"
+        }
+      ],
+      "requests": [
+        "I4_WEB_HOLD",
+        "I4_TUI_HOLD"
+      ]
+    },
+    {
+      "type": "ui-evidence",
+      "at": "2026-09-28T11:01:00.263Z",
+      "webQueuedSave": true,
+      "webEscRestoresDraft": true,
+      "webDeleteKeepsDraft": true,
+      "webBodyDoesNotEdit": true,
+      "tuiAltUpMiddleSelection": true,
+      "tuiUpDownNavigation": true,
+      "tuiQueuedSaveKeepsOrder": true,
+      "tuiEditingCtrlDNoDelete": true,
+      "tuiEscRestoresDraft": true
+    },
+    {
+      "type": "database",
+      "at": "2026-09-28T11:03:12.933Z",
+      "prompts": [
+        {
+          "id": "prompt_7bc25127-6211-442b-8be4-528a09794ff1",
+          "text": "I4_WEB_HOLD",
+          "status": "running",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_7850c9cd-72ea-4bd6-b69e-2dc60da3b6d0",
+          "runId": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "createdAt": 1790593213331,
+          "acceptedAt": 1790593213331,
+          "admissionOrder": 1,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_bc5ad439-4e95-4553-8faf-f27013ea5578",
+          "text": "I4_WEB_B_SAVED",
+          "status": "queued",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_8bfe9493-47f8-4e53-9bcd-eb20dcc469d7",
+          "runId": null,
+          "createdAt": 1790593213401,
+          "acceptedAt": 1790593213401,
+          "admissionOrder": 2,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_414c1391-ffcf-4337-92d3-f222ce4d22b7",
+          "text": "I4_WEB_C",
+          "status": "steered",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_21b995e3-c7da-4bda-a80e-033b4fcb9b3e",
+          "runId": null,
+          "createdAt": 1790593213409,
+          "acceptedAt": 1790593213409,
+          "admissionOrder": 3,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_8370e66c-5301-4338-b0ba-d0f0a0741c4f",
+          "text": "I4_WEB_E",
+          "status": "cancelled",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_f89268a4-e078-417e-be6d-4c0d60361dc3",
+          "runId": null,
+          "createdAt": 1790593213417,
+          "acceptedAt": 1790593213417,
+          "admissionOrder": 4,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_f470dbf1-ee23-4616-ae8f-1afe0509e74f",
+          "text": "I4_TUI_HOLD",
+          "status": "running",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_27fe857a-aac2-45ff-a356-6fcc5ff1876f",
+          "runId": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "createdAt": 1790593213430,
+          "acceptedAt": 1790593213430,
+          "admissionOrder": 5,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_acfc5c95-425e-4856-aca9-6fce86073f4b",
+          "text": "I4_TUI_B",
+          "status": "queued",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_bab7b014-3ccb-4b86-b645-08c717bb2642",
+          "runId": null,
+          "createdAt": 1790593213469,
+          "acceptedAt": 1790593213469,
+          "admissionOrder": 6,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_1985b88e-1f22-45d2-9f23-45d0653f3f99",
+          "text": "I4_TUI_C_SAVED",
+          "status": "queued",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_c7b40f34-4704-4b4e-ad4c-10d615a3b38a",
+          "runId": null,
+          "createdAt": 1790593213477,
+          "acceptedAt": 1790593213477,
+          "admissionOrder": 7,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_afe36a5d-8a4a-482e-8f28-054cfbcb6ea7",
+          "text": "I4_TUI_E",
+          "status": "queued",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_a0b93839-b9de-4807-a97c-0937d4e8dd50",
+          "runId": null,
+          "createdAt": 1790593213484,
+          "acceptedAt": 1790593213484,
+          "admissionOrder": 8,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "status": "running",
+          "sessionId": "session_1790593213319_t41v3a1"
+        },
+        {
+          "id": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "status": "running",
+          "sessionId": "session_1790593213422_lljwe42"
+        }
+      ],
+      "requests": [
+        "I4_WEB_HOLD",
+        "I4_TUI_HOLD"
+      ]
+    },
+    {
+      "type": "provider-closed",
+      "at": "2026-09-28T11:03:50.122Z",
+      "marker": "I4_WEB_HOLD"
+    },
+    {
+      "type": "provider-closed",
+      "at": "2026-09-28T11:03:50.122Z",
+      "marker": "I4_TUI_HOLD"
+    },
+    {
+      "type": "ready",
+      "at": "2026-09-28T11:03:50.566Z",
+      "url": "http://127.0.0.1:61224",
+      "pid": 70698,
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve4-ui-e2e-2zqDFe/manifest.json"
+    },
+    {
+      "type": "cold-restart-pass",
+      "at": "2026-09-28T11:03:50.579Z",
+      "prompts": [
+        {
+          "id": "prompt_7bc25127-6211-442b-8be4-528a09794ff1",
+          "text": "I4_WEB_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_7850c9cd-72ea-4bd6-b69e-2dc60da3b6d0",
+          "runId": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "createdAt": 1790593213331,
+          "acceptedAt": 1790593213331,
+          "admissionOrder": 1,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_bc5ad439-4e95-4553-8faf-f27013ea5578",
+          "text": "I4_WEB_B_SAVED",
+          "status": "retained",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_8bfe9493-47f8-4e53-9bcd-eb20dcc469d7",
+          "runId": null,
+          "createdAt": 1790593213401,
+          "acceptedAt": 1790593213401,
+          "admissionOrder": 2,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_414c1391-ffcf-4337-92d3-f222ce4d22b7",
+          "text": "I4_WEB_C",
+          "status": "steered",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_21b995e3-c7da-4bda-a80e-033b4fcb9b3e",
+          "runId": null,
+          "createdAt": 1790593213409,
+          "acceptedAt": 1790593213409,
+          "admissionOrder": 3,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_8370e66c-5301-4338-b0ba-d0f0a0741c4f",
+          "text": "I4_WEB_E",
+          "status": "cancelled",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_f89268a4-e078-417e-be6d-4c0d60361dc3",
+          "runId": null,
+          "createdAt": 1790593213417,
+          "acceptedAt": 1790593213417,
+          "admissionOrder": 4,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_f470dbf1-ee23-4616-ae8f-1afe0509e74f",
+          "text": "I4_TUI_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_27fe857a-aac2-45ff-a356-6fcc5ff1876f",
+          "runId": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "createdAt": 1790593213430,
+          "acceptedAt": 1790593213430,
+          "admissionOrder": 5,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_acfc5c95-425e-4856-aca9-6fce86073f4b",
+          "text": "I4_TUI_B",
+          "status": "retained",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_bab7b014-3ccb-4b86-b645-08c717bb2642",
+          "runId": null,
+          "createdAt": 1790593213469,
+          "acceptedAt": 1790593213469,
+          "admissionOrder": 6,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_1985b88e-1f22-45d2-9f23-45d0653f3f99",
+          "text": "I4_TUI_C_SAVED",
+          "status": "retained",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_c7b40f34-4704-4b4e-ad4c-10d615a3b38a",
+          "runId": null,
+          "createdAt": 1790593213477,
+          "acceptedAt": 1790593213477,
+          "admissionOrder": 7,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_afe36a5d-8a4a-482e-8f28-054cfbcb6ea7",
+          "text": "I4_TUI_E",
+          "status": "retained",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_a0b93839-b9de-4807-a97c-0937d4e8dd50",
+          "runId": null,
+          "createdAt": 1790593213484,
+          "acceptedAt": 1790593213484,
+          "admissionOrder": 8,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_6e60af43-cb5f-4394-af9b-3011cc2a8a39",
+          "text": "I4_WEB_F",
+          "status": "retained",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_79b1a6d3-601f-48d6-b983-5ea841df3560",
+          "runId": null,
+          "createdAt": 1790593421705,
+          "acceptedAt": 1790593421705,
+          "admissionOrder": 9,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "status": "interrupted",
+          "sessionId": "session_1790593213319_t41v3a1"
+        },
+        {
+          "id": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "status": "interrupted",
+          "sessionId": "session_1790593213422_lljwe42"
+        }
+      ],
+      "requests": [
+        "I4_WEB_HOLD",
+        "I4_TUI_HOLD"
+      ]
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-28T11:04:08.461Z",
+      "marker": "I4_WEB_B_RESENT",
+      "number": 3
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-28T11:04:12.645Z",
+      "marker": "I4_WEB_D",
+      "number": 4
+    },
+    {
+      "type": "assert-pass",
+      "at": "2026-09-28T11:04:31.032Z",
+      "assertions": {
+        "command": "assert",
+        "statuses": {
+          "I4_WEB_HOLD": "interrupted",
+          "I4_WEB_B_RESENT": "succeeded",
+          "I4_WEB_F": "retained",
+          "I4_WEB_D": "succeeded",
+          "I4_TUI_B": "retained",
+          "I4_TUI_C_SAVED": "retained",
+          "I4_TUI_E": "retained"
+        },
+        "requests": {
+          "I4_WEB_HOLD": 1,
+          "I4_TUI_HOLD": 1,
+          "I4_WEB_B_RESENT": 1,
+          "I4_WEB_D": 1
+        }
+      },
+      "prompts": [
+        {
+          "id": "prompt_7bc25127-6211-442b-8be4-528a09794ff1",
+          "text": "I4_WEB_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_7850c9cd-72ea-4bd6-b69e-2dc60da3b6d0",
+          "runId": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "createdAt": 1790593213331,
+          "acceptedAt": 1790593213331,
+          "admissionOrder": 1,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_bc5ad439-4e95-4553-8faf-f27013ea5578",
+          "text": "I4_WEB_B_RESENT",
+          "status": "succeeded",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_8bfe9493-47f8-4e53-9bcd-eb20dcc469d7",
+          "runId": "run_a23f5848-d408-4b71-83ab-394035f505b6",
+          "createdAt": 1790593213401,
+          "acceptedAt": 1790593448402,
+          "admissionOrder": 10,
+          "ownerId": "backend_70698_e9eef048-9e57-4141-a873-daa3fb249d73"
+        },
+        {
+          "id": "prompt_414c1391-ffcf-4337-92d3-f222ce4d22b7",
+          "text": "I4_WEB_C",
+          "status": "steered",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_21b995e3-c7da-4bda-a80e-033b4fcb9b3e",
+          "runId": null,
+          "createdAt": 1790593213409,
+          "acceptedAt": 1790593213409,
+          "admissionOrder": 3,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_8370e66c-5301-4338-b0ba-d0f0a0741c4f",
+          "text": "I4_WEB_E",
+          "status": "cancelled",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_f89268a4-e078-417e-be6d-4c0d60361dc3",
+          "runId": null,
+          "createdAt": 1790593213417,
+          "acceptedAt": 1790593213417,
+          "admissionOrder": 4,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_f470dbf1-ee23-4616-ae8f-1afe0509e74f",
+          "text": "I4_TUI_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_27fe857a-aac2-45ff-a356-6fcc5ff1876f",
+          "runId": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "createdAt": 1790593213430,
+          "acceptedAt": 1790593213430,
+          "admissionOrder": 5,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_acfc5c95-425e-4856-aca9-6fce86073f4b",
+          "text": "I4_TUI_B",
+          "status": "retained",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_bab7b014-3ccb-4b86-b645-08c717bb2642",
+          "runId": null,
+          "createdAt": 1790593213469,
+          "acceptedAt": 1790593213469,
+          "admissionOrder": 6,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_1985b88e-1f22-45d2-9f23-45d0653f3f99",
+          "text": "I4_TUI_C_SAVED",
+          "status": "retained",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_c7b40f34-4704-4b4e-ad4c-10d615a3b38a",
+          "runId": null,
+          "createdAt": 1790593213477,
+          "acceptedAt": 1790593213477,
+          "admissionOrder": 7,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_afe36a5d-8a4a-482e-8f28-054cfbcb6ea7",
+          "text": "I4_TUI_E",
+          "status": "retained",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_a0b93839-b9de-4807-a97c-0937d4e8dd50",
+          "runId": null,
+          "createdAt": 1790593213484,
+          "acceptedAt": 1790593213484,
+          "admissionOrder": 8,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_6e60af43-cb5f-4394-af9b-3011cc2a8a39",
+          "text": "I4_WEB_F",
+          "status": "retained",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_79b1a6d3-601f-48d6-b983-5ea841df3560",
+          "runId": null,
+          "createdAt": 1790593421705,
+          "acceptedAt": 1790593421705,
+          "admissionOrder": 9,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_118dfa3b-860f-47e0-9cbe-dbe321819ca2",
+          "text": "I4_WEB_D",
+          "status": "succeeded",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_8c346ead-6ce4-467b-b4f3-b133fb43c744",
+          "runId": "run_a2063889-5d7f-41b5-a427-069eeea9fb5e",
+          "createdAt": 1790593452596,
+          "acceptedAt": 1790593452596,
+          "admissionOrder": 11,
+          "ownerId": "backend_70698_e9eef048-9e57-4141-a873-daa3fb249d73"
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "status": "interrupted",
+          "sessionId": "session_1790593213319_t41v3a1"
+        },
+        {
+          "id": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "status": "interrupted",
+          "sessionId": "session_1790593213422_lljwe42"
+        },
+        {
+          "id": "run_a23f5848-d408-4b71-83ab-394035f505b6",
+          "status": "succeeded",
+          "sessionId": "session_1790593213319_t41v3a1"
+        },
+        {
+          "id": "run_a2063889-5d7f-41b5-a427-069eeea9fb5e",
+          "status": "succeeded",
+          "sessionId": "session_1790593213319_t41v3a1"
+        }
+      ],
+      "requests": [
+        "I4_WEB_HOLD",
+        "I4_TUI_HOLD",
+        "I4_WEB_B_RESENT",
+        "I4_WEB_D"
+      ]
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-28T11:04:51.787Z",
+      "marker": "I4_TUI_C_SAVED_RESENT",
+      "number": 5
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-28T11:07:48.668Z",
+      "marker": "I4_TUI_E_RESENT",
+      "number": 6
+    },
+    {
+      "type": "assert-pass",
+      "at": "2026-09-28T11:08:10.055Z",
+      "assertions": {
+        "command": "assert",
+        "statuses": {
+          "I4_WEB_HOLD": "interrupted",
+          "I4_WEB_B_RESENT": "succeeded",
+          "I4_WEB_F": "retained",
+          "I4_WEB_C": "steered",
+          "I4_WEB_E": "cancelled",
+          "I4_WEB_D": "succeeded",
+          "I4_TUI_HOLD": "interrupted",
+          "I4_TUI_B": "cancelled",
+          "I4_TUI_C_SAVED_RESENT": "succeeded",
+          "I4_TUI_E_RESENT": "succeeded"
+        },
+        "requests": {
+          "I4_WEB_HOLD": 1,
+          "I4_TUI_HOLD": 1,
+          "I4_WEB_B_RESENT": 1,
+          "I4_WEB_D": 1,
+          "I4_TUI_C_SAVED_RESENT": 1,
+          "I4_TUI_E_RESENT": 1
+        }
+      },
+      "prompts": [
+        {
+          "id": "prompt_7bc25127-6211-442b-8be4-528a09794ff1",
+          "text": "I4_WEB_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_7850c9cd-72ea-4bd6-b69e-2dc60da3b6d0",
+          "runId": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "createdAt": 1790593213331,
+          "acceptedAt": 1790593213331,
+          "admissionOrder": 1,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_bc5ad439-4e95-4553-8faf-f27013ea5578",
+          "text": "I4_WEB_B_RESENT",
+          "status": "succeeded",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_8bfe9493-47f8-4e53-9bcd-eb20dcc469d7",
+          "runId": "run_a23f5848-d408-4b71-83ab-394035f505b6",
+          "createdAt": 1790593213401,
+          "acceptedAt": 1790593448402,
+          "admissionOrder": 10,
+          "ownerId": "backend_70698_e9eef048-9e57-4141-a873-daa3fb249d73"
+        },
+        {
+          "id": "prompt_414c1391-ffcf-4337-92d3-f222ce4d22b7",
+          "text": "I4_WEB_C",
+          "status": "steered",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_21b995e3-c7da-4bda-a80e-033b4fcb9b3e",
+          "runId": null,
+          "createdAt": 1790593213409,
+          "acceptedAt": 1790593213409,
+          "admissionOrder": 3,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_8370e66c-5301-4338-b0ba-d0f0a0741c4f",
+          "text": "I4_WEB_E",
+          "status": "cancelled",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_f89268a4-e078-417e-be6d-4c0d60361dc3",
+          "runId": null,
+          "createdAt": 1790593213417,
+          "acceptedAt": 1790593213417,
+          "admissionOrder": 4,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_f470dbf1-ee23-4616-ae8f-1afe0509e74f",
+          "text": "I4_TUI_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_27fe857a-aac2-45ff-a356-6fcc5ff1876f",
+          "runId": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "createdAt": 1790593213430,
+          "acceptedAt": 1790593213430,
+          "admissionOrder": 5,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_acfc5c95-425e-4856-aca9-6fce86073f4b",
+          "text": "I4_TUI_B",
+          "status": "cancelled",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_bab7b014-3ccb-4b86-b645-08c717bb2642",
+          "runId": null,
+          "createdAt": 1790593213469,
+          "acceptedAt": 1790593213469,
+          "admissionOrder": 6,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_1985b88e-1f22-45d2-9f23-45d0653f3f99",
+          "text": "I4_TUI_C_SAVED_RESENT",
+          "status": "succeeded",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_c7b40f34-4704-4b4e-ad4c-10d615a3b38a",
+          "runId": "run_27984ee0-0cfe-48eb-9fc3-3e7e38979039",
+          "createdAt": 1790593213477,
+          "acceptedAt": 1790593491750,
+          "admissionOrder": 12,
+          "ownerId": "backend_70698_e9eef048-9e57-4141-a873-daa3fb249d73"
+        },
+        {
+          "id": "prompt_afe36a5d-8a4a-482e-8f28-054cfbcb6ea7",
+          "text": "I4_TUI_E_RESENT",
+          "status": "succeeded",
+          "sessionId": "session_1790593213422_lljwe42",
+          "userMessageId": "message_a0b93839-b9de-4807-a97c-0937d4e8dd50",
+          "runId": "run_7bd0a493-424d-4516-bf41-53f2f22f1b87",
+          "createdAt": 1790593213484,
+          "acceptedAt": 1790593668632,
+          "admissionOrder": 13,
+          "ownerId": "backend_70698_e9eef048-9e57-4141-a873-daa3fb249d73"
+        },
+        {
+          "id": "prompt_6e60af43-cb5f-4394-af9b-3011cc2a8a39",
+          "text": "I4_WEB_F",
+          "status": "retained",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_79b1a6d3-601f-48d6-b983-5ea841df3560",
+          "runId": null,
+          "createdAt": 1790593421705,
+          "acceptedAt": 1790593421705,
+          "admissionOrder": 9,
+          "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+        },
+        {
+          "id": "prompt_118dfa3b-860f-47e0-9cbe-dbe321819ca2",
+          "text": "I4_WEB_D",
+          "status": "succeeded",
+          "sessionId": "session_1790593213319_t41v3a1",
+          "userMessageId": "message_8c346ead-6ce4-467b-b4f3-b133fb43c744",
+          "runId": "run_a2063889-5d7f-41b5-a427-069eeea9fb5e",
+          "createdAt": 1790593452596,
+          "acceptedAt": 1790593452596,
+          "admissionOrder": 11,
+          "ownerId": "backend_70698_e9eef048-9e57-4141-a873-daa3fb249d73"
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+          "status": "interrupted",
+          "sessionId": "session_1790593213319_t41v3a1"
+        },
+        {
+          "id": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+          "status": "interrupted",
+          "sessionId": "session_1790593213422_lljwe42"
+        },
+        {
+          "id": "run_a23f5848-d408-4b71-83ab-394035f505b6",
+          "status": "succeeded",
+          "sessionId": "session_1790593213319_t41v3a1"
+        },
+        {
+          "id": "run_a2063889-5d7f-41b5-a427-069eeea9fb5e",
+          "status": "succeeded",
+          "sessionId": "session_1790593213319_t41v3a1"
+        },
+        {
+          "id": "run_27984ee0-0cfe-48eb-9fc3-3e7e38979039",
+          "status": "succeeded",
+          "sessionId": "session_1790593213422_lljwe42"
+        },
+        {
+          "id": "run_7bd0a493-424d-4516-bf41-53f2f22f1b87",
+          "status": "succeeded",
+          "sessionId": "session_1790593213422_lljwe42"
+        }
+      ],
+      "requests": [
+        "I4_WEB_HOLD",
+        "I4_TUI_HOLD",
+        "I4_WEB_B_RESENT",
+        "I4_WEB_D",
+        "I4_TUI_C_SAVED_RESENT",
+        "I4_TUI_E_RESENT"
+      ]
+    },
+    {
+      "type": "ui-evidence",
+      "at": "2026-09-28T11:08:11.156Z",
+      "webColdRetainedVisible": true,
+      "webRetainedLeaseKeepsOtherPrompts": true,
+      "webSendOnlySelectedRetained": true,
+      "webNewMessageDoesNotDrainRetained": true,
+      "webRefreshRetainsDraftAndHistory": true,
+      "tuiColdRetainedVisible": true,
+      "tuiManualSendOnlySelected": true,
+      "tuiPostFixSendRestoresDraftThroughHistoryRemount": true,
+      "tuiCrossClientSelectedRemovalDoesNotDeleteNeighbor": true,
+      "webConsoleNoErrors": true
+    },
+    {
+      "type": "cleanup-pass",
+      "at": "2026-09-28T11:08:24.072Z",
+      "pidReleased": true,
+      "portReleased": true,
+      "credentialsRemoved": true,
+      "root": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve4-ui-e2e-2zqDFe"
+    }
+  ],
+  "requests": [
+    "I4_WEB_HOLD",
+    "I4_TUI_HOLD",
+    "I4_WEB_B_RESENT",
+    "I4_WEB_D",
+    "I4_TUI_C_SAVED_RESENT",
+    "I4_TUI_E_RESENT"
+  ],
+  "failures": [],
+  "final": {
+    "prompts": [
+      {
+        "id": "prompt_7bc25127-6211-442b-8be4-528a09794ff1",
+        "text": "I4_WEB_HOLD",
+        "status": "interrupted",
+        "sessionId": "session_1790593213319_t41v3a1",
+        "userMessageId": "message_7850c9cd-72ea-4bd6-b69e-2dc60da3b6d0",
+        "runId": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+        "createdAt": 1790593213331,
+        "acceptedAt": 1790593213331,
+        "admissionOrder": 1,
+        "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+      },
+      {
+        "id": "prompt_bc5ad439-4e95-4553-8faf-f27013ea5578",
+        "text": "I4_WEB_B_RESENT",
+        "status": "succeeded",
+        "sessionId": "session_1790593213319_t41v3a1",
+        "userMessageId": "message_8bfe9493-47f8-4e53-9bcd-eb20dcc469d7",
+        "runId": "run_a23f5848-d408-4b71-83ab-394035f505b6",
+        "createdAt": 1790593213401,
+        "acceptedAt": 1790593448402,
+        "admissionOrder": 10,
+        "ownerId": "backend_70698_e9eef048-9e57-4141-a873-daa3fb249d73"
+      },
+      {
+        "id": "prompt_414c1391-ffcf-4337-92d3-f222ce4d22b7",
+        "text": "I4_WEB_C",
+        "status": "steered",
+        "sessionId": "session_1790593213319_t41v3a1",
+        "userMessageId": "message_21b995e3-c7da-4bda-a80e-033b4fcb9b3e",
+        "runId": null,
+        "createdAt": 1790593213409,
+        "acceptedAt": 1790593213409,
+        "admissionOrder": 3,
+        "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+      },
+      {
+        "id": "prompt_8370e66c-5301-4338-b0ba-d0f0a0741c4f",
+        "text": "I4_WEB_E",
+        "status": "cancelled",
+        "sessionId": "session_1790593213319_t41v3a1",
+        "userMessageId": "message_f89268a4-e078-417e-be6d-4c0d60361dc3",
+        "runId": null,
+        "createdAt": 1790593213417,
+        "acceptedAt": 1790593213417,
+        "admissionOrder": 4,
+        "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+      },
+      {
+        "id": "prompt_f470dbf1-ee23-4616-ae8f-1afe0509e74f",
+        "text": "I4_TUI_HOLD",
+        "status": "interrupted",
+        "sessionId": "session_1790593213422_lljwe42",
+        "userMessageId": "message_27fe857a-aac2-45ff-a356-6fcc5ff1876f",
+        "runId": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+        "createdAt": 1790593213430,
+        "acceptedAt": 1790593213430,
+        "admissionOrder": 5,
+        "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+      },
+      {
+        "id": "prompt_acfc5c95-425e-4856-aca9-6fce86073f4b",
+        "text": "I4_TUI_B",
+        "status": "cancelled",
+        "sessionId": "session_1790593213422_lljwe42",
+        "userMessageId": "message_bab7b014-3ccb-4b86-b645-08c717bb2642",
+        "runId": null,
+        "createdAt": 1790593213469,
+        "acceptedAt": 1790593213469,
+        "admissionOrder": 6,
+        "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+      },
+      {
+        "id": "prompt_1985b88e-1f22-45d2-9f23-45d0653f3f99",
+        "text": "I4_TUI_C_SAVED_RESENT",
+        "status": "succeeded",
+        "sessionId": "session_1790593213422_lljwe42",
+        "userMessageId": "message_c7b40f34-4704-4b4e-ad4c-10d615a3b38a",
+        "runId": "run_27984ee0-0cfe-48eb-9fc3-3e7e38979039",
+        "createdAt": 1790593213477,
+        "acceptedAt": 1790593491750,
+        "admissionOrder": 12,
+        "ownerId": "backend_70698_e9eef048-9e57-4141-a873-daa3fb249d73"
+      },
+      {
+        "id": "prompt_afe36a5d-8a4a-482e-8f28-054cfbcb6ea7",
+        "text": "I4_TUI_E_RESENT",
+        "status": "succeeded",
+        "sessionId": "session_1790593213422_lljwe42",
+        "userMessageId": "message_a0b93839-b9de-4807-a97c-0937d4e8dd50",
+        "runId": "run_7bd0a493-424d-4516-bf41-53f2f22f1b87",
+        "createdAt": 1790593213484,
+        "acceptedAt": 1790593668632,
+        "admissionOrder": 13,
+        "ownerId": "backend_70698_e9eef048-9e57-4141-a873-daa3fb249d73"
+      },
+      {
+        "id": "prompt_6e60af43-cb5f-4394-af9b-3011cc2a8a39",
+        "text": "I4_WEB_F",
+        "status": "retained",
+        "sessionId": "session_1790593213319_t41v3a1",
+        "userMessageId": "message_79b1a6d3-601f-48d6-b983-5ea841df3560",
+        "runId": null,
+        "createdAt": 1790593421705,
+        "acceptedAt": 1790593421705,
+        "admissionOrder": 9,
+        "ownerId": "backend_61374_4e832d11-42d7-4648-8e1c-0d4369b6dfcc"
+      },
+      {
+        "id": "prompt_118dfa3b-860f-47e0-9cbe-dbe321819ca2",
+        "text": "I4_WEB_D",
+        "status": "succeeded",
+        "sessionId": "session_1790593213319_t41v3a1",
+        "userMessageId": "message_8c346ead-6ce4-467b-b4f3-b133fb43c744",
+        "runId": "run_a2063889-5d7f-41b5-a427-069eeea9fb5e",
+        "createdAt": 1790593452596,
+        "acceptedAt": 1790593452596,
+        "admissionOrder": 11,
+        "ownerId": "backend_70698_e9eef048-9e57-4141-a873-daa3fb249d73"
+      }
+    ],
+    "runs": [
+      {
+        "id": "run_7b66ecac-22da-449d-80fd-c5d9d7d075de",
+        "status": "interrupted",
+        "sessionId": "session_1790593213319_t41v3a1"
+      },
+      {
+        "id": "run_62e6639b-4725-4290-80db-e8e8ea3938f7",
+        "status": "interrupted",
+        "sessionId": "session_1790593213422_lljwe42"
+      },
+      {
+        "id": "run_a23f5848-d408-4b71-83ab-394035f505b6",
+        "status": "succeeded",
+        "sessionId": "session_1790593213319_t41v3a1"
+      },
+      {
+        "id": "run_a2063889-5d7f-41b5-a427-069eeea9fb5e",
+        "status": "succeeded",
+        "sessionId": "session_1790593213319_t41v3a1"
+      },
+      {
+        "id": "run_27984ee0-0cfe-48eb-9fc3-3e7e38979039",
+        "status": "succeeded",
+        "sessionId": "session_1790593213422_lljwe42"
+      },
+      {
+        "id": "run_7bd0a493-424d-4516-bf41-53f2f22f1b87",
+        "status": "succeeded",
+        "sessionId": "session_1790593213422_lljwe42"
+      }
+    ],
+    "requests": [
+      "I4_WEB_HOLD",
+      "I4_TUI_HOLD",
+      "I4_WEB_B_RESENT",
+      "I4_WEB_D",
+      "I4_TUI_C_SAVED_RESENT",
+      "I4_TUI_E_RESENT"
+    ]
+  }
+}

@@ -10,6 +10,9 @@ import {
   initDatabase,
 } from "../../services/database/index.js";
 
+import { DatabasePromptSubmissionStore } from "../prompt-scheduler/database-store.js";
+import { createDatabaseRunLedger } from "./index.js";
+
 interface ClaimResult {
   readonly errorName?: string;
   readonly ok: boolean;
@@ -38,6 +41,7 @@ afterEach(async () => {
 function spawnClaim(input: {
   readonly dbPath: string;
   readonly hold: boolean;
+  readonly seedQueue?: boolean;
   readonly ownerId: string;
   readonly runId: string;
 }): ChildProcessWithoutNullStreams {
@@ -47,14 +51,27 @@ function spawnClaim(input: {
   const ledgerUrl = pathToFileURL(
     resolve("packages/ohbaby-agent/src/runtime/run-ledger/index.ts"),
   ).href;
+  const promptUrl = pathToFileURL(
+    resolve(
+      "packages/ohbaby-agent/src/runtime/prompt-scheduler/database-store.ts",
+    ),
+  ).href;
   const script = `
     const { closeDatabase, initDatabase } = await import(${JSON.stringify(databaseUrl)});
     const { createDatabaseRunLedger } = await import(${JSON.stringify(ledgerUrl)});
+    const { DatabasePromptSubmissionStore } = await import(${JSON.stringify(promptUrl)});
     const input = JSON.parse(process.env.OHBABY_TEST_INPUT);
     initDatabase({ dbPath: input.dbPath });
     try {
       const ledger = createDatabaseRunLedger({ ownerId: input.ownerId, ownerPid: process.pid });
       const record = await ledger.claimPendingRun({ runId: input.runId, sessionId: "session_shared", triggerSource: "user" });
+      if (input.seedQueue) {
+        const prompts = new DatabasePromptSubmissionStore({ ownerId: input.ownerId, ownerPid: process.pid });
+        for (const suffix of ["active", "queued"]) await prompts.accept({promptId: input.ownerId+"-"+suffix,clientRequestId:input.ownerId+"-"+suffix,userMessageId:input.ownerId+"-user-"+suffix,scopeKey:"shared",sessionId:"session_shared",text:suffix,maxQueuedPrompts:20});
+        await prompts.claim(input.ownerId+"-active");
+        await prompts.markRunning(input.ownerId+"-active",record.runId);
+        await ledger.markRunning(record.runId);
+      }
       process.stdout.write("OHBABY_CLAIM " + JSON.stringify({ ok: true, ownerId: input.ownerId, runId: record.runId }) + "\\n");
       if (input.hold) {
         await new Promise((resolveStop) => {
@@ -198,3 +215,79 @@ describe("TUI and serve dual-writer run claim", () => {
     await waitForExit(tui);
   }, 20_000);
 });
+
+it("keeps another live process's queued and running work intact, and recovers only its dead owner", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ohbaby-dual-queue-"));
+  cleanupDirectories.push(directory);
+  const dbPath = join(directory, "agent.db");
+  initDatabase({ dbPath });
+  for (const id of ["session_shared", "session_other"])
+    getDatabase()
+      .prepare(
+        "INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) VALUES (?,?,?,?,'active',1,1,'{}')",
+      )
+      .run(id, "project", directory, id);
+  closeDatabase();
+  const tui = spawnClaim({
+    dbPath,
+    hold: true,
+    seedQueue: true,
+    ownerId: "tui",
+    runId: "tui-run",
+  });
+  expect((await waitForClaim(tui)).ok).toBe(true);
+  initDatabase({ dbPath });
+  const prompts = new DatabasePromptSubmissionStore({
+    ownerId: "serve",
+    ownerPid: process.pid,
+  });
+  const ledger = createDatabaseRunLedger({
+    ownerId: "serve",
+    ownerPid: process.pid,
+  });
+  await prompts.accept({
+    promptId: "serve-queued",
+    clientRequestId: "serve-queued",
+    userMessageId: "serve-user",
+    scopeKey: "shared",
+    sessionId: "session_other",
+    text: "own",
+    maxQueuedPrompts: 20,
+  });
+  await ledger.claimPendingRun({
+    runId: "serve-run",
+    sessionId: "session_other",
+    triggerSource: "user",
+  });
+  const live = await prompts.get("tui-active");
+  const queued = await prompts.get("tui-queued");
+  const own = await prompts.get("serve-queued");
+  const ownRun = await ledger.get("serve-run");
+  await prompts.recoverAllInterrupted({ scopeKey: "shared" });
+  await ledger.recoverOrphanedRuns();
+  expect(await prompts.get("tui-active")).toEqual(live);
+  expect(await prompts.get("tui-queued")).toEqual(queued);
+  expect(
+    (await prompts.listQueued("shared")).map((item) => item.promptId),
+  ).toEqual(["serve-queued"]);
+  expect(await prompts.claim("tui-queued")).toBeNull();
+  expect(await prompts.get("tui-queued")).toEqual(queued);
+  tui.kill("SIGKILL");
+  await waitForExit(tui);
+  await prompts.recoverAllInterrupted({ scopeKey: "shared" });
+  await ledger.recoverOrphanedRuns();
+  expect(await prompts.get("tui-active")).toMatchObject({
+    status: "interrupted",
+    ownerId: "tui",
+  });
+  expect(await prompts.get("tui-queued")).toMatchObject({
+    status: "retained",
+    ownerId: "tui",
+  });
+  expect(await ledger.get("tui-run")).toMatchObject({
+    status: "interrupted",
+    endTimeSource: "recovery",
+  });
+  expect(await prompts.get("serve-queued")).toEqual(own);
+  expect(await ledger.get("serve-run")).toEqual(ownRun);
+}, 20000);

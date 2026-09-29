@@ -179,6 +179,28 @@ for (const backend of ["memory", "sqlite"] as const) {
         ),
       ).toHaveLength(1);
     });
+    it("preserves source order metadata on committed native tool projections", async () => {
+      const store = createStore();
+      const { manager, message, textPart } = await setup(store);
+      const request = input(message.id, textPart.id);
+      const result = await manager.commitModelStep({
+        ...request,
+        tools: request.tools.map((tool) => ({
+          ...tool,
+          metadata: { sourceOrder: 7, providerExtra: "kept" },
+        })),
+      });
+      expect(result.toolParts[0]?.metadata).toEqual({
+        sourceOrder: 7,
+        providerExtra: "kept",
+      });
+      expect(
+        (await store.listBySession("session"))[0]?.parts.find(
+          (part) => part.type === "tool",
+        )?.metadata,
+      ).toEqual({ sourceOrder: 7, providerExtra: "kept" });
+    });
+
     it("rejects projection mismatch with no changes or completion event", async () => {
       const store = createStore();
       const { manager, message, textPart, bus } = await setup(store);

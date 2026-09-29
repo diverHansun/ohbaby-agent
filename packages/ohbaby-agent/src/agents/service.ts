@@ -49,6 +49,7 @@ export class AgentService {
       reasoning,
       environment: params.environment,
       initialUserMessageId: params.initialUserMessageId,
+      displayUserText: params.displayUserText,
       prompt: params.prompt,
       runId: params.runId,
       signal: params.signal,

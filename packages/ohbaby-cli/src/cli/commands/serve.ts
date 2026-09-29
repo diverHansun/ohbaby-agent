@@ -147,7 +147,24 @@ export function createServeCommand(
         return;
       }
       if (action === "stop") {
-        runtime.stdout.write(`daemon ${await runtime.stopDaemonFromState()}\n`);
+        runtime.stdout.write("daemon stopping\n");
+        const result = await runtime.stopDaemonFromState();
+        if (result.processExit === "not-running") {
+          runtime.stdout.write("daemon not-running\n");
+          runtime.setExitCode(0);
+        } else if (result.processExit === "confirmed") {
+          runtime.stdout.write(
+            result.cleanup === "confirmed"
+              ? "daemon stopped\n"
+              : `daemon stopped; cleanup ${result.cleanup}${result.reason ? `: ${result.reason}` : ""}\n`,
+          );
+          runtime.setExitCode(result.cleanup === "confirmed" ? 0 : 1);
+        } else {
+          runtime.stdout.write(
+            `daemon exit unconfirmed${result.reason ? `: ${result.reason}` : ""}\n`,
+          );
+          runtime.setExitCode(1);
+        }
         return;
       }
 

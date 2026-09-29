@@ -1,0 +1,227 @@
+{
+  "profile": "zenmux-gpt56-luna-responses",
+  "entry": "TerminalApp stdin with persistent backend",
+  "result": "passed",
+  "seededVerifiedCapabilities": false,
+  "emptyConfig": true,
+  "savedProtocol": "openai-responses",
+  "discoveredReasoning": {
+    "status": "identified",
+    "mode": "effort",
+    "supportsDisabled": false,
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default": {
+      "enabled": true,
+      "effort": "medium"
+    },
+    "source": "builtin:zenmux/gpt-5.6-luna"
+  },
+  "permissionErrors": [],
+  "cleanupErrors": [],
+  "providerRequests": [
+    {
+      "id": 1,
+      "purpose": "session-title",
+      "messageCount": 2,
+      "replayStateCount": 0,
+      "replayStateHashes": [],
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 160
+        },
+        "inputTokens": 160,
+        "outputTokens": 49,
+        "totalTokens": 209
+      }
+    },
+    {
+      "id": 2,
+      "purpose": "agent-step",
+      "messageCount": 2,
+      "replayStateCount": 0,
+      "replayStateHashes": [],
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 5593,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 3
+        },
+        "inputTokens": 5596,
+        "outputTokens": 78,
+        "totalTokens": 5674
+      }
+    },
+    {
+      "id": 3,
+      "purpose": "agent-step",
+      "messageCount": 4,
+      "replayStateCount": 1,
+      "replayStateHashes": [
+        "d295ade30ec065890b5b0a4de5405faabef2deaf48dc9d7f359e70b966329af9"
+      ],
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 5593,
+          "cacheWrite": 198,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": true
+          },
+          "uncached": 3
+        },
+        "inputTokens": 5794,
+        "outputTokens": 16,
+        "totalTokens": 5810
+      }
+    }
+  ],
+  "wire": [
+    {
+      "sequence": 1,
+      "path": "/api/v1/models",
+      "kind": "metadata",
+      "status": 200
+    },
+    {
+      "sequence": 2,
+      "context": {
+        "purpose": "session-title",
+        "id": 1
+      },
+      "path": "/api/v1/responses",
+      "kind": "generation",
+      "protocol": "openai-responses",
+      "toolPairing": {
+        "calls": [],
+        "results": [],
+        "invalidIds": 0,
+        "duplicateCalls": 0,
+        "duplicateResults": 0,
+        "resultsBeforeCalls": 0,
+        "unmatchedResults": 0,
+        "unansweredCalls": 0
+      },
+      "finalUsage": {
+        "input_tokens": 160,
+        "output_tokens": 49,
+        "total_tokens": 209,
+        "input_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "status": 200
+    },
+    {
+      "sequence": 3,
+      "context": {
+        "purpose": "agent-step",
+        "id": 2
+      },
+      "path": "/api/v1/responses",
+      "kind": "generation",
+      "protocol": "openai-responses",
+      "toolPairing": {
+        "calls": [],
+        "results": [],
+        "invalidIds": 0,
+        "duplicateCalls": 0,
+        "duplicateResults": 0,
+        "resultsBeforeCalls": 0,
+        "unmatchedResults": 0,
+        "unansweredCalls": 0
+      },
+      "finalUsage": {
+        "input_tokens": 5596,
+        "output_tokens": 78,
+        "total_tokens": 5674,
+        "input_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 5593
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "status": 200
+    },
+    {
+      "sequence": 4,
+      "context": {
+        "purpose": "agent-step",
+        "id": 3
+      },
+      "path": "/api/v1/responses",
+      "kind": "generation",
+      "protocol": "openai-responses",
+      "toolPairing": {
+        "calls": [
+          "21d579aea5052a79476318479c5f79552b5cb9fabb42b7a681bd4d2496024a12"
+        ],
+        "results": [
+          "21d579aea5052a79476318479c5f79552b5cb9fabb42b7a681bd4d2496024a12"
+        ],
+        "invalidIds": 0,
+        "duplicateCalls": 0,
+        "duplicateResults": 0,
+        "resultsBeforeCalls": 0,
+        "unmatchedResults": 0,
+        "unansweredCalls": 0
+      },
+      "finalUsage": {
+        "input_tokens": 5794,
+        "output_tokens": 16,
+        "total_tokens": 5810,
+        "input_tokens_details": {
+          "cached_tokens": 5593,
+          "cache_write_tokens": 198
+        }
+      },
+      "model": "openai/gpt-5.6-luna",
+      "status": 200
+    }
+  ],
+  "checkpoints": [
+    {
+      "label": "tui-real-tool",
+      "messageCount": 3,
+      "answer": {
+        "sha256": "f1c1c331cd3ee6cd83cc6b97aa2c60340ba9d874dd93ac6170c2c7965a4fae3f",
+        "characters": 41,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 3,
+      "httpRequests": 4
+    }
+  ]
+}

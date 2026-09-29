@@ -9,6 +9,7 @@ import {
   InMemorySubagentInstanceStore,
   SessionSubagentHost,
 } from "../../../packages/ohbaby-agent/src/agents/index.js";
+import { InMemorySubagentExecutionStore } from "../../../packages/ohbaby-agent/src/agents/subagents/execution-store.js";
 import type { RuntimeAgent } from "../../../packages/ohbaby-agent/src/agents/index.js";
 import {
   GoalService,
@@ -68,6 +69,11 @@ function createFixture(options: { readonly safetyCapTurns?: number } = {}) {
   };
   const store = new InMemorySubagentInstanceStore();
   const host = new SessionSubagentHost({
+    executionStore: new InMemorySubagentExecutionStore(),
+    resolveRequester: async (input) => ({
+      rootRunId: input.requesterRunId,
+      rootSessionId: input.parentSessionId,
+    }),
     agentManager: {
       getRuntimeAgent(role): Promise<RuntimeAgent> {
         return Promise.resolve({
@@ -101,10 +107,24 @@ function createFixture(options: { readonly safetyCapTurns?: number } = {}) {
     },
     store,
   });
+  let rootSequence = 1;
+  let requestSequence = 0;
+  const run = host.run.bind(host);
+  host.run = (input) =>
+    run({
+      requesterRunId: `goal-root-${rootSequence}`,
+      requesterMessageId: "goal-message",
+      requestId: `request-${++requestSequence}`,
+      ...input,
+    });
   const goalService = new GoalService({
     executionControl: {
       async interruptGoalExecution(input): Promise<void> {
-        await host.interruptByParent(input.sessionId, input.reason);
+        await host.interruptByRootRun(
+          `goal-root-${rootSequence}`,
+          input.reason,
+        );
+        rootSequence += 1;
       },
     },
     persistence: new InMemoryGoalPersistence(),
@@ -142,22 +162,22 @@ describe("goal and subagent lifecycle integration", () => {
         prompt: "long work",
         role: "explore",
       });
-      await waitUntilRunning(store, started.item.subagentId);
+      await waitUntilRunning(store, started.execution.subagentId);
       await host.run({
         mode: "background",
         parentSessionId: parent.id,
         prompt: "queued follow-up",
-        subagentId: started.item.subagentId,
+        subagentId: started.execution.subagentId,
       });
 
       await goalService.pauseGoal(parent.id, "paused by user");
 
       const record = await store.get({
         parentSessionId: parent.id,
-        subagentId: started.item.subagentId,
+        subagentId: started.execution.subagentId,
       });
       expect(record).toMatchObject({
-        pendingQueue: [{ prompt: "queued follow-up" }],
+        pendingQueue: [],
         status: "interrupted",
       });
       expect(record?.closedAt).toBeUndefined();
@@ -179,13 +199,13 @@ describe("goal and subagent lifecycle integration", () => {
         prompt: "unexpected straggler",
         role: "explore",
       });
-      await waitUntilRunning(store, started.item.subagentId);
+      await waitUntilRunning(store, started.execution.subagentId);
 
       await goalService.updateGoalFromModel(parent.id, "complete");
 
       const record = await store.get({
         parentSessionId: parent.id,
-        subagentId: started.item.subagentId,
+        subagentId: started.execution.subagentId,
       });
       expect(await goalService.getSnapshot(parent.id)).toBeNull();
       expect(record?.status).toBe("interrupted");
@@ -208,13 +228,13 @@ describe("goal and subagent lifecycle integration", () => {
         prompt: "long work",
         role: "explore",
       });
-      await waitUntilRunning(store, started.item.subagentId);
+      await waitUntilRunning(store, started.execution.subagentId);
 
       await goalService.cancelGoal(parent.id);
 
       const record = await store.get({
         parentSessionId: parent.id,
-        subagentId: started.item.subagentId,
+        subagentId: started.execution.subagentId,
       });
       expect(await goalService.getSnapshot(parent.id)).toBeNull();
       expect(record?.status).toBe("interrupted");
@@ -238,13 +258,13 @@ describe("goal and subagent lifecycle integration", () => {
         prompt: "ordinary paused-period work",
         role: "explore",
       });
-      await waitUntilRunning(store, ordinary.item.subagentId);
+      await waitUntilRunning(store, ordinary.execution.subagentId);
 
       await goalService.cancelGoal(parent.id);
 
       const record = await store.get({
         parentSessionId: parent.id,
-        subagentId: ordinary.item.subagentId,
+        subagentId: ordinary.execution.subagentId,
       });
       expect(await goalService.getSnapshot(parent.id)).toBeNull();
       expect(record?.status).toBe("running");
@@ -266,7 +286,7 @@ describe("goal and subagent lifecycle integration", () => {
         prompt: "long work",
         role: "explore",
       });
-      await waitUntilRunning(store, started.item.subagentId);
+      await waitUntilRunning(store, started.execution.subagentId);
       await goalService.pauseGoal(parent.id);
 
       await goalService.resumeGoal(parent.id);
@@ -274,7 +294,7 @@ describe("goal and subagent lifecycle integration", () => {
       await expect(
         store.get({
           parentSessionId: parent.id,
-          subagentId: started.item.subagentId,
+          subagentId: started.execution.subagentId,
         }),
       ).resolves.toMatchObject({ status: "interrupted" });
 
@@ -282,9 +302,9 @@ describe("goal and subagent lifecycle integration", () => {
         mode: "background",
         parentSessionId: parent.id,
         prompt: "main explicitly resumed this subagent",
-        subagentId: started.item.subagentId,
+        subagentId: started.execution.subagentId,
       });
-      await waitUntilRunning(store, started.item.subagentId);
+      await waitUntilRunning(store, started.execution.subagentId);
     } finally {
       await host.dispose();
     }
@@ -305,12 +325,12 @@ describe("goal and subagent lifecycle integration", () => {
         prompt: "long work",
         role: "explore",
       });
-      await waitUntilRunning(store, started.item.subagentId);
+      await waitUntilRunning(store, started.execution.subagentId);
       await host.run({
         mode: "background",
         parentSessionId: parent.id,
         prompt: "queued after safety pause",
-        subagentId: started.item.subagentId,
+        subagentId: started.execution.subagentId,
       });
       goalService.attachTurnRunner({
         runTurn() {
@@ -325,10 +345,10 @@ describe("goal and subagent lifecycle integration", () => {
       expect(turn).toHaveBeenCalledTimes(1);
       const record = await store.get({
         parentSessionId: parent.id,
-        subagentId: started.item.subagentId,
+        subagentId: started.execution.subagentId,
       });
       expect(record).toMatchObject({
-        pendingQueue: [{ prompt: "queued after safety pause" }],
+        pendingQueue: [],
         status: "interrupted",
       });
       expect(record?.closedAt).toBeUndefined();

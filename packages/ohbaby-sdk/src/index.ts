@@ -1,4 +1,5 @@
 export type {
+  UiSessionCreationResult,
   SubmitPromptOptions,
   UiCommandClient,
   UiPromptCommandClient,
@@ -30,9 +31,14 @@ export type {
   UiCommandRecord,
   UiCommandRecorder,
 } from "./command-record.js";
+export { isUiPromptNamingSource } from "./prompt.js";
 export type {
+  UiSteerQueuedPromptInput,
+  UiSteerQueuedPromptReceipt,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
+  UiResubmitRetainedPromptInput,
+  UiPromptResubmissionReceipt,
   UiPromptCompletion,
   UiCompletedPromptSubmission,
   UiPromptError,
@@ -40,6 +46,7 @@ export type {
   UiPromptEditLease,
   UiPromptSubmission,
   UiPromptSubmissionStatus,
+  UiPromptNamingSource,
   UiPromptTerminalStatus,
   UiAcquirePromptEditLeaseInput,
   UiRenewPromptEditLeaseInput,
@@ -104,8 +111,10 @@ export type {
   UiRunUpdatedEvent,
   UiRuntimeUpdatedEvent,
   UiSnapshotReplacedEvent,
+  UiSessionResyncRequiredEvent,
 } from "./events.js";
 export type {
+  UiCommandCompletion,
   UiCommandAction,
   UiCommandArgumentMode,
   UiCommandCatalog,
@@ -209,3 +218,55 @@ export { isStableErrorCode } from "./error-code.js";
 export { isLoopbackHost } from "./loopback-host.js";
 
 export { isUiReasoningConfig, UI_REASONING_STATUSES } from "./connect-model.js";
+
+export type {
+  UiPermissionResyncRequiredEvent,
+  UiPermissionBinding,
+  UiPermissionSnapshot,
+  UiPermissionSnapshotQuery,
+  UiPermissionResponseContext,
+  UiSessionIndexEntry,
+  UiPermissionEvent,
+  UiPermissionUnavailableEvent,
+} from "./permission.js";
+
+export { createPermissionSync } from "./permission-sync.js";
+export * from "./session-view.js";
+export * from "./session-sync.js";
+export type {
+  PermissionSync,
+  PermissionSyncState,
+  PermissionSyncOptions,
+  PermissionSyncEvent,
+} from "./permission-sync.js";
+
+export * from "./execution.js";
+export * from "./duration.js";
+
+export type {
+  UiSubagentBudget,
+  UiSubagentExecution,
+  UiSubagentQuery,
+  UiSubagentExecutionList,
+  UiSubagentExecutionView,
+  UiSubagentConversationQuery,
+  UiSubagentConversationView,
+  UiSubagentConversationChangedEvent,
+  UiSubagentConversationUnavailableEvent,
+  UiSubagentConversationEvent,
+  UiSubagentConversationSelection,
+  UiSubagentConversationUnwatchQuery,
+  UiSubagentReadClient,
+} from "./subagent.js";
+export { createSubagentReader } from "./subagent-reader.js";
+export type { UiSubagentReaderState } from "./subagent-reader.js";
+export {
+  compareSubagentMessages,
+  createSubagentConversationReader,
+} from "./subagent-conversation-reader.js";
+export type { UiSubagentConversationReaderState } from "./subagent-conversation-reader.js";
+
+export { hasUnsentSteerAfterLatestStop } from "./run-inputs.js";
+export { compareUiPromptQueueOrder } from "./prompt-queue-order.js";
+
+export { isUiCommandCompletion } from "./slash-command/types.js";

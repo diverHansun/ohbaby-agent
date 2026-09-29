@@ -603,7 +603,7 @@ describe("createPersistentUiStateStore", () => {
 
     expect(messages).toHaveLength(1);
     expect(messages[0]?.role).toBe("assistant");
-    expect(messages[0]?.parts).toEqual([
+    expect(messages[0]?.parts).toMatchObject([
       { text: "Context compacted", type: "text" },
     ]);
     expect(JSON.stringify(messages)).not.toContain("raw summary text");
@@ -663,7 +663,7 @@ describe("createPersistentUiStateStore", () => {
     const messages = snapshot.sessions[0]?.messages ?? [];
 
     expect(messages).toHaveLength(1);
-    expect(messages[0]?.parts).toEqual([
+    expect(messages[0]?.parts).toMatchObject([
       { text: "still visible prompt", type: "text" },
     ]);
     expect(JSON.stringify(messages)).not.toContain("already compacted prompt");

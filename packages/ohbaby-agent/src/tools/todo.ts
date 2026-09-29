@@ -1,3 +1,5 @@
+import type { ResourceAccess } from "../core/tool-scheduler/resources.js";
+import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type { MessageWithParts } from "../core/message/index.js";
 import type { MessageScopeFilter } from "../core/message/types.js";
 import type {
@@ -489,10 +491,22 @@ function todoMetadata(
   };
 }
 
+const capturedWorkScope = Symbol("todo execution work scope");
+
 function resolveToolWorkScopeId(
   context: ToolExecutionContext,
   options: TodoToolOptions,
+  params?: Record<string, unknown>,
 ): TodoWorkScopeId | undefined {
+  if (
+    params &&
+    Object.prototype.hasOwnProperty.call(params, capturedWorkScope)
+  ) {
+    const scope: unknown = Reflect.get(params, capturedWorkScope);
+    return typeof scope === "string" && scope.startsWith("goal:")
+      ? (scope as TodoWorkScopeId)
+      : undefined;
+  }
   if (context.contextScopeId !== undefined) return undefined;
   return options.resolveWorkScopeId?.(context);
 }
@@ -509,8 +523,8 @@ function createTodoReadTool(store: TodoStore, options: TodoToolOptions): Tool {
     source: "builtin",
     category: "readonly",
     annotations: { readOnlyHint: true },
-    async execute(_params, context): Promise<ToolExecutionResult> {
-      const workScopeId = resolveToolWorkScopeId(context, options);
+    async execute(params, context): Promise<ToolExecutionResult> {
+      const workScopeId = resolveToolWorkScopeId(context, options, params);
       const todos = await store.read(
         context.sessionId,
         context.contextScopeId,
@@ -560,7 +574,7 @@ function createTodoWriteTool(store: TodoStore, options: TodoToolOptions): Tool {
     category: "write",
     async execute(params, context): Promise<ToolExecutionResult> {
       const todos = parseTodos(params);
-      const workScopeId = resolveToolWorkScopeId(context, options);
+      const workScopeId = resolveToolWorkScopeId(context, options, params);
       const result = await store.write(
         context.sessionId,
         todos,
@@ -582,5 +596,31 @@ export function createTodoTools(
   return [
     createTodoReadTool(store, options),
     createTodoWriteTool(store, options),
-  ];
+  ].map((tool) => {
+    const accesses = (
+      params: Record<string, unknown>,
+      context: ToolExecutionContext,
+    ): readonly ResourceAccess[] => [
+      {
+        kind: "scope" as const,
+        key: todoScopeKey({
+          sessionId: context.sessionId,
+          contextScopeId: context.contextScopeId,
+          workScopeId: resolveToolWorkScopeId(context, options, params),
+        }),
+        mode:
+          tool.name === "todo_read" ? ("read" as const) : ("write" as const),
+      },
+    ];
+    return withToolAdmission(tool, {
+      plan: accesses,
+      resolve: (params, context) => {
+        const snapshot = {
+          ...params,
+          [capturedWorkScope]: resolveToolWorkScopeId(context, options, params),
+        };
+        return { resources: accesses(snapshot, context), params: snapshot };
+      },
+    });
+  });
 }

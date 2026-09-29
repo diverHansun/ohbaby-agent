@@ -12,6 +12,7 @@ export {
 export { createInMemorySessionStore } from "./store.js";
 export {
   createTemporarySessionTitle,
+  sessionTitleIntent,
   isDefaultSessionTitle,
   sanitizePromptForSessionTitle,
 } from "./prompt-sanitizer.js";

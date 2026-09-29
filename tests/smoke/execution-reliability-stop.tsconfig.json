@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "composite": false, "rootDir": "../.." },
+  "include": ["execution-reliability-stop.real.e2e.test.ts", "execution-reliability-stop-real.vitest.config.ts"]
+}

@@ -10,7 +10,7 @@ interface FakeSdkClient {
 }
 
 const TITLE_GENERATION_PROMPT_MARKER =
-  "Generate a concise title for a coding-agent chat session.";
+  "Write a short conversation title that identifies the user's task.";
 
 export interface FrameSource {
   lastFrame(): string | undefined;
@@ -156,12 +156,7 @@ function firstUserMessageForSessionTitleRequest(
   );
   const content =
     typeof userMessage?.content === "string" ? userMessage.content : "";
-  const marker = "First user message:\n";
-  const markerIndex = content.indexOf(marker);
-  if (markerIndex < 0) {
-    return "Fake session title";
-  }
-  return content.slice(markerIndex + marker.length);
+  return content;
 }
 
 export function writeToolCallEvent(input: {
@@ -221,7 +216,7 @@ export function promptLine(frame: string): string {
 export function promptIsReady(frame: string): boolean {
   const line = promptLine(frame).replace(/[^\x00-\x7F]/gu, "");
 
-  return line.trim() === ">";
+  return line.trim() === ">" && !frame.includes("Syncing session");
 }
 
 function stripAnsi(input: string): string {

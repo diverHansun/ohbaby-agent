@@ -6,6 +6,134 @@ import { createInMemoryMessageStore } from "./store.js";
 import type { MessageIdGenerator, MessageStore } from "./types.js";
 
 describe("MessageManager", () => {
+  it("holds mutations behind the application commit queue and isolates projection failures", async () => {
+    const store = createInMemoryMessageStore();
+    const bus = createBus();
+    const manager = createMessageManager({ store, bus });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const timeline: string[] = [];
+    manager.setCommitCoordinator({
+      async run(_sessionId, operation) {
+        await gate;
+        return operation();
+      },
+      onCommitted(change) {
+        timeline.push(`projection:${change.messages?.[0]?.runId ?? "unknown"}`);
+        throw new Error("projection failed");
+      },
+      onProjectionError(sessionId) {
+        timeline.push(`unhealthy:${sessionId}`);
+      },
+    });
+    bus.subscribe(Message.Event.Updated, () => {
+      timeline.push("notification");
+    });
+    const creating = manager.createMessage({
+      id: "queued",
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+      runId: "real-run",
+    });
+    await Promise.resolve();
+    expect(await store.getMessage("queued")).toBeUndefined();
+    release();
+    await expect(creating).resolves.toMatchObject({
+      id: "queued",
+      runId: "real-run",
+    });
+    expect(timeline).toEqual([
+      "projection:real-run",
+      "unhealthy:session_1",
+      "notification",
+    ]);
+    timeline.length = 0;
+    await manager.saveReasoningPart({
+      messageId: "queued",
+      partId: "reasoning",
+      text: "display only",
+      endReason: "normal",
+    });
+    expect(timeline).toEqual([]);
+    expect(
+      (await manager.listPageByRun("session_1", "real-run")).messages[0]?.parts,
+    ).toMatchObject([{ id: "reasoning", endReason: "normal" }]);
+    await expect(manager.toModelMessages("session_1")).resolves.toEqual([]);
+  });
+
+  it("preserves source run and context identity in bus payloads", async () => {
+    const bus = createBus();
+    const manager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    const events: unknown[] = [];
+    bus.subscribe(Message.Event.Updated, (payload) => {
+      events.push(payload.info);
+    });
+    bus.subscribe(Message.Event.PartUpdated, (payload) => {
+      events.push(payload.part);
+    });
+    const message = await manager.createMessage({
+      sessionId: "s",
+      role: "assistant",
+      agent: "a",
+      runId: "r",
+      contextScopeId: "scope",
+    });
+    await manager.appendPart(message.id, {
+      type: "reasoning",
+      text: "old explicit append",
+      endReason: "interrupted",
+    });
+    expect(events).toMatchObject([
+      { runId: "r", contextScopeId: "scope" },
+      { endReason: "interrupted", contextScopeId: "scope" },
+    ]);
+  });
+
+  it("distinguishes newly created message identities from updates and compaction summaries", async () => {
+    const changes: { created: readonly string[] | undefined; ids: string[] }[] =
+      [];
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+      commitCoordinator: {
+        run: (_session, operation) => operation(),
+        onCommitted(change) {
+          changes.push({
+            created: change.createdMessageIds,
+            ids: change.messages?.map((message) => message.id) ?? [],
+          });
+        },
+        onProjectionError(_session, error) {
+          throw error;
+        },
+      },
+    });
+    const message = await manager.createMessage({
+      sessionId: "session",
+      role: "assistant",
+      agent: "default",
+    });
+    await manager.updateMessage(message.id, { finish: "stop" });
+    await manager.commitCompaction({
+      sessionId: "session",
+      compactedAt: 100,
+      expectedParts: [],
+      summary: { agent: "summary", text: "context" },
+    });
+    expect(changes).toEqual([
+      { created: ["message_1"], ids: ["message_1"] },
+      { created: undefined, ids: ["message_1"] },
+      { created: ["message_2"], ids: ["message_2"] },
+    ]);
+  });
+
   it("rejects malformed message event payloads at runtime", () => {
     const bus = createBus();
     const invalidPayload = {

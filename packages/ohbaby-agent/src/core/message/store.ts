@@ -1,3 +1,10 @@
+import { applyMessagePatch } from "./message-patch.js";
+import {
+  compareMessages,
+  decodeMessagePage,
+  makeMessagePage,
+  validateMessageIds,
+} from "./pagination.js";
 import { isDeepStrictEqual } from "node:util";
 import {
   ModelStateSchema,
@@ -5,6 +12,9 @@ import {
 } from "../../services/interface-providers/native-state.js";
 import { createTokenUsageMetadata } from "./token-usage-metadata.js";
 import type {
+  MessagePage,
+  MessagePageOptions,
+  ReasoningPart,
   Message,
   ModelStatePart,
   ToolPart,
@@ -18,6 +28,7 @@ import type {
   CommitCompactionResult,
   UpdateMessagePatch,
   UpdatePartPatch,
+  UpdatePartCondition,
   StoreCompactionInput,
   TextPart,
 } from "./types.js";
@@ -71,7 +82,148 @@ export function createInMemoryMessageStore(): MessageStore {
     };
   }
 
+  function listPage(
+    sessionId: string,
+    options: MessagePageOptions = {},
+    runId?: string,
+  ): MessagePage {
+    const { limit, cursor, direction } = decodeMessagePage(
+      sessionId,
+      options,
+      runId,
+    );
+    const entries = [...messages.values()]
+      .filter(
+        (message) =>
+          message.sessionId === sessionId &&
+          (options.scope === undefined ||
+            message.contextScopeId === options.scope.contextScopeId) &&
+          (runId === undefined || message.runId === runId) &&
+          (cursor === undefined ||
+            (direction === "before"
+              ? message.time.created < cursor.createdAt ||
+                (message.time.created === cursor.createdAt &&
+                  message.id < cursor.id)
+              : message.time.created > cursor.createdAt ||
+                (message.time.created === cursor.createdAt &&
+                  message.id > cursor.id))),
+      )
+      .sort((a, b) =>
+        direction === "before" ? compareMessages(b, a) : compareMessages(a, b),
+      )
+      .slice(0, limit + 1)
+      .map((message) => ({
+        info: clone(message),
+        parts: listPartsForMessage(message.id),
+      }));
+    return makeMessagePage(sessionId, options, entries, limit, runId);
+  }
+
   return {
+    runtimeInputMemory: {
+      get(messageId): MessageWithParts | undefined {
+        const info = messages.get(messageId);
+        return info
+          ? { info: clone(info), parts: listPartsForMessage(messageId) }
+          : undefined;
+      },
+      put(message): void {
+        const prepared = clone(message);
+        const existing = messages.get(prepared.info.id);
+        if (
+          existing &&
+          (existing.sessionId !== prepared.info.sessionId ||
+            existing.contextScopeId !== prepared.info.contextScopeId ||
+            existing.role !== prepared.info.role)
+        )
+          throw new Error("Runtime input message owner conflict");
+        const seen = new Set<string>();
+        for (const part of prepared.parts) {
+          if (
+            part.messageId !== prepared.info.id ||
+            part.sessionId !== prepared.info.sessionId ||
+            part.contextScopeId !== prepared.info.contextScopeId ||
+            seen.has(part.id) ||
+            (parts.has(part.id) &&
+              parts.get(part.id)?.messageId !== prepared.info.id)
+          )
+            throw new Error("Runtime input part owner conflict");
+          seen.add(part.id);
+        }
+        for (const [id, part] of parts)
+          if (part.messageId === prepared.info.id) parts.delete(id);
+        messages.set(prepared.info.id, prepared.info);
+        for (const part of prepared.parts) parts.set(part.id, part);
+      },
+    },
+    async listPageBySession(sessionId, options): Promise<MessagePage> {
+      await Promise.resolve();
+      return listPage(sessionId, options);
+    },
+    async listPageByRun(sessionId, runId, options): Promise<MessagePage> {
+      await Promise.resolve();
+      return listPage(sessionId, options, runId);
+    },
+    async listByIds(sessionId, messageIds): Promise<MessageWithParts[]> {
+      await Promise.resolve();
+      validateMessageIds(messageIds);
+      const ids = new Set(messageIds);
+      return [...messages.values()]
+        .filter(
+          (message) => message.sessionId === sessionId && ids.has(message.id),
+        )
+        .sort(compareMessages)
+        .map((message) => ({
+          info: clone(message),
+          parts: listPartsForMessage(message.id),
+        }));
+    },
+    async getPart(partId): Promise<Part | undefined> {
+      await Promise.resolve();
+      const part = parts.get(partId);
+      return part === undefined ? undefined : clone(part);
+    },
+    async saveReasoningPart(input): Promise<ReasoningPart | undefined> {
+      await Promise.resolve();
+      const message = messages.get(input.messageId);
+      if (message === undefined)
+        throw new Error(`Message not found: ${input.messageId}`);
+      if (
+        input.sessionId !== undefined &&
+        input.sessionId !== message.sessionId
+      )
+        throw new Error("Reasoning identity belongs to another session");
+      const existing = parts.get(input.partId);
+      if (
+        existing !== undefined &&
+        (existing.messageId !== input.messageId ||
+          existing.type !== "reasoning")
+      )
+        throw new Error("Reasoning identity belongs to another part");
+      if (input.text === "")
+        return existing === undefined ? undefined : clone(existing);
+      const part: ReasoningPart = {
+        ...existing,
+        id: input.partId,
+        messageId: message.id,
+        sessionId: message.sessionId,
+        contextScopeId: message.contextScopeId,
+        orderIndex:
+          existing?.orderIndex ?? listPartsForMessage(message.id).length,
+        type: "reasoning",
+        text: input.text,
+        ...(input.endReason === undefined
+          ? {}
+          : { endReason: input.endReason }),
+        metadata: {
+          ...existing?.metadata,
+          ...input.metadata,
+          ...(input.runId === undefined ? {} : { runId: input.runId }),
+        },
+      };
+      parts.set(part.id, clone(part));
+      return clone(part);
+    },
     commitModelStep(
       input: StoreModelStepInput,
     ): Promise<CommitModelStepResult> {
@@ -115,7 +267,7 @@ export function createInMemoryMessageStore(): MessageStore {
       if (!existing) {
         return Promise.reject(new Error(`Message not found: ${messageId}`));
       }
-      const updated = { ...existing, ...patch } as Message;
+      const updated = applyMessagePatch(existing, patch);
       messages.set(messageId, clone(updated));
       return Promise.resolve(clone(updated));
     },
@@ -175,11 +327,19 @@ export function createInMemoryMessageStore(): MessageStore {
       partId: string,
       patch: Omit<UpdatePartPatch, "delta">,
       updatedAt: number,
+      condition?: UpdatePartCondition,
     ): Promise<Part> {
       const existing = parts.get(partId);
       if (!existing) {
         return Promise.reject(new Error(`Part not found: ${partId}`));
       }
+      if (
+        condition?.ifToolUnfinished &&
+        (existing.type !== "tool" ||
+          (existing.state.status !== "pending" &&
+            existing.state.status !== "running"))
+      )
+        return Promise.resolve(clone(existing));
       const updated = { ...existing, ...patch } as Part;
       parts.set(partId, clone(updated));
       touchMessage(existing.messageId, updatedAt);
@@ -458,6 +618,7 @@ export function prepareModelStep(
     type: "tool",
     callId: tool.callId,
     tool: tool.name,
+    ...(tool.metadata === undefined ? {} : { metadata: tool.metadata }),
     state: {
       status: "pending",
       input: tool.arguments,

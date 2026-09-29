@@ -6,24 +6,33 @@
 
 ## 1. ConnectionState 五态 → 状态文字
 
-状态文字（header 右侧）是用户能看到的唯一连接真相（无诊断行）。不显示圆点或内层胶囊。颜色组：slate=蓝、green、gold、red。
+主会话状态文字（header 右侧）呈现根会话连接态（无诊断行）。不显示圆点或内层胶囊。颜色组：slate=蓝、green、gold、red。
 
-| ConnectionState | 文案 | 色组 | 动效 | 含义 |
-|---|---|---|---|---|
-| `live` + run idle | `idle` | green | 无 | 实时、空闲 |
-| `live` + run running | `running` | slate | pulse | 实时、agent 运行中 |
-| `connecting` | `connecting` | gold | pulse | 建连中 |
-| `reconnecting` | `reconnecting` | gold | pulse | SSE 断、带 Last-Event-ID 重连 |
-| `resyncing` | `resyncing` | slate | 无 | 命中 resync-required，重拉 snapshot 重建 |
-| `disconnected` | `disconnected` | red | 无 | 不可恢复（如 401），等用户介入 |
+| ConnectionState      | 文案           | 色组  | 动效  | 含义                                     |
+| -------------------- | -------------- | ----- | ----- | ---------------------------------------- |
+| `live` + run idle    | `idle`         | green | 无    | 实时、空闲                               |
+| `live` + run running | `running`      | slate | pulse | 实时、agent 运行中                       |
+| `connecting`         | `connecting`   | gold  | pulse | 建连中                                   |
+| `reconnecting`       | `reconnecting` | gold  | pulse | SSE 断、带 Last-Event-ID 重连            |
+| `resyncing`          | `resyncing`    | slate | 无    | 命中 resync-required，重拉 snapshot 重建 |
+| `disconnected`       | `disconnected` | red   | 无    | 不可恢复（如 401），等用户介入           |
 
 > `running` 是 `live` 下的子状态（连接 live 且有 run 进行）。`reconnecting` 必须显眼（gold + pulse）；`resyncing` 用 slate 静态文字表示正在重同步，不把它误画成仍在运行。
 
 ---
 
+### 会话首次加载与重同步
+
+- 选择新的 binding 后立即按新会话身份显示，不能借用旧会话消息或发送/Stop 控制。草稿仍按会话保存且可编辑。
+- 首次读取在 800ms 内完成时不显示恢复横幅；超过 800ms 后在内容留白中显示次要文字 `Loading conversation…`，使用 `role="status" aria-live="polite"`，不挤动 composer。
+- 同会话已有内容的正常重连保留内容，只通过连接状态说明同步；缓存中的 running 不代表已确认实时状态。实际读取失败显示错误、`role="alert"` 和 `Retry conversation`。
+- 健康执行检查只保留后端准入等待，不发布虚假的 recovering 状态抢占 Web/TUI header。真实补保存或失败继续显示恢复状态与原因；执行失败且历史可读时保留历史及草稿。
+
 ## 2. 运行态（run）
 
 - **running**：状态文字 `running`(slate,pulse) + 流内三色波点思考指示器（`Thinking · {elapsed}s`）。composer 空草稿显示圆形方块 Stop，有草稿显示圆形纸飞机；发送后 follow-up 进入队列、草稿清空，恢复 Stop。
+- **等待子代理**：在既有根 StatusBar 的正常布局区域显示等待及完成/活动数量，不使用固定底部坐标覆盖输入区或末尾消息。
+- **waiting-for-permission**：当前根存在主/子待批时提示等待审批，即使没有 primary active run；这不修改无关 primary 的执行状态。
 - **idle**：状态文字 `idle`(green) + 流内定稿行 + composer 显示圆形纸飞机。
 - **中断**：double-esc 或 Stop → 转 idle（与 CLI 一致）。
 - **重连 / 重同步**：顶栏显示 `reconnecting` / `resyncing`，保留最后已知 run 状态。空草稿且最后已知 running 时显示不可点的圆形 Stop；不能据此断言 run 当前仍在执行。同步后依最新快照更新主按钮。
@@ -46,7 +55,7 @@
 UI 不得静默失败。当前已定义的呈现：
 
 - **401 token 失效** → `disconnected`(红) 文字 + 提示"重启 ohbaby serve / 重新打开"。
-- **403 错主**（审批属于另一连接）→ 权限模态内提示，不误标为已处置（见 [`components.md`](./components.md) PermissionModal）。
+- **审批同步**有独立 idle/syncing/ready/error/unavailable 状态；全局 live 不自动启用按钮。临时失败耗尽后显示 Retry approvals，严重 PERMISSION_UNAVAILABLE 保持停用、不自动重试。PERMISSION_NOT_PENDING 重新同步，旧范围错误不更新新范围。见 [`components.md`](./components.md)。
 - **网络错 / 通用失败** → 通知条（待补具体样式；归 ConversationStream 顶部或 header 下方的瞬时条）。
 
 > 注：通用错误通知条的视觉样式当前设计未给出具体稿，实现时按"瞬时、可见、可关"补齐；状态机层面已由 ConnectionState 覆盖主链路失败。
@@ -56,3 +65,20 @@ UI 不得静默失败。当前已定义的呈现：
 ## 5. 开发者可观测性（不在 UI）
 
 `seqNum / clientId / lastEventId / 端口` 等不进 UI（决策 1，简洁优先）。正确性（基线对齐、续传、resync）在内部强制执行，开发者从 devtools/console/日志查看。v0.1.6 不做指标/trace 上报（见 [`../non-functional.md`](../non-functional.md)）。
+
+## 6. 子会话阅读状态
+
+| 状态 | 呈现与交互 |
+| --- | --- |
+| 未打开 | 根消息中的紧凑委派行显示任务和 execution 状态，无额外顶部栏 |
+| 定位中 | 显示 `Locating delegation…`；目标明确后定位该次父消息，自动滚底不能覆盖定位 |
+| 已接受、未开跑 | 蓝色父消息显示 `From parent` 和 `Queued`；开跑后由同一消息身份接管 |
+| 阅读浮层 | 子消息、思考与工具增量更新；根输入区保持形状和草稿，显示 `Read-only subagent`，写操作禁用 |
+| 放大阅读 | 原消息 DOM 和阅读状态不变；显示父子路径，根阅读区和输入区隐藏；底部标明 `Read-only` |
+| 阅读旧窗口 | 保持当前阅读位置，显示后续历史间隔；用户滚动或主动加载推进窗口，也可跳转最新，不靠程序滚动循环加载 |
+| 无精确锚点 | 说明原始委派消息不可定位，展示可用历史；正文为空且有可靠存档结果时显示 `Stored result` |
+| 重连或读取失败 | 分别显示 `Reconnecting…` 或错误与 Retry；不把连接异常伪装为子任务成功 |
+| 根有待审批 | 子会话仅提示 `Approval required`；回根后实际审批卡取代输入区（含 Todo/队列），保留草稿和停止入口，最后一项处理完恢复输入区 |
+| 关闭 | 恢复根输入和焦点；根持有的子会话阅读缓存保留，重开工具展开可恢复，明确点击委派仍优先定位该次父消息 |
+
+运行结果与阅读模式相互独立：关闭、放大、收起或切换子会话都不取消 execution，也不改变其终态。

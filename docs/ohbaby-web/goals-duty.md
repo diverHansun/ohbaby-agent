@@ -24,14 +24,14 @@
 - **G2 连接层与视图层分离**：`api/daemon`（纯逻辑）能脱离 UI 独立测试；UI 能独立替换。该解耦同时让连接层保持干净 seam，将来若需抽成共享包（desktop/app 复用）代价低——但**那不是本期目标**（见 ND7）。
 - **G3 行为与 CLI/TUI 一致**：不产生"只有 web 才有"的会话行为——把 server ADR-001 的契约一致性延伸到前端。
 - **G4 轻量、同源**：纯静态 SPA，能被 daemon 同源伺服，零额外后端、零 CORS。
-- **G5 断线可恢复**：面向"网络失败模型"设计——基于 `Last-Event-ID` / snapshot 重建视图，这正是 in-process CLI 不需要、也不应背负的复杂度。
+- **G5 断线可恢复**：面向"网络失败模型"设计——普通会话事件基于 `Last-Event-ID` / snapshot 重建视图；审批独立按 epoch/root/revision 恢复，并与 TUI 使用共享 SDK 恢复引擎。
 
 ---
 
 ## Duties（职责）
 
 - **D1 浏览器 daemon 客户端**：一个 `BrowserDaemonClient` 直接实现 SDK `UiBackendClient`，对 daemon 讲 `/v1` REST + 一条逻辑 SSE（fetch-stream），含 `Last-Event-ID` 续传与 `resync-required` 处理。
-- **D2 事件投影**：把 `UiEvent` 投影为 UI 视图状态（消息流 / run 状态机 / 待审批队列 / 连接态）。
+- **D2 事件投影**：把 `UiEvent` 投影为 UI 视图状态（消息流 / run 状态机 / 连接态），并消费独立审批同步状态（待处理列表与 readiness）。
 - **D3 会话交互 UI（v0.1.6 闭环）**：snapshot 首屏、流式消息、发 prompt、权限审批（准/拒，模态 slide-up）、中断 run，以及 composer 的 **mode 切换（auto/plan）** 与 **权限策略切换（default / full-access）**。视图层详细设计见 [`ui/`](./ui/README.md)。
 - **D4 引导接入与 selected scope 传递**：从 daemon 注入的 `window.__OHBABY__` 读取 `token / clientId / baseUrl / directory`；URL fragment 可覆盖初始 selected directory。所有 workspace HTTP/SSE 请求显式发送 `x-ohbaby-directory`，不得依赖 server cwd/query fallback。
 - **D5 纯静态构建产物**：产出可被 daemon 伺服的 `dist`（HTML/JS/CSS/资源）。

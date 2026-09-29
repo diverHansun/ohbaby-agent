@@ -1,0 +1,9 @@
+
+ RUN  v2.1.9 /Users/hansun025/Projects/code-cli/ohbaby-agent
+
+ ✓ packages/ohbaby-agent/src/runtime/execution-recovery/crash-evidence.integration.test.ts (6 tests) 942ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  18:51:48
+   Duration  1.27s (transform 86ms, setup 10ms, collect 110ms, tests 942ms, environment 0ms, prepare 32ms)

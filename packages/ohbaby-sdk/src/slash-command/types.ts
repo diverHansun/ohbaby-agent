@@ -1,3 +1,5 @@
+import type { UiPromptReceipt } from "../prompt.js";
+
 export type UiSlashCommandSurface =
   | "tui"
   | "stdout"
@@ -53,6 +55,7 @@ export interface UiSlashTokenSpan {
 }
 
 export interface UiSlashCommandInvocation {
+  readonly clientRequestId?: string;
   readonly clientInvocationId: string;
   readonly commandId: string;
   readonly path: readonly string[];
@@ -133,3 +136,75 @@ export type UiCommandResolveError = UiSlashCommandResolveError;
 export type UiCommandResolveOptions = UiSlashCommandResolveOptions;
 export type UiCommandResolved = UiSlashCommandResolved;
 export type UiCommandResolveResult = UiSlashCommandResolveResult;
+
+/** Handler completion, independent of transport delivery and subsequent prompt execution. */
+export type UiCommandCompletion = {
+  readonly commandRunId: string;
+  readonly clientInvocationId: string;
+  readonly sessionId?: string;
+  /** Number of output-bearing result events. */
+  readonly outputCount: number;
+  /** Number of result and failure events, including pure actions; excludes started. */
+  readonly eventCount: number;
+  readonly promptReceipt?: UiPromptReceipt;
+} & (
+  | { readonly status: "completed" }
+  | { readonly status: "failed"; readonly error: UiSlashCommandError }
+);
+
+/** Validate receipts at transport boundaries, including older daemons returning void. */
+export function isUiCommandCompletion(
+  value: unknown,
+): value is UiCommandCompletion {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<UiCommandCompletion>;
+  if (
+    candidate.sessionId !== undefined &&
+    (typeof candidate.sessionId !== "string" ||
+      candidate.sessionId.length === 0)
+  )
+    return false;
+  if (candidate.promptReceipt !== undefined) {
+    const rawReceipt = (value as { promptReceipt: unknown }).promptReceipt;
+    if (typeof rawReceipt !== "object" || rawReceipt === null) return false;
+    const receipt = rawReceipt as Partial<UiPromptReceipt>;
+    if (
+      ![
+        receipt.promptId,
+        receipt.clientRequestId,
+        receipt.userMessageId,
+        receipt.sessionId,
+      ].every((id) => typeof id === "string" && id.length > 0) ||
+      typeof receipt.createdAt !== "string" ||
+      !Number.isFinite(Date.parse(receipt.createdAt)) ||
+      ![
+        "steered",
+        "queued",
+        "retained",
+        "starting",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "interrupted",
+      ].includes(receipt.status ?? "")
+    )
+      return false;
+  }
+  return (
+    typeof candidate.commandRunId === "string" &&
+    candidate.commandRunId.length > 0 &&
+    typeof candidate.clientInvocationId === "string" &&
+    candidate.clientInvocationId.length > 0 &&
+    typeof candidate.outputCount === "number" &&
+    Number.isSafeInteger(candidate.outputCount) &&
+    candidate.outputCount >= 0 &&
+    typeof candidate.eventCount === "number" &&
+    Number.isSafeInteger(candidate.eventCount) &&
+    candidate.eventCount >= candidate.outputCount &&
+    (candidate.status === "completed" ||
+      (candidate.status === "failed" &&
+        typeof candidate.error?.code === "string" &&
+        typeof candidate.error.message === "string"))
+  );
+}

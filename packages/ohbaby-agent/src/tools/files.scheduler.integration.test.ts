@@ -15,6 +15,8 @@ import {
   type PermissionInfo,
 } from "../permission/index.js";
 import { createBuiltinTools } from "./index.js";
+import * as fileLocks from "./utils/file-locks.js";
+import { ResourceUnavailableError } from "../core/tool-scheduler/resources.js";
 
 function createScheduler(): ToolSchedulerInstance {
   const bus = createBus();
@@ -51,12 +53,302 @@ describe("file tools scheduler integration", () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
+  it.each(["write", "edit"] as const)(
+    "cancels a queued %s before entering its protected operation",
+    async (toolName) => {
+      const bus = createBus();
+      let resourceWaiting!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        resourceWaiting = resolve;
+      });
+      const scheduler = createToolScheduler({
+        bus,
+        permissionState: createPermissionState({
+          bus,
+          initialLevel: "full-access",
+        }),
+        onExecutionFact: (fact) => {
+          if (fact.owner.callId === "queued_call" && fact.reason === "resource")
+            resourceWaiting();
+        },
+      });
+      for (const builtin of createBuiltinTools()) scheduler.register(builtin);
+      const environment = createHostLocalEnvironment(tempRoot);
+      const filePath = path.join(tempRoot, "queued.txt");
+      await fs.writeFile(filePath, "old\n");
+      const mtime = (await fs.stat(filePath)).mtimeMs;
+      let release!: () => void;
+      let entered!: () => void;
+      const enteredPromise = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holder = fileLocks.withFileLock(filePath, () => {
+        entered();
+        return gate;
+      });
+      await enteredPromise;
+      const tool = scheduler.get(toolName);
+      if (!tool) throw new Error(`Missing tool: ${toolName}`);
+      const execute = tool.execute.bind(tool);
+      let executionCount = 0;
+      vi.spyOn(tool, "execute").mockImplementation((...args) => {
+        executionCount++;
+        return execute(...args);
+      });
+      const controller = new AbortController();
+      const call = scheduler.execute({
+        runId: "queued_run",
+        callId: "queued_call",
+        environment,
+        messageId: "queued_message",
+        sessionId: "queued_session",
+        toolName,
+        signal: controller.signal,
+        params:
+          toolName === "write"
+            ? {
+                file_path: filePath,
+                content: "new\n",
+                expected_mtime_ms: mtime,
+              }
+            : { file_path: filePath, old_string: "old", new_string: "new" },
+      });
+      let successor: Promise<void> | undefined;
+      try {
+        await waiting;
+        controller.abort();
+        expect((await call).status).toBe("cancelled");
+        expect(executionCount).toBe(0);
+        let successorStarted = false;
+        successor = fileLocks.withFileLock(filePath, () => {
+          successorStarted = true;
+          return Promise.resolve();
+        });
+        await fileLocks.withFileLock(
+          path.join(tempRoot, "independent.txt"),
+          () => Promise.resolve(),
+        );
+        expect(successorStarted).toBe(false);
+        await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
+      } finally {
+        release();
+        await holder;
+        await call;
+        await successor;
+      }
+      expect(executionCount).toBe(0);
+      await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
+    },
+  );
+
+  it.each([
+    ["write", "resolve"],
+    ["write", "reject"],
+    ["edit", "resolve"],
+    ["edit", "reject"],
+  ] as const)(
+    "keeps %s protected after scheduler timeout until rename %s",
+    async (toolName, settlement) => {
+      let confirmed!: () => void;
+      const cleanupConfirmed = new Promise<void>((resolve) => {
+        confirmed = resolve;
+      });
+      let capacityWaiting!: () => void;
+      const waitingForCapacity = new Promise<void>((resolve) => {
+        capacityWaiting = resolve;
+      });
+      const startedCalls: string[] = [];
+      const bus = createBus();
+      const scheduler = createToolScheduler({
+        bus,
+        config: { concurrency: { maxConcurrency: 1 } },
+        permissionState: createPermissionState({
+          bus,
+          initialLevel: "full-access",
+        }),
+        onExecutionFact: (fact) => {
+          if (fact.phase === "started") startedCalls.push(fact.owner.callId);
+          if (
+            fact.owner.callId === "capacity_waiter" &&
+            fact.reason === "capacity"
+          )
+            capacityWaiting();
+          if (fact.owner.callId === "late_call" && fact.cleanup === "confirmed")
+            confirmed();
+        },
+      });
+      for (const tool of createBuiltinTools()) scheduler.register(tool);
+      const environment = createHostLocalEnvironment(tempRoot);
+      const filePath = path.join(tempRoot, "late.txt");
+      await fs.writeFile(filePath, "old\n");
+      const mtime = (await fs.stat(filePath)).mtimeMs;
+      let release!: () => void;
+      let entered!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const enteredPromise = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let releaseIndependent!: () => void;
+      const independentGate = new Promise<void>((resolve) => {
+        releaseIndependent = resolve;
+      });
+      let independentEntered!: () => void;
+      const independentStarted = new Promise<void>((resolve) => {
+        independentEntered = resolve;
+      });
+      const pending: Promise<unknown>[] = [];
+      const rename = fs.rename;
+      vi.spyOn(fs, "rename").mockImplementationOnce(async (...args) => {
+        entered();
+        await gate;
+        if (settlement === "reject") throw new Error("late rename failure");
+        await rename(...args);
+      });
+      vi.useFakeTimers();
+      const call = scheduler.execute({
+        runId: "late_run",
+        callId: "late_call",
+        environment,
+        messageId: "late_message",
+        sessionId: "late_session",
+        toolName,
+        params:
+          toolName === "write"
+            ? {
+                file_path: filePath,
+                content: "new\n",
+                expected_mtime_ms: mtime,
+              }
+            : { file_path: filePath, old_string: "old", new_string: "new" },
+      });
+      try {
+        await enteredPromise;
+        // Timeout ends the logical call; cleanup continues to own the file.
+        await vi.advanceTimersByTimeAsync(120_001);
+        const result = await call;
+        expect(result.status).toBe("error");
+        expect(result.error?.message).toContain("timed out");
+        await vi.advanceTimersByTimeAsync(1_000);
+        let successorStarted = false;
+        const successor = fileLocks
+          .withFileLock(filePath, async () => {
+            successorStarted = true;
+            return await fs.readFile(filePath, "utf8");
+          })
+          .catch((error: unknown) => error);
+        expect(await successor).toBeInstanceOf(ResourceUnavailableError);
+        expect(successorStarted).toBe(false);
+        await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
+        const blockedRead = await scheduler.execute({
+          callId: "late_reader",
+          messageId: "late_message",
+          sessionId: "other_session",
+          toolName: "read",
+          params: { file_path: filePath },
+          environment,
+        });
+        expect(blockedRead.status).toBe("error");
+        expect(blockedRead.error?.message).toContain("unconfirmed");
+        const blockedWrite = await scheduler.execute({
+          callId: "late_writer",
+          messageId: "late_message",
+          sessionId: "late_session",
+          toolName: "write",
+          params: { file_path: filePath, content: "must not execute\n" },
+          environment,
+        });
+        expect(blockedWrite.error?.message).toContain("unconfirmed");
+        expect(startedCalls).not.toContain("late_reader");
+        expect(startedCalls).not.toContain("late_writer");
+        const independentPath = path.join(tempRoot, "independent.txt");
+        const run = (
+          callId: string,
+          name: string,
+          params: Record<string, unknown>,
+        ): ReturnType<typeof scheduler.execute> =>
+          scheduler.execute({
+            callId,
+            messageId: "late_message",
+            sessionId: "late_session",
+            toolName: name,
+            params,
+            environment,
+          });
+        // Real file tools use the returned single slot while A still owns its file.
+        expect(
+          (
+            await run("independent_write", "write", {
+              file_path: independentPath,
+              content: "independent\n",
+            })
+          ).status,
+        ).toBe("success");
+        const independentRead = await run("independent_read", "read", {
+          file_path: independentPath,
+        });
+        expect(independentRead.status).toBe("success");
+        expect(independentRead.output).toContain("independent");
+        vi.mocked(fs.rename).mockImplementationOnce(async (...args) => {
+          independentEntered();
+          await independentGate;
+          await rename(...args);
+        });
+        const independentHolder = run("independent_holder", "write", {
+          file_path: independentPath,
+          content: "second\n",
+          expected_mtime_ms: (await fs.stat(independentPath)).mtimeMs,
+        });
+        pending.push(independentHolder);
+        await independentStarted;
+        const capacityWaiter = run("capacity_waiter", "write", {
+          file_path: path.join(tempRoot, "third.txt"),
+          content: "third\n",
+        });
+        pending.push(capacityWaiter);
+        await waitingForCapacity;
+        release();
+        await cleanupConfirmed;
+        // A's late settlement must not return the slot now owned by B.
+        await vi.advanceTimersByTimeAsync(0);
+        expect(scheduler.getStatus("capacity_waiter")).toBe("queued");
+        expect(startedCalls).not.toContain("capacity_waiter");
+        releaseIndependent();
+        expect((await independentHolder).status).toBe("success");
+        expect((await capacityWaiter).status).toBe("success");
+        await expect(
+          fileLocks.withFileLock(filePath, () => fs.readFile(filePath, "utf8")),
+        ).resolves.toBe(settlement === "resolve" ? "new\n" : "old\n");
+        await expect(fs.readdir(tempRoot)).resolves.toEqual([
+          "independent.txt",
+          "late.txt",
+          "third.txt",
+        ]);
+      } finally {
+        release();
+        releaseIndependent();
+        try {
+          await Promise.allSettled(pending);
+          await call;
+          await cleanupConfirmed;
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    },
+  );
+
   it("routes write dry_run and absolute-path writes through ToolScheduler", async () => {
     const scheduler = createScheduler();
     const environment = createHostLocalEnvironment(tempRoot);
     const absolutePath = path.join(tempRoot, "nested", "note.txt");
 
     const preview = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_preview",
       environment,
       messageId: "message_1",
@@ -75,6 +367,7 @@ describe("file tools scheduler integration", () => {
     await expect(fs.access(absolutePath)).rejects.toThrow();
 
     const write = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_actual",
       environment,
       messageId: "message_1",
@@ -97,6 +390,7 @@ describe("file tools scheduler integration", () => {
     await fs.writeFile(filePath, "old\n", "utf8");
 
     const missingMtime = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_missing_mtime",
       environment,
       messageId: "message_1",
@@ -115,6 +409,7 @@ describe("file tools scheduler integration", () => {
     await expect(fs.readFile(filePath, "utf8")).resolves.toBe("old\n");
 
     const staleMtime = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_stale_mtime",
       environment,
       messageId: "message_1",
@@ -133,6 +428,7 @@ describe("file tools scheduler integration", () => {
 
     const currentMtime = (await fs.stat(filePath)).mtimeMs;
     const success = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_matching_mtime",
       environment,
       messageId: "message_1",
@@ -155,6 +451,7 @@ describe("file tools scheduler integration", () => {
     vi.spyOn(fs, "rename").mockRejectedValueOnce(new Error("rename failed"));
 
     const result = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_rename_failure",
       environment,
       messageId: "message_1",
@@ -185,7 +482,21 @@ describe("file tools scheduler integration", () => {
       })(),
       state: permissionState,
     });
-    const scheduler = createToolScheduler({ bus, permission, permissionState });
+    const scheduler = createToolScheduler({
+      bus,
+      permission: {
+        ask: (input) =>
+          permission.ask({
+            ...input,
+            category:
+              input.category === "subagent-control"
+                ? "dangerous"
+                : input.category,
+            source: { rootSessionId: input.sessionId, ancestorSessionIds: [] },
+          }),
+      },
+      permissionState,
+    });
     const permissionUpdates: PermissionInfo[] = [];
     for (const tool of createBuiltinTools()) {
       scheduler.register(tool);
@@ -202,6 +513,7 @@ describe("file tools scheduler integration", () => {
     await fs.writeFile(outsideEditPath, "old\n", "utf8");
 
     const read = await scheduler.execute({
+      runId: "file_test_run",
       callId: "read_outside",
       environment,
       messageId: "message_1",
@@ -210,6 +522,7 @@ describe("file tools scheduler integration", () => {
       toolName: "read",
     });
     const readForEdit = await scheduler.execute({
+      runId: "file_test_run",
       callId: "read_outside_edit_target",
       environment,
       messageId: "message_1",
@@ -218,6 +531,7 @@ describe("file tools scheduler integration", () => {
       toolName: "read",
     });
     const write = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_outside",
       environment,
       messageId: "message_1",
@@ -229,6 +543,7 @@ describe("file tools scheduler integration", () => {
       toolName: "write",
     });
     const edit = await scheduler.execute({
+      runId: "file_test_run",
       callId: "edit_outside",
       environment,
       messageId: "message_1",
@@ -274,7 +589,7 @@ describe("file tools scheduler integration", () => {
     );
   });
 
-  it("remembers full-access external absolute write approval", async () => {
+  it("allows full-access external absolute writes without approval or saved rules", async () => {
     const bus = createBus();
     const permissionState = createPermissionState({
       bus,
@@ -288,7 +603,21 @@ describe("file tools scheduler integration", () => {
       })(),
       state: permissionState,
     });
-    const scheduler = createToolScheduler({ bus, permission, permissionState });
+    const scheduler = createToolScheduler({
+      bus,
+      permission: {
+        ask: (input) =>
+          permission.ask({
+            ...input,
+            category:
+              input.category === "subagent-control"
+                ? "dangerous"
+                : input.category,
+            source: { rootSessionId: input.sessionId, ancestorSessionIds: [] },
+          }),
+      },
+      permissionState,
+    });
     const permissionUpdates: PermissionInfo[] = [];
     for (const tool of createBuiltinTools()) {
       scheduler.register(tool);
@@ -305,6 +634,7 @@ describe("file tools scheduler integration", () => {
     await fs.writeFile(outsideEditPath, "old\n", "utf8");
 
     const internal = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_internal_auto",
       environment,
       messageId: "message_1",
@@ -316,6 +646,7 @@ describe("file tools scheduler integration", () => {
       toolName: "write",
     });
     const external = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_external_auto",
       environment,
       messageId: "message_1",
@@ -327,6 +658,7 @@ describe("file tools scheduler integration", () => {
       toolName: "write",
     });
     const readForEdit = await scheduler.execute({
+      runId: "file_test_run",
       callId: "read_external_auto_edit",
       environment,
       messageId: "message_1",
@@ -335,6 +667,7 @@ describe("file tools scheduler integration", () => {
       toolName: "read",
     });
     const externalEdit = await scheduler.execute({
+      runId: "file_test_run",
       callId: "edit_external_auto",
       environment,
       messageId: "message_1",
@@ -352,13 +685,8 @@ describe("file tools scheduler integration", () => {
     expect(external.status).toBe("success");
     expect(readForEdit.status).toBe("success");
     expect(externalEdit.status).toBe("success");
-    expect(permissionUpdates.map((info) => info.callId)).toEqual([
-      "write_external_auto",
-    ]);
-    expect(permissionUpdates[0]?.name).toBe("external_directory");
-    expect(permissionUpdates[0]?.pattern.replaceAll("\\", "/")).toContain(
-      outsideRoot.replaceAll("\\", "/").toLowerCase(),
-    );
+    expect(permissionUpdates).toEqual([]);
+    expect(permissionState.getSessionRules("session_1")).toEqual([]);
     await expect(fs.readFile(outsideWritePath, "utf8")).resolves.toBe(
       "external\n",
     );
@@ -376,7 +704,21 @@ describe("file tools scheduler integration", () => {
       })(),
       state: permissionState,
     });
-    const scheduler = createToolScheduler({ bus, permission, permissionState });
+    const scheduler = createToolScheduler({
+      bus,
+      permission: {
+        ask: (input) =>
+          permission.ask({
+            ...input,
+            category:
+              input.category === "subagent-control"
+                ? "dangerous"
+                : input.category,
+            source: { rootSessionId: input.sessionId, ancestorSessionIds: [] },
+          }),
+      },
+      permissionState,
+    });
     const permissionUpdates: PermissionInfo[] = [];
     for (const tool of createBuiltinTools()) {
       scheduler.register(tool);
@@ -396,6 +738,7 @@ describe("file tools scheduler integration", () => {
     const siblingViaDotDot = `${safeDir}${path.sep}..${path.sep}other${path.sep}note.txt`;
 
     const safeWrite = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_safe_absolute",
       environment,
       messageId: "message_1",
@@ -407,6 +750,7 @@ describe("file tools scheduler integration", () => {
       toolName: "write",
     });
     const siblingWrite = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_sibling_dotdot",
       environment,
       messageId: "message_1",
@@ -459,6 +803,7 @@ describe("file tools scheduler integration", () => {
     const escapedDirectory = path.join(outsideRoot, "newdir");
 
     const result = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_symlink_escape",
       environment,
       messageId: "message_1",
@@ -488,7 +833,21 @@ describe("file tools scheduler integration", () => {
       generateId: () => "permission_relative_symlink_escape",
       state: permissionState,
     });
-    const scheduler = createToolScheduler({ bus, permission, permissionState });
+    const scheduler = createToolScheduler({
+      bus,
+      permission: {
+        ask: (input) =>
+          permission.ask({
+            ...input,
+            category:
+              input.category === "subagent-control"
+                ? "dangerous"
+                : input.category,
+            source: { rootSessionId: input.sessionId, ancestorSessionIds: [] },
+          }),
+      },
+      permissionState,
+    });
     const permissionUpdates: PermissionInfo[] = [];
     for (const tool of createBuiltinTools()) {
       scheduler.register(tool);
@@ -507,6 +866,7 @@ describe("file tools scheduler integration", () => {
     );
 
     const result = await scheduler.execute({
+      runId: "file_test_run",
       callId: "write_relative_symlink_escape",
       environment,
       messageId: "message_1",
@@ -538,6 +898,7 @@ describe("file tools scheduler integration", () => {
     await fs.writeFile(filePath, "old\nunchanged\n", "utf8");
 
     const preview = await scheduler.execute({
+      runId: "file_test_run",
       callId: "edit_preview",
       environment,
       messageId: "message_1",
@@ -559,6 +920,7 @@ describe("file tools scheduler integration", () => {
     );
 
     const actual = await scheduler.execute({
+      runId: "file_test_run",
       callId: "edit_actual",
       environment,
       messageId: "message_1",
@@ -578,6 +940,7 @@ describe("file tools scheduler integration", () => {
     );
 
     const consecutive = await scheduler.execute({
+      runId: "file_test_run",
       callId: "edit_consecutive",
       environment,
       messageId: "message_1",
@@ -597,6 +960,7 @@ describe("file tools scheduler integration", () => {
 
     await fs.writeFile(filePath, "external\n", "utf8");
     const staleContentEdit = await scheduler.execute({
+      runId: "file_test_run",
       callId: "edit_stale_content",
       environment,
       messageId: "message_1",
@@ -614,6 +978,7 @@ describe("file tools scheduler integration", () => {
     await expect(fs.readFile(filePath, "utf8")).resolves.toBe("external\n");
 
     const contentMatched = await scheduler.execute({
+      runId: "file_test_run",
       callId: "edit_current_content",
       environment,
       messageId: "message_1",

@@ -35,6 +35,7 @@ export function promptRecordToUi(
 ): UiPromptSubmission {
   return {
     promptId: record.promptId,
+    steerReceipt: record.steerReceipt,
     clientRequestId: record.clientRequestId,
     scopeKey: record.scopeKey,
     sessionId: record.sessionId,
@@ -50,6 +51,12 @@ export function promptRecordToUi(
         ? undefined
         : new Date(record.editLeaseExpiresAt).toISOString(),
     createdAt: new Date(record.createdAt).toISOString(),
+    acceptedAt:
+      record.acceptedAt === undefined
+        ? undefined
+        : new Date(record.acceptedAt).toISOString(),
+    admissionOrder: record.admissionOrder,
+    endTimeSource: record.endTimeSource,
     updatedAt: new Date(record.updatedAt).toISOString(),
     startedAt:
       record.startedAt === undefined
@@ -67,6 +74,7 @@ export function promptRecordToCompletion(
 ): UiCompletedPromptSubmission {
   const { endedAt, error, status, ...prompt } = promptRecordToUi(record);
   if (
+    status !== "steered" &&
     status !== "succeeded" &&
     status !== "failed" &&
     status !== "cancelled" &&

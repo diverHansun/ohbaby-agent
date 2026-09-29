@@ -1,6 +1,28 @@
 import type { UiReasoningConfig } from "./connect-model.js";
+/** Original skill intent, separate from the expanded execution input. */
+export interface UiPromptNamingSource {
+  readonly skillName: string;
+  readonly request: string;
+}
+
+export function isUiPromptNamingSource(
+  value: unknown,
+): value is UiPromptNamingSource {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "skillName" in value &&
+    typeof value.skillName === "string" &&
+    "request" in value &&
+    typeof value.request === "string"
+  );
+}
+
 export type UiPromptSubmissionStatus =
+  | "steered"
   | "queued"
+  | "retained"
   | "starting"
   | "running"
   | "succeeded"
@@ -21,6 +43,7 @@ export interface UiPromptError {
 }
 
 export interface UiPromptSubmission {
+  readonly steerReceipt?: UiSteerQueuedPromptReceipt;
   readonly reasoning?: UiReasoningConfig;
   readonly promptId: string;
   readonly clientRequestId: string;
@@ -34,6 +57,9 @@ export interface UiPromptSubmission {
   readonly editLeaseOwnerId?: string;
   readonly editLeaseExpiresAt?: string;
   readonly createdAt: string;
+  readonly acceptedAt?: string;
+  readonly admissionOrder?: number;
+  readonly endTimeSource?: "recovery";
   readonly updatedAt: string;
   readonly startedAt?: string;
   readonly endedAt?: string;
@@ -41,7 +67,7 @@ export interface UiPromptSubmission {
 
 export type UiPromptTerminalStatus = Extract<
   UiPromptSubmissionStatus,
-  "succeeded" | "failed" | "cancelled" | "interrupted"
+  "succeeded" | "failed" | "cancelled" | "interrupted" | "steered"
 >;
 
 type UiCompletedPromptBase = Omit<
@@ -52,6 +78,10 @@ type UiCompletedPromptBase = Omit<
 };
 
 export type UiCompletedPromptSubmission =
+  | (UiCompletedPromptBase & {
+      readonly status: "steered";
+      readonly error?: never;
+    })
   | (UiCompletedPromptBase & {
       readonly status: "succeeded";
       readonly error?: never;
@@ -88,6 +118,18 @@ export interface UiEditQueuedPromptInput {
   readonly editLeaseId: string;
 }
 
+export interface UiResubmitRetainedPromptInput extends UiEditQueuedPromptInput {
+  readonly operationId: string;
+}
+
+export interface UiPromptResubmissionReceipt {
+  readonly operationId: string;
+  readonly promptId: string;
+  readonly userMessageId: string;
+  readonly sessionId: string;
+  readonly acceptedAt: number;
+}
+
 export interface UiCancelQueuedPromptInput {
   readonly promptId: string;
   readonly editLeaseId?: string;
@@ -112,4 +154,19 @@ export interface UiRenewPromptEditLeaseInput {
 export interface UiReleasePromptEditLeaseInput {
   readonly promptId: string;
   readonly editLeaseId: string;
+}
+
+/** Transfers one queued submission into this exact active run, without changing its reasoning settings. */
+export interface UiSteerQueuedPromptInput {
+  readonly promptId: string;
+  readonly expectedRunId: string;
+  readonly clientRequestId: string;
+}
+export interface UiSteerQueuedPromptReceipt {
+  readonly promptId: string;
+  readonly userMessageId: string;
+  readonly inputId: string;
+  readonly acceptedTargetRunId: string;
+  readonly acceptedAt: number;
+  readonly clientRequestId: string;
 }

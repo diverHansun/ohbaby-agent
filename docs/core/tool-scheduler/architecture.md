@@ -66,10 +66,11 @@ ToolScheduler 是 ohbaby-agent 的工具调度中心，位于 Agent 与 tools �
 **职责**：管理工具注册和查询
 
 **数据结构**：
+
 ```typescript
 class ToolRegistry {
-  private tools: Map<string, Tool>             // 所有来源的工具
-  private categoryMap: Map<string, ToolCategory>  // 显式或推断类别映射
+  private tools: Map<string, Tool>; // 所有来源的工具
+  private categoryMap: Map<string, ToolCategory>; // 显式或推断类别映射
 }
 ```
 
@@ -78,36 +79,38 @@ Registry 不按来源维护多个 map；来源由每个 `Tool.source` 字段表�
 > 网络工具（`web_search` / `web_fetch`）以 `source: "builtin"` 注册到统一 `tools` map；它们是 `tools` 入口，后端通过 `services/search-providers/registry` 调用具体厂商，对调度器是透明的。
 
 **主要方法**：
+
 - `register(tool)`: 注册工具
 - `get(name)`: 获取工具
 - `getCategory(name)`: 获取工具类别
 - `getAvailableTools(mode)`: 根据模式获取可用工具
 
 **类别映射表**：
+
 ```typescript
 const BUILTIN_CATEGORIES: Record<string, ToolCategory> = {
   // readonly（只读，可并行 ≤5）
-  'read': 'readonly',
-  'glob': 'readonly',
-  'grep': 'readonly',
-  'list': 'readonly',
-  'todo_read': 'readonly',
+  read: "readonly",
+  glob: "readonly",
+  grep: "readonly",
+  list: "readonly",
+  todo_read: "readonly",
 
   // write（写入，串行）
-  'write': 'write',
-  'edit': 'write',
-  'todo_write': 'write',
+  write: "write",
+  edit: "write",
+  todo_write: "write",
 
   // dangerous（危险，串行）
-  'bash': 'dangerous',
+  bash: "dangerous",
 
   // network（网络，可并行 ≤5）
-  'web_fetch': 'network',
-  'web_search': 'network',
+  web_fetch: "network",
+  web_search: "network",
 
   // subagent（子代理，可并行 ≤3）
-  'task': 'subagent',
-}
+  task: "subagent",
+};
 
 // MCP 工具类别在注册时由 adaptMcpTool() 根据 annotations.readOnlyHint 推断：
 //   readOnlyHint === true  → 'readonly'
@@ -121,7 +124,7 @@ ToolScheduler 不消费 MCP 私有的 `isTrusted`。需要绕过普通类别自�
 
 ```typescript
 interface Tool {
-  requireExplicitApproval?: boolean
+  requireExplicitApproval?: boolean;
 }
 ```
 
@@ -132,20 +135,22 @@ interface Tool {
 **职责**：管理工具调用状态
 
 **状态定义**：
+
 ```typescript
 type ToolCallStatus =
-  | 'pending'           // 等待处理
-  | 'checking_permission' // 检查权限状态
-  | 'awaiting_approval' // 等待用户确认
-  | 'queued'            // 等待执行（并发控制）
-  | 'executing'         // 正在执行
-  | 'success'           // 执行成功
-  | 'error'             // 执行失败
-  | 'rejected'          // 被拒绝
-  | 'cancelled'         // 被取消
+  | "pending" // 等待处理
+  | "checking_permission" // 检查权限状态
+  | "awaiting_approval" // 等待用户确认
+  | "queued" // 等待执行（并发控制）
+  | "executing" // 正在执行
+  | "success" // 执行成功
+  | "error" // 执行失败
+  | "rejected" // 被拒绝
+  | "cancelled"; // 被取消
 ```
 
 **状态转换规则**：
+
 ```
 pending
    │
@@ -170,6 +175,7 @@ checking_permission
 **职责**：控制工具执行的并发，维护三个独立计数器
 
 **并发策略**：
+
 - `readonly`/`network`：读写互斥锁，最多 5 个并行
 - `write`/`dangerous`：排他锁，无任何读/写操作时才能执行
 - `memory`：独立于读写锁，始终允许并行（不受 readingCount/writeInProgress 影响）
@@ -178,66 +184,81 @@ checking_permission
 > **注意**：memory 和 subagent 不参与 wave 分组（见 §2.4），它们在 `executeBatch()` 中被分离并立即启动。但 subagent 仍经过 CC 层的 `canExecute()` 准入检查以维持 maxSubagent=3 的硬限制。
 
 **核心逻辑**：
+
 ```typescript
 class ConcurrencyController {
-  private readingCount = 0           // readonly/network 计数
-  private writeInProgress = false    // write/dangerous 标志
-  private subagentCount = 0          // subagent 独立计数
-  private readonly maxRead = 5
-  private readonly maxSubagent = 3
-  private pendingQueue: QueuedCall[] = []
+  private readingCount = 0; // readonly/network 计数
+  private writeInProgress = false; // write/dangerous 标志
+  private subagentCount = 0; // subagent 独立计数
+  private readonly maxRead = 5;
+  private readonly maxSubagent = 3;
+  private pendingQueue: QueuedCall[] = [];
 
   canExecute(category: ToolCategory): boolean {
     switch (category) {
-      case 'memory':
-        return true  // 始终允许，不受读写锁影响
+      case "memory":
+        return true; // 始终允许，不受读写锁影响
 
-      case 'subagent':
-        return this.subagentCount < this.maxSubagent  // 独立上限，不阻塞读写
+      case "subagent":
+        return this.subagentCount < this.maxSubagent; // 独立上限，不阻塞读写
 
-      case 'readonly':
-      case 'network':
-        return !this.writeInProgress && this.readingCount < this.maxRead
+      case "readonly":
+      case "network":
+        return !this.writeInProgress && this.readingCount < this.maxRead;
 
-      case 'write':
-      case 'dangerous':
-        return !this.writeInProgress && this.readingCount === 0
+      case "write":
+      case "dangerous":
+        return !this.writeInProgress && this.readingCount === 0;
     }
   }
 
   acquire(category: ToolCategory): void {
     switch (category) {
-      case 'memory':    break  // 无需计数
-      case 'subagent':  this.subagentCount++; break
-      case 'readonly':
-      case 'network':   this.readingCount++; break
-      case 'write':
-      case 'dangerous': this.writeInProgress = true; break
+      case "memory":
+        break; // 无需计数
+      case "subagent":
+        this.subagentCount++;
+        break;
+      case "readonly":
+      case "network":
+        this.readingCount++;
+        break;
+      case "write":
+      case "dangerous":
+        this.writeInProgress = true;
+        break;
     }
   }
 
   release(category: ToolCategory): void {
     switch (category) {
-      case 'memory':    break
-      case 'subagent':  this.subagentCount--; break
-      case 'readonly':
-      case 'network':   this.readingCount--; break
-      case 'write':
-      case 'dangerous': this.writeInProgress = false; break
+      case "memory":
+        break;
+      case "subagent":
+        this.subagentCount--;
+        break;
+      case "readonly":
+      case "network":
+        this.readingCount--;
+        break;
+      case "write":
+      case "dangerous":
+        this.writeInProgress = false;
+        break;
     }
-    this.processQueue()
+    this.processQueue();
   }
 }
 ```
 
 **并发矩阵**：
 
-| 当前状态 | readonly/network | write/dangerous | memory | subagent† |
-|----------|-----------------|-----------------|--------|----------|
-| 空闲 | 允许（≤5） | 允许 | 始终允许 | 允许（≤3） |
-| 有读操作 | 允许（≤5） | 排队等待 | 始终允许 | 允许（≤3） |
-| 有写操作 | 排队等待 | 排队等待 | 始终允许 | 允许（≤3） |
-| subagent=3 | 允许（≤5） | 允许 | 始终允许 | 排队等待 |
+| 当前状态   | readonly/network | write/dangerous | memory   | subagent†  |
+| ---------- | ---------------- | --------------- | -------- | ---------- |
+| 空闲       | 允许（≤5）       | 允许            | 始终允许 | 允许（≤3） |
+| 有读操作   | 允许（≤5）       | 排队等待        | 始终允许 | 允许（≤3） |
+| 有写操作   | 排队等待         | 排队等待        | 始终允许 | 允许（≤3） |
+| subagent=3 | 允许（≤5）       | 允许            | 始终允许 | 排队等待   |
 
 > † subagent 和 memory 不参与 wave 分组，在 `executeBatch()` 中被提前分离并立即启动。此矩阵描述的是 CC 层对单个调用的准入判断，与 wave 分组无关。
 
@@ -245,17 +266,17 @@ class ConcurrencyController {
 
 `executeBatch()` 采用两层并发控制，各层职责不同：
 
-| 层级 | 组件 | 职责 | 粒度 |
-|------|------|------|------|
-| Wave 层 | `executeBatch` 内部 | 按类别将调用分为 wave → 逐 wave 执行 | 批次内分组 |
-| CC 层 | `ConcurrencyController` | 读写互斥、subagent 计数上限 | 单个调用准入 |
+| 层级    | 组件                    | 职责                                 | 粒度         |
+| ------- | ----------------------- | ------------------------------------ | ------------ |
+| Wave 层 | `executeBatch` 内部     | 按类别将调用分为 wave → 逐 wave 执行 | 批次内分组   |
+| CC 层   | `ConcurrencyController` | 读写互斥、subagent 计数上限          | 单个调用准入 |
 
 **两层如何协作**：
 
 ```
 executeBatch(calls)
   │
-  ├── 1. Policy 检查 + Permission 确认（ASK 串行逐一确认）
+  ├── 1. Policy 检查 + Permission 确认（ASK 独立登记并回答）
   │
   ├── 2. 分离 memory/subagent → 立即启动（不进波次）
   │
@@ -275,6 +296,7 @@ executeBatch(calls)
 ```
 
 **设计取舍**：
+
 - Wave 层保证语义安全：写/危险操作不与其他操作混入同一 wave
 - CC 层保证资源安全：即使同一 wave 内调用过多，仍受 maxRead/maxSubagent 限制
 - memory/subagent 跳过 wave：memory 无副作用无需排队；subagent 可能长时间运行，阻塞后续 wave 不合理
@@ -284,6 +306,7 @@ executeBatch(calls)
 **职责**：执行工具调用
 
 **执行流程**：
+
 1. 检查工具是否存在
 2. 创建 ToolCall 对象，状态设为 pending
 3. 调用 Policy.check() 获取决策
@@ -301,11 +324,13 @@ executeBatch(calls)
 **应用场景**：工具调用状态管理
 
 **实现方式**：
+
 - 明确的状态枚举
 - 显式的状态转换规则
 - 每次转换通过 transition() 方法
 
 **选择理由**：
+
 - 工具调用有明确的生命周期
 - 状态转换需要可追踪
 - 便于调试和监控
@@ -315,10 +340,12 @@ executeBatch(calls)
 **应用场景**：并发控制和任务排队
 
 **实现方式**：
+
 - pendingQueue 存储等待执行的调用
 - processQueue() 在资源释放时处理队列
 
 **选择理由**：
+
 - 写操作需要等待读操作完成
 - 保证公平调度
 
@@ -327,10 +354,12 @@ executeBatch(calls)
 **应用场景**：状态变化通知
 
 **实现方式**：
+
 - 通过 Bus 发布状态变化事件
 - UI 和其他模块订阅事件
 
 **选择理由**：
+
 - 解耦状态管理和 UI 更新
 - 支持多个订阅者
 
@@ -342,10 +371,10 @@ executeBatch(calls)
 
 ```typescript
 // 获取当前模式
-const mode = Policy.getMode()
+const mode = Policy.getMode();
 
 // 检查工具执行决策
-const decision = Policy.check(category)
+const decision = Policy.check(category);
 // decision: 'allow' | 'deny' | 'ask'
 ```
 
@@ -357,11 +386,11 @@ try {
   await Permission.ask({
     sessionId,
     messageId,
-    type: 'tool',
+    type: "tool",
     name: toolName,
     title: `Execute ${toolName}`,
-    metadata: { params }
-  })
+    metadata: { params },
+  });
   // 用户批准，继续执行
 } catch (error) {
   if (error instanceof Permission.RejectedError) {
@@ -378,8 +407,8 @@ const result = await tool.execute(params, {
   sessionId,
   messageId,
   callId,
-  signal
-})
+  signal,
+});
 ```
 
 ---
@@ -388,16 +417,16 @@ const result = await tool.execute(params, {
 
 ### 5.1 发布的事件
 
-| 事件名称 | 触发时机 | 携带数据 |
-|----------|----------|----------|
-| ToolScheduler.Event.StatusChanged | 状态变化时 | callId, previousStatus, currentStatus, toolName |
-| ToolScheduler.Event.ExecutionStarted | 开始执行时 | callId, toolName, params |
-| ToolScheduler.Event.ExecutionCompleted | 执行完成时 | callId, toolName, result |
+| 事件名称                               | 触发时机   | 携带数据                                        |
+| -------------------------------------- | ---------- | ----------------------------------------------- |
+| ToolScheduler.Event.StatusChanged      | 状态变化时 | callId, previousStatus, currentStatus, toolName |
+| ToolScheduler.Event.ExecutionStarted   | 开始执行时 | callId, toolName, params                        |
+| ToolScheduler.Event.ExecutionCompleted | 执行完成时 | callId, toolName, result                        |
 
 ### 5.2 订阅的事件
 
-| 事件名称 | 来源 | 处理逻辑 |
-|----------|------|----------|
+| 事件名称                 | 来源       | 处理逻辑         |
+| ------------------------ | ---------- | ---------------- |
 | Permission.Event.Replied | Permission | 处理用户确认响应 |
 
 ---
@@ -406,14 +435,14 @@ const result = await tool.execute(params, {
 
 ### 6.1 错误类型
 
-| 错误类型 | 场景 | 处理方式 |
-|----------|------|----------|
-| ToolNotFoundError | 工具不存在 | 返回错误，状态设为 error |
-| PolicyDeniedError | Policy 返回 deny | 状态设为 rejected |
-| PermissionRejectedError | 用户拒绝 | 状态设为 rejected |
-| ExecutionError | 工具执行失败 | 状态设为 error |
-| TimeoutError | 执行超时 | 终止执行，状态设为 error |
-| CancelledError | 被取消 | 状态设为 cancelled |
+| 错误类型                | 场景             | 处理方式                 |
+| ----------------------- | ---------------- | ------------------------ |
+| ToolNotFoundError       | 工具不存在       | 返回错误，状态设为 error |
+| PolicyDeniedError       | Policy 返回 deny | 状态设为 rejected        |
+| PermissionRejectedError | 用户拒绝         | 状态设为 rejected        |
+| ExecutionError          | 工具执行失败     | 状态设为 error           |
+| TimeoutError            | 执行超时         | 终止执行，状态设为 error |
+| CancelledError          | 被取消           | 状态设为 cancelled       |
 
 ### 6.2 错误恢复
 
@@ -434,13 +463,13 @@ const result = await tool.execute(params, {
 
 ```typescript
 // 创建带超时的 AbortController
-const controller = new AbortController()
-const timeout = setTimeout(() => controller.abort(), 120000)
+const controller = new AbortController();
+const timeout = setTimeout(() => controller.abort(), 120000);
 
 try {
-  await tool.execute(params, { ...context, signal: controller.signal })
+  await tool.execute(params, { ...context, signal: controller.signal });
 } finally {
-  clearTimeout(timeout)
+  clearTimeout(timeout);
 }
 ```
 
@@ -450,18 +479,18 @@ try {
 
 ### 8.1 外部依赖
 
-| 依赖模块 | 依赖方式 | 用途 |
-|----------|----------|------|
-| Policy | 运行时依赖 | 获取模式和决策 |
-| Permission | 运行时依赖 | 用户确认 |
-| Bus | 运行时依赖 | 事件发布/订阅 |
-| tools | 运行时依赖 | 工具实现 |
+| 依赖模块   | 依赖方式   | 用途           |
+| ---------- | ---------- | -------------- |
+| Policy     | 运行时依赖 | 获取模式和决策 |
+| Permission | 运行时依赖 | 用户确认       |
+| Bus        | 运行时依赖 | 事件发布/订阅  |
+| tools      | 运行时依赖 | 工具实现       |
 
 ### 8.2 被依赖
 
-| 依赖方 | 调用接口 | 用途 |
-|--------|----------|------|
-| Agent | execute(), getAvailableTools() | 工具调用和工具列表 |
+| 依赖方 | 调用接口                       | 用途               |
+| ------ | ------------------------------ | ------------------ |
+| Agent  | execute(), getAvailableTools() | 工具调用和工具列表 |
 
 ---
 

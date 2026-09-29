@@ -1,0 +1,46 @@
+{
+  "verifiedAt": "2026-09-28T12:52:02.646Z",
+  "tuiExitCode": 0,
+  "modelRequests": 0,
+  "daemonExited": true,
+  "providerClosed": true,
+  "credentialsRemoved": true,
+  "receiptCount": 2,
+  "runCount": 4,
+  "prompts": [
+    {
+      "text": "I4_WEB_HOLD",
+      "status": "interrupted"
+    },
+    {
+      "text": "I4_WEB_RESPONSE_LOST",
+      "status": "succeeded"
+    },
+    {
+      "text": "I4_WEB_C",
+      "status": "retained"
+    },
+    {
+      "text": "I4_WEB_E",
+      "status": "retained"
+    },
+    {
+      "text": "I4_TUI_HOLD",
+      "status": "interrupted"
+    },
+    {
+      "text": "I4_TUI_RESPONSE_LOST",
+      "status": "succeeded"
+    },
+    {
+      "text": "I4_TUI_C",
+      "status": "retained"
+    },
+    {
+      "text": "I4_TUI_E",
+      "status": "retained"
+    }
+  ],
+  "footerErrorAbsent": true,
+  "retainedItemsPreserved": true
+}

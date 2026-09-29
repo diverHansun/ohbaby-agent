@@ -1,4 +1,4 @@
-import type { UiEvent, UiEventHandler, UiNotice, UiSnapshot } from "ohbaby-sdk";
+import type { UiEvent, UiEventHandler, UiNotice } from "ohbaby-sdk";
 import type { BusUnsubscribe } from "../../bus/index.js";
 import type { NoticeDraft } from "./types.js";
 
@@ -31,14 +31,23 @@ export class InProcessEventRouter {
     });
   }
 
-  async publishSnapshotReplacement(
-    readSnapshot: () => Promise<UiSnapshot>,
-  ): Promise<void> {
-    this.publish({
-      snapshot: await readSnapshot(),
-      timestamp: this.options.nowMs(),
-      type: "snapshot.replaced",
-    });
+  /** Critical projection delivery reports failure after all healthy observers run. */
+  publishRecovery(event: UiEvent): void {
+    let failure: unknown;
+    let failed = false;
+    for (const handler of this.handlers) {
+      try {
+        handler(event);
+      } catch (error) {
+        failed = true;
+        failure = error;
+        if (event.type === "session.unavailable") this.handlers.delete(handler);
+      }
+    }
+    if (failed)
+      throw failure instanceof Error
+        ? failure
+        : new Error("Session observer failed", { cause: failure });
   }
 
   subscribeEvents(handler: UiEventHandler): BusUnsubscribe {

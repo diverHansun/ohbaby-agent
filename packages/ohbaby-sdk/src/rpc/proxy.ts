@@ -7,10 +7,23 @@ interface SerializedError {
   readonly stack?: string;
 }
 
-const CALLBACK_KEYS = new Set<PropertyKey>(["subscribeEvents"]);
-const NESTED_SIGNAL_METHODS = new Set<PropertyKey>([
-  "submitPromptAndWait",
-  "waitForPrompt",
+const CALLBACK_KEYS = new Set<PropertyKey>([
+  "subscribeEvents",
+  "subscribePermissionEvents",
+]);
+const NESTED_SIGNAL_ARGUMENTS = new Map<PropertyKey, number>([
+  ["submitPromptAndWait", 1],
+  ["waitForPrompt", 1],
+  ["getPermissionSnapshot", 0],
+  ["getSessionView", 0],
+  ["getSessionHistory", 0],
+  ["getSessionControl", 0],
+  ["getPromptReceipt", 0],
+  ["listSubagentExecutions", 0],
+  ["getSubagentExecutionView", 0],
+  ["getSubagentConversationView", 0],
+  ["watchSubagentConversation", 0],
+  ["unwatchSubagentConversation", 0],
 ]);
 
 function boundaryDelay(): Promise<void> {
@@ -97,15 +110,16 @@ function extractCallSignal(
   methodName: PropertyKey,
   args: readonly unknown[],
 ): ExtractedCallSignal {
-  if (NESTED_SIGNAL_METHODS.has(methodName)) {
-    const options = args[1];
+  const optionsIndex = NESTED_SIGNAL_ARGUMENTS.get(methodName);
+  if (optionsIndex !== undefined) {
+    const options = args[optionsIndex];
     if (isRecord(options) && isAbortSignal(options.signal)) {
       const { signal, ...serializableOptions } = options;
       const serializableArgs = [...args];
-      serializableArgs[1] = serializableOptions;
+      serializableArgs[optionsIndex] = serializableOptions;
       return {
         args: serializableArgs,
-        nestedOptionsIndex: 1,
+        nestedOptionsIndex: optionsIndex,
         signal,
       };
     }
@@ -215,8 +229,14 @@ export function createRPC<API extends object>(): {
     ): API & CallbackAPI {
       return new Proxy(callbacks, {
         get(target, prop): unknown {
-          if (CALLBACK_KEYS.has(prop) && prop in target) {
-            return (target as Record<PropertyKey, unknown>)[prop];
+          if (CALLBACK_KEYS.has(prop)) {
+            if (prop in target) {
+              return (target as Record<PropertyKey, unknown>)[prop];
+            }
+            // Local subscriptions carry live callbacks and return a synchronous
+            // unsubscribe function; neither belongs on the JSON call boundary.
+            const method = impl && (impl as Record<PropertyKey, unknown>)[prop];
+            if (typeof method === "function") return method.bind(impl);
           }
           if (typeof prop === "symbol") {
             return undefined;

@@ -881,15 +881,10 @@ describe("ohbaby-web eventReducer", () => {
     );
 
     expect(state.snapshot?.activeSessionId).toBe("session_2");
-    expect(state.commandNotices).toMatchObject([
-      {
-        id: "command_new",
-        kind: "success",
-      },
-    ]);
+    expect(state.commandNotices).toEqual([]);
   });
 
-  it("projects slash command failures into command notices", () => {
+  it("ignores unassociated command failures", () => {
     const state = reduceUiEvent(
       replaceSnapshot(emptySnapshot(), 0),
       {
@@ -906,21 +901,26 @@ describe("ohbaby-web eventReducer", () => {
       1,
     );
 
-    expect(state.commandNotices).toEqual([
-      {
-        commandId: "command_bad",
-        createdAt: timestamp,
-        id: "command_bad",
-        kind: "error",
-        path: [],
-        text: "Unknown command",
-      },
-    ]);
+    expect(state.commandNotices).toEqual([]);
   });
 
   it("filters unsupported commands from help command notices", () => {
     const state = reduceUiEvent(
-      replaceSnapshot(emptySnapshot(), 0),
+      reduceUiEvent(
+        replaceSnapshot(emptySnapshot(), 0),
+        {
+          type: "command.started",
+          command: {
+            commandRunId: "command_help",
+            clientInvocationId: "invoke_help",
+            commandId: "help",
+            path: ["help"],
+            surface: "tui",
+          },
+          timestamp: Date.parse(timestamp),
+        },
+        0.5,
+      ),
       {
         clientInvocationId: "invoke_help",
         commandRunId: "command_help",

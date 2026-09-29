@@ -1,0 +1,55 @@
+{
+  "commit": "47605aaa",
+  "command": "pnpm test",
+  "exitCode": 0,
+  "files": {
+    "passed": 475,
+    "skipped": 6,
+    "total": 481
+  },
+  "tests": {
+    "passed": 5316,
+    "skipped": 17,
+    "total": 5333
+  },
+  "durationSeconds": 234.99,
+  "logTail": [
+    "   ✓ npm packed CLI smoke > installs the packed ohbaby-cli tarball globally and exposes ohbaby help and version 144993ms",
+    "",
+    " Test Files  475 passed | 6 skipped (481)",
+    "      Tests  5316 passed | 17 skipped (5333)",
+    "   Start at  13:46:24",
+    "   Duration  234.99s (transform 9.82s, setup 1.78s, collect 64.13s, tests 567.42s, environment 3.52s, prepare 15.86s)"
+  ],
+  "build": {
+    "command": "pnpm build",
+    "exitCode": 0,
+    "afterFinalFullSuite": true
+  },
+  "hooks": {
+    "lintErrors": 0,
+    "lintWarnings": 93,
+    "typecheck": "passed"
+  },
+  "protectedExecutionPaths": {
+    "base": "8d154655",
+    "head": "47605aaa",
+    "paths": [
+      "packages/ohbaby-agent/src/core/system-prompt",
+      "packages/ohbaby-agent/src/core/context",
+      "packages/ohbaby-agent/src/core/llm-client",
+      "packages/ohbaby-agent/src/core/interface-providers",
+      "packages/ohbaby-agent/src/core/tools",
+      "packages/ohbaby-agent/src/runtime/subagent"
+    ],
+    "changedFiles": [],
+    "realCacheHitRateMeasured": false
+  },
+  "cleanup": {
+    "generatedImageFilesDeleted": 45,
+    "testBrowserTabsClosed": true,
+    "viewportOverrideReset": true,
+    "ownedServicesStopped": true,
+    "userDaemon4096Modified": false
+  }
+}

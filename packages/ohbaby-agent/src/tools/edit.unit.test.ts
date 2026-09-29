@@ -182,7 +182,7 @@ describe("edit file tool", () => {
 
   it("rejects missing, multiple, binary, and oversized edits without changing text files", async () => {
     const target = await writeFile(tempRoot, "note.txt", "same\nsame\n");
-    await writeFile(tempRoot, "large.txt", "x".repeat(1_000_001));
+    await writeFile(tempRoot, "large.txt", "x".repeat(10 * 1024 * 1024 + 1));
     await fs.writeFile(
       path.join(tempRoot, "binary.bin"),
       Buffer.from([0x61, 0x00, 0x62]),
@@ -229,7 +229,7 @@ describe("edit file tool", () => {
         },
         context,
       ),
-    ).rejects.toThrow("File is too large to read");
+    ).rejects.toThrow("Edit original budget");
 
     await expect(fs.readFile(target, "utf8")).resolves.toBe("same\nsame\n");
   });
@@ -344,5 +344,199 @@ describe("edit file tool", () => {
     await expect(fs.readFile(target, "utf8")).resolves.toBe(
       "top = 1\nmiddle = keep\nbottom = 2\n",
     );
+  });
+  it("rejects invalid UTF-8 without changing original bytes", async () => {
+    const target = path.join(tempRoot, "invalid.txt");
+    const bytes = Buffer.from([97, 255, 98]);
+    await fs.writeFile(target, bytes);
+    await expect(
+      createEditTool().execute(
+        { file_path: "invalid.txt", old_string: "a", new_string: "z" },
+        createTestContext(tempRoot),
+      ),
+    ).rejects.toThrow("UTF-8");
+    expect(await fs.readFile(target)).toEqual(bytes);
+  });
+
+  it("edits above the former read limit and omits an oversized diff", async () => {
+    const original = "a".repeat(1_100_000) + "unique";
+    const target = await writeFile(tempRoot, "large.txt", original);
+    const result = await createEditTool().execute(
+      { file_path: "large.txt", old_string: "unique", new_string: "changed" },
+      createTestContext(tempRoot),
+    );
+    expect(await fs.readFile(target, "utf8")).toBe(
+      "a".repeat(1_100_000) + "changed",
+    );
+    expect(result.metadata?.diffOmitted).toBe(true);
+    expect(result.output).toContain("Diff omitted");
+  });
+
+  it("rejects batch replacement growth before writing", async () => {
+    const target = await writeFile(tempRoot, "grow.txt", "x".repeat(2000));
+    await expect(
+      createEditTool().execute(
+        {
+          file_path: "grow.txt",
+          old_string: "x",
+          new_string: "y".repeat(6000),
+          replace_all: true,
+        },
+        createTestContext(tempRoot),
+      ),
+    ).rejects.toThrow("Edit result budget");
+    expect(await fs.readFile(target, "utf8")).toBe("x".repeat(2000));
+  });
+
+  it("rejects fuzzy work above its budget without changing the file", async () => {
+    const original = "long line\n".repeat(100_000);
+    const target = await writeFile(tempRoot, "fuzzy.txt", original);
+    await expect(
+      createEditTool().execute(
+        { file_path: "fuzzy.txt", old_string: "missing", new_string: "y" },
+        createTestContext(tempRoot),
+      ),
+    ).rejects.toThrow("fuzzy matching budget");
+    expect(await fs.readFile(target, "utf8")).toBe(original);
+  });
+  it("preserves BOM and no final newline for an exact edit", async () => {
+    const target = await writeFile(tempRoot, "bom.txt", "\uFEFFold");
+    await createEditTool().execute(
+      { file_path: "bom.txt", old_string: "old", new_string: "new" },
+      createTestContext(tempRoot),
+    );
+    expect(await fs.readFile(target, "utf8")).toBe("\uFEFFnew");
+  });
+
+  it("rejects a single replacement result above the limit without writing", async () => {
+    const target = await writeFile(tempRoot, "single.txt", "old suffix");
+    await expect(
+      createEditTool().execute(
+        {
+          file_path: "single.txt",
+          old_string: "old",
+          new_string: "x".repeat(10 * 1024 * 1024),
+        },
+        createTestContext(tempRoot),
+      ),
+    ).rejects.toThrow("Edit result budget");
+    expect(await fs.readFile(target, "utf8")).toBe("old suffix");
+  });
+
+  it("omits large output previews in metadata and keeps dry-run content intact", async () => {
+    const original = "a".repeat(20_000) + "old";
+    const target = await writeFile(tempRoot, "preview.txt", original);
+    const result = await createEditTool().execute(
+      {
+        file_path: "preview.txt",
+        old_string: "old",
+        new_string: "new",
+        dry_run: true,
+      },
+      createTestContext(tempRoot),
+    );
+    expect(result.output).toContain("Diff omitted");
+    expect(result.metadata).toMatchObject({
+      diff: "",
+      diffOmitted: true,
+      dryRun: true,
+    });
+    expect(await fs.readFile(target, "utf8")).toBe(original);
+  });
+
+  it("rejects an incomplete UTF-8 sequence at EOF", async () => {
+    const target = path.join(tempRoot, "incomplete.txt");
+    const original = Buffer.from([97, 0xe4, 0xb8]);
+    await fs.writeFile(target, original);
+    await expect(
+      createEditTool().execute(
+        { file_path: "incomplete.txt", old_string: "a", new_string: "z" },
+        createTestContext(tempRoot),
+      ),
+    ).rejects.toThrow("UTF-8");
+    expect(await fs.readFile(target)).toEqual(original);
+  });
+  it("reports a committed change when post-rename metadata cannot be read", async () => {
+    const target = await writeFile(tempRoot, "metadata.txt", "old");
+
+    let committed = false;
+    const rename = fs.rename.bind(fs);
+    const stat = fs.stat.bind(fs);
+    vi.spyOn(fs, "rename").mockImplementation(async (...args) => {
+      await rename(...args);
+      committed = true;
+    });
+    vi.spyOn(fs, "stat").mockImplementation((...args) => {
+      if (committed) return Promise.reject(new Error("metadata unavailable"));
+      return stat(...args);
+    });
+    const result = await createEditTool().execute(
+      { file_path: "metadata.txt", old_string: "old", new_string: "new" },
+      createTestContext(tempRoot),
+    );
+    expect(result.output).toContain("metadata unavailable");
+    expect(result.metadata).toMatchObject({
+      sizeBytes: 3,
+    });
+    expect(typeof result.metadata?.metadataWarning).toBe("string");
+    expect(result.metadata?.mtimeMs).toBeUndefined();
+    expect(await fs.readFile(target, "utf8")).toBe("new");
+  });
+  it("rejects a surrogate-splitting batch match without changing the 10 MiB original", async () => {
+    const original = Buffer.from("😀".repeat(2_621_440));
+    const target = path.join(tempRoot, "surrogate-budget.txt");
+    await fs.writeFile(target, original);
+    await expect(
+      createEditTool().execute(
+        {
+          file_path: "surrogate-budget.txt",
+          old_string: "\uD83D",
+          new_string: "aa",
+          replace_all: true,
+        },
+        createTestContext(tempRoot),
+      ),
+    ).rejects.toThrow("well-formed Unicode");
+    expect((await fs.readFile(target)).equals(original)).toBe(true);
+  });
+
+  it.each(["\uD83D", "\uDE00"])(
+    "rejects malformed replacement input %j before changing bytes",
+    async (replacement) => {
+      const target = await writeFile(
+        tempRoot,
+        "invalid-replacement.txt",
+        "old",
+      );
+      await expect(
+        createEditTool().execute(
+          {
+            file_path: "invalid-replacement.txt",
+            old_string: "old",
+            new_string: replacement,
+          },
+          createTestContext(tempRoot),
+        ),
+      ).rejects.toThrow("well-formed Unicode");
+      expect(await fs.readFile(target, "utf8")).toBe("old");
+    },
+  );
+
+  it("replaces whole emoji matches within the UTF-8 result budget", async () => {
+    const target = await writeFile(tempRoot, "emoji.txt", "😀😀");
+    const result = await createEditTool().execute(
+      {
+        file_path: "emoji.txt",
+        old_string: "😀",
+        new_string: "🌍",
+        replace_all: true,
+      },
+      createTestContext(tempRoot),
+    );
+    expect(await fs.readFile(target, "utf8")).toBe("🌍🌍");
+    expect(result.metadata).toMatchObject({
+      sizeBytes: 8,
+      replacementCount: 2,
+    });
   });
 });

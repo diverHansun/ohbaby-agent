@@ -37,6 +37,10 @@ export {
 export {
   killTree,
   killTreeWithPlatform,
+  probeProcessTree,
+  type KillTreeResult,
+  type ProcessTreeState,
+  type ProcessTreeProbeOptions,
   type KillTreeOptions,
   type KillTreePlatformOptions,
 } from "./process.js";

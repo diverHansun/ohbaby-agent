@@ -5,6 +5,39 @@ import {
 } from "./tool-metadata-projection.js";
 
 describe("tool metadata projection", () => {
+  it("preserves read continuation without inventing an unknown total", () => {
+    expect(
+      projectToolMetadataForModel("read", {
+        path: "/workspace/large.txt",
+        nextCursor: "opaque",
+        hasMore: true,
+        lineCount: undefined,
+        sizeBytes: 2000000,
+      }),
+    ).toEqual({
+      path: "/workspace/large.txt",
+      nextCursor: "opaque",
+      hasMore: true,
+    });
+  });
+  it("keeps search completeness separate from limited previews", () => {
+    expect(
+      projectToolMetadataForModel("grep", {
+        count: 1,
+        scanComplete: false,
+        displayLimited: true,
+        stopReason: "result_limit",
+        processExited: true,
+        raw: "not projected",
+      }),
+    ).toEqual({
+      count: 1,
+      scanComplete: false,
+      displayLimited: true,
+      stopReason: "result_limit",
+      processExited: true,
+    });
+  });
   it("projects the local select_tools MCP selection contract", () => {
     expect(
       projectToolMetadataForModel("select_tools", {
@@ -54,6 +87,21 @@ describe("tool metadata projection", () => {
       subagentId: "subagent_1",
       success: true,
     });
+  });
+
+  it("does not project a previous error as a background queued input's result", () => {
+    expect(
+      projectToolMetadataForModel("subagent_run", {
+        subagent: {
+          item: {
+            subagentId: "child",
+            status: "interrupted",
+            error: "previous failure",
+            pendingQueue: [{ prompt: "next" }],
+          },
+        },
+      }),
+    ).toEqual({ subagentId: "child", status: "queued" });
   });
 
   it("projects only the shell job fields for task tools", () => {

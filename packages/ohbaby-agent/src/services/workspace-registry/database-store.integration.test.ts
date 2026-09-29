@@ -18,25 +18,25 @@ describe("workspace registry database store", () => {
     await rm(directory, { force: true, recursive: true });
   });
 
-  it("persists ordered projects and keeps hidden discovery tombstones", () => {
+  it("persists ordered projects and keeps hidden discovery tombstones", async () => {
     let time = 1_000;
     const store = createWorkspaceRegistryStore({ now: () => time++ });
 
-    store.ensureDiscovered(["/repo/a", "/repo/b", "/repo/a"]);
+    await store.ensureDiscovered(["/repo/a", "/repo/b", "/repo/a"]);
     expect(store.list()).toMatchObject([
       { position: 0, scopeKey: "/repo/a", visibility: "visible" },
       { position: 1, scopeKey: "/repo/b", visibility: "visible" },
     ]);
 
-    expect(store.hide("/repo/a")).toBe(true);
-    store.ensureDiscovered(["/repo/a"]);
+    expect(await store.hide("/repo/a")).toBe(true);
+    await store.ensureDiscovered(["/repo/a"]);
     expect(store.list()[0]).toMatchObject({
       position: 0,
       scopeKey: "/repo/a",
       visibility: "hidden",
     });
 
-    const reopened = store.open("/repo/a");
+    const reopened = await store.open("/repo/a");
     expect(reopened).toMatchObject({
       position: 0,
       scopeKey: "/repo/a",
@@ -44,9 +44,9 @@ describe("workspace registry database store", () => {
     });
   });
 
-  it("does not create a hidden tombstone for an unknown project", () => {
+  it("does not create a hidden tombstone for an unknown project", async () => {
     const store = createWorkspaceRegistryStore();
-    expect(store.hide("/repo/missing")).toBe(false);
+    expect(await store.hide("/repo/missing")).toBe(false);
     expect(store.list()).toEqual([]);
   });
 });

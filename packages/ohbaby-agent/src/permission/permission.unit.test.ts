@@ -20,6 +20,12 @@ function baseAskInput(
   overrides: Partial<PermissionAskInput> = {},
 ): PermissionAskInput {
   return {
+    runId: "run_1",
+    signal: new AbortController().signal,
+    source: {
+      rootSessionId: overrides.sessionId ?? "session_1",
+      ancestorSessionIds: [],
+    },
     callId: "call_1",
     category: "write",
     messageId: "message_1",
@@ -72,7 +78,7 @@ describe("PermissionManager", () => {
     permission.respond("session_1", "permission_1", { type: "once" });
 
     await expect(askPromise).resolves.toBe("once");
-    expect(replied).toEqual([
+    expect(replied).toMatchObject([
       {
         callId: "call_1",
         permissionId: "permission_1",
@@ -105,7 +111,7 @@ describe("PermissionManager", () => {
     permission.respond("session_1", "permission_1", { type: "once" });
 
     await expect(askPromise).resolves.toBe("once");
-    expect(replied).toEqual([
+    expect(replied).toMatchObject([
       {
         callId: "call_1",
         permissionId: "permission_1",
@@ -241,7 +247,7 @@ describe("PermissionManager", () => {
     ).resolves.toBe("always");
   });
 
-  it("serializes asks and publishes the next request only after the first resolves", async () => {
+  it("publishes every ask immediately and permits independent answers", async () => {
     const bus = createBus();
     let nextId = 1;
     const permission = createPermissionManager({
@@ -264,7 +270,10 @@ describe("PermissionManager", () => {
     );
 
     await Promise.resolve();
-    expect(updated.map((info) => info.id)).toEqual(["permission_1"]);
+    expect(updated.map((info) => info.id)).toEqual([
+      "permission_1",
+      "permission_2",
+    ]);
 
     permission.respond("session_1", "permission_1", { type: "once" });
     await expect(first).resolves.toBe("once");
@@ -300,7 +309,10 @@ describe("PermissionManager", () => {
     } satisfies Partial<PermissionRejectedWithSuggestionError>);
 
     const cancelled = permission.ask(baseAskInput());
-    permission.respond("session_1", "permission_3", { type: "cancel" });
+    expect(() =>
+      permission.respond("session_1", "permission_3", { type: "cancel" }),
+    ).toThrow("INVALID_PERMISSION_CHOICE");
+    permission.revoke("permission_3", "cancelled");
     await expect(cancelled).resolves.toBe("cancel");
   });
 
@@ -336,7 +348,7 @@ describe("PermissionManager", () => {
 
     await expect(first).resolves.toBe("always");
     await expect(second).resolves.toBe("always");
-    expect(replied).toEqual([
+    expect(replied).toMatchObject([
       {
         callId: "call_1",
         permissionId: "permission_1",
@@ -405,7 +417,10 @@ describe("PermissionManager", () => {
       }),
     );
 
-    permission.respond("session_1", "permission_1", { type: "always" });
+    expect(() =>
+      permission.respond("session_1", "permission_1", { type: "always" }),
+    ).toThrow("INVALID_PERMISSION_CHOICE");
+    permission.respond("session_1", "permission_1", { type: "once" });
 
     await expect(first).resolves.toBe("once");
     expect(state.getSessionRules("session_1")).toEqual([]);
@@ -416,7 +431,7 @@ describe("PermissionManager", () => {
 
     permission.respond("session_1", "permission_2", { type: "once" });
     await expect(second).resolves.toBe("once");
-    expect(replied).toEqual([
+    expect(replied).toMatchObject([
       {
         callId: "call_1",
         permissionId: "permission_1",
@@ -470,7 +485,7 @@ describe("PermissionManager", () => {
 
     permission.respond("session_1", "permission_2", { type: "once" });
     await expect(second).resolves.toBe("once");
-    expect(replied).toEqual([
+    expect(replied).toMatchObject([
       {
         callId: "call_1",
         permissionId: "permission_1",
@@ -521,8 +536,11 @@ describe("PermissionManager", () => {
 
     await expect(first).resolves.toBe("always");
     await expect(second).resolves.toBe("always");
-    expect(updated.map((info) => info.id)).toEqual(["permission_1"]);
-    expect(replied).toEqual([
+    expect(updated.map((info) => info.id)).toEqual([
+      "permission_1",
+      "permission_2",
+    ]);
+    expect(replied).toMatchObject([
       {
         callId: "call_1",
         permissionId: "permission_1",
@@ -582,7 +600,7 @@ describe("PermissionManager", () => {
     await expect(afterClear).resolves.toBe("once");
   });
 
-  it("downgrades always responses for write tools without a scoped path", async () => {
+  it("rejects always responses for write tools without a scoped path", async () => {
     const bus = createBus();
     let nextId = 1;
     const permission = createPermissionManager({
@@ -600,10 +618,13 @@ describe("PermissionManager", () => {
     });
 
     const first = permission.ask(baseAskInput({ params: {} }));
-    permission.respond("session_1", "permission_1", { type: "always" });
+    expect(() =>
+      permission.respond("session_1", "permission_1", { type: "always" }),
+    ).toThrow("INVALID_PERMISSION_CHOICE");
+    permission.respond("session_1", "permission_1", { type: "once" });
 
     await expect(first).resolves.toBe("once");
-    expect(replied).toEqual([
+    expect(replied).toMatchObject([
       {
         callId: "call_1",
         permissionId: "permission_1",
@@ -647,7 +668,7 @@ describe("PermissionManager", () => {
 
     await expect(current).resolves.toBe("cancel");
     await expect(queued).resolves.toBe("cancel");
-    expect(replied).toEqual([
+    expect(replied).toMatchObject([
       {
         callId: "call_1",
         permissionId: "permission_1",

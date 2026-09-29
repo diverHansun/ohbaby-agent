@@ -1,3 +1,4 @@
+import { getMessageOrigin } from "../message/origin.js";
 import type { MessageWithParts } from "../message/index.js";
 import { serializeHistory } from "./serialization.js";
 import type { TokenCounter } from "./types.js";
@@ -26,7 +27,7 @@ function nextUserBoundary(
 ): number | undefined {
   let seenUser = false;
   for (const [index, message] of history.entries()) {
-    if (message.info.role !== "user") {
+    if (getMessageOrigin(message) !== "user") {
       continue;
     }
     if (seenUser) {

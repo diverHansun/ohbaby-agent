@@ -1,0 +1,77 @@
+.ohb-empty-status {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  position: absolute;
+  right: 26px;
+  top: 22px;
+}
+
+.ohb-app-empty .ohb-error-banner + .ohb-empty-status {
+  top: 58px;
+}
+
+.ohb-empty-hero {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  margin-top: -24px;
+  max-width: min(684px, 100%);
+  padding: 0 22px;
+  width: min(684px, 100%);
+}
+
+.ohb-wordmark {
+  display: flex;
+  font-size: 70px;
+}
+
+.ohb-wordmark span {
+  background: transparent;
+}
+
+.ohb-wordmark span:nth-child(1) {
+  color: #c9a23f;
+}
+
+.ohb-wordmark span:nth-child(2) {
+  color: #c97e92;
+}
+
+.ohb-wordmark span:nth-child(3) {
+  color: #5f86c4;
+}
+
+.ohb-empty-context {
+  align-items: center;
+  color: #8a8d94;
+  display: flex;
+  flex-wrap: wrap;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 26px;
+  max-width: 88vw;
+}
+
+.ohb-empty-context span:not(:last-child)::after {
+  color: #c9cdd4;
+  content: ".";
+  margin-left: 10px;
+}
+
+.ohb-bootstrap-error {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: min(620px, 88vw);
+  text-align: center;
+}
+
+.ohb-bootstrap-error p {
+  color: #904b42;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  margin: 0;
+}

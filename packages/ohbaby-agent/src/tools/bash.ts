@@ -1,3 +1,4 @@
+import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type {
   ChildProcess,
   SpawnOptionsWithoutStdio,
@@ -19,6 +20,8 @@ import {
   DEFAULT_SHELL_JOB_TIMEOUT_MS,
   MAX_SHELL_JOB_TIMEOUT_MS,
   ShellJobRegistry,
+  type ShellJobRegistryOptions,
+  type ShellJobSnapshot,
 } from "./shell-job-registry.js";
 import {
   getNumberParam,
@@ -31,7 +34,9 @@ const MAX_TIMEOUT_MS = MAX_SHELL_JOB_TIMEOUT_MS;
 
 export interface BashShell {
   acceptable(): string;
-  killTree(process: ChildProcess): Promise<void> | void;
+  killTree(
+    process: ChildProcess,
+  ): ReturnType<ShellJobRegistryOptions["killTree"]>;
 }
 
 export type SpawnCommand = (
@@ -94,123 +99,175 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
   const registry =
     options.registry ??
     new ShellJobRegistry({
-      killTree: (child): Promise<void> | void => shell.killTree(child),
+      terminationManagesObservation: shell === Shell,
+      killTree: (child): ReturnType<ShellJobRegistryOptions["killTree"]> =>
+        shell.killTree(child),
     });
 
-  return {
-    name: "bash",
-    description:
-      "Run a shell command in the execution workspace. Set run_in_background=true to return a job_id immediately. timeout is the maximum lifetime of the shell job for both foreground and background commands; the default is 120000ms and the maximum is 600000ms.",
-    parametersJsonSchema: {
-      additionalProperties: false,
-      properties: {
-        command: { type: "string" },
-        timeout: {
-          maximum: MAX_TIMEOUT_MS,
-          minimum: 1,
-          type: "integer",
+  return withToolAdmission(
+    {
+      name: "bash",
+      description:
+        "Run a shell command in the execution workspace. Set run_in_background=true to return a job_id immediately. timeout is the maximum lifetime of the shell job for both foreground and background commands; the default is 120000ms and the maximum is 600000ms.",
+      parametersJsonSchema: {
+        additionalProperties: false,
+        properties: {
+          command: { type: "string" },
+          timeout: {
+            maximum: MAX_TIMEOUT_MS,
+            minimum: 1,
+            type: "integer",
+          },
+          run_in_background: { default: false, type: "boolean" },
         },
-        run_in_background: { default: false, type: "boolean" },
+        required: ["command"],
+        type: "object",
       },
-      required: ["command"],
-      type: "object",
-    },
-    source: "builtin",
-    category: "dangerous",
-    timeoutOwner: "tool",
-    async execute(params, context): Promise<ToolExecutionResult> {
-      const command = getStringParam(params, "command");
-      const timeout = getNumberParam(params, "timeout", {
-        defaultValue: DEFAULT_TIMEOUT_MS,
-        integer: true,
-        max: MAX_TIMEOUT_MS,
-        min: 1,
-      });
-      const runInBackground = params.run_in_background ?? false;
-      if (typeof runInBackground !== "boolean") {
-        throw new ToolParameterError(
-          'Expected parameter "run_in_background" to be a boolean.',
-        );
-      }
-      const parsed = parseCommand(command);
-      if (parsed.hasError) {
-        throw new ToolParameterError(
-          "Unsupported shell syntax in bash command.",
-        );
-      }
-      throwIfCancelled(context.signal);
+      source: "builtin",
+      category: "dangerous",
+      timeoutOwner: "tool",
+      async execute(params, context): Promise<ToolExecutionResult> {
+        const command = getStringParam(params, "command");
+        const timeout = getNumberParam(params, "timeout", {
+          defaultValue: DEFAULT_TIMEOUT_MS,
+          integer: true,
+          max: MAX_TIMEOUT_MS,
+          min: 1,
+        });
+        const runInBackground = params.run_in_background ?? false;
+        if (typeof runInBackground !== "boolean") {
+          throw new ToolParameterError(
+            'Expected parameter "run_in_background" to be a boolean.',
+          );
+        }
+        const parsed = parseCommand(command);
+        if (parsed.hasError) {
+          throw new ToolParameterError(
+            "Unsupported shell syntax in bash command.",
+          );
+        }
+        throwIfCancelled(context.signal);
 
-      const commandContext = resolveCommandContext(context);
-      const shellPath = shell.acceptable();
-      const shellKind = detectShellKind(shellPath);
-      const preflight = await runPreflight({
-        command,
-        cwd: commandContext.cwd,
-        parsed,
-        shellKind,
-      });
-      throwIfCancelled(context.signal);
-      const args = shellArgs(shellPath, command);
-      const commandPrefix = commandContext.commandPrefix ?? [];
-      const spawnFile = commandPrefix[0] ?? shellPath;
-      const spawnArgs =
-        commandPrefix.length > 0
-          ? [...commandPrefix.slice(1), shellPath, ...args]
-          : args;
-      const child = spawn(spawnFile, spawnArgs, {
-        cwd: commandContext.cwd,
-        detached: shouldDetach(),
-        env: stateEnvironment({
-          callId: context.callId,
+        if (
+          !context.owner &&
+          (context.runId !== undefined || context.contextScopeId !== undefined)
+        ) {
+          throw new Error(
+            "Bash requires a trusted execution owner for interactive or scoped execution.",
+          );
+        }
+        const commandContext = resolveCommandContext(context);
+        const shellPath = shell.acceptable();
+        const shellKind = detectShellKind(shellPath);
+        const preflight = await runPreflight({
+          command,
           cwd: commandContext.cwd,
-          env: commandContext.env,
-          messageId: context.messageId,
-          sessionId: context.sessionId,
-          shellPath,
-        }),
-        windowsHide: true,
-      });
-      child.stdin?.end();
-
-      const snapshot = registry.start({
-        captureMode: runInBackground ? "tail" : "head",
-        child,
-        contextScopeId: context.contextScopeId,
-        metadata: {
-          cdTargets: preflight.cdTargets,
-          cwd: commandContext.cwd,
-          paths: parsed.details.flatMap((detail) => [...detail.paths]),
-          pid: child.pid,
-          resolvedPaths: preflight.resolvedPaths,
-          roots: parsed.roots,
-          shell: shellPath,
+          parsed,
           shellKind,
-        },
-        sessionId: context.sessionId,
-        timeoutMs: timeout,
-      });
-      if (runInBackground) {
-        return { metadata: snapshot.metadata, output: snapshot.output };
-      }
+        });
+        throwIfCancelled(context.signal);
+        const args = shellArgs(shellPath, command);
+        const commandPrefix = commandContext.commandPrefix ?? [];
+        const spawnFile = commandPrefix[0] ?? shellPath;
+        const spawnArgs =
+          commandPrefix.length > 0
+            ? [...commandPrefix.slice(1), shellPath, ...args]
+            : args;
+        const release = context.environment?.retain?.();
+        let snapshot: ShellJobSnapshot;
+        try {
+          throwIfCancelled(context.signal);
+          snapshot = registry.start({
+            owner: context.owner ?? {
+              sessionId: context.sessionId,
+              rootSessionId: context.sessionId,
+              workspaceKey: commandContext.cwd,
+              scopeKey: context.environment?.scopeKey,
+              runId: context.runId,
+              messageId: context.messageId,
+              callId: context.callId,
+              contextScopeId: context.contextScopeId,
+            },
+            release,
+            reportCleanup: context.reportCleanup,
+            reportCleanupError: context.reportCleanupError,
+            captureMode: runInBackground ? "tail" : "head",
+            child: (): ChildProcess => {
+              throwIfCancelled(context.signal);
+              return spawn(spawnFile, spawnArgs, {
+                cwd: commandContext.cwd,
+                detached: shouldDetach(),
+                env: stateEnvironment({
+                  callId: context.callId,
+                  cwd: commandContext.cwd,
+                  env: commandContext.env,
+                  messageId: context.messageId,
+                  sessionId: context.sessionId,
+                  shellPath,
+                }),
+                windowsHide: true,
+              });
+            },
+            contextScopeId: context.contextScopeId,
+            metadata: {
+              cdTargets: preflight.cdTargets,
+              cwd: commandContext.cwd,
+              paths: parsed.details.flatMap((detail) => [...detail.paths]),
+              resolvedPaths: preflight.resolvedPaths,
+              roots: parsed.roots,
+              shell: shellPath,
+              shellKind,
+            },
+            sessionId: context.sessionId,
+            timeoutMs: timeout,
+          });
+        } catch (error) {
+          await release?.();
+          throw error;
+        }
+        // Cancellation may have happened synchronously during registration/spawn.
+        if (context.signal.aborted) {
+          await registry.kill(
+            snapshot.jobId,
+            context.sessionId,
+            context.contextScopeId,
+          );
+        }
+        if (runInBackground) {
+          return { metadata: snapshot.metadata, output: snapshot.output };
+        }
 
-      const abortHandler = (): void => {
-        void registry.kill(
-          snapshot.jobId,
-          context.sessionId,
-          context.contextScopeId,
-        );
-      };
-      context.signal.addEventListener("abort", abortHandler, { once: true });
-      try {
-        const result = await registry.waitForTerminal(
-          snapshot.jobId,
-          context.sessionId,
-          context.contextScopeId,
-        );
-        return { metadata: result.metadata, output: result.output };
-      } finally {
-        context.signal.removeEventListener("abort", abortHandler);
-      }
+        const abortHandler = (): void => {
+          void registry.kill(
+            snapshot.jobId,
+            context.sessionId,
+            context.contextScopeId,
+          );
+        };
+        context.signal.addEventListener("abort", abortHandler, { once: true });
+        try {
+          const result = await registry.waitForTerminal(
+            snapshot.jobId,
+            context.sessionId,
+            context.contextScopeId,
+          );
+          return {
+            metadata: result.metadata,
+            output: result.output,
+            executionOutcome:
+              result.status === "timed_out"
+                ? "timed-out"
+                : result.status === "cancelled"
+                  ? "cancelled"
+                  : result.status === "failed"
+                    ? "error"
+                    : "success",
+          };
+        } finally {
+          context.signal.removeEventListener("abort", abortHandler);
+        }
+      },
     },
-  };
+    { cleanupOwner: "tool" },
+  );
 }

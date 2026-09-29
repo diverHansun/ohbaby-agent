@@ -1,6 +1,7 @@
 import { sameReasoning } from "./types.js";
 /* eslint-disable @typescript-eslint/require-await -- The in-memory store intentionally implements the same async contract as SQLite. */
 import { randomUUID } from "node:crypto";
+import { isValidOwnerPid } from "../../utils/process-owner.js";
 import {
   InvalidPromptClientRequestIdError,
   InvalidPromptTransitionError,
@@ -18,16 +19,26 @@ import type {
   FinishPromptSubmissionInput,
   PromptEditLease,
   PromptSubmissionRecord,
+  PromptHistoryWindow,
   PromptSubmissionStore,
+  PromptResubmissionReceipt,
+  ResubmitRetainedPromptInput,
+  ResubmitRetainedPromptResult,
+  RecoverPromptSubmissionsOptions,
 } from "./types.js";
 
 export interface InMemoryPromptSubmissionStoreOptions {
   readonly now?: () => number;
+  readonly ownerId?: string;
+  readonly ownerPid?: number;
+  readonly isOwnerAlive?: (pid: number) => boolean;
 }
 
 function clone(record: PromptSubmissionRecord): PromptSubmissionRecord {
   return {
     ...record,
+    steerReceipt: record.steerReceipt ? { ...record.steerReceipt } : undefined,
+    namingSource: record.namingSource ? { ...record.namingSource } : undefined,
     reasoning: record.reasoning ? { ...record.reasoning } : undefined,
     error: record.error ? { ...record.error } : undefined,
   };
@@ -45,11 +56,42 @@ function compareOrder(
 
 export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
   private readonly records = new Map<string, PromptSubmissionRecord>();
+  readonly runtimeInputMemory = {
+    get: (id: string): PromptSubmissionRecord | undefined => {
+      const r = this.records.get(id);
+      return r ? structuredClone(r) : undefined;
+    },
+    all: (): readonly PromptSubmissionRecord[] =>
+      [...this.records.values()].map((r) => structuredClone(r)),
+    put: (record: PromptSubmissionRecord): void => {
+      this.records.set(record.promptId, structuredClone(record));
+    },
+  };
   private readonly now: () => number;
   private lastCreatedAt = 0;
+  private readonly ownerId: string;
+  private readonly ownerPid: number;
+  private readonly isOwnerAlive: (pid: number) => boolean;
+  private readonly resubmissions = new Map<
+    string,
+    { text: string; receipt: PromptResubmissionReceipt }
+  >();
 
   constructor(options: InMemoryPromptSubmissionStoreOptions = {}) {
     this.now = options.now ?? Date.now;
+    this.ownerId = options.ownerId ?? `owner_${randomUUID()}`;
+    this.ownerPid = options.ownerPid ?? process.pid;
+    this.isOwnerAlive =
+      options.isOwnerAlive ??
+      ((pid): boolean => {
+        if (!isValidOwnerPid(pid)) return true;
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch (error) {
+          return (error as NodeJS.ErrnoException).code !== "ESRCH";
+        }
+      });
   }
 
   async assertCapacity(
@@ -102,7 +144,13 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     if (queuedCount >= input.maxQueuedPrompts) {
       throw new PromptQueueFullError(input.scopeKey, input.maxQueuedPrompts);
     }
-    const at = Math.max(this.now(), this.lastCreatedAt + 1);
+    const at = Math.max(
+      this.now(),
+      this.lastCreatedAt + 1,
+      ...[...this.records.values()]
+        .filter((r) => r.scopeKey === input.scopeKey)
+        .map((r) => r.acceptedAt ?? r.createdAt),
+    );
     this.lastCreatedAt = at;
     const record: PromptSubmissionRecord = {
       promptId: input.promptId,
@@ -111,8 +159,14 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       sessionId: input.sessionId,
       userMessageId: input.userMessageId,
       text: input.text,
+      titleExpected: input.titleExpected,
+      namingSource: input.namingSource ? { ...input.namingSource } : undefined,
       reasoning: input.reasoning ? { ...input.reasoning } : undefined,
       status: "queued",
+      ownerId: this.ownerId,
+      ownerPid: this.ownerPid,
+      acceptedAt: at,
+      admissionOrder: this.nextAdmissionOrder(input.scopeKey),
       createdAt: at,
       updatedAt: at,
     };
@@ -204,6 +258,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     const updated: PromptSubmissionRecord = {
       ...current,
       text,
+      namingSource: text === current.text ? current.namingSource : undefined,
       editLeaseId: undefined,
       editLeaseOwnerId: undefined,
       editLeaseExpiresAt: undefined,
@@ -260,7 +315,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
 
   async claim(promptId: string): Promise<PromptSubmissionRecord | null> {
     const current = this.records.get(promptId);
-    if (current?.status !== "queued") {
+    if (current?.status !== "queued" || !this.owns(current)) {
       return null;
     }
     if ((current.editLeaseExpiresAt ?? 0) > this.now()) {
@@ -285,6 +340,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     runId: string,
   ): Promise<PromptSubmissionRecord> {
     const current = this.require(promptId);
+    this.assertOwned(current);
     if (current.status !== "starting") {
       throw new InvalidPromptTransitionError(
         promptId,
@@ -304,6 +360,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
 
   async requeueBusy(promptId: string): Promise<PromptSubmissionRecord> {
     const current = this.require(promptId);
+    this.assertOwned(current);
     if (current.status !== "starting" || current.runId !== undefined) {
       throw new InvalidPromptTransitionError(
         promptId,
@@ -326,25 +383,31 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     input: FinishPromptSubmissionInput,
   ): Promise<PromptSubmissionRecord> {
     const current = this.require(promptId);
-    if (current.status !== "starting" && current.status !== "running") {
+    this.assertOwned(current);
+    if (
+      input.expectedRunId !== undefined &&
+      current.runId !== input.expectedRunId
+    )
+      throw new PromptVersionConflictError(promptId);
+    if (
+      ["succeeded", "failed", "cancelled", "interrupted"].includes(
+        current.status,
+      )
+    )
+      return clone(current);
+    if (current.status !== "starting" && current.status !== "running")
       throw new InvalidPromptTransitionError(
         promptId,
         current.status,
         input.status,
       );
-    }
-    if (
-      input.expectedRunId !== undefined &&
-      current.runId !== input.expectedRunId
-    ) {
-      throw new PromptVersionConflictError(promptId);
-    }
     const at = this.nextTime(current);
     const updated: PromptSubmissionRecord = {
       ...current,
       status: input.status,
       updatedAt: at,
-      endedAt: at,
+      endedAt: input.endedAt ?? at,
+      endTimeSource: input.endTimeSource,
       error: input.error,
     };
     this.records.set(promptId, updated);
@@ -356,9 +419,17 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
   ): Promise<readonly PromptSubmissionRecord[]> {
     return [...this.records.values()]
       .filter(
-        (record) => record.scopeKey === scopeKey && record.status === "queued",
+        (record) =>
+          record.scopeKey === scopeKey &&
+          record.status === "queued" &&
+          this.owns(record),
       )
-      .sort(compareOrder)
+      .sort(
+        (a, b) =>
+          (a.acceptedAt ?? a.createdAt) - (b.acceptedAt ?? b.createdAt) ||
+          (a.admissionOrder ?? 0) - (b.admissionOrder ?? 0) ||
+          compareOrder(a, b),
+      )
       .map(clone);
   }
 
@@ -371,41 +442,226 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       .map(clone);
   }
 
+  async getSessionTitleExpected(
+    scopeKey: string,
+    sessionId: string,
+  ): Promise<string | undefined> {
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.scopeKey === scopeKey &&
+          record.sessionId === sessionId &&
+          record.titleExpected !== undefined,
+      )
+      .sort((a, b) => a.createdAt - b.createdAt)[0]?.titleExpected;
+  }
+
+  async hasForSession(scopeKey: string, sessionId: string): Promise<boolean> {
+    for (const record of this.records.values()) {
+      if (record.scopeKey === scopeKey && record.sessionId === sessionId)
+        return true;
+    }
+    return false;
+  }
+
+  async listForSession(
+    scopeKey: string,
+    sessionId: string,
+    window: PromptHistoryWindow = {},
+  ): Promise<readonly PromptSubmissionRecord[]> {
+    const messageIds = new Set(window.messageIds ?? []);
+    const runIds = new Set(window.runIds ?? []);
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.scopeKey === scopeKey &&
+          record.sessionId === sessionId &&
+          (record.status === "queued" ||
+            record.status === "retained" ||
+            record.status === "starting" ||
+            record.status === "running" ||
+            messageIds.has(record.userMessageId) ||
+            (record.runId !== undefined && runIds.has(record.runId))),
+      )
+      .sort(compareOrder)
+      .map(clone);
+  }
+
   async listScopesWithQueued(): Promise<readonly string[]> {
     return [
       ...new Set(
         [...this.records.values()]
-          .filter((record) => record.status === "queued")
+          .filter((record) => record.status === "queued" && this.owns(record))
           .map((record) => record.scopeKey),
       ),
     ].sort();
   }
 
-  async recoverInterrupted(scopeKey: string): Promise<number> {
-    let count = 0;
-    for (const current of [...this.records.values()]) {
+  async resubmitRetained(
+    input: ResubmitRetainedPromptInput,
+  ): Promise<ResubmitRetainedPromptResult> {
+    if (!input.operationId.trim() || input.operationId.startsWith("legacy:"))
+      throw new InvalidPromptClientRequestIdError(input.operationId);
+    const key = JSON.stringify([input.scopeKey, input.operationId]);
+    const previous = this.resubmissions.get(key);
+    if (previous) {
       if (
-        current.scopeKey !== scopeKey ||
-        (current.status !== "starting" && current.status !== "running")
-      ) {
+        previous.receipt.promptId !== input.promptId ||
+        previous.text !== input.text
+      )
+        throw new PromptIdempotencyConflictError(input.operationId);
+      return {
+        record: clone(this.require(input.promptId)),
+        receipt: { ...previous.receipt },
+        inserted: false,
+      };
+    }
+    const current = this.require(input.promptId);
+    if (current.scopeKey !== input.scopeKey || current.status !== "retained")
+      throw new PromptVersionConflictError(input.promptId);
+    this.assertLease(current, input.editLeaseId, input.ownerClientId);
+    if (!input.text.trim()) throw new Error("Prompt text must not be empty");
+    const count = [...this.records.values()].filter(
+      (r) => r.scopeKey === input.scopeKey && r.status === "queued",
+    ).length;
+    if (count >= input.maxQueuedPrompts)
+      throw new PromptQueueFullError(input.scopeKey, input.maxQueuedPrompts);
+    const acceptedAt = Math.max(
+      this.now(),
+      ...[...this.records.values()]
+        .filter((r) => r.scopeKey === input.scopeKey)
+        .map((r) => r.acceptedAt ?? r.createdAt),
+    );
+    const record: PromptSubmissionRecord = {
+      ...current,
+      text: input.text,
+      namingSource:
+        input.text === current.text ? current.namingSource : undefined,
+      status: "queued",
+      acceptedAt,
+      admissionOrder: this.nextAdmissionOrder(input.scopeKey),
+      ownerId: this.ownerId,
+      ownerPid: this.ownerPid,
+      updatedAt: this.nextTime(current),
+      runId: undefined,
+      startedAt: undefined,
+      endedAt: undefined,
+      endTimeSource: undefined,
+      error: undefined,
+      editLeaseId: undefined,
+      editLeaseOwnerId: undefined,
+      editLeaseExpiresAt: undefined,
+    };
+    const receipt: PromptResubmissionReceipt = {
+      operationId: input.operationId,
+      promptId: current.promptId,
+      sessionId: current.sessionId,
+      userMessageId: current.userMessageId,
+      acceptedAt,
+    };
+    this.records.set(record.promptId, record);
+    this.resubmissions.set(key, { text: input.text, receipt });
+    return { record: clone(record), receipt: { ...receipt }, inserted: true };
+  }
+
+  async getResubmissionReceipt(
+    scopeKey: string,
+    operationId: string,
+  ): Promise<PromptResubmissionReceipt | undefined> {
+    const receipt = this.resubmissions.get(
+      JSON.stringify([scopeKey, operationId]),
+    )?.receipt;
+    return receipt ? { ...receipt } : undefined;
+  }
+
+  async retainOwnedQueued(scopeKey?: string): Promise<number> {
+    let count = 0;
+    for (const current of this.records.values()) {
+      if (
+        current.status !== "queued" ||
+        !this.owns(current) ||
+        (scopeKey !== undefined && current.scopeKey !== scopeKey)
+      )
         continue;
-      }
-      const at = this.nextTime(current);
       this.records.set(current.promptId, {
         ...current,
-        status: "interrupted",
-        updatedAt: at,
-        endedAt: at,
-        error: {
-          code: "PROCESS_INTERRUPTED",
-          message: "Process interrupted before prompt completed",
-          source: "runtime",
-          retryable: true,
-        },
+        status: "retained",
+        updatedAt: this.nextTime(current),
+        endedAt: undefined,
+        editLeaseId: undefined,
+        editLeaseOwnerId: undefined,
+        editLeaseExpiresAt: undefined,
       });
-      count += 1;
+      count++;
     }
     return count;
+  }
+
+  async recoverInterrupted(scopeKey: string): Promise<number> {
+    return this.recoverAllInterrupted({ scopeKey });
+  }
+
+  async recoverAllInterrupted(
+    options: RecoverPromptSubmissionsOptions = {},
+  ): Promise<number> {
+    let count = 0;
+    for (const current of this.records.values()) {
+      if (
+        !["queued", "starting", "running"].includes(current.status) ||
+        (options.scopeKey !== undefined &&
+          current.scopeKey !== options.scopeKey) ||
+        (options.sessionId !== undefined &&
+          current.sessionId !== options.sessionId)
+      )
+        continue;
+      const unknown = !current.ownerId || !isValidOwnerPid(current.ownerPid);
+      const recover = unknown
+        ? options.recoverUnknownOwner === true
+        : this.owns(current)
+          ? options.includeCurrentOwner === true
+          : !this.isOwnerAlive(current.ownerPid);
+      if (!recover) continue;
+      const at = this.nextTime(current);
+      const retained = current.status === "queued";
+      this.records.set(current.promptId, {
+        ...current,
+        status: retained ? "retained" : "interrupted",
+        updatedAt: at,
+        endedAt: retained ? undefined : at,
+        endTimeSource: retained ? undefined : "recovery",
+        editLeaseId: undefined,
+        editLeaseOwnerId: undefined,
+        editLeaseExpiresAt: undefined,
+        error: retained
+          ? undefined
+          : {
+              code: "PROCESS_INTERRUPTED",
+              message: "Process interrupted before prompt completed",
+              source: "runtime",
+              retryable: true,
+            },
+      });
+      count++;
+    }
+    return count;
+  }
+
+  private owns(record: PromptSubmissionRecord): boolean {
+    return record.ownerId === this.ownerId && record.ownerPid === this.ownerPid;
+  }
+  private assertOwned(record: PromptSubmissionRecord): void {
+    if (!this.owns(record))
+      throw new PromptVersionConflictError(record.promptId);
+  }
+  private nextAdmissionOrder(scopeKey: string): number {
+    return (
+      Math.max(
+        0,
+        ...[...this.records.values()]
+          .filter((r) => r.scopeKey === scopeKey)
+          .map((r) => r.admissionOrder ?? 0),
+      ) + 1
+    );
   }
 
   private require(promptId: string): PromptSubmissionRecord {
@@ -417,7 +673,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
   }
 
   private assertQueued(record: PromptSubmissionRecord): void {
-    if (record.status !== "queued") {
+    if (record.status !== "queued" && record.status !== "retained") {
       throw new PromptNotQueuedError(record.promptId);
     }
   }

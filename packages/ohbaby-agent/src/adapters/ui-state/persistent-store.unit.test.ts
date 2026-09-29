@@ -121,7 +121,7 @@ describe("messageToUiMessage", () => {
         info,
         parts: [textPart("message_user", "hello"), runtimePart],
       })?.parts,
-    ).toEqual([{ text: "hello", type: "text" }]);
+    ).toMatchObject([{ text: "hello", type: "text" }]);
   });
 
   it("omits todo tool calls and results from a persisted transcript", () => {
@@ -151,7 +151,7 @@ describe("messageToUiMessage", () => {
       ],
     };
 
-    expect(messageToUiMessage(message)?.parts).toEqual([
+    expect(messageToUiMessage(message)?.parts).toMatchObject([
       { text: "Working on it.", type: "text" },
     ]);
   });
@@ -171,7 +171,7 @@ describe("messageToUiMessage", () => {
         status: "completed",
       });
 
-      expect(messageToUiMessage(message)?.parts).toEqual([
+      expect(messageToUiMessage(message)?.parts).toMatchObject([
         {
           call: {
             id: "call_bash",
@@ -193,6 +193,35 @@ describe("messageToUiMessage", () => {
     },
   );
 
+  it("preserves stored subagent execution identity on the UI result while keeping scheduler metadata", () => {
+    const execution = {
+      executionId: "historical-execution",
+      subagentId: "worker",
+      status: "completed",
+    };
+    const base = messageWithToolState({
+      input: {},
+      status: "completed",
+      output: "answer",
+      metadata: { subagent: { execution }, internalDebug: "not for UI" },
+    });
+    const message: MessageWithParts = {
+      ...base,
+      parts: base.parts.map((part) =>
+        part.type === "tool"
+          ? { ...part, tool: "subagent_run", metadata: { sourceOrder: 2 } }
+          : part,
+      ),
+    };
+    const result = messageToUiMessage(message)?.parts.find(
+      (part) => part.type === "tool-result",
+    );
+    expect(result?.metadata).toEqual({
+      sourceOrder: 2,
+      subagent: { execution },
+    });
+  });
+
   it("preserves partial output for an aborted tool", () => {
     const message = messageWithToolState({
       error: "Tool execution aborted by user",
@@ -201,7 +230,7 @@ describe("messageToUiMessage", () => {
       status: "aborted",
     });
 
-    expect(messageToUiMessage(message)?.parts[1]).toEqual({
+    expect(messageToUiMessage(message)?.parts[1]).toMatchObject({
       result: {
         callId: "call_bash",
         error: "Tool execution aborted by user",
@@ -218,7 +247,7 @@ describe("messageToUiMessage", () => {
       status: "error",
     });
 
-    expect(messageToUiMessage(message)?.parts).toEqual([
+    expect(messageToUiMessage(message)?.parts).toMatchObject([
       {
         call: {
           id: "call_bash",
@@ -247,7 +276,7 @@ describe("messageToUiMessage", () => {
       status: "completed",
     });
 
-    expect(messageToUiMessage(message)?.parts).toEqual([
+    expect(messageToUiMessage(message)?.parts).toMatchObject([
       {
         call: {
           id: "call_bash",
@@ -337,3 +366,59 @@ function messageWithToolState(state: ToolState): MessageWithParts {
     ],
   };
 }
+
+it("projects automatic runtime input as a system fact while preserving user Steer origin", () => {
+  const message = assistantMessage({ time: { created: 1 } });
+  const origin = {
+    kind: "subagent-result" as const,
+    inputId: "input",
+    targetRunId: "run",
+    sourceId: "execution",
+  };
+  expect(
+    messageToUiMessage({
+      ...message,
+      info: { ...message.info, runtimeInput: origin },
+    })?.role,
+  ).toBe("system");
+  expect(
+    messageToUiMessage({
+      ...message,
+      info: {
+        id: "user",
+        sessionId: "root",
+        role: "user",
+        agent: "main",
+        time: { created: 1 },
+        runtimeInput: { ...origin, kind: "user-steer" },
+      },
+    })?.role,
+  ).toBe("user");
+});
+
+it.each(["subagent-status", "subagent-result", "user-steer"] as const)(
+  "preserves %s provenance without changing the durable input",
+  (kind) => {
+    const message: MessageWithParts = {
+      ...assistantMessage({ time: { created: 1 } }),
+      info: {
+        id: "input",
+        sessionId: "root",
+        role: "user",
+        agent: "main",
+        time: { created: 1 },
+        runtimeInput: {
+          kind,
+          inputId: "input",
+          targetRunId: "run",
+          sourceId: "source",
+        },
+      },
+    };
+    expect(messageToUiMessage(message)).toMatchObject({
+      runtimeInputKind: kind,
+    });
+    expect(message.info.role).toBe("user");
+    expect(message.parts).toHaveLength(1);
+  },
+);

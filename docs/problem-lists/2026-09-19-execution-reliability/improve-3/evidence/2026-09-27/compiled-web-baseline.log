@@ -1,0 +1,5 @@
+{"activeSessionStable":true,"followupFinalAfterRefresh":1,"followupFinalBeforeRefresh":1,"followupUserAfterRefresh":1,"runtimeMarkersVisible":false,"titleContainsRuntimeMarker":false,"toolFinalAfterRefresh":1,"toolFinalBeforeRefresh":1,"toolPanelCompleted":true}
+E2E_UI_EVIDENCE_PASS {"activeSessionStable":true,"followupFinalAfterRefresh":1,"followupFinalBeforeRefresh":1,"followupUserAfterRefresh":1,"runtimeMarkersVisible":false,"titleContainsRuntimeMarker":false,"toolFinalAfterRefresh":1,"toolFinalBeforeRefresh":1,"toolPanelCompleted":true}
+E2E_BACKEND_PASS {"keyPresent":true,"keyStable":true,"requestCount":3,"runtimePartCounts":[1,1,2],"titleRequests":1,"toolResultConsumed":true}
+E2E_CLEANUP_PASS {"finalStatus":"stopped","pidReleased":true,"portReleased":true}
+E2E_DIAGNOSTICS_PASS {"eventCount":5,"events":["diagnostics.started","migration.config.completed","migration.data.completed","server.started","server.stopped"],"file":"2026-09-27T12-28-39-192Z-16267-8f070bb7.jsonl"}

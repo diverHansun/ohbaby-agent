@@ -8,6 +8,7 @@ import type {
   UiConnectModelResult,
   UiContextWindowUsage,
   UiEvent,
+  UiPermissionEvent,
   UiEventHandler,
   UiPermissionState,
   UiProbeModelContextWindowInput,
@@ -18,7 +19,16 @@ import type {
   UiUnsubscribe,
 } from "ohbaby-sdk";
 import { createDaemonServerApp } from "ohbaby-server";
-import { createOhbabyWebRuntime } from "./client.js";
+import { sessionViewFromSnapshot } from "./session-recovery.test-utils.js";
+import type {
+  UiSessionScope,
+  UiSessionView,
+  UiSessionHistory,
+  UiSessionControl,
+  UiPromptReceiptQuery,
+  UiPromptReceiptResult,
+} from "ohbaby-sdk";
+import { createOhbabyWebRuntime } from "../../runtime.js";
 import type { OhbabyBootstrapConfig } from "./wire.js";
 
 const timestamp = "2026-06-12T00:00:00.000Z";
@@ -139,6 +149,108 @@ class FakeBackend implements UiBackendClient {
     }
   }
 
+  readonly createdSessionIds: string[] = [];
+  getSelectedSessionId(): ReturnType<UiBackendClient["getSelectedSessionId"]> {
+    return Promise.resolve(this.snapshot.activeSessionId);
+  }
+  getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return Promise.resolve(
+      this.snapshot.sessions.map(
+        ({ messages: _messages, ...session }) => session,
+      ),
+    );
+  }
+  getPermissionSnapshot(
+    input: Parameters<UiBackendClient["getPermissionSnapshot"]>[0],
+  ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+    return Promise.resolve({
+      permissionEpoch: "epoch",
+      rootSessionId: input.rootSessionId,
+      permissionRevision: 0,
+      requests: [],
+    });
+  }
+  subscribePermissionEvents(
+    _handler: (event: UiPermissionEvent) => void,
+  ): UiUnsubscribe {
+    return () => undefined;
+  }
+  createSession(
+    input?: Parameters<UiBackendClient["createSession"]>[0],
+  ): ReturnType<UiBackendClient["createSession"]> {
+    const selected = this.snapshot.sessions.find(
+      (session) => session.id === input?.reuseSessionId,
+    );
+    if (selected?.messages.length === 0)
+      return Promise.resolve({ ...selected, created: false });
+    const session = {
+      id: `session_${String(this.snapshot.sessions.length + 1)}`,
+      title: "New session",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      messages: [],
+    };
+    this.createdSessionIds.push(session.id);
+    this.snapshot = {
+      ...this.snapshot,
+      sessions: [...this.snapshot.sessions, session],
+      activeSessionId: session.id,
+    };
+    this.emit({ type: "session.updated", session });
+    return Promise.resolve({ ...session, created: true });
+  }
+  selectSession(sessionId: string): Promise<void> {
+    this.snapshot = { ...this.snapshot, activeSessionId: sessionId };
+    return Promise.resolve();
+  }
+
+  getSessionView(input: UiSessionScope): Promise<UiSessionView> {
+    const view = sessionViewFromSnapshot({
+      ...this.snapshot,
+      activeSessionId: input.sessionId,
+    });
+    return Promise.resolve({
+      ...view,
+      version: { ...view.version, runtimeEpoch: input.runtimeEpoch ?? "epoch" },
+      bindingGeneration: input.bindingGeneration,
+    });
+  }
+  async getSessionHistory(input: UiSessionScope): Promise<UiSessionHistory> {
+    const view = await this.getSessionView(input);
+    return {
+      version: view.version,
+      bindingGeneration: input.bindingGeneration,
+      messages: [],
+      prompts: [],
+      reasoningMissing: false,
+      hasMore: false,
+    };
+  }
+  getSessionControl(input: UiSessionScope): Promise<UiSessionControl> {
+    const run = this.snapshot.runs.find(
+      (run) =>
+        run.sessionId === input.sessionId &&
+        ["running", "waiting-for-permission"].includes(run.status.kind),
+    );
+    return Promise.resolve({
+      runtimeEpoch: input.runtimeEpoch ?? "epoch",
+      sessionId: input.sessionId,
+      rootSessionId: input.sessionId,
+      bindingGeneration: input.bindingGeneration,
+      runId: run?.id ?? null,
+      driver: run ? "user" : null,
+    });
+  }
+  getPromptReceipt(
+    input: UiPromptReceiptQuery,
+  ): Promise<UiPromptReceiptResult> {
+    return Promise.resolve({
+      runtimeEpoch: input.runtimeEpoch ?? "epoch",
+      bindingGeneration: input.bindingGeneration,
+      clientRequestId: input.clientRequestId,
+      receipt: null,
+    });
+  }
   getSnapshot(): Promise<UiSnapshot> {
     return Promise.resolve(this.snapshot);
   }
@@ -257,6 +369,12 @@ class FakeBackend implements UiBackendClient {
       },
     }));
     this.promptCompletions.set(promptId, completion);
+    void completion.then(({ prompt }) => {
+      this.snapshot = {
+        ...this.snapshot,
+        prompts: [...(this.snapshot.prompts ?? []), prompt],
+      };
+    });
     return Promise.resolve({
       clientRequestId: options?.clientRequestId ?? `request_${promptId}`,
       createdAt: timestamp,
@@ -284,8 +402,32 @@ class FakeBackend implements UiBackendClient {
     );
   }
 
+  resubmitRetainedPrompt(): ReturnType<
+    UiBackendClient["resubmitRetainedPrompt"]
+  > {
+    return Promise.reject(new Error("Unused retained resubmission stub"));
+  }
+  resubmitRetainedPromptForOwner(
+    _input: Parameters<UiBackendClient["resubmitRetainedPrompt"]>[0],
+    _owner: string,
+  ): ReturnType<UiBackendClient["resubmitRetainedPrompt"]> {
+    return this.resubmitRetainedPrompt();
+  }
+
   editQueuedPrompt(): ReturnType<UiBackendClient["editQueuedPrompt"]> {
     return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  steerQueuedPrompt(
+    _input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return Promise.reject(new Error("unused"));
+  }
+  steerQueuedPromptForOwner(
+    input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+    _owner?: string,
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return this.steerQueuedPrompt(input);
   }
 
   cancelQueuedPrompt(): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
@@ -409,9 +551,24 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(permission);
   }
 
-  executeCommand(invocation: UiSlashCommandInvocation): Promise<void> {
+  executeCommand(
+    invocation: UiSlashCommandInvocation,
+  ): ReturnType<UiBackendClient["executeCommand"]> {
     this.executedCommands.push(invocation);
     const commandRunId = `command_${String(this.executedCommands.length)}`;
+    if (invocation.commandId.startsWith("skill.")) {
+      return this.submitPromptAccepted(invocation.rawArgs, {
+        clientRequestId: invocation.clientRequestId,
+        sessionId: invocation.sessionId,
+      }).then((promptReceipt) => ({
+        status: "completed",
+        commandRunId,
+        clientInvocationId: invocation.clientInvocationId,
+        outputCount: 0,
+        eventCount: 0,
+        promptReceipt,
+      }));
+    }
     this.emit({
       command: {
         clientInvocationId: invocation.clientInvocationId,
@@ -462,7 +619,20 @@ class FakeBackend implements UiBackendClient {
         timestamp: Date.parse(timestamp),
         type: "command.result.delivered",
       });
-      return Promise.resolve();
+      return Promise.resolve({
+        ...{
+          status: "completed" as const,
+          commandRunId: "command_1",
+          clientInvocationId: "invoke_1",
+          outputCount: 0,
+          eventCount: 0,
+        },
+        clientInvocationId: invocation.clientInvocationId,
+        sessionId: invocation.sessionId,
+        commandRunId,
+        outputCount: 1,
+        eventCount: 1,
+      });
     }
     this.emit({
       clientInvocationId: invocation.clientInvocationId,
@@ -471,7 +641,20 @@ class FakeBackend implements UiBackendClient {
       timestamp: Date.parse(timestamp),
       type: "command.result.delivered",
     });
-    return Promise.resolve();
+    return Promise.resolve({
+      ...{
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      },
+      clientInvocationId: invocation.clientInvocationId,
+      sessionId: invocation.sessionId,
+      commandRunId,
+      outputCount: 1,
+      eventCount: 1,
+    });
   }
 
   respondPermission(): Promise<void> {
@@ -581,6 +764,10 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
         { fetch: fetchImpl },
       );
       await runtime.ready;
+      await waitFor(
+        () => runtime.store.getSnapshot().sessionControl?.runId === "run_1",
+        "control did not load",
+      );
 
       await expect(
         runtime.abortSession("session_1", "run_1"),
@@ -588,22 +775,32 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       expect(backend.abortedRunIds).toEqual(["run_1"]);
 
       await expect(runtime.abortSession("session_2", "run_1")).rejects.toThrow(
-        "does not belong to session",
+        "exact running task",
       );
       expect(backend.abortedRunIds).toEqual(["run_1"]);
 
       await runtime.selectSession("session_2");
+      await waitFor(
+        () =>
+          runtime.store.getSnapshot().view.snapshot?.activeSessionId ===
+          "session_2",
+        "selected history did not load",
+      );
+      await waitFor(
+        () => runtime.store.getSnapshot().sessionControl?.runId === "run_2",
+        "new control did not load",
+      );
       await expect(
         runtime.abortSession("session_2", "run_2"),
       ).resolves.toBeUndefined();
       expect(backend.abortedRunIds).toEqual(["run_1", "run_2"]);
 
-      await expect(
-        runtime.abortSession("session_without_run"),
-      ).resolves.toBeUndefined();
+      await expect(runtime.abortSession("session_without_run")).rejects.toThrow(
+        "exact running task",
+      );
       await expect(
         runtime.abortSession("session_2", "run_unknown"),
-      ).resolves.toBeUndefined();
+      ).rejects.toThrow("exact running task");
       expect(backend.abortedRunIds).toEqual(["run_1", "run_2"]);
       await runtime.dispose();
     } finally {
@@ -611,96 +808,129 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
     }
   });
 
-  it("connects through app.request and consumes prompt events", async () => {
-    const backend = new FakeBackend();
-    const server = createDaemonServerApp({
-      authToken,
-      backend,
-      createSessionId: () => "session_generated",
-      packageVersion: "0.1.7-test",
-    });
-    await server.start();
-    try {
-      const fetchImpl: typeof fetch = (input, init = {}) => {
-        const url = new URL(urlFromRequestInput(input));
-        return Promise.resolve(
-          server.app.request(`${url.pathname}${url.search}`, {
-            body: init.body,
-            headers: init.headers,
-            method: init.method,
-            signal: init.signal,
-          }),
+  it.each(["accepted", "waiting"] as const)(
+    "forwards naming source through Web and HTTP %s submission",
+    async (mode) => {
+      const backend = new FakeBackend();
+      const server = createDaemonServerApp({
+        authToken,
+        backend,
+        createSessionId: () => "session_generated",
+        packageVersion: "0.1.7-test",
+      });
+      await server.start();
+      try {
+        const fetchImpl: typeof fetch = (input, init = {}) => {
+          const url = new URL(urlFromRequestInput(input));
+          return Promise.resolve(
+            server.app.request(`${url.pathname}${url.search}`, {
+              body: init.body,
+              headers: init.headers,
+              method: init.method,
+              signal: init.signal,
+            }),
+          );
+        };
+        const config: OhbabyBootstrapConfig = {
+          baseUrl: "http://127.0.0.1:4096",
+          clientId: "client_web",
+          directory: "/repo",
+          startupIntent: { startupSessionMode: { type: "fresh" } },
+          token: authToken,
+        };
+        const runtime = createOhbabyWebRuntime(config, { fetch: fetchImpl });
+        await runtime.ready;
+        const client = runtime.client;
+        if (!client) throw new Error("Expected an active browser client");
+
+        const submit =
+          mode === "accepted"
+            ? client.submitPromptAccepted.bind(client)
+            : client.submitPromptAndWait.bind(client);
+        await submit("hello", {
+          namingSource: { skillName: "review", request: "Review queue" },
+          clientRequestId: "request_1",
+        });
+
+        await waitFor(
+          () =>
+            runtime.store
+              .getSnapshot()
+              .view.snapshot?.sessions.some(
+                (session) => session.id === "session_generated",
+              ) === true,
+          "timed out waiting for server event",
         );
-      };
-      const config: OhbabyBootstrapConfig = {
-        baseUrl: "http://127.0.0.1:4096",
-        clientId: "client_web",
-        directory: "/repo",
-        startupIntent: { startupSessionMode: { type: "fresh" } },
-        token: authToken,
-      };
-      const runtime = createOhbabyWebRuntime(config, { fetch: fetchImpl });
-      await runtime.ready;
-      const client = runtime.client;
-      if (!client) throw new Error("Expected an active browser client");
-
-      await client.submitPromptAccepted("hello", {
-        clientRequestId: "request_1",
-      });
-
-      await waitFor(
-        () =>
-          runtime.store
-            .getSnapshot()
-            .view.snapshot?.sessions.some(
-              (session) => session.id === "session_generated",
-            ) === true,
-        "timed out waiting for server event",
-      );
-      expect(backend.submitted).toEqual([
-        {
-          options: {
-            clientRequestId: "request_1",
-            sessionId: "session_generated",
+        expect(backend.submitted).toEqual([
+          {
+            options: {
+              clientRequestId: "request_1",
+              namingSource: { skillName: "review", request: "Review queue" },
+              sessionId: "session_generated",
+            },
+            text: "hello",
           },
-          text: "hello",
-        },
-      ]);
-      expect(runtime.store.getSnapshot()).toMatchObject({
-        connectionState: "live",
-        view: {
-          snapshot: {
-            sessions: [{ id: "session_generated" }],
+        ]);
+        expect(runtime.store.getSnapshot()).toMatchObject({
+          connectionState: "live",
+          view: {
+            snapshot: {
+              sessions: [{ id: "session_generated" }],
+            },
           },
-        },
-      });
+        });
 
-      await runtime.executeSlashCommand({
-        sessionId: "session_generated",
-        text: "/status",
-      });
-      await waitFor(
-        () =>
-          runtime.store
-            .getSnapshot()
-            .view.commandNotices.some(
-              (notice) =>
-                notice.kind === "success" && notice.text === "status ok",
-            ),
-        "timed out waiting for command notice",
-      );
-      expect(backend.executedCommands).toHaveLength(1);
-      expect(backend.executedCommands[0]).toMatchObject({
-        commandId: "status",
-        path: ["status"],
-        raw: "/status",
-        sessionId: "session_generated",
-      });
-      await runtime.dispose();
-    } finally {
-      await server.dispose();
-    }
-  });
+        for (const namingSource of [
+          null,
+          "invalid",
+          { skillName: "review" },
+          { skillName: 42, request: "task" },
+        ]) {
+          const rejected = await fetchImpl("http://127.0.0.1:4096/v1/prompts", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${authToken}`,
+              "content-type": "application/json",
+              "x-ohbaby-client-id": "client_web",
+            },
+            body: JSON.stringify({
+              clientRequestId: "invalid-source",
+              sessionId: "session_generated",
+              text: "hello",
+              namingSource,
+            }),
+          });
+          expect(rejected.status).toBe(400);
+        }
+        expect(backend.submitted).toHaveLength(1);
+
+        await runtime.executeSlashCommand({
+          sessionId: "session_generated",
+          text: "/status",
+        });
+        await waitFor(
+          () =>
+            runtime.store
+              .getSnapshot()
+              .view.commandNotices.some(
+                (notice) =>
+                  notice.kind === "success" && notice.text === "status ok",
+              ),
+          "timed out waiting for command notice",
+        );
+        expect(backend.executedCommands).toHaveLength(1);
+        expect(backend.executedCommands[0]).toMatchObject({
+          commandId: "status",
+          path: ["status"],
+          raw: "/status",
+          sessionId: "session_generated",
+        });
+        await runtime.dispose();
+      } finally {
+        await server.dispose();
+      }
+    },
+  );
 
   it("routes structured web commands through REST and keeps overlay ids out of raw command execution", async () => {
     const backend = new FakeBackend();
@@ -874,31 +1104,13 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
 
       await runtime.createSession();
       await runtime.createSession();
+      expect(backend.createdSessionIds).toEqual(["session_1"]);
+      await backend.createSession();
       await runtime.selectSession("session_2");
 
-      expect(backend.executedCommands).toEqual([
-        expect.objectContaining({
-          argv: ["--no-reuse-empty-session"],
-          commandId: "new",
-          path: ["new"],
-          raw: "/new --no-reuse-empty-session",
-          rawArgs: "--no-reuse-empty-session",
-        }),
-        expect.objectContaining({
-          argv: [],
-          commandId: "new",
-          path: ["new"],
-          raw: "/new",
-          rawArgs: "",
-        }),
-        expect.objectContaining({
-          argv: ["--session_id", "session_2"],
-          commandId: "resume",
-          path: ["resume"],
-          raw: "/resume --session_id session_2",
-          rawArgs: "--session_id session_2",
-        }),
-      ]);
+      expect(backend.createdSessionIds).toEqual(["session_1", "session_2"]);
+      expect(backend.executedCommands).toEqual([]);
+      expect(await runtime.client?.getSelectedSessionId()).toBe("session_2");
       await runtime.dispose();
     } finally {
       await server.dispose();
@@ -982,7 +1194,7 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       const initialProjectedSession = runtime.store
         .getSnapshot()
         .view.snapshot?.sessions.find((session) => session.id === "session_2");
-      expect(initialProjectedSession?.messages).toEqual([]);
+      expect(initialProjectedSession?.messages ?? []).toEqual([]);
 
       await runtime.selectSession("session_2");
       await waitFor(

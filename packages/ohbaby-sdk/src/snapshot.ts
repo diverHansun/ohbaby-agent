@@ -1,3 +1,4 @@
+import type { UiModelRequest, UiToolExecution } from "./execution.js";
 import type { UiReasoningConfig } from "./connect-model.js";
 import type { UiContextWindowUsage } from "./context-window.js";
 import type { UiPromptSubmission } from "./prompt.js";
@@ -45,6 +46,7 @@ export interface UiPermissionState {
 }
 
 export interface UiSnapshot {
+  readonly serverNow?: number;
   readonly sessions: readonly UiSession[];
   readonly activeSessionId: string | null;
   readonly runs: readonly UiRun[];
@@ -94,6 +96,11 @@ export interface UiSession {
 }
 
 export interface UiRun {
+  readonly inputsCloseReason?: string;
+  readonly endedAt?: string;
+  readonly endTimeSource?: "recovery";
+  readonly unsentSteer?: boolean;
+  readonly modelActivity?: UiModelRequest;
   readonly id: string;
   readonly sessionId: string;
   readonly status: UiRunStatus;
@@ -103,6 +110,13 @@ export interface UiRun {
 }
 
 export interface UiMessage {
+  /** Preserves runtime provenance independently of the presentation role. */
+  readonly runtimeInputKind?:
+    | "user-steer"
+    | "subagent-result"
+    | "subagent-status";
+  readonly modelRequests?: readonly UiModelRequest[];
+  readonly runId?: string;
   readonly id: string;
   readonly role: "user" | "assistant" | "system" | "tool";
   readonly parts: readonly UiMessagePart[];
@@ -113,13 +127,20 @@ export interface UiMessage {
   readonly finishReason?: string;
 }
 
-export type UiMessagePart =
+export type UiMessagePart = {
+  readonly id?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly endReason?: "normal" | "interrupted" | "failed";
+  readonly saveState?: "pending" | "saved" | "failed";
+} & (
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "reasoning"; readonly text: string }
   | { readonly type: "tool-call"; readonly call: UiToolCall }
-  | { readonly type: "tool-result"; readonly result: UiToolResult };
+  | { readonly type: "tool-result"; readonly result: UiToolResult }
+);
 
 export interface UiToolCall {
+  readonly execution?: UiToolExecution;
   readonly id: string;
   readonly name: string;
   readonly input: Record<string, unknown>;
@@ -127,6 +148,7 @@ export interface UiToolCall {
 }
 
 export interface UiToolResult {
+  readonly execution?: UiToolExecution;
   readonly callId: string;
   readonly output: string;
   readonly error?: string;
@@ -134,6 +156,13 @@ export interface UiToolResult {
 
 export interface UiPermissionRequest {
   readonly id: string;
+  readonly sessionId: string;
+  readonly callId: string;
+  readonly messageId: string;
+  readonly rootSessionId: string;
+  readonly createdAt: number;
+  readonly contextScopeId?: string;
+  readonly sourceLabel?: string;
   readonly runId: string;
   readonly title: string;
   readonly description: string;

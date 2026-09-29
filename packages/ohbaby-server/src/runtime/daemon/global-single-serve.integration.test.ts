@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import type {
+  UiPromptReceipt,
+  UiPromptResubmissionReceipt,
+  UiPromptSubmission,
+} from "ohbaby-sdk";
 import { NodeSqliteConnection } from "../../../../ohbaby-agent/src/services/database/connection.js";
 import { createRemoteUiBackendClient } from "../../protocols/jsonrpc/client.js";
 
@@ -73,7 +78,7 @@ function spawnServe(input: {
           isAbortError: (error) => error instanceof Error && error.name === "AbortError",
           kind: "openai-compatible",
           async streamResponse(request) {
-            if (JSON.stringify(request.messages).includes("Generate a concise title")) {
+            if (JSON.stringify(request.messages).includes("Write a short conversation title")) {
               return (async function* () {
                 yield { textDelta: "Process E2E", finishReason: "stop" };
               })();
@@ -111,7 +116,7 @@ function spawnServe(input: {
           isAbortError: () => false,
           kind: "openai-compatible",
           async streamResponse(request) {
-            if (JSON.stringify(request.messages).includes("Generate a concise title")) {
+            if (JSON.stringify(request.messages).includes("Write a short conversation title")) {
               return (async function* () {
                 yield { textDelta: "Process failure", finishReason: "stop" };
               })();
@@ -230,6 +235,106 @@ async function waitForStarted(path: string, count: number): Promise<void> {
   }
 }
 
+async function createServerSession(
+  origin: string,
+  headers: Record<string, string>,
+): Promise<string> {
+  const response = await fetch(`${origin}/v1/sessions`, {
+    body: JSON.stringify({}),
+    headers,
+    method: "POST",
+  });
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    readonly session: { readonly id: string };
+  };
+  return body.session.id;
+}
+
+async function snapshotPrompts(
+  origin: string,
+  headers: Record<string, string>,
+): Promise<readonly UiPromptSubmission[]> {
+  const response = await fetch(`${origin}/v1/snapshot`, { headers });
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    readonly snapshot: { readonly prompts?: readonly UiPromptSubmission[] };
+  };
+  return body.snapshot.prompts ?? [];
+}
+
+async function waitForPromptStatus(
+  origin: string,
+  headers: Record<string, string>,
+  promptId: string,
+  status: UiPromptSubmission["status"],
+): Promise<UiPromptSubmission> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const prompt = (await snapshotPrompts(origin, headers)).find(
+      (candidate) => candidate.promptId === promptId,
+    );
+    if (prompt?.status === status) return prompt;
+    if (Date.now() >= deadline)
+      throw new Error(
+        `Timed out waiting for ${promptId} ${status}: ${prompt?.status ?? "missing"}`,
+      );
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+  }
+}
+
+async function acquirePromptLease(
+  origin: string,
+  headers: Record<string, string>,
+  promptId: string,
+): Promise<string> {
+  const response = await fetch(
+    `${origin}/v1/prompts/${encodeURIComponent(promptId)}/edit-lease`,
+    {
+      headers,
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    readonly lease: { readonly editLeaseId: string };
+  };
+  return body.lease.editLeaseId;
+}
+
+async function resubmitRetained(
+  origin: string,
+  headers: Record<string, string>,
+  promptId: string,
+  input: {
+    readonly editLeaseId: string;
+    readonly operationId: string;
+    readonly text: string;
+  },
+): Promise<UiPromptResubmissionReceipt> {
+  const response = await fetch(
+    `${origin}/v1/prompts/${encodeURIComponent(promptId)}/resubmit`,
+    {
+      headers,
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  const body = (await response.json()) as {
+    readonly receipt: UiPromptResubmissionReceipt;
+  };
+  expect(response.status, JSON.stringify(body)).toBe(200);
+  return body.receipt;
+}
+
+async function startedCount(path: string): Promise<number> {
+  return (await readFile(path, "utf8").catch(() => ""))
+    .trim()
+    .split("\n")
+    .filter(Boolean).length;
+}
+
 describe("global single serve across real processes", () => {
   it("migrates legacy platform data before a direct server start opens SQLite", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-data-migrate-"));
@@ -339,11 +444,14 @@ describe("global single serve across real processes", () => {
       readonly clientRequestId: string;
       readonly promptId: string;
     }[] = [];
+    const sessionIds: string[] = [];
     for (let index = 1; index <= 11; index += 1) {
+      const sessionId = await createServerSession(origin, headers);
+      sessionIds.push(sessionId);
       const response = await fetch(`${origin}/v1/prompts`, {
         body: JSON.stringify({
           clientRequestId: `process_request_${String(index)}`,
-          sessionId: `process_session_${String(index)}`,
+          sessionId,
           text: `process prompt ${String(index)}`,
         }),
         headers,
@@ -361,7 +469,7 @@ describe("global single serve across real processes", () => {
     const retried = await fetch(`${origin}/v1/prompts`, {
       body: JSON.stringify({
         clientRequestId: "process_request_11",
-        sessionId: "process_session_11",
+        sessionId: sessionIds[10],
         text: "process prompt 11",
       }),
       headers,
@@ -399,7 +507,7 @@ describe("global single serve across real processes", () => {
     await waitForExit(child);
   }, 20_000);
 
-  it("recovers queued work but marks active work interrupted after a real daemon crash", async () => {
+  it("retains queued work after a crash and explicitly resubmits one original prompt idempotently", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-prompt-recovery-"));
     cleanupDirectories.push(root);
     const repo = join(root, "repo");
@@ -428,24 +536,30 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionIds: string[] = [];
     let activePromptId = "";
     let queuedPromptId = "";
+    let queuedReceipt: UiPromptReceipt | undefined;
     for (let index = 1; index <= 11; index += 1) {
+      const sessionId = await createServerSession(firstOrigin, headers);
+      sessionIds.push(sessionId);
       const response = await fetch(`${firstOrigin}/v1/prompts`, {
         body: JSON.stringify({
           clientRequestId: `recovery_request_${String(index)}`,
-          sessionId: `recovery_session_${String(index)}`,
+          sessionId,
           text: `recovery prompt ${String(index)}`,
         }),
         headers,
         method: "POST",
       });
-      const receipt = (await response.json()) as { readonly promptId: string };
+      expect(response.status).toBe(202);
+      const receipt = (await response.json()) as UiPromptReceipt;
       if (index === 1) {
         activePromptId = receipt.promptId;
       }
       if (index === 11) {
         queuedPromptId = receipt.promptId;
+        queuedReceipt = receipt;
       }
     }
     await waitForStarted(startedPath, 10);
@@ -463,7 +577,7 @@ describe("global single serve across real processes", () => {
     });
     const sessionHeaders: Record<string, Record<string, string>> = {};
     for (let index = 1; index <= 11; index += 1) {
-      const sessionId = `recovery_session_${String(index)}`;
+      const sessionId = sessionIds[index - 1];
       const clientId = `recovery_view_${String(index)}`;
       const scopedHeaders = {
         ...headers,
@@ -485,7 +599,7 @@ describe("global single serve across real processes", () => {
     for (;;) {
       statuses = await Promise.all(
         Array.from({ length: 11 }, async (_unused, zeroBasedIndex) => {
-          const sessionId = `recovery_session_${String(zeroBasedIndex + 1)}`;
+          const sessionId = sessionIds[zeroBasedIndex];
           const response = await fetch(`${secondOrigin}/v1/snapshot`, {
             headers: sessionHeaders[sessionId],
           });
@@ -505,7 +619,7 @@ describe("global single serve across real processes", () => {
         }),
       );
       if (
-        statuses[10] === "succeeded" &&
+        statuses[10] === "retained" &&
         statuses.filter((status) => status === "interrupted").length === 10
       ) {
         break;
@@ -517,10 +631,95 @@ describe("global single serve across real processes", () => {
       }
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
     }
-    expect(statuses[10]).toBe("succeeded");
+    expect(statuses[10]).toBe("retained");
     expect(statuses.filter((status) => status === "interrupted")).toHaveLength(
       10,
     );
+
+    expect(await startedCount(startedPath)).toBe(10);
+    if (!queuedReceipt) throw new Error("Missing durable queued receipt");
+    const queuedHeaders = sessionHeaders[queuedReceipt.sessionId];
+    const retained = await waitForPromptStatus(
+      secondOrigin,
+      queuedHeaders,
+      queuedPromptId,
+      "retained",
+    );
+    expect(retained).toMatchObject({
+      userMessageId: queuedReceipt.userMessageId,
+      createdAt: queuedReceipt.createdAt,
+    });
+    const editLeaseId = await acquirePromptLease(
+      secondOrigin,
+      queuedHeaders,
+      queuedPromptId,
+    );
+    const retryInput = {
+      editLeaseId,
+      operationId: "recovered-send-11",
+      text: retained.text,
+    };
+    const [receipt, duplicate] = await Promise.all([
+      resubmitRetained(secondOrigin, queuedHeaders, queuedPromptId, retryInput),
+      resubmitRetained(secondOrigin, queuedHeaders, queuedPromptId, retryInput),
+    ]);
+    expect(duplicate).toEqual(receipt);
+    expect(receipt).toMatchObject({
+      promptId: queuedPromptId,
+      userMessageId: queuedReceipt.userMessageId,
+      sessionId: queuedReceipt.sessionId,
+    });
+    const sent = await waitForPromptStatus(
+      secondOrigin,
+      queuedHeaders,
+      queuedPromptId,
+      "succeeded",
+    );
+    expect(sent).toMatchObject({
+      createdAt: queuedReceipt.createdAt,
+      userMessageId: queuedReceipt.userMessageId,
+    });
+    expect(
+      await resubmitRetained(
+        secondOrigin,
+        queuedHeaders,
+        queuedPromptId,
+        retryInput,
+      ),
+    ).toEqual(receipt);
+    expect(await startedCount(startedPath)).toBe(11);
+    const database = new NodeSqliteConnection(common.dbPath);
+    try {
+      expect(
+        database
+          .prepare<{
+            count: number;
+          }>(
+            "SELECT COUNT(*) AS count FROM message WHERE id = ? AND session_id = ?",
+          )
+          .get(queuedReceipt.userMessageId, queuedReceipt.sessionId)?.count,
+      ).toBe(1);
+      expect(
+        database
+          .prepare<{
+            count: number;
+          }>(
+            "SELECT COUNT(*) AS count FROM run_ledger WHERE session_id = ? AND context_scope_id IS NULL",
+          )
+          .get(queuedReceipt.sessionId)?.count,
+      ).toBe(1);
+      expect(
+        database
+          .prepare<{
+            count: number;
+          }>(
+            "SELECT COUNT(*) AS count FROM prompt_resubmission WHERE operation_id = ?",
+          )
+          .get(retryInput.operationId)?.count,
+      ).toBe(1);
+    } finally {
+      database.close();
+    }
 
     const endpoint = new URL(second.url);
     const recoveredClient = createRemoteUiBackendClient({
@@ -529,7 +728,7 @@ describe("global single serve across real processes", () => {
       directory: repo,
       host: endpoint.hostname,
       port: Number(endpoint.port),
-      startupIntent: { resumeSessionId: "recovery_session_1" },
+      startupIntent: { resumeSessionId: sessionIds[0] },
     });
     try {
       const completion = await recoveredClient.waitForPrompt(activePromptId);
@@ -546,6 +745,40 @@ describe("global single serve across real processes", () => {
 
     secondChild.kill("SIGTERM");
     await waitForExit(secondChild);
+    const thirdChild = spawnServe(common);
+    const third = await waitForReady(thirdChild);
+    const thirdOrigin = new URL(third.url).origin;
+    const reconnected = await fetch(`${thirdOrigin}/v1/clients`, {
+      body: JSON.stringify({
+        clientId: queuedHeaders["x-ohbaby-client-id"],
+        startupIntent: { resumeSessionId: queuedReceipt.sessionId },
+      }),
+      headers: queuedHeaders,
+      method: "POST",
+    });
+    expect(reconnected.status).toBe(200);
+    expect(
+      await resubmitRetained(
+        thirdOrigin,
+        queuedHeaders,
+        queuedPromptId,
+        retryInput,
+      ),
+    ).toEqual(receipt);
+    const persisted = await waitForPromptStatus(
+      thirdOrigin,
+      queuedHeaders,
+      queuedPromptId,
+      "succeeded",
+    );
+    expect(persisted).toMatchObject({
+      runId: sent.runId,
+      userMessageId: sent.userMessageId,
+      createdAt: sent.createdAt,
+    });
+    expect(await startedCount(startedPath)).toBe(11);
+    thirdChild.kill("SIGTERM");
+    await waitForExit(thirdChild);
   }, 20_000);
 
   it("preserves queued edit and cancel decisions across a real daemon restart", async () => {
@@ -577,6 +810,7 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionId = await createServerSession(firstOrigin, headers);
     const receipts: { readonly promptId: string }[] = [];
     for (const [index, text] of [
       "active",
@@ -586,7 +820,7 @@ describe("global single serve across real processes", () => {
       const response = await fetch(`${firstOrigin}/v1/prompts`, {
         body: JSON.stringify({
           clientRequestId: `edit_request_${String(index)}`,
-          sessionId: "edit_session",
+          sessionId,
           text,
         }),
         headers,
@@ -660,10 +894,33 @@ describe("global single serve across real processes", () => {
     await fetch(`${secondOrigin}/v1/clients`, {
       body: JSON.stringify({
         clientId: "edit_client",
-        startupIntent: { resumeSessionId: "edit_session" },
+        startupIntent: { resumeSessionId: sessionId },
       }),
       headers,
       method: "POST",
+    });
+    const retained = await waitForPromptStatus(
+      secondOrigin,
+      headers,
+      editable.promptId,
+      "retained",
+    );
+    expect(retained.text).toBe("after edit");
+    expect(
+      (await snapshotPrompts(secondOrigin, headers)).find(
+        (prompt) => prompt.promptId === cancellable.promptId,
+      )?.status,
+    ).toBe("cancelled");
+    expect(await startedCount(startedPath)).toBe(1);
+    const newLease = await acquirePromptLease(
+      secondOrigin,
+      headers,
+      editable.promptId,
+    );
+    await resubmitRetained(secondOrigin, headers, editable.promptId, {
+      editLeaseId: newLease,
+      operationId: "send-edited-retained",
+      text: retained.text,
     });
     await waitForStarted(startedPath, 2);
     const deadline = Date.now() + 10_000;
@@ -733,10 +990,11 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionId = await createServerSession(origin, headers);
     const active = await fetch(`${origin}/v1/prompts`, {
       body: JSON.stringify({
         clientRequestId: "limit_request_active",
-        sessionId: "limit_session",
+        sessionId,
         text: "active",
       }),
       headers,
@@ -750,7 +1008,7 @@ describe("global single serve across real processes", () => {
         return fetch(`${origin}/v1/prompts`, {
           body: JSON.stringify({
             clientRequestId: `limit_request_${String(index)}`,
-            sessionId: "limit_session",
+            sessionId,
             text: `queued ${String(index)}`,
           }),
           headers,
@@ -790,7 +1048,7 @@ describe("global single serve across real processes", () => {
     await waitForExit(child);
   }, 20_000);
 
-  it("preserves queued work across a graceful daemon stop and resumes it after restart", async () => {
+  it("retains queued work on graceful stop and sends only an explicitly resubmitted item after newer work", async () => {
     const root = await mkdtemp(join(tmpdir(), "ohbaby-real-graceful-stop-"));
     cleanupDirectories.push(root);
     const repo = join(root, "repo");
@@ -820,19 +1078,24 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
-    const receipts: { readonly promptId: string }[] = [];
-    for (const [index, text] of ["active", "queued"].entries()) {
+    const sessionId = await createServerSession(origin, headers);
+    const receipts: UiPromptReceipt[] = [];
+    for (const [index, text] of [
+      "active",
+      "retained B",
+      "retained C",
+    ].entries()) {
       const response = await fetch(`${origin}/v1/prompts`, {
         body: JSON.stringify({
           clientRequestId: `graceful_request_${String(index)}`,
-          sessionId: "graceful_session",
+          sessionId,
           text,
         }),
         headers,
         method: "POST",
       });
       expect(response.status).toBe(202);
-      receipts.push((await response.json()) as { readonly promptId: string });
+      receipts.push((await response.json()) as UiPromptReceipt);
       if (index === 0) {
         await waitForStarted(startedPath, 1);
       }
@@ -848,61 +1111,147 @@ describe("global single serve across real processes", () => {
         .prepare(
           `SELECT prompt_id, status
              FROM prompt_submission
-            WHERE prompt_id IN (?, ?)
+            WHERE session_id = ?
             ORDER BY created_at ASC`,
         )
-        .all(
-          receipts[0]?.promptId,
-          receipts[1]?.promptId,
-        ) as unknown as readonly {
+        .all(sessionId) as unknown as readonly {
         readonly prompt_id: string;
         readonly status: string;
       }[];
       expect(rows).toEqual([
-        { prompt_id: receipts[0]?.promptId, status: "running" },
-        { prompt_id: receipts[1]?.promptId, status: "queued" },
+        { prompt_id: receipts[0]?.promptId, status: "interrupted" },
+        { prompt_id: receipts[1]?.promptId, status: "retained" },
+        { prompt_id: receipts[2]?.promptId, status: "retained" },
       ]);
     } finally {
       stoppedDatabase.close();
     }
 
-    await writeFile(gatePath, "release", "utf8");
     const secondChild = spawnServe(common);
     const second = await waitForReady(secondChild);
     const secondOrigin = new URL(second.url).origin;
     await fetch(`${secondOrigin}/v1/clients`, {
       body: JSON.stringify({
         clientId: "graceful_client",
-        startupIntent: { resumeSessionId: "graceful_session" },
+        startupIntent: { resumeSessionId: sessionId },
       }),
       headers,
       method: "POST",
     });
+    const bReceipt = receipts[1];
+    const cReceipt = receipts[2];
+    const retainedB = await waitForPromptStatus(
+      secondOrigin,
+      headers,
+      bReceipt.promptId,
+      "retained",
+    );
+    const retainedC = await waitForPromptStatus(
+      secondOrigin,
+      headers,
+      cReceipt.promptId,
+      "retained",
+    );
+    expect(await startedCount(startedPath)).toBe(1);
+    const dResponse = await fetch(`${secondOrigin}/v1/prompts`, {
+      body: JSON.stringify({
+        clientRequestId: "new-D-after-restart",
+        sessionId,
+        text: "new D",
+      }),
+      headers,
+      method: "POST",
+    });
+    expect(dResponse.status).toBe(202);
+    const dReceipt = (await dResponse.json()) as UiPromptReceipt;
     await waitForStarted(startedPath, 2);
-    const deadline = Date.now() + 10_000;
-    for (;;) {
-      const response = await fetch(`${secondOrigin}/v1/snapshot`, { headers });
-      const body = (await response.json()) as {
-        readonly snapshot: {
-          readonly prompts?: readonly {
-            readonly promptId: string;
-            readonly status: string;
-          }[];
-        };
-      };
-      const queued = body.snapshot.prompts?.find(
-        (prompt) => prompt.promptId === receipts[1]?.promptId,
-      );
-      const active = body.snapshot.prompts?.find(
-        (prompt) => prompt.promptId === receipts[0]?.promptId,
-      );
-      if (active?.status === "interrupted" && queued?.status === "succeeded") {
-        break;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error("Timed out waiting for graceful-stop queue recovery");
-      }
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+    expect(
+      await waitForPromptStatus(
+        secondOrigin,
+        headers,
+        cReceipt.promptId,
+        "retained",
+      ),
+    ).toEqual(retainedC);
+    const lease = await acquirePromptLease(
+      secondOrigin,
+      headers,
+      bReceipt.promptId,
+    );
+    const resend = await resubmitRetained(
+      secondOrigin,
+      headers,
+      bReceipt.promptId,
+      { editLeaseId: lease, operationId: "graceful-send-B", text: "edited B" },
+    );
+    expect(resend).toMatchObject({
+      promptId: bReceipt.promptId,
+      userMessageId: bReceipt.userMessageId,
+      sessionId,
+    });
+    const queuedB = await waitForPromptStatus(
+      secondOrigin,
+      headers,
+      bReceipt.promptId,
+      "queued",
+    );
+    const runningD = await waitForPromptStatus(
+      secondOrigin,
+      headers,
+      dReceipt.promptId,
+      "running",
+    );
+    expect(queuedB.admissionOrder).toBeGreaterThan(
+      runningD.admissionOrder ?? 0,
+    );
+    expect(queuedB.createdAt).toBe(retainedB.createdAt);
+    expect(queuedB.acceptedAt).not.toBe(retainedB.acceptedAt);
+    expect(await startedCount(startedPath)).toBe(2);
+    await writeFile(gatePath, "release", "utf8");
+    await waitForPromptStatus(
+      secondOrigin,
+      headers,
+      dReceipt.promptId,
+      "succeeded",
+    );
+    const completedB = await waitForPromptStatus(
+      secondOrigin,
+      headers,
+      bReceipt.promptId,
+      "succeeded",
+    );
+    expect(completedB).toMatchObject({
+      text: "edited B",
+      createdAt: bReceipt.createdAt,
+      userMessageId: bReceipt.userMessageId,
+    });
+    expect(
+      await waitForPromptStatus(
+        secondOrigin,
+        headers,
+        cReceipt.promptId,
+        "retained",
+      ),
+    ).toEqual(retainedC);
+    expect(await startedCount(startedPath)).toBe(3);
+    const completedDatabase = new NodeSqliteConnection(dbPath);
+    try {
+      expect(
+        completedDatabase
+          .prepare<{
+            count: number;
+          }>("SELECT COUNT(*) AS count FROM message WHERE id = ?")
+          .get(bReceipt.userMessageId)?.count,
+      ).toBe(1);
+      expect(
+        completedDatabase
+          .prepare<{
+            count: number;
+          }>("SELECT COUNT(*) AS count FROM message WHERE id = ?")
+          .get(cReceipt.userMessageId)?.count,
+      ).toBe(0);
+    } finally {
+      completedDatabase.close();
     }
     secondChild.kill("SIGTERM");
     await waitForExit(secondChild);
@@ -937,10 +1286,11 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionId = await createServerSession(origin, headers);
     const accepted = await fetch(`${origin}/v1/prompts`, {
       body: JSON.stringify({
         clientRequestId: "provider_request_1",
-        sessionId: "provider_session",
+        sessionId,
         text: "fail with provider 429",
       }),
       headers,
@@ -986,7 +1336,7 @@ describe("global single serve across real processes", () => {
     await waitForExit(child);
   }, 20_000);
 
-  it("terminally marks queued work only when its workspace is truly unavailable", async () => {
+  it("keeps retained input while its workspace is unavailable and sends only after restoration", async () => {
     const root = await mkdtemp(
       join(tmpdir(), "ohbaby-real-workspace-unavailable-"),
     );
@@ -1020,12 +1370,13 @@ describe("global single serve across real processes", () => {
       headers,
       method: "POST",
     });
+    const sessionId = await createServerSession(origin, headers);
     let queuedPromptId = "";
     for (const [index, text] of ["active", "queued"].entries()) {
       const response = await fetch(`${origin}/v1/prompts`, {
         body: JSON.stringify({
           clientRequestId: `unavailable_request_${String(index)}`,
-          sessionId: "unavailable_session",
+          sessionId,
           text,
         }),
         headers,
@@ -1058,17 +1409,57 @@ describe("global single serve across real processes", () => {
         .get(queuedPromptId) as
         | { readonly error_data: string | null; readonly status: string }
         | undefined;
-      expect(row?.status).toBe("failed");
-      expect(
-        row?.error_data ? JSON.parse(row.error_data) : undefined,
-      ).toMatchObject({
-        code: "WORKSPACE_UNAVAILABLE",
-        source: "runtime",
-      });
+      expect(row?.status).toBe("retained");
+      expect(row?.error_data).toBeNull();
     } finally {
       database.close();
     }
+    expect(await startedCount(startedPath)).toBe(1);
     secondChild.kill("SIGTERM");
     await waitForExit(secondChild);
+    await mkdir(join(missingRepo, ".git"), { recursive: true });
+    const restoredChild = spawnServe(common);
+    const restored = await waitForReady(restoredChild);
+    const restoredOrigin = new URL(restored.url).origin;
+    const registered = await fetch(`${restoredOrigin}/v1/clients`, {
+      body: JSON.stringify({
+        clientId: "unavailable_client",
+        startupIntent: { resumeSessionId: sessionId },
+      }),
+      headers,
+      method: "POST",
+    });
+    expect(registered.status).toBe(200);
+    const retained = await waitForPromptStatus(
+      restoredOrigin,
+      headers,
+      queuedPromptId,
+      "retained",
+    );
+    expect(await startedCount(startedPath)).toBe(1);
+    const lease = await acquirePromptLease(
+      restoredOrigin,
+      headers,
+      queuedPromptId,
+    );
+    await resubmitRetained(restoredOrigin, headers, queuedPromptId, {
+      editLeaseId: lease,
+      operationId: "restored-workspace-send",
+      text: retained.text,
+    });
+    await writeFile(gatePath, "release", "utf8");
+    const completed = await waitForPromptStatus(
+      restoredOrigin,
+      headers,
+      queuedPromptId,
+      "succeeded",
+    );
+    expect(completed).toMatchObject({
+      userMessageId: retained.userMessageId,
+      createdAt: retained.createdAt,
+    });
+    expect(await startedCount(startedPath)).toBe(2);
+    restoredChild.kill("SIGTERM");
+    await waitForExit(restoredChild);
   }, 20_000);
 });

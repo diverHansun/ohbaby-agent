@@ -36,6 +36,29 @@ const settle = (ms = 20): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("GoalService", () => {
+  it("only normalizes on explicit initialization and reads live initialized state without replay", async () => {
+    const persistence = new InMemoryGoalPersistence();
+    const original = new GoalService({
+      persistence,
+      executionControl: noOpExecutionControl,
+    });
+    await original.createGoal("s1", { actor: "user", objective: "saved" });
+    const service = new GoalService({
+      persistence,
+      executionControl: noOpExecutionControl,
+    });
+    const before = await persistence.list("s1");
+    expect(service.peekSnapshot("s1")).toBeUndefined();
+    expect(await persistence.list("s1")).toEqual(before);
+    await Promise.all([service.initSession("s1"), service.initSession("s1")]);
+    expect(service.peekSnapshot("s1")?.status).toBe("paused");
+    expect((await persistence.list("s1")).length).toBe(before.length + 1);
+    await service.resumeGoal("s1");
+    await service.initSession("s1");
+    expect(service.peekSnapshot("s1")?.status).toBe("active");
+    await service.initSession("empty");
+    expect(service.peekSnapshot("empty")).toBeNull();
+  });
   it("awaits execution interruption when an active goal pauses", async () => {
     const interruptions: GoalExecutionInterruptInput[] = [];
     const service = new GoalService({

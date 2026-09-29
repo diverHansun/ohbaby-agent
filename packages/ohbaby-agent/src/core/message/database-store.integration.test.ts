@@ -1,3 +1,6 @@
+import { serializeHistory } from "../context/serialization.js";
+import { estimateHistoryForCompaction } from "../context/compaction-policy.js";
+import { toModelMessages } from "./converter.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -13,6 +16,8 @@ import {
   type StatementRunResult,
 } from "../../services/database/index.js";
 import { createDatabaseMessageStore } from "./database-store.js";
+import { messageToUiMessage } from "../../adapters/ui-state/persistent-store.js";
+import { messageCursor } from "./pagination.js";
 import { serializeHistoryMessages } from "../context/serializer.js";
 import {
   createTokenUsageMetadata,
@@ -72,6 +77,415 @@ afterEach(async () => {
 });
 
 describe("createDatabaseMessageStore", () => {
+  it("preserves tool execution facts through SQLite reopen and paged UI projection", async () => {
+    const message: Message = {
+      id: "tool-facts",
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+      runId: "run",
+      time: { created: 1_000 },
+    };
+    const execution = {
+      phase: "ended" as const,
+      createdAt: 1_100,
+      phaseStartedAt: 4_100,
+      executionStartedAt: 2_100,
+      endedAt: 4_100,
+      outcome: "timed-out" as const,
+      cleanup: "confirmed" as const,
+    };
+    const store = createDatabaseMessageStore();
+    await store.insertMessage(message);
+    await store.appendPart({
+      message,
+      partId: "tool-part",
+      data: {
+        type: "tool",
+        callId: "call",
+        tool: "bash",
+        state: {
+          status: "error",
+          input: { command: "sleep 10" },
+          error: "timed out",
+        },
+        metadata: { execution },
+      },
+      updatedAt: 4_100,
+    });
+
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const reopened = createDatabaseMessageStore();
+    const page = await reopened.listPageByRun("session_1", "run", { limit: 1 });
+    expect(page.messages).toHaveLength(1);
+    const saved = page.messages[0];
+    expect(saved.parts[0]?.metadata?.execution).toEqual(execution);
+    const ui = messageToUiMessage(saved);
+    expect(ui?.parts).toMatchObject([
+      { type: "tool-call", call: { execution } },
+      { type: "tool-result", result: { execution, error: "timed out" } },
+    ]);
+    expect(page.hasMore).toBe(false);
+    expect(
+      messageToUiMessage({
+        info: message,
+        parts: [
+          {
+            ...saved.parts[0],
+            metadata: {
+              execution: { phase: "bad", createdAt: 1, phaseStartedAt: 2 },
+            },
+          } as unknown as (typeof saved.parts)[number],
+        ],
+      })?.parts,
+    ).toMatchObject([
+      { type: "tool-call", call: { execution: undefined } },
+      {
+        type: "tool-result",
+        result: { execution: undefined, error: "timed out" },
+      },
+    ]);
+  });
+  it("pages forward across equal timestamps and enforces session, scope and run cursor binding", async () => {
+    const store = createDatabaseMessageStore();
+    for (const id of ["a", "b", "c", "d", "e"])
+      await store.insertMessage({
+        ...userMessage(id),
+        runId: "run_a",
+        contextScopeId: "scope_a",
+      });
+    await store.insertMessage({
+      ...userMessage("foreign_run"),
+      runId: "run_b",
+      contextScopeId: "scope_a",
+    });
+    await store.insertMessage({
+      ...userMessage("foreign_scope"),
+      runId: "run_a",
+      contextScopeId: "scope_b",
+    });
+    const scope = { contextScopeId: "scope_a" };
+    const after = messageCursor(
+      "session_1",
+      { ...userMessage("a"), runId: "run_a" },
+      { scope },
+      "run_a",
+    );
+    const first = await store.listPageByRun("session_1", "run_a", {
+      scope,
+      after,
+      limit: 2,
+    });
+    expect(first.messages.map(({ info }) => info.id)).toEqual(["b", "c"]);
+    expect(first.hasMore).toBe(true);
+    const backward = await store.listPageByRun("session_1", "run_a", {
+      scope,
+      before: first.nextCursor,
+      limit: 2,
+    });
+    expect(backward.messages.map(({ info }) => info.id)).toEqual(["a", "b"]);
+    expect(backward.hasMore).toBe(false);
+    const second = await store.listPageByRun("session_1", "run_a", {
+      scope,
+      after: first.nextCursor,
+      limit: 2,
+    });
+    expect(second.messages.map(({ info }) => info.id)).toEqual(["d", "e"]);
+    expect(second.hasMore).toBe(false);
+    expect(second.nextCursor).toBeUndefined();
+    await expect(
+      store.listPageByRun("session_1", "run_a", {
+        scope,
+        after,
+        before: after,
+      }),
+    ).rejects.toThrow(/cursor/i);
+    await expect(
+      store.listPageByRun("session_1", "run_a", { scope, after: "invalid" }),
+    ).rejects.toThrow(/cursor/i);
+    await expect(
+      store.listPageByRun("session_1", "run_b", { scope, after }),
+    ).rejects.toThrow(/cursor/i);
+    await expect(
+      store.listPageByRun("session_1", "run_a", {
+        scope: { contextScopeId: "scope_b" },
+        after,
+      }),
+    ).rejects.toThrow(/cursor/i);
+    const plan = getDatabase()
+      .prepare<{ detail: string }>(
+        "EXPLAIN QUERY PLAN SELECT * FROM message WHERE session_id = ? AND json_extract(data, '$.runId') = ? AND (created_at, id) > (?, ?) ORDER BY created_at ASC, id ASC LIMIT ?",
+      )
+      .all("session_1", "run_a", 1000, "a", 3)
+      .map((row) => row.detail)
+      .join("\n");
+    expect(plan).toContain("idx_message_session_run_page");
+    expect(plan).not.toMatch(/TEMP B-TREE/);
+  });
+  it("merges request observations into current JSON and keeps terminal records across reopen", async () => {
+    let store = createDatabaseMessageStore();
+    await store.insertMessage({
+      id: "assistant",
+      role: "assistant",
+      agent: "default",
+      sessionId: "session_1",
+      runId: "run",
+      time: { created: 100 },
+    });
+    const request = {
+      requestId: "r",
+      runId: "run",
+      messageId: "assistant",
+      step: 1,
+      attempt: 1,
+      purpose: "agent-step",
+      startedAt: 100,
+      outcome: "running" as const,
+    };
+    await store.updateMessage("assistant", { modelRequests: [request] });
+    await store.updateMessage("assistant", {
+      finish: "stop",
+      time: { created: 100, completed: 500 },
+    });
+    await store.updateMessage("assistant", {
+      modelRequests: [{ ...request, endedAt: 450, outcome: "success" }],
+    });
+    await store.updateMessage("assistant", {
+      modelRequests: [{ ...request, firstTextAt: 999 }],
+    });
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    store = createDatabaseMessageStore();
+    expect(await store.getMessage("assistant")).toMatchObject({
+      finish: "stop",
+      time: { completed: 500 },
+      modelRequests: [{ ...request, endedAt: 450, outcome: "success" }],
+    });
+    await expect(
+      store.updateMessage("assistant", {
+        modelRequests: [{ ...request, requestId: "foreign", runId: "child" }],
+      }),
+    ).rejects.toThrow("owner");
+  });
+  it("uses covering order indexes for session, scope and run keyset pages", () => {
+    const queries = [
+      {
+        where: "session_id = ?",
+        params: ["session_1"],
+        index: "idx_message_session_page",
+      },
+      {
+        where: "session_id = ? AND context_scope_id IS NULL",
+        params: ["session_1"],
+        index: "idx_message_session_scope_page",
+      },
+      {
+        where: "session_id = ? AND json_extract(data, '$.runId') = ?",
+        params: ["session_1", "run_a"],
+        index: "idx_message_session_run_page",
+      },
+    ];
+    for (const query of queries) {
+      const plan = getDatabase()
+        .prepare<{ detail: string }>(
+          `EXPLAIN QUERY PLAN SELECT * FROM message WHERE ${query.where} AND (created_at, id) < (?, ?) ORDER BY created_at DESC, id DESC LIMIT ?`,
+        )
+        .all(...query.params, 1000, "message_100", 51)
+        .map((row) => row.detail)
+        .join("\n");
+      expect(plan).toContain(query.index);
+      expect(plan).not.toMatch(/TEMP B-TREE/);
+    }
+  });
+
+  it("pages equal timestamps without duplicates and limits SQL before loading parts", async () => {
+    const queries: string[] = [];
+    const db = getDatabase();
+    const instrumented: DatabaseConnection = {
+      path: db.path,
+      exec: (sql) => {
+        db.exec(sql);
+      },
+      close: () => {
+        throw new Error("Wrapper must not close DB");
+      },
+      pragma: (name) => db.pragma(name),
+      prepare: (sql) => {
+        queries.push(sql);
+        return db.prepare(sql);
+      },
+    };
+    const store = createDatabaseMessageStore({ db: instrumented });
+    for (let i = 0; i < 205; i++) {
+      await store.insertMessage({
+        ...userMessage(`message_${String(i).padStart(3, "0")}`),
+        runId: i < 3 ? "run_a" : "run_b",
+      });
+    }
+    queries.length = 0;
+    const first = await store.listPageBySession("session_1");
+    expect(first.messages).toHaveLength(50);
+    expect(first.messages[0]?.info.id).toBe("message_155");
+    expect(first.hasMore).toBe(true);
+    expect(
+      queries.some((sql) =>
+        sql.includes("ORDER BY created_at DESC, id DESC LIMIT"),
+      ),
+    ).toBe(true);
+    expect(queries.filter((sql) => sql.includes("FROM part"))).toHaveLength(1);
+    const second = await store.listPageBySession("session_1", {
+      before: first.nextCursor,
+      limit: 200,
+    });
+    expect(second.messages).toHaveLength(155);
+    expect(second.messages.at(-1)?.info.id).toBe("message_154");
+    expect(second.hasMore).toBe(false);
+    await expect(
+      store.listPageBySession("session_1", { limit: 201 }),
+    ).rejects.toThrow(/limit/i);
+    await expect(
+      store.listPageBySession("session_1", { before: "invalid" }),
+    ).rejects.toThrow(/cursor/i);
+    await expect(
+      store.listPageBySession("other", { before: first.nextCursor }),
+    ).rejects.toThrow(/cursor/i);
+    await expect(
+      store.listPageByRun("session_1", "run_a"),
+    ).resolves.toMatchObject({
+      messages: [
+        { info: { id: "message_000", runId: "run_a" } },
+        { info: { id: "message_001" } },
+        { info: { id: "message_002" } },
+      ],
+      hasMore: false,
+    });
+    await expect(
+      store.listByIds("session_1", ["message_003", "message_002", "absent"]),
+    ).resolves.toMatchObject([
+      { info: { id: "message_002" } },
+      { info: { id: "message_003" } },
+    ]);
+    await expect(store.listByIds("other", ["message_003"])).resolves.toEqual(
+      [],
+    );
+  });
+
+  it("idempotently saves display reasoning and preserves its own ending after reopen", async () => {
+    const store = createDatabaseMessageStore();
+    await store.insertMessage({
+      ...userMessage(),
+      role: "assistant",
+      agent: "default",
+      finish: "error",
+    });
+    const input = {
+      messageId: "message_1",
+      partId: "real_reasoning",
+      text: "thought",
+      endReason: "normal" as const,
+      updatedAt: 2000,
+      metadata: { provider: "kept" },
+    };
+    await store.saveReasoningPart(input);
+    await store.saveReasoningPart({ ...input, text: "thought complete" });
+    await expect(
+      store.saveReasoningPart({ ...input, partId: "empty", text: "" }),
+    ).resolves.toBeUndefined();
+    await store.insertMessage(userMessage("other"));
+    await expect(
+      store.saveReasoningPart({ ...input, messageId: "other" }),
+    ).rejects.toThrow(/belong|identity/i);
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const history = await createDatabaseMessageStore().listByIds("session_1", [
+      "message_1",
+    ]);
+    expect(history).toMatchObject([
+      {
+        info: { finish: "error" },
+        parts: [
+          {
+            id: "real_reasoning",
+            text: "thought complete",
+            endReason: "normal",
+            metadata: { provider: "kept" },
+          },
+        ],
+      },
+    ]);
+    expect(history[0]?.parts).toHaveLength(1);
+    expect(serializeHistoryMessages(history)).toEqual([]);
+  });
+
+  it("keeps model requests, summary text and token estimates unchanged by saved display reasoning", async () => {
+    const store = createDatabaseMessageStore();
+    const message: Message = {
+      id: "assistant",
+      sessionId: "session_1",
+      agent: "default",
+      role: "assistant",
+      time: { created: 1000 },
+    };
+    await store.insertMessage(message);
+    await store.appendPart({
+      message,
+      partId: "body",
+      data: { type: "text", text: "Answer" },
+      updatedAt: 1001,
+    });
+    await store.appendPart({
+      message,
+      partId: "tool",
+      data: {
+        type: "tool",
+        callId: "real-call",
+        tool: "read",
+        state: {
+          status: "completed",
+          input: { path: "a" },
+          output: "file contents",
+        },
+      },
+      updatedAt: 1002,
+    });
+    const before = await store.listBySession("session_1");
+    const protocolReasoning = new Map([
+      ["assistant", "active protocol reasoning"],
+    ]);
+    const beforeRequest = serializeHistoryMessages(before, protocolReasoning);
+    const beforeSummary = serializeHistory(before, {
+      includeToolContext: true,
+    });
+    const beforeTokens = estimateHistoryForCompaction(before, {
+      estimateTokens: (text) => text.length,
+    });
+    await store.saveReasoningPart({
+      messageId: "assistant",
+      partId: "display",
+      text: "Private display text".repeat(1000),
+      endReason: "normal",
+      updatedAt: 1003,
+    });
+    const after = await store.listBySession("session_1");
+    expect(serializeHistoryMessages(after, protocolReasoning)).toEqual(
+      beforeRequest,
+    );
+    expect(beforeRequest[0]).toMatchObject({
+      reasoningText: "active protocol reasoning",
+    });
+    expect(toModelMessages(after)).toEqual(toModelMessages(before));
+    expect(serializeHistory(after, { includeToolContext: true })).toEqual(
+      beforeSummary,
+    );
+    expect(
+      estimateHistoryForCompaction(after, {
+        estimateTokens: (text) => text.length,
+      }),
+    ).toBe(beforeTokens);
+    expect(after[0]?.parts).toHaveLength(3);
+  });
+
   it("persists messages and ordered parts", async () => {
     const store = createDatabaseMessageStore();
     await store.insertMessage(userMessage());

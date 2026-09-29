@@ -26,7 +26,7 @@ interface CapturedRequest {
 
 const cleanupDirectories: string[] = [];
 const TITLE_GENERATION_PROMPT_MARKER =
-  "Generate a concise title for a coding-agent chat session.";
+  "Write a short conversation title that identifies the user's task.";
 const CLI_BIN_PATH = join(
   process.cwd(),
   "packages",
@@ -428,7 +428,7 @@ describe("CLI prompt process smoke", () => {
       // inherit the stale temperature stored in model.json.
       const titleRequest = titleRequests[0];
       expect(titleRequest.body).toMatchObject({
-        max_tokens: 128,
+        max_tokens: 200,
         model: "fake-model",
         stream: true,
       });

@@ -303,6 +303,12 @@ describe("MessageRow", () => {
           ...toolCall("call_1"),
           input: { command: "pnpm test" },
           status: "running",
+          execution: {
+            phase: "executing",
+            phaseStartedAt: 1000,
+            createdAt: 0,
+            executionStartedAt: 1000,
+          },
         },
         type: "tool-call",
       },
@@ -330,6 +336,12 @@ describe("MessageRow", () => {
           ...toolCall("call_1"),
           input: { command: "pnpm test" },
           status: "running",
+          execution: {
+            phase: "executing",
+            phaseStartedAt: 1000,
+            createdAt: 0,
+            executionStartedAt: 1000,
+          },
         },
         type: "tool-call",
       },
@@ -373,3 +385,22 @@ function toolCall(id: string): UiToolCall {
     status: "running",
   };
 }
+
+it("does not spin legacy pending tools without executing facts", () => {
+  const message = {
+    id: "wait",
+    role: "assistant" as const,
+    createdAt: "2026-01-01",
+    parts: [
+      {
+        type: "tool-call" as const,
+        call: { id: "c", name: "bash", input: {}, status: "pending" as const },
+      },
+    ],
+  };
+  expect(
+    renderMessageParts(message, 80, createTheme("dark", 3)).map(
+      (part) => part.kind,
+    ),
+  ).toEqual(["text"]);
+});

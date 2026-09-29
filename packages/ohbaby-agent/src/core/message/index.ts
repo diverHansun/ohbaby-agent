@@ -17,6 +17,12 @@ export {
 } from "./token-usage-metadata.js";
 export type { MessageOrigin } from "./origin.js";
 export type {
+  RuntimeInputOrigin,
+  MessagePageOptions,
+  MessagePage,
+  SaveReasoningPartInput,
+  MessageCommitCoordinator,
+  MessageCommittedChange,
   AssistantMessage,
   CreateMessageInput,
   CreatePartInput,
@@ -39,6 +45,7 @@ export type {
   ToolState,
   UpdateMessagePatch,
   UpdatePartPatch,
+  UpdatePartCondition,
   UserMessage,
 } from "./types.js";
 

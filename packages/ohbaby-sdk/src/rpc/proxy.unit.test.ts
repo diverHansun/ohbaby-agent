@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRPC } from "./proxy.js";
 
 interface DemoAPI {
@@ -149,6 +149,111 @@ describe("createRPC", () => {
       (proxy as unknown as DemoCallbacks).subscribeEvents(() => undefined),
     ).toBe(unsubscribe);
   });
+
+  it("keeps approval subscriptions synchronous and preserves callbacks and receiver", () => {
+    const handler = (): void => undefined;
+    const onError = (): void => undefined;
+    const unsubscribe = (): void => undefined;
+    const impl = {
+      value: "backend",
+      subscribePermissionEvents(
+        received: typeof handler,
+        error: typeof onError,
+      ): () => void {
+        expect(this.value).toBe("backend");
+        expect(received).toBe(handler);
+        expect(error).toBe(onError);
+        return unsubscribe;
+      },
+    };
+    const rpc = createRPC<typeof impl>();
+    rpc.connectImpl(impl);
+    const proxy = rpc.createProxy({});
+    const result = proxy.subscribePermissionEvents(handler, onError);
+    if (result instanceof Promise) void result.catch(() => undefined);
+    expect(result).toBe(unsubscribe);
+  });
+
+  it("passes approval query cancellation out of band at argument zero", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const rpc = createRPC<{
+      getPermissionSnapshot(input: {
+        rootSessionId: string;
+        signal?: AbortSignal;
+      }): Promise<string>;
+    }>();
+    rpc.connectImpl({
+      getPermissionSnapshot(input) {
+        receivedSignal = input.signal;
+        expect(input.rootSessionId).toBe("root");
+        return new Promise((_resolve, reject) => {
+          input.signal?.addEventListener(
+            "abort",
+            () => {
+              reject(new Error("cancelled"));
+            },
+            { once: true },
+          );
+        });
+      },
+    });
+    const controller = new AbortController();
+    const pending = rpc.createProxy({}).getPermissionSnapshot({
+      rootSessionId: "root",
+      signal: controller.signal,
+    });
+    const rejected = pending.catch((error: unknown) => error);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    expect(await rejected).toMatchObject({ name: "AbortError" });
+    expect(receivedSignal).toBe(controller.signal);
+    expect(receivedSignal?.aborted).toBe(true);
+  });
+
+  it.each([
+    "getSessionView",
+    "getSessionHistory",
+    "getSessionControl",
+    "getPromptReceipt",
+    "listSubagentExecutions",
+    "getSubagentExecutionView",
+  ] as const)(
+    "preserves %s cancellation across the JSON proxy boundary",
+    async (method) => {
+      let receivedSignal: AbortSignal | undefined;
+      const implementation = {
+        [method]: (input: {
+          sessionId: string;
+          signal?: AbortSignal;
+        }): Promise<string> => {
+          receivedSignal = input.signal;
+          input.signal?.throwIfAborted();
+          return new Promise((_resolve, reject) =>
+            input.signal?.addEventListener(
+              "abort",
+              () => {
+                reject(new Error("backend cancelled"));
+              },
+              { once: true },
+            ),
+          );
+        },
+      };
+      const rpc = createRPC<typeof implementation>();
+      rpc.connectImpl(implementation);
+      const controller = new AbortController();
+      const outcome = rpc
+        .createProxy({})
+        [method]({ sessionId: "root", signal: controller.signal })
+        .catch((error: unknown) => error);
+      await vi.waitFor(() => {
+        expect(receivedSignal).toBeDefined();
+      });
+      controller.abort();
+      expect(await outcome).toMatchObject({ name: "AbortError" });
+      expect(receivedSignal).toBe(controller.signal);
+    },
+  );
 
   it("rejects a pending call when its AbortSignal is aborted", async () => {
     const rpc = createRPC<DemoAPI>();

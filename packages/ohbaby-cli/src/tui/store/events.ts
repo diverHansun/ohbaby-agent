@@ -28,6 +28,7 @@ import type {
 import { renderStatusPanel } from "../render/status-panel.js";
 import {
   advanceTranscriptCommit,
+  appendPromptCompletions,
   type TranscriptCommitState,
 } from "./transcript.js";
 
@@ -46,6 +47,10 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
   );
 
   return {
+    durationSample:
+      snapshot.serverNow === undefined
+        ? undefined
+        : { serverNow: snapshot.serverNow, receivedAt: performance.now() },
     activeSessionId: snapshot.activeSessionId,
     catalog: null,
     catalogInvalidation: null,
@@ -57,12 +62,17 @@ export function createStateFromSnapshot(snapshot: UiSnapshot): TuiStoreState {
     todos: snapshot.todos ?? [],
     resolvedPermissionIds: [],
     interactions: [],
-    committedItems: transcript.committedItems,
+    committedItems: appendPromptCompletions(
+      transcript.committedItems,
+      snapshot.prompts ?? [],
+      snapshot.activeSessionId,
+      true,
+    ),
     committedPartCounts: transcript.committedPartCounts,
     liveMessage: transcript.liveMessage,
     messages,
     notices: [],
-    permissions: snapshot.permissions,
+    permissions: [],
     permission: snapshot.permission,
     prompts: snapshot.prompts ?? [],
     reasoningByMessageId: {},
@@ -77,6 +87,19 @@ export function applyTuiEvent(
   state: TuiStoreState,
   event: UiEvent,
 ): TuiStoreState {
+  if (
+    "timestamp" in event &&
+    event.timestamp !== undefined &&
+    event.timestamp !== state.durationSample?.serverNow
+  ) {
+    state = {
+      ...state,
+      durationSample: {
+        serverNow: event.timestamp,
+        receivedAt: performance.now(),
+      },
+    };
+  }
   switch (event.type) {
     case "snapshot.replaced":
       return preserveLocalQueues(
@@ -176,7 +199,9 @@ export function applyTuiEvent(
       const isActiveSession = event.run.sessionId === state.activeSessionId;
       const next = rebuildFromCollections(state, {
         runs: upsertById(state.runs, event.run),
-        ...(isActiveSession ? { runtime: event.run.status } : {}),
+        ...(isActiveSession
+          ? { runtime: event.run.status, runtimeErrorRunId: event.run.id }
+          : {}),
       });
       if (!isActiveSession) {
         return next;
@@ -242,32 +267,10 @@ export function applyTuiEvent(
       });
 
     case "permission.requested":
-      if (state.resolvedPermissionIds.includes(event.request.id)) {
-        return state;
-      }
-      return rebuildWithPermissions(state, {
-        permissions: upsertById(state.permissions, event.request),
-        runtime: {
-          kind: "waiting-for-permission",
-          requestId: event.request.id,
-        },
-      });
-
     case "permission.resolved":
-      return rebuildWithPermissions(
-        {
-          ...state,
-          resolvedPermissionIds: rememberResolvedPermission(
-            state.resolvedPermissionIds,
-            event.requestId,
-          ),
-        },
-        {
-          permissions: state.permissions.filter(
-            (request) => request.id !== event.requestId,
-          ),
-        },
-      );
+    case "permission.unavailable":
+    case "permission.resync-required":
+      return state;
 
     case "permission.updated":
       return rebuildFromCollections(state, {
@@ -426,11 +429,115 @@ export function createTuiStore(snapshot: UiSnapshot): TuiStore {
     getState(): TuiStoreState {
       return state;
     },
-    replaceSnapshot(nextSnapshot): void {
-      state = applyTuiEvent(state, {
-        snapshot: nextSnapshot,
-        type: "snapshot.replaced",
+    selectSession(sessionId): void {
+      state = rebuildFromCollections(state, {
+        activeSessionId: sessionId,
+        runtime: { kind: "idle" },
       });
+      notify();
+    },
+    setSessionIndex(index): void {
+      state = rebuildFromCollections(state, {
+        sessions: index.map((session) => ({
+          ...session,
+          messages:
+            state.sessions.find((existing) => existing.id === session.id)
+              ?.messages ?? [],
+        })),
+      });
+      notify();
+    },
+    installSessionView(view, older = [], resetTranscript = false): void {
+      state = {
+        ...state,
+        durationSample:
+          view.serverNow === undefined
+            ? undefined
+            : { serverNow: view.serverNow, receivedAt: performance.now() },
+      };
+      const messages = new Map(
+        [...older, ...view.session.messages].map((message) => [
+          message.id,
+          message,
+        ]),
+      );
+      const session = {
+        ...view.session,
+        messages: [...messages.values()].sort(
+          (a, b) =>
+            a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+        ),
+      };
+      const runs = view.runs;
+      const latestRuns = [...runs].sort(
+        (a, b) =>
+          Date.parse(b.startedAt) - Date.parse(a.startedAt) ||
+          Date.parse(b.updatedAt) - Date.parse(a.updatedAt) ||
+          b.id.localeCompare(a.id),
+      );
+      const activeRun = latestRuns.find(
+        (run) =>
+          run.status.kind === "running" ||
+          run.status.kind === "waiting-for-permission",
+      );
+      const independentError =
+        state.runtime.kind === "error" && state.runtimeErrorRunId === undefined;
+      const runtimeRun =
+        activeRun ?? (independentError ? undefined : latestRuns.at(0));
+      const previous = resetTranscript
+        ? {
+            ...state,
+            committedItems: [],
+            committedPartCounts: {},
+            liveMessage: null,
+          }
+        : state;
+      state = rebuildFromCollections(previous, {
+        activeSessionId: session.id,
+        sessions: upsertById(state.sessions, session),
+        runs,
+        prompts: view.prompts,
+        runtime:
+          runtimeRun?.status ??
+          (state.runtime.kind === "error" ? state.runtime : { kind: "idle" }),
+        runtimeErrorRunId:
+          runtimeRun?.status.kind === "error"
+            ? runtimeRun.id
+            : state.runtimeErrorRunId,
+        goals:
+          view.goal.status === "ready"
+            ? [
+                ...state.goals.filter((item) => item.sessionId !== session.id),
+                ...(view.goal.value
+                  ? [{ sessionId: session.id, goal: view.goal.value }]
+                  : []),
+              ]
+            : state.goals,
+        todos:
+          view.todo.status === "ready"
+            ? [
+                ...state.todos.filter((item) => item.sessionId !== session.id),
+                ...(view.todo.value ? [view.todo.value] : []),
+              ]
+            : state.todos,
+        contextWindowUsages:
+          view.context.status === "ready"
+            ? [
+                ...state.contextWindowUsages.filter(
+                  (item) => item.sessionId !== session.id,
+                ),
+                ...(view.context.value ? [view.context.value] : []),
+              ]
+            : state.contextWindowUsages,
+      });
+      notify();
+    },
+    replaceSnapshot(nextSnapshot): void {
+      state = preserveLocalQueues(state, createStateFromSnapshot(nextSnapshot));
+      notify();
+    },
+    setPermissions(requests): void {
+      state = rebuildFromCollections(state, { permissions: requests });
       notify();
     },
     setCatalog(catalog): void {
@@ -458,11 +565,7 @@ function preserveLocalQueues(
 ): TuiStoreState {
   const activeSessionChanged =
     previous.activeSessionId !== next.activeSessionId;
-  const permissions = mergePermissions(
-    previous.permissions,
-    next.permissions,
-    previous.resolvedPermissionIds,
-  );
+  const permissions = activeSessionChanged ? [] : previous.permissions;
   const sessions = mergeSessions(next.sessions, previous.sessions);
   const runs = mergeRuns(next.runs, previous.runs);
   const permission = previous.permission ?? next.permission;
@@ -511,7 +614,12 @@ function preserveLocalQueues(
     goals,
     todos,
     interactions: previous.interactions,
-    committedItems: transcript.committedItems,
+    committedItems: appendPromptCompletions(
+      transcript.committedItems,
+      next.prompts,
+      next.activeSessionId,
+      activeSessionChanged,
+    ),
     committedPartCounts: transcript.committedPartCounts,
     liveMessage: transcript.liveMessage,
     messages,
@@ -526,6 +634,8 @@ function preserveLocalQueues(
     resolvedPermissionIds: previous.resolvedPermissionIds,
     runs,
     runtime,
+    runtimeErrorRunId:
+      runtime.kind === "error" ? next.runtimeErrorRunId : undefined,
     sessions,
     snapshot,
   };
@@ -541,6 +651,7 @@ function rebuildFromCollections(
     readonly permission?: UiPermissionState;
     readonly prompts?: readonly UiPromptSubmission[];
     readonly runtime?: TuiRuntimeStatus;
+    readonly runtimeErrorRunId?: string;
     readonly contextWindowUsages?: readonly UiContextWindowUsage[];
     readonly goals?: readonly UiSessionGoal[];
     readonly todos?: readonly UiSessionTodoList[];
@@ -585,7 +696,13 @@ function rebuildFromCollections(
   return {
     ...state,
     activeSessionId,
-    committedItems: transcript.committedItems,
+    committedItems: appendPromptCompletions(
+      transcript.committedItems,
+      prompts,
+      activeSessionId,
+      state.activeSessionId !== activeSessionId ||
+        state.committedItems.length === 0,
+    ),
     committedPartCounts: transcript.committedPartCounts,
     contextWindowUsages,
     goals,
@@ -597,6 +714,12 @@ function rebuildFromCollections(
     prompts,
     runs,
     runtime,
+    runtimeErrorRunId:
+      runtime.kind !== "error"
+        ? undefined
+        : patch.runtime === undefined
+          ? state.runtimeErrorRunId
+          : patch.runtimeErrorRunId,
     sessions,
     snapshot,
   };
@@ -621,49 +744,6 @@ function resolveTranscriptState(
       : undefined;
 
   return advanceTranscriptCommit(previousCommit, messages, runtime);
-}
-
-function rebuildWithPermissions(
-  state: TuiStoreState,
-  patch: {
-    readonly permissions: readonly UiPermissionRequest[];
-    readonly runtime?: TuiRuntimeStatus;
-  },
-): TuiStoreState {
-  const runtime =
-    patch.permissions.length > 0
-      ? {
-          kind: "waiting-for-permission" as const,
-          requestId: patch.permissions[0].id,
-        }
-      : (patch.runtime ?? resolveRuntimeAfterPermission(state));
-
-  return rebuildFromCollections(state, {
-    permissions: patch.permissions,
-    runtime,
-  });
-}
-
-function mergePermissions(
-  previous: readonly UiPermissionRequest[],
-  next: readonly UiPermissionRequest[],
-  resolvedPermissionIds: readonly string[],
-): readonly UiPermissionRequest[] {
-  const resolved = new Set(resolvedPermissionIds);
-  const merged = new Map<string, UiPermissionRequest>();
-
-  for (const request of next) {
-    if (!resolved.has(request.id)) {
-      merged.set(request.id, request);
-    }
-  }
-  for (const request of previous) {
-    if (!resolved.has(request.id) && !merged.has(request.id)) {
-      merged.set(request.id, request);
-    }
-  }
-
-  return Array.from(merged.values());
 }
 
 function mergeSessions(
@@ -791,37 +871,6 @@ function resolveRuntimeAfterSnapshot(
   }
 
   return next.runtime;
-}
-
-function resolveRuntimeAfterPermission(state: TuiStoreState): TuiRuntimeStatus {
-  if (state.runtime.kind !== "waiting-for-permission") {
-    return state.runtime;
-  }
-
-  const waiting = state.runtime;
-  const request = state.permissions.find(
-    (candidate) => candidate.id === waiting.requestId,
-  );
-  const run = state.runs.find((candidate) => candidate.id === request?.runId);
-
-  if (run?.status.kind === "running") {
-    return run.status;
-  }
-  if (run?.status.kind === "waiting-for-permission") {
-    return { kind: "running", runId: run.id };
-  }
-
-  return { kind: "idle" };
-}
-
-function rememberResolvedPermission(
-  resolvedPermissionIds: readonly string[],
-  requestId: string,
-): readonly string[] {
-  return [
-    ...resolvedPermissionIds.filter((id) => id !== requestId),
-    requestId,
-  ].slice(-100);
 }
 
 function updateSessionMessages(

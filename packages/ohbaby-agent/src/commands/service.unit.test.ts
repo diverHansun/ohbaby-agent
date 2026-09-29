@@ -17,6 +17,115 @@ import { createInteractionBroker } from "../runtime/interaction-broker/index.js"
 type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 
 describe("CommandService", () => {
+  it.each(["throw", "noop"] as const)(
+    "returns an explicit completion for %s handlers",
+    async (behavior) => {
+      const { service } = createServiceHarness({
+        extraCommands: [pluginCommand("test", ["test"])],
+        extraHandlers: [
+          {
+            id: "test",
+            execute(): void {
+              if (behavior === "throw") throw new Error("handler failed");
+            },
+          },
+        ],
+      });
+      const completion = await service.executeCommand(
+        makeInvocation("test", ["test"]),
+      );
+      expect(completion).toMatchObject({
+        status: behavior === "throw" ? "failed" : "completed",
+        outputCount: 0,
+        eventCount: behavior === "throw" ? 1 : 0,
+      });
+      if (completion.status === "failed")
+        expect(completion.error.message).toBe("handler failed");
+    },
+  );
+  it("returns the first business failure only after all handler output", async () => {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const { service, events } = createServiceHarness({
+      extraCommands: [pluginCommand("test", ["test"])],
+      extraHandlers: [
+        {
+          id: "test",
+          async execute(_invocation, context): Promise<void> {
+            context.fail({ code: "FIRST", message: "first" });
+            await gate;
+            context.emitOutput({ kind: "text", text: "still useful" });
+            context.emitAction({ kind: "noop" });
+            context.fail({ code: "SECOND", message: "second" });
+          },
+        },
+      ],
+    });
+    let settled = false;
+    const pending = service
+      .executeCommand(makeInvocation("test", ["test"]))
+      .then((result) => {
+        settled = true;
+        return result;
+      });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish();
+    expect(await pending).toMatchObject({
+      status: "failed",
+      commandRunId: "command_1",
+      clientInvocationId: "inv_1",
+      sessionId: "session_1",
+      outputCount: 1,
+      eventCount: 4,
+      error: { code: "FIRST" },
+    });
+    expect(events.map((event) => event.type)).toEqual([
+      "started",
+      "failed",
+      "result",
+      "result",
+      "failed",
+    ]);
+  });
+
+  it("completes a skill at acceptance with the original request receipt and no empty action", async () => {
+    const receipt = {
+      clientRequestId: "request_1",
+      promptId: "prompt_1",
+      userMessageId: "message_1",
+      sessionId: "session_1",
+      status: "queued" as const,
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    const submitPromptAccepted = vi.fn(() => Promise.resolve(receipt));
+    const { service, events } = createServiceHarness({
+      skills: { listUserInvocable: () => [], loadPrompt: () => "skill body" },
+      submitPromptAccepted,
+    });
+    const result = await service.executeCommand({
+      ...makeInvocation("skill.demo", ["demo"], ["request"]),
+      clientRequestId: "request_1",
+    });
+    expect(submitPromptAccepted).toHaveBeenCalledWith(
+      "skill body\n\nUser request:\nrequest",
+      {
+        sessionId: "session_1",
+        clientRequestId: "request_1",
+        namingSource: { skillName: "demo", request: "request" },
+      },
+    );
+    expect(result).toMatchObject({
+      status: "completed",
+      promptReceipt: receipt,
+      outputCount: 0,
+      eventCount: 0,
+    });
+    expect(events.map((event) => event.type)).toEqual(["started"]);
+  });
+
   it("lists permission commands in the builtin catalog", async () => {
     const { service } = createServiceHarness();
 
@@ -1622,6 +1731,31 @@ describe("CommandService", () => {
       reuseInactiveEmptySessions: false,
     });
   });
+
+  it.each([
+    ["--no-reuse-empty-sesion"],
+    ["unexpected-value"],
+    ["--no-reuse-empty-session", "--unknown"],
+  ])(
+    "rejects unsupported /new arguments before creating or selecting (%s)",
+    async (...argv) => {
+      const createSession = vi.fn(() =>
+        Promise.resolve({ id: "session_new", title: "New session" }),
+      );
+      const { events, service } = createServiceHarness({
+        sessions: { createSession, listSessions: () => [] },
+      });
+
+      await service.executeCommand(makeInvocation("new", ["new"], argv));
+
+      expect(createSession).not.toHaveBeenCalled();
+      expect(events.at(-1)).toMatchObject({
+        type: "failed",
+        error: { code: "INVALID_ARGS", recoverable: true },
+      });
+      expect(events.some((event) => event.type === "result")).toBe(false);
+    },
+  );
 
   it("selects a reused new session with a consistent current-session payload", async () => {
     const createSession = vi.fn<

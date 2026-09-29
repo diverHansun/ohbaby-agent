@@ -1,6 +1,10 @@
+import {
+  recoveryBinding,
+  sessionViewFromSnapshot,
+} from "./session-recovery.test-utils.js";
 import { describe, expect, it } from "vitest";
 import type { UiSnapshot } from "ohbaby-sdk";
-import { createOhbabyWebRuntime } from "./client.js";
+import { createOhbabyWebRuntime } from "../../runtime.js";
 
 const encoder = new TextEncoder();
 
@@ -37,7 +41,7 @@ function directoryFromScopeHeader(request: Request): string {
 
 function emptySnapshot(title: string): UiSnapshot {
   return {
-    activeSessionId: null,
+    activeSessionId: `session-${title}`,
     permission: { level: "default", mode: "auto", sessionRules: [] },
     permissions: [],
     runs: [],
@@ -180,7 +184,7 @@ describe("ohbaby web workspace switching", () => {
               start(controller): void {
                 controller.enqueue(
                   encoder.encode(
-                    `data: ${JSON.stringify({ clientId: "client-a", type: "hello" })}\n\n`,
+                    `data: ${JSON.stringify({ clientId: "client-a", type: "hello", ...recoveryBinding(directory === "/repo-a" ? "session-A" : "session-B") })}\n\n`,
                   ),
                 );
                 request.signal.addEventListener(
@@ -196,7 +200,7 @@ describe("ohbaby web workspace switching", () => {
           ),
         );
       }
-      if (request.url.endsWith("/v1/snapshot")) {
+      if (new URL(request.url).pathname.endsWith("/view")) {
         if (directory === "/repo-a") {
           repoASnapshots += 1;
           if (repoASnapshots === 2) {
@@ -207,12 +211,16 @@ describe("ohbaby web workspace switching", () => {
             Response.json({
               ok: true,
               seqNum: 0,
-              snapshot: emptySnapshot("A"),
+              view: sessionViewFromSnapshot(emptySnapshot("A")),
             }),
           );
         }
         return Promise.resolve(
-          Response.json({ ok: true, seqNum: 0, snapshot: emptySnapshot("B") }),
+          Response.json({
+            ok: true,
+            seqNum: 0,
+            view: sessionViewFromSnapshot(emptySnapshot("B")),
+          }),
         );
       }
       if (request.url.endsWith("/v1/model")) {
@@ -237,17 +245,19 @@ describe("ohbaby web workspace switching", () => {
     );
     await runtime.ready;
 
-    const selecting = runtime.selectSession("session-A");
+    await waitFor(
+      () => runtime.store.getSnapshot().sessionSync.status === "ready",
+    );
+    runtime.retrySession();
     await waitFor(() => oldResyncStarted);
     await runtime.switchWorkspace("/repo-b");
     resolveOldResync?.(
       Response.json({
         ok: true,
         seqNum: 99,
-        snapshot: emptySnapshot("STALE-A"),
+        view: sessionViewFromSnapshot(emptySnapshot("STALE-A")),
       }),
     );
-    await selecting;
 
     expect(runtime.getWorkspaceSnapshot().selectedDirectory).toBe("/repo-b");
     expect(runtime.store.getSnapshot().view.snapshot?.sessions[0]?.title).toBe(
@@ -335,12 +345,14 @@ describe("ohbaby web workspace switching", () => {
       if (request.url.endsWith("/v1/clients")) {
         return Promise.resolve(Response.json({ clientId, ok: true }));
       }
-      if (request.url.endsWith("/v1/snapshot")) {
+      if (new URL(request.url).pathname.endsWith("/view")) {
         return Promise.resolve(
           Response.json({
             ok: true,
             seqNum: 0,
-            snapshot: emptySnapshot(directory === "/repo-b" ? "B" : "A"),
+            view: sessionViewFromSnapshot(
+              emptySnapshot(directory === "/repo-b" ? "B" : "A"),
+            ),
           }),
         );
       }
@@ -354,7 +366,7 @@ describe("ohbaby web workspace switching", () => {
               start(controller): void {
                 controller.enqueue(
                   encoder.encode(
-                    `data: ${JSON.stringify({ clientId, type: "hello" })}\n\n`,
+                    `data: ${JSON.stringify({ clientId, type: "hello", ...recoveryBinding(directory === "/repo-b" ? "session-B" : "session-A") })}\n\n`,
                   ),
                 );
                 request.signal.addEventListener(
@@ -419,7 +431,15 @@ describe("ohbaby web workspace switching", () => {
     );
     expect(
       repoBRequests.map((request) => new URL(request.url).pathname),
-    ).toEqual(["/v1/clients", "/v1/events", "/v1/snapshot", "/v1/model"]);
+    ).toEqual(
+      expect.arrayContaining([
+        "/v1/clients",
+        "/v1/events",
+        "/v1/sessions/session-B/view",
+        "/v1/model",
+        "/v1/sessions/index",
+      ]),
+    );
     expect(new Set(repoBRequests.map((request) => request.clientId)).size).toBe(
       1,
     );
@@ -472,7 +492,7 @@ describe("ohbaby web workspace switching", () => {
               start(controller): void {
                 controller.enqueue(
                   encoder.encode(
-                    `data: ${JSON.stringify({ type: "hello" })}\n\n`,
+                    `data: ${JSON.stringify({ type: "hello", ...recoveryBinding("session-A") })}\n\n`,
                   ),
                 );
                 request.signal.addEventListener(
@@ -488,12 +508,12 @@ describe("ohbaby web workspace switching", () => {
           ),
         );
       }
-      if (request.url.endsWith("/v1/snapshot")) {
+      if (new URL(request.url).pathname.endsWith("/view")) {
         return Promise.resolve(
           Response.json({
             ok: true,
             seqNum: 0,
-            snapshot: emptySnapshot("A"),
+            view: sessionViewFromSnapshot(emptySnapshot("A")),
           }),
         );
       }
@@ -637,7 +657,7 @@ describe("ohbaby web workspace switching", () => {
                 start(controller): void {
                   controller.enqueue(
                     encoder.encode(
-                      `data: ${JSON.stringify({ type: "hello" })}\n\n`,
+                      `data: ${JSON.stringify({ type: "hello", ...recoveryBinding(directory === unicodeDirectory ? "session-B" : "session-A") })}\n\n`,
                     ),
                   );
                   request.signal.addEventListener(
@@ -653,13 +673,13 @@ describe("ohbaby web workspace switching", () => {
             ),
           );
         }
-        if (request.url.endsWith("/v1/snapshot")) {
+        if (new URL(request.url).pathname.endsWith("/view")) {
           return Promise.resolve(
             Response.json({
               ok: true,
               seqNum: 0,
-              snapshot: emptySnapshot(
-                directory === unicodeDirectory ? "B" : "A",
+              view: sessionViewFromSnapshot(
+                emptySnapshot(directory === unicodeDirectory ? "B" : "A"),
               ),
             }),
           );

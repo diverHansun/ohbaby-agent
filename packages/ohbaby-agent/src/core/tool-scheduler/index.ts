@@ -1,3 +1,4 @@
+export { ToolDeliveryError } from "./delivery.js";
 import { ToolSchedulerEvent } from "./events.js";
 
 export {
@@ -9,9 +10,12 @@ export { ToolSchedulerEvent } from "./events.js";
 export { createToolRegistry } from "./registry.js";
 export { createToolScheduler, timeoutForTool } from "./scheduler.js";
 export type {
+  AdmissionWaitReason,
   AgentToolConfig,
   AgentToolConfigProvider,
   BatchToolCallRequest,
+  BatchToolCallObserver,
+  ToolExecutionObservation,
   ConcurrencyConfig,
   FinalToolCallStatus,
   PermissionPort,
@@ -32,6 +36,8 @@ export type {
   ToolDefinition,
   ToolExecutionContext,
   ToolExecutionEnvironment,
+  ToolExecutionFact,
+  ToolExecutionOwner,
   ToolExecutionResult,
   ToolRegistry,
   ToolScheduler as ToolSchedulerInstance,

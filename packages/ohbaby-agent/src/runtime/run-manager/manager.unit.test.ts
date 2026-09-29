@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { createBus } from "../../bus/index.js";
+import { createPermissionManager } from "../../permission/index.js";
+import type { SchedulerPermissionResponse } from "../../permission/index.js";
 import type {
   LifecycleEvent,
   LifecycleResult,
@@ -20,6 +23,13 @@ import type {
   StreamScope,
 } from "../stream-bridge/index.js";
 import { SnapshotHookExecutionError } from "../../snapshot/index.js";
+import { NodeSqliteConnection } from "../../services/database/connection.js";
+import { runWriteTransaction } from "../../services/database/index.js";
+import {
+  createDatabaseWriteBudget,
+  getDatabaseWriteBudget,
+  withDatabaseWriteBudget,
+} from "../../services/database/write-budget.js";
 import {
   ConcurrencyRejectedError,
   RunManager,
@@ -167,19 +177,37 @@ class RecordingLedger implements RunLedger {
     return this.inner.markRunning(runId);
   }
 
-  markSucceeded(runId: string): Promise<RunLedgerRecord> {
+  markSucceeded(
+    runId: string,
+    options?: Parameters<RunLedger["markSucceeded"]>[1],
+  ): Promise<RunLedgerRecord> {
     this.calls.push("markSucceeded");
-    return this.inner.markSucceeded(runId);
+    return this.inner.markSucceeded(runId, options);
   }
 
-  markFailed(runId: string, error: unknown): Promise<RunLedgerRecord> {
+  markFailed(
+    runId: string,
+    error: unknown,
+    errorData?: RunLedgerRecord["errorData"],
+    options?: Parameters<RunLedger["markFailed"]>[3],
+  ): Promise<RunLedgerRecord> {
     this.calls.push("markFailed");
-    return this.inner.markFailed(runId, error);
+    return this.inner.markFailed(runId, error, errorData, options);
   }
 
-  markCancelled(runId: string, reason?: string): Promise<RunLedgerRecord> {
+  markCancelled(
+    runId: string,
+    reason?: string,
+    options?: Parameters<RunLedger["markCancelled"]>[2],
+  ): Promise<RunLedgerRecord> {
     this.calls.push("markCancelled");
-    return this.inner.markCancelled(runId, reason);
+    return this.inner.markCancelled(runId, reason, options);
+  }
+
+  markRunInterrupted(
+    ...args: Parameters<RunLedger["markRunInterrupted"]>
+  ): Promise<RunLedgerRecord> {
+    return this.inner.markRunInterrupted(...args);
   }
 
   markInterrupted(
@@ -189,9 +217,11 @@ class RecordingLedger implements RunLedger {
     return this.inner.markInterrupted(options);
   }
 
-  recoverOrphanedRuns(): Promise<MarkInterruptedResult> {
+  recoverOrphanedRuns(
+    options?: Parameters<RunLedger["recoverOrphanedRuns"]>[0],
+  ): Promise<MarkInterruptedResult> {
     this.calls.push("recoverOrphanedRuns");
-    return this.inner.recoverOrphanedRuns();
+    return this.inner.recoverOrphanedRuns(options);
   }
 
   get(runId: string): Promise<RunLedgerRecord | undefined> {
@@ -770,16 +800,25 @@ function createManager(lifecycle: RunLifecycle): ManagerFixture {
 }
 
 function createManagerWithOverrides(input: {
+  readonly currentRunInputs?: {
+    close(runId: string, reason: string): Promise<void>;
+  };
   readonly lifecycle: RunLifecycle;
+  readonly runLedger?: RunLedger;
+  readonly beforeFinalize?: import("./types.js").RunManagerDeps["beforeFinalize"];
   readonly bridge?: StreamBridge;
   readonly hookExecutor?: HookExecutor;
   readonly onStepUsage?: RunStepUsageObserver;
+  readonly revokePermissionsForRun?: (runId: string, reason: string) => void;
   readonly sandboxManager?: SandboxManager;
 }): ManagerFixture {
   const fixture = createManager(input.lifecycle);
   const manager = new RunManager({
     lifecycle: input.lifecycle,
-    runLedger: fixture.ledger,
+    beforeFinalize: input.beforeFinalize,
+    currentRunInputs: input.currentRunInputs,
+    revokePermissionsForRun: input.revokePermissionsForRun,
+    runLedger: input.runLedger ?? fixture.ledger,
     streamBridge: input.bridge ?? fixture.bridge,
     hookExecutor: input.hookExecutor ?? fixture.hooks,
     ...(input.onStepUsage === undefined
@@ -857,6 +896,46 @@ it("freezes accepted run reasoning and isolates sibling context scopes", async (
 });
 
 describe("RunManager", () => {
+  it("preserves fatal persistence failure instead of reporting an abort as user cancellation", async () => {
+    const lifecycle = new AbortAwareLifecycle();
+    const { manager, ledger, hooks } = createManager(lifecycle);
+    const record = await manager.create({
+      sessionId: "fatal_session",
+      triggerSource: "user",
+      directory: "/repo",
+      modelId: "test",
+    });
+    await lifecycle.started.promise;
+    manager.fail(record.runId, new Error("subagent database failed"));
+    manager.cancel(record.runId, "late user cancellation");
+    const completion = await manager.waitForCompletion(record.runId);
+    expect(completion).toMatchObject({
+      status: "failed",
+      error: "subagent database failed",
+    });
+    expect((await ledger.get(record.runId))?.status).toBe("failed");
+    expect(hooks.contexts.at(-1)).toMatchObject({
+      status: "failed",
+      error: "subagent database failed",
+    });
+  });
+  it("passes the lifecycle's final body through this run's completion", async () => {
+    const { manager } = createManager(new SessionLifecycle());
+    const record = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+
+    await expect(
+      manager.waitForCompletion(record.runId),
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      finalResponse: "Hello",
+    });
+  });
+
   it("starts a session run without preassembled messages", async () => {
     const lifecycle = new SessionLifecycle();
     const { manager, bridge } = createManager(lifecycle);
@@ -870,6 +949,7 @@ describe("RunManager", () => {
     });
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "Hello",
     });
 
     expect(record.runId).toBe("run_explicit");
@@ -1003,6 +1083,7 @@ describe("RunManager", () => {
     await manager.waitForCompletion(record.runId);
 
     expect(lifecycle.calls[0]).toMatchObject({
+      runId: record.runId,
       contextScopeId: "subagent_1",
       directory: "D:/repo",
       initiatingUserMessageId: "user_child_1",
@@ -1184,6 +1265,7 @@ describe("RunManager", () => {
     });
     await expect(manager.waitForCompletion(sibling.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "",
     });
 
     lifecycle.firstFinish.resolve(undefined);
@@ -1195,6 +1277,7 @@ describe("RunManager", () => {
     );
     await expect(manager.waitForCompletion(next.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "",
     });
   });
 
@@ -1210,6 +1293,7 @@ describe("RunManager", () => {
 
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "done",
       usage: {
         inputTokens: 7,
         outputTokens: 5,
@@ -1286,7 +1370,7 @@ describe("RunManager", () => {
       fixture.manager.waitForCompletion(record.runId),
     ).resolves.toEqual({
       error: "late cancellation",
-      status: "cancelled",
+      status: "interrupted",
       terminalReason: "cancelled",
       usage: {
         inputTokens: 7,
@@ -1335,6 +1419,7 @@ describe("RunManager", () => {
     });
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "done",
     });
 
     const toolStart = bridge.events.find(
@@ -1351,7 +1436,7 @@ describe("RunManager", () => {
         params: { location: "NYC" },
         runId: "run_1",
         sessionId: "session_1",
-        status: "executing",
+        status: "pending",
         step: 1,
         toolName: "get_weather",
       },
@@ -1387,6 +1472,7 @@ describe("RunManager", () => {
     });
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "done",
     });
 
     expect(
@@ -1464,7 +1550,7 @@ describe("RunManager", () => {
     expect(bridge.events).toEqual([]);
   });
 
-  it("propagates cancel through AbortSignal and marks the run cancelled", async () => {
+  it("propagates cancel through AbortSignal and marks the run interrupted", async () => {
     const lifecycle = new AbortAwareLifecycle();
     const observations: Parameters<RunStepUsageObserver>[0][] = [];
     const { manager, ledger, bridge } = createManagerWithOverrides({
@@ -1485,12 +1571,12 @@ describe("RunManager", () => {
 
     expect(signal?.aborted).toBe(true);
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
-      status: "cancelled",
+      status: "interrupted",
       error: "user requested stop",
       terminalReason: "cancelled",
     });
     await expect(ledger.get(record.runId)).resolves.toMatchObject({
-      status: "cancelled",
+      status: "interrupted",
       error: "user requested stop",
     });
     expect(bridge.endedScopes).toEqual(["run/run_override"]);
@@ -1513,9 +1599,14 @@ describe("RunManager", () => {
 
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "Hello",
     });
     expect(sandboxManager.released).toEqual(["lease_session_1"]);
     expect(bridge.endedScopes).toEqual(["run/run_override"]);
+    expect(manager.hasActiveWork()).toBe(true);
+    await expect(manager.waitForCleanup()).rejects.toThrow(
+      "Sandbox release remains unconfirmed",
+    );
   });
 
   it("does not orphan active runs when initial stream publish fails", async () => {
@@ -1534,6 +1625,7 @@ describe("RunManager", () => {
 
     await expect(manager.waitForCompletion(record.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "Hello",
     });
     await expect(ledger.get(record.runId)).resolves.toMatchObject({
       status: "succeeded",
@@ -1623,6 +1715,7 @@ describe("RunManager", () => {
     });
     await expect(manager.waitForCompletion(second.runId)).resolves.toEqual({
       status: "succeeded",
+      finalResponse: "replacement",
     });
   });
 
@@ -1704,7 +1797,7 @@ describe("RunManager", () => {
     });
   });
 
-  it("marks prior pending and running ledger records interrupted during init", async () => {
+  it("leaves records with unknown owners untouched during online init", async () => {
     const { manager, ledger } = createManager(new CompletingLifecycle());
     await ledger.createPending({
       runId: "pending_run",
@@ -1718,13 +1811,13 @@ describe("RunManager", () => {
     });
     await ledger.markRunning("running_run");
 
-    await expect(manager.init()).resolves.toEqual({ updatedCount: 2 });
+    await expect(manager.init()).resolves.toEqual({ updatedCount: 0 });
     await expect(manager.init()).resolves.toEqual({ updatedCount: 0 });
     await expect(ledger.get("pending_run")).resolves.toMatchObject({
-      status: "interrupted",
+      status: "pending",
     });
     await expect(ledger.get("running_run")).resolves.toMatchObject({
-      status: "interrupted",
+      status: "running",
     });
   });
 
@@ -1734,5 +1827,651 @@ describe("RunManager", () => {
     expect(() => {
       manager.cancel("missing_run");
     }).toThrow(RunManagerNotFoundError);
+  });
+});
+
+describe("run permission cleanup", () => {
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])(
+    "settles a real orphaned wait at the worker terminal (child=%s, failure=%s)",
+    async (isSubagent, fails) => {
+      const permission = createPermissionManager({ bus: createBus() });
+      let waiting: Promise<SchedulerPermissionResponse> | undefined;
+      let requestId = "";
+      const lifecycle: RunLifecycle = {
+        async *run(params) {
+          if (!params.runId || !params.signal)
+            throw new Error("Missing identity");
+          waiting = permission.ask({
+            runId: params.runId,
+            sessionId: params.sessionId,
+            callId: "terminal_call",
+            messageId: "terminal_message",
+            toolName: "bash",
+            params: { command: "printf terminal" },
+            category: "dangerous",
+            signal: params.signal,
+            source: {
+              rootSessionId: "root",
+              ancestorSessionIds: isSubagent ? ["root"] : [],
+              sourceLabel: isSubagent ? "Child" : "Main agent",
+            },
+          });
+          await Promise.resolve();
+          requestId = permission.listPending()[0].id;
+          yield {
+            type: "llm:start",
+            sessionId: params.sessionId,
+            step: 1,
+            timestamp: 1,
+          };
+          if (fails) throw new Error("Controlled lifecycle failure");
+          return { success: true, finishReason: "stop", finalResponse: "done" };
+        },
+      };
+      const { manager } = createManagerWithOverrides({
+        lifecycle,
+        revokePermissionsForRun: (runId, reason) => {
+          permission.revokeByRun(runId, reason);
+        },
+      });
+      const sessionId = isSubagent ? "child" : "root";
+      try {
+        const run = await manager.create({
+          directory: "D:/repo",
+          modelId: "fake-model",
+          sessionId,
+          triggerSource: "user",
+          isSubagent,
+        });
+        const completion = await manager.waitForCompletion(run.runId);
+        expect(completion.status).toBe(fails ? "failed" : "succeeded");
+        await expect(waiting).resolves.toBe("cancel");
+        expect(permission.listPending()).toEqual([]);
+        expect(
+          permission.respond(sessionId, requestId, { type: "always" }),
+        ).toBe("revoked");
+        expect(permission.state.getSessionRules(sessionId)).toEqual([]);
+      } finally {
+        permission.dispose();
+      }
+    },
+  );
+
+  it.each([
+    ["success", (): SessionLifecycle => new SessionLifecycle()],
+    ["failure", (): ThrowingLifecycle => new ThrowingLifecycle()],
+  ] as const)(
+    "revokes the actual run on %s before completion",
+    async (_name, lifecycle) => {
+      const revoked: string[] = [];
+      const { manager } = createManagerWithOverrides({
+        lifecycle: lifecycle(),
+        revokePermissionsForRun(runId) {
+          revoked.push(runId);
+        },
+      });
+      const run = await manager.create({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_1",
+        triggerSource: "user",
+      });
+      await manager.waitForCompletion(run.runId);
+      expect(revoked).toEqual([run.runId]);
+    },
+  );
+
+  it("revokes synchronously on cancel without waiting for execution cleanup", async () => {
+    const lifecycle = new AbortAwareLifecycle();
+    const revoked: string[] = [];
+    const { manager } = createManagerWithOverrides({
+      lifecycle,
+      revokePermissionsForRun(runId) {
+        revoked.push(runId);
+      },
+    });
+    const run = await manager.create({
+      directory: "D:/repo",
+      modelId: "fake-model",
+      sessionId: "session_1",
+      triggerSource: "user",
+    });
+    await lifecycle.started.promise;
+    manager.cancel(run.runId);
+    expect(revoked).toEqual([run.runId]);
+    await manager.waitForCompletion(run.runId);
+    expect(revoked.every((id) => id === run.runId)).toBe(true);
+  });
+});
+
+it("seals input admission synchronously before cancellation and awaits durable closure before terminal", async () => {
+  const lifecycle = new AbortAwareLifecycle();
+  const persistence = createDeferred();
+  const closed: string[] = [];
+  const { manager, ledger } = createManagerWithOverrides({
+    lifecycle,
+    currentRunInputs: {
+      close(runId) {
+        closed.push(runId);
+        return persistence.promise;
+      },
+    },
+  });
+  const run = await manager.create({
+    directory: "/repo",
+    modelId: "fake-model",
+    sessionId: "session",
+    triggerSource: "user",
+  });
+  await lifecycle.started.promise;
+  manager.cancel(run.runId);
+  expect(closed).toEqual([run.runId]);
+  await Promise.resolve();
+  expect((await ledger.get(run.runId))?.status).toBe("running");
+  persistence.resolve();
+  expect((await manager.waitForCompletion(run.runId)).status).toBe(
+    "interrupted",
+  );
+});
+
+describe("durable run handoff", () => {
+  const runOptions = {
+    directory: "/repo",
+    modelId: "fake-model",
+    sessionId: "session_1",
+    triggerSource: "user" as const,
+  };
+
+  it("keeps the execution slot after a terminal write fails and retries without rerunning", async () => {
+    const lifecycle = new CompletingLifecycle();
+    const ledger = createInMemoryRunLedger();
+    const save = ledger.markSucceeded.bind(ledger);
+    let unavailable = true;
+    ledger.markSucceeded = async (...args): Promise<RunLedgerRecord> => {
+      if (unavailable) throw new Error("disk unavailable");
+      return save(...args);
+    };
+    const { manager, bridge, sandboxManager } = createManagerWithOverrides({
+      lifecycle,
+      runLedger: ledger,
+    });
+    const run = await manager.create(runOptions);
+    await expect(manager.waitForCompletion(run.runId)).rejects.toMatchObject({
+      name: "RunFinalizationError",
+      runId: run.runId,
+      stage: "run-terminal",
+    });
+    expect(manager.hasActiveWork()).toBe(true);
+    expect(bridge.endedScopes).toEqual([]);
+    expect(sandboxManager.released).toHaveLength(1);
+    await expect(
+      manager.create({
+        ...runOptions,
+        runId: "replacement",
+        explicit: { multitaskStrategy: "interrupt-current" },
+      }),
+    ).rejects.toMatchObject({ name: "RunFinalizationError" });
+    unavailable = false;
+    const completions = await Promise.all([
+      manager.retryFinalization(run.runId),
+      manager.retryFinalization(run.runId),
+    ]);
+    expect(completions).toEqual([
+      { status: "succeeded", finalResponse: "Hello" },
+      { status: "succeeded", finalResponse: "Hello" },
+    ]);
+    expect((await ledger.get(run.runId))?.endedAt).toBe(10_000);
+    expect(manager.hasActiveWork()).toBe(false);
+    expect(bridge.endedScopes).toEqual([`run/${run.runId}`]);
+    expect(lifecycle.calls).toHaveLength(1);
+    await expect(manager.retryFinalization(run.runId)).resolves.toEqual(
+      completions[0],
+    );
+  });
+
+  it("retries input closure while preserving the original successful outcome", async () => {
+    let unavailable = true;
+    const reasons: string[] = [];
+    const lifecycle = new CompletingLifecycle();
+    const { manager, ledger, bridge } = createManagerWithOverrides({
+      lifecycle,
+      currentRunInputs: {
+        close: async (_runId, reason) => {
+          await Promise.resolve();
+          reasons.push(reason);
+          if (unavailable) throw new Error("input close unavailable");
+        },
+      },
+    });
+    const run = await manager.create(runOptions);
+    await expect(manager.waitForCompletion(run.runId)).rejects.toMatchObject({
+      name: "RunFinalizationError",
+      stage: "input-closure",
+    });
+    expect((await ledger.get(run.runId))?.status).toBe("running");
+    expect(bridge.endedScopes).toEqual([]);
+    manager.cancel(run.runId, "late stop after main settled");
+    unavailable = false;
+    await expect(manager.retryFinalization(run.runId)).resolves.toEqual({
+      status: "succeeded",
+      finalResponse: "Hello",
+    });
+    expect(reasons).toEqual(["succeeded", "succeeded"]);
+    expect(lifecycle.calls).toHaveLength(1);
+  });
+
+  it("reconciles a committed terminal when the write response is lost", async () => {
+    const ledger = createInMemoryRunLedger({ now: () => 50 });
+    const save = ledger.markSucceeded.bind(ledger);
+    ledger.markSucceeded = async (...args): Promise<RunLedgerRecord> => {
+      await save(...args);
+      throw new Error("response lost");
+    };
+    const { manager } = createManagerWithOverrides({
+      lifecycle: new CompletingLifecycle(),
+      runLedger: ledger,
+    });
+    const run = await manager.create(runOptions);
+    await expect(manager.waitForCompletion(run.runId)).resolves.toEqual({
+      status: "succeeded",
+      finalResponse: "Hello",
+    });
+    expect((await ledger.get(run.runId))?.endedAt).toBe(10_000);
+    expect(manager.get(run.runId)?.error).toBeUndefined();
+  });
+
+  it("preserves the ledger winner instead of publishing a conflicting local outcome", async () => {
+    const ledger = createInMemoryRunLedger();
+    const lifecycle = new BlockingLifecycle();
+    const { manager } = createManagerWithOverrides({
+      lifecycle,
+      runLedger: ledger,
+    });
+    const run = await manager.create(runOptions);
+    await lifecycle.started.promise;
+    await ledger.markCancelled(run.runId, "already committed");
+    const committed = await ledger.get(run.runId);
+    lifecycle.finish.resolve(undefined);
+    await expect(manager.waitForCompletion(run.runId)).resolves.toMatchObject({
+      status: "cancelled",
+      error: "already committed",
+    });
+    expect(manager.get(run.runId)?.endedAt).toBe(committed?.endedAt);
+  });
+
+  it("does not wait for sandbox cleanup to hand off after durable terminal", async () => {
+    const cleanup = createDeferred();
+    const sandboxManager = new RecordingSandboxManager();
+    sandboxManager.release = (): Promise<void> => cleanup.promise;
+    const { manager } = createManagerWithOverrides({
+      lifecycle: new CompletingLifecycle(),
+      sandboxManager,
+    });
+    const run = await manager.create(runOptions);
+    try {
+      await expect(
+        Promise.race([
+          manager.waitForCompletion(run.runId).then(() => "done"),
+          new Promise<string>((resolve) =>
+            setTimeout(() => {
+              resolve("blocked");
+            }, 50),
+          ),
+        ]),
+      ).resolves.toBe("done");
+      expect(manager.hasActiveWork()).toBe(true);
+    } finally {
+      cleanup.resolve();
+    }
+    await manager.waitForCleanup();
+    expect(manager.hasActiveWork()).toBe(false);
+  });
+
+  it("cannot bypass locally pending finalization by initializing again", async () => {
+    const ledger = createInMemoryRunLedger();
+    ledger.markSucceeded = (): Promise<RunLedgerRecord> =>
+      Promise.reject(new Error("save unavailable"));
+    const { manager } = createManagerWithOverrides({
+      lifecycle: new CompletingLifecycle(),
+      runLedger: ledger,
+    });
+    const run = await manager.create(runOptions);
+    await expect(manager.waitForCompletion(run.runId)).rejects.toMatchObject({
+      name: "RunFinalizationError",
+    });
+    await expect(manager.init()).rejects.toMatchObject({
+      name: "ConcurrencyRejectedError",
+    });
+    expect(manager.hasActiveWork()).toBe(true);
+  });
+});
+
+it("keeps fatal history facts gated and retries the owning history finalizer", async () => {
+  const lifecycle = new AbortAwareLifecycle();
+  let unavailable = true;
+  const outcomes: import("./types.js").RunWorkerResult[] = [];
+  const { manager, ledger } = createManagerWithOverrides({
+    lifecycle,
+    beforeFinalize: async (_runId, outcome) => {
+      await Promise.resolve();
+      outcomes.push(outcome);
+      if (unavailable) throw new Error("tool history unavailable");
+    },
+  });
+  const run = await manager.create({
+    directory: "/repo",
+    modelId: "test",
+    sessionId: "fatal",
+    triggerSource: "user",
+  });
+  const signal = await lifecycle.started.promise;
+  manager.fail(run.runId, new Error("tool result not saved"));
+  expect(signal?.aborted).toBe(true);
+  await expect(manager.waitForCompletion(run.runId)).rejects.toMatchObject({
+    name: "RunFinalizationError",
+    stage: "execution-history",
+  });
+  expect((await ledger.get(run.runId))?.status).toBe("running");
+  expect(manager.hasActiveWork()).toBe(true);
+  unavailable = false;
+  await expect(manager.retryFinalization(run.runId)).resolves.toMatchObject({
+    status: "failed",
+    error: "tool result not saved",
+    terminalReason: "tool_persistence_failure",
+  });
+  expect(outcomes).toHaveLength(2);
+  expect(outcomes[0]).toBe(outcomes[1]);
+  expect(manager.hasActiveWork()).toBe(false);
+});
+
+it("does not run finalization recovery while the main logic is still executing", async () => {
+  const lifecycle = new BlockingLifecycle();
+  let historyFinalizations = 0;
+  const { manager } = createManagerWithOverrides({
+    lifecycle,
+    beforeFinalize: async () => {
+      await Promise.resolve();
+      historyFinalizations++;
+    },
+  });
+  const run = await manager.create({
+    directory: "/repo",
+    modelId: "test",
+    sessionId: "slow",
+    triggerSource: "user",
+  });
+  await lifecycle.started.promise;
+  manager.cancel(run.runId, "user-stop");
+  const retry = manager.retryFinalization(run.runId);
+  await Promise.resolve();
+  expect(historyFinalizations).toBe(0);
+  expect(manager.hasActiveWork()).toBe(true);
+  lifecycle.finish.resolve(undefined);
+  await expect(retry).resolves.toMatchObject({ status: "interrupted" });
+  expect(historyFinalizations).toBe(1);
+});
+
+it("preserves the error from a terminal already committed with the same status", async () => {
+  const lifecycle = new BlockingLifecycle();
+  const ledger = createInMemoryRunLedger();
+  const { manager } = createManagerWithOverrides({
+    lifecycle,
+    runLedger: ledger,
+  });
+  const run = await manager.create({
+    directory: "/repo",
+    modelId: "test",
+    sessionId: "same-status",
+    triggerSource: "user",
+  });
+  await lifecycle.started.promise;
+  await ledger.markFailed(run.runId, "first durable failure");
+  manager.fail(run.runId, new Error("later local failure"));
+  lifecycle.finish.resolve(undefined);
+  await expect(manager.waitForCompletion(run.runId)).resolves.toMatchObject({
+    status: "failed",
+    error: "first durable failure",
+  });
+});
+
+it("finalizes a synchronous sandbox acquire failure without an unobserved run", async () => {
+  const sandboxManager = new RecordingSandboxManager();
+  sandboxManager.acquire = (): Promise<SandboxLease> => {
+    throw new Error("sandbox unavailable");
+  };
+  const { manager } = createManagerWithOverrides({
+    lifecycle: new CompletingLifecycle(),
+    sandboxManager,
+  });
+  const run = await manager.create({
+    directory: "/repo",
+    modelId: "test",
+    sessionId: "sandbox",
+    triggerSource: "user",
+  });
+  await expect(manager.waitForCompletion(run.runId)).resolves.toMatchObject({
+    status: "failed",
+    error: "sandbox unavailable",
+  });
+  expect(manager.hasActiveWork()).toBe(false);
+});
+
+it("does not add a hidden retry when Stop input closure already failed before main exit", async () => {
+  const lifecycle = new BlockingLifecycle();
+  let attempts = 0;
+  let unavailable = true;
+  const { manager } = createManagerWithOverrides({
+    lifecycle,
+    currentRunInputs: {
+      close: async () => {
+        await Promise.resolve();
+        attempts++;
+        if (unavailable) throw new Error("close unavailable");
+      },
+    },
+  });
+  const run = await manager.create({
+    directory: "/repo",
+    modelId: "test",
+    sessionId: "stop-retry",
+    triggerSource: "user",
+  });
+  await lifecycle.started.promise;
+  manager.cancel(run.runId, "user-stop");
+  await expect(manager.waitForInputClosure(run.runId)).rejects.toThrow(
+    "close unavailable",
+  );
+  lifecycle.finish.resolve(undefined);
+  await expect(manager.waitForCompletion(run.runId)).rejects.toMatchObject({
+    stage: "input-closure",
+  });
+  expect(attempts).toBe(1);
+  unavailable = false;
+  await expect(manager.retryFinalization(run.runId)).resolves.toMatchObject({
+    status: "interrupted",
+  });
+  expect(attempts).toBe(2);
+});
+
+it("uses Stop's expired save budget until an explicit singleflight retry starts a fresh attempt", async () => {
+  const db = new NodeSqliteConnection(":memory:");
+  const lifecycle = new BlockingLifecycle();
+  const budgets: ReturnType<typeof getDatabaseWriteBudget>[] = [];
+  let historyCalls = 0;
+  const { manager, ledger } = createManagerWithOverrides({
+    lifecycle,
+    currentRunInputs: {
+      close: () => {
+        budgets.push(getDatabaseWriteBudget());
+        return Promise.resolve();
+      },
+    },
+    beforeFinalize: async () => {
+      historyCalls++;
+      budgets.push(getDatabaseWriteBudget());
+      await runWriteTransaction(db, () => {
+        if (historyCalls === 1) {
+          const until = performance.now() + 50;
+          while (performance.now() < until) {
+            /* A slow synchronous database callback consumes the save allowance. */
+          }
+        }
+      });
+    },
+  });
+  const run = await manager.create({
+    directory: "/repo",
+    modelId: "test",
+    sessionId: "budget",
+    triggerSource: "user",
+  });
+  await lifecycle.started.promise;
+  const original = createDatabaseWriteBudget(30);
+  withDatabaseWriteBudget(original, () => {
+    manager.cancel(run.runId, "user-stop");
+  });
+  lifecycle.finish.resolve(undefined);
+  await expect(manager.waitForCompletion(run.runId)).rejects.toMatchObject({
+    stage: "execution-history",
+    cause: { name: "DatabaseWriteBudgetError" },
+  });
+  expect(budgets).toEqual([original, original]);
+  expect((await ledger.get(run.runId))?.status).toBe("running");
+  const retry = manager.retryFinalization(run.runId);
+  expect(manager.retryFinalization(run.runId)).toBe(retry);
+  await expect(retry).resolves.toMatchObject({ status: "interrupted" });
+  expect(historyCalls).toBe(2);
+  expect(budgets[2]?.deadlineAt).toBeGreaterThan(original.deadlineAt);
+  db.close();
+});
+
+it("persists Stop input immediately and finalizes after a slow main exit without spending idle time as DB wait", async () => {
+  const db = new NodeSqliteConnection(":memory:");
+  db.exec("CREATE TABLE facts(value TEXT)");
+  const lifecycle = new BlockingLifecycle();
+  const { manager } = createManagerWithOverrides({
+    lifecycle,
+    currentRunInputs: {
+      close: () =>
+        runWriteTransaction(db, (connection) => {
+          connection.prepare("INSERT INTO facts VALUES ('closed')").run();
+        }),
+    },
+    beforeFinalize: () =>
+      runWriteTransaction(db, (connection) => {
+        connection.prepare("INSERT INTO facts VALUES ('final')").run();
+      }),
+  });
+  const run = await manager.create({
+    directory: "/repo",
+    modelId: "test",
+    sessionId: "slow-stop",
+    triggerSource: "user",
+  });
+  await lifecycle.started.promise;
+  try {
+    manager.cancel(run.runId, "user-stop");
+    await manager.waitForInputClosure(run.runId);
+    expect(db.prepare("SELECT value FROM facts").all()).toEqual([
+      { value: "closed" },
+    ]);
+    // Real wall time: the previous fixed five-second deadline wrongly expires here.
+    await new Promise((resolve) => setTimeout(resolve, 5100));
+    lifecycle.finish.resolve(undefined);
+    await expect(manager.waitForCompletion(run.runId)).resolves.toMatchObject({
+      status: "interrupted",
+    });
+    expect(db.prepare("SELECT value FROM facts").all()).toEqual([
+      { value: "closed" },
+      { value: "final" },
+    ]);
+  } finally {
+    lifecycle.finish.resolve(undefined);
+    await manager.waitForCompletion(run.runId).catch(() => undefined);
+    db.close();
+  }
+}, 10_000);
+
+it("continues shutdown cancellation for other runs when one permission revocation throws", async () => {
+  const signals = new Map<string, AbortSignal | undefined>();
+  const lifecycle: RunLifecycle = {
+    async *run(params) {
+      signals.set(params.sessionId, params.signal);
+      yield {
+        type: "llm:start",
+        sessionId: params.sessionId,
+        step: 1,
+        timestamp: 1,
+      };
+      if (!params.signal?.aborted)
+        await new Promise<void>((resolve) =>
+          params.signal?.addEventListener(
+            "abort",
+            () => {
+              resolve();
+            },
+            {
+              once: true,
+            },
+          ),
+        );
+      return { success: false, finishReason: "error", finalResponse: "" };
+    },
+  };
+  const { manager } = createManagerWithOverrides({
+    lifecycle,
+    revokePermissionsForRun: (runId) => {
+      if (runId === "first") throw new Error("permission unavailable");
+    },
+  });
+  for (const runId of ["first", "second"])
+    await manager.create({
+      runId,
+      directory: "/repo",
+      modelId: "test",
+      sessionId: runId,
+      triggerSource: "user",
+    });
+  await vi.waitFor(() => {
+    expect(signals.size).toBe(2);
+  });
+  await expect(manager.cancelAll("service-shutdown")).rejects.toThrow();
+  expect(signals.get("first")?.aborted).toBe(true);
+  expect(signals.get("second")?.aborted).toBe(true);
+  await expect(manager.waitForCompletion("second")).resolves.toMatchObject({
+    status: "interrupted",
+  });
+});
+
+it("returns durable error details when a committed failure has the same message", async () => {
+  const lifecycle = new BlockingLifecycle();
+  const ledger = createInMemoryRunLedger();
+  const { manager } = createManagerWithOverrides({
+    lifecycle,
+    runLedger: ledger,
+  });
+  const run = await manager.create({
+    directory: "/repo",
+    modelId: "test",
+    sessionId: "durable-error",
+    triggerSource: "user",
+  });
+  await lifecycle.started.promise;
+  await ledger.markFailed(run.runId, "same failure", {
+    code: "DURABLE_FAILURE",
+    message: "same failure",
+    source: "runtime",
+    retryable: false,
+  });
+  manager.fail(run.runId, new Error("same failure"));
+  lifecycle.finish.resolve(undefined);
+  await expect(manager.waitForCompletion(run.runId)).resolves.toMatchObject({
+    status: "failed",
+    errorData: { code: "DURABLE_FAILURE" },
   });
 });

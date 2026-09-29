@@ -1,3 +1,19 @@
+import {
+  collectCleanup,
+  createShutdownOptions,
+  type ShutdownOptions,
+  type CleanupResult,
+} from "../../runtime/shutdown.js";
+import { repairInterruptedRunHistory } from "../../runtime/execution-recovery/history.js";
+import { RunFinalizationError } from "../../runtime/run-manager/errors.js";
+import { subscribeApprovalExecutionChanges } from "../../agents/subagents/approval-blocking.js";
+import type { CurrentRunInputStore } from "../../runtime/prompt-scheduler/current-run-inputs.js";
+import { createSubagentResultArtifacts } from "../../agents/subagents/result-artifacts.js";
+import { createSubagentContinuationCoordinator } from "../../agents/subagents/continuation-coordinator.js";
+import { collectExecutionFacts } from "../../agents/subagents/execution-facts.js";
+import { createStorage } from "../../services/storage/index.js";
+import { PermissionEvent } from "../../permission/events.js";
+import { randomUUID } from "node:crypto";
 import { activeModelProfiles } from "../../config/llm/model-profile.js";
 import {
   mergeReasoningIntent,
@@ -19,7 +35,10 @@ import {
   type ContextManager,
   type ContextUsage,
 } from "../../core/context/index.js";
-import { Lifecycle } from "../../core/lifecycle/index.js";
+import {
+  Lifecycle,
+  type DisplayReasoningOwner,
+} from "../../core/lifecycle/index.js";
 import type { ResolvedStepTools } from "../../core/lifecycle/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
@@ -30,7 +49,10 @@ import {
   type Tool,
   type ToolDefinition,
 } from "../../core/tool-scheduler/index.js";
-import type { PermissionStateStore } from "../../permission/index.js";
+import type {
+  PermissionManager,
+  PermissionStateStore,
+} from "../../permission/index.js";
 import { Shell } from "../../shell/index.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/index.js";
 import {
@@ -44,6 +66,8 @@ import {
   AgentService,
   DEFAULT_SUBAGENT_ROLE,
   InMemorySubagentInstanceStore,
+  InMemorySubagentExecutionStore,
+  type SubagentExecutionStore,
   SessionSubagentHost,
   type StartSessionParams,
   SUBAGENT_ROLES,
@@ -123,6 +147,8 @@ import { formatUnknown } from "./runtime-format.js";
 import { createStreamBridgeRunEventSource } from "./stream-bridge-run-event-source.js";
 import type { UiRuntimeComposition } from "./types.js";
 
+import { createPermissionSourcePort } from "./permission-source.js";
+
 const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
   defaults: {
     user: {
@@ -151,6 +177,7 @@ export interface UiRuntimeCompositionOptions {
   readonly onStepUsage?: RunStepUsageObserver;
   readonly mcpManager?: McpManagerPort;
   readonly permission?: PermissionPort;
+  readonly permissionManager?: PermissionManager;
   readonly permissionState: PermissionStateStore;
   readonly runLedger?: RunLedger;
   readonly sandboxManager?: HostLocalSandboxManager;
@@ -161,10 +188,15 @@ export interface UiRuntimeCompositionOptions {
   readonly workdir?: string;
   /** goal 记录的持久化；缺省用内存实现（与 messageManager 的缺省姿态一致）。 */
   readonly goalPersistence?: GoalPersistencePort;
+  readonly goalService?: GoalService;
+  readonly displayReasoning?: DisplayReasoningOwner;
   readonly goalExecutionControl: GoalExecutionControlPort;
   readonly onGoalChange?: GoalServiceDeps["onChange"];
   readonly onTodoWrite?: (event: TodoWriteEvent) => void;
   readonly subagentInstanceStore?: SubagentInstanceStore;
+  readonly subagentExecutionStore?: SubagentExecutionStore;
+  readonly currentRunInputStore?: CurrentRunInputStore;
+  readonly resultStorageRoot?: string;
   readonly subagentOwnerId?: string;
   readonly subagentOwnerPid?: number;
 }
@@ -263,6 +295,75 @@ export async function createUiRuntimeComposition(
   const mcpToolMenu = new McpToolMenu();
   const scopeToolSequence = new ScopeToolSequence();
   let registeredMcpToolNames = new Set<string>();
+  const sessionManager =
+    options.sessionManager ??
+    createInMemorySessionManager({
+      bus: options.bus,
+      messageCleaner: options.messageManager,
+      now: options.now,
+    });
+  const subagentExecutionStore =
+    options.subagentExecutionStore ?? new InMemorySubagentExecutionStore();
+  const resultArtifacts = createSubagentResultArtifacts({
+    store: subagentExecutionStore,
+    storage: createStorage({ rootDir: options.resultStorageRoot }),
+    rootDir: options.resultStorageRoot,
+    sessionExists: async (sessionId) =>
+      Boolean(await sessionManager.get(sessionId)),
+    now: options.now,
+  });
+  const factsFor = (
+    execution: Parameters<typeof collectExecutionFacts>[0]["execution"],
+  ): ReturnType<typeof collectExecutionFacts> =>
+    collectExecutionFacts({
+      execution,
+      messages: options.messageManager,
+      permissions: options.permissionManager,
+      now: options.now,
+    });
+  const continuation = options.currentRunInputStore
+    ? createSubagentContinuationCoordinator({
+        inputs: options.currentRunInputStore,
+        executions: subagentExecutionStore,
+        prepareResult: (execution, signal) =>
+          resultArtifacts.prepare(execution, { signal }),
+        collectFacts: factsFor,
+        now: options.now,
+        subscribe: (identity, wake) => {
+          const unsubs = [
+            options.bus.subscribe(PermissionEvent.Updated, ({ info }) => {
+              if (info.rootSessionId === identity.sessionId) wake();
+            }),
+            options.bus.subscribe(PermissionEvent.Replied, (info) => {
+              if (info.rootSessionId === identity.sessionId) wake();
+            }),
+          ];
+          return () => {
+            for (const unsubscribe of unsubs) unsubscribe();
+          };
+        },
+      })
+    : undefined;
+  const subagentInstanceStore =
+    options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
+  const runtimeGeneration = randomUUID();
+  const permissionSource = createPermissionSourcePort({
+    manager: options.permissionManager,
+    bus: options.bus,
+    projectRoot: options.workdir ?? process.cwd(),
+    getSession: (sessionId) => sessionManager.get(sessionId),
+    getSubagentRecord: async (session, contextScopeId) => {
+      if (!session.parentId) return null;
+      return (
+        (await subagentInstanceStore.listByParent(session.parentId)).find(
+          (record) =>
+            record.sessionId === session.id &&
+            (contextScopeId === undefined ||
+              record.contextScopeId === contextScopeId),
+        ) ?? null
+      );
+    },
+  });
   const toolScheduler = createToolScheduler({
     accessGuard({ request, tool }) {
       if (tool.source !== "mcp" || !registeredMcpToolNames.has(tool.name)) {
@@ -278,18 +379,52 @@ export async function createUiRuntimeComposition(
     },
     agentTools: agentManager,
     bus: options.bus,
-    permission: options.permission,
+    permission: options.permissionManager
+      ? permissionSource
+      : options.permission,
+    async resolveOwner(request) {
+      const source = await permissionSource.resolveSource(request);
+      if (!source) throw new Error("Tool owner resolution was cancelled");
+      let rootRunId = request.runId;
+      let executionId: string | undefined;
+      if (source.rootSessionId !== request.sessionId) {
+        if (!request.runId || !request.contextScopeId)
+          throw new Error("Subagent tool execution ownership is missing");
+        const execution = await subagentExecutionStore.getByChildRun({
+          sessionId: request.sessionId,
+          contextScopeId: request.contextScopeId,
+          runId: request.runId,
+        });
+        if (execution?.rootSessionId !== source.rootSessionId)
+          throw new Error(
+            "Subagent tool execution ownership does not match its root session",
+          );
+        rootRunId = execution.rootRunId;
+        executionId = execution.executionId;
+      }
+      return {
+        sessionId: request.sessionId,
+        runId: request.runId,
+        rootRunId,
+        executionId,
+        messageId: request.messageId,
+        callId: request.callId,
+        contextScopeId: request.contextScopeId,
+        scopeKey: request.environment?.scopeKey,
+        workspaceKey: permissionSource.workspaceKey,
+        rootSessionId: source.rootSessionId,
+        runtimeGeneration,
+      };
+    },
     permissionState: options.permissionState,
   });
   const sandboxManager =
-    options.sandboxManager ?? createHostLocalSandboxManager(options.workdir);
-  const sessionManager =
-    options.sessionManager ??
-    createInMemorySessionManager({
-      bus: options.bus,
-      messageCleaner: options.messageManager,
-      now: options.now,
+    options.sandboxManager ??
+    createHostLocalSandboxManager(options.workdir, {
+      authorizeInternalRead: (input) =>
+        resultArtifacts.authorizeRead({ ...input, operation: "read" }),
     });
+
   const todoService = new TodoService({
     history: options.messageManager,
     onWarning(message, error): void {
@@ -307,7 +442,9 @@ export async function createUiRuntimeComposition(
   });
   const todoWorkScopes = new TodoWorkScopeRegistry();
   const shellJobRegistry = new ShellJobRegistry({
-    killTree: (child): Promise<void> | void => Shell.killTree(child),
+    terminationManagesObservation: true,
+    killTree: (child): ReturnType<typeof Shell.killTree> =>
+      Shell.killTree(child),
   });
 
   async function ensureRootSession(input: {
@@ -490,6 +627,9 @@ export async function createUiRuntimeComposition(
   const contextManager =
     options.contextManager ??
     createContextManager({
+      filterModelHistory: options.currentRunInputStore?.filterModelHistory.bind(
+        options.currentRunInputStore,
+      ),
       bus: options.bus,
       llmClient: createContextSummaryClient(options.llmClient),
       memory: createMemoryLoader(),
@@ -513,6 +653,7 @@ export async function createUiRuntimeComposition(
       }),
     });
   const lifecycle = new Lifecycle({
+    displayReasoning: options.displayReasoning,
     contextManager,
     llmClient: options.llmClient,
     messageManager: options.messageManager,
@@ -532,6 +673,50 @@ export async function createUiRuntimeComposition(
   });
 
   const runManager = new RunManager({
+    async beforeFinalize(runId, outcome) {
+      const run = await runLedger.get(runId);
+      if (!run) throw new Error(`Missing execution record for ${runId}`);
+      // Only the primary waits for descendants. A child finalizer must never wait
+      // for its root (the root is already waiting for that child's completion).
+      if (run.contextScopeId === undefined) {
+        const children = await subagentExecutionStore.listByRootRun(runId);
+        for (const child of children) {
+          if (!child.childRunId || !runManager.get(child.childRunId)) continue;
+          try {
+            await runManager.waitForCompletion(child.childRunId);
+          } catch (error) {
+            if (!(error instanceof RunFinalizationError)) throw error;
+            await runManager.retryFinalization(child.childRunId);
+          }
+        }
+      }
+      if (outcome.status !== "succeeded") {
+        await repairInterruptedRunHistory(options.messageManager, {
+          sessionId: run.sessionId,
+          contextScopeId: run.contextScopeId,
+          runId,
+          reason: run.inputsCloseReason ?? outcome.error ?? outcome.status,
+          now: options.now,
+        });
+      }
+    },
+    currentRunInputs: {
+      close(runId, reason) {
+        // Both owners seal synchronously before either durable write is awaited.
+        if (reason === "succeeded" || reason === "completed")
+          shellJobRegistry.sealRootRun(runId);
+        else shellJobRegistry.cancelByRootRun(runId);
+        const inputsClosed = options.currentRunInputStore?.close(runId, reason);
+        const childrenClosed = subagentHost.interruptByRootRun(runId, reason);
+        return Promise.all([inputsClosed, childrenClosed]).then(
+          () => undefined,
+        );
+      },
+    },
+    createCurrentRunInputPort: continuation?.createPort,
+    revokePermissionsForRun: (runId, reason): void => {
+      options.permissionManager?.revokeByRun(runId, reason);
+    },
     createRunId(): string {
       return reservedRunIds.shift() ?? nextRunId();
     },
@@ -617,9 +802,48 @@ export async function createUiRuntimeComposition(
     }
   };
 
-  const subagentInstanceStore =
-    options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
   const subagentHost = new SessionSubagentHost({
+    collectExecutionFacts: factsFor,
+    ensureResultArtifact: async (execution) => {
+      await resultArtifacts.prepare(execution, { forceFile: true });
+    },
+    onTerminal: (record) => continuation?.notify(record.rootRunId),
+    isApprovalBlocked: async (executionId, parentSessionId) => {
+      const execution = await subagentExecutionStore.get({
+        executionId,
+        parentSessionId,
+      });
+      return execution ? (await factsFor(execution)).approval.blocked : false;
+    },
+    subscribeExecution: (sessionId, runId, wake) =>
+      subscribeApprovalExecutionChanges(options.bus, sessionId, runId, wake),
+    executionStore: subagentExecutionStore,
+    async resolveRequester(
+      input,
+    ): Promise<{ rootRunId: string; rootSessionId: string }> {
+      const run = await runLedger.get(input.requesterRunId);
+      const session = await sessionManager.get(input.parentSessionId);
+      if (
+        run?.sessionId !== input.parentSessionId ||
+        run.contextScopeId !== input.parentContextScopeId ||
+        !["pending", "running"].includes(run.status) ||
+        !session ||
+        session.isSubagent ||
+        session.parentId !== undefined
+      ) {
+        throw new Error("Invalid or inactive primary subagent requester run");
+      }
+      return { rootRunId: run.runId, rootSessionId: run.sessionId };
+    },
+    onFatal(error, rootRunId): void {
+      runManager.fail(rootRunId, error);
+      options.onNotice?.({
+        key: `subagent:fatal:${rootRunId}`,
+        level: "error",
+        message: error.message,
+        title: "Subagent result persistence failed",
+      });
+    },
     getParentReasoning: (sessionId, contextScopeId): ReasoningIntent =>
       runManager.getActiveReasoning(sessionId, contextScopeId) ??
       mergeReasoningIntent(options.llmClient.config.reasoning),
@@ -637,30 +861,71 @@ export async function createUiRuntimeComposition(
     store: subagentInstanceStore,
     now: options.now,
   });
-  await subagentHost.recoverInterrupted();
+  // Persistent recovery is gated per root session before execution admission.
 
   const interruptRunTree = async (
     runId: string,
     reason?: string,
-  ): Promise<void> => {
-    const run = runManager.get(runId);
-    const parentSessionId =
-      run?.sessionId ?? (await runLedger.get(runId))?.sessionId;
-    if (run) {
-      runManager.cancel(runId, reason);
-    }
-    if (parentSessionId === undefined) {
-      return;
-    }
-    await subagentHost.interruptByParent(
-      parentSessionId,
-      reason ?? "parent run interrupted",
-    );
-  };
+  ): Promise<void> =>
+    runManager.withFinalizationWriteBudget(runId, async () => {
+      // UI Stop is already bound to a concrete root identity. Seal its local
+      // execution before any storage read can wait behind a busy database.
+      shellJobRegistry.cancelByRootRun(runId);
+      const initiallyClosed = subagentHost.interruptByRootRun(
+        runId,
+        reason ?? "user-stop",
+      );
+      void initiallyClosed.catch(() => undefined);
+      if (runManager.get(runId))
+        runManager.cancel(runId, reason ?? "user-stop");
+      const run = await runLedger.get(runId);
+      if (!run) {
+        await initiallyClosed;
+        return;
+      }
+      const session = await sessionManager.get(run.sessionId);
+      let rootRunId = runId;
+      if (session?.isSubagent && session.parentId) {
+        let before: { createdAt: number; executionId: string } | undefined;
+        let found = false;
+        for (;;) {
+          const executions = await subagentExecutionStore.list({
+            parentSessionId: session.parentId,
+            subagentId: run.contextScopeId,
+            limit: 200,
+            before,
+          });
+          const execution = executions.find(
+            (record) =>
+              record.childRunId === runId &&
+              record.childSessionId === run.sessionId &&
+              record.childScopeId === run.contextScopeId,
+          );
+          if (execution) {
+            rootRunId = execution.rootRunId;
+            found = true;
+            break;
+          }
+          if (executions.length < 200) break;
+          const last = executions[executions.length - 1];
+          before = { createdAt: last.createdAt, executionId: last.executionId };
+        }
+        if (!found) return;
+      }
+      // Calling the async method seals synchronously, before cancellation callbacks.
+      shellJobRegistry.cancelByRootRun(rootRunId);
+      const interrupted =
+        rootRunId === runId
+          ? initiallyClosed
+          : subagentHost.interruptByRootRun(rootRunId, reason ?? "user-stop");
+      if (runManager.get(rootRunId)) runManager.cancel(rootRunId, reason);
+      await interrupted;
+    });
 
   const unsubscribeSessionRemoved = options.bus.subscribe(
     SessionEvent.Removed,
     (payload) => {
+      trackLifecycleCleanup(resultArtifacts.deleteSession(payload.sessionId));
       contextManager.disposeSession(payload.sessionId);
       mcpToolMenu.disposeSession(payload.sessionId);
       scopeToolSequence.disposeSession(payload.sessionId);
@@ -697,34 +962,36 @@ export async function createUiRuntimeComposition(
     },
   );
 
-  const goalService = new GoalService({
-    executionControl: options.goalExecutionControl,
-    onChange: (event): void => {
-      options.onGoalChange?.(event);
-      const status = event.snapshot?.status;
-      options.onNotice?.({
-        level: "info",
-        message:
-          event.change.kind === "completion"
-            ? "Goal completed."
-            : event.snapshot === null
-              ? "Goal cleared."
-              : `Goal ${status ?? "updated"}${event.snapshot.pauseReason ? `: ${event.snapshot.pauseReason}` : ""}`,
-        source: "goals",
-        title: "Goal",
-      });
-    },
-    onError: ({ error, sessionId }): void => {
-      options.onNotice?.({
-        key: `goal:execution:${sessionId}:${formatUnknown(error)}`,
-        level: "error",
-        message: formatUnknown(error),
-        source: "goals",
-        title: "Goal execution control failed",
-      });
-    },
-    persistence: options.goalPersistence ?? new InMemoryGoalPersistence(),
-  });
+  const goalService =
+    options.goalService ??
+    new GoalService({
+      executionControl: options.goalExecutionControl,
+      onChange: (event): void => {
+        options.onGoalChange?.(event);
+        const status = event.snapshot?.status;
+        options.onNotice?.({
+          level: "info",
+          message:
+            event.change.kind === "completion"
+              ? "Goal completed."
+              : event.snapshot === null
+                ? "Goal cleared."
+                : `Goal ${status ?? "updated"}${event.snapshot.pauseReason ? `: ${event.snapshot.pauseReason}` : ""}`,
+          source: "goals",
+          title: "Goal",
+        });
+      },
+      onError: ({ error, sessionId }): void => {
+        options.onNotice?.({
+          key: `goal:execution:${sessionId}:${formatUnknown(error)}`,
+          level: "error",
+          message: formatUnknown(error),
+          source: "goals",
+          title: "Goal execution control failed",
+        });
+      },
+      persistence: options.goalPersistence ?? new InMemoryGoalPersistence(),
+    });
 
   for (const tool of createBuiltinTools({
     goalBackend: goalService,
@@ -887,7 +1154,24 @@ export async function createUiRuntimeComposition(
     toolScheduler.register(createMcpPromptTool(mcpManager));
   }
 
+  let admissionClosed = false;
+  let disposal: Promise<CleanupResult> | undefined;
+  const closeAdmission = (): void => {
+    if (admissionClosed) return;
+    admissionClosed = true;
+    subagentHost.closeAdmission();
+    shellJobRegistry.closeAdmission();
+    toolScheduler.cancelAll();
+  };
+
   return {
+    getSubagentWaitState: (rootRunId) =>
+      continuation?.getWaitState(rootRunId) ?? {
+        waiting: false,
+        approvalBlocked: false,
+      },
+    getSubagentExecutionBudget: (executionId) =>
+      subagentHost.getExecutionBudget(executionId),
     agentManager,
     goals: goalService,
     todos: todoService,
@@ -900,6 +1184,8 @@ export async function createUiRuntimeComposition(
     reserveRunId,
 
     startSession(input: StartSessionParams): Promise<AgentSessionStartResult> {
+      if (admissionClosed)
+        return Promise.reject(new Error("Runtime is shutting down"));
       const runId = takeRunId(input.runId);
       return agentService.startSession({
         ...input,
@@ -1010,10 +1296,13 @@ export async function createUiRuntimeComposition(
 
     interruptRunTree,
 
-    interruptSubagentsByParent(parentSessionId, reason): Promise<void> {
-      return subagentHost
-        .interruptByParent(parentSessionId, reason)
-        .then(() => undefined);
+    async interruptSubagentsByParent(parentSessionId, reason): Promise<void> {
+      const roots = await runLedger.getActiveRuns(parentSessionId);
+      await Promise.all(
+        roots
+          .filter((run) => run.contextScopeId === undefined)
+          .map((run) => subagentHost.interruptByRootRun(run.runId, reason)),
+      );
     },
 
     getActivityReasons(): readonly string[] {
@@ -1024,20 +1313,27 @@ export async function createUiRuntimeComposition(
         ...(shellJobRegistry.hasActiveWork() ? ["background shell jobs"] : []),
       ];
     },
-    async dispose(): Promise<void> {
+    closeAdmission,
+    dispose(
+      shutdown: ShutdownOptions = createShutdownOptions(),
+    ): Promise<CleanupResult> {
+      closeAdmission();
+      if (disposal) return disposal;
       unsubscribeSessionRemoved();
+      permissionSource.dispose();
       todoService.dispose();
       todoWorkScopes.dispose();
-      toolScheduler.cancelAll();
-      await Promise.all([
-        shellJobRegistry.dispose(),
-        subagentHost.dispose(),
-        runManager.cancelAll("runtime disposed"),
-      ]);
-      while (pendingLifecycleCleanups.size > 0) {
-        await Promise.all([...pendingLifecycleCleanups]);
-      }
-      await sandboxManager.dispose();
+      disposal = collectCleanup(shutdown, {
+        shell: () => shellJobRegistry.dispose(),
+        subagents: () => subagentHost.dispose(),
+        runs: () => runManager.cancelAll("service-shutdown"),
+        lifecycle: async () => {
+          while (pendingLifecycleCleanups.size > 0)
+            await Promise.all([...pendingLifecycleCleanups]);
+        },
+        sandbox: () => sandboxManager.dispose(),
+      });
+      return disposal;
     },
   };
 }

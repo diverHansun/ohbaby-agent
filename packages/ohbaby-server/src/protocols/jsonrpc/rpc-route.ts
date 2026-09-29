@@ -1,27 +1,57 @@
-import { isUiReasoningConfig } from "ohbaby-sdk";
+import {
+  subagentReadForClient,
+  subagentConversationReadForClient,
+  watchSubagentConversationForClient,
+  unwatchSubagentConversationForClient,
+} from "../../coordination/session-access.js";
+import {
+  createOrReuseClientSession,
+  parseSessionCreationOptions,
+  abortForClient,
+  parseSessionQuery,
+  receiptForClient,
+  sessionReadForClient,
+  sessionRecoveryCapability,
+} from "../../coordination/session-access.js";
+import { randomUUID } from "node:crypto";
+import { isUiReasoningConfig, isUiPromptNamingSource } from "ohbaby-sdk";
 import type {
   SubmitPromptOptions,
   UiAcquirePromptEditLeaseInput,
   UiBackendClient,
+  UiEvent,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
+  UiResubmitRetainedPromptInput,
   UiReleasePromptEditLeaseInput,
   UiRenewPromptEditLeaseInput,
 } from "ohbaby-sdk";
-import type { UiPromptQueueExecutionPort } from "ohbaby-agent";
+import {
+  parseNewSessionCommandArgs,
+  type UiPromptQueueExecutionPort,
+} from "ohbaby-agent";
 import {
   DaemonForbiddenError,
   isDaemonForbiddenError,
-  parseDaemonStartupIntent,
   respondInteractionForClient,
   type DaemonClientViewCoordinator,
 } from "../../coordination/client-view.js";
+import {
+  initializePermissionClient,
+  parsePermissionBinding,
+  permissionSnapshotForClient,
+  respondPermissionForClient,
+  selectPermissionSession,
+} from "../../coordination/permission-access.js";
 import { PermissionRouter } from "../../coordination/permission-router.js";
 import {
   acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
+  executeCommandForClient,
   cancelQueuedPromptForClient,
+  steerQueuedPromptForClient,
   editQueuedPromptForClient,
+  resubmitRetainedPromptForClient,
   releasePromptEditLeaseForClient,
   renewPromptEditLeaseForClient,
 } from "../../coordination/prompt-backend.js";
@@ -79,7 +109,17 @@ function submitPromptOptions(value: unknown): SubmitPromptOptions | undefined {
     error.code = "INVALID_REASONING";
     throw error;
   }
+  if (
+    value.namingSource !== undefined &&
+    !isUiPromptNamingSource(value.namingSource)
+  )
+    throw Object.assign(new Error("Invalid naming source"), {
+      code: "INVALID_NAMING_SOURCE",
+    });
   return {
+    ...(value.namingSource !== undefined
+      ? { namingSource: value.namingSource }
+      : {}),
     ...(value.reasoning !== undefined ? { reasoning: value.reasoning } : {}),
     ...(typeof value.clientRequestId === "string"
       ? { clientRequestId: value.clientRequestId }
@@ -120,33 +160,180 @@ export function parseDaemonRpcBody(body: string): {
   }
 }
 
+// Match the built-in resume command grammar without loading chat history or
+// mutating the shared backend selection.
+function parseResumeSessionId(argv: readonly string[]): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--session_id" || arg === "--session-id") {
+      const value = argv[index + 1];
+      return value && !value.startsWith("-") ? value : undefined;
+    }
+    if (arg.startsWith("--session_id=") || arg.startsWith("--session-id=")) {
+      const value = arg.slice(arg.indexOf("=") + 1);
+      return value && !value.startsWith("-") ? value : undefined;
+    }
+    if (!arg.startsWith("-")) return arg;
+  }
+  return undefined;
+}
+
 export async function callDaemonBackend(input: {
   readonly backend: UiBackendClient & UiPromptQueueExecutionPort;
   readonly clientViews: DaemonClientViewCoordinator;
   readonly createSessionId: () => string;
   readonly permissionRouter: PermissionRouter;
+  readonly permissionEpoch: string;
   readonly request: DaemonRpcRequest;
   readonly signal?: AbortSignal;
+  readonly emitCommandEvent: (event: UiEvent) => void;
 }): Promise<unknown> {
   const { backend, clientViews, createSessionId, permissionRouter, request } =
     input;
 
   switch (request.method) {
+    case "getSubagentConversationView":
+    case "watchSubagentConversation":
+    case "unwatchSubagentConversation": {
+      const query = request.params[0] as
+        | import("ohbaby-sdk").UiSubagentConversationUnwatchQuery
+        | undefined;
+      if (!query || typeof query !== "object")
+        throw new Error("Invalid subagent conversation query");
+      const access = {
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        query: { ...query, signal: input.signal },
+      };
+      if (request.method === "getSubagentConversationView")
+        return subagentConversationReadForClient(access);
+      if (request.method === "watchSubagentConversation")
+        return watchSubagentConversationForClient({
+          ...access,
+          signal: input.signal,
+        });
+      unwatchSubagentConversationForClient(access);
+      return undefined;
+    }
+    case "listSubagentExecutions":
+    case "getSubagentExecutionView": {
+      const raw = request.params[0] as
+        | (import("ohbaby-sdk").UiSubagentQuery & {
+            executionId?: string;
+          })
+        | undefined;
+      if (
+        !raw ||
+        typeof raw !== "object" ||
+        (request.method === "getSubagentExecutionView" && !raw.executionId)
+      )
+        throw new Error("Invalid execution query");
+      return subagentReadForClient({
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        query: {
+          ...raw,
+          executionId:
+            request.method === "getSubagentExecutionView"
+              ? raw.executionId
+              : undefined,
+          signal: input.signal,
+        },
+      });
+    }
+
+    case "getSessionView":
+    case "getSessionHistory":
+    case "getSessionControl":
+      return sessionReadForClient({
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        kind: request.method,
+        query: {
+          ...parseSessionQuery(request.params[0]),
+          signal: input.signal,
+        },
+      });
+    case "getPromptReceipt":
+      return receiptForClient({
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        query: {
+          ...parseSessionQuery(request.params[0], true),
+          signal: input.signal,
+        },
+      });
     case "getSnapshot": {
       const snapshot = await backend.getSnapshot();
       return permissionRouter.filterSnapshotForClient(
         clientViews.projectSnapshot(request.clientId, snapshot),
-        request.clientId,
+        clientViews.isRegistered(request.clientId)
+          ? clientViews.binding(request.clientId, input.permissionEpoch)
+              .rootSessionId
+          : null,
       );
     }
     case "initializeClient": {
-      const snapshot = await backend.getSnapshot();
-      clientViews.initializeClient(
+      const binding = await initializePermissionClient(
+        backend,
+        clientViews,
         request.clientId,
-        snapshot,
-        parseDaemonStartupIntent(request.params[0]),
+        request.params[0],
+        input.permissionEpoch,
       );
-      return undefined;
+      return {
+        ...binding,
+        ...sessionRecoveryCapability(backend, input.permissionEpoch),
+      };
+    }
+    case "getSessionIndex":
+      return backend.getSessionIndex();
+    case "getSelectedSessionId":
+      return clientViews.binding(request.clientId, input.permissionEpoch)
+        .rootSessionId;
+    case "getPermissionSnapshot":
+      return permissionSnapshotForClient(
+        backend,
+        clientViews,
+        request.clientId,
+        parsePermissionBinding(request.params[0]),
+        input.permissionEpoch,
+      );
+    case "selectSession": {
+      const binding = await selectPermissionSession(
+        backend,
+        clientViews,
+        request.clientId,
+        request.params[0] as string,
+        input.permissionEpoch,
+        typeof request.params[1] === "number" ? request.params[1] : undefined,
+      );
+      return {
+        ...binding,
+        ...sessionRecoveryCapability(backend, input.permissionEpoch),
+      };
+    }
+    case "createSession": {
+      const { session, binding } = await createOrReuseClientSession(
+        backend,
+        clientViews,
+        request.clientId,
+        input.permissionEpoch,
+        parseSessionCreationOptions(request.params[0]),
+      );
+      return {
+        session,
+        ...binding,
+        ...sessionRecoveryCapability(backend, input.permissionEpoch),
+      };
     }
     case "getContextWindowUsage":
       return backend.getContextWindowUsage(
@@ -168,7 +355,11 @@ export async function callDaemonBackend(input: {
         permissionRouter,
         text: request.params[0] as string,
       });
-      return accepted.receipt;
+      return {
+        ...accepted.receipt,
+        ...clientViews.binding(request.clientId, input.permissionEpoch),
+        ...sessionRecoveryCapability(backend, input.permissionEpoch),
+      };
     }
     case "editQueuedPrompt": {
       const input = request.params[0] as UiEditQueuedPromptInput;
@@ -182,6 +373,66 @@ export async function callDaemonBackend(input: {
         throw new DaemonForbiddenError("Prompt belongs to another session");
       }
       return editQueuedPromptForClient(backend, input, request.clientId);
+    }
+    case "resubmitRetainedPrompt": {
+      const input = request.params[0] as UiResubmitRetainedPromptInput;
+      if (
+        !isRecord(input) ||
+        [input.promptId, input.editLeaseId, input.operationId, input.text].some(
+          (value) => typeof value !== "string" || !value.trim(),
+        )
+      ) {
+        throw Object.assign(
+          new Error("promptId, editLeaseId, operationId and text are required"),
+          { code: "INVALID_ARGUMENT" },
+        );
+      }
+      if (
+        !clientViews.canAccessPrompt(
+          request.clientId,
+          await backend.getSnapshot(),
+          input.promptId,
+        )
+      ) {
+        throw new DaemonForbiddenError("Prompt belongs to another session");
+      }
+      return resubmitRetainedPromptForClient(
+        backend,
+        {
+          promptId: input.promptId,
+          editLeaseId: input.editLeaseId,
+          operationId: input.operationId,
+          text: input.text,
+        },
+        request.clientId,
+        clientViews,
+      );
+    }
+    case "steerQueuedPrompt": {
+      const input = request.params[0] as Parameters<
+        UiBackendClient["steerQueuedPrompt"]
+      >[0];
+      if (
+        !isRecord(input) ||
+        [input.promptId, input.expectedRunId, input.clientRequestId].some(
+          (value) => typeof value !== "string" || !value.trim(),
+        )
+      ) {
+        throw Object.assign(
+          new Error("promptId, expectedRunId and clientRequestId are required"),
+          { code: "INVALID_ARGUMENT" },
+        );
+      }
+      if (
+        !clientViews.canAccessPrompt(
+          request.clientId,
+          await backend.getSnapshot(),
+          input.promptId,
+        )
+      ) {
+        throw new DaemonForbiddenError("Prompt belongs to another session");
+      }
+      return steerQueuedPromptForClient(backend, input, request.clientId);
     }
     case "cancelQueuedPrompt": {
       const input = request.params[0] as UiCancelQueuedPromptInput;
@@ -271,24 +522,193 @@ export async function callDaemonBackend(input: {
         request.clientId,
         request.params[0] as ExecuteCommandInvocation,
       );
-      return backend.executeCommand(invocation);
+      try {
+        if (
+          invocation.commandId === "new" ||
+          invocation.commandId === "resume"
+        ) {
+          const commandRunId = randomUUID();
+          const identity = {
+            commandRunId,
+            clientInvocationId: invocation.clientInvocationId,
+          };
+          input.emitCommandEvent({
+            type: "command.started",
+            timestamp: Date.now(),
+            command: {
+              ...identity,
+              commandId: invocation.commandId,
+              path: invocation.path,
+              surface: invocation.surface,
+              ...(invocation.sessionId === undefined
+                ? {}
+                : { sessionId: invocation.sessionId }),
+            },
+          });
+          const newOptions =
+            invocation.commandId === "new"
+              ? parseNewSessionCommandArgs(invocation.argv)
+              : undefined;
+          if (newOptions !== undefined && "code" in newOptions) {
+            input.emitCommandEvent({
+              type: "command.failed",
+              ...identity,
+              timestamp: Date.now(),
+              error: newOptions,
+            });
+            return {
+              ...identity,
+              sessionId: invocation.sessionId,
+              status: "failed",
+              error: newOptions,
+              outputCount: 0,
+              eventCount: 1,
+            };
+          }
+          const sessionId = parseResumeSessionId(invocation.argv);
+          if (invocation.commandId === "resume" && sessionId === undefined) {
+            input.emitCommandEvent({
+              type: "command.failed",
+              ...identity,
+              timestamp: Date.now(),
+              error: {
+                code: "SESSION_ID_REQUIRED",
+                message: "Use /resume --session_id <id> to resume a session",
+                recoverable: true,
+              },
+            });
+            return {
+              ...identity,
+              sessionId: invocation.sessionId,
+              status: "failed",
+              error: {
+                code: "SESSION_ID_REQUIRED",
+                message: "Use /resume --session_id <id> to resume a session",
+                recoverable: true,
+              },
+              outputCount: 0,
+              eventCount: 1,
+            };
+          }
+          try {
+            let selectedId: string;
+            let output: Extract<
+              UiEvent,
+              { type: "command.result.delivered" }
+            >["output"];
+            if (invocation.commandId === "new") {
+              const { session, created } = await createOrReuseClientSession(
+                backend,
+                clientViews,
+                request.clientId,
+                input.permissionEpoch,
+                newOptions?.reuseInactiveEmptySessions
+                  ? { reuseInactiveEmpty: { excludeSessionIds: [] } }
+                  : undefined,
+              );
+              selectedId = session.id;
+              output = {
+                kind: "data",
+                subject: created ? "session.created" : "session.current",
+                data: { session },
+              };
+            } else {
+              // Missing resume arguments were rejected above; preserve every accepted flag spelling.
+              if (sessionId === undefined)
+                throw new Error("Resume session is required");
+              selectedId = sessionId;
+              await selectPermissionSession(
+                backend,
+                clientViews,
+                request.clientId,
+                selectedId,
+                input.permissionEpoch,
+              );
+              output = {
+                kind: "data",
+                subject: "session.current",
+                data: { sessionId: selectedId },
+              };
+            }
+            input.emitCommandEvent({
+              type: "command.result.delivered",
+              ...identity,
+              timestamp: Date.now(),
+              output,
+            });
+            input.emitCommandEvent({
+              type: "command.result.delivered",
+              ...identity,
+              timestamp: Date.now(),
+              action: {
+                kind: "session.selected",
+                data: {
+                  choiceId: selectedId,
+                  ...(invocation.commandId === "new" ? { source: "new" } : {}),
+                },
+              },
+            });
+            return {
+              ...identity,
+              sessionId: invocation.sessionId,
+              status: "completed",
+              outputCount: 1,
+              eventCount: 2,
+            };
+          } catch (error) {
+            input.emitCommandEvent({
+              type: "command.failed",
+              ...identity,
+              timestamp: Date.now(),
+              error: {
+                code: "EXECUTION_ERROR",
+                message: error instanceof Error ? error.message : String(error),
+                recoverable: true,
+              },
+            });
+            return {
+              ...identity,
+              sessionId: invocation.sessionId,
+              status: "failed",
+              error: {
+                code: "EXECUTION_ERROR",
+                message: error instanceof Error ? error.message : String(error),
+                recoverable: true,
+              },
+              outputCount: 0,
+              eventCount: 1,
+            };
+          }
+        }
+        const completion = await executeCommandForClient({
+          backend,
+          clientId: request.clientId,
+          clientViews,
+          createSessionId,
+          permissionRouter,
+          invocation,
+        });
+        return {
+          ...completion,
+          ...(completion.promptReceipt
+            ? clientViews.binding(request.clientId, input.permissionEpoch)
+            : {}),
+        };
+      } finally {
+        clientViews.completeCommandInvocation(invocation.clientInvocationId);
+      }
     }
     case "respondPermission":
-      if (
-        !permissionRouter.canRespondPermission(
-          request.params[0] as string,
-          request.clientId,
-        )
-      ) {
-        throw new DaemonForbiddenError(
-          "Permission request is owned by another client",
-        );
-      }
-      return backend.respondPermission(
+      return respondPermissionForClient(
+        backend,
+        clientViews,
+        request.clientId,
         request.params[0] as string,
         request.params[1] as Parameters<
           UiBackendClient["respondPermission"]
         >[1],
+        parsePermissionBinding(request.params[2]),
+        input.permissionEpoch,
       );
     case "respondInteraction": {
       const interactionId = request.params[0] as string;
@@ -303,8 +723,21 @@ export async function callDaemonBackend(input: {
       });
       return undefined;
     }
-    case "abortRun":
-      return backend.abortRun(request.params[0] as string);
+    case "abortRun": {
+      const runId = request.params[0];
+      if (typeof runId !== "string" || !runId)
+        throw Object.assign(new Error("An exact runId is required"), {
+          code: "INVALID_SESSION_QUERY",
+        });
+      return abortForClient({
+        backend,
+        views: clientViews,
+        clientId: request.clientId,
+        epoch: input.permissionEpoch,
+        query: parseSessionQuery(request.params[1]),
+        runId,
+      });
+    }
   }
 }
 

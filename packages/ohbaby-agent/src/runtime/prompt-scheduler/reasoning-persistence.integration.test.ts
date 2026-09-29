@@ -103,7 +103,7 @@ it("migrates pre-reasoning submissions and reads legacy sessions without prefere
   initDatabase({
     dbPath: path,
     migrations: INITIAL_MIGRATIONS.filter(
-      (migration) => migration.version !== "016_prompt_submission_reasoning",
+      (migration) => migration.version < "016_prompt_submission_reasoning",
     ),
   });
   getDatabase()
@@ -121,7 +121,7 @@ it("migrates pre-reasoning submissions and reads legacy sessions without prefere
   expect(await new DatabasePromptSubmissionStore().get("p")).toMatchObject({
     text: "legacy",
     reasoning: undefined,
-    status: "queued",
+    status: "retained",
   });
   expect(
     (await createDatabaseSessionStore().get("s"))?.reasoning,

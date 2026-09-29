@@ -16,6 +16,7 @@ import {
   type MigrationDefinition,
   type SyncTransactionCallback,
 } from "./index.js";
+import { NodeSqliteConnection } from "./connection.js";
 import { INITIAL_MIGRATIONS } from "./migrations.js";
 
 const cleanupPaths: string[] = [];
@@ -54,7 +55,7 @@ describe("services/database", () => {
     ).toBe(1);
     expect(
       db.pragma<{ busy_timeout: number }>("busy_timeout")[0]?.busy_timeout,
-    ).toBe(5000);
+    ).toBe(25);
     expect(
       db
         .prepare<{
@@ -69,6 +70,56 @@ describe("services/database", () => {
         }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
         .get("scheduler_job"),
     ).toBeUndefined();
+  });
+
+  it("adds nullable naming metadata while an old connection keeps its prepared read and writes", async () => {
+    const dbPath = await tempDbPath();
+    initDatabase({
+      dbPath,
+      migrations: INITIAL_MIGRATIONS.filter((m) => m.version < "023"),
+    });
+    const old = new NodeSqliteConnection(dbPath);
+    const read = old.prepare<{ text: string }>(
+      "SELECT text FROM prompt_submission WHERE prompt_id = ?",
+    );
+    const insert = old.prepare(
+      "INSERT INTO prompt_submission(prompt_id,client_request_id,scope_key,session_id,user_message_id,text,status,created_at,updated_at,accepted_at,admission_order) VALUES(?,?,'/w','s',?,?,'queued',1,1,1,1)",
+    );
+    try {
+      old
+        .prepare(
+          "INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) VALUES('s','p','/w','Existing title','active',1,1,'{}')",
+        )
+        .run();
+      insert.run("before", "before", "m-before", "original text");
+      closeDatabase();
+      initDatabase({ dbPath });
+      expect(read.get("before")).toEqual({ text: "original text" });
+      insert.run("after", "after", "m-after", "old writer still works");
+      expect(
+        getDatabase()
+          .prepare<{
+            naming_source: string | null;
+          }>(
+            "SELECT naming_source FROM prompt_submission WHERE prompt_id='after'",
+          )
+          .get()?.naming_source,
+      ).toBeNull();
+      expect(
+        getDatabase()
+          .prepare<{ title: string }>("SELECT title FROM session WHERE id='s'")
+          .get()?.title,
+      ).toBe("Existing title");
+      expect(
+        old
+          .prepare<{
+            status: string;
+          }>("SELECT status FROM prompt_submission WHERE prompt_id='before'")
+          .get()?.status,
+      ).toBe("queued");
+    } finally {
+      old.close();
+    }
   });
 
   it("records migrations only once across repeated initialization", async () => {
@@ -99,6 +150,13 @@ describe("services/database", () => {
       { version: "014_prompt_submission" },
       { version: "015_prompt_submission_idempotency_lease" },
       { version: "016_prompt_submission_reasoning" },
+      { version: "017_message_recovery_pages" },
+      { version: "018_subagent_execution" },
+      { version: "019_current_run_input" },
+      { version: "020_final_step_steer_admission" },
+      { version: "021_subagent_delegation_identity" },
+      { version: "022_retained_prompt_admission" },
+      { version: "023_prompt_naming_source" },
     ]);
   });
 
@@ -148,8 +206,8 @@ describe("services/database", () => {
     const legacyInsert = getDatabase().prepare(
       `INSERT INTO prompt_submission
         (prompt_id, scope_key, session_id, user_message_id, text, status,
-         created_at, updated_at)
-       VALUES (?, '/repo', 'session_legacy', ?, ?, 'queued', ?, ?)`,
+         created_at, updated_at, accepted_at, admission_order)
+       VALUES (?, '/repo', 'session_legacy', ?, ?, 'queued', ?, ?, 4, 4)`,
     );
     expect(() => {
       legacyInsert.run(
@@ -296,7 +354,7 @@ describe("services/database", () => {
     const legacyMigrations: MigrationDefinition[] = [
       {
         version: "001_initial",
-        sql: "CREATE TABLE scheduler_job (id TEXT PRIMARY KEY);",
+        sql: `${INITIAL_MIGRATIONS[0]?.sql ?? ""} CREATE TABLE scheduler_job (id TEXT PRIMARY KEY);`,
       },
       {
         version: "002_part_order_unique",
@@ -353,18 +411,7 @@ describe("services/database", () => {
     const legacyMigrations: MigrationDefinition[] = [
       {
         version: "001_initial",
-        sql: `
-          CREATE TABLE run_ledger (
-            run_id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            trigger TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending',
-            created_at INTEGER NOT NULL,
-            started_at INTEGER,
-            ended_at INTEGER,
-            error TEXT
-          );
-        `,
+        sql: INITIAL_MIGRATIONS[0]?.sql ?? "",
       },
       { version: "002_part_order_unique", sql: "SELECT 1;" },
       {
@@ -469,7 +516,7 @@ describe("services/database", () => {
     const dbPath = await tempDbPath();
     initDatabase({ dbPath });
 
-    expect(() => {
+    await expect(
       withTransaction((db) => {
         db.prepare(
           `INSERT INTO ${schema.session.tableName}
@@ -492,8 +539,8 @@ describe("services/database", () => {
             (id, session_id, role, created_at, updated_at, data)
            VALUES (?, ?, ?, ?, ?, ?)`,
         ).run("msg_1", "missing_session", "user", 1, 1, "{}");
-      });
-    }).toThrow(/FOREIGN KEY/i);
+      }),
+    ).rejects.toThrow(/FOREIGN KEY/i);
 
     expect(
       getDatabase()
@@ -508,7 +555,7 @@ describe("services/database", () => {
     const dbPath = await tempDbPath();
     initDatabase({ dbPath });
 
-    withTransaction((db) => {
+    await withTransaction((db) => {
       db.prepare(
         `INSERT INTO ${schema.session.tableName}
           (id, project_id, project_root, agent, title, status, created_at, updated_at, message_count, data)
@@ -560,11 +607,11 @@ describe("services/database", () => {
       );
     };
 
-    expect(() => {
+    await expect(
       withTransaction(
         asyncOperation as unknown as (db: DatabaseConnection) => void,
-      );
-    }).toThrow(/synchronous/);
+      ),
+    ).rejects.toThrow(/synchronous/);
     await Promise.resolve();
 
     expect(
@@ -602,9 +649,9 @@ describe("services/database", () => {
       return escaped;
     }) as unknown as SyncTransactionCallback<void>;
 
-    expect(() => {
-      withTransaction(escapingOperation);
-    }).toThrow(/synchronous/);
+    await expect(withTransaction(escapingOperation)).rejects.toThrow(
+      /synchronous/,
+    );
 
     await expect(escaped).rejects.toThrow(/transaction is no longer active/);
     expect(
@@ -639,9 +686,9 @@ describe("services/database", () => {
       return Promise.resolve();
     }) as unknown as SyncTransactionCallback<void>;
 
-    expect(() => {
-      withTransaction(thenableOperation);
-    }).toThrow(/synchronous/);
+    await expect(withTransaction(thenableOperation)).rejects.toThrow(
+      /synchronous/,
+    );
 
     expect(
       getDatabase()
@@ -811,4 +858,38 @@ describe("services/database", () => {
       }
     }
   });
+});
+
+it("upgrades existing request owners once and cascades the lookup index with messages", async () => {
+  const dbPath = await tempDbPath();
+  initDatabase({
+    dbPath,
+    migrations: INITIAL_MIGRATIONS.filter((m) => m.version < "020"),
+  });
+  const db = getDatabase();
+  db.prepare(
+    "INSERT INTO session(id,project_id,project_root,agent,title,status,created_at,updated_at,message_count,data) VALUES('lookup-session','project','/repo','default','test','active',1,1,1,'{}')",
+  ).run();
+  db.prepare(
+    "INSERT INTO message(id,session_id,role,created_at,updated_at,data) VALUES('lookup-message','lookup-session','assistant',1,1,?)",
+  ).run(
+    JSON.stringify({
+      id: "lookup-message",
+      modelRequests: [{ requestId: "existing-request" }],
+    }),
+  );
+  closeDatabase();
+  initDatabase({ dbPath });
+  const reopened = getDatabase();
+  expect(
+    reopened
+      .prepare(
+        "SELECT message_id FROM current_run_request_owner WHERE request_id=?",
+      )
+      .get("existing-request"),
+  ).toEqual({ message_id: "lookup-message" });
+  reopened.prepare("DELETE FROM message WHERE id='lookup-message'").run();
+  expect(
+    reopened.prepare("SELECT * FROM current_run_request_owner").all(),
+  ).toEqual([]);
 });

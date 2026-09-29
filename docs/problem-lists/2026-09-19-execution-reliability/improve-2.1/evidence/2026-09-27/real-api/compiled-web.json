@@ -1,0 +1,56 @@
+{
+  "model": "openai/gpt-5.6-luna",
+  "protocol": "openai-responses",
+  "realCredentialPresent": true,
+  "ui": {
+    "usedSessionId": "session_1790486453260_j6ci531",
+    "emptySessionId": "session_1790486517938_1gvr0o1",
+    "finalAnswerVisible": true,
+    "refreshStable": true,
+    "reuseAfterRefresh": true,
+    "sequentialNewClicks": 6,
+    "fastRefreshReuseMs": 913
+  },
+  "sessions": [
+    {
+      "id": "session_1790486453260_j6ci531",
+      "parent_id": null,
+      "status": "active"
+    },
+    {
+      "id": "session_1790486517938_1gvr0o1",
+      "parent_id": null,
+      "status": "active"
+    }
+  ],
+  "used": {
+    "messages": 5,
+    "runs": 2,
+    "prompts": 2
+  },
+  "empty": {
+    "messages": 0,
+    "runs": 0,
+    "prompts": 0
+  },
+  "tools": [
+    {
+      "name": "read",
+      "status": "completed"
+    }
+  ],
+  "promptStatuses": [
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    }
+  ],
+  "answerContainsFixture": true,
+  "cleanup": {
+    "processExited": true,
+    "stderrBytes": 0
+  },
+  "passed": true
+}

@@ -1,0 +1,18 @@
+
+ RUN  v2.1.9 /Users/hansun025/Projects/code-cli/ohbaby-agent
+
+stdout | packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts > improve-4 measured handoff > starts B after durable A during normal
+HANDOFF_SAMPLE {"scenario":"normal","historyMessages":0,"handoffMs":12.76,"oldCleanupHeldUntilMs":14.19,"cleanupReleasedAfterB":false}
+
+stdout | packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts > improve-4 measured handoff > starts B after durable A during slow-cleanup-stop
+HANDOFF_SAMPLE {"scenario":"slow-cleanup-stop","historyMessages":0,"handoffMs":10.96,"oldCleanupHeldUntilMs":11.65,"cleanupReleasedAfterB":true}
+
+ ✓ packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts (141 tests | 138 skipped) 202ms
+stdout | packages/ohbaby-agent/src/adapters/ui-inprocess.contract.test.ts > improve-4 measured handoff > starts B after durable A during long-history
+HANDOFF_SAMPLE {"scenario":"long-history","historyMessages":200,"handoffMs":14.39,"oldCleanupHeldUntilMs":15.16,"cleanupReleasedAfterB":false}
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 138 skipped (141)
+   Start at  18:47:37
+   Duration  1.47s (transform 698ms, setup 8ms, collect 1.06s, tests 202ms, environment 0ms, prepare 25ms)

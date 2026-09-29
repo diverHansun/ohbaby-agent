@@ -37,6 +37,7 @@ export interface GoalServiceDeps {
  */
 export class GoalService {
   private readonly stores = new Map<string, Promise<GoalStore>>();
+  private readonly initializedStores = new Map<string, GoalStore>();
   private readonly driving = new Map<string, Promise<void>>();
   private runner: GoalTurnRunner | undefined;
   private readonly safetyCapTurns: number;
@@ -50,6 +51,16 @@ export class GoalService {
     this.runner = runner;
   }
 
+  /** Explicit recovery boundary; repeated initialization never replays live goals. */
+  async initSession(sessionId: string): Promise<void> {
+    await this.storeFor(sessionId);
+  }
+
+  /** Undefined means recovery has not completed; null means an initialized empty goal. */
+  peekSnapshot(sessionId: string): GoalSnapshot | null | undefined {
+    return this.initializedStores.get(sessionId)?.getSnapshot();
+  }
+
   /** 懒重建 + 缓存；重建自带 active→paused 归一化。 */
   storeFor(sessionId: string): Promise<GoalStore> {
     const existing = this.stores.get(sessionId);
@@ -61,12 +72,18 @@ export class GoalService {
       ...(this.deps.createGoalId !== undefined
         ? { createGoalId: this.deps.createGoalId }
         : {}),
-    }).then((store) => {
-      store.onChange = (snapshot, change): void => {
-        this.deps.onChange?.({ change, sessionId, snapshot });
-      };
-      return store;
-    });
+    })
+      .then((store) => {
+        store.onChange = (snapshot, change): void => {
+          this.deps.onChange?.({ change, sessionId, snapshot });
+        };
+        this.initializedStores.set(sessionId, store);
+        return store;
+      })
+      .catch((error: unknown) => {
+        this.stores.delete(sessionId);
+        throw error;
+      });
     this.stores.set(sessionId, created);
     return created;
   }

@@ -40,6 +40,15 @@ function delay(ms: number): Promise<void> {
 export class SandboxManager implements SandboxManagerPort {
   private readonly contexts = new Map<string, InternalSandboxContext>();
   private readonly leases = new Map<string, InternalSandboxContext>();
+  private readonly retainedOperations = new Map<
+    InternalSandboxContext,
+    number
+  >();
+  private readonly deferredDestruction = new Set<InternalSandboxContext>();
+  private readonly physicalDestruction = new WeakMap<
+    InternalSandboxContext,
+    Promise<void>
+  >();
   private readonly pendingCreates = new Set<string>();
   private readonly pendingCreateSettlements = new Map<string, Promise<void>>();
   private readonly pendingDestroys = new Map<string, Promise<void>>();
@@ -158,9 +167,11 @@ export class SandboxManager implements SandboxManagerPort {
 
     return Promise.resolve(
       createSandboxLease({
+        authorizeInternalRead: this.options.authorizeInternalRead,
         context,
         leaseId,
         release: (releasedLeaseId) => this.releaseById(releasedLeaseId),
+        retain: () => this.retainOperation(context),
       }),
     );
   }
@@ -181,6 +192,9 @@ export class SandboxManager implements SandboxManagerPort {
     if (existing) {
       return existing;
     }
+    // Closing admission is synchronous, before awaiting pending creation/drain.
+    const context = this.contexts.get(scope.scopeKey);
+    if (context?.status === "active") context.status = "destroying";
     const operation = this.destroyContextAfterCreate(scope);
     this.pendingDestroys.set(scope.scopeKey, operation);
     const clear = (): void => {
@@ -235,12 +249,53 @@ export class SandboxManager implements SandboxManagerPort {
     if (!context) {
       return;
     }
-    if (context.status === "destroyed") {
+    if (
+      context.status === "destroyed" ||
+      this.deferredDestruction.has(context)
+    ) {
       return;
     }
 
     context.status = "destroying";
     await this.waitForDrain(context);
+    if ((this.retainedOperations.get(context) ?? 0) > 0) {
+      // Logical disposal is bounded; real operations keep the original adapter alive.
+      this.deferredDestruction.add(context);
+      return;
+    }
+    await this.destroyPhysicalContext(context);
+  }
+
+  private retainOperation(
+    context: InternalSandboxContext,
+  ): () => Promise<void> {
+    if (context.status !== "active")
+      throw new Error("Sandbox context is closing");
+    this.retainedOperations.set(
+      context,
+      (this.retainedOperations.get(context) ?? 0) + 1,
+    );
+    let released = false;
+    return async (): Promise<void> => {
+      if (released) return;
+      released = true;
+      const remaining = (this.retainedOperations.get(context) ?? 1) - 1;
+      if (remaining > 0) {
+        this.retainedOperations.set(context, remaining);
+        return;
+      }
+      this.retainedOperations.delete(context);
+      if (this.deferredDestruction.has(context))
+        await this.destroyPhysicalContext(context);
+    };
+  }
+
+  private destroyPhysicalContext(
+    context: InternalSandboxContext,
+  ): Promise<void> {
+    const existing = this.physicalDestruction.get(context);
+    if (existing) return existing;
+    this.deferredDestruction.delete(context);
     context.leaseCount = 0;
     context.status = "destroyed";
     for (const [leaseId, leaseContext] of this.leases.entries()) {
@@ -248,8 +303,13 @@ export class SandboxManager implements SandboxManagerPort {
         this.leases.delete(leaseId);
       }
     }
-    this.contexts.delete(scope.scopeKey);
-    await context.adapter.destroy(context.handle);
+    if (this.contexts.get(context.scopeKey) === context)
+      this.contexts.delete(context.scopeKey);
+    const operation = Promise.resolve().then(() =>
+      context.adapter.destroy(context.handle),
+    );
+    this.physicalDestruction.set(context, operation);
+    return operation;
   }
 
   private releaseById(leaseId: string): Promise<void> {

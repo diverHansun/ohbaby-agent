@@ -1,5 +1,11 @@
 import type {
   UiEvent,
+  SessionSyncState,
+  UiSessionControl,
+  UiPermissionBinding,
+  UiPermissionSnapshot,
+  UiSessionIndexEntry,
+  PermissionSyncState,
   UiReasoningConfig,
   UiCompactSessionResult,
   UiContextWindowUsage,
@@ -111,20 +117,59 @@ export interface CommandNotice {
   readonly kind: "error" | "running" | "success";
   readonly markdown?: string;
   readonly output?: CommandOutput;
+  readonly outputs?: readonly CommandOutput[];
   readonly path: readonly string[];
   readonly sessionId?: string;
   readonly text?: string;
 }
 
+export interface UnknownPromptRequest {
+  readonly directory: string;
+  readonly runtimeEpoch: string;
+  readonly clientRequestId: string;
+  readonly sessionId?: string;
+  readonly status: "unknown" | "epoch-changed";
+  /** Transient UI state; never persisted with the unresolved identity. */
+  readonly submitting?: boolean;
+}
 export interface StoreSnapshot {
+  readonly durationSample?: {
+    readonly serverNow: number;
+    readonly receivedAt: number;
+  };
+  readonly sessionSync: SessionSyncState;
+  readonly sessionControl: UiSessionControl | null;
+  readonly historyState: "loading" | "ready" | "error";
+  readonly historyError?: string;
+  readonly historyBefore?: string;
+  readonly historyHasMore: boolean;
+  readonly historyStale: boolean;
+  readonly unknownPromptRequests: readonly UnknownPromptRequest[];
+  readonly permissionSync: PermissionSyncState;
+  readonly sessionIndex: readonly UiSessionIndexEntry[];
   readonly connectionState: ConnectionState;
   readonly currentModel: UiCurrentModelConfig | null;
   readonly error: string | null;
   readonly view: ViewState;
 }
 
-export interface RegisterClientResponse {
+export interface RegisterClientResponse extends UiPermissionBinding {
   readonly clientId: string;
+  readonly ok: true;
+}
+
+export interface PermissionSnapshotResponse {
+  readonly ok: true;
+  readonly snapshot: UiPermissionSnapshot;
+}
+export interface SessionIndexResponse {
+  readonly ok: true;
+  readonly sessions: readonly UiSessionIndexEntry[];
+}
+export interface BindingResponse extends UiPermissionBinding {
+  readonly runtimeEpoch?: string;
+  readonly sessionRecoveryVersion?: number;
+  readonly subagentConversationVersion?: number;
   readonly ok: true;
 }
 
@@ -221,6 +266,12 @@ export interface PermissionStateResponse {
 export type WebSseEvent =
   | {
       readonly type: "hello";
+      readonly runtimeEpoch?: string;
+      readonly sessionRecoveryVersion?: number;
+      readonly subagentConversationVersion?: number;
+      readonly permissionEpoch: string;
+      readonly rootSessionId: string | null;
+      readonly bindingGeneration: number;
       readonly clientId: string;
     }
   | {
@@ -238,6 +289,7 @@ export type WebSseEvent =
     };
 
 export interface SubmitPromptRequest {
+  readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
   readonly reasoning?: UiReasoningConfig;
   readonly clientRequestId: string;
   readonly sessionId?: string;
@@ -254,4 +306,7 @@ export type CommandOutput = UiSlashCommandOutput;
 
 export type PermissionResponseRequest =
   | UiPermissionResponse
-  | { readonly response: UiPermissionResponse };
+  | {
+      readonly response: UiPermissionResponse;
+      readonly context: UiPermissionBinding;
+    };

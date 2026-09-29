@@ -69,7 +69,7 @@ describe("permission evaluator", () => {
     ["auto", "default", call("bash", { command: "npm install" }), "ask"],
     ["auto", "default", call("bash", { command: "rm -rf foo" }), "ask"],
     ["auto", "full-access", call("bash", { command: "rm -rf foo" }), "allow"],
-    ["auto", "full-access", call("sensitive_path"), "ask"],
+    ["auto", "full-access", call("sensitive_path"), "allow"],
     ["auto", "full-access", call("external_directory"), "allow"],
     ["auto", "default", call("todo_write", { todos: [] }), "allow"],
     ["auto", "default", call("subagent_run"), "allow"],
@@ -135,11 +135,11 @@ describe("permission evaluator", () => {
     ).toBe("allow");
   });
 
-  it("does not let session allow rules bypass sensitive path confirmations", () => {
+  it("does not let session allow rules bypass sensitive path confirmations at default level", () => {
     const decision = evaluatePermission(
       call("sensitive_path", { path: "C:/Windows/System32/config/SAM" }),
       state({
-        level: "full-access",
+        level: "default",
         mode: "auto",
         rules: [rule({ tool: "sensitive_path" })],
       }),

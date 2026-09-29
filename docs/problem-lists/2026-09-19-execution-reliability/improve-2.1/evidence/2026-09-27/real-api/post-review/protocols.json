@@ -1,0 +1,1127 @@
+[
+  {
+    "profile": "zenmux-gpt56-luna-chat",
+    "recordedAt": "2026-09-27T05:51:49.951Z",
+    "entry": "createDaemonServerApp REST -> persistent backend",
+    "result": "passed",
+    "saved": {
+      "saved": true,
+      "protocol": "openai-compatible",
+      "persistedProtocol": "openai-compatible",
+      "contextWindowTokens": 128000,
+      "contextWindowSource": "user"
+    },
+    "resolved": {
+      "entry": "POST /v1/model/context-window-probe -> GET /v1/model",
+      "contextWindowSource": "detected",
+      "provider": "zenmux",
+      "model": "openai/gpt-5.6-luna",
+      "interfaceProvider": "openai-compatible",
+      "contextWindowTokens": 1050000,
+      "reasoningStatus": "identified"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 1050000,
+        "currentTokens": 7411
+      },
+      {
+        "phase": "post-reopen",
+        "tokens": 1050000,
+        "currentTokens": 9260
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      },
+      {
+        "status": "succeeded"
+      }
+    ],
+    "maxHttpRequests": 20,
+    "seededVerifiedCapabilities": true,
+    "permissionErrors": [],
+    "providerRequests": [
+      {
+        "id": 1,
+        "purpose": "session-title",
+        "messageCount": 2,
+        "replayStateCount": 0,
+        "replayStateHashes": [],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 164
+          },
+          "inputTokens": 164,
+          "outputTokens": 8,
+          "totalTokens": 172
+        }
+      },
+      {
+        "id": 2,
+        "purpose": "agent-step",
+        "messageCount": 2,
+        "replayStateCount": 0,
+        "replayStateHashes": [],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 6356,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 203
+          },
+          "inputTokens": 6559,
+          "outputTokens": 86,
+          "totalTokens": 6645
+        }
+      },
+      {
+        "id": 3,
+        "purpose": "agent-step",
+        "messageCount": 4,
+        "replayStateCount": 1,
+        "replayStateHashes": [
+          "ed59b6315011cc0a150b922fc6e5127dc5e166d3987e1b8a53e6c01a5c817ebc"
+        ],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 6556,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 131
+          },
+          "inputTokens": 6687,
+          "outputTokens": 71,
+          "totalTokens": 6758
+        }
+      },
+      {
+        "id": 4,
+        "purpose": "agent-step",
+        "messageCount": 6,
+        "replayStateCount": 2,
+        "replayStateHashes": [
+          "077f3edda18ec2c52f0069e34ac10d997a4d199ec59e9953740cdca78ea40b44",
+          "ed59b6315011cc0a150b922fc6e5127dc5e166d3987e1b8a53e6c01a5c817ebc"
+        ],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 6684,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 194
+          },
+          "inputTokens": 6878,
+          "outputTokens": 16,
+          "totalTokens": 6894
+        }
+      },
+      {
+        "id": 5,
+        "purpose": "agent-step",
+        "messageCount": 8,
+        "replayStateCount": 2,
+        "replayStateHashes": [
+          "077f3edda18ec2c52f0069e34ac10d997a4d199ec59e9953740cdca78ea40b44",
+          "ed59b6315011cc0a150b922fc6e5127dc5e166d3987e1b8a53e6c01a5c817ebc"
+        ],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 6875,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 168
+          },
+          "inputTokens": 7043,
+          "outputTokens": 16,
+          "totalTokens": 7059
+        }
+      }
+    ],
+    "wire": [
+      {
+        "sequence": 1,
+        "path": "/api/v1/models",
+        "kind": "metadata",
+        "captureError": "transport"
+      },
+      {
+        "sequence": 2,
+        "path": "/api/v1/models",
+        "kind": "metadata",
+        "status": 200
+      },
+      {
+        "sequence": 3,
+        "context": {
+          "purpose": "session-title",
+          "id": 1
+        },
+        "path": "/api/v1/chat/completions",
+        "kind": "generation",
+        "protocol": "openai-compatible",
+        "toolPairing": {
+          "calls": [],
+          "results": [],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "total_tokens": 172,
+          "prompt_tokens": 164,
+          "completion_tokens": 8,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        },
+        "model": "openai/gpt-5.6-luna",
+        "status": 200
+      },
+      {
+        "sequence": 4,
+        "context": {
+          "purpose": "agent-step",
+          "id": 2
+        },
+        "path": "/api/v1/chat/completions",
+        "kind": "generation",
+        "protocol": "openai-compatible",
+        "toolPairing": {
+          "calls": [],
+          "results": [],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "total_tokens": 6645,
+          "prompt_tokens": 6559,
+          "completion_tokens": 86,
+          "prompt_tokens_details": {
+            "cached_tokens": 6356
+          }
+        },
+        "model": "openai/gpt-5.6-luna",
+        "status": 200
+      },
+      {
+        "sequence": 5,
+        "context": {
+          "purpose": "agent-step",
+          "id": 3
+        },
+        "path": "/api/v1/chat/completions",
+        "kind": "generation",
+        "protocol": "openai-compatible",
+        "toolPairing": {
+          "calls": [
+            "77cb0a4db01a4f7fea3d25d79a3b3d4698e70d9f45b11488a10845f041fe3425"
+          ],
+          "results": [
+            "77cb0a4db01a4f7fea3d25d79a3b3d4698e70d9f45b11488a10845f041fe3425"
+          ],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "total_tokens": 6758,
+          "prompt_tokens": 6687,
+          "completion_tokens": 71,
+          "prompt_tokens_details": {
+            "cached_tokens": 6556
+          }
+        },
+        "model": "openai/gpt-5.6-luna",
+        "status": 200
+      },
+      {
+        "sequence": 6,
+        "context": {
+          "purpose": "agent-step",
+          "id": 4
+        },
+        "path": "/api/v1/chat/completions",
+        "kind": "generation",
+        "protocol": "openai-compatible",
+        "toolPairing": {
+          "calls": [
+            "77cb0a4db01a4f7fea3d25d79a3b3d4698e70d9f45b11488a10845f041fe3425",
+            "332878d6b6d5e9dc1957b73a38f21e023b6d0d837079f715221bd19ef0e1cdaa"
+          ],
+          "results": [
+            "77cb0a4db01a4f7fea3d25d79a3b3d4698e70d9f45b11488a10845f041fe3425",
+            "332878d6b6d5e9dc1957b73a38f21e023b6d0d837079f715221bd19ef0e1cdaa"
+          ],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "total_tokens": 6894,
+          "prompt_tokens": 6878,
+          "completion_tokens": 16,
+          "prompt_tokens_details": {
+            "cached_tokens": 6684
+          }
+        },
+        "model": "openai/gpt-5.6-luna",
+        "status": 200
+      },
+      {
+        "sequence": 7,
+        "context": {
+          "purpose": "agent-step",
+          "id": 5
+        },
+        "path": "/api/v1/chat/completions",
+        "kind": "generation",
+        "protocol": "openai-compatible",
+        "toolPairing": {
+          "calls": [
+            "77cb0a4db01a4f7fea3d25d79a3b3d4698e70d9f45b11488a10845f041fe3425",
+            "332878d6b6d5e9dc1957b73a38f21e023b6d0d837079f715221bd19ef0e1cdaa"
+          ],
+          "results": [
+            "77cb0a4db01a4f7fea3d25d79a3b3d4698e70d9f45b11488a10845f041fe3425",
+            "332878d6b6d5e9dc1957b73a38f21e023b6d0d837079f715221bd19ef0e1cdaa"
+          ],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "total_tokens": 7059,
+          "prompt_tokens": 7043,
+          "completion_tokens": 16,
+          "prompt_tokens_details": {
+            "cached_tokens": 6875
+          }
+        },
+        "model": "openai/gpt-5.6-luna",
+        "status": 200
+      }
+    ],
+    "checkpoints": [
+      {
+        "label": "first-read",
+        "messageCount": 4,
+        "answer": {
+          "sha256": "f1c1c331cd3ee6cd83cc6b97aa2c60340ba9d874dd93ac6170c2c7965a4fae3f",
+          "characters": 41,
+          "project": true,
+          "release": true,
+          "owner": true
+        },
+        "toolCalls": [
+          {
+            "name": "skill",
+            "status": "failed"
+          },
+          {
+            "name": "read",
+            "status": "completed"
+          }
+        ],
+        "privateStateVisible": false,
+        "requests": 4,
+        "httpRequests": 6
+      },
+      {
+        "label": "post-reopen",
+        "messageCount": 6,
+        "answer": {
+          "sha256": "f1c1c331cd3ee6cd83cc6b97aa2c60340ba9d874dd93ac6170c2c7965a4fae3f",
+          "characters": 41,
+          "project": true,
+          "release": true,
+          "owner": true
+        },
+        "toolCalls": [
+          {
+            "name": "skill",
+            "status": "failed"
+          },
+          {
+            "name": "read",
+            "status": "completed"
+          }
+        ],
+        "privateStateVisible": false,
+        "requests": 5,
+        "httpRequests": 7
+      }
+    ]
+  },
+  {
+    "profile": "zenmux-gpt56-luna-responses",
+    "recordedAt": "2026-09-27T05:51:51.676Z",
+    "entry": "createDaemonServerApp REST -> persistent backend",
+    "result": "passed",
+    "saved": {
+      "saved": true,
+      "protocol": "openai-responses",
+      "persistedProtocol": "openai-responses",
+      "contextWindowTokens": 128000,
+      "contextWindowSource": "user"
+    },
+    "resolved": {
+      "entry": "POST /v1/model/context-window-probe -> GET /v1/model",
+      "contextWindowSource": "detected",
+      "provider": "zenmux",
+      "model": "openai/gpt-5.6-luna",
+      "interfaceProvider": "openai-responses",
+      "contextWindowTokens": 1050000,
+      "reasoningStatus": "identified"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 1050000,
+        "currentTokens": 7346
+      },
+      {
+        "phase": "post-reopen",
+        "tokens": 1050000,
+        "currentTokens": 9136
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      },
+      {
+        "status": "succeeded"
+      }
+    ],
+    "maxHttpRequests": 20,
+    "seededVerifiedCapabilities": true,
+    "permissionErrors": [],
+    "providerRequests": [
+      {
+        "id": 1,
+        "purpose": "session-title",
+        "messageCount": 2,
+        "replayStateCount": 0,
+        "replayStateHashes": [],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 163
+          },
+          "inputTokens": 163,
+          "outputTokens": 11,
+          "totalTokens": 174
+        }
+      },
+      {
+        "id": 2,
+        "purpose": "agent-step",
+        "messageCount": 2,
+        "replayStateCount": 0,
+        "replayStateHashes": [],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 6356,
+            "cacheWrite": 198,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 6557,
+          "outputTokens": 65,
+          "totalTokens": 6622
+        }
+      },
+      {
+        "id": 3,
+        "purpose": "agent-step",
+        "messageCount": 4,
+        "replayStateCount": 1,
+        "replayStateHashes": [
+          "3ce4b91a6c2475c85934343f5f1c1a47a3379a5578d0cae3a3f205acbb24388f"
+        ],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 6554,
+            "cacheWrite": 107,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 6664,
+          "outputTokens": 73,
+          "totalTokens": 6737
+        }
+      },
+      {
+        "id": 4,
+        "purpose": "agent-step",
+        "messageCount": 6,
+        "replayStateCount": 2,
+        "replayStateHashes": [
+          "3ce4b91a6c2475c85934343f5f1c1a47a3379a5578d0cae3a3f205acbb24388f",
+          "e32bed57783143294859c90f36cb7d5ebd1e1b03f3941380c16a629d635b6532"
+        ],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 6661,
+            "cacheWrite": 192,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 6856,
+          "outputTokens": 16,
+          "totalTokens": 6872
+        }
+      },
+      {
+        "id": 5,
+        "purpose": "agent-step",
+        "messageCount": 8,
+        "replayStateCount": 3,
+        "replayStateHashes": [
+          "3ce4b91a6c2475c85934343f5f1c1a47a3379a5578d0cae3a3f205acbb24388f",
+          "7a8ca4a36261f0912ec034bbe2882a7fcc811fe3523c31d6d7ea04394aa51b57",
+          "e32bed57783143294859c90f36cb7d5ebd1e1b03f3941380c16a629d635b6532"
+        ],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 6853,
+            "cacheWrite": 164,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 7020,
+          "outputTokens": 16,
+          "totalTokens": 7036
+        }
+      }
+    ],
+    "wire": [
+      {
+        "sequence": 1,
+        "path": "/api/v1/models",
+        "kind": "metadata",
+        "captureError": "transport"
+      },
+      {
+        "sequence": 2,
+        "path": "/api/v1/models",
+        "kind": "metadata",
+        "status": 200
+      },
+      {
+        "sequence": 3,
+        "context": {
+          "purpose": "session-title",
+          "id": 1
+        },
+        "path": "/api/v1/responses",
+        "kind": "generation",
+        "protocol": "openai-responses",
+        "toolPairing": {
+          "calls": [],
+          "results": [],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "input_tokens": 163,
+          "output_tokens": 11,
+          "total_tokens": 174,
+          "input_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        },
+        "model": "openai/gpt-5.6-luna",
+        "status": 200
+      },
+      {
+        "sequence": 4,
+        "context": {
+          "purpose": "agent-step",
+          "id": 2
+        },
+        "path": "/api/v1/responses",
+        "kind": "generation",
+        "protocol": "openai-responses",
+        "toolPairing": {
+          "calls": [],
+          "results": [],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "input_tokens": 6557,
+          "output_tokens": 65,
+          "total_tokens": 6622,
+          "input_tokens_details": {
+            "cached_tokens": 6356,
+            "cache_write_tokens": 198
+          }
+        },
+        "model": "openai/gpt-5.6-luna",
+        "status": 200
+      },
+      {
+        "sequence": 5,
+        "context": {
+          "purpose": "agent-step",
+          "id": 3
+        },
+        "path": "/api/v1/responses",
+        "kind": "generation",
+        "protocol": "openai-responses",
+        "toolPairing": {
+          "calls": [
+            "33f834efc63227d2f291aac9c249e8994580eaeafbd85765e5eea1eb7793c0a6"
+          ],
+          "results": [
+            "33f834efc63227d2f291aac9c249e8994580eaeafbd85765e5eea1eb7793c0a6"
+          ],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "input_tokens": 6664,
+          "output_tokens": 73,
+          "total_tokens": 6737,
+          "input_tokens_details": {
+            "cached_tokens": 6554,
+            "cache_write_tokens": 107
+          }
+        },
+        "model": "openai/gpt-5.6-luna",
+        "status": 200
+      },
+      {
+        "sequence": 6,
+        "context": {
+          "purpose": "agent-step",
+          "id": 4
+        },
+        "path": "/api/v1/responses",
+        "kind": "generation",
+        "protocol": "openai-responses",
+        "toolPairing": {
+          "calls": [
+            "33f834efc63227d2f291aac9c249e8994580eaeafbd85765e5eea1eb7793c0a6",
+            "e34a4ad75c8e1d0cb0df5c10521420cdf9517f3bc0da748dfbc7998538fc7db4"
+          ],
+          "results": [
+            "33f834efc63227d2f291aac9c249e8994580eaeafbd85765e5eea1eb7793c0a6",
+            "e34a4ad75c8e1d0cb0df5c10521420cdf9517f3bc0da748dfbc7998538fc7db4"
+          ],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "input_tokens": 6856,
+          "output_tokens": 16,
+          "total_tokens": 6872,
+          "input_tokens_details": {
+            "cached_tokens": 6661,
+            "cache_write_tokens": 192
+          }
+        },
+        "model": "openai/gpt-5.6-luna",
+        "status": 200
+      },
+      {
+        "sequence": 7,
+        "context": {
+          "purpose": "agent-step",
+          "id": 5
+        },
+        "path": "/api/v1/responses",
+        "kind": "generation",
+        "protocol": "openai-responses",
+        "toolPairing": {
+          "calls": [
+            "33f834efc63227d2f291aac9c249e8994580eaeafbd85765e5eea1eb7793c0a6",
+            "e34a4ad75c8e1d0cb0df5c10521420cdf9517f3bc0da748dfbc7998538fc7db4"
+          ],
+          "results": [
+            "33f834efc63227d2f291aac9c249e8994580eaeafbd85765e5eea1eb7793c0a6",
+            "e34a4ad75c8e1d0cb0df5c10521420cdf9517f3bc0da748dfbc7998538fc7db4"
+          ],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "input_tokens": 7020,
+          "output_tokens": 16,
+          "total_tokens": 7036,
+          "input_tokens_details": {
+            "cached_tokens": 6853,
+            "cache_write_tokens": 164
+          }
+        },
+        "model": "openai/gpt-5.6-luna",
+        "status": 200
+      }
+    ],
+    "checkpoints": [
+      {
+        "label": "first-read",
+        "messageCount": 4,
+        "answer": {
+          "sha256": "f1c1c331cd3ee6cd83cc6b97aa2c60340ba9d874dd93ac6170c2c7965a4fae3f",
+          "characters": 41,
+          "project": true,
+          "release": true,
+          "owner": true
+        },
+        "toolCalls": [
+          {
+            "name": "skill",
+            "status": "failed"
+          },
+          {
+            "name": "read",
+            "status": "completed"
+          }
+        ],
+        "privateStateVisible": false,
+        "requests": 4,
+        "httpRequests": 6
+      },
+      {
+        "label": "post-reopen",
+        "messageCount": 6,
+        "answer": {
+          "sha256": "f1c1c331cd3ee6cd83cc6b97aa2c60340ba9d874dd93ac6170c2c7965a4fae3f",
+          "characters": 41,
+          "project": true,
+          "release": true,
+          "owner": true
+        },
+        "toolCalls": [
+          {
+            "name": "skill",
+            "status": "failed"
+          },
+          {
+            "name": "read",
+            "status": "completed"
+          }
+        ],
+        "privateStateVisible": false,
+        "requests": 5,
+        "httpRequests": 7
+      }
+    ]
+  },
+  {
+    "profile": "zenmux-claude-sonnet5-anthropic",
+    "recordedAt": "2026-09-27T05:51:47.093Z",
+    "entry": "createDaemonServerApp REST -> persistent backend",
+    "result": "passed",
+    "saved": {
+      "saved": true,
+      "protocol": "anthropic",
+      "persistedProtocol": "anthropic",
+      "contextWindowTokens": 128000,
+      "contextWindowSource": "user"
+    },
+    "resolved": {
+      "entry": "POST /v1/model/context-window-probe -> GET /v1/model",
+      "contextWindowSource": "detected",
+      "provider": "zenmux",
+      "model": "anthropic/claude-sonnet-5",
+      "interfaceProvider": "anthropic",
+      "contextWindowTokens": 1000000,
+      "reasoningStatus": "identified"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 1000000,
+        "currentTokens": 10727
+      },
+      {
+        "phase": "post-reopen",
+        "tokens": 1000000,
+        "currentTokens": 8982
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      },
+      {
+        "status": "succeeded"
+      }
+    ],
+    "maxHttpRequests": 20,
+    "seededVerifiedCapabilities": true,
+    "permissionErrors": [],
+    "providerRequests": [
+      {
+        "id": 1,
+        "purpose": "session-title",
+        "messageCount": 2,
+        "replayStateCount": 0,
+        "replayStateHashes": [],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 240
+          },
+          "inputTokens": 240,
+          "outputTokens": 17,
+          "totalTokens": 257
+        }
+      },
+      {
+        "id": 2,
+        "purpose": "agent-step",
+        "messageCount": 2,
+        "replayStateCount": 0,
+        "replayStateHashes": [],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 12375,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 12377,
+          "outputTokens": 114,
+          "totalTokens": 12491
+        }
+      },
+      {
+        "id": 3,
+        "purpose": "agent-step",
+        "messageCount": 4,
+        "replayStateCount": 1,
+        "replayStateHashes": [
+          "9678ba0aa1579df786ed2e26ecea12ee595c2b096f7e2427b8441223ab5aff91"
+        ],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 12666,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 12668,
+          "outputTokens": 23,
+          "totalTokens": 12691
+        }
+      },
+      {
+        "id": 4,
+        "purpose": "agent-step",
+        "messageCount": 6,
+        "replayStateCount": 1,
+        "replayStateHashes": [
+          "9678ba0aa1579df786ed2e26ecea12ee595c2b096f7e2427b8441223ab5aff91"
+        ],
+        "exhausted": true,
+        "settled": true,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 12906,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 12908,
+          "outputTokens": 23,
+          "totalTokens": 12931
+        }
+      }
+    ],
+    "wire": [
+      {
+        "sequence": 1,
+        "path": "/api/anthropic/v1/models",
+        "kind": "metadata",
+        "captureError": "transport"
+      },
+      {
+        "sequence": 2,
+        "path": "/api/anthropic/v1/models",
+        "kind": "metadata",
+        "status": 200
+      },
+      {
+        "sequence": 3,
+        "context": {
+          "purpose": "session-title",
+          "id": 1
+        },
+        "path": "/api/anthropic/v1/messages",
+        "kind": "generation",
+        "protocol": "anthropic",
+        "toolPairing": {
+          "calls": [],
+          "results": [],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "input_tokens": 240,
+          "output_tokens": 17,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        "model": "anthropic/claude-sonnet-5",
+        "status": 200
+      },
+      {
+        "sequence": 4,
+        "context": {
+          "purpose": "agent-step",
+          "id": 2
+        },
+        "path": "/api/anthropic/v1/messages",
+        "kind": "generation",
+        "protocol": "anthropic",
+        "toolPairing": {
+          "calls": [],
+          "results": [],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "input_tokens": 2,
+          "output_tokens": 114,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 12375
+        },
+        "model": "anthropic/claude-sonnet-5",
+        "status": 200
+      },
+      {
+        "sequence": 5,
+        "context": {
+          "purpose": "agent-step",
+          "id": 3
+        },
+        "path": "/api/anthropic/v1/messages",
+        "kind": "generation",
+        "protocol": "anthropic",
+        "toolPairing": {
+          "calls": [
+            "bd0201f36b1b42c5f4115e4662cd0d73f38127a1fab2ba991145161404280437"
+          ],
+          "results": [
+            "bd0201f36b1b42c5f4115e4662cd0d73f38127a1fab2ba991145161404280437"
+          ],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "input_tokens": 2,
+          "output_tokens": 23,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 12666
+        },
+        "model": "anthropic/claude-sonnet-5",
+        "status": 200
+      },
+      {
+        "sequence": 6,
+        "context": {
+          "purpose": "agent-step",
+          "id": 4
+        },
+        "path": "/api/anthropic/v1/messages",
+        "kind": "generation",
+        "protocol": "anthropic",
+        "toolPairing": {
+          "calls": [
+            "bd0201f36b1b42c5f4115e4662cd0d73f38127a1fab2ba991145161404280437"
+          ],
+          "results": [
+            "bd0201f36b1b42c5f4115e4662cd0d73f38127a1fab2ba991145161404280437"
+          ],
+          "invalidIds": 0,
+          "duplicateCalls": 0,
+          "duplicateResults": 0,
+          "resultsBeforeCalls": 0,
+          "unmatchedResults": 0,
+          "unansweredCalls": 0
+        },
+        "finalUsage": {
+          "input_tokens": 2,
+          "output_tokens": 23,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 12906
+        },
+        "model": "anthropic/claude-sonnet-5",
+        "status": 200
+      }
+    ],
+    "checkpoints": [
+      {
+        "label": "first-read",
+        "messageCount": 3,
+        "answer": {
+          "sha256": "5c169c8864a27f07aa737d52581d014eaa407e6a855c9291156fa32157f1f976",
+          "characters": 37,
+          "project": true,
+          "release": true,
+          "owner": true
+        },
+        "toolCalls": [
+          {
+            "name": "read",
+            "status": "completed"
+          }
+        ],
+        "privateStateVisible": false,
+        "requests": 3,
+        "httpRequests": 5
+      },
+      {
+        "label": "post-reopen",
+        "messageCount": 5,
+        "answer": {
+          "sha256": "5c169c8864a27f07aa737d52581d014eaa407e6a855c9291156fa32157f1f976",
+          "characters": 37,
+          "project": true,
+          "release": true,
+          "owner": true
+        },
+        "toolCalls": [
+          {
+            "name": "read",
+            "status": "completed"
+          }
+        ],
+        "privateStateVisible": false,
+        "requests": 4,
+        "httpRequests": 6
+      }
+    ]
+  }
+]

@@ -1,4 +1,8 @@
-﻿import { render as renderInk } from "ink-testing-library";
+import { applyTuiEvent, createStateFromSnapshot } from "./store/events.js";
+// eslint-disable-next-line no-restricted-imports -- This contract fixture uses the real durable-operation behavior; production TUI only calls the SDK.
+import { InMemoryPromptSubmissionStore } from "../../../ohbaby-agent/src/runtime/prompt-scheduler/in-memory-store.js";
+import type { UiSessionView } from "ohbaby-sdk";
+import { render as renderInk } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiCommandInvocation,
@@ -7,6 +11,9 @@ import type {
   UiContextWindowUsage,
   UiEvent,
   UiEventHandler,
+  UiPermissionEvent,
+  UiPermissionRequest,
+  UiPermissionSnapshot,
   UiPromptCompletion,
   UiPromptReceipt,
   UiPromptTerminalStatus,
@@ -24,6 +31,13 @@ import type {
   TuiCommandCatalog,
   TuiCommandSpec,
 } from "./store/snapshot.js";
+
+vi.mock("./pending-prompts.js", () => ({
+  createPendingPromptStorage: (): { read(): never[]; write(): void } => ({
+    read: (): never[] => [],
+    write: (): void => undefined,
+  }),
+}));
 
 function snapshot(): UiSnapshot {
   return {
@@ -312,6 +326,11 @@ describe("OhbabyTerminalApp", () => {
 
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Run command",
         id: "permission_1",
@@ -319,12 +338,23 @@ describe("OhbabyTerminalApp", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
     expect(app.lastFrame()).toContain("todo 10");
     expect(app.lastFrame()).toContain("ctrl+t to collapse");
 
-    client.emit({ requestId: "permission_1", type: "permission.resolved" });
+    client.emit({
+      requestId: "permission_1",
+      type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      sessionId: "session_1",
+      reason: "once",
+    });
     await flush();
 
     app.stdin.write("\u0014");
@@ -788,7 +818,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await waitForFrame(
       app,
-      (frame) => frame.includes("Visible answer") && !frame.includes("Thought"),
+      (frame) => frame.includes("Visible answer") && frame.includes("Thought"),
     );
   });
 
@@ -872,11 +902,11 @@ describe("OhbabyTerminalApp", () => {
     );
   });
 
-  it("shows a readable status error when the initial snapshot fails", async () => {
+  it("shows a readable sync status when the initial session view fails", async () => {
     const client = {
       ...createFakeClient(snapshot()),
-      getSnapshot: vi.fn(() =>
-        Promise.reject(new Error("snapshot unavailable")),
+      getSessionView: vi.fn(() =>
+        Promise.reject(new Error("session unavailable")),
       ),
     };
     const app = render(
@@ -888,8 +918,71 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("error: snapshot unavailable");
+    expect(app.lastFrame()).toContain("Syncing session");
     expect(app.lastFrame()).not.toContain("status: error");
+  });
+
+  it("projects execution recovery updates and lets a blocked draft submit retry", async () => {
+    const baseClient = createFakeClient(snapshot());
+    if (!baseClient.getSessionView)
+      throw new Error("Missing session-view fixture");
+    const initial = await baseClient.getSessionView({ sessionId: "session_1" });
+    const client = {
+      ...baseClient,
+      getSessionView: vi.fn(() =>
+        Promise.resolve({
+          ...initial,
+          executionRecovery: {
+            status: "recovering" as const,
+            message: "internal detail",
+          },
+        }),
+      ),
+    };
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    expect(app.lastFrame()).toContain("Checking execution records…");
+    app.stdin.write("retry draft");
+    await flush();
+    app.stdin.write("\r");
+    await flush();
+    expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+    client.emit({
+      type: "session.changed",
+      version: {
+        ...initial.version,
+        sessionRevision: initial.version.sessionRevision + 1,
+      },
+      executionRecovery: {
+        status: "blocked",
+        message: "Execution history repair failed",
+      },
+    });
+    await flush();
+    expect(app.lastFrame()).toContain("Execution history repair failed");
+    expect(app.lastFrame()).toContain("retry draft");
+    app.stdin.write("\r");
+    await flush();
+    expect(client.submitPromptAccepted).toHaveBeenCalledWith(
+      "retry draft",
+      expect.any(Object),
+    );
+    client.emit({
+      type: "session.changed",
+      version: {
+        ...initial.version,
+        sessionRevision: initial.version.sessionRevision + 2,
+      },
+      executionRecovery: { status: "ready" },
+    });
+    await flush();
+    expect(app.lastFrame()).not.toContain("Execution history repair failed");
+    expect(app.lastFrame()).not.toContain("Checking execution records…");
   });
 
   it("shows a readable status error when command catalog loading fails", async () => {
@@ -1259,6 +1352,11 @@ describe("OhbabyTerminalApp", () => {
 
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [
           { id: "allow_once", intent: "allow", label: "Allow once" },
           { id: "reject", intent: "deny", label: "Reject" },
@@ -1269,6 +1367,9 @@ describe("OhbabyTerminalApp", () => {
         title: "Write file",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
 
@@ -1397,7 +1498,7 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("> draft");
   });
 
-  it("clears submitted prompts immediately and surfaces concurrent submit errors", async () => {
+  it("clears accepted drafts and preserves another draft while receipt is unresolved", async () => {
     const client = createFakeClient(snapshot());
     client.submitPromptAccepted
       .mockImplementationOnce(
@@ -1427,11 +1528,9 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     await flush();
 
-    expect(client.submitPromptAccepted).toHaveBeenCalledWith(
-      "second",
-      expect.objectContaining({ sessionId: "session_1" }),
-    );
-    expect(app.lastFrame()).toContain("A prompt is already running");
+    expect(client.submitPromptAccepted).toHaveBeenCalledTimes(1);
+    expect(app.lastFrame()).toContain("> second");
+    expect(app.lastFrame()).toContain("Submission outcome unknown");
   });
 
   it("shows queued state for prompts submitted while a run is active", async () => {
@@ -1555,6 +1654,13 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\r");
     await flush();
 
+    firstSubmit.resolve(promptReceipt("prompt_first"));
+    await firstSubmit.promise;
+    await flush();
+    await waitForFrame(
+      app,
+      (frame) => !frame.includes("Submission outcome unknown"),
+    );
     app.stdin.write("second");
     app.stdin.write("\r");
     client.emit({
@@ -1597,7 +1703,7 @@ describe("OhbabyTerminalApp", () => {
     await waitForFrame(app, (frame) => !frame.includes("Queued"));
   });
 
-  it("edits and cancels the latest queued prompt in an explicit key mode", async () => {
+  it("selects before editing and deletes only in queue focus", async () => {
     const prompt = {
       clientRequestId: "request_queued",
       createdAt: "2026-05-14T00:00:04.000Z",
@@ -1620,6 +1726,9 @@ describe("OhbabyTerminalApp", () => {
     await waitForFrame(app, (frame) => frame.includes("queued text"));
     app.stdin.write("\u001B[1;3A");
     app.stdin.write("\u001B[1;3A");
+    await waitForFrame(app, (frame) => frame.includes("Enter edit"));
+    expect(client.acquirePromptEditLease).not.toHaveBeenCalled();
+    app.stdin.write("\r");
     await waitForFrame(app, (frame) => frame.includes("editing"));
     expect(client.acquirePromptEditLease).toHaveBeenCalledWith({
       promptId: "prompt_queued",
@@ -1639,8 +1748,14 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\u0004");
     app.stdin.write("\u0004");
     await flush();
+    expect(client.cancelQueuedPrompt).not.toHaveBeenCalled();
+    app.stdin.write("\u001b");
+    await flush();
+    app.stdin.write("\u001B[1;3A");
+    await flush();
+    app.stdin.write("\u0004");
+    await flush();
     expect(client.cancelQueuedPrompt).toHaveBeenCalledWith({
-      editLeaseId: "lease_1",
       promptId: "prompt_queued",
     });
     expect(client.cancelQueuedPrompt).toHaveBeenCalledTimes(1);
@@ -1802,6 +1917,11 @@ describe("OhbabyTerminalApp", () => {
 
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [
           { id: "allow_once", intent: "allow", label: "Allow once" },
           { id: "reject", intent: "deny", label: "Reject" },
@@ -1812,11 +1932,19 @@ describe("OhbabyTerminalApp", () => {
         title: "Write file",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
     client.emit({
       requestId: "permission_1",
       type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      sessionId: "session_1",
+      reason: "once",
     });
     await waitForFrame(
       app,
@@ -1836,8 +1964,11 @@ describe("OhbabyTerminalApp", () => {
     expect(client.abortRun).toHaveBeenCalledWith("run_1");
   });
 
-  it("aborts the permission run on Ctrl+C while a permission dialog is open", async () => {
-    const client = createFakeClient(snapshot());
+  it("aborts the verified root run on Ctrl+C while a permission dialog is open", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      status: { kind: "running", runId: "run_1" },
+    });
     const app = render(
       <OhbabyTerminalApp
         client={client}
@@ -1848,6 +1979,11 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [
           { id: "allow_once", intent: "allow", label: "Allow once" },
           { id: "reject", intent: "deny", label: "Reject" },
@@ -1858,6 +1994,9 @@ describe("OhbabyTerminalApp", () => {
         title: "Write file",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
 
@@ -2166,7 +2305,7 @@ describe("OhbabyTerminalApp", () => {
     };
     const refresh = createDeferred<UiSnapshot>();
     const client = createFakeClient(initialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(initialSnapshot)
       .mockReturnValueOnce(refresh.promise);
     const app = render(
@@ -2213,7 +2352,7 @@ describe("OhbabyTerminalApp", () => {
     app.unmount();
   });
 
-  it("keeps the current transcript surface when an existing session refresh fails", async () => {
+  it("keeps the validated root selection when its history refresh fails", async () => {
     const currentSession: UiSnapshot["sessions"][number] = {
       createdAt: "2026-05-14T00:00:00.000Z",
       id: "session_1",
@@ -2243,7 +2382,7 @@ describe("OhbabyTerminalApp", () => {
       sessions: [currentSession, targetSession],
     };
     const client = createFakeClient(initialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(initialSnapshot)
       .mockRejectedValueOnce(new Error("snapshot refresh failed"));
     const app = render(
@@ -2272,13 +2411,15 @@ describe("OhbabyTerminalApp", () => {
     expect(app.stdout.frames.slice(frameCount).join("")).not.toContain(
       SESSION_VIEW_CLEAR_SEQUENCE,
     );
-    expect(app.lastFrame()).toContain("Source history before failed switch");
-    expect(app.lastFrame()).toContain("auto · default · session_1");
+    expect(app.lastFrame()).not.toContain(
+      "Source history before failed switch",
+    );
+    expect(app.lastFrame()).toContain("auto · default · session_2");
     expect(app.lastFrame()).not.toContain(renderOhbabyLogo());
     app.unmount();
   });
 
-  it("keeps the current transcript surface when an existing session refresh returns a mismatched active session", async () => {
+  it("ignores mismatched history without rolling back the validated root selection", async () => {
     const currentSession: UiSnapshot["sessions"][number] = {
       createdAt: "2026-05-14T00:00:00.000Z",
       id: "session_1",
@@ -2323,7 +2464,7 @@ describe("OhbabyTerminalApp", () => {
       sessions: [currentSession, targetSession],
     };
     const client = createFakeClient(initialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(initialSnapshot)
       .mockResolvedValueOnce(mismatchedSnapshot);
     const app = render(
@@ -2351,10 +2492,10 @@ describe("OhbabyTerminalApp", () => {
 
     const output = app.stdout.frames.slice(frameCount).join("");
     expect(output).not.toContain(SESSION_VIEW_CLEAR_SEQUENCE);
-    expect(app.lastFrame()).toContain(
+    expect(app.lastFrame()).not.toContain(
       "Source history before mismatched switch",
     );
-    expect(app.lastFrame()).toContain("auto · default · session_1");
+    expect(app.lastFrame()).toContain("auto · default · session_2");
     expect(app.lastFrame()).not.toContain("Mismatched target history");
     expect(app.lastFrame()).not.toContain(renderOhbabyLogo());
     app.unmount();
@@ -2409,7 +2550,7 @@ describe("OhbabyTerminalApp", () => {
       ],
     };
     const client = createFakeClient(staleFilteredSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(staleFilteredSnapshot)
       .mockResolvedValueOnce(refreshedSnapshot);
     const app = render(
@@ -2436,7 +2577,7 @@ describe("OhbabyTerminalApp", () => {
       candidate.includes("Restored target history"),
     );
     expect(frame).not.toContain(renderOhbabyLogo());
-    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+    expect(client.readSessionSnapshot).toHaveBeenCalledTimes(2);
     const output = app.stdout.frames.slice(frameCount).join("");
     expect(countOccurrences(output, SESSION_VIEW_CLEAR_SEQUENCE)).toBe(1);
     const clearIndex = output.lastIndexOf(SESSION_VIEW_CLEAR_SEQUENCE);
@@ -2502,7 +2643,7 @@ describe("OhbabyTerminalApp", () => {
     const initial = createDeferred<UiSnapshot>();
     const refresh = createDeferred<UiSnapshot>();
     const client = createFakeClient(staleInitialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockReturnValueOnce(initial.promise)
       .mockReturnValueOnce(refresh.promise);
     const app = render(
@@ -2573,7 +2714,7 @@ describe("OhbabyTerminalApp", () => {
     const secondSelection = createDeferred<UiSnapshot>();
     const thirdSelection = createDeferred<UiSnapshot>();
     const client = createFakeClient(initialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(initialSnapshot)
       .mockReturnValueOnce(secondSelection.promise)
       .mockReturnValueOnce(thirdSelection.promise);
@@ -2595,6 +2736,7 @@ describe("OhbabyTerminalApp", () => {
       timestamp: Date.now(),
       type: "command.result.delivered",
     });
+    await flush();
     client.emit({
       action: {
         data: { choiceId: "session_3" },
@@ -2683,7 +2825,7 @@ describe("OhbabyTerminalApp", () => {
     };
     const oldRefresh = createDeferred<UiSnapshot>();
     const client = createFakeClient(initialSnapshot, catalog);
-    client.getSnapshot
+    client.readSessionSnapshot
       .mockResolvedValueOnce(initialSnapshot)
       .mockReturnValueOnce(oldRefresh.promise);
     const app = render(
@@ -2743,7 +2885,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
     expect(app.lastFrame()).not.toContain("Old refresh history");
-    expect(client.getSnapshot).toHaveBeenCalledTimes(2);
+    expect(client.readSessionSnapshot).toHaveBeenCalledTimes(1);
     app.unmount();
   });
 
@@ -2963,24 +3105,20 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("\r");
     await waitForFrame(app, (nextFrame) => nextFrame.includes("Loading..."));
 
-    client.emit({
-      snapshot: {
-        activeSessionId: "session_2",
-        permissions: [],
-        runs: [],
-        sessions: [
-          {
-            createdAt: "2026-05-14T00:00:00.000Z",
-            id: "session_2",
-            messages: [],
-            title: "Second",
-            updatedAt: "2026-05-14T00:00:01.000Z",
-          },
-        ],
-        status: { kind: "idle" },
-      },
-      timestamp: 2,
-      type: "snapshot.replaced",
+    client.installSourceSnapshot({
+      activeSessionId: "session_2",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-14T00:00:00.000Z",
+          id: "session_2",
+          messages: [],
+          title: "Second",
+          updatedAt: "2026-05-14T00:00:01.000Z",
+        },
+      ],
+      status: { kind: "idle" },
     });
 
     await waitForFrame(
@@ -3007,24 +3145,20 @@ describe("OhbabyTerminalApp", () => {
     await waitForCommandCount(client, 1);
     const invocation = firstExecutedCommand(client);
 
-    client.emit({
-      snapshot: {
-        activeSessionId: "session_2",
-        permissions: [],
-        runs: [],
-        sessions: [
-          {
-            createdAt: "2026-05-14T00:00:00.000Z",
-            id: "session_2",
-            messages: [],
-            title: "Second",
-            updatedAt: "2026-05-14T00:00:01.000Z",
-          },
-        ],
-        status: { kind: "idle" },
-      },
-      timestamp: 5,
-      type: "snapshot.replaced",
+    client.installSourceSnapshot({
+      activeSessionId: "session_2",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          createdAt: "2026-05-14T00:00:00.000Z",
+          id: "session_2",
+          messages: [],
+          title: "Second",
+          updatedAt: "2026-05-14T00:00:01.000Z",
+        },
+      ],
+      status: { kind: "idle" },
     });
     client.emit({
       clientInvocationId: invocation.clientInvocationId,
@@ -3475,6 +3609,7 @@ describe("OhbabyTerminalApp", () => {
       (frame) => frame.includes("medium") && frame.includes("high"),
     );
     expect(client.getCurrentModel).toHaveBeenCalledTimes(2);
+    expect(client.getSnapshot).not.toHaveBeenCalled();
     app.unmount();
   });
 
@@ -4355,6 +4490,11 @@ describe("OhbabyTerminalApp", () => {
     });
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Run bash",
         id: "permission_1",
@@ -4362,6 +4502,9 @@ describe("OhbabyTerminalApp", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
 
@@ -4370,9 +4513,13 @@ describe("OhbabyTerminalApp", () => {
 
     app.stdin.write("\r");
     await flush();
-    expect(client.respondPermission).toHaveBeenCalledWith("permission_1", {
-      choiceId: "allow",
-    });
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "permission_1",
+      {
+        choiceId: "allow",
+      },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
   });
 
   it("defaults permission selection to first allow when available", async () => {
@@ -4387,6 +4534,11 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [
           { id: "allow", intent: "allow", label: "Allow" },
           { id: "deny", intent: "deny", label: "Deny" },
@@ -4397,14 +4549,21 @@ describe("OhbabyTerminalApp", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
 
     app.stdin.write("\r");
     await flush();
-    expect(client.respondPermission).toHaveBeenCalledWith("permission_2", {
-      choiceId: "allow",
-    });
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "permission_2",
+      {
+        choiceId: "allow",
+      },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
   });
 
   it("keeps escape on the deny permission safe default", async () => {
@@ -4419,6 +4578,11 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     client.emit({
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [
           { id: "allow", intent: "allow", label: "Allow" },
           { id: "deny", intent: "deny", label: "Deny" },
@@ -4429,14 +4593,449 @@ describe("OhbabyTerminalApp", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     await flush();
 
     app.stdin.write("\u001B");
     await flush();
-    expect(client.respondPermission).toHaveBeenCalledWith("permission_3", {
-      choiceId: "deny",
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "permission_3",
+      {
+        choiceId: "deny",
+      },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
+  });
+});
+
+function approval(
+  id: string,
+  sourceLabel = "Child agent",
+): UiPermissionRequest {
+  return {
+    id,
+    sessionId: "child",
+    rootSessionId: "session_1",
+    runId: "child-run",
+    callId: "child-call",
+    messageId: "child-message",
+    sourceLabel,
+    createdAt: 100,
+    title: `Approve ${id}`,
+    description: "Edit src/a.ts",
+    choices: [
+      { id: "allow_once", label: "Allow once", intent: "allow" },
+      { id: "reject", label: "Reject", intent: "deny" },
+    ],
+  };
+}
+
+describe("independent TUI approvals", () => {
+  it("keeps an abnormal selected child unready and requests a main session while history waits", async () => {
+    const initial = snapshot();
+    const child = {
+      ...initial.sessions[0],
+      id: "child",
+      parentId: "session_1",
+      isSubagent: true,
+    };
+    const client = createFakeClient({
+      ...initial,
+      activeSessionId: "child",
+      sessions: [...initial.sessions, child],
+      permissions: [],
     });
+    client.readSessionSnapshot.mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) =>
+      frame.includes("Return to a main session to approve requests."),
+    );
+    app.stdin.write("\r");
+    await flush();
+    expect(client.respondPermission).not.toHaveBeenCalled();
+    expect(app.lastFrame()).not.toContain("Permission:");
+    expect(client.getPermissionSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ rootSessionId: "child" }),
+    );
+  });
+
+  it("restores approvals and permits non-first selection while chat history is unavailable", async () => {
+    const initial = {
+      ...snapshot(),
+      permissions: [approval("p1"), approval("p2")],
+    };
+    const client = createFakeClient(initial);
+    client.readSessionSnapshot.mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    await flush();
+    expect(app.lastFrame()).toContain("Child agent");
+    expect(app.lastFrame()).toContain("Approve p1");
+    expect(app.lastFrame()).not.toContain("Cancel run");
+    app.stdin.write("]");
+    await flush();
+    expect(app.lastFrame()).toContain("Approve p2");
+    app.stdin.write("\r");
+    await flush();
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "p2",
+      { choiceId: "allow_once" },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
+  });
+
+  it("locks approval on transport failure until its new baseline arrives, independently of old full snapshots", async () => {
+    const initial = { ...snapshot(), permissions: [approval("p1")] };
+    const client = createFakeClient(initial);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    await flush();
+    let release!: (value: UiPermissionSnapshot) => void;
+    client.getPermissionSnapshot.mockImplementation(
+      (input: { rootSessionId: string | null }) =>
+        input.rootSessionId === null
+          ? Promise.resolve({
+              permissionEpoch: "epoch",
+              rootSessionId: null,
+              permissionRevision: 0,
+              requests: [],
+            })
+          : new Promise<UiPermissionSnapshot>((resolve) => {
+              release = resolve;
+            }),
+    );
+    client.failPermissionTransport();
+    await flush();
+    app.stdin.write("\r");
+    await flush();
+    expect(client.respondPermission).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(typeof release).toBe("function");
+    });
+    release({
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      requests: [],
+    });
+    await flush();
+    client.emit({ type: "snapshot.replaced", snapshot: initial });
+    await flush();
+    expect(app.lastFrame()).not.toContain("Approve p1");
+  });
+  it("keeps a severely unavailable root frozen through retry keys and delivery failures", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      permissions: [approval("frozen")],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Approve frozen"));
+    const queries = client.getPermissionSnapshot.mock.calls.length;
+    client.emit({
+      type: "permission.unavailable",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      reason: "Approval projection is unavailable.",
+    });
+    await flush();
+    app.stdin.write("r");
+    await flush();
+    client.failPermissionTransport();
+    await flush();
+    await flush();
+    app.stdin.write("\r");
+    await flush();
+    expect(client.getPermissionSnapshot).toHaveBeenCalledTimes(queries);
+    expect(client.respondPermission).not.toHaveBeenCalled();
+    expect(app.lastFrame()).not.toContain("R retry approval sync");
+  });
+
+  it("retries a transient approval query without waiting for failed chat history", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      permissions: [approval("retry")],
+    });
+    client.readSessionSnapshot.mockRejectedValue(new Error("history failed"));
+    client.getPermissionSnapshot.mockRejectedValueOnce(
+      new Error("temporary approval failure"),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Approve retry"));
+    expect(client.getPermissionSnapshot).toHaveBeenCalledTimes(2);
+    app.stdin.write("\r");
+    await flush();
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "retry",
+      { choiceId: "allow_once" },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
+  });
+
+  it("shows a new independent id for the same call and ignores stale history and ordinary copies", async () => {
+    const first = approval("p1");
+    const client = createFakeClient({ ...snapshot(), permissions: [first] });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Approve p1"));
+    client.emit({
+      type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      requestId: "p1",
+      sessionId: "child",
+      reason: "once",
+    });
+    client.emit({
+      type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 3,
+      request: approval("p2"),
+    });
+    client.emit({
+      type: "snapshot.replaced",
+      snapshot: { ...snapshot(), permissions: [first] },
+    });
+    await waitForFrame(app, (frame) => frame.includes("Approve p2"));
+    expect(app.lastFrame()).not.toContain("Approve p1");
+    app.stdin.write("\r");
+    await flush();
+    expect(client.respondPermission).toHaveBeenCalledWith(
+      "p2",
+      { choiceId: "allow_once" },
+      { permissionEpoch: "epoch", rootSessionId: "session_1" },
+    );
+  });
+  it.each(["Escape", "Ctrl+C"])(
+    "does not redirect %s Stop from the displayed run A to a newly discovered B",
+    async (key) => {
+      const client = createFakeClient({
+        ...snapshot(),
+        status: { kind: "running", runId: "run-A" },
+      });
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await flush();
+      if (key === "Escape") {
+        app.stdin.write("\u001B");
+        await waitForFrame(app, (frame) =>
+          frame.includes("Press Esc again to interrupt"),
+        );
+      }
+      client.getSessionControl.mockResolvedValue({
+        runtimeEpoch: "epoch",
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        runId: "run-B",
+        driver: "user",
+      });
+      app.stdin.write(key === "Escape" ? "\u001B" : "\u0003");
+      await flush();
+      expect(client.abortRun).not.toHaveBeenCalled();
+      app.unmount();
+    },
+  );
+  it("does not discover and stop a run on Ctrl+C while control is unknown", async () => {
+    const client = createFakeClient(snapshot());
+    const control = client.getSessionControl.mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    const calls = control.mock.calls.length;
+    app.stdin.write("\u0003");
+    await flush();
+    expect(control).toHaveBeenCalledTimes(calls);
+    expect(client.abortRun).not.toHaveBeenCalled();
+    app.unmount();
+  });
+  it("offers explicit forget for an unknown submission without replaying it", async () => {
+    const client = createFakeClient(snapshot());
+    client.submitPromptAccepted.mockRejectedValue(
+      new TypeError("fetch failed"),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("uncertain prompt");
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) => frame.includes("Ctrl+X forget"));
+    app.stdin.write("\u0018");
+    await flush();
+    expect(client.submitPromptAccepted).toHaveBeenCalledTimes(1);
+    expect(app.lastFrame()).not.toContain("Ctrl+X forget");
+    app.unmount();
+  });
+  it("refreshes Ink Static for a completed source part append and ignores its duplicate", async () => {
+    vi.stubEnv("OHBABY_TUI_STATIC_TRANSCRIPT", "1");
+    try {
+      const initial = snapshot();
+      const client = createFakeClient({
+        ...initial,
+        sessions: initial.sessions.map((session) => ({
+          ...session,
+          messages: [
+            {
+              id: "done",
+              role: "assistant",
+              status: "completed",
+              createdAt: "2026-01-01",
+              parts: [{ id: "part", type: "text", text: "😀hello" }],
+            },
+          ],
+        })),
+      });
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await flush();
+      const append = {
+        type: "session.changed" as const,
+        version: {
+          runtimeEpoch: "epoch",
+          sessionId: "session_1",
+          viewGeneration: "test-view",
+          sessionRevision: 2,
+        },
+        textAppends: [
+          { messageId: "done", partId: "part", offset: 7, text: " world" },
+        ],
+      };
+      client.emit(append);
+      await flush();
+      expect(app.frames.join("\n")).toContain("😀hello world");
+      client.emit(append);
+      await flush();
+      expect(app.lastFrame()).toContain("😀hello world");
+      expect(app.lastFrame()).not.toContain("world world");
+      app.unmount();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it.each(["root", "unknown", "changed"])(
+    "uses only verified root Stop for a child approval (%s control)",
+    async (state) => {
+      const request = {
+        ...approval("child-stop"),
+        sessionId: "child",
+        rootSessionId: "session_1",
+        runId: "child-run",
+      };
+      const client = createFakeClient({
+        ...snapshot(),
+        permissions: [request],
+        status: { kind: "running", runId: "root-run" },
+      });
+      if (state === "unknown")
+        client.getSessionControl.mockImplementation(
+          () => new Promise(() => undefined),
+        );
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await waitForFrame(app, (frame) => frame.includes("Approve child-stop"));
+      if (state === "changed")
+        client.getSessionControl.mockResolvedValue({
+          runtimeEpoch: "epoch",
+          sessionId: "session_1",
+          rootSessionId: "session_1",
+          runId: "new-root-run",
+          driver: "user",
+        });
+      app.stdin.write("\u0003");
+      await flush();
+      if (state === "root")
+        expect(client.abortRun).toHaveBeenCalledWith("root-run");
+      else expect(client.abortRun).not.toHaveBeenCalled();
+      expect(client.abortRun).not.toHaveBeenCalledWith("child-run");
+      app.unmount();
+    },
+  );
+  it("keeps drafts editable and confirmed Stop available while the core view hangs", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      status: { kind: "running", runId: "run_1" },
+    });
+    client.readSessionSnapshot.mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("draft while syncing");
+    app.stdin.write("\r");
+    await flush();
+    expect(app.lastFrame()).toContain("draft while syncing");
+    expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+    app.stdin.write("\u001B");
+    await waitForFrame(app, (frame) =>
+      frame.includes("Press Esc again to interrupt"),
+    );
+    app.stdin.write("\u001B");
+    await flush();
+    expect(client.abortRun).toHaveBeenCalledWith("run_1");
+    expect(client.getSnapshot).not.toHaveBeenCalled();
   });
 });
 
@@ -4450,13 +5049,20 @@ function createFakeClient(
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
+  readonly steerQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly cancelQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly editQueuedPrompt: ReturnType<typeof vi.fn>;
+  readonly resubmitRetainedPrompt: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
   readonly getCurrentModel: ReturnType<typeof vi.fn>;
+  readonly getSessionControl: ReturnType<typeof vi.fn>;
   readonly getSnapshot: ReturnType<typeof vi.fn>;
+  readonly readSessionSnapshot: ReturnType<typeof vi.fn>;
+  readonly installSourceSnapshot: (snapshot: UiSnapshot) => void;
+  readonly getPermissionSnapshot: ReturnType<typeof vi.fn>;
+  readonly failPermissionTransport: () => void;
   readonly listCommands: ReturnType<typeof vi.fn>;
   readonly probeModelContextWindow: ReturnType<typeof vi.fn>;
   readonly respondInteraction: ReturnType<typeof vi.fn>;
@@ -4470,8 +5076,150 @@ function createFakeClient(
   readonly waitForPrompt: ReturnType<typeof vi.fn>;
 } {
   const handlers = new Set<UiEventHandler>();
+  const permissionHandlers = new Map<
+    (event: UiPermissionEvent) => void,
+    ((error: unknown) => void) | undefined
+  >();
+  let pendingPermissions = [...initialSnapshot.permissions];
+  let permissionRevision = initialSnapshot.permissions.length;
+  let sourceState = createStateFromSnapshot(initialSnapshot);
+  let sessionRevision = 1;
+  const readSessionSnapshot = vi.fn(() =>
+    Promise.resolve(sourceState.snapshot),
+  );
+  const sourceView = (value: UiSnapshot, sessionId: string): UiSessionView => ({
+    version: {
+      runtimeEpoch: "epoch",
+      sessionId: value.activeSessionId ?? sessionId,
+      viewGeneration: "test-view",
+      sessionRevision,
+    },
+    session: value.sessions.find((session) => session.id === sessionId) ?? {
+      id: sessionId,
+      title: sessionId,
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+      messages: [],
+    },
+    runs: value.runs.length
+      ? value.runs.filter((run) => run.sessionId === sessionId)
+      : value.status.kind === "running" || value.status.kind === "error"
+        ? [
+            {
+              id:
+                value.status.kind === "running"
+                  ? value.status.runId
+                  : "run-error",
+              sessionId,
+              status: value.status,
+              startedAt: "2026-01-01",
+              updatedAt: "2026-01-01",
+            },
+          ]
+        : [],
+    prompts: (value.prompts ?? []).filter(
+      (prompt) => prompt.sessionId === sessionId,
+    ),
+    history: { hasMore: false },
+    reasoningMissing: false,
+    goal: {
+      status: "ready",
+      value:
+        value.goals?.find((item) => item.sessionId === sessionId)?.goal ?? null,
+    },
+    todo: {
+      status: "ready",
+      value: value.todos?.find((item) => item.sessionId === sessionId) ?? null,
+    },
+    context: {
+      status: "ready",
+      value:
+        value.contextWindowUsages?.find(
+          (item) => item.sessionId === sessionId,
+        ) ?? null,
+    },
+  });
 
   return {
+    installSourceSnapshot(value): void {
+      sourceState = createStateFromSnapshot(value);
+      for (const handler of handlers)
+        handler({
+          type: "session.index.invalidated",
+          selectedSessionId: value.activeSessionId,
+        });
+    },
+    readSessionSnapshot,
+    getSessionView: vi.fn(async ({ sessionId }: { sessionId: string }) =>
+      sourceView(await readSessionSnapshot(), sessionId),
+    ),
+    getSessionHistory: vi.fn(({ sessionId }: { sessionId: string }) =>
+      Promise.resolve({
+        version: sourceView(sourceState.snapshot, sessionId).version,
+        messages: [],
+        prompts: [],
+        reasoningMissing: false,
+        hasMore: false,
+      }),
+    ),
+    getSessionControl: vi.fn(({ sessionId }: { sessionId: string }) =>
+      Promise.resolve({
+        runtimeEpoch: "epoch",
+        sessionId,
+        rootSessionId: sessionId,
+        runId:
+          sourceState.runs.find(
+            (run) =>
+              run.sessionId === sessionId && run.status.kind === "running",
+          )?.id ??
+          (sourceState.runtime.kind === "running"
+            ? sourceState.runtime.runId
+            : null),
+        driver: "user" as const,
+      }),
+    ),
+    getPromptReceipt: vi.fn(
+      ({ clientRequestId }: { clientRequestId: string }) =>
+        Promise.resolve({
+          runtimeEpoch: "epoch",
+          clientRequestId,
+          receipt: null,
+        }),
+    ),
+    getSelectedSessionId: () => Promise.resolve(sourceState.activeSessionId),
+    getSessionIndex: () =>
+      Promise.resolve(
+        initialSnapshot.sessions.map(
+          ({ messages: _messages, ...entry }) => entry,
+        ),
+      ),
+    createSession: () => Promise.reject(new Error("Unused test method")),
+    selectSession: () => Promise.resolve(),
+    getPermissionSnapshot: vi.fn(
+      (input: {
+        rootSessionId: string | null;
+      }): Promise<UiPermissionSnapshot> =>
+        Promise.resolve({
+          permissionEpoch: "epoch",
+          rootSessionId: input.rootSessionId,
+          permissionRevision,
+          requests: pendingPermissions.filter(
+            (request) => request.rootSessionId === input.rootSessionId,
+          ),
+        }),
+    ),
+    subscribePermissionEvents(handler, onError): () => void {
+      permissionHandlers.set(handler, onError);
+      return () => {
+        permissionHandlers.delete(handler);
+      };
+    },
+    failPermissionTransport(): void {
+      const errors = [...permissionHandlers.values()];
+      permissionHandlers.clear();
+      for (const onError of errors)
+        onError?.(new Error("local delivery failed"));
+    },
     abortRun: vi.fn(() => Promise.resolve()),
     acquirePromptEditLease: vi.fn((input: { readonly promptId: string }) => {
       const prompt = initialSnapshot.prompts?.find(
@@ -4480,7 +5228,7 @@ function createFakeClient(
       return prompt
         ? Promise.resolve({
             editLeaseId: "lease_1",
-            expiresAt: "2026-05-14T00:01:00.000Z",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
             ownerClientId: "client_tui",
             prompt,
           })
@@ -4510,6 +5258,7 @@ function createFakeClient(
         },
       }),
     ),
+    steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     cancelQueuedPrompt: vi.fn((input: { readonly promptId: string }) => {
       const prompt = initialSnapshot.prompts?.find(
         (candidate) => candidate.promptId === input.promptId,
@@ -4534,10 +5283,117 @@ function createFakeClient(
     ),
     setSearchApiKey: vi.fn(() => Promise.resolve(searchConnectResult())),
     emit(event): void {
+      if (
+        event.type === "permission.requested" ||
+        event.type === "permission.resolved" ||
+        event.type === "permission.unavailable" ||
+        event.type === "permission.resync-required"
+      ) {
+        if (event.type === "permission.requested") {
+          pendingPermissions.push(event.request);
+          permissionRevision = event.permissionRevision;
+        }
+        if (event.type === "permission.resolved") {
+          pendingPermissions = pendingPermissions.filter(
+            (request) => request.id !== event.requestId,
+          );
+          permissionRevision = event.permissionRevision;
+        }
+        for (const handler of permissionHandlers.keys()) handler(event);
+      }
+      if (
+        [
+          "session.updated",
+          "message.appended",
+          "message.updated",
+          "message.part.delta",
+          "message.reasoning.delta",
+          "message.reasoning.end",
+          "run.updated",
+          "prompt.submitted",
+          "prompt.updated",
+          "todo.updated",
+          "goal.updated",
+        ].includes(event.type)
+      ) {
+        const previousSessionId = sourceState.activeSessionId;
+        sourceState = applyTuiEvent(sourceState, event);
+        if (
+          event.type === "message.reasoning.delta" ||
+          event.type === "message.reasoning.end"
+        ) {
+          sourceState = {
+            ...sourceState,
+            snapshot: {
+              ...sourceState.snapshot,
+              sessions: sourceState.sessions.map((session) => ({
+                ...session,
+                messages: session.messages.map((message) =>
+                  message.id === event.messageId
+                    ? {
+                        ...message,
+                        parts: [
+                          ...message.parts.filter(
+                            (part) => part.type !== "reasoning",
+                          ),
+                          {
+                            id: `${message.id}-thought`,
+                            type: "reasoning" as const,
+                            text: event.content,
+                            ...(event.type === "message.reasoning.end"
+                              ? {
+                                  endReason: "normal" as const,
+                                  saveState: "saved" as const,
+                                }
+                              : {}),
+                          },
+                        ],
+                      }
+                    : message,
+                ),
+              })),
+            },
+          };
+        }
+        sourceState = {
+          ...sourceState,
+          sessions: sourceState.snapshot.sessions,
+        };
+        if (previousSessionId !== sourceState.activeSessionId)
+          for (const handler of handlers)
+            handler({
+              type: "session.index.invalidated",
+              selectedSessionId: sourceState.activeSessionId,
+            });
+        sessionRevision++;
+        const sessionId =
+          "sessionId" in event && typeof event.sessionId === "string"
+            ? event.sessionId
+            : sourceState.activeSessionId;
+        if (sessionId) {
+          const next = sourceView(sourceState.snapshot, sessionId);
+          for (const handler of handlers)
+            handler({
+              type: "session.changed",
+              version: next.version,
+              messages: next.session.messages,
+              runs: next.runs,
+              prompts: next.prompts,
+              todo: next.todo,
+              goal: next.goal,
+              context: next.context,
+            });
+        }
+        return;
+      }
+      sourceState = applyTuiEvent(sourceState, event);
       for (const handler of handlers) {
         handler(event);
       }
     },
+    resubmitRetainedPrompt: vi.fn(() =>
+      Promise.reject(new Error("Unused retained resubmission stub")),
+    ),
     editQueuedPrompt: vi.fn(
       (input: { readonly promptId: string; readonly text: string }) => {
         const prompt = initialSnapshot.prompts?.find(
@@ -4548,7 +5404,15 @@ function createFakeClient(
           : Promise.reject(new Error("prompt not found"));
       },
     ),
-    executeCommand: vi.fn(() => Promise.resolve()),
+    executeCommand: vi.fn(() =>
+      Promise.resolve({
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      }),
+    ),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
     getCurrentModel: vi.fn(() => Promise.resolve(null)),
     getSnapshot: vi.fn(() => Promise.resolve(initialSnapshot)),
@@ -4577,7 +5441,7 @@ function createFakeClient(
         return prompt
           ? Promise.resolve({
               editLeaseId: input.editLeaseId,
-              expiresAt: "2026-05-14T00:01:00.000Z",
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
               ownerClientId: "client_tui",
               prompt,
             })
@@ -4843,3 +5707,849 @@ async function waitForFrame(
   }
   throw new Error(`Timed out waiting for frame. Last frame:\n${frame}`);
 }
+
+it("Steers a selected queued row with a stable request after an uncertain response", async () => {
+  const prompt = {
+    clientRequestId: "queued-request",
+    createdAt: "2026-05-14T00:00:04Z",
+    promptId: "queued-steer",
+    scopeKey: "/repo",
+    sessionId: "session_1",
+    status: "queued" as const,
+    text: "steer this row",
+    updatedAt: "2026-05-14T00:00:04Z",
+    userMessageId: "queued-message",
+  };
+  const client = createFakeClient({
+    ...snapshot(),
+    prompts: [prompt],
+    runs: [
+      {
+        id: "run_1",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:03Z",
+        status: { kind: "running", runId: "run_1" },
+        updatedAt: "2026-05-14T00:00:03Z",
+      },
+    ],
+    status: { kind: "running", runId: "run_1" },
+  });
+  client.listSubagentExecutions = () =>
+    Promise.resolve({
+      executions: [],
+      hasMore: false,
+      waiting: false,
+      approvalBlocked: false,
+      activeCount: 0,
+      completedCount: 0,
+    });
+  client.getSubagentExecutionView = () =>
+    Promise.reject(new Error("No selection"));
+  client.steerQueuedPrompt
+    .mockRejectedValueOnce(new Error("response lost"))
+    .mockResolvedValueOnce({ acceptedTargetRunId: "run_1" });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("Steer"));
+  await flush();
+  app.stdin.write("\u0013");
+  await waitForFrame(app, (frame) => frame.includes("response lost"));
+  app.stdin.write("\u0007");
+  await waitForFrame(app, (frame) => frame.includes("Read only"));
+  await flush();
+  app.stdin.write("\u001b");
+  await waitForFrame(app, (frame) => frame.includes("Ctrl+G subagents"));
+  app.stdin.write("\u0013");
+  await waitForFrame(app, (frame) => frame.includes("Steer accepted"));
+  expect(client.steerQueuedPrompt.mock.calls[0][0]).toMatchObject({
+    promptId: "queued-steer",
+    expectedRunId: "run_1",
+  });
+  expect(client.steerQueuedPrompt.mock.calls[1][0]).toEqual(
+    client.steerQueuedPrompt.mock.calls[0][0],
+  );
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+  expect(client.abortRun).not.toHaveBeenCalled();
+});
+
+it.each(["before", "after"])(
+  "expires TUI Steer notice when target ends %s acknowledgement",
+  async (timing) => {
+    const prompt = {
+      clientRequestId: "queued-request",
+      createdAt: "2026-05-14T00:00:04Z",
+      promptId: "queued-steer",
+      scopeKey: "/repo",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: "steer this row",
+      updatedAt: "2026-05-14T00:00:04Z",
+      userMessageId: "queued-message",
+    };
+    const client = createFakeClient({
+      ...snapshot(),
+      prompts: [prompt],
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: "2026-05-14T00:00:03Z",
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: "2026-05-14T00:00:03Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
+    });
+    client.listSubagentExecutions = (): Promise<
+      import("ohbaby-sdk").UiSubagentExecutionList
+    > =>
+      Promise.resolve({
+        executions: [],
+        hasMore: false,
+        waiting: false,
+        approvalBlocked: false,
+        activeCount: 0,
+        completedCount: 0,
+      });
+    client.getSubagentExecutionView = (): Promise<
+      import("ohbaby-sdk").UiSubagentExecutionView
+    > => Promise.reject(new Error("No selection"));
+    let accept!: (receipt: { acceptedTargetRunId: string }) => void;
+    client.steerQueuedPrompt.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          accept = resolve;
+        }),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Steer"));
+    await flush();
+    app.stdin.write("\u0013");
+    await flush();
+    if (timing === "after") {
+      accept({ acceptedTargetRunId: "run_1" });
+      await waitForFrame(app, (frame) => frame.includes("Steer accepted"));
+    }
+    client.emit({
+      type: "run.updated",
+      run: {
+        id: "run_1",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:03Z",
+        updatedAt: "2026-05-14T00:00:05Z",
+        endedAt: "2026-05-14T00:00:05Z",
+        status: { kind: "idle" },
+        terminalReason: "user-stop",
+        inputsCloseReason: "user-stop",
+        unsentSteer: true,
+      },
+    });
+    await waitForFrame(app, (frame) =>
+      frame.includes("Task stopped before your steer message was sent."),
+    );
+    if (timing === "before") accept({ acceptedTargetRunId: "run_1" });
+    await flush();
+    expect(app.lastFrame()).not.toContain("Steer accepted");
+    client.emit({
+      type: "run.updated",
+      run: {
+        id: "run_2",
+        sessionId: "session_1",
+        startedAt: "2026-05-14T00:00:06Z",
+        updatedAt: "2026-05-14T00:00:06Z",
+        status: { kind: "running", runId: "run_2" },
+      },
+    });
+    await flush();
+    app.stdin.write("next prompt");
+    await flush();
+    expect(app.lastFrame()).not.toContain("Steer accepted");
+  },
+);
+
+it("opens execution reads without rebinding root or exposing child stop and approval controls", async () => {
+  const client = createFakeClient({
+    ...snapshot(),
+    status: { kind: "running", runId: "run_1" },
+  });
+  client.listSubagentExecutions = () =>
+    Promise.resolve({
+      executions: [
+        {
+          executionId: "execution",
+          subagentId: "worker",
+          rootSessionId: "session_1",
+          rootRunId: "run_1",
+          status: "running",
+          createdAt: 1,
+          updatedAt: 2,
+          resultStored: false,
+          delivery: "none",
+        },
+      ],
+      hasMore: false,
+      waiting: true,
+      approvalBlocked: false,
+      activeCount: 1,
+      completedCount: 0,
+    });
+  client.getSubagentExecutionView = () =>
+    Promise.resolve({
+      execution: {
+        executionId: "execution",
+        subagentId: "worker",
+        rootSessionId: "session_1",
+        rootRunId: "run_1",
+        status: "running",
+        createdAt: 1,
+        updatedAt: 2,
+        resultStored: false,
+        delivery: "none",
+      },
+      messages: [],
+      history: { hasMore: false },
+      reasoningMissing: false,
+      readOnly: true,
+    });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("Ctrl+G subagents"));
+  app.stdin.write("\u0007");
+  await waitForFrame(app, (frame) => frame.includes("Read only"));
+  await flush();
+  app.stdin.write("\r");
+  await flush();
+  app.stdin.write("\u0003");
+  await flush();
+  expect(client.abortRun).not.toHaveBeenCalled();
+  expect(client.respondPermission).not.toHaveBeenCalled();
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+});
+
+it.each([
+  {
+    name: "newer successful run",
+    control: "current",
+    failureAt: "2026-01-01",
+    showOldError: false,
+  },
+  {
+    name: "unknown control",
+    control: "unknown",
+    failureAt: "2026-01-01",
+    showOldError: true,
+  },
+  {
+    name: "other session control",
+    control: "other",
+    failureAt: "2026-01-01",
+    showOldError: true,
+  },
+  {
+    name: "newer admission failure",
+    control: "current",
+    failureAt: "2026-01-03",
+    showOldError: true,
+  },
+])(
+  "keeps terminal prompt error scoped to $name",
+  async ({ control, failureAt, showOldError }) => {
+    const baseClient = createFakeClient({
+      ...snapshot(),
+      prompts: [
+        {
+          promptId: "old-prompt",
+          clientRequestId: "old-request",
+          userMessageId: "old-message",
+          sessionId: "session_1",
+          scopeKey: "/repo",
+          text: "old input",
+          status: "interrupted",
+          runId: "old-run",
+          error: {
+            code: "INTERRUPTED",
+            message: "old interrupted prompt",
+            source: "runtime",
+            retryable: false,
+          },
+          createdAt: failureAt,
+          updatedAt: failureAt,
+        },
+      ],
+      runs: [
+        {
+          id: "new-success",
+          sessionId: "session_1",
+          status: { kind: "idle" },
+          startedAt: "2026-01-02",
+          updatedAt: "2026-01-02",
+        },
+      ],
+    });
+    const client = {
+      ...baseClient,
+      getSessionControl:
+        control === "unknown"
+          ? vi.fn(
+              () =>
+                new Promise<import("ohbaby-sdk").UiSessionControl>(
+                  () => undefined,
+                ),
+            )
+          : control === "other"
+            ? vi.fn(() =>
+                Promise.resolve({
+                  runtimeEpoch: "epoch",
+                  sessionId: "session_other",
+                  rootSessionId: "session_other",
+                  runId: null,
+                  driver: "user" as const,
+                }),
+              )
+            : baseClient.getSessionControl,
+    };
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    expect(app.lastFrame()?.includes("old interrupted prompt")).toBe(
+      showOldError,
+    );
+    if (showOldError) return;
+    if (!client.getSessionView) throw new Error("Missing session-view fixture");
+    const view = await client.getSessionView({ sessionId: "session_1" });
+    client.emit({
+      type: "session.changed",
+      version: {
+        ...view.version,
+        sessionRevision: view.version.sessionRevision + 1,
+      },
+      executionRecovery: {
+        status: "blocked",
+        message: "independent recovery error",
+      },
+    });
+    await waitForFrame(app, (frame) =>
+      frame.includes("independent recovery error"),
+    );
+  },
+);
+
+it("does not revive a recovered run error when a remote session view has a newer success", async () => {
+  const client = createFakeClient({
+    ...snapshot(),
+    status: { kind: "idle" },
+    runs: [
+      {
+        id: "new-success",
+        sessionId: "session_1",
+        status: { kind: "idle" },
+        startedAt: "2026-09-28T12:08:00.961Z",
+        updatedAt: "2026-09-28T12:08:00.982Z",
+      },
+      {
+        id: "old-recovered",
+        sessionId: "session_1",
+        status: {
+          kind: "error",
+          message: "process interrupted before owner exited",
+          recoverable: true,
+        },
+        startedAt: "2026-09-28T12:03:52.271Z",
+        updatedAt: "2026-09-28T12:04:10.417Z",
+      },
+    ],
+  });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => !frame.includes("Syncing session"));
+  await flush();
+  expect(app.lastFrame()).not.toContain(
+    "error: process interrupted before owner exited",
+  );
+  if (!client.getSessionView) throw new Error("Missing session-view fixture");
+  const view = await client.getSessionView({ sessionId: "session_1" });
+  client.emit({
+    type: "session.changed",
+    version: {
+      ...view.version,
+      sessionRevision: view.version.sessionRevision + 1,
+    },
+    executionRecovery: {
+      status: "blocked",
+      message: "independent recovery error",
+    },
+  });
+  await waitForFrame(app, (frame) =>
+    frame.includes("independent recovery error"),
+  );
+});
+
+it("keeps queue order stable when a middle lease update arrives last", async () => {
+  const prompts = ["B", "C", "E"].map((text, index) => ({
+    clientRequestId: text,
+    promptId: text,
+    userMessageId: `m-${text}`,
+    scopeKey: "/repo",
+    sessionId: "session_1",
+    status: "queued" as const,
+    text: `queue-${text}`,
+    createdAt: "2026-01-01T00:00:00Z",
+    acceptedAt: "2026-01-01T00:00:00Z",
+    admissionOrder: index + 1,
+    updatedAt: "2026-01-01T00:00:00Z",
+  }));
+  const client = createFakeClient({ ...snapshot(), prompts });
+  if (!client.getSessionView) throw new Error("Missing session-view fixture");
+  const sourceView = await client.getSessionView({ sessionId: "session_1" });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await flush();
+  client.emit({
+    type: "session.changed",
+    version: {
+      ...sourceView.version,
+      sessionRevision: sourceView.version.sessionRevision + 1,
+    },
+    prompts: [
+      prompts[0],
+      prompts[2],
+      {
+        ...prompts[1],
+        editLeaseOwnerId: "other-client",
+        updatedAt: "2026-01-01T00:01:00Z",
+      },
+    ],
+  });
+  await flush();
+  const frame = app.lastFrame() ?? "";
+  expect(frame.indexOf("queue-B")).toBeLessThan(frame.indexOf("queue-C"));
+  expect(frame.indexOf("queue-C")).toBeLessThan(frame.indexOf("queue-E"));
+  app.stdin.write("\u001b[1;3A");
+  await flush();
+  app.stdin.write("\u001b[A");
+  await flush();
+  expect(app.lastFrame()).toContain("› queue-C");
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+});
+
+it("preserves the root draft and leased queue edit while visiting a read-only child browser", async () => {
+  const prompt = {
+    clientRequestId: "q",
+    createdAt: "2026-05-14T00:00:04Z",
+    promptId: "p",
+    scopeKey: "/repo",
+    sessionId: "session_1",
+    status: "queued" as const,
+    text: "queued original",
+    updatedAt: "2026-05-14T00:00:04Z",
+    userMessageId: "m",
+  };
+  const client = createFakeClient({ ...snapshot(), prompts: [prompt] });
+  client.listSubagentExecutions = () =>
+    Promise.resolve({
+      executions: [],
+      hasMore: false,
+      waiting: false,
+      approvalBlocked: false,
+      activeCount: 0,
+      completedCount: 0,
+    });
+  client.getSubagentExecutionView = () =>
+    Promise.reject(new Error("No selection"));
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("queued original"));
+  app.stdin.write("kept draft");
+  await flush();
+  app.stdin.write("\u0007");
+  await waitForFrame(app, (frame) => frame.includes("Read only"));
+  await flush();
+  app.stdin.write("forbidden child typing");
+  await flush();
+  app.stdin.write("\u001b");
+  await waitForFrame(app, (frame) => frame.includes("Ctrl+G subagents"));
+  expect(app.lastFrame()).toContain("kept draft");
+  expect(app.lastFrame()).not.toContain("forbidden child typing");
+  app.stdin.write("\u001B[1;3A");
+  await waitForFrame(app, (frame) => frame.includes("Enter edit"));
+  app.stdin.write("\r");
+  await waitForFrame(app, (frame) => frame.includes("editing"));
+  app.stdin.write(" edited");
+  await flush();
+  app.stdin.write("\u0007");
+  await waitForFrame(app, (frame) => frame.includes("Read only"));
+  await flush();
+  app.stdin.write("\u001b");
+  await waitForFrame(app, (frame) => frame.includes("Ctrl+G subagents"));
+  expect(app.lastFrame()).toContain("queued original edited");
+  expect(app.lastFrame()).toContain("Enter save");
+  expect(client.acquirePromptEditLease).toHaveBeenCalledTimes(1);
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+});
+
+it.each(["queued", "succeeded", "lost twice", "another operation"] as const)(
+  "replays only the attempted retained send after %s acknowledgement loss",
+  async (scenario) => {
+    const store = new InMemoryPromptSubmissionStore({
+      ownerId: "owner",
+      ownerPid: process.pid,
+    });
+    await store.accept({
+      promptId: "p",
+      clientRequestId: "r",
+      userMessageId: "m",
+      scopeKey: "/repo",
+      sessionId: "session_1",
+      text: "retained body",
+      maxQueuedPrompts: 10,
+    });
+    await store.retainOwnedQueued();
+    const lease = await store.acquireEditLease("p", "tui", 60000);
+    const prompt = {
+      promptId: "p",
+      clientRequestId: "r",
+      userMessageId: "m",
+      scopeKey: "/repo",
+      sessionId: "session_1",
+      text: "retained body",
+      status: "retained" as const,
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+    };
+    const client = createFakeClient({ ...snapshot(), prompts: [prompt] });
+    client.acquirePromptEditLease.mockResolvedValue({
+      ...lease,
+      prompt,
+      expiresAt: new Date(lease.expiresAt).toISOString(),
+    });
+    let insertions = 0;
+    let executions = 0;
+    client.resubmitRetainedPrompt.mockImplementation(
+      async (input: import("ohbaby-sdk").UiResubmitRetainedPromptInput) => {
+        const request = {
+          ...input,
+          scopeKey: "/repo",
+          ownerClientId: "tui",
+          maxQueuedPrompts: 10,
+        };
+        const result = await store.resubmitRetained(
+          scenario === "another operation" &&
+            client.resubmitRetainedPrompt.mock.calls.length === 1
+            ? { ...request, operationId: "other-operation" }
+            : request,
+        );
+        if (result.inserted) insertions++;
+        if (scenario === "succeeded" && result.inserted) {
+          await store.claim("p");
+          await store.markRunning("p", "run-p");
+          await store.finish("p", {
+            status: "succeeded",
+            expectedRunId: "run-p",
+          });
+          executions++;
+        }
+        const current = await store.get("p");
+        if (!current) throw new Error("Missing accepted prompt");
+        client.emit({
+          type: "prompt.updated",
+          prompt: { ...prompt, text: current.text, status: current.status },
+        });
+        if (
+          client.resubmitRetainedPrompt.mock.calls.length <=
+          (scenario === "lost twice" ? 2 : 1)
+        )
+          throw new Error("response lost after commit");
+        return result.receipt;
+      },
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("retained body"));
+    app.stdin.write("original draft");
+    await flush();
+    app.stdin.write("\u001b[1;3A");
+    await flush();
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) => frame.includes("Enter send"));
+    app.stdin.write(" edited");
+    await flush();
+    app.stdin.write("\r");
+    await waitForFrame(app, (frame) => frame.includes("Send outcome unknown"));
+    expect(client.resubmitRetainedPrompt).toHaveBeenCalledTimes(1);
+    app.stdin.write(" changed after send");
+    await flush();
+    expect(app.lastFrame()).not.toContain("changed after send");
+    app.stdin.write("\r");
+    await flush();
+    expect(client.resubmitRetainedPrompt.mock.calls[1]).toEqual(
+      client.resubmitRetainedPrompt.mock.calls[0],
+    );
+    if (scenario === "lost twice") {
+      expect(client.resubmitRetainedPrompt).toHaveBeenCalledTimes(2);
+      expect(app.lastFrame()).toContain("retained body edited");
+      app.stdin.write("\r");
+      await flush();
+      expect(client.resubmitRetainedPrompt.mock.calls[2]).toEqual(
+        client.resubmitRetainedPrompt.mock.calls[0],
+      );
+    }
+    expect(insertions).toBe(1);
+    expect(executions).toBe(scenario === "succeeded" ? 1 : 0);
+    expect((await store.get("p"))?.userMessageId).toBe("m");
+    if (scenario === "another operation") {
+      expect(app.lastFrame()).toContain("retained body edited");
+      app.stdin.write("\u001b");
+      await flush();
+    }
+    expect(app.lastFrame()).toContain("> original draft");
+    expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+    expect(client.abortRun).not.toHaveBeenCalled();
+  },
+);
+
+it("selects the middle retained item, retries the same Send, and preserves the input draft", async () => {
+  const prompts = ["one", "two", "three"].map((id, index) => ({
+    admissionOrder: index + 1,
+    promptId: id,
+    clientRequestId: `r-${id}`,
+    userMessageId: `m-${id}`,
+    sessionId: "session_1",
+    scopeKey: "/repo",
+    text: `retained ${id}`,
+    status: "retained" as const,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  }));
+  const client = createFakeClient({ ...snapshot(), prompts });
+  client.resubmitRetainedPrompt
+    .mockRejectedValueOnce(new Error("response lost"))
+    .mockResolvedValue({ promptId: "two" });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("retained three"));
+  app.stdin.write("original draft");
+  await flush();
+  app.stdin.write("\u001B[1;3A");
+  await waitForFrame(app, (frame) => frame.includes("Enter edit"));
+  expect(client.acquirePromptEditLease).not.toHaveBeenCalled();
+  app.stdin.write("\u001B[A");
+  await flush();
+  app.stdin.write("\r");
+  await waitForFrame(app, (frame) => frame.includes("Enter send"));
+  expect(client.acquirePromptEditLease).toHaveBeenCalledWith({
+    promptId: "two",
+  });
+  app.stdin.write(" edited");
+  await flush();
+  app.stdin.write("\r");
+  await waitForFrame(app, (frame) => frame.includes("response lost"));
+  expect(app.lastFrame()).toContain("retained two edited");
+  app.stdin.write("\r");
+  await waitForFrame(app, (frame) => frame.includes("> original draft"));
+  expect(client.resubmitRetainedPrompt.mock.calls[0]).toEqual(
+    client.resubmitRetainedPrompt.mock.calls[1],
+  );
+  expect(client.resubmitRetainedPrompt).toHaveBeenCalledWith({
+    promptId: "two",
+    editLeaseId: "lease_1",
+    operationId: expect.any(String) as string,
+    text: "retained two edited",
+  });
+  expect(client.editQueuedPrompt).not.toHaveBeenCalled();
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+  expect(client.abortRun).not.toHaveBeenCalled();
+  if (!client.getSessionView) throw new Error("Missing session-view fixture");
+  const view = await client.getSessionView({ sessionId: "session_1" });
+  client.emit({
+    type: "session.changed",
+    version: {
+      ...view.version,
+      sessionRevision: view.version.sessionRevision + 1,
+    },
+    messages: [
+      {
+        ...view.session.messages[0],
+        parts: [{ type: "text", text: "Finalized retained reply" }],
+      },
+    ],
+  });
+  await waitForFrame(app, (frame) =>
+    frame.includes("Finalized retained reply"),
+  );
+  expect(app.lastFrame()).toContain("> original draft");
+});
+
+it("does not delete a neighboring row when the selected prompt was claimed elsewhere", async () => {
+  const prompts = ["one", "two", "three"].map((id, index) => ({
+    admissionOrder: index + 1,
+    promptId: id,
+    clientRequestId: `r-${id}`,
+    userMessageId: `m-${id}`,
+    sessionId: "session_1",
+    scopeKey: "/repo",
+    text: `queued ${id}`,
+    status: "queued" as const,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  }));
+  const client = createFakeClient({ ...snapshot(), prompts });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("queued three"));
+  app.stdin.write("original draft");
+  await flush();
+  app.stdin.write("\u001B[1;3A");
+  await flush();
+  app.stdin.write("\u001B[A");
+  await flush();
+  client.emit({
+    type: "prompt.updated",
+    prompt: { ...prompts[1], status: "starting" },
+  });
+  await waitForFrame(app, (frame) => frame.includes("Queued 2"));
+  app.stdin.write("\u0004");
+  await flush();
+  expect(client.cancelQueuedPrompt).not.toHaveBeenCalled();
+  expect(client.acquirePromptEditLease).not.toHaveBeenCalled();
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+  expect(app.lastFrame()).toContain("original draft");
+});
+
+it("keeps expired retained edit text associated and lets Esc restore the draft without Stop", async () => {
+  const prompt = {
+    promptId: "p",
+    clientRequestId: "r",
+    userMessageId: "m",
+    sessionId: "session_1",
+    scopeKey: "/repo",
+    text: "retained body",
+    status: "retained" as const,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  };
+  const run = {
+    id: "run_1",
+    sessionId: "session_1",
+    startedAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    status: { kind: "running" as const, runId: "run_1" },
+  };
+  const client = createFakeClient({
+    ...snapshot(),
+    prompts: [prompt],
+    runs: [run],
+    status: run.status,
+  });
+  client.acquirePromptEditLease.mockResolvedValue({
+    editLeaseId: "expired",
+    expiresAt: "2020-01-01T00:00:00Z",
+    ownerClientId: "tui",
+    prompt,
+  });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("retained body"));
+  app.stdin.write("original draft");
+  await flush();
+  app.stdin.write("\u001B[1;3A");
+  await flush();
+  app.stdin.write("\r");
+  await waitForFrame(app, (frame) => frame.includes("Edit unavailable"));
+  app.stdin.write("\r");
+  await flush();
+  expect(client.resubmitRetainedPrompt).not.toHaveBeenCalled();
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+  app.stdin.write("\u001b");
+  await flush();
+  expect(app.lastFrame()).toContain("original draft");
+  expect(client.abortRun).not.toHaveBeenCalled();
+});
+
+it("keeps the default in-process TUI header quiet during a healthy entry check", async () => {
+  // eslint-disable-next-line no-restricted-syntax -- Contract verifies the real default backend entry gate through the TUI.
+  const { createInProcessUiBackendClient } = await import("ohbaby-agent");
+  let resume: (() => void) | undefined;
+  let checking = false;
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: snapshot(),
+    recoverExecutionSession: async () => {
+      if (!checking) return false;
+      await new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      return false;
+    },
+  });
+  try {
+    await client.initializeSession("session_1");
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("local draft");
+    await flush();
+    checking = true;
+    const entry = client.initializeSession("session_1");
+    await vi.waitFor(() => {
+      expect(resume).toBeDefined();
+    });
+    await flush();
+    expect(app.lastFrame()).toContain("local draft");
+    expect(app.lastFrame()).not.toContain("Checking execution records");
+    resume?.();
+    await entry;
+    await flush();
+    expect(app.lastFrame()).not.toContain("Checking execution records");
+  } finally {
+    resume?.();
+    await client.dispose();
+  }
+});

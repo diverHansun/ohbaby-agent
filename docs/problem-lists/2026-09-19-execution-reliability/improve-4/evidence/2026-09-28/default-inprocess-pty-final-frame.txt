@@ -1,0 +1,34 @@
+    Ctrl+G subagents · 0 executions
+    | I4_LOCAL_A_HOLD
+
+    I4LOCALAHOLDSTARTED
+    [Response cancelled by the user.]
+
+    | I4_LOCAL_STEER
+
+    interrupted · Total 15s
+
+    | I4_LOCAL_B
+
+    I4LOCALB_OK
+
+    Total 15s
+
+    | I4_LOCAL_EXIT_HOLD
+
+    [Response cancelled by the user.]
+    I4LOCALEXITHOLDSTARTED
+
+    interrupted · Total 2s
+
+    | I4_LOCAL_RETAIN_SENT
+
+    I4LOCALRETAINSENTOK
+
+    Total 0s
+
+    Task stopped before your steer message was sent.
+    ╭──────────────────────────────────────────────────────────────────────╮
+    │ > I4 LOCAL kept draft                                                │
+    ╰──────────────────────────────────────────────────────────────────────╯
+    auto · default · session_1790594721850_sdmv8y1          9.6K / 128K (7%)

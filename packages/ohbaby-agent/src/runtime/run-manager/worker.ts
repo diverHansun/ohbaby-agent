@@ -80,6 +80,7 @@ function serializableToolResult(
   return withDefined({
     callId: result.callId,
     duration: result.duration,
+    execution: result.execution,
     error: result.error
       ? withDefined({
           details:
@@ -110,7 +111,10 @@ function toToolExecutionEnvironment(
   }
 
   return {
+    authorizeInternalRead: lease.authorizeInternalRead?.bind(lease),
     workdir: lease.workdir,
+    scopeKey: lease.scopeKey,
+    retain: lease.retain?.bind(lease),
     containsTrustedPath: lease.containsTrustedPath.bind(lease),
     resolveCommandContext: lease.resolveCommandContext.bind(lease),
     preflight: lease.preflight.bind(lease),
@@ -153,18 +157,24 @@ export class RunWorker {
 
     try {
       const result = await this.consumeLifecycle();
-      const status = this.context.abortSignal.aborted
-        ? "cancelled"
-        : result.success
-          ? "succeeded"
-          : "failed";
+      const fatalError = this.deps.getFatalError?.();
+      const status = fatalError
+        ? "failed"
+        : this.context.abortSignal.aborted
+          ? "cancelled"
+          : result.success
+            ? "succeeded"
+            : "failed";
       const error =
-        status === "failed"
+        fatalError?.message ??
+        (status === "failed"
           ? result.finalResponse || "Lifecycle did not complete successfully"
           : status === "cancelled"
             ? abortReason(this.context.abortSignal)
-            : undefined;
-      const terminalReason = result.terminalReason;
+            : undefined);
+      const terminalReason = fatalError
+        ? "tool_persistence_failure"
+        : result.terminalReason;
 
       await this.executeHook(
         "post-run",
@@ -199,13 +209,17 @@ export class RunWorker {
         ...(terminalReason === undefined ? {} : { terminalReason }),
       };
     } catch (error) {
-      const status: RunStatus = this.context.abortSignal.aborted
-        ? "cancelled"
-        : "failed";
+      const fatalError = this.deps.getFatalError?.();
+      const status: RunStatus = fatalError
+        ? "failed"
+        : this.context.abortSignal.aborted
+          ? "cancelled"
+          : "failed";
       const message =
-        status === "cancelled"
+        fatalError?.message ??
+        (status === "cancelled"
           ? abortReason(this.context.abortSignal)
-          : errorToMessage(error);
+          : errorToMessage(error));
 
       await this.executeHook(
         "post-run",
@@ -250,7 +264,9 @@ export class RunWorker {
     }
 
     return {
+      currentRunInputs: this.deps.currentRunInputs,
       directory: this.context.directory,
+      runId: this.context.runId,
       modelId: this.context.modelId,
       ...(this.context.reasoning === undefined
         ? {}
@@ -329,6 +345,7 @@ export class RunWorker {
     if (event.type === "llm:reasoning-end") {
       this.publish(scope, "run.llm.reasoning.end", {
         ...this.streamBase(event),
+        endReason: event.endReason,
         timestamp: event.timestamp,
         step: event.step,
         messageId: event.messageId,
@@ -337,6 +354,19 @@ export class RunWorker {
       return;
     }
 
+    if (
+      event.type === "llm:request-started" ||
+      event.type === "llm:first-text" ||
+      event.type === "llm:request-ended"
+    ) {
+      this.publish(scope, `run.${event.type.replace(":", ".")}`, {
+        ...this.streamBase(event),
+        timestamp: event.timestamp,
+        step: event.step,
+        request: event.request,
+      });
+      return;
+    }
     if (event.type === "llm:start") {
       this.publish(
         scope,
@@ -462,8 +492,21 @@ export class RunWorker {
         step: event.step,
         callId: event.callId,
         toolName: event.toolName,
-        status: "executing",
+        status: "pending",
         params: event.params,
+      });
+      return;
+    }
+
+    if (event.type === "tool:state") {
+      this.publish(scope, "run.tool.state", {
+        ...this.streamBase(event),
+        timestamp: event.timestamp,
+        step: event.step,
+        callId: event.callId,
+        toolName: event.toolName,
+        params: event.params,
+        execution: event.execution,
       });
       return;
     }
@@ -514,8 +557,10 @@ export class RunWorker {
   private streamBase(event: LifecycleEvent): Record<string, unknown> {
     return withDefined({
       contextScopeId: event.contextScopeId ?? this.context.contextScopeId,
-      runId: this.context.runId,
-      sessionId: this.context.sessionId,
+      messageId: event.messageId,
+      partId: event.partId,
+      runId: event.runId ?? this.context.runId,
+      sessionId: event.sessionId,
     });
   }
 

@@ -2,7 +2,9 @@ import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { UiPromptError } from "ohbaby-sdk";
 
 export type PromptSubmissionStatus =
+  | "steered"
   | "queued"
+  | "retained"
   | "starting"
   | "running"
   | "succeeded"
@@ -11,6 +13,10 @@ export type PromptSubmissionStatus =
   | "interrupted";
 
 export interface PromptSubmissionRecord {
+  readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
+  /** Admission-created temporary title; preserved when the queued text changes. */
+  readonly titleExpected?: string;
+  readonly steerReceipt?: import("./current-run-inputs.js").SteerQueuedPromptReceipt;
   readonly reasoning?: ReasoningConfig;
   readonly promptId: string;
   readonly clientRequestId: string;
@@ -26,6 +32,9 @@ export interface PromptSubmissionRecord {
   readonly editLeaseOwnerId?: string;
   readonly editLeaseExpiresAt?: number;
   readonly error?: UiPromptError;
+  readonly acceptedAt?: number;
+  readonly admissionOrder?: number;
+  readonly endTimeSource?: "recovery";
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly startedAt?: number;
@@ -33,6 +42,9 @@ export interface PromptSubmissionRecord {
 }
 
 export interface AcceptPromptSubmissionInput {
+  readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
+  /** Admission-created temporary title; preserved when the queued text changes. */
+  readonly titleExpected?: string;
   readonly reasoning?: ReasoningConfig;
   readonly promptId: string;
   readonly clientRequestId: string;
@@ -75,9 +87,61 @@ type PromptTerminalResult =
 
 export type FinishPromptSubmissionInput = PromptTerminalResult & {
   readonly expectedRunId?: string;
+  readonly endedAt?: number;
+  readonly endTimeSource?: "recovery";
 };
 
+export interface PromptHistoryWindow {
+  readonly messageIds?: readonly string[];
+  readonly runIds?: readonly string[];
+}
+
+export interface PromptResubmissionReceipt {
+  readonly operationId: string;
+  readonly promptId: string;
+  readonly userMessageId: string;
+  readonly sessionId: string;
+  readonly acceptedAt: number;
+}
+
+export interface ResubmitRetainedPromptInput {
+  readonly scopeKey: string;
+  readonly promptId: string;
+  readonly operationId: string;
+  readonly editLeaseId: string;
+  readonly ownerClientId?: string;
+  readonly text: string;
+  readonly maxQueuedPrompts: number;
+}
+
+export interface ResubmitRetainedPromptResult {
+  readonly record: PromptSubmissionRecord;
+  readonly receipt: PromptResubmissionReceipt;
+  readonly inserted: boolean;
+}
+
+export interface RecoverPromptSubmissionsOptions {
+  readonly scopeKey?: string;
+  readonly sessionId?: string;
+  /** Only after the caller has closed this owner's execution admission. */
+  readonly includeCurrentOwner?: boolean;
+  /** Offline legacy recovery only; absence of an owner is not death evidence. */
+  readonly recoverUnknownOwner?: boolean;
+}
+
 export interface PromptSubmissionStore {
+  resubmitRetained(
+    input: ResubmitRetainedPromptInput,
+  ): Promise<ResubmitRetainedPromptResult>;
+  getResubmissionReceipt(
+    scopeKey: string,
+    operationId: string,
+  ): Promise<PromptResubmissionReceipt | undefined>;
+  retainOwnedQueued(scopeKey?: string): Promise<number>;
+  recoverAllInterrupted(
+    options?: RecoverPromptSubmissionsOptions,
+  ): Promise<number>;
+
   assertCapacity(scopeKey: string, maxQueuedPrompts: number): Promise<void>;
   accept(
     input: AcceptPromptSubmissionInput,
@@ -123,6 +187,18 @@ export interface PromptSubmissionStore {
   ): Promise<PromptSubmissionRecord>;
   listQueued(scopeKey: string): Promise<readonly PromptSubmissionRecord[]>;
   listVisible(scopeKey: string): Promise<readonly PromptSubmissionRecord[]>;
+  /** Durable receipt existence, including terminal history without message/run associations. */
+  hasForSession(scopeKey: string, sessionId: string): Promise<boolean>;
+  /** Original admission title remains recoverable even when its prompt was cancelled. */
+  getSessionTitleExpected(
+    scopeKey: string,
+    sessionId: string,
+  ): Promise<string | undefined>;
+  listForSession(
+    scopeKey: string,
+    sessionId: string,
+    window?: PromptHistoryWindow,
+  ): Promise<readonly PromptSubmissionRecord[]>;
   listScopesWithQueued(): Promise<readonly string[]>;
   recoverInterrupted(scopeKey: string): Promise<number>;
 }
@@ -132,7 +208,9 @@ export interface PromptExecutionControls {
   markRunning(runId: string): Promise<void>;
 }
 
-export type PromptExecutionResult = PromptTerminalResult;
+export type PromptExecutionResult = PromptTerminalResult & {
+  readonly endedAt?: number;
+};
 
 export type PromptSubmissionExecutor = (
   prompt: PromptSubmissionRecord,

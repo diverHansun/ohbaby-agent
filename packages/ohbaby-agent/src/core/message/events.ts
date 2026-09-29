@@ -33,11 +33,20 @@ const MessageErrorSchema = z.discriminatedUnion("name", [
   }),
 ]);
 
+const RuntimeInputSchema = z.object({
+  kind: z.enum(["user-steer", "subagent-result", "subagent-status"]),
+  inputId: z.string(),
+  targetRunId: z.string(),
+  sourceId: z.string(),
+});
 const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
   z.object({
     id: z.string(),
     sessionId: z.string(),
+    contextScopeId: z.string().optional(),
+    runId: z.string().optional(),
     role: z.literal("user"),
+    runtimeInput: RuntimeInputSchema.optional(),
     time: MessageTimeSchema,
     agent: z.string(),
     model: z
@@ -52,7 +61,28 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
   z.object({
     id: z.string(),
     sessionId: z.string(),
+    contextScopeId: z.string().optional(),
+    runId: z.string().optional(),
     role: z.literal("assistant"),
+    runtimeInput: RuntimeInputSchema.optional(),
+    modelRequests: z
+      .array(
+        z.object({
+          requestId: z.string(),
+          inputIds: z.array(z.string()).readonly().optional(),
+          runId: z.string(),
+          messageId: z.string(),
+          step: z.number(),
+          attempt: z.number(),
+          purpose: z.string(),
+          startedAt: z.number(),
+          firstTextAt: z.number().optional(),
+          endedAt: z.number().optional(),
+          endTimeSource: z.literal("recovery").optional(),
+          outcome: z.enum(["running", "success", "error", "aborted"]),
+        }),
+      )
+      .optional(),
     time: MessageTimeSchema,
     agent: z.string(),
     parentId: z.string().optional(),
@@ -64,7 +94,10 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
   z.object({
     id: z.string(),
     sessionId: z.string(),
+    contextScopeId: z.string().optional(),
+    runId: z.string().optional(),
     role: z.literal("system"),
+    runtimeInput: RuntimeInputSchema.optional(),
     time: MessageTimeSchema,
     kind: z.union([z.literal("abort"), z.literal("error"), z.literal("info")]),
     agent: z.string().optional(),
@@ -74,6 +107,7 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
 const PartBaseSchema = {
   id: z.string(),
   messageId: z.string(),
+  contextScopeId: z.string().optional(),
   sessionId: z.string(),
   orderIndex: z.number(),
   time: z
@@ -126,6 +160,7 @@ const PartSchema: z.ZodType<Part> = z.discriminatedUnion("type", [
   z.object({
     ...PartBaseSchema,
     type: z.literal("reasoning"),
+    endReason: z.enum(["normal", "interrupted", "failed"]).optional(),
     text: z.string(),
     metadata: z.record(z.unknown()).optional(),
   }),

@@ -26,14 +26,14 @@
 
 子组件职责：
 
-| 子组件 | 职责 | 追溯 |
-|--------|------|------|
-| **transport** | 用 Hono 装配 HTTP server：挂载各协议路由、套中间件、绑定监听 | D1 |
-| **protocols/jsonrpc** | jsonrpc 信封解析 + RPC handler + remote client（供 CLI/attach/测试） | D2, D5 |
-| **protocols/web** | 浏览器用 REST + SSE 路由 | D2 |
-| **coordination** | 单写者协调：prompt-queue、permission-router、event-bus（seqNum + 环形缓冲 + replay） | D3 |
-| **auth** | Hono 中间件：token（fail-closed）、CORS（origin 白名单） | D4 |
-| **lifecycle** | foreground 启动/停止（主路径）；detached 降级抽屉 | D6, N6 |
+| 子组件                | 职责                                                                                 | 追溯   |
+| --------------------- | ------------------------------------------------------------------------------------ | ------ |
+| **transport**         | 用 Hono 装配 HTTP server：挂载各协议路由、套中间件、绑定监听                         | D1     |
+| **protocols/jsonrpc** | jsonrpc 信封解析 + RPC handler + remote client（供 CLI/attach/测试）                 | D2, D5 |
+| **protocols/web**     | 浏览器用 REST + SSE 路由                                                             | D2     |
+| **coordination**      | 单写者协调：prompt-queue、permission-router、event-bus（seqNum + 环形缓冲 + replay） | D3     |
+| **auth**              | Hono 中间件：token（fail-closed）、CORS（origin 白名单）                             | D4     |
+| **lifecycle**         | foreground 启动/停止（主路径）；detached 降级抽屉                                    | D6, N6 |
 
 依赖方向恒为 `protocols → coordination → CoreApiHost(sdk 契约)`，无环（G5）。`ohbaby-server` 只依赖 `ohbaby-agent` 拿 `createPersistentUiBackendClient` + `ohbaby-sdk` 契约类型；`ohbaby-agent` 不反向依赖 `ohbaby-server`。
 
@@ -89,7 +89,7 @@ packages/ohbaby-server/src/
 ├── coordination/
 │   ├── prompt-backend.ts       Prompt 接单/owner 协调
 │   ├── client-view.ts          per-client snapshot/event 投影
-│   ├── permission-router.ts    permission/interaction owner 路由
+│   ├── permission-router.ts    按根会话过滤审批（interaction owner 由 client-view 保留）
 │   └── event-bus.ts            seqNum + 环形缓冲 + replay
 ├── auth/token.ts               Bearer token 校验与脱敏
 └── runtime/
@@ -107,14 +107,14 @@ packages/ohbaby-server/src/
 
 ## 4. Architectural Constraints & Trade-offs（约束与权衡）
 
-| 决策 | 放弃的方案 | 当前方案的代价 |
-|------|-----------|---------------|
-| 引入 Hono | 保留手写 Node http（零新依赖） | 新增运行时依赖 + 重写路由；换来中间件管线与 G2 实证 |
-| A2（UiEvent 直发 + replay） | A1（现在抽领域事件投影层） | ACP/A2A 接入时要回头补投影一次；换来当前不为想象未来付费 |
-| foreground 主路径、detached 降级 | 把 detached 当一等能力一起做 | 后台常驻能力暂不打磨；换来避开 daemon 最复杂、bug 最多的部分 |
-| `core-api-factory` 留在 agent | 随 04 移入 server/host | server 不掌管"选 local/remote"；换来默认 CLI 彻底不依赖 server 包 |
-| 端口-适配器分层 | 单文件按 if 分发 | 多几个目录/文件；换来新增协议时核心零改动 |
-| 窄导出面（只 `index.ts`） | 直接导出深路径 | 需维护一层 re-export；换来调用方不耦合内部结构 |
+| 决策                             | 放弃的方案                     | 当前方案的代价                                                    |
+| -------------------------------- | ------------------------------ | ----------------------------------------------------------------- |
+| 引入 Hono                        | 保留手写 Node http（零新依赖） | 新增运行时依赖 + 重写路由；换来中间件管线与 G2 实证               |
+| A2（UiEvent 直发 + replay）      | A1（现在抽领域事件投影层）     | ACP/A2A 接入时要回头补投影一次；换来当前不为想象未来付费          |
+| foreground 主路径、detached 降级 | 把 detached 当一等能力一起做   | 后台常驻能力暂不打磨；换来避开 daemon 最复杂、bug 最多的部分      |
+| `core-api-factory` 留在 agent    | 随 04 移入 server/host         | server 不掌管"选 local/remote"；换来默认 CLI 彻底不依赖 server 包 |
+| 端口-适配器分层                  | 单文件按 if 分发               | 多几个目录/文件；换来新增协议时核心零改动                         |
+| 窄导出面（只 `index.ts`）        | 直接导出深路径                 | 需维护一层 re-export；换来调用方不耦合内部结构                    |
 
 ### 后续维护者须知（为什么不能随意改）
 

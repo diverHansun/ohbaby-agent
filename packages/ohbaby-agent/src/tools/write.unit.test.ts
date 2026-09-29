@@ -282,4 +282,202 @@ describe("write file tool", () => {
 
     await expect(fs.readdir(tempRoot)).resolves.toEqual([]);
   });
+  it.each([
+    Buffer.from([255, 254, 97, 0]),
+    Buffer.from([97, 0, 98]),
+    Buffer.from([255]),
+  ])("fully replaces non-text old bytes %j", async (bytes) => {
+    const target = path.join(tempRoot, "old.bin");
+    await fs.writeFile(target, bytes);
+    const result = await createWriteTool().execute(
+      {
+        file_path: "old.bin",
+        content: "new",
+        expected_mtime_ms: await statMtimeMs(target),
+      },
+      createTestContext(tempRoot),
+    );
+    expect(await fs.readFile(target, "utf8")).toBe("new");
+    expect(result.metadata?.created).toBe(false);
+  });
+
+  it("previews invalid old UTF-8 as unavailable, never as creation", async () => {
+    const target = path.join(tempRoot, "invalid.txt");
+    await fs.writeFile(target, Buffer.from([255]));
+    const result = await createWriteTool().execute(
+      {
+        file_path: "invalid.txt",
+        content: "new",
+        dry_run: true,
+        expected_mtime_ms: await statMtimeMs(target),
+      },
+      createTestContext(tempRoot),
+    );
+    expect(result.metadata).toMatchObject({
+      created: false,
+      diffOmitted: true,
+    });
+    expect(result.output).toContain("Diff omitted");
+    expect(await fs.readFile(target)).toEqual(Buffer.from([255]));
+  });
+
+  it.each([false, true])(
+    "rejects oversized write content before creating or changing target (existing=%s)",
+    async (existing) => {
+      const target = path.join(tempRoot, "budget.txt");
+      if (existing) await fs.writeFile(target, "old");
+      await expect(
+        createWriteTool().execute(
+          {
+            file_path: "budget.txt",
+            content: "x".repeat(20 * 1024 * 1024 + 1),
+            expected_mtime_ms: existing ? await statMtimeMs(target) : undefined,
+          },
+          createTestContext(tempRoot),
+        ),
+      ).rejects.toThrow("Write content budget");
+      if (existing) expect(await fs.readFile(target, "utf8")).toBe("old");
+      else
+        await expect(fs.stat(target)).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
+
+  it("honors cancellation before rename and removes temporary files", async () => {
+    const target = await writeFile(tempRoot, "cancel.txt", "old");
+    const controller = new AbortController();
+    const actualChmod = fs.chmod.bind(fs);
+    vi.spyOn(fs, "chmod").mockImplementation(async (...args) => {
+      await actualChmod(...args);
+      controller.abort();
+    });
+    await expect(
+      createWriteTool().execute(
+        {
+          file_path: "cancel.txt",
+          content: "new",
+          expected_mtime_ms: await statMtimeMs(target),
+        },
+        { ...createTestContext(tempRoot), signal: controller.signal },
+      ),
+    ).rejects.toThrow();
+    expect(await fs.readFile(target, "utf8")).toBe("old");
+    expect(await fs.readdir(tempRoot)).toEqual(["cancel.txt"]);
+  });
+
+  it("checks write permission during dry run", async () => {
+    const context = createTestContext(tempRoot);
+    context.resolvePathForWrite = (): Promise<string> =>
+      Promise.reject(new Error("write denied"));
+    await expect(
+      createWriteTool().execute(
+        { file_path: "new.txt", content: "x", dry_run: true },
+        context,
+      ),
+    ).rejects.toThrow("write denied");
+    expect(await fs.readdir(tempRoot)).toEqual([]);
+  });
+  it("includes an existing BOM in the write limit", async () => {
+    const target = await writeFile(tempRoot, "bom.txt", "\uFEFFold");
+    await expect(
+      createWriteTool().execute(
+        {
+          file_path: "bom.txt",
+          content: "x".repeat(20 * 1024 * 1024),
+          expected_mtime_ms: await statMtimeMs(target),
+        },
+        createTestContext(tempRoot),
+      ),
+    ).rejects.toThrow("Write content budget");
+    expect(await fs.readFile(target, "utf8")).toBe("\uFEFFold");
+  });
+
+  it("overwrites a large old file using only its header for normal writes", async () => {
+    const target = await writeFile(
+      tempRoot,
+      "large.txt",
+      "a".repeat(21 * 1024 * 1024),
+    );
+    const readFile = vi.spyOn(fs, "readFile");
+    const result = await createWriteTool().execute(
+      {
+        file_path: "large.txt",
+        content: "new",
+        expected_mtime_ms: await statMtimeMs(target),
+      },
+      createTestContext(tempRoot),
+    );
+    expect(readFile).not.toHaveBeenCalled();
+    expect(result.metadata).toMatchObject({ created: false, bytes: 3 });
+    expect(await fs.readFile(target, "utf8")).toBe("new");
+  });
+
+  it("reports success when cancellation arrives after atomic rename", async () => {
+    const target = await writeFile(tempRoot, "committed.txt", "old");
+    const controller = new AbortController();
+    const rename = fs.rename.bind(fs);
+    vi.spyOn(fs, "rename").mockImplementation(async (...args) => {
+      await rename(...args);
+      controller.abort();
+    });
+    const result = await createWriteTool().execute(
+      {
+        file_path: "committed.txt",
+        content: "new",
+        expected_mtime_ms: await statMtimeMs(target),
+      },
+      { ...createTestContext(tempRoot), signal: controller.signal },
+    );
+    expect(result.output).toContain("Wrote");
+    expect(await fs.readFile(target, "utf8")).toBe("new");
+  });
+
+  it("does not modify a pre-aborted request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      createWriteTool().execute(
+        { file_path: "new.txt", content: "new" },
+        { ...createTestContext(tempRoot), signal: controller.signal },
+      ),
+    ).rejects.toThrow();
+    expect(await fs.readdir(tempRoot)).toEqual([]);
+  });
+  it("reports a committed change when post-rename metadata cannot be read", async () => {
+    const target = await writeFile(tempRoot, "metadata.txt", "old");
+    const mtime = (await fs.stat(target)).mtimeMs;
+    let committed = false;
+    const rename = fs.rename.bind(fs);
+    const stat = fs.stat.bind(fs);
+    vi.spyOn(fs, "rename").mockImplementation(async (...args) => {
+      await rename(...args);
+      committed = true;
+    });
+    vi.spyOn(fs, "stat").mockImplementation((...args) => {
+      if (committed) return Promise.reject(new Error("metadata unavailable"));
+      return stat(...args);
+    });
+    const result = await createWriteTool().execute(
+      { file_path: "metadata.txt", content: "new", expected_mtime_ms: mtime },
+      createTestContext(tempRoot),
+    );
+    expect(result.output).toContain("metadata unavailable");
+    expect(result.metadata).toMatchObject({
+      sizeBytes: 3,
+    });
+    expect(typeof result.metadata?.metadataWarning).toBe("string");
+    expect(result.metadata?.mtimeMs).toBeUndefined();
+    expect(await fs.readFile(target, "utf8")).toBe("new");
+  });
+  it.each(["\uD83D", "\uDE00"])(
+    "rejects malformed Unicode content %j without creating a target",
+    async (content) => {
+      await expect(
+        createWriteTool().execute(
+          { file_path: "invalid.txt", content },
+          createTestContext(tempRoot),
+        ),
+      ).rejects.toThrow("well-formed Unicode");
+      expect(await fs.readdir(tempRoot)).toEqual([]);
+    },
+  );
 });

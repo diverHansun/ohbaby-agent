@@ -38,6 +38,14 @@ SDK 内部由六类能力组成：
 
 Observation contract 只描述“记录什么”和“如何 best-effort 提交”，不决定“写到哪里”。默认 Agent/Server composition 注入本地 no-op；需要持久化或转发的集成者显式注入 recorder，并由创建者管理 drain/flush。任何低层 recorder 都不得隐式选择 stdout/stderr。
 
+### 子代理连续会话读取
+
+`createSubagentConversationReader` 管理一个逻辑子代理的只读选择，复用客户端现有事件流；它不启动、停止或修改子代理。`subagentConversationVersion: 1` 表示支持会话读取和 watch/unwatch，旧消费者可忽略该能力，TUI 仍使用原有交互。
+
+历史窗口与实时投影基线分开保存。历史支持 before/after 和 execution 锚点；实时事件携带独立 scope revision，缺口或重连重新读取权威基线。同代际恢复保留已加载历史和阅读位置，代际变化使用新快照。队列中的父消息以预留的 `childUserMessageId` 展示，启动后沿用该 ID，不提前写入模型历史。
+
+每次 watch 预分配唯一 ID；切换、关闭或请求失败时取消对应 ID。网络客户端同步分配单调 `watchSequence`，服务端在当前绑定内拒绝低序请求，不能让迟到的请求或响应覆盖当前选择。该读取生命周期与根会话的控制面独立，审批和用户输入仍归根会话。
+
 ---
 
 ## 二、Design Pattern & Rationale（设计模式与理由）

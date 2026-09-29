@@ -8,13 +8,13 @@
 
 ## 1. Use Case Overview（用例概览）
 
-| 用例 | 落地职责 |
-|------|---------|
-| **UC1 启动会话并渲染首屏** | D1 / D4 / D3 |
-| **UC2 发话并接收流式回复** | D3 / D2 |
-| **UC3 处置权限请求** | D3 |
-| **UC4 断线恢复 / 重同步** | D1 / G5 |
-| **UC5 执行 web-safe slash 命令** | D6 / D2 |
+| 用例                                             | 落地职责          |
+| ------------------------------------------------ | ----------------- |
+| **UC1 启动会话并渲染首屏**                       | D1 / D4 / D3      |
+| **UC2 发话并接收流式回复**                       | D3 / D2           |
+| **UC3 处置权限请求**                             | D3                |
+| **UC4 断线恢复 / 重同步**                        | D1 / G5           |
+| **UC5 执行 web-safe slash 命令**                 | D6 / D2           |
 | **UC6 切换 selected workspace**（v0.1.7 已完成） | D7 / D4 / D1 / D2 |
 
 ---
@@ -22,13 +22,15 @@
 ## 2. Main Flow Description（主流程描述）
 
 ### UC1 启动会话并渲染首屏
+
 1. `bootstrap.ts` 读 `window.__OHBABY__` → 构造 `OhbabyWebRuntime`；runtime 为 selected workspace 建立唯一 `BrowserDaemonClient`。
-2. `POST /v1/clients`（startup intent）→ clientId。
-3. **先开** SSE 并缓冲事件 → 收 `hello` → `connecting`。
-4. `GET /v1/snapshot`（含 seqNum 基线）→ 投影初始 ViewState。
-5. 应用缓冲中 seq>基线 的事件 → `live`。
+2. `POST /v1/clients`（startup intent）→ clientId 及根会话绑定；注册只读轻量元数据。
+3. 建立 SSE，服务端安装订阅后发送 hello；客户端确认 epoch/root/bindingGeneration。
+4. 独立读取审批基线并应用连续增量后置 permissionSync=ready；审批查询不阻塞 SSE reader。
+5. 聊天 snapshot、model 与会话索引另行加载，失败不关闭健康 SSE 或已就绪审批。
 
 ### UC2 发话并接收流式回复
+
 1. 用户按 Enter 后，Composer 同帧清空草稿；Web 记录 keyed local attempt，并立即显示用户行、startup Thinking 与 admission spinner，不等待 HTTP 或 runtime 热身。
 2. `runtime.client.submitPromptAccepted(...)` → `POST /v1/prompts` → `202` + receipt。receipt 是受理线性化点：Web 记录服务端 `userMessageId` 并停止 admission spinner；首次会话的 `selectSession` 独立进行，不延长或回滚受理状态。
 3. 展示按 `formal UiMessage > starting/running UiPromptSubmission > local attempt` 在同一 render 中接管；正式消息与 run 可乱序到达，但同一 prompt 始终最多一条用户行、一个 Thinking。active run 的 follow-up 不插入 conversation，只进入现有 Queue。
@@ -36,17 +38,20 @@
 5. 只有 live run 可 `abort`；startup Thinking 不伪造可取消的 run handle。
 
 ### UC3 处置权限请求
-1. SSE 推 `permission.requested` → 入 PendingPermission 队列 → **权限模态 slide-up 弹出**（渲染队首；多于一个显示"还有 N 个待处理"）。仅当权限策略为 `default` 时弹出（`full-access` 不弹）。
-2. 用户准/拒 → `POST /v1/permissions/:id`。
-3. `permission.resolved` 回流 → 移除该 PendingPermission，模态显示下一个或关闭。
-4. 模态**纯由队列投影**：resync 时 ViewState 重建 → 队列重算 → 模态自动刷新/关闭（该请求可能已被它端处置）。视觉规格见 [`ui/components.md`](./ui/components.md)。
+
+1. 独立审批基线和 requested/resolved 按 permissionRevision 更新当前 root 列表；卡片可用 Previous/Next 选择非首项，并显示真实主/子来源。
+2. permissionSync=ready 时才可准/拒，`POST /v1/permissions/:id` 带预期 epoch/root/bindingGeneration。选项无 Cancel run。
+3. 同 root 任一页面回答后，两页均消费 resolved 撤卡；HTTP 成功不代表工具已执行。
+4. 全部页面关闭也不撤销 backend pending；重开后重新取独立基线。全量 ViewState 替换不覆盖审批。视觉规格见 [`ui/components.md`](./ui/components.md)。
 
 ### UC4 断线恢复 / 重同步
+
 1. SSE 断 → `reconnecting` → 带 `Last-Event-ID` 重连。
 2. 命中 replay → 补发缺失事件 → 回 `live`。
 3. 命中 `resync-required` → `resyncing` → 重拉 snapshot，经统一 `snapshot.replaced` barrier 更新 store 和 subscriber → 回 `live`。
 
 ### UC5 执行 web slash 命令
+
 1. 用户在 Composer 输入 `/`，web 懒加载/缓存 `GET /v1/commands?surface=web` 的 palette catalog。
 2. 候选面板展示两类真实返回命令：web-safe passthrough（`/status`、`/help`、`/new`、`/mcps`、`/skills`）与结构化 overlay（`/connect`、`/connect-search`、`/compact`）。
 3. 用户用 `↑/↓` 选择、`Tab` 补全、`Enter` 执行或打开 overlay；web 使用 `ohbaby-sdk` 的 slash parser/resolve 校验 passthrough 命令。
@@ -56,6 +61,7 @@
 7. 非 slash 输入仍走 UC2 的 prompt 流。
 
 ### UC6 切换 selected workspace（v0.1.7 已完成）
+
 1. 用户从 known-project 列表选择另一个 directory。
 2. runtime 先令旧 scope client 失效并关闭其 SSE，清空旧 scope 的易失 ViewState/seqNum 游标。
 3. runtime 用新 directory 创建替代 client，重新执行 UC1 的单 client + 单 SSE + snapshot 流。
@@ -68,7 +74,7 @@
 贯穿四个用例：
 
 - **web 负责**：投影（事件→ViewState）、UI 呈现与交互、维护 `lastAppliedSeqNum` 游标、连接态机推进、重连/重拉的客户端编排。
-- **daemon 负责**：会话真相、prompt 队列调度（含跨连接 FIFO）、权限归属校验、SSE replay 缓冲与 resync 信号、workspace scope 解析。
+- **daemon 负责**：会话真相、prompt 队列调度（含跨连接 FIFO）、审批 workspace/root/binding 校验、SSE replay 缓冲与 resync 信号、workspace scope 解析。
 - **web 绝不做**：自己判定权限归属、补发/重放命令、跨 backend 实例同步状态（ND9）、canonicalize/校验 scope（ND10）。web 可以选择 directory，但 server 才决定 canonical scope identity。
 
 > controller/service 不在 web 侧膨胀：`http`/`events` 是 adapter，`eventReducer` 是纯投影，workspace/session/slash 编排集中在 runtime façade，业务能力由 SDK client 承担，UI 不含会话业务逻辑。
@@ -77,26 +83,26 @@
 
 ## 4. Failure & Decision Points（失败点与决策点）
 
-| 用例 | 失败/决策点 | web 预期行为 |
-|------|------------|-------------|
-| UC1 | token 失效 → `401` | 进 `disconnected`，提示"重启 `ohbaby serve` / 重新打开" |
-| UC1 | clients/snapshot 请求失败 | 停在 `connecting`，可重试，不静默 |
-| UC2 | `202` 后链路中断（run 进行中） | **不自动重复提交**；恢复后可用 receipt 的 `promptId` 查询终态 |
-| UC2 | receipt 前 HTTP 拒绝 | 删除对应 local attempt；当前草稿仍空才恢复旧文本，不覆盖用户已输入的新草稿 |
-| UC2 | receipt 后 session 选择失败 | 保留 accepted 用户行与 Thinking，只显示独立导航错误，不恢复旧草稿或诱导重复发送 |
-| UC2 | starting 因 session busy 回 queued | provisional 行与 startup Thinking 退出，现有 Queue 接管；不伪造正式消息 |
-| UC2 | failed/interrupted 早于正式消息 | 由持久化 submission 重建用户行并内联错误；刷新后仍可见 |
-| UC2 | abort 与 run 自然结束竞态 | 以 `run.updated` 为准，UI 不抢先标记终态 |
-| UC3 | 审批错主 → `403` | 提示"该审批属于另一连接"，不误标为已处置 |
-| UC3 | 待决时断线 | resync 后据新 snapshot 重建队列——该请求可能已被它端处置而消失 |
-| UC4 | `resync-required` | 必须丢弃 ViewState 重建，**绝不静默错位**（核心正确性） |
-| UC4 | 重连退避 | 有上界，不紧循环空转 |
-| UC5 | 命令目录拉取失败 | 不执行命令，显示可关闭错误，draft 保留 |
-| UC5 | 未知/不可用命令 | 不发送到 daemon，显示解析错误 |
-| UC5 | 命令执行失败 | 通过 `CommandNotice` 显示错误，不吞掉 |
-| UC5 | 命令带交互 action | 不进入候选面板；手写 POST 也被 server 400 拒绝 |
-| UC5 | overlay 命令被手写 `POST /v1/commands` | server 400 拒绝；UI 正常入口只能打开结构化 overlay |
-| UC6 | directory 缺失/不可读/不是目录 | 展示结构化 `400`；不使用 query/cwd 猜测项目 |
-| UC6 | 切换中旧 SSE 仍有事件到达 | 丢弃旧 generation 事件；不得写入新 scope ViewState |
+| 用例 | 失败/决策点                            | web 预期行为                                                                                        |
+| ---- | -------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| UC1  | token 失效 → `401`                     | 进 `disconnected`，提示"重启 `ohbaby serve` / 重新打开"                                             |
+| UC1  | 注册失败                               | 连接失败并提示；聊天/model 读取失败另报错，不阻塞已连接审批                                         |
+| UC2  | `202` 后链路中断（run 进行中）         | **不自动重复提交**；恢复后可用 receipt 的 `promptId` 查询终态                                       |
+| UC2  | receipt 前 HTTP 拒绝                   | 删除对应 local attempt；当前草稿仍空才恢复旧文本，不覆盖用户已输入的新草稿                          |
+| UC2  | receipt 后 session 选择失败            | 保留 accepted 用户行与 Thinking，只显示独立导航错误，不恢复旧草稿或诱导重复发送                     |
+| UC2  | starting 因 session busy 回 queued     | provisional 行与 startup Thinking 退出，现有 Queue 接管；不伪造正式消息                             |
+| UC2  | failed/interrupted 早于正式消息        | 由持久化 submission 重建用户行并内联错误；刷新后仍可见                                              |
+| UC2  | abort 与 run 自然结束竞态              | 以 `run.updated` 为准，UI 不抢先标记终态                                                            |
+| UC3  | 旧 ID / 旧绑定 / 严重故障              | 分别处理 PERMISSION_NOT_PENDING、PERMISSION_SCOPE_CHANGED、PERMISSION_UNAVAILABLE，不按发起页面独占 |
+| UC3  | 待决时断线                             | 立即停用按钮；每次 hello 后读独立审批快照，已处置请求不复活                                         |
+| UC4  | `resync-required`                      | 普通 ViewState 恢复与审批 resync 分开；不把全局快照作为审批前置                                     |
+| UC4  | 重连退避                               | 有上界，不紧循环空转                                                                                |
+| UC5  | 命令目录拉取失败                       | 不执行命令，显示可关闭错误，draft 保留                                                              |
+| UC5  | 未知/不可用命令                        | 不发送到 daemon，显示解析错误                                                                       |
+| UC5  | 命令执行失败                           | 通过 `CommandNotice` 显示错误，不吞掉                                                               |
+| UC5  | 命令带交互 action                      | 不进入候选面板；手写 POST 也被 server 400 拒绝                                                      |
+| UC5  | overlay 命令被手写 `POST /v1/commands` | server 400 拒绝；UI 正常入口只能打开结构化 overlay                                                  |
+| UC6  | directory 缺失/不可读/不是目录         | 展示结构化 `400`；不使用 query/cwd 猜测项目                                                         |
+| UC6  | 切换中旧 SSE 仍有事件到达              | 丢弃旧 generation 事件；不得写入新 scope ViewState                                                  |
 
 > 这些失败点与 [`test.md`](./test.md) 的 Critical Scenarios 一一对应。

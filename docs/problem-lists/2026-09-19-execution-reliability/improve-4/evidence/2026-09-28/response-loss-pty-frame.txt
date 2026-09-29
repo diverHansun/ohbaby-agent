@@ -1,0 +1,26 @@
+    Ctrl+G subagents · 0 executions
+    | I4_TUI_HOLD
+
+    I4TUIHOLD_STARTED
+
+    interrupted · End time unknown (recovered)
+
+    | I4_TUI_RESPONSE_LOST
+
+    I4TUIRESPONSELOSTOK
+
+    Total 0s
+
+     Queued 2
+     › I4_TUI_C · Retained · Steer unavailable
+     ↳ I4_TUI_E · Retained · Steer unavailable
+     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer
+    ╭──────────────────────────────────────────────────────────────────────╮
+    │ > I4_TUI_RESPONSE_LOST                                               │
+    ╰──────────────────────────────────────────────────────────────────────╯
+    Enter retry the same send · Esc restore draft
+    error: process interrupted before owner exited · Queued 2 8.1K / 128K
+    · auto · default · session_1790597032252_4sa5fy2          (6%)
+    Send outcome unknown. Retry the same send to recover its receipt. Daemon
+     request resubmitRetainedPrompt returned invalid JSON: terminated. Esc
+    restores your draft.

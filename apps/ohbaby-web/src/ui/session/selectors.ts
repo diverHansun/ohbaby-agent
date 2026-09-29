@@ -1,0 +1,344 @@
+import { compareUiPromptQueueOrder } from "ohbaby-sdk";
+import type {
+  UiContextWindowUsage,
+  UiGoal,
+  UiMessage,
+  UiPermissionLevel,
+  UiPermissionMode,
+  UiPermissionRequest,
+  UiPromptSubmission,
+  UiRun,
+  UiRunStatus,
+  UiSession,
+  UiSessionIndexEntry,
+  UiSessionTodoList,
+  UiSnapshot,
+} from "ohbaby-sdk";
+import type {
+  CommandNotice,
+  ConnectionState,
+  ReasoningViewState,
+  StoreSnapshot,
+} from "../../api/daemon/wire.js";
+
+export interface HeaderModel {
+  readonly connectionKind:
+    | "idle"
+    | "running"
+    | "connecting"
+    | "reconnecting"
+    | "resyncing"
+    | "disconnected";
+  readonly statusLabel: string;
+  readonly contextLabel: string;
+  readonly contextRatio: number;
+  readonly contextWindowUsage: UiContextWindowUsage | null;
+  readonly modelLabel: string;
+}
+
+import type { ComposerModel } from "../composer/Composer.js";
+
+export interface ViewModel {
+  readonly activeGoal: UiGoal | null;
+  readonly activeSession: UiSession | null;
+  readonly sessionIndex: readonly UiSessionIndexEntry[];
+  readonly activeTodoList: UiSessionTodoList | null;
+  readonly commandCatalogVersion: string | null;
+  readonly commandNotices: readonly CommandNotice[];
+  readonly composer: ComposerModel;
+  readonly error: string | null;
+  readonly header: HeaderModel;
+  readonly isEmpty: boolean;
+  readonly pendingPermissions: readonly UiPermissionRequest[];
+  readonly queuedPrompts: readonly UiPromptSubmission[];
+  readonly reasoningByMessageId: Record<string, ReasoningViewState>;
+  readonly snapshot: UiSnapshot | null;
+}
+
+const DEFAULT_MODE: UiPermissionMode = "auto";
+const DEFAULT_PERMISSION_LEVEL: UiPermissionLevel = "default";
+
+export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
+  const daemonSnapshot = snapshot.view.snapshot;
+  const selectedRoot = snapshot.permissionSync.binding
+    ? snapshot.permissionSync.binding.rootSessionId
+    : daemonSnapshot?.activeSessionId;
+  const indexedSession = snapshot.sessionIndex.find(
+    (session) => session.id === selectedRoot,
+  );
+  const activeSession =
+    daemonSnapshot?.sessions.find((session) => session.id === selectedRoot) ??
+    (indexedSession ? { ...indexedSession, messages: [] } : null);
+  const activeSessionId = selectedRoot ?? activeSession?.id;
+  const control = snapshot.sessionControl;
+  const controlMatches =
+    control !== null &&
+    control.sessionId === activeSessionId &&
+    control.rootSessionId === activeSessionId &&
+    control.runtimeEpoch === snapshot.sessionSync.scope?.runtimeEpoch &&
+    control.bindingGeneration === snapshot.sessionSync.scope.bindingGeneration;
+  const activeRunId = controlMatches ? (control.runId ?? undefined) : undefined;
+  const sessionView = snapshot.sessionSync.view;
+  const viewMatches =
+    snapshot.sessionSync.status === "ready" &&
+    sessionView !== undefined &&
+    sessionView.version.sessionId === activeSessionId &&
+    sessionView.version.runtimeEpoch ===
+      snapshot.sessionSync.scope?.runtimeEpoch &&
+    sessionView.bindingGeneration ===
+      snapshot.sessionSync.scope.bindingGeneration;
+  const executionRecovery =
+    (viewMatches ? sessionView.executionRecovery : undefined) ??
+    (controlMatches ? control.executionRecovery : undefined);
+  const coreReady =
+    snapshot.sessionSync.status === "ready" ||
+    (snapshot.sessionSync.status === "idle" && !activeSessionId);
+  const snapshotStatus = daemonSnapshot?.status;
+  const runStatus: UiRunStatus = activeRunId
+    ? snapshotStatus?.kind === "running" && snapshotStatus.runId === activeRunId
+      ? snapshotStatus
+      : { kind: "running", runId: activeRunId }
+    : coreReady && daemonSnapshot?.activeSessionId === activeSessionId
+      ? (snapshotStatus ?? { kind: "idle" })
+      : { kind: "idle" };
+  const permission = daemonSnapshot?.permission;
+  const pendingPermissions = snapshot.permissionSync.requests;
+  const attentionStatus: UiRunStatus = pendingPermissions.length
+    ? { kind: "waiting-for-permission", requestId: pendingPermissions[0].id }
+    : runStatus;
+  const activeRun = selectActiveRun(daemonSnapshot, activeSessionId, runStatus);
+  const isRunning =
+    attentionStatus.kind === "running" ||
+    attentionStatus.kind === "waiting-for-permission";
+  const runStateUnknown = !coreReady && !controlMatches && !isRunning;
+  const headerConnection =
+    snapshot.connectionState === "live" && runStateUnknown
+      ? "resyncing"
+      : snapshot.connectionState;
+  const pendingUnknown = snapshot.unknownPromptRequests.some(
+    (request) =>
+      request.sessionId === activeSessionId &&
+      request.status !== "epoch-changed",
+  );
+
+  return {
+    activeGoal: selectActiveGoal(daemonSnapshot, activeSessionId),
+    activeSession,
+    sessionIndex: snapshot.sessionIndex,
+    activeTodoList: selectActiveTodoList(daemonSnapshot, activeSessionId),
+    commandCatalogVersion: snapshot.view.commandCatalogVersion,
+    commandNotices: snapshot.view.commandNotices,
+    composer: {
+      ...(activeRunId === undefined ? {} : { activeRunId }),
+      ...(activeRun?.startedAt === undefined
+        ? {}
+        : { activeRunStartedAt: activeRun.startedAt }),
+      ...(activeSessionId === undefined ? {} : { activeSessionId }),
+      canSend:
+        snapshot.connectionState === "live" &&
+        coreReady &&
+        executionRecovery?.status !== "recovering" &&
+        (!activeSessionId || controlMatches) &&
+        !pendingUnknown,
+      canStop:
+        snapshot.connectionState === "live" &&
+        controlMatches &&
+        activeRunId !== undefined,
+      disabled: false,
+      isRunning,
+      mode: permission?.mode ?? DEFAULT_MODE,
+      permissionLevel: permission?.level ?? DEFAULT_PERMISSION_LEVEL,
+    },
+    error:
+      snapshot.error ??
+      (executionRecovery?.status === "blocked"
+        ? executionRecovery.message
+        : null),
+    header: {
+      connectionKind: selectConnectionKind(headerConnection, attentionStatus),
+      statusLabel:
+        snapshot.connectionState === "live" &&
+        executionRecovery?.status === "recovering"
+          ? "Checking execution records…"
+          : snapshot.connectionState === "live" && runStateUnknown
+            ? snapshot.sessionSync.status === "syncing"
+              ? "syncing"
+              : "unknown"
+            : selectStatusLabel(snapshot.connectionState, attentionStatus),
+      ...selectContextModel(
+        daemonSnapshot,
+        activeSessionId,
+        snapshot.currentModel?.model,
+      ),
+    },
+    isEmpty: (activeSession?.messages.length ?? 0) === 0,
+    pendingPermissions,
+    queuedPrompts: selectQueuedPrompts(daemonSnapshot, activeSessionId),
+    reasoningByMessageId: snapshot.view.reasoningByMessageId,
+    snapshot: daemonSnapshot,
+  };
+}
+
+export function selectActiveTodoList(
+  snapshot: UiSnapshot | null,
+  sessionId: string | null | undefined,
+): UiSessionTodoList | null {
+  if (!snapshot || !sessionId) return null;
+  const todoList = (snapshot.todos ?? []).find(
+    (candidate) => candidate.sessionId === sessionId,
+  );
+  return todoList?.visible === true && todoList.todos.length > 0
+    ? todoList
+    : null;
+}
+
+function selectQueuedPrompts(
+  snapshot: UiSnapshot | null,
+  sessionId: string | null | undefined,
+): readonly UiPromptSubmission[] {
+  if (!snapshot || !sessionId) return [];
+  return (snapshot.prompts ?? [])
+    .filter(
+      (prompt) =>
+        prompt.sessionId === sessionId &&
+        (prompt.status === "queued" || prompt.status === "retained"),
+    )
+    .sort(compareUiPromptQueueOrder);
+}
+
+function selectActiveGoal(
+  snapshot: UiSnapshot | null,
+  sessionId: string | null | undefined,
+): UiGoal | null {
+  if (!snapshot || sessionId === undefined || sessionId === null) {
+    return null;
+  }
+  return (
+    snapshot.goals?.find((goal) => goal.sessionId === sessionId)?.goal ?? null
+  );
+}
+
+export function selectActiveSession(
+  snapshot: UiSnapshot | null,
+): UiSession | null {
+  if (!snapshot) {
+    return null;
+  }
+  if (snapshot.activeSessionId === null) {
+    return null;
+  }
+  return (
+    snapshot.sessions.find(
+      (session) => session.id === snapshot.activeSessionId,
+    ) ?? null
+  );
+}
+
+export function messageText(message: UiMessage): string {
+  return message.parts
+    .map((part) =>
+      part.type === "text" || part.type === "reasoning" ? part.text : "",
+    )
+    .join("");
+}
+
+function selectActiveRun(
+  snapshot: UiSnapshot | null,
+  sessionId: string | undefined,
+  status: UiRunStatus,
+): UiRun | undefined {
+  if (status.kind === "running") {
+    return snapshot?.runs.find((run) => run.id === status.runId);
+  }
+  if (status.kind !== "waiting-for-permission") {
+    return undefined;
+  }
+  return snapshot?.runs.find(
+    (run) =>
+      (sessionId === undefined || run.sessionId === sessionId) &&
+      run.status.kind === "waiting-for-permission",
+  );
+}
+
+function selectConnectionKind(
+  connectionState: ConnectionState,
+  status: UiRunStatus,
+): HeaderModel["connectionKind"] {
+  if (connectionState !== "live") {
+    return connectionState;
+  }
+  return status.kind === "running" || status.kind === "waiting-for-permission"
+    ? "running"
+    : "idle";
+}
+
+function selectStatusLabel(
+  connectionState: ConnectionState,
+  status: UiRunStatus,
+): string {
+  if (connectionState === "live" && status.kind === "waiting-for-permission") {
+    return "waiting for permission";
+  }
+  if (
+    connectionState === "live" &&
+    status.kind === "running" &&
+    status.title !== undefined
+  ) {
+    return status.title;
+  }
+  return selectConnectionKind(connectionState, status);
+}
+
+function selectContextModel(
+  snapshot: UiSnapshot | null,
+  sessionId: string | null | undefined,
+  configuredModel: string | undefined,
+): Omit<HeaderModel, "connectionKind" | "statusLabel"> {
+  const usage = selectContextUsage(snapshot, sessionId);
+  if (!usage) {
+    return {
+      contextLabel: "0 / 0",
+      contextRatio: 0,
+      contextWindowUsage: null,
+      modelLabel: configuredModel ?? "model pending",
+    };
+  }
+  return {
+    contextLabel: `${compactNumber(usage.currentTokens)} / ${compactNumber(
+      usage.contextWindowTokens,
+    )}`,
+    contextRatio: clamp01(usage.contextWindowRatio),
+    contextWindowUsage: usage,
+    modelLabel: usage.modelId,
+  };
+}
+
+function selectContextUsage(
+  snapshot: UiSnapshot | null,
+  sessionId: string | null | undefined,
+): UiContextWindowUsage | undefined {
+  if (
+    !snapshot?.contextWindowUsages?.length ||
+    sessionId === null ||
+    sessionId === undefined
+  ) {
+    return undefined;
+  }
+  return snapshot.contextWindowUsages.find(
+    (usage) => usage.sessionId === sessionId,
+  );
+}
+
+function compactNumber(value: number): string {
+  if (value >= 1_000_000) {
+    return `${String(Math.round(value / 100_000) / 10)}m`;
+  }
+  if (value >= 1_000) {
+    return `${String(Math.round(value / 100) / 10)}k`;
+  }
+  return String(value);
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}

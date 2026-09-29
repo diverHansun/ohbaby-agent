@@ -142,6 +142,64 @@ async function eventuallyEmit(
 }
 
 class FakeBackend implements UiBackendClient {
+  private readonly createdSessions: Awaited<
+    ReturnType<UiBackendClient["getSessionIndex"]>
+  >[number][] = [];
+  getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return Promise.resolve([
+      ...this.snapshot.sessions,
+      ...this.createdSessions,
+      ...["session_1", "session_2", "session_selected", "session_target"]
+        .filter((id) => !this.snapshot.sessions.some((s) => s.id === id))
+        .map((id) => ({
+          id,
+          title: id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+    ]);
+  }
+  getSelectedSessionId(): Promise<string | null> {
+    return Promise.resolve(this.snapshot.activeSessionId);
+  }
+  createSession(): ReturnType<UiBackendClient["createSession"]> {
+    const session = {
+      id: "session_new",
+      title: "New session",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.createdSessions.push(session);
+    return Promise.resolve(session);
+  }
+  selectSession(_sessionId: string): Promise<void> {
+    return Promise.resolve();
+  }
+  getPermissionSnapshot(
+    input: Parameters<UiBackendClient["getPermissionSnapshot"]>[0],
+  ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+    return Promise.resolve({
+      permissionEpoch: "test-epoch",
+      rootSessionId: input.rootSessionId,
+      permissionRevision: 0,
+      requests: this.snapshot.permissions.filter(
+        (request) => request.rootSessionId === input.rootSessionId,
+      ),
+    });
+  }
+  subscribePermissionEvents(
+    handler: Parameters<UiBackendClient["subscribePermissionEvents"]>[0],
+  ): () => void {
+    return this.subscribeEvents((event) => {
+      if (
+        event.type === "permission.requested" ||
+        event.type === "permission.resolved" ||
+        event.type === "permission.unavailable"
+      )
+        handler(event);
+    });
+  }
+
   private nextPromptId = 0;
   private readonly promptCompletions = new Map<
     string,
@@ -274,8 +332,32 @@ class FakeBackend implements UiBackendClient {
     );
   }
 
+  resubmitRetainedPrompt(): ReturnType<
+    UiBackendClient["resubmitRetainedPrompt"]
+  > {
+    return Promise.reject(new Error("Unused retained resubmission stub"));
+  }
+  resubmitRetainedPromptForOwner(
+    _input: Parameters<UiBackendClient["resubmitRetainedPrompt"]>[0],
+    _owner: string,
+  ): ReturnType<UiBackendClient["resubmitRetainedPrompt"]> {
+    return this.resubmitRetainedPrompt();
+  }
+
   editQueuedPrompt(): ReturnType<UiBackendClient["editQueuedPrompt"]> {
     return Promise.reject(new Error("No queued prompt in fake backend"));
+  }
+
+  steerQueuedPrompt(
+    _input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return Promise.reject(new Error("unused"));
+  }
+  steerQueuedPromptForOwner(
+    input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+    _owner?: string,
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return this.steerQueuedPrompt(input);
   }
 
   cancelQueuedPrompt(): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
@@ -394,11 +476,24 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(this.permissionState);
   }
 
+  onCommand?: () => void;
+
   executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
-  ): Promise<void> {
+  ): ReturnType<UiBackendClient["executeCommand"]> {
     this.calls.push({ args: [invocation], method: "executeCommand" });
-    return Promise.resolve();
+    this.onCommand?.();
+    return Promise.resolve({
+      ...{
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      },
+      clientInvocationId: invocation.clientInvocationId,
+      sessionId: invocation.sessionId,
+    });
   }
 
   respondPermission(
@@ -563,7 +658,9 @@ describe("createRemoteUiBackendClient", () => {
       backend,
       async (client) => {
         const eventPromise = new Promise<UiEvent>((resolve) => {
-          client.subscribeEvents(resolve);
+          client.subscribeEvents((event) => {
+            if (event.type !== "session.resync-required") resolve(event);
+          });
         });
 
         await eventuallyEmit(backend, noticeEmitted(), eventPromise);
@@ -592,7 +689,9 @@ describe("createRemoteUiBackendClient", () => {
           sessionId: "session_1",
         });
         const eventPromise = new Promise<UiEvent>((resolve) => {
-          client.subscribeEvents(resolve);
+          client.subscribeEvents((event) => {
+            if (event.type !== "session.resync-required") resolve(event);
+          });
         });
         await eventuallyEmit(backend, sessionUpdated(), eventPromise);
 
@@ -664,18 +763,7 @@ describe("createRemoteUiBackendClient", () => {
       surface: "tui" as const,
     };
 
-    await withRemoteClient(backend, async (client) => {
-      await client.getSnapshot();
-      await client.getContextWindowUsage(contextInput);
-      await client.listCommands(listQuery);
-      await client.submitPromptAndWait("hello", { sessionId: "session_1" });
-      await client.compactSession(compactOptions);
-      await client.getCurrentModel();
-      await client.probeModelContextWindow(probeInput);
-      await client.connectModel(connectInput);
-      await client.setSearchApiKey(searchInput);
-      await client.setPermission(permissionInput);
-      await client.executeCommand(invocation);
+    backend.onCommand = (): void => {
       backend.emit({
         command: {
           clientInvocationId: invocation.clientInvocationId,
@@ -699,17 +787,30 @@ describe("createRemoteUiBackendClient", () => {
         timestamp: Date.now(),
         type: "interaction.requested",
       });
+    };
+    await withRemoteClient(backend, async (client) => {
+      await client.getSnapshot();
+      await client.getContextWindowUsage(contextInput);
+      await client.listCommands(listQuery);
+      await client.submitPromptAndWait("hello", { sessionId: "session_1" });
+      await client.compactSession(compactOptions);
+      await client.getCurrentModel();
+      await client.probeModelContextWindow(probeInput);
+      await client.connectModel(connectInput);
+      await client.setSearchApiKey(searchInput);
+      await client.setPermission(permissionInput);
+      await client.executeCommand(invocation);
       await client.respondPermission("permission_1", { choiceId: "allow" });
       await client.respondInteraction("interaction_1", {
         choiceId: "choice_1",
         kind: "accepted",
       });
-      await client.abortRun("run_1");
+      await expect(client.abortRun("run_1")).rejects.toMatchObject({
+        code: "SESSION_RECOVERY_UNSUPPORTED",
+      });
     });
 
     expect(backend.calls).toEqual([
-      { args: [], method: "getSnapshot" },
-      { args: [], method: "getSnapshot" },
       { args: [], method: "getSnapshot" },
       { args: [contextInput], method: "getContextWindowUsage" },
       { args: [listQuery], method: "listCommands" },
@@ -733,7 +834,6 @@ describe("createRemoteUiBackendClient", () => {
         args: ["interaction_1", { choiceId: "choice_1", kind: "accepted" }],
         method: "respondInteraction",
       },
-      { args: ["run_1"], method: "abortRun" },
     ]);
   });
 
@@ -742,7 +842,9 @@ describe("createRemoteUiBackendClient", () => {
 
     await withRemoteClient(backend, async (client) => {
       const eventPromise = new Promise<UiEvent>((resolve) => {
-        client.subscribeEvents(resolve);
+        client.subscribeEvents((event) => {
+          if (event.type !== "session.resync-required") resolve(event);
+        });
       });
 
       await eventuallyEmit(backend, noticeEmitted(), eventPromise);
@@ -836,3 +938,206 @@ describe("createRemoteUiBackendClient", () => {
     await expect(client.dispose()).resolves.toBeUndefined();
   });
 });
+
+it.each([
+  {
+    commandId: "new",
+    argv: [],
+    sessionId: "session_new",
+    subject: "session.created",
+  },
+  {
+    commandId: "new",
+    argv: ["--no-reuse-empty-session"],
+    sessionId: "session_new",
+    subject: "session.created",
+  },
+  {
+    commandId: "resume",
+    argv: ["--session_id", "session_2"],
+    sessionId: "session_2",
+    subject: "session.current",
+  },
+  {
+    commandId: "resume",
+    argv: ["--session-id=session_2"],
+    sessionId: "session_2",
+    subject: "session.current",
+  },
+  {
+    commandId: "resume",
+    argv: ["session_2"],
+    sessionId: "session_2",
+    subject: "session.current",
+  },
+])(
+  "delivers the remote $commandId selection contract using metadata only ($argv)",
+  async ({ commandId, argv, sessionId, subject }) => {
+    const backend = new FakeBackend();
+    const history = vi
+      .spyOn(backend, "getSnapshot")
+      .mockRejectedValue(new Error("history unavailable"));
+    await withRemoteClient(backend, async (client) => {
+      const events: UiEvent[] = [];
+      let connected = false;
+      const stop = client.subscribeEvents((event) => {
+        events.push(event);
+      });
+      const stopPermissions = client.subscribePermissionEvents((event) => {
+        if (event.type === "permission.resync-required") connected = true;
+      });
+      try {
+        await vi.waitUntil(() => connected);
+        await client.executeCommand({
+          commandId,
+          path: [commandId],
+          argv,
+          raw: `/${commandId}`,
+          rawArgs: argv.join(" "),
+          surface: "tui",
+          clientInvocationId: "remote-session-command",
+        });
+        await vi.waitUntil(
+          () =>
+            events.some(
+              (event) =>
+                event.type === "command.result.delivered" &&
+                event.action?.kind === "session.selected",
+            ),
+          { timeout: 300 },
+        );
+        expect(
+          events.find((event) => event.type === "command.started"),
+        ).toMatchObject({
+          command: { clientInvocationId: "remote-session-command", commandId },
+        });
+        expect(
+          events.find(
+            (event) =>
+              event.type === "command.result.delivered" &&
+              event.output !== undefined,
+          ),
+        ).toMatchObject({ output: { kind: "data", subject } });
+        expect(
+          events.find(
+            (event) =>
+              event.type === "command.result.delivered" &&
+              event.action !== undefined,
+          ),
+        ).toMatchObject({
+          action: { kind: "session.selected", data: { choiceId: sessionId } },
+        });
+        await vi.waitUntil(
+          async () => (await client.getSelectedSessionId()) === sessionId,
+        );
+        expect(history).not.toHaveBeenCalled();
+        expect(
+          backend.calls.filter((call) => call.method === "executeCommand"),
+        ).toEqual([]);
+      } finally {
+        stop();
+        stopPermissions();
+      }
+    });
+  },
+);
+
+it.each([
+  { argv: [], code: "SESSION_ID_REQUIRED" },
+  { argv: ["--session_id", "--other"], code: "SESSION_ID_REQUIRED" },
+  { argv: ["--session-id="], code: "SESSION_ID_REQUIRED" },
+  { argv: ["missing-session"], code: "EXECUTION_ERROR" },
+])(
+  "reports invalid remote resume arguments without changing the binding ($argv)",
+  async ({ argv, code }) => {
+    const backend = new FakeBackend();
+    const history = vi
+      .spyOn(backend, "getSnapshot")
+      .mockRejectedValue(new Error("history unavailable"));
+    await withRemoteClient(backend, async (client) => {
+      const events: UiEvent[] = [];
+      let connected = false;
+      const stop = client.subscribeEvents((event) => {
+        events.push(event);
+      });
+      const stopPermissions = client.subscribePermissionEvents((event) => {
+        if (event.type === "permission.resync-required") connected = true;
+      });
+      try {
+        await vi.waitUntil(() => connected);
+        await client.executeCommand({
+          commandId: "resume",
+          path: ["resume"],
+          argv,
+          raw: "/resume",
+          rawArgs: argv.join(" "),
+          surface: "tui",
+          clientInvocationId: "invalid-resume",
+        });
+        await vi.waitUntil(() =>
+          events.some((event) => event.type === "command.failed"),
+        );
+        expect(
+          events.find((event) => event.type === "command.failed"),
+        ).toMatchObject({ error: { code } });
+        expect(
+          events.some((event) => event.type === "command.result.delivered"),
+        ).toBe(false);
+        expect(await client.getSelectedSessionId()).toBe(null);
+        expect(history).not.toHaveBeenCalled();
+      } finally {
+        stop();
+        stopPermissions();
+      }
+    });
+  },
+);
+
+it.each([
+  ["--no-reuse-empty-sesion"],
+  ["unexpected-value"],
+  ["--no-reuse-empty-session", "--unknown"],
+])(
+  "rejects unsupported remote /new arguments without mutating the session (%s)",
+  async (...argv) => {
+    const backend = new FakeBackend();
+    const createSession = vi.spyOn(backend, "createSession");
+    await withRemoteClient(backend, async (client) => {
+      await client.selectSession("session_1");
+      const events: UiEvent[] = [];
+      let connected = false;
+      const stop = client.subscribeEvents((event) => events.push(event));
+      const stopPermissions = client.subscribePermissionEvents((event) => {
+        if (event.type === "permission.resync-required") connected = true;
+      });
+      try {
+        await vi.waitUntil(() => connected);
+        await client.executeCommand({
+          commandId: "new",
+          path: ["new"],
+          argv,
+          raw: "/new",
+          rawArgs: argv.join(" "),
+          surface: "tui",
+          clientInvocationId: "invalid-new",
+        });
+        await vi.waitUntil(() =>
+          events.some((event) => event.type === "command.failed"),
+        );
+        expect(
+          events.find((event) => event.type === "command.failed"),
+        ).toMatchObject({
+          error: { code: "INVALID_ARGS", recoverable: true },
+        });
+        expect(createSession).not.toHaveBeenCalled();
+        expect(
+          events.some((event) => event.type === "command.result.delivered"),
+        ).toBe(false);
+        expect(await client.getSelectedSessionId()).toBe("session_1");
+      } finally {
+        stop();
+        stopPermissions();
+      }
+    });
+  },
+);

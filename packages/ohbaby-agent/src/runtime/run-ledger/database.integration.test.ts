@@ -1,16 +1,13 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeDatabase,
   getDatabase,
   initDatabase,
   schema,
   type DatabaseConnection,
-  type DatabaseStatement,
-  type SqliteValue,
-  type StatementRunResult,
 } from "../../services/database/index.js";
 import { NodeSqliteConnection } from "../../services/database/connection.js";
 import {
@@ -21,6 +18,39 @@ import {
 } from "./index.js";
 
 const cleanupPaths: string[] = [];
+
+it.each([0, -1, 1.5, NaN, Infinity])(
+  "preserves unknown invalid owner PID %s and refuses a competing claim",
+  async (ownerPid) => {
+    const probe = vi.fn(() => false);
+    const ledger = createDatabaseRunLedger({ isOwnerAlive: probe });
+    await ledger.createPending({
+      runId: "unknown",
+      sessionId: "session_1",
+      triggerSource: "user",
+      ownerId: "old",
+      ownerPid,
+    });
+    await expect(ledger.recoverOrphanedRuns()).resolves.toEqual({
+      updatedCount: 0,
+    });
+    await expect(ledger.markInterrupted()).resolves.toEqual({
+      updatedCount: 0,
+    });
+    await expect(
+      ledger.claimPendingRun({
+        runId: "new",
+        sessionId: "session_1",
+        triggerSource: "user",
+      }),
+    ).rejects.toBeInstanceOf(SessionRunBusyError);
+    expect((await ledger.get("unknown"))?.status).toBe("pending");
+    expect(probe).not.toHaveBeenCalled();
+    await expect(
+      ledger.recoverOrphanedRuns({ recoverUnknownOwner: true }),
+    ).resolves.toEqual({ updatedCount: 1 });
+  },
+);
 
 function insertSession(id = "session_1"): void {
   getDatabase()
@@ -381,7 +411,9 @@ describe("createDatabaseRunLedger", () => {
     });
     await ledger.markRunning("other_session");
 
-    await expect(ledger.markInterrupted()).resolves.toEqual({
+    await expect(
+      ledger.markInterrupted({ recoverUnknownOwner: true }),
+    ).resolves.toEqual({
       updatedCount: 2,
     });
     await expect(ledger.getActiveRuns()).resolves.toEqual([]);
@@ -415,44 +447,155 @@ function createStatusRaceConnection(
   let armed = true;
   return {
     path: db.path,
-    exec(sql: string): void {
+    exec(sql): void {
+      if (armed && sql === "BEGIN IMMEDIATE") {
+        armed = false;
+        const other = new NodeSqliteConnection(db.path);
+        try {
+          other
+            .prepare(
+              `UPDATE ${schema.runLedger.tableName} SET status = ?, ended_at = ? WHERE run_id = ?`,
+            )
+            .run(status, 9_999, runId);
+        } finally {
+          other.close();
+        }
+      }
       db.exec(sql);
     },
-    prepare<Row = Record<string, unknown>>(
-      sql: string,
-    ): DatabaseStatement<Row> {
-      const statement = db.prepare<Row>(sql);
-      if (
-        !sql.includes(`FROM ${schema.runLedger.tableName} WHERE run_id = ?`)
-      ) {
-        return statement;
-      }
-      return {
-        get(...params: SqliteValue[]): Row | undefined {
-          const row = statement.get(...params);
-          if (armed && row !== undefined && params[0] === runId) {
-            armed = false;
-            db.prepare(
-              `UPDATE ${schema.runLedger.tableName}
-               SET status = ?, ended_at = ?
-               WHERE run_id = ?`,
-            ).run(status, 9_999, runId);
-          }
-          return row;
-        },
-        all(...params: SqliteValue[]): Row[] {
-          return statement.all(...params);
-        },
-        run(...params: SqliteValue[]): StatementRunResult {
-          return statement.run(...params);
-        },
-      };
-    },
-    pragma<Row = Record<string, unknown>>(name: string): Row[] {
-      return db.pragma<Row>(name);
-    },
+    prepare: db.prepare.bind(db),
+    pragma: db.pragma.bind(db),
     close(): void {
-      throw new Error("Test connection wrapper must not close the database");
+      throw new Error("Test wrapper must not close shared database");
     },
   };
 }
+
+it("records a single interruption with the original end time and preserves committed terminals", async () => {
+  const ledger = createDatabaseRunLedger({
+    now: () => 100,
+    isOwnerAlive: () => true,
+  });
+  await ledger.createPending({
+    runId: "interrupt_one",
+    sessionId: "session_1",
+    triggerSource: "user",
+  });
+  await expect(
+    ledger.markRunInterrupted("interrupt_one", "user stop", { endedAt: 42 }),
+  ).resolves.toMatchObject({
+    status: "interrupted",
+    endedAt: 42,
+    inputsCloseReason: "user stop",
+  });
+  await expect(
+    ledger.markRunInterrupted("interrupt_one", "late", { endedAt: 90 }),
+  ).resolves.toMatchObject({
+    status: "interrupted",
+    endedAt: 42,
+    error: "user stop",
+  });
+  await ledger.createPending({
+    runId: "success_one",
+    sessionId: "session_2",
+    triggerSource: "user",
+  });
+  await ledger.markRunning("success_one");
+  await ledger.markSucceeded("success_one", { endedAt: 66 });
+  await expect(
+    ledger.markRunInterrupted("success_one", "late stop"),
+  ).resolves.toMatchObject({ status: "succeeded", endedAt: 66 });
+});
+
+it("bulk interruption does not touch another live owner", async () => {
+  const ledger = createDatabaseRunLedger({
+    isOwnerAlive: (pid) => pid === 123,
+  });
+  await ledger.createPending({
+    runId: "live_owner",
+    sessionId: "session_1",
+    triggerSource: "user",
+    ownerId: "live",
+    ownerPid: 123,
+  });
+  await ledger.createPending({
+    runId: "dead_owner",
+    sessionId: "session_2",
+    triggerSource: "user",
+    ownerId: "dead",
+    ownerPid: 456,
+  });
+  await expect(ledger.markInterrupted()).resolves.toEqual({ updatedCount: 1 });
+  expect((await ledger.get("live_owner"))?.status).toBe("pending");
+  expect(await ledger.get("dead_owner")).toMatchObject({
+    status: "interrupted",
+    endTimeSource: "recovery",
+  });
+});
+
+it("labels orphaned end times as recovery without rewriting a saved terminal", async () => {
+  const ledger = createDatabaseRunLedger({
+    now: () => 500,
+    isOwnerAlive: () => false,
+  });
+  await ledger.createPending({
+    runId: "orphan_time",
+    sessionId: "session_1",
+    triggerSource: "user",
+    ownerPid: 456,
+  });
+  await ledger.createPending({
+    runId: "finished_time",
+    sessionId: "session_2",
+    triggerSource: "user",
+    ownerPid: 456,
+  });
+  await ledger.markRunInterrupted("finished_time", "service-shutdown", {
+    endedAt: 200,
+  });
+  await expect(ledger.recoverOrphanedRuns()).resolves.toEqual({
+    updatedCount: 1,
+  });
+  expect(await ledger.get("orphan_time")).toMatchObject({
+    status: "interrupted",
+    endTimeSource: "recovery",
+    endedAt: 500,
+  });
+  expect(await ledger.get("finished_time")).toMatchObject({
+    status: "interrupted",
+    endedAt: 200,
+  });
+  expect((await ledger.get("finished_time"))?.endTimeSource).toBeUndefined();
+});
+
+it("scopes cold recovery and requires explicit offline permission for unknown owners", async () => {
+  const ledger = createDatabaseRunLedger({ isOwnerAlive: () => false });
+  await ledger.createPending({
+    runId: "unknown_owner",
+    sessionId: "session_1",
+    triggerSource: "user",
+  });
+  await ledger.createPending({
+    runId: "other_orphan",
+    sessionId: "session_2",
+    triggerSource: "user",
+    ownerPid: 456,
+  });
+  await expect(
+    ledger.recoverOrphanedRuns({ sessionId: "session_1" }),
+  ).resolves.toEqual({ updatedCount: 0 });
+  await expect(
+    ledger.markInterrupted({ sessionId: "session_1" }),
+  ).resolves.toEqual({ updatedCount: 0 });
+  expect((await ledger.get("other_orphan"))?.status).toBe("pending");
+  await expect(
+    ledger.recoverOrphanedRuns({
+      sessionId: "session_1",
+      recoverUnknownOwner: true,
+    }),
+  ).resolves.toEqual({ updatedCount: 1 });
+  expect((await ledger.get("other_orphan"))?.status).toBe("pending");
+  await expect(
+    ledger.markInterrupted({ sessionId: "session_2" }),
+  ).resolves.toEqual({ updatedCount: 1 });
+});

@@ -22,7 +22,10 @@ describe("DatabasePromptSubmissionStore", () => {
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "ohbaby-prompt-store-"));
     now = 100;
-    initDatabase({ dbPath: join(directory, "agent.db"), now: () => ++now });
+    initDatabase({
+      dbPath: join(directory, "agent.db"),
+      now: (): number => ++now,
+    });
     getDatabase()
       .prepare(
         `INSERT INTO session
@@ -35,6 +38,115 @@ describe("DatabasePromptSubmissionStore", () => {
   afterEach(async () => {
     closeDatabase();
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it.each([
+    "queued",
+    "starting",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "interrupted",
+  ] as const)(
+    "detects %s receipt existence only in its exact scope and session",
+    async (status) => {
+      const store = new DatabasePromptSubmissionStore();
+      expect(await store.hasForSession("/workspace", "session_1")).toBe(false);
+      await store.accept({
+        promptId: "receipt",
+        clientRequestId: "receipt-request",
+        scopeKey: "/workspace",
+        sessionId: "session_1",
+        userMessageId: "future-message",
+        text: "hello",
+        maxQueuedPrompts: 100,
+      });
+      if (status === "cancelled") await store.cancelQueued("receipt");
+      else if (status !== "queued") {
+        await store.claim("receipt");
+        if (status === "running") await store.markRunning("receipt", "run_1");
+        else if (status === "interrupted")
+          await store.recoverAllInterrupted({
+            scopeKey: "/workspace",
+            includeCurrentOwner: true,
+          });
+        else if (status === "succeeded")
+          await store.finish("receipt", { status });
+        else if (status === "failed")
+          await store.finish("receipt", {
+            status,
+            error: {
+              code: "FIXTURE",
+              message: "failed",
+              source: "runtime",
+              retryable: false,
+            },
+          });
+      }
+      expect((await store.get("receipt"))?.status).toBe(status);
+      expect(await store.hasForSession("/workspace", "session_1")).toBe(true);
+      expect(await store.hasForSession("/other", "session_1")).toBe(false);
+      expect(await store.hasForSession("/workspace", "other-session")).toBe(
+        false,
+      );
+    },
+  );
+
+  it("selects only session active prompts and bounded history associations", async () => {
+    const store = new DatabasePromptSubmissionStore({
+      now: (): number => ++now,
+    });
+    for (const id of ["active", "run", "message", "old", "other-scope"]) {
+      await store.accept({
+        clientRequestId: id,
+        promptId: id,
+        sessionId: "session_1",
+        scopeKey: id === "other-scope" ? "/other" : "/workspace",
+        text: id,
+        userMessageId: `message_${id}`,
+        maxQueuedPrompts: 100,
+      });
+      if (id !== "active") {
+        await store.claim(id);
+        await store.markRunning(id, `run_${id}`);
+        await store.finish(id, {
+          status: "succeeded",
+          expectedRunId: `run_${id}`,
+        });
+      }
+    }
+    expect(
+      (await store.listForSession("/workspace", "session_1")).map(
+        (p) => p.promptId,
+      ),
+    ).toEqual(["active"]);
+    expect(
+      (
+        await store.listForSession("/workspace", "session_1", {
+          messageIds: ["message_message", "message_other-scope"],
+          runIds: ["run_run"],
+        })
+      ).map((p) => p.promptId),
+    ).toEqual(["active", "run", "message"]);
+    expect(
+      await store.listForSession("/workspace", "missing", {
+        runIds: ["run_run"],
+      }),
+    ).toEqual([]);
+    expect(
+      (
+        await store.listForSession("/workspace", "session_1", {
+          messageIds: [
+            ...Array.from(
+              { length: 40_000 },
+              (_, index) => `unknown_${String(index)}`,
+            ),
+            "message_message",
+          ],
+        })
+      ).map((p) => p.promptId),
+    ).toEqual(["active", "message"]);
   });
 
   it("persists edit, cancel, claim and recovery transitions", async () => {
@@ -68,7 +180,12 @@ describe("DatabasePromptSubmissionStore", () => {
     ).rejects.toBeInstanceOf(PromptNotQueuedError);
     await store.markRunning(first.record.promptId, "run_1");
 
-    expect(await store.recoverInterrupted("/workspace")).toBe(1);
+    expect(
+      await store.recoverAllInterrupted({
+        scopeKey: "/workspace",
+        includeCurrentOwner: true,
+      }),
+    ).toBe(1);
     expect(await store.get(first.record.promptId)).toMatchObject({
       runId: "run_1",
       status: "interrupted",
@@ -125,7 +242,7 @@ describe("DatabasePromptSubmissionStore", () => {
     });
     await liveStore.claim(live.record.promptId);
 
-    expect(await liveStore.recoverAllInterrupted()).toBe(1);
+    expect(await liveStore.recoverAllInterrupted()).toBe(2);
     expect(await store.get(running.record.promptId)).toMatchObject({
       status: "interrupted",
     });
@@ -134,9 +251,10 @@ describe("DatabasePromptSubmissionStore", () => {
       ownerPid: 42,
       status: "starting",
     });
-    await expect(store.listScopesWithQueued()).resolves.toEqual([
-      "/workspace-2",
-    ]);
+    expect(await store.get("prompt_queued")).toMatchObject({
+      status: "retained",
+    });
+    await expect(store.listScopesWithQueued()).resolves.toEqual([]);
   });
 
   it("enforces the durable queued-record limit inside the acceptance transaction", async () => {

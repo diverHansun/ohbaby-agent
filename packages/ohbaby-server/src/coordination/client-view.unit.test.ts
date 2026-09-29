@@ -75,6 +75,11 @@ function snapshotWithSessions(): UiSnapshot {
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Allow tool",
         id: "permission_1",
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_1",
+        messageId: "message_1",
+        createdAt: 1,
         runId: "run_1",
         title: "Tool permission",
       },
@@ -82,6 +87,11 @@ function snapshotWithSessions(): UiSnapshot {
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Allow tool",
         id: "permission_2",
+        sessionId: "session_2",
+        rootSessionId: "session_2",
+        callId: "call_2",
+        messageId: "message_2",
+        createdAt: 2,
         runId: "run_2",
         title: "Tool permission",
       },
@@ -275,6 +285,7 @@ describe("DaemonClientViewCoordinator", () => {
     const base = snapshotWithSessions();
     const snapshot: UiSnapshot = {
       ...base,
+      permissions: [],
       runs: base.runs.map((run) =>
         run.sessionId === "session_1"
           ? {
@@ -355,7 +366,7 @@ describe("DaemonClientViewCoordinator", () => {
       permission: { level: "full-access", mode: "plan" },
       permissions: [{ id: "permission_1" }],
       runs: [{ id: "run_1" }],
-      status: { kind: "running", runId: "run_1" },
+      status: { kind: "waiting-for-permission", requestId: "permission_1" },
       sessions: [
         {
           id: "session_1",
@@ -397,7 +408,7 @@ describe("DaemonClientViewCoordinator", () => {
       () => "session_generated",
     );
 
-    expect(prepared).toEqual({
+    expect(prepared).toMatchObject({
       options: { sessionId: "session_generated" },
       sessionId: "session_generated",
     });
@@ -470,6 +481,108 @@ describe("DaemonClientViewCoordinator", () => {
     ).toBeUndefined();
   });
 
+  it("routes child changes only to the active watch and releases old tokens", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    const released: string[] = [];
+    coordinator.setSubagentUnwatchHandler((selection) => {
+      released.push(selection.watchId);
+    });
+    coordinator.initializeClient(
+      "client",
+      { sessions: [sessionWithMessages("root")] },
+      { resumeSessionId: "root" },
+    );
+    const binding = coordinator.binding("client", "epoch");
+    const childEvent: UiEvent = {
+      type: "subagent.conversation.changed",
+      rootSessionId: "root",
+      subagentId: "child",
+      change: {
+        type: "session.changed",
+        version: {
+          runtimeEpoch: "epoch",
+          sessionId: "real-child-session",
+          viewGeneration: "scope-generation",
+          sessionRevision: 1,
+        },
+      },
+    };
+    expect(
+      coordinator.routeEventForClient(childEvent, "client"),
+    ).toBeUndefined();
+    coordinator.watchSubagentConversation(
+      "client",
+      binding,
+      "epoch",
+      "child",
+      "watch-1",
+    );
+    expect(coordinator.routeEventForClient(childEvent, "client")).toMatchObject(
+      {
+        watchId: "watch-1",
+      },
+    );
+    coordinator.watchSubagentConversation(
+      "client",
+      binding,
+      "epoch",
+      "child",
+      "watch-2",
+    );
+    coordinator.unwatchSubagentConversation("client", "watch-1");
+    expect(coordinator.currentSubagentWatchId("client")).toBe("watch-2");
+    expect(released).toEqual(["watch-1"]);
+    coordinator.selectSession("client", null, binding.bindingGeneration);
+    expect(
+      coordinator.routeEventForClient(childEvent, "client"),
+    ).toBeUndefined();
+    expect(released).toEqual(["watch-1", "watch-2"]);
+    const nextBinding = coordinator.binding("client", "epoch");
+    coordinator.selectSession("client", "root", nextBinding.bindingGeneration);
+    coordinator.watchSubagentConversation(
+      "client",
+      coordinator.binding("client", "epoch"),
+      "epoch",
+      "child",
+      "watch-3",
+    );
+    coordinator.disconnectClient("client");
+    expect(released).toEqual(["watch-1", "watch-2", "watch-3"]);
+  });
+
+  it("invalidates pending watch admissions on a newer watch, root switch, and disconnect", () => {
+    const views = new DaemonClientViewCoordinator();
+    views.initializeClient(
+      "client",
+      { sessions: [sessionWithMessages("root")] },
+      { resumeSessionId: "root" },
+    );
+    const a = views.beginSubagentWatchAdmission("client", "a", "watch-a");
+    const b = views.beginSubagentWatchAdmission("client", "b", "watch-b");
+    expect(a.assertCurrent).toThrow("superseded");
+    expect(b.assertCurrent).not.toThrow();
+    a.invalidate();
+    expect(b.assertCurrent).not.toThrow();
+    views.watchSubagentConversation(
+      "client",
+      views.binding("client", "epoch"),
+      "epoch",
+      "old",
+      "watch-old",
+    );
+    views.unwatchSubagentConversation("client", "watch-old", "old");
+    expect(b.assertCurrent).not.toThrow();
+    views.selectSession(
+      "client",
+      null,
+      views.binding("client", "epoch").bindingGeneration,
+    );
+    expect(b.assertCurrent).toThrow("superseded");
+    const c = views.beginSubagentWatchAdmission("client", "c", "watch-c");
+    views.disconnectClient("client");
+    expect(c.assertCurrent).toThrow("superseded");
+  });
+
   it("routes command events only to the invoking client", () => {
     const coordinator = new DaemonClientViewCoordinator();
 
@@ -540,6 +653,30 @@ describe("DaemonClientViewCoordinator", () => {
     expect(
       coordinator.routeEventForClient(runtimeRunning("run_1"), "client_fresh"),
     ).toBeUndefined();
+  });
+
+  it("keeps command routing after failure until the handler completes", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.prepareCommandInvocation("client_a", commandInvocation());
+    const started = commandStarted();
+    coordinator.observeEvent(started);
+    const failed = {
+      type: "command.failed" as const,
+      commandRunId: started.command.commandRunId,
+      clientInvocationId: started.command.clientInvocationId,
+      timestamp: 1,
+      error: { code: "FAIL", message: "failed" },
+    };
+    coordinator.observeEvent(failed);
+    coordinator.afterEventBroadcast(failed);
+    const output = {
+      ...failed,
+      type: "command.result.delivered" as const,
+      output: { kind: "text" as const, text: "details after failure" },
+    };
+    expect(coordinator.routeEventForClient(output, "client_a")).toEqual(output);
+    coordinator.completeCommandInvocation(started.command.clientInvocationId);
+    expect(coordinator.routeEventForClient(output, "client_a")).toBeUndefined();
   });
 
   it("atomically claims an interaction only for its command owner", () => {
@@ -709,5 +846,147 @@ describe("DaemonClientViewCoordinator", () => {
         () => "claim_after_shutdown",
       ),
     ).toBeUndefined();
+  });
+});
+
+it.each([
+  { outcomes: [false, false], order: [0, 1], root: null },
+  { outcomes: [false, false], order: [1, 0], root: null },
+  { outcomes: [false, true], order: [0, 1], root: "provisional" },
+  { outcomes: [false, true], order: [1, 0], root: "provisional" },
+])(
+  "settles concurrent provisional prompt admissions without losing successful bindings ($outcomes, $order)",
+  ({ outcomes, order, root }) => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.initializeClient("client", emptySnapshot(), {
+      startupSessionMode: { type: "fresh" },
+    });
+    const first = coordinator.preparePromptSubmit(
+      "client",
+      undefined,
+      () => "provisional",
+    );
+    const second = coordinator.preparePromptSubmit(
+      "client",
+      undefined,
+      () => "unused",
+    );
+    const prepared = [first, second];
+    prepared[order[0]].finishAdmission(outcomes[order[0]]);
+    if (!outcomes[order[0]])
+      expect(coordinator.isPromptBindingProvisional("client")).toBe(true);
+    prepared[order[1]].finishAdmission(outcomes[order[1]]);
+    expect(coordinator.binding("client", "epoch")).toMatchObject({
+      rootSessionId: root,
+      bindingGeneration: 3,
+    });
+    expect(coordinator.isPromptBindingProvisional("client")).toBe(false);
+    if (root === null)
+      expect(
+        coordinator.preparePromptSubmit("client", undefined, () => "next")
+          .sessionId,
+      ).toBe("next");
+  },
+);
+
+it("does not roll back a concurrent explicit session selection when admission fails", () => {
+  const coordinator = new DaemonClientViewCoordinator();
+  coordinator.initializeClient("client", emptySnapshot(), {
+    startupSessionMode: { type: "fresh" },
+  });
+  const prepared = coordinator.preparePromptSubmit(
+    "client",
+    undefined,
+    () => "provisional",
+  );
+  coordinator.selectSession("client", "other", 2);
+  prepared.finishAdmission(false);
+  expect(coordinator.binding("client", "epoch")).toMatchObject({
+    rootSessionId: "other",
+    bindingGeneration: 3,
+  });
+  expect(coordinator.isPromptBindingProvisional("client")).toBe(false);
+});
+
+it("preserves an in-flight provisional admission when invalid registration fails", () => {
+  const coordinator = new DaemonClientViewCoordinator();
+  coordinator.initializeClient("client", emptySnapshot(), {
+    startupSessionMode: { type: "fresh" },
+  });
+  const prepared = coordinator.preparePromptSubmit(
+    "client",
+    undefined,
+    () => "provisional",
+  );
+  expect(() => {
+    coordinator.initializeClient("client", emptySnapshot(), {
+      resumeSessionId: "missing",
+    });
+  }).toThrow("Session not found");
+  prepared.finishAdmission(false);
+  expect(coordinator.binding("client", "epoch")).toMatchObject({
+    rootSessionId: null,
+    bindingGeneration: 3,
+  });
+  expect(coordinator.isPromptBindingProvisional("client")).toBe(false);
+});
+
+describe("DaemonClientViewCoordinator sessionIdsBoundByOtherClients", () => {
+  it("lists other live clients' roots and forgets disconnected clients", () => {
+    const views = new DaemonClientViewCoordinator();
+    const intent = { startupSessionMode: { type: "fresh" } } as const;
+    views.initializeClient("a", { sessions: [] }, intent);
+    views.initializeClient("b", { sessions: [] }, intent);
+    views.selectSession(
+      "a",
+      "session_a",
+      views.binding("a", "e").bindingGeneration,
+    );
+    views.selectSession(
+      "b",
+      "session_b",
+      views.binding("b", "e").bindingGeneration,
+    );
+
+    expect(views.sessionIdsBoundByOtherClients("a")).toEqual(["session_b"]);
+    views.disconnectClient("b");
+    expect(views.sessionIdsBoundByOtherClients("a")).toEqual([]);
+    views.initializeClient("b", { sessions: [] }, intent);
+    views.selectSession(
+      "b",
+      "session_b",
+      views.binding("b", "e").bindingGeneration,
+    );
+    expect(views.sessionIdsBoundByOtherClients("a")).toEqual(["session_b"]);
+  });
+});
+
+describe("short session admissions", () => {
+  it("retains every in-flight target after SSE occupancy ends, including concurrent requests", () => {
+    const views = new DaemonClientViewCoordinator();
+    views.initializeClient("owner", { sessions: [] }, {});
+    const finishFirst = views.beginSessionOperation("owner", "target");
+    const finishSecond = views.beginSessionOperation("owner", "target");
+    views.setClientSessionOccupancy("owner", false);
+    expect(views.protectedSessionIds()).toEqual(["target"]);
+    finishSecond();
+    finishSecond();
+    expect(views.protectedSessionIds()).toEqual(["target"]);
+    expect(views.hasPendingSessionOperation("owner")).toBe(true);
+    finishFirst();
+    expect(views.protectedSessionIds()).toEqual([]);
+    expect(views.hasPendingSessionOperation("owner")).toBe(false);
+  });
+  it("invalidates an empty check even when an intervening admission has already settled", () => {
+    const views = new DaemonClientViewCoordinator();
+    const check = views.beginSessionAdmissionCheck();
+    const finish = views.beginSessionOperation("owner", "target");
+    finish();
+    expect(check.changedSessionIds.has("target")).toBe(true);
+    expect(check.changedSessionIds.has("unrelated")).toBe(false);
+    check.release();
+    check.release();
+    views.beginSessionOperation("owner", "later")();
+    expect(check.changedSessionIds.has("later")).toBe(false);
   });
 });

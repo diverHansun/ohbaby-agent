@@ -1,8 +1,14 @@
+import { randomUUID } from "node:crypto";
 import { NodeSqliteConnection } from "./connection.js";
 import { DatabaseNotInitializedError, MigrationError } from "./errors.js";
 import { INITIAL_MIGRATIONS } from "./migrations.js";
 import { ensureDatabaseDirectory, resolveDatabasePath } from "./path.js";
-import { runWithBusyRetry } from "./busy-retry.js";
+import { isSqliteBusy } from "./busy-retry.js";
+import { DatabaseBusyError } from "./errors.js";
+import {
+  activateDatabaseWriteBudget,
+  remainingDatabaseWriteBudget,
+} from "./write-budget.js";
 import type {
   DatabaseConnection,
   DatabaseStatement,
@@ -14,6 +20,13 @@ import type {
 } from "./types.js";
 
 export { runWithBusyRetry } from "./busy-retry.js";
+export {
+  createDatabaseWriteBudget,
+  getDatabaseWriteBudget,
+  withDatabaseWriteBudget,
+  DatabaseWriteBudgetError,
+  type DatabaseWriteBudget,
+} from "./write-budget.js";
 export {
   DatabaseBusyError,
   DatabaseNotInitializedError,
@@ -106,9 +119,11 @@ function createScopedTransactionConnection(connection: DatabaseConnection): {
 }
 
 function initializePragma(connection: DatabaseConnection): void {
+  // Configure the startup budget before initialization writes. SQLite journal
+  // conversion can still reject immediately; failed initialization closes below.
+  connection.exec("PRAGMA busy_timeout = 5000");
   connection.exec("PRAGMA journal_mode = WAL");
   connection.exec("PRAGMA foreign_keys = ON");
-  connection.exec("PRAGMA busy_timeout = 5000");
 }
 
 function ensureMigrationTable(connection: DatabaseConnection): void {
@@ -154,12 +169,77 @@ function applyMigration(
   }
 }
 
+export class DatabaseUpgradeBlockedError extends Error {
+  readonly code = "DATABASE_UPGRADE_REQUIRES_OFFLINE";
+  constructor(readonly ownerPid: number) {
+    super(
+      `Database upgrade requires offline maintenance: known writer PID ${String(ownerPid)} is alive or cannot be verified. Stop old TUI, serve and SDK hosts before retrying.`,
+    );
+    this.name = "DatabaseUpgradeBlockedError";
+  }
+}
+
+function prepareOfflineMigration(
+  connection: DatabaseConnection,
+  migrations: readonly MigrationDefinition[],
+  options: InitDatabaseOptions,
+): void {
+  if (
+    !migrations.some(
+      (migration) =>
+        migration.requiresOfflineBackup && !hasMigration(connection, migration),
+    )
+  )
+    return;
+  const existing =
+    connection
+      .prepare<{ count: number }>("SELECT COUNT(*) AS count FROM migration")
+      .get()?.count ?? 0;
+  if (existing === 0) return; // New installations have no legacy work or data to retain.
+  const pids = new Set(options.knownWriterPids ?? []);
+  for (const table of [
+    "run_ledger",
+    "subagent_instance",
+    "prompt_submission",
+  ]) {
+    const columns = connection
+      .prepare<{ name: string }>(`PRAGMA table_info(${table})`)
+      .all();
+    if (!columns.some((column) => column.name === "owner_pid")) continue;
+    for (const row of connection
+      .prepare<{
+        owner_pid: number;
+      }>(
+        `SELECT DISTINCT owner_pid FROM ${table} WHERE owner_pid IS NOT NULL AND status IN ('pending','queued','starting','running')`,
+      )
+      .all())
+      pids.add(row.owner_pid);
+  }
+  for (const pid of pids) {
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") continue;
+      throw new DatabaseUpgradeBlockedError(pid);
+    }
+    throw new DatabaseUpgradeBlockedError(pid);
+  }
+  const backupPath =
+    options.migrationBackupPath ??
+    `${connection.path}.before-retained-${randomUUID()}.backup`;
+  connection.prepare("VACUUM main INTO ?").run(backupPath);
+  options.onMigrationBackup?.(backupPath);
+}
+
 function runMigrations(
   connection: DatabaseConnection,
   migrations: readonly MigrationDefinition[],
   now: () => number,
+  options: InitDatabaseOptions,
 ): void {
   ensureMigrationTable(connection);
+  prepareOfflineMigration(connection, migrations, options);
   for (const migration of migrations) {
     if (hasMigration(connection, migration)) {
       continue;
@@ -175,7 +255,12 @@ export function initDatabase(options: InitDatabaseOptions = {}): void {
 
   if (currentConnection) {
     if (currentPath === dbPath) {
-      runMigrations(currentConnection, migrations, now);
+      currentConnection.exec("PRAGMA busy_timeout = 5000");
+      try {
+        runMigrations(currentConnection, migrations, now, options);
+      } finally {
+        currentConnection.exec("PRAGMA busy_timeout = 25");
+      }
       return;
     }
     closeDatabase();
@@ -185,7 +270,8 @@ export function initDatabase(options: InitDatabaseOptions = {}): void {
   const connection = new NodeSqliteConnection(dbPath);
   try {
     initializePragma(connection);
-    runMigrations(connection, migrations, now);
+    runMigrations(connection, migrations, now, options);
+    connection.exec("PRAGMA busy_timeout = 25");
   } catch (error) {
     connection.close();
     throw error;
@@ -206,35 +292,150 @@ export function closeDatabase(): void {
   if (!currentConnection) {
     return;
   }
+  beginDatabaseShutdown(Date.now(), currentConnection);
   currentConnection.close();
   currentConnection = undefined;
   currentPath = undefined;
 }
 
-export function withTransaction<T>(operation: SyncTransactionCallback<T>): T {
+// One FIFO per connection: reserve before waiting, never hold a transaction over await.
+const writeTails = new WeakMap<DatabaseConnection, Promise<void>>();
+const WRITE_WAIT_BUDGET_MS = 5000;
+const shutdownDeadlines = new WeakMap<DatabaseConnection, number>();
+
+/** Tighten every current and future write on a connection; never extend it. */
+export function beginDatabaseShutdown(
+  deadlineAt: number,
+  connection: DatabaseConnection = getDatabase(),
+): void {
+  shutdownDeadlines.set(
+    connection,
+    Math.min(shutdownDeadlines.get(connection) ?? Infinity, deadlineAt),
+  );
+}
+
+export class DatabaseShutdownError extends Error {
+  constructor() {
+    super("Database shutdown deadline reached; write permission revoked");
+    this.name = "DatabaseShutdownError";
+  }
+}
+
+export async function runWriteTransaction<T>(
+  connection: DatabaseConnection,
+  operation: (db: DatabaseConnection) => T,
+): Promise<T> {
   if (isAsyncFunction(operation)) {
     throw new Error("Database transactions require a synchronous callback");
   }
-  return runWithBusyRetry(() => {
-    const connection = getDatabase();
-    const scoped = createScopedTransactionConnection(connection);
-    connection.exec("BEGIN IMMEDIATE");
+  const stopBudgetClock = activateDatabaseWriteBudget();
+  const deadline = performance.now() + WRITE_WAIT_BUDGET_MS;
+  const remainingBudget = (): number => {
+    const shutdownRemaining =
+      (shutdownDeadlines.get(connection) ?? Infinity) - Date.now();
+    if (shutdownRemaining <= 0) throw new DatabaseShutdownError();
+    const remaining = Math.min(
+      deadline - performance.now(),
+      shutdownRemaining,
+      remainingDatabaseWriteBudget(),
+    );
+    if (remaining <= 0) throw new DatabaseBusyError(0, undefined);
+    return remaining;
+  };
+  const previous = writeTails.get(connection) ?? Promise.resolve();
+  let release!: () => void;
+  const turn = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  writeTails.set(connection, turn);
+  let acquired = false;
+  const finishTurn = (): void => {
+    release();
+    if (writeTails.get(connection) === turn) writeTails.delete(connection);
+  };
+  try {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      // An expired queued write fails promptly, retaining its place in the FIFO
+      // until its predecessor exits so the following writer cannot overtake it.
+      await Promise.race([
+        previous,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            try {
+              remainingBudget();
+              reject(new DatabaseBusyError(0, undefined));
+            } catch (error) {
+              reject(error instanceof Error ? error : new Error(String(error)));
+            }
+          }, Math.ceil(remainingBudget()));
+        }),
+      ]);
+      acquired = true;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    // Yield even between uncontended writes so a long FIFO cannot starve Stop.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    let attempts = 0;
+    let lastBusy: unknown;
+    for (;;) {
+      const remaining = remainingBudget();
+      if (remaining <= 0) {
+        throw new DatabaseBusyError(attempts, lastBusy);
+      }
+      // The synchronous SQLite wait consumes the same remaining shutdown budget.
+      connection.exec(
+        `PRAGMA busy_timeout = ${String(Math.max(0, Math.min(25, Math.floor(remaining))))}`,
+      );
+      attempts += 1;
+      try {
+        connection.exec("BEGIN IMMEDIATE");
+        break;
+      } catch (error) {
+        if (!isSqliteBusy(error)) throw error;
+        lastBusy = error;
+        const remaining = remainingBudget();
+        if (remaining <= 0) throw new DatabaseBusyError(attempts, error);
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, Math.min(25, remaining)),
+        );
+      }
+    }
+    const scoped = createScopedTransactionConnection(connection);
+    try {
+      remainingBudget();
       const result = operation(scoped.db);
       if (isThenable(result)) {
+        // Observe a rejected accidental async callback as well as rejecting this write.
+        void Promise.resolve(result).catch(() => undefined);
         throw new Error("Database transactions require a synchronous callback");
       }
+      const commitBudget = remainingBudget();
+      connection.exec(
+        `PRAGMA busy_timeout = ${String(Math.max(0, Math.min(25, Math.floor(commitBudget))))}`,
+      );
       connection.exec("COMMIT");
       return result;
     } catch (error) {
       try {
         connection.exec("ROLLBACK");
       } catch {
-        // Keep the original operation error intact.
+        /* Preserve the original failure. */
       }
       throw error;
     } finally {
       scoped.deactivate();
     }
-  });
+  } finally {
+    stopBudgetClock();
+    if (acquired) finishTurn();
+    else void previous.then(finishTurn);
+  }
+}
+
+export function withTransaction<T>(
+  operation: SyncTransactionCallback<T>,
+): Promise<T> {
+  return runWriteTransaction(getDatabase(), operation);
 }

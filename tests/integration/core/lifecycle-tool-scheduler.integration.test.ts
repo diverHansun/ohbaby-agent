@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -28,12 +28,20 @@ import type {
   MessageIdGenerator,
   Part,
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
-import { createToolScheduler } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
+import {
+  createToolScheduler,
+  ToolSchedulerEvent,
+} from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
 import type {
   Tool,
   ToolExecutionEnvironment,
 } from "../../../packages/ohbaby-agent/src/core/tool-scheduler/index.js";
-import { createPermissionState } from "../../../packages/ohbaby-agent/src/permission/index.js";
+import {
+  createPermissionState,
+  createPermissionManager,
+  PermissionEvent,
+  type PermissionInfo,
+} from "../../../packages/ohbaby-agent/src/permission/index.js";
 import {
   closeDatabase,
   getDatabase,
@@ -41,6 +49,7 @@ import {
   schema,
 } from "../../../packages/ohbaby-agent/src/services/database/index.js";
 import { ScopeToolSequence } from "../../../packages/ohbaby-agent/src/mcp/integration/tool-sequence.js";
+import { SourceSessionProjection } from "../../../packages/ohbaby-agent/src/adapters/ui-state/source-session-projection.js";
 import type {
   InterfaceProviderRequest as ProviderRequest,
   InterfaceProviderStreamEvent as ProviderStreamEvent,
@@ -201,6 +210,7 @@ function createSequentialFakeLLMClient(
       },
     },
     config: {
+      interfaceProvider: "openai-compatible",
       modelProfiles: [
         {
           model: "fake-model",
@@ -1289,6 +1299,1161 @@ describe("lifecycle tool scheduler integration", () => {
       tools: requests[1]?.tools,
     });
     expect(JSON.stringify(firstPreparedRequest)).toBe(firstPreparedJson);
-    expect(Object.isFrozen(requests[0]?.tools?.[0]?.function)).toBe(true);
+    expect(Object.isFrozen(requests[0]?.tools?.[0])).toBe(true);
   });
+});
+
+it("delivers a fast result while a sibling still runs and preserves model result order", async () => {
+  const bus = createBus();
+  const scheduler = createToolScheduler({
+    bus,
+    permissionState: createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    }),
+  });
+  let release!: () => void;
+  const slow = new Promise<void>((r) => {
+    release = r;
+  });
+  const { withToolAdmission } =
+    await import("../../../packages/ohbaby-agent/src/core/tool-scheduler/tool-admission.js");
+  scheduler.register(
+    withToolAdmission(
+      {
+        name: "independent",
+        source: "builtin",
+        category: "readonly",
+        description: "test",
+        parametersJsonSchema: { type: "object" },
+        execute: async (params) => {
+          if (params.slow) await slow;
+          return { output: params.slow ? "A" : "B" };
+        },
+      },
+      { plan: () => [] },
+    ),
+  );
+  const messageManager = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+    idGenerator: createDeterministicIds(),
+  });
+  const requests: ProviderRequest[] = [];
+  const lifecycle = new Lifecycle({
+    messageManager,
+    toolScheduler: scheduler,
+    contextManager: createContextManagerMock(async () =>
+      preparedTurn([{ role: "user", content: "work" }]),
+    ),
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [
+          {
+            toolCallDeltas: [
+              {
+                id: "a",
+                index: 0,
+                name: "independent",
+                argumentsDelta: '{"slow":true}',
+              },
+              { id: "b", index: 1, name: "independent", argumentsDelta: "{}" },
+            ],
+            finishReason: "tool_calls",
+          },
+        ],
+        [{ textDelta: "done", finishReason: "stop" }],
+      ],
+      requests,
+    ),
+  });
+  const loop = lifecycle.run({
+    sessionId: "session_1",
+    runId: "run_delivery",
+    directory: "/tmp",
+    modelId: "fake-model",
+  });
+  const seen: string[] = [];
+  const consume = (async () => {
+    for await (const event of loop) {
+      if (event.type === "tool:result") {
+        seen.push(event.callId);
+        if (event.callId === "b") {
+          expect(requests).toHaveLength(1);
+          const messages = await messageManager.listBySession("session_1");
+          const part = messages
+            .flatMap((m) => m.parts)
+            .find((p) => p.type === "tool" && p.callId === "b");
+          expect(part).toMatchObject({
+            state: { status: "completed", output: "B" },
+            metadata: {
+              execution: {
+                phase: "ended",
+                outcome: "success",
+                runId: "run_delivery",
+              },
+            },
+          });
+          release();
+        }
+      }
+      if (event.type === "step:complete" && event.toolResults)
+        expect(event.toolResults.map((r) => r.callId)).toEqual(["a", "b"]);
+    }
+  })();
+  try {
+    await Promise.race([
+      consume,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("fast result was withheld")), 500),
+      ),
+    ]);
+  } finally {
+    release();
+    await consume;
+  }
+  expect(seen).toEqual(["b", "a"]);
+  expect(requests).toHaveLength(2);
+});
+
+it.each(["preparing", "executing", "ended"])(
+  "stops the lifecycle on %s persistence failure without a next model request",
+  async (phase) => {
+    const bus = createBus();
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+    });
+    let invocations = 0;
+    scheduler.register({
+      name: "work",
+      description: "work",
+      source: "builtin",
+      category: "readonly",
+      parametersJsonSchema: { type: "object" },
+      execute: () => {
+        invocations++;
+        return { output: "ok" };
+      },
+    });
+    const manager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    const update = manager.updatePart.bind(manager);
+    manager.updatePart = async (id, patch) => {
+      if (patch.metadata?.execution?.phase === phase)
+        throw new Error("injected disk failure");
+      return update(id, patch);
+    };
+    const requests: ProviderRequest[] = [];
+    const lifecycle = new Lifecycle({
+      messageManager: manager,
+      toolScheduler: scheduler,
+      contextManager: createContextManagerMock(async () =>
+        preparedTurn([{ role: "user", content: "go" }]),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                { id: "call", name: "work", index: 0, argumentsDelta: "{}" },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "must not run", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+    const events = [];
+    const loop = lifecycle.run({
+      sessionId: "session_1",
+      runId: "failure",
+      directory: "/tmp",
+      modelId: "fake-model",
+    });
+    let next = await loop.next();
+    while (!next.done) {
+      events.push(next.value.type);
+      next = await loop.next();
+    }
+    expect(next.value).toMatchObject({
+      success: false,
+      finishReason: "error",
+      failureCause: { name: "ToolDeliveryError" },
+    });
+    expect(requests).toHaveLength(1);
+    expect(events).not.toContain("tool:result");
+    expect(invocations).toBe(phase === "preparing" ? 0 : 1);
+  },
+);
+
+it("persists late cleanup after the lifecycle has finished without changing its timeout result", async () => {
+  const bus = createBus();
+  const scheduler = createToolScheduler({
+    bus,
+    permissionState: createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    }),
+    config: { timeout: { defaultTimeout: 5 } },
+    cleanupObservationMs: 100,
+  });
+  let resolve!: (result: { output: string }) => void;
+  const pending = new Promise<{ output: string }>((r) => {
+    resolve = r;
+  });
+  scheduler.register({
+    name: "work",
+    description: "work",
+    source: "builtin",
+    category: "readonly",
+    parametersJsonSchema: { type: "object" },
+    execute: () => pending,
+  });
+  const manager = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+    idGenerator: createDeterministicIds(),
+  });
+  const requests: ProviderRequest[] = [];
+  const lifecycle = new Lifecycle({
+    messageManager: manager,
+    toolScheduler: scheduler,
+    contextManager: createContextManagerMock(async () =>
+      preparedTurn([{ role: "user", content: "go" }]),
+    ),
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [
+          {
+            toolCallDeltas: [
+              { id: "call", name: "work", index: 0, argumentsDelta: "{}" },
+            ],
+            finishReason: "tool_calls",
+          },
+        ],
+        [{ textDelta: "done", finishReason: "stop" }],
+      ],
+      requests,
+    ),
+  });
+  await consumeLifecycle(
+    lifecycle.run({
+      sessionId: "session_1",
+      runId: "late-owner",
+      directory: "/tmp",
+      modelId: "fake-model",
+    }),
+  );
+  const read = async () =>
+    (await manager.listBySession("session_1"))
+      .flatMap((m) => m.parts)
+      .find((p) => p.type === "tool");
+  const before = await read();
+  expect(before).toMatchObject({
+    metadata: {
+      execution: {
+        runId: "late-owner",
+        phase: "ended",
+        outcome: "timed-out",
+        cleanup: "in-progress",
+      },
+    },
+  });
+  resolve({ output: "late success" });
+  await vi.waitFor(async () => {
+    expect(await read()).toMatchObject({
+      metadata: {
+        execution: {
+          phase: "ended",
+          outcome: "timed-out",
+          cleanup: "confirmed",
+        },
+      },
+    });
+  });
+  expect((await read())?.type === "tool" && (await read())).toMatchObject({
+    state: (
+      before as import("../../../packages/ohbaby-agent/src/core/message/index.js").ToolPart
+    ).state,
+  });
+  expect(requests).toHaveLength(2);
+});
+
+it.each(["active", "finished"] as const)(
+  "routes a late cleanup save failure to its %s original turn",
+  async (originalState) => {
+    const bus = createBus();
+    const failedFacts: unknown[] = [];
+    bus.subscribe(ToolSchedulerEvent.DeliveryFailed, (fact) => {
+      failedFacts.push(fact);
+    });
+    const diagnostics: {
+      error: unknown;
+      fact: import("../../../packages/ohbaby-agent/src/core/tool-scheduler/types.js").ToolExecutionFact;
+    }[] = [];
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      config: { timeout: { defaultTimeout: 5 } },
+      cleanupObservationMs: 1000,
+      onExecutionFactError: (error, fact) => {
+        diagnostics.push({ error, fact });
+      },
+    });
+    let finishOperation!: (value: { output: string }) => void;
+    const operation = new Promise<{ output: string }>((resolve) => {
+      finishOperation = resolve;
+    });
+    scheduler.register({
+      name: "work",
+      description: "work",
+      source: "builtin",
+      category: "readonly",
+      parametersJsonSchema: { type: "object" },
+      execute: () => operation,
+    });
+    const manager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    const update = manager.updatePart.bind(manager);
+    let lateSaveAttempted = false;
+    manager.updatePart = async (id, patch) => {
+      if (patch.metadata?.execution?.cleanup === "confirmed") {
+        lateSaveAttempted = true;
+        throw new Error("late cleanup save failed");
+      }
+      return update(id, patch);
+    };
+    const requests: ProviderRequest[] = [];
+    const llm = createSequentialFakeLLMClient(
+      [
+        [
+          {
+            toolCallDeltas: [
+              { id: "old-call", name: "work", index: 0, argumentsDelta: "{}" },
+            ],
+            finishReason: "tool_calls",
+          },
+        ],
+        [{ textDelta: "done", finishReason: "stop" }],
+        [{ textDelta: "healthy", finishReason: "stop" }],
+      ],
+      requests,
+    );
+    const stream = llm.provider.streamResponse.bind(llm.provider);
+    let modelSignal: AbortSignal | undefined;
+    let releaseModel!: () => void;
+    let count = 0;
+    llm.provider.streamResponse = async (request) => {
+      count++;
+      if (count === (originalState === "active" ? 2 : 3)) {
+        modelSignal = request.signal;
+        await new Promise<void>((resolve) => {
+          releaseModel = resolve;
+        });
+      }
+      return stream(request);
+    };
+    const lifecycle = new Lifecycle({
+      messageManager: manager,
+      toolScheduler: scheduler,
+      contextManager: createContextManagerMock(async () =>
+        preparedTurn([{ role: "user", content: "go" }]),
+      ),
+      llmClient: llm,
+    });
+    let releaseRequestEnd!: () => void;
+    const requestEndGate = new Promise<void>((resolve) => {
+      releaseRequestEnd = resolve;
+    });
+    const updateMessage = manager.updateMessage.bind(manager);
+    manager.updateMessage = async (id, patch) => {
+      if (
+        originalState === "active" &&
+        patch.modelRequests?.some((request) => request.outcome === "aborted")
+      )
+        await requestEndGate;
+      return updateMessage(id, patch);
+    };
+    let originalResult: unknown;
+    const original = consumeLifecycle(
+      lifecycle.run({
+        sessionId: "session_1",
+        runId: "old-run",
+        signal: new AbortController().signal,
+        directory: "/tmp",
+        modelId: "fake-model",
+      }),
+    ).then((result) => {
+      originalResult = result;
+      return result;
+    });
+    let healthy: ReturnType<typeof consumeLifecycle> | undefined;
+    if (originalState === "finished") {
+      await original;
+      healthy = consumeLifecycle(
+        lifecycle.run({
+          sessionId: "session_1",
+          runId: "new-run",
+          signal: new AbortController().signal,
+          directory: "/tmp",
+          modelId: "fake-model",
+        }),
+      );
+    }
+    await vi.waitFor(() => {
+      expect(modelSignal).toBeDefined();
+    });
+    finishOperation({ output: "late success" });
+    try {
+      await vi.waitFor(() => {
+        expect(lateSaveAttempted).toBe(true);
+        expect(diagnostics).toHaveLength(1);
+        expect(failedFacts).toHaveLength(1);
+      });
+      expect(failedFacts[0]).toMatchObject({
+        runId: "old-run",
+        callId: "old-call",
+        cleanup: "confirmed",
+      });
+      expect(diagnostics[0]).toMatchObject({
+        error: { name: "ToolDeliveryError" },
+        fact: {
+          owner: { runId: "old-run", callId: "old-call" },
+          phase: "cleanup",
+          cleanup: "confirmed",
+        },
+      });
+      if (originalState === "active") {
+        await vi.waitFor(() => {
+          expect(modelSignal?.aborted).toBe(true);
+        });
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        expect(originalResult).toBeUndefined();
+        releaseRequestEnd();
+        expect(await original).toMatchObject({
+          success: false,
+          terminalReason: "tool_persistence_failure",
+          failureCause: { name: "ToolDeliveryError" },
+        });
+        expect(count).toBe(2);
+        const records = (await manager.listBySession("session_1")).flatMap(
+          (message) =>
+            message.info.role === "assistant"
+              ? [...(message.info.modelRequests ?? [])]
+              : [],
+        );
+        expect(records).toHaveLength(2);
+        expect(records.every((request) => request.endedAt !== undefined)).toBe(
+          true,
+        );
+        expect(records[1].outcome).toBe("aborted");
+      } else {
+        expect(modelSignal?.aborted).toBe(false);
+        expect(originalResult).toMatchObject({ success: true });
+        releaseModel();
+        expect(await healthy).toMatchObject({ success: true });
+      }
+      const part = (await manager.listBySession("session_1"))
+        .flatMap((m) => m.parts)
+        .find((p) => p.type === "tool");
+      expect(part).toMatchObject({
+        metadata: {
+          execution: {
+            runId: "old-run",
+            phase: "ended",
+            outcome: "timed-out",
+            cleanup: "in-progress",
+          },
+        },
+      });
+    } finally {
+      releaseRequestEnd();
+      releaseModel();
+      await original;
+      await healthy;
+    }
+  },
+);
+
+it.each(["once", "reject"] as const)(
+  "persists and publishes independent B before answering A with %s, including SQLite refresh",
+  async (answer) => {
+    const directory = await mkdtemp(join(tmpdir(), "durable-independent-"));
+    initDatabase({ dbPath: join(directory, "fixture.db") });
+    insertSession("session_1");
+    const bus = createBus();
+    const state = createPermissionState({ bus });
+    const permissions = createPermissionManager({ bus, state });
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState: state,
+      permission: {
+        ask: (input) =>
+          permissions.ask({
+            ...input,
+            category: "write",
+            source: {
+              rootSessionId: input.sessionId,
+              ancestorSessionIds: [input.sessionId],
+            },
+          }),
+      },
+    });
+    const manager = createMessageManager({
+      bus,
+      store: createDatabaseMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    const published: import("ohbaby-sdk").UiSessionRecoveryEvent[] = [];
+    const makeSource = (messageManager = manager) =>
+      new SourceSessionProjection({
+        runtimeEpoch: "durable",
+        messageManager,
+        metadata: async (id) => ({
+          id,
+          title: "fixture",
+          createdAt: "2026-09-26",
+          updatedAt: "2026-09-26",
+        }),
+        runs: async () => [],
+        prompts: async () => [],
+        publish: (event) => {
+          published.push(event);
+        },
+      });
+    const source = makeSource();
+    await source.owner.initialize("session_1");
+    let refresh: SourceSessionProjection | undefined;
+    let pending!: PermissionInfo;
+    const off = bus.subscribe(PermissionEvent.Updated, ({ info }) => {
+      pending = info;
+    });
+    const calls: string[] = [];
+    const { withToolAdmission } =
+      await import("../../../packages/ohbaby-agent/src/core/tool-scheduler/tool-admission.js");
+    for (const [name, category] of [
+      ["write", "write"],
+      ["read", "readonly"],
+    ] as const) {
+      scheduler.register(
+        withToolAdmission(
+          {
+            name,
+            category,
+            source: "builtin",
+            description: "controlled independent tool",
+            parametersJsonSchema: { type: "object" },
+            execute: async () => {
+              calls.push(name);
+              return { output: name === "read" ? "B durable" : "A approved" };
+            },
+          },
+          { plan: () => [] },
+        ),
+      );
+    }
+    const requests: ProviderRequest[] = [];
+    const lifecycle = new Lifecycle({
+      messageManager: manager,
+      toolScheduler: scheduler,
+      contextManager: createContextManagerMock(async () =>
+        preparedTurn([{ role: "user", content: "work" }]),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  id: "a",
+                  index: 0,
+                  name: "write",
+                  argumentsDelta: '{"file_path":"a.txt","content":"A"}',
+                },
+                {
+                  id: "b",
+                  index: 1,
+                  name: "read",
+                  argumentsDelta: '{"file_path":"b.txt"}',
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "done", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+    const seen: string[] = [];
+    try {
+      for await (const event of lifecycle.run({
+        sessionId: "session_1",
+        runId: "durable",
+        directory,
+        modelId: "fake-model",
+      })) {
+        if (event.type === "tool:result") {
+          seen.push(event.callId);
+          if (event.callId === "b") {
+            expect(calls).toEqual(["read"]);
+            expect(requests).toHaveLength(1);
+            expect(pending.callId).toBe("a");
+            const records =
+              await createDatabaseMessageStore().listBySession("session_1");
+            expect(
+              records
+                .flatMap((m) => m.parts)
+                .find((p) => p.type === "tool" && p.callId === "b"),
+            ).toMatchObject({
+              state: { status: "completed", output: "B durable" },
+              metadata: { execution: { phase: "ended", outcome: "success" } },
+            });
+            expect(
+              published.some(
+                (e) =>
+                  e.type === "session.changed" &&
+                  e.messages?.some((m) =>
+                    m.parts.some(
+                      (p) =>
+                        p.type === "tool-result" &&
+                        p.result.callId === "b" &&
+                        p.result.output === "B durable",
+                    ),
+                  ),
+              ),
+            ).toBe(true);
+            refresh = makeSource(
+              createMessageManager({
+                bus: createBus(),
+                store: createDatabaseMessageStore(),
+              }),
+            );
+            await refresh.owner.initialize("session_1");
+            expect(refresh.owner.read("session_1").session.messages).toEqual(
+              source.owner.read("session_1").session.messages,
+            );
+            permissions.respond(pending.sessionId, pending.id, {
+              type: answer,
+            });
+          }
+        }
+        if (event.type === "step:complete" && event.toolResults)
+          expect(event.toolResults.map((r) => r.callId)).toEqual(["a", "b"]);
+      }
+      expect(seen).toEqual(["b", "a"]);
+      expect(requests).toHaveLength(2);
+      expect(calls).toEqual(answer === "once" ? ["read", "write"] : ["read"]);
+    } finally {
+      if (pending)
+        permissions.respond(pending.sessionId, pending.id, { type: "reject" });
+      off();
+      source.reasoning.dispose();
+      source.owner.dispose();
+      refresh?.reasoning.dispose();
+      refresh?.owner.dispose();
+      closeDatabase();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it.each([false, true])(
+  "persists real Bash cleanup and keeps background=%s dispatch result stable after lifecycle end",
+  async (background) => {
+    const directory = await mkdtemp(join(tmpdir(), "bash-delivery-"));
+    const { createBashTool } =
+      await import("../../../packages/ohbaby-agent/src/tools/bash.js");
+    const { ShellJobRegistry } =
+      await import("../../../packages/ohbaby-agent/src/tools/shell-job-registry.js");
+    const { Shell } =
+      await import("../../../packages/ohbaby-agent/src/shell/index.js");
+    const { createHostLocalEnvironment } =
+      await import("../../../packages/ohbaby-agent/src/adapters/ui-runtime/host-local-environment.js");
+    const registry = new ShellJobRegistry({
+      killTree: Shell.killTree,
+      terminationManagesObservation: true,
+    });
+    initDatabase({ dbPath: join(directory, "fixture.db") });
+    insertSession("session_1");
+    const bus = createBus();
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+      resolveOwner: (request) => ({
+        ...request,
+        rootSessionId: request.sessionId,
+        workspaceKey: directory,
+      }),
+    });
+    scheduler.register(createBashTool({ registry }));
+    const manager = createMessageManager({
+      bus,
+      store: createDatabaseMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    const source = new SourceSessionProjection({
+      runtimeEpoch: "bash",
+      messageManager: manager,
+      metadata: async (id) => ({
+        id,
+        title: "bash",
+        createdAt: "2026-09-26",
+        updatedAt: "2026-09-26",
+      }),
+      runs: async () => [],
+      prompts: async () => [],
+      publish: () => undefined,
+    });
+    await source.owner.initialize("session_1");
+    const requests: ProviderRequest[] = [];
+    const lifecycle = new Lifecycle({
+      messageManager: manager,
+      toolScheduler: scheduler,
+      contextManager: createContextManagerMock(async () =>
+        preparedTurn([{ role: "user", content: "work" }]),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              toolCallDeltas: [
+                {
+                  id: "bash",
+                  index: 0,
+                  name: "bash",
+                  argumentsDelta: JSON.stringify({
+                    command:
+                      "node -e 'process.stdout.write(\"OWNED_READY\\n\");setInterval(()=>{},100)'",
+                    timeout: background ? 10000 : 150,
+                    run_in_background: background,
+                  }),
+                },
+              ],
+              finishReason: "tool_calls",
+            },
+          ],
+          [{ textDelta: "done", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+    });
+    const results: string[] = [];
+    try {
+      for await (const event of lifecycle.run({
+        sessionId: "session_1",
+        runId: "bash",
+        directory,
+        environment: createHostLocalEnvironment(directory),
+        modelId: "fake-model",
+      }))
+        if (event.type === "tool:result") results.push(event.callId);
+      const readTool = async () =>
+        (await manager.listBySession("session_1"))
+          .flatMap((m) => m.parts)
+          .find((p) => p.type === "tool");
+      const terminal = await readTool();
+      if (
+        !terminal ||
+        terminal.type !== "tool" ||
+        terminal.state.status !== "completed"
+      )
+        throw new Error("Bash did not produce persisted result");
+      const jobId = String(terminal.state.metadata?.jobId);
+      const dispatch = structuredClone(terminal.state);
+      if (background) {
+        expect(registry.get(jobId, "session_1").status).toBe("running");
+        await registry.kill(jobId, "session_1");
+        await registry.kill(jobId, "session_1");
+      }
+      await vi.waitFor(() =>
+        expect(registry.get(jobId, "session_1").metadata.cleanup).toBe(
+          "confirmed",
+        ),
+      );
+      if (!background)
+        expect(terminal.state.metadata?.status).toBe("timed_out");
+      expect(terminal.metadata?.execution?.outcome).toBe(
+        background ? "success" : "timed-out",
+      );
+      await vi.waitFor(async () => {
+        const latest = await readTool();
+        expect(latest?.metadata?.execution?.cleanup).toBe("confirmed");
+      });
+      expect((await readTool())?.state).toEqual(dispatch);
+      expect(results).toEqual(["bash"]);
+      expect(requests).toHaveLength(2);
+      const refreshed = new SourceSessionProjection({
+        runtimeEpoch: "refresh",
+        messageManager: createMessageManager({
+          bus: createBus(),
+          store: createDatabaseMessageStore(),
+        }),
+        metadata: async (id) => ({
+          id,
+          title: "bash",
+          createdAt: "2026-09-26",
+          updatedAt: "2026-09-26",
+        }),
+        runs: async () => [],
+        prompts: async () => [],
+        publish: () => undefined,
+      });
+      try {
+        await refreshed.owner.initialize("session_1");
+        expect(refreshed.owner.read("session_1").session.messages).toEqual(
+          source.owner.read("session_1").session.messages,
+        );
+      } finally {
+        refreshed.reasoning.dispose();
+        refreshed.owner.dispose();
+      }
+    } finally {
+      await registry.dispose();
+      source.reasoning.dispose();
+      source.owner.dispose();
+      closeDatabase();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  15000,
+);
+
+it("keeps two timed-out SQLite write owners protected and projects out-of-order late cleanup without replay", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "late-write-owners-"));
+  initDatabase({ dbPath: join(directory, "fixture.db") });
+  insertSession("session_1");
+  const bus = createBus();
+  const releases = new Map<string, () => void>();
+  const unconfirmed = new Set<string>();
+  let bothUnconfirmed!: () => void;
+  const observed = new Promise<void>((r) => {
+    bothUnconfirmed = r;
+  });
+  const scheduler = createToolScheduler({
+    bus,
+    permissionState: createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    }),
+    config: { timeout: { defaultTimeout: 15 } },
+    cleanupObservationMs: 30,
+    onExecutionFact: (fact) => {
+      if (fact.cleanup === "unconfirmed") {
+        unconfirmed.add(fact.owner.callId);
+        if (unconfirmed.size === 2) bothUnconfirmed();
+      }
+    },
+  });
+  const { withToolAdmission } =
+    await import("../../../packages/ohbaby-agent/src/core/tool-scheduler/tool-admission.js");
+  const invoked: string[] = [];
+  scheduler.register(
+    withToolAdmission(
+      {
+        name: "controlled_write",
+        category: "write",
+        source: "builtin",
+        description: "owned file write",
+        parametersJsonSchema: { type: "object" },
+        execute: async (params, context) => {
+          invoked.push(context.callId);
+          if (params.hold)
+            await new Promise<void>((resolve) =>
+              releases.set(context.callId, resolve),
+            );
+          const { writeFile } = await import("node:fs/promises");
+          await writeFile(join(directory, String(params.file)), context.callId);
+          return { output: context.callId };
+        },
+      },
+      {
+        plan: (params) => [
+          {
+            kind: "file",
+            path: join(directory, String(params.file)),
+            scope: "file",
+            mode: "write",
+          },
+        ],
+        resolve: (params) => ({
+          resources: [
+            {
+              kind: "file",
+              path: join(directory, String(params.file)),
+              scope: "file",
+              mode: "write",
+            },
+          ],
+        }),
+      },
+    ),
+  );
+  const manager = createMessageManager({
+    bus,
+    store: createDatabaseMessageStore(),
+    idGenerator: createDeterministicIds(),
+  });
+  const source = new SourceSessionProjection({
+    runtimeEpoch: "owners",
+    messageManager: manager,
+    metadata: async (id) => ({
+      id,
+      title: "owners",
+      createdAt: "2026-09-26",
+      updatedAt: "2026-09-26",
+    }),
+    runs: async () => [],
+    prompts: async () => [],
+    publish: () => undefined,
+  });
+  await source.owner.initialize("session_1");
+  const call = (id: string, index: number, file: string, hold = false) => ({
+    id,
+    index,
+    name: "controlled_write",
+    argumentsDelta: JSON.stringify({ file, hold }),
+  });
+  const requests: ProviderRequest[] = [];
+  const client = createSequentialFakeLLMClient(
+    [
+      [
+        {
+          toolCallDeltas: [
+            call("a", 0, "a.txt", true),
+            call("b", 1, "b.txt", true),
+          ],
+          finishReason: "tool_calls",
+        },
+      ],
+      [
+        {
+          toolCallDeltas: [
+            call("retry-a", 0, "a.txt"),
+            call("retry-b", 1, "b.txt"),
+            call("independent", 2, "c.txt"),
+          ],
+          finishReason: "tool_calls",
+        },
+      ],
+      [
+        {
+          textDelta: "blocked writes explained; independent work done",
+          finishReason: "stop",
+        },
+      ],
+    ],
+    requests,
+  );
+  const stream = client.provider.streamResponse.bind(client.provider);
+  client.provider.streamResponse = async (request) => {
+    if (requests.length === 1) await observed;
+    return stream(request);
+  };
+  const lifecycle = new Lifecycle({
+    messageManager: manager,
+    toolScheduler: scheduler,
+    contextManager: createContextManagerMock(async () =>
+      preparedTurn([{ role: "user", content: "write" }]),
+    ),
+    llmClient: client,
+  });
+  const results: string[] = [];
+  const parts = async () =>
+    (await manager.listBySession("session_1"))
+      .flatMap((m) => m.parts)
+      .filter((p) => p.type === "tool");
+  try {
+    for await (const event of lifecycle.run({
+      sessionId: "session_1",
+      runId: "owners",
+      directory,
+      modelId: "fake-model",
+    }))
+      if (event.type === "tool:result") results.push(event.callId);
+    expect(invoked.sort()).toEqual(["a", "b", "independent"]);
+    const before = await parts();
+    for (const id of ["retry-a", "retry-b"]) {
+      const failed = before.find((p) => p.callId === id);
+      expect(failed?.state.status).toBe("error");
+      expect(JSON.stringify(failed?.state)).toMatch(
+        /not executed|did not execute/,
+      );
+      expect(JSON.stringify(failed?.state)).toContain("unconfirmed");
+      expect(failed?.metadata?.execution?.executionStartedAt).toBeUndefined();
+    }
+    releases.get("b")!();
+    await vi.waitFor(async () =>
+      expect(
+        (await parts()).find((p) => p.callId === "b")?.metadata?.execution
+          ?.cleanup,
+      ).toBe("confirmed"),
+    );
+    expect(
+      (await parts()).find((p) => p.callId === "a")?.metadata?.execution
+        ?.cleanup,
+    ).toBe("unconfirmed");
+    releases.get("a")!();
+    await vi.waitFor(async () =>
+      expect(
+        (await parts()).find((p) => p.callId === "a")?.metadata?.execution
+          ?.cleanup,
+      ).toBe("confirmed"),
+    );
+    const after = await parts();
+    for (const id of ["a", "b"]) {
+      expect(after.find((p) => p.callId === id)?.state).toEqual(
+        before.find((p) => p.callId === id)?.state,
+      );
+      expect(
+        after.find((p) => p.callId === id)?.metadata?.execution,
+      ).toMatchObject({ phase: "ended", outcome: "timed-out" });
+    }
+    expect(results).toHaveLength(5);
+    expect(new Set(results).size).toBe(5);
+    expect(requests).toHaveLength(3);
+    const refresh = new SourceSessionProjection({
+      runtimeEpoch: "refresh",
+      messageManager: createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      }),
+      metadata: async (id) => ({
+        id,
+        title: "owners",
+        createdAt: "2026-09-26",
+        updatedAt: "2026-09-26",
+      }),
+      runs: async () => [],
+      prompts: async () => [],
+      publish: () => undefined,
+    });
+    try {
+      await refresh.owner.initialize("session_1");
+      expect(refresh.owner.read("session_1").session.messages).toEqual(
+        source.owner.read("session_1").session.messages,
+      );
+    } finally {
+      refresh.reasoning.dispose();
+      refresh.owner.dispose();
+    }
+  } finally {
+    for (const release of releases.values()) release();
+    await vi.waitFor(async () => {
+      const saved = await parts();
+      expect(
+        saved
+          .filter((p) => ["a", "b"].includes(p.callId))
+          .every((p) => p.metadata?.execution?.cleanup === "confirmed"),
+      ).toBe(true);
+    });
+    source.reasoning.dispose();
+    source.owner.dispose();
+    closeDatabase();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("allows real foreground Bash gates in separate child batches sharing one root and workspace", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "child-bash-overlap-"));
+  const { createBashTool } =
+    await import("../../../packages/ohbaby-agent/src/tools/bash.js");
+  const { ShellJobRegistry } =
+    await import("../../../packages/ohbaby-agent/src/tools/shell-job-registry.js");
+  const { Shell } =
+    await import("../../../packages/ohbaby-agent/src/shell/index.js");
+  const { createHostLocalEnvironment } =
+    await import("../../../packages/ohbaby-agent/src/adapters/ui-runtime/host-local-environment.js");
+  const registry = new ShellJobRegistry({
+    killTree: Shell.killTree,
+    terminationManagesObservation: true,
+  });
+  const script = join(directory, "gate.cjs");
+  await writeFile(
+    script,
+    `const fs=require('node:fs');const path=require('node:path');const side=process.argv[2];fs.writeFileSync(path.join(__dirname,side+'.start'),String(Date.now()));const timer=setInterval(()=>{if(fs.existsSync(path.join(__dirname,'release'))){clearInterval(timer);fs.writeFileSync(path.join(__dirname,side+'.end'),String(Date.now()));console.log(side+' done')}},10);`,
+  );
+  const bus = createBus();
+  const scheduler = createToolScheduler({
+    bus,
+    permissionState: createPermissionState({
+      bus,
+      initialLevel: "full-access",
+    }),
+    resolveOwner: (request) => ({
+      ...request,
+      rootSessionId: "shared-parent",
+      workspaceKey: directory,
+    }),
+  });
+  scheduler.register(createBashTool({ registry }));
+  const operations = ["left", "right"].map((side) =>
+    scheduler.executeBatch({
+      calls: [
+        {
+          callId: side,
+          sessionId: side,
+          messageId: side,
+          runId: side,
+          contextScopeId: side,
+          environment: createHostLocalEnvironment(directory),
+          toolName: "bash",
+          params: { command: `node '${script}' ${side}`, timeout: 5000 },
+        },
+      ],
+      observer: {
+        onCallState: () => Promise.resolve(),
+        onCallSettled: () => Promise.resolve(),
+      },
+    }),
+  );
+  try {
+    await vi.waitFor(
+      async () => {
+        for (const side of ["left", "right"])
+          expect(
+            Number(await readFile(join(directory, side + ".start"), "utf8")),
+          ).toBeGreaterThan(0);
+      },
+      { timeout: 3000 },
+    );
+    await writeFile(join(directory, "release"), "go");
+    const results = await Promise.all(operations);
+    expect(results.flat().map((result) => result.execution?.outcome)).toEqual([
+      "success",
+      "success",
+    ]);
+    const intervals = await Promise.all(
+      ["left", "right"].map(async (side) => ({
+        start: Number(await readFile(join(directory, side + ".start"), "utf8")),
+        end: Number(await readFile(join(directory, side + ".end"), "utf8")),
+      })),
+    );
+    expect(Math.max(...intervals.map((i) => i.start))).toBeLessThan(
+      Math.min(...intervals.map((i) => i.end)),
+    );
+  } finally {
+    await writeFile(join(directory, "release"), "cleanup");
+    await Promise.allSettled(operations);
+    await registry.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

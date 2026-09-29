@@ -22,6 +22,28 @@ function message(input: {
 }
 
 describe("message origin", () => {
+  it("distinguishes registered runtime inputs from user text and user steering", () => {
+    const user = message({ id: "runtime", role: "user" });
+    const runtimeInput = {
+      kind: "subagent-result" as const,
+      inputId: "input",
+      targetRunId: "run",
+      sourceId: "notification",
+    };
+    expect(
+      getMessageOrigin({ ...user, info: { ...user.info, runtimeInput } }),
+    ).toBe("runtime");
+    expect(
+      getMessageOrigin({
+        ...user,
+        info: {
+          ...user.info,
+          runtimeInput: { ...runtimeInput, kind: "user-steer" },
+        },
+      }),
+    ).toBe("user");
+    expect(getMessageOrigin(user)).toBe("user");
+  });
   it("derives summary from the existing context-summary metadata", () => {
     const summaryPart = {
       id: "part_summary",
@@ -83,4 +105,25 @@ describe("message origin", () => {
       getMessageOrigin(message({ id: "message_system", role: "system" })),
     ).toBe("system");
   });
+});
+
+it("keeps registered input origin through persisted-message events", async () => {
+  const { createBus } = await import("../../bus/index.js");
+  const { MessageEvent } = await import("./events.js");
+  const bus = createBus();
+  const original = message({ id: "input", role: "user" });
+  const runtimeInput = {
+    kind: "subagent-result" as const,
+    inputId: "input",
+    targetRunId: "run",
+    sourceId: "notification",
+  };
+  let observed: unknown;
+  bus.subscribe(MessageEvent.Updated, ({ info }) => {
+    observed = info.runtimeInput;
+  });
+  bus.publish(MessageEvent.Updated, {
+    info: { ...original.info, runtimeInput },
+  });
+  expect(observed).toEqual(runtimeInput);
 });

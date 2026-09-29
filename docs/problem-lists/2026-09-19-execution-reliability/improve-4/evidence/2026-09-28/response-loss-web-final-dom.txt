@@ -1,0 +1,54 @@
+- main:
+  - navigation "Projects":
+    - button "Expand sessions":
+    - button "Open workspace": W
+    - button "Project actions for workspace":
+    - button "Open project":
+  - complementary:
+    - strong: workspace
+    - generic: <fixture>/workspace
+    - button:
+      - generic: New session
+    - generic: Recent sessions
+    - button:
+      - strong: I4 Web fixture
+      - generic: Sep 28
+    - button:
+    - button:
+      - strong: I4 TUI fixture
+      - generic: Sep 28
+    - button:
+    - generic: 2 sessions
+  - generic "ohbaby":
+    - generic: oh
+    - generic: ba
+    - generic: by
+  - generic: idle
+  - generic: fixture
+  - button "6% context used, approximately 8.1K of 128K tokens":
+  - article "User message":
+    - paragraph: I4_WEB_HOLD
+  - article "Assistant message":
+    - paragraph: I4_WEB_HOLD_STARTED
+  - generic: interrupted · End time unknown (recovered)
+  - article "User message":
+    - paragraph: I4_WEB_RESPONSE_LOST
+  - article "Assistant message":
+    - paragraph: I4_WEB_RESPONSE_LOST_OK
+  - generic: Total 0s
+  - region "Queued prompts":
+    - generic: Queued 2
+    - generic: ↳ I4_WEB_C · Retained
+    - 'button "Steer queued prompt: I4_WEB_C" [disabled]': Steer
+    - 'button "Edit prompt: I4_WEB_C"':
+    - 'button "Delete prompt: I4_WEB_C"':
+    - generic: ↳ I4_WEB_E · Retained
+    - 'button "Steer queued prompt: I4_WEB_E" [disabled]': Steer
+    - 'button "Edit prompt: I4_WEB_E"':
+    - 'button "Delete prompt: I4_WEB_E"':
+  - textbox "Message, auto mode, default permission":
+    - /placeholder: ""
+    - text: I4_WEB_ORIGINAL_DRAFT
+  - 'button "Permission policy: default. Ask before protected actions. Click to enable full-access without approval prompts."':
+  - text: unknown
+  - button "Send message":

@@ -190,6 +190,8 @@ export interface CreateInterfaceProviderOptions {
 }
 
 export interface InterfaceProviderInstance<TClient = unknown> {
+  /** Default adapters initiate I/O in the call; lazy adapters opt into first-next timing. */
+  readonly streamStart?: "call" | "iterator";
   id: string;
   kind: InterfaceProviderKind;
   client: TClient;

@@ -18,6 +18,7 @@ import type {
   UiSessionGoal,
   UiSessionTodoList,
   UiSnapshot,
+  UiSessionView,
 } from "ohbaby-sdk";
 import type { TranscriptItem } from "./transcript.js";
 
@@ -71,6 +72,10 @@ export interface TuiInteractionRequest {
 export type TerminalClient = CoreAPI & SDKAPI;
 
 export interface TuiStoreState {
+  readonly durationSample?: {
+    readonly serverNow: number;
+    readonly receivedAt: number;
+  };
   readonly snapshot: UiSnapshot;
   readonly activeSessionId: string | null;
   readonly sessions: readonly UiSession[];
@@ -80,6 +85,8 @@ export interface TuiStoreState {
   readonly permission: UiPermissionState | undefined;
   readonly prompts: readonly UiPromptSubmission[];
   readonly runtime: TuiRuntimeStatus;
+  /** Set only when a Run projection supplied the current error. */
+  readonly runtimeErrorRunId?: string;
   readonly interactions: readonly TuiInteractionRequest[];
   readonly notices: readonly UiNotice[];
   readonly commandNotices: readonly TuiCommandNotice[];
@@ -103,7 +110,17 @@ export interface TuiStore {
   readonly getState: () => TuiStoreState;
   readonly dispatch: (event: UiEvent) => void;
   readonly dispatchMany: (events: readonly UiEvent[]) => void;
+  readonly installSessionView: (
+    view: UiSessionView,
+    older?: readonly UiMessage[],
+    resetTranscript?: boolean,
+  ) => void;
+  readonly selectSession: (sessionId: string | null) => void;
+  readonly setSessionIndex: (
+    sessions: readonly Omit<UiSession, "messages">[],
+  ) => void;
   readonly replaceSnapshot: (snapshot: UiSnapshot) => void;
+  readonly setPermissions: (requests: readonly UiPermissionRequest[]) => void;
   readonly setCatalog: (catalog: TuiCommandCatalog) => void;
   readonly subscribe: (listener: () => void) => () => void;
 }

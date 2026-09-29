@@ -1,3 +1,4 @@
+import type { InterfaceProviderRequest } from "../../packages/ohbaby-agent/src/services/interface-providers/types.js";
 /** Interactive controller: all generation enters the real persistent UI backend. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
@@ -192,7 +193,14 @@ async function drainWithDeadline(
 export async function createFormalCacheSession(
   profileId: string,
   options: {
+    /** In-memory inspection at the real provider boundary; never persisted by this harness. */
+    onProviderRequest?: (
+      request: InterfaceProviderRequest,
+      sequence: number,
+    ) => void;
     requireDetectedWindow?: boolean;
+    /** Scenarios with their own scoped approval handler can disable the Read-only fixture handler. */
+    handleControlledPermissions?: boolean;
     maxRequests?: number;
     /** Exercise public connect/discovery instead of seeding a verified profile. */
     emptyConfig?: boolean;
@@ -305,9 +313,9 @@ export async function createFormalCacheSession(
         dbPath: join(root, "session.db"),
         workdir,
         projectDirectory: workdir,
-        createLLMClient: async (options): Promise<LLMClientInstance> => {
+        createLLMClient: async (clientOptions): Promise<LLMClientInstance> => {
           const client = await createLLMClient({
-            ...options,
+            ...clientOptions,
             modelJsonPath: configPath,
             env: { ...environment, ...process.env },
           });
@@ -337,6 +345,7 @@ export async function createFormalCacheSession(
               usage: undefined as TokenUsage | undefined,
             };
             providerRequests.push(row);
+            options.onProviderRequest?.(request, row.id);
             const iterable = await context
               .run(row, () => stream(request))
               .catch((error: unknown) => {
@@ -412,6 +421,7 @@ export async function createFormalCacheSession(
         contextUpdates.push(event.usage);
       if (
         options.requireDetectedWindow &&
+        options.handleControlledPermissions !== false &&
         event.type === "permission.requested"
       ) {
         const task = handlePermission(event.request).catch(() => {

@@ -3,6 +3,9 @@ import type {
   UiCommandOutput,
   UiContextWindowUsage,
   UiMessage,
+  UiRun,
+  UiRunStatus,
+  UiSessionView,
   UiSnapshot,
 } from "ohbaby-sdk";
 import {
@@ -132,6 +135,192 @@ function latestCommandNoticeText(state: TuiStoreState): string | undefined {
 }
 
 describe("TUI store event reducer", () => {
+  it.each(["newest-first", "oldest-first"] as const)(
+    "projects current run facts independently of %s transport order",
+    (order) => {
+      const oldError = {
+        kind: "error",
+        message: "old interruption",
+        recoverable: true,
+      } as const;
+      const latestError = {
+        kind: "error",
+        message: "current failure",
+        recoverable: true,
+      } as const;
+      const older: UiRun = {
+        id: "older",
+        sessionId: "session_1",
+        status: oldError,
+        startedAt: "2026-09-28T12:05:00+01:00",
+        updatedAt: "2026-09-28T11:06:00Z",
+      };
+      const latest: UiRun = {
+        id: "latest",
+        sessionId: "session_1",
+        status: { kind: "idle" },
+        startedAt: "2026-09-28T12:04:00Z",
+        updatedAt: "2026-09-28T12:04:01Z",
+      };
+      const cases: readonly {
+        oldStatus: UiRunStatus;
+        latestStatus: UiRunStatus;
+        expected: UiRunStatus;
+      }[] = [
+        {
+          oldStatus: oldError,
+          latestStatus: { kind: "idle" },
+          expected: { kind: "idle" },
+        },
+        {
+          oldStatus: oldError,
+          latestStatus: latestError,
+          expected: latestError,
+        },
+        {
+          oldStatus: { kind: "running", runId: "older" },
+          latestStatus: { kind: "idle" },
+          expected: { kind: "running", runId: "older" },
+        },
+        {
+          oldStatus: { kind: "waiting-for-permission", requestId: "approval" },
+          latestStatus: { kind: "idle" },
+          expected: { kind: "waiting-for-permission", requestId: "approval" },
+        },
+      ];
+      for (const scenario of cases) {
+        const store = createTuiStore(snapshot());
+        store.dispatch({ type: "run.updated", run: older });
+        const ordered = [
+          { ...latest, status: scenario.latestStatus },
+          { ...older, status: scenario.oldStatus },
+        ];
+        const runs =
+          order === "newest-first" ? ordered : [...ordered].reverse();
+        const expectedOrder = runs.map((run) => run.id);
+        const view: UiSessionView = {
+          version: {
+            runtimeEpoch: "epoch",
+            sessionId: "session_1",
+            viewGeneration: "view",
+            sessionRevision: 1,
+          },
+          session: snapshot().sessions[0],
+          runs,
+          prompts: [],
+          history: { hasMore: false },
+          reasoningMissing: false,
+          todo: { status: "ready", value: null },
+          goal: { status: "ready", value: null },
+          context: { status: "ready", value: null },
+        };
+        store.installSessionView(view);
+        expect(store.getState().runtime).toEqual(scenario.expected);
+        expect(view.runs.map((run) => run.id)).toEqual(expectedOrder);
+      }
+    },
+  );
+
+  it("preserves an independent runtime error when a session view contains no runs", () => {
+    const error = {
+      kind: "error",
+      message: "independent connection error",
+      recoverable: true,
+    } as const;
+    const store = createTuiStore({ ...snapshot(), status: error });
+    store.installSessionView({
+      version: {
+        runtimeEpoch: "epoch",
+        sessionId: "session_1",
+        viewGeneration: "view",
+        sessionRevision: 1,
+      },
+      session: snapshot().sessions[0],
+      runs: [],
+      prompts: [],
+      history: { hasMore: false },
+      reasoningMissing: false,
+      todo: { status: "ready", value: null },
+      goal: { status: "ready", value: null },
+      context: { status: "ready", value: null },
+    });
+    expect(store.getState().runtime).toEqual(error);
+  });
+
+  it.each(
+    ["snapshot", "runtime.updated", "snapshot.replaced"].flatMap((source) =>
+      ["independent connection error", "old interruption"].map((message) => ({
+        source,
+        message,
+      })),
+    ),
+  )(
+    "preserves $source error '$message' alongside a successful history run",
+    ({ source, message }) => {
+      const historical: UiRun = {
+        id: "historical",
+        sessionId: "session_1",
+        startedAt: "2026-09-28T11:00:00Z",
+        updatedAt: "2026-09-28T11:01:00Z",
+        status: {
+          kind: "error",
+          message: "old interruption",
+          recoverable: true,
+        },
+      };
+      const success: UiRun = {
+        id: "success",
+        sessionId: "session_1",
+        startedAt: "2026-09-28T12:00:00Z",
+        updatedAt: "2026-09-28T12:01:00Z",
+        status: { kind: "idle" },
+      };
+      const independentError = {
+        kind: "error",
+        message,
+        recoverable: true,
+      } as const;
+      const initial = { ...snapshot(), runs: [success, historical] };
+      const store = createTuiStore(
+        source === "snapshot"
+          ? { ...initial, status: independentError }
+          : initial,
+      );
+      if (source !== "snapshot") {
+        store.dispatch({ type: "run.updated", run: historical });
+        if (source === "snapshot.replaced")
+          store.dispatch({
+            type: "snapshot.replaced",
+            snapshot: { ...initial, status: independentError },
+          });
+        else
+          store.dispatch({ type: "runtime.updated", status: independentError });
+      }
+      store.installSessionView({
+        version: {
+          runtimeEpoch: "epoch",
+          sessionId: "session_1",
+          viewGeneration: "view",
+          sessionRevision: 1,
+        },
+        session: snapshot().sessions[0],
+        runs: [success, historical],
+        prompts: [],
+        history: { hasMore: false },
+        reasoningMissing: false,
+        todo: { status: "ready", value: null },
+        goal: { status: "ready", value: null },
+        context: { status: "ready", value: null },
+      });
+      expect(store.getState().runtime).toEqual(independentError);
+      expect(store.getState().runtimeErrorRunId).toBeUndefined();
+      store.dispatch({ type: "run.updated", run: historical });
+      store.selectSession("session_other");
+      expect(store.getState().runtime).toEqual({ kind: "idle" });
+      expect(store.getState().runtimeErrorRunId).toBeUndefined();
+    },
+  );
+
   it("hydrates and upserts todo projections by session", () => {
     const initial = createStateFromSnapshot({
       ...snapshot(),
@@ -939,7 +1128,7 @@ describe("TUI store event reducer", () => {
     });
   });
 
-  it("tracks permission, interaction, and command event queues", () => {
+  it("ignores ordinary approval events while tracking interaction and command queues", () => {
     const interaction = {
       commandRunId: "command_1",
       interactionId: "interaction_1",
@@ -951,6 +1140,11 @@ describe("TUI store event reducer", () => {
 
     state = applyTuiEvent(state, {
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Run bash",
         id: "permission_1",
@@ -958,6 +1152,9 @@ describe("TUI store event reducer", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
     state = applyTuiEvent(state, {
       request: interaction,
@@ -979,7 +1176,7 @@ describe("TUI store event reducer", () => {
       type: "command.failed",
     });
 
-    expect(state.permissions).toHaveLength(1);
+    expect(state.permissions).toHaveLength(0);
     expect(state.interactions).toHaveLength(1);
     expect(state.commandNotices.map((notice) => notice.kind)).toEqual([
       "result",
@@ -990,6 +1187,11 @@ describe("TUI store event reducer", () => {
     state = applyTuiEvent(state, {
       requestId: "permission_1",
       type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      sessionId: "session_1",
+      reason: "once",
     });
     state = applyTuiEvent(state, {
       commandRunId: "command_1",
@@ -1489,6 +1691,11 @@ describe("TUI store event reducer", () => {
     });
     state = applyTuiEvent(state, {
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Run bash",
         id: "permission_1",
@@ -1496,18 +1703,26 @@ describe("TUI store event reducer", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
 
     state = applyTuiEvent(state, {
       requestId: "permission_1",
       type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      sessionId: "session_1",
+      reason: "once",
     });
 
     expect(state.permissions).toHaveLength(0);
     expect(state.runtime).toEqual({ kind: "running", runId: "run_1" });
   });
 
-  it("keeps the active run visible when the stored run still says waiting for permission", () => {
+  it("does not infer run transitions from ordinary approval events", () => {
     let state = createStateFromSnapshot(snapshot());
     state = applyTuiEvent(state, {
       run: {
@@ -1521,6 +1736,11 @@ describe("TUI store event reducer", () => {
     });
     state = applyTuiEvent(state, {
       request: {
+        sessionId: "session_1",
+        rootSessionId: "session_1",
+        callId: "call_test",
+        messageId: "message_test",
+        createdAt: 100,
         choices: [{ id: "allow", intent: "allow", label: "Allow" }],
         description: "Run bash",
         id: "permission_1",
@@ -1528,15 +1748,26 @@ describe("TUI store event reducer", () => {
         title: "Permission",
       },
       type: "permission.requested",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 1,
     });
 
     state = applyTuiEvent(state, {
       requestId: "permission_1",
       type: "permission.resolved",
+      permissionEpoch: "epoch",
+      rootSessionId: "session_1",
+      permissionRevision: 2,
+      sessionId: "session_1",
+      reason: "once",
     });
 
     expect(state.permissions).toHaveLength(0);
-    expect(state.runtime).toEqual({ kind: "running", runId: "run_1" });
+    expect(state.runtime).toEqual({
+      kind: "waiting-for-permission",
+      requestId: "permission_1",
+    });
   });
 
   it("keeps successful state-changing command results silent", () => {
@@ -2264,40 +2495,26 @@ describe("TUI store event reducer", () => {
     expect(state.notices).toHaveLength(0);
   });
 
-  it("keeps live permissions across an old snapshot and does not revive resolved permissions", () => {
+  it("keeps independent approvals across full snapshots and never resurrects resolved cards", () => {
     const request = {
-      choices: [{ id: "allow", intent: "allow", label: "Allow" }],
-      description: "Run bash",
-      id: "permission_1",
-      runId: "run_1",
-      title: "Permission",
+      id: "p1",
+      sessionId: "child",
+      rootSessionId: "session_1",
+      callId: "call",
+      messageId: "message",
+      runId: "run-child",
+      createdAt: 100,
+      choices: [{ id: "allow_once", intent: "allow", label: "Allow once" }],
+      description: "Edit src/a.ts",
+      title: "Approval",
     } as const;
-    let state = applyTuiEvent(createStateFromSnapshot(snapshot()), {
-      request,
-      type: "permission.requested",
-    });
-
-    state = applyTuiEvent(state, {
-      snapshot: snapshot(),
-      type: "snapshot.replaced",
-    });
-    expect(state.permissions.map((permission) => permission.id)).toEqual([
-      "permission_1",
-    ]);
-
-    state = applyTuiEvent(state, {
-      requestId: "permission_1",
-      type: "permission.resolved",
-    });
-    state = applyTuiEvent(state, {
-      snapshot: {
-        ...snapshot(),
-        permissions: [request],
-      },
-      type: "snapshot.replaced",
-    });
-
-    expect(state.permissions).toHaveLength(0);
+    const store = createTuiStore(snapshot());
+    store.setPermissions([request]);
+    store.replaceSnapshot(snapshot());
+    expect(store.getState().permissions.map((item) => item.id)).toEqual(["p1"]);
+    store.setPermissions([]);
+    store.replaceSnapshot({ ...snapshot(), permissions: [request] });
+    expect(store.getState().permissions).toEqual([]);
   });
 
   it("keeps command notice ids unique after truncation", () => {

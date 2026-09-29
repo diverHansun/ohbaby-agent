@@ -1,41 +1,44 @@
+import { isUiCommandCompletion } from "ohbaby-sdk";
+import type {
+  UiSubagentQuery,
+  UiSubagentExecutionList,
+  UiSubagentExecutionView,
+  UiSubagentConversationQuery,
+  UiSubagentConversationView,
+  UiSubagentConversationSelection,
+  UiSubagentConversationUnwatchQuery,
+} from "ohbaby-sdk";
 import {
-  parseSlashCommandInput,
-  resolveSlashCommand,
+  createPermissionSync,
+  createSessionSync,
+  sameSessionGeneration,
+  type SessionSync,
+  type UiSessionScope,
+  type UiSessionHistory,
+  type UiPromptReceiptQuery,
+  type UiSessionControl,
+  type UiSessionView,
+  type UiPromptReceiptResult,
+  type PermissionSync,
+  type UiPermissionBinding,
+  type UiPermissionEvent,
   submitPromptAndWait as composeSubmitPromptAndWait,
   type SubmitPromptOptions,
   type UiBackendClient,
   type UiEventHandler,
   type UiPromptCompletion,
   type UiPromptReceipt,
-  type UiSnapshot,
   type UiUnsubscribe,
-  type UiSlashCommandInvocation,
   type UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import { FetchDaemonEventStream } from "./events.js";
 import { createDaemonHttpClient, DaemonHttpClient } from "./http.js";
 import type {
-  DirectoryPickerListResponse,
-  DirectoryPickerRootsResponse,
   OhbabyBootstrapConfig,
   WebSseEvent,
-  WorkspaceSnapshot,
+  UnknownPromptRequest,
 } from "./wire.js";
-import {
-  createOhbabyWebStore,
-  type OhbabyWebStore,
-} from "../../store/store.js";
-import {
-  readWebNavigationState,
-  replaceNavigationHash,
-  writeWebNavigationState,
-  type WebNavigationState,
-} from "./navigation-state.js";
-
-interface BufferedEvent {
-  readonly event: Extract<WebSseEvent, { type: "ui.event" }>["event"];
-  readonly seqNum: number;
-}
+import type { OhbabyWebStore } from "../../store/store.js";
 
 function reportEventSubscriberFailure(): void {
   try {
@@ -47,39 +50,35 @@ function reportEventSubscriberFailure(): void {
   }
 }
 
-export interface OhbabyWebRuntime {
-  readonly client: UiBackendClient | null;
-  readonly ready: Promise<void>;
-  readonly store: OhbabyWebStore;
-  abortSession(sessionId: string, runId?: string): Promise<void>;
-  archiveSession(sessionId: string): Promise<void>;
-  createSession(): Promise<void>;
-  dispose(): Promise<void>;
-  executeSlashCommand(input: {
-    readonly allowOverlay?: boolean;
-    readonly sessionId?: string;
-    readonly text: string;
-  }): Promise<void>;
-  getWorkspaceSnapshot(): WorkspaceSnapshot;
-  getDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse>;
-  hideWorkspace(directory: string): Promise<void>;
-  listDirectoryPicker(directory: string): Promise<DirectoryPickerListResponse>;
-  listWebCommands(): Promise<UiWebCommandCatalog>;
-  openWorkspace(directory: string): Promise<void>;
-  refreshWorkspaces(): Promise<void>;
-  selectSession(sessionId: string): Promise<void>;
-  subscribeWorkspaces(listener: () => void): () => void;
-  switchWorkspace(directory: string): Promise<void>;
-}
-
-class BrowserDaemonClient implements UiBackendClient {
+export class BrowserDaemonClient implements UiBackendClient {
   private readonly config: OhbabyBootstrapConfig;
   private readonly events: FetchDaemonEventStream;
   private readonly http: DaemonHttpClient;
   private readonly store: OhbabyWebStore;
+  private readonly permissionSync: PermissionSync;
+  private readonly sessionSync: SessionSync;
+  private recoverySupported = false;
+  private subagentConversationSupported = false;
+  private subagentWatchSequence = 0;
+  private scopeTicket = 0;
+  private selectionTicket = 0;
+  private modelTicket = 0;
+  private indexTicket = 0;
+  private controlTicket = 0;
+  private historyTicket = 0;
+  private receiptTicket = 0;
+  private control: UiSessionControl | null = null;
+  private unknownPrompts: UnknownPromptRequest[] = [];
+  private readonly submittingPrompts = new Set<string>();
+  private persistedUnknownIds = new Set<string>();
+  private readonly permissionHandlers = new Set<{
+    handler: (event: UiPermissionEvent) => void;
+    onError?: (error: unknown) => void;
+  }>();
+  private connectionGeneration = 0;
+  private transportLive = false;
   private readonly eventHandlers = new Set<UiEventHandler>();
   private readonly lifecycleController = new AbortController();
-  private buffering = false;
   private readonly commandCatalogPromises = new Map<
     string,
     Promise<UiWebCommandCatalog>
@@ -87,8 +86,6 @@ class BrowserDaemonClient implements UiBackendClient {
   private connectPromise: Promise<void> | undefined;
   private connected = false;
   private closed = false;
-  private resyncPromise: Promise<void> | undefined;
-  private readonly bufferedEvents: BufferedEvent[] = [];
 
   constructor(input: {
     readonly config: OhbabyBootstrapConfig;
@@ -100,6 +97,48 @@ class BrowserDaemonClient implements UiBackendClient {
     this.events = input.events;
     this.http = input.http;
     this.store = input.store;
+    this.unknownPrompts = readUnknownPrompts(this.config.directory ?? "");
+    this.persistedUnknownIds = new Set(
+      this.unknownPrompts.map((request) => request.clientRequestId),
+    );
+    this.store.setUnknownPromptRequests(this.unknownPrompts);
+    this.sessionSync = createSessionSync({
+      query: async (scope, signal) =>
+        (await this.http.getSessionView({ ...scope, signal })).view,
+      onChange: (state) => {
+        if (this.closed) return;
+        const becameReady =
+          state.status === "ready" &&
+          this.store.getSnapshot().sessionSync.status !== "ready";
+        this.store.setSessionSync(state);
+        if (becameReady) void this.refreshControl();
+      },
+    });
+    let validatedPermissionScope: string | undefined;
+    this.permissionSync = createPermissionSync({
+      query: async (binding, signal) => {
+        const scope = JSON.stringify([
+          binding.permissionEpoch,
+          binding.rootSessionId,
+          binding.bindingGeneration,
+        ]);
+        if (validatedPermissionScope !== scope) {
+          const index = await this.http.getSessionIndex({ signal });
+          const selected = index.sessions.find(
+            (session) => session.id === binding.rootSessionId,
+          );
+          if (!selected || selected.parentId || selected.isSubagent) {
+            throw new Error("Return to a main session to approve requests.");
+          }
+          validatedPermissionScope = scope;
+        }
+        return (await this.http.getPermissionSnapshot({ ...binding, signal }))
+          .snapshot;
+      },
+      onChange: (state) => {
+        this.store.setPermissionSync(state);
+      },
+    });
   }
 
   async connect(): Promise<void> {
@@ -124,66 +163,535 @@ class BrowserDaemonClient implements UiBackendClient {
     this.store.setError(null);
     try {
       await this.http.registerClient(
-        {
-          startupIntent: this.config.startupIntent,
-        },
+        { startupIntent: this.config.startupIntent },
         { signal: this.lifecycleController.signal },
       );
       if (this.isClosed()) return;
-      this.buffering = true;
       await this.events.start({
         onConnectionState: (state) => {
           if (this.closed) return;
-          this.store.setConnectionState(state);
           if (state === "live") {
+            if (!this.transportLive) this.connectionGeneration += 1;
+            this.transportLive = true;
             this.store.setError(null);
+          } else {
+            this.transportLive = false;
+            this.permissionSync.disconnect();
+            this.sessionSync.disconnect();
+            this.clearControl();
+            this.notifyConversationResync(true);
           }
+          this.store.setConnectionState(state);
         },
         onError: (error) => {
           if (this.closed) return;
+          this.transportLive = false;
+          this.permissionSync.disconnect();
+          this.sessionSync.disconnect();
+          this.clearControl();
+          this.notifyConversationResync(true);
           this.store.setError(error.message);
         },
-        onEvent: (event) => this.handleSseEvent(event.payload, event.id),
+        onEvent: (event) => {
+          this.handleSseEvent(event.payload, event.id);
+        },
       });
       if (this.isClosed()) return;
-      const response = await this.http.getSnapshot({
-        signal: this.lifecycleController.signal,
-      });
-      if (this.isClosed()) {
-        return;
-      }
-      this.dispatchUiEvent(
-        { snapshot: response.snapshot, type: "snapshot.replaced" },
-        response.seqNum,
-        "snapshot-barrier",
-      );
-      const model = (
-        await this.http.getCurrentModel({
-          signal: this.lifecycleController.signal,
-        })
-      ).model;
-      if (this.isClosed()) return;
-      this.store.setCurrentModel(model);
-      const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
-      this.events.setLastEventId(maxBufferedSeqNum);
-      this.buffering = false;
-      this.store.setConnectionState("live");
     } catch (error) {
       this.connected = false;
       if (!this.isClosed()) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.store.setError(message);
+        this.store.setError(
+          error instanceof Error ? error.message : String(error),
+        );
         this.store.setConnectionState("disconnected");
       }
       await this.events.close();
       throw error;
     }
+    // History and model failures do not own the transport or approval readiness.
+  }
+
+  private refreshUnrelatedViews(): void {
+    void this.refreshModel();
+    void this.refreshIndex();
+  }
+
+  private async refreshModel(): Promise<void> {
+    const ticket = ++this.modelTicket;
+    const scope = this.scopeTicket;
+    try {
+      const response = await this.http.getCurrentModel({
+        signal: this.lifecycleController.signal,
+      });
+      if (
+        !this.closed &&
+        ticket === this.modelTicket &&
+        scope === this.scopeTicket
+      )
+        this.store.setCurrentModel(response.model);
+    } catch (error) {
+      if (
+        !this.closed &&
+        ticket === this.modelTicket &&
+        scope === this.scopeTicket
+      )
+        this.store.setError(errorMessage(error));
+    }
+  }
+
+  private async refreshIndex(): Promise<void> {
+    const ticket = ++this.indexTicket;
+    const scope = this.scopeTicket;
+    try {
+      const sessions = await this.getSessionIndex();
+      if (
+        !this.closed &&
+        ticket === this.indexTicket &&
+        scope === this.scopeTicket
+      )
+        this.store.setSessionIndex(sessions);
+    } catch (error) {
+      if (
+        !this.closed &&
+        ticket === this.indexTicket &&
+        scope === this.scopeTicket
+      )
+        this.store.setError(errorMessage(error));
+    }
+  }
+
+  private acceptBinding(
+    binding: UiPermissionBinding & {
+      readonly runtimeEpoch?: string;
+      readonly sessionRecoveryVersion?: number;
+      readonly subagentConversationVersion?: number;
+    },
+    fromHello = false,
+  ): void {
+    if (
+      typeof binding.permissionEpoch !== "string" ||
+      !Number.isSafeInteger(binding.bindingGeneration) ||
+      (binding.rootSessionId !== null &&
+        typeof binding.rootSessionId !== "string")
+    ) {
+      this.permissionSync.disconnect();
+      this.store.setError(
+        "Permission subscription binding is missing or invalid",
+      );
+      return;
+    }
+    const previous = this.permissionSync.getState().binding;
+    if (
+      previous &&
+      ((!fromHello && previous.permissionEpoch !== binding.permissionEpoch) ||
+        (previous.permissionEpoch === binding.permissionEpoch &&
+          previous.bindingGeneration > binding.bindingGeneration))
+    )
+      return;
+    const changed =
+      previous?.rootSessionId !== binding.rootSessionId ||
+      previous.bindingGeneration !== binding.bindingGeneration ||
+      previous.permissionEpoch !== binding.permissionEpoch;
+    if (changed) {
+      ++this.scopeTicket;
+      ++this.historyTicket;
+      this.clearControl();
+    } else if (!fromHello) {
+      // Same scope (for example New session reusing the current empty session,
+      // or a prompt receipt): the live chat and approval subscriptions are
+      // still valid, so restarting them would only flash a recovery state.
+      const sync = this.sessionSync.getState();
+      if (this.transportLive && binding.rootSessionId) {
+        if (sync.status === "error") this.sessionSync.retry();
+        else if (sync.status === "idle")
+          this.sessionSync.begin(
+            this.currentScope(),
+            this.connectionGeneration,
+          );
+      }
+      if (
+        this.transportLive &&
+        this.permissionSync.getState().status === "error"
+      )
+        this.permissionSync.retry();
+      void this.refreshControl();
+      void this.retryUnknownPrompts();
+      this.refreshUnrelatedViews();
+      return;
+    }
+    if (this.transportLive)
+      this.permissionSync.begin(binding, this.connectionGeneration);
+    if (binding.sessionRecoveryVersion !== undefined || fromHello) {
+      this.recoverySupported =
+        binding.sessionRecoveryVersion === 1 &&
+        binding.runtimeEpoch === binding.permissionEpoch;
+    }
+    if (binding.subagentConversationVersion !== undefined || fromHello)
+      this.subagentConversationSupported =
+        binding.subagentConversationVersion === 1 &&
+        binding.runtimeEpoch === binding.permissionEpoch;
+    if (!this.recoverySupported) {
+      this.sessionSync.disconnect();
+      this.store.setSessionSync({
+        status: "error",
+        scope: null,
+        attempts: 0,
+        error: "Server does not support session recovery version 1",
+      });
+      return;
+    }
+    if (this.transportLive)
+      this.sessionSync.begin(this.currentScope(), this.connectionGeneration);
+    void this.refreshControl();
+    void this.retryUnknownPrompts();
+    this.refreshUnrelatedViews();
+    if (fromHello) this.notifyConversationResync(false);
+  }
+
+  private notifyConversationResync(disconnected: boolean): void {
+    const binding = this.permissionSync.getState().binding;
+    if (!binding) return;
+    this.notifyUiEvent({
+      type: "session.resync-required",
+      runtimeEpoch: binding.permissionEpoch,
+      sessionId: binding.rootSessionId,
+      bindingGeneration: binding.bindingGeneration,
+      connectionGeneration: this.connectionGeneration,
+      disconnected,
+    });
+  }
+
+  private currentScope(): UiSessionScope | null {
+    const binding = this.permissionSync.getState().binding;
+    return binding?.rootSessionId
+      ? {
+          sessionId: binding.rootSessionId,
+          runtimeEpoch: binding.permissionEpoch,
+          bindingGeneration: binding.bindingGeneration,
+        }
+      : null;
+  }
+
+  private clearControl(): void {
+    ++this.controlTicket;
+    this.control = null;
+    this.store.setSessionControl(null);
+  }
+
+  private async refreshControl(): Promise<void> {
+    const scope = this.currentScope();
+    if (!this.transportLive || !this.recoverySupported || !scope) {
+      this.clearControl();
+      return;
+    }
+    const scopeTicket = this.scopeTicket;
+    const ticket = ++this.controlTicket;
+    try {
+      const control = await this.getSessionControl({
+        ...scope,
+        signal: this.lifecycleController.signal,
+      });
+      if (
+        this.closed ||
+        scopeTicket !== this.scopeTicket ||
+        ticket !== this.controlTicket
+      )
+        return;
+      if (
+        control.runtimeEpoch !== scope.runtimeEpoch ||
+        control.sessionId !== scope.sessionId ||
+        control.rootSessionId !== scope.sessionId ||
+        control.bindingGeneration !== scope.bindingGeneration
+      )
+        throw new Error("Session control scope changed");
+      this.control = control;
+      this.store.setSessionControl(control);
+    } catch {
+      if (
+        !this.closed &&
+        scopeTicket === this.scopeTicket &&
+        ticket === this.controlTicket
+      )
+        this.clearControl();
+    }
+  }
+
+  retrySession(): void {
+    this.sessionSync.retry();
+    void this.refreshControl();
+  }
+
+  async loadEarlierHistory(): Promise<void> {
+    const state = this.sessionSync.getState();
+    const scope = this.currentScope();
+    if (!scope || state.status !== "ready" || !state.view) return;
+    const stored = this.store.getSnapshot();
+    const before = stored.historyStale
+      ? state.view.history.before
+      : stored.historyBefore;
+    if (!before) return;
+    const ticket = ++this.historyTicket;
+    const scopeTicket = this.scopeTicket;
+    this.store.setHistoryState("loading");
+    try {
+      const history = await this.getSessionHistory({
+        ...scope,
+        before,
+        signal: this.lifecycleController.signal,
+      });
+      const current = this.sessionSync.getState().view;
+      if (
+        this.closed ||
+        scopeTicket !== this.scopeTicket ||
+        ticket !== this.historyTicket
+      )
+        return;
+      if (
+        !current ||
+        history.bindingGeneration !== scope.bindingGeneration ||
+        !sameSessionGeneration(history.version, current.version)
+      )
+        throw new Error("History changed while loading; retry the page");
+      this.store.installSessionHistory(history);
+      this.store.setHistoryState("ready");
+    } catch (error) {
+      if (
+        !this.closed &&
+        scopeTicket === this.scopeTicket &&
+        ticket === this.historyTicket
+      )
+        this.store.setHistoryState("error", errorMessage(error));
+    }
+  }
+
+  async listSubagentExecutions(
+    input: UiSubagentQuery,
+  ): Promise<UiSubagentExecutionList> {
+    const binding = this.permissionSync.getState().binding;
+    const result = await this.http.listSubagentExecutions({
+      ...input,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.permissionSync.getState().binding)
+      throw new Error("Session binding changed during execution query");
+    return result.result;
+  }
+  async getSubagentExecutionView(
+    input: UiSubagentQuery & { executionId: string },
+  ): Promise<UiSubagentExecutionView> {
+    const binding = this.permissionSync.getState().binding;
+    const result = await this.http.getSubagentExecutionView({
+      ...input,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.permissionSync.getState().binding)
+      throw new Error("Session binding changed during execution query");
+    return result.result;
+  }
+  async getSubagentConversationView(
+    input: UiSubagentConversationQuery,
+  ): Promise<UiSubagentConversationView> {
+    if (!this.subagentConversationSupported)
+      throw new Error("Server does not support subagent conversations");
+    const binding = this.permissionSync.getState().binding;
+    const result = await this.http.getSubagentConversationView({
+      ...input,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.permissionSync.getState().binding)
+      throw new Error("Session binding changed during conversation query");
+    return result.result;
+  }
+  async watchSubagentConversation(
+    input: UiSubagentConversationQuery,
+  ): Promise<UiSubagentConversationSelection> {
+    const watchSequence = ++this.subagentWatchSequence;
+    if (!this.subagentConversationSupported)
+      throw new Error("Server does not support subagent conversations");
+    const binding = this.permissionSync.getState().binding;
+    const result = await this.http.watchSubagentConversation({
+      ...input,
+      watchSequence,
+      runtimeEpoch: binding?.permissionEpoch,
+      bindingGeneration: binding?.bindingGeneration,
+    });
+    if (binding !== this.permissionSync.getState().binding)
+      throw new Error("Session binding changed during conversation watch");
+    return result.result;
+  }
+  async unwatchSubagentConversation(
+    input: UiSubagentConversationUnwatchQuery,
+  ): Promise<void> {
+    const binding = this.permissionSync.getState().binding;
+    await this.http.unwatchSubagentConversation({
+      ...input,
+      runtimeEpoch: input.runtimeEpoch ?? binding?.permissionEpoch,
+      bindingGeneration: input.bindingGeneration ?? binding?.bindingGeneration,
+    });
+  }
+  async getSessionView(input: UiSessionScope): Promise<UiSessionView> {
+    return (await this.http.getSessionView(input)).view;
+  }
+  async getSessionHistory(
+    input: UiSessionScope & {
+      readonly before?: string;
+      readonly limit?: number;
+    },
+  ): Promise<UiSessionHistory> {
+    return (await this.http.getSessionHistory(input)).history;
+  }
+  async getSessionControl(input: UiSessionScope): Promise<UiSessionControl> {
+    return (await this.http.getSessionControl(input)).control;
+  }
+  async getPromptReceipt(
+    input: UiPromptReceiptQuery,
+  ): Promise<UiPromptReceiptResult> {
+    return (await this.http.getPromptReceipt(input)).result;
+  }
+
+  private publishUnknownPrompts(): void {
+    writeUnknownPrompts(
+      this.config.directory ?? "",
+      this.unknownPrompts,
+      this.persistedUnknownIds,
+    );
+    this.persistedUnknownIds = new Set(
+      this.unknownPrompts.map((request) => request.clientRequestId),
+    );
+    if (!this.closed)
+      this.store.setUnknownPromptRequests(
+        this.unknownPrompts.map((request) => ({
+          ...request,
+          submitting: this.submittingPrompts.has(request.clientRequestId),
+        })),
+      );
+  }
+
+  forgetUnknownPrompt(clientRequestId: string): void {
+    if (this.submittingPrompts.has(clientRequestId)) return;
+    this.unknownPrompts = this.unknownPrompts.filter(
+      (request) => request.clientRequestId !== clientRequestId,
+    );
+    this.publishUnknownPrompts();
+  }
+
+  async retryUnknownPrompts(): Promise<void> {
+    const binding = this.permissionSync.getState().binding;
+    if (!binding || !this.recoverySupported || this.closed) return;
+    const ticket = ++this.receiptTicket;
+    for (const request of [...this.unknownPrompts]) {
+      if (request.runtimeEpoch !== binding.permissionEpoch) {
+        this.unknownPrompts = this.unknownPrompts.map((value) =>
+          value.clientRequestId === request.clientRequestId
+            ? { ...value, status: "epoch-changed" }
+            : value,
+        );
+        this.publishUnknownPrompts();
+        continue;
+      }
+      try {
+        const result = await this.getPromptReceipt({
+          clientRequestId: request.clientRequestId,
+          sessionId: request.sessionId,
+          runtimeEpoch: request.runtimeEpoch,
+          bindingGeneration: binding.bindingGeneration,
+          signal: this.lifecycleController.signal,
+        });
+        if (
+          this.lifecycleController.signal.aborted ||
+          ticket !== this.receiptTicket ||
+          binding.bindingGeneration !==
+            this.permissionSync.getState().binding?.bindingGeneration
+        )
+          return;
+        if (
+          result.runtimeEpoch !== request.runtimeEpoch ||
+          result.bindingGeneration !== binding.bindingGeneration ||
+          result.clientRequestId !== request.clientRequestId
+        )
+          continue;
+        if (result.receipt) {
+          this.unknownPrompts = this.unknownPrompts.filter(
+            (value) => value.clientRequestId !== request.clientRequestId,
+          );
+          this.publishUnknownPrompts();
+          if (this.currentScope()?.sessionId === result.receipt.sessionId)
+            this.sessionSync.resync();
+        }
+      } catch {
+        /* An unknown result stays unknown. Never resend or navigate. */
+      }
+    }
+  }
+
+  retryPermissions(): void {
+    this.permissionSync.retry();
+  }
+
+  getSelectedSessionId(): ReturnType<UiBackendClient["getSelectedSessionId"]> {
+    return Promise.resolve(
+      this.permissionSync.getState().binding?.rootSessionId ?? null,
+    );
+  }
+
+  async createSession(
+    input?: Parameters<UiBackendClient["createSession"]>[0],
+  ): ReturnType<UiBackendClient["createSession"]> {
+    const ticket = ++this.selectionTicket;
+    const response = await this.http.createSession(input);
+    if (!this.closed && ticket === this.selectionTicket)
+      this.acceptBinding(response);
+    this.refreshUnrelatedViews();
+    return { ...response.session, created: response.created };
+  }
+
+  selectSession(
+    sessionId: string,
+  ): ReturnType<UiBackendClient["selectSession"]> {
+    return this.selectSessionForRuntime(sessionId);
+  }
+
+  async getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return (
+      await this.http.getSessionIndex({
+        signal: this.lifecycleController.signal,
+      })
+    ).sessions;
+  }
+
+  async getPermissionSnapshot(
+    input: Parameters<UiBackendClient["getPermissionSnapshot"]>[0],
+  ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+    return (
+      await this.http.getPermissionSnapshot({
+        ...this.permissionSync.getState().binding,
+        ...input,
+      })
+    ).snapshot;
+  }
+
+  subscribePermissionEvents(
+    handler: (event: UiPermissionEvent) => void,
+    onError?: (error: unknown) => void,
+  ): UiUnsubscribe {
+    const subscription = { handler, onError };
+    this.permissionHandlers.add(subscription);
+    return () => {
+      this.permissionHandlers.delete(subscription);
+    };
   }
 
   async close(): Promise<void> {
     this.closed = true;
     this.connected = false;
     this.lifecycleController.abort();
+    this.permissionSync.dispose();
+    this.sessionSync.dispose();
+    this.permissionHandlers.clear();
+    this.store.clearCommands();
     await this.events.close();
     this.store.setConnectionState("disconnected");
   }
@@ -207,18 +715,97 @@ class BrowserDaemonClient implements UiBackendClient {
     text: string,
     options?: SubmitPromptOptions,
   ): Promise<UiPromptReceipt> {
-    const { ok: _ok, ...receipt } = await this.http.submitPromptAccepted({
-      clientRequestId:
-        options?.clientRequestId ?? globalThis.crypto.randomUUID(),
-      ...(options?.sessionId === undefined
-        ? {}
-        : { sessionId: options.sessionId }),
-      text,
-      ...(options?.reasoning === undefined
-        ? {}
-        : { reasoning: options.reasoning }),
-    });
-    return receipt;
+    const binding = this.permissionSync.getState().binding;
+    if (
+      !this.recoverySupported ||
+      !binding ||
+      (binding.rootSessionId !== null &&
+        this.sessionSync.getState().status !== "ready")
+    )
+      throw new Error("Session is not synchronized");
+    const clientRequestId =
+      options?.clientRequestId ?? globalThis.crypto.randomUUID();
+    if (
+      this.unknownPrompts.some(
+        (request) => request.clientRequestId === clientRequestId,
+      )
+    )
+      throw new Error(
+        "Prompt result is unknown; query its receipt before submitting again",
+      );
+    const scopeTicket = this.scopeTicket;
+    const sessionId = options?.sessionId ?? binding.rootSessionId ?? undefined;
+    if (sessionId !== (binding.rootSessionId ?? undefined))
+      throw new Error("Selected session changed before submission");
+    if (
+      this.unknownPrompts.some(
+        (request) =>
+          request.sessionId === sessionId && request.status !== "epoch-changed",
+      )
+    )
+      throw new Error(
+        "A prompt result is unknown for this session; query its receipt before submitting again",
+      );
+    this.submittingPrompts.add(clientRequestId);
+    this.unknownPrompts = [
+      ...this.unknownPrompts,
+      {
+        directory: this.config.directory ?? "",
+        runtimeEpoch: binding.permissionEpoch,
+        clientRequestId,
+        sessionId,
+        status: "unknown",
+      },
+    ];
+    this.publishUnknownPrompts();
+    try {
+      const { ok: _ok, ...receipt } = await this.http.submitPromptAccepted({
+        clientRequestId,
+        sessionId,
+        text,
+        ...(options?.namingSource === undefined
+          ? {}
+          : { namingSource: options.namingSource }),
+        ...(options?.reasoning === undefined
+          ? {}
+          : { reasoning: options.reasoning }),
+      });
+      this.unknownPrompts = this.unknownPrompts.filter(
+        (request) => request.clientRequestId !== clientRequestId,
+      );
+      this.publishUnknownPrompts();
+      if (
+        !this.closed &&
+        scopeTicket === this.scopeTicket &&
+        "permissionEpoch" in receipt &&
+        "rootSessionId" in receipt &&
+        "bindingGeneration" in receipt
+      )
+        this.acceptBinding(receipt as typeof receipt & UiPermissionBinding);
+      return receipt;
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        [
+          "QUEUE_FULL",
+          "INVALID_CLIENT_REQUEST_ID",
+          "PROMPT_SCHEDULER_CLOSED",
+          "IDEMPOTENCY_CONFLICT",
+          "PROMPT_SUBMISSION_REJECTED",
+        ].includes(String(error.code))
+      ) {
+        this.unknownPrompts = this.unknownPrompts.filter(
+          (request) => request.clientRequestId !== clientRequestId,
+        );
+        this.publishUnknownPrompts();
+      }
+      throw error;
+    } finally {
+      this.submittingPrompts.delete(clientRequestId);
+      this.publishUnknownPrompts();
+    }
   }
 
   submitPromptAndWait(
@@ -269,6 +856,24 @@ class BrowserDaemonClient implements UiBackendClient {
     ).prompt;
   }
 
+  async resubmitRetainedPrompt(
+    input: Parameters<UiBackendClient["resubmitRetainedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["resubmitRetainedPrompt"]> {
+    return (await this.http.resubmitRetainedPrompt(input)).receipt;
+  }
+
+  async steerQueuedPrompt(
+    input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return (
+      await this.http.steerQueuedPrompt(
+        input.promptId,
+        input.expectedRunId,
+        input.clientRequestId,
+      )
+    ).receipt;
+  }
+
   async cancelQueuedPrompt(
     input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
@@ -314,8 +919,15 @@ class BrowserDaemonClient implements UiBackendClient {
   async connectModel(
     input: Parameters<UiBackendClient["connectModel"]>[0],
   ): ReturnType<UiBackendClient["connectModel"]> {
+    const scopeTicket = this.scopeTicket;
+    const ticket = ++this.modelTicket;
     const response = await this.http.connectModel(input);
-    this.store.setCurrentModel(response.model);
+    if (
+      !this.closed &&
+      scopeTicket === this.scopeTicket &&
+      ticket === this.modelTicket
+    )
+      this.store.setCurrentModel(response.model);
     return response.model;
   }
 
@@ -358,30 +970,182 @@ class BrowserDaemonClient implements UiBackendClient {
     input: Parameters<UiBackendClient["archiveSession"]>[0],
   ): ReturnType<UiBackendClient["archiveSession"]> {
     await this.http.archiveSession(input.sessionId);
-    await this.refreshProjectedSnapshot();
+    this.sessionSync.resync();
+    void this.refreshIndex();
   }
 
-  async createSessionForRuntime(): Promise<void> {
-    await this.http.createSession();
-    await this.refreshProjectedSnapshot();
+  createSessionForRuntime(): ReturnType<UiBackendClient["createSession"]> {
+    return this.createSession({
+      reuseInactiveEmpty: { excludeSessionIds: [] },
+    });
   }
 
   async selectSessionForRuntime(sessionId: string): Promise<void> {
-    await this.http.selectSession(sessionId);
-    await this.refreshProjectedSnapshot();
+    const ticket = ++this.selectionTicket;
+    const response = await this.http.selectSession(sessionId);
+    if (!this.closed && ticket === this.selectionTicket)
+      this.acceptBinding(response);
+    this.refreshUnrelatedViews();
   }
 
   async executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
   ): ReturnType<UiBackendClient["executeCommand"]> {
-    await this.http.executeCommand(invocation);
+    // Retain this invocation's feedback through the bounded store timeout;
+    // removing its presentation/correlation must not erase an observed failure.
+    const feedback = this.store.getCommandFeedback(
+      invocation.clientInvocationId,
+    );
+    const binding = this.permissionSync.getState().binding;
+    const skill = invocation.commandId.startsWith("skill.");
+    const clientRequestId = skill
+      ? (invocation.clientRequestId ?? globalThis.crypto.randomUUID())
+      : undefined;
+    const scopeTicket = this.scopeTicket;
+    const rejectLocally = (message: string): never => {
+      this.store.failCommand(invocation.clientInvocationId, message);
+      throw Object.assign(new Error(message), { commandFeedback: true });
+    };
+    if (skill && clientRequestId) {
+      if (!binding || !this.recoverySupported)
+        return rejectLocally("Session is not synchronized");
+      if (
+        this.unknownPrompts.some(
+          (request) =>
+            request.clientRequestId === clientRequestId ||
+            (request.sessionId === invocation.sessionId &&
+              request.status !== "epoch-changed"),
+        )
+      )
+        rejectLocally(
+          "Prompt result is unknown; query its receipt before submitting again",
+        );
+      this.submittingPrompts.add(clientRequestId);
+      this.unknownPrompts = [
+        ...this.unknownPrompts,
+        {
+          directory: this.config.directory ?? "",
+          runtimeEpoch: binding.permissionEpoch,
+          clientRequestId: clientRequestId,
+          sessionId: invocation.sessionId,
+          status: "unknown",
+        },
+      ];
+      this.publishUnknownPrompts();
+    }
+    try {
+      const completion = await this.http.executeCommand(
+        { ...invocation, ...(clientRequestId ? { clientRequestId } : {}) },
+        AbortSignal.any([
+          this.lifecycleController.signal,
+          AbortSignal.timeout(60_000),
+        ]),
+      );
+      if (
+        !isUiCommandCompletion(completion) ||
+        completion.clientInvocationId !== invocation.clientInvocationId ||
+        (!skill && completion.promptReceipt !== undefined)
+      )
+        throw new Error(
+          "server did not return a valid completion. Check its effects before running it again.",
+        );
+      if (
+        skill &&
+        completion.status === "completed" &&
+        completion.promptReceipt?.clientRequestId !== clientRequestId
+      )
+        throw new Error(
+          "Accepted skill receipt is missing or does not match this request",
+        );
+      if (
+        skill &&
+        (completion.status === "failed" ||
+          completion.promptReceipt?.clientRequestId === clientRequestId)
+      ) {
+        this.unknownPrompts = this.unknownPrompts.filter(
+          (request) => request.clientRequestId !== clientRequestId,
+        );
+        this.publishUnknownPrompts();
+      }
+      if (!this.closed && scopeTicket === this.scopeTicket) {
+        this.store.completeCommand(completion);
+        if (
+          completion.promptReceipt &&
+          "permissionEpoch" in completion &&
+          "rootSessionId" in completion &&
+          "bindingGeneration" in completion
+        )
+          this.acceptBinding(
+            completion as typeof completion & UiPermissionBinding,
+          );
+      }
+      return completion;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const unconfirmed = `Command result is unconfirmed: ${message}`;
+      const detail = feedback?.error
+        ? `${feedback.error.message} — ${unconfirmed}`
+        : unconfirmed;
+      if (!this.closed && scopeTicket === this.scopeTicket)
+        this.store.failCommand(invocation.clientInvocationId, detail);
+      throw Object.assign(new Error(detail), { commandFeedback: true });
+    } finally {
+      if (clientRequestId) {
+        this.submittingPrompts.delete(clientRequestId);
+        this.publishUnknownPrompts();
+      }
+    }
   }
 
   async respondPermission(
     requestId: string,
     response: Parameters<UiBackendClient["respondPermission"]>[1],
+    context?: Parameters<UiBackendClient["respondPermission"]>[2],
   ): ReturnType<UiBackendClient["respondPermission"]> {
-    await this.http.respondPermission(requestId, response);
+    const state = this.permissionSync.getState();
+    const binding = state.binding;
+    if (
+      state.status !== "ready" ||
+      !binding ||
+      !state.requests.some((request) => request.id === requestId)
+    )
+      throw new Error("Approvals are not synchronized");
+    if (
+      context &&
+      (context.permissionEpoch !== binding.permissionEpoch ||
+        context.rootSessionId !== binding.rootSessionId ||
+        (context.bindingGeneration !== undefined &&
+          context.bindingGeneration !== binding.bindingGeneration))
+    )
+      throw new Error("Permission scope changed");
+    try {
+      await this.http.respondPermission(requestId, {
+        response,
+        context: binding,
+      });
+    } catch (error) {
+      const latest = this.permissionSync.getState().binding;
+      if (
+        latest?.permissionEpoch !== binding.permissionEpoch ||
+        latest.rootSessionId !== binding.rootSessionId ||
+        latest.bindingGeneration !== binding.bindingGeneration
+      )
+        return;
+      if (typeof error === "object" && error !== null && "code" in error) {
+        if (error.code === "PERMISSION_NOT_PENDING") {
+          this.permissionSync.resync();
+          return;
+        }
+        if (error.code === "PERMISSION_UNAVAILABLE")
+          this.permissionSync.receive({
+            type: "permission.unavailable",
+            ...binding,
+            reason:
+              error instanceof Error ? error.message : "Approvals unavailable",
+          });
+      }
+      throw error;
+    }
   }
 
   async respondInteraction(
@@ -398,31 +1162,137 @@ class BrowserDaemonClient implements UiBackendClient {
   }
 
   async abortRun(runId: string): ReturnType<UiBackendClient["abortRun"]> {
-    const snapshot = this.store.getSnapshot().view.snapshot;
-    const sessionId = snapshot?.runs.find((run) => run.id === runId)?.sessionId;
-    if (!sessionId) {
-      return;
-    }
-    await this.http.abortSession(sessionId, { runId });
+    const target = this.control;
+    if (target?.runId !== runId)
+      throw new Error("The exact running task has not been verified");
+    await this.http.abortSession(target.sessionId, {
+      runId,
+      runtimeEpoch: target.runtimeEpoch,
+      bindingGeneration: target.bindingGeneration,
+    });
+    await this.refreshControl();
+  }
+  async abortSessionForRuntime(
+    sessionId: string,
+    runId?: string,
+  ): Promise<void> {
+    const target = this.control;
+    if (
+      target?.sessionId !== sessionId ||
+      !target.runId ||
+      (runId !== undefined && target.runId !== runId)
+    )
+      throw new Error("The exact running task has not been verified");
+    await this.abortRun(target.runId);
   }
 
-  private async handleSseEvent(
-    event: WebSseEvent,
-    seqNum: number | undefined,
-  ): Promise<void> {
+  private handleSseEvent(event: WebSseEvent, seqNum: number | undefined): void {
     if (this.closed) {
       return;
     }
     switch (event.type) {
       case "hello":
+        this.acceptBinding(event, true);
         return;
       case "error":
         this.store.setError(event.message);
         return;
       case "resync-required":
-        await this.resync(event.maxSeqNum);
+        this.permissionSync.resync();
+        this.sessionSync.resync();
+        this.notifyConversationResync(false);
         return;
       case "ui.event": {
+        if (
+          event.event.type === "permission.requested" ||
+          event.event.type === "permission.resolved" ||
+          event.event.type === "permission.unavailable" ||
+          event.event.type === "permission.resync-required"
+        ) {
+          this.permissionSync.receive(event.event);
+          for (const subscription of this.permissionHandlers) {
+            try {
+              subscription.handler(event.event);
+            } catch (error) {
+              this.permissionHandlers.delete(subscription);
+              try {
+                subscription.onError?.(error);
+              } catch {
+                // A failed observer must not interrupt the live event reader.
+              }
+            }
+          }
+          return;
+        }
+        if (
+          event.event.type === "session.changed" ||
+          event.event.type === "session.unavailable"
+        ) {
+          if (event.event.type === "session.changed")
+            this.store.invalidateSessionHistory(event.event);
+          this.sessionSync.receive(event.event);
+          if (event.event.type === "session.changed" && event.event.runs)
+            void this.refreshControl();
+          this.notifyUiEvent(event.event);
+          if (
+            seqNum !== undefined &&
+            Number.isSafeInteger(seqNum) &&
+            seqNum >= 0
+          )
+            this.events.setLastEventId(seqNum);
+          return;
+        }
+        if (event.event.type === "session.index.invalidated") {
+          void this.refreshIndex();
+          return;
+        }
+        if (event.event.type === "model.invalidated") {
+          void this.refreshModel();
+          return;
+        }
+        if (event.event.type === "session.resync-required") {
+          this.sessionSync.resync();
+          this.notifyUiEvent(event.event);
+          return;
+        }
+        if (
+          event.event.type === "subagent.conversation.changed" ||
+          event.event.type === "subagent.conversation.unavailable"
+        ) {
+          if (
+            seqNum === undefined ||
+            !Number.isSafeInteger(seqNum) ||
+            seqNum < 0
+          ) {
+            this.store.setError("Daemon event is missing a valid sequence id");
+            return;
+          }
+          this.notifyUiEvent(event.event);
+          this.events.setLastEventId(seqNum);
+          return;
+        }
+        if (event.event.type === "snapshot.replaced") return;
+        if (
+          [
+            "message.appended",
+            "message.updated",
+            "message.part.delta",
+            "message.reasoning.delta",
+            "message.reasoning.end",
+            "session.updated",
+            "session.archived",
+            "run.updated",
+            "run.interrupted",
+            "prompt.submitted",
+            "prompt.updated",
+            "todo.updated",
+            "goal.updated",
+            "context.window.updated",
+          ].includes(event.event.type)
+        ) {
+          this.notifyUiEvent(event.event);
+          return;
+        }
         if (
           seqNum === undefined ||
           !Number.isSafeInteger(seqNum) ||
@@ -431,80 +1301,22 @@ class BrowserDaemonClient implements UiBackendClient {
           this.store.setError("Daemon event is missing a valid sequence id");
           return;
         }
-        if (this.buffering) {
-          this.bufferedEvents.push({ event: event.event, seqNum });
-          return;
-        }
-        if (this.dispatchUiEvent(event.event, seqNum, "incremental")) {
+        if (this.dispatchUiEvent(event.event, seqNum, "incremental"))
           this.events.setLastEventId(seqNum);
-        }
       }
     }
   }
 
-  private async resync(lastEventId: number): Promise<void> {
-    this.resyncPromise ??= this.doResync(lastEventId).finally(() => {
-      this.resyncPromise = undefined;
-    });
-    await this.resyncPromise;
-  }
-
-  private async refreshProjectedSnapshot(): Promise<void> {
-    await this.resync(this.store.getSnapshot().view.lastAppliedSeqNum);
-  }
-
-  private async doResync(lastEventId: number): Promise<void> {
-    const previousBuffering = this.buffering;
-    this.buffering = true;
-    this.store.setConnectionState("resyncing");
-    let committedSeqNum = this.store.getSnapshot().view.lastAppliedSeqNum;
-    try {
-      const response = await this.http.getSnapshot({
-        signal: this.lifecycleController.signal,
-      });
-      if (this.closed) {
-        return;
-      }
-      this.dispatchUiEvent(
-        { snapshot: response.snapshot, type: "snapshot.replaced" },
-        response.seqNum,
-        "snapshot-barrier",
-      );
-      const maxBufferedSeqNum = this.applyBufferedEventsAfter(response.seqNum);
-      committedSeqNum = Math.max(response.seqNum, maxBufferedSeqNum);
-      this.events.setLastEventId(
-        Math.max(lastEventId, response.seqNum, maxBufferedSeqNum),
-      );
-    } catch (error) {
-      // The SSE remains open for imperative resyncs. Preserve every frame that
-      // arrived during the failed snapshot request and advance only to data
-      // that the reducer actually committed.
-      const maxBufferedSeqNum = this.applyBufferedEventsAfter(committedSeqNum);
-      this.events.setLastEventId(Math.max(committedSeqNum, maxBufferedSeqNum));
-      if (!this.isClosed()) this.store.setConnectionState("live");
-      throw error;
-    } finally {
-      this.buffering = previousBuffering;
-    }
-    this.store.setConnectionState("live");
-    const model = (
-      await this.http.getCurrentModel({
-        signal: this.lifecycleController.signal,
-      })
-    ).model;
-    if (this.isClosed()) return;
-    this.store.setCurrentModel(model);
-  }
-
-  private applyBufferedEventsAfter(seqNum: number): number {
-    let maxSeqNum = seqNum;
-    for (const event of this.bufferedEvents.splice(0)) {
-      if (event.seqNum > seqNum) {
-        this.dispatchUiEvent(event.event, event.seqNum, "incremental");
-        maxSeqNum = Math.max(maxSeqNum, event.seqNum);
+  private notifyUiEvent(event: Parameters<UiEventHandler>[0]): void {
+    let failed = false;
+    for (const handler of this.eventHandlers) {
+      try {
+        handler(event);
+      } catch {
+        failed = true;
       }
     }
-    return maxSeqNum;
+    if (failed) reportEventSubscriberFailure();
   }
 
   private dispatchUiEvent(
@@ -531,63 +1343,7 @@ class BrowserDaemonClient implements UiBackendClient {
   }
 }
 
-function createClientInvocationId(): string {
-  return globalThis.crypto.randomUUID();
-}
-
-function activeRunForSession(
-  snapshot: UiSnapshot,
-  sessionId: string,
-): UiSnapshot["runs"][number] | undefined {
-  const status = snapshot.status;
-  if (status.kind === "running") {
-    const run = snapshot.runs.find(
-      (candidate) => candidate.id === status.runId,
-    );
-    if (run?.sessionId === sessionId) {
-      return run;
-    }
-  }
-  if (status.kind === "waiting-for-permission") {
-    const request = snapshot.permissions.find(
-      (candidate) => candidate.id === status.requestId,
-    );
-    const run = snapshot.runs.find(
-      (candidate) => candidate.id === request?.runId,
-    );
-    if (run?.sessionId === sessionId) {
-      return run;
-    }
-  }
-  return snapshot.runs.find(
-    (candidate) =>
-      candidate.sessionId === sessionId &&
-      (candidate.status.kind === "running" ||
-        candidate.status.kind === "waiting-for-permission"),
-  );
-}
-
-function isAbortableRun(snapshot: UiSnapshot, runId: string): boolean {
-  const status = snapshot.status;
-  if (status.kind === "running" && status.runId === runId) {
-    return true;
-  }
-  if (
-    status.kind === "waiting-for-permission" &&
-    snapshot.permissions.some(
-      (request) => request.id === status.requestId && request.runId === runId,
-    )
-  ) {
-    return true;
-  }
-  const run = snapshot.runs.find((candidate) => candidate.id === runId);
-  return (
-    run?.status.kind === "running" ||
-    run?.status.kind === "waiting-for-permission"
-  );
-}
-
-function createBrowserDaemonClient(input: {
+export function createBrowserDaemonClient(input: {
   readonly config: OhbabyBootstrapConfig;
   readonly fetch?: typeof fetch;
   readonly store: OhbabyWebStore;
@@ -608,415 +1364,56 @@ function createBrowserDaemonClient(input: {
   });
 }
 
-class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
-  readonly store = createOhbabyWebStore();
-  readonly ready: Promise<void>;
-  private activeClient: BrowserDaemonClient | undefined;
-  private readonly globalHttp: DaemonHttpClient;
-  private readonly listeners = new Set<() => void>();
-  private controlPlaneAvailable = true;
-  private disposed = false;
-  private hasConnectedWorkspace = false;
-  private navigationState: WebNavigationState;
-  private switchPromise: Promise<void> = Promise.resolve();
-  private workspaceSnapshot: WorkspaceSnapshot;
-
-  constructor(
-    private readonly config: OhbabyBootstrapConfig,
-    private readonly fetchImpl: typeof fetch | undefined,
-  ) {
-    this.globalHttp = createDaemonHttpClient(
-      { ...config, directory: undefined },
-      fetchImpl,
-    );
-    this.navigationState = readWebNavigationState();
-    this.workspaceSnapshot = {
-      scopes: [],
-      selectedDirectory: null,
-    };
-    this.store.subscribe(() => {
-      this.persistActiveSession();
-    });
-    this.ready = this.initialize();
-  }
-
-  get client(): UiBackendClient | null {
-    return this.activeClient ?? null;
-  }
-
-  async createSession(): Promise<void> {
-    await this.requireActiveClient().createSessionForRuntime();
-  }
-
-  async dispose(): Promise<void> {
-    this.disposed = true;
-    await this.activeClient?.close();
-    this.activeClient = undefined;
-  }
-
-  async selectSession(sessionId: string): Promise<void> {
-    await this.requireActiveClient().selectSessionForRuntime(sessionId);
-  }
-
-  async archiveSession(sessionId: string): Promise<void> {
-    await this.requireActiveClient().archiveSession({ sessionId });
-  }
-
-  async abortSession(sessionId: string, runId?: string): Promise<void> {
-    const snapshot = this.store.getSnapshot().view.snapshot;
-    if (!snapshot) {
-      return;
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+const UNKNOWN_PROMPTS_KEY = "ohbaby.web.unknown-prompts.v1";
+function readUnknownPrompts(directory: string): UnknownPromptRequest[] {
+  try {
+    const storage = (globalThis as { localStorage?: Storage }).localStorage;
+    if (!storage) return [];
+    const prefix = `${UNKNOWN_PROMPTS_KEY}:${encodeURIComponent(directory)}:`;
+    const result: UnknownPromptRequest[] = [];
+    for (let index = 0; index < storage.length; index++) {
+      const key = storage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const value: unknown = JSON.parse(storage.getItem(key) ?? "null");
+      if (typeof value !== "object" || value === null) continue;
+      const record = value as Partial<UnknownPromptRequest>;
+      if (
+        record.directory === directory &&
+        typeof record.clientRequestId === "string" &&
+        typeof record.runtimeEpoch === "string" &&
+        (record.sessionId === undefined ||
+          typeof record.sessionId === "string") &&
+        (record.status === "unknown" || record.status === "epoch-changed")
+      )
+        result.push(record as UnknownPromptRequest);
     }
-    const run =
-      runId === undefined
-        ? activeRunForSession(snapshot, sessionId)
-        : snapshot.runs.find((candidate) => candidate.id === runId);
-    if (!run) {
-      return;
-    }
-    if (run.sessionId !== sessionId) {
-      throw new Error(`Run ${run.id} does not belong to session ${sessionId}`);
-    }
-    if (!isAbortableRun(snapshot, run.id)) {
-      return;
-    }
-    await this.requireActiveClient().abortRun(run.id);
-  }
-
-  async executeSlashCommand(input: {
-    readonly allowOverlay?: boolean;
-    readonly sessionId?: string;
-    readonly text: string;
-  }): Promise<void> {
-    const client = this.requireActiveClient();
-    const catalog = await client.listWebCommandsForRuntime();
-    const resolved = resolveSlashCommand(
-      catalog,
-      parseSlashCommandInput(input.text),
-      { surface: "tui" },
-    );
-    if (!resolved.ok) {
-      throw new Error(resolved.error.message);
-    }
-    const webCommand = catalog.commands.find(
-      (command) => command.id === resolved.command.id,
-    );
-    if (
-      webCommand?.executionKind === "overlay" &&
-      input.allowOverlay !== true
-    ) {
-      throw new Error(`Command "${input.text}" must be opened from the UI`);
-    }
-    await client.executeCommand({
-      argumentMode: resolved.command.argumentMode,
-      argv: resolved.argv,
-      body: resolved.body,
-      clientInvocationId: createClientInvocationId(),
-      commandId: resolved.command.id,
-      path: resolved.path,
-      raw: resolved.raw,
-      rawArgs: resolved.rawArgs,
-      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
-      surface: "tui",
-    } satisfies UiSlashCommandInvocation);
-  }
-
-  getWorkspaceSnapshot(): WorkspaceSnapshot {
-    return this.workspaceSnapshot;
-  }
-
-  subscribeWorkspaces(listener: () => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  }
-
-  async refreshWorkspaces(): Promise<void> {
-    const response = await this.globalHttp.listWorkspaceScopes();
-    const scopes = response.scopes;
-    this.publishWorkspaceSnapshot({
-      scopes,
-      selectedDirectory: this.workspaceSnapshot.selectedDirectory,
-    });
-  }
-
-  async openWorkspace(directory: string): Promise<void> {
-    const response = await this.globalHttp.openWorkspace(directory);
-    await this.refreshWorkspaces();
-    await this.queueSwitchWorkspace(response.scope.directory, false);
-  }
-
-  getDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse> {
-    return this.globalHttp.getDirectoryPickerRoots();
-  }
-
-  listDirectoryPicker(directory: string): Promise<DirectoryPickerListResponse> {
-    return this.globalHttp.listDirectoryPicker(directory);
-  }
-
-  listWebCommands(): Promise<UiWebCommandCatalog> {
-    return this.requireActiveClient().listWebCommandsForRuntime();
-  }
-
-  async hideWorkspace(directory: string): Promise<void> {
-    await this.globalHttp.hideWorkspace(directory);
-    const wasSelected = this.workspaceSnapshot.selectedDirectory === directory;
-    await this.refreshWorkspaces();
-    if (!wasSelected) {
-      return;
-    }
-    const next = this.workspaceSnapshot.scopes.find((scope) => scope.available);
-    if (next) {
-      await this.queueSwitchWorkspace(next.directory, false);
-      return;
-    }
-    await this.clearActiveWorkspace();
-  }
-
-  switchWorkspace(directory: string): Promise<void> {
-    return this.queueSwitchWorkspace(directory, true);
-  }
-
-  private queueSwitchWorkspace(
-    directory: string,
-    markOpened: boolean,
-  ): Promise<void> {
-    const pending = this.switchPromise.then(() =>
-      this.doSwitchWorkspace(directory, markOpened),
-    );
-    this.switchPromise = pending.catch(() => undefined);
-    return pending;
-  }
-
-  private async doSwitchWorkspace(
-    directory: string,
-    markOpened: boolean,
-  ): Promise<void> {
-    if (this.isDisposed()) return;
-    let selectedDirectory = directory.trim();
-    if (selectedDirectory.length === 0) {
-      throw new Error("Workspace directory cannot be empty");
-    }
-    if (markOpened && this.controlPlaneAvailable) {
-      selectedDirectory = (
-        await this.globalHttp.openWorkspace(selectedDirectory)
-      ).scope.directory;
-      await this.refreshWorkspaces();
-    }
-    if (selectedDirectory === this.workspaceSnapshot.selectedDirectory) {
-      this.rememberSelectedDirectory(selectedDirectory);
-      return;
-    }
-    const previousDirectory = this.workspaceSnapshot.selectedDirectory;
-    const previousScopes = this.workspaceSnapshot.scopes;
-    const previousClient = this.activeClient;
-    await previousClient?.close();
-    this.store.reset();
-    const nextClient = this.createClient({
-      ...this.scopedBootstrapConfig(),
-      clientId: this.hasConnectedWorkspace
-        ? globalThis.crypto.randomUUID()
-        : this.config.clientId,
-      directory: selectedDirectory,
-    });
-    this.activeClient = nextClient;
-    this.publishWorkspaceSnapshot({
-      scopes: this.workspaceSnapshot.scopes.map((scope) =>
-        scope.directory === selectedDirectory
-          ? { ...scope, loaded: true }
-          : scope,
-      ),
-      selectedDirectory,
-    });
-    try {
-      await nextClient.connect();
-      if (this.isDisposed()) {
-        await nextClient.close();
-        if (this.activeClient === nextClient) this.activeClient = undefined;
-        return;
-      }
-      this.hasConnectedWorkspace = true;
-      await this.restoreRememberedSession(selectedDirectory);
-      if (this.controlPlaneAvailable) {
-        await this.refreshWorkspaces();
-      }
-      this.rememberSelectedDirectory(selectedDirectory);
-    } catch (error) {
-      await nextClient.close();
-      if (this.isDisposed()) {
-        if (this.activeClient === nextClient) this.activeClient = undefined;
-        return;
-      }
-      this.store.reset();
-      this.activeClient =
-        previousDirectory === null
-          ? undefined
-          : this.createClient({
-              ...this.scopedBootstrapConfig(),
-              clientId: globalThis.crypto.randomUUID(),
-              directory: previousDirectory,
-            });
-      this.publishWorkspaceSnapshot({
-        scopes: previousScopes,
-        selectedDirectory: previousDirectory,
-      });
-      await this.activeClient?.connect().catch(() => undefined);
-      throw error;
-    }
-  }
-
-  private async initialize(): Promise<void> {
-    const hintedDirectory = this.config.directory?.trim();
-    try {
-      await this.refreshWorkspaces();
-    } catch (error) {
-      if (!hintedDirectory) {
-        throw error;
-      }
-      this.controlPlaneAvailable = false;
-      this.publishWorkspaceSnapshot({
-        scopes: [
-          {
-            available: true,
-            directory: hintedDirectory,
-            lastOpenedAt: 0,
-            loaded: true,
-            position: 0,
-          },
-        ],
-        selectedDirectory: null,
-      });
-      await this.queueSwitchWorkspace(hintedDirectory, false);
-      return;
-    }
-    let selectedDirectory: string | undefined;
-    if (hintedDirectory) {
-      const visibleHint = this.workspaceSnapshot.scopes.find(
-        (scope) => scope.directory === hintedDirectory && scope.available,
-      );
-      if (visibleHint) {
-        selectedDirectory = visibleHint.directory;
-      } else {
-        selectedDirectory = (
-          await this.globalHttp.openWorkspace(hintedDirectory)
-        ).scope.directory;
-        await this.refreshWorkspaces();
-      }
-    } else {
-      const remembered = this.navigationState.selectedDirectory;
-      selectedDirectory = this.workspaceSnapshot.scopes.find(
-        (scope) => scope.directory === remembered && scope.available,
-      )?.directory;
-      selectedDirectory ??= [...this.workspaceSnapshot.scopes]
-        .filter((scope) => scope.available)
-        .sort(
-          (left, right) =>
-            right.lastOpenedAt - left.lastOpenedAt ||
-            left.position - right.position,
-        )[0]?.directory;
-    }
-    if (selectedDirectory) {
-      await this.queueSwitchWorkspace(selectedDirectory, false);
-    }
-  }
-
-  private isDisposed(): boolean {
-    return this.disposed;
-  }
-
-  private async restoreRememberedSession(directory: string): Promise<void> {
-    const sessionId = this.navigationState.sessionByDirectory[directory];
-    const snapshot = this.store.getSnapshot().view.snapshot;
-    if (
-      !sessionId ||
-      snapshot?.activeSessionId === sessionId ||
-      !snapshot?.sessions.some((session) => session.id === sessionId)
-    ) {
-      return;
-    }
-    await this.activeClient?.selectSessionForRuntime(sessionId);
-  }
-
-  private persistActiveSession(): void {
-    const directory = this.workspaceSnapshot.selectedDirectory;
-    const sessionId = this.store.getSnapshot().view.snapshot?.activeSessionId;
-    if (!directory || !sessionId) {
-      return;
-    }
-    this.navigationState = {
-      selectedDirectory: directory,
-      sessionByDirectory: {
-        ...this.navigationState.sessionByDirectory,
-        [directory]: sessionId,
-      },
-    };
-    writeWebNavigationState(this.navigationState);
-    replaceNavigationHash({ directory, sessionId });
-  }
-
-  private rememberSelectedDirectory(directory: string): void {
-    this.navigationState = {
-      ...this.navigationState,
-      selectedDirectory: directory,
-    };
-    writeWebNavigationState(this.navigationState);
-    replaceNavigationHash({
-      directory,
-      sessionId: this.navigationState.sessionByDirectory[directory],
-    });
-  }
-
-  private async clearActiveWorkspace(): Promise<void> {
-    await this.activeClient?.close();
-    this.activeClient = undefined;
-    this.store.reset();
-    this.navigationState = {
-      ...this.navigationState,
-      selectedDirectory: null,
-    };
-    writeWebNavigationState(this.navigationState);
-    replaceNavigationHash({ directory: null });
-    this.publishWorkspaceSnapshot({
-      scopes: this.workspaceSnapshot.scopes,
-      selectedDirectory: null,
-    });
-  }
-
-  private createClient(config: OhbabyBootstrapConfig): BrowserDaemonClient {
-    return createBrowserDaemonClient({
-      config,
-      ...(this.fetchImpl === undefined ? {} : { fetch: this.fetchImpl }),
-      store: this.store,
-    });
-  }
-
-  private requireActiveClient(): BrowserDaemonClient {
-    if (!this.activeClient) {
-      throw new Error("No workspace is selected");
-    }
-    return this.activeClient;
-  }
-
-  private scopedBootstrapConfig(): OhbabyBootstrapConfig {
-    if (!this.hasConnectedWorkspace) {
-      return this.config;
-    }
-    const { startupIntent: _startupIntent, ...config } = this.config;
-    return config;
-  }
-
-  private publishWorkspaceSnapshot(snapshot: WorkspaceSnapshot): void {
-    this.workspaceSnapshot = snapshot;
-    for (const listener of this.listeners) {
-      listener();
-    }
+    return result;
+  } catch {
+    return [];
   }
 }
-
-export function createOhbabyWebRuntime(
-  config: OhbabyBootstrapConfig,
-  options: { readonly fetch?: typeof fetch } = {},
-): OhbabyWebRuntime {
-  return new BrowserOhbabyWebRuntime(config, options.fetch);
+function writeUnknownPrompts(
+  directory: string,
+  requests: readonly UnknownPromptRequest[],
+  previousIds: ReadonlySet<string>,
+): void {
+  try {
+    const storage = (globalThis as { localStorage?: Storage }).localStorage;
+    if (!storage) return;
+    const prefix = `${UNKNOWN_PROMPTS_KEY}:${encodeURIComponent(directory)}:`;
+    const ids = new Set(requests.map((request) => request.clientRequestId));
+    for (const id of previousIds)
+      if (!ids.has(id))
+        storage.removeItem(`${prefix}${encodeURIComponent(id)}`);
+    for (const request of requests)
+      storage.setItem(
+        `${prefix}${encodeURIComponent(request.clientRequestId)}`,
+        JSON.stringify(request),
+      );
+  } catch {
+    /* The active client still retains the unresolved identity in memory. */
+  }
 }

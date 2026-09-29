@@ -1,6 +1,6 @@
 # ohbaby-web · data-model（数据模型）
 
-> web 端的概念词典。只收**web 自己拥有的投影态与连接态**；领域类型（`UiSnapshot` / `UiEvent` / `UiMessage` / `UiRun` / `UiPermissionRequest` 等）是 `ohbaby-sdk` 的真相，web 只引用、不重定义（ND3/ND4）。
+> web 端的概念词典。只收**web 自己拥有的投影态、连接态与交互状态**；领域类型（`UiSnapshot` / `UiEvent` / `UiMessage` / `UiRun` / `UiPermissionRequest` 等）是 `ohbaby-sdk` 的真相，web 只引用、不重定义（ND3/ND4）。
 >
 > 前置：[`architecture.md`](./architecture.md) 已确认。
 
@@ -8,17 +8,17 @@
 
 ## 1. Core Concepts（核心概念）
 
-- **ViewState** —— store 持有的、从 snapshot + 事件投影出的 UI 状态。是 `eventReducer` 的输出，UI 的唯一读取源。
+- **ViewState** —— store 持有的、从 snapshot + 事件投影出的 UI 状态。是普通事件 `eventReducer` 的输出；审批另读独立的 `PermissionSyncState`。
 - **ConnectionState** —— web 对"浏览器↔daemon 链路"的视角。daemon 没有这个概念，是 web 独有的连接态机。
 - **StreamingMessage** —— 一条已由 snapshot / `message.appended` 建立、尚未定稿的 assistant 消息：后续 `message.part.delta` 只更新这条已有消息，直到 `message.updated` 定稿。
-- **PendingPermission** —— 本连接待用户处置的权限请求 + 归属信息。
+- **PendingPermission** —— 当前客户端所绑定根会话子树内待处置的独立权限请求；同根客户端共享可见范围。
 - **CommandNotice** —— slash 命令事件的轻量 UI 投影。它只展示命令 started/result/failed 的状态、输出或错误，不进入会话消息历史，不持久化。
 
 ---
 
 ## 2. Entity / Value Object 区分
 
-- **Entity（有身份、有生命周期）**：`StreamingMessage`（按 messageId 跟踪、随 delta 演进至定稿）、`PendingPermission`（按 requestId 跟踪、随用户应答或 resync 消失）、`CommandNotice`（按 commandRunId/clientInvocationId 跟踪，随命令结果或新 run 清理）。
+- **Entity（有身份、有生命周期）**：`StreamingMessage`（按 messageId 跟踪、随 delta 演进至定稿）、`PendingPermission`（按 requestId 跟踪，由权威 resolved 事件或审批 snapshot 确认移除）、`CommandNotice`（按 commandRunId/clientInvocationId 跟踪，随命令结果或新 run 清理）。
 - **Value Object（无身份、不可变快照）**：`ConnectionState`（某一时刻的连接阶段枚举值）、`ViewState`（某一次投影产出的不可变快照，reducer 每次产出新值）。
 
 > 不强行套 DDD，此区分仅帮助理解"谁会变、按什么 id 变"。
@@ -28,15 +28,17 @@
 ## 3. Key Data Fields（关键数据要素，描述含义而非类型）
 
 ### ViewState
+
 - `sessions` / `activeSessionId` —— 当前会话与选中项（投影自 snapshot）。
 - `messages` —— 当前会话的消息序列，含已定稿消息与至多一条 `StreamingMessage`。
 - `runStatus` —— 当前 run 的状态（idle / running / interrupted）。
-- `pendingPermissions` —— 待审批队列（`PendingPermission` 列表）。
+- 普通 ViewState 不承载审批真相；审批列表位于同一 store 的独立 `permissionSync.requests`。
 - `commandNotices` —— slash 命令的轻量结果/错误列表，最多保留少量近期项，避免长输出挤占会话流。
 - `contextWindowUsage` —— 上下文用量（投影自事件）。
 - `lastAppliedSeqNum` —— 已应用到 ViewState 的最大事件 seqNum（投影游标）。
 
 ### ConnectionState（五态机）
+
 - 取值：`connecting` → `live` → `reconnecting` → `resyncing` → `disconnected`。
 - `connecting`：已发起建连/订阅，尚未进入 live。
 - `live`：SSE 正常、事件实时流入。
@@ -45,6 +47,7 @@
 - `disconnected`：放弃/不可恢复（如 401），等待用户介入。
 
 ### StreamingMessage
+
 - `messageId` —— 在途消息标识。
 - `parts` —— 按 producer 顺序累积的片段；delta 只续写尾部 text，否则追加新的 text part，不能跨 tool part 覆盖前文。
 - `finalized` —— 是否已收到 `message.updated` 定稿。
@@ -52,11 +55,22 @@
 工具调用的 Web 卡片是 `tool-call.call.id` 与 `tool-result.callId` 的派生配对视图，不是独立持久化实体。同一调用只渲染一张卡；稳定 key 使用 call id，但 call id 不作为用户可见标题。
 
 ### PendingPermission
+
 - `requestId` —— 权限请求标识。
 - `request` —— 引用 sdk 的 `UiPermissionRequest`（领域真相，不在此展开）。
-- `ownedByThisClient` —— 归属本连接与否（错主时 server 返回 403，用于 UI 提示）。
+- `sessionId` / `runId` —— 实际发起请求的来源会话和 run；`callId` 只用于工具关联，不能代替 run identity。
+- `rootSessionId` / `sourceLabel` —— 根范围与简短来源标签；完整祖先链由 backend 校验，不作为 Web 自有字段。
+
+### PermissionSyncState
+
+- `status` —— `idle / syncing / ready / error / unavailable`，独立于普通连接态；只有 `ready` 才允许回复。
+- `binding` —— `permissionEpoch / rootSessionId / bindingGeneration`；连接或选择变化后拒绝旧 generation 的结果。
+- `requests` / `permissionRevision` —— 独立审批 snapshot 加连续审批增量所确认的列表与游标。
+- `attempts` / `error` —— 有界恢复次数与可见失败；显式 Retry 开启新一轮，严重 `unavailable` 保持禁用。
+- 共享 SDK `createPermissionSync` 推进此状态；全量 `UiSnapshot` 和普通 seq/replay 不覆盖它。
 
 ### CommandNotice
+
 - `id` —— 本地展示 id，优先来自 `commandRunId`。
 - `kind` —— `running` / `success` / `error`。
 - `commandId` / `path` —— 命令身份，用于标签与调试。
@@ -67,9 +81,29 @@
 
 ## 4. Lifecycle & Ownership（生命周期与归属）
 
-- **创建**：ViewState 在首屏由 `GET /v1/snapshot` 投影产生；StreamingMessage 由 snapshot 或 `message.appended` 建立，不能由孤立 delta 猜测创建；PendingPermission 在 `permission.requested` 入队；ConnectionState 在 bootstrap 建连时进入 `connecting`。
-- **更新**：均由 `eventReducer` 依据 SSE 事件推进；`lastAppliedSeqNum` 单调前进。`message.part.delta` 缺少稳定 messageId 或找不到目标消息时静默丢弃内容，但仍推进 seq 游标，等待既有 replay/resync 机制恢复权威状态。CommandNotice 由 `command.started` / `command.result.delivered` / `command.failed` 推进。
-- **失效/销毁**：StreamingMessage 在 `message.updated` 定稿后并入消息序列；PendingPermission 在用户应答或 `resyncing` 重建后移除；CommandNotice 在新 prompt/run 或达到保留上限时清理；整个 ViewState 在 `resyncing` 时被**整体丢弃重建**。
-- **归属**：以上概念**全部由 store 拥有、易失、绝不持久化**（落 G1）。daemon 拥有会话真相与 replay 缓冲；web 仅拥有自己的投影游标 `lastAppliedSeqNum` 与连接态。
+- **创建**：ViewState 由 `GET /v1/snapshot` 投影；StreamingMessage 由 snapshot 或 `message.appended` 建立。审批在收到当前连接的 `hello` binding 后，独立查询 `GET /v1/permissions` 并合并查询期间缓冲的增量。
+- **更新**：普通事件由 `eventReducer` 推进 `lastAppliedSeqNum`；孤立消息 delta 不创建消息。审批只由共享恢复引擎按 epoch、root、bindingGeneration 与 `permissionRevision` 推进；CommandNotice 由 `command.*` 事件推进。
+- **失效/销毁**：StreamingMessage 在 `message.updated` 定稿；审批由权威 resolved 或独立 snapshot 确认移除，HTTP 成功本身不做乐观删除。普通 `resync-required` 重建 ViewState，不覆盖审批。断线或 scope 切换立即禁止审批响应；服务端 pending 不随客户端断开取消。
+- **归属**：store 持有以上易失投影，不持久化。backend 持有审批事实；web 仅持有普通事件游标、独立审批游标、绑定及连接态。
 
 > 概念变化需同步检查 [`dfd-interface.md`](./dfd-interface.md)（投影流）与 [`test.md`](./test.md)（投影/连接态场景）。
+
+### UI 局部状态与唯一 owner
+
+以下状态随功能拆分迁移，不形成第二套服务端状态层；`session/selectors.ts` 的 ViewModel 仍是现有 store 的派生视图。
+
+| 状态 / 数据 | 拥有方 | 生命周期与边界 |
+| --- | --- | --- |
+| workspace、记忆导航、client 生命周期 | `src/runtime.ts` | 切换/销毁使旧 client 失效；只有一个活动 client 和逻辑 SSE；导航由既有 helper 持久化 |
+| unknown prompt 恢复记录 | `api/daemon/client.ts` | 随 browser client 的现有恢复机制；不移入 React 或 runtime |
+| localPromptAttempts、receipt 接管、promptProjection | `ui/session/SessionScreen.tsx` | 按原 scope/clientRequestId 区分；正式消息接管后不能重复显示；不改写服务端 prompt 队列 |
+| Stop pending 与延迟提示、session sync banner | `ui/session/use-stop-request.ts`、`use-session-sync-banner.ts` | 分别按 session/run 与同步 scope 隔离；RPC 接受不等于 run 可靠终态 |
+| draft、pending requestId/text、队列编辑缓冲与续租 | `ui/composer/Composer.tsx` | `draft-storage.ts` 保持原存储键；切 scope、租约失败及卸载清理本地生命周期；后端仍裁定租约有效性 |
+| slash query/选中索引、IME/keydown、编辑 revision | `ui/composer/Composer.tsx` | query 从唯一 draft 派生；一次按键只触发一个动作；异步写回校验 scope 与编辑 revision |
+| 命令表单与 pending、结果展示 | `ui/commands/` | SessionScreen 组合打开/关闭与请求；commands 不拥有草稿副本；迟到结果不能改写另一 scope 或用户新稿 |
+| permission 确认、焦点、当前卡片选择 | `ui/permissions/` | 权限事实来自独立 permissionSync；局部确认不复制 registry，不用消息 live 代替审批 ready |
+| 阅读位置、工具展开、TodoDock 展开 | `ui/conversation/` | 按稳定消息/call/todo 身份保留；history 分页保护锚点，scope 切换按现有语义重置 |
+
+`ComposerPrefill` 定义于 Composer，携带 `scopeKey`、`editRevision`、`nonce` 和 `text`。nonce 区分回填请求；scope/revision 判定是否仍可应用，不能只比较草稿字符串。异步命令清空也受发起 scope 与编辑 revision 约束。这些 guard 只让过时的本地结果失效，不是新的服务端 revision 或全局 store。
+
+职责依据见 [Web improve-3](./improve-3/02-change-spec.md)；跨包行为与最终验收见 [中央 improve-2.1](../problem-lists/2026-09-19-execution-reliability/improve-2.1/README.md)。

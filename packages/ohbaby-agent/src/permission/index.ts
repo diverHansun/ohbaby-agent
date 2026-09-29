@@ -17,10 +17,17 @@ export {
 } from "./rule.js";
 export { createPermissionState } from "./state.js";
 export {
+  InvalidPermissionChoiceError,
+  PermissionUnavailableError,
   PermissionRejectedError,
   PermissionRejectedWithSuggestionError,
 } from "./types.js";
 export type {
+  PermissionCommit,
+  PermissionSource,
+  PermissionIdentity,
+  PermissionTerminal,
+  PermissionRespondResult,
   PermissionAskInput,
   PermissionCall,
   PermissionDecision,
@@ -42,3 +49,5 @@ export type {
   SchedulerPermissionResponse,
   SystemPermissionResponse,
 } from "./types.js";
+
+export type { PermissionManagerOptions } from "./manager.js";

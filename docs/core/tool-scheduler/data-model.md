@@ -10,15 +10,15 @@
 
 工具根据其操作特性分为七类：
 
-| 类别 | 说明 | 并发特性 | 示例工具 |
-|------|------|----------|----------|
-| readonly | 只读操作 | 可并行（最多5个） | read, glob, grep, list；MCP工具（readOnlyHint=true） |
-| write | 写入操作 | 串行执行 | write, edit；MCP工具（readOnlyHint=false/未设置） |
-| dangerous | 危险操作 | 串行执行 | bash |
-| network | 网络操作 | 可并行（最多5个） | web_fetch, web_search（内置工具，背后走 search-providers） |
-| memory | 目标/内部状态操作 | 可并行（不受读写锁限制） | goals 工具（显式声明 `category: "memory"`） |
-| skill | 技能加载与技能资源读取 | 可并行（最多5个） | skill, skill_resource |
-| subagent | 子代理操作 | 可并行（最多3个，独立计数器） | task |
+| 类别      | 说明                   | 并发特性                      | 示例工具                                                   |
+| --------- | ---------------------- | ----------------------------- | ---------------------------------------------------------- |
+| readonly  | 只读操作               | 可并行（最多5个）             | read, glob, grep, list；MCP工具（readOnlyHint=true）       |
+| write     | 写入操作               | 串行执行                      | write, edit；MCP工具（readOnlyHint=false/未设置）          |
+| dangerous | 危险操作               | 串行执行                      | bash                                                       |
+| network   | 网络操作               | 可并行（最多5个）             | web_fetch, web_search（内置工具，背后走 search-providers） |
+| memory    | 目标/内部状态操作      | 可并行（不受读写锁限制）      | goals 工具（显式声明 `category: "memory"`）                |
+| skill     | 技能加载与技能资源读取 | 可并行（最多5个）             | skill, skill_resource                                      |
+| subagent  | 子代理操作             | 可并行（最多3个，独立计数器） | task                                                       |
 
 **MCP工具分类规则**：通过 `annotations.readOnlyHint` 在工具注册时推断，`true` → `readonly`，其余 → `write`。
 
@@ -26,12 +26,12 @@
 
 工具根据其来源分为四类：
 
-| 来源 | 代码位置 | 说明 | 注册时机 |
-|------|----------|------|----------|
-| builtin | `src/tools/` | 内置工具（含 web_search / web_fetch） | 启动时静态注册 |
-| module | 各模块内部 | 模块自带工具（当前无 memory LLM adapter） | 模块初始化时注册 |
-| skill | `src/skill/` | 技能系统工具（skill / skill_resource） | runtime composition 注册并在 skill registry 变化时刷新 |
-| mcp | 运行时动态 | MCP 服务器提供的工具 | 运行时发现注册 |
+| 来源    | 代码位置     | 说明                                      | 注册时机                                               |
+| ------- | ------------ | ----------------------------------------- | ------------------------------------------------------ |
+| builtin | `src/tools/` | 内置工具（含 web_search / web_fetch）     | 启动时静态注册                                         |
+| module  | 各模块内部   | 模块自带工具（当前无 memory LLM adapter） | 模块初始化时注册                                       |
+| skill   | `src/skill/` | 技能系统工具（skill / skill_resource）    | runtime composition 注册并在 skill registry 变化时刷新 |
+| mcp     | 运行时动态   | MCP 服务器提供的工具                      | 运行时发现注册                                         |
 
 > `web_search` / `web_fetch` 属于 `builtin`；它们是 `tools` 入口，后端走 `services/search-providers/` 路由到具体厂商（Tavily / Exa），但对调度器仍是普通的 builtin 工具，不另立来源类型。
 
@@ -39,17 +39,17 @@
 
 工具调用的生命周期状态：
 
-| 状态 | 说明 | 可转换到 |
-|------|------|----------|
-| pending | 初始状态，等待处理 | checking_permission |
-| checking_permission | 正在检查权限状态 | queued, awaiting_approval, rejected |
-| awaiting_approval | 等待用户确认 | queued, rejected, cancelled |
-| queued | 已批准，等待并发资源 | executing |
-| executing | 正在执行 | success, error, cancelled |
-| success | 执行成功（终态） | - |
-| error | 执行失败（终态） | - |
-| rejected | 被拒绝（终态） | - |
-| cancelled | 被取消（终态） | - |
+| 状态                | 说明                 | 可转换到                            |
+| ------------------- | -------------------- | ----------------------------------- |
+| pending             | 初始状态，等待处理   | checking_permission                 |
+| checking_permission | 正在检查权限状态     | queued, awaiting_approval, rejected |
+| awaiting_approval   | 等待用户确认         | queued, rejected, cancelled         |
+| queued              | 已批准，等待并发资源 | executing                           |
+| executing           | 正在执行             | success, error, cancelled           |
+| success             | 执行成功（终态）     | -                                   |
+| error               | 执行失败（终态）     | -                                   |
+| rejected            | 被拒绝（终态）       | -                                   |
+| cancelled           | 被取消（终态）       | -                                   |
 
 ### 1.4 ToolCall（工具调用）
 
@@ -71,25 +71,32 @@
 
 ```typescript
 // 工具类别
-type ToolCategory = 'readonly' | 'write' | 'dangerous' | 'network' | 'memory' | 'skill' | 'subagent'
+type ToolCategory =
+  | "readonly"
+  | "write"
+  | "dangerous"
+  | "network"
+  | "memory"
+  | "skill"
+  | "subagent";
 
 // 工具来源
-type ToolSource = 'builtin' | 'module' | 'skill' | 'mcp'
+type ToolSource = "builtin" | "module" | "skill" | "mcp";
 
 // 调用状态
 type ToolCallStatus =
-  | 'pending'
-  | 'checking_permission'
-  | 'awaiting_approval'
-  | 'queued'
-  | 'executing'
-  | 'success'
-  | 'error'
-  | 'rejected'
-  | 'cancelled'
+  | "pending"
+  | "checking_permission"
+  | "awaiting_approval"
+  | "queued"
+  | "executing"
+  | "success"
+  | "error"
+  | "rejected"
+  | "cancelled";
 
 // 终态状态
-type FinalStatus = 'success' | 'error' | 'rejected' | 'cancelled'
+type FinalStatus = "success" | "error" | "rejected" | "cancelled";
 ```
 
 ### 2.2 请求类型
@@ -97,16 +104,17 @@ type FinalStatus = 'success' | 'error' | 'rejected' | 'cancelled'
 ```typescript
 // 工具调用请求（来自 Agent）
 interface ToolCallRequest {
-  callId: string                    // 调用唯一标识
-  toolName: string                  // 工具名称
-  params: Record<string, unknown>   // 工具参数
-  sessionId: string                 // 所属会话
-  messageId: string                 // 关联消息
+  callId: string; // 调用唯一标识
+  toolName: string; // 工具名称
+  params: Record<string, unknown>; // 工具参数
+  sessionId: string; // 所属会话
+  runId?: string; // 真实执行 run；交互审批必需，不能用 callId 代替
+  messageId: string; // 关联消息
 }
 
 // 批量调用请求
 interface BatchToolCallRequest {
-  calls: ToolCallRequest[]
+  calls: ToolCallRequest[];
 }
 ```
 
@@ -114,13 +122,13 @@ interface BatchToolCallRequest {
 
 ```typescript
 interface Tool {
-  source: ToolSource
-  category?: ToolCategory
-  requireExplicitApproval?: boolean
+  source: ToolSource;
+  category?: ToolCategory;
+  requireExplicitApproval?: boolean;
 }
 ```
 
-`requireExplicitApproval: true` 表示即使当前 permission state 允许该类别，scheduler 仍必须调用 `Permission.ask()`，并使用 `reason: "explicit-approval-required"` 与 `rememberable: false`。该字段是通用工具语义；MCP 的 `trust`/`isTrusted` 只在 MCP adapter 内映射，不由 scheduler 直接消费。
+`requireExplicitApproval: true` 在默认权限档位下要求 scheduler 调用 `Permission.ask()`，使用 `reason: "explicit-approval-required"` 与 `rememberable: false`。`full-access` 跳过包括此项在内的人工 ask，但明确 deny、禁止路径/命令和参数/资源检查仍执行；切换档位不自动回答已有待办。FullAccess 自动放行外部写入或 shell preflight 时不新增目录信任，切回 default 后重新按常规边界判断；显式 always/session allow 的信任语义保留。该字段是通用工具语义；MCP 的 `trust`/`isTrusted` 只在 MCP adapter 内映射，不由 scheduler 直接消费。
 
 ### 2.3 调用状态类型
 
@@ -128,40 +136,41 @@ interface Tool {
 // 工具调用完整状态
 interface ToolCall {
   // 基础信息
-  callId: string
-  toolName: string
-  params: Record<string, unknown>
-  sessionId: string
-  messageId: string
+  callId: string;
+  toolName: string;
+  params: Record<string, unknown>;
+  sessionId: string;
+  runId?: string;
+  messageId: string;
 
   // 状态信息
-  status: ToolCallStatus
-  category: ToolCategory
+  status: ToolCallStatus;
+  category: ToolCategory;
 
   // 时间信息
-  createdAt: number
-  startedAt?: number              // 进入 executing 状态的时间
-  completedAt?: number            // 进入终态的时间
-  durationMs?: number             // completedAt - startedAt，执行耗时
+  createdAt: number;
+  startedAt?: number; // 进入 executing 状态的时间
+  completedAt?: number; // 进入终态的时间
+  durationMs?: number; // completedAt - startedAt，执行耗时
 
   // 进度信息（executing 状态下由工具回报）
   progress?: {
-    message?: string              // 人类可读进度描述（如 "Reading file..."）
-    percent?: number              // 0-100 完成百分比
-    current?: number              // 当前项数
-    total?: number                // 总项数
-  }
+    message?: string; // 人类可读进度描述（如 "Reading file..."）
+    percent?: number; // 0-100 完成百分比
+    current?: number; // 当前项数
+    total?: number; // 总项数
+  };
 
   // 结果信息（执行完成后）
-  result?: ToolCallResult
-  error?: ToolCallError
+  result?: ToolCallResult;
+  error?: ToolCallError;
 }
 
 // 等待中的调用（在队列中）
 interface QueuedCall {
-  call: ToolCall
-  resolve: (result: ToolCallResult) => void
-  reject: (error: Error) => void
+  call: ToolCall;
+  resolve: (result: ToolCallResult) => void;
+  reject: (error: Error) => void;
 }
 ```
 
@@ -170,30 +179,30 @@ interface QueuedCall {
 ```typescript
 // 调用结果
 interface ToolCallResult {
-  callId: string
-  status: 'success' | 'error' | 'rejected' | 'cancelled'
-  output?: string                   // 工具输出
-  metadata?: Record<string, unknown> // 元数据
-  error?: ToolCallError             // 错误信息
-  duration?: number                 // 执行时长（毫秒）
+  callId: string;
+  status: "success" | "error" | "rejected" | "cancelled";
+  output?: string; // 工具输出
+  metadata?: Record<string, unknown>; // 元数据
+  error?: ToolCallError; // 错误信息
+  duration?: number; // 执行时长（毫秒）
 }
 
 // 错误信息
 interface ToolCallError {
-  type: ToolCallErrorType
-  message: string
-  details?: unknown
+  type: ToolCallErrorType;
+  message: string;
+  details?: unknown;
 }
 
 // 错误类型
 type ToolCallErrorType =
-  | 'ToolNotFoundError'
-  | 'PolicyDeniedError'
-  | 'PermissionRejectedError'
-  | 'ExecutionError'
-  | 'TimeoutError'
-  | 'CancelledError'
-  | 'ValidationError'
+  | "ToolNotFoundError"
+  | "PolicyDeniedError"
+  | "PermissionRejectedError"
+  | "ExecutionError"
+  | "TimeoutError"
+  | "CancelledError"
+  | "ValidationError";
 ```
 
 ### 2.5 事件类型
@@ -201,27 +210,27 @@ type ToolCallErrorType =
 ```typescript
 // 状态变化事件
 interface StatusChangedEvent {
-  callId: string
-  toolName: string
-  previousStatus: ToolCallStatus
-  currentStatus: ToolCallStatus
-  timestamp: number
+  callId: string;
+  toolName: string;
+  previousStatus: ToolCallStatus;
+  currentStatus: ToolCallStatus;
+  timestamp: number;
 }
 
 // 执行开始事件
 interface ExecutionStartedEvent {
-  callId: string
-  toolName: string
-  params: Record<string, unknown>
-  timestamp: number
+  callId: string;
+  toolName: string;
+  params: Record<string, unknown>;
+  timestamp: number;
 }
 
 // 执行完成事件
 interface ExecutionCompletedEvent {
-  callId: string
-  toolName: string
-  result: ToolCallResult
-  timestamp: number
+  callId: string;
+  toolName: string;
+  result: ToolCallResult;
+  timestamp: number;
 }
 ```
 
@@ -230,19 +239,19 @@ interface ExecutionCompletedEvent {
 ```typescript
 // 并发配置
 interface ConcurrencyConfig {
-  maxReadConcurrency: number       // 默认 5（readonly/network 类别上限）
-  maxSubagentConcurrency: number   // 默认 3（subagent 类别独立上限）
+  maxReadConcurrency: number; // 默认 5（readonly/network 类别上限）
+  maxSubagentConcurrency: number; // 默认 3（subagent 类别独立上限）
 }
 
 // 超时配置
 interface TimeoutConfig {
-  defaultTimeout: number           // 默认 120000 (2分钟)
+  defaultTimeout: number; // 默认 120000 (2分钟)
 }
 
 // ToolScheduler 配置
 interface ToolSchedulerConfig {
-  concurrency: ConcurrencyConfig
-  timeout: TimeoutConfig
+  concurrency: ConcurrencyConfig;
+  timeout: TimeoutConfig;
 }
 ```
 
@@ -257,20 +266,20 @@ Core Tools 来自 `src/tools/`，启动时静态注册：
 ```typescript
 const CORE_TOOL_CATEGORIES: Record<string, ToolCategory> = {
   // readonly
-  'read': 'readonly',
-  'glob': 'readonly',
-  'grep': 'readonly',
-  'list': 'readonly',
-  'todo_read': 'readonly',
+  read: "readonly",
+  glob: "readonly",
+  grep: "readonly",
+  list: "readonly",
+  todo_read: "readonly",
 
   // write
-  'write': 'write',
-  'edit': 'write',
-  'todo_write': 'write',
+  write: "write",
+  edit: "write",
+  todo_write: "write",
 
   // dangerous
-  'bash': 'dangerous',
-}
+  bash: "dangerous",
+};
 ```
 
 ### 3.2 Module-Owned Tools 类别映射
@@ -289,9 +298,9 @@ const CORE_TOOL_CATEGORIES: Record<string, ToolCategory> = {
 ```typescript
 // 网络工具类别（已在 BUILTIN_CATEGORIES 中）
 const NETWORK_TOOL_CATEGORIES: Record<string, ToolCategory> = {
-  'web_fetch': 'network',
-  'web_search': 'network',
-}
+  web_fetch: "network",
+  web_search: "network",
+};
 ```
 
 **注意**：`web_search` / `web_fetch` 工具需要 `services/search-providers/` 后端配置（如 `TAVILY_API_KEY`）才能正常执行。配置由 `config/tools/{provider}` 负责，调度器对此透明。
@@ -301,10 +310,10 @@ const NETWORK_TOOL_CATEGORIES: Record<string, ToolCategory> = {
 ```typescript
 // 各模式允许的工具类别
 const MODE_ALLOWED_CATEGORIES: Record<Mode, ToolCategory[]> = {
-  'ask': ['readonly', 'network', 'memory'],
-  'plan': ['readonly', 'network', 'memory'],
-  'agent': ['readonly', 'write', 'dangerous', 'network', 'memory'],
-}
+  ask: ["readonly", "network", "memory"],
+  plan: ["readonly", "network", "memory"],
+  agent: ["readonly", "write", "dangerous", "network", "memory"],
+};
 ```
 
 ---
@@ -313,62 +322,65 @@ const MODE_ALLOWED_CATEGORIES: Record<Mode, ToolCategory[]> = {
 
 ### 4.1 状态转换表
 
-| 当前状态 | 事件 | 目标状态 | 条件 |
-|----------|------|----------|------|
-| pending | start | checking_permission | - |
-| checking_permission | permission_allow | queued | 并发检查通过 |
-| checking_permission | permission_allow | queued | 并发检查需等待 |
-| checking_permission | permission_deny | rejected | - |
-| checking_permission | permission_ask | awaiting_approval | - |
-| awaiting_approval | user_approve | queued | - |
-| awaiting_approval | user_reject | rejected | - |
-| awaiting_approval | cancel | cancelled | - |
-| queued | resource_available | executing | - |
-| queued | cancel | cancelled | - |
-| executing | complete | success | 执行成功 |
-| executing | fail | error | 执行失败 |
-| executing | cancel | cancelled | - |
-| executing | timeout | error | 超时 |
+| 当前状态            | 事件               | 目标状态            | 条件           |
+| ------------------- | ------------------ | ------------------- | -------------- |
+| pending             | start              | checking_permission | -              |
+| checking_permission | permission_allow   | queued              | 并发检查通过   |
+| checking_permission | permission_allow   | queued              | 并发检查需等待 |
+| checking_permission | permission_deny    | rejected            | -              |
+| checking_permission | permission_ask     | awaiting_approval   | -              |
+| awaiting_approval   | user_approve       | queued              | -              |
+| awaiting_approval   | user_reject        | rejected            | -              |
+| awaiting_approval   | cancel             | cancelled           | -              |
+| queued              | resource_available | executing           | -              |
+| queued              | cancel             | cancelled           | -              |
+| executing           | complete           | success             | 执行成功       |
+| executing           | fail               | error               | 执行失败       |
+| executing           | cancel             | cancelled           | -              |
+| executing           | timeout            | error               | 超时           |
 
 ### 4.2 状态转换函数
 
 ```typescript
 function transition(
   current: ToolCallStatus,
-  event: TransitionEvent
+  event: TransitionEvent,
 ): ToolCallStatus | null {
-  const transitions: Record<ToolCallStatus, Partial<Record<TransitionEvent, ToolCallStatus>>> = {
-    'pending': {
-      'start': 'checking_permission',
+  const transitions: Record<
+    ToolCallStatus,
+    Partial<Record<TransitionEvent, ToolCallStatus>>
+  > = {
+    pending: {
+      start: "checking_permission",
     },
-    'checking_permission': {
-      'permission_allow': 'queued',
-      'permission_deny': 'rejected',
-      'permission_ask': 'awaiting_approval',
+    checking_permission: {
+      permission_allow: "queued",
+      permission_deny: "rejected",
+      permission_ask: "awaiting_approval",
     },
-    'awaiting_approval': {
-      'user_approve': 'queued',
-      'user_reject': 'rejected',
-      'cancel': 'cancelled',
+    awaiting_approval: {
+      user_approve: "queued",
+      user_reject: "rejected",
+      cancel: "cancelled",
     },
-    'queued': {
-      'resource_available': 'executing',
-      'cancel': 'cancelled',
+    queued: {
+      resource_available: "executing",
+      cancel: "cancelled",
     },
-    'executing': {
-      'complete': 'success',
-      'fail': 'error',
-      'cancel': 'cancelled',
-      'timeout': 'error',
+    executing: {
+      complete: "success",
+      fail: "error",
+      cancel: "cancelled",
+      timeout: "error",
     },
     // 终态无转换
-    'success': {},
-    'error': {},
-    'rejected': {},
-    'cancelled': {},
-  }
+    success: {},
+    error: {},
+    rejected: {},
+    cancelled: {},
+  };
 
-  return transitions[current]?.[event] ?? null
+  return transitions[current]?.[event] ?? null;
 }
 ```
 
@@ -380,10 +392,10 @@ function transition(
 
 ```typescript
 interface ConcurrencyState {
-  readingCount: number       // 当前 readonly/network 操作数量
-  writeInProgress: boolean   // 是否有 write/dangerous 操作进行中
-  subagentCount: number      // 当前 subagent 操作数量（独立计数器）
-  pendingQueue: QueuedCall[] // 等待队列
+  readingCount: number; // 当前 readonly/network 操作数量
+  writeInProgress: boolean; // 是否有 write/dangerous 操作进行中
+  subagentCount: number; // 当前 subagent 操作数量（独立计数器）
+  pendingQueue: QueuedCall[]; // 等待队列
 }
 ```
 
@@ -393,27 +405,29 @@ interface ConcurrencyState {
 function canExecute(
   category: ToolCategory,
   state: ConcurrencyState,
-  config: ConcurrencyConfig
+  config: ConcurrencyConfig,
 ): boolean {
   // memory 类别：始终可并行执行，不受读写锁限制
-  if (category === 'memory') {
-    return true
+  if (category === "memory") {
+    return true;
   }
 
   // subagent 类别：独立上限计数器，不参与读写锁，但受自身上限约束
   // 不参与 wave 分组，在 executeBatch() 中被提前分离并立即启动
-  if (category === 'subagent') {
-    return state.subagentCount < config.maxSubagentConcurrency
+  if (category === "subagent") {
+    return state.subagentCount < config.maxSubagentConcurrency;
   }
 
-  const isReadLike = category === 'readonly' || category === 'network'
+  const isReadLike = category === "readonly" || category === "network";
 
   if (isReadLike) {
     // 读操作：无写操作且未达并发上限
-    return !state.writeInProgress && state.readingCount < config.maxReadConcurrency
+    return (
+      !state.writeInProgress && state.readingCount < config.maxReadConcurrency
+    );
   } else {
     // write/dangerous：无任何读写操作进行中
-    return !state.writeInProgress && state.readingCount === 0
+    return !state.writeInProgress && state.readingCount === 0;
   }
 }
 ```
@@ -450,27 +464,27 @@ executeBatch 示例（LLM 返回 6 个工具调用）：
 ```typescript
 const DEFAULT_CONFIG: ToolSchedulerConfig = {
   concurrency: {
-    maxReadConcurrency: 5,      // readonly/network 类别并发上限
-    maxSubagentConcurrency: 3,  // subagent 类别独立并发上限
+    maxReadConcurrency: 5, // readonly/network 类别并发上限
+    maxSubagentConcurrency: 3, // subagent 类别独立并发上限
   },
   timeout: {
-    defaultTimeout: 120000,     // 2 分钟
+    defaultTimeout: 120000, // 2 分钟
   },
-}
+};
 ```
 
 ### 6.2 终态集合
 
 ```typescript
 const FINAL_STATUSES: ToolCallStatus[] = [
-  'success',
-  'error',
-  'rejected',
-  'cancelled',
-]
+  "success",
+  "error",
+  "rejected",
+  "cancelled",
+];
 
 function isFinalStatus(status: ToolCallStatus): boolean {
-  return FINAL_STATUSES.includes(status)
+  return FINAL_STATUSES.includes(status);
 }
 ```
 
@@ -501,3 +515,5 @@ function isFinalStatus(status: ToolCallStatus): boolean {
 - [x] 状态机定义完整
 - [x] 并发控制逻辑清晰
 - [x] 类型定义符合 TypeScript 规范
+
+交互审批以独立 permissionId 标识每一次 ask；同一 callId 可连续产生外部目录与工具执行审批。scheduler 传入真实 runId、sessionId、callId 和该调用的 AbortSignal。runId 缺失的独立工具调用不得伪造身份进入人工审批；信号已终止时也不得通过已有规则快路径执行。

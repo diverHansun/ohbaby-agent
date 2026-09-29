@@ -1,3 +1,7 @@
+import type {
+  ShutdownOptions,
+  CleanupTaskResult,
+} from "../../runtime/shutdown.js";
 import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { UiEvent } from "ohbaby-sdk";
 import type {
@@ -20,6 +24,15 @@ import type { StreamBridge } from "../../runtime/stream-bridge/index.js";
 export type PublishUiEvent = (event: UiEvent) => void;
 
 export interface UiRuntimeComposition {
+  getSubagentWaitState(rootRunId: string): {
+    readonly waiting: boolean;
+    readonly approvalBlocked: boolean;
+  };
+  getSubagentExecutionBudget(
+    executionId: string,
+  ):
+    | import("../../agents/subagents/execution-budget.js").ExecutionBudgetSnapshot
+    | undefined;
   readonly agentManager: AgentManager;
   readonly goals: GoalService;
   readonly todos: TodoService;
@@ -57,5 +70,6 @@ export interface UiRuntimeComposition {
     reason?: string,
   ): Promise<void>;
   getActivityReasons(): readonly string[];
-  dispose(): Promise<void>;
+  closeAdmission?(): void;
+  dispose(options?: ShutdownOptions): Promise<CleanupTaskResult>;
 }

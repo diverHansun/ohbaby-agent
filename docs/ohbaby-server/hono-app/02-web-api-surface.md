@@ -19,35 +19,43 @@
 
 现有 backend 能力（取自 `server.ts` 的 `callBackend`）逐一映射：
 
-| backend 能力 | REST 端点 | 说明 |
-|------|------|------|
-| `getSnapshot` | `GET /v1/snapshot` | 经 client-view 投影为该连接视图（见 05） |
-| `initializeClient` | `POST /v1/clients` | 建立 client 视图（startup intent：resume/continue/fresh + 初始权限），返回 `clientId` |
-| `submitPromptAccepted` | `POST /v1/prompts` | 持久接单后返回 `UiPromptReceipt`；异步，202 + 经 SSE 出结果 |
-| `waitForPrompt` | `GET /v1/prompts/:id/completion` | 四种 Prompt 终态均以成功响应返回；HTTP abort 只中止等待 |
-| queue edit/cancel | `PATCH/DELETE /v1/prompts/:id` | 必选队列能力；认证 client 不能伪造 owner |
-| queue lease | `POST/PATCH/DELETE /v1/prompts/:id/edit-lease` | 获取、续租、释放编辑租约 |
-| `abortRun` | `POST /v1/sessions/:id/abort` | 中止当前 run |
-| create/select session façade | `POST /v1/sessions`; `PATCH /v1/sessions/:id/select` | 创建或选择会话；由 runtime façade 使用 |
-| `archiveSession` | `PATCH /v1/sessions/:id/archive` | 归档会话 |
-| `compactSession` | `POST /v1/sessions/:id/compact` | 压缩会话 |
-| `getContextWindowUsage` | `GET /v1/sessions/:id/context-window` | 上下文用量 |
-| `listCommands` | `GET /v1/commands` | 可用命令 |
-| `executeCommand` | `POST /v1/commands` | 执行命令（带 clientInvocationId 归属） |
-| `respondPermission` | `POST /v1/permissions/:id` | 审批应答；归属校验失败 → 403（见流 C） |
-| `respondInteraction` | `POST /v1/interactions/:id/respond` | 交互应答；REST/RPC 复用同一原子 owner claim |
-| `getCurrentModel` | `GET /v1/model` | 当前模型 |
-| `probeModelContextWindow` | `POST /v1/model/context-window-probe` | 只读探测，不写模型配置 |
-| `connectModel` | `POST /v1/model` | 切换/连接模型 |
-| `setSearchApiKey` | `POST /v1/settings/search-api-key` | 设置搜索 key |
-| `setPermission` | `PATCH /v1/permission` | 更新 permission mode/level |
-| `subscribeEvents` | `GET /v1/events` | **SSE**，带 `Last-Event-ID` replay（见 [`03`](./03-event-replay.md)） |
+| backend 能力                 | REST 端点                                            | 说明                                                                                                                                  |
+| ---------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `getSnapshot`                | `GET /v1/snapshot`                                   | 经 client-view 投影为该连接视图（见 05）                                                                                              |
+| `initializeClient`           | `POST /v1/clients`                                   | 建立 client 视图（startup intent：resume/continue/fresh + 初始权限），返回 `clientId` 及 epoch/root/bindingGeneration；仅查轻量元数据 |
+| `submitPromptAccepted`       | `POST /v1/prompts`                                   | 持久接单后返回 `UiPromptReceipt`；异步，202 + 经 SSE 出结果                                                                           |
+| `waitForPrompt`              | `GET /v1/prompts/:id/completion`                     | 四种 Prompt 终态均以成功响应返回；HTTP abort 只中止等待                                                                               |
+| queue edit/cancel            | `PATCH/DELETE /v1/prompts/:id`                       | 必选队列能力；认证 client 不能伪造 owner                                                                                              |
+| queue lease                  | `POST/PATCH/DELETE /v1/prompts/:id/edit-lease`       | 获取、续租、释放编辑租约                                                                                                              |
+| `abortRun`                   | `POST /v1/sessions/:id/abort`                        | 中止当前 run                                                                                                                          |
+| create/select session façade | `POST /v1/sessions`; `PATCH /v1/sessions/:id/select` | 仅验证/更新轻量元数据及客户端绑定，返回 root/bindingGeneration；不等待聊天快照                                                        |
+| `archiveSession`             | `PATCH /v1/sessions/:id/archive`                     | 归档会话                                                                                                                              |
+| `compactSession`             | `POST /v1/sessions/:id/compact`                      | 压缩会话                                                                                                                              |
+| `getContextWindowUsage`      | `GET /v1/sessions/:id/context-window`                | 上下文用量                                                                                                                            |
+| `listCommands`               | `GET /v1/commands`                                   | 可用命令                                                                                                                              |
+| `executeCommand`             | `POST /v1/commands`                                  | 执行命令（带 clientInvocationId 归属）                                                                                                |
+| `getSessionIndex`            | `GET /v1/sessions/index`                             | 根会话元数据，不读取 messages/runs/todos/model                                                                                        |
+| `getPermissionSnapshot`      | `GET /v1/permissions`                                | 独立审批快照；请求带预期 epoch/root/bindingGeneration                                                                                 |
+| `respondPermission`          | `POST /v1/permissions/:id`                           | 同根范围一次应答；JSON body 的 context 携带预期绑定                                                                                   |
+| `respondInteraction`         | `POST /v1/interactions/:id/respond`                  | 交互应答；REST/RPC 复用同一原子 owner claim                                                                                           |
+| `getCurrentModel`            | `GET /v1/model`                                      | 当前模型                                                                                                                              |
+| `probeModelContextWindow`    | `POST /v1/model/context-window-probe`                | 只读探测，不写模型配置                                                                                                                |
+| `connectModel`               | `POST /v1/model`                                     | 切换/连接模型                                                                                                                         |
+| `setSearchApiKey`            | `POST /v1/settings/search-api-key`                   | 设置搜索 key                                                                                                                          |
+| `setPermission`              | `PATCH /v1/permission`                               | 更新 permission mode/level                                                                                                            |
+| `subscribeEvents`            | `GET /v1/events`                                     | **SSE**，带 `Last-Event-ID` replay（见 [`03`](./03-event-replay.md)）                                                                 |
 
 > `:id` 依 route 分别表示 sessionId、promptId、interactionId 或 permission requestId。所有 workspace 端点都由全局 dispatcher 读取 `x-ohbaby-directory`、解析目标项目并转发到对应 per-scope app（见 [`04`](./04-multi-project-runtime.md)）。
 
 > **非 backend-capability 的端点**另在它处定义：`GET /api/health`（存活探针）、`GET /v1/connections`（连接观测）以及 `GET /doc`。`/doc` 是 `create-app.ts` 手写的信息性 OpenAPI 3.1 文档，不是代码生成链。
 
 `POST /v1/model` 与 `POST /v1/model/context-window-probe` 的 JSON body 共用协议字段 `interfaceProvider`，只接受 `openai-compatible`、`openai-responses`、`anthropic`。显式合法值优先于 `baseUrl` 推断；缺字段时保留 URL 推断，OpenAI 形状地址默认 Chat Completions。空字符串、`null` 或其他非法显式值返回 `400`。更新 key、窗口或输出上限时应继续传递原协议。
+
+### 子代理只读会话
+
+`GET /v1/sessions/:id/subagents/:subagentId/conversation` 对应 `getSubagentConversationView`，支持有界 before/after 分页及 `anchorExecutionId`。返回历史窗口、实时投影基线和相关执行状态；旧记录缺少消息锚点时明确返回定位不可用，不根据 prompt 文本猜测消息。
+
+同路径的 `/watch` 通过 POST/DELETE 对应 `watchSubagentConversation` / `unwatchSubagentConversation`。每个 client 同时订阅一个逻辑子代理，仍使用现有 SSE。coordination 校验 root、绑定代际和 scope，客户端同步分配单调 `watchSequence`，coordination 在异步读取前拒绝低序请求，避免网络倒序覆盖新选择；客户端预分配 ID 让未收到响应的请求也可以取消。释放旧 ID 不影响后来的选择；根绑定改变时释放订阅。以上三个能力在 JSON-RPC 中具有同义方法。
 
 ### prompt 的异步语义（对齐 SDK）
 
@@ -79,13 +87,13 @@
 
 ## 5. 与 jsonrpc 的关系（一张表讲清）
 
-| 维度 | jsonrpc `/api/rpc`（兼容） | web `/v1/*`（新主路径） |
-|------|------|------|
-| 消费者 | `ohbaby --remote-port`、集成测试 | 浏览器、未来 app |
-| 形态 | 单一 POST + method 信封 | 资源化 REST + 状态码 |
-| 事件 | `/api/events` SSE（切到新 event-bus） | `/v1/events` SSE（replay） |
-| 鉴权/项目路由/协调 | 同一全局 auth/workspace dispatcher；每 scope 独立 coordination + backend | **同一套** |
-| 文档/类型 | SDK 派生 method/params | SDK 业务 DTO + 内部 wire wrapper |
+| 维度               | jsonrpc `/api/rpc`（兼容）                                               | web `/v1/*`（新主路径）          |
+| ------------------ | ------------------------------------------------------------------------ | -------------------------------- |
+| 消费者             | `ohbaby --remote-port`、集成测试                                         | 浏览器、未来 app                 |
+| 形态               | 单一 POST + method 信封                                                  | 资源化 REST + 状态码             |
+| 事件               | `/api/events` SSE（切到新 event-bus）                                    | `/v1/events` SSE（replay）       |
+| 鉴权/项目路由/协调 | 同一全局 auth/workspace dispatcher；每 scope 独立 coordination + backend | **同一套**                       |
+| 文档/类型          | SDK 派生 method/params                                                   | SDK 业务 DTO + 内部 wire wrapper |
 
 要点：两者**不是两套服务**，是同一 Hono app 上架在同一 backend 的两个路由组——这是「不产生只在 web 才有的行为」的结构保证（详见 [`05`](./05-consumption-path-unification.md)）。
 

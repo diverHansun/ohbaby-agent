@@ -1,0 +1,116 @@
+{
+  "attemptId": "030c052e-f83d-49ec-9235-abf3469bd4da",
+  "startedAt": "2026-09-28T11:58:33.557Z",
+  "finishedAt": "2026-09-28T11:59:05.541Z",
+  "profileId": "zenmux-gpt56-luna-responses-context",
+  "scenario": "two-children",
+  "model": "openai/gpt-5.6-luna",
+  "protocol": "openai-responses",
+  "entry": "persistent backend + loopback HTTP",
+  "maxRequests": 24,
+  "passed": true,
+  "phase": "verified",
+  "diagnosis": {
+    "aStatus": "interrupted",
+    "bStatus": "succeeded",
+    "aBSeparateRuns": true,
+    "bExecutionCount": 1,
+    "lateSignalObserved": true,
+    "lateOutputAbsentFromB": true,
+    "childExecutions": 2,
+    "childProcesses": 2,
+    "childRequestsAtStop": 2,
+    "cStatus": "succeeded",
+    "totalRuns": 3,
+    "cToolPairingAccepted": true,
+    "aHistoryStableAfterC": true,
+    "cRequestsWithBothToolPairs": 1
+  },
+  "providerRequests": 8,
+  "httpRequests": 8,
+  "requests": [
+    {
+      "sequence": 1,
+      "kind": "generation",
+      "status": 200,
+      "phase": "start-A",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 0,
+      "toolResults": 0
+    },
+    {
+      "sequence": 2,
+      "kind": "generation",
+      "status": 200,
+      "phase": "start-A",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 0,
+      "toolResults": 0
+    },
+    {
+      "sequence": 3,
+      "kind": "generation",
+      "status": 200,
+      "captureError": "response_stream",
+      "phase": "start-A",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 2,
+      "toolResults": 2
+    },
+    {
+      "sequence": 4,
+      "kind": "generation",
+      "status": 200,
+      "phase": "start-A",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 0,
+      "toolResults": 0
+    },
+    {
+      "sequence": 5,
+      "kind": "generation",
+      "status": 200,
+      "phase": "start-A",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 0,
+      "toolResults": 0
+    },
+    {
+      "sequence": 6,
+      "kind": "generation",
+      "status": 200,
+      "phase": "stop-A-drain-B",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 2,
+      "toolResults": 2
+    },
+    {
+      "sequence": 7,
+      "kind": "generation",
+      "status": 200,
+      "phase": "stop-A-drain-B",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 3,
+      "toolResults": 3
+    },
+    {
+      "sequence": 8,
+      "kind": "generation",
+      "status": 200,
+      "phase": "C-history-replay",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 3,
+      "toolResults": 3
+    }
+  ],
+  "permissionErrors": [],
+  "cleanupErrors": []
+}

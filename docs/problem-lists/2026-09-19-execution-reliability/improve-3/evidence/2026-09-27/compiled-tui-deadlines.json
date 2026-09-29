@@ -1,0 +1,282 @@
+{
+  "events": [
+    {
+      "type": "ready",
+      "at": 60.405375,
+      "mode": "compiled-default-tui",
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-subagents-e2e-EJ5TEL/manifest.json",
+      "launch": "node scripts/run-subagent-continuation-e2e.mjs --attach-tui /var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-subagents-e2e-EJ5TEL/manifest.json"
+    },
+    {
+      "type": "parent-request",
+      "at": 22904.430167,
+      "request": 1
+    },
+    {
+      "type": "parent-request",
+      "at": 22986.300542,
+      "request": 2
+    },
+    {
+      "type": "child-request",
+      "at": 23021.805417,
+      "side": "A"
+    },
+    {
+      "type": "child-request",
+      "at": 23025.344417,
+      "side": "B"
+    },
+    {
+      "type": "child-request",
+      "at": 23025.6065,
+      "side": "C"
+    },
+    {
+      "type": "child-request",
+      "at": 35271.09875,
+      "side": "C"
+    },
+    {
+      "type": "parent-request",
+      "at": 51773.846334,
+      "request": 3
+    },
+    {
+      "type": "checkpoint-pass",
+      "at": 59212.010375,
+      "stage": "waiting",
+      "requests": 3,
+      "executions": [
+        {
+          "executionId": "subagent_execution_c91a9e35af8ba3dac275c3ec7b762fe9b4f96b04b39cab8ee9275f7140874168",
+          "status": "running",
+          "delivery": "none"
+        },
+        {
+          "executionId": "subagent_execution_ef9327875f72aa9baafdf3730f846ba1f0663cd1df88fb2925fb259d6ef93ca1",
+          "status": "running",
+          "delivery": "none"
+        },
+        {
+          "executionId": "subagent_execution_0cc25a342c2a8f5f92b276d6cfa992e968540adf43f551b385ad41786deb9493",
+          "status": "running",
+          "delivery": "none"
+        }
+      ],
+      "prompts": [
+        {
+          "status": "running",
+          "runId": "run_9627a34d-3f61-429b-b445-cb6936062de8"
+        },
+        {
+          "status": "queued",
+          "runId": null
+        },
+        {
+          "status": "steered",
+          "runId": null
+        }
+      ]
+    },
+    {
+      "type": "released",
+      "at": 59212.504125,
+      "name": "A"
+    },
+    {
+      "type": "parent-request",
+      "at": 59262.063125,
+      "request": 4
+    },
+    {
+      "type": "checkpoint-pass",
+      "at": 86268.311542,
+      "stage": "partial",
+      "requests": 4,
+      "executions": [
+        {
+          "executionId": "subagent_execution_c91a9e35af8ba3dac275c3ec7b762fe9b4f96b04b39cab8ee9275f7140874168",
+          "status": "completed",
+          "delivery": "processed"
+        },
+        {
+          "executionId": "subagent_execution_ef9327875f72aa9baafdf3730f846ba1f0663cd1df88fb2925fb259d6ef93ca1",
+          "status": "running",
+          "delivery": "none"
+        },
+        {
+          "executionId": "subagent_execution_0cc25a342c2a8f5f92b276d6cfa992e968540adf43f551b385ad41786deb9493",
+          "status": "running",
+          "delivery": "none"
+        }
+      ],
+      "prompts": [
+        {
+          "status": "running",
+          "runId": "run_9627a34d-3f61-429b-b445-cb6936062de8"
+        },
+        {
+          "status": "queued",
+          "runId": null
+        },
+        {
+          "status": "steered",
+          "runId": null
+        }
+      ]
+    },
+    {
+      "type": "parent-request",
+      "at": 119319.209292,
+      "request": 5
+    },
+    {
+      "type": "checkpoint-pass",
+      "at": 237241.961542,
+      "stage": "partial",
+      "requests": 5,
+      "executions": [
+        {
+          "executionId": "subagent_execution_c91a9e35af8ba3dac275c3ec7b762fe9b4f96b04b39cab8ee9275f7140874168",
+          "status": "completed",
+          "delivery": "processed"
+        },
+        {
+          "executionId": "subagent_execution_ef9327875f72aa9baafdf3730f846ba1f0663cd1df88fb2925fb259d6ef93ca1",
+          "status": "running",
+          "delivery": "none"
+        },
+        {
+          "executionId": "subagent_execution_0cc25a342c2a8f5f92b276d6cfa992e968540adf43f551b385ad41786deb9493",
+          "status": "running",
+          "delivery": "none"
+        }
+      ],
+      "prompts": [
+        {
+          "status": "running",
+          "runId": "run_9627a34d-3f61-429b-b445-cb6936062de8"
+        },
+        {
+          "status": "queued",
+          "runId": null
+        },
+        {
+          "status": "steered",
+          "runId": null
+        }
+      ]
+    },
+    {
+      "type": "parent-request",
+      "at": 239390.358709,
+      "request": 6
+    },
+    {
+      "type": "checkpoint-pass",
+      "at": 251279.492167,
+      "stage": "partial",
+      "requests": 6,
+      "executions": [
+        {
+          "executionId": "subagent_execution_c91a9e35af8ba3dac275c3ec7b762fe9b4f96b04b39cab8ee9275f7140874168",
+          "status": "completed",
+          "delivery": "processed"
+        },
+        {
+          "executionId": "subagent_execution_ef9327875f72aa9baafdf3730f846ba1f0663cd1df88fb2925fb259d6ef93ca1",
+          "status": "running",
+          "delivery": "none"
+        },
+        {
+          "executionId": "subagent_execution_0cc25a342c2a8f5f92b276d6cfa992e968540adf43f551b385ad41786deb9493",
+          "status": "running",
+          "delivery": "none"
+        }
+      ],
+      "prompts": [
+        {
+          "status": "running",
+          "runId": "run_9627a34d-3f61-429b-b445-cb6936062de8"
+        },
+        {
+          "status": "queued",
+          "runId": null
+        },
+        {
+          "status": "steered",
+          "runId": null
+        }
+      ]
+    },
+    {
+      "type": "checkpoint-pass",
+      "at": 299248.773584,
+      "stage": "partial",
+      "requests": 6,
+      "executions": [
+        {
+          "executionId": "subagent_execution_c91a9e35af8ba3dac275c3ec7b762fe9b4f96b04b39cab8ee9275f7140874168",
+          "status": "completed",
+          "delivery": "processed"
+        },
+        {
+          "executionId": "subagent_execution_ef9327875f72aa9baafdf3730f846ba1f0663cd1df88fb2925fb259d6ef93ca1",
+          "status": "running",
+          "delivery": "none"
+        },
+        {
+          "executionId": "subagent_execution_0cc25a342c2a8f5f92b276d6cfa992e968540adf43f551b385ad41786deb9493",
+          "status": "running",
+          "delivery": "none"
+        }
+      ],
+      "prompts": [
+        {
+          "status": "running",
+          "runId": "run_9627a34d-3f61-429b-b445-cb6936062de8"
+        },
+        {
+          "status": "queued",
+          "runId": null
+        },
+        {
+          "status": "steered",
+          "runId": null
+        }
+      ]
+    },
+    {
+      "type": "parent-request",
+      "at": 324388.65725,
+      "request": 7
+    },
+    {
+      "type": "parent-request",
+      "at": 336403.933667,
+      "request": 8
+    },
+    {
+      "type": "ordinary-request",
+      "at": 336498.444709
+    }
+  ],
+  "failures": [],
+  "kind": "compiled default TUI deadline and provider interruption observation",
+  "revision": "4cbd65edf1096e85a2282a41de9bb73c6f644701",
+  "successfulTerminalScenario": false,
+  "observations": {
+    "parentRequest4AtMs": 59262,
+    "firstDeadlineRequest5AtMs": 119319.209292,
+    "secondDeadlineRequest6AtMs": 239390.358709,
+    "firstGapMs": 60057.209292,
+    "secondGapMs": 120071.149417,
+    "thirdDeadlineVerified": false,
+    "laterOutcome": "Held scripted child SSE requests interrupted after about 300 seconds; failed results processed, parent ended, ordinary queue advanced. Not a successful large-result-delivery run."
+  },
+  "cleanup": {
+    "harnessExitCode": 0,
+    "ownedProcessesReleased": true
+  }
+}

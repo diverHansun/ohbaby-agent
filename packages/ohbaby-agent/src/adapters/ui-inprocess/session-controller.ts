@@ -15,6 +15,8 @@ export interface ResolveSessionForNewPromptInput {
   readonly createSession: (id?: string) => Promise<UiSession>;
   readonly explicitSessionId?: string;
   readonly getUiSession: (id: string) => Promise<UiSession | null | undefined>;
+  /** Checks persisted message, run, and prompt facts before reuse. */
+  readonly isAuthoritativelyEmpty?: (id: string) => Promise<boolean>;
   readonly projectRoot: string;
   readonly reuseInactiveEmptySessions?: boolean;
   readonly sessionManager?: InProcessSessionManager;
@@ -91,6 +93,7 @@ function isReusableCoreSession(
     session !== null &&
     session !== undefined &&
     isPrimarySession(session) &&
+    session.status === "active" &&
     session.stats.messageCount === 0 &&
     sameSessionProjectRoot(session.projectRoot, projectRoot)
   );
@@ -131,6 +134,7 @@ async function resolveReusableUiSession(input: {
   readonly projectRoot: string;
   readonly session: UiSession | null | undefined;
   readonly sessionManager?: InProcessSessionManager;
+  readonly isAuthoritativelyEmpty?: (id: string) => Promise<boolean>;
 }): Promise<ResolvedSessionForNewPrompt | null> {
   if (
     !input.session ||
@@ -138,6 +142,11 @@ async function resolveReusableUiSession(input: {
   ) {
     return null;
   }
+  if (
+    input.isAuthoritativelyEmpty &&
+    !(await input.isAuthoritativelyEmpty(input.session.id))
+  )
+    return null;
   if (!input.sessionManager) {
     return {
       isNewSession: false,
@@ -200,6 +209,7 @@ export async function resolveSessionForNewPrompt(
       projectRoot: input.projectRoot,
       session: activeSession,
       sessionManager: input.sessionManager,
+      isAuthoritativelyEmpty: input.isAuthoritativelyEmpty,
     });
     if (resolved) {
       return resolved;
@@ -213,18 +223,43 @@ export async function resolveSessionForNewPrompt(
     };
   }
 
-  const reusableCoreSession =
+  async function resolveCoreCandidate(
+    candidate: CoreSession | null | undefined,
+  ): Promise<ResolvedSessionForNewPrompt | null> {
+    if (!isReusableCoreSession(candidate, input.projectRoot)) return null;
+    if (
+      input.isAuthoritativelyEmpty &&
+      !(await input.isAuthoritativelyEmpty(candidate.id))
+    )
+      return null;
+    const uiSession = await resolveUiSession(input, candidate.id);
+    if (uiSession && !isReusableUiSession(uiSession, input.projectRoot))
+      return null;
+    return {
+      coreSession: candidate,
+      isNewSession: false,
+      session: uiSession
+        ? withCoreProjectRoot(uiSession, candidate)
+        : sessionMetadataToUiSession(candidate),
+    };
+  }
+
+  const firstCoreCandidate =
     await input.sessionManager?.findReusableEmptyPrimary?.(input.projectRoot);
-  if (isReusableCoreSession(reusableCoreSession, input.projectRoot)) {
-    const uiSession = await resolveUiSession(input, reusableCoreSession.id);
-    if (!uiSession || isReusableUiSession(uiSession, input.projectRoot)) {
-      return {
-        coreSession: reusableCoreSession,
-        isNewSession: false,
-        session: uiSession
-          ? withCoreProjectRoot(uiSession, reusableCoreSession)
-          : sessionMetadataToUiSession(reusableCoreSession),
-      };
+  const firstResolved = await resolveCoreCandidate(firstCoreCandidate);
+  if (firstResolved) return firstResolved;
+
+  if (input.sessionManager) {
+    const coreCandidates = await input.sessionManager.listByProjectRoot(
+      input.projectRoot,
+      { status: "active" },
+    );
+    for (const candidate of [...coreCandidates].sort(
+      sortCoreSessionsByUpdatedAtDesc,
+    )) {
+      if (candidate.id === firstCoreCandidate?.id) continue;
+      const resolved = await resolveCoreCandidate(candidate);
+      if (resolved) return resolved;
     }
   }
 
@@ -233,6 +268,7 @@ export async function resolveSessionForNewPrompt(
       projectRoot: input.projectRoot,
       session: candidate,
       sessionManager: input.sessionManager,
+      isAuthoritativelyEmpty: input.isAuthoritativelyEmpty,
     });
     if (resolved) {
       return resolved;

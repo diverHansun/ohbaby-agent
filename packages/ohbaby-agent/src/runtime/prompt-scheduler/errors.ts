@@ -108,3 +108,13 @@ export class PromptWaitAbortedError extends Error {
     this.name = "PromptWaitAbortedError";
   }
 }
+
+/** The durable accept operation was not invoked, so no receipt can result from this attempt. */
+export class PromptSubmissionRejectedError extends Error {
+  readonly code = "PROMPT_SUBMISSION_REJECTED";
+
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "PromptSubmissionRejectedError";
+  }
+}

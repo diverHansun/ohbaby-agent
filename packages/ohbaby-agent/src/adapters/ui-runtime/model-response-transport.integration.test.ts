@@ -259,6 +259,8 @@ describe("model result transport", () => {
         content: "Hello",
         delta: "Hello",
         contextScopeId: "subagent_1",
+        messageId: completion?.messageId,
+        partId: completion?.partId,
         runId: "run_1",
         sessionId: "child_session",
         timestamp: expect.any(Number) as number,
@@ -267,6 +269,8 @@ describe("model result transport", () => {
         content: "Hello world",
         delta: " world",
         contextScopeId: "subagent_1",
+        messageId: completion?.messageId,
+        partId: completion?.partId,
         runId: "run_1",
         sessionId: "child_session",
         timestamp: expect.any(Number) as number,
@@ -277,6 +281,8 @@ describe("model result transport", () => {
         ?.data,
     ).toEqual({
       contextScopeId: "subagent_1",
+      messageId: completion?.messageId,
+      partId: completion?.partId,
       finishReason: "stop",
       runId: "run_1",
       sessionId: "child_session",
@@ -294,12 +300,15 @@ describe("model result transport", () => {
     );
     expect(observedCompletion).toEqual({
       contextScopeId: "subagent_1",
+      messageId: completion?.messageId,
+      partId: completion?.partId,
       finishReason: "stop",
       sessionId: "child_session",
       step: 1,
       timestamp: expect.any(Number) as number,
       tokenUsage,
       type: "llm:complete",
+      runId: "run_1",
     });
     expect(
       result.observations.filter(

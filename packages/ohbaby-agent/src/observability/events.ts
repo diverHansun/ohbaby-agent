@@ -137,3 +137,10 @@ export const interactionCleanupFailure = defineDiagnosticEvent({
   },
   level: "warn",
 });
+
+export const durationClockAnomaly = defineDiagnosticEvent({
+  component: "diagnostics",
+  event: "ui.duration.clock_anomaly",
+  fields: { identity: diagnosticField.externalId("operation") },
+  level: "warn",
+});

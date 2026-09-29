@@ -99,6 +99,22 @@ function createMessageManager(
   );
   const removeMessage = vi.fn((): Promise<void> => Promise.resolve());
   const manager: MessageManager = {
+    getPart: vi.fn().mockResolvedValue(undefined),
+    setCommitCoordinator: vi.fn(),
+    saveReasoningPart: vi.fn(() =>
+      Promise.reject(
+        new Error("Display persistence is not used by this fixture"),
+      ),
+    ),
+    listPageBySession: vi.fn(() =>
+      Promise.reject(new Error("Recovery paging is not used by this fixture")),
+    ),
+    listPageByRun: vi.fn(() =>
+      Promise.reject(new Error("Recovery paging is not used by this fixture")),
+    ),
+    listByIds: vi.fn(() =>
+      Promise.reject(new Error("Recovery reads are not used by this fixture")),
+    ),
     commitModelStep: vi.fn<MessageManager["commitModelStep"]>(() =>
       Promise.reject(new Error("Native steps are not used by this fixture")),
     ),
@@ -207,6 +223,7 @@ interface RunCoordinatorFixture {
 function createRunCoordinator(
   completion: Awaited<ReturnType<AgentRunCoordinator["waitForCompletion"]>> = {
     status: "succeeded",
+    finalResponse: "final answer",
   },
 ): RunCoordinatorFixture {
   const cancel = vi.fn<AgentRunCoordinator["cancel"]>();
@@ -262,6 +279,45 @@ function createDeps(
 }
 
 describe("runAgent", () => {
+  it.each(["stream", "waitForCompletion"] as const)(
+    "cancels the actual run and revokes approvals on a mismatched %s run id",
+    async (waitMode) => {
+      const runCoordinator = createRunCoordinator();
+      const revokePermissionsForRun = vi.fn();
+      const pending = new Set(["run_1"]);
+      revokePermissionsForRun.mockImplementation((runId: string) =>
+        pending.delete(runId),
+      );
+      await expect(
+        runAgent(
+          createDeps({
+            runCoordinator: {
+              ...runCoordinator.coordinator,
+              revokePermissionsForRun,
+            },
+            runEventSource: {
+              subscribeRunEvents: () => ({
+                [Symbol.asyncIterator](): AsyncIterator<never> {
+                  return {
+                    next: () =>
+                      Promise.resolve({ done: true, value: undefined }),
+                  };
+                },
+              }),
+            },
+          }),
+          baseInput({ runId: "run_expected", waitMode }),
+        ),
+      ).rejects.toThrow("unexpected run id");
+      expect(runCoordinator.cancel).toHaveBeenCalledWith(
+        "run_1",
+        expect.stringContaining("unexpected run id"),
+      );
+      expect(pending.size).toBe(0);
+      expect(runCoordinator.waitForCompletion).not.toHaveBeenCalled();
+    },
+  );
+
   it("writes the initial user prompt, starts a session run, and returns final output", async () => {
     const messageManager = createMessageManager();
     const runCoordinator = createRunCoordinator();
@@ -306,7 +362,7 @@ describe("runAgent", () => {
       triggerSource: "user",
     });
     expect(runCoordinator.waitForCompletion).toHaveBeenCalledWith("run_1");
-    expect(messageManager.listBySession).toHaveBeenCalledWith("session_child");
+    expect(messageManager.listBySession).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       finalOutput: "final answer",
       mode: "waitForCompletion",
@@ -423,9 +479,105 @@ describe("runAgent", () => {
       agentName: "build",
       isSubagent: true,
     });
-    expect(messageManager.listBySession).toHaveBeenCalledWith("session_child", {
-      contextScopeId: "subagent_1",
+    expect(messageManager.listBySession).not.toHaveBeenCalled();
+  });
+
+  it("returns only the current run's final body, without old history or reasoning", async () => {
+    const messageManager = createMessageManager([assistantText("old answer")]);
+    const runCoordinator = createRunCoordinator({
+      status: "succeeded",
+      finalResponse: "current answer",
     });
+
+    const result = await runAgent(
+      createDeps({
+        messageManager: messageManager.manager,
+        runCoordinator: runCoordinator.coordinator,
+      }),
+      baseInput({ contextScopeId: "subagent_1" }),
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      finalOutput: "current answer",
+    });
+    expect(messageManager.listBySession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      status: "succeeded",
+      terminalReason: "max_steps_finalized",
+      finalResponse: "Partial findings",
+    },
+    {
+      status: "failed",
+      terminalReason: "provider_retry_exhausted",
+      error: "Provider unavailable",
+    },
+  ] as const)(
+    "preserves $terminalReason across the agent completion boundary",
+    async (completion) => {
+      const coordinator = createRunCoordinator(completion);
+      const result = await runAgent(
+        createDeps({ runCoordinator: coordinator.coordinator }),
+        baseInput(),
+      );
+      expect(result).toMatchObject({
+        runStatus: completion.status,
+        terminalReason: completion.terminalReason,
+        success: completion.status === "succeeded",
+        ...(completion.status === "succeeded"
+          ? { finalOutput: "Partial findings" }
+          : { error: "Provider unavailable" }),
+      });
+    },
+  );
+
+  it("keeps a successful empty final body empty instead of reusing prior text", async () => {
+    const messageManager = createMessageManager([assistantText("old answer")]);
+    const runCoordinator = createRunCoordinator({
+      status: "succeeded",
+      finalResponse: "",
+    });
+
+    const result = await runAgent(
+      createDeps({
+        messageManager: messageManager.manager,
+        runCoordinator: runCoordinator.coordinator,
+      }),
+      baseInput(),
+    );
+
+    expect(result).toMatchObject({ success: true, finalOutput: "" });
+    expect(messageManager.listBySession).not.toHaveBeenCalled();
+    expect(runCoordinator.waitForCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the failure reason without reading a partial or older report", async () => {
+    const messageManager = createMessageManager([
+      assistantText("partial report"),
+    ]);
+    const runCoordinator = createRunCoordinator({
+      status: "failed",
+      error: "provider disconnected",
+    });
+
+    const result = await runAgent(
+      createDeps({
+        messageManager: messageManager.manager,
+        runCoordinator: runCoordinator.coordinator,
+      }),
+      baseInput(),
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: "provider disconnected",
+    });
+    expect(result).toHaveProperty("runStatus", "failed");
+    expect(result).not.toHaveProperty("finalOutput");
+    expect(messageManager.listBySession).not.toHaveBeenCalled();
   });
 
   it("removes the initial user message when run creation fails", async () => {
@@ -533,6 +685,7 @@ describe("runAgent", () => {
     expect(result).toMatchObject({
       error: "stop",
       mode: "waitForCompletion",
+      runStatus: "cancelled",
       success: false,
     });
   });

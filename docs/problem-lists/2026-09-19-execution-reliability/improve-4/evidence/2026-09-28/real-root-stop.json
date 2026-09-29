@@ -1,0 +1,85 @@
+{
+  "attemptId": "a44c08c1-7f2d-4472-bcb4-261d3252d668",
+  "startedAt": "2026-09-28T11:57:52.587Z",
+  "finishedAt": "2026-09-28T11:58:07.485Z",
+  "profileId": "zenmux-gpt56-luna-responses-context",
+  "scenario": "root-bash",
+  "model": "openai/gpt-5.6-luna",
+  "protocol": "openai-responses",
+  "entry": "persistent backend + loopback HTTP",
+  "maxRequests": 18,
+  "passed": true,
+  "phase": "verified",
+  "diagnosis": {
+    "aStatus": "interrupted",
+    "bStatus": "succeeded",
+    "aBSeparateRuns": true,
+    "bExecutionCount": 1,
+    "lateSignalObserved": true,
+    "lateOutputAbsentFromB": true,
+    "childExecutions": 0,
+    "childProcesses": 0,
+    "childRequestsAtStop": 0,
+    "cStatus": "succeeded",
+    "totalRuns": 3,
+    "cToolPairingAccepted": true,
+    "aHistoryStableAfterC": true,
+    "cRequestsWithBothToolPairs": 1
+  },
+  "providerRequests": 5,
+  "httpRequests": 5,
+  "requests": [
+    {
+      "sequence": 1,
+      "kind": "generation",
+      "status": 200,
+      "phase": "start-A",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 0,
+      "toolResults": 0
+    },
+    {
+      "sequence": 2,
+      "kind": "generation",
+      "status": 200,
+      "phase": "start-A",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 0,
+      "toolResults": 0
+    },
+    {
+      "sequence": 3,
+      "kind": "generation",
+      "status": 200,
+      "phase": "stop-A-drain-B",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 1,
+      "toolResults": 1
+    },
+    {
+      "sequence": 4,
+      "kind": "generation",
+      "status": 200,
+      "phase": "stop-A-drain-B",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 2,
+      "toolResults": 2
+    },
+    {
+      "sequence": 5,
+      "kind": "generation",
+      "status": 200,
+      "phase": "C-history-replay",
+      "protocol": "openai-responses",
+      "toolPairingValid": true,
+      "toolCalls": 2,
+      "toolResults": 2
+    }
+  ],
+  "permissionErrors": [],
+  "cleanupErrors": []
+}

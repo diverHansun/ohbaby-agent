@@ -1,6 +1,8 @@
+import { RuntimeInputSnapshotChangedError } from "./runtime-input-error.js";
 import { createPromptCacheUsageTracker } from "../../adapters/ui-inprocess/prompt-cache-usage.js";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import * as llmStreaming from "../llm-client/index.js";
+import type { ModelRequestRecord } from "../llm-client/types.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -12,13 +14,21 @@ import {
   readTokenUsageMetadata,
 } from "../message/index.js";
 import type { MessageIdGenerator } from "../message/index.js";
-import { DEFAULT_MAX_STEPS, Lifecycle } from "./index.js";
+import {
+  DEFAULT_MAX_STEPS,
+  DisplayReasoningOwner,
+  Lifecycle,
+} from "./index.js";
 import {
   ProviderStreamInterruptedError,
   type LLMClientInstance,
   type TokenUsage,
 } from "../llm-client/index.js";
-import type { ToolSchedulerInstance } from "../tool-scheduler/index.js";
+import type {
+  BatchToolCallRequest,
+  ToolCallResult,
+  ToolSchedulerInstance,
+} from "../tool-scheduler/index.js";
 import type {
   ContextManager,
   ContextUsage,
@@ -30,6 +40,27 @@ import type {
   LifecycleResult,
   LifecycleSessionParams,
 } from "./index.js";
+
+async function deliverFixtureResults(
+  batch: BatchToolCallRequest,
+  results: ToolCallResult[],
+): Promise<ToolCallResult[]> {
+  for (const [index, result] of results.entries()) {
+    const execution = {
+      runId: batch.calls[index].runId,
+      phase: "ended" as const,
+      createdAt: 1,
+      phaseStartedAt: 2,
+      endedAt: 2,
+      outcome: result.status,
+    };
+    await batch.observer?.onCallSettled(batch.calls[index], index, {
+      ...result,
+      execution,
+    });
+  }
+  return results;
+}
 
 interface FakeSdkClient {
   readonly kind: "fake";
@@ -314,6 +345,73 @@ function createContextManagerMock(
 }
 
 describe("Lifecycle.run", () => {
+  it("persists request transitions before publishing their true owner", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(
+        vi
+          .fn()
+          .mockResolvedValue(
+            preparedTurn([{ role: "user", content: "hello" }]),
+          ),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            { reasoningTextDelta: "think" },
+            { textDelta: "" },
+            { textDelta: "Done.", finishReason: "stop" },
+          ],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const observations: LifecycleEvent[] = [];
+    for await (const event of lifecycle.run({
+      runId: "real-run",
+      directory: "/repo",
+      modelId: "fake-model",
+      sessionId: "session_test",
+    })) {
+      if (
+        event.type.startsWith("llm:request-") ||
+        event.type === "llm:first-text"
+      ) {
+        const records = await messageManager.listBySession("session_test");
+        const message = records.find(
+          (record) => record.info.id === event.messageId,
+        )?.info;
+        expect(
+          message?.role === "assistant" && message.modelRequests?.length,
+        ).toBe(1);
+        observations.push(event);
+      }
+    }
+    expect(observations.map((event) => event.type)).toEqual([
+      "llm:request-started",
+      "llm:first-text",
+      "llm:request-ended",
+    ]);
+    const records = await messageManager.listBySession("session_test");
+    expect(records[0].info).toMatchObject({
+      runId: "real-run",
+      modelRequests: [
+        { runId: "real-run", step: 1, attempt: 1, outcome: "success" },
+      ],
+    });
+    expect(
+      JSON.stringify(await messageManager.toModelMessages("session_test")),
+    ).not.toContain("modelRequests");
+  });
+
   it("uses a Kimi-style generous default maxSteps", () => {
     expect(DEFAULT_MAX_STEPS).toBe(1000);
   });
@@ -421,14 +519,16 @@ describe("Lifecycle.run", () => {
     const toolScheduler = {
       executeBatch: vi
         .fn<ToolSchedulerInstance["executeBatch"]>()
-        .mockResolvedValue([
-          {
-            callId: "call_read",
-            metadata: { mtimeMs: 1_700_000_000_000 },
-            output: "README contents",
-            status: "success",
-          },
-        ]),
+        .mockImplementation((batch) =>
+          deliverFixtureResults(batch, [
+            {
+              callId: "call_read",
+              metadata: { mtimeMs: 1_700_000_000_000 },
+              output: "README contents",
+              status: "success",
+            },
+          ]),
+        ),
     } as unknown as ToolSchedulerInstance;
     const resetTurnCompactionCount =
       vi.fn<ContextManager["resetTurnCompactionCount"]>();
@@ -506,8 +606,12 @@ describe("Lifecycle.run", () => {
         initiatingUserMessageId: "user_1",
         modelId: "fake-model",
         sessionId: "session_test",
+        runId: "actual_run",
       }),
     );
+    expect(
+      vi.mocked(toolScheduler).executeBatch.mock.calls[0]?.[0].calls[0]?.runId,
+    ).toBe("actual_run");
 
     expect(prepareTurn).toHaveBeenNthCalledWith(
       1,
@@ -572,13 +676,18 @@ describe("Lifecycle.run", () => {
       "turn:start",
       "context:prepared",
       "llm:start",
+      "llm:request-started",
+      "llm:request-ended",
       "llm:complete", // Final parsed tool snapshot after normal stream exhaustion.
       "tool:start",
       "tool:result",
       "step:complete",
       "context:prepared",
       "llm:start",
+      "llm:request-started",
+      "llm:first-text",
       "llm:delta",
+      "llm:request-ended",
       "llm:complete",
       "turn:end",
     ]);
@@ -729,6 +838,7 @@ describe("Lifecycle.run", () => {
       expect.any(String),
       expect.objectContaining({
         metadata: {
+          sourceOrder: expect.any(Number) as number,
           tokenUsage: {
             inputBreakdown: {
               cacheRead: 300,
@@ -1796,6 +1906,7 @@ describe("Lifecycle.run", () => {
       directory: "D:/repo",
       modelId: "fake-model",
       sessionId: "session_test",
+      runId: "run-real",
     });
     let next = await loop.next();
     while (!next.done) {
@@ -1818,6 +1929,8 @@ describe("Lifecycle.run", () => {
         content: "think ",
         delta: "think ",
         messageId: "message_1",
+        runId: "run-real",
+        partId: expect.any(String) as string,
         sessionId: "session_test",
         step: 1,
         timestamp: expect.any(Number) as number,
@@ -1827,6 +1940,8 @@ describe("Lifecycle.run", () => {
         content: "think about README",
         delta: "about README",
         messageId: "message_1",
+        runId: "run-real",
+        partId: expect.any(String) as string,
         sessionId: "session_test",
         step: 1,
         timestamp: expect.any(Number) as number,
@@ -1835,12 +1950,36 @@ describe("Lifecycle.run", () => {
       {
         content: "think about README",
         messageId: "message_1",
+        runId: "run-real",
+        partId: expect.any(String) as string,
         sessionId: "session_test",
         step: 1,
         timestamp: expect.any(Number) as number,
         type: "llm:reasoning-end",
+        endReason: "normal",
       },
     ]);
+    const saved = (await messageManager.listBySession("session_test"))[0];
+    expect(saved.parts).toContainEqual(
+      expect.objectContaining({
+        type: "reasoning",
+        text: "think about README",
+        endReason: "normal",
+        id: reasoningEvents[0]?.partId,
+      }),
+    );
+    for (const event of emitted.filter(
+      (event) =>
+        event.type === "llm:delta" ||
+        event.type === "tool:start" ||
+        event.type === "tool:result",
+    )) {
+      expect(event).toMatchObject({
+        runId: "run-real",
+        messageId: expect.any(String) as string,
+        partId: expect.any(String) as string,
+      });
+    }
     expect(appendPartSpy).not.toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ type: "reasoning" }),
@@ -1916,7 +2055,13 @@ describe("Lifecycle.run", () => {
     const messages = await messageManager.listBySession("session_test");
     expect(messages).toHaveLength(1);
     expect(messages[0]?.info.role).toBe("assistant");
-    expect(messages[0]?.parts).toEqual([]);
+    expect(messages[0]?.parts).toEqual([
+      expect.objectContaining({
+        type: "reasoning",
+        text: "thinking",
+        endReason: "normal",
+      }),
+    ]);
     expect(next.value).toMatchObject({
       finalResponse: "",
       finishReason: "stop",
@@ -2391,7 +2536,10 @@ describe("Lifecycle.run", () => {
     );
 
     expect(prepareTurn).toHaveBeenCalledTimes(1);
-    expect(prepareTurn.mock.calls[0]?.[0].signal).toBe(abortController.signal);
+    expect(prepareTurn.mock.calls[0]?.[0].signal?.aborted).toBe(true);
+    expect(prepareTurn.mock.calls[0]?.[0].signal?.reason).toBe(
+      abortController.signal.reason,
+    );
     expect(requests).toHaveLength(0);
     expect(events).toEqual([]);
     expect(result).toMatchObject({
@@ -2437,13 +2585,15 @@ describe("Lifecycle.run", () => {
       toolScheduler: {
         executeBatch: vi
           .fn<ToolSchedulerInstance["executeBatch"]>()
-          .mockResolvedValue([
-            {
-              callId: "call_bash",
-              output: "partial stdout before abort",
-              status: "cancelled",
-            },
-          ]),
+          .mockImplementation((batch) =>
+            deliverFixtureResults(batch, [
+              {
+                callId: "call_bash",
+                output: "partial stdout before abort",
+                status: "cancelled",
+              },
+            ]),
+          ),
       } as unknown as ToolSchedulerInstance,
     });
 
@@ -3533,6 +3683,7 @@ it("discards native state and usage from an overflowing attempt before accepting
   });
   const { result } = await consumeLifecycleEvents(
     lifecycle.run({
+      runId: "compaction-run",
       sessionId: "session_test",
       directory: "/test",
       modelId: "fake-model",
@@ -3551,6 +3702,18 @@ it("discards native state and usage from an overflowing attempt before accepting
   expect(states).toHaveLength(1);
   expect(JSON.stringify(states)).toContain("sig-2");
   expect(JSON.stringify(states)).not.toContain("sig-1");
+  const attempts = (await manager.listBySession("session_test")).flatMap(
+    (message) =>
+      message.info.role === "assistant"
+        ? [...(message.info.modelRequests ?? [])]
+        : [],
+  );
+  expect(attempts.map((request) => request.step)).toEqual([1, 1]);
+  expect(new Set(attempts.map((request) => request.requestId)).size).toBe(2);
+  expect(attempts.map((request) => request.outcome)).toEqual([
+    "error",
+    "success",
+  ]);
 });
 
 it.each(["message", "usage", "tools", "permanent"] as const)(
@@ -3899,3 +4062,552 @@ it.each(["length", "content_filter", "accepted_cancel"] as const)(
     ).toHaveLength(0);
   },
 );
+
+describe("display reasoning finalization", () => {
+  it.each([
+    ["stop", "interrupted"],
+    ["eof", "interrupted"],
+    ["error", "failed"],
+    ["protocol", "failed"],
+    ["length", "interrupted"],
+    ["content_filter", "failed"],
+    ["normal-then-error", "normal"],
+    ["tool-then-error", "normal"],
+  ] as const)(
+    "saves %s with its segment end reason",
+    async (scenario, expected) => {
+      const controller = new AbortController();
+      const stream = vi
+        .spyOn(llmStreaming, "streamResponse")
+        .mockImplementation(async function* () {
+          yield await Promise.resolve({
+            isComplete: false,
+            messageSnapshot: { content: "" },
+            reasoningTextDelta: "thought",
+            reasoningText: "thought",
+          });
+          if (scenario === "stop") controller.abort();
+          if (scenario === "normal-then-error")
+            yield { isComplete: false, messageSnapshot: { content: "body" } };
+          if (scenario === "error" || scenario === "normal-then-error")
+            throw new Error("model failure");
+          if (scenario === "tool-then-error") {
+            yield {
+              isComplete: false,
+              messageSnapshot: {
+                content: "",
+                toolCalls: [
+                  {
+                    callId: "tool",
+                    index: 0,
+                    name: "read",
+                    argumentsJson: "{",
+                  },
+                ],
+              },
+            };
+            throw new ProviderStreamInterruptedError(new Error("eof"), "eof");
+          }
+          if (scenario === "protocol")
+            throw new ProviderStreamInterruptedError(
+              new Error("protocol"),
+              "protocol",
+            );
+          if (scenario === "length" || scenario === "content_filter")
+            yield {
+              isComplete: true,
+              finishReason: scenario,
+              messageSnapshot: { content: "" },
+            };
+        });
+      const manager = createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+      });
+      const lifecycle = new Lifecycle({
+        llmClient: createSequentialFakeLLMClient([], []),
+        messageManager: manager,
+        contextManager: createContextManagerMock(
+          vi.fn().mockResolvedValue(preparedTurn([])),
+        ),
+        toolScheduler: {
+          executeBatch: vi.fn(),
+        } as unknown as ToolSchedulerInstance,
+      });
+      try {
+        await consumeLifecycleEvents(
+          lifecycle.run({
+            sessionId: "session",
+            runId: "run",
+            directory: "/test",
+            modelId: "fake-model",
+            signal: controller.signal,
+          }),
+        );
+      } catch (error) {
+        if (scenario !== "error" && scenario !== "normal-then-error")
+          throw error;
+      } finally {
+        stream.mockRestore();
+      }
+      const messages = await manager.listBySession("session");
+      expect(
+        messages
+          .flatMap((message) => message.parts)
+          .filter((part) => part.type === "reasoning"),
+      ).toEqual([
+        expect.objectContaining({ text: "thought", endReason: expected }),
+      ]);
+    },
+  );
+
+  it("uses separate real parts for reasoning resumed after text", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const lifecycle = new Lifecycle({
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            { reasoningTextDelta: "first" },
+            { textDelta: "body" },
+            { reasoningTextDelta: "second" },
+            { finishReason: "stop" },
+          ],
+        ],
+        requests,
+      ),
+      messageManager: manager,
+      contextManager: createContextManagerMock(
+        vi.fn().mockResolvedValue(preparedTurn([])),
+      ),
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    await consumeLifecycleEvents(
+      lifecycle.run({
+        sessionId: "session",
+        runId: "run",
+        directory: "/test",
+        modelId: "fake-model",
+      }),
+    );
+    const messages = await manager.listBySession("session");
+    expect(
+      messages
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "reasoning")
+        .map((part) => part.text),
+    ).toEqual(["first", "second"]);
+    const parts = messages.flatMap((message) => message.parts);
+    expect(
+      parts.every((part) => typeof part.metadata?.sourceOrder === "number"),
+    ).toBe(true);
+    expect(
+      [...parts]
+        .sort(
+          (a, b) =>
+            Number(a.metadata?.sourceOrder) - Number(b.metadata?.sourceOrder),
+        )
+        .map((part) =>
+          part.type === "reasoning" || part.type === "text" ? part.text : "",
+        ),
+    ).toEqual(["first", "body", "second"]);
+  });
+});
+
+describe("display save isolation during actual tool loops", () => {
+  it.each(["hanging", "rejecting", "projection-failure"] as const)(
+    "continues two model steps with a %s display writer",
+    async (failure) => {
+      const requests: InterfaceProviderRequest[] = [];
+      let executions = 0;
+      let writes = 0;
+      const owner = new DisplayReasoningOwner({
+        save: (): Promise<void> => {
+          writes++;
+          return failure === "hanging"
+            ? new Promise(() => undefined)
+            : Promise.reject(new Error("display storage"));
+        },
+        commit: (): void => {
+          if (failure === "projection-failure")
+            throw new Error("display projection");
+        },
+      });
+      const manager = createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+      });
+      const lifecycle = new Lifecycle({
+        displayReasoning: owner,
+        llmClient: createSequentialFakeLLMClient(
+          [
+            [
+              { reasoningTextDelta: "step one" },
+              {
+                toolCallDeltas: [
+                  {
+                    index: 0,
+                    id: "call-1",
+                    name: "read",
+                    argumentsDelta: "{}",
+                  },
+                ],
+                finishReason: "tool_calls",
+              },
+            ],
+            [
+              { reasoningTextDelta: "step two" },
+              { textDelta: "done", finishReason: "stop" },
+            ],
+          ],
+          requests,
+        ),
+        messageManager: manager,
+        contextManager: createContextManagerMock(
+          vi.fn().mockResolvedValue(preparedTurn([])),
+        ),
+        toolScheduler: {
+          executeBatch: ({ calls }: { calls: { callId: string }[] }) => {
+            executions++;
+            return Promise.resolve(
+              calls.map((call) => ({
+                callId: call.callId,
+                status: "success",
+                output: "read",
+              })),
+            );
+          },
+        } as unknown as ToolSchedulerInstance,
+      });
+      const { result } = await consumeLifecycleEvents(
+        lifecycle.run({
+          sessionId: "session",
+          runId: "run",
+          directory: "/test",
+          modelId: "fake-model",
+        }),
+      );
+      expect(result).toMatchObject({ success: true, finalResponse: "done" });
+      expect(requests).toHaveLength(2);
+      expect(executions).toBe(1);
+      expect(writes).toBe(failure === "hanging" ? 1 : 2);
+      expect(owner.snapshot("session").parts.map((part) => part.text)).toEqual([
+        "step one",
+        "step two",
+      ]);
+      expect(
+        (await manager.listBySession("session")).map(
+          (message) => message.info.runId,
+        ),
+      ).toEqual(["run", "run"]);
+    },
+  );
+});
+
+it("keeps resumed reasoning open while an earlier tool snapshot remains unchanged", async () => {
+  const manager = createMessageManager({
+    bus: createBus(),
+    store: createInMemoryMessageStore(),
+  });
+  const lifecycle = new Lifecycle({
+    llmClient: createSequentialFakeLLMClient(
+      [
+        [
+          { reasoningTextDelta: "A" },
+          {
+            toolCallDeltas: [
+              { index: 0, id: "tool", name: "read", argumentsDelta: "{}" },
+            ],
+          },
+          { reasoningTextDelta: "B1" },
+          { reasoningTextDelta: "B2" },
+          { finishReason: "length" },
+        ],
+      ],
+      [],
+    ),
+    messageManager: manager,
+    contextManager: createContextManagerMock(
+      vi.fn().mockResolvedValue(preparedTurn([])),
+    ),
+    toolScheduler: {
+      executeBatch: vi.fn(),
+    } as unknown as ToolSchedulerInstance,
+  });
+  await consumeLifecycleEvents(
+    lifecycle.run({
+      sessionId: "session",
+      runId: "run",
+      directory: "/test",
+      modelId: "fake-model",
+    }),
+  );
+  expect(
+    (await manager.listBySession("session"))
+      .flatMap((message) => message.parts)
+      .filter((part) => part.type === "reasoning")
+      .map((part) => ({ text: part.text, endReason: part.endReason })),
+  ).toEqual([
+    { text: "A", endReason: "normal" },
+    { text: "B1B2", endReason: "interrupted" },
+  ]);
+});
+
+it("preserves the complete protocol reasoning after the real 256-segment display budget evicts its first segment", async () => {
+  const requests: InterfaceProviderRequest[] = [];
+  const thoughts = Array.from(
+    { length: 257 },
+    (_, index) => `thought-${String(index)};`,
+  );
+  const chunks: InterfaceProviderStreamEvent[] = thoughts.flatMap((text) => [
+    { reasoningTextDelta: text },
+    { textDelta: "." },
+  ]);
+  chunks.push({
+    toolCallDeltas: [
+      { index: 0, id: "budget-call", name: "read", argumentsDelta: "{}" },
+    ],
+    finishReason: "tool_calls",
+  });
+  const save = vi.fn(() => new Promise<void>(() => undefined));
+  const owner = new DisplayReasoningOwner({ save });
+  const manager = createMessageManager({
+    bus: createBus(),
+    store: createInMemoryMessageStore(),
+  });
+  const protocolSnapshots: Map<string, string>[] = [];
+  const prepareTurn = vi.fn<ContextManager["prepareTurn"]>((input) => {
+    protocolSnapshots.push(new Map(input.activeReasoningByMessageId));
+    return Promise.resolve(preparedTurn([]));
+  });
+  const executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>((batch) =>
+    deliverFixtureResults(
+      batch,
+      batch.calls.map((call) => ({
+        callId: call.callId,
+        output: "exact tool result",
+        status: "success",
+      })),
+    ),
+  );
+  const lifecycle = new Lifecycle({
+    displayReasoning: owner,
+    llmClient: createSequentialFakeLLMClient(
+      [chunks, [{ textDelta: "done", finishReason: "stop" }]],
+      requests,
+    ),
+    messageManager: manager,
+    contextManager: createContextManagerMock(prepareTurn),
+    toolScheduler: { executeBatch } as unknown as ToolSchedulerInstance,
+  });
+  try {
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        sessionId: "budget-session",
+        runId: "budget-run",
+        directory: "/test",
+        modelId: "fake-model",
+      }),
+    );
+    expect(result).toMatchObject({ success: true, finalResponse: "done" });
+    expect(owner.snapshot("budget-session").missingCount).toBe(1);
+    expect(owner.snapshot("budget-session").parts).toHaveLength(256);
+    expect(
+      owner
+        .snapshot("budget-session")
+        .parts.some((part) => part.text === thoughts[0]),
+    ).toBe(false);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(requests).toHaveLength(2);
+    expect(executeBatch).toHaveBeenCalledTimes(1);
+    const records = await manager.listBySession("budget-session");
+    const first = records.at(0);
+    if (!first) throw new Error("Missing first model step");
+    expect(protocolSnapshots[1]?.get(first.info.id)).toBe(thoughts.join(""));
+    expect(first.parts).toContainEqual(
+      expect.objectContaining({ type: "text", text: ".".repeat(257) }),
+    );
+    expect(
+      first.parts.find(
+        (part) => part.type === "tool" && part.callId === "budget-call",
+      ),
+    ).toMatchObject({
+      state: { status: "completed", output: "exact tool result" },
+    });
+  } finally {
+    owner.dispose();
+  }
+});
+
+describe("same-run durable input continuation", () => {
+  it("continues in one lifecycle and confirms only the frozen provider attempt membership", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    let finishes = 0;
+    const admitted: ModelRequestRecord[] = [];
+    const confirmed: string[] = [];
+    const beforeStep = vi.fn().mockResolvedValue([]);
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(
+        () =>
+          Promise.resolve({
+            ...preparedTurn([{ role: "user", content: "protected" }]),
+            request: {
+              messages: [{ role: "user", content: "protected" }],
+              tools: undefined,
+              inputIds: ["frozen-a"],
+            },
+          }),
+        { assembleRequestFromInput: false },
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [{ textDelta: "Waiting", finishReason: "stop" }],
+          [{ textDelta: "Final", finishReason: "stop" }],
+        ],
+        requests,
+      ),
+      messageManager,
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const events: LifecycleEvent[] = [];
+    const loop = lifecycle.run({
+      runId: "root",
+      sessionId: "session",
+      directory: "/repo",
+      modelId: "fake-model",
+      maxSteps: 3,
+      currentRunInputs: {
+        beforeStep,
+        beforeFinish: () =>
+          Promise.resolve(++finishes === 1 ? "continue" : "finish"),
+        admitRequestAttempt: async (request) => {
+          admitted.push(request);
+          await messageManager.updateMessage(request.messageId, {
+            modelRequests: [request],
+          });
+        },
+        confirmRequestSuccess: (requestId) => {
+          confirmed.push(requestId);
+          return Promise.resolve();
+        },
+      },
+    });
+    for (;;) {
+      const next = await loop.next();
+      if (next.done) {
+        expect(next.value).toMatchObject({
+          success: true,
+          finalResponse: "Final",
+          terminalReason: "completed",
+        });
+        break;
+      }
+      events.push(next.value);
+    }
+    expect(requests).toHaveLength(2);
+    expect(events.filter((event) => event.type === "turn:start")).toHaveLength(
+      1,
+    );
+    expect(events.filter((event) => event.type === "turn:end")).toHaveLength(1);
+    expect(
+      admitted.map((record) => [record.runId, record.step, record.inputIds]),
+    ).toEqual([
+      ["root", 1, ["frozen-a"]],
+      ["root", 2, ["frozen-a"]],
+    ]);
+    expect(confirmed).toEqual(admitted.map((record) => record.requestId));
+    expect(beforeStep).toHaveBeenCalledTimes(2);
+  });
+  it("does not wait or award extra steps after the existing final step", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const beforeFinish = vi.fn().mockResolvedValue("continue");
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(() =>
+        Promise.resolve(preparedTurn([{ role: "user", content: "finalize" }])),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "Budget end", finishReason: "stop" }]],
+        requests,
+      ),
+      messageManager: createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+      }),
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        runId: "root",
+        sessionId: "session",
+        directory: "/repo",
+        modelId: "fake-model",
+        maxSteps: 1,
+        currentRunInputs: {
+          beforeStep: () => Promise.resolve([]),
+          beforeFinish,
+          admitRequestAttempt: () => Promise.resolve(),
+          confirmRequestSuccess: () => Promise.resolve(),
+        },
+      }),
+    );
+    expect(result.terminalReason).toBe("max_steps_finalized");
+    expect(beforeFinish).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+  });
+  it("reprepares a stale observation before provider launch without spending a model step", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const beforeStep = vi.fn().mockResolvedValue([]);
+    let attempts = 0;
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(() =>
+        Promise.resolve(preparedTurn([{ role: "user", content: "fresh" }])),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "Final", finishReason: "stop" }]],
+        requests,
+      ),
+      messageManager: createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+      }),
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        runId: "root",
+        sessionId: "session",
+        directory: "/repo",
+        modelId: "fake-model",
+        maxSteps: 1,
+        currentRunInputs: {
+          beforeStep,
+          beforeFinish: () => Promise.resolve("finish"),
+          admitRequestAttempt: () => {
+            if (++attempts === 1)
+              return Promise.reject(new RuntimeInputSnapshotChangedError());
+            return Promise.resolve();
+          },
+          confirmRequestSuccess: () => Promise.resolve(),
+        },
+      }),
+    );
+    expect(result.terminalReason).toBe("max_steps_finalized");
+    expect(beforeStep).toHaveBeenCalledTimes(2);
+    expect(requests).toHaveLength(1);
+  });
+});

@@ -1,6 +1,8 @@
 export type UiCommandMethod =
   | "submitPromptAccepted"
   | "editQueuedPrompt"
+  | "resubmitRetainedPrompt"
+  | "steerQueuedPrompt"
   | "cancelQueuedPrompt"
   | "acquirePromptEditLease"
   | "renewPromptEditLease"
@@ -133,6 +135,7 @@ export function buildUiCommandDetails(
         textLength: text.length,
       });
     }
+    case "resubmitRetainedPrompt":
     case "editQueuedPrompt": {
       const input = objectAt(args, 0);
       return redactedDetails({
@@ -191,6 +194,7 @@ export function buildUiCommandDetails(
     case "acquirePromptEditLease":
     case "archiveSession":
     case "updateSessionReasoning":
+    case "steerQueuedPrompt":
     case "cancelQueuedPrompt":
     case "releasePromptEditLease":
     case "renewPromptEditLease":

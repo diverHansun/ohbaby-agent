@@ -2,12 +2,28 @@ import type { UiEvent } from "ohbaby-sdk";
 
 export const DAEMON_RPC_METHODS = [
   "getSnapshot",
+  "listSubagentExecutions",
+  "getSubagentExecutionView",
+  "getSubagentConversationView",
+  "watchSubagentConversation",
+  "unwatchSubagentConversation",
+  "getSessionView",
+  "getSessionHistory",
+  "getSessionControl",
+  "getPromptReceipt",
+  "getSessionIndex",
+  "getSelectedSessionId",
+  "getPermissionSnapshot",
+  "createSession",
+  "selectSession",
   "initializeClient",
   "getContextWindowUsage",
   "listCommands",
   "submitPromptAccepted",
   "editQueuedPrompt",
+  "resubmitRetainedPrompt",
   "cancelQueuedPrompt",
+  "steerQueuedPrompt",
   "acquirePromptEditLease",
   "renewPromptEditLease",
   "releasePromptEditLease",
@@ -70,7 +86,13 @@ export type DaemonRpcResponse =
 export type DaemonSseEvent =
   | {
       readonly type: "hello";
+      readonly runtimeEpoch?: string;
+      readonly sessionRecoveryVersion?: number;
+      readonly subagentConversationVersion?: number;
       readonly clientId: string;
+      readonly permissionEpoch: string;
+      readonly rootSessionId: string | null;
+      readonly bindingGeneration: number;
     }
   | {
       readonly type: "ui.event";
@@ -231,7 +253,29 @@ export function parseDaemonSseEvent(value: unknown): DaemonSseEvent {
   );
   switch (type) {
     case "hello":
+      if (
+        value.rootSessionId !== null &&
+        typeof value.rootSessionId !== "string"
+      )
+        throw new TypeError("Daemon SSE hello rootSessionId is required");
       return {
+        ...(typeof value.runtimeEpoch === "string"
+          ? { runtimeEpoch: value.runtimeEpoch }
+          : {}),
+        ...(typeof value.sessionRecoveryVersion === "number"
+          ? { sessionRecoveryVersion: value.sessionRecoveryVersion }
+          : {}),
+        permissionEpoch: requireString(
+          value,
+          "permissionEpoch",
+          "Daemon SSE hello permissionEpoch is required",
+        ),
+        rootSessionId: value.rootSessionId,
+        bindingGeneration: requireNonNegativeInteger(
+          value,
+          "bindingGeneration",
+          "Daemon SSE hello bindingGeneration is required",
+        ),
         clientId: requireString(
           value,
           "clientId",

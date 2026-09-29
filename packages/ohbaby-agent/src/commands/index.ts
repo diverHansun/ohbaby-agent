@@ -11,7 +11,10 @@ export {
   sanitizeCommandSkillSummary,
 } from "./normalize.js";
 export { createCommandRunContext } from "./run-context.js";
-export { createBuiltinHandlers } from "./builtin.js";
+export {
+  createBuiltinHandlers,
+  parseNewSessionCommandArgs,
+} from "./builtin.js";
 export { createCommandService } from "./service.js";
 export type {
   CommandGoalBackend,

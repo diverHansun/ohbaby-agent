@@ -59,7 +59,11 @@ describe("runOhbabyCli", () => {
   it("starts the default terminal through ohbaby-agent without loading ohbaby-server", async () => {
     vi.resetModules();
     const core = createCore();
-    const dispose = vi.fn(() => Promise.resolve());
+    const cleanupOrder: string[] = [];
+    const dispose = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      cleanupOrder.push("host.finished");
+    });
     const subscribeEvents = vi.fn((): (() => void) => () => undefined);
     const buildCoreAPIImpl = vi.fn(() => ({
       callbacks: { subscribeEvents },
@@ -76,7 +80,11 @@ describe("runOhbabyCli", () => {
       }),
     );
     const logger = { emit: vi.fn() };
-    const disposeDiagnostics = vi.fn(() => Promise.resolve());
+    const clockAnomalyDefinition = {};
+    const disposeDiagnostics = vi.fn(() => {
+      cleanupOrder.push("diagnostics.closed");
+      return Promise.resolve();
+    });
     let diagnosticsUnavailable: (() => void) | undefined;
     const createProcessLogger = vi.fn(
       (options: { readonly onUnavailable?: () => void }) => {
@@ -93,20 +101,24 @@ describe("runOhbabyCli", () => {
     const activeNotice = vi.fn();
     const renderTerminalUi = vi.fn(
       (options: {
+        readonly reportDurationClockAnomaly?: (identity: string) => void;
         readonly subscribeDiagnosticsUnavailable?: (
           listener: () => void,
         ) => () => void;
       }) => {
+        options.reportDurationClockAnomaly?.("request-1");
         options.subscribeDiagnosticsUnavailable?.(activeNotice);
         diagnosticsUnavailable?.();
         return { waitUntilExit };
       },
     );
     const stderr: string[] = [];
-    vi.doMock("ohbaby-agent", () => ({
+    vi.doMock("ohbaby-agent", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ohbaby-agent")>()),
       buildCoreAPIImpl,
       createProcessLogger,
       dataMigrationCompleted: {},
+      durationClockAnomaly: clockAnomalyDefinition,
       loadRuntimeEnvIntoProcessEnv,
       migrateOhbabyData,
     }));
@@ -139,11 +151,15 @@ describe("runOhbabyCli", () => {
       logger,
     });
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
+    expect(logger.emit).toHaveBeenCalledWith(clockAnomalyDefinition, {
+      identity: "request-1",
+    });
     expect(
       renderTerminalUi.mock.calls[0]?.[0].subscribeDiagnosticsUnavailable,
     ).toBeTypeOf("function");
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(disposeDiagnostics).toHaveBeenCalledTimes(1);
+    expect(cleanupOrder).toEqual(["host.finished", "diagnostics.closed"]);
     expect(activeNotice).toHaveBeenCalledOnce();
     expect(stderr).toEqual([]);
   });
@@ -428,7 +444,7 @@ describe("runOhbabyCli", () => {
     expect(stderr.join("")).toContain("Unknown argument");
   });
 
-  it("preflights the terminal UI when resuming a session at startup", async () => {
+  it("starts terminal recovery without a legacy snapshot preflight when resuming", async () => {
     vi.resetModules();
     const core = createCore();
     const dispose = vi.fn(() => Promise.resolve());
@@ -465,7 +481,7 @@ describe("runOhbabyCli", () => {
       inProcess: true,
       resume: "session_2",
     });
-    expect(core.getSnapshot).toHaveBeenCalledTimes(1);
+    expect(core.getSnapshot).not.toHaveBeenCalled();
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
   });
@@ -752,7 +768,7 @@ describe("runOhbabyCli", () => {
       remotePort: 4096,
       resume: "session_1",
     });
-    expect(core.getSnapshot).toHaveBeenCalledTimes(1);
+    expect(core.getSnapshot).not.toHaveBeenCalled();
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
   });
@@ -794,7 +810,7 @@ describe("runOhbabyCli", () => {
       diagnosticsRole: "tui",
       inProcess: true,
     });
-    expect(core.getSnapshot).toHaveBeenCalledTimes(1);
+    expect(core.getSnapshot).not.toHaveBeenCalled();
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
   });
@@ -841,7 +857,109 @@ describe("runOhbabyCli", () => {
     expect(renderTerminalUi).not.toHaveBeenCalled();
   });
 
-  it("fails startup before rendering when resume preflight fails", async () => {
+  it("preserves cancellable subagent reads and root identity through the default TUI RPC host", async () => {
+    vi.resetModules();
+    const listSignal = new AbortController();
+    const viewSignal = new AbortController();
+    let viewReceived: AbortSignal | undefined;
+    const backendCancelled = vi.fn();
+    const list = vi.fn((input: import("ohbaby-sdk").UiSubagentQuery) => {
+      input.signal?.throwIfAborted();
+      expect(input).toMatchObject({
+        rootSessionId: "root-session",
+        before: "history-cursor",
+        bindingGeneration: 7,
+      });
+      expect(input.signal).toBe(listSignal.signal);
+      return Promise.resolve({
+        executions: [],
+        hasMore: false,
+        waiting: true,
+        approvalBlocked: false,
+        activeCount: 3,
+        completedCount: 0,
+      });
+    });
+    const view = vi.fn(
+      (
+        input: import("ohbaby-sdk").UiSubagentQuery & { executionId: string },
+      ): Promise<never> => {
+        viewReceived = input.signal;
+        input.signal?.throwIfAborted();
+        expect(input).toMatchObject({
+          rootSessionId: "root-session",
+          executionId: "child-execution",
+          bindingGeneration: 7,
+        });
+        return new Promise((_resolve, reject) => {
+          input.signal?.addEventListener(
+            "abort",
+            () => {
+              backendCancelled();
+              reject(new Error("Backend read cancelled"));
+            },
+            { once: true },
+          );
+        });
+      },
+    );
+    const core = Object.assign(createCore(), {
+      listSubagentExecutions: list,
+      getSubagentExecutionView: view,
+    });
+    const dispose = vi.fn(() => Promise.resolve());
+    vi.doMock("./tui/index.js", () => ({
+      renderTerminalUi: (options: {
+        client: CoreAPI;
+      }): { waitUntilExit(): Promise<void> } => ({
+        waitUntilExit: async (): Promise<void> => {
+          const listing = await options.client.listSubagentExecutions?.({
+            rootSessionId: "root-session",
+            before: "history-cursor",
+            bindingGeneration: 7,
+            signal: listSignal.signal,
+          });
+          expect(listing?.activeCount).toBe(3);
+          const pending = options.client.getSubagentExecutionView?.({
+            rootSessionId: "root-session",
+            executionId: "child-execution",
+            bindingGeneration: 7,
+            signal: viewSignal.signal,
+          });
+          const rejected = expect(pending).rejects.toMatchObject({
+            name: "AbortError",
+          });
+          await vi.waitFor(() => {
+            expect(viewReceived).toBe(viewSignal.signal);
+          });
+          viewSignal.abort();
+          await rejected;
+          expect(backendCancelled).toHaveBeenCalledOnce();
+        },
+      }),
+    }));
+    const { runOhbabyCli } = await import("./bin.js");
+    expect(
+      await runOhbabyCli(
+        ["node", "ohbaby"],
+        {},
+        {
+          loadRuntimeEnvIntoProcessEnv: () => Promise.resolve(),
+          createCoreHost: () => ({
+            core,
+            callbacks: { subscribeEvents: (): (() => void) => () => undefined },
+            dispose,
+          }),
+        },
+      ),
+    ).toBe(0);
+    expect(list).toHaveBeenCalledOnce();
+    expect(view).toHaveBeenCalledOnce();
+    expect(core.selectSession).not.toHaveBeenCalled();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("leaves resume errors to the subscribed session recovery UI", async () => {
     vi.resetModules();
     const core = createCore();
     core.getSnapshot.mockRejectedValue(new Error("Session not found: missing"));
@@ -853,7 +971,9 @@ describe("runOhbabyCli", () => {
     }));
     const loadRuntimeEnvIntoProcessEnv = vi.fn(() => Promise.resolve());
     const subscribeEvents = vi.fn((): (() => void) => () => undefined);
-    const renderTerminalUi = vi.fn();
+    const renderTerminalUi = vi.fn(() => ({
+      waitUntilExit: (): Promise<void> => Promise.resolve(),
+    }));
     vi.doMock("ohbaby-agent", () => {
       throw new Error("agent should be loaded only by the default loader");
     });
@@ -872,8 +992,9 @@ describe("runOhbabyCli", () => {
           loadRuntimeEnvIntoProcessEnv,
         },
       ),
-    ).rejects.toThrow("Session not found: missing");
-    expect(renderTerminalUi).not.toHaveBeenCalled();
+    ).resolves.toBe(0);
+    expect(renderTerminalUi).toHaveBeenCalledTimes(1);
+    expect(core.getSnapshot).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
@@ -984,13 +1105,21 @@ describe("runOhbabyCli", () => {
 });
 
 function createCore(): {
+  readonly getSessionIndex: ReturnType<typeof vi.fn>;
+  readonly getSelectedSessionId: ReturnType<typeof vi.fn>;
+  readonly createSession: ReturnType<typeof vi.fn>;
+  readonly selectSession: ReturnType<typeof vi.fn>;
+  readonly getPermissionSnapshot: ReturnType<typeof vi.fn>;
+  readonly subscribePermissionEvents: ReturnType<typeof vi.fn>;
   readonly acquirePromptEditLease: ReturnType<typeof vi.fn>;
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
+  readonly steerQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly cancelQueuedPrompt: ReturnType<typeof vi.fn>;
+  readonly resubmitRetainedPrompt: ReturnType<typeof vi.fn>;
   readonly editQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
   readonly getContextWindowUsage: ReturnType<typeof vi.fn>;
@@ -1010,6 +1139,12 @@ function createCore(): {
 } {
   const prompt = promptCompletion().prompt;
   return {
+    getSessionIndex: vi.fn(() => Promise.resolve([])),
+    getSelectedSessionId: vi.fn(() => Promise.resolve(null)),
+    createSession: vi.fn(() => Promise.resolve()),
+    selectSession: vi.fn(() => Promise.resolve()),
+    getPermissionSnapshot: vi.fn(() => Promise.resolve()),
+    subscribePermissionEvents: vi.fn(() => () => undefined),
     acquirePromptEditLease: vi.fn(() =>
       Promise.resolve({
         editLeaseId: "lease_1",
@@ -1023,6 +1158,7 @@ function createCore(): {
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
     archiveSession: vi.fn(() => Promise.resolve()),
+    steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     cancelQueuedPrompt: vi.fn(() => Promise.resolve(prompt)),
     compactSession: vi.fn(() => Promise.resolve()),
     connectModel: vi.fn(() =>
@@ -1046,6 +1182,9 @@ function createCore(): {
       } as const),
     ),
     executeCommand: vi.fn(() => Promise.resolve()),
+    resubmitRetainedPrompt: vi.fn(() =>
+      Promise.reject(new Error("Unused retained resubmission stub")),
+    ),
     editQueuedPrompt: vi.fn(() => Promise.resolve(prompt)),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
     getCurrentModel: vi.fn(() => Promise.resolve(null)),

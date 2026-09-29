@@ -2,7 +2,6 @@ import { mergeReasoningIntent } from "../../services/interface-providers/reasoni
 import type { LifecycleEvent } from "../lifecycle/index.js";
 import type { ModelToolDefinition } from "../llm-client/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
-import { extractFinalOutput } from "./output.js";
 import type {
   AgentRunDeps,
   AgentRunEventSource,
@@ -69,6 +68,7 @@ async function writeInitialUserMessage(
     | "agentName"
     | "contextScopeId"
     | "initialUserMessageId"
+    | "displayUserText"
     | "initialUserPrompt"
     | "sessionId"
   >,
@@ -90,6 +90,9 @@ async function writeInitialUserMessage(
   });
   await deps.messageManager.appendPart(message.id, {
     text: input.initialUserPrompt,
+    ...(input.displayUserText === undefined
+      ? {}
+      : { metadata: { displayText: input.displayUserText } }),
     type: "text",
   });
   return message.id;
@@ -181,6 +184,7 @@ export async function runAgent(
     agentName: input.agentName,
     contextScopeId: scope.contextScopeId,
     initialUserMessageId: input.initialUserMessageId,
+    displayUserText: input.displayUserText,
     initialUserPrompt: input.initialUserPrompt,
     sessionId: scope.sessionId,
   });
@@ -227,6 +231,19 @@ export async function runAgent(
     }
     throw error;
   }
+  if (input.runId && record.runId !== input.runId) {
+    const reason = `Agent run coordinator created unexpected run id: ${record.runId}`;
+    try {
+      deps.runCoordinator.cancel(record.runId, reason);
+    } finally {
+      try {
+        deps.runCoordinator.revokePermissionsForRun?.(record.runId, reason);
+      } finally {
+        await preSubscribed?.close();
+      }
+    }
+    throw new Error(reason);
+  }
   const unbindAbort = bindAgentAbort({
     cancel: deps.runCoordinator.cancel.bind(deps.runCoordinator),
     runId: record.runId,
@@ -236,11 +253,6 @@ export async function runAgent(
     try {
       if (!runEventSource) {
         throw new Error("Agent run event source is required for stream mode");
-      }
-      if (input.runId && record.runId !== input.runId) {
-        throw new Error(
-          `Agent run coordinator created unexpected run id: ${record.runId}`,
-        );
       }
       const events =
         preSubscribed?.events ??
@@ -268,18 +280,14 @@ export async function runAgent(
     const completion = await deps.runCoordinator.waitForCompletion(
       record.runId,
     );
-    const history =
-      scope.contextScopeId === undefined
-        ? await deps.messageManager.listBySession(scope.sessionId)
-        : await deps.messageManager.listBySession(scope.sessionId, {
-            contextScopeId: scope.contextScopeId,
-          });
-    const finalOutput = extractFinalOutput(history);
     const success = completion.status === "succeeded";
-    const output = finalOutput !== "" ? finalOutput : completion.error;
     const base = {
       mode: "waitForCompletion" as const,
       runId: record.runId,
+      runStatus: completion.status,
+      ...(completion.terminalReason === undefined
+        ? {}
+        : { terminalReason: completion.terminalReason }),
       sessionId: scope.sessionId,
       steps: 0,
       toolCalls: [] satisfies readonly AgentToolCallSummary[],
@@ -287,7 +295,7 @@ export async function runAgent(
     if (success) {
       return {
         ...base,
-        finalOutput: output ?? "",
+        finalOutput: completion.finalResponse ?? "",
         finishReason: "stop" as const,
         success: true,
       };

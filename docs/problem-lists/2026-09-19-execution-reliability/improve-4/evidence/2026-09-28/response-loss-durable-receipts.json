@@ -1,0 +1,26 @@
+[
+  {
+    "operation_id": "9a4c610c-9a56-492b-9a7b-2fa4dc38b9e2",
+    "prompt_id": "prompt_c6330f45-316b-4c35-9981-f6c9bc6ac699",
+    "text": "I4_WEB_RESPONSE_LOST",
+    "receipt": {
+      "operationId": "9a4c610c-9a56-492b-9a7b-2fa4dc38b9e2",
+      "promptId": "prompt_c6330f45-316b-4c35-9981-f6c9bc6ac699",
+      "sessionId": "session_1790597032159_6zy8tb1",
+      "userMessageId": "message_a9e808ca-da57-454d-a135-3dd4f8cec3c4",
+      "acceptedAt": 1790597184198
+    }
+  },
+  {
+    "operation_id": "65b2b931-d8f0-4d84-842a-5ac64166f3b8",
+    "prompt_id": "prompt_8f89a396-1bbe-469e-8550-a462a77f5db1",
+    "text": "I4_TUI_RESPONSE_LOST",
+    "receipt": {
+      "operationId": "65b2b931-d8f0-4d84-842a-5ac64166f3b8",
+      "promptId": "prompt_8f89a396-1bbe-469e-8550-a462a77f5db1",
+      "sessionId": "session_1790597032252_4sa5fy2",
+      "userMessageId": "message_e824b7a9-21c5-45cc-beeb-361e95c2321e",
+      "acceptedAt": 1790597280951
+    }
+  }
+]

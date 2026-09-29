@@ -61,6 +61,7 @@ export function cloneSnapshot(
   const goals = snapshot.goals ?? [];
   const todos = snapshot.todos ?? [];
   return {
+    ...("serverNow" in snapshot ? { serverNow: snapshot.serverNow } : {}),
     sessions: snapshot.sessions.map(cloneSession),
     activeSessionId: snapshot.activeSessionId,
     runs: snapshot.runs.map(cloneRun),
@@ -76,6 +77,7 @@ export function cloneSnapshot(
 
 function toMutableSnapshot(snapshot: UiSnapshot): MutableUiSnapshot {
   return {
+    ...("serverNow" in snapshot ? { serverNow: snapshot.serverNow } : {}),
     sessions: snapshot.sessions.map(cloneSession),
     activeSessionId: snapshot.activeSessionId,
     runs: snapshot.runs.map(cloneRun),
@@ -97,6 +99,24 @@ export function createInMemoryUiStateStore(
   return {
     hasRun(runId: string): Promise<boolean> {
       return Promise.resolve(snapshot.runs.some((run) => run.id === runId));
+    },
+
+    getActiveSessionId(): Promise<string | null> {
+      return Promise.resolve(snapshot.activeSessionId);
+    },
+
+    getSessionIndex(): Promise<readonly Omit<UiSession, "messages">[]> {
+      return Promise.resolve(
+        snapshot.sessions.map(
+          ({ id, title, projectRoot, createdAt, updatedAt }) => ({
+            id,
+            title,
+            ...(projectRoot === undefined ? {} : { projectRoot }),
+            createdAt,
+            updatedAt,
+          }),
+        ),
+      );
     },
 
     readSnapshot(): Promise<UiSnapshot> {

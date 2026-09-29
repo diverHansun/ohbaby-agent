@@ -1,6 +1,6 @@
 import process from "node:process";
 import { describe, expect, it, vi } from "vitest";
-import { serverStopFailed, serverStopped, type Logger } from "ohbaby-agent";
+import { serverStopped, type Logger } from "ohbaby-agent";
 import { Supervisor } from "./supervisor.js";
 import type {
   DaemonPidFile,
@@ -407,8 +407,9 @@ describe("Supervisor", () => {
 
     await supervisor.start();
     await expect(supervisor.stop()).rejects.toThrow("pid release failed");
-    expect(emit).toHaveBeenCalledWith(serverStopFailed, {
-      error: new Error("pid release failed"),
+    // The sink is already closed when PID release fails; the stop error/report
+    // carries that failure rather than attempting a late diagnostic write.
+    expect(emit).toHaveBeenCalledWith(serverStopped, {
       reason: "requested",
     });
     await supervisor.start();
@@ -500,6 +501,145 @@ describe("Supervisor", () => {
     finishDiagnostics?.();
     await Promise.all([firstStop, secondStop]);
     expect(disposeDiagnostics).toHaveBeenCalledTimes(1);
-    expect(calls.at(-1)).toBe("diagnostics.dispose");
+    expect(calls.at(-1)).toBe("pid.release");
   });
+});
+
+it("closes admission synchronously and bounds explicit stop including a hanging final save", async () => {
+  const states: DaemonState[] = [];
+  let closed = false;
+  let stopCalls = 0;
+  const supervisor = new Supervisor({
+    pidFile: new RecordingPidFile([]),
+    stateFile: {
+      write(state): Promise<void> {
+        states.push(state);
+        return state.status === "stopped"
+          ? new Promise<void>(() => undefined)
+          : Promise.resolve();
+      },
+    },
+    bootstrap: (): DaemonRuntimeHandle => ({
+      start: (): Promise<void> => Promise.resolve(),
+      closeAdmission: (): void => {
+        closed = true;
+      },
+      stop: (): Promise<void> => {
+        stopCalls++;
+        return Promise.resolve();
+      },
+    }),
+    signalTarget: null,
+    shutdownTimeoutMs: 40,
+  });
+  await supervisor.start();
+  const start = Date.now();
+  const first = supervisor.stop();
+  expect(closed).toBe(true);
+  const second = supervisor.stop();
+  await expect(first).rejects.toThrow(/deadline|timed out/i);
+  await expect(second).rejects.toThrow(/deadline|timed out/i);
+  expect(Date.now() - start).toBeLessThan(180);
+  expect(stopCalls).toBe(1);
+});
+
+it("keeps the PID lock until diagnostics have closed and includes release failure in the final report", async () => {
+  const order: string[] = [];
+  let finishDiagnostics: (() => void) | undefined;
+  const reports: import("./types.js").DaemonShutdownReport[] = [];
+  const release = vi.fn(() => {
+    order.push("release");
+    return Promise.reject(new Error("unlink unavailable"));
+  });
+  const disposeDiagnostics = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finishDiagnostics = (): void => {
+          order.push("diagnostics");
+          resolve();
+        };
+      }),
+  );
+  const supervisor = new Supervisor({
+    pidFile: {
+      acquire: (): Promise<DaemonPidLock> =>
+        Promise.resolve({
+          record: { pid: process.pid, token: "original", startedAt: 1 },
+          release,
+        }),
+    },
+    stateFile: {
+      write: (): Promise<void> => Promise.resolve(),
+      writeShutdownReport: (report): Promise<void> => {
+        order.push("report");
+        reports.push(report);
+        return Promise.resolve();
+      },
+    },
+    bootstrap: (): DaemonRuntimeHandle => new RecordingRuntime([]),
+    disposeDiagnostics,
+    signalTarget: null,
+  });
+  await supervisor.start();
+  const stopped = supervisor.stop();
+  const rejected = expect(stopped).rejects.toThrow("unlink unavailable");
+  try {
+    await vi.waitFor(() => {
+      expect(disposeDiagnostics).toHaveBeenCalledOnce();
+    });
+    expect(release).not.toHaveBeenCalled();
+  } finally {
+    finishDiagnostics?.();
+    await rejected;
+  }
+  expect(order).toEqual(["diagnostics", "release", "report"]);
+  expect(reports).toHaveLength(1);
+  expect(reports[0]?.cleanup).toEqual({
+    status: "unconfirmed",
+    errors: ["pid.release: unlink unavailable"],
+  });
+});
+
+it("treats a returned unconfirmed cleanup result as shutdown failure", async () => {
+  const supervisor = new Supervisor({
+    pidFile: new RecordingPidFile([]),
+    stateFile: new CapturingStateFile(),
+    bootstrap: (): DaemonRuntimeHandle => ({
+      start: (): Promise<void> => Promise.resolve(),
+      stop: (): Promise<import("ohbaby-agent").CleanupResult> =>
+        Promise.resolve({
+          status: "unconfirmed" as const,
+          errors: ["tool still active"],
+        }),
+    }),
+    signalTarget: null,
+  });
+  await supervisor.start();
+  await expect(supervisor.stop()).rejects.toThrow("tool still active");
+});
+
+it("records the final stop diagnostic before disposing its logger", async () => {
+  let loggerClosed = false;
+  const recorded: unknown[] = [];
+  const supervisor = new Supervisor({
+    pidFile: new RecordingPidFile([]),
+    stateFile: new CapturingStateFile(),
+    bootstrap: (): DaemonRuntimeHandle => ({
+      start: () => Promise.resolve(),
+      stop: () => Promise.resolve(),
+    }),
+    signalTarget: null,
+    logger: {
+      emit(definition): void {
+        if (!loggerClosed) recorded.push(definition);
+      },
+    },
+    disposeDiagnostics: (): Promise<void> => {
+      loggerClosed = true;
+      return Promise.resolve();
+    },
+  });
+  await supervisor.start();
+  await supervisor.stop();
+  expect(recorded).toContain(serverStopped);
 });

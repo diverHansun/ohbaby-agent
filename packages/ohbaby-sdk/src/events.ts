@@ -1,3 +1,15 @@
+import type { UiPermissionEvent } from "./permission.js";
+import type { UiSubagentConversationEvent } from "./subagent.js";
+import type {
+  UiSessionRecoveryEvent,
+  UiSessionIndexInvalidatedEvent,
+  UiModelInvalidatedEvent,
+} from "./session-view.js";
+export type {
+  UiPermissionRequestedEvent,
+  UiPermissionResolvedEvent,
+  UiPermissionUnavailableEvent,
+} from "./permission.js";
 import type {
   UiSlashCommandAction,
   UiSlashCommandError,
@@ -9,7 +21,6 @@ import type {
   UiMessage,
   UiGoal,
   UiPermissionState,
-  UiPermissionRequest,
   UiRun,
   UiRunStatus,
   UiSession,
@@ -130,18 +141,6 @@ export interface UiTodoUpdatedEvent {
   readonly timestamp?: number;
 }
 
-export interface UiPermissionRequestedEvent {
-  readonly type: "permission.requested";
-  readonly request: UiPermissionRequest;
-  readonly timestamp?: number;
-}
-
-export interface UiPermissionResolvedEvent {
-  readonly type: "permission.resolved";
-  readonly requestId: string;
-  readonly timestamp?: number;
-}
-
 export interface UiNotice {
   readonly id: string;
   readonly key?: string;
@@ -210,7 +209,23 @@ export interface UiInteractionResolvedEvent {
   readonly timestamp: number;
 }
 
+/** Local transport notification; never a business revision or a snapshot replacement. */
+export interface UiSessionResyncRequiredEvent {
+  readonly type: "session.resync-required";
+  readonly runtimeEpoch: string;
+  readonly sessionId: string | null;
+  readonly bindingGeneration?: number;
+  readonly connectionGeneration?: number;
+  readonly disconnected?: boolean;
+  readonly unsupported?: boolean;
+}
+
 export type UiEvent =
+  | UiSubagentConversationEvent
+  | UiSessionResyncRequiredEvent
+  | UiSessionRecoveryEvent
+  | UiSessionIndexInvalidatedEvent
+  | UiModelInvalidatedEvent
   | UiSnapshotReplacedEvent
   | UiRuntimeUpdatedEvent
   | UiPermissionUpdatedEvent
@@ -227,8 +242,7 @@ export type UiEvent =
   | UiContextWindowUpdatedEvent
   | UiGoalUpdatedEvent
   | UiTodoUpdatedEvent
-  | UiPermissionRequestedEvent
-  | UiPermissionResolvedEvent
+  | UiPermissionEvent
   | UiNoticeEmittedEvent
   | UiCommandStartedEvent
   | UiCommandResultDeliveredEvent

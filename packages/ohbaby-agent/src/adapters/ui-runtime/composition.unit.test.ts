@@ -417,7 +417,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(toolNames).not.toContain("agent_close");
   });
 
-  it("marks only owned persisted subagents interrupted when runtime starts", async () => {
+  it("leaves persisted subagents for the owner-aware session recovery gate", async () => {
     const bus = createBus();
     const store = new InMemorySubagentInstanceStore();
     const owned: SubagentInstanceRecord = {
@@ -471,7 +471,7 @@ describe("createUiRuntimeComposition skill tools", () => {
         parentSessionId: "session_parent",
         subagentId: "subagent_1",
       }),
-    ).resolves.toMatchObject({ status: "interrupted" });
+    ).resolves.toMatchObject({ status: "running" });
     await expect(
       store.get({
         parentSessionId: "session_parent",
@@ -771,8 +771,8 @@ describe("createUiRuntimeComposition skill tools", () => {
   it("interrupts a parent subagent tree from durable run identity after manager eviction", async () => {
     const bus = createBus();
     const runLedger = createInMemoryRunLedger();
-    const interruptByParent = vi
-      .spyOn(SessionSubagentHost.prototype, "interruptByParent")
+    const interruptByRootRun = vi
+      .spyOn(SessionSubagentHost.prototype, "interruptByRootRun")
       .mockResolvedValue([]);
     const composition = await createUiRuntimeComposition({
       agentManager: new AgentManager(),
@@ -804,14 +804,14 @@ describe("createUiRuntimeComposition skill tools", () => {
       ).resolves.toBeUndefined();
 
       expect(cancelRun).not.toHaveBeenCalled();
-      expect(interruptByParent).toHaveBeenCalledWith(
-        "session_parent",
+      expect(interruptByRootRun).toHaveBeenCalledWith(
+        "run_evicted",
         "user cancelled",
       );
     } finally {
       getRun.mockRestore();
       cancelRun.mockRestore();
-      interruptByParent.mockRestore();
+      interruptByRootRun.mockRestore();
       await composition.dispose();
     }
   });
@@ -1487,6 +1487,13 @@ describe("createUiRuntimeComposition skill tools", () => {
       skillRegistry: createMutableSkillRegistry([]),
     });
 
+    await composition.ensureSessionRecord({
+      id: "session_1",
+      agentName: "build",
+      projectRoot: process.cwd(),
+      title: "MCP resource test",
+    });
+
     await expect(
       composition.toolScheduler.execute({
         agentName: "build",
@@ -1650,6 +1657,13 @@ describe("createUiRuntimeComposition skill tools", () => {
         mcpTools: [mcpTool(toolName, "Look up repository release notes")],
         policyMode: "agent",
       });
+
+    await composition.ensureSessionRecord({
+      id: "session_search_mcp",
+      agentName: "build",
+      projectRoot: workdir,
+      title: "MCP search test",
+    });
 
     const searchResult = await composition.toolScheduler.execute({
       agentName: "build",

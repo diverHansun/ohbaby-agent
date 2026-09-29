@@ -10,12 +10,12 @@
 
 加入 `packages/ohbaby-server/package.json` `dependencies`：
 
-| 依赖 | 用途 |
-|------|------|
-| `hono` | app + 路由 + 中间件 |
-| `@hono/node-server` | `ohbaby serve` 监听（Node 适配） |
+| 依赖                | 用途                                                  |
+| ------------------- | ----------------------------------------------------- |
+| `hono`              | app + 路由 + 中间件                                   |
+| `@hono/node-server` | `ohbaby serve` 监听（Node 适配）                      |
 | `@hono/zod-openapi` | 未采用；当前不为内部 Browser client 建 OpenAPI 生成链 |
-| `zod` | 未因本 surface 新增；当前 route 使用显式校验 |
+| `zod`               | 未因本 surface 新增；当前 route 使用显式校验          |
 
 > 守 G2：这些依赖**只进 `ohbaby-server`**，绝不进 `ohbaby-agent`。默认 CLI 直连路径不引入它们（ADR-001）。
 
@@ -24,36 +24,42 @@
 ## 2. 增量步骤（每步一 commit，跑全量门）
 
 ### M1 · 抽 client-view（行为不变）
+
 - 从 `server.ts` 平移 `snapshotForClient` / `routeEventForClient` / `activeSessionId` 推进 / command·permission 归属 → `coordination/client-view.ts`（纯函数）。
 - `server.ts` 改调 client-view，**行为不变**。
 - 补 client-view 单测（[`05`](./05-consumption-path-unification.md) §3.2）。
 - 门：现有 `server.integration.test.ts`、`client.integration.test.ts` 全绿。
 
 ### M2 · 立 Hono app 骨架 + health（不切流量）
+
 - 新增 `app/create-app.ts`、`transport/in-process.ts`、`transport/node-listen.ts`。
 - 仅挂 `GET /health` + 全局 logger/error 中间件。
 - `lifecycle/server-main.ts` 暂时**仍用旧 `server.ts`**对外，Hono app 仅自测。
 - 门：`app.request("/health")` 单测；包 build/typecheck 通过。
 
 ### M3 · jsonrpc 迁到 Hono 路由（兼容，行为不变）
+
 - `protocols/jsonrpc/rpc-route.ts`：把 `callBackend` 挂为 `POST /api/rpc`；`/api/events`、`/api/health`、`/api/shutdown` 迁到 Hono。
 - auth 中间件 fail-closed 化（[`01`](./01-app-assembly-and-transport.md) §4）。
 - `server-main` 切到 Hono app（经 `node-listen`）。**删除旧 `server.ts` 的 http 部分**。
 - 门：现有集成测试改打 Hono app（行为应不变）；`ohbaby --remote-port` 手测连通。
 
 ### M4 · event-bus + replay（解 S1）
+
 - `coordination/event-bus.ts`：seqNum + 环形缓冲 + replay（[`03`](./03-event-replay.md)）。
 - `/api/events` 与（即将的）`/v1/events` 事件源切到 event-bus；SSE 写 `id: seqNum`，解析 `Last-Event-ID`。
 - sdk 增 `ConnectionState` + remote client 重连感知。
 - 门：replay 单测（窗内补发 / 窗外 resync）；断线重连集成测试。
 
 ### M5 · CORS + web REST/SSE（已落地；OpenAPI 未采用）
+
 - `middleware/cors.ts`（仅挂 web 路由）。
 - Hono app 中的 `/v1` routes **复用 client-view + event-bus**，业务 DTO 对齐 SDK。
 - 没有引入 `@hono/zod-openapi` 或生成 client；`GET /doc` 是手写信息性 OpenAPI 3.1。Browser client 直接实现 SDK 合同。
 - 门：web 路由契约测试；跨 transport 等价测试（[`05`](./05-consumption-path-unification.md) §3.1）作为漂移回归门；CORS 预检测试。
 
 ### M6 · 多项目 runtime + 用户级 pid/state + serve ps（反多后端）
+
 - `runtime/instance-store.ts`（git-root scope，懒加载/统一回收）、`runtime/workspace-scope.ts`（fail-closed 解析）；唯一性沿用 `runtime/daemon/pid-file.ts` + `state-file.ts`，不新增单 lock 文件。
 - CLI 层：`serve status/stop/ps` 接用户级 pid/state + `GET /v1/connections`。
 - 修 S8（lane key）/ S9（断连清待决）。
@@ -65,14 +71,15 @@
 
 ## 3. 测试矩阵
 
-| 层 | 覆盖 | 落点 |
-|----|------|------|
-| 单元 | client-view 投影、event-bus replay、auth fail-closed、cors origin、scope 解析 | `*.unit.test.ts` |
-| 契约（跨 transport） | direct vs `app.fetch` 单客户端等价（漂移门） | 新增 `consumption-parity.contract.test.ts` |
-| 集成 | jsonrpc `/api/rpc`+SSE、web `/v1/*`+SSE、断线重连、多 scope、并发启动单 server | `*.integration.test.ts` |
-| 协调（P2 专属） | prompt FIFO、审批只回发起方、事件过滤、replay 窗外 resync | `coordination/*.unit/integration` |
+| 层                   | 覆盖                                                                           | 落点                                       |
+| -------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| 单元                 | client-view 投影、event-bus replay、auth fail-closed、cors origin、scope 解析  | `*.unit.test.ts`                           |
+| 契约（跨 transport） | direct vs `app.fetch` 单客户端等价（漂移门）                                   | 新增 `consumption-parity.contract.test.ts` |
+| 集成                 | jsonrpc `/api/rpc`+SSE、web `/v1/*`+SSE、断线重连、多 scope、并发启动单 server | `*.integration.test.ts`                    |
+| 协调（P2 专属）      | prompt FIFO、同根会话多页共享审批、事件过滤、replay 窗外 resync                | `coordination/*.unit/integration`          |
 
 命令（沿用父目录 [`../migration-sequence.md`](../migration-sequence.md) §8）：
+
 ```
 pnpm run lint && pnpm run typecheck
 pnpm run test:unit && pnpm run test:contract && pnpm run test:integration
@@ -84,11 +91,13 @@ pnpm run build
 ## 4. 验收标准
 
 **默认 CLI（不得回退，守 ADR-001 / N2）**
+
 - 默认 `ohbaby` 仍直连 backend，**不 import `hono`**（可用 `rg "from \"hono\"" packages/ohbaby-cli packages/ohbaby-agent` 验证为空）。
 - 默认启动不创建 server 锁/端口；关窗口无残留。
 - 同目录两终端 = 两独立 in-process session（C1 不回退）。
 
 **显式 server**
+
 - `ohbaby serve` 前台启动，打印 url + token + 停止方式；Ctrl+C 干净退出、释放全局锁。
 - 同机第二次 `ohbaby serve` **不**起第二个 server（提示已存在）。
 - `ohbaby --remote-port` / `attach` 经 jsonrpc 连通；web 端经 `/v1/*` + `/v1/events` 连通。
@@ -97,6 +106,7 @@ pnpm run build
 - auth 未带/错 token → 拒（fail-closed）；web 跨 origin 在白名单内放行、白名单外拦。
 
 **漂移门**
+
 - 跨 transport 契约测试绿：单客户端下 direct 与 `app.fetch` 行为等价。
 
 ---

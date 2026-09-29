@@ -1,5 +1,7 @@
+import { assertMutationBudget, EDIT_MAX_BYTES } from "./mutation-budgets.js";
 import { randomUUID } from "node:crypto";
-import fs from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import fs, { type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import type { ToolExecutionContext } from "../../core/tool-scheduler/index.js";
 import {
@@ -13,7 +15,6 @@ import { ToolParameterError } from "./params.js";
 export const DEFAULT_READ_LIMIT = 2_000;
 export const DEFAULT_SEARCH_LIMIT = 100;
 export const MAX_READ_LIMIT = 20_000;
-export const MAX_TEXT_FILE_BYTES = 1_000_000;
 export const MAX_SEARCH_VISITED_FILES = 10_000;
 export const TEXT_FILE_SAMPLE_BYTES = 4_096;
 
@@ -39,15 +40,6 @@ export class BinaryTextFileError extends Error {
   constructor(inputPath: string) {
     super(`Binary files cannot be read as text: ${inputPath}.`);
     this.name = "BinaryTextFileError";
-  }
-}
-
-export class TextFileTooLargeError extends Error {
-  constructor(inputPath: string, sizeBytes: number) {
-    super(
-      `File is too large to read: ${inputPath} (${String(sizeBytes)} bytes).`,
-    );
-    this.name = "TextFileTooLargeError";
   }
 }
 
@@ -169,8 +161,14 @@ function detectBinarySample(buffer: Buffer): boolean {
 }
 
 export function detectLineEnding(text: string): LineEnding {
-  const crlfCount = text.match(/\r\n/gu)?.length ?? 0;
-  const lfCount = text.match(/(?<!\r)\n/gu)?.length ?? 0;
+  let crlfCount = 0;
+  let lfCount = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "\n") {
+      if (text[index - 1] === "\r") crlfCount += 1;
+      else lfCount += 1;
+    }
+  }
   if (crlfCount === 0 && lfCount === 0) {
     return "none";
   }
@@ -184,7 +182,22 @@ export function detectLineEnding(text: string): LineEnding {
 export function convertToLineEnding(
   text: string,
   lineEnding: LineEnding,
+  budget?: { readonly label: string; readonly limit: number },
 ): string {
+  if (budget) {
+    let bytes = Buffer.byteLength(text);
+    for (let index = 0; index < text.length; index += 1) {
+      if (text[index] === "\r" && text[index + 1] === "\n") {
+        if (lineEnding !== "CRLF") bytes -= 1;
+        index += 1;
+      } else if (
+        lineEnding === "CRLF" &&
+        (text[index] === "\r" || text[index] === "\n")
+      )
+        bytes += 1;
+    }
+    assertMutationBudget(budget.label, bytes, budget.limit);
+  }
   const normalized = text.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
   if (lineEnding === "CRLF") {
     return normalized.replace(/\n/gu, "\r\n");
@@ -247,55 +260,128 @@ export function assertExpectedMtimeMs(
   }
 }
 
-export function assertTextFileSize(
-  stats: { readonly size: number },
-  inputPath: string,
-): void {
-  if (stats.size > MAX_TEXT_FILE_BYTES) {
-    throw new TextFileTooLargeError(inputPath, stats.size);
-  }
-}
-
 export async function readTextFileContent(
   filePath: string,
   inputPath = filePath,
+  signal?: AbortSignal,
 ): Promise<TextFileContent> {
-  const stats = await fs.stat(filePath);
-  if (!stats.isFile()) {
-    throw new Error(`Path is not a file: ${inputPath}`);
-  }
-  assertTextFileSize(stats, inputPath);
-
-  const handle = await fs.open(filePath, "r");
-  let sample: Buffer;
-  try {
-    sample = Buffer.alloc(Math.min(TEXT_FILE_SAMPLE_BYTES, stats.size));
-    if (sample.length > 0) {
-      await handle.read(sample, 0, sample.length, 0);
-    }
-  } finally {
-    await handle.close();
-  }
-  if (isProbablyBinaryTextFile(filePath, sample)) {
+  const buffer = await readBoundedFile(
+    filePath,
+    EDIT_MAX_BYTES,
+    "Edit original",
+    signal,
+  );
+  if (
+    isProbablyBinaryTextFile(
+      filePath,
+      buffer.subarray(0, TEXT_FILE_SAMPLE_BYTES),
+    )
+  ) {
     throw new BinaryTextFileError(inputPath);
   }
-
-  const buffer = await fs.readFile(filePath);
-  if (buffer.length > MAX_TEXT_FILE_BYTES) {
-    throw new TextFileTooLargeError(inputPath, buffer.length);
-  }
   const stripped = stripUtf8Bom(buffer);
-  const text = stripped.textBuffer.toString("utf8");
-
+  const text = decodeUtf8(stripped.textBuffer);
+  const stats = await fs.stat(filePath);
   return {
     bom: stripped.bom,
     encoding: "utf8",
     lineEnding: detectLineEnding(text),
-    mtimeMs: normalizeMtimeMs(stats.mtimeMs),
+    mtimeMs: stats.mtimeMs,
     path: filePath,
-    sizeBytes: stats.size,
+    sizeBytes: buffer.length,
     text,
   };
+}
+
+export function decodeUtf8(buffer: Buffer): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      buffer,
+    );
+  } catch {
+    throw new Error(
+      "File is not valid UTF-8. Use Bash with an explicit encoding if needed.",
+    );
+  }
+}
+
+async function openRegularFile(
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<{ handle: FileHandle; stats: Stats }> {
+  signal?.throwIfAborted();
+  const beforeOpen = await fs.stat(filePath);
+  if (!beforeOpen.isFile()) throw new Error(`Path is not a file: ${filePath}`);
+  signal?.throwIfAborted();
+  // A FIFO may replace the regular path between stat and open. On POSIX,
+  // nonblocking open lets fstat reject it without waiting for an external writer.
+  const flags =
+    process.platform === "win32"
+      ? constants.O_RDONLY
+      : constants.O_RDONLY | constants.O_NONBLOCK;
+  const handle = await fs.open(filePath, flags);
+  try {
+    signal?.throwIfAborted();
+    const stats = await handle.stat();
+    if (!stats.isFile()) throw new Error(`Path is not a file: ${filePath}`);
+    signal?.throwIfAborted();
+    return { handle, stats };
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+export async function readBoundedFile(
+  filePath: string,
+  limit: number,
+  label: string,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  const { handle, stats } = await openRegularFile(filePath, signal);
+  try {
+    assertMutationBudget(label, stats.size, limit);
+    // A fixed capacity read also bounds allocation if the file grows after stat.
+    const buffer = Buffer.alloc(Math.min(stats.size + 1, limit + 1));
+    let offset = 0;
+    while (offset < buffer.length) {
+      signal?.throwIfAborted();
+      const { bytesRead } = await handle.read(
+        buffer,
+        offset,
+        Math.min(64 * 1024, buffer.length - offset),
+        offset,
+      );
+      if (!bytesRead) break;
+      offset += bytesRead;
+    }
+    assertMutationBudget(label, offset, limit);
+    if (offset > stats.size)
+      throw new Error("File changed while reading; retry the operation.");
+    signal?.throwIfAborted();
+    return buffer.subarray(0, offset);
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function readWriteTargetHeader(
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<{ bom: boolean; mtimeMs: number; sizeBytes: number }> {
+  const { handle, stats } = await openRegularFile(filePath, signal);
+  try {
+    const header = Buffer.alloc(3);
+    const { bytesRead } = await handle.read(header, 0, 3, 0);
+    signal?.throwIfAborted();
+    return {
+      bom: hasUtf8Bom(header.subarray(0, bytesRead)),
+      mtimeMs: stats.mtimeMs,
+      sizeBytes: stats.size,
+    };
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function resolveWritableFile(
@@ -329,6 +415,28 @@ export async function resolveExistingFileIfPresent(
   }
 }
 
+export async function resolveWritablePreview(
+  context: ToolExecutionContext,
+  inputPath: string,
+): Promise<string> {
+  let candidate = inputPath;
+  const suffix: string[] = [];
+  for (;;) {
+    try {
+      return path.join(
+        await resolvePathForWrite(context, candidate),
+        ...suffix,
+      );
+    } catch (error) {
+      if (!isNodeErrorCode(error, "ENOENT")) throw error;
+      const parent = path.dirname(candidate);
+      if (parent === candidate) throw error;
+      suffix.unshift(path.basename(candidate));
+      candidate = parent;
+    }
+  }
+}
+
 export function resolvePreviewPath(
   context: ToolExecutionContext,
   inputPath: string,
@@ -351,7 +459,9 @@ export async function fileExists(filePath: string): Promise<boolean> {
 export async function writeTextFileAtomic(
   filePath: string,
   content: string,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   const directory = path.dirname(filePath);
   await fs.mkdir(directory, { recursive: true });
   const tempPath = path.join(
@@ -372,6 +482,7 @@ export async function writeTextFileAtomic(
         throw error;
       }
     }
+    signal?.throwIfAborted();
     await fs.rename(tempPath, filePath);
     cleanup = false;
   } finally {
@@ -391,4 +502,22 @@ export async function readWrittenFileMetadata(filePath: string): Promise<{
     mtimeMs: normalizeMtimeMs(stats.mtimeMs),
     sizeBytes: stats.size,
   };
+}
+
+export async function readCommittedFileMetadata(
+  filePath: string,
+  knownSizeBytes: number,
+): Promise<{
+  readonly mtimeMs?: number;
+  readonly sizeBytes: number;
+  readonly metadataWarning?: string;
+}> {
+  try {
+    return await readWrittenFileMetadata(filePath);
+  } catch {
+    return {
+      sizeBytes: knownSizeBytes,
+      metadataWarning: "Change committed; post-write metadata unavailable.",
+    };
+  }
 }

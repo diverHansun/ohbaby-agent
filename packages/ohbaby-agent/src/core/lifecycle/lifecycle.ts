@@ -1,3 +1,13 @@
+import { isRuntimeInputSnapshotChanged } from "./runtime-input-error.js";
+import type { ModelRequestRecord } from "../llm-client/types.js";
+import { ModelObservationError } from "../llm-client/request-observation.js";
+import { ToolBatchEventQueue } from "./tool-event-queue.js";
+import { ToolDeliveryError } from "../tool-scheduler/index.js";
+import { randomUUID } from "node:crypto";
+import {
+  DisplayReasoningOwner,
+  type ReasoningEndReason,
+} from "./display-reasoning.js";
 import {
   isContextOverflowError,
   ProviderRetryExhaustedError,
@@ -30,6 +40,7 @@ import type {
 } from "../message/index.js";
 import type {
   ToolCallRequest,
+  ToolExecutionObservation,
   ToolCallResult,
 } from "../tool-scheduler/index.js";
 import type {
@@ -73,6 +84,8 @@ interface StepResult {
 }
 
 interface ModelStepParams {
+  readonly currentRunInputs?: LifecycleSessionParams["currentRunInputs"];
+  readonly runId?: string;
   readonly modelId: string;
   readonly reasoning?: LifecycleSessionParams["reasoning"];
   readonly sessionId: string;
@@ -102,6 +115,11 @@ function providerFailure(error: unknown):
       readonly terminalReason: LifecycleResult["terminalReason"];
     }
   | undefined {
+  if (error instanceof ModelObservationError)
+    return {
+      finalResponse: error.message,
+      terminalReason: "model_persistence_failure",
+    };
   if (error instanceof ProviderRetryExhaustedError) {
     return {
       finalResponse: `LLM provider is unavailable after ${String(error.attempts)} retries. Retry or resume this run when the connection recovers.`,
@@ -319,14 +337,135 @@ async function markAssistantMessageError(
 
 export class Lifecycle {
   private readonly deps: LifecycleDeps;
+  private readonly displayReasoning: DisplayReasoningOwner;
+  private sourceOrder = 0;
+  private readonly activeModelRequests = new Map<
+    string,
+    { readonly request: ModelRequestRecord; readonly saved: Promise<unknown> }
+  >();
+
+  private async closeModelRequests(
+    runId: string | undefined,
+    endedAt: number,
+  ): Promise<void> {
+    if (!runId) return;
+    for (const [id, active] of this.activeModelRequests) {
+      if (active.request.runId !== runId) continue;
+      await active.saved;
+      const latest = this.activeModelRequests.get(id);
+      if (!latest) continue;
+      if (latest.request.endedAt !== undefined) await latest.saved;
+      else
+        await this.deps.messageManager.updateMessage(latest.request.messageId, {
+          modelRequests: [{ ...latest.request, endedAt, outcome: "aborted" }],
+        });
+      this.activeModelRequests.delete(id);
+    }
+  }
 
   constructor(deps: LifecycleDeps) {
     this.deps = deps;
+    this.displayReasoning =
+      deps.displayReasoning ??
+      new DisplayReasoningOwner({
+        save: (part): Promise<unknown> =>
+          deps.messageManager.saveReasoningPart(part),
+      });
   }
 
   async *run(
     params: LifecycleSessionParams,
     config: LifecycleConfig = {},
+  ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
+    const controller = new AbortController();
+    const signal = params.signal
+      ? AbortSignal.any([params.signal, controller.signal])
+      : controller.signal;
+    let active = true;
+    let completed = false;
+    let failure: ToolDeliveryError | undefined;
+    let rejectFailure!: (error: ToolDeliveryError) => void;
+    const failed = new Promise<never>((_resolve, reject) => {
+      rejectFailure = reject;
+    });
+    void failed.catch(() => undefined);
+    const onDeliveryError = (error: Error): void => {
+      if (!active || failure) return;
+      failure =
+        error instanceof ToolDeliveryError
+          ? error
+          : new ToolDeliveryError(error);
+      controller.abort(failure);
+      rejectFailure(failure);
+    };
+    const throwIfDeliveryFailed = (): void => {
+      if (failure) throw failure;
+    };
+    const loop = this.runTurn({ ...params, signal }, config, onDeliveryError);
+    let latestContext:
+      | Extract<LifecycleEvent, { type: "context:prepared" | "turn:start" }>
+      | undefined;
+    let step = 0;
+    try {
+      for (;;) {
+        throwIfDeliveryFailed();
+        const next = await Promise.race([loop.next(), failed]);
+        throwIfDeliveryFailed();
+        if (next.done) {
+          completed = true;
+          return next.value;
+        }
+        const event = next.value;
+        if (event.type === "context:prepared" || event.type === "turn:start")
+          latestContext = event;
+        if ("step" in event && event.step !== undefined) step = event.step;
+        if (event.type === "turn:end") active = false;
+        yield event;
+      }
+    } catch (error) {
+      if (!failure) throw error;
+      active = false;
+      await this.closeModelRequests(params.runId, Date.now());
+      if (latestContext)
+        yield {
+          type: "turn:end",
+          runId: params.runId,
+          sessionId: params.sessionId,
+          contextScopeId: params.contextScopeId,
+          step,
+          timestamp: Date.now(),
+          usage: latestContext.usage,
+          finishReason: "error",
+        };
+      return {
+        success: false,
+        finishReason: "error",
+        finalResponse: "Tool observations could not be saved",
+        terminalReason: "tool_persistence_failure",
+        failureCause: failure,
+      };
+    } finally {
+      active = false;
+      if (!completed) {
+        controller.abort(failure);
+        await this.closeModelRequests(params.runId, Date.now());
+        // An uncooperative provider cannot delay fatal delivery. Its pending next
+        // remains observed by the race, and return closes it when it cooperates.
+        void loop
+          .return({
+            success: false,
+            finishReason: "error",
+            finalResponse: "Run interrupted",
+          })
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  private async *runTurn(
+    params: LifecycleSessionParams,
+    config: LifecycleConfig,
+    onDeliveryError: (error: Error) => void,
   ): AsyncGenerator<LifecycleEvent, LifecycleResult, void> {
     params = {
       ...params,
@@ -362,6 +501,7 @@ export class Lifecycle {
     let finalResponse = "";
     const allToolCalls: ParsedToolCall[] = [];
     let turnStarted = false;
+    let staleInputRetries = 0;
     let promptSnapshot: AgentRunPromptSnapshot | undefined;
     const activeReasoningByMessageId = new Map<string, string>();
 
@@ -378,6 +518,10 @@ export class Lifecycle {
       }
 
       const isFinalStep = step === maxSteps;
+      const protectedInputs = await params.currentRunInputs?.beforeStep(
+        params.signal,
+        isFinalStep,
+      );
       const resolvedStepTools =
         (await this.deps.resolveTools?.({
           agentName: params.agent,
@@ -410,6 +554,8 @@ export class Lifecycle {
         ? [buildMaxStepsFinalizationMessage()]
         : undefined;
       let prepared = yield* this.prepareTurnWithProgress({
+        runId: params.runId,
+        protectedInputs,
         reasoning: mergeReasoningIntent(params.reasoning),
         ...(tailDirectives === undefined ? {} : { tailDirectives }),
         ...(activeReasoningByMessageId.size === 0
@@ -461,6 +607,8 @@ export class Lifecycle {
       });
 
       const runParams: ModelStepParams = {
+        currentRunInputs: params.currentRunInputs,
+        runId: params.runId,
         modelId: params.modelId,
         reasoning: params.reasoning,
         agent: params.agent,
@@ -481,6 +629,10 @@ export class Lifecycle {
           step,
         });
       } catch (error) {
+        if (isRuntimeInputSnapshotChanged(error) && ++staleInputRetries <= 3) {
+          step -= 1;
+          continue;
+        }
         const failure = providerFailure(error);
         if (failure) {
           finalResponse = failure.finalResponse;
@@ -507,6 +659,8 @@ export class Lifecycle {
         }
 
         prepared = yield* this.prepareTurnWithProgress({
+          runId: params.runId,
+          protectedInputs,
           reasoning: mergeReasoningIntent(params.reasoning),
           ...(tailDirectives === undefined ? {} : { tailDirectives }),
           ...(activeReasoningByMessageId.size === 0
@@ -552,6 +706,13 @@ export class Lifecycle {
             step,
           });
         } catch (retryError) {
+          if (
+            isRuntimeInputSnapshotChanged(retryError) &&
+            ++staleInputRetries <= 3
+          ) {
+            step -= 1;
+            continue;
+          }
           const failure = providerFailure(retryError);
           if (failure) {
             finalResponse = failure.finalResponse;
@@ -598,6 +759,7 @@ export class Lifecycle {
         }
       }
       const { assistantMessage, finalEvent } = stepResult;
+      staleInputRetries = 0;
       finalResponse = stepResult.finalResponse;
       if (
         assistantMessage?.role === "assistant" &&
@@ -835,6 +997,7 @@ export class Lifecycle {
             tools: parsedToolCalls.map((call) => ({
               ...call,
               argumentsJson: JSON.stringify(call.arguments),
+              metadata: { sourceOrder: ++this.sourceOrder },
             })),
             tokenUsage: finalEvent.tokenUsage,
             finishReason: finalEvent.finishReason ?? "stop",
@@ -905,6 +1068,15 @@ export class Lifecycle {
           sessionId: params.sessionId,
           step,
         });
+        if (
+          !isFinalStep &&
+          ((await params.currentRunInputs?.beforeFinish(params.signal)) ===
+            "continue" ||
+            params.signal?.aborted)
+        ) {
+          parentMessageId = assistantMessage?.id ?? parentMessageId;
+          continue;
+        }
         yield this.createTurnEndEvent(turn);
         return {
           success: true,
@@ -970,12 +1142,11 @@ export class Lifecycle {
           step,
           toolName: toolCall.name,
         });
-        await this.updateToolPart(toolParts.get(toolCall.id), {
-          input: toolCall.arguments,
-          status: "running",
-        });
         yield {
           type: "tool:start",
+          runId: params.runId,
+          messageId: assistantMessage?.id,
+          partId: toolParts.get(toolCall.id)?.id,
           callId: toolCall.id,
           contextScopeId: params.contextScopeId,
           params: toolCall.arguments,
@@ -986,12 +1157,35 @@ export class Lifecycle {
         };
       }
 
-      const toolResults = await this.executeToolCalls({
-        assistantMessage,
-        params: runParams,
-        step,
-        toolCalls,
-      });
+      let toolResults: ToolCallResult[];
+      try {
+        toolResults = yield* this.executeToolCalls({
+          assistantMessage,
+          params: runParams,
+          step,
+          toolCalls,
+          toolParts,
+          onDeliveryError,
+        });
+      } catch (error) {
+        yield this.createTurnEndEvent({
+          contextScopeId: params.contextScopeId,
+          finalResponse: "Tool observations could not be saved",
+          finishReason: "error",
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse: "Tool observations could not be saved",
+          terminalReason: "tool_persistence_failure",
+          failureCause: error,
+          usage,
+          toolCalls: allToolCalls,
+        };
+      }
       const resultByCallId = new Map(
         toolResults.map((result) => [result.callId, result] as const),
       );
@@ -1001,10 +1195,6 @@ export class Lifecycle {
         if (!result) {
           continue;
         }
-        await this.updateToolPart(
-          toolParts.get(toolCall.id),
-          resultToToolState(result, toolCall.arguments),
-        );
         await config.afterToolCall?.({
           callId: result.callId,
           contextScopeId: params.contextScopeId,
@@ -1014,17 +1204,6 @@ export class Lifecycle {
           step,
           toolName: toolCall.name,
         });
-        yield {
-          type: "tool:result",
-          callId: result.callId,
-          contextScopeId: params.contextScopeId,
-          params: toolCall.arguments,
-          result,
-          sessionId: params.sessionId,
-          step,
-          timestamp: Date.now(),
-          toolName: toolCall.name,
-        };
       }
 
       yield {
@@ -1080,6 +1259,12 @@ export class Lifecycle {
       }
 
       if (config.shouldStopAfterTurn?.(turn) === true) {
+        if (
+          (await params.currentRunInputs?.beforeFinish(params.signal)) ===
+            "continue" ||
+          params.signal?.aborted
+        )
+          continue;
         yield this.createTurnEndEvent(turn);
         return {
           success: true,
@@ -1105,6 +1290,7 @@ export class Lifecycle {
     readonly step: number;
   }): AsyncGenerator<LifecycleEvent, StepResult, void> {
     const { params, step } = input;
+    const currentRunInputs = params.currentRunInputs;
     const requestClient = {
       ...this.deps.llmClient,
       config: { ...this.deps.llmClient.config, model: params.modelId },
@@ -1117,20 +1303,13 @@ export class Lifecycle {
         })
       | undefined;
     let previousContent = "";
+    let previousToolSnapshot = "[]";
     let previousReasoning = "";
-    let reasoningEnded = false;
+    const reasoningState = { ended: false };
     let assistantTextPart: Part | undefined;
     let modelState: ModelState | undefined;
     let streamStopReason: StepResult["streamStopReason"];
     let observedUsage: TokenUsage | undefined;
-
-    yield {
-      type: "llm:start",
-      contextScopeId: params.contextScopeId,
-      sessionId: params.sessionId,
-      step,
-      timestamp: Date.now(),
-    };
 
     const assistantMessage = await this.deps.messageManager.createMessage({
       ...(params.contextScopeId === undefined
@@ -1138,18 +1317,96 @@ export class Lifecycle {
         : { contextScopeId: params.contextScopeId }),
       sessionId: params.sessionId,
       role: "assistant",
+      runId: params.runId,
       agent: params.agent ?? "default",
       parentId: input.parentMessageId,
       providerId: this.deps.llmClient.config.provider,
       modelId: params.modelId,
     });
 
+    let reasoningPartId = randomUUID();
+    let segmentReasoning = "";
+    let reasoningSourceOrder: number | undefined;
+    const identity = {
+      contextScopeId: params.contextScopeId,
+      sessionId: params.sessionId,
+      runId: params.runId,
+      messageId: assistantMessage.id,
+    };
+    yield {
+      type: "llm:start",
+      ...identity,
+      contextScopeId: params.contextScopeId,
+      step,
+      timestamp: Date.now(),
+    };
+    const finishReasoning = async (
+      endReason: ReasoningEndReason,
+    ): Promise<
+      Extract<LifecycleEvent, { type: "llm:reasoning-end" }> | undefined
+    > => {
+      if (!segmentReasoning || reasoningState.ended) return undefined;
+      reasoningState.ended = true;
+      await this.displayReasoning.finish(reasoningPartId, endReason);
+      return {
+        type: "llm:reasoning-end",
+        ...identity,
+        partId: reasoningPartId,
+        contextScopeId: params.contextScopeId,
+        content: segmentReasoning,
+        endReason,
+        step,
+        timestamp: Date.now(),
+      };
+    };
     try {
       for await (const response of streamResponse(
         requestClient,
         [...input.request.messages],
         {
           purpose: "agent-step",
+          ...(currentRunInputs
+            ? {
+                beforeRequestAttempt: (request: ModelRequestRecord) =>
+                  currentRunInputs.admitRequestAttempt(
+                    { ...request, inputIds: input.request.inputIds ?? [] },
+                    params.signal,
+                  ),
+              }
+            : {}),
+          ...(params.runId === undefined
+            ? {}
+            : {
+                requestOwner: {
+                  runId: params.runId,
+                  messageId: assistantMessage.id,
+                  step,
+                },
+                onRequestObservation: async (
+                  fact: import("../llm-client/types.js").ModelRequestObservation,
+                ): Promise<void> => {
+                  const saved = this.deps.messageManager.updateMessage(
+                    assistantMessage.id,
+                    { modelRequests: [fact.request] },
+                  );
+                  this.activeModelRequests.set(fact.request.requestId, {
+                    request: fact.request,
+                    saved,
+                  });
+                  try {
+                    await saved;
+                    if (fact.request.outcome === "success")
+                      await params.currentRunInputs?.confirmRequestSuccess(
+                        fact.request.requestId,
+                      );
+                  } catch (error) {
+                    this.activeModelRequests.delete(fact.request.requestId);
+                    throw error;
+                  }
+                  if (fact.request.endedAt !== undefined)
+                    this.activeModelRequests.delete(fact.request.requestId);
+                },
+              }),
           reasoning: mergeReasoningIntent(params.reasoning),
           sessionId: params.sessionId,
           ...(params.contextScopeId === undefined
@@ -1159,6 +1416,32 @@ export class Lifecycle {
           tools: input.request.tools,
         },
       )) {
+        if (response.requestObservation) {
+          const { type, request } = response.requestObservation;
+          const timestamp =
+            type === "request-started"
+              ? request.startedAt
+              : type === "first-text"
+                ? request.firstTextAt
+                : request.endedAt;
+          if (timestamp === undefined)
+            throw new ModelObservationError(
+              "Missing request observation timestamp",
+            );
+          yield {
+            type:
+              type === "request-started"
+                ? "llm:request-started"
+                : type === "first-text"
+                  ? "llm:first-text"
+                  : "llm:request-ended",
+            ...identity,
+            step,
+            request,
+            timestamp,
+          };
+          continue;
+        }
         if (response.modelState) modelState = response.modelState;
         if (response.streamStopReason)
           streamStopReason = response.streamStopReason;
@@ -1181,11 +1464,29 @@ export class Lifecycle {
           const content =
             response.reasoningText ??
             `${previousReasoning}${response.reasoningTextDelta}`;
+          if (reasoningState.ended) {
+            reasoningPartId = randomUUID();
+            segmentReasoning = "";
+            reasoningState.ended = false;
+            reasoningSourceOrder = undefined;
+          }
+          reasoningSourceOrder ??= ++this.sourceOrder;
           previousReasoning = content;
+          segmentReasoning += response.reasoningTextDelta;
+          await this.displayReasoning.update(
+            {
+              ...identity,
+              partId: reasoningPartId,
+              metadata: { sourceOrder: reasoningSourceOrder },
+            },
+            segmentReasoning,
+          );
           yield {
             type: "llm:reasoning-delta",
+            runId: params.runId,
+            partId: reasoningPartId,
             contextScopeId: params.contextScopeId,
-            content,
+            content: segmentReasoning,
             delta: response.reasoningTextDelta,
             messageId: assistantMessage.id,
             sessionId: params.sessionId,
@@ -1195,19 +1496,21 @@ export class Lifecycle {
         }
         const content = getTextContent(response.messageSnapshot);
 
+        const toolSnapshot = JSON.stringify(
+          response.messageSnapshot.toolCalls ?? [],
+        );
+        if (
+          toolSnapshot !== previousToolSnapshot &&
+          (response.messageSnapshot.toolCalls?.length ?? 0) > 0
+        ) {
+          const reasoningEnd = await finishReasoning("normal");
+          if (reasoningEnd) yield reasoningEnd;
+        }
+        previousToolSnapshot = toolSnapshot;
+
         if (content !== "" && content !== previousContent) {
-          if (previousReasoning !== "" && !reasoningEnded) {
-            reasoningEnded = true;
-            yield {
-              type: "llm:reasoning-end",
-              contextScopeId: params.contextScopeId,
-              content: previousReasoning,
-              messageId: assistantMessage.id,
-              sessionId: params.sessionId,
-              step,
-              timestamp: Date.now(),
-            };
-          }
+          const reasoningEnd = await finishReasoning("normal");
+          if (reasoningEnd) yield reasoningEnd;
           const delta = content.startsWith(previousContent)
             ? content.slice(previousContent.length)
             : content;
@@ -1227,12 +1530,15 @@ export class Lifecycle {
               {
                 type: "text",
                 text: content,
+                metadata: { sourceOrder: ++this.sourceOrder },
               },
             );
           }
 
           yield {
             type: "llm:delta",
+            ...identity,
+            partId: assistantTextPart.id,
             messageSnapshot: response.messageSnapshot,
             contextScopeId: params.contextScopeId,
             content,
@@ -1244,19 +1550,20 @@ export class Lifecycle {
         }
 
         if (response.isComplete) {
-          if (previousReasoning !== "" && !reasoningEnded) {
-            reasoningEnded = true;
-            yield {
-              type: "llm:reasoning-end",
-              content: previousReasoning,
-              messageId: assistantMessage.id,
-              sessionId: params.sessionId,
-              step,
-              timestamp: Date.now(),
-            };
-          }
+          const reasoningEnd = await finishReasoning(
+            params.signal?.aborted ||
+              streamStopReason === "user_aborted" ||
+              response.finishReason === "length"
+              ? "interrupted"
+              : response.finishReason === "content_filter"
+                ? "failed"
+                : "normal",
+          );
+          if (reasoningEnd) yield reasoningEnd;
           finalEvent = {
             type: "llm:complete",
+            ...identity,
+            partId: assistantTextPart?.id,
             messageSnapshot: response.messageSnapshot,
             contextScopeId: params.contextScopeId,
             finishReason: response.finishReason,
@@ -1269,17 +1576,15 @@ export class Lifecycle {
         }
       }
     } catch (error) {
-      if (previousReasoning !== "" && !reasoningEnded) {
-        yield {
-          type: "llm:reasoning-end",
-          contextScopeId: params.contextScopeId,
-          content: previousReasoning,
-          messageId: assistantMessage.id,
-          sessionId: params.sessionId,
-          step,
-          timestamp: Date.now(),
-        };
-      }
+      if (error instanceof ModelObservationError) throw error;
+      const reasoningEnd = await finishReasoning(
+        params.signal?.aborted ||
+          (error instanceof ProviderStreamInterruptedError &&
+            error.source !== "protocol")
+          ? "interrupted"
+          : "failed",
+      );
+      if (reasoningEnd) yield reasoningEnd;
       await markAssistantMessageError(
         this.deps.messageManager,
         assistantMessage,
@@ -1288,6 +1593,14 @@ export class Lifecycle {
       throw error;
     }
 
+    const reasoningEnd = await finishReasoning(
+      params.signal?.aborted ||
+        streamStopReason === "user_aborted" ||
+        !finalEvent
+        ? "interrupted"
+        : "normal",
+    );
+    if (reasoningEnd) yield reasoningEnd;
     if (params.signal?.aborted || streamStopReason === "user_aborted") {
       streamStopReason = "user_aborted";
       finalEvent = undefined;
@@ -1426,7 +1739,7 @@ export class Lifecycle {
         {
           type: "tool",
           callId: toolCall.id,
-          ...(metadata === undefined ? {} : { metadata }),
+          metadata: { ...metadata, sourceOrder: ++this.sourceOrder },
           state: {
             input: toolCall.arguments,
             raw: toolCall.rawArguments,
@@ -1443,28 +1756,25 @@ export class Lifecycle {
     return toolParts;
   }
 
-  private async updateToolPart(
-    part: ToolPart | undefined,
-    state: ToolState,
-  ): Promise<void> {
-    if (!part) {
-      return;
-    }
-    await this.deps.messageManager.updatePart(part.id, { state });
-  }
-
-  private executeToolCalls(input: {
+  private async *executeToolCalls(input: {
     readonly assistantMessage?: CoreMessage;
     readonly params: ModelStepParams;
     readonly step: number;
     readonly toolCalls: readonly ResolvedToolCall[];
-  }): Promise<ToolCallResult[]> {
-    const messageId =
-      input.assistantMessage?.id ??
-      input.params.parentMessageId ??
-      `${input.params.sessionId}:assistant:${String(input.step)}`;
+    readonly toolParts: Map<string, ToolPart>;
+    readonly onDeliveryError: (error: Error) => void;
+  }): AsyncGenerator<LifecycleEvent, ToolCallResult[], void> {
+    const messageId = input.assistantMessage?.id;
+    if (!messageId || input.toolParts.size !== input.toolCalls.length)
+      throw new ToolDeliveryError(new Error("Missing tool message part"));
+    const controller = new AbortController();
+    const signal = input.params.signal
+      ? AbortSignal.any([input.params.signal, controller.signal])
+      : controller.signal;
+    const queue = new ToolBatchEventQueue();
     const requests: ToolCallRequest[] = input.toolCalls.map((toolCall) => ({
       callId: toolCall.id,
+      runId: input.params.runId,
       contextScopeId: input.params.contextScopeId,
       environment: input.params.environment,
       agentName: input.params.agent,
@@ -1472,21 +1782,96 @@ export class Lifecycle {
       messageId,
       params: toolCall.arguments,
       sessionId: input.params.sessionId,
-      signal: input.params.signal,
+      signal,
       toolName: toolCall.name,
     }));
-
-    return this.deps.toolScheduler
-      .executeBatch({ calls: requests })
-      .catch((error: unknown) =>
-        input.toolCalls.map((toolCall) => ({
-          callId: toolCall.id,
-          error: {
-            message: `Tool scheduler failed: ${getErrorMessage(error)}`,
-            type: "ExecutionError" as const,
-          },
-          status: "error" as const,
-        })),
-      );
+    const save = async (
+      request: ToolCallRequest,
+      execution: ToolExecutionObservation,
+      result?: ToolCallResult,
+    ): Promise<void> => {
+      const partId = input.toolParts.get(request.callId)?.id;
+      const part = partId
+        ? await this.deps.messageManager.getPart(partId)
+        : undefined;
+      if (
+        !part ||
+        !isToolPart(part) ||
+        part.sessionId !== request.sessionId ||
+        part.messageId !== request.messageId
+      )
+        throw new Error("Tool message part is missing");
+      const previous = part.metadata?.execution;
+      // Late cleanup belongs to this original row and never overwrites a result.
+      const observation =
+        previous?.phase === "ended"
+          ? { ...previous, cleanup: execution.cleanup ?? previous.cleanup }
+          : { ...previous, ...execution };
+      await this.deps.messageManager.updatePart(part.id, {
+        metadata: { ...part.metadata, execution: observation },
+        ...(result
+          ? { state: resultToToolState(result, request.params) }
+          : execution.phase === "executing" && previous?.phase !== "ended"
+            ? { state: { status: "running" as const, input: request.params } }
+            : {}),
+      });
+    };
+    const eventBase = (
+      request: ToolCallRequest,
+    ): Omit<
+      Extract<LifecycleEvent, { type: "tool:state" }>,
+      "type" | "execution"
+    > => ({
+      runId: request.runId,
+      messageId: request.messageId,
+      partId: input.toolParts.get(request.callId)?.id,
+      callId: request.callId,
+      contextScopeId: request.contextScopeId,
+      params: request.params,
+      sessionId: request.sessionId,
+      step: input.step,
+      timestamp: Date.now(),
+      toolName: request.toolName,
+    });
+    const batch = this.deps.toolScheduler.executeBatch({
+      calls: requests,
+      observer: {
+        onDeliveryError: (_request, error) => {
+          input.onDeliveryError(error);
+        },
+        onCallState: async (request, execution) => {
+          await save(request, execution);
+          queue.push({
+            type: "tool:state",
+            ...eventBase(request),
+            execution,
+          });
+        },
+        onCallSettled: async (request, _index, result) => {
+          if (!result.execution)
+            throw new Error("Missing terminal tool observation");
+          await save(request, result.execution, result);
+          queue.push({ type: "tool:result", ...eventBase(request), result });
+        },
+      },
+    });
+    void batch.then(
+      () => {
+        queue.close();
+      },
+      (error: unknown) => {
+        queue.fail(error);
+      },
+    );
+    let completed = false;
+    try {
+      yield* queue.events();
+      const results = await batch;
+      completed = true;
+      return results;
+    } finally {
+      if (!completed) controller.abort();
+      queue.close();
+    }
   }
 }

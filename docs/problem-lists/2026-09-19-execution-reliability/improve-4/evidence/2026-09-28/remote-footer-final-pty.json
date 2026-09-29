@@ -1,0 +1,42 @@
+[
+  {
+    "action": "type draft without submission",
+    "chunk_id": "17c64c",
+    "wall_time_seconds": 1.001534042,
+    "session_id": 23371,
+    "original_token_count": 83,
+    "output": "\u001b[22A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    │ > I4_FOOTER_RECHECK_DRAFT_kept_without_submitting__I4_FOOTER_RECHECK │\u001b[K\r\n\u001b[1G    ╰─_DRAFT_kept_without_submitting__I4_FOOTER_RECHECK_DRAFT_kept_without─╯\u001b[K\r\n\u001b[1G    Queued 2 · auto · default · HECK_DRAFT_kept_without_subm8.1K / 128K (6%)\u001b[K\r\n\u001b[E"
+  },
+  {
+    "action": "clear unsent draft",
+    "chunk_id": "f7f95f",
+    "wall_time_seconds": 1.001872334,
+    "session_id": 23371,
+    "original_token_count": 117,
+    "output": "\u001b[22A\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[E\u001b[1G    │ >                                                                    │\u001b[K\r\n\u001b[1G    ╰──────────────────────────────────────────────────────────────────────╯\u001b[K\r\n\u001b[1G    Queued 2 · auto · default ·                             8.1K / 128K (6%)\u001b[K\r\n\u001b[E"
+  },
+  {
+    "action": "open read-only subagent view for full redraw",
+    "chunk_id": "b8ef37",
+    "wall_time_seconds": 1.00277625,
+    "session_id": 23371,
+    "original_token_count": 133,
+    "output": "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[3A\u001b[1G    Subagents · Read only · Esc back · Ctrl+G root · R retry\u001b[K\r\n\u001b[1G    Prompts, approvals and stop controls remain in the root conversation.\u001b[K\r\n\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n\u001b[3A\u001b[E\u001b[E\u001b[1G    Loading…\u001b[K\r\n\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[3A\u001b[E\u001b[E\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n"
+  },
+  {
+    "action": "return to root and capture final frame",
+    "chunk_id": "54e2ce",
+    "wall_time_seconds": 1.003228375,
+    "session_id": 23371,
+    "original_token_count": 460,
+    "output": "\u001b[3A\u001b[E\u001b[E\u001b[1G    Loading…\u001b[K\r\n\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[3A\u001b[E\u001b[E\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n\u001b[3A\u001b[E\u001b[E\u001b[1G    Loading…\u001b[K\r\n\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[3A\u001b[E\u001b[E\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n\u001b[3A\u001b[E\u001b[E\u001b[1G    Loading…\u001b[K\r\n\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[3A\u001b[E\u001b[E\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n\u001b[3A\u001b[E\u001b[E\u001b[1G    Loading…\u001b[K\r\n\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[3A\u001b[E\u001b[E\u001b[1G    ↑/↓ select · Enter open execution\u001b[K\r\n\u001b[3A\u001b[1G    Ctrl+G subagents · 0 executions\u001b[K\r\n\u001b[1G    | I4_TUI_HOLD\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    I4TUIHOLD_STARTED\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    interrupted · End time unknown (recovered)\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    | I4_TUI_RESPONSE_LOST\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    I4TUIRESPONSELOSTOK\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G    Total 0s\u001b[K\r\n\u001b[1G\u001b[K\r\n\u001b[1G     Queued 2\u001b[K\r\n\u001b[1G     › I4_TUI_C · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     ↳ I4_TUI_E · Retained · Steer unavailable\u001b[K\r\n\u001b[1G     Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer\u001b[K\r\n\u001b[1G    ╭──────────────────────────────────────────────────────────────────────╮\u001b[K\r\n\u001b[1G    │ >                                                                    │\u001b[K\r\n\u001b[1G    ╰──────────────────────────────────────────────────────────────────────╯\u001b[K\r\n\u001b[1G    Queued 2 · auto · default ·                             8.1K / 128K (6%)\u001b[K\r\n\u001b[1G    session_1790597032252_4sa5fy2\u001b[K\r\n"
+  },
+  {
+    "action": "idle Ctrl+C exits and cleanup",
+    "chunk_id": "636817",
+    "wall_time_seconds": 0.000024792,
+    "exit_code": 0,
+    "original_token_count": 37,
+    "output": "\u001b[?25h\u001b[?25h\u001b[?25hFOOTER_RECHECK_CLEANUP {\"tuiExitCode\":0,\"modelRequests\":0,\"daemonExited\":true,\"providerClosed\":true,\"credentialsRemoved\":true}\r\n"
+  }
+]

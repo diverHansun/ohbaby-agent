@@ -1,4 +1,10 @@
-import type { CoreAPI, UiPermissionRequest } from "ohbaby-sdk";
+import { Box, Text, useInput } from "ink";
+import { useState } from "react";
+import type {
+  CoreAPI,
+  UiPermissionRequest,
+  PermissionSyncState,
+} from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { ConfirmDialog } from "./confirm.js";
 import { ModelDialog } from "./model-dialog.js";
@@ -11,20 +17,84 @@ export interface DialogManagerProps {
   readonly client: CoreAPI;
   readonly interactions: readonly TuiInteractionRequest[];
   readonly permissions: readonly UiPermissionRequest[];
+  readonly permissionSync: PermissionSyncState;
+  readonly onRetryPermissions: () => void;
 }
 
 export function DialogManager({
   client,
   interactions,
   permissions,
+  permissionSync,
+  onRetryPermissions,
 }: DialogManagerProps): ReactElement {
+  const [selectedId, setSelectedId] = useState<string | undefined>();
+  const selectedIndex = Math.max(
+    0,
+    permissions.findIndex((request) => request.id === selectedId),
+  );
+  useInput((value) => {
+    if ((value === "[" || value === "]") && permissions.length > 1) {
+      const next =
+        (selectedIndex + (value === "]" ? 1 : -1) + permissions.length) %
+        permissions.length;
+      setSelectedId(permissions[next].id);
+    }
+    if (value.toLowerCase() === "r" && permissionSync.status === "error")
+      onRetryPermissions();
+  });
   if (permissions.length > 0) {
+    const request = permissions[selectedIndex];
+    const binding = permissionSync.binding;
     return (
-      <PermissionDialog
-        client={client}
-        key={permissions[0].id}
-        request={permissions[0]}
-      />
+      <Box flexDirection="column">
+        {permissions.length > 1 ? (
+          <Text dimColor>
+            Request {String(selectedIndex + 1)} of {String(permissions.length)}{" "}
+            · [ / ] choose request
+          </Text>
+        ) : null}
+        <PermissionDialog
+          client={client}
+          request={request}
+          ready={
+            permissionSync.status === "ready" &&
+            binding?.rootSessionId === request.rootSessionId
+          }
+          context={
+            binding === null
+              ? undefined
+              : {
+                  permissionEpoch: binding.permissionEpoch,
+                  rootSessionId: binding.rootSessionId,
+                  ...(binding.bindingGeneration === 0
+                    ? {}
+                    : { bindingGeneration: binding.bindingGeneration }),
+                }
+          }
+          onResync={onRetryPermissions}
+        />
+        {permissionSync.status === "error" ||
+        permissionSync.status === "unavailable" ? (
+          <Text color="red">
+            {permissionSync.error}
+            {permissionSync.status === "error"
+              ? " · R retry approval sync"
+              : ""}
+          </Text>
+        ) : null}
+      </Box>
+    );
+  }
+  if (
+    permissionSync.status === "error" ||
+    permissionSync.status === "unavailable"
+  ) {
+    return (
+      <Text color="red">
+        {permissionSync.error}
+        {permissionSync.status === "error" ? " · R retry approval sync" : ""}
+      </Text>
     );
   }
 

@@ -1,3 +1,8 @@
+import {
+  projectToolExecution,
+  toolExecutionStatus,
+  projectModelActivity,
+} from "ohbaby-sdk";
 import type {
   UiMessage,
   UiMessagePart,
@@ -86,9 +91,21 @@ function toolResultPart(part: ToolPart): UiMessagePart | undefined {
       : part.state.status === "aborted"
         ? (part.state.output ?? "")
         : "";
+  // Tool result metadata is stored on state, separately from scheduler metadata.
+  const subagent =
+    part.tool === "subagent_run" ? part.state.metadata?.subagent : undefined;
+  const execution =
+    typeof subagent === "object" && subagent !== null && "execution" in subagent
+      ? subagent.execution
+      : undefined;
   return {
+    id: part.id,
+    metadata: execution
+      ? { ...part.metadata, subagent: { execution } }
+      : part.metadata,
     result: {
       callId: part.callId,
+      execution: projectToolExecution(part.metadata?.execution),
       ...(outcome.error === undefined ? {} : { error: outcome.error }),
       output,
     },
@@ -114,11 +131,17 @@ function toolStateOutcome(
 
 function toolPartToUiParts(part: ToolPart): UiMessagePart[] {
   const callPart: UiMessagePart = {
+    id: part.id,
+    metadata: part.metadata,
     call: {
       id: part.callId,
       input: toolInput(part.state),
       name: part.tool,
-      status: toolCallStatus(part.state),
+      status: toolExecutionStatus(
+        projectToolExecution(part.metadata?.execution),
+        toolCallStatus(part.state),
+      ),
+      execution: projectToolExecution(part.metadata?.execution),
     },
     type: "tool-call",
   };
@@ -132,10 +155,29 @@ function partToUiParts(part: Part): UiMessagePart[] {
   }
   if (part.type === "model-state") return [];
   if (part.type === "text") {
-    return [{ text: part.text, type: "text" }];
+    return [
+      {
+        id: part.id,
+        text:
+          typeof part.metadata?.displayText === "string"
+            ? part.metadata.displayText
+            : part.text,
+        type: "text",
+        metadata: part.metadata,
+      },
+    ];
   }
   if (part.type === "reasoning") {
-    return [{ text: part.text, type: "reasoning" }];
+    return [
+      {
+        id: part.id,
+        text: part.text,
+        type: "reasoning",
+        metadata: part.metadata,
+        endReason: part.endReason,
+        saveState: "saved",
+      },
+    ];
   }
   if (HIDDEN_TRANSCRIPT_TOOLS.has(part.tool)) {
     return [];
@@ -146,7 +188,13 @@ function partToUiParts(part: Part): UiMessagePart[] {
 export function messageToUiMessage(
   message: MessageWithParts,
 ): UiMessage | undefined {
-  const activeParts = message.parts.filter(isActivePart);
+  const activeParts = message.parts
+    .filter(isActivePart)
+    .sort(
+      (left, right) =>
+        Number(left.metadata?.sourceOrder ?? left.orderIndex) -
+        Number(right.metadata?.sourceOrder ?? right.orderIndex),
+    );
   if (
     message.info.agent === SUMMARY_AGENT_NAME &&
     activeParts.some(isContextSummaryPart)
@@ -160,7 +208,10 @@ export function messageToUiMessage(
   }
 
   const parts = activeParts.flatMap(partToUiParts);
-  if (parts.length === 0) {
+  if (
+    parts.length === 0 &&
+    !(message.info.role === "assistant" && message.info.modelRequests?.length)
+  ) {
     return undefined;
   }
 
@@ -168,7 +219,18 @@ export function messageToUiMessage(
     createdAt: toIsoString(message.info.time.created),
     id: message.info.id,
     parts,
-    role: message.info.role,
+    ...(message.info.runtimeInput
+      ? { runtimeInputKind: message.info.runtimeInput.kind }
+      : {}),
+    role:
+      message.info.runtimeInput &&
+      message.info.runtimeInput.kind !== "user-steer"
+        ? "system"
+        : message.info.role,
+    runId: message.info.runId,
+    ...(message.info.role === "assistant"
+      ? { modelRequests: message.info.modelRequests }
+      : {}),
     ...assistantCompletionFields(message.info),
   };
 }
@@ -222,7 +284,12 @@ function runStatusToUiStatus(record: RunLedgerRecord): UiRunStatus {
   if (record.status === "pending" || record.status === "running") {
     return { kind: "running", runId: record.runId };
   }
-  if (record.status === "succeeded" || record.status === "cancelled") {
+  if (
+    record.status === "succeeded" ||
+    record.status === "cancelled" ||
+    (record.status === "interrupted" &&
+      (record.error === "user-stop" || record.error === "service-shutdown"))
+  ) {
     return { kind: "idle" };
   }
   return {
@@ -232,10 +299,14 @@ function runStatusToUiStatus(record: RunLedgerRecord): UiRunStatus {
   };
 }
 
-function runToUiRun(record: RunLedgerRecord): UiRun {
+export function runToUiRun(record: RunLedgerRecord): UiRun {
   return {
     id: record.runId,
     sessionId: record.sessionId,
+    inputsCloseReason: record.inputsCloseReason,
+    endedAt:
+      record.endedAt === undefined ? undefined : toIsoString(record.endedAt),
+    endTimeSource: record.endTimeSource,
     startedAt: toIsoString(record.startedAt ?? record.createdAt),
     status: runStatusToUiStatus(record),
     updatedAt: toIsoString(
@@ -439,14 +510,48 @@ export function createPersistentUiStateStore(
       return (await options.runLedger.get(runId)) !== undefined;
     },
 
+    async getActiveSessionId(): Promise<string | null> {
+      return (await readSessions()).activeSessionId;
+    },
+
+    async getSessionIndex(): Promise<readonly Omit<UiSession, "messages">[]> {
+      const projectRoot = await currentProjectRoot();
+      const sessions = (
+        await withSessionTransactionRetry(() =>
+          options.sessionManager.listByProjectRoot(projectRoot, {
+            status: "active",
+          }),
+        )
+      ).filter(isPrimarySession);
+      return sessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        projectRoot: session.projectRoot,
+        createdAt: new Date(session.createdAt).toISOString(),
+        updatedAt: new Date(session.updatedAt).toISOString(),
+      }));
+    },
+
     async readSnapshot(): Promise<UiSnapshot> {
       const { activeSessionId, sessions } = await readSessions();
       const runs = await readRuns(sessions);
+      const uiSessions = await Promise.all(sessions.map(readUiSession));
       const snapshot: UiSnapshot = {
+        serverNow: Date.now(),
         activeSessionId,
         permissions: mutable.permissions.map(clonePermission),
-        runs: runs.map(runToUiRun),
-        sessions: await Promise.all(sessions.map(readUiSession)),
+        runs: runs.map((record) => {
+          const run = runToUiRun(record);
+          return {
+            ...run,
+            modelActivity: projectModelActivity(
+              run,
+              uiSessions.find((session) => session.id === run.sessionId)
+                ?.messages ?? [],
+            ),
+          };
+        }),
+        sessions: uiSessions,
         status: snapshotStatus({ activeSessionId, runs }),
       };
       return cloneSnapshot(snapshot);
@@ -464,20 +569,10 @@ export function createPersistentUiStateStore(
         : undefined;
     },
 
-    async upsertSession(session: UiSession): Promise<void> {
-      const existing = await withSessionTransactionRetry(() =>
-        options.sessionManager.get(session.id),
-      );
-      if (!existing) {
-        return;
-      }
-      if (existing.title !== session.title) {
-        await withSessionTransactionRetry(() =>
-          options.sessionManager.update(session.id, {
-            title: session.title,
-          }),
-        );
-      }
+    upsertSession(_session: UiSession): Promise<void> {
+      // Persisted metadata belongs to SessionManager. Projection snapshots may
+      // be stale after a concurrent rename and must never write titles back.
+      return Promise.resolve();
     },
 
     setActiveSessionId(sessionId: string | null): Promise<void> {

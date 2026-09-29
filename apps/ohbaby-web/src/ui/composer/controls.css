@@ -1,0 +1,86 @@
+.ohb-reasoning-control {
+  display: inline-flex;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.ohb-reasoning-control select {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #54565c;
+  cursor: pointer;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  min-height: 30px;
+  padding: 0 29px 0 31px;
+}
+
+.ohb-reasoning-control select:hover {
+  border-color: #c6cfdd;
+}
+
+.ohb-reasoning-control select:focus-visible {
+  border-color: #5f86c4;
+  outline: 2px solid #5f86c4;
+  outline-offset: 2px;
+}
+
+.ohb-reasoning-icon,
+.ohb-reasoning-chevron {
+  color: #79879b;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.ohb-reasoning-icon {
+  left: 10px;
+}
+
+.ohb-reasoning-chevron {
+  right: 9px;
+}
+
+.ohb-reasoning-status {
+  color: #818792;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.ohb-reasoning-detecting,
+.ohb-reasoning-unknown {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  min-height: 30px;
+}
+
+.ohb-reasoning-spinner {
+  animation: ohb-spin 1s linear infinite;
+}
+
+.ohb-reasoning-error {
+  background: #ffffff;
+  border: 1px solid #e6ccc7;
+  border-radius: 7px;
+  bottom: calc(100% + 8px);
+  color: #a44f43;
+  font-size: 12px;
+  max-width: min(300px, 80vw);
+  padding: 8px 10px;
+  position: absolute;
+  right: 0;
+  width: max-content;
+}
+
+.ohb-composer-hint {
+  align-items: center;
+  color: #aeb2ba;
+  display: inline-flex;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  gap: 5px;
+}

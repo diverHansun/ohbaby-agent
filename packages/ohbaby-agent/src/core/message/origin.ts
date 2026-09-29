@@ -3,6 +3,7 @@ import type { MessageWithParts } from "./types.js";
 export const MODEL_CONTEXT_RUNTIME_KIND = "model-context:runtime:v1";
 
 export type MessageOrigin =
+  | "runtime"
   | "assistant"
   | "summary"
   | "system"
@@ -10,6 +11,11 @@ export type MessageOrigin =
   | "user";
 
 export function getMessageOrigin(message: MessageWithParts): MessageOrigin {
+  if (
+    message.info.runtimeInput &&
+    message.info.runtimeInput.kind !== "user-steer"
+  )
+    return "runtime";
   if (message.parts.some(isContextSummaryPart)) {
     return "summary";
   }

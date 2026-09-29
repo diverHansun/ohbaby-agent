@@ -15,6 +15,13 @@ import {
   writeToolCallEvent,
 } from "./helpers.js";
 
+vi.mock("../../../packages/ohbaby-cli/src/tui/pending-prompts.js", () => ({
+  createPendingPromptStorage: () => ({
+    read: () => [],
+    write: () => undefined,
+  }),
+}));
+
 const cleanupDirectories: string[] = [];
 
 afterEach(async () => {
@@ -151,8 +158,11 @@ describe("TUI main chain with real in-process backend", () => {
     await waitForFrame(app, promptIsReady);
     app.stdin.write("abort this");
     app.stdin.write("\r");
-    await waitForFrame(app, (frame) => frame.includes("Permission:"));
-
+    await waitForFrame(
+      app,
+      (frame) =>
+        frame.includes("Permission:") && frame.includes("Ctrl+C stop root run"),
+    );
     app.stdin.write("\u0003");
     const abortedFrame = await waitForFrame(
       app,

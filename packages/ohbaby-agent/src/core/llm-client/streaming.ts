@@ -1,3 +1,9 @@
+import { randomUUID } from "node:crypto";
+import {
+  ModelObservationError,
+  RequestAttemptObserver,
+} from "./request-observation.js";
+import type { ModelRequestObservation, ModelRequestRecord } from "./types.js";
 import { APIConnectionError as OpenAIConnectionError } from "openai";
 import { APIConnectionError as AnthropicConnectionError } from "@anthropic-ai/sdk/error";
 /**
@@ -255,6 +261,12 @@ export async function* streamResponse(
   llmClient: LLMClientInstance,
   messages: readonly ModelMessage[],
   options?: {
+    requestOwner?: Pick<ModelRequestRecord, "runId" | "messageId" | "step">;
+    /** Persist input membership and recheck run eligibility before each attempt. */
+    beforeRequestAttempt?: (request: ModelRequestRecord) => Promise<void>;
+    onRequestObservation?: (
+      observation: ModelRequestObservation,
+    ) => Promise<void>;
     retry?: Partial<ProviderRetryPolicy>;
     signal?: AbortSignal;
     tools?: readonly ModelToolDefinition[];
@@ -268,7 +280,7 @@ export async function* streamResponse(
   const { provider, config } = llmClient;
   const {
     retry,
-    signal,
+    signal: callerSignal,
     tools,
     maxTokens,
     purpose,
@@ -301,6 +313,22 @@ export async function* streamResponse(
   let failedAttempts = 0;
 
   for (;;) {
+    if (callerSignal?.aborted) {
+      yield buildAbortResponse({
+        accumulatedContent: "",
+        accumulatedReasoning: "",
+        accumulatedToolCalls: new Map(),
+        rawFinishReason: undefined,
+        tokenUsage: null,
+      });
+      return;
+    }
+    const controller = new AbortController();
+    const signal = callerSignal
+      ? options?.requestOwner
+        ? AbortSignal.any([callerSignal, controller.signal])
+        : callerSignal
+      : controller.signal;
     // Every provider retry is a new attempt. Keeping this state inside the
     // loop prevents usage, reasoning, finish state, and partial tool calls
     // from a failed attempt leaking into the replacement stream.
@@ -314,8 +342,61 @@ export async function* streamResponse(
     let reasoningTokens: number | undefined;
     let validatingProtocol = false;
 
+    const requestRecord: ModelRequestRecord | undefined = options?.requestOwner
+      ? {
+          ...options.requestOwner,
+          requestId: randomUUID(),
+          attempt: failedAttempts + 1,
+          purpose: purpose ?? "agent-step",
+          startedAt: 0,
+          outcome: "running",
+        }
+      : undefined;
+    const observer = new RequestAttemptObserver(
+      requestRecord,
+      options?.onRequestObservation,
+      signal,
+    );
+    let iterator:
+      | AsyncIterator<
+          import("../../services/interface-providers/types.js").InterfaceProviderStreamEvent
+        >
+      | undefined;
+    let exhausted = false;
+    let finalized = false;
+    let iteratorClosed = false;
+    const closeIterator = (): void => {
+      const target = iterator;
+      if (iteratorClosed || !target?.return) return;
+      const close = target.return.bind(target);
+      iteratorClosed = true;
+      // Resource cleanup must not hold cancellation hostage. Observe both a
+      // synchronous throw and a rejected close from an uncooperative adapter.
+      void Promise.resolve()
+        .then(close)
+        .catch(() => undefined);
+    };
     try {
-      const stream = await provider.streamResponse({
+      const beforeRequestAttempt = options?.beforeRequestAttempt;
+      if (beforeRequestAttempt) {
+        if (!requestRecord) {
+          throw new ModelObservationError(
+            new Error("Attempt admission requires a request owner"),
+          );
+        }
+        const admission = await observer.receive(
+          Promise.resolve()
+            .then(() => beforeRequestAttempt(requestRecord))
+            .catch((error: unknown) => ({ error })),
+        );
+        if (admission && "error" in admission) {
+          if (signal.aborted) throw signal.reason;
+          throw new ModelObservationError(admission.error);
+        }
+        if (signal.aborted) throw signal.reason;
+      }
+      if (provider.streamStart !== "iterator") observer.start();
+      const opening = provider.streamResponse({
         model: config.model,
         messages,
         ...(config.temperature === undefined
@@ -330,9 +411,48 @@ export async function* streamResponse(
         ...(contextScopeId === undefined ? {} : { contextScopeId }),
         promptCache,
       });
-
-      // Stream each normalized event from the provider
-      for await (const event of stream) {
+      // Attach the receiver immediately, including eager opening failures. For a
+      // lazy adapter the first next starts before any observation save is awaited.
+      const first = observer.receive(
+        opening
+          .then((stream) => {
+            iterator = stream[Symbol.asyncIterator]();
+            if (signal.aborted || finalized) {
+              closeIterator();
+              return { error: signal.reason ?? new Error("Request finalized") };
+            }
+            if (provider.streamStart === "iterator") observer.start();
+            return observer.next(iterator);
+          })
+          .catch((error: unknown) => {
+            observer.receivedError();
+            return { error };
+          }),
+      );
+      if (provider.streamStart === "iterator")
+        await observer.waitStarted(first);
+      await observer.flush();
+      for (const fact of observer.drain())
+        yield {
+          messageSnapshot: { content: null },
+          isComplete: false,
+          requestObservation: fact,
+        };
+      let next = await first;
+      for (;;) {
+        await observer.flush();
+        for (const fact of observer.drain())
+          yield {
+            messageSnapshot: { content: null },
+            isComplete: false,
+            requestObservation: fact,
+          };
+        if ("error" in next) throw next.error;
+        if (next.done) {
+          exhausted = true;
+          break;
+        }
+        const event = next.value;
         const finish = event.finishReason;
         if (event.nativeOutput !== undefined) {
           validatingProtocol = true;
@@ -359,6 +479,7 @@ export async function* streamResponse(
         // the eventual terminal response, but do not expose an attempt-local
         // usage-only frame that may later be discarded by a safe retry.
         if (isUsageOnlyEvent(event)) {
+          next = await observer.next(iterator);
           continue;
         }
 
@@ -421,8 +542,17 @@ export async function* streamResponse(
           tokenUsage:
             tokenUsage === null ? undefined : toStreamingTokenUsage(tokenUsage),
         };
+        next = await observer.next(iterator);
       }
-      if (signal?.aborted) {
+      if (signal.aborted) {
+        observer.end("aborted");
+        await observer.flush();
+        for (const fact of observer.drain())
+          yield {
+            messageSnapshot: { content: null },
+            isComplete: false,
+            requestObservation: fact,
+          };
         yield buildAbortResponse({
           accumulatedContent,
           accumulatedReasoning,
@@ -485,6 +615,14 @@ export async function* streamResponse(
         );
       }
       validatingProtocol = false;
+      observer.end("success");
+      await observer.flush();
+      for (const fact of observer.drain())
+        yield {
+          messageSnapshot: { content: null },
+          isComplete: false,
+          requestObservation: fact,
+        };
       yield {
         messageSnapshot,
         parsedToolCalls,
@@ -499,13 +637,22 @@ export async function* streamResponse(
       };
       return;
     } catch (error) {
+      observer.end(signal.aborted ? "aborted" : "error");
+      await observer.flush();
+      for (const fact of observer.drain())
+        yield {
+          messageSnapshot: { content: null },
+          isComplete: false,
+          requestObservation: fact,
+        };
+      if (error instanceof ModelObservationError) throw error;
       // Malformed tool arguments are a model output defect; surface them
       // as-is so consumers do not mistake them for a transport interruption.
       if (error instanceof ToolCallParseError) {
         throw error;
       }
       // Handle user-initiated interruption
-      if (signal?.aborted === true) {
+      if (signal.aborted) {
         // Return partial results instead of throwing
         // This allows consumers to save or reuse the partial response
         yield buildAbortResponse({
@@ -597,6 +744,13 @@ export async function* streamResponse(
         }
         throw sleepError;
       }
+    } finally {
+      finalized = true;
+      observer.end(signal.aborted ? "aborted" : "error");
+      observer.close();
+      if (!exhausted) controller.abort();
+      if (!exhausted) closeIterator();
+      await observer.flush();
     }
   }
 }

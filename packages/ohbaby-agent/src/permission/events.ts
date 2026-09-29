@@ -11,6 +11,11 @@ const PermissionTypeSchema = z.union([
 
 const PermissionInfoSchema = z.object({
   id: z.string(),
+  runId: z.string(),
+  rootSessionId: z.string(),
+  ancestorSessionIds: z.array(z.string()).readonly(),
+  sourceLabel: z.string().optional(),
+  contextScopeId: z.string().optional(),
   sessionId: z.string(),
   messageId: z.string(),
   callId: z.string(),
@@ -74,6 +79,9 @@ export const PermissionEvent = {
     z.object({
       sessionId: z.string(),
       permissionId: z.string(),
+      runId: z.string(),
+      rootSessionId: z.string(),
+      reason: z.string(),
       callId: z.string(),
       response: PermissionResponseSchema,
     }),

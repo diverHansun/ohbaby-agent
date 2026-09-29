@@ -11,3 +11,11 @@ export type {
   ResolvedStepTools,
   TurnContext,
 } from "./types.js";
+
+export { DisplayReasoningOwner } from "./display-reasoning.js";
+export type {
+  DisplayReasoningRecord,
+  DisplayReasoningChange,
+  DisplayReasoningOptions,
+  ReasoningEndReason,
+} from "./display-reasoning.js";

@@ -1,0 +1,110 @@
+[
+  {
+    "profile": "zenmux-gpt56-luna-chat",
+    "recordedAt": "2026-09-27T05:24:15.735Z",
+    "result": "failed",
+    "failure": {
+      "phase": "reopen",
+      "code": "ASSERTION_FAILED"
+    },
+    "saved": {
+      "saved": true,
+      "protocol": "openai-compatible",
+      "persistedProtocol": "openai-compatible",
+      "contextWindowTokens": 128000,
+      "contextWindowSource": "user"
+    },
+    "resolved": {
+      "entry": "GET /v1/model after discovery",
+      "provider": "zenmux",
+      "model": "openai/gpt-5.6-luna",
+      "interfaceProvider": "openai-compatible",
+      "contextWindowTokens": 128000,
+      "reasoningStatus": "identified"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 128000,
+        "currentTokens": 7373
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      }
+    ]
+  },
+  {
+    "profile": "zenmux-gpt56-luna-responses",
+    "recordedAt": "2026-09-27T05:24:18.541Z",
+    "result": "failed",
+    "failure": {
+      "phase": "reopen",
+      "code": "ASSERTION_FAILED"
+    },
+    "saved": {
+      "saved": true,
+      "protocol": "openai-responses",
+      "persistedProtocol": "openai-responses",
+      "contextWindowTokens": 128000,
+      "contextWindowSource": "user"
+    },
+    "resolved": {
+      "entry": "GET /v1/model after discovery",
+      "provider": "zenmux",
+      "model": "openai/gpt-5.6-luna",
+      "interfaceProvider": "openai-responses",
+      "contextWindowTokens": 128000,
+      "reasoningStatus": "identified"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 128000,
+        "currentTokens": 7336
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      }
+    ]
+  },
+  {
+    "profile": "zenmux-claude-sonnet5-anthropic",
+    "recordedAt": "2026-09-27T05:24:14.250Z",
+    "result": "failed",
+    "failure": {
+      "phase": "reopen",
+      "code": "ASSERTION_FAILED"
+    },
+    "saved": {
+      "saved": true,
+      "protocol": "anthropic",
+      "persistedProtocol": "anthropic",
+      "contextWindowTokens": 128000,
+      "contextWindowSource": "user"
+    },
+    "resolved": {
+      "entry": "GET /v1/model after discovery",
+      "provider": "zenmux",
+      "model": "anthropic/claude-sonnet-5",
+      "interfaceProvider": "anthropic",
+      "contextWindowTokens": 128000,
+      "reasoningStatus": "identified"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 128000,
+        "currentTokens": 10724
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      }
+    ]
+  }
+]

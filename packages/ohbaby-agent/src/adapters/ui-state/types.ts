@@ -12,6 +12,8 @@ export interface UiStateStore {
   readonly runLedger?: RunLedger;
   readonly requiresServiceManagersForWrites?: boolean;
   hasRun?(runId: string): Promise<boolean>;
+  getActiveSessionId(): Promise<string | null>;
+  getSessionIndex(): Promise<readonly Omit<UiSession, "messages">[]>;
   readSnapshot(): Promise<UiSnapshot>;
   getSession(sessionId: string): Promise<UiSession | undefined>;
   upsertSession(session: UiSession): Promise<void>;

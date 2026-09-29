@@ -113,3 +113,29 @@ describe("resolveWorkspaceScope", () => {
     });
   });
 });
+
+it("closes admission before waiting for a workspace creation already in flight", async () => {
+  let finish!: (value: { closeAdmission(): void; dispose(): void }) => void;
+  const disposed: string[] = [];
+  const store = new InstanceStore({
+    create: (): Promise<{ closeAdmission(): void; dispose(): void }> =>
+      new Promise<{ closeAdmission(): void; dispose(): void }>((resolve) => {
+        finish = resolve;
+      }),
+  });
+  const loading = store.loadScope("/pending");
+  await Promise.resolve();
+  const closing = store.disposeAll();
+  await expect(store.loadScope("/late")).rejects.toThrow(/closing/i);
+  finish({
+    closeAdmission: () => {
+      disposed.push("closed");
+    },
+    dispose: () => {
+      disposed.push("disposed");
+    },
+  });
+  await loading;
+  await closing;
+  expect(disposed).toEqual(["closed", "disposed"]);
+});

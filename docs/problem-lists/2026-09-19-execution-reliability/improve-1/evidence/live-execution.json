@@ -1,0 +1,338 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "provider": "zenmux",
+  "protocol": "openai-compatible",
+  "version": "0.1.13",
+  "runs": [
+    {
+      "root": "session_1790264138687_st6u4u1",
+      "runs": [
+        {
+          "run_id": "run_3136659d-a715-4a53-88a7-9ed8f933d8de",
+          "session_id": "session_1790264138687_st6u4u1",
+          "status": "succeeded",
+          "error": null
+        },
+        {
+          "run_id": "run_e227f072-59ac-4f12-b2d4-a395c619c3b8",
+          "session_id": "session_1790264138687_st6u4u1",
+          "status": "succeeded",
+          "error": null
+        }
+      ],
+      "children": [
+        {
+          "subagent_id": "subagent_mufp27r6_d3ot3hc2",
+          "session_id": "session_1790264166593_p3cn7c1",
+          "context_scope_id": "subagent_mufp27r6_d3ot3hc2",
+          "name": null,
+          "description": "Approval child",
+          "status": "completed",
+          "last_run_id": "subagent_run_mufp27r7_tbrwdnnw",
+          "error": null
+        },
+        {
+          "subagent_id": "subagent_mufp57cw_onw2mdhg",
+          "session_id": "session_1790264166593_p3cn7c1",
+          "context_scope_id": "subagent_mufp57cw_onw2mdhg",
+          "name": null,
+          "description": "Approve second",
+          "status": "completed",
+          "last_run_id": "subagent_run_mufp57cx_zsirwpqq",
+          "error": null
+        },
+        {
+          "subagent_id": "subagent_mufp57cv_jjx1su90",
+          "session_id": "session_1790264166593_p3cn7c1",
+          "context_scope_id": "subagent_mufp57cv_jjx1su90",
+          "name": null,
+          "description": "Reject first",
+          "status": "completed",
+          "last_run_id": "subagent_run_mufp57cw_xexgphav",
+          "error": null
+        }
+      ]
+    },
+    {
+      "root": "session_1790264483057_u17bol2",
+      "runs": [
+        {
+          "run_id": "run_76bcf450-0bd1-4efc-a53d-b61ffed6ffa7",
+          "session_id": "session_1790264483057_u17bol2",
+          "status": "succeeded",
+          "error": null
+        }
+      ],
+      "children": [
+        {
+          "subagent_id": "subagent_mufp948z_y34z71ot",
+          "session_id": "session_1790264488642_5py4o93",
+          "context_scope_id": "subagent_mufp948z_y34z71ot",
+          "name": "Timeout child",
+          "description": "Timeout child",
+          "status": "timed_out",
+          "last_run_id": "subagent_run_mufp948z_ct6gj67h",
+          "error": "Subagent timed out after 20000ms"
+        }
+      ]
+    },
+    {
+      "root": "session_1790264976556_brdllr6",
+      "runs": [
+        {
+          "run_id": "run_bb0195ab-dc5c-47f4-9c07-8e42475574d0",
+          "session_id": "session_1790264976556_brdllr6",
+          "status": "succeeded",
+          "error": null
+        },
+        {
+          "run_id": "run_63474762-bf7d-4423-bd1f-237dcb95bcfd",
+          "session_id": "session_1790264976556_brdllr6",
+          "status": "succeeded",
+          "error": null
+        },
+        {
+          "run_id": "run_bdf8a656-d0b3-4e08-b98b-af6a45efa1da",
+          "session_id": "session_1790264976556_brdllr6",
+          "status": "succeeded",
+          "error": null
+        }
+      ],
+      "children": [
+        {
+          "subagent_id": "subagent_mufpk99i_sgjpvcvs",
+          "session_id": "session_1790265008358_tzlg2z7",
+          "context_scope_id": "subagent_mufpk99i_sgjpvcvs",
+          "name": "Pending stream child",
+          "description": "Run one bash append command",
+          "status": "timed_out",
+          "last_run_id": "subagent_run_mufpk99i_ajjc94ta",
+          "error": "Subagent timed out after 180000ms"
+        },
+        {
+          "subagent_id": "subagent_mufpos0r_3pjg6c7o",
+          "session_id": "session_1790265008358_tzlg2z7",
+          "context_scope_id": "subagent_mufpos0r_3pjg6c7o",
+          "name": "Native recovery child",
+          "description": "Run one bash append command",
+          "status": "completed",
+          "last_run_id": "subagent_run_mufpos0s_yqwfrqxb",
+          "error": null
+        }
+      ]
+    },
+    {
+      "root": "session_1790265402197_i072381",
+      "runs": [
+        {
+          "run_id": "run_aa7218c1-2a59-435b-8e6a-33e0f357adff",
+          "session_id": "session_1790265402197_i072381",
+          "status": "succeeded",
+          "error": null
+        }
+      ],
+      "children": [
+        {
+          "subagent_id": "subagent_mufpsths_kgsse35u",
+          "session_id": "session_1790265407823_spqk1r2",
+          "context_scope_id": "subagent_mufpsths_kgsse35u",
+          "name": "TUI approval child",
+          "description": "Single bash call to append a line to tui-count.txt",
+          "status": "completed",
+          "last_run_id": "subagent_run_mufpsths_tidp3p55",
+          "error": null
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "sessionId": "session_1790264138687_st6u4u1",
+      "callId": "call_00_ET_FmV9eZmbz2Mg7x0a1R7z3995",
+      "command": "printf 'main-once\\n' >> main-count.txt",
+      "status": "completed",
+      "exitCode": 0
+    },
+    {
+      "sessionId": "session_1790264166593_p3cn7c1",
+      "contextScopeId": "subagent_mufp27r6_d3ot3hc2",
+      "callId": "call_00_pnvf3ZjAm3FavocCuS1j7617",
+      "command": "printf 'child-once\\n' >> child-count.txt",
+      "status": "completed",
+      "exitCode": 0
+    },
+    {
+      "sessionId": "session_1790264138687_st6u4u1",
+      "callId": "call_00_ET_uzxGtxp29SQpoOLxQGzA4208",
+      "command": "ls -l; echo '--- main-count.txt'; cat main-count.txt; echo '--- child-count.txt'; cat child-count.txt",
+      "status": "completed",
+      "exitCode": 0
+    },
+    {
+      "sessionId": "session_1790264166593_p3cn7c1",
+      "contextScopeId": "subagent_mufp57cv_jjx1su90",
+      "callId": "call_00_GRjIzijqQjj30TZAS5GR1250",
+      "command": "printf 'should-not-run\\n' >> rejected-count.txt",
+      "status": "error",
+      "error": "{\"status\":\"rejected\",\"error\":{\"type\":\"PermissionRejectedError\",\"message\":\"Tool rejected by user: bash\",\"details\":{\"name\":\"PermissionRejectedError\"}}}"
+    },
+    {
+      "sessionId": "session_1790264166593_p3cn7c1",
+      "contextScopeId": "subagent_mufp57cw_onw2mdhg",
+      "callId": "call_00_v0K2DBwdzOR0braSg3EG4036",
+      "command": "printf 'second-once\\n' >> second-count.txt",
+      "status": "completed",
+      "exitCode": 0
+    },
+    {
+      "sessionId": "session_1790264488642_5py4o93",
+      "contextScopeId": "subagent_mufp948z_y34z71ot",
+      "callId": "call_00_I4zEsp4pNjHRUHWIEw4h0949",
+      "command": "printf 'must-not-run\\n' >> timeout-count.txt",
+      "status": "aborted",
+      "error": "Tool execution aborted by user"
+    },
+    {
+      "sessionId": "session_1790264660612_s94fs65",
+      "contextScopeId": "subagent_mufpcsxx_hn1mssyo",
+      "callId": "call_00_r5vO08oWiQVEogGEXQiI1961",
+      "command": "printf 'stream-once\\n' >> stream-count.txt",
+      "status": "completed",
+      "exitCode": 0
+    },
+    {
+      "sessionId": "session_1790265008358_tzlg2z7",
+      "contextScopeId": "subagent_mufpk99i_sgjpvcvs",
+      "callId": "call_00_y3Af2p0pz9InnMJshGQ43119",
+      "command": "printf 'native-recovered\\n' >> native-recovered-count.txt",
+      "status": "aborted",
+      "error": "Tool execution aborted by user"
+    },
+    {
+      "sessionId": "session_1790265008358_tzlg2z7",
+      "contextScopeId": "subagent_mufpos0r_3pjg6c7o",
+      "callId": "call_00_up0U66KvYr8s3YFgHR8h3257",
+      "command": "printf 'native-recovered\\n' >> native-recovered-count.txt",
+      "status": "completed",
+      "exitCode": 0
+    },
+    {
+      "sessionId": "session_1790265407823_spqk1r2",
+      "contextScopeId": "subagent_mufpsths_kgsse35u",
+      "callId": "call_00_HQANGp2cjkW70gzhvfxk6961",
+      "command": "printf 'tui-once\\n' >> tui-count.txt",
+      "status": "completed",
+      "exitCode": 0
+    }
+  ],
+  "counts": [
+    {
+      "name": "main-count",
+      "exists": true,
+      "content": "main-once\n"
+    },
+    {
+      "name": "child-count",
+      "exists": true,
+      "content": "child-once\n"
+    },
+    {
+      "name": "second-count",
+      "exists": true,
+      "content": "second-once\n"
+    },
+    {
+      "name": "rejected-count",
+      "exists": false
+    },
+    {
+      "name": "timeout-count",
+      "exists": false
+    },
+    {
+      "name": "stream-count",
+      "exists": true,
+      "content": "stream-once\n"
+    },
+    {
+      "name": "native-recovered-count",
+      "exists": true,
+      "content": "native-recovered\n"
+    },
+    {
+      "name": "tui-count",
+      "exists": true,
+      "content": "tui-once\n"
+    }
+  ],
+  "finalBuild": {
+    "root": "session_1790265836583_j8tda31",
+    "runs": [
+      {
+        "run_id": "run_658a9ffa-65f8-4bc6-8f26-a6ba196f834e",
+        "session_id": "session_1790265836583_j8tda31",
+        "status": "succeeded",
+        "error": null
+      },
+      {
+        "run_id": "run_9dcac981-1bed-4899-984c-115cd2d7b22b",
+        "session_id": "session_1790265836583_j8tda31",
+        "status": "succeeded",
+        "error": null
+      }
+    ],
+    "children": [
+      {
+        "subagent_id": "subagent_mufq23qu_10cqiywg",
+        "session_id": "session_1790265841013_d3jph11",
+        "context_scope_id": "subagent_mufq23qu_10cqiywg",
+        "name": "Final build child",
+        "status": "completed",
+        "last_run_id": "subagent_run_mufq23qv_x5b6mrsw",
+        "error": null
+      },
+      {
+        "subagent_id": "subagent_mufq4jpw_yxe1f3oy",
+        "session_id": "session_1790265841013_d3jph11",
+        "context_scope_id": "subagent_mufq4jpw_yxe1f3oy",
+        "name": "Disconnected timeout child",
+        "status": "timed_out",
+        "last_run_id": "subagent_run_mufq4jpw_3ch3pf7c",
+        "error": "Subagent timed out after 20000ms"
+      }
+    ],
+    "tools": [
+      {
+        "sessionId": "session_1790265841013_d3jph11",
+        "callId": "call_00_DMldgpLzHxjbe5dJtWW49838",
+        "command": "printf 'final-build\\n' >> final-build-count.txt",
+        "status": "completed",
+        "exitCode": 0
+      },
+      {
+        "sessionId": "session_1790265841013_d3jph11",
+        "callId": "call_00_UZqwHQJqvW6SxVlAGeFW6980",
+        "command": "printf 'should-not-run\\n' >> disconnected-timeout-count.txt",
+        "status": "aborted",
+        "error": "Tool execution aborted by user"
+      }
+    ],
+    "finalCount": "final-build\n",
+    "disconnectedTimeoutFileExists": false
+  },
+  "metadataGuard": {
+    "tools": [
+      {
+        "callId": "call_00_HXffuVpG0RI3XxF6qLCS6236",
+        "sessionId": "session_1790265836583_j8tda31",
+        "command": "printf 'metadata-guard\\n' >> metadata-guard-count.txt",
+        "status": "completed",
+        "exitCode": 0
+      }
+    ],
+    "content": "metadata-guard\n"
+  },
+  "cleanup": {
+    "remainingActiveRuns": []
+  }
+}

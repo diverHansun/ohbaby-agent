@@ -2,6 +2,7 @@ import type {
   ToolCategory,
   ToolExecutionResult,
 } from "../../core/tool-scheduler/index.js";
+import { withToolAdmission } from "../../core/tool-scheduler/tool-admission.js";
 import { McpToolExecutionError } from "../errors.js";
 import type {
   McpCallToolResult,
@@ -111,7 +112,7 @@ export function adaptMcpTool(
   const name = localToolName(client.name, mcpTool.name);
   const category = inferCategory(mcpTool, client.config.trust);
 
-  return {
+  const tool: McpTool = {
     annotations: {
       readOnlyHint: mcpTool.annotations?.readOnlyHint,
     },
@@ -151,4 +152,6 @@ export function adaptMcpTool(
       return output;
     },
   };
+  withToolAdmission(tool, { settlementConfirmsCleanup: false });
+  return tool;
 }

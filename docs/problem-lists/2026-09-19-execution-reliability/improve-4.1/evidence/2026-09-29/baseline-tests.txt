@@ -1,0 +1,12 @@
+
+ RUN  v2.1.9 /Users/hansun025/Projects/code-cli/ohbaby-agent
+
+ ✓ packages/ohbaby-agent/src/services/session/prompt-sanitizer.unit.test.ts (6 tests) 3ms
+ ✓ apps/ohbaby-web/src/api/daemon/eventReducer.unit.test.ts (20 tests) 4ms
+ ✓ packages/ohbaby-agent/src/services/session/title-generator.unit.test.ts (8 tests) 8ms
+ ✓ apps/ohbaby-web/src/ui/conversation/tool-card.unit.test.tsx (20 tests) 33ms
+
+ Test Files  4 passed (4)
+      Tests  54 passed (54)
+   Start at  01:00:58
+   Duration  637ms (transform 294ms, setup 30ms, collect 560ms, tests 48ms, environment 263ms, prepare 179ms)

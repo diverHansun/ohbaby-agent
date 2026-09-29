@@ -93,6 +93,7 @@ export interface CreateRunPromptSnapshotInput extends SystemPromptProviderInput 
 }
 
 export interface PreparedModelRequest {
+  readonly inputIds?: readonly string[];
   readonly messages: readonly ModelMessage[];
   readonly tools: readonly ModelToolDefinition[] | undefined;
 }
@@ -188,6 +189,9 @@ export interface CompactResult {
 }
 
 export interface PrepareTurnInput {
+  readonly runId?: string;
+  /** Durable first-delivery inputs, excluded from compressible history. */
+  readonly protectedInputs?: readonly MessageWithParts[];
   readonly reasoning?: ReasoningIntent;
   readonly modelOrigin?: ModelOrigin;
   readonly sessionId: string;
@@ -250,6 +254,10 @@ export interface ContextManager {
 }
 
 export interface ContextManagerOptions {
+  /** Ledger-backed projection: pending/unsent runtime inputs cannot enter summaries. */
+  readonly filterModelHistory?: (
+    messages: readonly MessageWithParts[],
+  ) => Promise<readonly MessageWithParts[]>;
   readonly bus: BusInstance;
   readonly memory: MemoryReader;
   readonly messageManager: MessageManager;

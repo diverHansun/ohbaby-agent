@@ -1,4 +1,6 @@
-import { Box, Static, useStdout } from "ink";
+import { useExecutionDuration } from "../execution-duration.js";
+import type { UiPromptSubmission } from "ohbaby-sdk";
+import { Box, Text, Static, useStdout } from "ink";
 import { memo, type ReactElement } from "react";
 import { useTuiLayout } from "../../layout/context.js";
 import type { TranscriptItem } from "../../store/transcript.js";
@@ -26,28 +28,36 @@ export const CommittedTranscript = memo(function CommittedTranscript({
   if (useStatic) {
     return (
       <Static items={items as TranscriptItem[]}>
-        {(item): ReactElement => (
-          <MessageRow
-            bottomMargin={item.spacing ? 1 : 0}
-            contentWidth={layout.contentWidth}
-            key={item.id}
-            message={item.message}
-          />
-        )}
+        {(item): ReactElement =>
+          item.promptCompletion ? (
+            <PromptCompletion key={item.id} prompt={item.promptCompletion} />
+          ) : (
+            <MessageRow
+              bottomMargin={item.spacing ? 1 : 0}
+              contentWidth={layout.contentWidth}
+              key={item.id}
+              message={item.message}
+            />
+          )
+        }
       </Static>
     );
   }
 
   return (
     <Box flexDirection="column">
-      {items.map((item) => (
-        <MessageRow
-          bottomMargin={item.spacing ? 1 : 0}
-          contentWidth={layout.contentWidth}
-          key={item.id}
-          message={item.message}
-        />
-      ))}
+      {items.map((item) =>
+        item.promptCompletion ? (
+          <PromptCompletion key={item.id} prompt={item.promptCompletion} />
+        ) : (
+          <MessageRow
+            bottomMargin={item.spacing ? 1 : 0}
+            contentWidth={layout.contentWidth}
+            key={item.id}
+            message={item.message}
+          />
+        ),
+      )}
     </Box>
   );
 });
@@ -68,5 +78,29 @@ export function shouldUseStaticTranscript(
 
   return (
     input.isTTY === true && (input.platform ?? process.platform) === "win32"
+  );
+}
+
+function PromptCompletion({
+  prompt,
+}: {
+  readonly prompt: UiPromptSubmission;
+}): ReactElement {
+  const duration = useExecutionDuration(
+    prompt.promptId,
+    prompt.endTimeSource === "recovery"
+      ? undefined
+      : Date.parse(prompt.acceptedAt ?? prompt.createdAt),
+    prompt.endedAt === undefined ? undefined : Date.parse(prompt.endedAt),
+  );
+  return (
+    <Box marginBottom={1}>
+      <Text dimColor>
+        {prompt.status === "succeeded" ? "" : `${prompt.status} · `}
+        {prompt.endTimeSource === "recovery"
+          ? "End time unknown (recovered)"
+          : `Total ${duration ?? "—"}`}
+      </Text>
+    </Box>
   );
 }

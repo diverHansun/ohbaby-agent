@@ -15,7 +15,7 @@ describe("renderTerminalUi", () => {
     vi.mocked(render).mockClear();
   });
 
-  it("enables incremental rendering to reduce terminal repaint flicker", () => {
+  it("lets application controls own Ctrl+C while reducing terminal repaint flicker", () => {
     const unsubscribe = vi.fn();
     renderTerminalUi({
       client: {} as Parameters<typeof renderTerminalUi>[0]["client"],
@@ -24,6 +24,7 @@ describe("renderTerminalUi", () => {
 
     expect(render).toHaveBeenCalledWith(expect.anything(), {
       incrementalRendering: true,
+      exitOnCtrlC: false,
     });
   });
 });

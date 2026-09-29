@@ -126,6 +126,8 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     id: "new",
     path: ["new"],
     aliases: [],
+    acceptsArguments: true,
+    argsHint: "[--no-reuse-empty-session]",
     argumentMode: "argv",
     category: "session",
     description: "Start a new session",

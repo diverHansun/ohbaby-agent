@@ -207,12 +207,17 @@ export function createSessionManager(
     async update(
       sessionId: string,
       patch: UpdateSessionPatch,
+      condition?: { readonly expectedTitle: string },
     ): Promise<Session> {
       await getExistingSession(sessionId, options);
-      const session = await options.store.update(sessionId, {
-        ...patch,
-        updatedAt: now(),
-      });
+      const session = await options.store.update(
+        sessionId,
+        {
+          ...patch,
+          updatedAt: now(),
+        },
+        condition,
+      );
       options.bus.publish(SessionEvent.Updated, { session });
       return session;
     },

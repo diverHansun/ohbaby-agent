@@ -18,7 +18,7 @@
             REST/SSE             snapshotForClient/routeEventForClient...        同一个 backend
 ```
 
-差异的本质：**P2 比 P1 多了一层「多客户端协调」**——per-client `activeSessionId` 视图、prompt 排队、审批归属、事件按连接过滤/补发。P1 是单客户端（TUI 本身就是唯一客户端），不需要这层。
+差异的本质：**P2 比 P1 多了一层「多客户端协调」**——per-client `activeSessionId` 视图、prompt 排队、审批 root 绑定、事件按连接过滤/补发。P1 是单客户端（TUI 本身就是唯一客户端），不需要这层。
 
 **这层差异是合理的、必要的**——不是要消灭它。要消灭的是**不受控的漂移**：同一个 backend 行为，经 P1 和经 P2 看到的语义不一致（除了「多客户端」这个本就该有的区别之外）。
 
@@ -32,7 +32,7 @@
 
 ### 原则 B：per-client 视图逻辑提取为共享 coordination 单元
 
-现状问题：`server.ts` 里的 `snapshotForClient`、`routeEventForClient`、`activeSessionId` 跟踪、command/permission 归属——这些 per-client 视图投影**埋在 jsonrpc server 内部**。一旦 web adapter 自己再写一套，必然漂移。
+现状问题：`server.ts` 里的 `snapshotForClient`、`routeEventForClient`、`activeSessionId` 跟踪、command owner / permission root 绑定——这些 per-client 视图投影**埋在 jsonrpc server 内部**。一旦 web adapter 自己再写一套，必然漂移。
 
 做法（Δ8）：抽到 `coordination/client-view.ts`，成为**具名、可单测、被两条 adapter 共用**的纯函数集合：
 
@@ -40,7 +40,7 @@
 client-view.ts（纯投影，无 IO）
   projectSnapshot(snapshot, clientView) -> snapshot      // 原 snapshotForClient
   routeEvent(event, clientView, ownership) -> event | undefined  // 原 routeEventForClient
-  // activeSessionId 推进、command/permission 归属推进……
+  // activeSessionId 推进、command owner / permission root 绑定推进……
 ```
 
 - jsonrpc `rpc-route` 与 web `routes` **都调它**，不各写一份。
@@ -81,7 +81,7 @@ assert: 两 transport 下，单客户端可观察序列等价
 
 ### 3.3 多客户端协调测试（P2 专属）
 
-排队 FIFO、审批只回发起方、事件按连接过滤、SSE replay——这些是 P2 独有能力，单独测（不要求 P1 具备）。
+排队 FIFO、审批按客户端独立根会话绑定共享、事件按连接过滤、SSE replay——这些是 P2 独有能力，单独测（不要求 P1 具备）。
 
 ---
 
@@ -98,11 +98,11 @@ assert: 两 transport 下，单客户端可观察序列等价
 
 ## 5. 约束与权衡
 
-| 决策 | 放弃的方案 | 代价 |
-|------|-----------|------|
+| 决策                                       | 放弃的方案                          | 代价                                                                                       |
+| ------------------------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------ |
 | 契约层统一（共享 coordination + 契约测试） | 逼默认 CLI 也走 `app.fetch`（单面） | 要维护一套跨 transport 测试 + 保持 adapter 纯净；换来默认路径零序列化税、强隔离（ADR-001） |
-| client-view 抽为共享纯函数 | jsonrpc/web 各写视图逻辑 | 多一个具名单元；换来「只有一份、可测、不漂移」 |
-| 等价只断言单客户端 | 强求两路全等 | 多客户端差异另测；换来等价关系定义清晰、不自相矛盾 |
+| client-view 抽为共享纯函数                 | jsonrpc/web 各写视图逻辑            | 多一个具名单元；换来「只有一份、可测、不漂移」                                             |
+| 等价只断言单客户端                         | 强求两路全等                        | 多客户端差异另测；换来等价关系定义清晰、不自相矛盾                                         |
 
 ---
 

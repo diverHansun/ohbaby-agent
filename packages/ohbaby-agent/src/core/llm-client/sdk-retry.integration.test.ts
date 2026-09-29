@@ -256,7 +256,7 @@ describe("installed SDK and project retry boundaries", () => {
   );
 
   it.each(protocols)(
-    "%s honors SDK Retry-After while exposing its bounded cancellation delay without another HTTP request",
+    "%s cancels promptly during SDK Retry-After and sends no later HTTP request",
     async (protocol) => {
       const f = fixture(() => unavailable({ "retry-after": "2" }), protocol);
       const controller = new AbortController();
@@ -269,11 +269,13 @@ describe("installed SDK and project retry boundaries", () => {
       expect(f.attempts).toHaveLength(1);
       controller.abort();
       const cancelledAt = Date.now();
-      await vi.advanceTimersByTimeAsync(1899);
-      expect(settled).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(true);
       expect(await run.done).toEqual({});
-      expect(Date.now() - cancelledAt).toBe(1900);
+      expect(Date.now() - cancelledAt).toBe(0);
+      // The installed SDK still owns its sleep; when it wakes, the aborted
+      // request must not send again or leak an unobserved rejection.
+      await vi.advanceTimersByTimeAsync(2000);
       expect(f.attempts).toHaveLength(1);
       expect(f.providerCalls()).toBe(1);
       expect(run.frames.filter((frame) => frame.retry)).toHaveLength(0);

@@ -178,6 +178,93 @@ function createOneShotLlmClient(
 }
 
 class FakeBackend implements UiBackendClient {
+  getSessionView(): Promise<never> {
+    return Promise.reject(new Error("view unused by abort fixture"));
+  }
+  getSessionHistory(): Promise<never> {
+    return Promise.reject(new Error("history unused by abort fixture"));
+  }
+  getPromptReceipt(): Promise<never> {
+    return Promise.reject(new Error("receipt unused by abort fixture"));
+  }
+  getSessionControl(input: {
+    sessionId: string;
+  }): Promise<import("ohbaby-sdk").UiSessionControl> {
+    const run = this.snapshot.runs.find(
+      (run) =>
+        run.sessionId === input.sessionId &&
+        (run.status.kind === "running" ||
+          run.status.kind === "waiting-for-permission"),
+    );
+    return Promise.resolve({
+      runtimeEpoch: "test-epoch",
+      sessionId: input.sessionId,
+      rootSessionId: input.sessionId,
+      runId: run?.id ?? null,
+      driver: "user",
+    });
+  }
+
+  private readonly createdSessions: Awaited<
+    ReturnType<UiBackendClient["getSessionIndex"]>
+  >[number][] = [];
+  getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return Promise.resolve([
+      ...this.snapshot.sessions,
+      ...this.createdSessions,
+      ...["session_1", "session_2", "session_target"]
+        .filter(
+          (id) => !this.snapshot.sessions.some((session) => session.id === id),
+        )
+        .map((id) => ({
+          id,
+          title: id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+    ]);
+  }
+  getSelectedSessionId(): Promise<string | null> {
+    return Promise.resolve(this.snapshot.activeSessionId);
+  }
+  createSession(): ReturnType<UiBackendClient["createSession"]> {
+    const session = {
+      id: `session_new_${String(this.createdSessions.length + 1)}`,
+      title: "New session",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.createdSessions.push(session);
+    return Promise.resolve(session);
+  }
+  selectSession(_sessionId: string): Promise<void> {
+    return Promise.resolve();
+  }
+  getPermissionSnapshot(
+    input: Parameters<UiBackendClient["getPermissionSnapshot"]>[0],
+  ): ReturnType<UiBackendClient["getPermissionSnapshot"]> {
+    return Promise.resolve({
+      permissionEpoch: "test-epoch",
+      rootSessionId: input.rootSessionId,
+      permissionRevision: 0,
+      requests: this.snapshot.permissions.filter(
+        (request) => request.rootSessionId === input.rootSessionId,
+      ),
+    });
+  }
+  subscribePermissionEvents(
+    handler: Parameters<UiBackendClient["subscribePermissionEvents"]>[0],
+  ): () => void {
+    return this.subscribeEvents((event) => {
+      if (
+        event.type === "permission.requested" ||
+        event.type === "permission.resolved" ||
+        event.type === "permission.unavailable"
+      )
+        handler(event);
+    });
+  }
+
   admissionError: Error | undefined;
   private nextPromptId = 0;
   private readonly promptCompletions = new Map<
@@ -353,6 +440,30 @@ class FakeBackend implements UiBackendClient {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
+  resubmitRetainedPrompt(
+    _input: Parameters<UiBackendClient["resubmitRetainedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["resubmitRetainedPrompt"]> {
+    return Promise.reject(new Error("No retained prompt in fake backend"));
+  }
+  resubmitRetainedPromptForOwner(
+    input: Parameters<UiBackendClient["resubmitRetainedPrompt"]>[0],
+    _owner: string,
+  ): ReturnType<UiBackendClient["resubmitRetainedPrompt"]> {
+    return this.resubmitRetainedPrompt(input);
+  }
+
+  steerQueuedPrompt(
+    _input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return Promise.reject(new Error("unused"));
+  }
+  steerQueuedPromptForOwner(
+    input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
+    _owner?: string,
+  ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
+    return this.steerQueuedPrompt(input);
+  }
+
   cancelQueuedPrompt(
     _input: Parameters<UiBackendClient["cancelQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["cancelQueuedPrompt"]> {
@@ -458,9 +569,21 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(this.permissionState);
   }
 
-  executeCommand(invocation: UiSlashCommandInvocation): Promise<void> {
+  executeCommand(
+    invocation: UiSlashCommandInvocation,
+  ): ReturnType<UiBackendClient["executeCommand"]> {
     this.executedCommands.push(invocation);
-    return Promise.resolve();
+    return Promise.resolve({
+      ...{
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      },
+      clientInvocationId: invocation.clientInvocationId,
+      sessionId: invocation.sessionId,
+    });
   }
 
   respondPermission(
@@ -898,12 +1021,65 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("preserves and validates naming source at the JSON-RPC submission boundary", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    const headers = { ...authHeaders(), "content-type": "application/json" };
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ clientId: "naming-rpc" }),
+    });
+    const namingSource = { skillName: "review", request: "Review recovery" };
+    const submit = (source: unknown): ReturnType<typeof handle.app.request> =>
+      handle.app.request("/api/rpc", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          clientId: "naming-rpc",
+          id: "naming",
+          method: "submitPromptAccepted",
+          params: [
+            "expanded skill",
+            {
+              sessionId: "session_1",
+              clientRequestId: "naming-request",
+              namingSource: source,
+            },
+          ],
+        }),
+      });
+    try {
+      expect(await (await submit(namingSource)).json()).toMatchObject({
+        ok: true,
+      });
+      expect(backend.submitted[0]?.options?.namingSource).toEqual(namingSource);
+      for (const invalid of [
+        null,
+        { skillName: "review" },
+        { skillName: 42, request: "task" },
+      ])
+        expect(await (await submit(invalid)).json()).toMatchObject({
+          ok: false,
+        });
+      expect(backend.submitted).toHaveLength(1);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
   it("records one JSON-RPC primitive with transport correlation", async () => {
     const records: UiCommandRecord[] = [];
     const handle = createApp(new FakeBackend(), {
       commandRecorder: { record: (record) => records.push(record) },
     });
     await handle.start();
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "client_rpc" }),
+    });
     try {
       const response = await handle.app.request("/api/rpc", {
         body: JSON.stringify({
@@ -1056,6 +1232,11 @@ describe("createDaemonServerApp", () => {
       let stderrOutput = "";
       let stdoutOutput = "";
       await handle.start();
+      await handle.app.request("/v1/clients", {
+        method: "POST",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ clientId: "client_rpc" }),
+      });
       try {
         const response = await handle.app.request("/api/rpc", {
           body: JSON.stringify({
@@ -1138,6 +1319,11 @@ describe("createDaemonServerApp", () => {
       },
     });
     await handle.start();
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "client_rpc" }),
+    });
     try {
       const rpc = await handle.app.request("/api/rpc", {
         body: JSON.stringify({
@@ -1177,6 +1363,39 @@ describe("createDaemonServerApp", () => {
 
   it("allows only the owning RPC client to claim an interaction response", async () => {
     const backend = new FakeBackend();
+    backend.executeCommand = (
+      invocation,
+    ): ReturnType<UiBackendClient["executeCommand"]> => {
+      backend.emit({
+        command: {
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "web",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_1",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      return Promise.resolve({
+        status: "completed",
+        commandRunId: "command_1",
+        clientInvocationId: invocation.clientInvocationId,
+        outputCount: 0,
+        eventCount: 0,
+      });
+    };
     const records: UiCommandRecord[] = [];
     const handle = createApp(backend, {
       commandRecorder: { record: (record) => records.push(record) },
@@ -1207,28 +1426,6 @@ describe("createDaemonServerApp", () => {
           surface: "web",
         },
       ]);
-      backend.emit({
-        command: {
-          clientInvocationId: "invoke_1",
-          commandId: "status",
-          commandRunId: "command_1",
-          path: ["status"],
-          surface: "web",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "command.started",
-      });
-      backend.emit({
-        request: {
-          clientInvocationId: "invoke_1",
-          commandRunId: "command_1",
-          interactionId: "interaction_1",
-          kind: "confirm",
-          subject: "permission",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "interaction.requested",
-      });
 
       const unknown = await rpc(
         "client_a",
@@ -1279,6 +1476,50 @@ describe("createDaemonServerApp", () => {
 
   it("releases an interaction claim only after a known validation failure", async () => {
     const backend = new FakeBackend();
+    backend.executeCommand = (
+      invocation,
+    ): ReturnType<UiBackendClient["executeCommand"]> => {
+      backend.emit({
+        command: {
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "web",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_1",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_2",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      return Promise.resolve({
+        status: "completed",
+        commandRunId: "command_1",
+        clientInvocationId: invocation.clientInvocationId,
+        outputCount: 0,
+        eventCount: 0,
+      });
+    };
     const handle = createApp(backend);
     await handle.start();
     const rpc = (
@@ -1318,28 +1559,7 @@ describe("createDaemonServerApp", () => {
         headers: { ...authHeaders(), "content-type": "application/json" },
         method: "POST",
       });
-      backend.emit({
-        command: {
-          clientInvocationId: "invoke_1",
-          commandId: "status",
-          commandRunId: "command_1",
-          path: ["status"],
-          surface: "web",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "command.started",
-      });
-      backend.emit({
-        request: {
-          clientInvocationId: "invoke_1",
-          commandRunId: "command_1",
-          interactionId: "interaction_1",
-          kind: "confirm",
-          subject: "permission",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "interaction.requested",
-      });
+
       backend.interactionError = Object.assign(new Error("invalid response"), {
         code: "INVALID_INTERACTION_RESPONSE",
       });
@@ -1348,17 +1568,6 @@ describe("createDaemonServerApp", () => {
       backend.interactionError = undefined;
       expect((await rpc("rpc_retry")).status).toBe(200);
 
-      backend.emit({
-        request: {
-          clientInvocationId: "invoke_1",
-          commandRunId: "command_1",
-          interactionId: "interaction_2",
-          kind: "confirm",
-          subject: "permission",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "interaction.requested",
-      });
       backend.interactionError = new Error("unknown consumption state");
       expect((await rpc("rpc_unknown_failure", "interaction_2")).status).toBe(
         500,
@@ -1382,6 +1591,11 @@ describe("createDaemonServerApp", () => {
       packageVersion: "0.1.5-test",
     });
     await handle.start();
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "client_a" }),
+    });
     try {
       const response = await handle.app.request(
         "/api/events?clientId=client_a",
@@ -1391,7 +1605,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(readSseData(response)).resolves.toEqual({
+      await expect(readSseData(response)).resolves.toMatchObject({
         clientId: "client_a",
         type: "hello",
       });
@@ -1459,7 +1673,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(clientResponse.status).toBe(200);
-      await expect(clientResponse.json()).resolves.toEqual({
+      await expect(clientResponse.json()).resolves.toMatchObject({
         clientId: "client_web",
         ok: true,
       });
@@ -1497,7 +1711,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(409);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "client is not registered" },
         ok: false,
       });
@@ -1511,7 +1725,7 @@ describe("createDaemonServerApp", () => {
     let getSnapshotCalls = 0;
     backend.onGetSnapshot = (): void => {
       getSnapshotCalls += 1;
-      if (getSnapshotCalls === 2) {
+      if (getSnapshotCalls === 1) {
         backend.emit(sessionUpdated());
       }
     };
@@ -1569,7 +1783,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         ok: true,
         permission: {
           level: "full-access",
@@ -1832,7 +2046,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(401);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "Unauthorized" },
           ok: false,
         });
@@ -1878,7 +2092,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(400);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "clientId is required" },
           ok: false,
         });
@@ -1925,7 +2139,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(409);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "client is not registered" },
           ok: false,
         });
@@ -1967,7 +2181,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.executedCommands).toEqual([
         {
           argv: [],
@@ -2032,9 +2246,9 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.executedCommands).toEqual([
-        {
+        expect.objectContaining({
           argumentMode: "raw",
           argv: ["查", "X"],
           clientInvocationId: "invoke_skill",
@@ -2043,7 +2257,7 @@ describe("createDaemonServerApp", () => {
           raw: "/hansun-db 查 X",
           rawArgs: "查 X",
           surface: "tui",
-        },
+        }),
       ]);
     } finally {
       await handle.dispose();
@@ -2082,7 +2296,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "command is not supported by web passthrough" },
         ok: false,
       });
@@ -2092,149 +2306,49 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("creates sessions for registered web clients through a dedicated REST route", async () => {
+  it("creates fresh client-bound sessions and selects an existing root using lightweight APIs", async () => {
     const backend = new FakeBackend();
     const handle = createApp(backend);
     await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
     try {
       await handle.app.request("/v1/clients", {
+        method: "POST",
+        headers,
         body: JSON.stringify({ clientId: "client_web" }),
-        headers: {
-          ...authHeaders(),
-          "content-type": "application/json",
-        },
-        method: "POST",
-      });
-      const response = await handle.app.request("/v1/sessions", {
-        headers: {
-          ...authHeaders(),
-          "x-ohbaby-client-id": "client_web",
-        },
-        method: "POST",
-      });
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
-      expect(backend.executedCommands[0]?.clientInvocationId).toMatch(
-        /^web_session_/,
-      );
-      expect(backend.executedCommands).toEqual([
-        {
-          argumentMode: "argv",
-          argv: ["--no-reuse-empty-session"],
-          clientInvocationId: backend.executedCommands[0]?.clientInvocationId,
-          commandId: "new",
-          path: ["new"],
-          raw: "/new --no-reuse-empty-session",
-          rawArgs: "--no-reuse-empty-session",
-          surface: "tui",
-        },
-      ]);
-    } finally {
-      await handle.dispose();
-    }
-  });
-
-  it("allows repeated web session creation to reuse the active empty session", async () => {
-    const backend = new FakeBackend();
-    const handle = createApp(backend);
-    await handle.start();
-    try {
-      await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
-        headers: {
-          ...authHeaders(),
-          "content-type": "application/json",
-        },
-        method: "POST",
       });
       const first = await handle.app.request("/v1/sessions", {
-        headers: {
-          ...authHeaders(),
-          "x-ohbaby-client-id": "client_web",
-        },
         method: "POST",
+        headers,
       });
-      expect(first.status).toBe(200);
-      const firstInvocation = backend.executedCommands[0];
-      expect(firstInvocation).toMatchObject({
-        argv: ["--no-reuse-empty-session"],
-        commandId: "new",
-        rawArgs: "--no-reuse-empty-session",
+      expect(await first.json()).toMatchObject({
+        ok: true,
+        rootSessionId: "session_new_1",
+        bindingGeneration: 2,
       });
-
-      backend.emit({
-        action: {
-          data: { choiceId: "session_web_1" },
-          kind: "session.selected",
-        },
-        clientInvocationId: firstInvocation.clientInvocationId,
-        commandRunId: "command_new_1",
-        timestamp: Date.parse(timestamp),
-        type: "command.result.delivered",
-      });
-
       const second = await handle.app.request("/v1/sessions", {
-        headers: {
-          ...authHeaders(),
-          "x-ohbaby-client-id": "client_web",
-        },
         method: "POST",
+        headers,
       });
-
-      expect(second.status).toBe(200);
-      expect(backend.executedCommands[1]).toMatchObject({
-        argv: [],
-        commandId: "new",
-        raw: "/new",
-        rawArgs: "",
+      expect(await second.json()).toMatchObject({
+        ok: true,
+        rootSessionId: "session_new_2",
+        bindingGeneration: 3,
       });
-    } finally {
-      await handle.dispose();
-    }
-  });
-
-  it("selects sessions for registered web clients through a dedicated REST route", async () => {
-    const backend = new FakeBackend();
-    const handle = createApp(backend);
-    await handle.start();
-    try {
-      await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
-        headers: {
-          ...authHeaders(),
-          "content-type": "application/json",
-        },
-        method: "POST",
-      });
-      const response = await handle.app.request(
+      const selected = await handle.app.request(
         "/v1/sessions/session_2/select",
-        {
-          headers: {
-            ...authHeaders(),
-            "x-ohbaby-client-id": "client_web",
-          },
-          method: "PATCH",
-        },
+        { method: "PATCH", headers },
       );
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
-      expect(backend.executedCommands[0]?.clientInvocationId).toMatch(
-        /^web_session_/,
-      );
-      expect(backend.executedCommands).toEqual([
-        {
-          argumentMode: "argv",
-          argv: ["--session_id", "session_2"],
-          clientInvocationId: backend.executedCommands[0]?.clientInvocationId,
-          commandId: "resume",
-          path: ["resume"],
-          raw: "/resume --session_id session_2",
-          rawArgs: "--session_id session_2",
-          surface: "tui",
-        },
-      ]);
+      expect(await selected.json()).toMatchObject({
+        ok: true,
+        rootSessionId: "session_2",
+        bindingGeneration: 4,
+      });
+      expect(backend.executedCommands).toEqual([]);
     } finally {
       await handle.dispose();
     }
@@ -2265,7 +2379,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.archivedSessions).toEqual(["session_2"]);
     } finally {
       await handle.dispose();
@@ -2298,7 +2412,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(404);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "Session not found: session_missing" },
         ok: false,
       });
@@ -2336,7 +2450,7 @@ describe("createDaemonServerApp", () => {
       );
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "Cannot archive subagent session: child_1" },
         ok: false,
       });
@@ -2361,7 +2475,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(401);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "Unauthorized" },
           ok: false,
         });
@@ -2387,7 +2501,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(400);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "clientId is required" },
           ok: false,
         });
@@ -2416,7 +2530,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(409);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "client is not registered" },
           ok: false,
         });
@@ -2450,7 +2564,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "command invocation is invalid" },
         ok: false,
       });
@@ -2506,7 +2620,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "command is not supported by web passthrough" },
         ok: false,
       });
@@ -2562,7 +2676,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         error: { message: "command is not supported by web passthrough" },
         ok: false,
       });
@@ -2657,7 +2771,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(400);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "command is not supported by web passthrough" },
           ok: false,
         });
@@ -2716,7 +2830,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.executedCommands).toEqual([
         expect.objectContaining({ commandId: "goal", rawArgs: "pause" }),
       ]);
@@ -2772,7 +2886,7 @@ describe("createDaemonServerApp", () => {
         });
 
         expect(response.status).toBe(400);
-        await expect(response.json()).resolves.toEqual({
+        await expect(response.json()).resolves.toMatchObject({
           error: { message: "model connection body is invalid" },
           ok: false,
         });
@@ -3077,7 +3191,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(readSseData(response)).resolves.toEqual({
+      await expect(readSseData(response)).resolves.toMatchObject({
         clientId: "client_web",
         type: "hello",
       });
@@ -3112,7 +3226,7 @@ describe("createDaemonServerApp", () => {
       });
 
       expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         clientRequestId: "request_1",
         createdAt: timestamp,
         ok: true,
@@ -3159,7 +3273,7 @@ describe("createDaemonServerApp", () => {
         method: "POST",
       });
       expect(accepted.status).toBe(202);
-      await expect(accepted.json()).resolves.toEqual({
+      await expect(accepted.json()).resolves.toMatchObject({
         clientRequestId: "request_1",
         createdAt: timestamp,
         ok: true,
@@ -3247,6 +3361,266 @@ describe("createDaemonServerApp", () => {
       expect(backend.trustedQueueOwners).toEqual(
         Array.from({ length: 6 }, () => "client_web"),
       );
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("routes retained resubmission with trusted ownership and preserves domain conflict status", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const steer = vi
+      .spyOn(backend, "resubmitRetainedPromptForOwner")
+      .mockResolvedValue({
+        promptId: "prompt_1",
+        userMessageId: "message_1",
+
+        sessionId: "session_generated",
+        acceptedAt: 1,
+        operationId: "resubmit-1",
+      });
+    const handle = createApp(backend, {
+      createSessionId: () => "session_generated",
+    });
+    await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers,
+        method: "POST",
+      });
+      await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({ clientRequestId: "request_1", text: "queued" }),
+        headers,
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/prompts/prompt_1/resubmit",
+        {
+          body: JSON.stringify({
+            editLeaseId: "lease-1",
+            text: "retained edit",
+            operationId: "resubmit-1",
+            ownerClientId: "spoof",
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+      expect(response.status).toBe(200);
+      expect(steer).toHaveBeenLastCalledWith(
+        {
+          promptId: "prompt_1",
+          editLeaseId: "lease-1",
+          text: "retained edit",
+          operationId: "resubmit-1",
+        },
+        "client_web",
+      );
+      expect(await response.json()).toMatchObject({
+        receipt: { sessionId: "session_generated", userMessageId: "message_1" },
+      });
+      const rpcSteer = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          id: "steer-rpc",
+          clientId: "client_web",
+          method: "resubmitRetainedPrompt",
+          params: [
+            {
+              promptId: "prompt_1",
+              editLeaseId: "lease-1",
+              text: "retained edit",
+              operationId: "resubmit-1",
+            },
+          ],
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(await rpcSteer.json()).toMatchObject({
+        ok: true,
+        result: { sessionId: "session_generated" },
+      });
+      expect(steer).toHaveBeenLastCalledWith(
+        {
+          promptId: "prompt_1",
+          editLeaseId: "lease-1",
+          text: "retained edit",
+          operationId: "resubmit-1",
+        },
+        "client_web",
+      );
+      steer.mockRejectedValue(
+        Object.assign(new Error("Target closed"), {
+          code: "PROMPT_VERSION_CONFLICT",
+        }),
+      );
+      const conflict = await handle.app.request(
+        "/v1/prompts/prompt_1/resubmit",
+        {
+          body: JSON.stringify({
+            editLeaseId: "lease-1",
+            text: "retained edit",
+            operationId: "resubmit-2",
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+      expect(conflict.status).toBe(409);
+      const invalid = await handle.app.request(
+        "/v1/prompts/prompt_1/resubmit",
+        {
+          body: "{}",
+          headers,
+          method: "POST",
+        },
+      );
+      expect(invalid.status).toBe(400);
+      const calls = steer.mock.calls.length;
+      const forbidden = await handle.app.request(
+        "/v1/prompts/other-session-prompt/resubmit",
+        {
+          body: JSON.stringify({
+            editLeaseId: "lease",
+            operationId: "resubmit-3",
+            text: "hidden",
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+      expect(forbidden.status).toBe(403);
+      const rpcForbidden = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          id: "forbidden-resubmit",
+          clientId: "client_web",
+          method: "resubmitRetainedPrompt",
+          params: [
+            {
+              promptId: "other-session-prompt",
+              editLeaseId: "lease",
+              operationId: "resubmit-3",
+              text: "hidden",
+              ownerClientId: "spoofed",
+            },
+          ],
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(rpcForbidden.status).toBe(403);
+      expect(steer).toHaveBeenCalledTimes(calls);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("routes Steer with trusted ownership and preserves domain conflict status", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const steer = vi
+      .spyOn(backend, "steerQueuedPromptForOwner")
+      .mockResolvedValue({
+        promptId: "prompt_1",
+        userMessageId: "message_1",
+        inputId: "steer:prompt_1",
+        acceptedTargetRunId: "run-a",
+        acceptedAt: 1,
+        clientRequestId: "steer-1",
+      });
+    const handle = createApp(backend, {
+      createSessionId: () => "session_generated",
+    });
+    await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers,
+        method: "POST",
+      });
+      await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({ clientRequestId: "request_1", text: "queued" }),
+        headers,
+        method: "POST",
+      });
+      const response = await handle.app.request("/v1/prompts/prompt_1/steer", {
+        body: JSON.stringify({
+          expectedRunId: "run-a",
+          clientRequestId: "steer-1",
+          ownerClientId: "spoof",
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(response.status).toBe(200);
+      expect(steer).toHaveBeenLastCalledWith(
+        {
+          promptId: "prompt_1",
+          expectedRunId: "run-a",
+          clientRequestId: "steer-1",
+        },
+        "client_web",
+      );
+      expect(await response.json()).toMatchObject({
+        receipt: { acceptedTargetRunId: "run-a", userMessageId: "message_1" },
+      });
+      const rpcSteer = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          id: "steer-rpc",
+          clientId: "client_web",
+          method: "steerQueuedPrompt",
+          params: [
+            {
+              promptId: "prompt_1",
+              expectedRunId: "run-a",
+              clientRequestId: "steer-1",
+            },
+          ],
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(await rpcSteer.json()).toMatchObject({
+        ok: true,
+        result: { acceptedTargetRunId: "run-a" },
+      });
+      expect(steer).toHaveBeenLastCalledWith(
+        {
+          promptId: "prompt_1",
+          expectedRunId: "run-a",
+          clientRequestId: "steer-1",
+        },
+        "client_web",
+      );
+      steer.mockRejectedValue(
+        Object.assign(new Error("Target closed"), {
+          code: "CURRENT_RUN_INPUT_CONFLICT",
+        }),
+      );
+      const conflict = await handle.app.request("/v1/prompts/prompt_1/steer", {
+        body: JSON.stringify({
+          expectedRunId: "run-a",
+          clientRequestId: "steer-2",
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(conflict.status).toBe(409);
+      const invalid = await handle.app.request("/v1/prompts/prompt_1/steer", {
+        body: "{}",
+        headers,
+        method: "POST",
+      });
+      expect(invalid.status).toBe(400);
     } finally {
       await handle.dispose();
     }
@@ -3622,6 +3996,39 @@ describe("createDaemonServerApp", () => {
 
   it("routes REST interaction responses through the shared owner claim", async () => {
     const backend = new FakeBackend();
+    backend.executeCommand = (
+      invocation,
+    ): ReturnType<UiBackendClient["executeCommand"]> => {
+      backend.emit({
+        command: {
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "web",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_1",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      return Promise.resolve({
+        status: "completed",
+        commandRunId: "command_1",
+        clientInvocationId: invocation.clientInvocationId,
+        outputCount: 0,
+        eventCount: 0,
+      });
+    };
     const records: UiCommandRecord[] = [];
     const handle = createApp(backend, {
       commandRecorder: { record: (record) => records.push(record) },
@@ -3658,28 +4065,7 @@ describe("createDaemonServerApp", () => {
         headers,
         method: "POST",
       });
-      backend.emit({
-        command: {
-          clientInvocationId: "invoke_1",
-          commandId: "status",
-          commandRunId: "command_1",
-          path: ["status"],
-          surface: "web",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "command.started",
-      });
-      backend.emit({
-        request: {
-          clientInvocationId: "invoke_1",
-          commandRunId: "command_1",
-          interactionId: "interaction_1",
-          kind: "confirm",
-          subject: "permission",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "interaction.requested",
-      });
+
       records.length = 0;
 
       const unknown = await handle.app.request(
@@ -3738,6 +4124,16 @@ describe("createDaemonServerApp", () => {
     });
     const handle = createApp(backend);
     await handle.start();
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "web_queue" }),
+    });
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "rpc_queue" }),
+    });
     try {
       await handle.app.request("/v1/clients", {
         body: JSON.stringify({ clientId: "web_queue" }),
@@ -3793,7 +4189,7 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("returns prompt admission failures before issuing a receipt", async () => {
+  it("keeps unclassified prompt admission failures distinguishable from definite rejection", async () => {
     const backend = new FakeBackend();
     backend.admissionError = new Error("admission failed");
     const handle = createApp(backend, {
@@ -3819,7 +4215,7 @@ describe("createDaemonServerApp", () => {
         method: "POST",
       });
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(500);
       await expect(response.json()).resolves.toMatchObject({
         error: { message: "admission failed" },
         ok: false,
@@ -3829,13 +4225,16 @@ describe("createDaemonServerApp", () => {
     }
   });
 
-  it("treats a session without an active run as an idempotent abort", async () => {
+  it("rejects Stop without an explicit run ID", async () => {
     const backend = new FakeBackend();
     const handle = createApp(backend);
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -3855,8 +4254,7 @@ describe("createDaemonServerApp", () => {
         },
       );
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(response.status).toBe(400);
       expect(backend.abortedRunIds).toEqual([]);
     } finally {
       await handle.dispose();
@@ -3881,7 +4279,10 @@ describe("createDaemonServerApp", () => {
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -3891,7 +4292,11 @@ describe("createDaemonServerApp", () => {
       const response = await handle.app.request(
         "/v1/sessions/session_1/abort",
         {
-          body: JSON.stringify({ runId: "run_completed" }),
+          body: JSON.stringify({
+            runtimeEpoch: "test-epoch",
+            bindingGeneration: 1,
+            runId: "run_completed",
+          }),
           headers: {
             ...authHeaders(),
             "content-type": "application/json",
@@ -3901,15 +4306,14 @@ describe("createDaemonServerApp", () => {
         },
       );
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(response.status).toBe(409);
       expect(backend.abortedRunIds).toEqual([]);
     } finally {
       await handle.dispose();
     }
   });
 
-  it("treats an unknown runId as an idempotent abort", async () => {
+  it("rejects an unknown runId without aborting the active run", async () => {
     const backend = new FakeBackend({
       ...emptySnapshot(),
       activeSessionId: "session_1",
@@ -3928,7 +4332,10 @@ describe("createDaemonServerApp", () => {
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -3938,7 +4345,11 @@ describe("createDaemonServerApp", () => {
       const response = await handle.app.request(
         "/v1/sessions/session_1/abort",
         {
-          body: JSON.stringify({ runId: "run_unknown" }),
+          body: JSON.stringify({
+            runtimeEpoch: "test-epoch",
+            bindingGeneration: 1,
+            runId: "run_unknown",
+          }),
           headers: {
             ...authHeaders(),
             "content-type": "application/json",
@@ -3948,8 +4359,7 @@ describe("createDaemonServerApp", () => {
         },
       );
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(response.status).toBe(409);
       expect(backend.abortedRunIds).toEqual([]);
     } finally {
       await handle.dispose();
@@ -3982,7 +4392,10 @@ describe("createDaemonServerApp", () => {
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_2" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -3993,7 +4406,11 @@ describe("createDaemonServerApp", () => {
       const response = await handle.app.request(
         "/v1/sessions/session_2/abort",
         {
-          body: JSON.stringify({ runId: "run_2" }),
+          body: JSON.stringify({
+            runtimeEpoch: "test-epoch",
+            bindingGeneration: 1,
+            runId: "run_2",
+          }),
           headers: {
             ...authHeaders(),
             "content-type": "application/json",
@@ -4035,7 +4452,10 @@ describe("createDaemonServerApp", () => {
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -4082,7 +4502,10 @@ describe("createDaemonServerApp", () => {
     await handle.start();
     try {
       await handle.app.request("/v1/clients", {
-        body: JSON.stringify({ clientId: "client_web" }),
+        body: JSON.stringify({
+          clientId: "client_web",
+          startupIntent: { resumeSessionId: "session_1" },
+        }),
         headers: {
           ...authHeaders(),
           "content-type": "application/json",
@@ -4092,7 +4515,11 @@ describe("createDaemonServerApp", () => {
       const response = await handle.app.request(
         "/v1/sessions/session_1/abort",
         {
-          body: JSON.stringify({ runId: "run_2" }),
+          body: JSON.stringify({
+            runtimeEpoch: "test-epoch",
+            bindingGeneration: 1,
+            runId: "run_2",
+          }),
           headers: {
             ...authHeaders(),
             "content-type": "application/json",

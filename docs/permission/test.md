@@ -1,259 +1,82 @@
 # permission 模块 test.md
 
-本文档说明如何验证 `permission` 模块在真实协作环境中的可信性。测试围绕模块职责和交互边界展开，而非内部实现细节。
-
----
-
-## 一、Test Scope（测试范围）
-
-### 覆盖范围
-
-本模块测试覆盖以下职责：
-
-| 职责 | 验证目标 |
-|------|----------|
-| 权限确认执行 | ask() 正确阻塞并等待响应 |
-| 队列管理 | 请求按序处理，一次一个 |
-| 批准列表管理 | always 响应正确记录，后续请求可跳过确认 |
-| 响应处理 | 四种响应类型均正确处理 |
-| Pattern 生成与匹配 | 生成的 Pattern 格式正确，匹配逻辑符合预期 |
-| 事件发布 | 正确时机发布正确事件 |
-| 会话清理 | 清理时移除所有相关数据 |
-
-### 不在测试范围
-
-以下内容不在本模块测试范围内：
-
-- UI 层的确认框渲染与交互逻辑
-- Policy 模块的模式切换决策
-- Bus 模块的事件分发机制
-- 工具模块的调用逻辑
-- 超时处理（由 Agent 运行时负责）
-
----
-
-## 二、Critical Scenarios（关键场景）
-
-### 2.1 权限确认基本流程
-
-**场景 1：首次请求需要用户确认**
-
-- 前置条件：无已批准记录
-- 操作：调用 ask() 请求权限
-- 预期结果：
-  - 生成包含 permissionId 的 PermissionInfo
-  - 发布 Event.Updated 事件
-  - Promise 保持 pending 状态直到 respond() 被调用
-
-**场景 2：已批准的请求自动通过**
-
-- 前置条件：存在匹配的批准记录
-- 操作：调用 ask() 请求权限
-- 预期结果：
-  - Promise 立即 resolve
-  - 不发布 Event.Updated 事件
-
-**场景 3：用户选择 once**
-
-- 前置条件：有待处理的权限请求
-- 操作：调用 respond() 传入 { type: 'once' }
-- 预期结果：
-  - ask() 的 Promise resolve
-  - 发布 Event.Replied 事件
-  - 不添加批准记录
-  - 不发布 SwitchModeRequested 事件
-
-**场景 4：用户选择 always**
-
-- 前置条件：有待处理的权限请求
-- 操作：调用 respond() 传入 { type: 'always' }
-- 预期结果：
-  - ask() 的 Promise resolve
-  - 发布 Event.Replied 事件
-  - 添加对应 Pattern 到批准记录
-  - 发布 SwitchModeRequested 事件
-
-**场景 5：用户选择 reject**
-
-- 前置条件：有待处理的权限请求
-- 操作：调用 respond() 传入 { type: 'reject' }
-- 预期结果：
-  - ask() 的 Promise reject
-  - 抛出 PermissionRejectedError
-  - 发布 Event.Replied 事件
-
-**场景 6：用户选择 suggest**
-
-- 前置条件：有待处理的权限请求
-- 操作：调用 respond() 传入 { type: 'suggest', suggestion: '...' }
-- 预期结果：
-  - ask() 的 Promise reject
-  - 抛出 PermissionRejectedWithSuggestionError，包含建议内容
-  - 发布 Event.Replied 事件
-
-### 2.2 队列管理
-
-**场景 7：多个请求串行处理**
-
-- 前置条件：无
-- 操作：连续调用两次 ask()
-- 预期结果：
-  - 只发布一次 Event.Updated（第一个请求）
-  - 第一个请求 respond() 后，发布第二个请求的 Event.Updated
-  - 两个请求按顺序处理
-
-**场景 8：队列中的请求被会话清理**
-
-- 前置条件：队列中有待处理请求
-- 操作：调用 clearSession()
-- 预期结果：
-  - 该会话的所有待处理请求被移除
-  - 对应的 Promise 被 reject（可选：使用特定错误类型）
-
-### 2.3 Pattern 匹配
-
-**场景 9：精确匹配**
-
-- 前置条件：批准记录包含 `tool:edit:src/components/**`
-- 操作：请求 `tool:edit:src/components/Button.tsx`
-- 预期结果：匹配成功，自动通过
-
-**场景 10：父级匹配**
-
-- 前置条件：批准记录包含 `tool:edit:src/**`
-- 操作：请求 `tool:edit:src/components/Button.tsx`
-- 预期结果：匹配成功，自动通过
-
-**场景 11：不匹配**
-
-- 前置条件：批准记录包含 `tool:edit:src/**`
-- 操作：请求 `tool:edit:tests/unit/test.ts`
-- 预期结果：不匹配，需要用户确认
-
-**场景 12：工具级匹配**
-
-- 前置条件：批准记录包含 `tool:read`
-- 操作：请求读取任意文件
-- 预期结果：匹配成功，自动通过
-
-### 2.4 会话隔离
-
-**场景 13：不同会话的批准记录隔离**
-
-- 前置条件：Session A 有批准记录 `tool:edit:src/**`
-- 操作：Session B 请求 `tool:edit:src/file.ts`
-- 预期结果：不匹配，Session B 需要用户确认
-
-**场景 14：会话清理只影响目标会话**
-
-- 前置条件：Session A 和 Session B 都有批准记录
-- 操作：调用 clearSession(sessionA)
-- 预期结果：
-  - Session A 的批准记录被清除
-  - Session B 的批准记录保持不变
-
----
-
-## 三、Integration Points（集成点测试）
-
-### 3.1 与 Bus 模块集成
-
-**验证重点**：
-
-- Event.Updated 在正确时机发布
-- Event.Replied 包含正确的响应数据
-- Event.SwitchModeRequested 仅在 always 响应时发布
-
-**失败处理预期**：
-
-- 如果 Bus.publish() 失败，permission 模块应记录错误但不影响核心流程
-- 事件发布失败不应导致 Promise resolve/reject 失败
-
-### 3.2 与工具模块集成
-
-**验证重点**：
-
-- ask() 返回的 Promise 能正确阻塞工具执行
-- 工具模块传入的参数能正确转换为 PermissionInfo
-- reject 错误能被工具模块正确捕获和处理
-
-**失败处理预期**：
-
-- 工具模块传入无效参数时，ask() 应抛出明确错误
-
-### 3.3 与 Session 模块集成
-
-**验证重点**：
-
-- clearSession() 能正确清理指定会话的所有数据
-- 清理操作不影响其他会话
-
-**失败处理预期**：
-
-- 清理不存在的会话时，应静默成功（幂等性）
-
----
-
-## 四、Verification Strategy（验证策略）
-
-### 4.1 单元测试
-
-**适用场景**：
-
-- Pattern 生成逻辑
-- Pattern 匹配逻辑
-- ID 生成逻辑
-- 队列操作逻辑
-
-**策略**：
-
-- 使用纯函数测试，无需 mock
-- 覆盖边界情况（空输入、特殊字符、长路径）
-
-### 4.2 集成测试（Mock 外部依赖）
-
-**适用场景**：
-
-- ask() / respond() 完整流程
-- 事件发布验证
-- 批准记录管理
-
-**策略**：
-
-- Mock Bus 模块，验证事件发布调用
-- 使用内存存储，无需真实持久化
-- 验证 Promise 状态变化
-
-### 4.3 集成测试（真实依赖）
-
-**适用场景**：
-
-- 与真实 Bus 模块的事件流转
-- 多会话并发场景
-
-**策略**：
-
-- 在测试环境中使用真实 Bus 实例
-- 验证端到端事件流
-
-### 4.4 手动验证
-
-**适用场景**：
-
-- UI 确认框的用户体验
-- 不同响应选项的交互流程
-
-**验证要点**：
-
-- 确认框显示内容是否清晰
-- 四个选项是否都能正常工作
-- 队列处理时用户感知是否正常
-
----
-
-## 五、文档自检
-
-- [x] 所有关键职责都有对应的验证场景
-- [x] 模块与外部交互时的失败处理预期已明确
-- [x] 测试围绕行为而非实现细节
-- [x] 场景来源于 goals-duty.md 和 dfd-interface.md
+本篇说明当前模块应保持的行为回归。跨层发布门和实际客户端验收见 [执行可靠性 improve-1 验收标准](../problem-lists/2026-09-19-execution-reliability/improve-1/04-test-and-acceptance.md)；本文不替代运行记录或声称所有手动场景已通过。
+
+## 一、模块测试范围
+
+| 行为         | 核心断言                                                                             |
+| ------------ | ------------------------------------------------------------------------------------ |
+| 请求身份     | run/session/call/message/source/signal 必需；来源字段冻结，审批 ID 与 callId 独立    |
+| 独立 pending | 同一或不同会话的多条请求都立即登记；可先回答非首项，不需要前一条结束                 |
+| 一次决议     | 双回答、回答与撤销竞争、通知重入只能完成一次 Promise 和规则副作用                    |
+| 来源规则     | always 只写真实来源 session，可自动结算同 session 已登记且匹配的可记忆请求           |
+| 快速路径     | 既有合法规则和 Full Access 直接返回，不发 pending requested/resolved、不推进投影版本 |
+| 生命周期     | signal abort、run 终态、来源链失效、clearSession 和 dispose 都结束正确范围的等待     |
+| 故障隔离     | 关键提交失败冻结可信 root；普通通知失败不改变合法决议                                |
+| 近期终态     | 有界保存最小身份，安全重复/撤销可区分；淘汰后返回 not-pending                        |
+| 求值与模式   | deny 优先，default 敏感请求不可记忆，Full Access 不发新人工审批且不写 always 规则    |
+
+UI 渲染、server 认证和独立恢复属于对应 adapter/SDK/server/client 测试，不通过 mock manager 冒充跨层验收。审批不新增墙钟超时，执行期限由运行生命周期验证。
+
+## 二、关键场景
+
+### 请求和响应
+
+1. 首次 ask 登记独立 ID、真实来源和 abort listener，先提交 requested 再通知；Promise 保持等待。
+2. 连续登记 A/B，直接回答 B：B 结束、A 保持 pending；每个请求都有自己的 requested 与唯一 resolved。
+3. 同一 callId 顺序触发两次审批：第二次使用新 permissionId，第一次回答不能代答第二次。
+4. once 不写规则；reject 只拒绝目标请求；suggest 保留非空建议。
+5. cancel、未知 choice、不可记忆 always、扩大的 pattern 不认领 pending，不写规则。
+6. 两个入口同时合法回答同一 ID，只有一个 accepted；安全重复为 already-resolved；已撤销为 revoked；未知或终态淘汰为 not-pending。
+
+### always 和求值
+
+1. always 静默写规则，关键提交和终态记录完成前观察者不可重入。
+2. 自动结算同来源 session 中已经 pending、匹配且可记忆的请求，每条再次检查 signal、最新策略和健康并提交独立终态。
+3. root、兄弟 session、不同 pattern 或不可记忆请求不被联动批准。
+4. 命中已有 allow 规则的新调用不产生审批转移；规则变化自身也不推进 pending revision。
+5. default 下敏感路径即使有 allow 仍需一次确认；Full Access 下敏感/显式 MCP/外部目录等新请求直接放行，已有 deny 仍拒绝，工具自身保护继续生效。
+6. Full Access 切换影响后续准入，不自动回答旧 pending，不创建或扩散会话规则。
+
+### 取消和清理
+
+1. 登记前已 aborted 不创建条目；登记后的 abort 拆 listener 并完成等待；批准后执行仍检查 signal。
+2. 取消先赢则迟到 always 不写规则；always 先赢后取消不撤回已合法规则。
+3. 结束同 session 的 run A 只撤销 A，run B 和其他 run 不受影响。
+4. 来源、root 或中间祖先删除撤销经过该节点的请求；不能将其迁移到另一 root。
+5. clearSession 清目标规则并撤销来源链请求；dispose 完成全部等待，之后不能新登记。
+6. 批量撤销的通知回调重入回答或 ask，不能让正在清理的范围重新放行。
+7. 页面关闭、断线或历史读取失败不等于 run 终态，不撤销有效 pending。
+
+### 关键提交与通知
+
+1. requested/resolved 的同步投影与 manager 转移处于同一调用栈，无 await 或普通观察者插入。
+2. 关键提交抛错时，即使投影与通知同时失败，也必须结束受影响等待、拆 listener，查询报告 unavailable 而非正常空集合。
+3. 已写入合法规则不因后续通知失败回滚；RuleAdded/Replied 失败不重复执行工具或规则副作用。
+4. 严重 ID/来源一致性冲突冻结可信 root，其他 root 继续工作；普通非法请求不能触发全局冻结。
+5. 专用投递最后一条 resolved 失败后立即失效该订阅/连接，不等待下一条增量才发现；重同步读取权威基线。
+
+## 三、测试位置和运行方式
+
+| 位置                                                                                  | 主要职责                                      |
+| ------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `packages/ohbaby-agent/src/permission/permission.unit.test.ts`                        | ask/respond、规则、模式和兼容行为             |
+| `packages/ohbaby-agent/src/permission/permission-lifecycle.unit.test.ts`              | 独立 pending、身份、竞争、撤销、故障与终态    |
+| `packages/ohbaby-agent/src/permission/{classifier,evaluator,rule,state}.unit.test.ts` | 分类、求值、规则和状态                        |
+| `packages/ohbaby-agent/src/adapters/app-events/permission-projection.unit.test.ts`    | 原子版本投影、来源一致性和通知隔离            |
+| `packages/ohbaby-agent/src/adapters/ui-runtime/permission-source.unit.test.ts`        | 可信来源解析、父链与取消                      |
+| `tests/integration/agents/permission-run-lifecycle.integration.test.ts`               | 真实 scheduler / 主子生命周期与 run 身份      |
+| `tests/integration/agents/inprocess-child-permission.integration.test.ts`             | 实际 in-process 根审批、子执行与双响应        |
+| `packages/ohbaby-agent/src/host/core-api-permission.integration.test.ts`              | 实际默认 host 加本地 RPC 的订阅与独立查询边界 |
+
+```bash
+pnpm exec vitest run packages/ohbaby-agent/src/permission
+pnpm exec vitest run packages/ohbaby-agent/src/adapters/app-events/permission-projection.unit.test.ts packages/ohbaby-agent/src/adapters/ui-runtime/permission-source.unit.test.ts
+pnpm exec vitest run tests/integration/agents/permission-run-lifecycle.integration.test.ts tests/integration/agents/inprocess-child-permission.integration.test.ts packages/ohbaby-agent/src/host/core-api-permission.integration.test.ts
+```
+
+测试 fixture 显式提供执行 ID 与调用 controller，不为生产缺失身份添加兜底。故障注入聚焦行为：一个请求是否执行一次、等待是否结束、其他范围是否保留，而不是只断言 Map 内部操作。
+
+## 四、客户端协作验证
+
+实际 Web/TUI 验证必须能看到来源、选择非首项、拒绝单条并确认其他请求仍可回答。聊天历史/model 挂起或失败时，审批仍可通过轻量根元数据、独立快照和专用事件恢复。断线、切范围和同步失败立即停用按钮；旧 epoch/generation 的快照、事件和应答回调不能修改新范围。审批卡不提供 Cancel run。默认 TUI 保持本进程入口，不能以仅测试 in-process adapter 替代实际 host/RPC/编译产物接线验证。

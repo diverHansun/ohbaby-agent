@@ -111,6 +111,7 @@ export function projectToolMetadataForModel(
         "mtimeMs",
         "hasMore",
         "nextOffset",
+        "nextCursor",
         "lineCount",
       ]);
     case "write":
@@ -129,12 +130,20 @@ export function projectToolMetadataForModel(
       ]);
     case "list":
     case "glob":
-    case "grep":
       return copyMetadataFields(metadata, [
         "count",
         "truncated",
         "skippedBinaryFiles",
         "skippedLargeFiles",
+      ]);
+    case "grep":
+      return copyMetadataFields(metadata, [
+        "count",
+        "truncated",
+        "scanComplete",
+        "displayLimited",
+        "stopReason",
+        "processExited",
       ]);
     case "web_search":
     case "web_fetch":
@@ -146,8 +155,38 @@ export function projectToolMetadataForModel(
       ]);
     case "subagent_run": {
       const subagent = nestedMetadata(metadata, "subagent");
+      const execution = subagent && nestedMetadata(subagent, "execution");
+      if (execution)
+        return {
+          ...copyMetadataFields(nestedMetadata(subagent, "item") ?? {}, [
+            "subagentId",
+            "sessionId",
+            "contextScopeId",
+            "role",
+            "name",
+            "description",
+          ]),
+          ...copyMetadataFields(execution, [
+            "executionId",
+            "subagentId",
+            "childSessionId",
+            "childScopeId",
+            "childRunId",
+            "mode",
+            "status",
+            "reason",
+            "resultStored",
+            "sizeBytes",
+          ]),
+          ...copyMetadataFields(subagent, ["success", "paused"]),
+        };
       const item =
         subagent === undefined ? undefined : nestedMetadata(subagent, "item");
+      const paused = subagent?.paused === true;
+      const queued =
+        subagent?.success === undefined &&
+        Array.isArray(item?.pendingQueue) &&
+        item.pendingQueue.length > 0;
       return subagent === undefined || item === undefined
         ? {}
         : {
@@ -158,31 +197,52 @@ export function projectToolMetadataForModel(
               "role",
               "name",
               "description",
-              "status",
-              "error",
             ]),
+            ...(paused
+              ? { status: "paused", paused: true }
+              : queued
+                ? { status: "queued" }
+                : copyMetadataFields(item, ["status", "error"])),
             ...copyMetadataFields(subagent, ["success"]),
           };
     }
     case "subagent_status": {
       const status = nestedMetadata(metadata, "subagentStatus");
-      const items = status?.items;
-      return Array.isArray(items)
+      return status
         ? {
-            items: items.map((item) =>
-              typeof item === "object" && item !== null && !Array.isArray(item)
-                ? copyMetadataFields(item as ToolMetadata, [
-                    "subagentId",
-                    "sessionId",
-                    "contextScopeId",
-                    "role",
-                    "name",
-                    "description",
-                    "status",
-                    "error",
-                  ])
-                : {},
-            ),
+            items: Array.isArray(status.items)
+              ? status.items.map((item) =>
+                  typeof item === "object" && item !== null
+                    ? copyMetadataFields(item as ToolMetadata, [
+                        "subagentId",
+                        "sessionId",
+                        "contextScopeId",
+                        "role",
+                        "status",
+                        "currentRunId",
+                        "lastRunId",
+                        "pendingInputs",
+                      ])
+                    : {},
+                )
+              : [],
+            ...(Array.isArray(status.executions)
+              ? {
+                  executions: status.executions.map((execution) =>
+                    typeof execution === "object" && execution !== null
+                      ? copyMetadataFields(execution as ToolMetadata, [
+                          "executionId",
+                          "subagentId",
+                          "childRunId",
+                          "status",
+                          "reason",
+                          "resultStored",
+                          "sizeBytes",
+                        ])
+                      : {},
+                  ),
+                }
+              : {}),
           }
         : {};
     }
@@ -193,7 +253,7 @@ export function projectToolMetadataForModel(
       return item === undefined
         ? copyMetadataFields(metadata, ["error"])
         : {
-            ...copyMetadataFields(close ?? {}, ["previousStatus"]),
+            ...copyMetadataFields(close ?? {}, ["previousStatus", "reason"]),
             ...copyMetadataFields(item, [
               "subagentId",
               "sessionId",
@@ -202,7 +262,6 @@ export function projectToolMetadataForModel(
               "name",
               "description",
               "status",
-              "error",
             ]),
           };
     }

@@ -1,0 +1,95 @@
+[
+  {
+    "profile": "zenmux-gpt56-luna-chat",
+    "recordedAt": "2026-09-27T05:15:59.691Z",
+    "result": "failed",
+    "failure": {
+      "phase": "post-reopen",
+      "code": "ASSERTION_FAILED"
+    },
+    "saved": {
+      "saved": true,
+      "protocol": "openai-compatible",
+      "persistedProtocol": "openai-compatible",
+      "contextWindowTokens": 128000,
+      "contextWindowSource": "user"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 128000,
+        "currentTokens": 7368
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      },
+      {
+        "status": "succeeded"
+      }
+    ]
+  },
+  {
+    "profile": "zenmux-gpt56-luna-responses",
+    "recordedAt": "2026-09-27T05:16:00.545Z",
+    "result": "failed",
+    "failure": {
+      "phase": "post-reopen",
+      "code": "ASSERTION_FAILED"
+    },
+    "saved": {
+      "saved": true,
+      "protocol": "openai-responses",
+      "persistedProtocol": "openai-responses",
+      "contextWindowTokens": 128000,
+      "contextWindowSource": "user"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 128000,
+        "currentTokens": 7338
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      },
+      {
+        "status": "succeeded"
+      }
+    ]
+  },
+  {
+    "profile": "zenmux-claude-sonnet5-anthropic",
+    "recordedAt": "2026-09-27T05:15:57.889Z",
+    "result": "failed",
+    "failure": {
+      "phase": "post-reopen",
+      "code": "ASSERTION_FAILED"
+    },
+    "saved": {
+      "saved": true,
+      "protocol": "anthropic",
+      "persistedProtocol": "anthropic",
+      "contextWindowTokens": 128000,
+      "contextWindowSource": "user"
+    },
+    "visibleContextWindows": [
+      {
+        "phase": "first-read",
+        "tokens": 128000,
+        "currentTokens": 10726
+      }
+    ],
+    "completions": [
+      {
+        "status": "succeeded"
+      },
+      {
+        "status": "succeeded"
+      }
+    ]
+  }
+]
