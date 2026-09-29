@@ -411,7 +411,6 @@ describe("read file tool", () => {
 
   it("rejects replacement during a read and releases the actual handle", async () => {
     await writeFile(tempRoot, "race.txt", "a\nb");
-    await writeFile(tempRoot, "replacement.txt", "c\nd");
     const originalOpen = fs.open.bind(fs);
     let opened: Awaited<ReturnType<typeof fs.open>> | undefined;
     vi.spyOn(fs, "open").mockImplementation(async (...args) => {
@@ -421,10 +420,9 @@ describe("read file tool", () => {
       vi.spyOn(handle, "read").mockImplementationOnce(
         async (...readArgs: Parameters<typeof handle.read>) => {
           const result = await originalRead(...readArgs);
-          await fs.rename(
-            path.join(tempRoot, "replacement.txt"),
-            path.join(tempRoot, "race.txt"),
-          );
+          // Writing through the existing path works on both POSIX and Windows.
+          // Windows cannot rename over a file while the read handle is open.
+          await fs.writeFile(path.join(tempRoot, "race.txt"), "c\nd");
           return result;
         },
       );

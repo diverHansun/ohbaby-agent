@@ -38,6 +38,8 @@ jobs:
         run: pnpm typecheck
 
       - name: Lint
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm lint
 
       - name: Unit tests
