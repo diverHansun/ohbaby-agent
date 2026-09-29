@@ -122,6 +122,21 @@ describe("session title generator", () => {
     );
   });
 
+  it("keeps the provisional title when the provider exhausts its output budget", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createFakeLLMClient(
+      [{ textDelta: "Incomplete title" }, { finishReason: "length" }],
+      requests,
+    );
+    await expect(
+      generateSessionTitle({
+        firstUserMessage: "Name the task",
+        llmClient: client,
+      }),
+    ).resolves.toBeNull();
+    expect(requests).toHaveLength(1);
+  });
+
   it("does not persist the empty-response placeholder as a generated title", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const client = createFakeLLMClient([{ finishReason: "stop" }], requests);

@@ -122,7 +122,7 @@ message/lifecycle 在合适时机主动调用 `incrementStats()` 或等价方法
 
 ### 首轮自动命名与人工标题保护（2026-09-29）
 
-命名使用接受记录中的可选 `namingSource = { skillName, request }`；普通输入直接使用正文，skill 执行仍保留展开正文。辅助请求固定两条消息、`purpose=session-title`、200 tokens、5 秒超时，无执行 tools/history 或主执行显式 cache key，辅助用量不进入主 Run。脱敏先于限长；空结果、默认占位和失败保持临时标题。
+命名使用接受记录中的可选 `namingSource = { skillName, request }`；普通输入直接使用正文，skill 执行仍保留展开正文。辅助请求固定两条消息、`purpose=session-title`、200 tokens、5 秒超时，无执行 tools/history 或主执行显式 cache key，辅助用量不进入主 Run。脱敏先于限长；空结果、默认占位、失败以及 provider 以 `length` 结束的未完成结果保持临时标题；不重试辅助请求。
 
 新建会话的接受记录另存短 `titleExpected`，记录接受时系统生成的临时标题。首次执行按零消息事实及这个比较值确认资格；当前提交未携带比较值时，从同一 scope/session 的原始接受记录读取，取消首条提交不会消耗命名资格，重启 retained 后手动发送仍可命名；人工标题不匹配则跳过。queued 编辑和 retained 改文清除旧 skill 素材，比较值保留以便用新正文更新临时标题。历史无此字段的记录沿用原回退，不批量补名。
 
@@ -130,4 +130,4 @@ SessionManager/SessionStore.update 的可选第三参数 `expectedTitle` 在存�
 
 持久化 UI store 的 `upsertSession` 是投影兼容接口，不写回会话标题；临时标题和正式标题仅由 SessionManager 条件更新。消息追加、流式投影或临时标题 CAS 后拿到的旧 UiSession 不能覆盖其间的人工改名。临时更新后重新读取投影，使用当前权威名称发布与判断后续命名。
 
-标题专用指令以用户表达任务动作的自然语言选择输出语言，忽略代码、标识符、引号内例子、注释与 Skill/Request 标签的语言。skill 的 Request 同时决定任务及语言；空 Request 才回退技能名。只清除包住完整标题的匹配引号，保留标题内部的引用词组。
+标题专用指令先识别用户要求完成的动作子句，以该子句的自然语言选择标题动作与描述的语言；此优先级高于代码、标识符、引号内例子、注释与 Skill/Request 标签。指令附三个不依赖具体业务的语言选择示例，并要求输出前检查动作语言一致。skill 的 Request 同时决定任务及语言；空 Request 才回退技能名。只清除包住完整标题的匹配引号，保留标题内部的引用词组。
