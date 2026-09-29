@@ -1038,15 +1038,21 @@ export function Composer(props: {
                         editing ||
                         props.model.disabled
                       }
-                      steer={(input) => props.client.steerQueuedPrompt(input)}
-                      onAccepted={() => {
+                      steer={async (input) => {
+                        const generation = draftScopeGeneration.current;
+                        const revision = editRevision.current;
+                        const receipt =
+                          await props.client.steerQueuedPrompt(input);
                         if (
+                          generation === draftScopeGeneration.current &&
+                          revision === editRevision.current &&
                           currentSteerTarget.current.activeRunId ===
-                            props.model.activeRunId &&
+                            input.expectedRunId &&
                           currentSteerTarget.current.activeSessionId ===
                             props.model.activeSessionId
                         )
-                          setSteerNoticeRunId(props.model.activeRunId);
+                          setSteerNoticeRunId(input.expectedRunId);
+                        return receipt;
                       }}
                     />
                     <button

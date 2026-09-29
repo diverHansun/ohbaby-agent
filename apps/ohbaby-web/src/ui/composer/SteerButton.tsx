@@ -12,7 +12,7 @@ export function SteerButton(props: {
   readonly steer: (
     input: UiSteerQueuedPromptInput,
   ) => Promise<UiSteerQueuedPromptReceipt>;
-  readonly onAccepted: () => void;
+  readonly onAccepted?: () => void;
 }): ReactElement {
   const attempt = useRef<UiSteerQueuedPromptInput | undefined>(undefined);
   const [pending, setPending] = useState(false);
@@ -49,7 +49,7 @@ export function SteerButton(props: {
             .then(
               () => {
                 setAccepted(true);
-                props.onAccepted();
+                props.onAccepted?.();
               },
               (caught: unknown) => {
                 setError(

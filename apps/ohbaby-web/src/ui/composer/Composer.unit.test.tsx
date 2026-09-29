@@ -650,3 +650,58 @@ it.each(["before", "after"])(
     expect(document.body.textContent).not.toContain("Steer accepted");
   },
 );
+
+it.each(["draft edit", "session round trip"])(
+  "does not revive Steer acceptance after a pending request crosses %s",
+  async (change) => {
+    let accept!: (receipt: { acceptedTargetRunId: string }) => void;
+    const acknowledgement = new Promise<{ acceptedTargetRunId: string }>(
+      (resolve) => {
+        accept = resolve;
+      },
+    );
+    const model = {
+      canSend: true,
+      canStop: true,
+      disabled: false,
+      isRunning: true,
+      mode: "auto" as const,
+      permissionLevel: "default" as const,
+      activeSessionId: "session",
+      activeRunId: "run-1",
+    };
+    const f = fixture({
+      model,
+      queuedPrompts: [queuedPrompt("queued")],
+      client: {
+        steerQueuedPrompt: () => acknowledgement,
+        getCurrentModel: () => Promise.resolve(null),
+        subscribeEvents: (): (() => void) => (): void => undefined,
+      } as unknown as UiBackendClient,
+    });
+    await flushAction(() =>
+      document
+        .querySelector<HTMLButtonElement>(
+          '[aria-label="Steer queued prompt: body p"]',
+        )
+        ?.click(),
+    );
+    if (change === "draft edit") {
+      f.type("new draft while acknowledgement is pending");
+    } else {
+      f.update({
+        draftScopeKey: "workspace:other",
+        model: { ...model, activeSessionId: "other", activeRunId: "other-run" },
+      });
+      f.update({ draftScopeKey: "workspace:session", model });
+    }
+    await flushAction(() => {
+      accept({ acceptedTargetRunId: "run-1" });
+    });
+    expect(document.body.textContent).not.toContain("Steer accepted");
+    if (change === "draft edit")
+      expect(f.input().value).toBe(
+        "new draft while acknowledgement is pending",
+      );
+  },
+);

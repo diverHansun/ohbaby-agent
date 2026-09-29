@@ -139,12 +139,13 @@ function isExpectedPromptInterruption(
     (candidate) =>
       candidate.id === prompt.runId && candidate.sessionId === prompt.sessionId,
   );
+  const terminalReason = prompt.error.terminalReason ?? run?.terminalReason;
+  // Successful aborts retain a generic marker alongside the concrete stop reason.
   const reason =
-    prompt.error.terminalReason ??
-    run?.terminalReason ??
-    (prompt.error.code === "RUN_INTERRUPTED"
+    (terminalReason === undefined || terminalReason === "cancelled") &&
+    prompt.error.code === "RUN_INTERRUPTED"
       ? prompt.error.message
-      : undefined);
+      : terminalReason;
   return reason === "user-stop" || reason === "service-shutdown";
 }
 

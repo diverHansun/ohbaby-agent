@@ -6416,6 +6416,10 @@ it.each([
   ["user-stop", "legacy", false],
   ["process-interrupted", "typed", true],
   ["cancelled", "typed", true],
+  ["user-stop", "abort", false],
+  ["service-shutdown", "abort", false],
+  ["runtime interrupted", "abort", true],
+  ["process-interrupted", "abort", true],
 ] as const)(
   "projects persisted interruption %s (%s) correctly after reload and session return",
   (reason, source, isError) => {
@@ -6430,8 +6434,12 @@ it.each([
             code: "RUN_INTERRUPTED",
             source: "runtime",
             retryable: true,
-            message: source === "legacy" ? reason : "runtime interrupted",
+            message:
+              source === "legacy" || source === "abort"
+                ? reason
+                : "runtime interrupted",
             ...(source === "typed" ? { terminalReason: reason } : {}),
+            ...(source === "abort" ? { terminalReason: "cancelled" } : {}),
           },
         }),
       ],
@@ -6444,6 +6452,7 @@ it.each([
           endedAt: timestamp,
           status: { kind: "idle" },
           ...(source === "run" ? { terminalReason: reason } : {}),
+          ...(source === "abort" ? { terminalReason: "cancelled" } : {}),
         },
       ],
       sessions: initial.sessions.map((session) => ({
@@ -6535,7 +6544,7 @@ it.each(["user-stop", "service-shutdown"])(
               source: "runtime",
               retryable: true,
               message: reason,
-              terminalReason: reason,
+              terminalReason: "cancelled",
             },
           }),
         ],
