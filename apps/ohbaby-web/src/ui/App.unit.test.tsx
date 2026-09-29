@@ -3904,35 +3904,51 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
-  it("shows a business failure in the originating goal overlay without claiming success", async () => {
-    const fake = createFakeRuntime({
-      snapshot: snapshotWithStatus({ kind: "idle" }),
-    });
-    fake.listCommands.mockResolvedValue(catalog(["goal"]));
-    fake.executeSlashCommand.mockResolvedValue({
-      status: "failed",
-      commandRunId: "r",
-      clientInvocationId: "i",
-      outputCount: 0,
-      eventCount: 1,
-      error: { code: "UNAVAILABLE", message: "budget subcommand unavailable" },
-    });
-    const app = mountApp(fake.runtime);
-    await setTextareaValue(app.container, "/goal budget 100");
-    await pressTextareaKey(app.container, "Enter");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-overlay")),
-    );
-    await clickButton(app.container, "Save goal");
-    await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-error")),
-    );
-    expect(
-      app.container.querySelector(".ohb-structured-error")?.textContent,
-    ).toContain("budget subcommand unavailable");
-    expect(app.container.querySelector(".ohb-structured-success")).toBeNull();
-    expect(app.container.querySelector(".ohb-command-notice")).toBeNull();
-  });
+  it.each(["completed failure", "lost response"])(
+    "shows a business failure in the originating goal overlay without claiming success: %s",
+    async (outcome) => {
+      const fake = createFakeRuntime({
+        snapshot: snapshotWithStatus({ kind: "idle" }),
+      });
+      fake.listCommands.mockResolvedValue(catalog(["goal"]));
+      fake.executeSlashCommand.mockResolvedValue({
+        status: "failed",
+        commandRunId: "r",
+        clientInvocationId: "i",
+        outputCount: 0,
+        eventCount: 1,
+        error: {
+          code: "UNAVAILABLE",
+          message: "budget subcommand unavailable",
+        },
+      });
+      if (outcome === "lost response")
+        fake.executeSlashCommand.mockRejectedValue(
+          new Error(
+            "budget subcommand unavailable. Command result is unconfirmed: response lost",
+          ),
+        );
+      const app = mountApp(fake.runtime);
+      await setTextareaValue(app.container, "/goal budget 100");
+      await pressTextareaKey(app.container, "Enter");
+      await waitFor(() =>
+        Boolean(app.container.querySelector(".ohb-structured-overlay")),
+      );
+      await clickButton(app.container, "Save goal");
+      await waitFor(() =>
+        Boolean(app.container.querySelector(".ohb-structured-error")),
+      );
+      expect(
+        app.container.querySelector(".ohb-structured-error")?.textContent,
+      ).toContain("budget subcommand unavailable");
+      if (outcome === "lost response")
+        expect(
+          app.container.querySelector(".ohb-structured-error")?.textContent,
+        ).toContain("unconfirmed");
+      expect(app.container.querySelector(".ohb-structured-success")).toBeNull();
+      expect(app.container.querySelector(".ohb-command-notice")).toBeNull();
+    },
+  );
 
   it("executes goal panel actions through the overlay allowance", async () => {
     const fake = createFakeRuntime({
@@ -6367,4 +6383,28 @@ it("keeps the child shell read-only and returns focus to pending approval when i
     app.container.querySelector(".ohb-permission-modal h2"),
   );
   expect(document.activeElement).not.toBe(trigger);
+});
+
+it("keeps slash parse failures beside input and clears only that error on editing", async () => {
+  const fake = createFakeRuntime({
+    snapshot: snapshotWithStatus({ kind: "idle" }),
+  });
+  fake.executeSlashCommand.mockRejectedValue(
+    new Error('Unknown command "/does-not-exist"'),
+  );
+  fake.store.setError("unrelated transport error");
+  const app = mountApp(fake.runtime);
+  await setTextareaValue(app.container, "/does-not-exist");
+  await pressTextareaKey(app.container, "Enter");
+  await waitFor(() =>
+    app.container.textContent.includes('Unknown command "/does-not-exist"'),
+  );
+  const inputArea = app.container.querySelector(".ohb-root-composer");
+  expect(inputArea?.textContent).toContain('Unknown command "/does-not-exist"');
+  expect(app.container.textContent).toContain("unrelated transport error");
+  await setTextareaValue(app.container, "/corrected");
+  expect(app.container.textContent).not.toContain(
+    'Unknown command "/does-not-exist"',
+  );
+  expect(app.container.textContent).toContain("unrelated transport error");
 });

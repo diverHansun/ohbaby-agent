@@ -314,9 +314,15 @@ export function SessionScreen({
   const composerEditRevision = useRef(0);
   const composerPrefillNonce = useRef(0);
   const commandScopeGeneration = useRef(0);
+  const [commandInputError, setCommandInputError] = useState<{
+    scopeKey: string;
+    clientRequestId: string | undefined;
+    message: string;
+  } | null>(null);
   const trackComposerRevision = useCallback(
     (revision: number): void => {
       composerEditRevision.current = revision;
+      setCommandInputError(null);
       for (const notice of runtime.store.getSnapshot().view.commandNotices)
         if (notice.kind === "error") runtime.store.consumeCommand(notice.id);
     },
@@ -343,6 +349,7 @@ export function SessionScreen({
     setStructuredOverlay(null);
     setComposerPrefill(null);
     setActionError(null);
+    setCommandInputError(null);
     return (): void => {
       commandScopeGeneration.current += 1;
     };
@@ -534,9 +541,11 @@ export function SessionScreen({
               "commandFeedback" in error
             )
           )
-            setActionError(
-              error instanceof Error ? error.message : String(error),
-            );
+            setCommandInputError({
+              scopeKey: draftScopeKey,
+              clientRequestId,
+              message: error instanceof Error ? error.message : String(error),
+            });
           return false;
         }
       }
@@ -615,6 +624,7 @@ export function SessionScreen({
     },
     [
       clearActionError,
+      draftScopeKey,
       openOverlayForSlashText,
       runAction,
       client,
@@ -1072,6 +1082,16 @@ export function SessionScreen({
                 : "contents",
           }}
         >
+          <ErrorBanner
+            message={
+              commandInputError?.scopeKey === draftScopeKey
+                ? commandInputError.message
+                : null
+            }
+            onDismiss={() => {
+              setCommandInputError(null);
+            }}
+          />
           <CommandNoticeList
             notices={view.commandNotices.filter(
               (notice) => notice.kind === "error",

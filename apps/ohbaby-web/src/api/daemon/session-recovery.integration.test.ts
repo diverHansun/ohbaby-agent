@@ -71,6 +71,7 @@ function fixture(
     };
     receipt?: (url: URL) => Promise<Response>;
     submit?: () => Promise<Response>;
+    command?: (body: string) => Response;
   } = {},
 ): {
   runtime: OhbabyWebRuntime;
@@ -113,6 +114,14 @@ function fixture(
           body: typeof init.body === "string" ? init.body : undefined,
           method: init.method,
         });
+        if (
+          url.pathname === "/v1/commands" &&
+          init.method === "POST" &&
+          options.command
+        )
+          return options.command(
+            typeof init.body === "string" ? init.body : "",
+          );
         if (url.pathname === "/v1/scopes")
           return Response.json({
             ok: true,
@@ -718,7 +727,30 @@ describe("browser session recovery", () => {
       setItem: (key: string, value: string) => values.set(key, value),
       removeItem: (key: string) => values.delete(key),
     });
-    const f = fixture();
+    const f = fixture({
+      command: (body) => {
+        const invocation = JSON.parse(body) as {
+          clientInvocationId: string;
+          clientRequestId: string;
+        };
+        return Response.json({
+          ok: true,
+          status: "completed",
+          commandRunId: "new-skill",
+          clientInvocationId: invocation.clientInvocationId,
+          outputCount: 0,
+          eventCount: 0,
+          promptReceipt: {
+            clientRequestId: invocation.clientRequestId,
+            promptId: "new-prompt",
+            sessionId: "root",
+            userMessageId: "new-message",
+            createdAt: "2026-09-29T00:00:00Z",
+            status: "queued",
+          },
+        });
+      },
+    });
     await f.runtime.ready;
     await vi.waitFor(() => {
       expect(
@@ -730,6 +762,41 @@ describe("browser session recovery", () => {
     );
     await vi.waitFor(() => {
       expect(f.runtime.store.getSnapshot().sessionSync.status).toBe("ready");
+    });
+    const invocation = {
+      clientInvocationId: "new-skill",
+      clientRequestId: "new-skill-intent",
+      commandId: "skill.review",
+      path: ["review"],
+      raw: "/review",
+      rawArgs: "",
+      argv: [],
+      sessionId: "root",
+      surface: "tui",
+    };
+    await expect(
+      requireClient(f.runtime).executeCommand(invocation),
+    ).resolves.toMatchObject({
+      status: "completed",
+      promptReceipt: { clientRequestId: "new-skill-intent" },
+    });
+    expect(f.runtime.store.getSnapshot().unknownPromptRequests).toMatchObject([
+      { clientRequestId: "old", status: "epoch-changed" },
+    ]);
+    await expect(
+      requireClient(f.runtime).executeCommand({
+        ...invocation,
+        clientInvocationId: "old-intent",
+        clientRequestId: "old",
+      }),
+    ).rejects.toThrow("query its receipt");
+    const commands = f.requests.filter(
+      (request) =>
+        request.url.pathname === "/v1/commands" && request.method === "POST",
+    );
+    expect(commands).toHaveLength(1);
+    expect(JSON.parse(commands[0]?.body ?? "{}")).toMatchObject({
+      clientRequestId: "new-skill-intent",
     });
     await expect(
       requireClient(f.runtime).submitPromptAccepted("new epoch intent", {

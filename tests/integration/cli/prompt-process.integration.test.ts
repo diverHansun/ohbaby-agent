@@ -428,7 +428,7 @@ describe("CLI prompt process smoke", () => {
       // inherit the stale temperature stored in model.json.
       const titleRequest = titleRequests[0];
       expect(titleRequest.body).toMatchObject({
-        max_tokens: 128,
+        max_tokens: 200,
         model: "fake-model",
         stream: true,
       });

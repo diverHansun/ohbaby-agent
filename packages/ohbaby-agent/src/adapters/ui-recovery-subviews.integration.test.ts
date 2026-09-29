@@ -70,7 +70,7 @@ describe("recovery subview initialization", () => {
       await backend.dispose();
     }
   });
-  it("keeps todo recovery independent of failed goal initialization while control and execution stay unavailable", async () => {
+  it("keeps todo recovery readable with blocked control and rejected execution after failed goal initialization", async () => {
     const persistence = new InMemoryGoalPersistence();
     vi.spyOn(persistence, "list").mockRejectedValue(
       new Error("goal storage failed"),
@@ -106,7 +106,16 @@ describe("recovery subview initialization", () => {
       expect(view.todo.status).toBe("ready");
       await expect(
         backend.getSessionControl({ sessionId: "root" }),
-      ).rejects.toMatchObject({ code: "SESSION_CONTROL_UNAVAILABLE" });
+      ).resolves.toMatchObject({
+        sessionId: "root",
+        rootSessionId: "root",
+        runId: null,
+        driver: null,
+        executionRecovery: {
+          status: "blocked",
+          message: "goal storage failed",
+        },
+      });
       await expect(
         backend.submitPromptAccepted("do not execute", {
           sessionId: "root",

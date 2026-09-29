@@ -1,5 +1,6 @@
 import type {
   UiCommandCompletion,
+  UiCommandError,
   UiCommandInvocation,
   UiPromptSubmission,
 } from "ohbaby-sdk";
@@ -33,6 +34,9 @@ export type UiEventSource = "incremental" | "snapshot-barrier";
 
 export interface OhbabyWebStore {
   beginCommand(invocation: UiCommandInvocation, overlay?: boolean): void;
+  getCommandFeedback(
+    clientInvocationId: string,
+  ): { readonly error?: UiCommandError } | undefined;
   completeCommand(completion: UiCommandCompletion): void;
   failCommand(clientInvocationId: string, message: string): void;
   consumeCommand(clientInvocationId: string): void;
@@ -94,6 +98,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       outputs: number;
       lastSeq: number;
       completion?: UiCommandCompletion;
+      error?: UiCommandError;
       timer: ReturnType<typeof setTimeout>;
     }
   >();
@@ -287,12 +292,17 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         };
       publish(snapshot);
     },
+    getCommandFeedback(id): ReturnType<OhbabyWebStore["getCommandFeedback"]> {
+      return commands.get(id);
+    },
     completeCommand(completion): void {
       const command = commands.get(completion.clientInvocationId);
       if (!command) return;
       command.completion = completion;
-      if (completion.status === "failed")
+      if (completion.status === "failed") {
+        command.error ??= completion.error;
         commandError(completion.clientInvocationId, completion.error.message);
+      }
       settleCommand(completion.clientInvocationId);
       publish(snapshot);
     },
@@ -525,6 +535,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         hideCommand = command.consumed || command.overlay;
         if (event.type !== "command.started") {
           command.events += 1;
+          if (event.type === "command.failed") command.error ??= event.error;
           if (event.type === "command.result.delivered" && event.output)
             command.outputs += 1;
           if (

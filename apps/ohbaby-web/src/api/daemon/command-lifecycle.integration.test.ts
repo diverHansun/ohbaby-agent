@@ -298,6 +298,26 @@ describe("real command acceptance and Web consumers", () => {
       await f.dispose();
     }
   });
+  it("keeps the real goal failure in the overlay rejection when its HTTP response is lost", async () => {
+    const f = await fixture(true);
+    try {
+      await f.runtime.createSession();
+      await waitFor(
+        () => f.runtime.store.getSnapshot().sessionSync.status === "ready",
+        "session not ready",
+      );
+      await expect(
+        f.runtime.executeSlashCommand({
+          allowOverlay: true,
+          text: "/goal budget 100",
+        }),
+      ).rejects.toThrow(/budget[\s\S]*unconfirmed/);
+      expect(f.runtime.store.getSnapshot().view.commandNotices).toEqual([]);
+      expect(f.commandRequests()).toBe(1);
+    } finally {
+      await f.dispose();
+    }
+  });
   it("returns failed completion for real goal fail at HTTP 200 without a chat card", async () => {
     const f = await fixture();
     try {

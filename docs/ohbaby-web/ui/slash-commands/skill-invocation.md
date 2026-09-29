@@ -337,3 +337,5 @@ Composer 的稳定 `clientRequestId` 经 SessionScreen/runtime/invocation 到 sk
 `/help /status /skills /mcps` 的等待、正文和失败归原结果窗口；关闭消费 store 中该 invocation 的呈现。skill started 和成功空 action 不生成卡片；普通命令解析、加载、提交错误在输入附近显示，可关闭或由后续编辑清理。Goal overlay 只根据明确 completed 展示成功，failed 显示原业务错误。
 
 Web 以 SSE 序号去重，累计 outputCount，并以 completion 的 eventCount（output/action/failed，不含 started）等齐后释放在途关联，避免 output 后的 session.selected 丢失。有效多条输出保留，纯 action 不覆盖正文。关闭只标记尚在处理的 invocation 为已消费；完成后直接释放，不保留永久 tombstone。关联最多 128 条，60 秒未确认或缺输出进入明确未知错误并释放；超时不取消服务端操作、不宣告成功。切换 session/binding/runtime 清理旧关联和呈现，同 scope 重装保留已消费状态。未登记的迟到或重放事件不创建结果卡。
+
+已接收的 overlay 业务错误保留在原 invocation 关联中；即使 HTTP 回执丢失或超时，原面板也显示该错误，并明确说明 handler 完成仍未确认，不产生通用卡或自动重放。旧 runtime 的 `epoch-changed` 提醒继续保留，但不阻止同 session 的新 skill 意图；同一 clientRequestId 仍不得重新执行。解析失败属于输入局部错误，编辑、关闭或切换 scope 会清理，其他操作错误不因此被清空。

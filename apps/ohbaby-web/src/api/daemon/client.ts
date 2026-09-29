@@ -991,6 +991,11 @@ export class BrowserDaemonClient implements UiBackendClient {
   async executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
   ): ReturnType<UiBackendClient["executeCommand"]> {
+    // Retain this invocation's feedback through the bounded store timeout;
+    // removing its presentation/correlation must not erase an observed failure.
+    const feedback = this.store.getCommandFeedback(
+      invocation.clientInvocationId,
+    );
     const binding = this.permissionSync.getState().binding;
     const skill = invocation.commandId.startsWith("skill.");
     const clientRequestId = skill
@@ -1008,7 +1013,8 @@ export class BrowserDaemonClient implements UiBackendClient {
         this.unknownPrompts.some(
           (request) =>
             request.clientRequestId === clientRequestId ||
-            request.sessionId === invocation.sessionId,
+            (request.sessionId === invocation.sessionId &&
+              request.status !== "epoch-changed"),
         )
       )
         rejectLocally(
@@ -1076,15 +1082,13 @@ export class BrowserDaemonClient implements UiBackendClient {
       return completion;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const unconfirmed = `Command result is unconfirmed: ${message}`;
+      const detail = feedback?.error
+        ? `${feedback.error.message}. ${unconfirmed}`
+        : unconfirmed;
       if (!this.closed && scopeTicket === this.scopeTicket)
-        this.store.failCommand(
-          invocation.clientInvocationId,
-          `Command result is unconfirmed: ${message}`,
-        );
-      throw Object.assign(
-        new Error(`Command result is unconfirmed: ${message}`),
-        { commandFeedback: true },
-      );
+        this.store.failCommand(invocation.clientInvocationId, detail);
+      throw Object.assign(new Error(detail), { commandFeedback: true });
     } finally {
       if (clientRequestId) {
         this.submittingPrompts.delete(clientRequestId);

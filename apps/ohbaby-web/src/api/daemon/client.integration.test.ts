@@ -1018,3 +1018,86 @@ it("releases locally rejected skill registration with an accurate entry error", 
   }).not.toThrow();
   await client.close();
 });
+
+it.each(["response loss", "timeout"])(
+  "preserves the first overlay business failure with unconfirmed completion on %s",
+  async (mode) => {
+    vi.useFakeTimers();
+    const store = createOhbabyWebStore();
+    const invocation = {
+      clientInvocationId: "overlay-failure",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal budget 100",
+      rawArgs: "budget 100",
+      argv: ["budget", "100"],
+      surface: "tui",
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => {
+      store.applyEvent(
+        {
+          type: "command.failed",
+          clientInvocationId: invocation.clientInvocationId,
+          commandRunId: "r",
+          timestamp: 1,
+          error: {
+            code: "UNAVAILABLE",
+            message: "budget subcommand unavailable",
+          },
+        },
+        1,
+      );
+      store.applyEvent(
+        {
+          type: "command.failed",
+          clientInvocationId: invocation.clientInvocationId,
+          commandRunId: "r",
+          timestamp: 2,
+          error: { code: "LATER", message: "later error" },
+        },
+        2,
+      );
+      if (mode === "timeout")
+        await new Promise<void>((_resolve, reject) => {
+          const timer = setTimeout(() => {
+            reject(new Error("timeout"));
+          }, 60_000);
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              reject(new Error("timeout"));
+            },
+            { once: true },
+          );
+        });
+      throw new Error("response lost");
+    });
+    const client = createBrowserDaemonClient({
+      config: { baseUrl: "http://localhost", clientId: "owner", token: "test" },
+      store,
+      fetch,
+    });
+    try {
+      store.beginCommand(invocation, true);
+      const rejected = client
+        .executeCommand(invocation)
+        .catch((error: unknown) => error);
+      if (mode === "timeout") await vi.advanceTimersByTimeAsync(60_000);
+      const error: unknown = await rejected;
+      if (!(error instanceof Error))
+        throw new Error("Expected command rejection");
+      expect(error.message).toMatch(
+        /budget subcommand unavailable.*unconfirmed/s,
+      );
+      expect(store.getSnapshot().view.commandNotices).toEqual([]);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(() => {
+        store.beginCommand(invocation, true);
+      }).not.toThrow();
+    } finally {
+      await client.close();
+      vi.useRealTimers();
+    }
+  },
+);
