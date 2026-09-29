@@ -92,7 +92,6 @@ export function ToolCard(props: {
       execution={execution}
       duration={duration}
       abnormal={abnormal ?? (failed ? "error" : undefined)}
-      showAbnormalDecoration={props.call.name.toLowerCase() !== "bash"}
       accent={failed ? "red" : toolAccent(props.call.name)}
       input={JSON.stringify(props.call.input, null, 2)}
       onToggle={() => {
@@ -130,7 +129,6 @@ export function OrphanToolResultCard(props: {
             ? "error"
             : undefined
       }
-      showAbnormalDecoration={false}
       duration={duration}
       accent={
         props.result.error === undefined &&
@@ -154,7 +152,6 @@ function ToolPanel(props: {
   readonly execution?: UiToolExecution;
   readonly duration?: string;
   readonly abnormal?: string;
-  readonly showAbnormalDecoration?: boolean;
   readonly accent: "blue" | "gold" | "green" | "red";
   readonly input?: string;
   readonly onToggle: () => void;
@@ -181,9 +178,6 @@ function ToolPanel(props: {
         >
           {props.title}
         </span>
-        {props.abnormal && props.showAbnormalDecoration !== false ? (
-          <span aria-hidden="true">⚠</span>
-        ) : null}
         {props.duration !== undefined ? (
           <span className="ohb-tool-duration">{props.duration}</span>
         ) : null}

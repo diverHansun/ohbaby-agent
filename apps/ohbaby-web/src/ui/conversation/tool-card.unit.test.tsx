@@ -345,24 +345,42 @@ describe("ToolCard", () => {
     },
   );
 
-  it("keeps the existing abnormal decoration for other tools", () => {
-    const app = mountCard(
-      {
-        ...toolCall({
-          status: "failed",
-          execution: {
-            phase: "ended",
-            createdAt: 1,
-            phaseStartedAt: 2,
-            outcome: "error",
-          },
-        }),
-        name: "web_fetch",
-      },
-      undefined,
-    );
-    expect(app.container.textContent).toContain("⚠");
-  });
+  it.each(["web_fetch", "mcp_s13_firecrawl-mcp_t17_firecrawl__scrape"])(
+    "keeps %s failure details and accessible status without the warning decoration",
+    (name) => {
+      const app = mountCard(
+        {
+          ...toolCall({
+            status: "failed",
+            execution: {
+              phase: "ended",
+              createdAt: 1,
+              phaseStartedAt: 2,
+              outcome: "error",
+            },
+          }),
+          name,
+        },
+        {
+          callId: "call_bash",
+          error: "fetch failed",
+          output: "partial output",
+        },
+      );
+      expect(app.container.querySelector("button")?.textContent).not.toContain(
+        "⚠",
+      );
+      expect(
+        app.container.querySelector(".ohb-tool-panel")?.classList,
+      ).toContain("ohb-tool-red");
+      expect(
+        app.container.querySelector("button")?.getAttribute("aria-label"),
+      ).toBe(`${name} · error`);
+      act(() => app.container.querySelector("button")?.click());
+      expect(app.container.textContent).toContain("fetch failed");
+      expect(app.container.textContent).toContain("partial output");
+    },
+  );
 
   it("colors a terminal failure from execution facts before call or result status catches up", () => {
     const execution = {
