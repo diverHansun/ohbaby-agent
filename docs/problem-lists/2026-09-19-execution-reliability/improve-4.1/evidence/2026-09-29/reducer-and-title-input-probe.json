@@ -1,0 +1,89 @@
+{
+  "kind": "pure-production-function-diagnostics",
+  "realLlmRequests": 0,
+  "notice": {
+    "afterAction": [
+      {
+        "commandId": "skill.using-superpowers",
+        "createdAt": "2026-09-29T00:00:00.000Z",
+        "id": "c1",
+        "kind": "success",
+        "path": ["using-superpowers"],
+        "sessionId": "s1",
+        "text": "Command completed"
+      }
+    ],
+    "afterUserMessage": [
+      {
+        "commandId": "skill.using-superpowers",
+        "createdAt": "2026-09-29T00:00:00.000Z",
+        "id": "c1",
+        "kind": "success",
+        "path": ["using-superpowers"],
+        "sessionId": "s1",
+        "text": "Command completed"
+      }
+    ],
+    "afterRun": [
+      {
+        "commandId": "skill.using-superpowers",
+        "createdAt": "2026-09-29T00:00:00.000Z",
+        "id": "c1",
+        "kind": "success",
+        "path": ["using-superpowers"],
+        "sessionId": "s1",
+        "text": "Command completed"
+      }
+    ],
+    "beforeFollowupAction": [
+      {
+        "commandId": "skill.using-superpowers",
+        "createdAt": "2026-09-29T00:00:00.000Z",
+        "id": "c1",
+        "kind": "success",
+        "path": ["using-superpowers"],
+        "sessionId": "s1",
+        "text": "Command completed"
+      },
+      {
+        "commandId": "resume",
+        "createdAt": "2026-09-29T00:00:00.000Z",
+        "id": "c2",
+        "kind": "success",
+        "path": ["resume"],
+        "sessionId": "s1",
+        "output": {
+          "kind": "text",
+          "text": "Useful command output"
+        },
+        "text": "Useful command output"
+      }
+    ],
+    "afterFollowupAction": [
+      {
+        "commandId": "skill.using-superpowers",
+        "createdAt": "2026-09-29T00:00:00.000Z",
+        "id": "c1",
+        "kind": "success",
+        "path": ["using-superpowers"],
+        "sessionId": "s1",
+        "text": "Command completed"
+      },
+      {
+        "commandId": "resume",
+        "createdAt": "2026-09-29T00:00:00.000Z",
+        "id": "c2",
+        "kind": "success",
+        "path": ["resume"],
+        "sessionId": "s1",
+        "text": "Command completed"
+      }
+    ]
+  },
+  "titleInput": {
+    "expandedLength": 4100,
+    "sanitizedLength": 2000,
+    "preservesUserRequest": false,
+    "prefix": "# Skill instructions General workflow guidance. General workflow guidance. Gener"
+  }
+}
