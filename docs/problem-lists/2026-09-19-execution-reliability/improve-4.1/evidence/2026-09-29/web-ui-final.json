@@ -1,0 +1,1442 @@
+{
+  "scope": "Actual compiled Web manual interactions and production HTTP/database assertions; compiled versions progress through 2facccea, 0ff1374a and final 47605aaa. No whole-harness PASS claim.",
+  "events": [
+    {
+      "type": "ready",
+      "at": "2026-09-29T04:50:10.073Z",
+      "url": "http://127.0.0.1:62214",
+      "daemonPort": 62215,
+      "pid": 60474,
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve41-web-kP48n6/manifest.json"
+    },
+    {
+      "type": "title-request",
+      "at": "2026-09-29T04:50:10.139Z",
+      "maxTokens": 200,
+      "input": "I41_A 健康切换验收"
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T04:50:10.161Z",
+      "marker": "I41_A",
+      "toolResult": false
+    },
+    {
+      "type": "title-request",
+      "at": "2026-09-29T04:50:10.211Z",
+      "maxTokens": 200,
+      "input": "I41_B 健康切换验收"
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T04:50:10.223Z",
+      "marker": "I41_B",
+      "toolResult": false
+    },
+    {
+      "type": "seeded",
+      "at": "2026-09-29T04:50:10.252Z",
+      "sessions": {
+        "A": "session_1790657410083_r5ga0g1",
+        "B": "session_1790657410190_l41prc2"
+      }
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T04:51:20.178Z",
+      "invocation": {
+        "argumentMode": "raw",
+        "argv": [
+          "I41_SKILL",
+          "检查会话切换后的状态卡片"
+        ],
+        "body": "",
+        "clientInvocationId": "abca2adf-8d8c-4ac6-b22a-933d44859bf7",
+        "clientRequestId": "ea3515d6-46a0-4533-b026-3e84ea2d6ecf",
+        "commandId": "skill.i41-review",
+        "path": [
+          "i41-review"
+        ],
+        "raw": "/i41-review I41_SKILL 检查会话切换后的状态卡片",
+        "rawArgs": "I41_SKILL 检查会话切换后的状态卡片",
+        "surface": "tui"
+      },
+      "dropResponse": false
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T04:51:20.188Z",
+      "clientInvocationId": "abca2adf-8d8c-4ac6-b22a-933d44859bf7",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_1",
+        "clientInvocationId": "abca2adf-8d8c-4ac6-b22a-933d44859bf7",
+        "sessionId": "session_1790657480179_dp7xlz1",
+        "outputCount": 0,
+        "eventCount": 0,
+        "promptReceipt": {
+          "promptId": "prompt_3d5ff1fb-4640-4cca-a352-a9c23a1e61fd",
+          "clientRequestId": "ea3515d6-46a0-4533-b026-3e84ea2d6ecf",
+          "userMessageId": "message_d1cf2138-0ee8-42aa-82aa-21835014994a",
+          "sessionId": "session_1790657480179_dp7xlz1",
+          "status": "queued",
+          "createdAt": "2026-09-29T04:51:20.187Z"
+        },
+        "status": "completed",
+        "permissionEpoch": "016cba65-7864-4820-9f9f-ae1b79e98bc3",
+        "rootSessionId": "session_1790657480179_dp7xlz1",
+        "bindingGeneration": 3
+      }
+    },
+    {
+      "type": "title-request",
+      "at": "2026-09-29T04:51:20.207Z",
+      "maxTokens": 200,
+      "input": "Skill: i41-review\nRequest: I41_SKILL 检查会话切换后的状态卡片"
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T04:51:20.227Z",
+      "marker": "I41_SKILL",
+      "toolResult": false
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T04:52:17.034Z",
+      "invocation": {
+        "argumentMode": "argv",
+        "argv": [],
+        "body": "",
+        "clientInvocationId": "06c3a988-803d-4ef2-a363-bf454534737d",
+        "clientRequestId": "ed078e80-953d-462a-ac44-f32232515d2a",
+        "commandId": "status",
+        "path": [
+          "status"
+        ],
+        "raw": "/status",
+        "rawArgs": "",
+        "sessionId": "session_1790657480179_dp7xlz1",
+        "surface": "tui"
+      },
+      "dropResponse": false
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T04:52:17.038Z",
+      "clientInvocationId": "06c3a988-803d-4ef2-a363-bf454534737d",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_2",
+        "clientInvocationId": "06c3a988-803d-4ef2-a363-bf454534737d",
+        "sessionId": "session_1790657480179_dp7xlz1",
+        "outputCount": 1,
+        "eventCount": 1,
+        "status": "completed"
+      }
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T04:54:04.686Z",
+      "invocation": {
+        "argumentMode": "argv",
+        "argv": [
+          "budget",
+          "100"
+        ],
+        "body": "",
+        "clientInvocationId": "b9e68275-0917-4f64-b3e7-f877b85fdf0a",
+        "commandId": "goal",
+        "path": [
+          "goal"
+        ],
+        "raw": "/goal budget 100",
+        "rawArgs": "budget 100",
+        "sessionId": "session_1790657410190_l41prc2",
+        "surface": "tui"
+      },
+      "dropResponse": false
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T04:54:04.688Z",
+      "clientInvocationId": "b9e68275-0917-4f64-b3e7-f877b85fdf0a",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_3",
+        "clientInvocationId": "b9e68275-0917-4f64-b3e7-f877b85fdf0a",
+        "sessionId": "session_1790657410190_l41prc2",
+        "outputCount": 0,
+        "eventCount": 1,
+        "status": "failed",
+        "error": {
+          "code": "invalid_transition",
+          "message": "The /goal budget subcommand is not available. State any hard limit in natural language so the main agent can record it.",
+          "recoverable": true
+        }
+      }
+    },
+    {
+      "type": "command-response-loss-armed",
+      "at": "2026-09-29T04:54:04.732Z"
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T04:54:20.833Z",
+      "invocation": {
+        "argumentMode": "argv",
+        "argv": [
+          "budget",
+          "100"
+        ],
+        "body": "",
+        "clientInvocationId": "1b30b7cb-3ec8-4ceb-9161-f36adcc5e759",
+        "commandId": "goal",
+        "path": [
+          "goal"
+        ],
+        "raw": "/goal budget 100",
+        "rawArgs": "budget 100",
+        "sessionId": "session_1790657410190_l41prc2",
+        "surface": "tui"
+      },
+      "dropResponse": true
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T04:54:20.835Z",
+      "clientInvocationId": "1b30b7cb-3ec8-4ceb-9161-f36adcc5e759",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_4",
+        "clientInvocationId": "1b30b7cb-3ec8-4ceb-9161-f36adcc5e759",
+        "sessionId": "session_1790657410190_l41prc2",
+        "outputCount": 0,
+        "eventCount": 1,
+        "status": "failed",
+        "error": {
+          "code": "invalid_transition",
+          "message": "The /goal budget subcommand is not available. State any hard limit in natural language so the main agent can record it.",
+          "recoverable": true
+        }
+      }
+    },
+    {
+      "type": "command-response-lost",
+      "at": "2026-09-29T04:54:20.846Z",
+      "clientInvocationId": "1b30b7cb-3ec8-4ceb-9161-f36adcc5e759"
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T04:55:21.785Z",
+      "invocation": {
+        "argumentMode": "argv",
+        "argv": [],
+        "body": "",
+        "clientInvocationId": "b053234e-4193-48df-adbd-f51d1a6c9144",
+        "clientRequestId": "fdd49c26-39ff-4b72-9674-c36438a54bd8",
+        "commandId": "skills",
+        "path": [
+          "skills"
+        ],
+        "raw": "/skills",
+        "rawArgs": "",
+        "sessionId": "session_1790657410190_l41prc2",
+        "surface": "tui"
+      },
+      "dropResponse": false
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T04:55:21.787Z",
+      "clientInvocationId": "b053234e-4193-48df-adbd-f51d1a6c9144",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_5",
+        "clientInvocationId": "b053234e-4193-48df-adbd-f51d1a6c9144",
+        "sessionId": "session_1790657410190_l41prc2",
+        "outputCount": 1,
+        "eventCount": 1,
+        "status": "completed"
+      }
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T04:55:47.047Z",
+      "invocation": {
+        "argumentMode": "argv",
+        "argv": [],
+        "body": "",
+        "clientInvocationId": "dd878d44-3481-4cc4-84c3-043ca50befb7",
+        "clientRequestId": "f054b7b0-fc6c-471c-a4fc-1f4ac17cc7bb",
+        "commandId": "mcps",
+        "path": [
+          "mcps"
+        ],
+        "raw": "/mcps",
+        "rawArgs": "",
+        "sessionId": "session_1790657410190_l41prc2",
+        "surface": "tui"
+      },
+      "dropResponse": false
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T04:55:47.049Z",
+      "clientInvocationId": "dd878d44-3481-4cc4-84c3-043ca50befb7",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_6",
+        "clientInvocationId": "dd878d44-3481-4cc4-84c3-043ca50befb7",
+        "sessionId": "session_1790657410190_l41prc2",
+        "outputCount": 1,
+        "eventCount": 1,
+        "status": "completed"
+      }
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T04:56:16.462Z",
+      "invocation": {
+        "argumentMode": "argv",
+        "argv": [],
+        "body": "",
+        "clientInvocationId": "c9c9b04c-6bfd-4052-9e2c-a00b9833d87d",
+        "clientRequestId": "5b236426-fe38-4792-a77b-516e4d96386d",
+        "commandId": "help",
+        "path": [
+          "help"
+        ],
+        "raw": "/help",
+        "rawArgs": "",
+        "sessionId": "session_1790657410190_l41prc2",
+        "surface": "tui"
+      },
+      "dropResponse": false
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T04:56:16.464Z",
+      "clientInvocationId": "c9c9b04c-6bfd-4052-9e2c-a00b9833d87d",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_7",
+        "clientInvocationId": "c9c9b04c-6bfd-4052-9e2c-a00b9833d87d",
+        "sessionId": "session_1790657410190_l41prc2",
+        "outputCount": 1,
+        "eventCount": 1,
+        "status": "completed"
+      }
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T04:56:46.508Z",
+      "marker": "I41_BASH",
+      "toolResult": false
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T04:57:09.563Z",
+      "marker": "I41_BASH",
+      "toolResult": true
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T04:57:55.616Z",
+      "marker": "I41_CHILD",
+      "toolResult": false
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T04:57:55.660Z",
+      "marker": "I41_CHILD_JOB",
+      "toolResult": false
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T04:58:36.361Z",
+      "marker": "I41_CHILD_JOB",
+      "toolResult": true
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T04:58:36.392Z",
+      "marker": "I41_CHILD",
+      "toolResult": true
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T05:01:32.298Z",
+      "marker": "I41_CHILD_NEXT",
+      "toolResult": false
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T05:01:32.334Z",
+      "marker": "I41_CHILD_JOB",
+      "toolResult": false
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T05:01:58.303Z",
+      "marker": "I41_CHILD_JOB",
+      "toolResult": true
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T05:01:58.336Z",
+      "marker": "I41_CHILD_NEXT",
+      "toolResult": true
+    },
+    {
+      "type": "command-response-loss-armed",
+      "at": "2026-09-29T05:04:17.067Z"
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T05:04:30.416Z",
+      "invocation": {
+        "argumentMode": "raw",
+        "argv": [
+          "I41_HOLD_LOSS",
+          "验证响应丢失只执行一次"
+        ],
+        "body": "",
+        "clientInvocationId": "985bc724-9782-4901-a5e3-f8b48ba3c195",
+        "clientRequestId": "b2fbedce-40ea-4e90-b3b0-8ae13170bea3",
+        "commandId": "skill.i41-review",
+        "path": [
+          "i41-review"
+        ],
+        "raw": "/i41-review I41_HOLD_LOSS 验证响应丢失只执行一次",
+        "rawArgs": "I41_HOLD_LOSS 验证响应丢失只执行一次",
+        "sessionId": "session_1790657410083_r5ga0g1",
+        "surface": "tui"
+      },
+      "dropResponse": true
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T05:04:30.423Z",
+      "clientInvocationId": "985bc724-9782-4901-a5e3-f8b48ba3c195",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_8",
+        "clientInvocationId": "985bc724-9782-4901-a5e3-f8b48ba3c195",
+        "sessionId": "session_1790657410083_r5ga0g1",
+        "outputCount": 0,
+        "eventCount": 0,
+        "promptReceipt": {
+          "promptId": "prompt_a87cbdd5-0c70-452c-99e4-b0580a19c41c",
+          "clientRequestId": "b2fbedce-40ea-4e90-b3b0-8ae13170bea3",
+          "userMessageId": "message_4fa7b92d-afc7-470b-aa8d-4bb8ee4809b3",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "status": "queued",
+          "createdAt": "2026-09-29T05:04:30.422Z"
+        },
+        "status": "completed",
+        "permissionEpoch": "016cba65-7864-4820-9f9f-ae1b79e98bc3",
+        "rootSessionId": "session_1790657410083_r5ga0g1",
+        "bindingGeneration": 5
+      }
+    },
+    {
+      "type": "command-response-lost",
+      "at": "2026-09-29T05:04:30.434Z",
+      "clientInvocationId": "985bc724-9782-4901-a5e3-f8b48ba3c195"
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T05:04:30.454Z",
+      "marker": "I41_HOLD_LOSS",
+      "toolResult": false
+    },
+    {
+      "type": "database",
+      "at": "2026-09-29T05:04:41.552Z",
+      "sessions": [
+        {
+          "id": "session_1790657410083_r5ga0g1",
+          "title": "验收会话 A",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657410190_l41prc2",
+          "title": "验收会话 B",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657425257_bnggtr3",
+          "title": "New session",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657480179_dp7xlz1",
+          "title": "检查会话切换",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657875633_wa3fpk4",
+          "title": "检查第一个任务",
+          "parent_id": "session_1790657410083_r5ga0g1"
+        }
+      ],
+      "prompts": [
+        {
+          "prompt_id": "prompt_ec8551ad-3b2f-4a16-9233-a47c771fa743",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded",
+          "client_request_id": "b2696d23-11b4-454e-8cad-077e63598c9a"
+        },
+        {
+          "prompt_id": "prompt_db556867-85b9-43ce-8132-94ccd81b15a0",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded",
+          "client_request_id": "09da3b10-8f9b-4bd6-a44d-2cec8c1b26e7"
+        },
+        {
+          "prompt_id": "prompt_3d5ff1fb-4640-4cca-a352-a9c23a1e61fd",
+          "session_id": "session_1790657480179_dp7xlz1",
+          "status": "succeeded",
+          "client_request_id": "ea3515d6-46a0-4533-b026-3e84ea2d6ecf"
+        },
+        {
+          "prompt_id": "prompt_cdc567e0-2919-4299-9896-da761bfc2076",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded",
+          "client_request_id": "3072f9f1-3a4a-4393-8266-122d466fe573"
+        },
+        {
+          "prompt_id": "prompt_2df32f44-f0a0-4627-aba4-2f96b683b6eb",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded",
+          "client_request_id": "be516204-fcef-4c0e-8ae7-0150c6630771"
+        },
+        {
+          "prompt_id": "prompt_36814d9a-cd6c-408a-9d09-40427fee7884",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded",
+          "client_request_id": "56f8b117-665c-4f43-9ee3-f88f78ad2ae6"
+        },
+        {
+          "prompt_id": "prompt_a87cbdd5-0c70-452c-99e4-b0580a19c41c",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "running",
+          "client_request_id": "b2fbedce-40ea-4e90-b3b0-8ae13170bea3"
+        }
+      ],
+      "runs": [
+        {
+          "run_id": "run_8e04f4e9-ad70-491c-a3a4-71ccf398bbc9",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_d2664354-4a46-4b83-aa6b-d63eac47c2d3",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_b957a3ae-c43a-4660-89b6-f3ce2231ffca",
+          "session_id": "session_1790657480179_dp7xlz1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_f52cdd17-a78d-478a-8eb0-0cd36b21ef73",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_6a91a055-e255-4ea9-ac4b-f28aa9e77b64",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "subagent_run_mum7grlg_76r57qv1",
+          "session_id": "session_1790657875633_wa3fpk4",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_e58128e9-493a-4d7a-9f79-d6128aaaf666",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "subagent_run_mum7les8_glsa88b8",
+          "session_id": "session_1790657875633_wa3fpk4",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_d929be67-faa8-466b-a367-8a0e36159c3c",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "running"
+        }
+      ],
+      "subagents": [
+        {
+          "id": "subagent_mum7grl8_iecxqckg",
+          "name": "稳定的验收子会话",
+          "description": "检查第一个任务"
+        }
+      ],
+      "titleRequests": 3,
+      "mainRequests": 14,
+      "failures": [
+        "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'object' !== 'string'\n"
+      ]
+    },
+    {
+      "type": "command-loss-asserted",
+      "at": "2026-09-29T05:05:14.766Z",
+      "clientInvocationId": "985bc724-9782-4901-a5e3-f8b48ba3c195",
+      "skill": true,
+      "promptStatus": "running"
+    },
+    {
+      "type": "ui-observation",
+      "at": "2026-09-29T05:05:14.766Z",
+      "observation": "Compiled31739 actual browser: A/B selects no Recovering; firstskill title live; /status /skills /mcps /help close without empty success cards; actualgoal normalHTTP200failed accurate overlay; lostHTTP exposes known-error loss fixedlater2facccea. Bash realexit7 has no glyph; childsmall/expandednoarrow, scroll59to679; Load earlier messages fetch returns both Bash tools; samechildID/name across two descriptions. Skillresponse truncatedafteracceptance: oneprompt/onerequest/run, unknowntransportfeedback visible with restored draft pendingrefresh."
+    },
+    {
+      "type": "command-response-loss-armed",
+      "at": "2026-09-29T05:10:24.843Z"
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T05:10:25.987Z",
+      "invocation": {
+        "argumentMode": "raw",
+        "argv": [
+          "I41_HOLD_LOSS_FINAL",
+          "刷新后停止验收"
+        ],
+        "body": "",
+        "clientInvocationId": "89989878-07e2-428d-aa5b-2a7bcdb28f75",
+        "clientRequestId": "74f923a4-26f4-4f71-a981-6edc62f5ec6e",
+        "commandId": "skill.i41-review",
+        "path": [
+          "i41-review"
+        ],
+        "raw": "/i41-review I41_HOLD_LOSS_FINAL 刷新后停止验收",
+        "rawArgs": "I41_HOLD_LOSS_FINAL 刷新后停止验收",
+        "sessionId": "session_1790657410083_r5ga0g1",
+        "surface": "tui"
+      },
+      "dropResponse": true
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T05:10:25.996Z",
+      "clientInvocationId": "89989878-07e2-428d-aa5b-2a7bcdb28f75",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_9",
+        "clientInvocationId": "89989878-07e2-428d-aa5b-2a7bcdb28f75",
+        "sessionId": "session_1790657410083_r5ga0g1",
+        "outputCount": 0,
+        "eventCount": 0,
+        "promptReceipt": {
+          "promptId": "prompt_2049f2a7-8156-416f-a522-41fbab108c12",
+          "clientRequestId": "74f923a4-26f4-4f71-a981-6edc62f5ec6e",
+          "userMessageId": "message_c8f4e986-1c1d-4002-bebe-18f84a62d23b",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "status": "queued",
+          "createdAt": "2026-09-29T05:10:25.994Z"
+        },
+        "status": "completed",
+        "permissionEpoch": "016cba65-7864-4820-9f9f-ae1b79e98bc3",
+        "rootSessionId": "session_1790657410083_r5ga0g1",
+        "bindingGeneration": 2
+      }
+    },
+    {
+      "type": "command-response-lost",
+      "at": "2026-09-29T05:10:26.005Z",
+      "clientInvocationId": "89989878-07e2-428d-aa5b-2a7bcdb28f75"
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T05:10:26.031Z",
+      "marker": "I41_HOLD_LOSS_FINAL",
+      "toolResult": false
+    },
+    {
+      "type": "database",
+      "at": "2026-09-29T05:10:37.578Z",
+      "sessions": [
+        {
+          "id": "session_1790657410083_r5ga0g1",
+          "title": "验收会话 A",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657410190_l41prc2",
+          "title": "验收会话 B",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657425257_bnggtr3",
+          "title": "New session",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657480179_dp7xlz1",
+          "title": "检查会话切换",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657875633_wa3fpk4",
+          "title": "检查第一个任务",
+          "parent_id": "session_1790657410083_r5ga0g1"
+        }
+      ],
+      "prompts": [
+        {
+          "prompt_id": "prompt_ec8551ad-3b2f-4a16-9233-a47c771fa743",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded",
+          "client_request_id": "b2696d23-11b4-454e-8cad-077e63598c9a"
+        },
+        {
+          "prompt_id": "prompt_db556867-85b9-43ce-8132-94ccd81b15a0",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded",
+          "client_request_id": "09da3b10-8f9b-4bd6-a44d-2cec8c1b26e7"
+        },
+        {
+          "prompt_id": "prompt_3d5ff1fb-4640-4cca-a352-a9c23a1e61fd",
+          "session_id": "session_1790657480179_dp7xlz1",
+          "status": "succeeded",
+          "client_request_id": "ea3515d6-46a0-4533-b026-3e84ea2d6ecf"
+        },
+        {
+          "prompt_id": "prompt_cdc567e0-2919-4299-9896-da761bfc2076",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded",
+          "client_request_id": "3072f9f1-3a4a-4393-8266-122d466fe573"
+        },
+        {
+          "prompt_id": "prompt_2df32f44-f0a0-4627-aba4-2f96b683b6eb",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded",
+          "client_request_id": "be516204-fcef-4c0e-8ae7-0150c6630771"
+        },
+        {
+          "prompt_id": "prompt_36814d9a-cd6c-408a-9d09-40427fee7884",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded",
+          "client_request_id": "56f8b117-665c-4f43-9ee3-f88f78ad2ae6"
+        },
+        {
+          "prompt_id": "prompt_a87cbdd5-0c70-452c-99e4-b0580a19c41c",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "failed",
+          "client_request_id": "b2fbedce-40ea-4e90-b3b0-8ae13170bea3"
+        },
+        {
+          "prompt_id": "prompt_2049f2a7-8156-416f-a522-41fbab108c12",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "running",
+          "client_request_id": "74f923a4-26f4-4f71-a981-6edc62f5ec6e"
+        }
+      ],
+      "runs": [
+        {
+          "run_id": "run_8e04f4e9-ad70-491c-a3a4-71ccf398bbc9",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_d2664354-4a46-4b83-aa6b-d63eac47c2d3",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_b957a3ae-c43a-4660-89b6-f3ce2231ffca",
+          "session_id": "session_1790657480179_dp7xlz1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_f52cdd17-a78d-478a-8eb0-0cd36b21ef73",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_6a91a055-e255-4ea9-ac4b-f28aa9e77b64",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "subagent_run_mum7grlg_76r57qv1",
+          "session_id": "session_1790657875633_wa3fpk4",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_e58128e9-493a-4d7a-9f79-d6128aaaf666",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "subagent_run_mum7les8_glsa88b8",
+          "session_id": "session_1790657875633_wa3fpk4",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_d929be67-faa8-466b-a367-8a0e36159c3c",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "failed"
+        },
+        {
+          "run_id": "run_7ccb4472-06ba-41f4-b73b-e6e7196fc1c7",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "running"
+        }
+      ],
+      "subagents": [
+        {
+          "id": "subagent_mum7grl8_iecxqckg",
+          "name": "稳定的验收子会话",
+          "description": "检查第一个任务"
+        }
+      ],
+      "titleRequests": 3,
+      "mainRequests": 15,
+      "failures": [
+        "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'object' !== 'string'\n"
+      ]
+    },
+    {
+      "type": "command-loss-asserted",
+      "at": "2026-09-29T05:11:09.343Z",
+      "clientInvocationId": "89989878-07e2-428d-aa5b-2a7bcdb28f75",
+      "skill": true,
+      "promptStatus": "running"
+    },
+    {
+      "type": "command-loss-asserted",
+      "at": "2026-09-29T05:11:44.788Z",
+      "clientInvocationId": "89989878-07e2-428d-aa5b-2a7bcdb28f75",
+      "skill": true,
+      "promptStatus": "interrupted"
+    },
+    {
+      "type": "legacy-fixture",
+      "at": "2026-09-29T05:12:12.611Z",
+      "count": 1,
+      "sessionId": "session_1790657410190_l41prc2"
+    },
+    {
+      "type": "ready",
+      "at": "2026-09-29T05:12:12.932Z",
+      "url": "http://127.0.0.1:62214",
+      "daemonPort": 65086,
+      "pid": 8658,
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve41-web-kP48n6/manifest.json"
+    },
+    {
+      "type": "command-response-loss-armed",
+      "at": "2026-09-29T05:13:33.768Z"
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T05:14:39.320Z",
+      "invocation": {
+        "argumentMode": "argv",
+        "argv": [
+          "budget",
+          "100"
+        ],
+        "body": "",
+        "clientInvocationId": "c1d5825f-7bc1-4b57-92ce-3293927a5528",
+        "commandId": "goal",
+        "path": [
+          "goal"
+        ],
+        "raw": "/goal budget 100",
+        "rawArgs": "budget 100",
+        "sessionId": "session_1790657410190_l41prc2",
+        "surface": "tui"
+      },
+      "dropResponse": true
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T05:14:39.325Z",
+      "clientInvocationId": "c1d5825f-7bc1-4b57-92ce-3293927a5528",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_1",
+        "clientInvocationId": "c1d5825f-7bc1-4b57-92ce-3293927a5528",
+        "sessionId": "session_1790657410190_l41prc2",
+        "outputCount": 0,
+        "eventCount": 1,
+        "status": "failed",
+        "error": {
+          "code": "invalid_transition",
+          "message": "The /goal budget subcommand is not available. State any hard limit in natural language so the main agent can record it.",
+          "recoverable": true
+        }
+      }
+    },
+    {
+      "type": "command-response-lost",
+      "at": "2026-09-29T05:14:39.336Z",
+      "clientInvocationId": "c1d5825f-7bc1-4b57-92ce-3293927a5528"
+    },
+    {
+      "type": "database",
+      "at": "2026-09-29T05:15:13.456Z",
+      "sessions": [
+        {
+          "id": "session_1790657410083_r5ga0g1",
+          "title": "验收会话 A",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657410190_l41prc2",
+          "title": "验收会话 B",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657425257_bnggtr3",
+          "title": "New session",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657480179_dp7xlz1",
+          "title": "检查会话切换",
+          "parent_id": null
+        },
+        {
+          "id": "session_1790657875633_wa3fpk4",
+          "title": "检查第一个任务",
+          "parent_id": "session_1790657410083_r5ga0g1"
+        }
+      ],
+      "prompts": [
+        {
+          "prompt_id": "prompt_ec8551ad-3b2f-4a16-9233-a47c771fa743",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded",
+          "client_request_id": "b2696d23-11b4-454e-8cad-077e63598c9a"
+        },
+        {
+          "prompt_id": "prompt_db556867-85b9-43ce-8132-94ccd81b15a0",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded",
+          "client_request_id": "09da3b10-8f9b-4bd6-a44d-2cec8c1b26e7"
+        },
+        {
+          "prompt_id": "prompt_3d5ff1fb-4640-4cca-a352-a9c23a1e61fd",
+          "session_id": "session_1790657480179_dp7xlz1",
+          "status": "succeeded",
+          "client_request_id": "ea3515d6-46a0-4533-b026-3e84ea2d6ecf"
+        },
+        {
+          "prompt_id": "prompt_cdc567e0-2919-4299-9896-da761bfc2076",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded",
+          "client_request_id": "3072f9f1-3a4a-4393-8266-122d466fe573"
+        },
+        {
+          "prompt_id": "prompt_2df32f44-f0a0-4627-aba4-2f96b683b6eb",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded",
+          "client_request_id": "be516204-fcef-4c0e-8ae7-0150c6630771"
+        },
+        {
+          "prompt_id": "prompt_36814d9a-cd6c-408a-9d09-40427fee7884",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded",
+          "client_request_id": "56f8b117-665c-4f43-9ee3-f88f78ad2ae6"
+        },
+        {
+          "prompt_id": "prompt_a87cbdd5-0c70-452c-99e4-b0580a19c41c",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "failed",
+          "client_request_id": "b2fbedce-40ea-4e90-b3b0-8ae13170bea3"
+        },
+        {
+          "prompt_id": "prompt_2049f2a7-8156-416f-a522-41fbab108c12",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "interrupted",
+          "client_request_id": "74f923a4-26f4-4f71-a981-6edc62f5ec6e"
+        }
+      ],
+      "runs": [
+        {
+          "run_id": "run_8e04f4e9-ad70-491c-a3a4-71ccf398bbc9",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_d2664354-4a46-4b83-aa6b-d63eac47c2d3",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_b957a3ae-c43a-4660-89b6-f3ce2231ffca",
+          "session_id": "session_1790657480179_dp7xlz1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_f52cdd17-a78d-478a-8eb0-0cd36b21ef73",
+          "session_id": "session_1790657410190_l41prc2",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_6a91a055-e255-4ea9-ac4b-f28aa9e77b64",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "subagent_run_mum7grlg_76r57qv1",
+          "session_id": "session_1790657875633_wa3fpk4",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_e58128e9-493a-4d7a-9f79-d6128aaaf666",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "subagent_run_mum7les8_glsa88b8",
+          "session_id": "session_1790657875633_wa3fpk4",
+          "status": "succeeded"
+        },
+        {
+          "run_id": "run_d929be67-faa8-466b-a367-8a0e36159c3c",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "failed"
+        },
+        {
+          "run_id": "run_7ccb4472-06ba-41f4-b73b-e6e7196fc1c7",
+          "session_id": "session_1790657410083_r5ga0g1",
+          "status": "interrupted"
+        }
+      ],
+      "subagents": [
+        {
+          "id": "subagent_mum7grl8_iecxqckg",
+          "name": "稳定的验收子会话",
+          "description": "检查第一个任务"
+        }
+      ],
+      "titleRequests": 3,
+      "mainRequests": 15,
+      "failures": [
+        "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'object' !== 'string'\n"
+      ]
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T05:15:31.151Z",
+      "invocation": {
+        "argumentMode": "raw",
+        "argv": [
+          "I41_HOLD_NORMAL",
+          "正常停止保持输入为空"
+        ],
+        "body": "",
+        "clientInvocationId": "76d6af6a-b831-4da5-abce-216aab8bcf69",
+        "clientRequestId": "9d4838c3-6e08-4549-9314-0ab35d602f85",
+        "commandId": "skill.i41-review",
+        "path": [
+          "i41-review"
+        ],
+        "raw": "/i41-review I41_HOLD_NORMAL 正常停止保持输入为空",
+        "rawArgs": "I41_HOLD_NORMAL 正常停止保持输入为空",
+        "sessionId": "session_1790657410190_l41prc2",
+        "surface": "tui"
+      },
+      "dropResponse": false
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T05:15:31.161Z",
+      "clientInvocationId": "76d6af6a-b831-4da5-abce-216aab8bcf69",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_2",
+        "clientInvocationId": "76d6af6a-b831-4da5-abce-216aab8bcf69",
+        "sessionId": "session_1790657410190_l41prc2",
+        "outputCount": 0,
+        "eventCount": 0,
+        "promptReceipt": {
+          "promptId": "prompt_9deeb453-6aeb-4918-b0b9-ece0f34d4c69",
+          "clientRequestId": "9d4838c3-6e08-4549-9314-0ab35d602f85",
+          "userMessageId": "message_8c533a46-cdb3-4f9c-b57a-de454b3899b3",
+          "sessionId": "session_1790657410190_l41prc2",
+          "status": "queued",
+          "createdAt": "2026-09-29T05:15:31.159Z"
+        },
+        "status": "completed",
+        "permissionEpoch": "998727d8-e16d-47f0-83b9-c334b4f3ecfa",
+        "rootSessionId": "session_1790657410190_l41prc2",
+        "bindingGeneration": 2
+      }
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T05:15:31.218Z",
+      "marker": "I41_HOLD_NORMAL",
+      "toolResult": false
+    },
+    {
+      "type": "ui-observation",
+      "at": "2026-09-29T05:16:58.569Z",
+      "observation": "Final2facccea frontend/backend: actualGoal budget fail with response loss retains real error plus unconfirmed in originatingoverlay; no success/chatcard. Parseunknown error besidecomposer clearsonedit. Normalacceptedskill I41_HOLD_NORMAL reloadwhileheld keepsrunning,Stop→interrupted with emptycomposer/nooutercommanderror. ActuallegacyBash afterdaemonrestart:input/output/realerror,noexecutionplaceholder,noinventedduration."
+    },
+    {
+      "type": "command-loss-asserted",
+      "at": "2026-09-29T05:16:58.570Z",
+      "clientInvocationId": "c1d5825f-7bc1-4b57-92ce-3293927a5528",
+      "skill": false
+    },
+    {
+      "type": "ui-observation",
+      "at": "2026-09-29T05:18:35.172Z",
+      "observation": "T37closed: afterphysicaldaemonrestart2facccea, openedseconddelegation samechild,Loadearlier fetchedolderpage,expandedfirstBash realExecution runId subagent_run_mum7grlg_76r57qv1 phaseended outcome success created/start/end timestamps plusInput/Output preserved."
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T05:19:27.199Z",
+      "invocation": {
+        "argumentMode": "argv",
+        "argv": [],
+        "body": "",
+        "clientInvocationId": "6698ad0c-245b-4b25-9fc0-b5934b325e21",
+        "clientRequestId": "c9172ed9-4404-4d02-bc5b-ecd22b6d9efc",
+        "commandId": "status",
+        "path": [
+          "status"
+        ],
+        "raw": "/status",
+        "rawArgs": "",
+        "sessionId": "session_1790657410190_l41prc2",
+        "surface": "tui"
+      },
+      "dropResponse": false
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T05:19:27.205Z",
+      "clientInvocationId": "6698ad0c-245b-4b25-9fc0-b5934b325e21",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_3",
+        "clientInvocationId": "6698ad0c-245b-4b25-9fc0-b5934b325e21",
+        "sessionId": "session_1790657410190_l41prc2",
+        "outputCount": 1,
+        "eventCount": 1,
+        "status": "completed"
+      }
+    },
+    {
+      "type": "ready",
+      "at": "2026-09-29T05:20:07.406Z",
+      "url": "http://127.0.0.1:62214",
+      "daemonPort": 49402,
+      "pid": 17823,
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve41-web-kP48n6/manifest.json"
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T05:21:33.862Z",
+      "invocation": {
+        "argumentMode": "argv",
+        "argv": [],
+        "body": "",
+        "clientInvocationId": "b15228b2-a0fd-4012-a729-9a241ff2f6ee",
+        "clientRequestId": "c6971ab1-31d6-4d87-b181-9621cc319245",
+        "commandId": "status",
+        "path": [
+          "status"
+        ],
+        "raw": "/status",
+        "rawArgs": "",
+        "sessionId": "session_1790657410190_l41prc2",
+        "surface": "tui"
+      },
+      "dropResponse": false
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T05:21:33.876Z",
+      "clientInvocationId": "b15228b2-a0fd-4012-a729-9a241ff2f6ee",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_1",
+        "clientInvocationId": "b15228b2-a0fd-4012-a729-9a241ff2f6ee",
+        "sessionId": "session_1790657410190_l41prc2",
+        "outputCount": 1,
+        "eventCount": 1,
+        "status": "completed"
+      }
+    },
+    {
+      "type": "ready",
+      "at": "2026-09-29T05:39:40.342Z",
+      "url": "http://127.0.0.1:62214",
+      "daemonPort": 51846,
+      "pid": 40904,
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve41-web-kP48n6/manifest.json"
+    },
+    {
+      "type": "command-request",
+      "at": "2026-09-29T05:40:35.222Z",
+      "invocation": {
+        "argumentMode": "argv",
+        "argv": [],
+        "body": "",
+        "clientInvocationId": "3f6fbbcf-e78e-4105-919a-187bc66c9b11",
+        "commandId": "status",
+        "path": [
+          "status"
+        ],
+        "raw": "/status",
+        "rawArgs": "",
+        "sessionId": "session_1790657410190_l41prc2",
+        "surface": "tui"
+      },
+      "dropResponse": false
+    },
+    {
+      "type": "command-response",
+      "at": "2026-09-29T05:40:35.236Z",
+      "clientInvocationId": "3f6fbbcf-e78e-4105-919a-187bc66c9b11",
+      "status": 200,
+      "reply": {
+        "ok": true,
+        "commandRunId": "command_1",
+        "clientInvocationId": "3f6fbbcf-e78e-4105-919a-187bc66c9b11",
+        "sessionId": "session_1790657410190_l41prc2",
+        "outputCount": 1,
+        "eventCount": 1,
+        "status": "completed"
+      }
+    },
+    {
+      "type": "ready",
+      "at": "2026-09-29T05:43:15.747Z",
+      "url": "http://127.0.0.1:62214",
+      "daemonPort": 52340,
+      "pid": 45523,
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve41-web-kP48n6/manifest.json"
+    },
+    {
+      "type": "command-failure",
+      "at": "2026-09-29T05:44:33.846Z",
+      "message": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'object' !== 'string'\n"
+    },
+    {
+      "type": "ui-observation",
+      "at": "2026-09-29T05:44:50.783Z",
+      "observation": "At 47605aaa: real normally stopped skill reopened after service restart and full reload has no user-stop error alert. Desktop and 443px unknown-command feedback visibly above composer; edit clears error. Status 443px dialog width 407, content clientWidth=scrollWidth=405, entire long path wraps; keyboard Enter closes. Screenshots visually inspected and scheduled for deletion."
+    },
+    {
+      "type": "run-request",
+      "at": "2026-09-29T05:45:19.605Z",
+      "marker": "I41_HOLD_FINAL_STOP",
+      "toolResult": false
+    },
+    {
+      "type": "ui-observation",
+      "at": "2026-09-29T05:46:23.106Z",
+      "observation": "At final compiled 47605aaa, sent I41_HOLD_FINAL_STOP through actual Web composer, waited for provider-held run, clicked Stop run, then performed full page.reload. Expected interrupted history remains, no alert, no revived command card, input empty."
+    },
+    {
+      "type": "cleanup",
+      "at": "2026-09-29T05:46:42.085Z",
+      "root": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve41-web-kP48n6",
+      "pidReleased": true
+    }
+  ],
+  "final": {
+    "sessions": [
+      {
+        "id": "session_1790657410083_r5ga0g1",
+        "title": "验收会话 A",
+        "parent_id": null
+      },
+      {
+        "id": "session_1790657410190_l41prc2",
+        "title": "验收会话 B",
+        "parent_id": null
+      },
+      {
+        "id": "session_1790657425257_bnggtr3",
+        "title": "New session",
+        "parent_id": null
+      },
+      {
+        "id": "session_1790657480179_dp7xlz1",
+        "title": "检查会话切换",
+        "parent_id": null
+      },
+      {
+        "id": "session_1790657875633_wa3fpk4",
+        "title": "检查第一个任务",
+        "parent_id": "session_1790657410083_r5ga0g1"
+      }
+    ],
+    "prompts": [
+      {
+        "prompt_id": "prompt_ec8551ad-3b2f-4a16-9233-a47c771fa743",
+        "session_id": "session_1790657410083_r5ga0g1",
+        "status": "succeeded",
+        "client_request_id": "b2696d23-11b4-454e-8cad-077e63598c9a"
+      },
+      {
+        "prompt_id": "prompt_db556867-85b9-43ce-8132-94ccd81b15a0",
+        "session_id": "session_1790657410190_l41prc2",
+        "status": "succeeded",
+        "client_request_id": "09da3b10-8f9b-4bd6-a44d-2cec8c1b26e7"
+      },
+      {
+        "prompt_id": "prompt_3d5ff1fb-4640-4cca-a352-a9c23a1e61fd",
+        "session_id": "session_1790657480179_dp7xlz1",
+        "status": "succeeded",
+        "client_request_id": "ea3515d6-46a0-4533-b026-3e84ea2d6ecf"
+      },
+      {
+        "prompt_id": "prompt_cdc567e0-2919-4299-9896-da761bfc2076",
+        "session_id": "session_1790657410190_l41prc2",
+        "status": "succeeded",
+        "client_request_id": "3072f9f1-3a4a-4393-8266-122d466fe573"
+      },
+      {
+        "prompt_id": "prompt_2df32f44-f0a0-4627-aba4-2f96b683b6eb",
+        "session_id": "session_1790657410083_r5ga0g1",
+        "status": "succeeded",
+        "client_request_id": "be516204-fcef-4c0e-8ae7-0150c6630771"
+      },
+      {
+        "prompt_id": "prompt_36814d9a-cd6c-408a-9d09-40427fee7884",
+        "session_id": "session_1790657410083_r5ga0g1",
+        "status": "succeeded",
+        "client_request_id": "56f8b117-665c-4f43-9ee3-f88f78ad2ae6"
+      },
+      {
+        "prompt_id": "prompt_a87cbdd5-0c70-452c-99e4-b0580a19c41c",
+        "session_id": "session_1790657410083_r5ga0g1",
+        "status": "failed",
+        "client_request_id": "b2fbedce-40ea-4e90-b3b0-8ae13170bea3"
+      },
+      {
+        "prompt_id": "prompt_2049f2a7-8156-416f-a522-41fbab108c12",
+        "session_id": "session_1790657410083_r5ga0g1",
+        "status": "interrupted",
+        "client_request_id": "74f923a4-26f4-4f71-a981-6edc62f5ec6e"
+      },
+      {
+        "prompt_id": "prompt_9deeb453-6aeb-4918-b0b9-ece0f34d4c69",
+        "session_id": "session_1790657410190_l41prc2",
+        "status": "interrupted",
+        "client_request_id": "9d4838c3-6e08-4549-9314-0ab35d602f85"
+      },
+      {
+        "prompt_id": "prompt_3cadbc82-561d-4b95-9ac2-ffedec9a914d",
+        "session_id": "session_1790657410190_l41prc2",
+        "status": "interrupted",
+        "client_request_id": "ff2f32b3-a4d5-4d46-8e3d-6cdb626513f0"
+      }
+    ],
+    "runs": [
+      {
+        "run_id": "run_8e04f4e9-ad70-491c-a3a4-71ccf398bbc9",
+        "session_id": "session_1790657410083_r5ga0g1",
+        "status": "succeeded"
+      },
+      {
+        "run_id": "run_d2664354-4a46-4b83-aa6b-d63eac47c2d3",
+        "session_id": "session_1790657410190_l41prc2",
+        "status": "succeeded"
+      },
+      {
+        "run_id": "run_b957a3ae-c43a-4660-89b6-f3ce2231ffca",
+        "session_id": "session_1790657480179_dp7xlz1",
+        "status": "succeeded"
+      },
+      {
+        "run_id": "run_f52cdd17-a78d-478a-8eb0-0cd36b21ef73",
+        "session_id": "session_1790657410190_l41prc2",
+        "status": "succeeded"
+      },
+      {
+        "run_id": "run_6a91a055-e255-4ea9-ac4b-f28aa9e77b64",
+        "session_id": "session_1790657410083_r5ga0g1",
+        "status": "succeeded"
+      },
+      {
+        "run_id": "subagent_run_mum7grlg_76r57qv1",
+        "session_id": "session_1790657875633_wa3fpk4",
+        "status": "succeeded"
+      },
+      {
+        "run_id": "run_e58128e9-493a-4d7a-9f79-d6128aaaf666",
+        "session_id": "session_1790657410083_r5ga0g1",
+        "status": "succeeded"
+      },
+      {
+        "run_id": "subagent_run_mum7les8_glsa88b8",
+        "session_id": "session_1790657875633_wa3fpk4",
+        "status": "succeeded"
+      },
+      {
+        "run_id": "run_d929be67-faa8-466b-a367-8a0e36159c3c",
+        "session_id": "session_1790657410083_r5ga0g1",
+        "status": "failed"
+      },
+      {
+        "run_id": "run_7ccb4472-06ba-41f4-b73b-e6e7196fc1c7",
+        "session_id": "session_1790657410083_r5ga0g1",
+        "status": "interrupted"
+      },
+      {
+        "run_id": "run_08c6992e-f343-40e8-98b5-2dc045fc60ad",
+        "session_id": "session_1790657410190_l41prc2",
+        "status": "interrupted"
+      },
+      {
+        "run_id": "run_9e902c4c-fc6d-4c5e-9121-e6b55e04e665",
+        "session_id": "session_1790657410190_l41prc2",
+        "status": "interrupted"
+      }
+    ],
+    "subagents": [
+      {
+        "id": "subagent_mum7grl8_iecxqckg",
+        "name": "稳定的验收子会话",
+        "description": "检查第一个任务"
+      }
+    ],
+    "titleRequests": 3,
+    "mainRequests": 17,
+    "failures": [
+      "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'object' !== 'string'\n"
+    ]
+  },
+  "requestSummary": {
+    "total": 20,
+    "auxiliary": 3
+  },
+  "controllerErrors": [
+    {
+      "kind": "fixture command schema misuse",
+      "detail": "record.observation mistakenly sent as object instead of string; rejected before recording. Correct string observation subsequently accepted. This intentionally remains in final failures; fixture exits 1 after successful cleanup. Product command-loss assertions and browser observations are separate evidence."
+    }
+  ]
+}

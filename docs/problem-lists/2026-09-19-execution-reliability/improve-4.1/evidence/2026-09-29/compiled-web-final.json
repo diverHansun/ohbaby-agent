@@ -1,0 +1,80 @@
+{
+  "E2E_UI_EVIDENCE_PASS": {
+    "activeSessionStable": true,
+    "followupFinalAfterRefresh": 1,
+    "followupFinalBeforeRefresh": 1,
+    "followupUserAfterRefresh": 1,
+    "runtimeMarkersVisible": false,
+    "titleContainsRuntimeMarker": false,
+    "toolFinalAfterRefresh": 1,
+    "toolFinalBeforeRefresh": 1,
+    "toolPanelCompleted": true,
+    "newSessionRegression": {
+      "usedSessionId": "session_1790660408548_oormhd1",
+      "emptySessionId": "session_1790660507200_1ckcds1",
+      "sequentialNewSessionIds": [
+        "session_1790660507200_1ckcds1",
+        "session_1790660507200_1ckcds1",
+        "session_1790660507200_1ckcds1",
+        "session_1790660507200_1ckcds1",
+        "session_1790660507200_1ckcds1",
+        "session_1790660507200_1ckcds1"
+      ],
+      "afterUsedSessionNewId": "session_1790660507200_1ckcds1",
+      "afterRefreshNewId": "session_1790660507200_1ckcds1"
+    }
+  },
+  "E2E_NEW_SESSION_DATABASE_PASS": {
+    "rootCount": 2,
+    "childCount": 0,
+    "sessions": [
+      {
+        "id": "session_1790660408548_oormhd1",
+        "projectRoot": "/private/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-compiled-web-e2e-1BWBep/workspace",
+        "parentId": null,
+        "status": "active",
+        "messageCount": 5,
+        "runCount": 2,
+        "promptCount": 2
+      },
+      {
+        "id": "session_1790660507200_1ckcds1",
+        "projectRoot": "/private/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-compiled-web-e2e-1BWBep/workspace",
+        "parentId": null,
+        "status": "active",
+        "messageCount": 0,
+        "runCount": 0,
+        "promptCount": 0
+      }
+    ]
+  },
+  "E2E_BACKEND_PASS": {
+    "keyPresent": true,
+    "keyStable": true,
+    "requestCount": 3,
+    "runtimePartCounts": [
+      1,
+      1,
+      2
+    ],
+    "titleRequests": 1,
+    "toolResultConsumed": true
+  },
+  "E2E_CLEANUP_PASS": {
+    "finalStatus": "stopped",
+    "pidReleased": true,
+    "portReleased": true
+  },
+  "E2E_DIAGNOSTICS_PASS": {
+    "eventCount": 5,
+    "events": [
+      "diagnostics.started",
+      "migration.config.completed",
+      "migration.data.completed",
+      "server.started",
+      "server.stopped"
+    ],
+    "file": "2026-09-29T05-39-03-662Z-40222-f0b1e9bf.jsonl"
+  },
+  "scope": "Compiled 0ff1374a Web; actual browser E01-E05 and new-session regression, production SQLite/wire/cache/diagnostics assertions; fixture exit 0. Later 47605aaa only changes Stop/Steer presentation, separately checked."
+}

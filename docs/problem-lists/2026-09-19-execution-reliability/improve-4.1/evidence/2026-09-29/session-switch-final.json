@@ -1,0 +1,658 @@
+{
+  "rows": [
+    {
+      "pass": 0,
+      "label": "A",
+      "elapsedMs": 13.624833999999993,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+          "elapsedMs": 5.5180839999999876,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "idle",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 0,
+      "label": "B",
+      "elapsedMs": 12.515375000000006,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+          "elapsedMs": 4.7862499999999955,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 0,
+      "label": "A",
+      "elapsedMs": 13.102834000000001,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+          "elapsedMs": 6.751999999999981,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 0,
+      "label": "B",
+      "elapsedMs": 14.62495899999999,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+          "elapsedMs": 4.477791999999994,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 0,
+      "label": "B",
+      "elapsedMs": 7.294749999999993,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+          "elapsedMs": 2.699792000000002,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 1,
+      "label": "A",
+      "elapsedMs": 7.2564160000000015,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+          "elapsedMs": 2.4100420000000042,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 1,
+      "label": "B",
+      "elapsedMs": 7.867916000000008,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+          "elapsedMs": 3.932249999999982,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 1,
+      "label": "A",
+      "elapsedMs": 8.17233299999998,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+          "elapsedMs": 3.3450420000000065,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 1,
+      "label": "B",
+      "elapsedMs": 6.829584000000011,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+          "elapsedMs": 3.445875000000001,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 1,
+      "label": "B",
+      "elapsedMs": 6.0217080000000465,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+          "elapsedMs": 2.2942920000000413,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 2,
+      "label": "A",
+      "elapsedMs": 7.4893749999999955,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+          "elapsedMs": 3.660500000000013,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 2,
+      "label": "B",
+      "elapsedMs": 12.484125000000006,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+          "elapsedMs": 4.593665999999985,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 2,
+      "label": "A",
+      "elapsedMs": 6.805499999999995,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+          "elapsedMs": 4.342916000000002,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 2,
+      "label": "B",
+      "elapsedMs": 6.973167000000046,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+          "elapsedMs": 3.5343750000000114,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410083_r5ga0g1",
+          "attempts": 0,
+          "generation": "6d20b37e-6798-49fc-b757-2281eac90dde"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "pass": 2,
+      "label": "B",
+      "elapsedMs": 6.902749999999969,
+      "baselines": [
+        {
+          "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+          "elapsedMs": 3.3290000000000077,
+          "status": 200
+        }
+      ],
+      "states": [
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0
+        },
+        {
+          "status": "syncing",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 1
+        },
+        {
+          "status": "ready",
+          "sessionId": "session_1790657410190_l41prc2",
+          "attempts": 0,
+          "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "peer": {
+        "generationBefore": "34c30a24-0571-4afa-a87b-563cea90621a",
+        "generationAfter": "34c30a24-0571-4afa-a87b-563cea90621a",
+        "additionalBaselines": 0,
+        "indexRefreshesObserved": 1,
+        "witnessSessionObserved": true,
+        "states": [
+          {
+            "status": "ready",
+            "sessionId": "session_1790657410190_l41prc2",
+            "attempts": 0,
+            "generation": "34c30a24-0571-4afa-a87b-563cea90621a"
+          }
+        ],
+        "errors": []
+      }
+    }
+  ],
+  "requests": [
+    {
+      "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+      "elapsedMs": 5.5180839999999876,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+      "elapsedMs": 4.7862499999999955,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+      "elapsedMs": 6.751999999999981,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+      "elapsedMs": 4.477791999999994,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+      "elapsedMs": 2.699792000000002,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+      "elapsedMs": 2.4100420000000042,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+      "elapsedMs": 3.932249999999982,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+      "elapsedMs": 3.3450420000000065,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+      "elapsedMs": 3.445875000000001,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+      "elapsedMs": 2.2942920000000413,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+      "elapsedMs": 3.660500000000013,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+      "elapsedMs": 4.593665999999985,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410083_r5ga0g1/view",
+      "elapsedMs": 4.342916000000002,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+      "elapsedMs": 3.5343750000000114,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+      "elapsedMs": 3.3290000000000077,
+      "status": 200
+    },
+    {
+      "path": "/v1/sessions/session_1790657410190_l41prc2/view",
+      "elapsedMs": 2.5384579999999914,
+      "status": 200
+    }
+  ],
+  "cleanupErrors": []
+}

@@ -1,0 +1,552 @@
+{
+  "events": [
+    {
+      "type": "ready",
+      "at": "2026-09-29T04:55:47.189Z",
+      "root": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve4-inprocess-qXt7dN",
+      "manifestPath": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve4-inprocess-qXt7dN/manifest.json"
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-29T04:56:28.208Z",
+      "marker": "I4_LOCAL_A_HOLD"
+    },
+    {
+      "type": "inprocess-proof",
+      "at": "2026-09-29T04:56:45.394Z",
+      "pid": 68773,
+      "args": [],
+      "ownDatabaseOwner": true,
+      "noChildren": true,
+      "noListener": true,
+      "globalDaemonStateUnchanged": true
+    },
+    {
+      "type": "before-steer",
+      "at": "2026-09-29T04:56:45.394Z",
+      "prompts": [
+        {
+          "id": "prompt_4a0ba8e5-532b-4f32-8df2-ca7ea3b64b65",
+          "text": "I4_LOCAL_A_HOLD",
+          "status": "running",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0c6b3b78-da7d-499b-b9b7-bb7e645925ad",
+          "runId": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657788132
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "running",
+          "ownerPid": 68773
+        }
+      ]
+    },
+    {
+      "type": "steer-proof",
+      "at": "2026-09-29T04:58:22.502Z",
+      "rootRunIdUnchanged": true,
+      "providerStillOpen": true,
+      "prompts": [
+        {
+          "id": "prompt_4a0ba8e5-532b-4f32-8df2-ca7ea3b64b65",
+          "text": "I4_LOCAL_A_HOLD",
+          "status": "running",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0c6b3b78-da7d-499b-b9b7-bb7e645925ad",
+          "runId": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657788132
+        },
+        {
+          "id": "prompt_8e5f0622-247f-48ad-8e93-e7f1affbe570",
+          "text": "I4_LOCAL_B",
+          "status": "queued",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_b2925696-1f67-45e4-a61b-dfafb603b736",
+          "runId": null,
+          "ownerPid": 68773,
+          "acceptedAt": 1790657828417
+        },
+        {
+          "id": "prompt_c153a288-031c-476e-b9a3-d2b2fba9c0fb",
+          "text": "I4_LOCAL_STEER",
+          "status": "steered",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_4999f078-8f9e-475c-b158-67fa4e3ba234",
+          "runId": null,
+          "ownerPid": 68773,
+          "acceptedAt": 1790657856228
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "running",
+          "ownerPid": 68773
+        }
+      ]
+    },
+    {
+      "type": "provider-closed",
+      "at": "2026-09-29T04:58:35.222Z",
+      "marker": "I4_LOCAL_A_HOLD"
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-29T04:58:35.282Z",
+      "marker": "I4_LOCAL_B"
+    },
+    {
+      "type": "assert-pass",
+      "at": "2026-09-29T04:58:50.818Z",
+      "prompts": [
+        {
+          "id": "prompt_4a0ba8e5-532b-4f32-8df2-ca7ea3b64b65",
+          "text": "I4_LOCAL_A_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0c6b3b78-da7d-499b-b9b7-bb7e645925ad",
+          "runId": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657788132
+        },
+        {
+          "id": "prompt_8e5f0622-247f-48ad-8e93-e7f1affbe570",
+          "text": "I4_LOCAL_B",
+          "status": "succeeded",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_b2925696-1f67-45e4-a61b-dfafb603b736",
+          "runId": "run_053fd762-298d-49a4-9225-9f85476539f4",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657828417
+        },
+        {
+          "id": "prompt_c153a288-031c-476e-b9a3-d2b2fba9c0fb",
+          "text": "I4_LOCAL_STEER",
+          "status": "steered",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_4999f078-8f9e-475c-b158-67fa4e3ba234",
+          "runId": null,
+          "ownerPid": 68773,
+          "acceptedAt": 1790657856228
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "interrupted",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_053fd762-298d-49a4-9225-9f85476539f4",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "succeeded",
+          "ownerPid": 68773
+        }
+      ],
+      "counts": {
+        "I4_LOCAL_A_HOLD": 1,
+        "I4_LOCAL_B": 1
+      }
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-29T04:59:05.035Z",
+      "marker": "I4_LOCAL_EXIT_HOLD"
+    },
+    {
+      "type": "before-exit",
+      "at": "2026-09-29T04:59:57.216Z",
+      "prompts": [
+        {
+          "id": "prompt_4a0ba8e5-532b-4f32-8df2-ca7ea3b64b65",
+          "text": "I4_LOCAL_A_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0c6b3b78-da7d-499b-b9b7-bb7e645925ad",
+          "runId": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657788132
+        },
+        {
+          "id": "prompt_8e5f0622-247f-48ad-8e93-e7f1affbe570",
+          "text": "I4_LOCAL_B",
+          "status": "succeeded",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_b2925696-1f67-45e4-a61b-dfafb603b736",
+          "runId": "run_053fd762-298d-49a4-9225-9f85476539f4",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657828417
+        },
+        {
+          "id": "prompt_c153a288-031c-476e-b9a3-d2b2fba9c0fb",
+          "text": "I4_LOCAL_STEER",
+          "status": "steered",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_4999f078-8f9e-475c-b158-67fa4e3ba234",
+          "runId": null,
+          "ownerPid": 68773,
+          "acceptedAt": 1790657856228
+        },
+        {
+          "id": "prompt_fa345059-3f4c-4091-b9c4-6a9b9a2339c7",
+          "text": "I4_LOCAL_EXIT_HOLD",
+          "status": "running",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0d0cb363-7a35-43f3-bae9-baea9f6e7c11",
+          "runId": "run_23aeda01-282e-4c11-b6c8-f763e05f5977",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657944994
+        },
+        {
+          "id": "prompt_8909bdd1-503b-44d5-a18e-c0a3e8cc0c09",
+          "text": "I4_LOCAL_RETAIN",
+          "status": "queued",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_ef4b294e-dfbf-425b-bde8-de69c35ca74f",
+          "runId": null,
+          "ownerPid": 68773,
+          "acceptedAt": 1790657985405
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "interrupted",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_053fd762-298d-49a4-9225-9f85476539f4",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "succeeded",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_23aeda01-282e-4c11-b6c8-f763e05f5977",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "running",
+          "ownerPid": 68773
+        }
+      ]
+    },
+    {
+      "type": "provider-closed",
+      "at": "2026-09-29T05:00:32.600Z",
+      "marker": "I4_LOCAL_EXIT_HOLD"
+    },
+    {
+      "type": "exit-proof",
+      "at": "2026-09-29T05:00:46.024Z",
+      "pid": 68773,
+      "code": 0,
+      "signal": null,
+      "prompts": [
+        {
+          "id": "prompt_4a0ba8e5-532b-4f32-8df2-ca7ea3b64b65",
+          "text": "I4_LOCAL_A_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0c6b3b78-da7d-499b-b9b7-bb7e645925ad",
+          "runId": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657788132
+        },
+        {
+          "id": "prompt_8e5f0622-247f-48ad-8e93-e7f1affbe570",
+          "text": "I4_LOCAL_B",
+          "status": "succeeded",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_b2925696-1f67-45e4-a61b-dfafb603b736",
+          "runId": "run_053fd762-298d-49a4-9225-9f85476539f4",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657828417
+        },
+        {
+          "id": "prompt_c153a288-031c-476e-b9a3-d2b2fba9c0fb",
+          "text": "I4_LOCAL_STEER",
+          "status": "steered",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_4999f078-8f9e-475c-b158-67fa4e3ba234",
+          "runId": null,
+          "ownerPid": 68773,
+          "acceptedAt": 1790657856228
+        },
+        {
+          "id": "prompt_fa345059-3f4c-4091-b9c4-6a9b9a2339c7",
+          "text": "I4_LOCAL_EXIT_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0d0cb363-7a35-43f3-bae9-baea9f6e7c11",
+          "runId": "run_23aeda01-282e-4c11-b6c8-f763e05f5977",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657944994
+        },
+        {
+          "id": "prompt_8909bdd1-503b-44d5-a18e-c0a3e8cc0c09",
+          "text": "I4_LOCAL_RETAIN",
+          "status": "retained",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_ef4b294e-dfbf-425b-bde8-de69c35ca74f",
+          "runId": null,
+          "ownerPid": 68773,
+          "acceptedAt": 1790657985405
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "interrupted",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_053fd762-298d-49a4-9225-9f85476539f4",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "succeeded",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_23aeda01-282e-4c11-b6c8-f763e05f5977",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "interrupted",
+          "ownerPid": 68773
+        }
+      ]
+    },
+    {
+      "type": "retained-proof",
+      "at": "2026-09-29T05:01:16.352Z",
+      "retained": {
+        "id": "prompt_8909bdd1-503b-44d5-a18e-c0a3e8cc0c09",
+        "text": "I4_LOCAL_RETAIN",
+        "status": "retained",
+        "sessionId": "session_1790657788124_va1ow01",
+        "userMessageId": "message_ef4b294e-dfbf-425b-bde8-de69c35ca74f",
+        "runId": null,
+        "ownerPid": 68773,
+        "acceptedAt": 1790657985405
+      },
+      "unchangedIdentity": true,
+      "noAutomaticExecution": true
+    },
+    {
+      "type": "provider-request",
+      "at": "2026-09-29T05:02:34.940Z",
+      "marker": "I4_LOCAL_RETAIN_SENT"
+    },
+    {
+      "type": "assert-pass",
+      "at": "2026-09-29T05:02:53.723Z",
+      "prompts": [
+        {
+          "id": "prompt_4a0ba8e5-532b-4f32-8df2-ca7ea3b64b65",
+          "text": "I4_LOCAL_A_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0c6b3b78-da7d-499b-b9b7-bb7e645925ad",
+          "runId": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657788132
+        },
+        {
+          "id": "prompt_8e5f0622-247f-48ad-8e93-e7f1affbe570",
+          "text": "I4_LOCAL_B",
+          "status": "succeeded",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_b2925696-1f67-45e4-a61b-dfafb603b736",
+          "runId": "run_053fd762-298d-49a4-9225-9f85476539f4",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657828417
+        },
+        {
+          "id": "prompt_c153a288-031c-476e-b9a3-d2b2fba9c0fb",
+          "text": "I4_LOCAL_STEER",
+          "status": "steered",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_4999f078-8f9e-475c-b158-67fa4e3ba234",
+          "runId": null,
+          "ownerPid": 68773,
+          "acceptedAt": 1790657856228
+        },
+        {
+          "id": "prompt_fa345059-3f4c-4091-b9c4-6a9b9a2339c7",
+          "text": "I4_LOCAL_EXIT_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0d0cb363-7a35-43f3-bae9-baea9f6e7c11",
+          "runId": "run_23aeda01-282e-4c11-b6c8-f763e05f5977",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657944994
+        },
+        {
+          "id": "prompt_8909bdd1-503b-44d5-a18e-c0a3e8cc0c09",
+          "text": "I4_LOCAL_RETAIN_SENT",
+          "status": "succeeded",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_ef4b294e-dfbf-425b-bde8-de69c35ca74f",
+          "runId": "run_00e09a81-cb2e-43c2-a8c0-a46492ec9089",
+          "ownerPid": 74909,
+          "acceptedAt": 1790658154886
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "interrupted",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_053fd762-298d-49a4-9225-9f85476539f4",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "succeeded",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_23aeda01-282e-4c11-b6c8-f763e05f5977",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "interrupted",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_00e09a81-cb2e-43c2-a8c0-a46492ec9089",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "succeeded",
+          "ownerPid": 74909
+        }
+      ],
+      "counts": {
+        "I4_LOCAL_A_HOLD": 1,
+        "I4_LOCAL_B": 1,
+        "I4_LOCAL_EXIT_HOLD": 1,
+        "I4_LOCAL_RETAIN_SENT": 1
+      }
+    },
+    {
+      "type": "inprocess-proof",
+      "at": "2026-09-29T05:02:53.778Z",
+      "pid": 74909,
+      "args": [
+        "--continue"
+      ],
+      "ownDatabaseOwner": true,
+      "noChildren": true,
+      "noListener": true,
+      "globalDaemonStateUnchanged": true
+    },
+    {
+      "type": "ui-evidence",
+      "at": "2026-09-29T05:02:53.778Z",
+      "defaultInprocess": true,
+      "steerSameRun": true,
+      "stopAllowsQueued": true,
+      "retainedNoAuto": true,
+      "retainedManualSend": true,
+      "draftPreserved": true
+    },
+    {
+      "type": "exit-proof",
+      "at": "2026-09-29T05:03:09.153Z",
+      "pid": 74909,
+      "code": 0,
+      "signal": null,
+      "prompts": [
+        {
+          "id": "prompt_4a0ba8e5-532b-4f32-8df2-ca7ea3b64b65",
+          "text": "I4_LOCAL_A_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0c6b3b78-da7d-499b-b9b7-bb7e645925ad",
+          "runId": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657788132
+        },
+        {
+          "id": "prompt_8e5f0622-247f-48ad-8e93-e7f1affbe570",
+          "text": "I4_LOCAL_B",
+          "status": "succeeded",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_b2925696-1f67-45e4-a61b-dfafb603b736",
+          "runId": "run_053fd762-298d-49a4-9225-9f85476539f4",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657828417
+        },
+        {
+          "id": "prompt_c153a288-031c-476e-b9a3-d2b2fba9c0fb",
+          "text": "I4_LOCAL_STEER",
+          "status": "steered",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_4999f078-8f9e-475c-b158-67fa4e3ba234",
+          "runId": null,
+          "ownerPid": 68773,
+          "acceptedAt": 1790657856228
+        },
+        {
+          "id": "prompt_fa345059-3f4c-4091-b9c4-6a9b9a2339c7",
+          "text": "I4_LOCAL_EXIT_HOLD",
+          "status": "interrupted",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_0d0cb363-7a35-43f3-bae9-baea9f6e7c11",
+          "runId": "run_23aeda01-282e-4c11-b6c8-f763e05f5977",
+          "ownerPid": 68773,
+          "acceptedAt": 1790657944994
+        },
+        {
+          "id": "prompt_8909bdd1-503b-44d5-a18e-c0a3e8cc0c09",
+          "text": "I4_LOCAL_RETAIN_SENT",
+          "status": "succeeded",
+          "sessionId": "session_1790657788124_va1ow01",
+          "userMessageId": "message_ef4b294e-dfbf-425b-bde8-de69c35ca74f",
+          "runId": "run_00e09a81-cb2e-43c2-a8c0-a46492ec9089",
+          "ownerPid": 74909,
+          "acceptedAt": 1790658154886
+        }
+      ],
+      "runs": [
+        {
+          "id": "run_f6d7896b-e2ca-4ea8-83c4-92fa31c6a307",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "interrupted",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_053fd762-298d-49a4-9225-9f85476539f4",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "succeeded",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_23aeda01-282e-4c11-b6c8-f763e05f5977",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "interrupted",
+          "ownerPid": 68773
+        },
+        {
+          "id": "run_00e09a81-cb2e-43c2-a8c0-a46492ec9089",
+          "sessionId": "session_1790657788124_va1ow01",
+          "status": "succeeded",
+          "ownerPid": 74909
+        }
+      ]
+    },
+    {
+      "type": "cleanup-pass",
+      "at": "2026-09-29T05:03:09.154Z",
+      "root": "/var/folders/md/0szgsv_x3bsdgk_fzj9qb6lh0000gn/T/ohbaby-improve4-inprocess-qXt7dN"
+    }
+  ],
+  "requests": [
+    "I4_LOCAL_A_HOLD",
+    "I4_LOCAL_B",
+    "I4_LOCAL_EXIT_HOLD",
+    "I4_LOCAL_RETAIN_SENT"
+  ],
+  "failures": []
+}
