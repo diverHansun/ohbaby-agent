@@ -29,7 +29,6 @@ export function ConversationStream(props: {
   readonly readingPosition?: ConversationReadingPosition;
   readonly anchorMessageId?: string;
   readonly anchorToken?: string;
-  readonly latestToken?: number;
   readonly onNearEnd?: () => void;
   readonly historyState: "loading" | "ready" | "error";
   readonly historyHasMore: boolean;
@@ -171,12 +170,6 @@ export function ConversationStream(props: {
       }
     }
   }, [props.anchorMessageId, props.anchorToken]);
-
-  useLayoutEffect(() => {
-    if (!props.latestToken) return;
-    stickToBottomRef.current = true;
-    scheduleStickScroll();
-  }, [props.latestToken, scheduleStickScroll]);
 
   useLayoutEffect(() => {
     scheduleStickScroll();

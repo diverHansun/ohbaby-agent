@@ -139,8 +139,7 @@
   color: #858991;
   white-space: nowrap;
 }
-.ohb-subagent-heading button,
-.ohb-child-footer button {
+.ohb-subagent-heading button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -153,8 +152,7 @@
   color: #73777f;
   cursor: pointer;
 }
-.ohb-subagent-heading button:hover,
-.ohb-child-footer button:hover {
+.ohb-subagent-heading button:hover {
   background: #eceef1;
 }
 .ohb-subagent-view .ohb-stream {
@@ -244,8 +242,7 @@
   }
 }
 @media (pointer: coarse) {
-  .ohb-subagent-heading > button,
-  .ohb-child-footer button {
+  .ohb-subagent-heading > button {
     min-width: 44px;
     height: 44px;
   }
@@ -259,18 +256,6 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: inherit;
-}
-.ohb-child-footer.is-floating {
-  position: absolute;
-  right: 10px;
-  bottom: 8px;
-  border: 0;
-  padding: 0;
-}
-.ohb-child-footer.is-floating button {
-  background: #fff;
-  border: 1px solid #e8e9ec;
-  border-radius: 50%;
 }
 .ohb-delegation-duration {
   margin-left: 10px;

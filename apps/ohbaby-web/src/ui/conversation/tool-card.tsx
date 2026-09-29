@@ -83,13 +83,16 @@ export function ToolCard(props: {
       ? execution.outcome
       : undefined;
   const failed =
-    props.call.status === "failed" || props.result?.error !== undefined;
+    props.call.status === "failed" ||
+    props.result?.error !== undefined ||
+    abnormal !== undefined;
 
   return (
     <ToolPanel
       execution={execution}
       duration={duration}
       abnormal={abnormal ?? (failed ? "error" : undefined)}
+      showAbnormalDecoration={props.call.name.toLowerCase() !== "bash"}
       accent={failed ? "red" : toolAccent(props.call.name)}
       input={JSON.stringify(props.call.input, null, 2)}
       onToggle={() => {
@@ -111,9 +114,22 @@ export function OrphanToolResultCard(props: {
   const { tools } = useContext(ConversationPresentation);
   const toolKey = props.result.callId;
   const open = tools ? (tools.get(toolKey) ?? false) : localOpen;
+  const execution = props.result.execution;
+  const duration = useExecutionDuration(
+    toolKey,
+    execution?.executionStartedAt,
+    execution?.endedAt,
+  );
   return (
     <ToolPanel
-      accent={props.result.error === undefined ? "green" : "red"}
+      execution={execution}
+      duration={duration}
+      accent={
+        props.result.error === undefined &&
+        (execution?.outcome === undefined || execution.outcome === "success")
+          ? "green"
+          : "red"
+      }
       onToggle={() => {
         tools?.set(toolKey, !open);
         setOpen((value) => !value);
@@ -130,6 +146,7 @@ function ToolPanel(props: {
   readonly execution?: UiToolExecution;
   readonly duration?: string;
   readonly abnormal?: string;
+  readonly showAbnormalDecoration?: boolean;
   readonly accent: "blue" | "gold" | "green" | "red";
   readonly input?: string;
   readonly onToggle: () => void;
@@ -156,7 +173,9 @@ function ToolPanel(props: {
         >
           {props.title}
         </span>
-        {props.abnormal ? <span aria-hidden="true">⚠</span> : null}
+        {props.abnormal && props.showAbnormalDecoration !== false ? (
+          <span aria-hidden="true">⚠</span>
+        ) : null}
         {props.duration !== undefined ? (
           <span className="ohb-tool-duration">{props.duration}</span>
         ) : null}
@@ -175,9 +194,7 @@ function ToolPanel(props: {
               <span>Execution</span>
               <pre>{JSON.stringify(props.execution, null, 2)}</pre>
             </section>
-          ) : (
-            <p>Execution stage history is unavailable for this tool.</p>
-          )}
+          ) : null}
           {props.input !== undefined ? (
             <section className="ohb-tool-input">
               <span>Input</span>

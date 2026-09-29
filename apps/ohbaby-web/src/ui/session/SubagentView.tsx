@@ -1,5 +1,5 @@
-import { ArrowDown, Maximize2, Minimize2, X } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type ReactElement } from "react";
+import { Maximize2, Minimize2, X } from "lucide-react";
+import { useLayoutEffect, useRef, type ReactElement } from "react";
 import type {
   UiSubagentConversationReaderState,
   createSubagentConversationReader,
@@ -43,7 +43,6 @@ export function SubagentView({
   readonly approvalRequired?: boolean;
   readonly anchorToken?: string;
 }): ReactElement {
-  const [latestToken, setLatestToken] = useState(0);
   const conversation = state.conversation;
   const selected = state.selected;
   const identity = `${selected?.rootSessionId ?? ""}:${selected?.subagentId ?? ""}`;
@@ -171,7 +170,6 @@ export function SubagentView({
         }}
       >
         <ConversationStream
-          latestToken={latestToken}
           preserveMessageOrder
           readingPosition={memory.position}
           anchorMessageId={
@@ -223,22 +221,9 @@ export function SubagentView({
           }
         />
       </ConversationPresentation.Provider>
-      <footer className={`ohb-child-footer${expanded ? "" : " is-floating"}`}>
-        {expanded ? <span>Read-only</span> : null}
-        <button
-          type="button"
-          title="Jump to latest"
-          aria-label="Jump to latest"
-          onClick={() => {
-            memory.position.sticky = true;
-            void reader.jumpToLatest().then(() => {
-              setLatestToken((value) => value + 1);
-            });
-          }}
-        >
-          <ArrowDown size={16} />
-        </button>
-      </footer>
+      {expanded ? (
+        <footer className="ohb-child-footer">Read-only</footer>
+      ) : null}
     </section>
   );
 }

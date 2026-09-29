@@ -139,9 +139,10 @@ it("keeps the same child transcript and open tools when expanding, with parent l
       row.getAttribute("data-message-id"),
     ),
   ).toEqual(["parent", "m"]);
-  expect(element.querySelector(".ohb-child-footer")?.textContent).not.toContain(
-    "Read-only",
-  );
+  expect(element.querySelector(".ohb-child-footer")).toBeNull();
+  expect(
+    element.querySelector('button[aria-label="Jump to latest"]'),
+  ).toBeNull();
   const transcript = element.querySelector(".ohb-stream");
   act(() =>
     element.querySelector<HTMLButtonElement>("button[aria-expanded]")?.click(),
@@ -152,6 +153,9 @@ it("keeps the same child transcript and open tools when expanding, with parent l
   expect(element.querySelector(".ohb-child-footer")?.textContent).toContain(
     "Read-only",
   );
+  expect(
+    element.querySelector('button[aria-label="Jump to latest"]'),
+  ).toBeNull();
   expect(element.textContent).toContain("y".repeat(20000));
   expect(element.querySelector("textarea")).toBeNull();
   expect(element.querySelector('button[aria-label="Collapse"]')).not.toBeNull();
@@ -352,9 +356,16 @@ it("keeps keyboard focus inside the child and only loads later history after use
     );
   });
   expect(document.activeElement).toBe(element.querySelector("h2"));
+  expect(element.querySelector(".ohb-child-footer")).toBeNull();
   const last = element.querySelector<HTMLButtonElement>(
-    'button[aria-label="Jump to latest"]',
+    ".ohb-child-gap button",
   );
+  expect(last?.textContent).toContain("Load later messages");
+  const stream = element.querySelector(".ohb-stream");
+  act(() => {
+    stream?.dispatchEvent(new Event("scroll"));
+  });
+  expect(loadLater).not.toHaveBeenCalled();
   last?.focus();
   act(() => {
     last?.dispatchEvent(
@@ -364,11 +375,6 @@ it("keeps keyboard focus inside the child and only loads later history after use
   expect(document.activeElement).toBe(
     element.querySelector('button[aria-label="Expand"]'),
   );
-  const stream = element.querySelector(".ohb-stream");
-  act(() => {
-    stream?.dispatchEvent(new Event("scroll"));
-  });
-  expect(loadLater).not.toHaveBeenCalled();
   act(() => {
     stream?.dispatchEvent(new WheelEvent("wheel"));
     stream?.dispatchEvent(new Event("scroll"));

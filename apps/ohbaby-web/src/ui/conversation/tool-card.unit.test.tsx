@@ -4,11 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DurationSampleContext } from "./use-execution-duration.js";
-import {
-  OrphanToolResultCard,
-  pairToolParts,
-  ToolCard,
-} from "./tool-card.js";
+import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
 
 (
   globalThis as typeof globalThis & {
@@ -61,6 +57,37 @@ describe("pairToolParts", () => {
     const result = { callId: "missing", error: "failed", output: "stderr" };
     expect(pairToolParts([{ result, type: "tool-result" }])).toEqual([
       { kind: "orphan-result", result, sourceIndex: 0 },
+    ]);
+  });
+
+  it("replaces a result-only window with one paired entry when its call arrives", () => {
+    const result: UiToolResult = {
+      callId: "call_bash",
+      output: "saved",
+      execution: {
+        phase: "ended",
+        createdAt: 1,
+        phaseStartedAt: 3,
+        executionStartedAt: 2,
+        endedAt: 3,
+        outcome: "success",
+      },
+    };
+    expect(pairToolParts([{ type: "tool-result", result }])).toEqual([
+      { kind: "orphan-result", result, sourceIndex: 0 },
+    ]);
+    expect(
+      pairToolParts([
+        { type: "tool-call", call: toolCall({ status: "completed" }) },
+        { type: "tool-result", result },
+      ]),
+    ).toEqual([
+      {
+        kind: "tool",
+        call: toolCall({ status: "completed" }),
+        result,
+        sourceIndex: 0,
+      },
     ]);
   });
 });
@@ -116,7 +143,10 @@ describe("ToolCard", () => {
     expect(
       app.container.querySelector("button")?.getAttribute("aria-label"),
     ).toContain("cancelled");
-    expect(app.container.textContent).toContain("⚠");
+    expect(app.container.textContent).not.toContain("⚠");
+    expect(
+      app.container.querySelector(".ohb-tool-details")?.textContent,
+    ).toContain("cancelled");
   });
 
   it.each([
@@ -231,7 +261,7 @@ describe("ToolCard", () => {
     expect(output).toContain("exit code 1");
   });
 
-  it("renders an orphan result without exposing its call id", () => {
+  it("renders an orphan result with its own execution without exposing its call id", () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -244,6 +274,14 @@ describe("ToolCard", () => {
             callId: "internal_call_id",
             error: "failed internally",
             output: "visible output",
+            execution: {
+              phase: "ended",
+              createdAt: 1000,
+              phaseStartedAt: 3000,
+              executionStartedAt: 1000,
+              endedAt: 3000,
+              outcome: "error",
+            },
           }}
         />,
       );
@@ -252,6 +290,80 @@ describe("ToolCard", () => {
     expect(container.textContent).toContain("tool result");
     expect(container.textContent).not.toContain("internal_call_id");
     expect(container.textContent).not.toContain("failed internally");
+    act(() => container.querySelector("button")?.click());
+    expect(container.textContent).toContain('"outcome": "error"');
+    expect(container.querySelector(".ohb-tool-duration")?.textContent).toBe(
+      "2s",
+    );
+  });
+
+  it.each(["error", "cancelled", "timed-out"] as const)(
+    "keeps Bash %s details without the warning decoration",
+    (outcome) => {
+      const app = mountCard(
+        toolCall({
+          status: "failed",
+          execution: {
+            phase: "ended",
+            createdAt: 1000,
+            phaseStartedAt: 4000,
+            executionStartedAt: 1000,
+            endedAt: 4000,
+            outcome,
+          },
+        }),
+        { callId: "call_bash", error: "real error", output: "partial output" },
+      );
+      expect(app.container.textContent).not.toContain("⚠");
+      expect(
+        app.container.querySelector(".ohb-tool-panel")?.classList,
+      ).toContain("ohb-tool-red");
+      expect(
+        app.container.querySelector(".ohb-tool-duration")?.textContent,
+      ).toBe("3s");
+      expect(
+        app.container.querySelector("button")?.getAttribute("aria-label"),
+      ).toContain(outcome);
+      act(() => app.container.querySelector("button")?.click());
+      expect(app.container.textContent).toContain("real error");
+      expect(app.container.textContent).toContain(outcome);
+    },
+  );
+
+  it("keeps the existing abnormal decoration for other tools", () => {
+    const app = mountCard(
+      {
+        ...toolCall({
+          status: "failed",
+          execution: {
+            phase: "ended",
+            createdAt: 1,
+            phaseStartedAt: 2,
+            outcome: "error",
+          },
+        }),
+        name: "web_fetch",
+      },
+      undefined,
+    );
+    expect(app.container.textContent).toContain("⚠");
+  });
+
+  it("colors a terminal failure from execution facts before call or result status catches up", () => {
+    const execution = {
+      phase: "ended" as const,
+      createdAt: 1,
+      phaseStartedAt: 2,
+      endedAt: 2,
+      outcome: "timed-out" as const,
+    };
+    const app = mountCard(
+      toolCall({ status: "running", execution }),
+      undefined,
+    );
+    expect(app.container.querySelector(".ohb-tool-panel")?.classList).toContain(
+      "ohb-tool-red",
+    );
   });
 });
 
@@ -392,12 +504,24 @@ it("reports an invalid clock once per anchor and never invents an active duratio
   }
 });
 
-it("explains missing historical execution stages only in expanded legacy details", () => {
-  const app = mountCard(toolCall({ status: "completed" }), undefined);
-  const note = "Execution stage history is unavailable for this tool.";
-  expect(app.container.textContent).not.toContain(note);
-  act(() => app.container.querySelector("button")?.click());
-  expect(app.container.textContent).toContain(note);
-  expect(app.container.querySelector(".ohb-tool-duration")).toBeNull();
-  expect(app.container.querySelector(".ohb-tool-executing")).toBeNull();
-});
+it.each(["bash", "web_fetch", "subagent_status"])(
+  "keeps legacy %s details without an execution block or invented duration",
+  (name) => {
+    const app = mountCard(
+      { ...toolCall({ status: "completed" }), name },
+      { callId: "call_bash", output: "saved output" },
+    );
+    const note = "Execution stage history is unavailable for this tool.";
+    expect(app.container.textContent).not.toContain(note);
+    act(() => app.container.querySelector("button")?.click());
+    expect(app.container.textContent).not.toContain(note);
+    expect(
+      app.container.querySelector(".ohb-tool-details")?.textContent,
+    ).toContain("saved output");
+    expect(
+      app.container.querySelector(".ohb-tool-details")?.textContent,
+    ).not.toContain("Execution");
+    expect(app.container.querySelector(".ohb-tool-duration")).toBeNull();
+    expect(app.container.querySelector(".ohb-tool-executing")).toBeNull();
+  },
+);

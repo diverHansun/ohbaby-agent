@@ -16,6 +16,7 @@ import {
   type StatementRunResult,
 } from "../../services/database/index.js";
 import { createDatabaseMessageStore } from "./database-store.js";
+import { messageToUiMessage } from "../../adapters/ui-state/persistent-store.js";
 import { messageCursor } from "./pagination.js";
 import { serializeHistoryMessages } from "../context/serializer.js";
 import {
@@ -76,6 +77,76 @@ afterEach(async () => {
 });
 
 describe("createDatabaseMessageStore", () => {
+  it("preserves tool execution facts through SQLite reopen and paged UI projection", async () => {
+    const message: Message = {
+      id: "tool-facts",
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+      runId: "run",
+      time: { created: 1_000 },
+    };
+    const execution = {
+      phase: "ended" as const,
+      createdAt: 1_100,
+      phaseStartedAt: 4_100,
+      executionStartedAt: 2_100,
+      endedAt: 4_100,
+      outcome: "timed-out" as const,
+      cleanup: "confirmed" as const,
+    };
+    const store = createDatabaseMessageStore();
+    await store.insertMessage(message);
+    await store.appendPart({
+      message,
+      partId: "tool-part",
+      data: {
+        type: "tool",
+        callId: "call",
+        tool: "bash",
+        state: {
+          status: "error",
+          input: { command: "sleep 10" },
+          error: "timed out",
+        },
+        metadata: { execution },
+      },
+      updatedAt: 4_100,
+    });
+
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const reopened = createDatabaseMessageStore();
+    const page = await reopened.listPageByRun("session_1", "run", { limit: 1 });
+    expect(page.messages).toHaveLength(1);
+    const saved = page.messages[0];
+    expect(saved.parts[0]?.metadata?.execution).toEqual(execution);
+    const ui = messageToUiMessage(saved);
+    expect(ui?.parts).toMatchObject([
+      { type: "tool-call", call: { execution } },
+      { type: "tool-result", result: { execution, error: "timed out" } },
+    ]);
+    expect(page.hasMore).toBe(false);
+    expect(
+      messageToUiMessage({
+        info: message,
+        parts: [
+          {
+            ...saved.parts[0],
+            metadata: {
+              execution: { phase: "bad", createdAt: 1, phaseStartedAt: 2 },
+            },
+          } as unknown as (typeof saved.parts)[number],
+        ],
+      })?.parts,
+    ).toMatchObject([
+      { type: "tool-call", call: { execution: undefined } },
+      {
+        type: "tool-result",
+        result: { execution: undefined, error: "timed out" },
+      },
+    ]);
+  });
   it("pages forward across equal timestamps and enforces session, scope and run cursor binding", async () => {
     const store = createDatabaseMessageStore();
     for (const id of ["a", "b", "c", "d", "e"])
