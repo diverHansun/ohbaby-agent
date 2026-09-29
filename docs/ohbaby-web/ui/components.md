@@ -60,6 +60,16 @@ Composer 通过 `topContent` 接收 SessionScreen 装配的 TodoDock，通过 `p
 
 ---
 
+### 2.0 运行过程与 Thought 披露
+
+正常成功、输出已定稿、有最终正文、没有 steer、且确有过程可折叠时，前端自动收起该 run 的过程。运行中和最终回复仍在流式输出时保持显示；失败、停止、中断、有中途补充或没有最终正文时正常展示。只归入明确关联 runId 的消息，用户消息与最终正文始终可见。最终消息自身的 reasoning 也由过程入口控制。
+
+`Total {time}` 位于最终正文前，时间和箭头组成同一个按钮；没有过程时仅显示耗时。既有失败文案、acceptedAt/createdAt 口径和恢复时的未知耗时保持不变。手动展开在当前挂载期间保留，刷新页面可恢复默认收起。
+
+Thought 使用 12px 线条箭头并常显，整轮使用 16px，均与文字间隔 8px。耗时箭头在 hover/focus-visible 时显示，无 hover 设备常显；隐藏时保留空间。原生 summary/button 支持键盘操作，按钮通过 aria-expanded/aria-controls 描述状态。隐藏过程不卸载工具卡，保留局部展开状态；显式定位先展开，过程中的焦点和阅读锚点迁移到可见入口。
+
+方案与验收：[Web 运行过程折叠 improve-1](../../problem-lists/2026-09-29-web-run-process-collapse/README.md)。
+
 ### 2.1 子代理委派与只读子会话
 
 已接受的 `subagent_run` 在主会话中显示为紧凑单行任务入口，包含省略长文的标题、短状态、耗时和进入箭头；状态使用可读英文，例如 `Timed out`。接受前失败且没有 execution 时保留普通失败工具卡，Input / Output 和错误仍可展开。普通工具维持原有披露方式。新状态行用留白分隔信息，不追加顶部 Subagents 栏。

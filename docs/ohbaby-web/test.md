@@ -138,3 +138,12 @@ Web 测试与阶段验收的映射见 [improve-3/03](./improve-3/03-test-criteri
 - 后续历史自动加载只由用户滚动触发，程序滚动不造成连续加载；无精确父消息锚点时展示可用历史说明。
 
 SDK 与 transport 的快照、增量、范围版本和重连恢复由对应层测试负责，Web 不另写一套同步引擎。浏览器仍需检查真实浮层尺寸、输入框间距、首条父气泡完整可见、放大/关闭后滚动与焦点，以及根审批入口。组件测试不能替代真实同一子代理多次委派的连续历史验证，也不能替代前端视觉审查；这些结果在阶段记录中单独保留，本文不声明 improve-3.1 已完成全部验收。
+
+
+## 运行过程折叠回归（2026-09-29）
+
+新增 `conversation/run-process.unit.test.ts` 和 `run-process.integration.test.tsx`，扩展 `ConversationStream.unit.test.tsx`、`App.unit.test.tsx`、`eventReducer.unit.test.ts`。覆盖明确 run 归属、成功与定稿的两种到达顺序、steer/停止/缺正文例外、最终消息内 reasoning、手动展开保留、显式定位、焦点与负阅读偏移、legacy reasoning 完成后保留。
+
+运行 `pnpm exec vitest run apps/ohbaby-web --maxWorkers=4 --minWorkers=1` 验证 Web 单元/集成/契约回归；正式页面另由 `node scripts/run-compiled-web-e2e.mjs` 配合浏览器执行工具、续问、刷新恢复和后台证据检查。
+
+[本轮验收记录](../problem-lists/2026-09-29-web-run-process-collapse/improve-1/05-implementation-acceptance.md) 区分自动化、真实模型浏览器证据和未实测的设备项目。
