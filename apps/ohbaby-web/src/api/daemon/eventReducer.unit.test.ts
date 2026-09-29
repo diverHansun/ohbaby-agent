@@ -305,7 +305,38 @@ describe("ohbaby-web eventReducer", () => {
       message_1: { content: "thinking", folded: true },
     });
 
-    state = replaceSnapshot(emptySnapshot(), 3);
+    state = reduceUiEvent(
+      state,
+      {
+        type: "run.updated",
+        run: {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: timestamp,
+          updatedAt: timestamp,
+          status: { kind: "idle" },
+        },
+      },
+      3,
+    );
+    expect(state.reasoningByMessageId).toEqual({
+      message_1: { content: "thinking", folded: true },
+    });
+    state = reduceUiEvent(
+      state,
+      {
+        type: "run.interrupted",
+        runId: "run_1",
+        sessionId: "session_1",
+        timestamp: 4,
+      },
+      4,
+    );
+    expect(state.reasoningByMessageId).toEqual({
+      message_1: { content: "thinking", folded: true },
+    });
+
+    state = replaceSnapshot(emptySnapshot(), 5);
 
     expect(state.reasoningByMessageId).toEqual({});
   });

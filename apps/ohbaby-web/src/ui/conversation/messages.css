@@ -237,3 +237,74 @@
 .ohb-chevron-open {
   transform: rotate(90deg);
 }
+
+.ohb-reasoning > summary,
+.ohb-run-disclosure {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.ohb-reasoning > summary {
+  list-style: none;
+  white-space: normal;
+}
+
+.ohb-reasoning > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ohb-thought-chevron {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.ohb-run-disclosure {
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+}
+
+.ohb-run-chevron {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  opacity: 0;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.ohb-reasoning[open] > summary .ohb-thought-chevron,
+.ohb-run-disclosure[aria-expanded="true"] .ohb-run-chevron {
+  transform: rotate(90deg);
+}
+
+.ohb-run-disclosure:hover .ohb-run-chevron,
+.ohb-run-disclosure:focus-visible .ohb-run-chevron {
+  opacity: 1;
+}
+
+.ohb-reasoning > summary:focus-visible,
+.ohb-run-disclosure:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+@media (hover: none) {
+  .ohb-run-chevron {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ohb-run-chevron {
+    transition: none;
+  }
+}

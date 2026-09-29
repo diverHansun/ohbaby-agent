@@ -1,5 +1,6 @@
 import type { UiMessage, UiMessagePart } from "ohbaby-sdk";
-import { useContext, type ReactElement } from "react";
+import { Fragment, useContext, type ReactElement, type ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
 import { ConversationPresentation } from "./ConversationPresentation.js";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import { MarkdownBlock } from "../shared/MarkdownBlock.js";
@@ -8,6 +9,9 @@ import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
 export function MessageRow(props: {
   readonly message: UiMessage;
   readonly reasoning?: ReasoningViewState;
+  readonly beforeText?: ReactNode;
+  readonly reasoningHidden?: boolean;
+  readonly reasoningIdPrefix?: string;
 }): ReactElement | null {
   const presentation = useContext(ConversationPresentation);
   const delegation = presentation.executions?.find(
@@ -16,6 +20,9 @@ export function MessageRow(props: {
   const isUser = props.message.role === "user";
   const visibleParts = filterTodoToolParts(props.message.parts);
   const pairedParts = pairToolParts(visibleParts);
+  const firstText = pairedParts.findIndex(
+    (entry) => entry.kind === "part" && entry.part.type === "text",
+  );
   if (
     props.reasoning === undefined &&
     props.message.parts.length > 0 &&
@@ -40,12 +47,19 @@ export function MessageRow(props: {
           </div>
         ) : null}
         {props.reasoning ? (
-          <details className="ohb-reasoning" open={!props.reasoning.folded}>
-            <summary>Thought</summary>
-            <pre>{props.reasoning.content}</pre>
-          </details>
+          <ReasoningDetails
+            open={!props.reasoning.folded}
+            label="Thought"
+            hidden={props.reasoningHidden}
+            id={
+              props.reasoningIdPrefix
+                ? `${props.reasoningIdPrefix}-live`
+                : undefined
+            }
+            text={props.reasoning.content}
+          />
         ) : null}
-        {pairedParts.map((entry) => {
+        {pairedParts.map((entry, index) => {
           if (entry.kind === "tool") {
             const custom = presentation.renderTool?.(
               props.message,
@@ -75,14 +89,23 @@ export function MessageRow(props: {
             );
           }
           return (
-            <MessagePart
-              isStreaming={props.message.status === "streaming"}
-              key={`${props.message.id}-${messagePartKey(
-                visibleParts,
-                entry.sourceIndex,
-              )}`}
-              part={entry.part}
-            />
+            <Fragment
+              key={`${props.message.id}-${messagePartKey(visibleParts, entry.sourceIndex)}`}
+            >
+              {index === firstText ? props.beforeText : null}
+              <MessagePart
+                isStreaming={props.message.status === "streaming"}
+                part={entry.part}
+                hidden={
+                  entry.part.type === "reasoning" && props.reasoningHidden
+                }
+                id={
+                  entry.part.type === "reasoning" && props.reasoningIdPrefix
+                    ? `${props.reasoningIdPrefix}-${String(entry.sourceIndex)}`
+                    : undefined
+                }
+              />
+            </Fragment>
           );
         })}
       </div>
@@ -177,6 +200,8 @@ export function filterTodoToolMessages(
 function MessagePart(props: {
   readonly isStreaming: boolean;
   readonly part: UiMessagePart;
+  readonly hidden?: boolean;
+  readonly id?: string;
 }): ReactElement {
   switch (props.part.type) {
     case "text":
@@ -187,25 +212,27 @@ function MessagePart(props: {
       );
     case "reasoning":
       return (
-        <details
-          className="ohb-reasoning"
+        <ReasoningDetails
           open={props.part.endReason === undefined}
-        >
-          <summary>
-            Thought
-            {props.part.endReason === "interrupted"
-              ? " · interrupted"
-              : props.part.endReason === "failed"
-                ? " · failed"
-                : ""}
-            {props.part.saveState === "pending"
-              ? " · saving"
-              : props.part.saveState === "failed"
-                ? " · not saved"
-                : ""}
-          </summary>
-          <pre>{props.part.text}</pre>
-        </details>
+          hidden={props.hidden}
+          id={props.id}
+          text={props.part.text}
+          label={
+            <>
+              Thought
+              {props.part.endReason === "interrupted"
+                ? " · interrupted"
+                : props.part.endReason === "failed"
+                  ? " · failed"
+                  : ""}
+              {props.part.saveState === "pending"
+                ? " · saving"
+                : props.part.saveState === "failed"
+                  ? " · not saved"
+                  : ""}
+            </>
+          }
+        />
       );
     case "tool-call":
       return <ToolCard call={props.part.call} result={undefined} />;
@@ -220,4 +247,31 @@ export function visibleMessageText(message: UiMessage): string {
       part.type === "text" || part.type === "reasoning" ? part.text : "",
     )
     .join("");
+}
+
+function ReasoningDetails(props: {
+  readonly open: boolean;
+  readonly label: ReactNode;
+  readonly text: string;
+  readonly hidden?: boolean;
+  readonly id?: string;
+}): ReactElement {
+  return (
+    <details
+      className="ohb-reasoning"
+      open={props.open}
+      hidden={props.hidden}
+      id={props.id}
+    >
+      <summary>
+        <span>{props.label}</span>
+        <ChevronRight
+          size={12}
+          className="ohb-thought-chevron"
+          aria-hidden="true"
+        />
+      </summary>
+      <pre>{props.text}</pre>
+    </details>
+  );
 }

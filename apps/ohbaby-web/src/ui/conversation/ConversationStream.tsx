@@ -1,11 +1,19 @@
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import type { UiMessage, UiPromptSubmission, UiRun } from "ohbaby-sdk";
 import type { ReactNode } from "react";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import { ModelWaiting, PromptDuration } from "./ExecutionProgress.js";
 import { filterTodoToolMessages, MessageRow } from "./MessageRow.js";
+import { projectRunProcesses, type RunProcess } from "./run-process.js";
 import { isNearBottom, scrollToBottom } from "./streamScroll.js";
 
 export interface PromptProjectionModel {
@@ -42,7 +50,9 @@ export function ConversationStream(props: {
   readonly prompts: readonly UiPromptSubmission[];
   readonly activeRun: UiRun | undefined;
   readonly isRunning: boolean;
-  readonly reasoningByMessageId: Readonly<Record<string, ReasoningViewState>>;
+  readonly reasoningByMessageId: Readonly<
+    Partial<Record<string, ReasoningViewState>>
+  >;
   readonly commandNotices: ReactNode;
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
@@ -50,6 +60,21 @@ export function ConversationStream(props: {
   const stickToBottomRef = useRef(true);
   const scheduledScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const anchorRef = useRef<{ top: number; height: number } | null>(null);
+  const localReading = useRef<{
+    sessionId: string | null;
+    position: ConversationReadingPosition;
+  }>({
+    sessionId: props.sessionId,
+    position: { top: 0, sticky: true },
+  });
+  if (localReading.current.sessionId !== props.sessionId) {
+    localReading.current = {
+      sessionId: props.sessionId,
+      position: { top: 0, sticky: true },
+    };
+  }
+  const readingPosition =
+    props.readingPosition ?? localReading.current.position;
   const messages = props.messages;
   const visibleMessages = filterTodoToolMessages(
     messages.filter(
@@ -58,35 +83,6 @@ export function ConversationStream(props: {
         message.runtimeInputKind !== "subagent-result",
     ),
   );
-  const terminalPrompts = props.prompts.filter(
-    (prompt) =>
-      prompt.sessionId === props.sessionId &&
-      prompt.endedAt !== undefined &&
-      Number.isFinite(Date.parse(prompt.createdAt)) &&
-      Number.isFinite(Date.parse(prompt.endedAt)) &&
-      ["succeeded", "failed", "cancelled", "interrupted"].includes(
-        prompt.status,
-      ),
-  );
-  const terminalAfter = new Map<string, typeof terminalPrompts>();
-  const unattached = terminalPrompts.filter((prompt) => {
-    const owner =
-      [...visibleMessages]
-        .reverse()
-        .find(
-          (message) =>
-            message.role === "assistant" &&
-            message.runId !== undefined &&
-            message.runId === prompt.runId,
-        ) ??
-      visibleMessages.find((message) => message.id === prompt.userMessageId);
-    if (!owner) return true;
-    terminalAfter.set(owner.id, [
-      ...(terminalAfter.get(owner.id) ?? []),
-      prompt,
-    ]);
-    return false;
-  });
   const timelineItems = [
     ...visibleMessages.map((message, index) => ({
       createdAt: message.createdAt,
@@ -107,6 +103,88 @@ export function ConversationStream(props: {
     if (left.kind !== right.kind) return left.kind === "message" ? -1 : 1;
     return left.index - right.index;
   });
+  const idPrefix = useId();
+  const [expandedRuns, setExpandedRuns] = useState<
+    Readonly<Partial<Record<string, boolean>>>
+  >({});
+  const runKey = (process: RunProcess): string =>
+    JSON.stringify([props.sessionId, process.prompt.runId]);
+  const messageDomId = (id: string): string =>
+    `${idPrefix}-${encodeURIComponent(props.sessionId ?? "")}-${encodeURIComponent(id)}`;
+  const processes = projectRunProcesses(
+    timelineItems.flatMap((item) =>
+      item.kind === "message" ? [item.message] : [],
+    ),
+    props.prompts,
+    props.sessionId,
+    props.reasoningByMessageId,
+  );
+  const beforeAnswer = new Map<string, RunProcess[]>();
+  const terminalAfter = new Map<string, RunProcess[]>();
+  const processOwners = new Map<string, RunProcess>();
+  for (const process of processes) {
+    const anchor = process.answerId ?? process.afterId;
+    if (anchor) {
+      const map = process.answerId ? beforeAnswer : terminalAfter;
+      map.set(anchor, [...(map.get(anchor) ?? []), process]);
+    }
+    if (process.foldable)
+      for (const id of process.processIds) processOwners.set(id, process);
+  }
+  const isOpen = (process: RunProcess): boolean =>
+    !process.foldable || expandedRuns[runKey(process)] === true;
+  const hiddenIds = new Set(
+    [...processOwners]
+      .filter(([, process]) => !isOpen(process))
+      .map(([id]) => id),
+  );
+  const collapsedProcesses = processes.filter(
+    (process) => process.foldable && !isOpen(process),
+  );
+  const hiddenSignature = JSON.stringify(collapsedProcesses.map(runKey));
+  const previouslyCollapsed = useRef(new Set<string>());
+  const focusedProcessElement = useRef<HTMLElement | null>(null);
+  const handledAnchor = useRef<string | undefined>(undefined);
+  const renderDuration = (process: RunProcess): ReactNode => {
+    const answer = visibleMessages.find(
+      (message) => message.id === process.answerId,
+    );
+    const reasoningPrefix = answer
+      ? `${messageDomId(answer.id)}-reasoning`
+      : "";
+    const controls = [
+      ...process.processIds.map(messageDomId),
+      ...(answer?.parts.flatMap((part, index) =>
+        part.type === "reasoning"
+          ? [`${reasoningPrefix}-${String(index)}`]
+          : [],
+      ) ?? []),
+      ...(answer && props.reasoningByMessageId[answer.id]
+        ? [`${reasoningPrefix}-live`]
+        : []),
+    ];
+    return (
+      <PromptDuration
+        key={process.prompt.promptId}
+        prompt={process.prompt}
+        disclosure={
+          process.foldable
+            ? {
+                open: isOpen(process),
+                controls: controls.join(" "),
+                id: `${messageDomId(process.prompt.promptId)}-disclosure`,
+                onToggle: (): void => {
+                  setExpandedRuns((current) => ({
+                    ...current,
+                    [runKey(process)]: !isOpen(process),
+                  }));
+                },
+              }
+            : undefined
+        }
+      />
+    );
+  };
   const activeSessionId = props.sessionId ?? null;
   const lastMessage = visibleMessages.at(-1);
   const messagesSignature = [
@@ -143,38 +221,107 @@ export function ConversationStream(props: {
 
   useLayoutEffect(() => {
     anchorRef.current = null;
-    stickToBottomRef.current = props.readingPosition?.sticky ?? true;
-    if (streamRef.current && props.readingPosition)
-      streamRef.current.scrollTop = props.readingPosition.top;
+    stickToBottomRef.current = readingPosition.sticky;
+    if (streamRef.current) streamRef.current.scrollTop = readingPosition.top;
     scheduleStickScroll();
   }, [activeSessionId, scheduleStickScroll]);
 
   useLayoutEffect(() => {
     if (!props.anchorMessageId) return;
+    const requestKey = JSON.stringify([
+      activeSessionId,
+      props.anchorMessageId,
+      props.anchorToken,
+    ]);
+    if (handledAnchor.current === requestKey) return;
+    const owner = processOwners.get(props.anchorMessageId);
+    if (owner && !isOpen(owner)) {
+      setExpandedRuns((current) => ({ ...current, [runKey(owner)]: true }));
+      return;
+    }
     const element = streamRef.current;
     const target = [
       ...(element?.querySelectorAll<HTMLElement>("[data-message-id]") ?? []),
     ].find((node) => node.dataset.messageId === props.anchorMessageId);
     if (element && target) {
+      handledAnchor.current = requestKey;
       stickToBottomRef.current = false;
       element.scrollTop +=
         target.getBoundingClientRect().top -
         element.getBoundingClientRect().top -
         12;
       // Explicit delegation anchors take precedence over the near-bottom heuristic.
-      if (props.readingPosition) {
-        props.readingPosition.top = element.scrollTop;
-        props.readingPosition.sticky = stickToBottomRef.current;
-        props.readingPosition.messageId = props.anchorMessageId;
-        props.readingPosition.offset = 12;
+      readingPosition.top = element.scrollTop;
+      readingPosition.sticky = stickToBottomRef.current;
+      readingPosition.messageId = props.anchorMessageId;
+      readingPosition.offset = 12;
+    }
+  }, [
+    props.anchorMessageId,
+    props.anchorToken,
+    activeSessionId,
+    hiddenSignature,
+  ]);
+
+  useLayoutEffect(() => {
+    const element = streamRef.current;
+    if (!element) return;
+    const position = readingPosition;
+    const hiddenFocus =
+      focusedProcessElement.current?.closest<HTMLElement>("[hidden]");
+    if (hiddenFocus) {
+      const row = hiddenFocus.closest<HTMLElement>("[data-message-id]");
+      const owner =
+        processOwners.get(row?.dataset.messageId ?? "") ??
+        processes.find(
+          (process) =>
+            process.answerId === row?.dataset.messageId && process.foldable,
+        );
+      if (owner)
+        document
+          .getElementById(`${messageDomId(owner.prompt.promptId)}-disclosure`)
+          ?.focus({ preventScroll: true });
+      focusedProcessElement.current = null;
+    }
+    const readingOwner = position.messageId
+      ? (processOwners.get(position.messageId) ??
+        collapsedProcesses.find(
+          (process) => process.answerId === position.messageId,
+        ))
+      : undefined;
+    if (
+      readingOwner &&
+      !isOpen(readingOwner) &&
+      !previouslyCollapsed.current.has(runKey(readingOwner)) &&
+      !stickToBottomRef.current
+    ) {
+      const owner = readingOwner;
+      const control = document.getElementById(
+        `${messageDomId(owner.prompt.promptId)}-disclosure`,
+      );
+      const answer = owner.answerId
+        ? document.getElementById(messageDomId(owner.answerId))
+        : null;
+      if (control && answer) {
+        element.scrollTop +=
+          control.getBoundingClientRect().top -
+          element.getBoundingClientRect().top -
+          Math.max(0, position.offset ?? 0);
+        position.messageId = owner.answerId;
+        position.offset =
+          answer.getBoundingClientRect().top -
+          element.getBoundingClientRect().top;
+        position.top = element.scrollTop;
       }
     }
-  }, [props.anchorMessageId, props.anchorToken]);
+    previouslyCollapsed.current = new Set(collapsedProcesses.map(runKey));
+  });
 
   useLayoutEffect(() => {
     scheduleStickScroll();
   }, [
     messagesSignature,
+    hiddenSignature,
     props.promptRows.map((row) => `${row.id}:${row.label ?? ""}`).join(","),
     props.startupThinkingAt,
     props.isRunning,
@@ -200,20 +347,19 @@ export function ConversationStream(props: {
       userScroll = true;
     };
     const onScroll = (): void => {
-      if (!props.readingPosition || userScroll)
-        stickToBottomRef.current = isNearBottom(element);
-      if (props.readingPosition) {
-        props.readingPosition.top = element.scrollTop;
-        props.readingPosition.sticky = stickToBottomRef.current;
-        const top = element.getBoundingClientRect().top;
-        const row = [
-          ...element.querySelectorAll<HTMLElement>("[data-message-id]"),
-        ].find((node) => node.getBoundingClientRect().bottom > top);
-        props.readingPosition.messageId = row?.dataset.messageId;
-        props.readingPosition.offset = row
-          ? row.getBoundingClientRect().top - top
-          : undefined;
-      }
+      if (userScroll) stickToBottomRef.current = isNearBottom(element);
+      readingPosition.top = element.scrollTop;
+      readingPosition.sticky = stickToBottomRef.current;
+      const top = element.getBoundingClientRect().top;
+      const row = [
+        ...element.querySelectorAll<HTMLElement>("[data-message-id]"),
+      ].find(
+        (node) => !node.hidden && node.getBoundingClientRect().bottom > top,
+      );
+      readingPosition.messageId = row?.dataset.messageId;
+      readingPosition.offset = row
+        ? row.getBoundingClientRect().top - top
+        : undefined;
       if (userScroll && stickToBottomRef.current) {
         props.onNearEnd?.();
       }
@@ -231,7 +377,7 @@ export function ConversationStream(props: {
       element.removeEventListener("pointerdown", markUserScroll);
       element.removeEventListener("keydown", markUserScroll);
     };
-  }, [props.readingPosition, props.onNearEnd]);
+  }, [readingPosition, props.onNearEnd]);
 
   useEffect(() => {
     const inner = streamInnerRef.current;
@@ -239,14 +385,9 @@ export function ConversationStream(props: {
       return;
     }
     const observer = new ResizeObserver(() => {
-      const position = props.readingPosition;
+      const position = readingPosition;
       const element = streamRef.current;
-      if (
-        position &&
-        element &&
-        !stickToBottomRef.current &&
-        position.messageId
-      ) {
+      if (element && !stickToBottomRef.current && position.messageId) {
         const row = [
           ...element.querySelectorAll<HTMLElement>("[data-message-id]"),
         ].find((node) => node.dataset.messageId === position.messageId);
@@ -263,7 +404,7 @@ export function ConversationStream(props: {
     return (): void => {
       observer.disconnect();
     };
-  }, [scheduleStickScroll, props.readingPosition]);
+  }, [scheduleStickScroll, readingPosition]);
 
   useEffect(() => {
     return (): void => {
@@ -274,7 +415,21 @@ export function ConversationStream(props: {
   }, []);
 
   return (
-    <section className="ohb-stream" ref={streamRef}>
+    <section
+      className="ohb-stream"
+      ref={streamRef}
+      onFocusCapture={(event) => {
+        focusedProcessElement.current = event.target;
+      }}
+      onBlurCapture={(event) => {
+        if (
+          !event.currentTarget.contains(event.relatedTarget) &&
+          !event.target.closest("[hidden]")
+        ) {
+          focusedProcessElement.current = null;
+        }
+      }}
+    >
       <div className="ohb-stream-inner" ref={streamInnerRef}>
         {props.historyHasMore ||
         props.historyStale ||
@@ -314,22 +469,29 @@ export function ConversationStream(props: {
             <div
               key={`message:${item.message.id}`}
               data-message-id={item.message.id}
+              id={messageDomId(item.message.id)}
+              hidden={hiddenIds.has(item.message.id)}
             >
               <MessageRow
                 message={item.message}
                 reasoning={props.reasoningByMessageId[item.message.id]}
+                reasoningIdPrefix={`${messageDomId(item.message.id)}-reasoning`}
+                reasoningHidden={(beforeAnswer.get(item.message.id) ?? []).some(
+                  (process) => process.foldable && !isOpen(process),
+                )}
+                beforeText={(beforeAnswer.get(item.message.id) ?? []).map(
+                  renderDuration,
+                )}
               />
-              {(terminalAfter.get(item.message.id) ?? []).map((prompt) => (
-                <PromptDuration key={prompt.promptId} prompt={prompt} />
-              ))}
+              {(terminalAfter.get(item.message.id) ?? []).map(renderDuration)}
             </div>
           ) : (
             <PromptProjectionRow key={`prompt:${item.row.id}`} row={item.row} />
           ),
         )}
-        {unattached.map((prompt) => (
-          <PromptDuration key={prompt.promptId} prompt={prompt} />
-        ))}
+        {processes
+          .filter((process) => !process.answerId && !process.afterId)
+          .map(renderDuration)}
         {props.commandNotices}
         {props.isRunning ? <ModelWaiting run={props.activeRun} /> : null}
       </div>

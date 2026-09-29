@@ -245,6 +245,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       scrollTop: 400,
     });
     await act(async () => {
+      stream.dispatchEvent(new Event("wheel"));
       stream.dispatchEvent(new Event("scroll"));
       await Promise.resolve();
     });
@@ -269,6 +270,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       scrollTop: 800,
     });
     await act(async () => {
+      stream.dispatchEvent(new Event("wheel"));
       stream.dispatchEvent(new Event("scroll"));
       await Promise.resolve();
     });
@@ -315,6 +317,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       scrollTop: 400,
     });
     act(() => {
+      stream.dispatchEvent(new Event("wheel"));
       stream.dispatchEvent(new Event("scroll"));
     });
     setScrollMetrics(stream, {
@@ -5831,7 +5834,7 @@ it.each(["succeeded", "failed", "cancelled", "interrupted"] as const)(
       expect(
         app.container
           .querySelector(".ohb-prompt-duration")
-          ?.previousElementSibling?.textContent.trim(),
+          ?.nextElementSibling?.textContent.trim(),
       ).toBe("final answer");
     act(() => {
       fake.store.replaceSnapshot(snapshot, 2);

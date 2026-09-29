@@ -99,12 +99,27 @@ function applyReasoningEvent(
       if (event.run.sessionId !== activeSessionId) {
         return reasoningByMessageId;
       }
-      return event.run.status.kind === "running" ? reasoningByMessageId : {};
+      return event.run.status.kind === "running"
+        ? reasoningByMessageId
+        : foldAllReasoning(reasoningByMessageId);
     case "run.interrupted":
-      return event.sessionId === activeSessionId ? {} : reasoningByMessageId;
+      return event.sessionId === activeSessionId
+        ? foldAllReasoning(reasoningByMessageId)
+        : reasoningByMessageId;
     default:
       return reasoningByMessageId;
   }
+}
+
+function foldAllReasoning(
+  reasoning: ViewState["reasoningByMessageId"],
+): ViewState["reasoningByMessageId"] {
+  return Object.fromEntries(
+    Object.entries(reasoning).map(([id, value]) => [
+      id,
+      { ...value, folded: true },
+    ]),
+  );
 }
 
 function foldReasoning(

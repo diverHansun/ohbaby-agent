@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import type { UiRun } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { useExecutionDuration } from "./use-execution-duration.js";
@@ -38,8 +39,15 @@ export function ModelWaiting({
 
 export function PromptDuration({
   prompt,
+  disclosure,
 }: {
   readonly prompt: import("ohbaby-sdk").UiPromptSubmission;
+  readonly disclosure?: {
+    readonly open: boolean;
+    readonly controls: string;
+    readonly id: string;
+    readonly onToggle: () => void;
+  };
 }): ReactElement {
   const duration = useExecutionDuration(
     prompt.promptId,
@@ -48,16 +56,23 @@ export function PromptDuration({
       : Date.parse(prompt.acceptedAt ?? prompt.createdAt),
     prompt.endedAt === undefined ? undefined : Date.parse(prompt.endedAt),
   );
-  if (prompt.endTimeSource === "recovery")
-    return (
-      <div className="ohb-prompt-duration">
-        {prompt.status} · End time unknown (recovered)
-      </div>
-    );
-  return (
-    <div className="ohb-prompt-duration">
-      {prompt.status !== "succeeded" ? `${prompt.status} · ` : ""}Total{" "}
-      {duration ?? "—"}
-    </div>
+  const label =
+    prompt.endTimeSource === "recovery"
+      ? `${prompt.status} · End time unknown (recovered)`
+      : `${prompt.status !== "succeeded" ? `${prompt.status} · ` : ""}Total ${duration ?? "—"}`;
+  return disclosure ? (
+    <button
+      type="button"
+      className="ohb-prompt-duration ohb-run-disclosure"
+      id={disclosure.id}
+      aria-expanded={disclosure.open}
+      aria-controls={disclosure.controls}
+      onClick={disclosure.onToggle}
+    >
+      <span>{label}</span>
+      <ChevronRight size={16} className="ohb-run-chevron" aria-hidden="true" />
+    </button>
+  ) : (
+    <div className="ohb-prompt-duration">{label}</div>
   );
 }
