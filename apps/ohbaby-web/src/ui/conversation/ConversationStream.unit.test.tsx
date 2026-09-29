@@ -168,6 +168,60 @@ function processButton(container: HTMLElement): HTMLButtonElement | null {
 }
 
 describe("completed run disclosure", () => {
+  it.each(["separate-process", "answer-reasoning"])(
+    "keeps one control above the process through repeated toggles: %s",
+    (kind) => {
+      const h = conversationHarness();
+      const readingPosition = { top: 0, sticky: true };
+      const messages =
+        kind === "separate-process"
+          ? [runMessage("progress"), runMessage("answer")]
+          : [
+              runMessage("answer", {
+                parts: [
+                  { type: "reasoning", text: "work", endReason: "normal" },
+                  { type: "text", text: "answer" },
+                ],
+              }),
+            ];
+      try {
+        h.render({ messages, readingPosition });
+        const control = required(processButton(h.container));
+        const process = required(
+          h.container.querySelector<HTMLElement>(
+            kind === "separate-process"
+              ? '[data-message-id="progress"]'
+              : "details",
+          ),
+        );
+        for (let cycle = 0; cycle < 3; cycle += 1) {
+          act(() => {
+            control.click();
+          });
+          expect(control.getAttribute("aria-expanded")).toBe("true");
+          expect(
+            control.compareDocumentPosition(process) &
+              Node.DOCUMENT_POSITION_FOLLOWING,
+          ).toBeTruthy();
+          expect(process.closest("[hidden]")).toBeNull();
+          expect(readingPosition.sticky).toBe(false);
+          act(() => {
+            control.click();
+          });
+          expect(control.getAttribute("aria-expanded")).toBe("false");
+          expect(process.closest("[hidden]")).not.toBeNull();
+          expect(processButton(h.container)).toBe(control);
+          expect(
+            h.container
+              .querySelector('[data-message-id="answer"] .ohb-markdown')
+              ?.closest("[hidden]"),
+          ).toBeNull();
+        }
+      } finally {
+        h.close();
+      }
+    },
+  );
   it("keeps streaming visible, then folds work with duration before the answer and preserves manual expansion", () => {
     const h = conversationHarness();
     try {

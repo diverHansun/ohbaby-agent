@@ -240,6 +240,7 @@
 
 .ohb-reasoning > summary,
 .ohb-run-disclosure {
+  align-self: flex-start;
   align-items: center;
   display: inline-flex;
   gap: 8px;

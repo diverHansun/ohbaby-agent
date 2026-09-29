@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useId,
@@ -120,6 +121,7 @@ export function ConversationStream(props: {
     props.reasoningByMessageId,
   );
   const beforeAnswer = new Map<string, RunProcess[]>();
+  const beforeProcess = new Map<string, RunProcess[]>();
   const terminalAfter = new Map<string, RunProcess[]>();
   const processOwners = new Map<string, RunProcess>();
   for (const process of processes) {
@@ -128,8 +130,15 @@ export function ConversationStream(props: {
       const map = process.answerId ? beforeAnswer : terminalAfter;
       map.set(anchor, [...(map.get(anchor) ?? []), process]);
     }
-    if (process.foldable)
+    if (process.foldable) {
+      const start = process.processIds.at(0) ?? process.answerId;
+      if (start)
+        beforeProcess.set(start, [
+          ...(beforeProcess.get(start) ?? []),
+          process,
+        ]);
       for (const id of process.processIds) processOwners.set(id, process);
+    }
   }
   const isOpen = (process: RunProcess): boolean =>
     !process.foldable || expandedRuns[runKey(process)] === true;
@@ -145,6 +154,7 @@ export function ConversationStream(props: {
   const previouslyCollapsed = useRef(new Set<string>());
   const focusedProcessElement = useRef<HTMLElement | null>(null);
   const handledAnchor = useRef<string | undefined>(undefined);
+  const toggleAnchor = useRef<{ id: string; offset: number } | null>(null);
   const renderDuration = (process: RunProcess): ReactNode => {
     const answer = visibleMessages.find(
       (message) => message.id === process.answerId,
@@ -174,9 +184,24 @@ export function ConversationStream(props: {
                 controls: controls.join(" "),
                 id: `${messageDomId(process.prompt.promptId)}-disclosure`,
                 onToggle: (): void => {
+                  const stream = streamRef.current;
+                  const id = `${messageDomId(process.prompt.promptId)}-disclosure`;
+                  const control = document.getElementById(id);
+                  if (stream && control) {
+                    toggleAnchor.current = {
+                      id,
+                      offset:
+                        control.getBoundingClientRect().top -
+                        stream.getBoundingClientRect().top,
+                    };
+                  }
+                  // Manual disclosure is a reading action, not new output to follow.
+                  stickToBottomRef.current = false;
+                  readingPosition.sticky = false;
+                  readingPosition.messageId = undefined;
                   setExpandedRuns((current) => ({
                     ...current,
-                    [runKey(process)]: !isOpen(process),
+                    [runKey(process)]: current[runKey(process)] !== true,
                   }));
                 },
               }
@@ -221,6 +246,7 @@ export function ConversationStream(props: {
 
   useLayoutEffect(() => {
     anchorRef.current = null;
+    toggleAnchor.current = null;
     stickToBottomRef.current = readingPosition.sticky;
     if (streamRef.current) streamRef.current.scrollTop = readingPosition.top;
     scheduleStickScroll();
@@ -267,6 +293,18 @@ export function ConversationStream(props: {
     const element = streamRef.current;
     if (!element) return;
     const position = readingPosition;
+    const manualAnchor = toggleAnchor.current;
+    if (manualAnchor) {
+      const control = document.getElementById(manualAnchor.id);
+      if (control) {
+        element.scrollTop +=
+          control.getBoundingClientRect().top -
+          element.getBoundingClientRect().top -
+          manualAnchor.offset;
+      }
+      position.top = element.scrollTop;
+      toggleAnchor.current = null;
+    }
     const hiddenFocus =
       focusedProcessElement.current?.closest<HTMLElement>("[hidden]");
     if (hiddenFocus) {
@@ -466,25 +504,27 @@ export function ConversationStream(props: {
         ) : null}
         {timelineItems.map((item) =>
           item.kind === "message" ? (
-            <div
-              key={`message:${item.message.id}`}
-              data-message-id={item.message.id}
-              id={messageDomId(item.message.id)}
-              hidden={hiddenIds.has(item.message.id)}
-            >
-              <MessageRow
-                message={item.message}
-                reasoning={props.reasoningByMessageId[item.message.id]}
-                reasoningIdPrefix={`${messageDomId(item.message.id)}-reasoning`}
-                reasoningHidden={(beforeAnswer.get(item.message.id) ?? []).some(
-                  (process) => process.foldable && !isOpen(process),
-                )}
-                beforeText={(beforeAnswer.get(item.message.id) ?? []).map(
-                  renderDuration,
-                )}
-              />
-              {(terminalAfter.get(item.message.id) ?? []).map(renderDuration)}
-            </div>
+            <Fragment key={`message:${item.message.id}`}>
+              {(beforeProcess.get(item.message.id) ?? []).map(renderDuration)}
+              <div
+                data-message-id={item.message.id}
+                id={messageDomId(item.message.id)}
+                hidden={hiddenIds.has(item.message.id)}
+              >
+                <MessageRow
+                  message={item.message}
+                  reasoning={props.reasoningByMessageId[item.message.id]}
+                  reasoningIdPrefix={`${messageDomId(item.message.id)}-reasoning`}
+                  reasoningHidden={(
+                    beforeAnswer.get(item.message.id) ?? []
+                  ).some((process) => process.foldable && !isOpen(process))}
+                  beforeText={(beforeAnswer.get(item.message.id) ?? [])
+                    .filter((process) => !process.foldable)
+                    .map(renderDuration)}
+                />
+                {(terminalAfter.get(item.message.id) ?? []).map(renderDuration)}
+              </div>
+            </Fragment>
           ) : (
             <PromptProjectionRow key={`prompt:${item.row.id}`} row={item.row} />
           ),

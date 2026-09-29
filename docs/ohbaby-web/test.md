@@ -142,7 +142,7 @@ SDK 与 transport 的快照、增量、范围版本和重连恢复由对应层�
 
 ## 运行过程折叠回归（2026-09-29）
 
-新增 `conversation/run-process.unit.test.ts` 和 `run-process.integration.test.tsx`，扩展 `ConversationStream.unit.test.tsx`、`App.unit.test.tsx`、`eventReducer.unit.test.ts`。覆盖明确 run 归属、成功与定稿的两种到达顺序、steer/停止/缺正文例外、最终消息内 reasoning、手动展开保留、显式定位、焦点与负阅读偏移、legacy reasoning 完成后保留。
+新增 `conversation/run-process.unit.test.ts` 和 `run-process.integration.test.tsx`，扩展 `ConversationStream.unit.test.tsx`、`App.unit.test.tsx`、`eventReducer.unit.test.ts`。覆盖明确 run 归属、成功与定稿的两种到达顺序、steer/停止/缺正文例外、最终消息内 reasoning、手动展开保留、显式定位、焦点与负阅读偏移、legacy reasoning 完成后保留；用户验收补充顶部入口固定、连续三轮展开/收起，避免按钮被过程推走。
 
 运行 `pnpm exec vitest run apps/ohbaby-web --maxWorkers=4 --minWorkers=1` 验证 Web 单元/集成/契约回归；正式页面另由 `node scripts/run-compiled-web-e2e.mjs` 配合浏览器执行工具、续问、刷新恢复和后台证据检查。
 
