@@ -5,6 +5,20 @@ export interface UiPromptNamingSource {
   readonly request: string;
 }
 
+export function isUiPromptNamingSource(
+  value: unknown,
+): value is UiPromptNamingSource {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "skillName" in value &&
+    typeof value.skillName === "string" &&
+    "request" in value &&
+    typeof value.request === "string"
+  );
+}
+
 export type UiPromptSubmissionStatus =
   | "steered"
   | "queued"

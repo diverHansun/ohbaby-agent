@@ -6001,6 +6001,202 @@ describe("createInProcessUiBackendClient", () => {
     ]);
   });
 
+  it.each([false, true])(
+    "keeps a manual rename after provisional CAS through persistent UI and message upserts (rejected=%s)",
+    async (rejectCas) => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "ohbaby-title-projection-"),
+      );
+      initDatabase({ dbPath: join(directory, "test.db") });
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      });
+      const sessionManager = createSessionManager({
+        bus: createBus(),
+        store: createDatabaseSessionStore(),
+        projectResolver: {
+          fromDirectory: (rootPath) => ({ id: "project", rootPath }),
+        },
+        messageCleaner: { removeMessages: () => Promise.resolve() },
+      });
+      await sessionManager.create(directory, {
+        id: "target",
+        title: "New session",
+      });
+      const runLedger = createInMemoryRunLedger();
+      const controlled = createControlledTitleLLMClient("Late generated title");
+      const client = createInProcessUiBackendClient({
+        llmClient: controlled.client,
+        sessionManager,
+        messageManager,
+        runLedger,
+        workdir: directory,
+        stateStore: createPersistentUiStateStore({
+          sessionManager,
+          messageManager,
+          runLedger,
+          projectRoot: directory,
+        }),
+      });
+      const update = sessionManager.update.bind(sessionManager);
+      let crossed = false;
+      vi.spyOn(sessionManager, "update").mockImplementation(
+        async (id, patch, condition) => {
+          if (
+            !crossed &&
+            rejectCas &&
+            condition &&
+            patch.title === "Target task"
+          )
+            await update(id, { title: "Manual before CAS" });
+          const result = await update(id, patch, condition);
+          if (!crossed && condition && patch.title === "Target task") {
+            crossed = true;
+            await update(id, { title: "Manual after CAS" });
+          }
+          return result;
+        },
+      );
+      try {
+        await client.submitPromptAndWait("Target task", {
+          sessionId: "target",
+        });
+        expect(crossed).toBe(true);
+        expect((await sessionManager.get("target"))?.title).toBe(
+          "Manual after CAS",
+        );
+        controlled.releaseTitle();
+        await vi.waitFor(async () => {
+          expect(
+            (await client.getSnapshot()).sessions.find((s) => s.id === "target")
+              ?.title,
+          ).toBe("Manual after CAS");
+        });
+      } finally {
+        controlled.releaseTitle();
+        await client.dispose();
+        closeDatabase();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "names the first actual turn after cancelling its first queued admission (restart=%s)",
+    async (restart) => {
+      const directory = await mkdtemp(join(tmpdir(), "ohbaby-cancel-title-"));
+      const dbPath = join(directory, "test.db");
+      initDatabase({ dbPath });
+      const gate = createDeferred<undefined>();
+      let waiting = 0;
+      const requests: InterfaceProviderRequest[] = [];
+      const base = createFakeLLMClient([
+        { textDelta: "Done", finishReason: "stop" },
+      ]);
+      const llmClient = {
+        ...base,
+        provider: {
+          ...base.provider,
+          streamResponse(
+            request: InterfaceProviderRequest,
+          ): ReturnType<typeof base.provider.streamResponse> {
+            requests.push(request);
+            return base.provider.streamResponse(request);
+          },
+        },
+      };
+      const create = (
+        block: boolean,
+      ): ReturnType<typeof createInProcessUiBackendClient> => {
+        const sessionManager = createSessionManager({
+          bus: createBus(),
+          store: createDatabaseSessionStore(),
+          projectResolver: {
+            fromDirectory: (rootPath) => ({ id: "project", rootPath }),
+          },
+          messageCleaner: { removeMessages: () => Promise.resolve() },
+        });
+        const messageManager = createMessageManager({
+          bus: createBus(),
+          store: createDatabaseMessageStore(),
+        });
+        const runLedger = createInMemoryRunLedger();
+        return createInProcessUiBackendClient({
+          llmClient,
+          sessionManager,
+          messageManager,
+          runLedger,
+          promptSubmissionStore: new DatabasePromptSubmissionStore(),
+          workdir: directory,
+          beforePromptSubmit: async () => {
+            if (block && waiting++ < 10) await gate.promise;
+          },
+          stateStore: createPersistentUiStateStore({
+            sessionManager,
+            messageManager,
+            runLedger,
+            projectRoot: directory,
+          }),
+        });
+      };
+      let client = create(true);
+      try {
+        for (let i = 0; i < 10; i++)
+          await client.submitPromptAccepted("Blocking turn", {
+            sessionId: `block-${String(i)}`,
+          });
+        await vi.waitFor(() => {
+          expect(waiting).toBe(10);
+        });
+        const first = await client.submitPromptAccepted("Cancelled task", {
+          sessionId: "target",
+        });
+        const second = await client.submitPromptAccepted("Real task", {
+          sessionId: "target",
+        });
+        expect(first.status).toBe("queued");
+        expect(second.status).toBe("queued");
+        await client.cancelQueuedPrompt({ promptId: first.promptId });
+        if (restart) {
+          const closing = client.dispose();
+          gate.resolve(undefined);
+          await closing;
+          closeDatabase();
+          initDatabase({ dbPath });
+          client = create(false);
+          await client.getSnapshot();
+          const lease = await client.acquirePromptEditLease({
+            promptId: second.promptId,
+          });
+          await client.resubmitRetainedPrompt({
+            promptId: second.promptId,
+            operationId: "resend",
+            editLeaseId: lease.editLeaseId,
+            text: "Real task",
+          });
+        } else gate.resolve(undefined);
+        await client.waitForPrompt(second.promptId);
+        await vi.waitFor(() => {
+          expect(
+            requests.filter(
+              (r) => r.purpose === "session-title" && r.sessionId === "target",
+            ),
+          ).toHaveLength(1);
+        });
+        expect(
+          (await client.getSnapshot()).sessions.find((s) => s.id === "target")
+            ?.title,
+        ).toBe("Real task");
+      } finally {
+        gate.resolve(undefined);
+        await client.dispose();
+        closeDatabase();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
   it.each(["unchanged", "edited", "manual"] as const)(
     "names a persisted retained first prompt after restart: %s",
     async (scenario) => {

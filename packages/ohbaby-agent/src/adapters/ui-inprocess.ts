@@ -2612,24 +2612,26 @@ export function createInProcessUiBackendClient(
     readonly expectedTemporaryTitle?: string;
     readonly uiSession: UiSession;
   }): Promise<boolean> {
-    if (input.coreSession?.isSubagent === true) {
-      return false;
-    }
     if (
-      (!isDefaultSessionTitle(input.uiSession.title) &&
-        input.uiSession.title !== input.expectedTemporaryTitle) ||
-      (input.coreSession &&
-        !isDefaultSessionTitle(input.coreSession.title) &&
-        input.coreSession.title !== input.expectedTemporaryTitle)
+      input.coreSession?.isSubagent === true ||
+      input.uiSession.messages.length > 0 ||
+      (input.coreSession?.stats.messageCount ?? 0) > 0
     ) {
       return false;
     }
-    if (input.uiSession.messages.length > 0) {
+    const expectedTitle =
+      input.expectedTemporaryTitle ??
+      (await promptSubmissionStore
+        .getSessionTitleExpected(promptScopeKey, input.uiSession.id)
+        .catch(() => undefined));
+    if (
+      (!isDefaultSessionTitle(input.uiSession.title) &&
+        input.uiSession.title !== expectedTitle) ||
+      (input.coreSession &&
+        !isDefaultSessionTitle(input.coreSession.title) &&
+        input.coreSession.title !== expectedTitle)
+    )
       return false;
-    }
-    if ((input.coreSession?.stats.messageCount ?? 0) > 0) {
-      return false;
-    }
 
     try {
       const messages = await messageManager.listBySession(input.uiSession.id);
@@ -2667,6 +2669,8 @@ export function createInProcessUiBackendClient(
     }
 
     await upsertSession(updatedSession);
+    updatedSession =
+      (await stateStore.getSession(updatedSession.id)) ?? updatedSession;
     publish({
       type: "session.updated",
       session: cloneSession(updatedSession),

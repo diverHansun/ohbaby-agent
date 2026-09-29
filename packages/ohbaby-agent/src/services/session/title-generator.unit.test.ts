@@ -60,6 +60,22 @@ describe("session title generator", () => {
     },
   );
 
+  it.each([
+    [
+      "修复切换会话时显示“Recovering conversation”",
+      "修复切换会话时显示“Recovering conversation”",
+    ],
+    ['Fix the "Recovering conversation"', 'Fix the "Recovering conversation"'],
+    ["“修复会话切换”", "修复会话切换"],
+    ["\"Fix 'quoted' text\"", "Fix 'quoted' text"],
+    ["“First phrase” and “last phrase”", "“First phrase” and “last phrase”"],
+  ])(
+    "preserves embedded quotes while stripping whole-title wrappers: %s",
+    (raw, expected) => {
+      expect(cleanGeneratedSessionTitle(raw)).toBe(expected);
+    },
+  );
+
   it("cleans model wrappers from generated titles", () => {
     expect(
       cleanGeneratedSessionTitle(

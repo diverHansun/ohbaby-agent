@@ -23,6 +23,7 @@ import {
   inferConnectModelInterfaceProvider,
   isConnectModelInterfaceProvider,
   isUiReasoningConfig,
+  isUiPromptNamingSource,
   UI_REASONING_STATUSES,
   supportsWebOverlayCommandInvocation,
   supportsWebPassthroughCommandInvocation,
@@ -2021,6 +2022,11 @@ class DaemonServerAppRuntime {
           promptRejectionBody("Invalid reasoning preference"),
           400,
         );
+      if (
+        body.namingSource !== undefined &&
+        !isUiPromptNamingSource(body.namingSource)
+      )
+        return context.json(promptRejectionBody("Invalid naming source"), 400);
       const text = asNonEmptyString(body.text);
       if (!text) {
         return context.json(promptRejectionBody("text is required"), 400);
@@ -2053,6 +2059,9 @@ class DaemonServerAppRuntime {
           createSessionId: this.createSessionId,
           options: {
             clientRequestId,
+            ...(body.namingSource === undefined
+              ? {}
+              : { namingSource: body.namingSource }),
             ...(body.reasoning === undefined
               ? {}
               : { reasoning: body.reasoning }),

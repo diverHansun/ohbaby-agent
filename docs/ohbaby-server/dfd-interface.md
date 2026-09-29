@@ -106,3 +106,8 @@
 显式进入、重连及执行仍核对当前 owner 和待补保存；同会话进行中的进入合并等待。首次 view/control/history 读取等待已开始的进入，GET 本身不启动持久恢复。等待放在 session owner 提交队列外，避免恢复回调与读取互等。
 
 健康检查不更换 `viewGeneration`，也不重复提交相同 `executionRecovery`；首次 seed 在检查后进行，已有视图只在真实持久修复或投影损坏时 rebuild。generation/revision 的 SDK 校验保持不变。恢复失败后仍尝试只读 seed：历史可读则返回含 `executionRecovery: blocked` 及原原因的视图，执行准入继续阻断；历史本身不可读才使整个会话不可用。其他健康会话不受局部错误影响。
+
+
+### 可选命名来源传输（2026-09-29）
+
+公共 `SubmitPromptOptions.namingSource` 使用 `{ skillName: string, request: string }`。Web HTTP DTO、REST 接受路由及 JSON-RPC options 解析完整传递此字段；服务端共用 SDK 类型守卫拒绝 null、数组及缺少字符串字段的来源。等待式提交仍由 client 组合接受与完成 primitive，因此保留相同来源；来源只服务标题，不替换执行 text。

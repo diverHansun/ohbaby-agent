@@ -442,6 +442,20 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       .map(clone);
   }
 
+  async getSessionTitleExpected(
+    scopeKey: string,
+    sessionId: string,
+  ): Promise<string | undefined> {
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.scopeKey === scopeKey &&
+          record.sessionId === sessionId &&
+          record.titleExpected !== undefined,
+      )
+      .sort((a, b) => a.createdAt - b.createdAt)[0]?.titleExpected;
+  }
+
   async hasForSession(scopeKey: string, sessionId: string): Promise<boolean> {
     for (const record of this.records.values()) {
       if (record.scopeKey === scopeKey && record.sessionId === sessionId)

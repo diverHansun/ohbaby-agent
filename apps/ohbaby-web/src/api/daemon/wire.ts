@@ -288,6 +288,7 @@ export type WebSseEvent =
     };
 
 export interface SubmitPromptRequest {
+  readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
   readonly reasoning?: UiReasoningConfig;
   readonly clientRequestId: string;
   readonly sessionId?: string;

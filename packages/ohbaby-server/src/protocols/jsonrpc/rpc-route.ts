@@ -14,7 +14,7 @@ import {
   sessionRecoveryCapability,
 } from "../../coordination/session-access.js";
 import { randomUUID } from "node:crypto";
-import { isUiReasoningConfig } from "ohbaby-sdk";
+import { isUiReasoningConfig, isUiPromptNamingSource } from "ohbaby-sdk";
 import type {
   SubmitPromptOptions,
   UiAcquirePromptEditLeaseInput,
@@ -108,7 +108,17 @@ function submitPromptOptions(value: unknown): SubmitPromptOptions | undefined {
     error.code = "INVALID_REASONING";
     throw error;
   }
+  if (
+    value.namingSource !== undefined &&
+    !isUiPromptNamingSource(value.namingSource)
+  )
+    throw Object.assign(new Error("Invalid naming source"), {
+      code: "INVALID_NAMING_SOURCE",
+    });
   return {
+    ...(value.namingSource !== undefined
+      ? { namingSource: value.namingSource }
+      : {}),
     ...(value.reasoning !== undefined ? { reasoning: value.reasoning } : {}),
     ...(typeof value.clientRequestId === "string"
       ? { clientRequestId: value.clientRequestId }

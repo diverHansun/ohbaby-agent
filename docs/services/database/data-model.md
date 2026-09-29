@@ -167,3 +167,5 @@ message 表
 `prompt_submission.naming_source TEXT NULL` 保存可选 `{ skillName, request }` JSON，仅 skill 命令提供；普通正文不重复保存。幂等接受重放返回原记录，不替换来源。queued/retained 正文变化在同一写事务内将该列置 NULL；正文未变则保留。
 
 `prompt_submission.title_expected TEXT NULL` 保存新会话接受时的短临时标题（最多 48 字符），用于首次执行和 retained 重启后的人工标题比较。它不是任务正文，也不随正文编辑失效；新正文可以替换仍匹配该值的临时标题。两列均为普通可空增列，无回填、无历史重命名、无新命名任务表。已有连接可继续用旧列清单读写；迁移集成测试保留旧连接及 prepared statements 验证此行为。
+
+首条自动标题比较值可通过 `getSessionTitleExpected(scopeKey, sessionId)` 从最早带标记的接受记录读取，包含 cancelled 等终态记录。用于零消息会话的首次实际执行，不依赖该条原始提交仍可执行，也不新增列或转移/修改历史记录。

@@ -70,6 +70,30 @@ for (const kind of ["memory", "sqlite"] as const) {
           );
     };
 
+    it("recovers the original admission title from a cancelled row in only its own session and scope", async () => {
+      await store.accept({
+        promptId: "original-title",
+        clientRequestId: "original-title",
+        scopeKey: "/w",
+        sessionId: "s",
+        userMessageId: "original-title-message",
+        text: "Original task",
+        titleExpected: "Original task",
+        maxQueuedPrompts: 100,
+      });
+      await store.cancelQueued("original-title");
+      await accept("next");
+      expect(await store.getSessionTitleExpected("/w", "s")).toBe(
+        "Original task",
+      );
+      expect(
+        await store.getSessionTitleExpected("/other", "s"),
+      ).toBeUndefined();
+      expect(
+        await store.getSessionTitleExpected("/w", "another-session"),
+      ).toBeUndefined();
+    });
+
     it("invalidates naming source on changed retained resubmission without changing its receipt on replay", async () => {
       await store.accept({
         promptId: "edited",

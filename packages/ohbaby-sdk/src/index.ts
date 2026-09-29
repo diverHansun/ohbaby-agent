@@ -31,6 +31,7 @@ export type {
   UiCommandRecord,
   UiCommandRecorder,
 } from "./command-record.js";
+export { isUiPromptNamingSource } from "./prompt.js";
 export type {
   UiSteerQueuedPromptInput,
   UiSteerQueuedPromptReceipt,

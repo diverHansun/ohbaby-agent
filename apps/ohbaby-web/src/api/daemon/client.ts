@@ -761,6 +761,9 @@ export class BrowserDaemonClient implements UiBackendClient {
         clientRequestId,
         sessionId,
         text,
+        ...(options?.namingSource === undefined
+          ? {}
+          : { namingSource: options.namingSource }),
         ...(options?.reasoning === undefined
           ? {}
           : { reasoning: options.reasoning }),

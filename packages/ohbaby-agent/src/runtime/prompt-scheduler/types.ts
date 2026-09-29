@@ -189,6 +189,11 @@ export interface PromptSubmissionStore {
   listVisible(scopeKey: string): Promise<readonly PromptSubmissionRecord[]>;
   /** Durable receipt existence, including terminal history without message/run associations. */
   hasForSession(scopeKey: string, sessionId: string): Promise<boolean>;
+  /** Original admission title remains recoverable even when its prompt was cancelled. */
+  getSessionTitleExpected(
+    scopeKey: string,
+    sessionId: string,
+  ): Promise<string | undefined>;
   listForSession(
     scopeKey: string,
     sessionId: string,

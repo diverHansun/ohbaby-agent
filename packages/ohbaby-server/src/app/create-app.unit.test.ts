@@ -1009,6 +1009,54 @@ describe("createDaemonServerApp", () => {
     }
   });
 
+  it("preserves and validates naming source at the JSON-RPC submission boundary", async () => {
+    const backend = new FakeBackend();
+    const handle = createApp(backend);
+    await handle.start();
+    const headers = { ...authHeaders(), "content-type": "application/json" };
+    await handle.app.request("/v1/clients", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ clientId: "naming-rpc" }),
+    });
+    const namingSource = { skillName: "review", request: "Review recovery" };
+    const submit = (source: unknown): ReturnType<typeof handle.app.request> =>
+      handle.app.request("/api/rpc", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          clientId: "naming-rpc",
+          id: "naming",
+          method: "submitPromptAccepted",
+          params: [
+            "expanded skill",
+            {
+              sessionId: "session_1",
+              clientRequestId: "naming-request",
+              namingSource: source,
+            },
+          ],
+        }),
+      });
+    try {
+      expect(await (await submit(namingSource)).json()).toMatchObject({
+        ok: true,
+      });
+      expect(backend.submitted[0]?.options?.namingSource).toEqual(namingSource);
+      for (const invalid of [
+        null,
+        { skillName: "review" },
+        { skillName: 42, request: "task" },
+      ])
+        expect(await (await submit(invalid)).json()).toMatchObject({
+          ok: false,
+        });
+      expect(backend.submitted).toHaveLength(1);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
   it("records one JSON-RPC primitive with transport correlation", async () => {
     const records: UiCommandRecord[] = [];
     const handle = createApp(new FakeBackend(), {

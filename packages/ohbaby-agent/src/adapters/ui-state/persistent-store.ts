@@ -569,20 +569,10 @@ export function createPersistentUiStateStore(
         : undefined;
     },
 
-    async upsertSession(session: UiSession): Promise<void> {
-      const existing = await withSessionTransactionRetry(() =>
-        options.sessionManager.get(session.id),
-      );
-      if (!existing) {
-        return;
-      }
-      if (existing.title !== session.title) {
-        await withSessionTransactionRetry(() =>
-          options.sessionManager.update(session.id, {
-            title: session.title,
-          }),
-        );
-      }
+    upsertSession(_session: UiSession): Promise<void> {
+      // Persisted metadata belongs to SessionManager. Projection snapshots may
+      // be stale after a concurrent rename and must never write titles back.
+      return Promise.resolve();
     },
 
     setActiveSessionId(sessionId: string | null): Promise<void> {

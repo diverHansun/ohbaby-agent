@@ -39,7 +39,13 @@ function fixture() {
     runtimeEpoch: "epoch",
     executions,
     instances: {
-      get: ({ subagentId }) =>
+      get: ({
+        subagentId,
+      }): Promise<{
+        parentSessionId: string;
+        name: string | undefined;
+        description: string | undefined;
+      }> =>
         Promise.resolve({
           parentSessionId: "root",
           name:
@@ -93,7 +99,10 @@ describe("continuous subagent live projection", () => {
     await f.accept("a1");
     await f.accept("a2");
     await f.accept("b1", "b");
-    const read = (subagentId: string, anchorExecutionId: string) =>
+    const read = (
+      subagentId: string,
+      anchorExecutionId: string,
+    ): ReturnType<SubagentConversationProjection["read"]> =>
       f.conversations.read({
         rootSessionId: "root",
         subagentId,

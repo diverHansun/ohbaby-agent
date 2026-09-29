@@ -631,6 +631,19 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       .map(promptSubmissionRowToRecord);
   }
 
+  async getSessionTitleExpected(
+    scopeKey: string,
+    sessionId: string,
+  ): Promise<string | undefined> {
+    return this.db
+      .prepare<{
+        title_expected: string;
+      }>(
+        `SELECT title_expected FROM ${this.tableName} WHERE scope_key = ? AND session_id = ? AND title_expected IS NOT NULL ORDER BY created_at ASC, prompt_id ASC LIMIT 1`,
+      )
+      .get(scopeKey, sessionId)?.title_expected;
+  }
+
   async hasForSession(scopeKey: string, sessionId: string): Promise<boolean> {
     return (
       this.db
