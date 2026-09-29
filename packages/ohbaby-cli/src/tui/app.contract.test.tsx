@@ -949,6 +949,9 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("Checking execution records…");
     app.stdin.write("retry draft");
     await flush();
+    app.stdin.write("\r");
+    await flush();
+    expect(client.submitPromptAccepted).not.toHaveBeenCalled();
     client.emit({
       type: "session.changed",
       version: {
@@ -6397,4 +6400,48 @@ it("keeps expired retained edit text associated and lets Esc restore the draft w
   await flush();
   expect(app.lastFrame()).toContain("original draft");
   expect(client.abortRun).not.toHaveBeenCalled();
+});
+
+it("keeps the default in-process TUI header quiet during a healthy entry check", async () => {
+  // eslint-disable-next-line no-restricted-syntax -- Contract verifies the real default backend entry gate through the TUI.
+  const { createInProcessUiBackendClient } = await import("ohbaby-agent");
+  let resume: (() => void) | undefined;
+  let checking = false;
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: snapshot(),
+    recoverExecutionSession: async () => {
+      if (!checking) return false;
+      await new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      return false;
+    },
+  });
+  try {
+    await client.initializeSession("session_1");
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("local draft");
+    await flush();
+    checking = true;
+    const entry = client.initializeSession("session_1");
+    await vi.waitFor(() => {
+      expect(resume).toBeDefined();
+    });
+    await flush();
+    expect(app.lastFrame()).toContain("local draft");
+    expect(app.lastFrame()).not.toContain("Checking execution records");
+    resume?.();
+    await entry;
+    await flush();
+    expect(app.lastFrame()).not.toContain("Checking execution records");
+  } finally {
+    resume?.();
+    await client.dispose();
+  }
 });

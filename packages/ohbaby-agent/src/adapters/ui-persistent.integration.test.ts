@@ -2856,3 +2856,76 @@ describe("createPersistentUiBackendClient", () => {
     }
   });
 });
+
+it("refreshes a seeded SQLite view only after actual orphan repair and leaves retained work unsent", async () => {
+  const directory = await tempDir("ohbaby-entry-repair-");
+  let client: PersistentUiBackendClient | undefined;
+  try {
+    const workdir = join(directory, "workspace");
+    const llm = createFakeLLMClient([
+      { textDelta: "seed", finishReason: "stop" },
+    ]);
+    const execute = vi.spyOn(llm.provider, "streamResponse");
+    client = createPersistentUiBackendClient({
+      dbPath: join(directory, "agent.db"),
+      workdir,
+      llmClient: llm,
+    });
+    await client.submitPromptAndWait("seed");
+    const sessionId = (await client.getSnapshot()).activeSessionId;
+    if (!sessionId) throw new Error("Missing session");
+    await client.initializeSession(sessionId);
+    if (!client.getSessionView || !client.getSessionControl)
+      throw new Error("Missing recovery API");
+    const before = await client.getSessionView({ sessionId });
+    const executions = execute.mock.calls.length;
+    const ledger = createDatabaseRunLedger({
+      ownerId: "dead",
+      ownerPid: 2147483647,
+    });
+    await ledger.createPending({
+      runId: "late-orphan",
+      sessionId,
+      triggerSource: "user",
+    });
+    await ledger.markRunning("late-orphan");
+    const { DatabasePromptSubmissionStore } =
+      await import("../runtime/prompt-scheduler/database-store.js");
+    const prompts = new DatabasePromptSubmissionStore({
+      ownerId: "dead",
+      ownerPid: 2147483647,
+    });
+    await prompts.accept({
+      promptId: "late-queued",
+      clientRequestId: "late-queued",
+      scopeKey: workdir,
+      sessionId,
+      text: "do not auto-send",
+      userMessageId: "late-user",
+      maxQueuedPrompts: 100,
+    });
+    await client.initializeSession(sessionId);
+    const repaired = await client.getSessionView({ sessionId });
+    expect(repaired.version.viewGeneration).not.toBe(
+      before.version.viewGeneration,
+    );
+    expect(
+      repaired.runs.find((run) => run.id === "late-orphan")?.status.kind,
+    ).toBe("error");
+    expect(
+      repaired.prompts.find((prompt) => prompt.promptId === "late-queued")
+        ?.status,
+    ).toBe("retained");
+    expect(repaired.executionRecovery).toEqual({ status: "ready" });
+    expect((await client.getSessionControl({ sessionId })).runId).toBeNull();
+    await client.initializeSession(sessionId);
+    expect((await client.getSessionView({ sessionId })).version).toEqual(
+      repaired.version,
+    );
+    expect(execute.mock.calls.length).toBe(executions);
+  } finally {
+    await client?.dispose();
+    closeDatabase();
+    await rm(directory, { force: true, recursive: true });
+  }
+});

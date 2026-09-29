@@ -72,12 +72,12 @@ it("checks 6000 old terminal histories once on cold entry without no-op write tr
     const close = vi.spyOn(f.inputs, "close");
     const exec = vi.spyOn(db, "exec");
     const coldStartedAt = performance.now();
-    await expect(f.recover("s")).resolves.toBeUndefined();
+    await expect(f.recover("s")).resolves.toBe(false);
     const coldReadMs = performance.now() - coldStartedAt;
     expect(scan).toHaveBeenCalledTimes(6000);
     scan.mockClear();
     const warmStartedAt = performance.now();
-    await expect(f.recover("s")).resolves.toBeUndefined();
+    await expect(f.recover("s")).resolves.toBe(false);
     const repeatedEntryMs = performance.now() - warmStartedAt;
     expect(scan).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();

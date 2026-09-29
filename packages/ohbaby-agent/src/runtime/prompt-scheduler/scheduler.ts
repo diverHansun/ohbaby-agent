@@ -582,7 +582,7 @@ export class WorkspacePromptScheduler {
   getRecoveryState(sessionId: string): PromptRecoveryState {
     const pending = this.pendingFinalizations.get(sessionId);
     const entryError = this.entryFailures.get(sessionId);
-    if (this.entryAttempts.has(sessionId))
+    if (this.entryAttempts.has(sessionId) && (pending || entryError))
       return {
         status: "recovering",
         promptId: pending?.prompt?.promptId ?? "",

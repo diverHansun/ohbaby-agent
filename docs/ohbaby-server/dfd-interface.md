@@ -99,3 +99,10 @@
 - 每条数据来去清楚？✅ 流 A–D。
 - 所有接口都服务于某条数据流？✅。
 - 数据责任是否清晰、无重复处理？✅ 领域真相归 backend，投递可靠性归本包，界线明确。
+
+
+### 会话进入与只读基线（improve-4.1）
+
+显式进入、重连及执行仍核对当前 owner 和待补保存；同会话进行中的进入合并等待。首次 view/control/history 读取等待已开始的进入，GET 本身不启动持久恢复。等待放在 session owner 提交队列外，避免恢复回调与读取互等。
+
+健康检查不更换 `viewGeneration`，也不重复提交相同 `executionRecovery`；首次 seed 在检查后进行，已有视图只在真实持久修复或投影损坏时 rebuild。generation/revision 的 SDK 校验保持不变。恢复失败后仍尝试只读 seed：历史可读则返回含 `executionRecovery: blocked` 及原原因的视图，执行准入继续阻断；历史本身不可读才使整个会话不可用。其他健康会话不受局部错误影响。

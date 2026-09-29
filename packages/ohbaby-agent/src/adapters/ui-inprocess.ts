@@ -275,7 +275,9 @@ export interface InProcessUiBackendOptions {
   readonly hookExecutor?: HookExecutor;
   readonly initialSnapshot?: UiSnapshot;
   readonly startupReady?: Promise<unknown>;
-  readonly recoverExecutionSession?: (sessionId: string) => Promise<void>;
+  readonly recoverExecutionSession?: (
+    sessionId: string,
+  ) => Promise<boolean> | Promise<void>;
   readonly llmClient?: LLMClientInstance;
   readonly logger?: Logger;
   readonly diagnosticsFilePath?: string;
@@ -786,6 +788,7 @@ export function createInProcessUiBackendClient(
     },
   });
   const sessionInitializationById = new Map<string, Promise<void>>();
+  const sessionEntries = new Map<string, Promise<void>>();
   const sharedGoalService = new GoalService({
     persistence: goalPersistence,
     now: (): number => now().getTime(),
@@ -881,6 +884,43 @@ export function createInProcessUiBackendClient(
     });
     sessionInitializationById.set(sessionId, initialization);
     return initialization;
+  }
+
+  // Entry joins live recovery and seeding outside the owner queue: recovery
+  // callbacks themselves need that queue to commit their result.
+  function enterSession(
+    sessionId: string,
+    waitForStartup = false,
+  ): Promise<void> {
+    const existing = sessionEntries.get(sessionId);
+    if (existing) return existing;
+    const entry = Promise.resolve()
+      .then(async () => {
+        if (waitForStartup) {
+          await ready;
+          await validatePermissionRoot(sessionId);
+        }
+        try {
+          await promptScheduler.recoverSession(sessionId);
+          await initializeSessionView(sessionId);
+        } catch (error) {
+          // Execution can be blocked while history remains readable. A read-only
+          // seed must not retry durable recovery or replace its original error.
+          await sourceProjection.owner
+            .initialize(sessionId)
+            .catch(() => undefined);
+          await sourceProjection.owner.runControl(sessionId, () =>
+            Promise.resolve(),
+          );
+          throw error;
+        }
+      })
+      .finally(() => {
+        if (sessionEntries.get(sessionId) === entry)
+          sessionEntries.delete(sessionId);
+      });
+    sessionEntries.set(sessionId, entry);
+    return entry;
   }
 
   const runtimeController = new InProcessRuntimeController({
@@ -1035,9 +1075,12 @@ export function createInProcessUiBackendClient(
           void sourceProjection.owner
             .runControl(sessionId, async () => {
               await sourceProjection.owner.ready(sessionId);
-              sourceProjection.owner.commit(sessionId, {
-                executionRecovery: state,
-              });
+              const previous =
+                sourceProjection.owner.read(sessionId).executionRecovery;
+              if (JSON.stringify(previous) !== JSON.stringify(state))
+                sourceProjection.owner.commit(sessionId, {
+                  executionRecovery: state,
+                });
             })
             .catch(() => undefined);
         if (state.status === "blocked")
@@ -1048,7 +1091,19 @@ export function createInProcessUiBackendClient(
             message: state.message,
           });
       },
-      beforeExecution: options.recoverExecutionSession,
+      async beforeExecution(sessionId): Promise<void> {
+        const changed = await options.recoverExecutionSession?.(sessionId);
+        if (sourceProjection.owner.hasViewOrPendingSeed(sessionId)) {
+          await sourceProjection.owner.ready(sessionId).catch(() => undefined);
+          let rebuild = changed === true;
+          try {
+            sourceProjection.owner.read(sessionId);
+          } catch {
+            rebuild = true;
+          }
+          if (rebuild) await sourceProjection.owner.rebuild(sessionId);
+        }
+      },
       beforeSessionWrite: initializeSessionView,
       commitCoordinator: {
         runControl: (sessionId, operation) =>
@@ -1763,8 +1818,12 @@ export function createInProcessUiBackendClient(
   async function readSnapshotWithPermission(): Promise<UiSnapshot> {
     await ready;
     const snapshot = await stateStore.readSnapshot();
-    if (snapshot.activeSessionId)
+    if (snapshot.activeSessionId) {
+      await sessionEntries
+        .get(snapshot.activeSessionId)
+        ?.catch(() => undefined);
       await sessionInitializationById.get(snapshot.activeSessionId);
+    }
     const prompts = (await promptScheduler.listVisible()).map(promptRecordToUi);
     // Explicit legacy reads retain their full-history shape; recovery clients use the bounded view.
     const sessions = await Promise.all(
@@ -1869,17 +1928,14 @@ export function createInProcessUiBackendClient(
     const generation = ++selectionGeneration;
     await ready;
     await validatePermissionRoot(sessionId);
-    void promptScheduler
-      .recoverSession(sessionId)
-      .then(() => initializeSessionView(sessionId))
-      .catch((error: unknown) => {
-        publishNotice({
-          key: `session:initialize:${sessionId}`,
-          level: "error",
-          title: "Session unavailable",
-          message: getErrorMessage(error),
-        });
+    void enterSession(sessionId).catch((error: unknown) => {
+      publishNotice({
+        key: `session:initialize:${sessionId}`,
+        level: "error",
+        title: "Session unavailable",
+        message: getErrorMessage(error),
       });
+    });
     if (generation !== selectionGeneration)
       throw permissionError(
         "PERMISSION_SCOPE_CHANGED",
@@ -2861,8 +2917,7 @@ export function createInProcessUiBackendClient(
       );
       if (submitOptions.reservedUserMessageId && recovery.status === "blocked")
         throw new Error(recovery.message);
-      await promptScheduler.recoverSession(submitOptions.sessionId);
-      await initializeSessionView(submitOptions.sessionId);
+      await enterSession(submitOptions.sessionId);
     }
     await options.beforePromptSubmit?.();
     let activePrompt: ActivePromptState = {
@@ -3439,8 +3494,7 @@ export function createInProcessUiBackendClient(
     if (explicitSessionId) {
       await ready;
       await assertCanUseAsPrimarySession(explicitSessionId);
-      await promptScheduler.recoverSession(explicitSessionId);
-      await initializeSessionView(explicitSessionId);
+      await enterSession(explicitSessionId);
       return explicitSessionId;
     }
     const snapshot = await stateStore.readSnapshot();
@@ -3448,8 +3502,7 @@ export function createInProcessUiBackendClient(
       return undefined;
     }
     await assertCanUseAsPrimarySession(snapshot.activeSessionId);
-    await promptScheduler.recoverSession(snapshot.activeSessionId);
-    await initializeSessionView(snapshot.activeSessionId);
+    await enterSession(snapshot.activeSessionId);
     return snapshot.activeSessionId;
   }
 
@@ -3630,30 +3683,21 @@ export function createInProcessUiBackendClient(
     if (disposed) return;
     const selected = await stateStore.getActiveSessionId();
     if (selected)
-      void promptScheduler
-        .recoverSession(selected)
-        .then(() => initializeSessionView(selected))
-        .catch((error: unknown) => {
-          publishNotice({
-            key: `session:initialize:${selected}`,
-            level: "error",
-            title: "Session unavailable",
-            message: getErrorMessage(error),
-          });
+      void enterSession(selected).catch((error: unknown) => {
+        publishNotice({
+          key: `session:initialize:${selected}`,
+          level: "error",
+          title: "Session unavailable",
+          message: getErrorMessage(error),
         });
+      });
     await promptScheduler.init();
   });
   // The eager startup promise remains observable through initialize and writes.
   void ready.catch(() => undefined);
   return {
     initialize: () => ready,
-    async initializeSession(sessionId): Promise<void> {
-      await ready;
-      await validatePermissionRoot(sessionId);
-      await promptScheduler.recoverSession(sessionId);
-      await initializeSessionView(sessionId);
-      await sourceProjection.owner.rebuild(sessionId);
-    },
+    initializeSession: (sessionId) => enterSession(sessionId, true),
     getSubagentConversationView: (input) => subagentConversations.read(input),
     retainSubagentConversation: (input) => subagentConversations.retain(input),
     releaseSubagentConversation: (input) =>
@@ -3666,13 +3710,32 @@ export function createInProcessUiBackendClient(
     },
     async getSessionView(input): Promise<UiSessionView> {
       await validateSessionRead(input);
+      const entry = sessionEntries.get(input.sessionId);
+      if (entry) {
+        try {
+          await entry;
+        } catch (error) {
+          // Return the blocked view when its history was readable; otherwise
+          // preserve the original entry error instead of rebuilding in a loop.
+          try {
+            return {
+              ...sourceProjection.owner.read(input.sessionId),
+              serverNow: Date.now(),
+            };
+          } catch {
+            throw error;
+          }
+        }
+      }
       try {
         await sourceProjection.owner.ready(input.sessionId);
         return {
           ...sourceProjection.owner.read(input.sessionId),
           serverNow: Date.now(),
         };
-      } catch {
+      } catch (error) {
+        if (!sourceProjection.owner.hasViewOrPendingSeed(input.sessionId))
+          throw error;
         await sourceProjection.owner.rebuild(input.sessionId);
         return {
           ...sourceProjection.owner.read(input.sessionId),
@@ -3682,6 +3745,7 @@ export function createInProcessUiBackendClient(
     },
     async getSessionHistory(input): Promise<UiSessionHistory> {
       await validateSessionRead(input);
+      await sessionEntries.get(input.sessionId)?.catch(() => undefined);
       await sourceProjection.owner.ready(input.sessionId);
       return sourceProjection.history(
         input.sessionId,
@@ -3691,7 +3755,14 @@ export function createInProcessUiBackendClient(
     },
     async getSessionControl(input): Promise<UiSessionControl> {
       await validateSessionRead(input);
-      if (sharedGoalService.peekSnapshot(input.sessionId) === undefined)
+      await sessionEntries.get(input.sessionId)?.catch(() => undefined);
+      const executionRecovery = promptScheduler.getRecoveryState(
+        input.sessionId,
+      );
+      if (
+        sharedGoalService.peekSnapshot(input.sessionId) === undefined &&
+        executionRecovery.status !== "blocked"
+      )
         throw permissionError(
           "SESSION_CONTROL_UNAVAILABLE",
           "Session execution control has not initialized",
@@ -3712,7 +3783,7 @@ export function createInProcessUiBackendClient(
         runtimeEpoch: permissionProjection.permissionEpoch,
         sessionId: input.sessionId,
         rootSessionId: input.sessionId,
-        executionRecovery: promptScheduler.getRecoveryState(input.sessionId),
+        executionRecovery,
         runId: activeRunId ?? null,
         driver: activeRunId ? (active?.owner ?? null) : null,
       };

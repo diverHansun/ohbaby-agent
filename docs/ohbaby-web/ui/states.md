@@ -21,6 +21,13 @@
 
 ---
 
+### 会话首次加载与重同步
+
+- 选择新的 binding 后立即按新会话身份显示，不能借用旧会话消息或发送/Stop 控制。草稿仍按会话保存且可编辑。
+- 首次读取在 800ms 内完成时不显示恢复横幅；超过 800ms 后在内容留白中显示次要文字 `Loading conversation…`，使用 `role="status" aria-live="polite"`，不挤动 composer。
+- 同会话已有内容的正常重连保留内容，只通过连接状态说明同步；缓存中的 running 不代表已确认实时状态。实际读取失败显示错误、`role="alert"` 和 `Retry conversation`。
+- 健康执行检查只保留后端准入等待，不发布虚假的 recovering 状态抢占 Web/TUI header。真实补保存或失败继续显示恢复状态与原因；执行失败且历史可读时保留历史及草稿。
+
 ## 2. 运行态（run）
 
 - **running**：状态文字 `running`(slate,pulse) + 流内三色波点思考指示器（`Thinking · {elapsed}s`）。composer 空草稿显示圆形方块 Stop，有草稿显示圆形纸飞机；发送后 follow-up 进入队列、草稿清空，恢复 Stop。

@@ -222,7 +222,11 @@ describe("root session execution recovery", () => {
       callId: "a",
       state: { status: "pending", input: {}, raw: "{}" },
     });
-    await Promise.all([f.recover("s"), f.recover("s")]);
+    expect(await Promise.all([f.recover("s"), f.recover("s")])).toEqual([
+      true,
+      true,
+    ]);
+    expect(await f.recover("s")).toBe(false);
     expect(await f.runs.get("dead")).toMatchObject({
       status: "interrupted",
       endTimeSource: "recovery",
@@ -232,7 +236,7 @@ describe("root session execution recovery", () => {
     if (repaired?.type === "tool" && repaired.state.status === "error")
       expect(repaired.state.error).toContain("outcome unknown");
     expect(await f.runs.get("live")).toMatchObject({ status: "pending" });
-    await expect(f.recover("other")).resolves.toBeUndefined();
+    await expect(f.recover("other")).resolves.toBe(false);
     expect(await f.runs.get("live")).toMatchObject({ status: "pending" });
   });
   it("coalesces retries, contains malformed session failures and rejects unknown roots", async () => {
@@ -642,10 +646,28 @@ it.each(["queued", "starting", "running"] as const)(
     const original = await f.prompts.get("p");
     await expect(f.recover("s")).rejects.toThrow(/Prompt p.*unknown owner/);
     expect(await f.prompts.get("p")).toEqual(original);
-    await expect(f.recover("healthy")).resolves.toBeUndefined();
+    await expect(f.recover("healthy")).resolves.toBe(false);
     if (!original) throw new Error("Missing prompt");
     f.prompts.runtimeInputMemory.put({ ...original, status: "retained" });
-    await expect(f.recover("s")).resolves.toBeUndefined();
+    await expect(f.recover("s")).resolves.toBe(false);
     expect((await f.prompts.get("p"))?.status).toBe("retained");
   },
 );
+
+it("carries actual partial repairs through a failed entry until a successful projection refresh", async () => {
+  const f = fixture();
+  await f.runs.createPending({
+    runId: "orphan",
+    sessionId: "s",
+    triggerSource: "user",
+    ownerId: "old",
+    ownerPid: 1,
+  });
+  vi.spyOn(f.messages, "listPageByRun").mockRejectedValueOnce(
+    new Error("history read failed"),
+  );
+  await expect(f.recover("s")).rejects.toThrow("history read failed");
+  expect((await f.runs.get("orphan"))?.status).toBe("interrupted");
+  expect(await f.recover("s")).toBe(true);
+  expect(await f.recover("s")).toBe(false);
+});

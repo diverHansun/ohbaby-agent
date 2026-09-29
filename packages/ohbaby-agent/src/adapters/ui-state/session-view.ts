@@ -97,6 +97,7 @@ export class SessionViewOwner {
 
   async ready(sessionId: string): Promise<void> {
     const partition = this.partitions.get(sessionId);
+    if (!partition?.ready && partition?.error) throw partition.error;
     if (!partition?.ready)
       throw Object.assign(new Error("Session view has not been initialized"), {
         code: "SESSION_NOT_INITIALIZED",

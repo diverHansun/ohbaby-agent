@@ -61,7 +61,12 @@ import { DirectoryPickerDialog } from "../workspace/directory-picker/DirectoryPi
 import { ProjectRail } from "../workspace/ProjectRail.js";
 import { selectViewModel, type ViewModel } from "./selectors.js";
 import { SessionSidebar } from "./SessionSidebar.js";
-import { EmptyState, ErrorBanner, StatusBar } from "./SessionStatus.js";
+import {
+  EmptyState,
+  ErrorBanner,
+  StatusBar,
+  SessionSyncNotice,
+} from "./SessionStatus.js";
 import { useSessionSyncBanner } from "./use-session-sync-banner.js";
 import { useStopRequest } from "./use-stop-request.js";
 
@@ -853,7 +858,7 @@ export function SessionScreen({
         ref={contentRef}
         className={`ohb-app-content ${
           showMain ? "ohb-app-content-main" : "ohb-app-content-empty"
-        } ${view.activeTodoList ? "ohb-app-content-has-todos" : ""} ${approvalDialogVisible ? "has-approval" : ""}`}
+        } ${sessionSyncBanner === "loading" ? "ohb-app-content-loading" : ""} ${view.activeTodoList ? "ohb-app-content-has-todos" : ""} ${approvalDialogVisible ? "has-approval" : ""}`}
       >
         <PermissionModal
           visible={!viewingSubagent}
@@ -873,25 +878,13 @@ export function SessionScreen({
           cancelLabel={stopRequest.label}
           permissions={view.pendingPermissions}
         />
-        {sessionSyncBanner ? (
-          <div className="ohb-error-banner" role="status">
-            <span>
-              {sessionSyncBanner === "recovering"
-                ? "Recovering conversation… Your draft remains editable."
-                : `Conversation unavailable: ${storeSnapshot.sessionSync.error ?? "Recovery failed"}`}
-            </span>
-            {sessionSyncBanner === "error" ? (
-              <button
-                type="button"
-                onClick={() => {
-                  runtime.retrySession();
-                }}
-              >
-                Retry conversation
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+        <SessionSyncNotice
+          state={sessionSyncBanner}
+          error={storeSnapshot.sessionSync.error}
+          onRetry={() => {
+            runtime.retrySession();
+          }}
+        />
         {promptRecoveryReminders.length > 0 ? (
           <div className="ohb-error-banner" role="status">
             <span>

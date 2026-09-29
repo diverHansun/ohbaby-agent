@@ -890,6 +890,7 @@ export function OhbabyTerminalApp({
             client={client}
             disabled={hasDialog || subagentBrowserOpen}
             canSubmit={
+              executionRecovery?.status !== "recovering" &&
               recoveryState.initialized &&
               recoveryState.runtimeEpoch !== undefined &&
               !recoveryState.pending.some((item) =>

@@ -20,7 +20,7 @@ it("preserves the real tool result committed by another SQLite connection after 
   const path = join(root, "facts.db");
   let other: NodeSqliteConnection | undefined;
   let resume: (() => void) | undefined;
-  let repair: Promise<void> | undefined;
+  let repair: Promise<boolean> | undefined;
   try {
     initDatabase({ dbPath: path });
     getDatabase()
@@ -88,7 +88,7 @@ it("preserves the real tool result committed by another SQLite connection after 
       123,
     );
     resume?.();
-    await repair;
+    expect(await repair).toBe(false);
     expect(await manager.getPart(tool.id)).toEqual(actual);
   } finally {
     if (resume) resume();

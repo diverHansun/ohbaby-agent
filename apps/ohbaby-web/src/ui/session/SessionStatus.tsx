@@ -128,3 +128,38 @@ export function ErrorBanner(props: {
     </div>
   );
 }
+
+export function SessionSyncNotice(props: {
+  readonly state: import("./use-session-sync-banner.js").SessionSyncBanner;
+  readonly error?: string;
+  readonly onRetry: () => void;
+}): ReactElement | null {
+  if (!props.state) return null;
+  if (props.state === "loading")
+    return (
+      <div
+        className="ohb-conversation-loading"
+        role="status"
+        aria-live="polite"
+      >
+        Loading conversation…
+      </div>
+    );
+  return (
+    <div
+      className="ohb-error-banner"
+      role={props.state === "error" ? "alert" : "status"}
+    >
+      <span>
+        {props.state === "recovering"
+          ? "Recovering conversation… Your draft remains editable."
+          : `Conversation unavailable: ${props.error ?? "Recovery failed"}`}
+      </span>
+      {props.state === "error" ? (
+        <button type="button" onClick={props.onRetry}>
+          Retry conversation
+        </button>
+      ) : null}
+    </div>
+  );
+}

@@ -3,6 +3,7 @@ import type { SessionSyncState, UiSessionView } from "ohbaby-sdk";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionSyncNotice } from "./SessionStatus.js";
 import {
   INITIAL_LOAD_BANNER_DELAY_MS,
   isSessionRecovery,
@@ -26,7 +27,13 @@ let current: ReturnType<typeof useSessionSyncBanner> = null;
 
 function Probe({ value }: { readonly value: SessionSyncState }): ReactElement {
   current = useSessionSyncBanner(value);
-  return <span />;
+  return (
+    <SessionSyncNotice
+      state={current}
+      error={value.error}
+      onRetry={() => undefined}
+    />
+  );
 }
 
 function render(value: SessionSyncState): void {
@@ -50,8 +57,8 @@ describe("isSessionRecovery", () => {
   it("treats the first read of a new scope as loading", () => {
     expect(isSessionRecovery(state({}))).toBe(false);
   });
-  it("treats an interrupted view, a failure or a retry as recovery", () => {
-    expect(isSessionRecovery(state({ view }))).toBe(true);
+  it("treats a failure or retry as recovery, but keeps ordinary reconnection quiet", () => {
+    expect(isSessionRecovery(state({ view }))).toBe(false);
     expect(isSessionRecovery(state({ error: "boom" }))).toBe(true);
     expect(isSessionRecovery(state({ attempts: 2 }))).toBe(true);
     expect(isSessionRecovery(state({ status: "ready", view }))).toBe(false);
@@ -63,7 +70,7 @@ describe("useSessionSyncBanner", () => {
     render(state({}));
     expect(current).toBeNull();
     act(() => {
-      vi.advanceTimersByTime(INITIAL_LOAD_BANNER_DELAY_MS - 1);
+      vi.advanceTimersByTime(100);
     });
     render(state({ status: "ready", view }));
     act(() => {
@@ -76,14 +83,26 @@ describe("useSessionSyncBanner", () => {
     act(() => {
       vi.advanceTimersByTime(INITIAL_LOAD_BANNER_DELAY_MS);
     });
-    expect(current).toBe("recovering");
+    expect(current).toBe("loading");
+    const notice = container.querySelector('[role="status"]');
+    expect(notice?.textContent).toBe("Loading conversation…");
+    expect(notice?.getAttribute("aria-live")).toBe("polite");
+    expect(container.querySelector(".ohb-error-banner")).toBeNull();
     render(state({ scope: { ...scope, bindingGeneration: 2 } }));
     expect(current).toBeNull();
   });
   it("shows recovery and error immediately", () => {
     render(state({ view }));
+    expect(current).toBeNull();
+    render(state({ view, error: "retrying" }));
     expect(current).toBe("recovering");
     render(state({ status: "error", error: "down" }));
     expect(current).toBe("error");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "down",
+    );
+    expect(container.querySelector("button")?.textContent).toBe(
+      "Retry conversation",
+    );
   });
 });

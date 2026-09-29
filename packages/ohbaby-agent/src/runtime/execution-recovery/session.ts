@@ -44,8 +44,11 @@ function active(run: RunLedgerRecord): boolean {
 /** Explicit entry gate. A failed attempt is kept blocked by its caller, never polled. */
 export function createSessionExecutionRecovery(
   options: SessionRecoveryOptions,
-): (sessionId: string) => Promise<void> {
-  const attempts = new Map<string, Promise<void>>();
+): (sessionId: string) => Promise<boolean> {
+  const attempts = new Map<string, Promise<boolean>>();
+  // Carry partial repairs across a failed attempt so the next successful entry
+  // still refreshes an already seeded projection.
+  const changedSessions = new Set<string>();
   // Only inputs/history of this exact terminal snapshot are checked. Every entry
   // still reads current owners and child eligibility; this is not a session gate cache.
   const checkedHistories = new Map<string, string>();
@@ -181,8 +184,12 @@ export function createSessionExecutionRecovery(
       [...byId.values()]
         .filter((run) => active(run) && recoverable(run))
         .map((run) => run.sessionId),
-    ))
-      await options.runs.recoverOrphanedRuns({ sessionId: affectedSession });
+    )) {
+      const repaired = await options.runs.recoverOrphanedRuns({
+        sessionId: affectedSession,
+      });
+      if (repaired.updatedCount > 0) changedSessions.add(sessionId);
+    }
     if (
       prompts.some(
         (prompt) =>
@@ -192,11 +199,13 @@ export function createSessionExecutionRecovery(
           isValidOwnerPid(prompt.ownerPid) &&
           !alive(prompt.ownerPid),
       )
-    )
-      await options.prompts.recoverAllInterrupted({
+    ) {
+      const repaired = await options.prompts.recoverAllInterrupted({
         sessionId,
         scopeKey: options.scopeKey,
       });
+      if (repaired > 0) changedSessions.add(sessionId);
+    }
     for (const previous of byId.values()) {
       // Legacy observed terminals also need one history check: their input
       // closure never proved that every model request/tool result was saved.
@@ -215,25 +224,30 @@ export function createSessionExecutionRecovery(
           run.runId,
           run.inputsCloseReason ?? "process-interrupted",
         );
+        changedSessions.add(sessionId);
         run = await options.runs.get(previous.runId);
         if (!run || active(run) || run.inputsClosedAt === undefined)
           throw new Error(
             `Recovery blocked: Run ${previous.runId} inputs remain open`,
           );
       }
-      await repairInterruptedRunHistory(options.messages, {
-        sessionId: run.sessionId,
-        contextScopeId: run.contextScopeId,
-        runId: run.runId,
-        reason: "process-interrupted",
-        now,
-      });
+      if (
+        await repairInterruptedRunHistory(options.messages, {
+          sessionId: run.sessionId,
+          contextScopeId: run.contextScopeId,
+          runId: run.runId,
+          reason: "process-interrupted",
+          now,
+        })
+      )
+        changedSessions.add(sessionId);
       // Commit progress per Run, so a later history/child write failure cannot
       // make every explicit retry spend its whole budget rechecking earlier Runs.
       checkedHistories.set(run.runId, JSON.stringify(run));
     }
     for (const execution of affectedExecutions)
-      if (execution.status === "queued" || execution.status === "running")
+      if (execution.status === "queued" || execution.status === "running") {
+        changedSessions.add(sessionId);
         await options.executions.finish(
           {
             executionId: execution.executionId,
@@ -245,7 +259,9 @@ export function createSessionExecutionRecovery(
             completedAt: now(),
           },
         );
+      }
     for (const { instance } of instanceRepairs) {
+      changedSessions.add(sessionId);
       const affected = affectedExecutions.filter(
         (execution) => execution.subagentId === instance.subagentId,
       );
@@ -262,7 +278,7 @@ export function createSessionExecutionRecovery(
       });
     }
   }
-  return (sessionId): Promise<void> => {
+  return (sessionId): Promise<boolean> => {
     const existing = attempts.get(sessionId);
     if (existing) return existing;
     const attempt = Promise.resolve()
@@ -271,6 +287,7 @@ export function createSessionExecutionRecovery(
           repair(sessionId),
         ),
       )
+      .then(() => changedSessions.delete(sessionId))
       .finally(() => {
         if (attempts.get(sessionId) === attempt) attempts.delete(sessionId);
       });

@@ -60,17 +60,15 @@ const DEFAULT_PERMISSION_LEVEL: UiPermissionLevel = "default";
 
 export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
   const daemonSnapshot = snapshot.view.snapshot;
-  const selectedRoot = daemonSnapshot
-    ? daemonSnapshot.activeSessionId
-    : snapshot.permissionSync.binding?.rootSessionId;
+  const selectedRoot = snapshot.permissionSync.binding
+    ? snapshot.permissionSync.binding.rootSessionId
+    : daemonSnapshot?.activeSessionId;
   const indexedSession = snapshot.sessionIndex.find(
     (session) => session.id === selectedRoot,
   );
   const activeSession =
     daemonSnapshot?.sessions.find((session) => session.id === selectedRoot) ??
-    (indexedSession
-      ? { ...indexedSession, messages: [] }
-      : selectActiveSession(daemonSnapshot));
+    (indexedSession ? { ...indexedSession, messages: [] } : null);
   const activeSessionId = selectedRoot ?? activeSession?.id;
   const control = snapshot.sessionControl;
   const controlMatches =
@@ -100,7 +98,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
     ? snapshotStatus?.kind === "running" && snapshotStatus.runId === activeRunId
       ? snapshotStatus
       : { kind: "running", runId: activeRunId }
-    : coreReady
+    : coreReady && daemonSnapshot?.activeSessionId === activeSessionId
       ? (snapshotStatus ?? { kind: "idle" })
       : { kind: "idle" };
   const permission = daemonSnapshot?.permission;
@@ -139,6 +137,7 @@ export function selectViewModel(snapshot: StoreSnapshot): ViewModel {
       canSend:
         snapshot.connectionState === "live" &&
         coreReady &&
+        executionRecovery?.status !== "recovering" &&
         (!activeSessionId || controlMatches) &&
         !pendingUnknown,
       canStop:

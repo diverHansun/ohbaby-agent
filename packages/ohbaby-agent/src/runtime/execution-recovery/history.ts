@@ -12,7 +12,8 @@ export interface InterruptedHistoryInput {
 export async function repairInterruptedRunHistory(
   manager: MessageManager,
   input: InterruptedHistoryInput,
-): Promise<void> {
+): Promise<boolean> {
+  let changed = false;
   let before: string | undefined;
   for (;;) {
     const page = await manager.listPageByRun(input.sessionId, input.runId, {
@@ -28,7 +29,8 @@ export async function repairInterruptedRunHistory(
             request.endedAt === undefined &&
             request.outcome === "running",
         );
-        if (unfinished.length)
+        if (unfinished.length) {
+          changed = true;
           await manager.updateMessage(message.info.id, {
             modelRequests: unfinished.map((request) => ({
               ...request,
@@ -37,6 +39,7 @@ export async function repairInterruptedRunHistory(
               endTimeSource: "recovery",
             })),
           });
+        }
       }
       for (const part of message.parts) {
         if (
@@ -52,22 +55,23 @@ export async function repairInterruptedRunHistory(
             current.state.status !== "running")
         )
           continue;
-        await repairTool(manager, current, input);
+        changed = (await repairTool(manager, current, input)) || changed;
       }
     }
     if (!page.hasMore || !page.nextCursor) break;
     before = page.nextCursor;
   }
+  return changed;
 }
 
 async function repairTool(
   manager: MessageManager,
   part: ToolPart,
   input: InterruptedHistoryInput,
-): Promise<void> {
+): Promise<boolean> {
   const recordedAt = (input.now ?? Date.now)();
   const execution = part.metadata?.execution;
-  await manager.updatePart(
+  const result = await manager.updatePart(
     part.id,
     {
       state: {
@@ -94,5 +98,13 @@ async function repairTool(
       },
     },
     { ifToolUnfinished: true },
+  );
+  const recovery =
+    result.type === "tool" ? result.metadata?.recovery : undefined;
+  return (
+    typeof recovery === "object" &&
+    recovery !== null &&
+    "recordedAt" in recovery &&
+    recovery.recordedAt === recordedAt
   );
 }

@@ -530,3 +530,17 @@
   padding: 12px 14px;
 }
 
+/* A slow first read occupies conversation whitespace without moving the composer. */
+.ohb-conversation-loading {
+  position: absolute;
+  top: 30%;
+  inset-inline: 24px;
+  text-align: center;
+  color: #73737c;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.ohb-app-content-loading .ohb-empty-hero {
+  visibility: hidden;
+}

@@ -138,7 +138,7 @@ it.each([
       const original = await manager.getPart(partId);
       const before = existsSync(marker) ? await readFile(marker, "utf8") : "";
       await createDatabaseRunLedger().recoverOrphanedRuns({ sessionId: "s" });
-      const repair = (): Promise<void> =>
+      const repair = (): Promise<boolean> =>
         repairInterruptedRunHistory(manager, {
           sessionId: "s",
           runId: "A",

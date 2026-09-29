@@ -150,6 +150,10 @@ describe("ohbaby-web ui selectors", () => {
     expect(selectViewModel(withView).header.statusLabel).toBe(
       "Checking execution records…",
     );
+    expect(selectViewModel(withView).composer).toMatchObject({
+      canSend: false,
+      disabled: false,
+    });
     const blocked = selectViewModel({
       ...withView,
       sessionSync: {
@@ -717,4 +721,32 @@ describe("independent session recovery gates", () => {
       }).composer.canStop,
     ).toBe(false);
   });
+});
+
+it("uses the new binding while the old session snapshot is still retained", () => {
+  const state = store(baseSnapshot());
+  const selected = selectViewModel({
+    ...state,
+    permissionSync: {
+      ...state.permissionSync,
+      binding: {
+        rootSessionId: "session_2",
+        permissionEpoch: "epoch",
+        bindingGeneration: 2,
+      },
+    },
+    sessionSync: {
+      status: "syncing",
+      attempts: 1,
+      scope: {
+        sessionId: "session_2",
+        runtimeEpoch: "epoch",
+        bindingGeneration: 2,
+      },
+    },
+  });
+  expect(selected.composer.activeSessionId).toBe("session_2");
+  expect(selected.activeSession?.messages ?? []).toEqual([]);
+  expect(selected.composer.canSend).toBe(false);
+  expect(selected.composer.canStop).toBe(false);
 });

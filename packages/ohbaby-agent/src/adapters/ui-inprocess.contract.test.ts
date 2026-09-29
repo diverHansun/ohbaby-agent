@@ -11221,3 +11221,161 @@ it.each(["entry", "shutdown"] as const)(
     }
   },
 );
+
+it("keeps healthy entry generation and revision stable while checking every entry", async () => {
+  const recover = vi.fn((): Promise<void> => Promise.resolve());
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: createInitialSnapshotWithTwoSessions(),
+    recoverExecutionSession: recover,
+  });
+  const events: UiEvent[] = [];
+  const unsubscribe = client.subscribeEvents((event) => events.push(event));
+  try {
+    await client.initializeSession("session_1");
+    const first = await client.getSessionView({ sessionId: "session_1" });
+    const checks = recover.mock.calls.length;
+    await client.initializeSession("session_2");
+    await client.initializeSession("session_1");
+    await client.initializeSession("session_1");
+    expect(recover.mock.calls.length).toBe(checks + 3);
+    expect(
+      (await client.getSessionView({ sessionId: "session_1" })).version,
+    ).toEqual(first.version);
+    expect(
+      events.filter((event) => event.type === "session.unavailable"),
+    ).toHaveLength(0);
+  } finally {
+    unsubscribe();
+    await client.dispose();
+  }
+});
+
+it("joins first reads to explicit initialization and preserves readable blocked history", async () => {
+  const gate = createDeferred<undefined>();
+  const entered = createDeferred<undefined>();
+  const recover = vi.fn(async (sessionId: string) => {
+    if (sessionId !== "session_2") return;
+    entered.resolve(undefined);
+    await gate.promise;
+    throw new Error("original recovery failure");
+  });
+  const messageManager = createMessageManager({
+    bus: createBus(),
+    store: createInMemoryMessageStore(),
+  });
+  await addCoreTextMessage(messageManager, {
+    sessionId: "session_2",
+    role: "user",
+    text: "saved history",
+  });
+  const goalPersistence = new InMemoryGoalPersistence();
+  const goalReads = vi.spyOn(goalPersistence, "list");
+  const client = createInProcessUiBackendClient({
+    goalPersistence,
+    messageManager,
+    initialSnapshot: createInitialSnapshotWithTwoSessions(),
+    recoverExecutionSession: recover,
+  });
+  try {
+    await client.initializeSession("session_1");
+    const entry = client.initializeSession("session_2");
+    const failure = expect(entry).rejects.toThrow("original recovery failure");
+    await entered.promise;
+    let settled = false;
+    const read = client
+      .getSessionView({ sessionId: "session_2" })
+      .finally(() => {
+        settled = true;
+      });
+    void read.catch(() => undefined);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    gate.resolve(undefined);
+    await failure;
+    const blocked = await read;
+    expect(blocked.session.id).toBe("session_2");
+    expect(blocked.session.messages[0]?.parts).toContainEqual(
+      expect.objectContaining({ type: "text", text: "saved history" }),
+    );
+    expect(blocked.executionRecovery).toMatchObject({
+      status: "blocked",
+      message: "original recovery failure",
+    });
+    expect(
+      (await client.getSessionControl({ sessionId: "session_2" }))
+        .executionRecovery,
+    ).toMatchObject({
+      status: "blocked",
+      message: "original recovery failure",
+    });
+    expect(
+      goalReads.mock.calls.some(([sessionId]) => sessionId === "session_2"),
+    ).toBe(false);
+    const checks = recover.mock.calls.length;
+    await client.getSessionView({ sessionId: "session_2" });
+    expect(recover.mock.calls.length).toBe(checks);
+    await client.initializeSession("session_1");
+  } finally {
+    gate.resolve(undefined);
+    await client.dispose();
+  }
+});
+
+it("coalesces cold entry while first view and control reads wait outside the owner queue", async () => {
+  const gate = createDeferred<undefined>();
+  const entered = createDeferred<undefined>();
+  const recover = vi.fn(async () => {
+    entered.resolve(undefined);
+    await gate.promise;
+  });
+  const client = createInProcessUiBackendClient({
+    initialSnapshot: {
+      ...createInitialSnapshotWithTwoSessions(),
+      activeSessionId: null,
+    },
+    recoverExecutionSession: recover,
+  });
+  const events: UiEvent[] = [];
+  const unsubscribe = client.subscribeEvents((event) => events.push(event));
+  try {
+    const one = client.initializeSession("session_2");
+    const two = client.initializeSession("session_2");
+    await entered.promise;
+    let settled = 0;
+    const view = client
+      .getSessionView({ sessionId: "session_2" })
+      .then((value) => {
+        settled++;
+        return value;
+      });
+    const control = client
+      .getSessionControl({ sessionId: "session_2" })
+      .then((value) => {
+        settled++;
+        return value;
+      });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(0);
+    gate.resolve(undefined);
+    await withTimeout(
+      Promise.all([one, two, view, control]),
+      1000,
+      "Entry and reads deadlocked",
+    );
+    expect(recover).toHaveBeenCalledTimes(1);
+    expect(await control).toMatchObject({
+      sessionId: "session_2",
+      executionRecovery: { status: "ready" },
+    });
+    expect((await view).version).toEqual(
+      (await client.getSessionView({ sessionId: "session_2" })).version,
+    );
+    expect(
+      events.filter((event) => event.type === "session.unavailable"),
+    ).toEqual([]);
+  } finally {
+    gate.resolve(undefined);
+    unsubscribe();
+    await client.dispose();
+  }
+});
