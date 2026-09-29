@@ -2,6 +2,7 @@ import {
   parseSlashCommandInput,
   resolveSlashCommand,
   type UiBackendClient,
+  type UiCommandCompletion,
   type UiSlashCommandInvocation,
   type UiWebCommandCatalog,
 } from "ohbaby-sdk";
@@ -42,9 +43,10 @@ export interface OhbabyWebRuntime {
   dispose(): Promise<void>;
   executeSlashCommand(input: {
     readonly allowOverlay?: boolean;
+    readonly clientRequestId?: string;
     readonly sessionId?: string;
     readonly text: string;
-  }): Promise<void>;
+  }): Promise<UiCommandCompletion>;
   getWorkspaceSnapshot(): WorkspaceSnapshot;
   getDirectoryPickerRoots(): Promise<DirectoryPickerRootsResponse>;
   hideWorkspace(directory: string): Promise<void>;
@@ -150,11 +152,22 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
 
   async executeSlashCommand(input: {
     readonly allowOverlay?: boolean;
+    readonly clientRequestId?: string;
     readonly sessionId?: string;
     readonly text: string;
-  }): Promise<void> {
+  }): Promise<UiCommandCompletion> {
     const client = this.requireActiveClient();
+    const binding = this.store.getSnapshot().permissionSync.binding;
+    const sessionId = input.sessionId ?? binding?.rootSessionId ?? undefined;
     const catalog = await client.listWebCommandsForRuntime();
+    if (
+      this.activeClient !== client ||
+      this.store.getSnapshot().permissionSync.binding?.bindingGeneration !==
+        binding?.bindingGeneration ||
+      this.store.getSnapshot().permissionSync.binding?.permissionEpoch !==
+        binding?.permissionEpoch
+    )
+      throw new Error("Selected session changed before command submission");
     const resolved = resolveSlashCommand(
       catalog,
       parseSlashCommandInput(input.text),
@@ -176,18 +189,23 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       this.sessionSelectionGeneration += 1;
       this.preserveRememberedSession = false;
     }
-    await client.executeCommand({
+    const invocation = {
       argumentMode: resolved.command.argumentMode,
       argv: resolved.argv,
       body: resolved.body,
       clientInvocationId: createClientInvocationId(),
+      ...(input.clientRequestId === undefined
+        ? {}
+        : { clientRequestId: input.clientRequestId }),
       commandId: resolved.command.id,
       path: resolved.path,
       raw: resolved.raw,
       rawArgs: resolved.rawArgs,
-      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      ...(sessionId === undefined ? {} : { sessionId }),
       surface: "tui",
-    } satisfies UiSlashCommandInvocation);
+    } satisfies UiSlashCommandInvocation;
+    this.store.beginCommand(invocation, input.allowOverlay === true);
+    return client.executeCommand(invocation);
   }
 
   getWorkspaceSnapshot(): WorkspaceSnapshot {

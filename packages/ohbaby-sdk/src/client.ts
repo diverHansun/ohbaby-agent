@@ -14,6 +14,7 @@ import type { UiReasoningConfig } from "./connect-model.js";
 import type { UiSessionRecoveryClient } from "./session-view.js";
 import type { UiSession } from "./snapshot.js";
 import type {
+  UiCommandCompletion,
   UiSlashCommandCatalog,
   UiSlashCommandInvocation,
   UiSlashCommandSurface,
@@ -198,7 +199,9 @@ export interface UiCommandClient
     input: UiSetSearchApiKeyInput,
   ): Promise<UiSetSearchApiKeyResult>;
   setPermission(input: UiPermissionUpdate): Promise<UiPermissionState>;
-  executeCommand(invocation: UiSlashCommandInvocation): Promise<void>;
+  executeCommand(
+    invocation: UiSlashCommandInvocation,
+  ): Promise<UiCommandCompletion>;
   respondPermission(
     requestId: string,
     response: UiPermissionResponse,

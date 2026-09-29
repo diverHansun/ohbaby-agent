@@ -331,6 +331,7 @@ export class DaemonClientViewCoordinator {
   private readonly commandBindingGenerations = new Map<string, number>();
   private readonly registrationAttempts = new Map<string, number>();
   private readonly commandOwnersByRunId = new Map<string, string>();
+  private readonly commandRunsByInvocationId = new Map<string, string>();
   private readonly interactionResponseStates = new Map<
     string,
     InteractionResponseState
@@ -794,6 +795,10 @@ export class DaemonClientViewCoordinator {
         );
         if (owner !== undefined) {
           this.commandOwnersByRunId.set(event.command.commandRunId, owner);
+          this.commandRunsByInvocationId.set(
+            event.command.clientInvocationId,
+            event.command.commandRunId,
+          );
         }
         return;
       }
@@ -918,13 +923,17 @@ export class DaemonClientViewCoordinator {
     return view.activeSessionId === sessionId ? event : undefined;
   }
 
-  afterEventBroadcast(event: UiEvent): void {
-    // A command may deliver multiple result events, so only an explicit
-    // failure is terminal here. Successful ownership is released during
-    // client routing cleanup until the event contract gains a completion signal.
-    if (event.type === "command.failed") {
-      this.forgetCommandOwner(event);
-    }
+  afterEventBroadcast(_event: UiEvent): void {
+    // Result/failure events are nonterminal. The request releases ownership
+    // after the awaited handler has handed every synchronous event to routing.
+  }
+
+  completeCommandInvocation(clientInvocationId: string): void {
+    const runId = this.commandRunsByInvocationId.get(clientInvocationId);
+    this.commandOwnersByInvocationId.delete(clientInvocationId);
+    this.commandBindingGenerations.delete(clientInvocationId);
+    this.commandRunsByInvocationId.delete(clientInvocationId);
+    if (runId !== undefined) this.commandOwnersByRunId.delete(runId);
   }
 
   disconnectClient(clientId: string): readonly string[] {
@@ -939,7 +948,7 @@ export class DaemonClientViewCoordinator {
     const interactionIds: string[] = [];
     for (const [invocationId, owner] of this.commandOwnersByInvocationId) {
       if (owner === clientId) {
-        this.commandOwnersByInvocationId.delete(invocationId);
+        this.completeCommandInvocation(invocationId);
         this.commandBindingGenerations.delete(invocationId);
       }
     }
@@ -965,6 +974,10 @@ export class DaemonClientViewCoordinator {
   }
 
   resetRuntimeState(): void {
+    this.commandOwnersByInvocationId.clear();
+    this.commandOwnersByRunId.clear();
+    this.commandRunsByInvocationId.clear();
+    this.commandBindingGenerations.clear();
     this.provisionalPromptBindings.clear();
     this.activePrompt = undefined;
     this.activePromptsBySession.clear();
@@ -1110,17 +1123,6 @@ export class DaemonClientViewCoordinator {
       this.commandOwnersByInvocationId.get(event.clientInvocationId) ??
       this.commandOwnersByRunId.get(event.commandRunId)
     );
-  }
-
-  private forgetCommandOwner(
-    event: Extract<
-      UiEvent,
-      { type: "command.result.delivered" | "command.failed" }
-    >,
-  ): void {
-    this.commandOwnersByInvocationId.delete(event.clientInvocationId);
-    this.commandBindingGenerations.delete(event.clientInvocationId);
-    this.commandOwnersByRunId.delete(event.commandRunId);
   }
 
   private setClientActiveSession(clientId: string, sessionId: string): void {

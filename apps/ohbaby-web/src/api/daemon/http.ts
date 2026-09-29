@@ -283,8 +283,12 @@ export class DaemonHttpClient {
     });
   }
 
-  executeCommand(input: ExecuteCommandRequest): Promise<OkResponse> {
+  executeCommand(
+    input: ExecuteCommandRequest,
+    signal?: AbortSignal,
+  ): Promise<import("ohbaby-sdk").UiCommandCompletion & OkResponse> {
     return this.request("/v1/commands", {
+      signal,
       body: input,
       method: "POST",
     });

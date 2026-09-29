@@ -1,10 +1,15 @@
-import type { UiPromptSubmission } from "ohbaby-sdk";
+import type {
+  UiCommandCompletion,
+  UiCommandInvocation,
+  UiPromptSubmission,
+} from "ohbaby-sdk";
 import {
   createInitialViewState,
   reduceUiEvent,
   replaceSnapshot,
 } from "../api/daemon/eventReducer.js";
 import type {
+  CommandNotice,
   ConnectionState,
   StoreSnapshot,
   UnknownPromptRequest,
@@ -27,6 +32,11 @@ export type StoreListener = () => void;
 export type UiEventSource = "incremental" | "snapshot-barrier";
 
 export interface OhbabyWebStore {
+  beginCommand(invocation: UiCommandInvocation, overlay?: boolean): void;
+  completeCommand(completion: UiCommandCompletion): void;
+  failCommand(clientInvocationId: string, message: string): void;
+  consumeCommand(clientInvocationId: string): void;
+  clearCommands(): void;
   setSessionSync(state: SessionSyncState): void;
   setSessionControl(control: UiSessionControl | null): void;
   installSessionHistory(page: UiSessionHistory): void;
@@ -74,6 +84,85 @@ export function createOhbabyWebStore(): OhbabyWebStore {
   const deleted = new Set<string>();
   const loadedPrompts = new Map<string, UiPromptSubmission>();
   const listeners = new Set<StoreListener>();
+  const commands = new Map<
+    string,
+    {
+      invocation: UiCommandInvocation;
+      consumed: boolean;
+      overlay: boolean;
+      events: number;
+      outputs: number;
+      lastSeq: number;
+      completion?: UiCommandCompletion;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  function releaseCommand(id: string): void {
+    const command = commands.get(id);
+    if (command) clearTimeout(command.timer);
+    commands.delete(id);
+  }
+  function clearCommands(): void {
+    for (const id of commands.keys()) releaseCommand(id);
+    snapshot = { ...snapshot, view: { ...snapshot.view, commandNotices: [] } };
+  }
+  function seedNotice(invocation: UiCommandInvocation): CommandNotice {
+    return {
+      id: invocation.clientInvocationId,
+      commandId: invocation.commandId,
+      sessionId: invocation.sessionId,
+      path: invocation.path,
+      createdAt: new Date().toISOString(),
+      kind: "running",
+      text: `/${invocation.path.join(" ")} running`,
+    };
+  }
+  function commandError(id: string, message: string): void {
+    const command = commands.get(id);
+    if (!command || command.consumed || command.overlay) return;
+    const existing = snapshot.view.commandNotices.find(
+      (notice) => notice.id === id,
+    );
+    const notice = {
+      ...(existing ?? seedNotice(command.invocation)),
+      kind: "error" as const,
+      text: existing?.kind === "error" ? existing.text : message,
+    };
+    snapshot = {
+      ...snapshot,
+      view: {
+        ...snapshot.view,
+        commandNotices: [
+          ...snapshot.view.commandNotices.filter((item) => item.id !== id),
+          notice,
+        ].slice(-64),
+      },
+    };
+  }
+  function settleCommand(id: string): void {
+    const command = commands.get(id);
+    if (!command?.completion) return;
+    if (
+      command.events < command.completion.eventCount ||
+      command.outputs < command.completion.outputCount
+    )
+      return;
+    if (
+      command.completion.outputCount === 0 &&
+      command.completion.status === "completed"
+    ) {
+      snapshot = {
+        ...snapshot,
+        view: {
+          ...snapshot.view,
+          commandNotices: snapshot.view.commandNotices.filter(
+            (notice) => notice.id !== id,
+          ),
+        },
+      };
+    }
+    releaseCommand(id);
+  }
 
   function publish(next: StoreSnapshot): void {
     const serverNow = next.view.snapshot?.serverNow;
@@ -159,6 +248,76 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     };
   }
   return {
+    beginCommand(invocation, overlay = false): void {
+      if (commands.has(invocation.clientInvocationId))
+        throw new Error("Command is already pending");
+      if (commands.size >= 128) throw new Error("Too many pending commands");
+      const id = invocation.clientInvocationId;
+      const timer = setTimeout(() => {
+        commandError(
+          id,
+          "Command result is unconfirmed. Check its effects before running it again.",
+        );
+        releaseCommand(id);
+        publish(snapshot);
+      }, 60_000);
+      (timer as unknown as { unref?: () => void }).unref?.();
+      commands.set(id, {
+        invocation,
+        overlay,
+        consumed: false,
+        events: 0,
+        outputs: 0,
+        lastSeq: snapshot.view.lastAppliedSeqNum,
+        timer,
+      });
+      if (
+        !overlay &&
+        ["help", "status", "skills", "mcps"].includes(invocation.commandId)
+      )
+        snapshot = {
+          ...snapshot,
+          view: {
+            ...snapshot.view,
+            commandNotices: [
+              ...snapshot.view.commandNotices,
+              seedNotice(invocation),
+            ].slice(-64),
+          },
+        };
+      publish(snapshot);
+    },
+    completeCommand(completion): void {
+      const command = commands.get(completion.clientInvocationId);
+      if (!command) return;
+      command.completion = completion;
+      if (completion.status === "failed")
+        commandError(completion.clientInvocationId, completion.error.message);
+      settleCommand(completion.clientInvocationId);
+      publish(snapshot);
+    },
+    failCommand(id, message): void {
+      commandError(id, message);
+      releaseCommand(id);
+      publish(snapshot);
+    },
+    consumeCommand(id): void {
+      const command = commands.get(id);
+      if (command) command.consumed = true;
+      publish({
+        ...snapshot,
+        view: {
+          ...snapshot.view,
+          commandNotices: snapshot.view.commandNotices.filter(
+            (notice) => notice.id !== id,
+          ),
+        },
+      });
+    },
+    clearCommands(): void {
+      clearCommands();
+      publish(snapshot);
+    },
     setSessionSync(sessionSync): void {
       const previous = snapshot.sessionSync;
       const changedScope =
@@ -167,6 +326,7 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         previous.scope?.bindingGeneration !==
           sessionSync.scope?.bindingGeneration;
       if (changedScope) {
+        clearCommands();
         loaded.clear();
         loadedPrompts.clear();
         observed.clear();
@@ -343,7 +503,59 @@ export function createOhbabyWebStore(): OhbabyWebStore {
         event.type === "session.unavailable"
       )
         return false;
-      const nextView = reduceUiEvent(snapshot.view, event, seqNum);
+      let commandId: string | undefined;
+      let hideCommand = false;
+      if (
+        event.type === "command.started" ||
+        event.type === "command.result.delivered" ||
+        event.type === "command.failed"
+      ) {
+        commandId =
+          event.type === "command.started"
+            ? event.command.clientInvocationId
+            : event.clientInvocationId;
+        const command = commands.get(commandId);
+        if (
+          !command ||
+          seqNum <= command.lastSeq ||
+          seqNum <= snapshot.view.lastAppliedSeqNum
+        )
+          return false;
+        command.lastSeq = seqNum;
+        hideCommand = command.consumed || command.overlay;
+        if (event.type !== "command.started") {
+          command.events += 1;
+          if (event.type === "command.result.delivered" && event.output)
+            command.outputs += 1;
+          if (
+            !hideCommand &&
+            (event.type === "command.failed" || event.output) &&
+            !snapshot.view.commandNotices.some(
+              (notice) => notice.id === commandId,
+            )
+          )
+            snapshot = {
+              ...snapshot,
+              view: {
+                ...snapshot.view,
+                commandNotices: [
+                  ...snapshot.view.commandNotices,
+                  seedNotice(command.invocation),
+                ],
+              },
+            };
+          event = { ...event, commandRunId: commandId };
+        } else {
+          // Registration owns origin and loading state; started can be missing or replayed.
+          return false;
+        }
+      }
+      let nextView = reduceUiEvent(snapshot.view, event, seqNum);
+      if (hideCommand)
+        nextView = {
+          ...nextView,
+          commandNotices: snapshot.view.commandNotices,
+        };
       if (nextView === snapshot.view) {
         return false;
       }
@@ -359,6 +571,10 @@ export function createOhbabyWebStore(): OhbabyWebStore {
               }
             : nextView,
       });
+      if (commandId) {
+        settleCommand(commandId);
+        publish(snapshot);
+      }
       return true;
     },
     getSnapshot(): StoreSnapshot {
@@ -367,10 +583,14 @@ export function createOhbabyWebStore(): OhbabyWebStore {
     replaceSnapshot(nextSnapshot, seqNum): void {
       publish({
         ...snapshot,
-        view: replaceSnapshot(nextSnapshot, seqNum),
+        view: {
+          ...replaceSnapshot(nextSnapshot, seqNum),
+          commandNotices: snapshot.view.commandNotices,
+        },
       });
     },
     reset(): void {
+      clearCommands();
       loaded.clear();
       observed.clear();
       deleted.clear();

@@ -1638,7 +1638,7 @@ function selectSessionThroughResumeCommand(
   client: UiBackendClient,
   sessionId: string,
   clientInvocationId: string,
-): Promise<void> {
+): ReturnType<UiBackendClient["executeCommand"]> {
   return client.executeCommand({
     argv: ["--session_id", sessionId],
     clientInvocationId,
@@ -6344,7 +6344,7 @@ describe("createInProcessUiBackendClient", () => {
       );
       await client.listCommands({ surface: "web" });
       const request = "修复切换会话时的恢复横幅";
-      await client.executeCommand({
+      const commandCompletion = await client.executeCommand({
         argv: [request],
         clientInvocationId: "skill-title",
         commandId: "skill.review-session",
@@ -6377,6 +6377,9 @@ describe("createInProcessUiBackendClient", () => {
         content: `Skill: review-session\nRequest: ${request}`,
       });
       expect(titleRequests[0]?.tools ?? []).toHaveLength(0);
+      if (!commandCompletion.promptReceipt)
+        throw new Error("Missing skill receipt");
+      await client.waitForPrompt(commandCompletion.promptReceipt.promptId);
       const mainRequests = controlled.requests.filter(
         (r) => !isTitleGenerationRequest(r),
       );
@@ -8195,7 +8198,7 @@ describe("createInProcessUiBackendClient", () => {
         recorder: { record: (record) => records.push(record) },
       });
 
-      await client.executeCommand({
+      const commandCompletion = await client.executeCommand({
         argv: ["check", "src/app.ts"],
         clientInvocationId: "cmd_skill_1",
         commandId: "skill.code-review",
@@ -8205,6 +8208,9 @@ describe("createInProcessUiBackendClient", () => {
         surface: "tui",
       });
 
+      if (!commandCompletion.promptReceipt)
+        throw new Error("Missing skill receipt");
+      await rawClient.waitForPrompt(commandCompletion.promptReceipt.promptId);
       const promptText = JSON.stringify(requests[0]?.messages);
       expect(promptText).toContain("# Code Review");
       expect(promptText).toContain("Check behavior and tests.");
@@ -10343,7 +10349,7 @@ describe("createInProcessUiBackendClient", () => {
 
     await expect(
       withTimeout(execution, 250, "command interaction remained pending"),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ status: "completed", outputCount: 0 });
     await expect(resolved).resolves.toMatchObject({
       status: "cancelled",
       type: "interaction.resolved",

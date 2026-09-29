@@ -590,8 +590,9 @@ describe("source session recovery HTTP/RPC/SSE", () => {
       ).toBe(false);
       // The same obsolete command arriving on the live connection must also be harmless.
       emit(late);
+      emit({ type: "model.invalidated" });
       let live = "";
-      while (!live.includes('"late-command"'))
+      while (!live.includes('"model.invalidated"'))
         live += new TextDecoder().decode((await reader.read()).value);
       expect(live).not.toContain('"session.selected"');
     } finally {

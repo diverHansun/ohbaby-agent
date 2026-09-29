@@ -69,6 +69,38 @@ function requireStringBody(init: RequestInit | undefined): string {
 }
 
 describe("createRemoteUiBackendClient", () => {
+  it("rejects an old daemon's empty command completion without retrying", async () => {
+    const fetcher = vi.fn((_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(requireStringBody(init)) as { id: string };
+      return Promise.resolve(Response.json({ id: body.id, ok: true }));
+    });
+    const client = createRemoteUiBackendClient({
+      clientId: "client_1",
+      fetch: fetcher,
+      port: 4096,
+      startupIntent: undefined,
+    });
+    await expect(
+      client.executeCommand({
+        clientInvocationId: "i",
+        commandId: "status",
+        path: ["status"],
+        raw: "/status",
+        rawArgs: "",
+        argv: [],
+        surface: "tui",
+      }),
+    ).rejects.toThrow("unconfirmed");
+    expect(
+      fetcher.mock.calls.filter(
+        (call) =>
+          (JSON.parse(requireStringBody(call[1])) as { method: string })
+            .method === "executeCommand",
+      ),
+    ).toHaveLength(1);
+    await client.dispose();
+  });
+
   it("throws remote structured errors with their stable fields intact", async () => {
     const client = createRemoteUiBackendClient({
       clientId: "client_1",

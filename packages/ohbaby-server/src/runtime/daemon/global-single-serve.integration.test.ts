@@ -78,7 +78,7 @@ function spawnServe(input: {
           isAbortError: (error) => error instanceof Error && error.name === "AbortError",
           kind: "openai-compatible",
           async streamResponse(request) {
-            if (JSON.stringify(request.messages).includes("Generate a concise title")) {
+            if (JSON.stringify(request.messages).includes("Write a short conversation title")) {
               return (async function* () {
                 yield { textDelta: "Process E2E", finishReason: "stop" };
               })();
@@ -116,7 +116,7 @@ function spawnServe(input: {
           isAbortError: () => false,
           kind: "openai-compatible",
           async streamResponse(request) {
-            if (JSON.stringify(request.messages).includes("Generate a concise title")) {
+            if (JSON.stringify(request.messages).includes("Write a short conversation title")) {
               return (async function* () {
                 yield { textDelta: "Process failure", finishReason: "stop" };
               })();

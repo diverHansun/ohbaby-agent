@@ -3904,6 +3904,36 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
+  it("shows a business failure in the originating goal overlay without claiming success", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.listCommands.mockResolvedValue(catalog(["goal"]));
+    fake.executeSlashCommand.mockResolvedValue({
+      status: "failed",
+      commandRunId: "r",
+      clientInvocationId: "i",
+      outputCount: 0,
+      eventCount: 1,
+      error: { code: "UNAVAILABLE", message: "budget subcommand unavailable" },
+    });
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "/goal budget 100");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+    await clickButton(app.container, "Save goal");
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-error")),
+    );
+    expect(
+      app.container.querySelector(".ohb-structured-error")?.textContent,
+    ).toContain("budget subcommand unavailable");
+    expect(app.container.querySelector(".ohb-structured-success")).toBeNull();
+    expect(app.container.querySelector(".ohb-command-notice")).toBeNull();
+  });
+
   it("executes goal panel actions through the overlay allowance", async () => {
     const fake = createFakeRuntime({
       snapshot: {
@@ -4054,6 +4084,16 @@ function createFakeRuntime(input: {
           }
         : null,
     );
+    const permissions = store.getSnapshot().permissionSync;
+    store.setPermissionSync({
+      ...permissions,
+      binding: {
+        permissionEpoch: "epoch",
+        rootSessionId: snapshot.activeSessionId,
+        bindingGeneration: (permissions.binding?.bindingGeneration ?? 0) + 1,
+      },
+      requests: snapshot.permissions,
+    });
     replaceFixture(snapshot, seq);
   };
   store.replaceSnapshot(input.snapshot, 1);
@@ -4073,7 +4113,14 @@ function createFakeRuntime(input: {
     Promise.resolve(),
   );
   const executeSlashCommand = vi.fn<OhbabyWebRuntime["executeSlashCommand"]>(
-    () => Promise.resolve(),
+    () =>
+      Promise.resolve({
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      }),
   );
   const editQueuedPrompt = vi.fn<UiBackendClient["editQueuedPrompt"]>(() =>
     Promise.reject(new Error("unused")),
@@ -4194,7 +4241,15 @@ function createFakeRuntime(input: {
     steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     cancelQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     connectModel,
-    executeCommand: vi.fn(() => Promise.resolve()),
+    executeCommand: vi.fn(() =>
+      Promise.resolve({
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      }),
+    ),
     editQueuedPrompt,
     resubmitRetainedPrompt: vi.fn(() =>
       Promise.reject(new Error("Unused retained resubmission stub")),
@@ -4570,6 +4625,16 @@ async function showSkillsModal(
   const clientInvocationId = `invoke_skills${suffix}`;
   const commandRunId = `command_skills${suffix}`;
   await act(async () => {
+    fake.store.beginCommand({
+      clientInvocationId,
+      commandId: "skills",
+      path: ["skills"],
+      raw: "/skills",
+      rawArgs: "",
+      argv: [],
+      surface: "tui",
+      sessionId: "session_1",
+    });
     fake.store.applyEvent(
       {
         command: {
@@ -4618,6 +4683,16 @@ async function showSkillsModal(
 
 async function showStatusModal(fake: FakeRuntime): Promise<void> {
   await act(async () => {
+    fake.store.beginCommand({
+      clientInvocationId: "invoke_status",
+      commandId: "status",
+      path: ["status"],
+      raw: "/status",
+      rawArgs: "",
+      argv: [],
+      surface: "tui",
+      sessionId: "session_1",
+    });
     fake.store.applyEvent(
       {
         command: {
@@ -5782,7 +5857,7 @@ describe("feature boundary late-result isolation", () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
-    const pending = deferred<undefined>();
+    const pending = deferred<import("ohbaby-sdk").UiCommandCompletion>();
     fake.executeSlashCommand.mockReturnValue(pending.promise);
     const app = mountApp(fake.runtime);
     await setTextareaValue(app.container, "/status");
@@ -5795,7 +5870,13 @@ describe("feature boundary late-result isolation", () => {
     await setTextareaValue(app.container, "B draft");
     const disabled = app.container.querySelector("textarea")?.disabled;
     await act(async () => {
-      pending.resolve(undefined);
+      pending.resolve({
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      });
       await pending.promise;
     });
     expect(disabled).toBe(false);

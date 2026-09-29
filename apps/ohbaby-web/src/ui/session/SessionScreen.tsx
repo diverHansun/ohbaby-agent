@@ -314,9 +314,14 @@ export function SessionScreen({
   const composerEditRevision = useRef(0);
   const composerPrefillNonce = useRef(0);
   const commandScopeGeneration = useRef(0);
-  const trackComposerRevision = useCallback((revision: number): void => {
-    composerEditRevision.current = revision;
-  }, []);
+  const trackComposerRevision = useCallback(
+    (revision: number): void => {
+      composerEditRevision.current = revision;
+      for (const notice of runtime.store.getSnapshot().view.commandNotices)
+        if (notice.kind === "error") runtime.store.consumeCommand(notice.id);
+    },
+    [runtime],
+  );
   const [actionError, setActionError] = useState<string | null>(null);
   const stopRequest = useStopRequest(
     runtime,
@@ -329,9 +334,6 @@ export function SessionScreen({
   >(null);
   const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(false);
-  const [closedCommandModalIds, setClosedCommandModalIds] = useState<
-    readonly string[]
-  >([]);
   const [structuredOverlay, setStructuredOverlay] =
     useState<StructuredOverlayState | null>(null);
   const [composerPrefill, setComposerPrefill] =
@@ -340,6 +342,7 @@ export function SessionScreen({
     commandScopeGeneration.current += 1;
     setStructuredOverlay(null);
     setComposerPrefill(null);
+    setActionError(null);
     return (): void => {
       commandScopeGeneration.current += 1;
     };
@@ -514,15 +517,23 @@ export function SessionScreen({
         if (opened) return true;
         clearActionError();
         try {
-          await runtime.executeSlashCommand({
+          const completion = await runtime.executeSlashCommand({
             ...(view.composer.activeSessionId === undefined
               ? {}
               : { sessionId: view.composer.activeSessionId }),
             text,
+            clientRequestId,
           });
-          return true;
+          return completion.status === "completed";
         } catch (error) {
-          if (generation === commandScopeGeneration.current)
+          if (
+            generation === commandScopeGeneration.current &&
+            !(
+              typeof error === "object" &&
+              error !== null &&
+              "commandFeedback" in error
+            )
+          )
             setActionError(
               error instanceof Error ? error.message : String(error),
             );
@@ -670,12 +681,8 @@ export function SessionScreen({
     () =>
       [...view.commandNotices]
         .reverse()
-        .find(
-          (notice) =>
-            !closedCommandModalIds.includes(notice.id) &&
-            createCommandResultModel(notice) !== null,
-        ) ?? null,
-    [closedCommandModalIds, view.commandNotices],
+        .find((notice) => createCommandResultModel(notice) !== null) ?? null,
+    [view.commandNotices],
   );
 
   const subagents = useMemo(
@@ -999,7 +1006,14 @@ export function SessionScreen({
                   }
                   reasoningByMessageId={view.reasoningByMessageId}
                   commandNotices={
-                    <CommandNoticeList notices={view.commandNotices} />
+                    <CommandNoticeList
+                      notices={view.commandNotices.filter(
+                        (notice) => notice.kind === "success",
+                      )}
+                      onClose={(id) => {
+                        runtime.store.consumeCommand(id);
+                      }}
+                    />
                   }
                 />
               </ConversationPresentation.Provider>
@@ -1009,10 +1023,7 @@ export function SessionScreen({
                 header={view.header}
                 notice={commandModalNotice}
                 onClose={() => {
-                  setClosedCommandModalIds((ids) => [
-                    ...ids,
-                    commandModalNotice.id,
-                  ]);
+                  runtime.store.consumeCommand(commandModalNotice.id);
                 }}
                 onInsertSkill={(text) => {
                   composerPrefillNonce.current += 1;
@@ -1022,10 +1033,7 @@ export function SessionScreen({
                     editRevision: composerEditRevision.current,
                     text,
                   });
-                  setClosedCommandModalIds((ids) => [
-                    ...ids,
-                    commandModalNotice.id,
-                  ]);
+                  runtime.store.consumeCommand(commandModalNotice.id);
                 }}
                 view={{
                   activeSession: view.activeSession
@@ -1064,6 +1072,14 @@ export function SessionScreen({
                 : "contents",
           }}
         >
+          <CommandNoticeList
+            notices={view.commandNotices.filter(
+              (notice) => notice.kind === "error",
+            )}
+            onClose={(id) => {
+              runtime.store.consumeCommand(id);
+            }}
+          />
           <Composer
             readOnly={viewingSubagent || approvalDialogVisible}
             client={client}

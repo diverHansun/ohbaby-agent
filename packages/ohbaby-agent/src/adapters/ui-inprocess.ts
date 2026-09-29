@@ -2675,6 +2675,8 @@ export function createInProcessUiBackendClient(
       type: "session.updated",
       session: cloneSession(updatedSession),
     });
+    if (updatedSession.title !== input.session.title)
+      await publishSessionIndexInvalidation();
     return updatedSession;
   }
 
@@ -2742,6 +2744,7 @@ export function createInProcessUiBackendClient(
           session: cloneSession(updatedUiSession),
         });
       }
+      await publishSessionIndexInvalidation();
       return;
     }
 
@@ -2759,6 +2762,7 @@ export function createInProcessUiBackendClient(
       type: "session.updated",
       session: cloneSession(updatedUiSession),
     });
+    await publishSessionIndexInvalidation();
   }
 
   async function resolveCompactTarget(
@@ -3633,8 +3637,8 @@ export function createInProcessUiBackendClient(
         return runtime.listMcpServerSummaries();
       },
     },
-    submitPromptAndWait(text, submitOptions) {
-      return submitPromptAndWaitInternal(text, submitOptions);
+    submitPromptAccepted(text, submitOptions) {
+      return submitPromptAcceptedInternal(text, submitOptions);
     },
     connectModel: connectModelInternal,
     setSearchApiKey: setSearchApiKeyInternal,
@@ -4147,7 +4151,9 @@ export function createInProcessUiBackendClient(
       return currentConnectModelFromOptions();
     },
 
-    executeCommand(invocation: UiCommandInvocation): Promise<void> {
+    executeCommand(
+      invocation: UiCommandInvocation,
+    ): ReturnType<UiBackendClient["executeCommand"]> {
       return commandService.executeCommand(invocation);
     },
 

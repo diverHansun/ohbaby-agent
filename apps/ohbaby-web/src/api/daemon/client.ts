@@ -1,3 +1,4 @@
+import { isUiCommandCompletion } from "ohbaby-sdk";
 import type {
   UiSubagentQuery,
   UiSubagentExecutionList,
@@ -690,6 +691,7 @@ export class BrowserDaemonClient implements UiBackendClient {
     this.permissionSync.dispose();
     this.sessionSync.dispose();
     this.permissionHandlers.clear();
+    this.store.clearCommands();
     await this.events.close();
     this.store.setConnectionState("disconnected");
   }
@@ -989,7 +991,106 @@ export class BrowserDaemonClient implements UiBackendClient {
   async executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
   ): ReturnType<UiBackendClient["executeCommand"]> {
-    await this.http.executeCommand(invocation);
+    const binding = this.permissionSync.getState().binding;
+    const skill = invocation.commandId.startsWith("skill.");
+    const clientRequestId = skill
+      ? (invocation.clientRequestId ?? globalThis.crypto.randomUUID())
+      : undefined;
+    const scopeTicket = this.scopeTicket;
+    const rejectLocally = (message: string): never => {
+      this.store.failCommand(invocation.clientInvocationId, message);
+      throw Object.assign(new Error(message), { commandFeedback: true });
+    };
+    if (skill && clientRequestId) {
+      if (!binding || !this.recoverySupported)
+        return rejectLocally("Session is not synchronized");
+      if (
+        this.unknownPrompts.some(
+          (request) =>
+            request.clientRequestId === clientRequestId ||
+            request.sessionId === invocation.sessionId,
+        )
+      )
+        rejectLocally(
+          "Prompt result is unknown; query its receipt before submitting again",
+        );
+      this.submittingPrompts.add(clientRequestId);
+      this.unknownPrompts = [
+        ...this.unknownPrompts,
+        {
+          directory: this.config.directory ?? "",
+          runtimeEpoch: binding.permissionEpoch,
+          clientRequestId: clientRequestId,
+          sessionId: invocation.sessionId,
+          status: "unknown",
+        },
+      ];
+      this.publishUnknownPrompts();
+    }
+    try {
+      const completion = await this.http.executeCommand(
+        { ...invocation, ...(clientRequestId ? { clientRequestId } : {}) },
+        AbortSignal.any([
+          this.lifecycleController.signal,
+          AbortSignal.timeout(60_000),
+        ]),
+      );
+      if (
+        !isUiCommandCompletion(completion) ||
+        completion.clientInvocationId !== invocation.clientInvocationId ||
+        (!skill && completion.promptReceipt !== undefined)
+      )
+        throw new Error(
+          "server did not return a valid completion. Check its effects before running it again.",
+        );
+      if (
+        skill &&
+        completion.status === "completed" &&
+        completion.promptReceipt?.clientRequestId !== clientRequestId
+      )
+        throw new Error(
+          "Accepted skill receipt is missing or does not match this request",
+        );
+      if (
+        skill &&
+        (completion.status === "failed" ||
+          completion.promptReceipt?.clientRequestId === clientRequestId)
+      ) {
+        this.unknownPrompts = this.unknownPrompts.filter(
+          (request) => request.clientRequestId !== clientRequestId,
+        );
+        this.publishUnknownPrompts();
+      }
+      if (!this.closed && scopeTicket === this.scopeTicket) {
+        this.store.completeCommand(completion);
+        if (
+          completion.promptReceipt &&
+          "permissionEpoch" in completion &&
+          "rootSessionId" in completion &&
+          "bindingGeneration" in completion
+        )
+          this.acceptBinding(
+            completion as typeof completion & UiPermissionBinding,
+          );
+      }
+      return completion;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!this.closed && scopeTicket === this.scopeTicket)
+        this.store.failCommand(
+          invocation.clientInvocationId,
+          `Command result is unconfirmed: ${message}`,
+        );
+      throw Object.assign(
+        new Error(`Command result is unconfirmed: ${message}`),
+        { commandFeedback: true },
+      );
+    } finally {
+      if (clientRequestId) {
+        this.submittingPrompts.delete(clientRequestId);
+        this.publishUnknownPrompts();
+      }
+    }
   }
 
   async respondPermission(

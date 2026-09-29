@@ -628,11 +628,24 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(permission);
   }
 
+  commandEvents: UiEvent[] = [];
+
   executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
-  ): Promise<void> {
+  ): ReturnType<UiBackendClient["executeCommand"]> {
     this.commandInvocations.push(invocation);
-    return Promise.resolve();
+    for (const event of this.commandEvents) this.emit(event);
+    return Promise.resolve({
+      ...{
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      },
+      clientInvocationId: invocation.clientInvocationId,
+      sessionId: invocation.sessionId,
+    });
   }
 
   respondPermission(
@@ -1326,6 +1339,7 @@ describe("createDaemonHttpServer", () => {
 
   it("replays owner-routed command events after reconnect", async () => {
     const backend = new FakeBackend();
+    backend.commandEvents = [commandResultDelivered()];
     await withServer(backend, async (url) => {
       const stream = await fetchEvents(url, "client_a");
       const reader = createSseFrameReader(stream);
@@ -1349,8 +1363,6 @@ describe("createDaemonHttpServer", () => {
       });
       expect(invoked.status).toBe(200);
       await reader.cancel();
-
-      backend.emit(commandResultDelivered());
       const resumed = await fetchEvents(url, "client_a", {
         "last-event-id": "0",
       });
@@ -1482,6 +1494,7 @@ describe("createDaemonHttpServer", () => {
 
   it("preserves interaction ownership across a reconnect within retention", async () => {
     const backend = new FakeBackend();
+    backend.commandEvents = [commandStarted(), interactionRequested()];
     await withServer(
       backend,
       async (url) => {
@@ -1506,8 +1519,6 @@ describe("createDaemonHttpServer", () => {
           ],
         });
         expect(invoked.status).toBe(200);
-        backend.emit(commandStarted());
-        backend.emit(interactionRequested());
 
         await reader.cancel();
         const resumed = await fetchEvents(url, "client_a");
@@ -1538,6 +1549,7 @@ describe("createDaemonHttpServer", () => {
 
   it("cancels an owned interaction after client routing retention expires", async () => {
     const backend = new FakeBackend();
+    backend.commandEvents = [commandStarted(), interactionRequested()];
     await withServer(
       backend,
       async (url) => {
@@ -1562,8 +1574,6 @@ describe("createDaemonHttpServer", () => {
           ],
         });
         expect(invoked.status).toBe(200);
-        backend.emit(commandStarted());
-        backend.emit(interactionRequested());
 
         await reader.cancel();
         await delay(30);
@@ -1651,6 +1661,7 @@ describe("createDaemonHttpServer", () => {
 
   it("does not expire interaction ownership when an older overlapping connection disconnects", async () => {
     const backend = new FakeBackend();
+    backend.commandEvents = [commandStarted(), interactionRequested()];
     await withServer(
       backend,
       async (url) => {
@@ -1675,8 +1686,6 @@ describe("createDaemonHttpServer", () => {
           ],
         });
         expect(invoked.status).toBe(200);
-        backend.emit(commandStarted());
-        backend.emit(interactionRequested());
 
         const second = await fetchEvents(url, "client_a");
         const secondReader = createSseFrameReader(second);
@@ -2151,6 +2160,17 @@ describe("createDaemonHttpServer", () => {
       ],
     });
 
+    const selected: UiEvent = {
+      action: {
+        data: { choiceId: "session_2" },
+        kind: "session.selected",
+      },
+      clientInvocationId: "invoke_sessions",
+      commandRunId: "command_sessions",
+      timestamp: Date.parse(timestamp),
+      type: "command.result.delivered",
+    };
+    backend.commandEvents = [selected];
     await withServer(backend, async (url) => {
       await postRpc(url, {
         clientId: "client_a",
@@ -2193,17 +2213,6 @@ describe("createDaemonHttpServer", () => {
           },
         ],
       });
-      const selected: UiEvent = {
-        action: {
-          data: { choiceId: "session_2" },
-          kind: "session.selected",
-        },
-        clientInvocationId: "invoke_sessions",
-        commandRunId: "command_sessions",
-        timestamp: Date.parse(timestamp),
-        type: "command.result.delivered",
-      };
-      backend.emit(selected);
       await expect(readEvent()).resolves.toEqual({
         event: selected,
         type: "ui.event",
@@ -2244,6 +2253,18 @@ describe("createDaemonHttpServer", () => {
       ],
     });
 
+    backend.commandEvents = [
+      {
+        action: {
+          data: { choiceId: "session_2" },
+          kind: "session.selected",
+        },
+        clientInvocationId: "invoke_sessions",
+        commandRunId: "command_sessions",
+        timestamp: Date.parse(timestamp),
+        type: "command.result.delivered",
+      },
+    ];
     await withServer(backend, async (url) => {
       await postRpc(url, {
         clientId: "client_a",
@@ -2273,16 +2294,6 @@ describe("createDaemonHttpServer", () => {
             surface: "tui",
           },
         ],
-      });
-      backend.emit({
-        action: {
-          data: { choiceId: "session_2" },
-          kind: "session.selected",
-        },
-        clientInvocationId: "invoke_sessions",
-        commandRunId: "command_sessions",
-        timestamp: Date.parse(timestamp),
-        type: "command.result.delivered",
       });
 
       const owner = await postRpc(url, {
@@ -2569,6 +2580,7 @@ describe("createDaemonHttpServer", () => {
   it("routes command results only to the invoking client", async () => {
     const backend = new FakeBackend();
 
+    backend.commandEvents = [commandResultDelivered()];
     await withServer(backend, async (url) => {
       const owner = await fetchEvents(url, "client_a");
       const observer = await fetchEvents(url, "client_b");
@@ -2594,8 +2606,6 @@ describe("createDaemonHttpServer", () => {
         ],
       });
       expect(invoked.status).toBe(200);
-
-      backend.emit(commandResultDelivered());
 
       await expect(readOwner()).resolves.toEqual({
         event: commandResultDelivered(),
@@ -2628,6 +2638,10 @@ describe("createDaemonHttpServer", () => {
       ],
     });
 
+    backend.commandEvents = [
+      commandResultDelivered(),
+      commandSessionSelected("session_2"),
+    ];
     await withServer(backend, async (url) => {
       await postRpc(url, {
         clientId: "client_a",
@@ -2652,9 +2666,6 @@ describe("createDaemonHttpServer", () => {
         ],
       });
       expect(invoked.status).toBe(200);
-
-      backend.emit(commandResultDelivered());
-      backend.emit(commandSessionSelected("session_2"));
 
       const snapshot = await postRpc(url, {
         clientId: "client_a",

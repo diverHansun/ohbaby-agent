@@ -69,6 +69,7 @@ import {
 import {
   acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
+  executeCommandForClient,
   cancelQueuedPromptForClient,
   steerQueuedPromptForClient,
   editQueuedPromptForClient,
@@ -381,6 +382,9 @@ function slashCommandInvocationFromBody(
     argv,
     commandId,
     clientInvocationId,
+    ...(asNonEmptyString(value.clientRequestId)
+      ? { clientRequestId: asNonEmptyString(value.clientRequestId) }
+      : {}),
     path,
     raw,
     rawArgs,
@@ -593,6 +597,44 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
     openapi: "3.1.0",
     components: {
       schemas: {
+        CommandCompletion: {
+          type: "object",
+          required: [
+            "ok",
+            "status",
+            "commandRunId",
+            "clientInvocationId",
+            "outputCount",
+            "eventCount",
+          ],
+          properties: {
+            ok: { const: true },
+            status: { enum: ["completed", "failed"] },
+            commandRunId: { type: "string" },
+            clientInvocationId: { type: "string" },
+            sessionId: { type: "string" },
+            outputCount: { type: "integer", minimum: 0 },
+            eventCount: {
+              type: "integer",
+              minimum: 0,
+              description:
+                "Result and failure events, including actions; excludes started",
+            },
+            error: {
+              type: "object",
+              required: ["code", "message"],
+              properties: {
+                code: { type: "string" },
+                message: { type: "string" },
+              },
+            },
+            promptReceipt: {
+              type: "object",
+              description:
+                "Existing UiPromptReceipt with the submitted clientRequestId; only accepted skill commands",
+            },
+          },
+        },
         SessionVersion: {
           type: "object",
           required: [
@@ -775,7 +817,13 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
         post: {
           responses: {
             "200": {
-              description: "Command invocation accepted",
+              description:
+                "Handler completion; HTTP 200 may contain status failed. Prompt receipt is present only for accepted skill submissions. Transport failure leaves completion unknown; do not replay commands.",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/CommandCompletion" },
+                },
+              },
             },
           },
           summary: "Execute a slash command invocation",
@@ -1647,10 +1695,40 @@ class DaemonServerAppRuntime {
         );
       }
 
-      await this.commandBackend("server-rest", { clientId }).executeCommand(
-        this.clientViews.prepareCommandInvocation(clientId, invocation),
-      );
-      return context.json({ ok: true });
+      const priorGeneration = this.clientViews.binding(
+        clientId,
+        this.permissionEpoch,
+      ).bindingGeneration;
+      try {
+        const completion = await executeCommandForClient({
+          backend: this.commandBackend("server-rest", { clientId }),
+          clientId,
+          clientViews: this.clientViews,
+          createSessionId: this.createSessionId,
+          permissionRouter: this.permissionRouter,
+          invocation: this.clientViews.prepareCommandInvocation(
+            clientId,
+            invocation,
+          ),
+        });
+        return context.json({
+          ok: true,
+          ...completion,
+          ...(completion.promptReceipt
+            ? this.clientViews.binding(clientId, this.permissionEpoch)
+            : {}),
+        });
+      } finally {
+        this.clientViews.completeCommandInvocation(
+          invocation.clientInvocationId,
+        );
+        if (
+          !this.clientViews.isPromptBindingProvisional(clientId) &&
+          this.clientViews.binding(clientId, this.permissionEpoch)
+            .bindingGeneration !== priorGeneration
+        )
+          this.notifyBinding(clientId);
+      }
     });
 
     this.app.get("/v1/model", async (context) => {

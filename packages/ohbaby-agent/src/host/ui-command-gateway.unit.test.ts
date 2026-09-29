@@ -116,6 +116,13 @@ describe("createUiCommandGateway", () => {
     const raw = {
       executeCommand: vi.fn(async () => {
         await rawSubmit();
+        return {
+          status: "completed" as const,
+          commandRunId: "command_1",
+          clientInvocationId: "invoke_1",
+          outputCount: 0,
+          eventCount: 0,
+        };
       }),
     };
     const gateway = createGateway(raw, records);

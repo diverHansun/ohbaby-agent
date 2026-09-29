@@ -569,9 +569,21 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(this.permissionState);
   }
 
-  executeCommand(invocation: UiSlashCommandInvocation): Promise<void> {
+  executeCommand(
+    invocation: UiSlashCommandInvocation,
+  ): ReturnType<UiBackendClient["executeCommand"]> {
     this.executedCommands.push(invocation);
-    return Promise.resolve();
+    return Promise.resolve({
+      ...{
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      },
+      clientInvocationId: invocation.clientInvocationId,
+      sessionId: invocation.sessionId,
+    });
   }
 
   respondPermission(
@@ -1351,6 +1363,39 @@ describe("createDaemonServerApp", () => {
 
   it("allows only the owning RPC client to claim an interaction response", async () => {
     const backend = new FakeBackend();
+    backend.executeCommand = (
+      invocation,
+    ): ReturnType<UiBackendClient["executeCommand"]> => {
+      backend.emit({
+        command: {
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "web",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_1",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      return Promise.resolve({
+        status: "completed",
+        commandRunId: "command_1",
+        clientInvocationId: invocation.clientInvocationId,
+        outputCount: 0,
+        eventCount: 0,
+      });
+    };
     const records: UiCommandRecord[] = [];
     const handle = createApp(backend, {
       commandRecorder: { record: (record) => records.push(record) },
@@ -1381,28 +1426,6 @@ describe("createDaemonServerApp", () => {
           surface: "web",
         },
       ]);
-      backend.emit({
-        command: {
-          clientInvocationId: "invoke_1",
-          commandId: "status",
-          commandRunId: "command_1",
-          path: ["status"],
-          surface: "web",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "command.started",
-      });
-      backend.emit({
-        request: {
-          clientInvocationId: "invoke_1",
-          commandRunId: "command_1",
-          interactionId: "interaction_1",
-          kind: "confirm",
-          subject: "permission",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "interaction.requested",
-      });
 
       const unknown = await rpc(
         "client_a",
@@ -1453,6 +1476,50 @@ describe("createDaemonServerApp", () => {
 
   it("releases an interaction claim only after a known validation failure", async () => {
     const backend = new FakeBackend();
+    backend.executeCommand = (
+      invocation,
+    ): ReturnType<UiBackendClient["executeCommand"]> => {
+      backend.emit({
+        command: {
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "web",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_1",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_2",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      return Promise.resolve({
+        status: "completed",
+        commandRunId: "command_1",
+        clientInvocationId: invocation.clientInvocationId,
+        outputCount: 0,
+        eventCount: 0,
+      });
+    };
     const handle = createApp(backend);
     await handle.start();
     const rpc = (
@@ -1492,28 +1559,7 @@ describe("createDaemonServerApp", () => {
         headers: { ...authHeaders(), "content-type": "application/json" },
         method: "POST",
       });
-      backend.emit({
-        command: {
-          clientInvocationId: "invoke_1",
-          commandId: "status",
-          commandRunId: "command_1",
-          path: ["status"],
-          surface: "web",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "command.started",
-      });
-      backend.emit({
-        request: {
-          clientInvocationId: "invoke_1",
-          commandRunId: "command_1",
-          interactionId: "interaction_1",
-          kind: "confirm",
-          subject: "permission",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "interaction.requested",
-      });
+
       backend.interactionError = Object.assign(new Error("invalid response"), {
         code: "INVALID_INTERACTION_RESPONSE",
       });
@@ -1522,17 +1568,6 @@ describe("createDaemonServerApp", () => {
       backend.interactionError = undefined;
       expect((await rpc("rpc_retry")).status).toBe(200);
 
-      backend.emit({
-        request: {
-          clientInvocationId: "invoke_1",
-          commandRunId: "command_1",
-          interactionId: "interaction_2",
-          kind: "confirm",
-          subject: "permission",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "interaction.requested",
-      });
       backend.interactionError = new Error("unknown consumption state");
       expect((await rpc("rpc_unknown_failure", "interaction_2")).status).toBe(
         500,
@@ -2213,7 +2248,7 @@ describe("createDaemonServerApp", () => {
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({ ok: true });
       expect(backend.executedCommands).toEqual([
-        {
+        expect.objectContaining({
           argumentMode: "raw",
           argv: ["查", "X"],
           clientInvocationId: "invoke_skill",
@@ -2222,7 +2257,7 @@ describe("createDaemonServerApp", () => {
           raw: "/hansun-db 查 X",
           rawArgs: "查 X",
           surface: "tui",
-        },
+        }),
       ]);
     } finally {
       await handle.dispose();
@@ -3961,6 +3996,39 @@ describe("createDaemonServerApp", () => {
 
   it("routes REST interaction responses through the shared owner claim", async () => {
     const backend = new FakeBackend();
+    backend.executeCommand = (
+      invocation,
+    ): ReturnType<UiBackendClient["executeCommand"]> => {
+      backend.emit({
+        command: {
+          clientInvocationId: "invoke_1",
+          commandId: "status",
+          commandRunId: "command_1",
+          path: ["status"],
+          surface: "web",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "command.started",
+      });
+      backend.emit({
+        request: {
+          clientInvocationId: "invoke_1",
+          commandRunId: "command_1",
+          interactionId: "interaction_1",
+          kind: "confirm",
+          subject: "permission",
+        },
+        timestamp: Date.parse(timestamp),
+        type: "interaction.requested",
+      });
+      return Promise.resolve({
+        status: "completed",
+        commandRunId: "command_1",
+        clientInvocationId: invocation.clientInvocationId,
+        outputCount: 0,
+        eventCount: 0,
+      });
+    };
     const records: UiCommandRecord[] = [];
     const handle = createApp(backend, {
       commandRecorder: { record: (record) => records.push(record) },
@@ -3997,28 +4065,7 @@ describe("createDaemonServerApp", () => {
         headers,
         method: "POST",
       });
-      backend.emit({
-        command: {
-          clientInvocationId: "invoke_1",
-          commandId: "status",
-          commandRunId: "command_1",
-          path: ["status"],
-          surface: "web",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "command.started",
-      });
-      backend.emit({
-        request: {
-          clientInvocationId: "invoke_1",
-          commandRunId: "command_1",
-          interactionId: "interaction_1",
-          kind: "confirm",
-          subject: "permission",
-        },
-        timestamp: Date.parse(timestamp),
-        type: "interaction.requested",
-      });
+
       records.length = 0;
 
       const unknown = await handle.app.request(

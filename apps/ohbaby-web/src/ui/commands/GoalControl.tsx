@@ -1,4 +1,4 @@
-import type { UiGoal } from "ohbaby-sdk";
+import type { UiCommandCompletion, UiGoal } from "ohbaby-sdk";
 import type { ChangeEvent, ReactElement } from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -12,7 +12,7 @@ export type ExecuteGoalCommand = (input: {
   readonly allowOverlay: true;
   readonly sessionId: string;
   readonly text: string;
-}) => Promise<void>;
+}) => Promise<UiCommandCompletion>;
 
 type GoalPanelAction = "delete" | "pause" | "resume" | "save" | "view";
 
@@ -76,11 +76,13 @@ export function GoalOverlayBody(props: {
       void runOverlayAction(
         setStatus,
         async () => {
-          await props.onExecuteSlashCommand({
+          const completion = await props.onExecuteSlashCommand({
             allowOverlay: true,
             sessionId,
             text,
           });
+          if (completion.status === "failed")
+            throw new Error(completion.error.message);
           return successMessage;
         },
         busyMessage,

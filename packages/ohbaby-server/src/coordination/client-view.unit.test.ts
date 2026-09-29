@@ -655,6 +655,30 @@ describe("DaemonClientViewCoordinator", () => {
     ).toBeUndefined();
   });
 
+  it("keeps command routing after failure until the handler completes", () => {
+    const coordinator = new DaemonClientViewCoordinator();
+    coordinator.prepareCommandInvocation("client_a", commandInvocation());
+    const started = commandStarted();
+    coordinator.observeEvent(started);
+    const failed = {
+      type: "command.failed" as const,
+      commandRunId: started.command.commandRunId,
+      clientInvocationId: started.command.clientInvocationId,
+      timestamp: 1,
+      error: { code: "FAIL", message: "failed" },
+    };
+    coordinator.observeEvent(failed);
+    coordinator.afterEventBroadcast(failed);
+    const output = {
+      ...failed,
+      type: "command.result.delivered" as const,
+      output: { kind: "text" as const, text: "details after failure" },
+    };
+    expect(coordinator.routeEventForClient(output, "client_a")).toEqual(output);
+    coordinator.completeCommandInvocation(started.command.clientInvocationId);
+    expect(coordinator.routeEventForClient(output, "client_a")).toBeUndefined();
+  });
+
   it("atomically claims an interaction only for its command owner", () => {
     const coordinator = new DaemonClientViewCoordinator();
     coordinator.prepareCommandInvocation("client_a", commandInvocation());

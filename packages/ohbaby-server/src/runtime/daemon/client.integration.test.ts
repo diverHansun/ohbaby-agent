@@ -476,11 +476,24 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(this.permissionState);
   }
 
+  onCommand?: () => void;
+
   executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
-  ): Promise<void> {
+  ): ReturnType<UiBackendClient["executeCommand"]> {
     this.calls.push({ args: [invocation], method: "executeCommand" });
-    return Promise.resolve();
+    this.onCommand?.();
+    return Promise.resolve({
+      ...{
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      },
+      clientInvocationId: invocation.clientInvocationId,
+      sessionId: invocation.sessionId,
+    });
   }
 
   respondPermission(
@@ -750,18 +763,7 @@ describe("createRemoteUiBackendClient", () => {
       surface: "tui" as const,
     };
 
-    await withRemoteClient(backend, async (client) => {
-      await client.getSnapshot();
-      await client.getContextWindowUsage(contextInput);
-      await client.listCommands(listQuery);
-      await client.submitPromptAndWait("hello", { sessionId: "session_1" });
-      await client.compactSession(compactOptions);
-      await client.getCurrentModel();
-      await client.probeModelContextWindow(probeInput);
-      await client.connectModel(connectInput);
-      await client.setSearchApiKey(searchInput);
-      await client.setPermission(permissionInput);
-      await client.executeCommand(invocation);
+    backend.onCommand = (): void => {
       backend.emit({
         command: {
           clientInvocationId: invocation.clientInvocationId,
@@ -785,6 +787,19 @@ describe("createRemoteUiBackendClient", () => {
         timestamp: Date.now(),
         type: "interaction.requested",
       });
+    };
+    await withRemoteClient(backend, async (client) => {
+      await client.getSnapshot();
+      await client.getContextWindowUsage(contextInput);
+      await client.listCommands(listQuery);
+      await client.submitPromptAndWait("hello", { sessionId: "session_1" });
+      await client.compactSession(compactOptions);
+      await client.getCurrentModel();
+      await client.probeModelContextWindow(probeInput);
+      await client.connectModel(connectInput);
+      await client.setSearchApiKey(searchInput);
+      await client.setPermission(permissionInput);
+      await client.executeCommand(invocation);
       await client.respondPermission("permission_1", { choiceId: "allow" });
       await client.respondInteraction("interaction_1", {
         choiceId: "choice_1",

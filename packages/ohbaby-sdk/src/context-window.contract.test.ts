@@ -193,7 +193,13 @@ describe("context window UI contract", () => {
         } as const);
       },
       executeCommand(): ReturnType<CoreAPI["executeCommand"]> {
-        return Promise.resolve();
+        return Promise.resolve({
+          status: "completed" as const,
+          commandRunId: "command_1",
+          clientInvocationId: "invoke_1",
+          outputCount: 0,
+          eventCount: 0,
+        });
       },
       resubmitRetainedPrompt(): Promise<never> {
         return Promise.reject(new Error("Unused retained resubmission stub"));

@@ -5404,7 +5404,15 @@ function createFakeClient(
           : Promise.reject(new Error("prompt not found"));
       },
     ),
-    executeCommand: vi.fn(() => Promise.resolve()),
+    executeCommand: vi.fn(() =>
+      Promise.resolve({
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      }),
+    ),
     getContextWindowUsage: vi.fn(() => Promise.resolve(null)),
     getCurrentModel: vi.fn(() => Promise.resolve(null)),
     getSnapshot: vi.fn(() => Promise.resolve(initialSnapshot)),

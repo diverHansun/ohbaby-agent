@@ -214,3 +214,66 @@ export function steerQueuedPromptForClient(
 ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
   return backend.steerQueuedPromptForOwner(input, trustedClientId);
 }
+
+/** Skills use the same pre-admission owner reservation as ordinary prompts. */
+export async function executeCommandForClient(input: {
+  readonly backend: UiBackendClient;
+  readonly clientId: string;
+  readonly clientViews: DaemonClientViewCoordinator;
+  readonly createSessionId: () => string;
+  readonly permissionRouter: PermissionRouter;
+  readonly invocation: Parameters<UiBackendClient["executeCommand"]>[0];
+}): ReturnType<UiBackendClient["executeCommand"]> {
+  const { invocation } = input;
+  if (!invocation.commandId.startsWith("skill."))
+    return input.backend.executeCommand(invocation);
+  const target =
+    invocation.sessionId ??
+    input.clientViews.binding(input.clientId, "prompt").rootSessionId ??
+    undefined;
+  const finishOperation = input.clientViews.beginSessionOperation(
+    input.clientId,
+    target,
+  );
+  try {
+    if (invocation.sessionId !== undefined) {
+      const previous = input.clientViews.binding(input.clientId, "prompt");
+      const sessions = await input.backend.getSessionIndex();
+      const selected = sessions.find(
+        (session) => session.id === invocation.sessionId,
+      );
+      if (!selected || selected.parentId || selected.isSubagent)
+        throw new Error("Prompt requires an available root session");
+      input.clientViews.assertBinding(input.clientId, previous, "prompt");
+    }
+    const started = beginPromptOwnership({
+      ...input,
+      options: {
+        sessionId: invocation.sessionId,
+        clientRequestId: invocation.clientRequestId,
+      },
+      text: invocation.raw,
+    });
+    try {
+      const completion = await input.backend.executeCommand({
+        ...invocation,
+        sessionId: started.item.sessionId,
+      });
+      const receipt = completion.promptReceipt;
+      started.finishAdmission(receipt !== undefined);
+      if (receipt) {
+        void input.backend
+          .waitForPrompt(receipt.promptId)
+          .finally(started.release)
+          .catch(() => undefined);
+      } else started.release();
+      return completion;
+    } catch (error) {
+      started.finishAdmission(false);
+      started.release();
+      throw error;
+    }
+  } finally {
+    finishOperation();
+  }
+}

@@ -47,6 +47,7 @@ import { PermissionRouter } from "../../coordination/permission-router.js";
 import {
   acquirePromptEditLeaseForClient,
   acceptDaemonPrompt,
+  executeCommandForClient,
   cancelQueuedPromptForClient,
   steerQueuedPromptForClient,
   editQueuedPromptForClient,
@@ -521,125 +522,181 @@ export async function callDaemonBackend(input: {
         request.clientId,
         request.params[0] as ExecuteCommandInvocation,
       );
-      if (invocation.commandId === "new" || invocation.commandId === "resume") {
-        const commandRunId = randomUUID();
-        const identity = {
-          commandRunId,
-          clientInvocationId: invocation.clientInvocationId,
-        };
-        input.emitCommandEvent({
-          type: "command.started",
-          timestamp: Date.now(),
-          command: {
-            ...identity,
-            commandId: invocation.commandId,
-            path: invocation.path,
-            surface: invocation.surface,
-            ...(invocation.sessionId === undefined
-              ? {}
-              : { sessionId: invocation.sessionId }),
-          },
-        });
-        const newOptions =
-          invocation.commandId === "new"
-            ? parseNewSessionCommandArgs(invocation.argv)
-            : undefined;
-        if (newOptions !== undefined && "code" in newOptions) {
+      try {
+        if (
+          invocation.commandId === "new" ||
+          invocation.commandId === "resume"
+        ) {
+          const commandRunId = randomUUID();
+          const identity = {
+            commandRunId,
+            clientInvocationId: invocation.clientInvocationId,
+          };
           input.emitCommandEvent({
-            type: "command.failed",
-            ...identity,
+            type: "command.started",
             timestamp: Date.now(),
-            error: newOptions,
-          });
-          return undefined;
-        }
-        const sessionId = parseResumeSessionId(invocation.argv);
-        if (invocation.commandId === "resume" && sessionId === undefined) {
-          input.emitCommandEvent({
-            type: "command.failed",
-            ...identity,
-            timestamp: Date.now(),
-            error: {
-              code: "SESSION_ID_REQUIRED",
-              message: "Use /resume --session_id <id> to resume a session",
-              recoverable: true,
+            command: {
+              ...identity,
+              commandId: invocation.commandId,
+              path: invocation.path,
+              surface: invocation.surface,
+              ...(invocation.sessionId === undefined
+                ? {}
+                : { sessionId: invocation.sessionId }),
             },
           });
-          return undefined;
-        }
-        try {
-          let selectedId: string;
-          let output: Extract<
-            UiEvent,
-            { type: "command.result.delivered" }
-          >["output"];
-          if (invocation.commandId === "new") {
-            const { session, created } = await createOrReuseClientSession(
-              backend,
-              clientViews,
-              request.clientId,
-              input.permissionEpoch,
-              newOptions?.reuseInactiveEmptySessions
-                ? { reuseInactiveEmpty: { excludeSessionIds: [] } }
-                : undefined,
-            );
-            selectedId = session.id;
-            output = {
-              kind: "data",
-              subject: created ? "session.created" : "session.current",
-              data: { session },
-            };
-          } else {
-            // Missing resume arguments were rejected above; preserve every accepted flag spelling.
-            if (sessionId === undefined)
-              throw new Error("Resume session is required");
-            selectedId = sessionId;
-            await selectPermissionSession(
-              backend,
-              clientViews,
-              request.clientId,
-              selectedId,
-              input.permissionEpoch,
-            );
-            output = {
-              kind: "data",
-              subject: "session.current",
-              data: { sessionId: selectedId },
+          const newOptions =
+            invocation.commandId === "new"
+              ? parseNewSessionCommandArgs(invocation.argv)
+              : undefined;
+          if (newOptions !== undefined && "code" in newOptions) {
+            input.emitCommandEvent({
+              type: "command.failed",
+              ...identity,
+              timestamp: Date.now(),
+              error: newOptions,
+            });
+            return {
+              ...identity,
+              sessionId: invocation.sessionId,
+              status: "failed",
+              error: newOptions,
+              outputCount: 0,
+              eventCount: 1,
             };
           }
-          input.emitCommandEvent({
-            type: "command.result.delivered",
-            ...identity,
-            timestamp: Date.now(),
-            output,
-          });
-          input.emitCommandEvent({
-            type: "command.result.delivered",
-            ...identity,
-            timestamp: Date.now(),
-            action: {
-              kind: "session.selected",
-              data: {
-                choiceId: selectedId,
-                ...(invocation.commandId === "new" ? { source: "new" } : {}),
+          const sessionId = parseResumeSessionId(invocation.argv);
+          if (invocation.commandId === "resume" && sessionId === undefined) {
+            input.emitCommandEvent({
+              type: "command.failed",
+              ...identity,
+              timestamp: Date.now(),
+              error: {
+                code: "SESSION_ID_REQUIRED",
+                message: "Use /resume --session_id <id> to resume a session",
+                recoverable: true,
               },
-            },
-          });
-        } catch (error) {
-          input.emitCommandEvent({
-            type: "command.failed",
-            ...identity,
-            timestamp: Date.now(),
-            error: {
-              code: "EXECUTION_ERROR",
-              message: error instanceof Error ? error.message : String(error),
-              recoverable: true,
-            },
-          });
+            });
+            return {
+              ...identity,
+              sessionId: invocation.sessionId,
+              status: "failed",
+              error: {
+                code: "SESSION_ID_REQUIRED",
+                message: "Use /resume --session_id <id> to resume a session",
+                recoverable: true,
+              },
+              outputCount: 0,
+              eventCount: 1,
+            };
+          }
+          try {
+            let selectedId: string;
+            let output: Extract<
+              UiEvent,
+              { type: "command.result.delivered" }
+            >["output"];
+            if (invocation.commandId === "new") {
+              const { session, created } = await createOrReuseClientSession(
+                backend,
+                clientViews,
+                request.clientId,
+                input.permissionEpoch,
+                newOptions?.reuseInactiveEmptySessions
+                  ? { reuseInactiveEmpty: { excludeSessionIds: [] } }
+                  : undefined,
+              );
+              selectedId = session.id;
+              output = {
+                kind: "data",
+                subject: created ? "session.created" : "session.current",
+                data: { session },
+              };
+            } else {
+              // Missing resume arguments were rejected above; preserve every accepted flag spelling.
+              if (sessionId === undefined)
+                throw new Error("Resume session is required");
+              selectedId = sessionId;
+              await selectPermissionSession(
+                backend,
+                clientViews,
+                request.clientId,
+                selectedId,
+                input.permissionEpoch,
+              );
+              output = {
+                kind: "data",
+                subject: "session.current",
+                data: { sessionId: selectedId },
+              };
+            }
+            input.emitCommandEvent({
+              type: "command.result.delivered",
+              ...identity,
+              timestamp: Date.now(),
+              output,
+            });
+            input.emitCommandEvent({
+              type: "command.result.delivered",
+              ...identity,
+              timestamp: Date.now(),
+              action: {
+                kind: "session.selected",
+                data: {
+                  choiceId: selectedId,
+                  ...(invocation.commandId === "new" ? { source: "new" } : {}),
+                },
+              },
+            });
+            return {
+              ...identity,
+              sessionId: invocation.sessionId,
+              status: "completed",
+              outputCount: 1,
+              eventCount: 2,
+            };
+          } catch (error) {
+            input.emitCommandEvent({
+              type: "command.failed",
+              ...identity,
+              timestamp: Date.now(),
+              error: {
+                code: "EXECUTION_ERROR",
+                message: error instanceof Error ? error.message : String(error),
+                recoverable: true,
+              },
+            });
+            return {
+              ...identity,
+              sessionId: invocation.sessionId,
+              status: "failed",
+              error: {
+                code: "EXECUTION_ERROR",
+                message: error instanceof Error ? error.message : String(error),
+                recoverable: true,
+              },
+              outputCount: 0,
+              eventCount: 1,
+            };
+          }
         }
-        return undefined;
+        const completion = await executeCommandForClient({
+          backend,
+          clientId: request.clientId,
+          clientViews,
+          createSessionId,
+          permissionRouter,
+          invocation,
+        });
+        return {
+          ...completion,
+          ...(completion.promptReceipt
+            ? clientViews.binding(request.clientId, input.permissionEpoch)
+            : {}),
+        };
+      } finally {
+        clientViews.completeCommandInvocation(invocation.clientInvocationId);
       }
-      return backend.executeCommand(invocation);
     }
     case "respondPermission":
       return respondPermissionForClient(

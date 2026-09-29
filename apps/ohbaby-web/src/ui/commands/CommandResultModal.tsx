@@ -20,6 +20,7 @@ import {
 
 export function CommandNoticeList(props: {
   readonly notices: readonly CommandNotice[];
+  readonly onClose?: (id: string) => void;
 }): ReactElement | null {
   const notices = props.notices.filter(
     (notice) => createCommandResultModel(notice) === null,
@@ -34,6 +35,15 @@ export function CommandNoticeList(props: {
           className={`ohb-command-notice ohb-command-${notice.kind}`}
           key={notice.id}
         >
+          {props.onClose ? (
+            <button
+              type="button"
+              title="Dismiss command result"
+              onClick={() => props.onClose?.(notice.id)}
+            >
+              <X size={14} />
+            </button>
+          ) : null}
           <div className="ohb-command-label">
             <span>{notice.kind}</span>
             <span>
@@ -42,7 +52,18 @@ export function CommandNoticeList(props: {
                 : notice.commandId}
             </span>
           </div>
-          {notice.markdown ? (
+          {notice.kind === "error" ? (
+            <>
+              <pre>{notice.text}</pre>
+              {notice.outputs?.map((output, index) => (
+                <MarkdownBlock key={index} text={outputAsJson(output)} />
+              ))}
+            </>
+          ) : notice.outputs && notice.outputs.length > 1 ? (
+            notice.outputs.map((output, index) => (
+              <MarkdownBlock key={index} text={outputAsJson(output)} />
+            ))
+          ) : notice.markdown ? (
             <MarkdownBlock text={notice.markdown} />
           ) : (
             <pre>{notice.text ?? ""}</pre>
@@ -106,13 +127,32 @@ export function CommandResultModal(props: {
             <X size={16} />
           </button>
         </header>
-        <CommandResultBody
-          header={props.header}
-          notice={props.notice}
-          onInsertSkill={props.onInsertSkill}
-          variant={model.variant}
-          view={props.view}
-        />
+        {props.notice.kind !== "success" ? (
+          <div
+            className="ohb-command-modal-body"
+            role={props.notice.kind === "error" ? "alert" : "status"}
+          >
+            {props.notice.text}
+          </div>
+        ) : null}
+        {props.notice.output?.kind === "data" ? (
+          <CommandResultBody
+            header={props.header}
+            notice={props.notice}
+            onInsertSkill={props.onInsertSkill}
+            variant={model.variant}
+            view={props.view}
+          />
+        ) : props.notice.output ? (
+          <div className="ohb-command-modal-body">
+            <MarkdownBlock text={outputAsJson(props.notice.output)} />
+          </div>
+        ) : null}
+        {props.notice.outputs?.slice(1).map((output, index) => (
+          <div className="ohb-command-modal-body" key={index}>
+            <MarkdownBlock text={outputAsJson(output)} />
+          </div>
+        ))}
       </section>
     </div>
   );

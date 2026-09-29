@@ -551,9 +551,24 @@ class FakeBackend implements UiBackendClient {
     return Promise.resolve(permission);
   }
 
-  executeCommand(invocation: UiSlashCommandInvocation): Promise<void> {
+  executeCommand(
+    invocation: UiSlashCommandInvocation,
+  ): ReturnType<UiBackendClient["executeCommand"]> {
     this.executedCommands.push(invocation);
     const commandRunId = `command_${String(this.executedCommands.length)}`;
+    if (invocation.commandId.startsWith("skill.")) {
+      return this.submitPromptAccepted(invocation.rawArgs, {
+        clientRequestId: invocation.clientRequestId,
+        sessionId: invocation.sessionId,
+      }).then((promptReceipt) => ({
+        status: "completed",
+        commandRunId,
+        clientInvocationId: invocation.clientInvocationId,
+        outputCount: 0,
+        eventCount: 0,
+        promptReceipt,
+      }));
+    }
     this.emit({
       command: {
         clientInvocationId: invocation.clientInvocationId,
@@ -604,7 +619,20 @@ class FakeBackend implements UiBackendClient {
         timestamp: Date.parse(timestamp),
         type: "command.result.delivered",
       });
-      return Promise.resolve();
+      return Promise.resolve({
+        ...{
+          status: "completed" as const,
+          commandRunId: "command_1",
+          clientInvocationId: "invoke_1",
+          outputCount: 0,
+          eventCount: 0,
+        },
+        clientInvocationId: invocation.clientInvocationId,
+        sessionId: invocation.sessionId,
+        commandRunId,
+        outputCount: 1,
+        eventCount: 1,
+      });
     }
     this.emit({
       clientInvocationId: invocation.clientInvocationId,
@@ -613,7 +641,20 @@ class FakeBackend implements UiBackendClient {
       timestamp: Date.parse(timestamp),
       type: "command.result.delivered",
     });
-    return Promise.resolve();
+    return Promise.resolve({
+      ...{
+        status: "completed" as const,
+        commandRunId: "command_1",
+        clientInvocationId: "invoke_1",
+        outputCount: 0,
+        eventCount: 0,
+      },
+      clientInvocationId: invocation.clientInvocationId,
+      sessionId: invocation.sessionId,
+      commandRunId,
+      outputCount: 1,
+      eventCount: 1,
+    });
   }
 
   respondPermission(): Promise<void> {

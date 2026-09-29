@@ -140,6 +140,10 @@ function applyCommandEvent(
 ): readonly CommandNotice[] {
   switch (event.type) {
     case "command.started":
+      if (
+        !["help", "status", "skills", "mcps"].includes(event.command.commandId)
+      )
+        return notices;
       return upsertCommandNotice(notices, {
         commandId: event.command.commandId,
         createdAt: new Date(event.timestamp).toISOString(),
@@ -152,38 +156,44 @@ function applyCommandEvent(
         text: `/${event.command.path.join(" ")} running`,
       });
     case "command.result.delivered": {
+      if (!event.output) return notices;
       const existing = notices.find(
         (notice) => notice.id === event.commandRunId,
       );
+      if (!existing) return notices;
       const content = commandOutputToNoticeContent(event.output);
       return upsertCommandNotice(notices, {
-        commandId: existing?.commandId ?? event.commandRunId,
-        createdAt:
-          existing?.createdAt ?? new Date(event.timestamp).toISOString(),
+        commandId: existing.commandId,
+        createdAt: existing.createdAt,
         id: event.commandRunId,
-        kind: "success",
-        path: existing?.path ?? [],
-        ...(existing?.sessionId === undefined
+        kind: existing.kind === "error" ? "error" : "success",
+        path: existing.path,
+        ...(existing.sessionId === undefined
           ? {}
           : { sessionId: existing.sessionId }),
         ...content,
+        output: existing.output ?? content.output,
+        outputs: [...(existing.outputs ?? []), event.output],
+        ...(existing.kind === "error" ? { text: existing.text } : {}),
       });
     }
     case "command.failed": {
       const existing = notices.find(
         (notice) => notice.id === event.commandRunId,
       );
+      if (!existing) return notices;
       return upsertCommandNotice(notices, {
-        commandId: existing?.commandId ?? event.commandRunId,
-        createdAt:
-          existing?.createdAt ?? new Date(event.timestamp).toISOString(),
+        commandId: existing.commandId,
+        createdAt: existing.createdAt,
         id: event.commandRunId,
         kind: "error",
-        path: existing?.path ?? [],
-        ...(existing?.sessionId === undefined
+        path: existing.path,
+        ...(existing.sessionId === undefined
           ? {}
           : { sessionId: existing.sessionId }),
-        text: event.error.message,
+        output: existing.output,
+        outputs: existing.outputs,
+        text: existing.kind === "error" ? existing.text : event.error.message,
       });
     }
     default:

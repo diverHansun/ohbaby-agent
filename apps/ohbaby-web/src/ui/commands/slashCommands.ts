@@ -118,10 +118,9 @@ export function slashCommandLabel(command: UiWebCommandSpec): string {
 export function createCommandResultModel(
   notice: CommandNotice,
 ): CommandResultModel | null {
-  if (notice.kind !== "success" || notice.output?.kind !== "data") {
-    return null;
-  }
-  switch (notice.output.subject) {
+  switch (
+    notice.output?.kind === "data" ? notice.output.subject : notice.commandId
+  ) {
     case "help":
       return commandResultModel(notice, "Help", "help");
     case "mcps":

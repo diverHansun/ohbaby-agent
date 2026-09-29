@@ -189,7 +189,17 @@ function fixture(
           `data: ${JSON.stringify({ type: "hello", clientId: "client", ...binding() })}\n\n`,
         ),
       );
-      return Response.json({ ok: true });
+      const invocation = (await request.json()) as {
+        clientInvocationId: string;
+      };
+      return Response.json({
+        ok: true,
+        status: "completed",
+        commandRunId: "new-command",
+        clientInvocationId: invocation.clientInvocationId,
+        outputCount: 0,
+        eventCount: 0,
+      });
     }
     if (path === "/v1/permissions")
       return Response.json({

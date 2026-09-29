@@ -3,6 +3,8 @@ import {
   recoveryBinding,
   sessionViewFromSnapshot,
 } from "./session-recovery.test-utils.js";
+import { createBrowserDaemonClient } from "./client.js";
+import { createOhbabyWebStore } from "../../store/store.js";
 import { createOhbabyWebRuntime } from "../../runtime.js";
 import type { OhbabyBootstrapConfig, WebSseEvent } from "./wire.js";
 
@@ -239,7 +241,35 @@ describe("ohbaby-web daemon client", () => {
         );
       }
       if (url.endsWith("/v1/commands")) {
-        return Promise.resolve(Response.json({ ok: true }));
+        const invocation = JSON.parse(
+          typeof init.body === "string" ? init.body : "{}",
+        ) as {
+          clientInvocationId: string;
+          clientRequestId?: string;
+          commandId: string;
+        };
+        return Promise.resolve(
+          Response.json({
+            ok: true,
+            status: "completed",
+            commandRunId: "command_1",
+            clientInvocationId: invocation.clientInvocationId,
+            outputCount: 0,
+            eventCount: 0,
+            ...(invocation.commandId.startsWith("skill.")
+              ? {
+                  promptReceipt: {
+                    clientRequestId: invocation.clientRequestId,
+                    promptId: "skill_prompt",
+                    userMessageId: "skill_message",
+                    sessionId: "session_1",
+                    status: "queued",
+                    createdAt: "2026-06-12T00:00:00.000Z",
+                  },
+                }
+              : {}),
+          }),
+        );
       }
       if (url.endsWith("/v1/permission")) {
         return Promise.resolve(
@@ -954,4 +984,37 @@ describe("ohbaby-web daemon client", () => {
     sseController?.close();
     await runtime.dispose();
   });
+});
+
+it("releases locally rejected skill registration with an accurate entry error", async () => {
+  const store = createOhbabyWebStore();
+  const fetch = vi.fn<typeof globalThis.fetch>();
+  const client = createBrowserDaemonClient({
+    config: { baseUrl: "http://localhost", clientId: "owner", token: "test" },
+    store,
+    fetch,
+  });
+  const invocation = {
+    clientInvocationId: "local-rejection",
+    clientRequestId: "stable",
+    commandId: "skill.review",
+    path: ["review"],
+    raw: "/review",
+    rawArgs: "",
+    argv: [],
+    surface: "tui",
+  };
+  store.beginCommand(invocation);
+  await expect(client.executeCommand(invocation)).rejects.toMatchObject({
+    message: "Session is not synchronized",
+    commandFeedback: true,
+  });
+  expect(store.getSnapshot().view.commandNotices).toMatchObject([
+    { kind: "error", text: "Session is not synchronized" },
+  ]);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(() => {
+    store.beginCommand(invocation);
+  }).not.toThrow();
+  await client.close();
 });

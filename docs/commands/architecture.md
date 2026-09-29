@@ -214,3 +214,11 @@ packages/ohbaby-agent/src/commands/
 **代价**：文档型帮助集中在全局说明中。
 
 **理由**：避免后续所有命令都膨胀出 help 变体。
+
+## 命令完成与 prompt 接受（2026-09）
+
+`executeCommand` 返回 `UiCommandCompletion`，包含 `commandRunId`、`clientInvocationId`、来源 `sessionId`、`outputCount`、`eventCount`，以及 `completed` 或 `failed + error`。run context 保留第一次业务错误，handler 的所有步骤结束后才返回；`fail` 和后续 output/action 仍照常发送。`completed` 表示 handler 无业务失败地结束，取消或无操作仍保留原语义。command recorder 的 returned/threw 只描述调用返回，不代替该业务结果。
+
+skill 通过 `submitPromptAccepted` 完成持久接受，并在 completion 的 `promptReceipt` 返回原 `clientRequestId` 对应的 `UiPromptReceipt`；不等待 Run 结束、不再发送空 `skill.submitted` action。后续失败、Stop 与排队由已有 prompt/run 事实显示。daemon 使用普通 prompt 的接受前客户端归属与临时 session 绑定机制，因此丢失 HTTP 回执仍可查询已有 prompt receipt。普通命令不能查询为 prompt，也不会自动重放。
+
+REST、JSON-RPC（包含 `/new`、`/resume` 特殊分支）、SDK 使用同一合同。业务失败可使用 HTTP 200；缺少合法 completion 视为结果未确认。server 的 invocation/run owner 在 handler await 完成、同步事件交接后释放，不能在第一条 failed 或 result 上释放。断开与 runtime dispose 同样清理关联。

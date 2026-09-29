@@ -114,6 +114,7 @@ export type {
   UiSessionResyncRequiredEvent,
 } from "./events.js";
 export type {
+  UiCommandCompletion,
   UiCommandAction,
   UiCommandArgumentMode,
   UiCommandCatalog,
@@ -267,3 +268,5 @@ export type { UiSubagentConversationReaderState } from "./subagent-conversation-
 
 export { hasUnsentSteerAfterLatestStop } from "./run-inputs.js";
 export { compareUiPromptQueueOrder } from "./prompt-queue-order.js";
+
+export { isUiCommandCompletion } from "./slash-command/types.js";

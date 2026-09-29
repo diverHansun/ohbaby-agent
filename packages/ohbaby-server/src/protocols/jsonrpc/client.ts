@@ -1,3 +1,4 @@
+import { isUiCommandCompletion } from "ohbaby-sdk";
 import type { UiSubagentReadClient } from "ohbaby-sdk";
 import { randomUUID } from "node:crypto";
 import {
@@ -526,10 +527,23 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     return this.rpc("setPermission", [input]);
   }
 
-  executeCommand(
+  async executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
   ): ReturnType<UiBackendClient["executeCommand"]> {
-    return this.rpc("executeCommand", [invocation]);
+    const completion = await this.rpc("executeCommand", [invocation]);
+    if (
+      !isUiCommandCompletion(completion) ||
+      completion.clientInvocationId !== invocation.clientInvocationId ||
+      (!invocation.commandId.startsWith("skill.") &&
+        completion.promptReceipt !== undefined) ||
+      (completion.promptReceipt !== undefined &&
+        invocation.clientRequestId !== undefined &&
+        completion.promptReceipt.clientRequestId !== invocation.clientRequestId)
+    )
+      throw new Error(
+        "Command result is unconfirmed: daemon returned no valid completion",
+      );
+    return completion;
   }
 
   respondPermission(

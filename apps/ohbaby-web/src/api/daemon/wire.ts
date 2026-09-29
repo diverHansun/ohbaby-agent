@@ -117,6 +117,7 @@ export interface CommandNotice {
   readonly kind: "error" | "running" | "success";
   readonly markdown?: string;
   readonly output?: CommandOutput;
+  readonly outputs?: readonly CommandOutput[];
   readonly path: readonly string[];
   readonly sessionId?: string;
   readonly text?: string;

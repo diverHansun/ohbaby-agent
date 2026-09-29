@@ -1,4 +1,6 @@
 import type {
+  UiCommandCompletion,
+  UiPromptReceipt,
   UiCommandCatalog,
   UiCommandInvocation,
   UiCommandSpec,
@@ -192,7 +194,7 @@ async function executeSkillCommand(
   options: CommandServiceOptions,
   invocation: UiCommandInvocation,
   context: ReturnType<typeof createCommandRunContext>,
-): Promise<void> {
+): Promise<UiPromptReceipt | undefined> {
   if (!options.skills) {
     context.fail({
       code: "SKILL_COMMAND_UNAVAILABLE",
@@ -207,29 +209,14 @@ async function executeSkillCommand(
     await options.skills.loadPrompt(skillName),
     invocation.rawArgs,
   );
-  if (!options.submitPromptAndWait) {
+  if (!options.submitPromptAccepted) {
     context.emitOutput({ kind: "markdown", markdown: prompt });
     return;
   }
-  const completion = await options.submitPromptAndWait(prompt, {
+  return options.submitPromptAccepted(prompt, {
     sessionId: invocation.sessionId,
+    clientRequestId: invocation.clientRequestId,
     namingSource,
-  });
-  if (completion.prompt.status !== "succeeded") {
-    context.fail({
-      code: `SKILL_PROMPT_${completion.prompt.status.toUpperCase()}`,
-      message:
-        completion.prompt.status === "failed" ||
-        completion.prompt.status === "interrupted"
-          ? completion.prompt.error.message
-          : "Skill prompt was cancelled",
-      recoverable: completion.prompt.status !== "interrupted",
-    });
-    return;
-  }
-  context.emitAction({
-    kind: "skill.submitted",
-    data: { skill: skillName },
   });
 }
 
@@ -270,7 +257,9 @@ export function createCommandService(
       );
     },
 
-    async executeCommand(invocation: UiCommandInvocation): Promise<void> {
+    async executeCommand(
+      invocation: UiCommandInvocation,
+    ): Promise<UiCommandCompletion> {
       const commandRunId = createCommandRunId();
       const context = createCommandRunContext({
         commandRunId,
@@ -297,7 +286,9 @@ export function createCommandService(
           !acceptedExtraCommandIds.has(invocation.commandId)
         ) {
           try {
-            await executeSkillCommand(options, invocation, context);
+            return context.completion(
+              await executeSkillCommand(options, invocation, context),
+            );
           } catch (error) {
             context.fail({
               code: "EXECUTION_ERROR",
@@ -305,14 +296,14 @@ export function createCommandService(
               recoverable: true,
             });
           }
-          return;
+          return context.completion();
         }
         context.fail({
           code: "COMMAND_NOT_FOUND",
           message: `Command not found: ${invocation.commandId}`,
           recoverable: true,
         });
-        return;
+        return context.completion();
       }
 
       try {
@@ -324,6 +315,7 @@ export function createCommandService(
           recoverable: true,
         });
       }
+      return context.completion();
     },
 
     abortCommandRun(commandRunId: string, reason = "aborted"): number {

@@ -291,3 +291,204 @@ it("does not rewind the receipt anchor when loading history against a cached vie
   });
   expect(store.getSnapshot().durationSample).toBe(received);
 });
+
+describe("command invocation presentation", () => {
+  const invocation = {
+    clientInvocationId: "i",
+    commandId: "help",
+    path: ["help"],
+    raw: "/help",
+    rawArgs: "",
+    argv: [],
+    surface: "tui",
+    sessionId: "s",
+  };
+  const result = (
+    text: string,
+  ): Extract<
+    import("ohbaby-sdk").UiEvent,
+    { type: "command.result.delivered" }
+  > => ({
+    type: "command.result.delivered" as const,
+    commandRunId: "r",
+    clientInvocationId: "i",
+    timestamp: 1,
+    output: { kind: "text" as const, text },
+  });
+  it("bounds unresolved commands and releases capacity on completion, timeout and scope change", () => {
+    vi.useFakeTimers();
+    try {
+      const store = createOhbabyWebStore();
+      store.setSessionSync(ready(view()));
+      for (let i = 0; i < 128; i += 1)
+        store.beginCommand({ ...invocation, clientInvocationId: String(i) });
+      expect(store.getSnapshot().view.commandNotices).toHaveLength(64);
+      expect(() => {
+        store.beginCommand(invocation);
+      }).toThrow("Too many pending commands");
+      store.completeCommand({
+        status: "completed",
+        commandRunId: "r",
+        clientInvocationId: "0",
+        outputCount: 0,
+        eventCount: 0,
+      });
+      expect(() => {
+        store.beginCommand(invocation);
+      }).not.toThrow();
+      vi.advanceTimersByTime(60_000);
+      expect(
+        store
+          .getSnapshot()
+          .view.commandNotices.every((notice) => notice.kind === "error"),
+      ).toBe(true);
+      expect(() => {
+        store.beginCommand(invocation);
+      }).not.toThrow();
+      store.setSessionSync({ status: "idle", scope: null, attempts: 0 });
+      expect(store.getSnapshot().view.commandNotices).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("retains action correlation after outputs until the final result event", () => {
+    const store = createOhbabyWebStore();
+    store.setSessionSync(ready(view()));
+    store.beginCommand({ ...invocation, commandId: "resume" });
+    store.applyEvent(result("selected session"), 1);
+    store.consumeCommand("i");
+    store.completeCommand({
+      status: "completed",
+      commandRunId: "r",
+      clientInvocationId: "i",
+      outputCount: 1,
+      eventCount: 2,
+    });
+    store.applyEvent(
+      {
+        ...result(""),
+        output: undefined,
+        action: { kind: "session.selected", data: { choiceId: "target" } },
+      },
+      2,
+    );
+    expect(store.getSnapshot().view.snapshot?.activeSessionId).toBe("target");
+    expect(store.getSnapshot().view.commandNotices).toEqual([]);
+  });
+  it("keeps accurate errors when receipt/output delivery times out and releases old runtime associations", () => {
+    vi.useFakeTimers();
+    try {
+      const store = createOhbabyWebStore();
+      store.setSessionSync(ready(view()));
+      store.beginCommand(invocation);
+      store.applyEvent(
+        {
+          ...result(""),
+          type: "command.failed",
+          error: { code: "ACTUAL", message: "actual error" },
+        },
+        1,
+      );
+      store.completeCommand({
+        status: "failed",
+        commandRunId: "r",
+        clientInvocationId: "i",
+        outputCount: 1,
+        eventCount: 2,
+        error: { code: "ACTUAL", message: "actual error" },
+      });
+      vi.advanceTimersByTime(60_000);
+      expect(store.getSnapshot().view.commandNotices[0]?.text).toBe(
+        "actual error",
+      );
+      store.reset();
+      store.setSessionSync(ready(view()));
+      store.beginCommand(invocation);
+      store.applyEvent(result("new runtime"), 1);
+      expect(store.getSnapshot().view.commandNotices[0]?.outputs).toEqual([
+        result("new runtime").output,
+      ]);
+      store.clearCommands();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("associates missing started, preserves every output and ignores pure action presentation", () => {
+    const store = createOhbabyWebStore();
+    store.setSessionSync(ready(view()));
+    store.beginCommand(invocation);
+    store.completeCommand({
+      status: "completed",
+      commandRunId: "r",
+      clientInvocationId: "i",
+      sessionId: "s",
+      outputCount: 2,
+      eventCount: 3,
+    });
+    store.applyEvent(result("first"), 1);
+    store.applyEvent(
+      { ...result("ignored"), output: undefined, action: { kind: "noop" } },
+      2,
+    );
+    store.applyEvent(result("second"), 3);
+    expect(store.getSnapshot().view.commandNotices[0]?.outputs).toEqual([
+      result("first").output,
+      result("second").output,
+    ]);
+    store.consumeCommand("i");
+    store.applyEvent(result("replayed"), 4);
+    store.setSessionSync(ready(view(2)));
+    expect(store.getSnapshot().view.commandNotices).toEqual([]);
+  });
+  it("consumes pending results and discards late events after a session switch", () => {
+    const store = createOhbabyWebStore();
+    store.setSessionSync(ready(view()));
+    store.beginCommand(invocation);
+    store.consumeCommand("i");
+    store.applyEvent(result("late"), 1);
+    expect(store.getSnapshot().view.commandNotices).toEqual([]);
+    store.setSessionSync({
+      ...ready(view()),
+      scope: { sessionId: "b", runtimeEpoch: "e" },
+    });
+    store.applyEvent(result("wrong session"), 2);
+    store.setSessionSync(ready(view()));
+    expect(store.getSnapshot().view.commandNotices).toEqual([]);
+  });
+  it("shows no skill or overlay cards and bounds missing completion as unknown", () => {
+    vi.useFakeTimers();
+    try {
+      const store = createOhbabyWebStore();
+      store.setSessionSync(ready(view()));
+      store.beginCommand({ ...invocation, commandId: "skill.demo" });
+      expect(store.getSnapshot().view.commandNotices).toEqual([]);
+      vi.advanceTimersByTime(60_000);
+      expect(store.getSnapshot().view.commandNotices[0]?.kind).toBe("error");
+      expect(store.getSnapshot().view.commandNotices[0]?.text).toContain(
+        "unconfirmed",
+      );
+      store.consumeCommand("i");
+      store.beginCommand({ ...invocation, commandId: "goal" }, true);
+      store.applyEvent(
+        {
+          ...result(""),
+          type: "command.failed",
+          error: { code: "FAILED", message: "actual failure" },
+        },
+        1,
+      );
+      store.completeCommand({
+        status: "failed",
+        commandRunId: "r",
+        clientInvocationId: "i",
+        outputCount: 0,
+        eventCount: 1,
+        error: { code: "FAILED", message: "actual failure" },
+      });
+      expect(store.getSnapshot().view.commandNotices).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
