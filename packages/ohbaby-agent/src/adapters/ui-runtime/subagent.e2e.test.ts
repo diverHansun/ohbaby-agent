@@ -734,7 +734,12 @@ describe("subagent runtime e2e", () => {
           finalResponse: "parent saw child failure",
         });
         expect(JSON.stringify(child)).toContain("partial child report");
-        expect(parentText).toContain(`status: ${terminalStatus}`);
+        const expectedStatus =
+          terminalStatus === "cancelled" ? "interrupted" : terminalStatus;
+        expect(parentText).toContain(`status: ${expectedStatus}`);
+        if (terminalStatus === "cancelled") {
+          expect(parentText).toContain("terminal_reason: cancelled");
+        }
         expect(parentText).toContain(
           terminalStatus === "timed_out"
             ? "Subagent timed out after 100ms"
