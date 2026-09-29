@@ -26,6 +26,7 @@ import {
 } from "./subagent-conversation-history.js";
 
 interface ScopeView {
+  readonly parentSessionId: string;
   readonly rootSessionId: string;
   readonly subagentId: string;
   readonly sessionId: string;
@@ -50,6 +51,13 @@ export class SubagentConversationProjection {
       readonly runtimeEpoch: string;
       readonly source: SourceSessionProjection;
       readonly executions: SubagentExecutionStore;
+      readonly instances?: {
+        get(input: { parentSessionId: string; subagentId: string }): Promise<{
+          readonly parentSessionId: string;
+          readonly name?: string;
+          readonly description?: string;
+        } | null>;
+      };
       readonly messages: MessageManager;
       readonly validateRoot: (id: string) => Promise<void>;
       readonly runs: (
@@ -216,6 +224,7 @@ export class SubagentConversationProjection {
     });
     scope = {
       rootSessionId: input.rootSessionId,
+      parentSessionId: latest.parentSessionId,
       subagentId: input.subagentId,
       sessionId,
       scopeId: latest.childScopeId,
@@ -259,12 +268,21 @@ export class SubagentConversationProjection {
         anchor && !anchor.childRunId && anchor.subagentId === input.subagentId
           ? anchor.output
           : undefined;
+      const instance = await this.options.instances?.get({
+        parentSessionId: scope.parentSessionId,
+        subagentId: input.subagentId,
+      });
+      const displayName =
+        instance?.parentSessionId === scope.parentSessionId
+          ? stableDisplayName(instance.name, instance.description)
+          : "Subagent";
       const executions = new Map(scope.executions);
       for (const record of page.executions)
         executions.set(record.executionId, record);
       return {
         rootSessionId: input.rootSessionId,
         subagentId: input.subagentId,
+        displayName,
         view: scope.owner.read(scope.sessionId),
         ...page,
         executions: [...executions.values()].map(conversationExecution),
@@ -411,4 +429,15 @@ function conversationExecution(
   record: SubagentExecutionRecord,
 ): UiSubagentExecution {
   return { ...projectSubagentExecution(record), prompt: record.prompt };
+}
+
+function stableDisplayName(name?: string, description?: string): string {
+  const value =
+    [name, description]
+      .map((value) => value?.trim())
+      .find((value) => value !== undefined && value !== "") ?? "Subagent";
+  const normalized = value.replace(/\s+/gu, " ");
+  return normalized.length > 80
+    ? `${normalized.slice(0, 77).trimEnd()}...`
+    : normalized;
 }

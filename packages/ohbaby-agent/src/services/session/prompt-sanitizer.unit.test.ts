@@ -1,12 +1,33 @@
 import { describe, expect, it } from "vitest";
 import {
   createTemporarySessionTitle,
+  sessionTitleIntent,
   isDefaultSessionTitle,
   redactPromptSecrets,
   sanitizePromptForSessionTitle,
 } from "./prompt-sanitizer.js";
 
 describe("session prompt sanitizer", () => {
+  it("uses skill args or the skill name for provisional titles without reading expansion", () => {
+    expect(
+      createTemporarySessionTitle(
+        sessionTitleIntent("execution body", {
+          skillName: "using-superpowers",
+          request: "",
+        }),
+      ),
+    ).toBe("using-superpowers");
+    expect(
+      createTemporarySessionTitle(
+        sessionTitleIntent("execution body", {
+          skillName: "review",
+          request: "Fix switching // 中文注释",
+        }),
+      ),
+    ).toBe("Fix switching // 中文注释");
+    expect(sessionTitleIntent("plain user request")).toBe("plain user request");
+  });
+
   it("redacts common secrets before sending prompt text to the title model", () => {
     const sanitized = sanitizePromptForSessionTitle(
       [

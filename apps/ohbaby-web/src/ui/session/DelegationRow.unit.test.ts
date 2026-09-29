@@ -3,7 +3,11 @@ import { expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { UiMessage, UiSubagentExecution, UiToolCall } from "ohbaby-sdk";
-import { DelegationRow, delegationExecution } from "./DelegationRow.js";
+import {
+  DelegationRow,
+  delegationExecution,
+  delegationTitle,
+} from "./DelegationRow.js";
 const call: UiToolCall = {
   id: "tool",
   name: "subagent_run",
@@ -171,4 +175,28 @@ it("keeps completed legacy delegation input and saved result readable without an
     });
     container.remove();
   }
+});
+
+it("labels each delegation with its own task even for the same named instance", () => {
+  const first = {
+    ...call,
+    input: {
+      subagentId: "worker",
+      name: "Researcher",
+      description: "Inspect recovery",
+    },
+  };
+  const next = {
+    ...call,
+    input: {
+      subagentId: "worker",
+      name: "Researcher",
+      description: "Verify the fix",
+    },
+  };
+  expect(delegationTitle(first)).toBe("Inspect recovery");
+  expect(delegationTitle(next)).toBe("Verify the fix");
+  expect(delegationTitle({ ...call, input: { name: "Researcher" } })).toBe(
+    "Researcher",
+  );
 });

@@ -17,7 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 
 const TITLE_MARKER =
-  "Generate a concise title for a coding-agent chat session.";
+  "Write a short conversation title that identifies the user's task.";
 const TOOL_CALL_ID = "call_compiled_web_read";
 const TOOL_FINAL = "OHBABY_COMPILED_WEB_TOOL_OK";
 const FOLLOWUP_FINAL = "OHBABY_COMPILED_WEB_FOLLOWUP_OK";

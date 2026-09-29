@@ -110,3 +110,8 @@ apps/ohbaby-web/
 审批事件在普通 seq 检查之前分流给 SDK `createPermissionSync`，不进入普通 replay 或 ViewState reducer。连接先安装订阅，再由 `hello` 确认 epoch、root 和 bindingGeneration；独立 `GET /v1/permissions` 提供基线。共享引擎负责有界查询、增量缓冲、gap 恢复和旧 generation 隔离，Web store 只保存其输出。全量 snapshot 慢或失败不阻塞审批恢复；消息的连接态 `live` 也不能使未完成基线同步的审批按钮可用。
 
 记忆会话恢复使用轻量 session index，不等待历史或 model 查询。恢复期间的旧快照不能覆盖记忆目标；显式 startup resume/fresh、后续手动选择及 new/resume 命令优先。metadata 暂时失败保留记忆偏好和现有连接，只有确认不存在或属于 child 时才跳过目标。导航持久化优先采用当前 transport binding；历史查询期间绑定改变则重新读取当前视图，避免迟到历史覆盖新选择。
+
+
+### 委派摘要与子会话名称（2026-09-29）
+
+主流委派行以本次 call 的 description、name、prompt 首行为摘要。只读子会话面板使用后端 `UiSubagentConversationView.displayName`：在已校验的 `(rootSessionId, subagentId)` 执行归属下查实例，优先实例 name，其次首次 description，缺失时显示 `Subagent`。名称合并多行空白并限制 80 字符，不从点击 call 或共享物理 Session.title 取值，也不新增模型请求。关闭重开、切换委派锚点及根会话后重新读取都采用同一实例来源。旧服务端缺少字段时前端统一回退 `Subagent`。

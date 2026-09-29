@@ -135,6 +135,7 @@ import {
 } from "./ui-inprocess/prompt-mapper.js";
 import {
   createTemporarySessionTitle,
+  sessionTitleIntent,
   generateSessionTitle,
   isDefaultSessionTitle,
   resolveSessionDisplayTitle,
@@ -151,7 +152,10 @@ import type { PermissionResponse as CorePermissionResponse } from "../permission
 import { Project } from "../project/index.js";
 import { IrisError } from "../utils/index.js";
 import type { AgentManager } from "../agents/index.js";
-import type { SubagentInstanceStore } from "../agents/index.js";
+import {
+  InMemorySubagentInstanceStore,
+  type SubagentInstanceStore,
+} from "../agents/index.js";
 import {
   goalTodoWorkScopeId,
   recoverTodosFromMessages,
@@ -246,6 +250,7 @@ type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 type PromptOwner = "user" | "goal";
 
 type InternalSubmitPromptOptions = SubmitPromptOptions & {
+  readonly expectedTemporaryTitle?: string;
   readonly signal?: AbortSignal;
   readonly owner?: PromptOwner;
   readonly goalId?: string;
@@ -642,6 +647,8 @@ export function createInProcessUiBackendClient(
     string,
     { goal?: string; todo?: string }
   >();
+  const subagentInstanceStore =
+    options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
   const subagentExecutionStore =
     options.subagentExecutionStore ?? new InMemorySubagentExecutionStore();
   const sourceLedger =
@@ -753,6 +760,7 @@ export function createInProcessUiBackendClient(
     source: sourceProjection,
     messages: messageManager,
     executions: subagentExecutionStore,
+    instances: subagentInstanceStore,
     validateRoot: async (id): Promise<void> => {
       await validatePermissionRoot(id);
     },
@@ -985,7 +993,7 @@ export function createInProcessUiBackendClient(
         sessionManager: options.sessionManager,
         skillRegistry,
         streamBridge: options.streamBridge,
-        subagentInstanceStore: options.subagentInstanceStore,
+        subagentInstanceStore,
         subagentExecutionStore,
         subagentOwnerId: options.subagentOwnerId,
         subagentOwnerPid: options.subagentOwnerPid,
@@ -1141,6 +1149,8 @@ export function createInProcessUiBackendClient(
           sessionId: prompt.sessionId,
           reservedUserMessageId: prompt.userMessageId,
           reasoning: prompt.reasoning,
+          namingSource: prompt.namingSource,
+          expectedTemporaryTitle: prompt.titleExpected,
           onRunStarted: (runId) => {
             executedRunId = runId;
             return controls.markRunning(runId);
@@ -1214,7 +1224,9 @@ export function createInProcessUiBackendClient(
     await reserveIdsFromState();
     const createdAt = timestamp();
     const baseProjectRoot = await resolveProjectRoot();
-    const temporaryTitle = createTemporarySessionTitle(text);
+    const temporaryTitle = createTemporarySessionTitle(
+      sessionTitleIntent(text, submitOptions?.namingSource),
+    );
     const snapshot = await stateStore.readSnapshot();
     const agentName = options.agentManager?.getDefault() ?? "build";
     const resolved = await resolveSessionForNewPrompt({
@@ -1304,6 +1316,13 @@ export function createInProcessUiBackendClient(
     }
     const accepted = await promptScheduler.accept({
       reasoning: submitOptions?.reasoning ?? sessionReasoningPreference,
+      namingSource: submitOptions?.namingSource,
+      titleExpected: (sessionId) =>
+        acceptedNewSessionIds.has(sessionId)
+          ? createTemporarySessionTitle(
+              sessionTitleIntent(text, submitOptions?.namingSource),
+            )
+          : undefined,
       clientRequestId: submitOptions?.clientRequestId,
       expectedSessionId: submitOptions?.sessionId,
       sessionId:
@@ -1322,6 +1341,7 @@ export function createInProcessUiBackendClient(
       text,
       userMessageId: options.createPromptUserMessageId?.() ?? messageIds.next(),
     });
+    acceptedNewSessionIds.delete(accepted.sessionId);
     return {
       promptId: accepted.promptId,
       clientRequestId: accepted.clientRequestId,
@@ -2589,14 +2609,18 @@ export function createInProcessUiBackendClient(
 
   async function isFirstUserMessageForTitle(input: {
     readonly coreSession?: CoreSession;
+    readonly expectedTemporaryTitle?: string;
     readonly uiSession: UiSession;
   }): Promise<boolean> {
     if (input.coreSession?.isSubagent === true) {
       return false;
     }
     if (
-      !isDefaultSessionTitle(input.uiSession.title) ||
-      (input.coreSession && !isDefaultSessionTitle(input.coreSession.title))
+      (!isDefaultSessionTitle(input.uiSession.title) &&
+        input.uiSession.title !== input.expectedTemporaryTitle) ||
+      (input.coreSession &&
+        !isDefaultSessionTitle(input.coreSession.title) &&
+        input.coreSession.title !== input.expectedTemporaryTitle)
     ) {
       return false;
     }
@@ -2628,6 +2652,7 @@ export function createInProcessUiBackendClient(
       const updatedCoreSession = await options.sessionManager.update(
         input.session.id,
         { title: input.title },
+        { expectedTitle: input.session.title },
       );
       updatedSession = {
         ...sessionMetadataToUiSession(updatedCoreSession),
@@ -2652,6 +2677,7 @@ export function createInProcessUiBackendClient(
   function scheduleSessionTitleGeneration(input: {
     readonly expectedTitle: string;
     readonly firstUserMessage: string;
+    readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
     readonly projectRoot: string;
     readonly sessionId: string;
   }): void {
@@ -2659,6 +2685,7 @@ export function createInProcessUiBackendClient(
       const llmClient = await resolveLLMClient(input.projectRoot);
       const generatedTitle = await generateSessionTitle({
         firstUserMessage: input.firstUserMessage,
+        namingSource: input.namingSource,
         llmClient,
         logger: options.logger ?? NOOP_LOGGER,
         sessionId: input.sessionId,
@@ -2687,14 +2714,25 @@ export function createInProcessUiBackendClient(
       const updatedCoreSession = await options.sessionManager.update(
         input.sessionId,
         { title: input.title },
+        { expectedTitle: input.expectedTitle },
       );
+      if (
+        updatedCoreSession.title !== input.title ||
+        updatedCoreSession.status !== "active"
+      )
+        return;
       const uiSession = await stateStore.getSession(input.sessionId);
-      if (uiSession?.title === input.expectedTitle) {
+      if (
+        uiSession &&
+        (uiSession.title === input.expectedTitle ||
+          uiSession.title === input.title)
+      ) {
         const updatedUiSession = {
           ...sessionMetadataToUiSession(updatedCoreSession),
           messages: uiSession.messages,
         };
-        await upsertSession(updatedUiSession);
+        if (uiSession.title === input.expectedTitle)
+          await upsertSession(updatedUiSession);
         publish({
           type: "session.updated",
           session: cloneSession(updatedUiSession),
@@ -2947,7 +2985,9 @@ export function createInProcessUiBackendClient(
       promptRuntime = runtime;
       const agentName = runtime.agentManager.getDefault();
       const baseProjectRoot = await resolveProjectRoot();
-      const temporaryTitle = createTemporarySessionTitle(text);
+      const temporaryTitle = createTemporarySessionTitle(
+        sessionTitleIntent(text, submitOptions?.namingSource),
+      );
       const snapshot = await stateStore.readSnapshot();
       const resolvedSession = await resolveSessionForNewPrompt({
         createSession: async (id) => {
@@ -2984,15 +3024,14 @@ export function createInProcessUiBackendClient(
       let session = resolvedSession.session;
       const existingCoreSession = resolvedSession.coreSession;
       let shouldGenerateSessionTitle = false;
-      const isNewSession =
-        resolvedSession.isNewSession ||
-        acceptedNewSessionIds.delete(session.id);
+      const isNewSession = resolvedSession.isNewSession;
       if (isNewSession) {
         shouldGenerateSessionTitle = true;
         sessionIds.reserve(session.id);
       } else if (
         await isFirstUserMessageForTitle({
           coreSession: existingCoreSession ?? undefined,
+          expectedTemporaryTitle: submitOptions?.expectedTemporaryTitle,
           uiSession: session,
         })
       ) {
@@ -3001,6 +3040,7 @@ export function createInProcessUiBackendClient(
           session,
           title: temporaryTitle,
         });
+        shouldGenerateSessionTitle = session.title === temporaryTitle;
       }
       const resolvedProjectRoot = session.projectRoot ?? baseProjectRoot;
       submittedSessionId = session.id;
@@ -3123,6 +3163,7 @@ export function createInProcessUiBackendClient(
         scheduleSessionTitleGeneration({
           expectedTitle: temporaryTitle,
           firstUserMessage: text,
+          namingSource: submitOptions?.namingSource,
           projectRoot: resolvedProjectRoot,
           sessionId: session.id,
         });

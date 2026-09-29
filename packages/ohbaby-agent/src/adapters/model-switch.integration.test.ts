@@ -94,7 +94,7 @@ describe("shared model configuration admission", () => {
                   ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
                     if (
                       JSON.stringify(request).includes(
-                        "Generate a concise title for a coding-agent chat session.",
+                        "Write a short conversation title that identifies the user's task.",
                       )
                     )
                       return Promise.resolve(
@@ -275,7 +275,7 @@ describe("shared model configuration admission", () => {
               request: InterfaceProviderRequest,
             ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
               const title = JSON.stringify(request).includes(
-                "Generate a concise title for a coding-agent chat session.",
+                "Write a short conversation title that identifies the user's task.",
               );
               const currentTurn = title ? 0 : ++turn;
               return Promise.resolve(

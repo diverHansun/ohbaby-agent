@@ -12,6 +12,54 @@ import {
 } from "./title-generator.js";
 
 describe("session title generator", () => {
+  it("names skill intent independently of a long execution prompt", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const client = createFakeLLMClient(
+      [{ textDelta: "修复会话切换提示" }, { finishReason: "stop" }],
+      requests,
+    );
+    await generateSessionTitle({
+      firstUserMessage:
+        "/private/skills/" + "execution instructions ".repeat(300),
+      namingSource: {
+        skillName: "using-superpowers",
+        request: "修复切换会话时的恢复横幅 OPENAI_API_KEY=sk-secret-value",
+      },
+      llmClient: client,
+    });
+    expect(requests[0]?.maxTokens).toBe(200);
+    expect(requests[0]?.messages).toHaveLength(2);
+    const material = JSON.stringify(requests[0]?.messages[1]);
+    expect(material).toContain("Skill: using-superpowers");
+    expect(material).toContain("Request: 修复切换会话时的恢复横幅");
+    expect(material).not.toContain("execution instructions");
+    expect(material).not.toContain("sk-secret-value");
+  });
+
+  it.each([
+    { skillName: "using-superpowers", request: "" },
+    { skillName: "review", request: "Fix session switching // 中文注释" },
+    {
+      skillName: "review",
+      request: "Fix recovery " + "x".repeat(2500) + " OPENAI_API_KEY=sk-hidden",
+    },
+  ])(
+    "keeps skill-only and multilingual material readable with bounded redacted args",
+    async (namingSource) => {
+      const requests: InterfaceProviderRequest[] = [];
+      await generateSessionTitle({
+        firstUserMessage: "expanded unrelated prompt",
+        namingSource,
+        llmClient: createFakeLLMClient([{ finishReason: "stop" }], requests),
+      });
+      const user = requests[0]?.messages[1]?.content as string;
+      expect(user).toContain(`Skill: ${namingSource.skillName}`);
+      expect(user).toContain(`Request: ${namingSource.request.slice(0, 30)}`);
+      expect(user.length).toBeLessThan(2250);
+      expect(user).not.toContain("sk-hidden");
+    },
+  );
+
   it("cleans model wrappers from generated titles", () => {
     expect(
       cleanGeneratedSessionTitle(
@@ -50,6 +98,8 @@ describe("session title generator", () => {
       temperature: 0.8,
     });
     expect(client.config.maxTokens).toBe(8192);
+    expect(requests[0]?.tools ?? []).toHaveLength(0);
+    expect(requests[0]?.promptCache.key).toBeUndefined();
     expect(JSON.stringify(requests[0].messages)).toContain("[redacted]");
     expect(JSON.stringify(requests[0].messages)).not.toContain(
       "sk-secret-value",

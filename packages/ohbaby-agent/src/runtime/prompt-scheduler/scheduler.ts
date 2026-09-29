@@ -77,6 +77,8 @@ export interface WorkspacePromptSchedulerOptions {
 }
 
 export interface AcceptWorkspacePromptInput {
+  readonly titleExpected?: (sessionId: string) => string | undefined;
+  readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
   readonly reasoning?:
     | ReasoningConfig
     | ((sessionId: string) => Promise<ReasoningConfig | undefined>);
@@ -272,6 +274,8 @@ export class WorkspacePromptScheduler {
           scopeKey: this.options.scopeKey,
           sessionId,
           text: input.text,
+          namingSource: input.namingSource,
+          titleExpected: input.titleExpected?.(sessionId),
           reasoning,
           userMessageId:
             input.userMessageId ??

@@ -88,6 +88,8 @@ export interface UiSubagentConversationQuery extends UiSubagentQuery {
   readonly anchorExecutionId?: string;
 }
 export interface UiSubagentConversationView {
+  /** Stable instance name; absent only on older servers. */
+  readonly displayName?: string;
   readonly rootSessionId: string;
   readonly subagentId: string;
   /** Current live tail baseline; its version belongs to this logical scope. */

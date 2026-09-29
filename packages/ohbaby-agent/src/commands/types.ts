@@ -193,7 +193,10 @@ export interface CommandServiceOptions {
   readonly permission?: CommandPermissionProvider;
   readonly submitPromptAndWait?: (
     text: string,
-    options?: { readonly sessionId?: string },
+    options?: {
+      readonly sessionId?: string;
+      readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
+    },
   ) => Promise<UiPromptCompletion> | UiPromptCompletion;
   readonly connectModel?: (
     input: UiConnectModelInput,

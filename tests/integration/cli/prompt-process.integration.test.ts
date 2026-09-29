@@ -26,7 +26,7 @@ interface CapturedRequest {
 
 const cleanupDirectories: string[] = [];
 const TITLE_GENERATION_PROMPT_MARKER =
-  "Generate a concise title for a coding-agent chat session.";
+  "Write a short conversation title that identifies the user's task.";
 const CLI_BIN_PATH = join(
   process.cwd(),
   "packages",

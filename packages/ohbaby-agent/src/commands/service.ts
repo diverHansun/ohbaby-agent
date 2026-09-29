@@ -202,6 +202,7 @@ async function executeSkillCommand(
     return;
   }
   const skillName = skillNameFromCommandId(invocation.commandId);
+  const namingSource = { skillName, request: invocation.rawArgs };
   const prompt = formatSkillPrompt(
     await options.skills.loadPrompt(skillName),
     invocation.rawArgs,
@@ -212,6 +213,7 @@ async function executeSkillCommand(
   }
   const completion = await options.submitPromptAndWait(prompt, {
     sessionId: invocation.sessionId,
+    namingSource,
   });
   if (completion.prompt.status !== "succeeded") {
     context.fail({

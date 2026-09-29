@@ -31,7 +31,7 @@ class FakeAbortError extends Error {
 }
 
 const TITLE_GENERATION_PROMPT_MARKER =
-  "Generate a concise title for a coding-agent chat session.";
+  "Write a short conversation title that identifies the user's task.";
 const cleanupDirectories: string[] = [];
 
 afterEach(async () => {
@@ -98,13 +98,7 @@ function titleTextForSessionTitleRequest(
   request: InterfaceProviderRequest,
 ): string {
   const content = lastUserMessageText(request);
-  const marker = "First user message:\n";
-  const markerIndex = content.indexOf(marker);
-  return createTemporarySessionTitle(
-    markerIndex < 0
-      ? "Fake session"
-      : content.slice(markerIndex + marker.length),
-  );
+  return createTemporarySessionTitle(content);
 }
 
 function createBlockingFifoLlmClient(input: {

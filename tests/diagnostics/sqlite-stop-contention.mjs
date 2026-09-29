@@ -106,7 +106,7 @@ try {
     });
     if (
       requestBody.includes(
-        "Generate a concise title for a coding-agent chat session.",
+        "Write a short conversation title that identifies the user's task.",
       )
     ) {
       response.end(

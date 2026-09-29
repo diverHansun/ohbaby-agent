@@ -45,6 +45,7 @@ export type {
   UiPromptEditLease,
   UiPromptSubmission,
   UiPromptSubmissionStatus,
+  UiPromptNamingSource,
   UiPromptTerminalStatus,
   UiAcquirePromptEditLeaseInput,
   UiRenewPromptEditLeaseInput,

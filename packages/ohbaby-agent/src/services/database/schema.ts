@@ -164,6 +164,8 @@ export const schema = {
     sessionId: "session_id",
     userMessageId: "user_message_id",
     text: "text",
+    namingSource: "naming_source",
+    titleExpected: "title_expected",
     status: "status",
     runId: "run_id",
     ownerId: "owner_id",

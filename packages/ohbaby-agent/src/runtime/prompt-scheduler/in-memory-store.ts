@@ -38,6 +38,7 @@ function clone(record: PromptSubmissionRecord): PromptSubmissionRecord {
   return {
     ...record,
     steerReceipt: record.steerReceipt ? { ...record.steerReceipt } : undefined,
+    namingSource: record.namingSource ? { ...record.namingSource } : undefined,
     reasoning: record.reasoning ? { ...record.reasoning } : undefined,
     error: record.error ? { ...record.error } : undefined,
   };
@@ -158,6 +159,8 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       sessionId: input.sessionId,
       userMessageId: input.userMessageId,
       text: input.text,
+      titleExpected: input.titleExpected,
+      namingSource: input.namingSource ? { ...input.namingSource } : undefined,
       reasoning: input.reasoning ? { ...input.reasoning } : undefined,
       status: "queued",
       ownerId: this.ownerId,
@@ -255,6 +258,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     const updated: PromptSubmissionRecord = {
       ...current,
       text,
+      namingSource: text === current.text ? current.namingSource : undefined,
       editLeaseId: undefined,
       editLeaseOwnerId: undefined,
       editLeaseExpiresAt: undefined,
@@ -517,6 +521,8 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
     const record: PromptSubmissionRecord = {
       ...current,
       text: input.text,
+      namingSource:
+        input.text === current.text ? current.namingSource : undefined,
       status: "queued",
       acceptedAt,
       admissionOrder: this.nextAdmissionOrder(input.scopeKey),

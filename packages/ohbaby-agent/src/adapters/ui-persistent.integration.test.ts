@@ -38,7 +38,7 @@ interface Deferred<T> {
 }
 
 const TITLE_GENERATION_PROMPT_MARKER =
-  "Generate a concise title for a coding-agent chat session.";
+  "Write a short conversation title that identifies the user's task.";
 
 function createDeferred<T>(): Deferred<T> {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -729,14 +729,7 @@ function titleTextForSessionTitleRequest(
   );
   const content =
     typeof userMessage?.content === "string" ? userMessage.content : "";
-  const marker = "First user message:\n";
-  const markerIndex = content.indexOf(marker);
-  if (markerIndex < 0) {
-    return "Fake session title";
-  }
-  return createTemporarySessionTitle(
-    content.slice(markerIndex + marker.length),
-  );
+  return createTemporarySessionTitle(content);
 }
 
 function requireRun(runs: readonly UiRun[], id: string): UiRun {

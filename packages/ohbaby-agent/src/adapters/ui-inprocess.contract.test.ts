@@ -60,7 +60,10 @@ import {
 } from "../runtime/run-ledger/index.js";
 import { PermissionEvent } from "../permission/index.js";
 import { Project } from "../project/index.js";
-import { InMemoryPromptSubmissionStore } from "../runtime/prompt-scheduler/index.js";
+import {
+  InMemoryPromptSubmissionStore,
+  DatabasePromptSubmissionStore,
+} from "../runtime/prompt-scheduler/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
 import { createHostLocalSandboxManager } from "./ui-runtime/host-local-environment.js";
 import { reloadLLMConfig } from "../config/index.js";
@@ -226,7 +229,7 @@ function createControlledTitleLLMClient(title: string): {
 
 function isTitleGenerationRequest(request: InterfaceProviderRequest): boolean {
   return JSON.stringify(request.messages).includes(
-    "Generate a concise title for a coding-agent chat session.",
+    "Write a short conversation title that identifies the user's task.",
   );
 }
 
@@ -238,14 +241,7 @@ function titleTextForSessionTitleRequest(
   );
   const content =
     typeof userMessage?.content === "string" ? userMessage.content : "";
-  const marker = "First user message:\n";
-  const markerIndex = content.indexOf(marker);
-  if (markerIndex < 0) {
-    return "Fake session title";
-  }
-  return createTemporarySessionTitle(
-    content.slice(markerIndex + marker.length),
-  );
+  return createTemporarySessionTitle(content);
 }
 
 function createTitleProviderStream(
@@ -4337,6 +4333,16 @@ describe("createInProcessUiBackendClient", () => {
     expect(childText).not.toContain("AI Events Researcher");
     expect(childText).not.toContain("events-scout");
     expect(requests.filter(isGenericSubagentRequest)).toHaveLength(1);
+    const executions = await client.listSubagentExecutions({
+      rootSessionId: "session_1",
+    });
+    const subagentId = executions.executions[0]?.subagentId;
+    expect(subagentId).toBeDefined();
+    const child = await client.getSubagentConversationView({
+      rootSessionId: "session_1",
+      subagentId,
+    });
+    expect(child.displayName).toBe("events-scout");
 
     const parentToolMessageContent = requests[2]?.messages.at(-1)?.content;
     const parentToolContent =
@@ -5995,6 +6001,268 @@ describe("createInProcessUiBackendClient", () => {
     ]);
   });
 
+  it.each(["unchanged", "edited", "manual"] as const)(
+    "names a persisted retained first prompt after restart: %s",
+    async (scenario) => {
+      const projectRoot = await mkdtemp(
+        join(tmpdir(), "ohbaby-retained-title-"),
+      );
+      const dbPath = join(projectRoot, "fixture.db");
+      const controlled = createControlledTitleLLMClient(
+        "Generated retained title",
+      );
+      const namingSource = { skillName: "review", request: "Original task" };
+      const text = "Long expanded execution instructions ".repeat(100);
+      const manager = (): ReturnType<typeof createSessionManager> =>
+        createSessionManager({
+          bus: createBus(),
+          store: createDatabaseSessionStore(),
+          projectResolver: {
+            fromDirectory: (directory) => ({
+              id: "project",
+              rootPath: directory,
+            }),
+          },
+          messageCleaner: { removeMessages: () => Promise.resolve() },
+        });
+      initDatabase({ dbPath });
+      await manager().create(projectRoot, {
+        id: "retained-session",
+        title: "Original task",
+      });
+      const initialStore = new DatabasePromptSubmissionStore();
+      await initialStore.accept({
+        promptId: "retained-first",
+        clientRequestId: "retained-first",
+        userMessageId: "retained-message",
+        scopeKey: projectRoot,
+        sessionId: "retained-session",
+        text,
+        namingSource,
+        titleExpected: "Original task",
+        maxQueuedPrompts: 100,
+      });
+      await initialStore.retainOwnedQueued();
+      closeDatabase();
+      initDatabase({ dbPath });
+      const sessionManager = manager();
+      if (scenario === "manual")
+        await sessionManager.update("retained-session", {
+          title: "Manual title",
+        });
+      const prompts = new DatabasePromptSubmissionStore();
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+      });
+      const runLedger = createInMemoryRunLedger();
+      const client = createInProcessUiBackendClient({
+        llmClient: controlled.client,
+        sessionManager,
+        promptSubmissionStore: prompts,
+        messageManager,
+        runLedger,
+        workdir: projectRoot,
+        stateStore: createPersistentUiStateStore({
+          sessionManager,
+          messageManager,
+          runLedger,
+          projectRoot,
+          initialActiveSessionId: "retained-session",
+        }),
+      });
+      try {
+        await client.getSnapshot();
+        expect(controlled.requests).toHaveLength(0);
+        expect((await prompts.get("retained-first"))?.status).toBe("retained");
+        const lease = await client.acquirePromptEditLease({
+          promptId: "retained-first",
+        });
+        await client.resubmitRetainedPrompt({
+          promptId: "retained-first",
+          operationId: "manual-resend",
+          editLeaseId: lease.editLeaseId,
+          text: scenario === "edited" ? "New task after edit" : text,
+        });
+        await client.waitForPrompt("retained-first");
+        if (scenario === "manual") {
+          expect(
+            controlled.requests.filter(isTitleGenerationRequest),
+          ).toHaveLength(0);
+          expect((await sessionManager.get("retained-session"))?.title).toBe(
+            "Manual title",
+          );
+        } else {
+          await withTimeout(
+            controlled.titleStarted.promise,
+            1000,
+            "Retained title did not start",
+          );
+          expect((await sessionManager.get("retained-session"))?.title).toBe(
+            scenario === "edited" ? "New task after edit" : "Original task",
+          );
+          const titleRequests = controlled.requests.filter(
+            isTitleGenerationRequest,
+          );
+          expect(titleRequests).toHaveLength(1);
+          expect(titleRequests[0]?.messages[1]?.content).toBe(
+            scenario === "edited"
+              ? "New task after edit"
+              : "Skill: review\nRequest: Original task",
+          );
+          const named = waitForUiEvent(
+            client,
+            (event): event is Extract<UiEvent, { type: "session.updated" }> =>
+              event.type === "session.updated" &&
+              event.session.title === "Generated retained title",
+          );
+          controlled.releaseTitle();
+          await named;
+        }
+      } finally {
+        controlled.releaseTitle();
+        await client.dispose();
+        closeDatabase();
+        await rm(projectRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("carries raw skill intent from command acceptance to naming without changing execution", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-title-"));
+    const controlled = createControlledTitleLLMClient("修复会话切换提示");
+    const prompts = new InMemoryPromptSubmissionStore();
+    const client = createInProcessUiBackendClient({
+      llmClient: controlled.client,
+      promptSubmissionStore: prompts,
+      workdir: projectRoot,
+    });
+    try {
+      const skillDir = join(projectRoot, ".ohbaby", "skill", "review-session");
+      await mkdir(skillDir, { recursive: true });
+      const body =
+        "Inspect execution files and internal tool instructions. ".repeat(100);
+      await writeFile(
+        join(skillDir, "SKILL.md"),
+        `---\nname: review-session\ndescription: Review sessions\n---\n${body}`,
+      );
+      await client.listCommands({ surface: "web" });
+      const request = "修复切换会话时的恢复横幅";
+      await client.executeCommand({
+        argv: [request],
+        clientInvocationId: "skill-title",
+        commandId: "skill.review-session",
+        path: ["review-session"],
+        raw: `/review-session ${request}`,
+        rawArgs: request,
+        surface: "web",
+      });
+      await withTimeout(
+        controlled.titleStarted.promise,
+        1000,
+        "Title did not start",
+      );
+      const snapshot = await client.getSnapshot();
+      expect(snapshot.sessions[0]?.title).toBe(request);
+      const accepted = await prompts.listVisible(projectRoot);
+      expect(accepted[0]?.namingSource).toEqual({
+        skillName: "review-session",
+        request,
+      });
+      expect(accepted[0]?.titleExpected).toBe(request);
+      expect(accepted[0]?.text).toContain(body.trim());
+      expect(accepted[0]?.text).toContain(`User request:\n${request}`);
+      const titleRequests = controlled.requests.filter(
+        isTitleGenerationRequest,
+      );
+      expect(titleRequests).toHaveLength(1);
+      expect(titleRequests[0]?.messages[1]).toMatchObject({
+        role: "user",
+        content: `Skill: review-session\nRequest: ${request}`,
+      });
+      expect(titleRequests[0]?.tools ?? []).toHaveLength(0);
+      const mainRequests = controlled.requests.filter(
+        (r) => !isTitleGenerationRequest(r),
+      );
+      expect(JSON.stringify(mainRequests)).toContain(body.trim());
+      expect(JSON.stringify(mainRequests)).toContain(request);
+      const named = waitForUiEvent(
+        client,
+        (event): event is Extract<UiEvent, { type: "session.updated" }> =>
+          event.type === "session.updated" &&
+          event.session.title === "修复会话切换提示",
+      );
+      controlled.releaseTitle();
+      await named;
+      const sessionId = snapshot.sessions[0]?.id;
+      if (!sessionId) throw new Error("Expected the admitted session");
+      await client.submitPromptAndWait("Follow up without renaming", {
+        sessionId,
+      });
+      expect(controlled.requests.filter(isTitleGenerationRequest)).toHaveLength(
+        1,
+      );
+      expect((await client.getSnapshot()).sessions[0]?.title).toBe(
+        "修复会话切换提示",
+      );
+    } finally {
+      controlled.releaseTitle();
+      await client.dispose();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a manual title written between automatic naming read and write", async () => {
+    const store = createInMemorySessionStore();
+    const manager = createSessionManager({
+      bus: createBus(),
+      store,
+      createSessionId: () => "session_1",
+      projectResolver: {
+        fromDirectory: (directory: string) => ({
+          id: "title-project",
+          rootPath: directory,
+        }),
+      },
+      messageCleaner: { removeMessages: () => Promise.resolve() },
+    });
+    const controlled = createControlledTitleLLMClient("Late AI title");
+    const client = createInProcessUiBackendClient({
+      llmClient: controlled.client,
+      sessionManager: manager,
+    });
+    await client.submitPromptAndWait("Temporary task");
+    await controlled.titleStarted.promise;
+    const originalGet = manager.get.bind(manager);
+    let crossed = false;
+    const updated = createDeferred<undefined>();
+    vi.spyOn(manager, "get").mockImplementation(async (id) => {
+      const old = await originalGet(id);
+      if (!crossed && old?.title === "Temporary task") {
+        crossed = true;
+        await manager.update(id, { title: "Manual wins" });
+      }
+      return old;
+    });
+    const originalUpdate = manager.update.bind(manager);
+    vi.spyOn(manager, "update").mockImplementation(
+      async (id, patch, condition) => {
+        const result = await originalUpdate(id, patch, condition);
+        if (patch.title === "Late AI title") updated.resolve(undefined);
+        return result;
+      },
+    );
+    controlled.releaseTitle();
+    await withTimeout(
+      updated.promise,
+      1000,
+      "Automatic write was not attempted",
+    );
+    expect(crossed).toBe(true);
+    expect((await originalGet("session_1"))?.title).toBe("Manual wins");
+    await client.dispose();
+  });
+
   it("writes a temporary first-message title then applies an async AI title", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -6059,7 +6327,7 @@ describe("createInProcessUiBackendClient", () => {
       title: "Sessions backend naming",
     });
     expect(titleRequest).toMatchObject({
-      maxTokens: 128,
+      maxTokens: 200,
       model: "fake-model",
       purpose: "session-title",
       sessionId: "session_1",

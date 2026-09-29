@@ -294,7 +294,7 @@ const provider = createServer(async (request, response) => {
       "cache-control": "no-cache",
     });
     if (
-      raw.includes("Generate a concise title for a coding-agent chat session.")
+      raw.includes("Write a short conversation title that identifies the user's task.")
     ) {
       finish(
         response,

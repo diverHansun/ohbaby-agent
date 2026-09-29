@@ -285,3 +285,25 @@ describe("createDatabaseSessionStore", () => {
     });
   });
 });
+
+it("compares automatic title at the write boundary after a manual rename", async () => {
+  const store = createDatabaseSessionStore();
+  await store.insert(createSession({ title: "Temporary" }));
+  const original = await store.get("session_1");
+  if (!original) throw new Error("Expected persisted session");
+  const expected = original.title;
+  await store.update("session_1", { title: "Manual" });
+  await store.update(
+    "session_1",
+    { title: "Generated" },
+    { expectedTitle: expected },
+  );
+  expect((await store.get("session_1"))?.title).toBe("Manual");
+  await store.update("session_1", { status: "archived" });
+  await store.update(
+    "session_1",
+    { title: "Late" },
+    { expectedTitle: "Manual" },
+  );
+  expect((await store.get("session_1"))?.title).toBe("Manual");
+});

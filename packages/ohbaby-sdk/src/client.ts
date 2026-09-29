@@ -59,6 +59,7 @@ import type {
 } from "./prompt.js";
 
 export interface SubmitPromptOptions {
+  readonly namingSource?: import("./prompt.js").UiPromptNamingSource;
   readonly reasoning?: UiReasoningConfig;
   readonly clientRequestId?: string;
   readonly sessionId?: string;

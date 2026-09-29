@@ -497,13 +497,24 @@ export function createDatabaseSessionStore(
         });
       },
 
-      update(sessionId: string, patch: Partial<Session>): Promise<Session> {
+      update(
+        sessionId: string,
+        patch: Partial<Session>,
+        condition?: { readonly expectedTitle: string },
+      ): Promise<Session> {
         return withWriteBoundary(() => {
           const existing = transaction
             ? getTransactionSession(transaction, sessionId)
             : getRow(sessionId);
           if (!existing) {
             throw new SessionNotFoundError(sessionId);
+          }
+          if (
+            condition &&
+            (existing.title !== condition.expectedTitle ||
+              existing.status !== "active")
+          ) {
+            return cloneSession(existing);
           }
           const updated: Session = {
             ...existing,

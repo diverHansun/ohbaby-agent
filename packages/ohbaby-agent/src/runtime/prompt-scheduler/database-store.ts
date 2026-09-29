@@ -44,6 +44,8 @@ export interface PromptSubmissionRow {
   readonly user_message_id: string;
   readonly text: string;
   readonly reasoning_data: string | null;
+  readonly naming_source: string | null;
+  readonly title_expected: string | null;
   readonly status: PromptSubmissionStatus;
   readonly run_id: string | null;
   readonly owner_id: string | null;
@@ -125,6 +127,12 @@ export function promptSubmissionRowToRecord(
     sessionId: row.session_id,
     userMessageId: row.user_message_id,
     text: row.text,
+    titleExpected: row.title_expected ?? undefined,
+    namingSource: row.naming_source
+      ? (JSON.parse(
+          row.naming_source,
+        ) as PromptSubmissionRecord["namingSource"])
+      : undefined,
     reasoning: row.reasoning_data
       ? (JSON.parse(row.reasoning_data) as PromptSubmissionRecord["reasoning"])
       : undefined,
@@ -233,9 +241,9 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       db.prepare(
         `INSERT INTO ${this.tableName}
           (prompt_id, client_request_id, scope_key, session_id,
-           user_message_id, text, reasoning_data, status,
+           user_message_id, text, reasoning_data, naming_source, title_expected, status,
            created_at, updated_at, owner_id, owner_pid, accepted_at, admission_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
       ).run(
         input.promptId,
         input.clientRequestId,
@@ -244,6 +252,8 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         input.userMessageId,
         input.text,
         input.reasoning ? JSON.stringify(input.reasoning) : null,
+        input.namingSource ? JSON.stringify(input.namingSource) : null,
+        input.titleExpected ?? null,
         at,
         at,
         this.ownerId,
@@ -365,7 +375,8 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         const result = db
           .prepare(
             `UPDATE ${this.tableName}
-           SET text = ?, edit_lease_id = NULL,
+           SET naming_source = CASE WHEN text = ? THEN naming_source ELSE NULL END,
+               text = ?, edit_lease_id = NULL,
                edit_lease_owner_id = NULL, edit_lease_expires_at = NULL,
                updated_at = ?
            WHERE prompt_id = ? AND status IN ('queued', 'retained')
@@ -373,6 +384,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
              AND (? IS NULL OR edit_lease_owner_id = ?)`,
           )
           .run(
+            text,
             text,
             this.nextTime(current),
             promptId,
@@ -721,13 +733,14 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       const order = this.nextAdmissionOrder(db, input.scopeKey);
       const result = db
         .prepare(
-          `UPDATE ${this.tableName} SET text=?, status='queued', owner_id=?, owner_pid=?,
+          `UPDATE ${this.tableName} SET naming_source=CASE WHEN text=? THEN naming_source ELSE NULL END, text=?, status='queued', owner_id=?, owner_pid=?,
         accepted_at=?, admission_order=?, updated_at=?, run_id=NULL, started_at=NULL, ended_at=NULL,
         end_time_source=NULL, error_data=NULL, edit_lease_id=NULL, edit_lease_owner_id=NULL, edit_lease_expires_at=NULL
         WHERE prompt_id=? AND status='retained' AND edit_lease_id=? AND edit_lease_expires_at>?
           AND (? IS NULL OR edit_lease_owner_id=?)`,
         )
         .run(
+          input.text,
           input.text,
           this.ownerId,
           this.ownerPid,

@@ -93,7 +93,12 @@ export interface SessionManager {
     options?: ListSessionOptions,
   ): Promise<Session[]>;
   getRecent(limit?: number): Promise<Session[]>;
-  update(sessionId: string, patch: UpdateSessionPatch): Promise<Session>;
+  /** With expectedTitle, atomically updates only a matching active session; otherwise returns it unchanged. */
+  update(
+    sessionId: string,
+    patch: UpdateSessionPatch,
+    condition?: { readonly expectedTitle: string },
+  ): Promise<Session>;
   incrementStats(sessionId: string, delta: SessionStatsDelta): Promise<Session>;
   remove(sessionId: string, options?: RemoveSessionOptions): Promise<void>;
 }
@@ -114,7 +119,12 @@ export interface SessionStore {
     options?: ListSessionOptions,
   ): Promise<Session[]>;
   getRecent(limit: number): Promise<Session[]>;
-  update(sessionId: string, patch: Partial<Session>): Promise<Session>;
+  /** With expectedTitle, atomically updates only a matching active session; otherwise returns it unchanged. */
+  update(
+    sessionId: string,
+    patch: Partial<Session>,
+    condition?: { readonly expectedTitle: string },
+  ): Promise<Session>;
   remove(sessionId: string): Promise<void>;
   withTransaction<T>(
     operation: (store: SessionStore) => Promise<T>,

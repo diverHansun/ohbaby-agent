@@ -118,3 +118,12 @@ message/lifecycle 在合适时机主动调用 `incrementStats()` 或等价方法
 - [x] Project 识别职责不再放在 session 内部
 - [x] session 与 message 的职责边界清晰
 - [x] 架构保持简单，没有引入额外服务层
+
+
+### 首轮自动命名与人工标题保护（2026-09-29）
+
+命名使用接受记录中的可选 `namingSource = { skillName, request }`；普通输入直接使用正文，skill 执行仍保留展开正文。辅助请求固定两条消息、`purpose=session-title`、200 tokens、5 秒超时，无执行 tools/history 或主执行显式 cache key，辅助用量不进入主 Run。脱敏先于限长；空结果、默认占位和失败保持临时标题。
+
+新建会话的接受记录另存短 `titleExpected`，记录接受时系统生成的临时标题。首次执行按零消息事实及这个比较值确认资格，重启 retained 后手动发送仍可命名；人工标题不匹配则跳过。queued 编辑和 retained 改文清除旧 skill 素材，比较值保留以便用新正文更新临时标题。历史无此字段的记录沿用原回退，不批量补名。
+
+SessionManager/SessionStore.update 的可选第三参数 `expectedTitle` 在存储写边界比较当前标题且要求 active；不匹配时返回现有会话。数据库使用已有写事务，内存 store 同步比较后修改，不新增全局锁。自动命名最终写回必须携带这个条件。

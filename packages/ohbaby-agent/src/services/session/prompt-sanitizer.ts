@@ -18,6 +18,15 @@ export function sanitizePromptForSessionTitle(
   );
 }
 
+export function sessionTitleIntent(
+  text: string,
+  namingSource?: import("ohbaby-sdk").UiPromptNamingSource,
+): string {
+  return namingSource
+    ? namingSource.request.trim() || namingSource.skillName
+    : text;
+}
+
 export function createTemporarySessionTitle(
   firstUserMessage: string,
   maxLength = DEFAULT_TEMPORARY_TITLE_MAX_LENGTH,

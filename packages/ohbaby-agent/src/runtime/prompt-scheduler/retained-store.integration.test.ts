@@ -70,6 +70,107 @@ for (const kind of ["memory", "sqlite"] as const) {
           );
     };
 
+    it("invalidates naming source on changed retained resubmission without changing its receipt on replay", async () => {
+      await store.accept({
+        promptId: "edited",
+        clientRequestId: "edited",
+        scopeKey: "/w",
+        sessionId: "s",
+        userMessageId: "edited-message",
+        text: "skill body",
+        namingSource: { skillName: "review", request: "Old task" },
+        maxQueuedPrompts: 100,
+      });
+      await store.retainOwnedQueued();
+      const lease = await store.acquireEditLease("edited", "client", 1000);
+      const input = {
+        scopeKey: "/w",
+        promptId: "edited",
+        operationId: "edited-resend",
+        editLeaseId: lease.editLeaseId,
+        ownerClientId: "client",
+        text: "New task",
+        maxQueuedPrompts: 100,
+      };
+      const result = await store.resubmitRetained(input);
+      expect(result.record.namingSource).toBeUndefined();
+      expect((await store.resubmitRetained(input)).receipt).toEqual(
+        result.receipt,
+      );
+      expect((await accept("plain")).record.namingSource).toBeUndefined();
+    });
+
+    it("keeps naming facts through replay and restart, but invalidates changed text", async () => {
+      const namingSource = {
+        skillName: "using-superpowers",
+        request: "Fix switching",
+      };
+      const input = {
+        promptId: "named",
+        clientRequestId: "named",
+        scopeKey: "/w",
+        sessionId: "s",
+        userMessageId: "m-named",
+        text: "expanded skill",
+        namingSource,
+        maxQueuedPrompts: 100,
+      };
+      await store.accept(input);
+      expect(
+        (
+          await store.accept({
+            ...input,
+            namingSource: { ...namingSource, request: "Wrong replay" },
+          })
+        ).record.namingSource,
+      ).toEqual(namingSource);
+      await store.retainOwnedQueued();
+      if (kind === "sqlite") {
+        closeDatabase();
+        initDatabase({ dbPath: join(directory, "fixture.db") });
+        store = new DatabasePromptSubmissionStore({
+          ownerId: "owner",
+          ownerPid: process.pid,
+          now: (): number => now,
+        });
+      }
+      expect(await store.listQueued("/w")).toEqual([]);
+      const lease = await store.acquireEditLease("named", "client", 1000);
+      const resent = await store.resubmitRetained({
+        scopeKey: "/w",
+        promptId: "named",
+        operationId: "resend",
+        editLeaseId: lease.editLeaseId,
+        ownerClientId: "client",
+        text: input.text,
+        maxQueuedPrompts: 100,
+      });
+      expect(resent.record.namingSource).toEqual(namingSource);
+      const edit = await store.acquireEditLease("named", "client", 1000);
+      expect(
+        (
+          await store.commitEdit(
+            "named",
+            edit.editLeaseId,
+            "New task",
+            "client",
+          )
+        ).namingSource,
+      ).toBeUndefined();
+      await store.retainOwnedQueued();
+      const second = await store.acquireEditLease("named", "client", 1000);
+      const changed = await store.resubmitRetained({
+        scopeKey: "/w",
+        promptId: "named",
+        operationId: "resend-changed",
+        editLeaseId: second.editLeaseId,
+        ownerClientId: "client",
+        text: "Yet another task",
+        maxQueuedPrompts: 100,
+      });
+      expect(changed.record.namingSource).toBeUndefined();
+    });
+
     it("persists owner at acceptance and never claims another owner's head", async () => {
       const foreign = (await accept("a")).record;
       expect(foreign).toMatchObject({

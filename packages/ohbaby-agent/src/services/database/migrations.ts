@@ -621,4 +621,9 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
       DROP TABLE migration_022_child_execution;
     `,
   },
+  {
+    version: "023_prompt_naming_source",
+    sql: `ALTER TABLE prompt_submission ADD COLUMN naming_source TEXT;
+          ALTER TABLE prompt_submission ADD COLUMN title_expected TEXT;`,
+  },
 ];

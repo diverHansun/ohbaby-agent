@@ -16,6 +16,7 @@ import {
   type MigrationDefinition,
   type SyncTransactionCallback,
 } from "./index.js";
+import { NodeSqliteConnection } from "./connection.js";
 import { INITIAL_MIGRATIONS } from "./migrations.js";
 
 const cleanupPaths: string[] = [];
@@ -71,6 +72,56 @@ describe("services/database", () => {
     ).toBeUndefined();
   });
 
+  it("adds nullable naming metadata while an old connection keeps its prepared read and writes", async () => {
+    const dbPath = await tempDbPath();
+    initDatabase({
+      dbPath,
+      migrations: INITIAL_MIGRATIONS.filter((m) => m.version < "023"),
+    });
+    const old = new NodeSqliteConnection(dbPath);
+    const read = old.prepare<{ text: string }>(
+      "SELECT text FROM prompt_submission WHERE prompt_id = ?",
+    );
+    const insert = old.prepare(
+      "INSERT INTO prompt_submission(prompt_id,client_request_id,scope_key,session_id,user_message_id,text,status,created_at,updated_at,accepted_at,admission_order) VALUES(?,?,'/w','s',?,?,'queued',1,1,1,1)",
+    );
+    try {
+      old
+        .prepare(
+          "INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) VALUES('s','p','/w','Existing title','active',1,1,'{}')",
+        )
+        .run();
+      insert.run("before", "before", "m-before", "original text");
+      closeDatabase();
+      initDatabase({ dbPath });
+      expect(read.get("before")).toEqual({ text: "original text" });
+      insert.run("after", "after", "m-after", "old writer still works");
+      expect(
+        getDatabase()
+          .prepare<{
+            naming_source: string | null;
+          }>(
+            "SELECT naming_source FROM prompt_submission WHERE prompt_id='after'",
+          )
+          .get()?.naming_source,
+      ).toBeNull();
+      expect(
+        getDatabase()
+          .prepare<{ title: string }>("SELECT title FROM session WHERE id='s'")
+          .get()?.title,
+      ).toBe("Existing title");
+      expect(
+        old
+          .prepare<{
+            status: string;
+          }>("SELECT status FROM prompt_submission WHERE prompt_id='before'")
+          .get()?.status,
+      ).toBe("queued");
+    } finally {
+      old.close();
+    }
+  });
+
   it("records migrations only once across repeated initialization", async () => {
     const dbPath = await tempDbPath();
 
@@ -105,6 +156,7 @@ describe("services/database", () => {
       { version: "020_final_step_steer_admission" },
       { version: "021_subagent_delegation_identity" },
       { version: "022_retained_prompt_admission" },
+      { version: "023_prompt_naming_source" },
     ]);
   });
 

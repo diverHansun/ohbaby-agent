@@ -5,11 +5,7 @@ import {
 } from "ohbaby-sdk";
 import { SubagentView, type SubagentReadingCache } from "./SubagentView.js";
 import { ConversationPresentation } from "../conversation/ConversationPresentation.js";
-import {
-  DelegationRow,
-  delegationExecution,
-  delegationTitle,
-} from "./DelegationRow.js";
+import { DelegationRow, delegationExecution } from "./DelegationRow.js";
 import { subagentSheetGeometry } from "./subagent-layout.js";
 import { TodoDock } from "../conversation/TodoDock.js";
 import { PermissionPolicyControl } from "../permissions/PermissionPolicyControl.js";
@@ -727,7 +723,6 @@ export function SessionScreen({
   const approvalDialogVisible =
     !viewingSubagent && view.pendingPermissions.length > 0;
   const [childExpanded, setChildExpanded] = useState(false);
-  const [childTitle, setChildTitle] = useState("Subagent task");
   const [childAnchorToken, setChildAnchorToken] = useState(0);
   const childTrigger = useRef<HTMLButtonElement | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -974,7 +969,6 @@ export function SessionScreen({
                         )}
                         onOpen={(execution, trigger) => {
                           childTrigger.current = trigger;
-                          setChildTitle(delegationTitle(call));
                           setChildAnchorToken((value) => value + 1);
                           void childReader.select(execution);
                         }}
@@ -1128,7 +1122,7 @@ export function SessionScreen({
             readingCache={childReadingCache}
             state={childState}
             rootTitle={view.activeSession?.title ?? "Main conversation"}
-            title={childTitle}
+            title={childState.conversation?.displayName ?? "Subagent"}
             expanded={childExpanded}
             onExpandedChange={setChildExpanded}
             onClose={closeChild}

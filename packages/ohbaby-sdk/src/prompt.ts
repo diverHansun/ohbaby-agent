@@ -1,4 +1,10 @@
 import type { UiReasoningConfig } from "./connect-model.js";
+/** Original skill intent, separate from the expanded execution input. */
+export interface UiPromptNamingSource {
+  readonly skillName: string;
+  readonly request: string;
+}
+
 export type UiPromptSubmissionStatus =
   | "steered"
   | "queued"

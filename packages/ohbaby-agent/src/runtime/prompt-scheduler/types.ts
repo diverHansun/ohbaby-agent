@@ -13,6 +13,9 @@ export type PromptSubmissionStatus =
   | "interrupted";
 
 export interface PromptSubmissionRecord {
+  readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
+  /** Admission-created temporary title; preserved when the queued text changes. */
+  readonly titleExpected?: string;
   readonly steerReceipt?: import("./current-run-inputs.js").SteerQueuedPromptReceipt;
   readonly reasoning?: ReasoningConfig;
   readonly promptId: string;
@@ -39,6 +42,9 @@ export interface PromptSubmissionRecord {
 }
 
 export interface AcceptPromptSubmissionInput {
+  readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
+  /** Admission-created temporary title; preserved when the queued text changes. */
+  readonly titleExpected?: string;
   readonly reasoning?: ReasoningConfig;
   readonly promptId: string;
   readonly clientRequestId: string;

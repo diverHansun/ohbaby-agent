@@ -38,6 +38,19 @@ function fixture() {
   const conversations = new SubagentConversationProjection({
     runtimeEpoch: "epoch",
     executions,
+    instances: {
+      get: ({ subagentId }) =>
+        Promise.resolve({
+          parentSessionId: "root",
+          name:
+            subagentId === "a"
+              ? "Researcher\nalpha"
+              : subagentId === "long"
+                ? "Researcher ".repeat(20)
+                : undefined,
+          description: subagentId === "b" ? "First task B" : undefined,
+        }),
+    },
     messages,
     source,
     publish: (event) => {
@@ -75,6 +88,40 @@ function fixture() {
 }
 
 describe("continuous subagent live projection", () => {
+  it("uses stable instance names for different anchors sharing one physical session", async () => {
+    const f = fixture();
+    await f.accept("a1");
+    await f.accept("a2");
+    await f.accept("b1", "b");
+    const read = (subagentId: string, anchorExecutionId: string) =>
+      f.conversations.read({
+        rootSessionId: "root",
+        subagentId,
+        anchorExecutionId,
+      });
+    expect((await read("a", "a1")).displayName).toBe("Researcher alpha");
+    expect((await read("a", "a2")).displayName).toBe("Researcher alpha");
+    expect((await read("b", "b1")).displayName).toBe("First task B");
+    await f.conversations.retain({
+      rootSessionId: "root",
+      subagentId: "a",
+      watchId: "watch",
+    });
+    await f.conversations.release({
+      rootSessionId: "root",
+      subagentId: "a",
+      watchId: "watch",
+    });
+    expect((await read("a", "a1")).displayName).toBe("Researcher alpha");
+    await f.accept("missing", "missing");
+    expect((await read("missing", "missing")).displayName).toBe("Subagent");
+    await f.accept("long", "long");
+    const longName = (await read("long", "long")).displayName;
+    expect(longName?.length).toBeLessThanOrEqual(80);
+    expect(longName).toMatch(/^Researcher .*\.\.\.$/u);
+    f.conversations.dispose();
+  });
+
   it("exposes stored output only for the selected execution without a child run", async () => {
     const f = fixture();
     const a = await f.accept("stored-a");
