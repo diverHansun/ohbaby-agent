@@ -29,6 +29,7 @@ import type {
 import { createOhbabyWebStore, type OhbabyWebStore } from "./store/store.js";
 
 export interface OhbabyWebRuntime {
+  readonly serverUrl?: string;
   readonly client: UiBackendClient | null;
   readonly ready: Promise<void>;
   readonly store: OhbabyWebStore;
@@ -102,6 +103,10 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
       this.persistActiveSession();
     });
     this.ready = this.initialize();
+  }
+
+  get serverUrl(): string {
+    return this.config.baseUrl;
   }
 
   get client(): UiBackendClient | null {

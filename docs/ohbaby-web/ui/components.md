@@ -22,6 +22,8 @@ Composer 通过 `topContent` 接收 SessionScreen 装配的 TodoDock，通过 `p
 
 ## 0. ProjectRail / SessionSidebar（项目轨与会话侧栏）
 
+会话行采用 [会话侧栏设计](../../problem-lists/2026-09-30-web-session-sidebar/improve-1/frontend/03-ui-layout-and-style.md)：Sessions、无圆点/底部计数、标题左侧实心 pin、hover 的 … 与右键共用 Pin/Unpin/Archive 菜单；浏览器置顶按当前项目隔离。行为见该议题前端 04。
+
 - 会话侧栏以宽度动画展开和收起，内容在动画中不重排。
 - `New session` 使用 `SquarePen` 方笔图标和英文文案；默认透明、无描边，hover/focus 时整块显示浅灰底。按钮左右完整留白，不得贴住或裁到侧栏右边缘。
 

@@ -1,0 +1,215 @@
+/* Local sidebar palette; the project rail and conversation keep their own styles. */
+.ohb-sidebar,
+.ohb-session-menu {
+  --session-ink: #3f4147;
+  --session-muted: #737780;
+  --session-row-hover: rgba(255, 255, 255, 0.56);
+  --session-menu-surface: #fff;
+  --session-menu-hover: #f0f0f2;
+  --session-border: rgba(30, 32, 38, 0.12);
+  --session-focus: #5f86c4;
+  --session-radius: 9px;
+  --session-gap: 8px;
+  --session-control: 24px;
+}
+
+.ohb-session-row {
+  position: relative;
+  flex: none;
+  min-height: 50px;
+  width: 100%;
+  border-radius: var(--session-radius);
+  color: var(--session-ink);
+}
+
+.ohb-session-row:hover,
+.ohb-session-row:focus-within,
+.ohb-session-row.is-menu-open {
+  background: var(--session-row-hover);
+}
+
+.ohb-session-row.ohb-session-active {
+  background: rgba(229, 235, 247, 0.68);
+  color: #26282d;
+}
+
+.ohb-session-main {
+  display: block;
+  width: 100%;
+  min-height: 50px;
+  border: 0;
+  border-radius: inherit;
+  padding: var(--session-gap) var(--session-gap) var(--session-gap) 32px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.ohb-session-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ohb-session-title,
+.ohb-session-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-session-title {
+  text-overflow: clip;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.ohb-session-row:hover .ohb-session-title,
+.ohb-session-row:focus-within .ohb-session-title,
+.ohb-session-row.is-menu-open .ohb-session-title {
+  margin-right: 28px;
+}
+
+.ohb-session-title.is-scrolling {
+  mask-image: linear-gradient(to right, #000 calc(100% - 8px), transparent);
+}
+
+.ohb-session-title.is-scroll-ended {
+  mask-image: none;
+}
+
+.ohb-session-title.is-scrolling > span {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.ohb-session-copy small {
+  color: var(--session-muted);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.ohb-session-pin,
+.ohb-session-actions {
+  position: absolute;
+  top: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--session-control);
+  height: var(--session-control);
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--session-muted);
+}
+
+.ohb-session-pin {
+  left: 4px;
+}
+
+.ohb-session-pin .lucide-pin,
+.ohb-session-menu .lucide-pin {
+  transform: rotate(-45deg);
+}
+
+.ohb-session-actions {
+  right: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms ease-out;
+}
+
+.ohb-session-row:hover .ohb-session-actions,
+.ohb-session-row:focus-within .ohb-session-actions,
+.ohb-session-row.is-menu-open .ohb-session-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ohb-session-pin:not(:disabled):hover,
+.ohb-session-actions:not(:disabled):hover {
+  color: var(--session-ink);
+  background: rgba(30, 32, 38, 0.06);
+}
+
+.ohb-session-row button:focus-visible {
+  outline: 2px solid var(--session-focus);
+  outline-offset: -2px;
+}
+
+.ohb-session-row button:disabled {
+  cursor: default;
+}
+
+.ohb-session-menu {
+  position: fixed;
+  z-index: 50;
+  box-sizing: border-box;
+  width: 176px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--session-border);
+  border-radius: var(--session-radius);
+  background: var(--session-menu-surface);
+  color: var(--session-ink);
+  box-shadow:
+    0 4px 16px rgba(20, 22, 28, 0.12),
+    0 1px 3px rgba(20, 22, 28, 0.06);
+  animation: ohb-session-menu-in 100ms ease-out;
+}
+
+.ohb-session-menu button {
+  display: flex;
+  align-items: center;
+  gap: var(--session-gap);
+  width: 100%;
+  min-height: 32px;
+  padding: 4px var(--session-gap);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.ohb-session-menu button:hover,
+.ohb-session-menu button:focus {
+  background: var(--session-menu-hover);
+  outline: none;
+}
+
+.ohb-session-menu svg {
+  flex: none;
+}
+.ohb-session-pin-error {
+  margin: 4px 8px;
+  color: var(--session-muted);
+  font-size: 12px;
+}
+
+@keyframes ohb-session-menu-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ohb-session-actions {
+    transition: none;
+  }
+  .ohb-session-menu {
+    animation: none;
+  }
+}

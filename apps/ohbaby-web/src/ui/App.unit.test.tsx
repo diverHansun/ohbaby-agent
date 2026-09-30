@@ -3065,10 +3065,10 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
     expect(
-      app.container.querySelector('button[title="Select Saved one"]'),
+      app.container.querySelector('button[aria-label="Select Saved one"]'),
     ).not.toBeNull();
     expect(
-      app.container.querySelector('button[title="Select Saved two"]'),
+      app.container.querySelector('button[aria-label="Select Saved two"]'),
     ).not.toBeNull();
     await clickButton(app.container, "Select Saved two");
     expect(fake.selectSession).toHaveBeenCalledWith("two");
@@ -3130,7 +3130,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       app.container.querySelector(".ohb-sidebar")?.hasAttribute("inert"),
     ).toBe(false);
     expect(
-      app.container.querySelector('button[title="Select Session 2"]')
+      app.container.querySelector('button[aria-label="Select Session 2"]')
         ?.textContent,
     ).not.toContain("0 messages");
 
@@ -3362,7 +3362,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     await clickButton(app.container, "Expand sessions");
-    await clickButton(app.container, "Archive Session 2");
+    await clickButton(app.container, "Actions for Session 2");
+    await clickButton(document.body, "Archive");
 
     expect(confirm).toHaveBeenCalledWith("Archive this session?");
     expect(fake.archiveSession).toHaveBeenCalledWith("session_2");
@@ -3392,7 +3393,8 @@ describe("OhbabyWebApp slash command interactions", () => {
     const app = mountApp(fake.runtime);
 
     await clickButton(app.container, "Expand sessions");
-    await clickButton(app.container, "Archive Session 2");
+    await clickButton(app.container, "Actions for Session 2");
+    await clickButton(document.body, "Archive");
 
     expect(fake.archiveSession).not.toHaveBeenCalled();
     expect(fake.selectSession).not.toHaveBeenCalled();
@@ -4900,7 +4902,12 @@ async function clickButton(
   container: ParentNode,
   title: string,
 ): Promise<void> {
-  const button = container.querySelector(`button[title="${title}"]`);
+  const button = Array.from(container.querySelectorAll("button")).find(
+    (candidate) =>
+      candidate.getAttribute("title") === title ||
+      candidate.getAttribute("aria-label") === title ||
+      candidate.textContent === title,
+  );
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error(`button not found: ${title}`);
   }

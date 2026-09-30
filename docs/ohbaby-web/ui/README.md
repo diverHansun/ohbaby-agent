@@ -6,6 +6,8 @@
 
 ## 设计源（source of truth）
 
+会话行的置顶、操作菜单、长标题滚动与重排以 [2026-09-30 会话侧栏设计](../../problem-lists/2026-09-30-web-session-sidebar/README.md) 为准。
+
 > **导航目标已实施**：OpenCode 风格项目 rail、默认收起且按需展开的项目 session sidebar 与项目管理交互，以 [`../../problem-lists/2026-07-11-opencode-style-web-navigation/`](../../problem-lists/2026-07-11-opencode-style-web-navigation/README.md) 为 Phase 2 权威。下面的 claude.ai 稿保留为历史视觉参考；其中旧的大写黑字标、720px 输入框和框外 mode/permission 按钮已由 [`../../problem-lists/2026-09-18-web-chrome-polish/improve-2/`](../../problem-lists/2026-09-18-web-chrome-polish/improve-2/00-discussion.md) 覆盖。
 
 - **会话区视觉参考**：claude.ai 设计项目 `ohbaby-agent Web UI设计`

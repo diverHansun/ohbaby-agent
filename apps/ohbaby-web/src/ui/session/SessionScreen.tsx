@@ -670,11 +670,11 @@ export function SessionScreen({
     [runAction, runtime, view.activeSession?.id],
   );
   const archiveSession = useCallback(
-    (sessionId: string): void => {
+    async (sessionId: string): Promise<boolean> => {
       if (!window.confirm("Archive this session?")) {
-        return;
+        return false;
       }
-      void runAction(() => runtime.archiveSession(sessionId));
+      return runAction(() => runtime.archiveSession(sessionId));
     },
     [runAction, runtime],
   );
@@ -881,6 +881,7 @@ export function SessionScreen({
         workspace={workspace}
       />
       <SessionSidebar
+        serverUrl={runtime.serverUrl}
         open={sessionSidebarOpen}
         onArchiveSession={archiveSession}
         onCreateSession={createSession}

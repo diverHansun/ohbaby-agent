@@ -408,107 +408,7 @@
   gap: 4px;
   min-height: 0;
   overflow-y: auto;
-}
-
-.ohb-session-row {
-  align-items: center;
-  background: transparent;
-  border-radius: 9px;
-  color: #54565c;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  min-height: 50px;
-  width: 100%;
-}
-
-.ohb-session-row:hover {
-  background: rgba(255, 255, 255, 0.48);
-}
-
-.ohb-session-disabled {
-  opacity: 1;
-}
-
-.ohb-session-active {
-  background: rgba(229, 235, 247, 0.68);
-  color: #26282d;
-}
-
-.ohb-session-main {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  display: grid;
-  gap: 9px;
-  grid-template-columns: 7px minmax(0, 1fr);
-  min-height: 50px;
-  min-width: 0;
-  padding: 8px 0 8px 9px;
-  text-align: left;
-}
-
-.ohb-session-main:disabled,
-.ohb-session-archive:disabled {
-  cursor: default;
-}
-
-.ohb-session-dot {
-  background: #c9cdd4;
-  border-radius: 50%;
-  height: 7px;
-  width: 7px;
-}
-
-.ohb-session-active .ohb-session-dot {
-  background: #5f86c4;
-}
-
-.ohb-session-running .ohb-session-dot {
-  animation: ohb-pulse 1.4s ease-in-out infinite;
-}
-
-.ohb-session-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.ohb-session-copy strong,
-.ohb-session-copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ohb-session-copy strong {
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.ohb-session-copy small {
-  color: #a3a6ad;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 11px;
-}
-
-.ohb-session-archive {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 8px;
-  color: #c3c7cf;
-  display: flex;
-  height: 32px;
-  justify-content: center;
-  margin-right: 2px;
-  width: 32px;
-}
-
-.ohb-session-archive:not(:disabled):hover {
-  background: #eef1f6;
-  color: #6b7280;
+  overflow-anchor: none;
 }
 
 .ohb-sidebar-empty {
@@ -516,18 +416,6 @@
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;
   padding: 12px 8px;
-}
-
-.ohb-sidebar-footer {
-  align-items: center;
-  border-top: 1px solid #e9e9eb;
-  color: #a3a6ad;
-  display: flex;
-  flex: none;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 11px;
-  justify-content: space-between;
-  padding: 12px 14px;
 }
 
 /* A slow first read occupies conversation whitespace without moving the composer. */
