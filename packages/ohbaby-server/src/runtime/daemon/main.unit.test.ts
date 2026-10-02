@@ -234,6 +234,8 @@ describe("startDaemonServer", () => {
   it("preserves the startup failure when diagnostics disposal also rejects", async () => {
     vi.resetModules();
     const startupError = new Error("primary server startup failed");
+    const beforeBackendStart = vi.fn(() => Promise.resolve());
+    const backendCleanup = vi.fn(() => Promise.resolve());
     const disposeDiagnostics = vi.fn(() =>
       Promise.reject(new Error("diagnostics dispose failed")),
     );
@@ -264,6 +266,8 @@ describe("startDaemonServer", () => {
       const { startDaemonServer } = await import("./main.js");
       await expect(
         startDaemonServer({
+          beforeBackendStart,
+          backendCleanup,
           diagnosticsFactory: () =>
             Promise.resolve({
               dispose: disposeDiagnostics,
@@ -277,6 +281,8 @@ describe("startDaemonServer", () => {
         }),
       ).rejects.toBe(startupError);
       expect(disposeDiagnostics).toHaveBeenCalledOnce();
+      expect(beforeBackendStart).toHaveBeenCalledOnce();
+      expect(backendCleanup).toHaveBeenCalledOnce();
     } finally {
       vi.doUnmock("ohbaby-agent");
       vi.doUnmock("./server.js");
@@ -458,6 +464,7 @@ describe("startDaemonServer", () => {
   });
 
   it("reuses a healthy server state for the same scope", async () => {
+    const beforeBackendStart = vi.fn(() => Promise.resolve());
     vi.resetModules();
     const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-main-"));
     const stateFilePath = join(tempDir, "daemon-state.json");
@@ -487,6 +494,7 @@ describe("startDaemonServer", () => {
     try {
       const { startDaemonServer } = await import("./main.js");
       const daemon = await startDaemonServer({
+        beforeBackendStart,
         healthCheck: () => Promise.resolve(true),
         packageVersion: "0.1.0",
         pidFilePath: join(tempDir, "daemon.pid"),
@@ -494,6 +502,7 @@ describe("startDaemonServer", () => {
         stateFilePath,
       });
 
+      expect(beforeBackendStart).not.toHaveBeenCalled();
       expect(daemon).toMatchObject({
         host: "127.0.0.1",
         port: 4096,
@@ -1336,6 +1345,8 @@ describe("startDaemonServer", () => {
   it("disposes MCP managers when the daemon stops", async () => {
     vi.resetModules();
     const tempDir = await mkdtemp(join(tmpdir(), "ohbaby-daemon-main-"));
+    const beforeBackendStart = vi.fn(() => Promise.resolve());
+    const backendCleanup = vi.fn(() => Promise.resolve());
     const disposeBackend = vi.fn(() => Promise.resolve());
     const disposeAll = vi.fn(() => Promise.resolve());
     const closePersistentUiBackendDatabase = vi.fn();
@@ -1355,13 +1366,23 @@ describe("startDaemonServer", () => {
     try {
       const { startDaemonServer } = await import("./main.js");
       const daemon = await startDaemonServer({
+        beforeBackendStart,
+        backendCleanup,
         pidFilePath: join(tempDir, "daemon.pid"),
         port: 0,
         stateFilePath: join(tempDir, "daemon-state.json"),
       });
 
+      expect(beforeBackendStart.mock.invocationCallOrder[0]).toBeLessThan(
+        createPersistentUiBackendClient.mock.invocationCallOrder[0] ?? Infinity,
+      );
+      expect(backendCleanup).not.toHaveBeenCalled();
       await daemon.stop();
 
+      expect(backendCleanup).toHaveBeenCalledOnce();
+      expect(disposeAll.mock.invocationCallOrder[0]).toBeLessThan(
+        backendCleanup.mock.invocationCallOrder[0] ?? Infinity,
+      );
       expect(disposeBackend).toHaveBeenCalledTimes(1);
       expect(disposeAll).toHaveBeenCalledTimes(1);
       expect(closePersistentUiBackendDatabase).toHaveBeenCalledTimes(1);

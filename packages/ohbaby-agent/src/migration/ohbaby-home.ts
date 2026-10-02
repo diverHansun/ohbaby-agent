@@ -235,7 +235,7 @@ async function preserveConflict(
   report.conflicts.push(targetPath);
   warn(
     options,
-    `Legacy configuration conflicts with ${targetPath}; preserved at ${sibling}`,
+    `Config migration: kept ${targetPath} unchanged; saved the conflicting legacy config to ${sibling}.`,
   );
 }
 

@@ -124,3 +124,5 @@ export {
   beginDatabaseShutdown,
   DatabaseShutdownError,
 } from "./services/database/index.js";
+
+export { installSystemProxy } from "./utils/network-proxy/index.js";

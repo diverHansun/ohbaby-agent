@@ -294,7 +294,7 @@ try {
       ).toBe(0);
       expect(result.stdout).not.toContain("ui.command.");
       expect(result.stderr).not.toContain("ui.command.");
-      expect(result.stderr).toBe("");
+      expect(result.stderr).toMatch(/^Network: [^\n]+\n$/u);
       const diagnosticsPath = /diagnostics: ([^\n]+)/u.exec(result.stdout)?.[1];
       expect(diagnosticsPath).toBeTypeOf("string");
       expect(diagnosticsPath).toContain(join(logRoot, "serve"));

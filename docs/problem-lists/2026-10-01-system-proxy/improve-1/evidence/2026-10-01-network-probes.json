@@ -1,0 +1,360 @@
+{
+  "scope": "2026-10-01 planning transport probes, not production implementation acceptance",
+  "productCodeChanged": false,
+  "systemProxyChanged": false,
+  "liveCalls": {
+    "meta": {
+      "date": "2026-10-01T12:41:22.877Z",
+      "node": "v26.3.1",
+      "scope": "temporary transport spike; existing source adapters; no product changes",
+      "proxy": {
+        "host": "127.0.0.1",
+        "port": 1082
+      },
+      "proxyEnvPresent": [],
+      "maxTokens": 256,
+      "timeoutMs": 45000
+    },
+    "rows": [
+      {
+        "id": "zenmux-deepseek-chat",
+        "model": "deepseek/deepseek-v4.1-flash",
+        "protocol": "openai-compatible",
+        "mode": "node-default",
+        "result": "OK",
+        "elapsedMs": 4053,
+        "frames": 2,
+        "chars": 2,
+        "finish": "stop",
+        "proxyConnections": 0,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 9
+          },
+          "inputTokens": 9,
+          "outputTokens": 1,
+          "totalTokens": 10
+        }
+      },
+      {
+        "id": "zhipu-glm-chat",
+        "model": "glm-5.3-flash",
+        "protocol": "openai-compatible",
+        "mode": "node-default",
+        "result": "OK",
+        "elapsedMs": 2918,
+        "frames": 42,
+        "chars": 2,
+        "finish": "stop",
+        "proxyConnections": 0,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 17
+          },
+          "inputTokens": 17,
+          "outputTokens": 44,
+          "totalTokens": 61
+        }
+      },
+      {
+        "id": "zenmux-deepseek-chat",
+        "model": "deepseek/deepseek-v4.1-flash",
+        "protocol": "openai-compatible",
+        "mode": "system-static-snapshot",
+        "result": "OK",
+        "elapsedMs": 3653,
+        "frames": 2,
+        "chars": 2,
+        "finish": "stop",
+        "proxyConnections": 2,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 9
+          },
+          "inputTokens": 9,
+          "outputTokens": 1,
+          "totalTokens": 10
+        }
+      },
+      {
+        "id": "zhipu-glm-chat",
+        "model": "glm-5.3-flash",
+        "protocol": "openai-compatible",
+        "mode": "system-static-snapshot",
+        "result": "OK",
+        "elapsedMs": 3183,
+        "frames": 80,
+        "chars": 2,
+        "finish": "stop",
+        "proxyConnections": 2,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 17
+          },
+          "inputTokens": 17,
+          "outputTokens": 81,
+          "totalTokens": 98
+        }
+      },
+      {
+        "id": "zenmux-luna-responses",
+        "model": "openai/gpt-5.6-luna",
+        "protocol": "openai-responses",
+        "mode": "system-static-snapshot",
+        "result": "OK",
+        "elapsedMs": 4345,
+        "frames": 2,
+        "chars": 2,
+        "finish": "stop",
+        "proxyConnections": 0,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 11
+          },
+          "inputTokens": 11,
+          "outputTokens": 5,
+          "totalTokens": 16
+        }
+      },
+      {
+        "id": "zenmux-sonnet-anthropic",
+        "model": "anthropic/claude-sonnet-5",
+        "protocol": "anthropic",
+        "mode": "system-static-snapshot",
+        "result": "OK",
+        "elapsedMs": 3485,
+        "frames": 3,
+        "chars": 2,
+        "finish": "stop",
+        "proxyConnections": 0,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 16
+          },
+          "inputTokens": 16,
+          "outputTokens": 4,
+          "totalTokens": 20
+        }
+      },
+      {
+        "id": "dashscope-qwen-chat",
+        "model": "qwen3.8-flash",
+        "protocol": "openai-compatible",
+        "mode": "system-static-snapshot",
+        "result": "OK",
+        "elapsedMs": 2523,
+        "frames": 11,
+        "chars": 2,
+        "finish": "stop",
+        "proxyConnections": 2,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 66
+          },
+          "inputTokens": 66,
+          "outputTokens": 26,
+          "totalTokens": 92
+        }
+      }
+    ]
+  },
+  "reusedRouteConfirmation": {
+    "meta": {
+      "date": "2026-10-01T12:43:33.227Z",
+      "node": "v26.3.1",
+      "scope": "temporary transport spike; existing source adapters; no product changes",
+      "proxy": {
+        "host": "127.0.0.1",
+        "port": 1082
+      },
+      "proxyEnvPresent": [],
+      "maxTokens": 256,
+      "timeoutMs": 45000
+    },
+    "rows": [
+      {
+        "id": "zenmux-luna-responses",
+        "model": "openai/gpt-5.6-luna",
+        "protocol": "openai-responses",
+        "mode": "system-static-snapshot",
+        "result": "OK",
+        "elapsedMs": 5355,
+        "frames": 2,
+        "chars": 2,
+        "finish": "stop",
+        "proxyConnections": 2,
+        "proxySends": 2,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 11
+          },
+          "inputTokens": 11,
+          "outputTokens": 5,
+          "totalTokens": 16
+        }
+      },
+      {
+        "id": "zenmux-sonnet-anthropic",
+        "model": "anthropic/claude-sonnet-5",
+        "protocol": "anthropic",
+        "mode": "system-static-snapshot",
+        "result": "OK",
+        "elapsedMs": 3370,
+        "frames": 3,
+        "chars": 2,
+        "finish": "stop",
+        "proxyConnections": 0,
+        "proxySends": 1,
+        "usage": {
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 16
+          },
+          "inputTokens": 16,
+          "outputTokens": 4,
+          "totalTokens": 20
+        }
+      }
+    ]
+  },
+  "nativeLifecycleAndBypass": {
+    "node": "v26.3.1",
+    "afterB": {
+      "body": "B:ok",
+      "proxyDelta": {
+        "A": 0,
+        "B": 1
+      }
+    },
+    "oldStream": "A:firstlast",
+    "afterEmpty": {
+      "body": "B:ok",
+      "proxyDelta": {
+        "A": 0,
+        "B": 0
+      }
+    },
+    "afterRestoreB": {
+      "body": "A:ok",
+      "proxyDelta": {
+        "A": 0,
+        "B": 0
+      }
+    },
+    "afterRestoreA": {
+      "body": "direct:ok",
+      "proxyDelta": {
+        "A": 0,
+        "B": 0
+      }
+    },
+    "bypass": [
+      {
+        "rule": "",
+        "host": "127.0.0.1",
+        "outcome": "A:ok",
+        "newProxyTunnels": 1
+      },
+      {
+        "rule": "127.0.0.1",
+        "host": "127.0.0.1",
+        "outcome": "direct:ok",
+        "newProxyTunnels": 0
+      },
+      {
+        "rule": "127.0.0.0/8",
+        "host": "127.0.0.1",
+        "outcome": "A:ok",
+        "newProxyTunnels": 1
+      },
+      {
+        "rule": "*.local",
+        "host": "ohbaby-proxy-fixture.local",
+        "outcome": "TimeoutError",
+        "newProxyTunnels": 0
+      },
+      {
+        "rule": "<local>",
+        "host": "ohbaby-proxy-fixture",
+        "outcome": "A:ok",
+        "newProxyTunnels": 1
+      }
+    ]
+  },
+  "tavilyHttpFixture": {
+    "node": "v26.3.1",
+    "protocol": "http fixture only; HTTPS not proven",
+    "one": {
+      "label": "default-then-A",
+      "result": "OK",
+      "A": 1,
+      "B": 0
+    },
+    "two": {
+      "label": "same-client-then-B",
+      "result": "OK",
+      "A": 0,
+      "B": 1
+    },
+    "three": {
+      "label": "explicit-A-while-global-B",
+      "result": "OK",
+      "A": 1,
+      "B": 0
+    },
+    "fixtureNote": "Initial fixture omitted images and failed SDK response parsing after successful routing; adding images:[] yielded the successful final results recorded here."
+  }
+}

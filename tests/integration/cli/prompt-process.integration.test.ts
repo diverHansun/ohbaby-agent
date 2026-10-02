@@ -395,7 +395,7 @@ describe("CLI prompt process smoke", () => {
 
       expect(result.code).toBe(0);
       expect(result.stdout).toBe("fake smoke ok");
-      expect(result.stderr).toBe("");
+      expect(result.stderr).toMatch(/^Network: [^\n]+\n$/u);
       const mainRequests = server.requests.filter(
         (request) => !isTitleGenerationRequest(request),
       );

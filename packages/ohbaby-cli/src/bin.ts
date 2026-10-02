@@ -73,7 +73,15 @@ export interface RunOhbabyCliIo {
   readonly stdout?: CliWritable;
 }
 
+interface NetworkProxyHandle {
+  dispose(): Promise<void>;
+}
+type InstallSystemProxy = (options?: {
+  readonly onStatus?: (message: string) => void;
+}) => Promise<NetworkProxyHandle>;
+
 export interface RunOhbabyCliDependencies {
+  readonly installSystemProxy?: InstallSystemProxy;
   readonly onHostShutdownComplete?: () => void;
   readonly createCoreHost?: (options: CliGlobalOptions) => CliCoreHostResult;
   readonly listDaemonConnections?: NonNullable<
@@ -85,7 +93,12 @@ export interface RunOhbabyCliDependencies {
   readonly openUrl?: CliCommandRuntime["openUrl"];
   readonly readServeCoexistenceNotice?: () => Promise<string | undefined>;
   readonly readDaemonStatus?: CliCommandRuntime["readDaemonStatus"];
-  readonly startDaemonServer?: CliCommandRuntime["startDaemonServer"];
+  readonly startDaemonServer?: (
+    options: Parameters<CliCommandRuntime["startDaemonServer"]>[0] & {
+      readonly beforeBackendStart?: () => Promise<void>;
+      readonly backendCleanup?: () => Promise<void>;
+    },
+  ) => ReturnType<CliCommandRuntime["startDaemonServer"]>;
   readonly stopDaemonFromState?: CliCommandRuntime["stopDaemonFromState"];
 }
 
@@ -107,6 +120,7 @@ interface RemoteDaemonClientOptions {
 }
 
 interface AgentRuntimeModule {
+  readonly installSystemProxy?: unknown;
   readonly collectCleanup?: typeof collectCleanup;
   readonly createShutdownOptions?: typeof createShutdownOptions;
   readonly buildCoreAPIImpl?: unknown;
@@ -126,6 +140,8 @@ type AgentCoreFactoryOptions = CliGlobalOptions & {
 type DefaultStartDaemonServerOptions = Parameters<
   NonNullable<CliCommandRuntime["startDaemonServer"]>
 >[0] & {
+  readonly beforeBackendStart?: () => Promise<void>;
+  readonly backendCleanup?: () => Promise<void>;
   readonly diagnosticsFactory?: (context: {
     readonly ohbabyHome: string;
     readonly workspaceRoot: string;
@@ -354,6 +370,11 @@ async function loadDefaultDependencies(
   };
 
   return {
+    installSystemProxy: requireFunction(
+      runtimeModule.installSystemProxy,
+      "installSystemProxy",
+      AGENT_RUNTIME_MODULE,
+    ) as InstallSystemProxy,
     async createCoreHost(options): Promise<CliCoreHost> {
       const { diagnosticsRole, ...agentOptions } = options;
       const remoteOptions = remoteHostOptionsFromCliOptions(options);
@@ -592,10 +613,30 @@ export async function runOhbabyCli(
     throw new Error("CLI runtime dependencies were not initialized");
   }
 
+  const proxyOwnership = { server: false };
+  let proxyHandle: NetworkProxyHandle | undefined;
+  const initializeProxy = async (): Promise<void> => {
+    const install =
+      dependencies.installSystemProxy ??
+      defaultDependencies?.installSystemProxy;
+    if (!proxyHandle && install) {
+      proxyHandle = await install({
+        onStatus: (message) => {
+          stderr.write(`${message}\n`);
+        },
+      });
+    }
+  };
+  const disposeProxy = async (): Promise<void> => {
+    const handle = proxyHandle;
+    proxyHandle = undefined;
+    await handle?.dispose();
+  };
   let exitCode: number = EXIT_CODES.ok;
   const runtime: CliCommandRuntime = {
     onHostShutdownComplete: dependencies.onHostShutdownComplete,
     async createCoreHost(options) {
+      if (options.remotePort === undefined) await initializeProxy();
       return createRpcCoreHost(await createCoreHost(options));
     },
     createStdoutRenderer(options = {}) {
@@ -639,7 +680,17 @@ export async function runOhbabyCli(
             }
           },
         }),
-    startDaemonServer,
+    async startDaemonServer(options) {
+      const server = await startDaemonServer({
+        ...options,
+        beforeBackendStart: async () => {
+          await initializeProxy();
+        },
+        backendCleanup: disposeProxy,
+      });
+      proxyOwnership.server = !server.reused;
+      return server;
+    },
     stderr,
     stdout,
     stopDaemonFromState,
@@ -695,6 +746,7 @@ export async function runOhbabyCli(
     }
     throw error;
   } finally {
+    if (!proxyOwnership.server) await disposeProxy();
     presentStartupNotices();
   }
 }

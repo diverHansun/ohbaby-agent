@@ -6,6 +6,125 @@ import type { CoreAPI, UiPromptCompletion } from "ohbaby-sdk";
 import type { CliCommandRuntime } from "./cli/commands/types.js";
 
 describe("runOhbabyCli", () => {
+  it("initializes proxy after env and disposes it when host startup fails", async () => {
+    const { runOhbabyCli } = await import("./bin.js");
+    const order: string[] = [];
+    await expect(
+      runOhbabyCli(
+        ["node", "ohbaby", "run", "hello"],
+        {
+          stdout: { write: () => undefined },
+          stderr: { write: () => undefined },
+        },
+        {
+          loadRuntimeEnvIntoProcessEnv: () => {
+            order.push("env");
+          },
+          installSystemProxy: async () => {
+            await Promise.resolve();
+            order.push("proxy");
+            return {
+              dispose: async (): Promise<void> => {
+                await Promise.resolve();
+                order.push("proxy.dispose");
+              },
+            };
+          },
+          createCoreHost: () => {
+            order.push("host");
+            throw new Error("startup failed");
+          },
+        },
+      ),
+    ).rejects.toThrow("startup failed");
+    expect(order).toEqual(["env", "proxy", "host", "proxy.dispose"]);
+  });
+
+  it.each(["--help", "--version", "serve status", "serve stop", "serve ps"])(
+    "does not initialize networking for %s",
+    async (command) => {
+      const { runOhbabyCli } = await import("./bin.js");
+      const installSystemProxy = vi.fn();
+      await runOhbabyCli(
+        ["node", "ohbaby", ...command.split(" ")],
+        {
+          stdout: { write: () => undefined },
+          stderr: { write: () => undefined },
+        },
+        {
+          loadRuntimeEnvIntoProcessEnv: () => undefined,
+          installSystemProxy,
+          createCoreHost: vi.fn(),
+          readDaemonStatus: () => Promise.resolve(undefined),
+          listDaemonConnections: () => Promise.resolve([]),
+          stopDaemonFromState: () =>
+            Promise.resolve({
+              processExit: "not-running",
+              cleanup: "confirmed",
+            }),
+        },
+      );
+      expect(installSystemProxy).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([true, false])(
+    "retains serve proxy until shutdown and skips reused server (%s)",
+    async (reused) => {
+      const { runOhbabyCli } = await import("./bin.js");
+      const order: string[] = [];
+      let cleanup: (() => Promise<void>) | undefined;
+      const installSystemProxy = vi.fn(async () => {
+        await Promise.resolve();
+        order.push("proxy");
+        return {
+          dispose: async (): Promise<void> => {
+            await Promise.resolve();
+            order.push("proxy.dispose");
+          },
+        };
+      });
+      await runOhbabyCli(
+        ["node", "ohbaby", "serve", "--no-open"],
+        {
+          stdout: { write: () => undefined },
+          stderr: { write: () => undefined },
+        },
+        {
+          loadRuntimeEnvIntoProcessEnv: () => {
+            order.push("env");
+          },
+          installSystemProxy,
+          createCoreHost: vi.fn(),
+          startDaemonServer: async (options) => {
+            if (!reused) await options.beforeBackendStart?.();
+            cleanup = options.backendCleanup;
+            order.push("server");
+            return {
+              host: "127.0.0.1",
+              port: 4096,
+              url: "http://127.0.0.1:4096",
+              scopeRoot: "/repo",
+              reused,
+              stop: async (): Promise<void> => {
+                await cleanup?.();
+              },
+            };
+          },
+        },
+      );
+      expect(order).toEqual(
+        reused ? ["env", "server"] : ["env", "proxy", "server"],
+      );
+      await cleanup?.();
+      expect(order).toEqual(
+        reused
+          ? ["env", "server"]
+          : ["env", "proxy", "server", "proxy.dispose"],
+      );
+    },
+  );
+
   it("recognizes npm symlinked bin entrypoints on Unix-like platforms", async () => {
     vi.resetModules();
     const tempDir = join(tmpdir(), "ohbaby-bin");
@@ -61,6 +180,7 @@ describe("runOhbabyCli", () => {
     const core = createCore();
     const cleanupOrder: string[] = [];
     const dispose = vi.fn(async () => {
+      await Promise.resolve();
       await new Promise((resolve) => setTimeout(resolve, 5));
       cleanupOrder.push("host.finished");
     });
@@ -116,6 +236,14 @@ describe("runOhbabyCli", () => {
     vi.doMock("ohbaby-agent", async (importOriginal) => ({
       ...(await importOriginal<typeof import("ohbaby-agent")>()),
       buildCoreAPIImpl,
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: async (): Promise<void> => {
+            await Promise.resolve();
+            cleanupOrder.push("proxy.closed");
+          },
+        }),
+      ),
       createProcessLogger,
       dataMigrationCompleted: {},
       durationClockAnomaly: clockAnomalyDefinition,
@@ -159,7 +287,11 @@ describe("runOhbabyCli", () => {
     ).toBeTypeOf("function");
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(disposeDiagnostics).toHaveBeenCalledTimes(1);
-    expect(cleanupOrder).toEqual(["host.finished", "diagnostics.closed"]);
+    expect(cleanupOrder).toEqual([
+      "host.finished",
+      "diagnostics.closed",
+      "proxy.closed",
+    ]);
     expect(activeNotice).toHaveBeenCalledOnce();
     expect(stderr).toEqual([]);
   });
@@ -316,6 +448,11 @@ describe("runOhbabyCli", () => {
     vi.resetModules();
     const stderr: string[] = [];
     vi.doMock("ohbaby-agent", () => ({
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: (): Promise<void> => Promise.resolve(),
+        }),
+      ),
       buildCoreAPIImpl: vi.fn(),
       loadRuntimeEnvIntoProcessEnv: vi.fn(
         (options: { readonly onWarning?: (message: string) => void }) => {
@@ -382,6 +519,11 @@ describe("runOhbabyCli", () => {
     vi.resetModules();
     const stderr: string[] = [];
     vi.doMock("ohbaby-agent", () => ({
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: (): Promise<void> => Promise.resolve(),
+        }),
+      ),
       buildCoreAPIImpl: vi.fn(),
       loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
     }));
@@ -404,6 +546,11 @@ describe("runOhbabyCli", () => {
     vi.resetModules();
     const stderr: string[] = [];
     vi.doMock("ohbaby-agent", () => ({
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: (): Promise<void> => Promise.resolve(),
+        }),
+      ),
       buildCoreAPIImpl: vi.fn(),
       loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
     }));
@@ -426,6 +573,11 @@ describe("runOhbabyCli", () => {
     vi.resetModules();
     const stderr: string[] = [];
     vi.doMock("ohbaby-agent", () => ({
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: (): Promise<void> => Promise.resolve(),
+        }),
+      ),
       buildCoreAPIImpl: vi.fn(),
       loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
     }));
@@ -488,6 +640,7 @@ describe("runOhbabyCli", () => {
 
   it("passes remote server options to the terminal host", async () => {
     vi.resetModules();
+    const installSystemProxy = vi.fn();
     const core = createCore();
     const dispose = vi.fn(() => Promise.resolve());
     const createCoreHost = vi.fn(() => ({
@@ -513,6 +666,7 @@ describe("runOhbabyCli", () => {
         ["node", "ohbaby", "--remote-port", "4096"],
         {},
         {
+          installSystemProxy,
           createCoreHost,
           loadRuntimeEnvIntoProcessEnv,
         },
@@ -525,6 +679,7 @@ describe("runOhbabyCli", () => {
     });
     expect(renderTerminalUi).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
+    expect(installSystemProxy).not.toHaveBeenCalled();
   });
 
   it("loads explicit remote hosts from ohbaby-server", async () => {
@@ -544,6 +699,11 @@ describe("runOhbabyCli", () => {
     const waitUntilExit = vi.fn(() => Promise.resolve());
     const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
     vi.doMock("ohbaby-agent", () => ({
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: (): Promise<void> => Promise.resolve(),
+        }),
+      ),
       buildCoreAPIImpl,
       loadRuntimeEnvIntoProcessEnv,
     }));
@@ -595,6 +755,11 @@ describe("runOhbabyCli", () => {
       },
     }));
     vi.doMock("ohbaby-agent", () => ({
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: (): Promise<void> => Promise.resolve(),
+        }),
+      ),
       buildCoreAPIImpl: vi.fn(() => {
         throw new Error("agent host should not be used for explicit remote");
       }),
@@ -635,6 +800,11 @@ describe("runOhbabyCli", () => {
     const waitUntilExit = vi.fn(() => Promise.resolve());
     const renderTerminalUi = vi.fn(() => ({ waitUntilExit }));
     vi.doMock("ohbaby-agent", () => ({
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: (): Promise<void> => Promise.resolve(),
+        }),
+      ),
       buildCoreAPIImpl,
       loadRuntimeEnvIntoProcessEnv,
     }));
@@ -1005,6 +1175,11 @@ describe("runOhbabyCli", () => {
     const unsubscribe = vi.fn();
     const subscribeEvents = vi.fn(() => unsubscribe);
     vi.doMock("ohbaby-agent", () => ({
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: (): Promise<void> => Promise.resolve(),
+        }),
+      ),
       buildCoreAPIImpl: vi.fn(() => ({
         callbacks: { subscribeEvents },
         core,
@@ -1034,6 +1209,11 @@ describe("runOhbabyCli", () => {
     vi.resetModules();
     const stderr: string[] = [];
     vi.doMock("ohbaby-agent", () => ({
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: (): Promise<void> => Promise.resolve(),
+        }),
+      ),
       buildCoreAPIImpl: vi.fn(),
       loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
     }));
@@ -1068,6 +1248,11 @@ describe("runOhbabyCli", () => {
         }),
     );
     vi.doMock("ohbaby-agent", () => ({
+      installSystemProxy: vi.fn(() =>
+        Promise.resolve({
+          dispose: (): Promise<void> => Promise.resolve(),
+        }),
+      ),
       buildCoreAPIImpl: vi.fn(),
       loadRuntimeEnvIntoProcessEnv: vi.fn(() => Promise.resolve()),
     }));

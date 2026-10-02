@@ -31,6 +31,50 @@ function providerCause(error: unknown): unknown {
   return error;
 }
 
+const NETWORK_ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+]);
+
+// Only expose allowlisted codes, never messages, URLs or connection options.
+function networkCauseMessage(error: unknown): string | undefined {
+  const seen = new Set<object>();
+  let current = error;
+  let proxyCode: string | undefined;
+  let networkCode: string | undefined;
+  for (let depth = 0; depth < 16; depth++) {
+    if (typeof current !== "object" || current === null || seen.has(current))
+      break;
+    seen.add(current);
+    const value = current as { code?: unknown; cause?: unknown };
+    if (value.code === "OHBABY_PROXY_CONFIG") {
+      proxyCode ??= value.code;
+    } else if (
+      typeof value.code === "string" &&
+      NETWORK_ERROR_CODES.has(value.code)
+    ) {
+      networkCode ??= value.code;
+    }
+    current = value.cause;
+  }
+  if (proxyCode === "OHBABY_PROXY_CONFIG")
+    return "Proxy configuration is invalid";
+  const suffix = networkCode === undefined ? "" : ` (${networkCode})`;
+  return networkCode === undefined
+    ? undefined
+    : `LLM provider connection failed${suffix}`;
+}
+
 function providerErrorText(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
   const value = error as { error?: unknown; message?: unknown };
@@ -46,12 +90,14 @@ function providerMessage(
   error: unknown,
   statusCode: number | undefined,
 ): string {
+  const networkDetail = networkCauseMessage(error);
   if (error instanceof ProviderRetryExhaustedError) {
-    return `LLM provider request failed after ${String(error.attempts)} retries`;
+    return `LLM provider request failed after ${String(error.attempts)} retries${networkDetail === undefined ? "" : `: ${networkDetail}`}`;
   }
   if (error instanceof ProviderStreamInterruptedError) {
-    return "LLM provider stream was interrupted";
+    return `LLM provider stream was interrupted${networkDetail === undefined ? "" : `: ${networkDetail}`}`;
   }
+  if (networkDetail !== undefined) return networkDetail;
   if (statusCode === 400) {
     const detail = providerErrorText(providerCause(error));
     if (detail && /\btemperature\b.*\bdeprecated\b/iu.test(detail)) {
@@ -92,7 +138,7 @@ export function normalizeRunError(error: unknown): UiPromptError {
   if (!isProvider) {
     return {
       code: "RUNTIME_ERROR",
-      message: message(error),
+      message: networkCauseMessage(error) ?? message(error),
       retryable: false,
       source: "runtime",
     };
