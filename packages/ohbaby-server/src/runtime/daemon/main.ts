@@ -79,6 +79,8 @@ function createWorkspaceRegistryIfAvailable():
 }
 
 export interface StartDaemonServerOptions {
+  readonly beforeBackendStart?: () => Promise<void>;
+  readonly backendCleanup?: () => Promise<void>;
   readonly host?: string;
   readonly port?: number;
   readonly authToken?: string;
@@ -147,6 +149,7 @@ function delay(ms: number): Promise<void> {
 function createServerRuntime(input: {
   readonly authToken: string;
   readonly backend: PersistentUiBackendClient;
+  readonly backendCleanup?: () => Promise<void>;
   readonly packageVersion: string;
   readonly releaseDatabase: () => void;
   readonly scopeRoot: string;
@@ -227,7 +230,18 @@ function createServerRuntime(input: {
         mcp: () => McpManager.disposeAll(),
       });
       input.releaseDatabase();
-      return result;
+      const network = await collectCleanup(options, {
+        network: async () => {
+          await input.backendCleanup?.();
+        },
+      });
+      return {
+        status:
+          result.status === "confirmed" && network.status === "confirmed"
+            ? "confirmed"
+            : "unconfirmed",
+        errors: [...result.errors, ...network.errors],
+      };
     },
   };
 }
@@ -493,9 +507,16 @@ async function startFreshDaemon(input: {
   readonly diagnosticsHandle?: ProcessLoggerHandle;
 }): Promise<RunningDaemonServer> {
   let server: DaemonHttpServerHandle | undefined;
+  let backendCleanupComplete = false;
+  const cleanupBackend = async (): Promise<void> => {
+    if (backendCleanupComplete) return;
+    backendCleanupComplete = true;
+    await input.options.backendCleanup?.();
+  };
   const logger = input.diagnosticsHandle?.logger ?? NOOP_LOGGER;
   const supervisor = new Supervisor({
     async bootstrap(): Promise<DaemonRuntimeHandle> {
+      await input.options.beforeBackendStart?.();
       const createBackend = (workdir: string): PersistentUiBackendClient =>
         createPersistentUiBackendClient({
           ...(input.options.dbPath === undefined
@@ -534,6 +555,7 @@ async function startFreshDaemon(input: {
       return createServerRuntime({
         authToken: input.authToken,
         backend,
+        backendCleanup: cleanupBackend,
         packageVersion: input.packageVersion,
         releaseDatabase,
         scopeRoot: input.scopeRoot,
@@ -552,7 +574,16 @@ async function startFreshDaemon(input: {
         }),
   });
 
-  await supervisor.start();
+  try {
+    await supervisor.start();
+  } catch (error) {
+    try {
+      await cleanupBackend();
+    } catch {
+      /* Preserve startup failure. */
+    }
+    throw error;
+  }
   const startedServer = server;
   if (!startedServer) {
     throw new Error("daemon server failed to initialize");

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ProviderRetryExhaustedError } from "../../core/llm-client/index.js";
+import {
+  ProviderRetryExhaustedError,
+  ProviderStreamInterruptedError,
+} from "../../core/llm-client/index.js";
 import {
   normalizeLifecycleRunError,
   normalizeRunError,
@@ -35,6 +38,72 @@ describe("normalizeRunError", () => {
       source: "provider",
       statusCode: 503,
     });
+  });
+
+  it("shows nested proxy connection causes while preserving retry metadata", () => {
+    const socket = Object.assign(
+      new Error("http://user:password@proxy/?key=sk-secret"),
+      {
+        code: "ECONNREFUSED",
+      },
+    );
+    const proxy = new Error("secret proxy credentials", { cause: socket });
+    const sdk = Object.assign(
+      new Error("Request timed out", { cause: proxy }),
+      {
+        status: 408,
+      },
+    );
+    expect(normalizeRunError(new ProviderRetryExhaustedError(sdk, 3))).toEqual({
+      code: "PROVIDER_RETRY_EXHAUSTED",
+      message:
+        "LLM provider request failed after 3 retries: LLM provider connection failed (ECONNREFUSED)",
+      source: "provider",
+      retryable: true,
+      statusCode: 408,
+      attempts: 3,
+    });
+  });
+
+  it("preserves stream interruption metadata with safe TLS details", () => {
+    const cause = Object.assign(new Error("certificate for secret host"), {
+      code: "CERT_HAS_EXPIRED",
+    });
+    expect(
+      normalizeRunError(new ProviderStreamInterruptedError(cause)),
+    ).toEqual({
+      code: "PROVIDER_STREAM_INTERRUPTED",
+      message:
+        "LLM provider stream was interrupted: LLM provider connection failed (CERT_HAS_EXPIRED)",
+      retryable: false,
+      source: "provider",
+    });
+  });
+
+  it("handles cyclic causes and never copies secret-containing network messages", () => {
+    const cause = {
+      code: "ENOTFOUND",
+      message: "sk-secret http://user:password@host",
+      cause: {},
+    };
+    cause.cause = cause;
+    const detail = normalizeRunError({ status: 408, cause });
+    expect(detail.message).toBe("LLM provider connection failed (ENOTFOUND)");
+    expect(JSON.stringify(detail)).not.toMatch(/sk-secret|password|http:/u);
+  });
+
+  it("bounds cause traversal and safely describes invalid proxy configuration", () => {
+    expect(
+      normalizeRunError({
+        code: "OHBABY_PROXY_CONFIG",
+        message: "http://secret@host",
+      }).message,
+    ).toBe("Proxy configuration is invalid");
+    let cause: unknown = { code: "ENOTFOUND" };
+    for (let i = 0; i < 40; i++) cause = { cause };
+    expect(normalizeRunError({ status: 408, cause }).message).toBe(
+      "LLM provider request timed out",
+    );
   });
 
   it("maps provider authentication failures to a stable redacted code", () => {
