@@ -148,12 +148,18 @@ export function createProxyPolicy(
     .filter((value): value is string => Boolean(value))
     .map((value) => new URL(value));
   const origin = override.explicit
-    ? "environment proxy"
+    ? "using environment proxy settings; system proxy settings are overridden"
     : system.source === "system"
-      ? "system settings"
-      : "OS routing (system proxy discovery unavailable)";
+      ? "following system settings"
+      : "system proxy discovery unavailable";
+  const routing =
+    http && https
+      ? "HTTP and HTTPS proxy enabled."
+      : !http && !https
+        ? "no HTTP/HTTPS proxy configured; using OS routing."
+        : `HTTP ${http ? "proxy enabled" : "uses OS routing"}; HTTPS ${https ? "proxy enabled" : "uses OS routing"}.`;
   return {
-    status: `Network: ${origin}; HTTP ${http ? "proxy" : "OS route"}, HTTPS ${https ? "proxy" : "OS route"}${override.bypass.includes("*") ? "; NO_PROXY=* bypasses all" : ""}`,
+    status: `Network: ${origin} — ${routing}${override.bypass.includes("*") ? " NO_PROXY=* bypasses all proxies." : ""}`,
     route(url): string | undefined {
       if (isLoopback(url.hostname) || bypass.some((matches) => matches(url)))
         return undefined;
