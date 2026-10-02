@@ -1,0 +1,40 @@
+{
+  "at": "2026-10-02T03:28:10.000Z",
+  "node": "v26.3.1",
+  "platform": "darwin",
+  "results": [
+    {
+      "provider": "zenmux",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "baseUrl": "https://zenmux.ai/api/v1",
+      "ok": true,
+      "elapsedMs": 3604,
+      "outputCharacters": 2,
+      "networkStatus": [
+        "Network: system settings; HTTP proxy, HTTPS proxy"
+      ]
+    },
+    {
+      "provider": "zhipu",
+      "model": "glm-5.3-flash",
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+      "ok": true,
+      "elapsedMs": 12083,
+      "outputCharacters": 2,
+      "networkStatus": [
+        "Network: system settings; HTTP proxy, HTTPS proxy"
+      ]
+    },
+    {
+      "provider": "dashscope",
+      "model": "qwen3.8-flash",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "ok": true,
+      "elapsedMs": 4696,
+      "outputCharacters": 2,
+      "networkStatus": [
+        "Network: system settings; HTTP proxy, HTTPS proxy"
+      ]
+    }
+  ]
+}

@@ -54,5 +54,21 @@ jobs:
       - name: Permission clients and runtime coexistence
         run: pnpm exec vitest run apps/ohbaby-web/src/api/daemon/server-client.integration.test.ts apps/ohbaby-web/src/ui/App.unit.test.tsx packages/ohbaby-cli/src/tui/app.contract.test.tsx packages/ohbaby-agent/src/runtime/run-ledger/dual-writer-process.integration.test.ts packages/ohbaby-cli/src/bin.unit.test.ts packages/ohbaby-server/src/protocols/jsonrpc/client.unit.test.ts
 
+      - name: Network routing and HTTPS SDK compatibility
+        run: pnpm exec vitest run packages/ohbaby-agent/src/utils/network-proxy
+
       - name: Build
         run: pnpm build
+
+  network-minimum-node:
+    name: Network routing on minimum Node 24.0.0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.0.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run packages/ohbaby-agent/src/utils/network-proxy
