@@ -25,6 +25,8 @@ import { useTuiLayout } from "../../layout/context.js";
 import type { TuiCommandCatalog } from "../../store/snapshot.js";
 import { useTheme } from "../../theme/index.js";
 import { Completion } from "./completion.js";
+import { editorViewport } from "./editor-viewport.js";
+import { formatFooterRows, sameFooterModel } from "./footer.js";
 import {
   applyEditorAction,
   createEditorState,
@@ -54,6 +56,9 @@ export interface PromptProps {
   readonly catalog: TuiCommandCatalog | null;
   readonly client: CoreAPI;
   readonly contextWindowUsage?: string;
+  readonly projectRoot?: string;
+  readonly model?: UiCurrentModelConfig | null;
+  readonly reasoning?: UiReasoningConfig | null;
   readonly disabled: boolean;
   readonly goalStatus?: UiGoal["status"];
   readonly isRuntimeRunning?: boolean;
@@ -84,6 +89,9 @@ export function Prompt({
   catalog,
   client,
   contextWindowUsage = "",
+  projectRoot,
+  model,
+  reasoning,
   disabled,
   goalStatus,
   loadCatalog,
@@ -305,6 +313,8 @@ export function Prompt({
 
   useInput(
     (value, key) => {
+      // Reserved for the Tasks viewport; plain PageUp still loads history.
+      if (key.meta && (key.pageUp || key.pageDown)) return;
       if (queuedMutationPendingRef.current) return;
       const generation = draftGeneration.current;
       if (key.ctrl && (key.upArrow || key.downArrow)) {
@@ -714,11 +724,18 @@ export function Prompt({
     { isActive: !disabled },
   );
 
-  const dockStatus = formatDockStatus({
-    activeSessionId,
+  const footerRows = formatFooterRows({
+    width: layout.contentWidth,
+    projectRoot,
+    model,
+    reasoning:
+      !activeSessionId &&
+      pendingReasoning &&
+      sameFooterModel(model, pendingReasoning.model)
+        ? pendingReasoning.reasoning
+        : reasoning,
     permission,
-    queuedPromptCount: queuedPrompts.length,
-    runtimeStatusLabel,
+    usage: contextWindowUsage,
   });
   const goalStatusColor =
     goalStatus === "active" ? theme.status.accent : theme.status.warning;
@@ -766,14 +783,29 @@ export function Prompt({
           </Text>
         </Box>
       )}
+      {goalStatus === undefined ? null : (
+        <Text color={goalStatusColor}>goal {goalStatus}</Text>
+      )}
+      {runtimeStatusLabel ? <Text dimColor>{runtimeStatusLabel}</Text> : null}
       <Box
         borderColor={theme.border}
-        borderStyle="round"
+        borderStyle="single"
+        borderLeft={false}
+        borderRight={false}
         flexDirection="column"
         paddingX={1}
         width={layout.contentWidth}
       >
-        {renderEditorLines(editor, disabled, theme.cursor)}
+        {renderEditorLines(
+          editor,
+          disabled,
+          theme.cursor,
+          Math.max(1, layout.contentWidth - 4),
+          Math.max(
+            1,
+            Math.min(disabled ? 3 : 5, Math.floor((layout.rows - 1) / 4)),
+          ),
+        )}
       </Box>
       {queuedEdit ? (
         <Text dimColor>
@@ -788,24 +820,13 @@ export function Prompt({
                   : "Enter save · Esc restore draft"}
         </Text>
       ) : null}
-      {dockStatus === "" &&
-      contextWindowUsage === "" &&
-      goalStatus === undefined ? null : (
-        <Box justifyContent="space-between">
-          <Box>
-            {goalStatus === undefined ? null : (
-              <Text color={goalStatusColor}>goal {goalStatus}</Text>
-            )}
-            {goalStatus !== undefined && dockStatus !== "" ? (
-              <Text dimColor>{" · "}</Text>
-            ) : null}
-            <Text dimColor>{dockStatus}</Text>
-          </Box>
-          {contextWindowUsage === "" ? null : (
-            <Text dimColor>{contextWindowUsage}</Text>
-          )}
-        </Box>
-      )}
+      <Box flexDirection="column" width={layout.contentWidth}>
+        {footerRows.map((row, index) => (
+          <Text key={index} dimColor wrap="truncate-end">
+            {row}
+          </Text>
+        ))}
+      </Box>
       {error === null ? null : <Text color={theme.status.error}>{error}</Text>}
       <Completion
         catalog={catalog}
@@ -820,51 +841,33 @@ function renderEditorLines(
   editor: EditorState,
   disabled: boolean,
   cursorColor: string,
+  width: number,
+  maxRows: number,
 ): readonly ReactElement[] {
-  const isEmpty = editorText(editor).length === 0;
-  return editor.lines.map((line, index) => (
-    <Text key={String(index)}>
-      <Text dimColor={disabled}>{index === 0 ? "> " : "  "}</Text>
-      {disabled && isEmpty && index === 0 ? (
-        <Text dimColor>paused</Text>
+  if (disabled && editorText(editor).length === 0)
+    return [
+      <Text key="paused" dimColor>
+        {"> paused"}
+      </Text>,
+    ];
+  return editorViewport(editor, width, maxRows).map((row, index) => (
+    <Text key={index} wrap="truncate-end">
+      <Text dimColor={disabled || row.hiddenBefore}>
+        {index === 0 ? (row.hiddenBefore ? "↑ " : "> ") : "  "}
+      </Text>
+      {disabled || row.cursorStart === undefined ? (
+        row.text
       ) : (
-        renderEditorLineText({
-          cursorColor,
-          editor,
-          enabled: !disabled,
-          index,
-          line,
-        })
+        <>
+          {row.text.slice(0, row.cursorStart)}
+          <Text color={cursorColor} inverse>
+            {row.text.slice(row.cursorStart, row.cursorEnd)}
+          </Text>
+          {row.text.slice(row.cursorEnd)}
+        </>
       )}
     </Text>
   ));
-}
-
-function renderEditorLineText(input: {
-  readonly cursorColor: string;
-  readonly editor: EditorState;
-  readonly enabled: boolean;
-  readonly index: number;
-  readonly line: string;
-}): ReactElement {
-  if (!input.enabled || input.editor.cursor.row !== input.index) {
-    return <Text>{input.line}</Text>;
-  }
-
-  const cursorColumn = input.editor.cursor.col;
-  const cursorChar =
-    cursorColumn >= input.line.length
-      ? " "
-      : input.line.slice(cursorColumn, cursorColumn + 1);
-  return (
-    <Text>
-      {input.line.slice(0, cursorColumn)}
-      <Text color={input.cursorColor} inverse>
-        {cursorChar}
-      </Text>
-      {input.line.slice(cursorColumn + cursorChar.length)}
-    </Text>
-  );
 }
 
 function isDeleteControlInput(
@@ -879,32 +882,6 @@ function isDeleteControlInput(
     value === "[P" ||
     value === "\u001B[P"
   );
-}
-
-function formatDockStatus(input: {
-  readonly activeSessionId: string | null;
-  readonly permission?: UiPermissionState;
-  readonly queuedPromptCount: number;
-  readonly runtimeStatusLabel?: string;
-}): string {
-  const parts: string[] = [];
-  if (input.runtimeStatusLabel) {
-    parts.push(input.runtimeStatusLabel);
-  }
-  if (input.queuedPromptCount > 0) {
-    parts.push(
-      input.queuedPromptCount === 1
-        ? "Queued"
-        : `Queued ${String(input.queuedPromptCount)}`,
-    );
-  }
-  if (input.permission) {
-    parts.push(input.permission.mode, input.permission.level);
-  }
-  if (input.activeSessionId) {
-    parts.push(input.activeSessionId);
-  }
-  return parts.join(" · ");
 }
 
 async function submitInput(

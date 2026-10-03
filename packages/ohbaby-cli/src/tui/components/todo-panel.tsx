@@ -1,46 +1,115 @@
-import { Box, Text } from "ink";
+import { Box, Text, useBoxMetrics, useInput, type DOMElement } from "ink";
 import type { UiSessionTodoList, UiTodoItem, UiTodoStatus } from "ohbaby-sdk";
-import type { ReactElement } from "react";
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react";
+import { TodoPanelRefContext, useTuiLayout } from "../layout/context.js";
 import { useTheme } from "../theme/index.js";
 
 export const COMPACT_TODO_LIMIT = 5;
 
 export interface TodoPanelProps {
   readonly expanded: boolean;
+  readonly inputEnabled?: boolean;
   readonly todoList: UiSessionTodoList | null;
+  readonly summaryOnly?: boolean;
 }
 
 export function TodoPanel({
   expanded,
+  inputEnabled = true,
   todoList,
+  summaryOnly = false,
 }: TodoPanelProps): ReactElement | null {
   const theme = useTheme();
+  const panelRef = useContext(TodoPanelRefContext);
+  const contentRef = useRef<DOMElement>(null);
+  const content = useBoxMetrics(contentRef);
+  const layout = useTuiLayout();
+  const [offset, setOffset] = useState(0);
+  const budget = layout.todoPanelRows;
+  const todos = todoList?.todos ?? [];
+  const displayed = expanded ? todos : selectCompactTodos(todos);
+  const hiddenCount = todos.length - displayed.length;
+  const chromeRows = 1 + (hiddenCount > 0 ? 1 : 0);
+  const paging =
+    Boolean(todoList?.visible) &&
+    todos.length > 0 &&
+    !summaryOnly &&
+    budget !== undefined &&
+    content.height + chromeRows > budget;
+  const pageRows = Math.max(
+    1,
+    (budget ?? content.height + chromeRows + 1) - chromeRows - 1,
+  );
+  const lastOffset = Math.max(0, content.height - pageRows);
+  const start = Math.min(offset, lastOffset);
+  useEffect(() => {
+    setOffset(0);
+  }, [expanded, todoList?.sessionId]);
+  useInput(
+    (_value, key) => {
+      if (!key.meta || (!key.pageUp && !key.pageDown)) return;
+      setOffset(
+        Math.max(
+          0,
+          Math.min(lastOffset, start + (key.pageDown ? pageRows : -pageRows)),
+        ),
+      );
+    },
+    { isActive: paging && inputEnabled },
+  );
   if (!todoList || todoList.todos.length === 0 || !todoList.visible) {
     return null;
   }
 
+  // In a short terminal, keep approval choices and the saved draft in view.
+  // The expanded state is retained and restored when the dialog closes.
+  if (summaryOnly) {
+    return (
+      <Box ref={panelRef}>
+        <Text color={theme.text.dim}>Tasks · {todoList.todos.length}</Text>
+      </Box>
+    );
+  }
+
   const hasOverflow = todoList.todos.length > COMPACT_TODO_LIMIT;
-  const displayed = expanded
-    ? todoList.todos
-    : selectCompactTodos(todoList.todos);
-  const hiddenCount = todoList.todos.length - displayed.length;
 
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Box ref={panelRef} flexDirection="column" paddingX={1}>
       <Box justifyContent="space-between">
         <Text color={theme.status.accent}>Tasks</Text>
         {hasOverflow && expanded ? (
           <Text dimColor>ctrl+t to collapse</Text>
         ) : null}
       </Box>
-      {displayed.map((todo, index) => (
-        <Box key={`${String(index)}:${todo.content}`}>
-          <Text color={todoColor(todo.status, theme)}>
-            {todoMarker(todo.status)}{" "}
-          </Text>
-          <Text dimColor={todo.status === "completed"}>{todo.content}</Text>
+      <Box
+        flexDirection="column"
+        height={paging ? pageRows : undefined}
+        overflow={paging ? "hidden" : undefined}
+        contentOffsetY={paging ? start : 0}
+      >
+        <Box ref={contentRef} flexShrink={0} flexDirection="column">
+          {displayed.map((todo, index) => (
+            <Box key={`${String(index)}:${todo.content}`}>
+              <Text color={todoColor(todo.status, theme)}>
+                {todoMarker(todo.status)}{" "}
+              </Text>
+              <Text dimColor={todo.status === "completed"}>{todo.content}</Text>
+            </Box>
+          ))}
         </Box>
-      ))}
+      </Box>
+      {paging ? (
+        <Text dimColor wrap="truncate-end">
+          {start + 1}–{Math.min(start + pageRows, content.height)}/
+          {content.height} rows · Alt+PgUp/PgDn
+        </Text>
+      ) : null}
       {hiddenCount > 0 ? (
         <Text dimColor>+{hiddenCount} more · ctrl+t to expand</Text>
       ) : null}

@@ -98,7 +98,13 @@ describe("skills panel rendering contract", () => {
     try {
       await until(() => stdout.output().includes("showing 1-10 of 22"));
       stdin.write(PAGE_DOWN);
-      await until(() => stdout.output().includes("showing 11-20 of 22"));
+      // Ink can preserve "showing 1" and patch from column 17 instead of
+      // re-emitting the entire label. Both streams produce the same range.
+      await until(
+        () =>
+          stdout.output().includes("showing 11-20 of 22") ||
+          stdout.output().includes("\u001b[17G\u001b[K1-20 of 22"),
+      );
 
       expect(stdout.output()).not.toContain(ERASE_SCREEN);
     } finally {
@@ -120,7 +126,13 @@ describe("skills panel rendering contract", () => {
     try {
       await until(() => stdout.output().includes("showing 1-3 of 22"));
       stdin.write(PAGE_DOWN);
-      await until(() => stdout.output().includes("showing 4-6 of 22"));
+      // The stable "showing " prefix remains onscreen; the new range starts
+      // at column 16 when Ink uses a prefix-preserving line update.
+      await until(
+        () =>
+          stdout.output().includes("showing 4-6 of 22") ||
+          stdout.output().includes("\u001b[16G\u001b[K4-6 of 22"),
+      );
 
       expect(stdout.output()).not.toContain(ERASE_SCREEN);
     } finally {

@@ -7,10 +7,9 @@ export interface LiveTailWindow {
 
 /**
  * Clamps the rendered live message to its trailing `maxLines` terminal rows.
- * Ink rewrites the whole dynamic frame with a terminal clear (including the
- * scrollback buffer) once that frame is as tall as the terminal, so the live
- * region must stay strictly below the terminal height. One row of the budget
- * is reserved for the "hidden lines" marker whenever clipping happens.
+ * AppShell reserves the other controls from the terminal height so the live
+ * region fits alongside input and dialogs. One row of the budget is reserved
+ * for the "hidden lines" marker whenever clipping happens.
  */
 export function clampRenderedPartsToTail(
   parts: readonly RenderedPart[],

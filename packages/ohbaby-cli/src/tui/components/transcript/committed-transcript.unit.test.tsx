@@ -8,15 +8,18 @@ import {
 } from "./committed-transcript.js";
 
 describe("shouldUseStaticTranscript", () => {
-  it("uses static transcript for Windows TTYs to reduce prompt repaint flicker", () => {
-    expect(
-      shouldUseStaticTranscript({
-        env: {},
-        isTTY: true,
-        platform: "win32",
-      }),
-    ).toBe(true);
-  });
+  it.each(["darwin", "linux", "win32"] as const)(
+    "uses stable transcript output for %s TTYs",
+    (platform) => {
+      expect(
+        shouldUseStaticTranscript({
+          env: {},
+          isTTY: true,
+          platform,
+        }),
+      ).toBe(true);
+    },
+  );
 
   it("keeps non-TTY renders dynamic so tests and redirected output stay replaceable", () => {
     expect(

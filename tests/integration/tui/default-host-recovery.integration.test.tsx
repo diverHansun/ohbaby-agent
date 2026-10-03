@@ -35,8 +35,11 @@ it("recovers the default persistent host through its real JSON proxy with live q
       app,
       (current) =>
         current.includes("Sync failed") ||
-        (current.includes(session.id) && !current.includes("Syncing session")),
+        (current.includes("auto/default") &&
+          !current.includes("Syncing session")),
     );
+    expect(await client.getSelectedSessionId()).toBe(session.id);
+    expect(frame).not.toContain(session.id);
     expect(frame).not.toContain("Sync failed");
     expect(frame).not.toContain("throwIfAborted");
     const controller = new AbortController();

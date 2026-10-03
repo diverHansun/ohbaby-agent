@@ -35,6 +35,17 @@ describe("computeLayoutMetrics", () => {
     });
   });
 
+  it.each([1, 3, 8, 20])(
+    "keeps padding and content inside %i columns",
+    (columns) => {
+      const metrics = computeLayoutMetrics({ columns, rows: 20 });
+      expect(
+        metrics.contentWidth + 2 * metrics.horizontalPadding,
+      ).toBeLessThanOrEqual(columns);
+      expect(metrics.contentWidth).toBeGreaterThan(0);
+    },
+  );
+
   it("keeps a minimum live tail height on tiny terminals", () => {
     expect(computeLayoutMetrics({ columns: 80, rows: 8 }).liveTailRows).toBe(3);
   });

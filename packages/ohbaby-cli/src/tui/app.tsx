@@ -11,15 +11,8 @@ import {
   DurationSampleContext,
   DurationDiagnosticContext,
 } from "./components/execution-duration.js";
-import { Box, Text, useApp, useInput, useStdout } from "ink";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { Box, Text, useApp, useInput, useStdout, useWindowSize } from "ink";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type {
   CoreAPI,
@@ -55,7 +48,9 @@ import {
 } from "./components/prompt/index.js";
 import { COMPACT_TODO_LIMIT, TodoPanel } from "./components/todo-panel.js";
 import { AppShell } from "./layout/app-shell.js";
-import { formatContextWindowUsage } from "./render/usage.js";
+import { formatFooterContextUsage } from "./render/usage.js";
+import { useFooterModel } from "./use-footer-model.js";
+import { useSubagentState } from "./use-subagent-state.js";
 import { createTuiStore } from "./store/events.js";
 import {
   selectActiveGoal,
@@ -136,6 +131,7 @@ export function OhbabyTerminalApp({
   >(new Map());
   const store = storeRef.current;
   const { exit } = useApp();
+  const terminalSize = useWindowSize();
   const { write: writeStdout } = useStdout();
   if (clearOnStart && !didClearOnStartRef.current) {
     writeStdout(NEW_SESSION_CLEAR_SEQUENCE);
@@ -146,6 +142,10 @@ export function OhbabyTerminalApp({
     (state) => state.activeSessionId,
   );
   activeSessionIdRef.current = activeSessionId;
+  const footerModel = useFooterModel(client, activeSessionId, subscribeEvents);
+  const activeSession = useTuiStoreSelector(store, (state) =>
+    state.sessions.find((session) => session.id === state.activeSessionId),
+  );
   useEffect(() => {
     if (activeSessionId !== null) setPendingReasoning(null);
   }, [activeSessionId]);
@@ -158,11 +158,8 @@ export function OhbabyTerminalApp({
     () => createSubagentReader(client, activeSessionId ?? ""),
     [client, activeSessionId],
   );
-  const subagentState = useSyncExternalStore(
-    subagents.subscribe,
-    subagents.getSnapshot,
-  );
   const [subagentBrowserOpen, setSubagentBrowserOpen] = useState(false);
+  const subagentState = useSubagentState(subagents, subagentBrowserOpen);
   useEffect(() => {
     setSubagentBrowserOpen(false);
     if (!activeSessionId) return;
@@ -216,7 +213,7 @@ export function OhbabyTerminalApp({
   const runtime = useTuiStoreSelector(store, (state) => state.runtime);
   const hasBackendDialog = permissions.length > 0 || interactions.length > 0;
   const hasDialog = hasBackendDialog || commandPanel !== null;
-  const contextWindowUsageLabel = formatContextWindowUsage(
+  const contextWindowUsageLabel = formatFooterContextUsage(
     activeContextWindowUsage,
   );
   const [escInterruptArmedRunId, setEscInterruptArmedRunId] = useState<
@@ -390,6 +387,13 @@ export function OhbabyTerminalApp({
     },
     [setActiveCommandPanel, writeStdout],
   );
+  const closeSubagentBrowser = useCallback((): void => {
+    subagents.select();
+    // The browser unmounts Static history. Re-entering the root must replace
+    // that terminal projection before the newly mounted Static prints it.
+    writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
+    setSubagentBrowserOpen(false);
+  }, [subagents, writeStdout]);
   const closeCommandPanel = useCallback((): void => {
     setActiveCommandPanel(null);
   }, [setActiveCommandPanel]);
@@ -504,7 +508,8 @@ export function OhbabyTerminalApp({
   useInput(
     (value, key) => {
       if (key.ctrl && value === "g" && client.listSubagentExecutions) {
-        setSubagentBrowserOpen((open) => !open);
+        if (subagentBrowserOpen) closeSubagentBrowser();
+        else setSubagentBrowserOpen(true);
         return;
       }
       if (subagentBrowserOpen) return;
@@ -743,8 +748,16 @@ export function OhbabyTerminalApp({
     }
   }, [activeSessionId, setActiveCommandPanel]);
 
+  // A selected ID can arrive before its view. Wait for that initial install so
+  // its empty context snapshot cannot overwrite a faster explicit usage query.
+  // This scalar identity stays stable through ordinary text/model deltas.
+  const contextReadySessionId =
+    recoveryState.sync.status === "ready" &&
+    recoveryState.sync.view?.version.sessionId === activeSessionId
+      ? activeSessionId
+      : null;
   useEffect(() => {
-    const sessionId = activeSessionId;
+    const sessionId = contextReadySessionId;
     if (!sessionId) {
       return;
     }
@@ -798,7 +811,7 @@ export function OhbabyTerminalApp({
     return (): void => {
       cancelled = true;
     };
-  }, [activeSessionId, client, store]);
+  }, [contextReadySessionId, client, store]);
 
   return (
     <ThemeProvider>
@@ -808,10 +821,7 @@ export function OhbabyTerminalApp({
           <SubagentBrowser
             reader={subagents}
             state={subagentState}
-            onClose={() => {
-              subagents.select();
-              setSubagentBrowserOpen(false);
-            }}
+            onClose={closeSubagentBrowser}
           />
         ) : (
           <>
@@ -873,7 +883,12 @@ export function OhbabyTerminalApp({
               panel={hasBackendDialog ? null : commandPanel}
               runtime={runtime}
             />
-            <TodoPanel expanded={todoExpanded} todoList={activeTodoList} />
+            <TodoPanel
+              expanded={todoExpanded}
+              inputEnabled={!hasDialog}
+              todoList={activeTodoList}
+              summaryOnly={hasDialog && terminalSize.rows <= 24}
+            />
             <CatalogInvalidation store={store} />
           </>
         )}
@@ -919,6 +934,9 @@ export function OhbabyTerminalApp({
             loadCatalog={loadCatalog}
             onCommandPanelOpen={openCommandPanel}
             permission={permission}
+            projectRoot={activeSession?.projectRoot}
+            model={footerModel}
+            reasoning={activeSession?.reasoning}
             queuedPrompts={queuedPrompts}
             unsentSteer={hasUnsentSteerAfterLatestStop(runs, activeSessionId)}
             contextWindowUsage={contextWindowUsageLabel}
@@ -934,21 +952,15 @@ export function OhbabyTerminalApp({
                         recoveryState.runtimeEpoch === undefined ||
                         recoveryState.sync.status === "syncing"
                       ? "Syncing session… draft kept"
-                      : recoveryState.historyStale
-                        ? "Earlier history may be stale · PageUp refresh"
-                        : recoveryState.sync.view?.reasoningMissing ||
-                            recoveryState.historyReasoningMissing
-                          ? "Some reasoning is unavailable"
-                          : recoveryState.pending.length > 0
-                            ? recoveryState.pending.some(
-                                (item) =>
-                                  item.runtimeEpoch !== undefined &&
-                                  item.runtimeEpoch !==
-                                    recoveryState.runtimeEpoch,
-                              )
-                              ? "Previous runtime submission unconfirmed · Ctrl+X forget all (may still run)"
-                              : "Submission outcome unknown · Ctrl+R query · Ctrl+X forget all (may still run)"
-                            : runtimeStatusLabel))
+                      : recoveryState.pending.length > 0
+                        ? recoveryState.pending.some(
+                            (item) =>
+                              item.runtimeEpoch !== undefined &&
+                              item.runtimeEpoch !== recoveryState.runtimeEpoch,
+                          )
+                          ? "Previous runtime submission unconfirmed · Ctrl+X forget all (may still run)"
+                          : "Submission outcome unknown · Ctrl+R query · Ctrl+X forget all (may still run)"
+                        : runtimeStatusLabel))
             }
           />
         </Box>

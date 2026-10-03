@@ -343,8 +343,9 @@ describe("OhbabyTerminalApp", () => {
       permissionRevision: 1,
     });
     await flush();
-    expect(app.lastFrame()).toContain("todo 10");
-    expect(app.lastFrame()).toContain("ctrl+t to collapse");
+    expect(app.lastFrame()).toContain("Tasks · 10");
+    expect(app.lastFrame()).not.toContain("todo 10");
+    expect(app.lastFrame()).toContain("Permission");
 
     client.emit({
       requestId: "permission_1",
@@ -356,6 +357,8 @@ describe("OhbabyTerminalApp", () => {
       reason: "once",
     });
     await flush();
+    expect(app.lastFrame()).toContain("todo 10");
+    expect(app.lastFrame()).toContain("ctrl+t to collapse");
 
     app.stdin.write("\u0014");
     await flush();
@@ -400,8 +403,8 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     const logoAnchor = renderOhbabyLogo({ maxWidth: 80 })[0]?.trim();
-    expect(app.lastFrame()).toContain("╭");
-    expect(app.lastFrame()).toContain("╰");
+    expect(app.lastFrame()).toContain("─");
+    expect(app.lastFrame()).not.toMatch(/╭|╰/u);
     expect(app.lastFrame()).toContain(logoAnchor);
     expect(app.lastFrame()).not.toContain("___  _   _");
     expect(app.lastFrame()).toContain(">");
@@ -539,11 +542,44 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    await waitForFrame(app, (frame) => frame.includes("38.4K / 1M (4%)"));
+    await waitForFrame(app, (frame) => frame.includes("4% 38.4k/1m"));
 
     expect(client.getContextWindowUsage).toHaveBeenCalledWith({
       sessionId: "session_1",
     });
+  });
+
+  it("queries context after the selected session view installs and not on text deltas", async () => {
+    const base = createFakeClient(snapshot());
+    if (!base.getSessionView) throw new Error("Missing session-view fixture");
+    const view = await base.getSessionView({ sessionId: "session_1" });
+    const initialView = createDeferred<UiSessionView>();
+    const usage = contextWindowUsage();
+    const client = {
+      ...base,
+      getSessionView: vi.fn(() => initialView.promise),
+      getContextWindowUsage: vi.fn(() => Promise.resolve(usage)),
+    };
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Syncing session"));
+    expect(client.getContextWindowUsage).not.toHaveBeenCalled();
+    initialView.resolve(view);
+    await waitForFrame(app, (frame) => frame.includes("4% 38.4k/1m"));
+    expect(client.getContextWindowUsage).toHaveBeenCalledTimes(1);
+    client.emit({
+      type: "message.part.delta",
+      sessionId: "session_1",
+      messageId: "message_1",
+      delta: "lo",
+    });
+    await waitForFrame(app, (frame) => frame.includes("Hello"));
+    expect(client.getContextWindowUsage).toHaveBeenCalledTimes(1);
+    app.unmount();
   });
 
   it("renders compact active goal status near the prompt", async () => {
@@ -636,7 +672,7 @@ describe("OhbabyTerminalApp", () => {
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("38.4K / 1M (4%)") &&
+        nextFrame.includes("4% 38.4k/1m") &&
         nextFrame.includes("Context unavailable"),
     );
 
@@ -693,11 +729,11 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("| please inspect the repo");
+    expect(app.lastFrame()).toContain("│ please inspect the repo");
     expect(app.lastFrame()).not.toContain("you");
   });
 
-  it("folds reasoning from completed and legacy assistant messages only by message lifecycle", async () => {
+  it("hides reasoning bodies and Thought labels across message lifecycles", async () => {
     const baseSnapshot = snapshot();
     const client = createFakeClient({
       ...baseSnapshot,
@@ -743,13 +779,13 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("Thought");
+    expect(app.lastFrame()).not.toContain("Thought");
     expect(app.lastFrame()).not.toContain("completed reasoning details");
-    expect(app.lastFrame()).toContain("streaming reasoning details");
+    expect(app.lastFrame()).not.toContain("streaming reasoning details");
     expect(app.lastFrame()).not.toContain("legacy reasoning details");
   });
 
-  it("renders live reasoning events and folds them before assistant text", async () => {
+  it("hides live reasoning events while retaining the visible assistant answer", async () => {
     const baseSnapshot = snapshot();
     const client = createFakeClient({
       ...baseSnapshot,
@@ -786,7 +822,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(app.lastFrame()).toContain("thinking through it");
+    expect(app.lastFrame()).not.toContain("thinking through it");
 
     client.emit({
       content: "thinking through it",
@@ -796,7 +832,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(app.lastFrame()).toContain("Thought");
+    expect(app.lastFrame()).not.toContain("Thought");
     expect(app.lastFrame()).not.toContain("thinking through it");
 
     client.emit({
@@ -808,7 +844,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await waitForFrame(app, (frame) => frame.includes("Visible answer"));
 
-    expect(app.lastFrame()).toContain("Thought");
+    expect(app.lastFrame()).not.toContain("Thought");
     expect(app.lastFrame()).toContain("Visible answer");
 
     client.emit({
@@ -818,7 +854,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await waitForFrame(
       app,
-      (frame) => frame.includes("Visible answer") && frame.includes("Thought"),
+      (frame) => frame.includes("Visible answer") && !frame.includes("Thought"),
     );
   });
 
@@ -1023,8 +1059,9 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    expect(app.lastFrame()).toContain("auto · default · session_1");
-    expect(app.lastFrame()).toContain("38.4K / 1M (4%)");
+    expect(app.lastFrame()).toContain("auto/default");
+    expect(app.lastFrame()).not.toContain("session_1");
+    expect(app.lastFrame()).toContain("4% 38.4k/1m");
     expect(app.lastFrame()).not.toContain("status: idle | session:");
 
     client.emit({
@@ -1043,7 +1080,7 @@ describe("OhbabyTerminalApp", () => {
     });
     await flush();
 
-    expect(app.lastFrame()).toContain("plan · full-access");
+    expect(app.lastFrame()).toContain("plan/full-access");
   });
 
   it("toggles permission mode with Shift+Tab", async () => {
@@ -1163,7 +1200,8 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("Hello");
     expect(app.lastFrame()).not.toContain("Hellolo");
     expect(app.lastFrame()).not.toContain("ohbaby");
-    expect(app.lastFrame()).toContain("auto · default · session_stream");
+    expect(app.lastFrame()).toContain("auto/default");
+    expect(app.lastFrame()).not.toContain("session_stream");
     expect(app.lastFrame()).not.toContain("status: idle | session:");
   });
 
@@ -1320,7 +1358,9 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("  Edit src/app.ts permission denied");
+    expect(app.lastFrame()).toContain(
+      "  Edit src/app.ts failed: permission denied",
+    );
     expect(app.lastFrame()).not.toContain("  Error permission denied");
   });
 
@@ -1346,7 +1386,8 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    expect(app.lastFrame()).toContain("auto · default · session_1");
+    expect(app.lastFrame()).toContain("auto/default");
+    expect(app.lastFrame()).not.toContain("session_1");
     expect(app.lastFrame()).not.toContain("status: running");
     expect(app.lastFrame()).not.toContain("run_raw_123");
 
@@ -1419,7 +1460,8 @@ describe("OhbabyTerminalApp", () => {
 
     await waitForFrame(app, (frame) => frame.includes("provider failed"));
     expect(app.lastFrame()).toContain("PROVIDER_FAILED");
-    expect(app.lastFrame()).toContain("auto · default · session_1");
+    expect(app.lastFrame()).toContain("auto/default");
+    expect(app.lastFrame()).not.toContain("session_1");
   });
 
   it("clears an old prompt failure when a newer prompt starts", async () => {
@@ -1750,7 +1792,7 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     expect(client.cancelQueuedPrompt).not.toHaveBeenCalled();
     app.stdin.write("\u001b");
-    await flush();
+    await flushEscapeInput();
     app.stdin.write("\u001B[1;3A");
     await flush();
     app.stdin.write("\u0004");
@@ -1817,7 +1859,7 @@ describe("OhbabyTerminalApp", () => {
     );
 
     app.stdin.write("\u001B");
-    await flush();
+    await flushEscapeInput();
 
     expect(client.abortRun).toHaveBeenCalledWith("run_1");
   });
@@ -1883,7 +1925,7 @@ describe("OhbabyTerminalApp", () => {
     expect(client.abortRun).not.toHaveBeenCalled();
 
     app.stdin.write("\u001B");
-    await flush();
+    await flushEscapeInput();
 
     expect(client.abortRun).toHaveBeenCalledWith("run_2");
   });
@@ -1959,7 +2001,7 @@ describe("OhbabyTerminalApp", () => {
     expect(client.abortRun).not.toHaveBeenCalled();
 
     app.stdin.write("\u001B");
-    await flush();
+    await flushEscapeInput();
 
     expect(client.abortRun).toHaveBeenCalledWith("run_1");
   });
@@ -2414,7 +2456,10 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).not.toContain(
       "Source history before failed switch",
     );
-    expect(app.lastFrame()).toContain("auto · default · session_2");
+    expect(app.lastFrame()).toContain("auto/default");
+    expect(client.getSessionView).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sessionId: "session_2" }),
+    );
     expect(app.lastFrame()).not.toContain(renderOhbabyLogo());
     app.unmount();
   });
@@ -2495,7 +2540,10 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).not.toContain(
       "Source history before mismatched switch",
     );
-    expect(app.lastFrame()).toContain("auto · default · session_2");
+    expect(app.lastFrame()).toContain("auto/default");
+    expect(client.getSessionView).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sessionId: "session_2" }),
+    );
     expect(app.lastFrame()).not.toContain("Mismatched target history");
     expect(app.lastFrame()).not.toContain(renderOhbabyLogo());
     app.unmount();
@@ -3113,6 +3161,7 @@ describe("OhbabyTerminalApp", () => {
         {
           createdAt: "2026-05-14T00:00:00.000Z",
           id: "session_2",
+          projectRoot: "/workspace/second-project",
           messages: [],
           title: "Second",
           updatedAt: "2026-05-14T00:00:01.000Z",
@@ -3124,7 +3173,7 @@ describe("OhbabyTerminalApp", () => {
     await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("session_2") &&
+        nextFrame.includes("/workspace/second-project") &&
         !nextFrame.includes("Loading...") &&
         !nextFrame.includes("Status"),
     );
@@ -3153,6 +3202,7 @@ describe("OhbabyTerminalApp", () => {
         {
           createdAt: "2026-05-14T00:00:00.000Z",
           id: "session_2",
+          projectRoot: "/workspace/second-project",
           messages: [],
           title: "Second",
           updatedAt: "2026-05-14T00:00:01.000Z",
@@ -3179,7 +3229,7 @@ describe("OhbabyTerminalApp", () => {
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("session_2") &&
+        nextFrame.includes("/workspace/second-project") &&
         !nextFrame.includes("D:/Stale") &&
         !nextFrame.includes("Status"),
     );
@@ -3577,7 +3627,15 @@ describe("OhbabyTerminalApp", () => {
       interfaceProvider: "openai-compatible" as const,
       model: "reasoning-model",
     };
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
     client.getCurrentModel
+      .mockClear()
       .mockResolvedValueOnce({
         ...current,
         reasoning: { status: "detecting", efforts: [] },
@@ -3592,13 +3650,6 @@ describe("OhbabyTerminalApp", () => {
           default: { enabled: true, effort: "medium" },
         },
       });
-    const app = render(
-      <OhbabyTerminalApp
-        client={client}
-        subscribeEvents={client.subscribeEvents}
-      />,
-    );
-    await flush();
     app.stdin.write("/effort");
     app.stdin.write("\r");
     await waitForFrame(app, (frame) =>
@@ -4600,7 +4651,7 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     app.stdin.write("\u001B");
-    await flush();
+    await flushEscapeInput();
     expect(client.respondPermission).toHaveBeenCalledWith(
       "permission_3",
       {
@@ -5033,10 +5084,41 @@ describe("independent TUI approvals", () => {
       frame.includes("Press Esc again to interrupt"),
     );
     app.stdin.write("\u001B");
-    await flush();
+    await flushEscapeInput();
     expect(client.abortRun).toHaveBeenCalledWith("run_1");
     expect(client.getSnapshot).not.toHaveBeenCalled();
   });
+});
+
+it("keeps a real runtime error visible when restored reasoning is unavailable", async () => {
+  const client = createFakeClient({
+    ...snapshot(),
+    status: {
+      kind: "error",
+      message: "actual runtime failure",
+      recoverable: true,
+    },
+  });
+  const getSessionView = client.getSessionView;
+  if (!getSessionView) throw new Error("Missing session-view fixture");
+  client.getSessionView = async (query) => ({
+    ...(await getSessionView(query)),
+    reasoningMissing: true,
+  });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  try {
+    const frame = await waitForFrame(app, (value) =>
+      value.includes("actual runtime failure"),
+    );
+    expect(frame).not.toContain("Some reasoning is unavailable");
+  } finally {
+    app.unmount();
+  }
 });
 
 function createFakeClient(
@@ -5679,6 +5761,14 @@ function isUiCommandInvocation(value: unknown): value is UiCommandInvocation {
     typeof record.commandId === "string" &&
     Array.isArray(record.path)
   );
+}
+
+// Ink buffers a bare Escape for 20 ms to distinguish it from chunked CSI/Alt
+// input. A zero-delay render flush does not mean the key has been delivered.
+async function flushEscapeInput(): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 35);
+  });
 }
 
 async function flush(): Promise<void> {
@@ -6332,7 +6422,7 @@ it.each(["queued", "succeeded", "lost twice", "another operation"] as const)(
     if (scenario === "another operation") {
       expect(app.lastFrame()).toContain("retained body edited");
       app.stdin.write("\u001b");
-      await flush();
+      await flushEscapeInput();
     }
     expect(app.lastFrame()).toContain("> original draft");
     expect(client.submitPromptAccepted).not.toHaveBeenCalled();
@@ -6505,7 +6595,7 @@ it("keeps expired retained edit text associated and lets Esc restore the draft w
   expect(client.resubmitRetainedPrompt).not.toHaveBeenCalled();
   expect(client.submitPromptAccepted).not.toHaveBeenCalled();
   app.stdin.write("\u001b");
-  await flush();
+  await flushEscapeInput();
   expect(app.lastFrame()).toContain("original draft");
   expect(client.abortRun).not.toHaveBeenCalled();
 });

@@ -152,12 +152,12 @@ describe("TUI persistent backend display", () => {
       (nextFrame) =>
         nextFrame.includes("Remember this") &&
         nextFrame.includes("Persisted") &&
-        nextFrame.includes("auto · default ·"),
+        nextFrame.includes("auto/default"),
     );
 
-    expect(frame).toContain("| Remember this");
+    expect(frame).toContain("│ Remember this");
     expect(frame).not.toContain("you");
-    expect(frame).not.toContain("ohbaby");
+    expect(frame).not.toContain("██╔═══██╗"); // Empty-state logo is gone; the project path may contain ohbaby.
     app.unmount();
   });
 
@@ -220,7 +220,7 @@ describe("TUI persistent backend display", () => {
       app,
       (frame) =>
         frame.includes("Seeded") &&
-        frame.includes("auto · default ·") &&
+        frame.includes("auto/default") &&
         !frame.includes("Permission:"),
     );
 
@@ -232,7 +232,7 @@ describe("TUI persistent backend display", () => {
 
     expect(promptIsReady(frame)).toBe(true);
     expect(frame).not.toContain("Permission:");
-    expect(frame).toContain("auto · default ·");
+    expect(frame).toContain("auto/default");
     app.unmount();
   });
 
@@ -290,7 +290,9 @@ describe("TUI persistent backend display", () => {
     const lastRequest = requests.at(-1);
     const serializedMessages = JSON.stringify(lastRequest?.messages ?? []);
 
-    expect(frame).toContain("auto · default · session_alpha");
+    expect(frame).toContain("auto/default");
+    expect(await restored.getSelectedSessionId()).toBe("session_alpha");
+    expect(frame).not.toContain("session_alpha");
     expect(serializedMessages).toContain("Alpha prompt");
     expect(serializedMessages).toContain("Alpha reply.");
     expect(serializedMessages).toContain("Continue alpha");
@@ -354,11 +356,13 @@ describe("TUI persistent backend display", () => {
     const frame = await waitForFrame(
       app,
       (nextFrame) =>
-        nextFrame.includes("auto · default · session_1") &&
+        nextFrame.includes("auto/default") &&
         nextFrame.includes("Prompt 1") &&
         nextFrame.includes("Reply 1."),
     );
 
+    expect(await restored.getSelectedSessionId()).toBe("session_1");
+    expect(frame).not.toContain("session_1");
     expect(frame).not.toContain("Reply 8.");
     app.unmount();
   });

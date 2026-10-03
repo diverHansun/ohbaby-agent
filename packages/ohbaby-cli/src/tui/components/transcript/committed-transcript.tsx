@@ -1,9 +1,9 @@
-import { useExecutionDuration } from "../execution-duration.js";
-import type { UiPromptSubmission } from "ohbaby-sdk";
-import { Box, Text, Static, useStdout } from "ink";
+import { Box, useStdout } from "ink";
 import { memo, type ReactElement } from "react";
 import { useTuiLayout } from "../../layout/context.js";
 import type { TranscriptItem } from "../../store/transcript.js";
+import { ReplayableTranscript } from "./replayable-transcript.js";
+import { PromptCompletion } from "./prompt-completion.js";
 import { MessageRow } from "../message/message-row.js";
 
 export interface CommittedTranscriptProps {
@@ -22,26 +22,11 @@ export const CommittedTranscript = memo(function CommittedTranscript({
   const layout = useTuiLayout();
   const { stdout } = useStdout();
   const useStatic = shouldUseStaticTranscript({
-    isTTY: stdout.isTTY,
+    isTTY: "isTTY" in stdout && stdout.isTTY === true,
   });
 
   if (useStatic) {
-    return (
-      <Static items={items as TranscriptItem[]}>
-        {(item): ReactElement =>
-          item.promptCompletion ? (
-            <PromptCompletion key={item.id} prompt={item.promptCompletion} />
-          ) : (
-            <MessageRow
-              bottomMargin={item.spacing ? 1 : 0}
-              contentWidth={layout.contentWidth}
-              key={item.id}
-              message={item.message}
-            />
-          )
-        }
-      </Static>
-    );
+    return <ReplayableTranscript items={items} />;
   }
 
   return (
@@ -76,31 +61,5 @@ export function shouldUseStaticTranscript(
     return true;
   }
 
-  return (
-    input.isTTY === true && (input.platform ?? process.platform) === "win32"
-  );
-}
-
-function PromptCompletion({
-  prompt,
-}: {
-  readonly prompt: UiPromptSubmission;
-}): ReactElement {
-  const duration = useExecutionDuration(
-    prompt.promptId,
-    prompt.endTimeSource === "recovery"
-      ? undefined
-      : Date.parse(prompt.acceptedAt ?? prompt.createdAt),
-    prompt.endedAt === undefined ? undefined : Date.parse(prompt.endedAt),
-  );
-  return (
-    <Box marginBottom={1}>
-      <Text dimColor>
-        {prompt.status === "succeeded" ? "" : `${prompt.status} · `}
-        {prompt.endTimeSource === "recovery"
-          ? "End time unknown (recovered)"
-          : `Total ${duration ?? "—"}`}
-      </Text>
-    </Box>
-  );
+  return input.isTTY === true;
 }

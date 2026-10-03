@@ -62,9 +62,11 @@ describe("TUI main chain with real in-process backend", () => {
       nextFrame.includes("Hello world"),
     );
 
-    expect(frame).not.toContain("ohbaby");
+    expect(frame).not.toContain("██╔═══██╗"); // Empty-state logo is gone; the project path may contain ohbaby.
     expect(frame).not.toContain("Hellolo");
-    expect(frame).toContain("auto · default · session_1");
+    expect(frame).toContain("auto/default");
+    expect(await client.getSelectedSessionId()).toBe("session_1");
+    expect(frame).not.toContain("session_1");
     app.unmount();
   });
 
@@ -119,7 +121,9 @@ describe("TUI main chain with real in-process backend", () => {
     expect(completedFrame).not.toContain("tool write");
     expect(completedFrame).not.toContain("tool result");
     expect(completedFrame).not.toContain("result hidden");
-    expect(completedFrame).toContain("auto · default · session_1");
+    expect(completedFrame).toContain("auto/default");
+    expect(await client.getSelectedSessionId()).toBe("session_1");
+    expect(completedFrame).not.toContain("session_1");
 
     app.stdin.write("again");
     app.stdin.write("\r");
@@ -127,7 +131,9 @@ describe("TUI main chain with real in-process backend", () => {
       frame.includes("Second prompt works."),
     );
 
-    expect(secondFrame).toContain("auto · default · session_1");
+    expect(secondFrame).toContain("auto/default");
+    expect(await client.getSelectedSessionId()).toBe("session_1");
+    expect(secondFrame).not.toContain("session_1");
     expect(client.submitPromptAccepted).toHaveBeenCalledTimes(2);
     app.unmount();
   });
@@ -179,7 +185,9 @@ describe("TUI main chain with real in-process backend", () => {
       frame.includes("After abort works."),
     );
 
-    expect(recoveredFrame).toContain("auto · default · session_1");
+    expect(recoveredFrame).toContain("auto/default");
+    expect(await realClient.getSelectedSessionId()).toBe("session_1");
+    expect(recoveredFrame).not.toContain("session_1");
     expect(recoveredFrame).not.toContain("Permission:");
     app.unmount();
   });
@@ -195,11 +203,11 @@ describe("TUI main chain with real in-process backend", () => {
       />,
     );
 
-    await waitForFrame(app, (frame) => frame.includes("auto · default"));
+    await waitForFrame(app, (frame) => frame.includes("auto/default"));
     app.stdin.write("\u001B[Z");
-    await waitForFrame(app, (frame) => frame.includes("plan · default"));
+    await waitForFrame(app, (frame) => frame.includes("plan/default"));
     app.stdin.write("\u001B[Z");
-    await waitForFrame(app, (frame) => frame.includes("auto · default"));
+    await waitForFrame(app, (frame) => frame.includes("auto/default"));
     app.stdin.write("/permission");
     app.stdin.write("\r");
     await waitForFrame(app, (nextFrame) =>
@@ -208,10 +216,10 @@ describe("TUI main chain with real in-process backend", () => {
     app.stdin.write("\u001B[B");
     app.stdin.write("\r");
     const frame = await waitForFrame(app, (nextFrame) =>
-      nextFrame.includes("auto · full-access"),
+      nextFrame.includes("auto/full-access"),
     );
 
-    expect(frame).toContain("auto · full-access");
+    expect(frame).toContain("auto/full-access");
     expect(frame).not.toContain("status: idle");
     app.unmount();
   });
@@ -229,7 +237,7 @@ describe("TUI main chain with real in-process backend", () => {
 
     await waitForFrame(app, promptIsReady);
     app.stdin.write("\u001B[Z");
-    await waitForFrame(app, (frame) => frame.includes("plan · default"));
+    await waitForFrame(app, (frame) => frame.includes("plan/default"));
 
     app.stdin.write("/status");
     app.stdin.write("\r");
@@ -243,7 +251,7 @@ describe("TUI main chain with real in-process backend", () => {
         !nextFrame.includes("Unknown command"),
     );
 
-    expect(frame).toContain("plan · default");
+    expect(frame).toContain("plan/default");
     expect(frame).not.toContain("status: idle");
 
     app.stdin.write("\u001B");
@@ -277,9 +285,9 @@ describe("TUI main chain with real in-process backend", () => {
       />,
     );
 
-    await waitForFrame(app, (frame) => frame.includes("auto · default"));
+    await waitForFrame(app, (frame) => frame.includes("auto/default"));
     app.stdin.write("\u001B[Z");
-    await waitForFrame(app, (frame) => frame.includes("plan · default"));
+    await waitForFrame(app, (frame) => frame.includes("plan/default"));
 
     app.stdin.write("try to write");
     app.stdin.write("\r");
@@ -328,7 +336,7 @@ describe("TUI main chain with real in-process backend", () => {
     await waitForFrame(app, (frame) => frame.includes("Permission level:"));
     app.stdin.write("\u001B[B");
     app.stdin.write("\r");
-    await waitForFrame(app, (frame) => frame.includes("auto · full-access"));
+    await waitForFrame(app, (frame) => frame.includes("auto/full-access"));
 
     app.stdin.write("write automatically");
     app.stdin.write("\r");
