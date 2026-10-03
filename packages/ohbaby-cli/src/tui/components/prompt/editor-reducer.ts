@@ -1,3 +1,5 @@
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 export interface EditorState {
   readonly cursor: EditorCursor;
   readonly draft: string | null;
@@ -57,6 +59,7 @@ export function applyEditorAction(
   state: EditorState,
   action: EditorAction,
 ): EditorReducerResult {
+  state = withCursor(state, state.cursor);
   switch (action.type) {
     case "insert":
       return { state: insertText(state, action.text) };
@@ -93,10 +96,21 @@ function insertText(state: EditorState, text: string): EditorState {
     return state;
   }
 
-  let next = state;
-  for (const char of text.replace(/\r\n/gu, "\n")) {
-    next = char === "\n" ? insertNewline(next) : insertChar(next, char);
-  }
+  const { row, col } = state.cursor;
+  const line = lineAt(state, row);
+  const inserted = text.replace(/\r\n/gu, "\n").split("\n");
+  const lines = [...state.lines];
+  const replacement = [...inserted];
+  replacement[0] = line.slice(0, col) + replacement[0];
+  replacement[replacement.length - 1] += line.slice(col);
+  lines.splice(row, 1, ...replacement);
+  const next = withLinesAndCursor(state, lines, {
+    row: row + inserted.length - 1,
+    col:
+      inserted.length === 1
+        ? col + text.length
+        : (inserted.at(-1) ?? "").length,
+  });
   return {
     ...next,
     draft: next.historyIndex === next.history.length ? next.draft : null,
@@ -104,40 +118,15 @@ function insertText(state: EditorState, text: string): EditorState {
   };
 }
 
-function insertChar(state: EditorState, char: string): EditorState {
-  const lines = [...state.lines];
-  const line = lineAt(state, state.cursor.row);
-  lines[state.cursor.row] =
-    `${line.slice(0, state.cursor.col)}${char}${line.slice(state.cursor.col)}`;
-  return withLinesAndCursor(state, lines, {
-    col: state.cursor.col + char.length,
-    row: state.cursor.row,
-  });
-}
-
-function insertNewline(state: EditorState): EditorState {
-  const lines = [...state.lines];
-  const line = lineAt(state, state.cursor.row);
-  lines.splice(
-    state.cursor.row,
-    1,
-    line.slice(0, state.cursor.col),
-    line.slice(state.cursor.col),
-  );
-  return withLinesAndCursor(state, lines, {
-    col: 0,
-    row: state.cursor.row + 1,
-  });
-}
-
 function backspace(state: EditorState): EditorState {
   if (state.cursor.col > 0) {
     const lines = [...state.lines];
     const line = lineAt(state, state.cursor.row);
+    const previous = previousBoundary(line, state.cursor.col);
     lines[state.cursor.row] =
-      `${line.slice(0, state.cursor.col - 1)}${line.slice(state.cursor.col)}`;
+      `${line.slice(0, previous)}${line.slice(state.cursor.col)}`;
     return withLinesAndCursor(state, lines, {
-      col: state.cursor.col - 1,
+      col: previousBoundary(lineAt(state, state.cursor.row), state.cursor.col),
       row: state.cursor.row,
     });
   }
@@ -165,7 +154,7 @@ function clearCurrentLine(state: EditorState): EditorState {
 function moveLeft(state: EditorState): EditorState {
   if (state.cursor.col > 0) {
     return withCursor(state, {
-      col: state.cursor.col - 1,
+      col: previousBoundary(lineAt(state, state.cursor.row), state.cursor.col),
       row: state.cursor.row,
     });
   }
@@ -182,7 +171,7 @@ function moveRight(state: EditorState): EditorState {
   const currentLine = lineAt(state, state.cursor.row);
   if (state.cursor.col < currentLine.length) {
     return withCursor(state, {
-      col: state.cursor.col + 1,
+      col: nextBoundary(currentLine, state.cursor.col),
       row: state.cursor.row,
     });
   }
@@ -226,7 +215,7 @@ function historyDown(state: EditorState): EditorState {
 
 function submit(state: EditorState): EditorReducerResult {
   const submission = editorText(state).trim();
-  if (submission === "") {
+  if (submission.trim() === "") {
     return { state };
   }
 
@@ -275,9 +264,32 @@ function clampCursor(
 ): EditorCursor {
   const row = Math.min(Math.max(0, cursor.row), lines.length - 1);
   const col = Math.min(Math.max(0, cursor.col), (lines[row] ?? "").length);
-  return { col, row };
+  return { col: boundaryAtOrAfter(lines[row] ?? "", col), row };
 }
 
 function lineAt(state: EditorState, row: number): string {
   return state.lines[row] ?? "";
+}
+
+/** All externally supplied/interior UTF-16 offsets snap forward consistently. */
+export function boundaryAtOrAfter(text: string, col: number): number {
+  for (const { index, segment } of GRAPHEMES.segment(text)) {
+    if (col <= index) return index;
+    if (col < index + segment.length) return index + segment.length;
+  }
+  return text.length;
+}
+function previousBoundary(text: string, col: number): number {
+  let previous = 0;
+  for (const { index } of GRAPHEMES.segment(text)) {
+    if (index >= col) break;
+    previous = index;
+  }
+  return previous;
+}
+function nextBoundary(text: string, col: number): number {
+  for (const { index, segment } of GRAPHEMES.segment(text)) {
+    if (index + segment.length > col) return index + segment.length;
+  }
+  return text.length;
 }

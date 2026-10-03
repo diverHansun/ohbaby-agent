@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, usePaste } from "ink";
 import { formatError } from "../../format-error.js";
 import type {
   CoreAPI,
@@ -25,6 +25,7 @@ import { useTuiLayout } from "../../layout/context.js";
 import type { TuiCommandCatalog } from "../../store/snapshot.js";
 import { useTheme } from "../../theme/index.js";
 import { Completion } from "./completion.js";
+import { createInputStream } from "./input-stream.js";
 import { editorViewport } from "./editor-viewport.js";
 import { formatFooterRows, sameFooterModel } from "./footer.js";
 import {
@@ -43,9 +44,15 @@ import {
 type SubmitPrompt = (
   text: string,
   reasoning?: UiReasoningConfig,
+  source?: {
+    readonly sessionId: string | null;
+    readonly creationGeneration: number;
+  },
 ) => Promise<import("ohbaby-sdk").UiPromptReceipt>;
 export interface PromptProps {
   readonly canSubmit?: boolean;
+  readonly footerOnly?: boolean;
+  readonly submissionContextGeneration?: number;
   readonly unsentSteer?: boolean;
   readonly onQueueModeChange?: (active: boolean) => void;
   readonly submitPrompt?: SubmitPrompt;
@@ -80,6 +87,8 @@ export interface PendingReasoningSelection {
 export function Prompt({
   activeSessionId,
   activeRunId,
+  footerOnly = false,
+  submissionContextGeneration,
   canSubmit = true,
   unsentSteer = false,
   onQueueModeChange,
@@ -134,7 +143,7 @@ export function Prompt({
     readonly retainedSendText?: string;
     readonly expiresAt: string;
     readonly leaseLost?: boolean;
-    readonly originalInput: string;
+    readonly originalEditor: EditorState;
     readonly promptId: string;
   } | null>(null);
   const [queuedMutationPending, setQueuedMutationPending] = useState(false);
@@ -143,8 +152,33 @@ export function Prompt({
   const queuedEditRef = useRef(queuedEdit);
   const draftSessionRef = useRef(activeSessionId);
   const draftGeneration = useRef(0);
+  const originSessions = useRef(new Map<number, string | null>());
+  const sourceGenerationRef = useRef(submissionContextGeneration);
+  const inputStream = useRef(createInputStream());
+  const insertionSequence = useRef<{
+    base: EditorState;
+    text: string;
+    state: EditorState;
+  } | null>(null);
+  const inFlightEditLeases = useRef(new Set<string>());
+  const [preparing, setPreparing] = useState(0);
+  const preparingByGeneration = useRef(new Map<number, number>());
+  const [unsent, setUnsent] = useState<readonly string[]>([]);
+  const unsentRef = useRef<readonly string[]>([]);
+  const replaceUnsent = (next: readonly string[]): void => {
+    unsentRef.current = next;
+    setUnsent(next);
+  };
   const sessionDrafts = useRef(
-    new Map<string | null, { editor: EditorState; edit: typeof queuedEdit }>(),
+    new Map<
+      string | null,
+      {
+        editor: EditorState;
+        edit: typeof queuedEdit;
+        unsent?: readonly string[];
+        error?: string | null;
+      }
+    >(),
   );
   const queuedMutationPendingRef = useRef(false);
   const lastLeaseRenewalAtRef = useRef(0);
@@ -181,7 +215,24 @@ export function Prompt({
   const applyEditor = (
     action: EditorAction,
   ): ReturnType<typeof applyEditorAction> => {
-    const result = applyEditorAction(editorRef.current, action);
+    let result: ReturnType<typeof applyEditorAction>;
+    if (action.type === "insert") {
+      const previous = insertionSequence.current;
+      const base =
+        previous?.state === editorRef.current
+          ? previous.base
+          : editorRef.current;
+      const text =
+        (previous?.state === editorRef.current ? previous.text : "") +
+        action.text;
+      result = applyEditorAction(base, { type: "insert", text });
+      // Keep the raw insertion anchor while suffix fragments arrive. The
+      // displayed cursor still always follows complete grapheme boundaries.
+      insertionSequence.current = { base, text, state: result.state };
+    } else {
+      insertionSequence.current = null;
+      result = applyEditorAction(editorRef.current, action);
+    }
     replaceEditor(result.state);
     return result;
   };
@@ -197,20 +248,60 @@ export function Prompt({
   };
 
   useLayoutEffect(() => {
-    if (draftSessionRef.current === activeSessionId) return;
+    const explicitChange =
+      submissionContextGeneration !== sourceGenerationRef.current;
+    const receiptBinding =
+      draftSessionRef.current === null &&
+      activeSessionId !== null &&
+      !explicitChange &&
+      (submissionContextGeneration !== undefined ||
+        activeSessionId === acceptedNewSessionIdRef.current);
+    if (receiptBinding) {
+      draftSessionRef.current = activeSessionId;
+      acceptedNewSessionIdRef.current = activeSessionId;
+      originSessions.current.set(draftGeneration.current, activeSessionId);
+      return;
+    }
+    if (draftSessionRef.current === activeSessionId && !explicitChange) return;
     sessionDrafts.current.set(draftSessionRef.current, {
       editor: editorRef.current,
       edit: queuedEditRef.current,
+      unsent,
+      error,
     });
     draftGeneration.current += 1;
+    sourceGenerationRef.current = submissionContextGeneration;
+    acceptedNewSessionIdRef.current = null;
+    inputStream.current.reset();
+    setPreparing(0);
+    replaceUnsent([]);
     draftSessionRef.current = activeSessionId;
     const stored = sessionDrafts.current.get(activeSessionId);
-    replaceEditor(stored?.editor ?? createEditorState());
-    replaceQueuedEdit(stored?.edit ?? null);
+    replaceUnsent(
+      activeSessionId === null
+        ? (stored?.unsent ?? []).map((message) =>
+            message.startsWith("Earlier new-session input not sent · ")
+              ? message
+              : `Earlier new-session input not sent · ${message}`,
+          )
+        : (stored?.unsent ?? []),
+    );
+    // A new creation context starts blank; earlier unbound intentions stay
+    // available through the existing history keys, without implicit sending.
+    replaceEditor(
+      activeSessionId === null
+        ? createEditorState({ history: stored?.editor.history ?? [] })
+        : (stored?.editor ?? createEditorState()),
+    );
+    replaceQueuedEdit(activeSessionId === null ? null : (stored?.edit ?? null));
     selectQueue(null);
-    replaceQueuedMutationPending(false);
-    setError(null);
-  }, [activeSessionId]);
+    replaceQueuedMutationPending(
+      stored?.edit !== null &&
+        stored?.edit !== undefined &&
+        inFlightEditLeases.current.has(stored.edit.editLeaseId),
+    );
+    setError(stored?.error ?? null);
+  }, [activeSessionId, submissionContextGeneration]);
 
   useEffect(() => {
     onQueueModeChange?.(queueSelectionId !== null || queuedEdit !== null);
@@ -267,14 +358,15 @@ export function Prompt({
   const restoreQueuedEditInput = (): void => {
     const current = queuedEditRef.current;
     if (!current) return;
-    replaceInput(current.originalInput);
+    replaceEditor(current.originalEditor);
     replaceQueuedEdit(null);
     setError(null);
   };
 
   const renewQueuedEditLease = (): void => {
     const current = queuedEditRef.current;
-    if (!current || current.retainedSendText !== undefined) return;
+    if (!current || current.retainedSendText !== undefined || current.leaseLost)
+      return;
     const generation = draftGeneration.current;
     const now = Date.now();
     if (now - lastLeaseRenewalAtRef.current < 20_000) return;
@@ -294,7 +386,9 @@ export function Prompt({
         replaceQueuedEdit({
           ...queuedEditRef.current,
           expiresAt: lease.expiresAt,
-          leaseLost: false,
+          leaseLost:
+            queuedEditRef.current.leaseLost === true ||
+            Date.parse(lease.expiresAt) <= Date.now(),
         });
       })
       .catch((caught: unknown) => {
@@ -311,11 +405,33 @@ export function Prompt({
       });
   };
 
+  usePaste(
+    (text) => {
+      const edit = queuedEditRef.current;
+      if (
+        queuedMutationPendingRef.current ||
+        queueSelectionRef.current !== null ||
+        edit?.retainedSendText !== undefined
+      )
+        return;
+      if (edit) renewQueuedEditLease();
+      applyEditor({ type: "insert", text: inputStream.current.push(text) });
+      selectIndex(0);
+      setError(null);
+    },
+    { isActive: !disabled && !footerOnly },
+  );
+
   useInput(
     (value, key) => {
       // Reserved for the Tasks viewport; plain PageUp still loads history.
       if (key.meta && (key.pageUp || key.pageDown)) return;
       if (queuedMutationPendingRef.current) return;
+      if (value.startsWith("\n") && inputStream.current.pendingCR()) {
+        const continuation = inputStream.current.push(value);
+        if (continuation) applyEditor({ type: "insert", text: continuation });
+        return;
+      }
       const generation = draftGeneration.current;
       if (key.ctrl && (key.upArrow || key.downArrow)) {
         setSteerSelection((current) =>
@@ -468,7 +584,7 @@ export function Prompt({
                 status:
                   lease.prompt.status === "retained" ? "retained" : "queued",
                 operationId: randomUUID(),
-                originalInput: editorText(editorRef.current),
+                originalEditor: editorRef.current,
                 promptId: prompt.promptId,
               });
               selectQueue(null);
@@ -501,6 +617,7 @@ export function Prompt({
       }
 
       if (key.return) {
+        inputStream.current.reset();
         if (key.shift) {
           if (currentQueuedEdit?.retainedSendText !== undefined) return;
           if (currentQueuedEdit) renewQueuedEditLease();
@@ -515,7 +632,8 @@ export function Prompt({
         if (currentQueuedEdit) {
           if (
             currentInput.trim() === "" ||
-            (currentQueuedEdit.leaseLost &&
+            ((currentQueuedEdit.leaseLost ||
+              Date.parse(currentQueuedEdit.expiresAt) <= Date.now()) &&
               currentQueuedEdit.retainedSendText === undefined)
           )
             return;
@@ -534,6 +652,12 @@ export function Prompt({
               ...currentQueuedEdit,
               retainedSendText: input.text,
             });
+          const mutationSourceSession = draftSessionRef.current;
+          inFlightEditLeases.current.add(currentQueuedEdit.editLeaseId);
+          const ownsLease = (): boolean =>
+            draftSessionRef.current === mutationSourceSession &&
+            queuedEditRef.current?.editLeaseId ===
+              currentQueuedEdit.editLeaseId;
           const mutation =
             currentQueuedEdit.status === "retained"
               ? client.resubmitRetainedPrompt({
@@ -543,24 +667,38 @@ export function Prompt({
               : client.editQueuedPrompt(input);
           void mutation
             .then(() => {
-              if (
-                generation === draftGeneration.current &&
-                queuedEditRef.current?.editLeaseId ===
-                  currentQueuedEdit.editLeaseId
-              )
+              if (ownsLease()) {
+                replaceQueuedMutationPending(false);
                 restoreQueuedEditInput();
+              } else {
+                const stored = sessionDrafts.current.get(mutationSourceSession);
+                if (stored?.edit?.editLeaseId === currentQueuedEdit.editLeaseId)
+                  sessionDrafts.current.set(mutationSourceSession, {
+                    ...stored,
+                    editor: stored.edit.originalEditor,
+                    edit: null,
+                    error: null,
+                  });
+              }
             })
             .catch((caught: unknown) => {
-              if (generation === draftGeneration.current)
-                setError(
-                  currentQueuedEdit.status === "retained"
-                    ? `Send outcome unknown. Retry the same send to recover its receipt. ${formatError(caught)}. Esc restores your draft.`
-                    : formatError(caught),
-                );
+              const message =
+                currentQueuedEdit.status === "retained"
+                  ? `Send outcome unknown. Retry the original send. ${formatError(caught)}. Esc restores your draft.`
+                  : formatError(caught);
+              if (ownsLease()) setError(message);
+              else {
+                const stored = sessionDrafts.current.get(mutationSourceSession);
+                if (stored?.edit?.editLeaseId === currentQueuedEdit.editLeaseId)
+                  sessionDrafts.current.set(mutationSourceSession, {
+                    ...stored,
+                    error: message,
+                  });
+              }
             })
             .finally(() => {
-              if (generation === draftGeneration.current)
-                replaceQueuedMutationPending(false);
+              inFlightEditLeases.current.delete(currentQueuedEdit.editLeaseId);
+              if (ownsLease()) replaceQueuedMutationPending(false);
             });
           return;
         }
@@ -569,57 +707,112 @@ export function Prompt({
         if (result.submission === undefined) {
           return;
         }
-        if (
-          activeSessionId === null &&
-          pendingReasoning !== null &&
-          pendingReasoning !== undefined &&
-          !result.submission.trim().startsWith("/")
-        ) {
-          const submission = result.submission;
-          replaceInput("");
-          const send = (): Promise<void> =>
-            submitInput(
-              submission,
-              acceptedNewSessionIdRef.current,
-              pendingReasoning,
-              catalog,
-              client,
-              loadCatalog,
-              replaceInput,
-              setError,
-              selectedIndexRef.current,
-              onCommandPanelOpen,
-              true,
-              (sessionId) => {
+        const submission = result.submission;
+        const sourceSession = draftSessionRef.current;
+        const sourceGeneration = draftGeneration.current;
+        const creationGeneration =
+          submissionContextGeneration ?? sourceGeneration;
+        const sourceKey = sourceSession;
+        if (!originSessions.current.has(sourceGeneration))
+          originSessions.current.set(sourceGeneration, sourceSession);
+        const selection = selectedIndexRef.current;
+        const capturedReasoning =
+          sourceSession === null ? pendingReasoning : null;
+        const ownsContext = (): boolean =>
+          sourceGeneration === draftGeneration.current;
+        const notice = (message: string | null): void => {
+          if (ownsContext()) setError(message);
+        };
+        const preserveUnsent = (message: string): void => {
+          const storageKey =
+            originSessions.current.get(sourceGeneration) ?? sourceKey;
+          const currentOwner =
+            ownsContext() ||
+            (storageKey !== null && storageKey === draftSessionRef.current);
+          const stored = sessionDrafts.current.get(storageKey);
+          const reason = message
+            .replace(/^Not sent: /u, "")
+            .replace(/\.? ↑ recover text\.?$/u, "");
+          const record = `Not sent · ↑ recover · ${reason} · ${submission.replace(/\s+/gu, " ").slice(0, 12)}`;
+          const records = [
+            ...(currentOwner ? unsentRef.current : (stored?.unsent ?? [])),
+            record,
+          ];
+          if (currentOwner) replaceUnsent(records);
+          else {
+            if (stored)
+              sessionDrafts.current.set(storageKey, {
+                ...stored,
+                unsent: records,
+              });
+            if (storageKey === null && draftSessionRef.current === null) {
+              replaceUnsent([
+                ...unsentRef.current,
+                `Earlier new-session input not sent · ${reason}`,
+              ]);
+            }
+          }
+        };
+        const prepareCount = (delta: number): void => {
+          const count =
+            (preparingByGeneration.current.get(sourceGeneration) ?? 0) + delta;
+          preparingByGeneration.current.set(sourceGeneration, count);
+          if (ownsContext()) setPreparing(count);
+        };
+        prepareCount(1);
+        const send = async (): Promise<void> => {
+          if (!ownsContext()) {
+            preserveUnsent("Not sent: source context changed. ↑ recover text.");
+            prepareCount(-1);
+            return;
+          }
+          await submitInput(
+            submission,
+            sourceSession ?? acceptedNewSessionIdRef.current,
+            capturedReasoning,
+            catalog,
+            client,
+            loadCatalog,
+            () => undefined,
+            notice,
+            selection,
+            onCommandPanelOpen,
+            true,
+            (sessionId) => {
+              if (ownsContext() && sourceSession === null)
                 acceptedNewSessionIdRef.current = sessionId;
-              },
-              submitPrompt,
-            );
+            },
+            submitPrompt,
+            ownsContext,
+            preserveUnsent,
+            { sessionId: sourceSession, creationGeneration },
+          );
+          prepareCount(-1);
+        };
+        // Preserve the existing first-send sequence for all independent intents
+        // in one creation context; the editor remains available during prepare.
+        if (sourceSession === null && !submission.trim().startsWith("/")) {
           pendingSubmissionRef.current = pendingSubmissionRef.current.then(
             send,
             send,
           );
-          return;
-        }
-        void submitInput(
-          result.submission,
-          activeSessionId,
-          activeSessionId === null ? pendingReasoning : null,
-          catalog,
-          client,
-          loadCatalog,
-          replaceInput,
-          setError,
-          selectedIndexRef.current,
-          onCommandPanelOpen,
-          true,
-          undefined,
-          submitPrompt,
-        );
+        } else void send();
         return;
       }
 
-      if (currentQueuedEdit?.retainedSendText !== undefined) return;
+      if (currentQueuedEdit?.retainedSendText !== undefined) {
+        const navigation = key.leftArrow
+          ? "move-left"
+          : key.rightArrow
+            ? "move-right"
+            : key.home
+              ? "move-home"
+              : key.end
+                ? "move-end"
+                : null;
+        if (navigation) applyEditor({ type: navigation });
+        return;
+      }
       if (currentQueuedEdit) renewQueuedEditLease();
 
       if (currentInput.startsWith("/") && candidates.length > 0) {
@@ -716,12 +909,12 @@ export function Prompt({
       }
 
       if (value.length > 0 && !key.ctrl && !key.meta) {
-        applyEditor({ text: value, type: "insert" });
+        applyEditor({ text: inputStream.current.push(value), type: "insert" });
         selectIndex(0);
         setError(null);
       }
     },
-    { isActive: !disabled },
+    { isActive: !disabled && !footerOnly },
   );
 
   const footerRows = formatFooterRows({
@@ -741,85 +934,106 @@ export function Prompt({
     goalStatus === "active" ? theme.status.accent : theme.status.warning;
 
   return (
-    <Box flexDirection="column">
-      {unsentSteer ? (
-        <Text dimColor>Task stopped before your steer message was sent.</Text>
-      ) : null}
-      {steerNoticeRunId && steerNoticeRunId === activeRunId ? (
-        <Text>
-          Steer accepted · waiting for the active run’s next safe boundary
-        </Text>
-      ) : null}
-      {queuedPrompts.length === 0 ? null : (
-        <Box flexDirection="column" paddingX={1} width={layout.contentWidth}>
-          <Text dimColor>Queued {queuedPrompts.length}</Text>
-          {queuedPrompts.map((prompt, index) => (
-            <Text
-              dimColor={queuedEdit?.promptId !== prompt.promptId}
-              key={prompt.promptId}
-            >
-              {(
-                queueSelectionId
-                  ? prompt.promptId === queueSelectionId
-                  : index === Math.min(steerSelection, queuedPrompts.length - 1)
-              )
-                ? "›"
-                : "↳"}{" "}
-              {prompt.text.replace(/\s+/gu, " ").trim()}
-              {queuedEdit?.promptId === prompt.promptId ? " · editing" : ""}
-              {prompt.status === "retained" ? " · Retained" : ""}
-              {prompt.status === "queued" &&
-              activeRunId &&
-              !prompt.editLeaseOwnerId &&
-              !queuedEdit
-                ? " · Steer"
-                : " · Steer unavailable"}
+    <Box flexDirection="column" width={layout.contentWidth}>
+      {footerOnly ? null : (
+        <>
+          {preparing > 0 ? <Text dimColor>Preparing…</Text> : null}
+          {unsent.length > 0 ? (
+            <Text dimColor wrap="truncate-end">
+              {unsent.length > 1 ? `${String(unsent.length)} unsent · ` : ""}
+              {unsent.at(-1)}
             </Text>
-          ))}
-          <Text dimColor>
-            {queueSelectionId
-              ? "↑/↓ select · Enter edit · Ctrl+D Delete · Esc back to draft"
-              : "Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer"}
-          </Text>
-        </Box>
+          ) : null}
+          {unsentSteer ? (
+            <Text dimColor>
+              Task stopped before your steer message was sent.
+            </Text>
+          ) : null}
+          {steerNoticeRunId && steerNoticeRunId === activeRunId ? (
+            <Text>
+              Steer accepted · waiting for the active run’s next safe boundary
+            </Text>
+          ) : null}
+          {queuedPrompts.length === 0 ? null : (
+            <Box
+              flexDirection="column"
+              paddingX={1}
+              width={layout.contentWidth}
+            >
+              <Text dimColor>Queued {queuedPrompts.length}</Text>
+              {queuedPrompts.map((prompt, index) => (
+                <Text
+                  dimColor={queuedEdit?.promptId !== prompt.promptId}
+                  key={prompt.promptId}
+                  wrap="truncate-end"
+                >
+                  {(
+                    queueSelectionId
+                      ? prompt.promptId === queueSelectionId
+                      : index ===
+                        Math.min(steerSelection, queuedPrompts.length - 1)
+                  )
+                    ? "›"
+                    : "↳"}{" "}
+                  {prompt.text.replace(/\s+/gu, " ").trim()}
+                  {queuedEdit?.promptId === prompt.promptId ? " · editing" : ""}
+                  {prompt.status === "retained" ? " · Retained" : ""}
+                  {prompt.status === "queued" &&
+                  activeRunId &&
+                  !prompt.editLeaseOwnerId &&
+                  !queuedEdit
+                    ? " · Steer"
+                    : " · Steer unavailable"}
+                </Text>
+              ))}
+              <Text dimColor>
+                {queueSelectionId
+                  ? "↑/↓ select · Enter edit · Ctrl+D Delete · Esc back to draft"
+                  : "Alt+↑ select queue · Ctrl+↑/↓ select Steer · Ctrl+S Steer"}
+              </Text>
+            </Box>
+          )}
+          {goalStatus === undefined ? null : (
+            <Text color={goalStatusColor}>goal {goalStatus}</Text>
+          )}
+          {runtimeStatusLabel ? (
+            <Text dimColor>{runtimeStatusLabel}</Text>
+          ) : null}
+          <Box
+            borderColor={theme.border}
+            borderStyle="single"
+            borderLeft={false}
+            borderRight={false}
+            flexDirection="column"
+            paddingX={1}
+            width={layout.contentWidth}
+          >
+            {renderEditorLines(
+              editor,
+              disabled,
+              theme.cursor,
+              Math.max(0, layout.contentWidth - 4),
+              Math.max(
+                1,
+                Math.min(disabled ? 3 : 5, Math.floor((layout.rows - 1) / 4)),
+              ),
+            )}
+          </Box>
+          {queuedEdit ? (
+            <Text dimColor>
+              {queuedMutationPending
+                ? "Updating queued prompt…"
+                : queuedEdit.retainedSendText !== undefined
+                  ? "Enter retry the same send · Esc restore draft"
+                  : queuedEdit.leaseLost
+                    ? "Edit unavailable · Esc restore draft"
+                    : queuedEdit.status === "retained"
+                      ? "Enter send · Esc restore draft"
+                      : "Enter save · Esc restore draft"}
+            </Text>
+          ) : null}
+        </>
       )}
-      {goalStatus === undefined ? null : (
-        <Text color={goalStatusColor}>goal {goalStatus}</Text>
-      )}
-      {runtimeStatusLabel ? <Text dimColor>{runtimeStatusLabel}</Text> : null}
-      <Box
-        borderColor={theme.border}
-        borderStyle="single"
-        borderLeft={false}
-        borderRight={false}
-        flexDirection="column"
-        paddingX={1}
-        width={layout.contentWidth}
-      >
-        {renderEditorLines(
-          editor,
-          disabled,
-          theme.cursor,
-          Math.max(1, layout.contentWidth - 4),
-          Math.max(
-            1,
-            Math.min(disabled ? 3 : 5, Math.floor((layout.rows - 1) / 4)),
-          ),
-        )}
-      </Box>
-      {queuedEdit ? (
-        <Text dimColor>
-          {queuedMutationPending
-            ? "Updating queued prompt…"
-            : queuedEdit.retainedSendText !== undefined
-              ? "Enter retry the same send · Esc restore draft"
-              : queuedEdit.leaseLost
-                ? "Edit unavailable · Esc restore draft"
-                : queuedEdit.status === "retained"
-                  ? "Enter send · Esc restore draft"
-                  : "Enter save · Esc restore draft"}
-        </Text>
-      ) : null}
       <Box flexDirection="column" width={layout.contentWidth}>
         {footerRows.map((row, index) => (
           <Text key={index} dimColor wrap="truncate-end">
@@ -827,12 +1041,16 @@ export function Prompt({
           </Text>
         ))}
       </Box>
-      {error === null ? null : <Text color={theme.status.error}>{error}</Text>}
-      <Completion
-        catalog={catalog}
-        input={editorText(editor)}
-        selectedIndex={selectedIndex}
-      />
+      {footerOnly || error === null ? null : (
+        <Text color={theme.status.error}>{error}</Text>
+      )}
+      {footerOnly ? null : (
+        <Completion
+          catalog={catalog}
+          input={editorText(editor)}
+          selectedIndex={selectedIndex}
+        />
+      )}
     </Box>
   );
 }
@@ -850,7 +1068,11 @@ function renderEditorLines(
         {"> paused"}
       </Text>,
     ];
-  return editorViewport(editor, width, maxRows).map((row, index) => (
+  const initial = editorViewport(editor, width, maxRows);
+  const range = initial[0]?.visibleRange;
+  const rows =
+    range && maxRows > 1 ? editorViewport(editor, width, maxRows - 1) : initial;
+  const result = rows.map((row, index) => (
     <Text key={index} wrap="truncate-end">
       <Text dimColor={disabled || row.hiddenBefore}>
         {index === 0 ? (row.hiddenBefore ? "↑ " : "> ") : "  "}
@@ -868,6 +1090,23 @@ function renderEditorLines(
       )}
     </Text>
   ));
+  if (range && maxRows > 1) {
+    const visible = rows[0]?.visibleRange ?? range;
+    result.push(
+      <Text
+        key="range"
+        dimColor
+        wrap="truncate-end"
+      >{`  lines ${String(visible.start)}–${String(visible.end)}/${String(visible.total)}`}</Text>,
+    );
+  } else if (rows.some((row) => row.resizeRequired) && maxRows > rows.length) {
+    result.push(
+      <Text key="resize" dimColor wrap="truncate-end">
+        Resize terminal to read input
+      </Text>,
+    );
+  }
+  return result;
 }
 
 function isDeleteControlInput(
@@ -903,14 +1142,20 @@ async function submitInput(
   alreadyCleared = false,
   onAccepted?: (sessionId: string) => void,
   submitPrompt?: SubmitPrompt,
+  ownsContext: () => boolean = () => true,
+  preserveUnsent: (message: string) => void = () => undefined,
+  source?: {
+    readonly sessionId: string | null;
+    readonly creationGeneration: number;
+  },
 ): Promise<void> {
   const text = input.trim();
 
-  if (text === "") {
+  if (text.trim() === "") {
     return;
   }
 
-  if (!text.startsWith("/")) {
+  if (!text.trim().startsWith("/")) {
     setError(null);
     if (!alreadyCleared) replaceInput("");
     let reasoning: UiReasoningConfig | undefined;
@@ -940,9 +1185,13 @@ async function submitInput(
         // Model lookup must not prevent an otherwise valid first prompt.
       }
     }
+    if (!ownsContext()) {
+      preserveUnsent("Not sent: source context changed. ↑ recover text.");
+      return;
+    }
     try {
       const receipt = await (submitPrompt
-        ? submitPrompt(text, reasoning)
+        ? submitPrompt(text, reasoning, source)
         : client.submitPromptAccepted(text, {
             clientRequestId: randomUUID(),
             reasoning,
@@ -950,7 +1199,10 @@ async function submitInput(
           }));
       onAccepted?.(receipt.sessionId);
     } catch (caught) {
-      setError(formatError(caught));
+      const message = formatError(caught);
+      if (!message.startsWith("Submission outcome unknown"))
+        preserveUnsent(`Not sent: ${message}. ↑ recover text.`);
+      setError(message);
     }
     return;
   }
@@ -958,6 +1210,9 @@ async function submitInput(
   let commandCatalog = catalog;
   if (commandCatalog === null) {
     if (!loadCatalog) {
+      preserveUnsent(
+        "Not sent: command catalog is not loaded. ↑ recover text.",
+      );
       setError("Command catalog is not loaded");
       return;
     }
@@ -971,7 +1226,11 @@ async function submitInput(
     }
   }
 
-  const result = resolveCommand(parseSlashInput(text), commandCatalog, {
+  if (!ownsContext()) {
+    preserveUnsent("Not sent: source context changed. ↑ recover text.");
+    return;
+  }
+  const result = resolveCommand(parseSlashInput(text.trim()), commandCatalog, {
     sessionId: activeSessionId ?? undefined,
     surface: "tui",
   });
@@ -1009,6 +1268,7 @@ async function submitInput(
   }
 
   if (result.kind !== "resolved") {
+    preserveUnsent(`Not sent: ${result.reason}. ↑ recover text.`);
     setError(result.reason);
     return;
   }
