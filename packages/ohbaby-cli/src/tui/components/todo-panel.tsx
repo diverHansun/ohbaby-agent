@@ -17,6 +17,7 @@ export interface TodoPanelProps {
   readonly inputEnabled?: boolean;
   readonly todoList: UiSessionTodoList | null;
   readonly summaryOnly?: boolean;
+  readonly stopped?: boolean;
 }
 
 export function TodoPanel({
@@ -24,6 +25,7 @@ export function TodoPanel({
   inputEnabled = true,
   todoList,
   summaryOnly = false,
+  stopped = false,
 }: TodoPanelProps): ReactElement | null {
   const theme = useTheme();
   const panelRef = useContext(TodoPanelRefContext);
@@ -69,23 +71,25 @@ export function TodoPanel({
 
   // In a short terminal, keep approval choices and the saved draft in view.
   // The expanded state is retained and restored when the dialog closes.
-  if (summaryOnly) {
+  const completed = todos.filter((todo) => todo.status === "completed").length;
+  if (summaryOnly || !expanded) {
     return (
       <Box ref={panelRef}>
-        <Text color={theme.text.dim}>Tasks · {todoList.todos.length}</Text>
+        <Text color={theme.text.dim}>
+          Tasks {completed}/{todos.length} completed · Ctrl+T expand
+        </Text>
       </Box>
     );
   }
 
-  const hasOverflow = todoList.todos.length > COMPACT_TODO_LIMIT;
-
   return (
     <Box ref={panelRef} flexDirection="column" paddingX={1}>
       <Box justifyContent="space-between">
-        <Text color={theme.status.accent}>Tasks</Text>
-        {hasOverflow && expanded ? (
-          <Text dimColor>ctrl+t to collapse</Text>
-        ) : null}
+        <Text color={theme.status.accent}>
+          Tasks{stopped ? " · Stopped" : ""} {completed}/{todos.length}{" "}
+          completed
+        </Text>
+        {todos.length > 0 ? <Text dimColor>ctrl+t to collapse</Text> : null}
       </Box>
       <Box
         flexDirection="column"
@@ -99,7 +103,12 @@ export function TodoPanel({
               <Text color={todoColor(todo.status, theme)}>
                 {todoMarker(todo.status)}{" "}
               </Text>
-              <Text dimColor={todo.status === "completed"}>{todo.content}</Text>
+              <Text
+                bold={!stopped && todo.status === "in_progress"}
+                dimColor={todo.status === "completed"}
+              >
+                {todo.content}
+              </Text>
             </Box>
           ))}
         </Box>

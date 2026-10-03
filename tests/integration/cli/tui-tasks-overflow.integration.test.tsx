@@ -119,7 +119,7 @@ describe("TUI expanded Tasks viewport", () => {
       }
       stdin.send("\u0014");
       await tick();
-      expect(stdout.text()).toContain("+15 more · ctrl+t to expand");
+      expect(stdout.text()).toContain("Tasks 0/20 completed · Ctrl+T expand");
       expect(stdout.text()).toContain("draft five");
     } finally {
       app.unmount();
@@ -238,6 +238,8 @@ describe("TUI expanded Tasks viewport", () => {
     );
     try {
       await tick();
+      await tick();
+      stdin.send("\u0014");
       await tick();
       expect(stdout.text()).toContain("Alt+PgUp/PgDn");
       for (let page = 0; page < 10; page++) {

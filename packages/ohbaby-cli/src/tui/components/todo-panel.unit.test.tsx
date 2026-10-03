@@ -43,7 +43,29 @@ describe("TodoPanel", () => {
     ]);
   });
 
-  it("renders five compact items and all items when expanded", () => {
+  it("shows complete counts and stopped status without changing unfinished markers", () => {
+    const app = render(
+      <ThemeProvider>
+        <TodoPanel
+          expanded
+          stopped
+          todoList={{
+            sessionId: "s",
+            visible: true,
+            todos: [
+              { content: "finished", status: "completed" },
+              { content: "interrupted", status: "in_progress" },
+            ],
+          }}
+        />
+      </ThemeProvider>,
+    );
+    expect(app.lastFrame()).toContain("Tasks · Stopped 1/2 completed");
+    expect(app.lastFrame()).toContain("● interrupted");
+    app.unmount();
+  });
+
+  it("renders a one-line collapsed summary and all items when expanded", () => {
     const todos: readonly UiTodoItem[] = Array.from(
       { length: 10 },
       (_, index) => ({
@@ -58,8 +80,8 @@ describe("TodoPanel", () => {
       </ThemeProvider>,
     );
 
-    expect(app.lastFrame()).toContain("+5 more · ctrl+t to expand");
-    expect(app.lastFrame()).toContain("task 5");
+    expect(app.lastFrame()).toContain("Tasks 0/10 completed · Ctrl+T expand");
+    expect(app.lastFrame()).not.toContain("task 5");
     expect(app.lastFrame()).not.toContain("task 6");
 
     app.rerender(

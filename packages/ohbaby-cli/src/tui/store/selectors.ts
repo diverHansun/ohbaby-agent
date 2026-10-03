@@ -57,6 +57,17 @@ export function selectActiveGoal(state: TuiStoreState): UiGoal | null {
   );
 }
 
+/** Current session's retained facts, including hidden lists for explicit review. */
+export function selectActiveRawTodoList(
+  state: TuiStoreState,
+): UiSessionTodoList | null {
+  return (
+    state.todos.find(
+      (candidate) => candidate.sessionId === state.activeSessionId,
+    ) ?? null
+  );
+}
+
 export function selectActiveTodoList(
   state: TuiStoreState,
 ): UiSessionTodoList | null {

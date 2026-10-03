@@ -10,6 +10,7 @@ describe("computeLayoutMetrics", () => {
       isCompact: true,
       liveTailRows: 20,
       rows: 30,
+      approvalRows: 27,
     });
   });
 
@@ -21,6 +22,7 @@ describe("computeLayoutMetrics", () => {
       isCompact: false,
       liveTailRows: 30,
       rows: 40,
+      approvalRows: 37,
     });
   });
 
@@ -32,6 +34,7 @@ describe("computeLayoutMetrics", () => {
       isCompact: false,
       liveTailRows: 30,
       rows: 40,
+      approvalRows: 37,
     });
   });
 

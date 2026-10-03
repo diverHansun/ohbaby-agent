@@ -7,6 +7,8 @@ import type {
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { useTheme } from "../theme/index.js";
+import { useTuiLayout } from "../layout/context.js";
+import { visibleWidth, wrapAnsi } from "../render/wrap.js";
 
 export interface PermissionDialogProps {
   readonly client: CoreAPI;
@@ -14,208 +16,280 @@ export interface PermissionDialogProps {
   readonly ready: boolean;
   readonly context?: UiPermissionResponseContext;
   readonly onResync: () => void;
+  readonly maxHeight?: number;
+  readonly controllableRun?: boolean;
+  readonly syncError?: string;
+  readonly retryHint?: string;
 }
 
+/** Fixed chrome and a shared reading window keep every original description reachable. */
 export function PermissionDialog({
   client,
-  request: originalRequest,
+  request: original,
   ready,
   context,
   onResync,
+  maxHeight = 18,
+  controllableRun = false,
+  syncError,
+  retryHint,
 }: PermissionDialogProps): ReactElement {
+  const theme = useTheme();
+  const layout = useTuiLayout();
+  const width = Math.max(1, layout.contentWidth);
   const request = {
-    ...originalRequest,
-    choices: originalRequest.choices.filter(
-      (choice) => choice.id !== "cancel" && choice.intent !== "abort",
+    ...original,
+    choices: original.choices.filter(
+      (c) => c.id !== "cancel" && c.intent !== "abort",
     ),
   };
+  const initial = (): string | undefined =>
+    (
+      request.choices.find((c) => c.intent === "allow") ??
+      request.choices.find((c) => c.intent === "deny") ??
+      request.choices.at(0)
+    )?.id;
+  const identity = JSON.stringify([
+    request.id,
+    request.rootSessionId,
+    context?.permissionEpoch,
+    context?.rootSessionId,
+    context?.bindingGeneration,
+  ]);
+  const scope = useRef({ identity });
+  if (scope.current.identity !== identity) scope.current = { identity };
   const mounted = useRef(true);
-  const readyRef = useRef(ready);
-  readyRef.current = ready;
+  const [selected, setSelected] = useState(initial);
+  const selectedRef = useRef(selected);
+  const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expired, setExpired] = useState(false);
+  const [offset, setOffset] = useState(0);
   useLayoutEffect(() => {
     mounted.current = true;
     return (): void => {
       mounted.current = false;
     };
   }, []);
-  const theme = useTheme();
-  const [selectedIndex, setSelectedIndex] = useState(() =>
-    findInitialChoiceIndex(request),
-  );
-  const selectedIndexRef = useRef(selectedIndex);
-  const [pending, setPending] = useState(false);
-  const pendingRef = useRef(false);
-  const identity = JSON.stringify([
-    request.id,
-    context?.permissionEpoch,
-    context?.rootSessionId,
-    context?.bindingGeneration,
-  ]);
-  const responseScope = useRef({ identity });
-  if (responseScope.current.identity !== identity)
-    responseScope.current = { identity };
-  const [error, setError] = useState<string | null>(null);
-
-  const selectIndex = (index: number): void => {
-    selectedIndexRef.current = index;
-    setSelectedIndex(index);
-  };
-
-  const current = useRef({ request, context, onResync });
-  current.current = { request, context, onResync };
   useLayoutEffect(() => {
-    selectedIndexRef.current = findInitialChoiceIndex(request);
-    setSelectedIndex(selectedIndexRef.current);
+    selectedRef.current = initial();
+    setSelected(selectedRef.current);
     pendingRef.current = false;
     setPending(false);
     setError(null);
+    setExpired(false);
+    setOffset(0);
   }, [identity]);
+  // Keep identity rather than position when the same request updates its choices.
+  const selectedIndex = Math.max(
+    0,
+    request.choices.findIndex((c) => c.id === selected),
+  );
+  useLayoutEffect(() => {
+    if (!request.choices.some((c) => c.id === selectedRef.current)) {
+      selectedRef.current = initial();
+      setSelected(selectedRef.current);
+      setOffset(0);
+    }
+  }, [JSON.stringify(request.choices)]);
+  const source =
+    request.sessionId === request.rootSessionId
+      ? "Main agent"
+      : `Subagent: ${request.sourceLabel ?? request.sessionId}`;
+  const label = (choice: UiPermissionRequest["choices"][number]): string =>
+    choice.id === "allow_always"
+      ? `Allow matching requests in ${request.sessionId === request.rootSessionId ? "this session" : "this subagent session"} (${request.sessionId})`
+      : choice.label;
+  const titleLine = `Permission: ${request.title}`;
+  const sourceLine = `From: ${source}`;
+  const fullChrome = [titleLine, sourceLine].filter(
+    (line) => summary(line, width) !== line,
+  );
+  const heading = wrapAnsi(request.description, width);
+  const starts: number[] = [];
+  const body = [...heading];
+  for (const choice of request.choices) {
+    starts.push(body.length);
+    body.push(
+      ...wrapAnsi(
+        `Option: ${choice.label}${choice.id === "allow_always" ? `\nScope: ${label(choice)}` : ""}`,
+        width,
+      ),
+    );
+  }
+  for (const line of fullChrome) body.push(...wrapAnsi(line, width));
+  const errorStart = body.length;
+  if (error || syncError)
+    body.push(...wrapAnsi(`Error: ${error ?? syncError ?? ""}`, width));
+  const deny = request.choices.find((c) => c.intent === "deny");
+  const available =
+    ready && !!context && !expired && request.choices.length > 0;
+  const hints = wrapAnsi(
+    `${available && !pending ? `Enter select · ${deny ? "Esc=reject" : "Esc does not submit"} · ↑↓ move · ` : ""}PgUp/PgDn read${controllableRun ? " · Ctrl+C stop" : ""}${retryHint ? ` · ${retryHint}` : ""}`,
+    width,
+  );
+  const choiceRows = Math.min(3, request.choices.length);
+  const readingRows = Math.max(
+    1,
+    maxHeight - 2 - 1 - choiceRows - hints.length,
+  );
+  const tooSmall = maxHeight < 2 + 1 + choiceRows + hints.length + 1;
+  const start = Math.max(0, Math.min(offset, body.length - readingRows));
+  const choiceStart = Math.max(
+    0,
+    Math.min(
+      selectedIndex - choiceRows + 1,
+      request.choices.length - choiceRows,
+    ),
+  );
   useInput((_, key) => {
-    const { request, context, onResync } = current.current;
+    if (key.pageUp || key.pageDown) {
+      setOffset(
+        Math.max(
+          0,
+          Math.min(
+            body.length - readingRows,
+            start + (key.pageUp ? -readingRows : readingRows),
+          ),
+        ),
+      );
+      return;
+    }
+    if (!mounted.current || pendingRef.current || !available || tooSmall)
+      return;
     if (
-      pendingRef.current ||
-      !mounted.current ||
-      !readyRef.current ||
-      !context
+      key.upArrow ||
+      key.leftArrow ||
+      key.downArrow ||
+      key.rightArrow ||
+      key.tab
     ) {
+      const delta = key.upArrow || key.leftArrow ? -1 : 1;
+      const index =
+        (selectedIndex + delta + request.choices.length) %
+        request.choices.length;
+      selectedRef.current = request.choices[index].id;
+      setSelected(selectedRef.current);
+      setOffset(starts[index]);
       return;
     }
-
-    if (key.upArrow || key.leftArrow) {
-      if (request.choices.length === 0) {
-        return;
+    if (!key.return && !key.escape) return;
+    const choice = key.escape
+      ? deny
+      : request.choices.find((c) => c.id === selectedRef.current);
+    if (!choice) {
+      if (key.escape) {
+        setError("No reject option. Choose an option explicitly.");
+        setOffset(body.length);
       }
-
-      selectIndex(
-        (selectedIndexRef.current - 1 + request.choices.length) %
-          request.choices.length,
-      );
       return;
     }
-
-    if (key.downArrow || key.rightArrow || key.tab) {
-      if (request.choices.length === 0) {
-        return;
-      }
-
-      selectIndex((selectedIndexRef.current + 1) % request.choices.length);
-      return;
-    }
-
-    const scope = responseScope.current;
-    const isCurrent = (): boolean =>
-      mounted.current && responseScope.current === scope;
-    const updatePending = (value: boolean): void => {
-      pendingRef.current = value;
-      setPending(value);
-    };
-    if (key.escape) {
-      respondWithChoice(
-        client,
-        request,
-        findEscapeDefaultChoiceIndex(request),
-        updatePending,
-        setError,
-        context,
-        onResync,
-        isCurrent,
-      );
-      return;
-    }
-
-    if (key.return) {
-      respondWithChoice(
-        client,
-        request,
-        selectedIndexRef.current,
-        updatePending,
-        setError,
-        context,
-        onResync,
-        isCurrent,
-      );
-    }
+    const currentScope = scope.current;
+    pendingRef.current = true;
+    setPending(true);
+    setError(null);
+    void client
+      .respondPermission(request.id, { choiceId: choice.id }, context)
+      .catch((caught: unknown) => {
+        if (!mounted.current || scope.current !== currentScope) return;
+        const message =
+          caught instanceof Error
+            ? caught.message
+            : "Permission response failed";
+        setError(message);
+        pendingRef.current = false;
+        setPending(false);
+        setOffset(body.length);
+        if (
+          typeof caught === "object" &&
+          caught !== null &&
+          "code" in caught &&
+          caught.code === "PERMISSION_NOT_PENDING"
+        ) {
+          setExpired(true);
+          onResync();
+        }
+      });
   });
-
+  if (tooSmall)
+    return (
+      <Box flexDirection="column">
+        {wrapAnsi("Resize terminal to review this request", width)
+          .slice(0, Math.max(0, maxHeight))
+          .map((line, i) => (
+            <Text key={i}>{line}</Text>
+          ))}
+      </Box>
+    );
+  const visibleError = error ?? syncError;
+  const status = visibleError
+    ? `Error: ${visibleError}${expired ? " · Synchronizing approvals..." : ""}`
+    : pending
+      ? "sending..."
+      : !ready || !context || expired
+        ? "Synchronizing approvals..."
+        : request.choices.length === 0
+          ? "No choices; cannot respond"
+          : "";
+  const range = `${String(start + 1)}–${String(Math.min(body.length, start + readingRows))}/${String(body.length)}`;
   return (
     <Box flexDirection="column">
-      <Text color={theme.status.warning}>Permission: {request.title}</Text>
-      <Text>
-        {request.sessionId === request.rootSessionId
-          ? "Main agent"
-          : (request.sourceLabel ?? request.sessionId)}
-      </Text>
-      <Text>{request.description}</Text>
-      {request.choices.map((choice, index) => (
-        <Text key={choice.id}>
-          {index === selectedIndex ? ">" : " "} {choice.label} [{choice.intent}]
+      <Text color={theme.status.warning}>{summary(titleLine, width)}</Text>
+      <Text>{summary(sourceLine, width)}</Text>
+      {body.slice(start, start + readingRows).map((line, i) => (
+        <Text
+          key={i}
+          color={start + i >= errorStart ? theme.status.error : undefined}
+        >
+          {line || " "}
         </Text>
       ))}
-      {request.choices.length === 0 ? <Text dimColor>No choices</Text> : null}
-      {request.choices.length === 0 ? null : (
-        <Text dimColor>Enter select | Esc safe default | arrows move</Text>
-      )}
-      {!ready ? <Text dimColor>Synchronizing approvals...</Text> : null}
-      {pending ? <Text dimColor>sending...</Text> : null}
-      {error === null ? null : <Text color={theme.status.error}>{error}</Text>}
+      <Text
+        dimColor={!visibleError}
+        color={visibleError ? theme.status.error : undefined}
+      >
+        {summary(status ? `${status} · ${range}` : range, width)}
+      </Text>
+      {request.choices
+        .slice(choiceStart, choiceStart + choiceRows)
+        .map((choice) => (
+          <Text
+            key={choice.id}
+            bold={choice.id === selected}
+            color={choice.id === selected ? theme.status.accent : undefined}
+          >
+            {summary(
+              `${choice.id === selected ? ">" : " "} ${label(choice)}`,
+              width,
+            )}
+          </Text>
+        ))}
+      {hints.map((line, i) => (
+        <Text dimColor key={i}>
+          {line}
+        </Text>
+      ))}
     </Box>
   );
 }
-
-function respondWithChoice(
-  client: CoreAPI,
-  request: UiPermissionRequest,
-  choiceIndex: number,
-  setPending: (pending: boolean) => void,
-  setError: (message: string | null) => void,
-  context: UiPermissionResponseContext,
-  onResync: () => void,
-  isCurrent: () => boolean,
-): void {
-  if (request.choices.length === 0) {
-    setError("Permission request has no choices");
-    return;
-  }
-
-  const choice = request.choices[choiceIndex % request.choices.length];
-
-  setPending(true);
-  void client
-    .respondPermission(request.id, { choiceId: choice.id }, context)
-    .catch((caught: unknown) => {
-      if (!isCurrent()) return;
-      setError(formatError(caught));
-      setPending(false);
-      if (
-        typeof caught === "object" &&
-        caught !== null &&
-        "code" in caught &&
-        caught.code === "PERMISSION_NOT_PENDING"
-      )
-        onResync();
-    });
-}
-
-function findInitialChoiceIndex(request: UiPermissionRequest): number {
-  const allowIndex = request.choices.findIndex(
-    (choice) => choice.intent === "allow",
+function summary(text: string, width: number): string {
+  const plain = text.replace(/[\r\n\t]/gu, " ");
+  if (visibleWidth(plain) <= width) return plain;
+  const chars = Array.from(
+    new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(plain),
+    (item) => item.segment,
   );
-
-  return allowIndex >= 0 ? allowIndex : findEscapeDefaultChoiceIndex(request);
-}
-
-function findEscapeDefaultChoiceIndex(request: UiPermissionRequest): number {
-  const denyIndex = request.choices.findIndex(
-    (choice) => choice.intent === "deny",
-  );
-
-  if (denyIndex >= 0) {
-    return denyIndex;
+  let front = "",
+    back = "";
+  while (chars.length) {
+    const a = chars.shift() ?? "";
+    if (visibleWidth(front + a + "…" + back) > width) break;
+    front += a;
+    if (!chars.length) break;
+    const b = chars.pop() ?? "";
+    if (visibleWidth(front + "…" + b + back) > width) break;
+    back = b + back;
   }
-
-  return 0;
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : "Permission response failed";
+  return front + "…" + back;
 }

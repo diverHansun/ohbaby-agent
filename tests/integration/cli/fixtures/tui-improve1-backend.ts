@@ -14,6 +14,8 @@ export function createTuiReviewBackend(historyLines = 40) {
   let requests: UiPermissionRequest[] = [];
   let permissionRevision = 0;
   let refreshes = 0;
+  const submitted: string[] = [];
+  const responses: { requestId: string; choiceId: string }[] = [];
   const now = "2026-10-03T00:00:00.000Z";
   let view: UiSessionView = {
     version: {
@@ -120,6 +122,20 @@ export function createTuiReviewBackend(historyLines = 40) {
     });
   };
   const client = {
+    submitPromptAccepted: async (
+      text: string,
+      options?: Parameters<CoreAPI["submitPromptAccepted"]>[1],
+    ) => {
+      submitted.push(text);
+      return {
+        promptId: `review-prompt-${submitted.length}`,
+        clientRequestId: options?.clientRequestId ?? "review-request",
+        userMessageId: "review-user",
+        sessionId: view.session.id,
+        status: "queued" as const,
+        createdAt: now,
+      };
+    },
     getSelectedSessionId: async () => view.session.id,
     getSessionIndex: async () => [{ ...view.session, messages: undefined }],
     getSessionView: async () => view,
@@ -160,7 +176,11 @@ export function createTuiReviewBackend(historyLines = 40) {
         approvals.delete(handler);
       };
     },
-    respondPermission: async (requestId: string) => {
+    respondPermission: async (
+      requestId: string,
+      response: { choiceId: string },
+    ) => {
+      responses.push({ requestId, choiceId: response.choiceId });
       requests = requests.filter((request) => request.id !== requestId);
       permissionRevision++;
       for (const handler of approvals)
@@ -216,7 +236,9 @@ export function createTuiReviewBackend(historyLines = 40) {
     get requests() {
       return requests;
     },
-    approve(): void {
+    responses,
+    submitted,
+    approve(patch: Partial<UiPermissionRequest> = {}): void {
       const request: UiPermissionRequest = {
         id: "fake-approval",
         rootSessionId: view.session.id,
@@ -231,6 +253,7 @@ export function createTuiReviewBackend(historyLines = 40) {
           { id: "allow", label: "Allow once", intent: "allow" },
           { id: "deny", label: "Deny", intent: "deny" },
         ],
+        ...patch,
       };
       requests = [request];
       permissionRevision++;

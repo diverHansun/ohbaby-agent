@@ -11,7 +11,7 @@ import {
   DurationSampleContext,
   DurationDiagnosticContext,
 } from "./components/execution-duration.js";
-import { Box, Text, useApp, useInput, useStdout, useWindowSize } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type {
@@ -46,7 +46,7 @@ import {
   Prompt,
   type PendingReasoningSelection,
 } from "./components/prompt/index.js";
-import { COMPACT_TODO_LIMIT, TodoPanel } from "./components/todo-panel.js";
+import { TodoPanel } from "./components/todo-panel.js";
 import { AppShell } from "./layout/app-shell.js";
 import { formatFooterContextUsage } from "./render/usage.js";
 import { useFooterModel } from "./use-footer-model.js";
@@ -54,7 +54,7 @@ import { useSubagentState } from "./use-subagent-state.js";
 import { createTuiStore } from "./store/events.js";
 import {
   selectActiveGoal,
-  selectActiveTodoList,
+  selectActiveRawTodoList,
   selectActiveContextWindowUsage,
   useTuiStoreSelector,
 } from "./store/selectors.js";
@@ -118,6 +118,10 @@ export function OhbabyTerminalApp({
   const didClearOnStartRef = useRef(false);
   const disposedRef = useRef(false);
   const [screenGeneration, setScreenGeneration] = useState(0);
+  const submissionGenerationRef = useRef(0);
+  const [submissionContextGeneration, setSubmissionContextGeneration] =
+    useState(0);
+  const submissionEpochRef = useRef<string | undefined>(undefined);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [pendingReasoning, setPendingReasoning] =
     useState<PendingReasoningSelection | null>(null);
@@ -131,7 +135,6 @@ export function OhbabyTerminalApp({
   >(new Map());
   const store = storeRef.current;
   const { exit } = useApp();
-  const terminalSize = useWindowSize();
   const { write: writeStdout } = useStdout();
   if (clearOnStart && !didClearOnStartRef.current) {
     writeStdout(NEW_SESSION_CLEAR_SEQUENCE);
@@ -172,7 +175,7 @@ export function OhbabyTerminalApp({
       subagents.dispose();
     };
   }, [subagents, activeSessionId]);
-  const activeTodoList = useTuiStoreSelector(store, selectActiveTodoList);
+  const activeTodoList = useTuiStoreSelector(store, selectActiveRawTodoList);
   const catalog = useTuiStoreSelector(store, (state) => state.catalog);
   const interactions = useTuiStoreSelector(
     store,
@@ -219,7 +222,10 @@ export function OhbabyTerminalApp({
   const [escInterruptArmedRunId, setEscInterruptArmedRunId] = useState<
     string | null
   >(null);
-  const [todoExpanded, setTodoExpanded] = useState(false);
+  const [todoChoices, setTodoChoices] = useState<Record<string, boolean>>({});
+  const todoBindings = useRef(
+    new Map<string, { runId: string; stopped: boolean }>(),
+  );
   const escInterruptArmedRunIdRef = useRef<string | null>(null);
   const escInterruptTimerRef = useRef<{
     readonly runId: string;
@@ -278,16 +284,65 @@ export function OhbabyTerminalApp({
     permissions.length,
     recoveryState.control,
   ]);
-  const todoRunId =
-    runtime.kind === "running"
-      ? runtime.runId
-      : runtime.kind === "waiting-for-permission"
-        ? (permissions.find((request) => request.id === runtime.requestId)
-            ?.runId ?? null)
-        : null;
+  const todoScope = `${recoveryState.runtimeEpoch ?? "unknown"}:${activeSessionId ?? "none"}`;
+  const trustedView =
+    recoveryState.sync.status === "ready" &&
+    recoveryState.sync.view?.version.sessionId === activeSessionId &&
+    recoveryState.sync.view.version.runtimeEpoch === recoveryState.runtimeEpoch
+      ? recoveryState.sync.view
+      : undefined;
+  const boundRun = trustedView?.runs
+    .filter((run) => run.sessionId === activeSessionId)
+    .reduce<
+      (typeof runs)[number] | undefined
+    >((current, run) => (!current || run.startedAt > current.startedAt ? run : current), undefined);
+  const controlAgrees =
+    recoveryState.control === null ||
+    recoveryState.control.runId === null ||
+    recoveryState.control.runId === boundRun?.id;
+  let currentTodoBinding = todoBindings.current.get(todoScope);
+  if (
+    boundRun &&
+    controlAgrees &&
+    (boundRun.endedAt !== undefined ||
+      boundRun.terminalReason !== undefined ||
+      boundRun.status.kind === "running" ||
+      boundRun.status.kind === "waiting-for-permission")
+  ) {
+    currentTodoBinding = {
+      runId: boundRun.id,
+      stopped:
+        boundRun.endedAt !== undefined || boundRun.terminalReason !== undefined,
+    };
+  }
+  if (
+    !boundRun &&
+    trustedView &&
+    recoveryState.control?.rootSessionId === activeSessionId &&
+    recoveryState.control.runtimeEpoch === recoveryState.runtimeEpoch &&
+    recoveryState.control.runId === null
+  ) {
+    currentTodoBinding = { runId: "idle", stopped: true };
+  }
+  const todoBinding = currentTodoBinding;
   useEffect(() => {
-    setTodoExpanded(false);
-  }, [activeSessionId, activeTodoList === null, todoRunId]);
+    if (todoBinding) todoBindings.current.set(todoScope, todoBinding);
+  }, [todoScope, todoBinding]);
+  const todoIdentity = todoBinding
+    ? `${todoScope}:${todoBinding.runId}:${todoBinding.stopped ? "stopped" : "active"}`
+    : null;
+  const todoShown =
+    todoIdentity !== null &&
+    (todoChoices[todoIdentity] ?? !todoBinding?.stopped);
+  const todoExpanded = todoBinding?.stopped
+    ? todoShown
+    : todoIdentity !== null && (todoChoices[todoIdentity] ?? true);
+  const presentedTodos =
+    activeTodoList &&
+    todoIdentity !== null &&
+    (todoBinding?.stopped ? todoShown : activeTodoList.visible)
+      ? { ...activeTodoList, visible: true }
+      : null;
   useEffect(
     () => (): void => {
       if (escInterruptTimerRef.current !== null) {
@@ -380,12 +435,51 @@ export function OhbabyTerminalApp({
     });
   }, [initialNotices, store, subscribeDiagnosticsUnavailable]);
   const resetTranscriptSurface = useCallback(
-    (_reason: TranscriptSurfaceResetReason): void => {
+    (
+      _reason: TranscriptSurfaceResetReason,
+      invalidateSubmission = true,
+    ): void => {
+      if (invalidateSubmission) {
+        submissionGenerationRef.current += 1;
+        setSubmissionContextGeneration(submissionGenerationRef.current);
+      }
       writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
       setScreenGeneration((current) => current + 1);
       setActiveCommandPanel(null);
     },
     [setActiveCommandPanel, writeStdout],
+  );
+  useEffect(() => {
+    if (
+      submissionEpochRef.current !== undefined &&
+      recoveryState.runtimeEpoch !== undefined &&
+      submissionEpochRef.current !== recoveryState.runtimeEpoch
+    ) {
+      submissionGenerationRef.current += 1;
+      setSubmissionContextGeneration(submissionGenerationRef.current);
+    }
+    submissionEpochRef.current = recoveryState.runtimeEpoch;
+  }, [recoveryState.runtimeEpoch]);
+  const submitPrompt = useCallback(
+    (
+      text: string,
+      reasoning?: PendingReasoningSelection["reasoning"],
+      source?: { sessionId: string | null; creationGeneration: number },
+    ) => {
+      if (!recoveryRef.current)
+        return Promise.reject(new Error("Session recovery unavailable"));
+      if (
+        source &&
+        (source.creationGeneration !== submissionGenerationRef.current ||
+          (source.sessionId !== null &&
+            source.sessionId !== activeSessionIdRef.current))
+      )
+        return Promise.reject(
+          new Error("Submission cancelled because the session changed"),
+        );
+      return recoveryRef.current.submit(text, reasoning);
+    },
+    [],
   );
   const closeSubagentBrowser = useCallback((): void => {
     subagents.select();
@@ -507,7 +601,12 @@ export function OhbabyTerminalApp({
 
   useInput(
     (value, key) => {
-      if (key.ctrl && value === "g" && client.listSubagentExecutions) {
+      if (
+        (!hasDialog || subagentBrowserOpen) &&
+        key.ctrl &&
+        value === "g" &&
+        client.listSubagentExecutions
+      ) {
         if (subagentBrowserOpen) closeSubagentBrowser();
         else setSubagentBrowserOpen(true);
         return;
@@ -520,11 +619,16 @@ export function OhbabyTerminalApp({
       if (
         !hasDialog &&
         activeTodoList !== null &&
-        activeTodoList.todos.length > COMPACT_TODO_LIMIT &&
+        activeTodoList.todos.length > 0 &&
+        !queueInputMode &&
+        todoIdentity !== null &&
         key.ctrl &&
         (value === "t" || value === "\u0014")
       ) {
-        setTodoExpanded((expanded) => !expanded);
+        setTodoChoices((choices) => ({
+          ...choices,
+          [todoIdentity]: !todoExpanded,
+        }));
         return;
       }
 
@@ -681,7 +785,7 @@ export function OhbabyTerminalApp({
         pendingStorage.write(pending);
       },
       onHistory: () => {
-        resetTranscriptSurface("switch-session");
+        resetTranscriptSurface("switch-session", false);
       },
       onModelInvalidated: () => {
         void loadCatalog().catch(() => undefined);
@@ -702,6 +806,7 @@ export function OhbabyTerminalApp({
       } else {
         eventDispatcher.dispatch(tuiEvent);
         if (isNewSessionSelectionEvent(tuiEvent)) {
+          installedSessionId = undefined;
           resetTranscriptSurface("new-session");
           recovery.select(null);
         }
@@ -816,27 +921,36 @@ export function OhbabyTerminalApp({
   return (
     <ThemeProvider>
       <AppShell>
-        <HeaderContainer store={store} />
+        {permissions.length === 0 ? <HeaderContainer store={store} /> : null}
         {subagentBrowserOpen ? (
-          <SubagentBrowser
-            reader={subagents}
-            state={subagentState}
-            onClose={closeSubagentBrowser}
-          />
+          <>
+            {permissions.length > 0 ? (
+              <Text dimColor>
+                Approval pending · Ctrl+G close browser to review
+              </Text>
+            ) : null}
+            <SubagentBrowser
+              reader={subagents}
+              state={subagentState}
+              onClose={closeSubagentBrowser}
+            />
+          </>
         ) : (
           <>
-            {client.listSubagentExecutions ? (
+            {permissions.length === 0 && client.listSubagentExecutions ? (
               <Text dimColor>
                 Ctrl+G subagents · {subagentState.list?.executions.length ?? 0}{" "}
                 executions
               </Text>
             ) : null}
-            <SubagentWait
-              state={subagentState}
-              run={recoveryState.sync.view?.runs.find(
-                (run) => run.id === recoveryState.control?.runId,
-              )}
-            />
+            {permissions.length === 0 ? (
+              <SubagentWait
+                state={subagentState}
+                run={recoveryState.sync.view?.runs.find(
+                  (run) => run.id === recoveryState.control?.runId,
+                )}
+              />
+            ) : null}
             <DurationDiagnosticContext.Provider
               value={reportDurationClockAnomaly}
             >
@@ -852,15 +966,25 @@ export function OhbabyTerminalApp({
               permissions={permissions}
               permissionSync={permissionSync.state}
               onRetryPermissions={permissionSync.retry}
+              approvalRetryHint={
+                recoveryState.error ||
+                recoveryState.sync.status === "error" ||
+                recoveryState.pending.length > 0
+                  ? "Ctrl+R retry recovery"
+                  : undefined
+              }
+              approvalStatus={
+                runtime.kind === "error"
+                  ? formatError(runtime)
+                  : recoveryState.error
+              }
+              controllableRun={Boolean(
+                recoveryState.control?.runId &&
+                recoveryState.control.rootSessionId === activeSessionId &&
+                recoveryState.control.runtimeEpoch ===
+                  recoveryState.runtimeEpoch,
+              )}
             />
-            {permissions.length > 0 ? (
-              <Text dimColor>
-                {recoveryState.control?.rootSessionId ===
-                  permissions[0].rootSessionId && recoveryState.control.runId
-                  ? "Ctrl+C stop root run"
-                  : "Stop target syncing · Ctrl+R retry"}
-              </Text>
-            ) : null}
             <CommandPanelManager
               catalog={catalog}
               client={client}
@@ -883,13 +1007,17 @@ export function OhbabyTerminalApp({
               panel={hasBackendDialog ? null : commandPanel}
               runtime={runtime}
             />
-            <TodoPanel
-              expanded={todoExpanded}
-              inputEnabled={!hasDialog}
-              todoList={activeTodoList}
-              summaryOnly={hasDialog && terminalSize.rows <= 24}
-            />
-            <CatalogInvalidation store={store} />
+            <Box display={hasDialog ? "none" : "flex"} flexDirection="column">
+              <TodoPanel
+                expanded={todoExpanded}
+                inputEnabled={!hasDialog && !queueInputMode}
+                todoList={presentedTodos}
+                stopped={todoBinding?.stopped}
+              />
+            </Box>
+            {permissions.length === 0 ? (
+              <CatalogInvalidation store={store} />
+            ) : null}
           </>
         )}
         <Box
@@ -897,6 +1025,7 @@ export function OhbabyTerminalApp({
           flexDirection="column"
         >
           <Prompt
+            footerOnly={permissions.length > 0}
             onQueueModeChange={setQueueInputMode}
             activeSessionId={activeSessionId}
             activeRunId={recoveryState.control?.runId ?? undefined}
@@ -922,13 +1051,8 @@ export function OhbabyTerminalApp({
             onLoadHistory={() => {
               void recoveryRef.current?.loadHistory();
             }}
-            submitPrompt={(text, reasoning) => {
-              if (!recoveryRef.current)
-                return Promise.reject(
-                  new Error("Session recovery unavailable"),
-                );
-              return recoveryRef.current.submit(text, reasoning);
-            }}
+            submitPrompt={submitPrompt}
+            submissionContextGeneration={submissionContextGeneration}
             goalStatus={activeGoal?.status}
             isRuntimeRunning={runtime.kind === "running"}
             loadCatalog={loadCatalog}

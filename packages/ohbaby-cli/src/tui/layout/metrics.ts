@@ -6,6 +6,7 @@ export interface TuiLayoutMetrics {
   readonly isCompact: boolean;
   readonly liveTailRows: number;
   readonly todoPanelRows?: number;
+  readonly approvalRows?: number;
 }
 
 const MAX_CONTENT_WIDTH = 220;
@@ -50,5 +51,6 @@ export function computeLayoutMetrics(input: {
     isCompact,
     liveTailRows,
     rows,
+    approvalRows: Math.max(0, rows - 3),
   };
 }

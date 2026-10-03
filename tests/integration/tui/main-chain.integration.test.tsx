@@ -166,8 +166,7 @@ describe("TUI main chain with real in-process backend", () => {
     app.stdin.write("\r");
     await waitForFrame(
       app,
-      (frame) =>
-        frame.includes("Permission:") && frame.includes("Ctrl+C stop root run"),
+      (frame) => frame.includes("Permission:") && frame.includes("Ctrl+C stop"),
     );
     app.stdin.write("\u0003");
     const abortedFrame = await waitForFrame(

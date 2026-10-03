@@ -3,6 +3,7 @@ import { applyTuiEvent, createStateFromSnapshot } from "./store/events.js";
 import { InMemoryPromptSubmissionStore } from "../../../ohbaby-agent/src/runtime/prompt-scheduler/in-memory-store.js";
 import type { UiSessionView } from "ohbaby-sdk";
 import { render as renderInk } from "ink-testing-library";
+import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiCommandInvocation,
@@ -285,7 +286,7 @@ describe("OhbabyTerminalApp", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
-  it("renders compact todos above the prompt and toggles overflow with Ctrl+T", async () => {
+  it("defaults to expanded Tasks and preserves a collapsed summary through approvals", async () => {
     const todos = Array.from({ length: 10 }, (_, index) => ({
       content: `todo ${String(index + 1)}`,
       status: index === 0 ? ("in_progress" as const) : ("pending" as const),
@@ -312,17 +313,12 @@ describe("OhbabyTerminalApp", () => {
     );
 
     await flush();
-    expect(app.lastFrame()).toContain("todo 5");
-    expect(app.lastFrame()).not.toContain("todo 6");
-    expect(app.lastFrame()).toContain("+5 more · ctrl+t to expand");
-    expect((app.lastFrame() ?? "").indexOf("Tasks")).toBeLessThan(
-      (app.lastFrame() ?? "").indexOf(">"),
-    );
-
+    expect(app.lastFrame()).toContain("todo 10");
+    expect(app.lastFrame()).toContain("Tasks 0/10 completed");
     app.stdin.write("\u0014");
     await flush();
-    expect(app.lastFrame()).toContain("todo 10");
-    expect(app.lastFrame()).toContain("ctrl+t to collapse");
+    expect(app.lastFrame()).toContain("Tasks 0/10 completed · Ctrl+T expand");
+    expect(app.lastFrame()).not.toContain("todo 1");
 
     client.emit({
       request: {
@@ -343,7 +339,7 @@ describe("OhbabyTerminalApp", () => {
       permissionRevision: 1,
     });
     await flush();
-    expect(app.lastFrame()).toContain("Tasks · 10");
+    expect(app.lastFrame()).not.toContain("Tasks");
     expect(app.lastFrame()).not.toContain("todo 10");
     expect(app.lastFrame()).toContain("Permission");
 
@@ -357,11 +353,7 @@ describe("OhbabyTerminalApp", () => {
       reason: "once",
     });
     await flush();
-    expect(app.lastFrame()).toContain("todo 10");
-    expect(app.lastFrame()).toContain("ctrl+t to collapse");
-
-    app.stdin.write("\u0014");
-    await flush();
+    expect(app.lastFrame()).toContain("Tasks 0/10 completed · Ctrl+T expand");
     expect(app.lastFrame()).not.toContain("todo 10");
 
     client.emit({
@@ -380,8 +372,180 @@ describe("OhbabyTerminalApp", () => {
       visible: true,
     });
     await flush();
-    expect(app.lastFrame()).toContain("+5 more · ctrl+t to expand");
+    expect(app.lastFrame()).toContain("Tasks 0/10 completed · Ctrl+T expand");
     expect(app.lastFrame()).not.toContain("todo 10");
+    app.unmount();
+  });
+
+  it("hides confirmed stopped Tasks and explicitly reviews raw hidden unfinished todos", async () => {
+    const initial = snapshot();
+    const run = {
+      id: "run_tasks",
+      sessionId: "session_1",
+      startedAt: "2026-05-14T00:00:03Z",
+      updatedAt: "2026-05-14T00:00:03Z",
+      status: { kind: "running" as const, runId: "run_tasks" },
+    };
+    const todos = [
+      { content: "unfinished task", status: "in_progress" as const },
+    ];
+    const client = createFakeClient({
+      ...initial,
+      runs: [run],
+      status: run.status,
+      todos: [{ sessionId: "session_1", visible: true, todos }],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("unfinished task"));
+    client.emit({
+      type: "runtime.updated",
+      status: {
+        kind: "error",
+        message: "connection unknown",
+        recoverable: true,
+      },
+    });
+    await flush();
+    expect(app.lastFrame()).toContain("unfinished task");
+    client.emit({
+      type: "run.updated",
+      run: {
+        ...run,
+        endedAt: "2026-05-14T00:00:05Z",
+        status: { kind: "idle" },
+        terminalReason: "interrupted",
+      },
+    });
+    client.emit({
+      type: "todo.updated",
+      sessionId: "session_1",
+      visible: false,
+      todos,
+    });
+    await flush();
+    expect(app.lastFrame()).not.toContain("Tasks");
+    app.stdin.write("\u0014");
+    await flush();
+    expect(app.lastFrame()).toContain("Tasks · Stopped 0/1 completed");
+    expect(app.lastFrame()).toContain("● unfinished task");
+    app.stdin.write("\u0014");
+    await flush();
+    expect(app.lastFrame()).not.toContain("Tasks");
+    app.unmount();
+  });
+
+  it("retains a same-run Tasks choice across session return and child completion, resetting for a real new run", async () => {
+    const initial = snapshot();
+    const run = {
+      id: "run_tasks",
+      sessionId: "session_1",
+      startedAt: "2026-05-14T00:00:03Z",
+      updatedAt: "2026-05-14T00:00:03Z",
+      status: { kind: "running" as const, runId: "run_tasks" },
+    };
+    const value: UiSnapshot = {
+      ...initial,
+      runs: [run],
+      status: run.status,
+      todos: [
+        {
+          sessionId: "session_1",
+          visible: true,
+          todos: [{ content: "parent task", status: "pending" }],
+        },
+      ],
+    };
+    const client = createFakeClient(value);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("parent task"));
+    app.stdin.write("\u0014");
+    await flush();
+    expect(app.lastFrame()).toContain("Tasks 0/1 completed · Ctrl+T expand");
+    const other = { ...initial.sessions[0], id: "session_2" };
+    client.installSourceSnapshot({
+      ...value,
+      activeSessionId: "session_2",
+      sessions: [...initial.sessions, other],
+      status: { kind: "idle" },
+    });
+    await flush();
+    expect(app.lastFrame()).not.toContain("Tasks");
+    client.installSourceSnapshot(value);
+    await flush();
+    expect(app.lastFrame()).toContain("Tasks 0/1 completed · Ctrl+T expand");
+    client.emit({
+      type: "run.updated",
+      run: {
+        ...run,
+        id: "child_run",
+        sessionId: "child_session",
+        endedAt: "2026-05-14T00:00:05Z",
+        status: { kind: "idle" },
+      },
+    });
+    await flush();
+    expect(app.lastFrame()).toContain("Tasks 0/1 completed · Ctrl+T expand");
+    client.installSourceSnapshot({
+      ...value,
+      runs: [
+        {
+          ...run,
+          id: "new_parent",
+          startedAt: "2026-05-14T00:00:06Z",
+          status: { kind: "running", runId: "new_parent" },
+        },
+      ],
+      status: { kind: "running", runId: "new_parent" },
+    });
+    client.emit({
+      type: "run.updated",
+      run: {
+        ...run,
+        id: "new_parent",
+        startedAt: "2026-05-14T00:00:06Z",
+        status: { kind: "running", runId: "new_parent" },
+      },
+    });
+    await flush();
+    expect(app.lastFrame()).toContain("parent task");
+    app.unmount();
+  });
+
+  it("can manually review retained hidden todos in a confirmed idle session without run records", async () => {
+    const client = createFakeClient({
+      ...snapshot(),
+      runs: [],
+      status: { kind: "idle" },
+      todos: [
+        {
+          sessionId: "session_1",
+          visible: false,
+          todos: [{ content: "retained fact", status: "pending" }],
+        },
+      ],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    expect(app.lastFrame()).not.toContain("Tasks");
+    app.stdin.write("\u0014");
+    await flush();
+    expect(app.lastFrame()).toContain("Tasks · Stopped 0/1 completed");
+    expect(app.lastFrame()).toContain("retained fact");
     app.unmount();
   });
 
@@ -1418,9 +1582,9 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).not.toContain("status: waiting");
     expect(app.lastFrame()).not.toContain("permission_raw_123");
     expect(app.lastFrame()).toContain("Enter select");
-    expect(app.lastFrame()).toContain("Esc safe default");
-    expect(app.lastFrame()).toContain("> Allow once [allow]");
-    expect(app.lastFrame()).toContain("  Reject [deny]");
+    expect(app.lastFrame()).toContain("Esc=reject");
+    expect(app.lastFrame()).toContain("> Allow once");
+    expect(app.lastFrame()).toContain("  Reject");
   });
 
   it("preserves a stable runtime error code in the user-facing label", async () => {
@@ -3387,12 +3551,24 @@ describe("OhbabyTerminalApp", () => {
     await settleConnectInput();
     app.stdin.write("\u001B[B");
     await settleConnectInput();
-    app.stdin.write("\r");
-    await settleConnectInput();
+    await saveEffortAndFlushEffects(app);
+    await waitForFrame(
+      app,
+      (frame) =>
+        !frame.includes("↑↓ select · Enter save") &&
+        !frame.includes("Syncing session") &&
+        frame.includes("high"),
+    );
     app.stdin.write("hello");
     app.stdin.write("\r");
     await flush();
     expect(client.updateSessionReasoning).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(
+        client.submitPromptAccepted,
+        app.lastFrame(),
+      ).toHaveBeenCalledTimes(1);
+    });
     expect(client.submitPromptAccepted).toHaveBeenCalledWith(
       "hello",
       expect.objectContaining({ reasoning: { enabled: true, effort: "high" } }),
@@ -3479,8 +3655,14 @@ describe("OhbabyTerminalApp", () => {
     await settleConnectInput();
     app.stdin.write("\u001B[B");
     await settleConnectInput();
-    app.stdin.write("\r");
-    await settleConnectInput();
+    await saveEffortAndFlushEffects(app);
+    await waitForFrame(
+      app,
+      (frame) =>
+        !frame.includes("↑↓ select · Enter save") &&
+        !frame.includes("Syncing session") &&
+        frame.includes("high"),
+    );
     client.getCurrentModel.mockResolvedValue({
       provider: "zenmux",
       baseUrl: "https://example.test",
@@ -3497,6 +3679,12 @@ describe("OhbabyTerminalApp", () => {
     app.stdin.write("hello");
     app.stdin.write("\r");
     await flush();
+    await vi.waitFor(() => {
+      expect(
+        client.submitPromptAccepted,
+        app.lastFrame(),
+      ).toHaveBeenCalledTimes(1);
+    });
     expect(client.submitPromptAccepted).toHaveBeenCalledWith(
       "hello",
       expect.objectContaining({ reasoning: undefined }),
@@ -3537,23 +3725,41 @@ describe("OhbabyTerminalApp", () => {
     await settleConnectInput();
     app.stdin.write("\u001B[B");
     await settleConnectInput();
-    app.stdin.write("\r");
-    await settleConnectInput();
+    await saveEffortAndFlushEffects(app);
+    await waitForFrame(
+      app,
+      (frame) =>
+        !frame.includes("↑↓ select · Enter save") &&
+        !frame.includes("Syncing session") &&
+        frame.includes("high"),
+    );
     let releaseFirst!: (value: typeof model) => void;
     const firstLookup = new Promise<typeof model>((resolve) => {
       releaseFirst = resolve;
     });
+    let firstLookupStarted = false;
     client.getCurrentModel
-      .mockImplementationOnce(() => firstLookup)
+      .mockImplementationOnce(() => {
+        firstLookupStarted = true;
+        return firstLookup;
+      })
       .mockResolvedValue(model);
     app.stdin.write("first");
     app.stdin.write("\r");
     app.stdin.write("second");
     app.stdin.write("\r");
-    await flush();
+    await vi.waitFor(() => {
+      expect(firstLookupStarted).toBe(true);
+    });
     expect(client.submitPromptAccepted).not.toHaveBeenCalled();
     releaseFirst(model);
     await flush();
+    await vi.waitFor(() => {
+      expect(
+        client.submitPromptAccepted,
+        app.lastFrame(),
+      ).toHaveBeenCalledTimes(2);
+    });
     expect(
       client.submitPromptAccepted.mock.calls.map((call) => String(call[0])),
     ).toEqual(["first", "second"]);
@@ -5701,6 +5907,24 @@ async function sendConnectKey(
   await settleConnectInput();
 }
 
+// Closing the panel commits a frame before Prompt's passive input effect runs.
+// Flush React work before issuing synchronous fake-stdin events to the new owner.
+async function saveEffortAndFlushEffects(app: {
+  readonly stdin: { readonly write: (chunk: string) => void };
+}): Promise<void> {
+  const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = environment.IS_REACT_ACT_ENVIRONMENT;
+  environment.IS_REACT_ACT_ENVIRONMENT = true;
+  try {
+    await act(async () => {
+      app.stdin.write("\r");
+      await flush();
+    });
+  } finally {
+    environment.IS_REACT_ACT_ENVIRONMENT = previous;
+  }
+}
+
 async function settleConnectInput(): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, 50);
@@ -6245,6 +6469,63 @@ it("keeps queue order stable when a middle lease update arrives last", async () 
   await flush();
   expect(app.lastFrame()).toContain("› queue-C");
   expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+});
+
+it("keeps an open child browser when approval arrives, then Ctrl+G reveals approval", async () => {
+  const client = createFakeClient(snapshot());
+  client.listSubagentExecutions = () =>
+    Promise.resolve({
+      executions: [],
+      hasMore: false,
+      waiting: false,
+      approvalBlocked: false,
+      activeCount: 0,
+      completedCount: 0,
+    });
+  client.getSubagentExecutionView = () =>
+    Promise.reject(new Error("No selection"));
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await flush();
+  app.stdin.write("kept browser draft");
+  app.stdin.write("\u0007");
+  await waitForFrame(app, (frame) => frame.includes("Read only"));
+  client.emit({
+    type: "permission.requested",
+    permissionEpoch: "epoch",
+    rootSessionId: "session_1",
+    permissionRevision: 1,
+    request: {
+      id: "browser-approval",
+      sessionId: "session_1",
+      rootSessionId: "session_1",
+      runId: "r",
+      callId: "c",
+      messageId: "m",
+      createdAt: 1,
+      title: "Approval after browser",
+      description: "Review operation",
+      choices: [{ id: "deny", intent: "deny", label: "Reject" }],
+    },
+  });
+  await flush();
+  expect(app.lastFrame()).toContain("Read only");
+  expect(app.lastFrame()).toContain(
+    "Approval pending · Ctrl+G close browser to review",
+  );
+  expect(app.lastFrame()).not.toContain("Review operation");
+  app.stdin.write("\u0007");
+  await waitForFrame(app, (frame) => frame.includes("Review operation"));
+  expect(app.lastFrame()).not.toContain("Read only");
+  app.stdin.write("\u0007");
+  await flush();
+  expect(app.lastFrame()).toContain("Review operation");
+  expect(app.lastFrame()).not.toContain("Read only");
+  app.unmount();
 });
 
 it("preserves the root draft and leased queue edit while visiting a read-only child browser", async () => {

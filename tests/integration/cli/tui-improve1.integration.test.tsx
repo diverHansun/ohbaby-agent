@@ -86,6 +86,9 @@ describe("improve-1 full Ink App", () => {
           },
         });
         await tick();
+        // This fixture is idle: Tasks now require explicit readback.
+        stdin.send("\u0014");
+        await tick();
         const text = stdout.text();
         expect(text).toContain("History 40");
         expect(text).toContain("/review/中文-project");
