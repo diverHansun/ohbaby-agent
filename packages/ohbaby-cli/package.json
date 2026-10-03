@@ -47,12 +47,12 @@
   "dependencies": {
     "chalk": "^5.4.1",
     "figlet": "^1.11.0",
-    "ink": "6.6.0",
+    "ink": "8.0.0",
     "ink-gradient": "4.0.1",
     "ohbaby-agent": "workspace:*",
-    "ohbaby-server": "workspace:*",
     "ohbaby-sdk": "workspace:*",
-    "react": "19.2.3",
+    "ohbaby-server": "workspace:*",
+    "react": "19.3.0",
     "yargs": "^17.7.2"
   },
   "devDependencies": {

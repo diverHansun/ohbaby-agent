@@ -77,7 +77,7 @@ export interface CliWritable {
 }
 
 export interface TerminalUiLifecycle {
-  readonly waitUntilExit?: () => Promise<void>;
+  readonly waitUntilExit?: () => Promise<unknown>;
   readonly unmount?: () => void;
 }
 
