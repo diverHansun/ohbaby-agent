@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UiContextWindowUsage } from "ohbaby-sdk";
-import { formatContextWindowUsage } from "./usage.js";
+import { formatContextWindowUsage, formatFooterContextUsage } from "./usage.js";
 
 describe("formatContextWindowUsage", () => {
   it("formats current tokens, full context window, and integer percent", () => {
@@ -52,3 +52,29 @@ function usage(
     sessionId: "session_1",
   };
 }
+
+describe("formatFooterContextUsage", () => {
+  it.each([
+    [2_000, "0.2% 2k/1m"],
+    [20_000, "2% 20k/1m"],
+    [0, "0% 0/1m"],
+    [1, "<0.1% 1/1m"],
+    [1_200_000, "120% 1.2m/1m"],
+  ])(
+    "formats %i tokens from the backend ratio without losing precision",
+    (tokens, expected) => {
+      expect(formatFooterContextUsage(usage(tokens, 1_000_000))).toBe(expected);
+    },
+  );
+  it("rejects unavailable or invalid estimates", () => {
+    for (const value of [
+      null,
+      usage(5, 0),
+      usage(-5, 100),
+      usage(Number.NaN, 100),
+      { ...usage(1, 100), contextWindowRatio: Number.NaN },
+    ]) {
+      expect(formatFooterContextUsage(value)).toBe("—");
+    }
+  });
+});

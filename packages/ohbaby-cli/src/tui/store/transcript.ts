@@ -306,10 +306,19 @@ function reuseLiveMessage(
   return previous;
 }
 
+export function isVisibleTranscriptMessage(message: UiMessage): boolean {
+  return (
+    message.runtimeInputKind !== "subagent-status" &&
+    message.runtimeInputKind !== "subagent-result"
+  );
+}
+
 export function splitTranscript(
   messages: readonly UiMessage[],
   runtime: TuiRuntimeStatus,
 ): TranscriptSplit {
+  // Apply the same structured-source display contract to live and recovered history.
+  messages = messages.filter(isVisibleTranscriptMessage);
   const last = messages.at(-1);
   if (!last || runtime.kind === "idle" || runtime.kind === "error") {
     return { committedMessages: messages, liveMessage: null };

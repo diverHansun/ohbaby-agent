@@ -34,7 +34,7 @@ export const darkPalette = {
   textDim: "#9A938A",
   textMuted: "#6E675F",
   textStrong: "#F5F2EC",
-  userBlockBg: "#2C5D8A",
+  userBlockBg: "#262522",
   yellow: "#E0C06B",
 } as const satisfies RawPalette;
 
@@ -54,6 +54,6 @@ export const lightPalette = {
   textDim: "#5F5750",
   textMuted: "#6E675F",
   textStrong: "#0F0D0B",
-  userBlockBg: "#DCEEFF",
+  userBlockBg: "#E9E6E0",
   yellow: "#9A7B1F",
 } as const satisfies RawPalette;

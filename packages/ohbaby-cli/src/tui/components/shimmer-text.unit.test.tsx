@@ -95,3 +95,21 @@ describe("ShimmerText", () => {
     });
   });
 });
+
+it("keeps emoji graphemes intact at every colored segment boundary", () => {
+  const graphemes = ["a", "👨‍👩‍👧‍👦", "👩🏽‍💻", "❤️", "🇹🇼", "é", "b"];
+  const text = graphemes.join("");
+  const boundaries = new Set([0]);
+  let length = 0;
+  for (const grapheme of graphemes) {
+    length += grapheme.length;
+    boundaries.add(length);
+  }
+  for (let tick = 0; tick < shimmerCycleLength(text); tick++) {
+    const { before, shimmer, after } = computeShimmerSegments(text, tick);
+    expect(before + shimmer + after).toBe(text);
+    expect(boundaries.has(before.length)).toBe(true);
+    expect(boundaries.has(before.length + shimmer.length)).toBe(true);
+  }
+  expect(shimmerCycleLength(text)).toBe(graphemes.length + 8);
+});

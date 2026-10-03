@@ -9,7 +9,7 @@ import type {
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
 import { mdToAnsi } from "../../render/markdown.js";
-import { wrapAnsi } from "../../render/wrap.js";
+import { visibleWidth, wrapAnsi } from "../../render/wrap.js";
 import type { TuiReasoningViewState } from "../../store/snapshot.js";
 import { useTheme, type Theme } from "../../theme/index.js";
 import { Spinner } from "../spinner.js";
@@ -138,6 +138,7 @@ export function pairToolCallResult(
 }
 
 export interface RenderedMessagePart {
+  readonly width?: number;
   readonly backgroundColor?: string;
   readonly color: string | undefined;
   readonly dimColor: boolean;
@@ -172,22 +173,9 @@ export function renderMessageParts(
   message: UiMessage,
   partWidth: number,
   theme: Theme,
-  reasoning?: TuiReasoningViewState,
+  _reasoning?: TuiReasoningViewState,
 ): readonly (RenderedMessagePart | RenderedSpinnerPart)[] {
   const rendered: (RenderedMessagePart | RenderedSpinnerPart)[] = [];
-
-  if (reasoning && message.role === "assistant") {
-    rendered.push({
-      color: theme.reasoning,
-      dimColor: true,
-      indent: 0,
-      index: -1,
-      kind: "text",
-      text: reasoning.folded
-        ? "Thought"
-        : wrapAnsi(reasoning.content, partWidth).join("\n"),
-    });
-  }
 
   for (const part of pairToolCallResult(message.parts)) {
     if (
@@ -223,13 +211,14 @@ export function renderMessageParts(
     }
 
     rendered.push({
+      width: partWidth,
       backgroundColor:
         message.role === "user" ? theme.message.userBlockBg : undefined,
       color:
         message.role === "user"
           ? theme.role.user
           : pairedPartColor(part, theme),
-      dimColor: part.kind === "part" && part.part.type === "reasoning",
+      dimColor: false,
       gutterColor:
         message.role === "user" ? theme.message.userGutter : undefined,
       indent,
@@ -319,11 +308,15 @@ function renderTextPart(
     <Box flexDirection="column">
       {part.text.split("\n").map((line, index) => (
         <Text backgroundColor={part.backgroundColor} key={String(index)}>
-          <Text color={part.gutterColor}>
-            {part.index === 0 && index === 0 ? "| " : "  "}
-          </Text>
+          <Text color={part.gutterColor}>{"│ "}</Text>
           <Text color={part.color} dimColor={part.dimColor}>
             {line}
+            {" ".repeat(
+              Math.max(
+                0,
+                (part.width ?? visibleWidth(line)) - visibleWidth(line),
+              ),
+            )}
           </Text>
         </Text>
       ))}
@@ -377,6 +370,14 @@ function renderToolLabelSegments(
         errorStart,
         hasError: errorText !== "",
         nameEnd,
+        nameColor: toolNameColor(call.name, theme),
+        statusColor:
+          (result?.execution ?? call.execution)?.phase ===
+            "awaiting-approval" &&
+          !result?.error &&
+          call.status !== "failed"
+            ? theme.status.waiting
+            : theme.tool.failed,
       }),
       char,
     );
@@ -412,15 +413,24 @@ function colorForToolLabelIndex(
     readonly errorStart: number;
     readonly hasError: boolean;
     readonly nameEnd: number;
+    readonly nameColor: string;
+    readonly statusColor: string;
   },
 ): string {
   if (rawIndex < boundaries.nameEnd) {
-    return theme.tool.name;
+    return boundaries.nameColor;
   }
   if (boundaries.hasError && rawIndex >= boundaries.errorStart) {
-    return theme.tool.failed;
+    return boundaries.statusColor;
   }
   return theme.tool.arg;
+}
+
+function toolNameColor(name: string, theme: Theme): string {
+  if (["read", "glob", "grep", "web_search", "web_fetch"].includes(name))
+    return theme.tool.read;
+  if (["write", "edit"].includes(name)) return theme.tool.edit;
+  return theme.tool.name;
 }
 
 function pairedPartIndent(part: PairedMessagePart): number {
@@ -444,13 +454,7 @@ function renderSingleMessagePart(
         ? mdToAnsi(part.text, { width: partWidth }).join("\n")
         : wrapAnsi(part.text, partWidth).join("\n");
     case "reasoning":
-      return message.status === "streaming" && part.endReason === undefined
-        ? wrapAnsi(part.text, partWidth).join("\n")
-        : part.saveState === "failed"
-          ? "Thought · save failed"
-          : part.saveState === "pending"
-            ? "Thought · saving"
-            : "Thought";
+      return part.saveState === "failed" ? "Reasoning could not be saved" : "";
     case "tool-call":
     case "tool-result":
       return wrapAnsi(renderToolPart(part), partWidth).join("\n");
@@ -475,7 +479,9 @@ function pairedPartColor(
     case "tool-result":
       return part.part.result.error ? theme.tool.failed : theme.tool.success;
     case "reasoning":
-      return theme.reasoning;
+      return part.part.saveState === "failed"
+        ? theme.status.error
+        : theme.reasoning;
     case "text":
       return undefined;
   }

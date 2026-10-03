@@ -84,9 +84,9 @@ describe("WorkingSpinner", () => {
     expect(frameOf(runtime).trim()).toBe("");
   });
 
-  it("renders the dot glyph and a phrase while running", () => {
+  it("renders a single shimmering phrase while running", () => {
     const frame = frameOf({ kind: "running", runId: "run_1" });
-    expect(frame).toContain("⠋");
+    expect(frame).not.toContain("⠋");
     expect(matchedPhrase(frame)).toBeDefined();
   });
 
@@ -183,4 +183,124 @@ it("routes a clock anomaly once to diagnostics without repeating it on ticks", (
   act(() => {
     app.unmount();
   });
+});
+
+it("keeps its phrase across permission and retry attempts in the same run", () => {
+  const random = vi
+    .spyOn(Math, "random")
+    .mockReturnValueOnce(0)
+    .mockReturnValueOnce(0.9);
+  let app!: ReturnType<typeof render>;
+  act(() => {
+    app = render(
+      <WorkingSpinner
+        runtime={{ kind: "running", runId: "run_1" }}
+        modelActivity={request}
+      />,
+    );
+  });
+  const phrase = matchedPhrase(app.lastFrame() ?? "");
+  act(() => {
+    app.rerender(
+      <WorkingSpinner
+        runtime={{ kind: "waiting-for-permission", requestId: "approve" }}
+        modelActivity={request}
+      />,
+    );
+  });
+  act(() => {
+    app.rerender(
+      <WorkingSpinner
+        runtime={{ kind: "running", runId: "run_1" }}
+        modelActivity={{ ...request, requestId: "retry", attempt: 1 }}
+      />,
+    );
+  });
+  expect(app.lastFrame()).toContain(phrase);
+  expect(random).not.toHaveBeenCalled();
+  act(() => {
+    app.unmount();
+  });
+});
+
+it("runs one animation timer and stops animation and duration timers when hidden", () => {
+  vi.useFakeTimers();
+  delete process.env.OHBABY_TUI_NO_ANIM;
+  const interval = vi.spyOn(globalThis, "setInterval");
+  const sample = { serverNow: 2000, receivedAt: performance.now() };
+  const view = (hidden: boolean): ReactElement => (
+    <DurationSampleContext.Provider value={sample}>
+      <WorkingSpinner
+        runtime={{ kind: "running", runId: "run_1" }}
+        modelActivity={hidden ? { ...request, firstTextAt: 2000 } : request}
+      />
+    </DurationSampleContext.Provider>
+  );
+  let app!: ReturnType<typeof render>;
+  act(() => {
+    app = render(view(false));
+  });
+  expect(interval.mock.calls.map((call) => call[1]).sort()).toEqual(
+    [1000, 150].sort(),
+  );
+  act(() => {
+    vi.advanceTimersByTime(100);
+  });
+  act(() => {
+    app.rerender(view(true));
+  });
+  act(() => {
+    vi.advanceTimersByTime(100);
+  });
+  expect(app.lastFrame()).toBe("");
+  expect(vi.getTimerCount()).toBe(0);
+  act(() => {
+    app.unmount();
+  });
+});
+
+it("keeps the run phrase while displaying current state titles and per-request durations", () => {
+  const sample = { serverNow: 5000, receivedAt: performance.now() };
+  const view = (retry: boolean, title?: string): ReactElement => (
+    <DurationSampleContext.Provider value={sample}>
+      <WorkingSpinner
+        runtime={{ kind: "running", runId: "run_1", title }}
+        modelActivity={
+          retry
+            ? { ...request, requestId: "retry", startedAt: 4000, attempt: 1 }
+            : request
+        }
+      />
+    </DurationSampleContext.Provider>
+  );
+  let app!: ReturnType<typeof render>;
+  act(() => {
+    app = render(view(false));
+  });
+  const phrase = matchedPhrase(app.lastFrame() ?? "");
+  expect(app.lastFrame()).toContain("4s");
+  act(() => {
+    app.rerender(view(true, "Retrying request"));
+  });
+  expect(app.lastFrame()).toContain("Retrying request");
+  expect(app.lastFrame()).toContain("1s");
+  act(() => {
+    app.rerender(view(true));
+  });
+  expect(app.lastFrame()).toContain(phrase);
+  expect(app.lastFrame()).toContain("1s");
+  act(() => {
+    app.unmount();
+  });
+});
+
+it("keeps the same run phrase after the transcript is remounted", () => {
+  vi.spyOn(Math, "random").mockReturnValueOnce(0).mockReturnValue(0.9);
+  const before = matchedPhrase(
+    frameOf({ kind: "running", runId: "remounted-run" }),
+  );
+  expect(before).toBeDefined();
+  expect(
+    matchedPhrase(frameOf({ kind: "running", runId: "remounted-run" })),
+  ).toBe(before);
 });

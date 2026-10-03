@@ -91,35 +91,26 @@ describe("MessageRow", () => {
     });
   });
 
-  it("renders transient reasoning as dim text before assistant content", () => {
+  it("hides transient and persisted reasoning without Thought headings", () => {
     const theme = createTheme("dark", 3);
-    const message = assistantMessage([
-      { text: "visible answer", type: "text" },
-    ]);
-
-    expect(
-      renderMessageParts(message, 80, theme, {
-        content: "thinking through it",
+    for (const status of ["streaming", "completed"] as const) {
+      const message = {
+        ...assistantMessage([
+          { type: "reasoning" as const, text: "private reasoning" },
+          { text: "visible answer", type: "text" as const },
+        ]),
+        status,
+      };
+      const parts = renderMessageParts(message, 80, theme, {
+        content: "private transient",
         folded: false,
-      })[0],
-    ).toMatchObject({
-      color: theme.reasoning,
-      dimColor: true,
-      kind: "text",
-      text: "thinking through it",
-    });
-
-    expect(
-      renderMessageParts(message, 80, theme, {
-        content: "thinking through it",
-        folded: true,
-      })[0],
-    ).toMatchObject({
-      color: theme.reasoning,
-      dimColor: true,
-      kind: "text",
-      text: "Thought",
-    });
+      });
+      expect(
+        parts
+          .map((part) => (part.kind === "text" ? part.text : part.label))
+          .join("\n"),
+      ).toBe("visible answer");
+    }
   });
 
   it("aligns wrapped historical user message lines under the muted gutter", () => {
@@ -130,8 +121,8 @@ describe("MessageRow", () => {
     const app = render(<MessageRow contentWidth={16} message={message} />);
     const frame = app.lastFrame() ?? "";
 
-    expect(frame).toContain("| please");
-    expect(frame).toContain("  the repository");
+    expect(frame).toContain("│ please");
+    expect(frame).toContain("│ the repository");
   });
 
   it("marks a length-truncated assistant message in the rendered output", () => {
@@ -404,3 +395,102 @@ it("does not spin legacy pending tools without executing facts", () => {
     ),
   ).toEqual(["text"]);
 });
+
+it.each(["dark", "light"] as const)(
+  "separates tool categories from neutral arguments in %s mode",
+  (mode) => {
+    const theme = createTheme(mode, 3);
+    for (const [name, color] of [
+      ["read", theme.tool.read],
+      ["grep", theme.tool.read],
+      ["edit", theme.tool.edit],
+      ["write", theme.tool.edit],
+      ["bash", theme.tool.name],
+    ]) {
+      const parts = renderMessageParts(
+        assistantMessage([
+          {
+            type: "tool-call",
+            call: {
+              id: name,
+              name,
+              input: { path: "src/中文文件.ts" },
+              status: "completed",
+            },
+          },
+        ]),
+        80,
+        theme,
+      );
+      expect(parts[0]).toMatchObject({
+        segments: [
+          { color },
+          { color: theme.text.normal, text: " src/中文文件.ts" },
+        ],
+      });
+    }
+  },
+);
+
+it("wraps Chinese and emoji user text within a full width neutral area", () => {
+  const parts = renderMessageParts(
+    userMessage([{ type: "text", text: "中文🙂中文🙂中文🙂" }]),
+    10,
+    createTheme("dark", 3),
+  );
+  expect(parts[0]).toMatchObject({
+    width: 10,
+    backgroundColor: createTheme("dark", 3).message.userBlockBg,
+  });
+  const app = render(
+    <MessageRow
+      contentWidth={12}
+      message={userMessage([{ type: "text", text: "中文🙂中文🙂中文🙂" }])}
+    />,
+  );
+  expect(app.lastFrame()).toContain("│ 中文🙂中文");
+  expect(app.lastFrame()).not.toContain("| ");
+  app.unmount();
+});
+
+it("renders reasoning save failures as readable errors without exposing reasoning", () => {
+  const theme = createTheme("dark", 3);
+  const parts = renderMessageParts(
+    assistantMessage([
+      { type: "reasoning", text: "private", saveState: "failed" },
+    ]),
+    80,
+    theme,
+  );
+  expect(parts).toHaveLength(1);
+  expect(parts[0]).toMatchObject({
+    color: theme.status.error,
+    dimColor: false,
+    text: "Reasoning could not be saved",
+  });
+});
+
+it.each(["web_search", "web_fetch"])(
+  "uses the read category for registered %s tool",
+  (name) => {
+    const theme = createTheme("dark", 3);
+    const parts = renderMessageParts(
+      assistantMessage([
+        {
+          type: "tool-call",
+          call: {
+            id: name,
+            name,
+            input: { query: "search" },
+            status: "completed",
+          },
+        },
+      ]),
+      80,
+      theme,
+    );
+    expect(parts[0]).toMatchObject({
+      segments: [{ color: theme.tool.read }, { color: theme.tool.arg }],
+    });
+  },
+);

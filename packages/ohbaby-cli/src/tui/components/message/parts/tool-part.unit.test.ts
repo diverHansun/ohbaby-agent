@@ -57,3 +57,42 @@ function toolCall(
     type: "tool-call",
   };
 }
+
+it("does not expose subagent prompts and uses only declared name or object fields", () => {
+  expect(
+    renderToolLabel(
+      toolCall("subagent_run", "completed", {
+        prompt: "INTERNAL PRIVATE PROMPT",
+      }).call,
+    ),
+  ).toBe("Subagent Run");
+  expect(
+    renderToolLabel(
+      toolCall("subagent_run", "completed", {
+        name: "Audit UI",
+        prompt: "PRIVATE",
+      }).call,
+    ),
+  ).toBe("Subagent Run Audit UI");
+  expect(
+    renderToolLabel(
+      toolCall("subagent_status", "completed", { subagent_id: "agent-1" }).call,
+    ),
+  ).toBe("Subagent Status agent-1");
+});
+
+it("labels failure and approval independently of color", () => {
+  expect(renderToolLabel(toolCall("bash", "failed", {}).call)).toContain(
+    "failed",
+  );
+  expect(
+    renderToolLabel({
+      ...toolCall("bash", "pending", {}).call,
+      execution: {
+        phase: "awaiting-approval",
+        phaseStartedAt: 1,
+        createdAt: 1,
+      },
+    }),
+  ).toContain("approval");
+});

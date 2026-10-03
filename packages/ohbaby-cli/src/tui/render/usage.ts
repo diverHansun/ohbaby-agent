@@ -46,3 +46,29 @@ function formatPercent(ratio: number): string {
 
   return `${String(Math.round(ratio * 100))}%`;
 }
+
+/** Compact footer view; status-panel details keep their existing format. */
+export function formatFooterContextUsage(
+  usage: UiContextWindowUsage | null | undefined,
+): string {
+  if (
+    !usage ||
+    !Number.isFinite(usage.contextWindowTokens) ||
+    usage.contextWindowTokens <= 0 ||
+    !Number.isFinite(usage.currentTokens) ||
+    usage.currentTokens < 0 ||
+    !Number.isFinite(usage.contextWindowRatio) ||
+    usage.contextWindowRatio < 0
+  )
+    return "—";
+  const percent = usage.contextWindowRatio * 100;
+  const label =
+    percent === 0
+      ? "0%"
+      : percent < 0.1
+        ? "<0.1%"
+        : percent < 1
+          ? `${formatScaledNumber(percent)}%`
+          : `${String(Math.round(percent))}%`;
+  return `${label} ${formatTokenAmount(usage.currentTokens).toLowerCase()}/${formatTokenAmount(usage.contextWindowTokens).toLowerCase()}`;
+}

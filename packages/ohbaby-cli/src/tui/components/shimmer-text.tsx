@@ -3,10 +3,11 @@ import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { useTheme } from "../theme/index.js";
 
-const SHIMMER_INTERVAL_MS = 55;
+const SHIMMER_INTERVAL_MS = 150;
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 /** Idle steps between sweeps, so the highlight pauses off the end before looping. */
 export const SHIMMER_GAP = 8;
-/** Highlight window is the head character ± this many neighbours (5-char band). */
+/** Highlight window is the head grapheme ± this many neighbours (5-grapheme band). */
 export const SHIMMER_HALF_WIDTH = 2;
 
 export interface ShimmerSegments {
@@ -15,9 +16,9 @@ export interface ShimmerSegments {
   readonly after: string;
 }
 
-/** Total tick cycle for a phrase: one step per character plus the idle gap. */
+/** Total tick cycle for a phrase: one step per grapheme plus the idle gap. */
 export function shimmerCycleLength(text: string): number {
-  return Array.from(text).length + SHIMMER_GAP;
+  return Array.from(GRAPHEMES.segment(text)).length + SHIMMER_GAP;
 }
 
 /**
@@ -29,7 +30,7 @@ export function computeShimmerSegments(
   text: string,
   tick: number,
 ): ShimmerSegments {
-  const chars = Array.from(text);
+  const chars = Array.from(GRAPHEMES.segment(text), ({ segment }) => segment);
   const start = tick - SHIMMER_HALF_WIDTH;
   const end = tick + SHIMMER_HALF_WIDTH;
 

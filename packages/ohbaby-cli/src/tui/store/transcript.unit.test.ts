@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UiMessage } from "ohbaby-sdk";
 import type { TuiRuntimeStatus } from "./snapshot.js";
-import { splitTranscript } from "./transcript.js";
+import { advanceTranscriptCommit, splitTranscript } from "./transcript.js";
 
 describe("splitTranscript", () => {
   it("keeps an empty transcript fully committed", () => {
@@ -191,3 +191,46 @@ function assistantMessage(
     ...overrides,
   };
 }
+
+describe("internal runtime inputs", () => {
+  it("filters sources before choosing the live tail without changing stored messages", () => {
+    const live = assistantMessage("answer", "still streaming", {
+      status: "streaming",
+    });
+    const internal: UiMessage = {
+      ...userMessage("internal", "private"),
+      role: "system",
+      runtimeInputKind: "subagent-status",
+    };
+    const messages = [live, internal];
+    expect(splitTranscript(messages, running())).toEqual({
+      committedMessages: [],
+      liveMessage: live,
+    });
+    expect(
+      advanceTranscriptCommit(undefined, messages, running()).committedItems,
+    ).toEqual([]);
+    expect(messages).toEqual([live, internal]);
+  });
+  it("preserves ordinary system, user-steer, user text and assistant quotations", () => {
+    const visible: UiMessage[] = [
+      { ...userMessage("notice", "normal notice"), role: "system" },
+      {
+        ...userMessage("steer", "change direction"),
+        runtimeInputKind: "user-steer",
+      },
+      userMessage("user", "subagent-status quoted by user"),
+      assistantMessage("quote", "subagent-result quoted by assistant"),
+    ];
+    const internal: UiMessage[] = ["subagent-status", "subagent-result"].map(
+      (kind, index) => ({
+        ...userMessage(`internal-${String(index)}`, "private"),
+        role: "system",
+        runtimeInputKind: kind as "subagent-status" | "subagent-result",
+      }),
+    );
+    expect(
+      splitTranscript([...visible, ...internal], idle()).committedMessages,
+    ).toEqual(visible);
+  });
+});

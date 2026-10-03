@@ -338,7 +338,7 @@ export function createTuiSessionRecovery(options: {
             event.version.sessionRevision > current.version.sessionRevision;
 
           if (applies && event.historyInvalidated) {
-            historyStale = true;
+            historyStale = older.length > 0;
             historyBefore = undefined;
             historyMore = true;
             invalidatedAt = event.version.sessionRevision;
@@ -379,6 +379,7 @@ export function createTuiSessionRecovery(options: {
             older = older.filter(
               (message) => !event.removedMessageIds?.includes(message.id),
             );
+          if (older.length === 0) historyStale = false;
           sync.receive(event);
           // Text deltas do not change the independently queried Stop target.
           if (
@@ -487,6 +488,9 @@ export function createTuiSessionRecovery(options: {
         historyStale = false;
         publish({
           historyStale: false,
+          error: state.error?.startsWith("History unavailable:")
+            ? undefined
+            : state.error,
           historyReasoningMissing:
             state.historyReasoningMissing === true || page.reasoningMissing,
         });

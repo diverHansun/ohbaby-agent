@@ -54,6 +54,8 @@ export interface Theme {
   };
   readonly tool: {
     readonly arg: string;
+    readonly read: string;
+    readonly edit: string;
     readonly failed: string;
     readonly name: string;
     readonly running: string;
@@ -92,14 +94,14 @@ export function createTheme(mode: ColorMode, colorLevel = 3): Theme {
       remove: color("red", "red"),
     },
     message: {
-      userBlockBg: color("userBlockBg", "blue"),
+      userBlockBg: color("userBlockBg", mode === "dark" ? "black" : "white"),
       userGutter: color("textMuted", "gray"),
     },
     mode,
     reasoning: color("textMuted", "gray"),
     role: {
       assistant: color("text", "white"),
-      user: color("text", "white"),
+      user: color("text", mode === "dark" ? "white" : "black"),
     },
     spinner: {
       frames: BRAILLE_SPINNER_FRAMES,
@@ -128,7 +130,9 @@ export function createTheme(mode: ColorMode, colorLevel = 3): Theme {
       strong: color("textStrong", "white"),
     },
     tool: {
-      arg: color("textDim", "gray"),
+      arg: color("text", mode === "dark" ? "white" : "black"),
+      read: color("skyBlue", "cyan"),
+      edit: color("purple", "magenta"),
       failed: color("red", "red"),
       name: color("gold", "yellow"),
       running: color("purple", "magenta"),

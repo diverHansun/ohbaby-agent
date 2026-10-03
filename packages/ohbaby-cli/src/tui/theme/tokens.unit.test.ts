@@ -34,7 +34,7 @@ describe("createTheme", () => {
     });
     expect(theme.tool.name).toBe(darkPalette.gold);
     expect(theme.tool.name).not.toBe(darkPalette.goldBright);
-    expect(theme.tool.arg).toBe(darkPalette.textDim);
+    expect(theme.tool.arg).toBe(darkPalette.text);
     expect(theme.reasoning).toBe(darkPalette.textMuted);
     expect(theme.editing).toBe(darkPalette.editing);
     expect(theme.border).toBe(darkPalette.border);
@@ -72,10 +72,10 @@ describe("createTheme", () => {
     expect(theme.status.error).toBe("red");
     expect(theme.editing).toBe("cyan");
     expect(theme.border).toBe("gray");
-    expect(theme.message.userBlockBg).toBe("blue");
+    expect(theme.message.userBlockBg).toBe("black");
     expect(theme.message.userGutter).toBe("gray");
     expect(theme.tool.name).toBe("yellow");
-    expect(theme.tool.arg).toBe("gray");
+    expect(theme.tool.arg).toBe("white");
     expect(theme.spinner.palette).toEqual(["yellow"]);
     expect(theme.workingSpinner).toEqual({
       base: "magenta",

@@ -20,8 +20,17 @@ export const WORKING_PHRASES = [
   "Using parallel agents to complete tasks actually distracts my attention...",
 ] as const;
 
-/** Pick a random phrase. Used once per turn. */
-export function pickWorkingPhrase(): string {
-  const index = Math.floor(Math.random() * WORKING_PHRASES.length);
+/** A run keeps its phrase even when navigation remounts the transcript. */
+export function pickWorkingPhrase(runId?: string): string {
+  let hash = 2166136261;
+  if (runId !== undefined) {
+    for (let index = 0; index < runId.length; index++) {
+      hash = Math.imul(hash ^ runId.charCodeAt(index), 16777619) >>> 0;
+    }
+  }
+  const index =
+    runId === undefined
+      ? Math.floor(Math.random() * WORKING_PHRASES.length)
+      : hash % WORKING_PHRASES.length;
   return WORKING_PHRASES[index] ?? WORKING_PHRASES[0];
 }

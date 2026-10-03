@@ -1,3 +1,6 @@
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const EMOJI_CLUSTER = /\p{Emoji_Presentation}|\p{Emoji}\uFE0F/u;
+
 const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_RESET = `${ANSI_ESCAPE}[0m`;
 const ANSI_ESCAPE_PATTERN = new RegExp(
@@ -103,7 +106,7 @@ function wrapLongPlainWord(word: string, width: number): string[] {
   const output: string[] = [];
   let current = "";
   let currentWidth = 0;
-  for (const char of word) {
+  for (const { segment: char } of GRAPHEMES.segment(word)) {
     const nextWidth = charWidth(char);
     if (currentWidth > 0 && currentWidth + nextWidth > width) {
       output.push(current);
@@ -178,7 +181,7 @@ function tokenizeAnsi(input: string): readonly AnsiToken[] {
 }
 
 function pushTextTokens(tokens: AnsiToken[], text: string): void {
-  for (const char of text) {
+  for (const { segment: char } of GRAPHEMES.segment(text)) {
     tokens.push({ kind: "text", value: char });
   }
 }
@@ -188,6 +191,10 @@ function normalizeWidth(width: number): number {
 }
 
 function charWidth(char: string): number {
+  // One displayed emoji (including joined, skin-tone and flag sequences) is
+  // one two-column grapheme. Iterating code points overcounts joined emoji
+  // and undercounts text-default symbols followed by VS16, such as ❤️.
+  if (EMOJI_CLUSTER.test(char)) return 2;
   const codePoint = char.codePointAt(0);
   if (codePoint === undefined) {
     return 0;
@@ -195,11 +202,11 @@ function charWidth(char: string): number {
   if (char === "\n" || char === "\r") {
     return 0;
   }
-  if (codePoint === 0) {
+  if (codePoint < 32 || (codePoint >= 0x7f && codePoint <= 0x9f)) {
     return 0;
   }
   if (
-    (codePoint >= 0x0300 && codePoint <= 0x036f) ||
+    /^(?:\p{Mark}|\p{Default_Ignorable_Code_Point})+$/u.test(char) ||
     (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
   ) {
     return 0;

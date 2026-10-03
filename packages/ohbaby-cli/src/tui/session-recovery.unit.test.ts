@@ -733,3 +733,75 @@ describe("TUI independent control query frequency", () => {
     recovery.dispose();
   });
 });
+
+it("does not mark absent older pages stale when history is invalidated", async () => {
+  const { recovery, client } = setup();
+  await recovery.start();
+  await tick();
+  recovery.receive({
+    type: "session.changed",
+    version: view("a", 2).version,
+    historyInvalidated: true,
+  });
+  expect(recovery.getState().historyStale).toBe(false);
+  await recovery.loadHistory();
+  expect(client.getSessionHistory).not.toHaveBeenCalled();
+  recovery.dispose();
+});
+
+it("keeps invalidated history readable after a failed refresh, then clears stale on retry", async () => {
+  const old = {
+    id: "older",
+    createdAt: "2025-01-01",
+    role: "assistant" as const,
+    parts: [{ type: "text" as const, text: "old page" }],
+  };
+  const page = {
+    version: view().version,
+    messages: [old],
+    prompts: [],
+    reasoningMissing: false,
+    hasMore: false,
+  };
+  const history = vi
+    .fn()
+    .mockResolvedValueOnce(page)
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce({
+      ...page,
+      version: view("a", 2).version,
+      messages: [{ ...old, parts: [{ type: "text", text: "corrected page" }] }],
+    });
+  const { recovery, store } = setup({
+    getSessionView: vi.fn(() =>
+      Promise.resolve({
+        ...view(),
+        history: { hasMore: true, before: "cursor" },
+      }),
+    ),
+    getSessionHistory: history,
+  });
+  await recovery.start();
+  await tick();
+  await recovery.loadHistory();
+  recovery.receive({
+    type: "session.changed",
+    version: view("a", 2).version,
+    historyInvalidated: true,
+  });
+  await recovery.loadHistory();
+  expect(recovery.getState().historyStale).toBe(true);
+  expect(recovery.getState().error).toContain("History unavailable");
+  expect(
+    store.getState().messages.find((message) => message.id === "older")
+      ?.parts[0],
+  ).toMatchObject({ text: "old page" });
+  await recovery.loadHistory();
+  expect(recovery.getState().historyStale).toBe(false);
+  expect(recovery.getState().error).toBeUndefined();
+  expect(
+    store.getState().messages.find((message) => message.id === "older")
+      ?.parts[0],
+  ).toMatchObject({ text: "corrected page" });
+  recovery.dispose();
+});

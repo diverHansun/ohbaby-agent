@@ -32,8 +32,15 @@ export function renderToolLabelParts(
   call: UiToolCall,
   result?: UiToolResult,
 ): ToolLabelParts {
-  const summary = formatPrimaryInput(call.input);
-  const error = result?.error ? formatBody(result.error) : "";
+  const summary = formatPrimaryInput(call);
+  const execution = result?.execution ?? call.execution;
+  const error = result?.error
+    ? `failed: ${formatBody(result.error)}`
+    : call.status === "failed"
+      ? "failed"
+      : execution?.phase === "awaiting-approval"
+        ? "awaiting approval"
+        : "";
   return {
     error,
     name: formatToolName(call.name),
@@ -49,8 +56,13 @@ function formatToolName(name: string): string {
     .join(" ");
 }
 
-function formatPrimaryInput(input: Record<string, unknown>): string {
-  for (const key of ["command", "file_path", "path", "query", "prompt"]) {
+function formatPrimaryInput(call: UiToolCall): string {
+  const input = call.input;
+  // Subagent prompts are runtime instructions, not user-facing task titles.
+  const keys = call.name.startsWith("subagent_")
+    ? ["name", "subagent_id"]
+    : ["command", "file_path", "path", "query", "prompt"];
+  for (const key of keys) {
     const value = input[key];
     if (typeof value === "string" && value.trim() !== "") {
       return truncate(value.trim());
