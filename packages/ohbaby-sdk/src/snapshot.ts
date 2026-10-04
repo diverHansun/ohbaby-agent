@@ -147,7 +147,44 @@ export interface UiToolCall {
   readonly status: "pending" | "running" | "completed" | "failed";
 }
 
+export type UiToolResultDetails =
+  | {
+      readonly kind: "mutation";
+      readonly diff?: string;
+      readonly diffOmissionReason?: string;
+      readonly created?: boolean;
+      readonly dryRun?: boolean;
+    }
+  | {
+      readonly kind: "search";
+      readonly unit: "files" | "matches";
+      readonly count?: number;
+      readonly scanComplete?: boolean;
+      readonly displayLimited?: boolean;
+    }
+  | {
+      readonly kind: "read";
+      readonly startLine?: number;
+      readonly shownLineCount?: number;
+      readonly hasMore?: boolean;
+    }
+  | {
+      readonly kind: "bash";
+      readonly exitCode?: number;
+      readonly jobId?: string;
+      readonly status?:
+        | "running"
+        | "completed"
+        | "failed"
+        | "timed_out"
+        | "cancelled";
+      readonly outputTruncated?: boolean;
+    };
+
 export interface UiToolResult {
+  readonly details?: UiToolResultDetails;
+  /** Absent in legacy results; false means the source did not save output. */
+  readonly outputAvailable?: boolean;
   readonly execution?: UiToolExecution;
   readonly callId: string;
   readonly output: string;

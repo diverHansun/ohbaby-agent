@@ -23,6 +23,7 @@ export interface RipgrepMatch {
   readonly line: number;
   readonly text?: string;
   readonly matchStart: number;
+  readonly matchCount: number;
 }
 
 interface SearchOptions {
@@ -184,6 +185,7 @@ export async function searchWithRipgrep(
             text:
               typeof data.lines.text === "string" ? data.lines.text : undefined,
             matchStart,
+            matchCount: data.submatches.length,
           });
           if (reason) stop(reason);
         } else throw new Error("Unexpected record type");

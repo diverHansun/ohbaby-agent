@@ -981,7 +981,10 @@ export function createToolScheduler(
     const observed = operation.then(
       (value) => {
         finish();
-        return value;
+        return {
+          ...value,
+          metadata: { ...value.metadata, uiToolSource: tool.source },
+        };
       },
       (error: unknown) => {
         finish();

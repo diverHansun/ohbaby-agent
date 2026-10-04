@@ -59,12 +59,14 @@ export function boundedDiff(before: string, after: string): DiffPreview {
     return omittedDiff(
       `combined input exceeds ${String(DIFF_INPUT_MAX_BYTES)} bytes`,
     );
-  // The renderer emits every line. Bound its output BEFORE allocating its line
-  // arrays or diff. Each input byte can cause at most two output bytes (empty lines).
-  // This conservative bound deliberately prefers omission to partial previews.
-  if (bytes * 2 + 128 > DIFF_OUTPUT_MAX_BYTES)
-    return omittedDiff(
-      `preview exceeds ${String(DIFF_OUTPUT_MAX_BYTES)}-byte output budget`,
-    );
-  return { diff: renderUnifiedDiff({ before, after }), diffOmitted: false };
+  try {
+    const diff = renderUnifiedDiff({ before, after });
+    if (Buffer.byteLength(diff) > DIFF_OUTPUT_MAX_BYTES)
+      return omittedDiff(
+        `preview exceeds ${String(DIFF_OUTPUT_MAX_BYTES)}-byte output budget`,
+      );
+    return { diff, diffOmitted: false };
+  } catch {
+    return omittedDiff("diff calculation unavailable");
+  }
 }

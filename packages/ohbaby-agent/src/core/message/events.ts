@@ -136,6 +136,7 @@ const ToolStateSchema = z.discriminatedUnion("status", [
   }),
   z.object({
     status: z.literal("error"),
+    output: z.string().optional(),
     input: z.record(z.unknown()),
     error: z.string(),
     metadata: z.record(z.unknown()).optional(),

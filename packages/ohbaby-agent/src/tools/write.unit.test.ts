@@ -1,3 +1,4 @@
+import * as diffOutput from "./utils/output.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -76,6 +77,49 @@ describe("write file tool", () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
+  it("commits successfully when the optional diff calculation fails", async () => {
+    await writeFile(tempRoot, "note.txt", "old\n");
+    vi.spyOn(diffOutput, "renderUnifiedDiff").mockImplementation(() => {
+      throw new Error("diff failed");
+    });
+    const result = await createWriteTool().execute(
+      {
+        file_path: "note.txt",
+        content: "new\n",
+        expected_mtime_ms: await statMtimeMs(path.join(tempRoot, "note.txt")),
+      },
+      createTestContext(tempRoot),
+    );
+    expect(result.metadata).toMatchObject({
+      created: false,
+      diffOmitted: true,
+      diffOmissionReason: "diff calculation unavailable",
+    });
+    expect(await fs.readFile(path.join(tempRoot, "note.txt"), "utf8")).toBe(
+      "new\n",
+    );
+  });
+
+  it("saves an honest omitted diff when replacing binary contents", async () => {
+    await fs.writeFile(path.join(tempRoot, "note.txt"), Buffer.from([0, 255]));
+    const result = await createWriteTool().execute(
+      {
+        file_path: "note.txt",
+        content: "new\n",
+        expected_mtime_ms: await statMtimeMs(path.join(tempRoot, "note.txt")),
+      },
+      createTestContext(tempRoot),
+    );
+    expect(result.metadata).toMatchObject({
+      created: false,
+      diffOmitted: true,
+      diffOmissionReason: "old contents are binary",
+    });
+    expect(await fs.readFile(path.join(tempRoot, "note.txt"), "utf8")).toBe(
+      "new\n",
+    );
+  });
+
   it("creates parent directories and writes new files without an mtime precondition", async () => {
     const context = createTestContext(tempRoot);
 
@@ -91,9 +135,11 @@ describe("write file tool", () => {
     expect(result.metadata).toMatchObject({
       bytes: Buffer.byteLength("hello\n"),
       created: true,
+      diffOmitted: false,
       encoding: "utf8",
       lineEnding: "LF",
     });
+    expect(result.metadata?.diff).toContain("+hello");
     expect(result.metadata?.mtimeMs).toEqual(expect.any(Number));
   });
 
@@ -184,8 +230,10 @@ describe("write file tool", () => {
     );
     expect(result.metadata).toMatchObject({
       created: false,
+      diffOmitted: false,
       encoding: "utf8",
     });
+    expect(result.metadata?.diff).toContain("-old");
   });
 
   it("previews overwrites with dry_run and a matching mtime without modifying content", async () => {

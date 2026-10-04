@@ -49,6 +49,7 @@
     "agent-base": "^7",
     "axios": "^1.7.7",
     "chalk": "^5.4.1",
+    "diff": "8.0.2",
     "dotenv": "^16.4.7",
     "exa-js": "^2.0.12",
     "https-proxy-agent": "^7",

@@ -176,6 +176,7 @@ export type {
   UiSnapshot,
   UiToolCall,
   UiToolResult,
+  UiToolResultDetails,
   UiTodoItem,
   UiTodoStatus,
   UiSessionTodoList,

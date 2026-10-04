@@ -59,11 +59,14 @@ export function createGlobTool(): Tool {
         });
         const truncated = scan.truncated || matches.length >= limit;
 
+        const output = renderList(matches, "No files matched.");
         return {
-          output: renderList(matches, "No files matched."),
+          output,
           metadata: {
             count: matches.length,
             truncated,
+            scanComplete: !truncated,
+            displayLimited: matches.length > 0 && output !== matches.join("\n"),
             visitedFileCount: scan.visitedFileCount,
           },
         };

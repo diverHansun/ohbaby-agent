@@ -97,6 +97,7 @@ export function createGrepTool(): Tool {
           );
         const matches: string[] = [];
         let outputBytes = 0;
+        let matchCount = 0;
         const display = { limited: false };
         const result = await searchWithRipgrep({
           executablePath: resolveBundledRipgrepPath(),
@@ -112,6 +113,7 @@ export function createGrepTool(): Tool {
             if (outputBytes + cost > OUTPUT_BYTES - NOTICE_RESERVE_BYTES)
               return "output-limit";
             matches.push(line);
+            matchCount += match.matchCount;
             outputBytes += cost;
             display.limited ||= rendered.limited;
             return matches.length >= limit ? "match-limit" : undefined;
@@ -143,6 +145,7 @@ export function createGrepTool(): Tool {
           output,
           metadata: {
             count: matches.length,
+            matchCount,
             scanComplete,
             displayLimited: display.limited || Boolean(result.stopReason),
             truncated: !scanComplete || display.limited,

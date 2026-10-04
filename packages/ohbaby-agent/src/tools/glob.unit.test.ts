@@ -67,6 +67,29 @@ describe("glob file tool", () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
+  it("reports token display clipping separately from a complete scan", async () => {
+    const directory = Array.from(
+      { length: 4 },
+      (_, i) => `${String(i)}${"a".repeat(200)}`,
+    ).join("/");
+    await fs.mkdir(path.join(tempRoot, directory), { recursive: true });
+    await Promise.all(
+      Array.from({ length: 50 }, (_, i) =>
+        writeFile(tempRoot, `${directory}/${String(i)}.txt`, ""),
+      ),
+    );
+    const result = await createGlobTool().execute(
+      { pattern: "**/*.txt", limit: 100 },
+      createTestContext(tempRoot),
+    );
+    expect(result.metadata).toMatchObject({
+      count: 50,
+      scanComplete: true,
+      displayLimited: true,
+    });
+    expect(result.output).toContain("[results truncated]");
+  });
+
   it("finds matching files while applying default ignores", async () => {
     await writeFile(tempRoot, "src/a.ts", "export const alpha = 1;\n");
     await writeFile(tempRoot, "src/b.js", "const beta = 2;\n");
@@ -80,7 +103,12 @@ describe("glob file tool", () => {
 
     expect(result.output).toContain("src/a.ts");
     expect(result.output).not.toContain("node_modules/hidden.ts");
-    expect(result.metadata).toMatchObject({ count: 1, truncated: false });
+    expect(result.metadata).toMatchObject({
+      count: 1,
+      truncated: false,
+      scanComplete: true,
+      displayLimited: false,
+    });
   });
 
   it("continues scanning until it reaches matching results", async () => {
@@ -104,6 +132,11 @@ describe("glob file tool", () => {
     );
 
     expect(result.output).toContain("src/z-target.ts");
-    expect(result.metadata).toMatchObject({ count: 1, truncated: true });
+    expect(result.metadata).toMatchObject({
+      count: 1,
+      truncated: true,
+      scanComplete: false,
+      displayLimited: false,
+    });
   });
 });

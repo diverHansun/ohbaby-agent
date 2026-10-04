@@ -1,3 +1,4 @@
+import { projectToolResultDetails } from "./tool-result-details.js";
 import {
   projectToolExecution,
   toolExecutionStatus,
@@ -85,12 +86,7 @@ function toolResultPart(part: ToolPart): UiMessagePart | undefined {
     return undefined;
   }
   const outcome = toolStateOutcome(part.state);
-  const output =
-    part.state.status === "completed"
-      ? part.state.output
-      : part.state.status === "aborted"
-        ? (part.state.output ?? "")
-        : "";
+  const output = part.state.output ?? "";
   // Tool result metadata is stored on state, separately from scheduler metadata.
   const subagent =
     part.tool === "subagent_run" ? part.state.metadata?.subagent : undefined;
@@ -108,6 +104,12 @@ function toolResultPart(part: ToolPart): UiMessagePart | undefined {
       execution: projectToolExecution(part.metadata?.execution),
       ...(outcome.error === undefined ? {} : { error: outcome.error }),
       output,
+      outputAvailable: part.state.output !== undefined,
+      details: projectToolResultDetails(
+        part.tool,
+        part.state.metadata,
+        part.state.status,
+      ),
     },
     type: "tool-result",
   };

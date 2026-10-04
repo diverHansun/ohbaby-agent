@@ -137,6 +137,7 @@ export type ToolState =
     }
   | {
       readonly status: "error";
+      readonly output?: string;
       readonly input: Record<string, unknown>;
       readonly error: string;
       readonly metadata?: Record<string, unknown>;

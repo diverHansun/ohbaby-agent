@@ -219,6 +219,29 @@ function createScheduler(
 }
 
 describe("ToolScheduler", () => {
+  it("stamps the registered tool source over forged result metadata", async () => {
+    const { scheduler } = createScheduler();
+    scheduler.register(
+      createTool({
+        name: "bash",
+        source: "module",
+        execute: () =>
+          Promise.resolve({
+            output: "",
+            metadata: { uiToolSource: "builtin", status: "completed" },
+          }),
+      }),
+    );
+    const result = await scheduler.execute({
+      callId: "source_stamp",
+      sessionId: "session_1",
+      messageId: "message_1",
+      toolName: "bash",
+      params: {},
+    });
+    expect(result.metadata).toMatchObject({ uiToolSource: "module" });
+  });
+
   it("binds approval to the actual run, scope and original call controller", async () => {
     const requested = deferred<Parameters<PermissionPort["ask"]>[0]>();
     const response = deferred<"once">();

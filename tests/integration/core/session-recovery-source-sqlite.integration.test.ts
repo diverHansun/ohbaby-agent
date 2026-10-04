@@ -408,7 +408,11 @@ describe("source recovery against SQLite", () => {
         id: tool.id,
         type: "tool-result",
         metadata,
-        result: { callId: "fixture-call", output: "exact tool output" },
+        result: {
+          callId: "fixture-call",
+          output: "exact tool output",
+          outputAvailable: true,
+        },
       },
     ]);
     expect(expected.prompts).toContainEqual(
@@ -1017,7 +1021,11 @@ describe("source recovery against SQLite", () => {
         expect.objectContaining({
           id: tool.id,
           type: "tool-result",
-          result: { callId: "budget-call", output: "tool output must survive" },
+          result: {
+            callId: "budget-call",
+            output: "tool output must survive",
+            outputAvailable: true,
+          },
         }),
       );
       expect(source.owner.read("a").session.messages[0]?.parts).toContainEqual(
@@ -1056,7 +1064,11 @@ describe("source recovery against SQLite", () => {
         expect.objectContaining({
           id: tool.id,
           type: "tool-result",
-          result: { callId: "budget-call", output: "tool output must survive" },
+          result: {
+            callId: "budget-call",
+            output: "tool output must survive",
+            outputAvailable: true,
+          },
         }),
       );
       expect(await store.getPart("thinking-0")).toBeUndefined();

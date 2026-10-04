@@ -67,6 +67,20 @@ describe("grep file tool", () => {
     await fs.rm(tempRoot, { force: true, recursive: true });
   });
 
+  it("counts pattern occurrences separately from matching output locations", async () => {
+    await writeFile(tempRoot, "a.txt", "foo foo\nfoo\n");
+    const result = await createGrepTool().execute(
+      { pattern: "foo" },
+      createTestContext(tempRoot),
+    );
+    expect(result.metadata).toMatchObject({
+      count: 2,
+      matchCount: 3,
+      scanComplete: true,
+      displayLimited: false,
+    });
+  });
+
   it("searches included text files with line numbers", async () => {
     await writeFile(tempRoot, "src/a.ts", "export const alpha = 1;\n");
     await writeFile(tempRoot, path.join("src", "b.js"), "const alpha = 2;\n");

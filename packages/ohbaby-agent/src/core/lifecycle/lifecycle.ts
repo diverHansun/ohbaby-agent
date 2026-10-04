@@ -258,6 +258,7 @@ function resultToToolState(
     error: toolResultBaseContent(result),
     input,
     ...(result.metadata === undefined ? {} : { metadata: result.metadata }),
+    ...(result.output === undefined ? {} : { output: result.output }),
     status: "error",
   };
 }

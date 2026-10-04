@@ -1,3 +1,6 @@
+import { createInMemoryStreamBridge } from "../../runtime/stream-bridge/index.js";
+import { createInMemoryUiStateStore } from "../../adapters/ui-state/memory-store.js";
+import { startRunStreamProjection } from "../../adapters/ui-runtime/run-stream-adapter.js";
 import { serializeHistory } from "../context/serialization.js";
 import { estimateHistoryForCompaction } from "../context/compaction-policy.js";
 import { toModelMessages } from "./converter.js";
@@ -77,6 +80,182 @@ afterEach(async () => {
 });
 
 describe("createDatabaseMessageStore", () => {
+  it("keeps whitelisted details and failed partial output identical in live, snapshot and paged history", async () => {
+    const message: Message = {
+      id: "facts",
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+      time: { created: 1000 },
+    };
+    const store = createDatabaseMessageStore();
+    await store.insertMessage(message);
+    const stateStore = createInMemoryUiStateStore({
+      activeSessionId: "session_1",
+      permissions: [],
+      runs: [],
+      sessions: [
+        {
+          id: "session_1",
+          createdAt: "2026",
+          updatedAt: "2026",
+          title: "Session",
+          messages: [],
+        },
+      ],
+      status: { kind: "idle" },
+    });
+    const bridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
+    const projection = startRunStreamProjection({
+      assistantMessageId: "facts",
+      autoStart: false,
+      nextMessageId: () => "next",
+      publish: () => undefined,
+      runId: "run",
+      sessionId: "session_1",
+      stateStore,
+      streamBridge: bridge,
+      timestamp: () => "2026",
+    });
+    const fixtures = [
+      {
+        name: "bash",
+        output: "partial stdout",
+        error: "exit code 9",
+        metadata: {
+          uiToolSource: "builtin",
+          exitCode: 9,
+          status: "failed",
+          truncated: true,
+          jobId: "job",
+          secret: "hidden",
+        },
+      },
+      {
+        name: "read",
+        output: "1: text",
+        metadata: {
+          uiToolSource: "builtin",
+          startLine: 1,
+          shownLineCount: 1,
+          hasMore: false,
+        },
+      },
+      {
+        name: "grep",
+        output: "a:1: foo foo",
+        metadata: {
+          uiToolSource: "builtin",
+          matchCount: 2,
+          scanComplete: true,
+          displayLimited: false,
+        },
+      },
+      {
+        name: "glob",
+        output: "No files matched.",
+        metadata: {
+          uiToolSource: "builtin",
+          count: 0,
+          scanComplete: true,
+          displayLimited: false,
+        },
+      },
+      {
+        name: "write",
+        output: "Wrote",
+        metadata: {
+          uiToolSource: "builtin",
+          diff: "--- before\n+++ after\n@@ -1 +1 @@\n-old\n+new",
+          diffOmitted: false,
+          created: false,
+        },
+      },
+      { name: "bash", error: "legacy failure", metadata: {} },
+    ];
+    for (const [index, fixture] of fixtures.entries()) {
+      const callId = `call_${String(index)}`;
+      const input = { command: "fixture" };
+      await store.appendPart({
+        message,
+        partId: `part_${String(index)}`,
+        updatedAt: 2000 + index,
+        data: {
+          type: "tool",
+          callId,
+          tool: fixture.name,
+          state: fixture.error
+            ? {
+                status: "error",
+                input,
+                error: fixture.error,
+                output: fixture.output,
+                metadata: fixture.metadata,
+              }
+            : {
+                status: "completed",
+                input,
+                output: fixture.output ?? "",
+                metadata: fixture.metadata,
+              },
+        },
+      });
+      bridge.publish("run/run", "run.tool.start", {
+        callId,
+        params: input,
+        runId: "run",
+        sessionId: "session_1",
+        timestamp: index * 2,
+        toolName: fixture.name,
+      });
+      bridge.publish("run/run", "run.tool.result", {
+        callId,
+        result: {
+          status: fixture.error ? "error" : "success",
+          ...(fixture.output === undefined ? {} : { output: fixture.output }),
+          ...(fixture.error ? { error: { message: fixture.error } } : {}),
+          metadata: fixture.metadata,
+        },
+        runId: "run",
+        sessionId: "session_1",
+        timestamp: index * 2 + 1,
+      });
+    }
+    bridge.end("run/run");
+    projection.start();
+    await projection.done;
+    const live = (
+      await stateStore.readSnapshot()
+    ).sessions[0]?.messages[0]?.parts
+      .filter((part) => part.type === "tool-result")
+      .map((part) => part.result);
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const reopened = createDatabaseMessageStore();
+    const history = (
+      await reopened.listPageBySession("session_1", { limit: 1 })
+    ).messages;
+    const saved = messageToUiMessage(history[0])
+      ?.parts.filter((part) => part.type === "tool-result")
+      .map((part) => part.result);
+    expect(JSON.parse(JSON.stringify(saved))).toEqual(
+      JSON.parse(JSON.stringify(live)),
+    );
+    expect(saved?.[0]).toMatchObject({
+      output: "partial stdout",
+      outputAvailable: true,
+      error: "exit code 9",
+      details: { kind: "bash", exitCode: 9, outputTruncated: true },
+    });
+    expect(saved?.[5]).toMatchObject({
+      output: "",
+      outputAvailable: false,
+      error: "legacy failure",
+    });
+    expect(saved?.[5]?.details).toBeUndefined();
+    expect(JSON.stringify(saved)).not.toContain("hidden");
+  });
+
   it("preserves tool execution facts through SQLite reopen and paged UI projection", async () => {
     const message: Message = {
       id: "tool-facts",

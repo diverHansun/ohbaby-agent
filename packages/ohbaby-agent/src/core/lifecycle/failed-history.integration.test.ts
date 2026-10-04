@@ -1,3 +1,4 @@
+import { messageToUiMessage } from "../../adapters/ui-state/persistent-store.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import { Lifecycle } from "./lifecycle.js";
@@ -270,6 +271,55 @@ describe("failed model history persistence", () => {
       serializeHistory(history, { includeToolContext: true }),
     ).not.toContain("unsafe partial");
   });
+  it("persists an ordinary failed tool's partial output through the lifecycle state conversion", async () => {
+    const controller = new AbortController();
+    const f = fixture([
+      {
+        toolCallDeltas: [
+          { index: 0, id: "bash-1", name: "bash", argumentsDelta: "{}" },
+        ],
+        finishReason: "tool_calls",
+      },
+    ]);
+    f.execute.mockImplementation(async (batch) => {
+      const result = {
+        callId: "bash-1",
+        status: "error" as const,
+        output: "partial stdout",
+        execution: {
+          phase: "ended" as const,
+          createdAt: 1,
+          phaseStartedAt: 2,
+          endedAt: 2,
+          outcome: "error" as const,
+        },
+        error: { type: "ExecutionError" as const, message: "shell failed" },
+        metadata: { uiToolSource: "builtin", status: "failed", exitCode: 9 },
+      };
+      await batch.observer?.onCallSettled(batch.calls[0], 0, result);
+      controller.abort();
+      return [result];
+    });
+    await f.run(controller.signal);
+    const history = await f.manager.listBySession("session");
+    const tool = history[0].parts.find((part) => part.type === "tool");
+    expect(tool).toMatchObject({
+      type: "tool",
+      state: { status: "error", output: "partial stdout" },
+    });
+    const saved = messageToUiMessage(history[0])?.parts.find(
+      (part) => part.type === "tool-result",
+    );
+    expect(saved).toMatchObject({
+      result: {
+        output: "partial stdout",
+        outputAvailable: true,
+        error: "shell failed",
+        details: { kind: "bash", exitCode: 9 },
+      },
+    });
+  });
+
   it("keeps accepted tool results when the user cancels during tool execution", async () => {
     const controller = new AbortController();
     const f = fixture([

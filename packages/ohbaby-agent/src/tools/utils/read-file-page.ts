@@ -282,6 +282,7 @@ export async function readFilePage(options: {
         nextCursor,
         nextOffset: hasMore ? line : undefined,
         path: filePath,
+        startLine: prior?.line ?? offset,
         shownLineCount,
         sizeBytes: size,
       },

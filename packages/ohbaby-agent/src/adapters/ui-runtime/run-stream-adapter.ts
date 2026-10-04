@@ -23,6 +23,7 @@ import type {
 } from "../../core/context/index.js";
 import type { UiStateStore } from "../ui-state/index.js";
 import { cloneMessage, cloneRun } from "../ui-state/index.js";
+import { projectToolResultDetails } from "../ui-state/tool-result-details.js";
 import { projectToolUiOutcome } from "../ui-state/tool-ui-outcome.js";
 import { noticeFromCompactResult } from "./prompt-context.js";
 import {
@@ -195,6 +196,9 @@ function appendToolResult(input: {
   readonly message: UiMessage;
   readonly result: ToolResultPayload;
 }): UiMessage {
+  const call = input.message.parts.find(
+    (part) => part.type === "tool-call" && part.call.id === input.callId,
+  );
   const outcome = projectToolUiOutcome({
     error: input.result.error?.message,
     metadata: input.result.metadata,
@@ -226,6 +230,12 @@ function appendToolResult(input: {
           callId: input.callId,
           error: outcome.error,
           output: input.result.output ?? "",
+          outputAvailable: input.result.output !== undefined,
+          details: projectToolResultDetails(
+            call?.type === "tool-call" ? call.call.name : undefined,
+            input.result.metadata,
+            input.result.status,
+          ),
           execution: projectToolExecution(input.result.execution),
         },
       },

@@ -1074,7 +1074,11 @@ describe("lifecycle tool scheduler integration", () => {
               status: "completed",
               input: { path },
               output: "new contents",
-              metadata: { mtimeMs: 456, internalSecret: "new-storage-only" },
+              metadata: {
+                mtimeMs: 456,
+                internalSecret: "new-storage-only",
+                uiToolSource: "builtin",
+              },
             },
           })),
         );

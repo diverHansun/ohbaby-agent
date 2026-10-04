@@ -98,8 +98,8 @@ export function createWriteTool(): Tool {
               WRITE_MAX_BYTES,
             );
             context.signal.throwIfAborted();
-            if (dryRun) {
-              let preview;
+            let preview;
+            {
               if (existing && lockedExistingPath) {
                 if (
                   existing.sizeBytes + Buffer.byteLength(content) >
@@ -121,7 +121,7 @@ export function createWriteTool(): Tool {
                     else
                       preview = boundedDiff(
                         decodeUtf8(oldBytes).replace(/^\uFEFF/u, ""),
-                        content,
+                        contentToWrite.replace(/^\uFEFF/u, ""),
                       );
                   } catch (error) {
                     context.signal.throwIfAborted();
@@ -132,7 +132,14 @@ export function createWriteTool(): Tool {
                     );
                   }
                 }
-              } else preview = boundedDiff("", content);
+              } else
+                preview = boundedDiff(
+                  "",
+                  contentToWrite.replace(/^\uFEFF/u, ""),
+                );
+            }
+            context.signal.throwIfAborted();
+            if (dryRun) {
               const diff = diffPreviewMessage(preview);
               const bytes = Buffer.byteLength(contentToWrite, "utf8");
 
@@ -173,6 +180,7 @@ export function createWriteTool(): Tool {
               metadata: {
                 bytes,
                 created: !existed,
+                ...preview,
                 encoding: "utf8",
                 lineEnding: detectLineEnding(content),
                 mtimeMs: written.mtimeMs,
