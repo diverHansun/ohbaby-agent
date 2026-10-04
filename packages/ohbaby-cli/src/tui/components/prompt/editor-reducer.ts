@@ -1,3 +1,5 @@
+import stringWidth from "string-width";
+
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 export interface EditorState {
@@ -6,6 +8,8 @@ export interface EditorState {
   readonly history: readonly string[];
   readonly historyIndex: number;
   readonly lines: readonly string[];
+  /** Desired terminal cell column across consecutive vertical moves. */
+  readonly preferredColumn?: number;
 }
 
 export interface EditorCursor {
@@ -23,6 +27,8 @@ export type EditorAction =
   | { readonly type: "move-home" }
   | { readonly type: "move-left" }
   | { readonly type: "move-right" }
+  | { readonly type: "move-up" }
+  | { readonly type: "move-down" }
   | { readonly type: "newline" }
   | { readonly type: "submit" };
 
@@ -60,6 +66,10 @@ export function applyEditorAction(
   action: EditorAction,
 ): EditorReducerResult {
   state = withCursor(state, state.cursor);
+  if (action.type !== "move-up" && action.type !== "move-down") {
+    const { preferredColumn: _preferredColumn, ...reset } = state;
+    state = reset;
+  }
   switch (action.type) {
     case "insert":
       return { state: insertText(state, action.text) };
@@ -73,6 +83,10 @@ export function applyEditorAction(
       return { state: moveLeft(state) };
     case "move-right":
       return { state: moveRight(state) };
+    case "move-up":
+      return { state: moveVertically(state, -1) };
+    case "move-down":
+      return { state: moveVertically(state, 1) };
     case "move-home":
       return { state: withCursor(state, { col: 0, row: state.cursor.row }) };
     case "move-end":
@@ -179,6 +193,33 @@ function moveRight(state: EditorState): EditorState {
     return state;
   }
   return withCursor(state, { col: 0, row: state.cursor.row + 1 });
+}
+
+/** Keep a cell column, not a UTF-16 offset; never split a wide grapheme/tab. */
+function moveVertically(state: EditorState, delta: -1 | 1): EditorState {
+  const row = state.cursor.row + delta;
+  if (row < 0 || row >= state.lines.length) return state;
+  const preferredColumn =
+    state.preferredColumn ??
+    cellColumn(lineAt(state, state.cursor.row).slice(0, state.cursor.col));
+  const target = lineAt(state, row);
+  let col = 0;
+  let cells = 0;
+  for (const { segment, index } of GRAPHEMES.segment(target)) {
+    const width = segment === "\t" ? 4 - (cells % 4) : stringWidth(segment);
+    if (cells + width > preferredColumn) break;
+    cells += width;
+    col = index + segment.length;
+  }
+  return { ...withCursor(state, { col, row }), preferredColumn };
+}
+
+function cellColumn(text: string): number {
+  let cells = 0;
+  for (const { segment } of GRAPHEMES.segment(text)) {
+    cells += segment === "\t" ? 4 - (cells % 4) : stringWidth(segment);
+  }
+  return cells;
 }
 
 function historyUp(state: EditorState): EditorState {

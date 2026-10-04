@@ -72,7 +72,8 @@ describe("createTheme", () => {
     expect(theme.status.error).toBe("red");
     expect(theme.editing).toBe("cyan");
     expect(theme.border).toBe("gray");
-    expect(theme.message.userBlockBg).toBe("black");
+    // A 16-color black/white fill reads as a hard bar; keep only the gutter.
+    expect(theme.message.userBlockBg).toBeUndefined();
     expect(theme.message.userGutter).toBe("gray");
     expect(theme.tool.name).toBe("yellow");
     expect(theme.tool.arg).toBe("white");

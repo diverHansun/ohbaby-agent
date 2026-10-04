@@ -55,8 +55,14 @@ function VisibleWorkingPhrase({
   );
   return (
     <Box>
-      <ShimmerText text={text} />
-      {duration === undefined ? null : <Text dimColor> · {duration}</Text>}
+      <Box flexShrink={1}>
+        <ShimmerText text={text} />
+      </Box>
+      {duration === undefined ? null : (
+        <Box flexShrink={0}>
+          <Text dimColor> · {duration}</Text>
+        </Box>
+      )}
     </Box>
   );
 }

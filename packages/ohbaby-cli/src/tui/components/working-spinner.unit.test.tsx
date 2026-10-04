@@ -1,4 +1,6 @@
 import type { ReactElement } from "react";
+import { Box } from "ink";
+import stringWidth from "string-width";
 import {
   DurationDiagnosticContext,
   DurationSampleContext,
@@ -9,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TuiRuntimeStatus } from "../store/snapshot.js";
 import { WorkingSpinner } from "./working-spinner.js";
 import { WORKING_PHRASES } from "./working-phrases.js";
+import { SHIMMER_INTERVAL_MS } from "./shimmer-text.js";
 
 const previousNoAnimation = process.env.OHBABY_TUI_NO_ANIM;
 const previousActEnvironment = (
@@ -135,6 +138,37 @@ describe("WorkingSpinner", () => {
   });
 });
 
+it.each([20, 40])(
+  "keeps long phrases and their timer on one row at %i columns",
+  (columns) => {
+    const sample = { serverNow: 2000, receivedAt: performance.now() };
+    let app!: ReturnType<typeof render>;
+    act(() => {
+      app = render(
+        <Box width={columns}>
+          <DurationSampleContext.Provider value={sample}>
+            <WorkingSpinner
+              runtime={{
+                kind: "running",
+                runId: "run_1",
+                title: WORKING_PHRASES[0],
+              }}
+              modelActivity={request}
+            />
+          </DurationSampleContext.Provider>
+        </Box>,
+      );
+    });
+    const frame = app.lastFrame() ?? "";
+    expect(frame.split("\n")).toHaveLength(1);
+    expect(frame).toContain(" · 1s");
+    expect(stringWidth(frame)).toBeLessThanOrEqual(columns);
+    act(() => {
+      app.unmount();
+    });
+  },
+);
+
 it("hides the heartbeat during startup and after first body text", () => {
   let app!: ReturnType<typeof render>;
   act(() => {
@@ -241,7 +275,7 @@ it("runs one animation timer and stops animation and duration timers when hidden
     app = render(view(false));
   });
   expect(interval.mock.calls.map((call) => call[1]).sort()).toEqual(
-    [1000, 150].sort(),
+    [1000, SHIMMER_INTERVAL_MS].sort(),
   );
   act(() => {
     vi.advanceTimersByTime(100);

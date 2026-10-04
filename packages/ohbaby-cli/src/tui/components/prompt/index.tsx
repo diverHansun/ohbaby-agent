@@ -27,6 +27,7 @@ import { useTheme } from "../../theme/index.js";
 import { Completion } from "./completion.js";
 import { createInputStream } from "./input-stream.js";
 import { editorViewport } from "./editor-viewport.js";
+import { editorNavigation } from "./editor-navigation.js";
 import { formatFooterRows, sameFooterModel } from "./footer.js";
 import {
   applyEditorAction,
@@ -425,7 +426,8 @@ export function Prompt({
   useInput(
     (value, key) => {
       // Reserved for the Tasks viewport; plain PageUp still loads history.
-      if (key.meta && (key.pageUp || key.pageDown)) return;
+      if ((key.meta || key.shift) && (key.pageUp || key.pageDown)) return;
+      if (key.shift && (key.home || key.end)) return;
       if (queuedMutationPendingRef.current) return;
       if (value.startsWith("\n") && inputStream.current.pendingCR()) {
         const continuation = inputStream.current.push(value);
@@ -801,16 +803,14 @@ export function Prompt({
       }
 
       if (currentQueuedEdit?.retainedSendText !== undefined) {
-        const navigation = key.leftArrow
-          ? "move-left"
-          : key.rightArrow
-            ? "move-right"
-            : key.home
-              ? "move-home"
-              : key.end
-                ? "move-end"
-                : null;
-        if (navigation) applyEditor({ type: navigation });
+        const navigation = editorNavigation(
+          editorRef.current,
+          key,
+          value,
+          false,
+        );
+        if (navigation && navigation.type !== "load-history")
+          applyEditor(navigation);
         return;
       }
       if (currentQueuedEdit) renewQueuedEditLease();
@@ -852,18 +852,10 @@ export function Prompt({
         }
       }
 
-      if (key.pageUp) {
-        onLoadHistory?.();
-        return;
-      }
-
-      if (key.upArrow) {
-        applyEditor({ type: "history-up" });
-        return;
-      }
-
-      if (key.downArrow) {
-        applyEditor({ type: "history-down" });
+      const navigation = editorNavigation(editorRef.current, key, value);
+      if (navigation) {
+        if (navigation.type === "load-history") onLoadHistory?.();
+        else applyEditor(navigation);
         return;
       }
 
@@ -885,26 +877,6 @@ export function Prompt({
       if (isDeleteControlInput(value, key)) {
         applyEditor({ type: "backspace" });
         selectIndex(0);
-        return;
-      }
-
-      if (key.leftArrow) {
-        applyEditor({ type: "move-left" });
-        return;
-      }
-
-      if (key.rightArrow) {
-        applyEditor({ type: "move-right" });
-        return;
-      }
-
-      if (key.home) {
-        applyEditor({ type: "move-home" });
-        return;
-      }
-
-      if (key.end) {
-        applyEditor({ type: "move-end" });
         return;
       }
 

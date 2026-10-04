@@ -2,8 +2,12 @@ import { render } from "ink-testing-library";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  PULSE_FRAMES,
+  SHIMMER_GAP,
+  SHIMMER_INTERVAL_MS,
   ShimmerText,
-  computeShimmerSegments,
+  computeShimmerSpans,
+  mixHex,
   shimmerCycleLength,
 } from "./shimmer-text.js";
 
@@ -31,29 +35,53 @@ afterEach(() => {
   }
 });
 
-describe("computeShimmerSegments", () => {
+describe("computeShimmerSpans", () => {
   it("reassembles the original text at every tick", () => {
-    const text = "abcdef";
+    const text = "abcdefghijklmnop";
     for (let tick = 0; tick < shimmerCycleLength(text); tick += 1) {
-      const { before, shimmer, after } = computeShimmerSegments(text, tick);
-      expect(before + shimmer + after).toBe(text);
+      const spans = computeShimmerSpans(text, tick);
+      expect(spans.map((span) => span.text).join("")).toBe(text);
+      for (const span of spans) {
+        expect(span.intensity).toBeGreaterThanOrEqual(0);
+        expect(span.intensity).toBeLessThanOrEqual(1);
+      }
     }
   });
 
-  it("advances the highlighted window as the tick increases", () => {
-    const text = "abcdef";
-    const first = computeShimmerSegments(text, 1);
-    const second = computeShimmerSegments(text, 3);
-    expect(first.before.length).toBeLessThan(second.before.length);
-    expect(first.shimmer).not.toBe("");
-    expect(second.shimmer).not.toBe("");
+  it("sweeps a soft highlight left to right with graded edges", () => {
+    const text = "abcdefghijklmnopqrstuvwxyz";
+    const peakAt = (tick: number): number => {
+      let offset = 0;
+      let best = { offset: -1, intensity: -1 };
+      for (const span of computeShimmerSpans(text, tick)) {
+        if (span.intensity > best.intensity)
+          best = { offset, intensity: span.intensity };
+        offset += span.text.length;
+      }
+      return best.offset;
+    };
+    expect(peakAt(4)).toBeLessThan(peakAt(8));
+    const levels = new Set(
+      computeShimmerSpans(text, 8).map((span) => span.intensity),
+    );
+    expect(levels.size).toBeGreaterThanOrEqual(3);
   });
 
-  it("leaves no highlight during the idle gap past the end", () => {
+  it("rests with no highlight during the idle gap", () => {
     const text = "abc";
-    const past = computeShimmerSegments(text, text.length + 2);
-    expect(past.shimmer).toBe("");
-    expect(past.before).toBe(text);
+    const cycle = shimmerCycleLength(text);
+    for (let tick = cycle - SHIMMER_GAP; tick < cycle; tick += 1) {
+      expect(
+        computeShimmerSpans(text, tick).every((span) => span.intensity === 0),
+      ).toBe(true);
+    }
+  });
+
+  it("mixes hex colours and declines named colours", () => {
+    expect(mixHex("#000000", "#ffffff", 0.5)).toBe("#808080");
+    expect(mixHex("#000000", "#ffffff", 1)).toBe("#ffffff");
+    expect(mixHex("magenta", "#ffffff", 0.5)).toBeUndefined();
+    expect(PULSE_FRAMES.length).toBeGreaterThan(1);
   });
 });
 
@@ -83,16 +111,22 @@ describe("ShimmerText", () => {
       app = render(<ShimmerText text="Igniting the cosmo" />);
     });
 
-    expect(setIntervalSpy).toHaveBeenCalled();
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    expect(app?.lastFrame()).toContain(PULSE_FRAMES[0]);
     act(() => {
-      vi.advanceTimersByTime(80);
+      vi.advanceTimersByTime(SHIMMER_INTERVAL_MS);
     });
+    expect(app?.lastFrame()).toContain(PULSE_FRAMES[1]);
     // Text content is stable across ticks; only the highlight colour moves.
     expect(app?.lastFrame()).toContain("Igniting the cosmo");
-
+    act(() => {
+      app?.rerender(<ShimmerText text="A different, longer waiting phrase" />);
+    });
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
     act(() => {
       app?.unmount();
     });
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
@@ -106,10 +140,11 @@ it("keeps emoji graphemes intact at every colored segment boundary", () => {
     boundaries.add(length);
   }
   for (let tick = 0; tick < shimmerCycleLength(text); tick++) {
-    const { before, shimmer, after } = computeShimmerSegments(text, tick);
-    expect(before + shimmer + after).toBe(text);
-    expect(boundaries.has(before.length)).toBe(true);
-    expect(boundaries.has(before.length + shimmer.length)).toBe(true);
+    let offset = 0;
+    for (const span of computeShimmerSpans(text, tick)) {
+      expect(boundaries.has(offset)).toBe(true);
+      offset += span.text.length;
+    }
+    expect(offset).toBe(text.length);
   }
-  expect(shimmerCycleLength(text)).toBe(graphemes.length + 8);
 });

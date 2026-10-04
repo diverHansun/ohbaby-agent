@@ -17,7 +17,8 @@ export interface Theme {
     readonly remove: string;
   };
   readonly message: {
-    readonly userBlockBg: string;
+    /** Undefined: no fill, only the gutter (unknown or low-color terminal). */
+    readonly userBlockBg: string | undefined;
     readonly userGutter: string;
   };
   readonly mode: ColorMode;
@@ -76,7 +77,19 @@ export const BRAILLE_SPINNER_FRAMES = [
   "⠏",
 ] as const;
 
-export function createTheme(mode: ColorMode, colorLevel = 3): Theme {
+export interface ThemeSurfaceOptions {
+  /**
+   * User message fill: a color derived from the real terminal background,
+   * `null` for no fill, or undefined for the palette default.
+   */
+  readonly userBlockBg?: string | null;
+}
+
+export function createTheme(
+  mode: ColorMode,
+  colorLevel = 3,
+  surface: ThemeSurfaceOptions = {},
+): Theme {
   const palette = mode === "light" ? lightPalette : darkPalette;
   const color = createColorResolver(palette, colorLevel);
 
@@ -94,7 +107,12 @@ export function createTheme(mode: ColorMode, colorLevel = 3): Theme {
       remove: color("red", "red"),
     },
     message: {
-      userBlockBg: color("userBlockBg", mode === "dark" ? "black" : "white"),
+      // 16-color "black"/"white" fills look like a hard black/white bar on
+      // most themes; a fill is only used when it can stay low-contrast.
+      userBlockBg:
+        colorLevel < 2 || surface.userBlockBg === null
+          ? undefined
+          : (surface.userBlockBg ?? palette.userBlockBg),
       userGutter: color("textMuted", "gray"),
     },
     mode,
