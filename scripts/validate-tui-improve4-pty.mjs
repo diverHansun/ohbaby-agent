@@ -100,6 +100,15 @@ for (const filename of (await readdir(directory)).filter((name) =>
       get("latest-before-wheel").lines.slice(0, 2),
       `${capture.case}: mouse wheel did not move the document`,
     );
+    assert.deepEqual(
+      get("wheel-burst").lines,
+      get("wheel-stepped").lines,
+      `${capture.case}: batched wheel reports lost scroll distance`,
+    );
+    assert(
+      !text("wheel-follow-restored").includes("History ·"),
+      `${capture.case}: scrolling to the bottom did not restore follow mode`,
+    );
     for (const name of ["wheel-stream-65", "wheel-stream-70"])
       assert.deepEqual(
         get(name).lines,

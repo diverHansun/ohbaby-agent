@@ -8,8 +8,10 @@ import {
   type DOMElement,
 } from "ink";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactElement,
@@ -52,11 +54,18 @@ export function FullscreenShell({
   const viewport = useBoxMetrics(viewportRef);
   const document = useBoxMetrics(documentRef);
   // null means follow the document end. A number is a pinned document row.
-  const [position, setPosition] = useState<number | null>(null);
+  const [position, setRenderedPosition] = useState<number | null>(null);
+  // A terminal chunk can contain many wheel/key reports before React renders.
+  // Advance the input cursor immediately so each report builds on the last.
+  const positionRef = useRef<number | null>(null);
+  const setPosition = useCallback((next: number | null): void => {
+    positionRef.current = next;
+    setRenderedPosition(next);
+  }, []);
   useEffect(() => {
     anchor.current = null;
     setPosition(null);
-  }, [identity]);
+  }, [identity, setPosition]);
   const end = Math.max(0, document.height - viewport.height);
   const offset = position === null ? end : Math.min(position, end);
   const selectPosition = (next: number): void => {
@@ -75,20 +84,22 @@ export function FullscreenShell({
     setPosition(next >= end ? null : next);
   };
   const scroll = (delta: number): void => {
-    selectPosition(Math.max(0, Math.min(end, offset + delta)));
+    selectPosition(
+      Math.max(0, Math.min(end, (positionRef.current ?? end) + delta)),
+    );
   };
   // A document row alone is not an identity: prepending history and reflowing
   // earlier messages must keep the reader attached to the same message.
   useLayoutEffect(() => {
     const target = anchor.current;
     const node = target && anchors.current.get(target.id);
-    if (position === null || !target || !node) return;
+    if (positionRef.current === null || !target || !node) return;
     const box = measureElement(node);
     const next = Math.min(
       end,
       box.y + Math.min(target.row, Math.max(0, box.height - 1)),
     );
-    if (next !== position) setPosition(next);
+    if (next !== positionRef.current) setPosition(next);
   });
   useInput(
     (value, key) => {
@@ -105,8 +116,13 @@ export function FullscreenShell({
     { isActive: scrollEnabled },
   );
   useTranscriptMouse(({ delta, y }) => {
-    if (scrollEnabled && y < viewport.height) scroll(delta * 3);
+    if (scrollEnabled && (!priorityDock || y < viewport.height))
+      scroll(delta * 3);
   });
+  const transcriptWindow = useMemo(
+    () => ({ top: offset, height: viewport.height }),
+    [offset, viewport.height],
+  );
   const height = Math.max(1, layout.rows - 1);
   const minimumDocumentRows = priorityDock
     ? 1
@@ -147,9 +163,7 @@ export function FullscreenShell({
           >
             <Box ref={documentRef} flexDirection="column" flexShrink={0}>
               <TranscriptAnchorContext.Provider value={anchors.current}>
-                <TranscriptWindowContext.Provider
-                  value={{ top: offset, height: viewport.height }}
-                >
+                <TranscriptWindowContext.Provider value={transcriptWindow}>
                   <TranscriptDocumentContext.Provider value={true}>
                     {output}
                   </TranscriptDocumentContext.Provider>
