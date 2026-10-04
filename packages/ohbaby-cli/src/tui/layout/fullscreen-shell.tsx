@@ -117,7 +117,7 @@ export function FullscreenShell({
   );
   useTranscriptMouse(({ delta, y }) => {
     if (scrollEnabled && (!priorityDock || y < viewport.height))
-      scroll(delta * 3);
+      scroll(delta * 2);
   });
   const transcriptWindow = useMemo(
     () => ({ top: offset, height: viewport.height }),

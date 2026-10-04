@@ -77,6 +77,23 @@ describe("computeShimmerSpans", () => {
     }
   });
 
+  it("advances 25 graphemes per second and retains a 600ms rest", () => {
+    expect(SHIMMER_INTERVAL_MS).toBe(50);
+    expect(SHIMMER_GAP * SHIMMER_INTERVAL_MS).toBe(600);
+    const text = "x".repeat(60);
+    const peaks = (elapsedMs: number): number[] => {
+      const intensities = computeShimmerSpans(
+        text,
+        elapsedMs / SHIMMER_INTERVAL_MS,
+      ).flatMap((span) => Array.from(span.text, () => span.intensity));
+      const peak = Math.max(...intensities);
+      return intensities.flatMap((intensity, index) =>
+        intensity === peak ? [index] : [],
+      );
+    };
+    expect(peaks(1600)).toEqual(peaks(600).map((index) => index + 25));
+  });
+
   it("mixes hex colours and declines named colours", () => {
     expect(mixHex("#000000", "#ffffff", 0.5)).toBe("#808080");
     expect(mixHex("#000000", "#ffffff", 1)).toBe("#ffffff");
@@ -102,8 +119,9 @@ describe("ShimmerText", () => {
     });
   });
 
-  it("starts a sweep timer when animation is enabled", () => {
+  it("uses one 50ms clock with a slower 200ms glyph and a 2s pulse cycle", () => {
     vi.useFakeTimers();
+    process.env.OHBABY_TUI_NO_ANIM = "0";
     const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
     let app: ReturnType<typeof render> | undefined;
 
@@ -112,11 +130,26 @@ describe("ShimmerText", () => {
     });
 
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 50);
     expect(app?.lastFrame()).toContain(PULSE_FRAMES[0]);
     act(() => {
-      vi.advanceTimersByTime(SHIMMER_INTERVAL_MS);
+      vi.advanceTimersByTime(199);
+    });
+    expect(app?.lastFrame()).toContain(PULSE_FRAMES[0]);
+    act(() => {
+      vi.advanceTimersByTime(1);
     });
     expect(app?.lastFrame()).toContain(PULSE_FRAMES[1]);
+    for (let frame = 2; frame < 10; frame++) {
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(app?.lastFrame()).toContain(PULSE_FRAMES[frame]);
+    }
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(app?.lastFrame()).toContain(PULSE_FRAMES[0]);
     // Text content is stable across ticks; only the highlight colour moves.
     expect(app?.lastFrame()).toContain("Igniting the cosmo");
     act(() => {

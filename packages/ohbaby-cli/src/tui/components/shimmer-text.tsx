@@ -4,17 +4,20 @@ import type { ReactElement } from "react";
 import { useTheme } from "../theme/index.js";
 
 /**
- * One timer drives both the pulse glyph and the sweep: 10 fps keeps the
- * indicator alive without exceeding the output budget of one changed row.
+ * One 20 fps clock drives the sweep while the pulse glyph changes only every
+ * 200ms. Both animations stay within the output budget of one changed row.
  */
-export const SHIMMER_INTERVAL_MS = 100;
+export const SHIMMER_INTERVAL_MS = 50;
+const PULSE_INTERVAL_MS = 200;
+const SHIMMER_GRAPHEMES_PER_SECOND = 25;
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-/** Idle ticks between sweeps, so the highlight rests off the end before looping. */
-export const SHIMMER_GAP = 6;
+/** Keep a 600ms rest off the end regardless of the animation refresh rate. */
+export const SHIMMER_GAP = 600 / SHIMMER_INTERVAL_MS;
 /** Graphemes on each side of the sweep head that still receive some light. */
 export const SHIMMER_HALF_WIDTH = 6;
 /** Graphemes the sweep head advances per tick. */
-export const SHIMMER_STEP = 2;
+export const SHIMMER_STEP =
+  (SHIMMER_GRAPHEMES_PER_SECOND * SHIMMER_INTERVAL_MS) / 1000;
 /** Intensity levels; adjacent graphemes at one level share a styled span. */
 const LEVELS = 5;
 /** Pulse like Claude Code's working indicator rather than a tool spinner. */
@@ -134,7 +137,10 @@ export function ShimmerText({ text }: ShimmerTextProps): ReactElement {
       ),
     [base, highlight],
   );
-  const glyph = animate ? PULSE_FRAMES[tick % PULSE_FRAMES.length] : "✻";
+  const pulseFrame = Math.floor(
+    (tick * SHIMMER_INTERVAL_MS) / PULSE_INTERVAL_MS,
+  );
+  const glyph = animate ? PULSE_FRAMES[pulseFrame % PULSE_FRAMES.length] : "✻";
   const prefix = <Text color={theme.status.running}>{glyph} </Text>;
 
   if (!animate) {

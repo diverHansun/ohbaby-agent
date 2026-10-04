@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { Terminal } from "@xterm/headless";
+import { Markdown } from "@earendil-works/pi-tui";
 import { Box, render, Text } from "ink";
 import type {
   CoreAPI,
@@ -363,6 +364,37 @@ function historyItems(
 }
 
 describe("fullscreen review probes", () => {
+  it("reuses unchanged long message formatting when scrolling and refreshes it for text and width changes", async () => {
+    const format = vi.spyOn(Markdown.prototype, "render");
+    let text = Array.from(
+      { length: 120 },
+      (_, index) => `LINE-${String(index).padStart(3, "0")} **中文正文**`,
+    ).join("\n");
+    const h = await harness({ text });
+    try {
+      const latest = screen(h.term);
+      format.mockClear();
+      for (let turn = 0; turn < 5; turn++) await h.press("\u001b[<64;3;2M");
+      expect(screen(h.term)).not.toEqual(latest);
+      expect(format).not.toHaveBeenCalled();
+      const reading = screen(h.term);
+      text += "\nNEW-CONTENT";
+      await h.update({ text });
+      expect(format).toHaveBeenCalled();
+      expect(screen(h.term)).toEqual(reading);
+      await h.press(SHIFT_END);
+      expect(screen(h.term).join("\n")).toContain("NEW-CONTENT");
+      format.mockClear();
+      await h.resize(42, 20);
+      expect(format).toHaveBeenCalled();
+      expect(screen(h.term).join("\n")).toContain("NEW-CONTENT");
+    } finally {
+      await h.close();
+      h.term.dispose();
+      format.mockRestore();
+    }
+  });
+
   it("preserves the read message when older history is prepended", async () => {
     const history = historyItems(30);
     const h = await harness({ text: "LATEST", history });

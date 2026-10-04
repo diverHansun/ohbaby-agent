@@ -30,7 +30,9 @@ export function renderTerminalUi(options: TerminalUiOptions): Instance {
       exitOnCtrlC: false,
       // Send each synchronized frame update as one write to avoid tearing in
       // terminals without DEC mode 2026.
-      ...(fullscreen ? { stdout: createFrameCoalescingStdout(stdout) } : {}),
+      ...(fullscreen
+        ? { maxFps: 60, stdout: createFrameCoalescingStdout(stdout) }
+        : {}),
     },
   );
   if (!fullscreen) return instance;

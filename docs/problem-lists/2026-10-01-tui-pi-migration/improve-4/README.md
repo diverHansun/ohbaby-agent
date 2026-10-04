@@ -10,4 +10,6 @@
 
 再次反馈后的根因复现、独立输出 viewport/dock、应用内滚动、退出回显和改动整理见 [独立输出区收尾](07-independent-transcript-viewport.md)。06 文档中的 Markdown 分段和 ANSI 改写是已被替换的中间方案。
 
+闪屏和连续输入修复后，进一步的构建去重、滚动排版复用及等待动画节奏调整见 [性能与节奏收尾](08-build-scroll-animation-polish.md)。
+
 实际 GUI 滚动体验与进程自动化分开验收；电脑控制无法访问系统 Terminal，不能以 PTY 结果替代鼠标滚轮、触控板和中文 IME 验证。

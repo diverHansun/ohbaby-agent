@@ -15,6 +15,7 @@ import {
   memo,
   useCallback,
   useContext,
+  useMemo,
   useRef,
   useState,
   useLayoutEffect,
@@ -111,6 +112,27 @@ export const MessageRow = memo(function MessageRow({
     },
     [anchors, anchorId, message.id],
   );
+  const partWidth = Math.max(
+    1,
+    contentWidth - (message.role === "user" ? 2 : 0),
+  );
+  // Scrolling changes the viewport, not the message. Reuse both its formatted
+  // parts and React children until the content or presentation changes.
+  const content = useMemo(
+    () => (
+      <MessageParts
+        message={message}
+        parts={renderMessageParts(
+          message,
+          partWidth,
+          theme,
+          reasoning,
+          toolsExpanded,
+        )}
+      />
+    ),
+    [message, partWidth, theme, reasoning, toolsExpanded],
+  );
   if (hidden && measured)
     return (
       <Box
@@ -121,21 +143,9 @@ export const MessageRow = memo(function MessageRow({
       />
     );
 
-  const partWidth = Math.max(
-    1,
-    contentWidth - (message.role === "user" ? 2 : 0),
-  );
-  const renderedParts = renderMessageParts(
-    message,
-    partWidth,
-    theme,
-    reasoning,
-    toolsExpanded,
-  );
-
   return (
     <Box ref={register} flexDirection="column" marginBottom={bottomMargin}>
-      <MessageParts message={message} parts={renderedParts} />
+      {content}
     </Box>
   );
 });

@@ -115,12 +115,23 @@ describe("working indicator real Ink stdout", () => {
         const contentWrites = writes.filter(
           (chunk) => chunk !== "\u001b[?2026h" && chunk !== "\u001b[?2026l",
         );
-        expect(contentWrites.length).toBeLessThanOrEqual(noAnimation ? 2 : 12);
-        expect(writes.length).toBeLessThanOrEqual(noAnimation ? 6 : 36);
+        // 20 animation frames, plus one elapsed-time update and one boundary
+        // frame. A faster clock must not add another independent pulse timer.
+        const maxContentUpdates = noAnimation ? 2 : 22;
+        expect(contentWrites.length).toBeLessThanOrEqual(maxContentUpdates);
+        expect(writes.length).toBeLessThanOrEqual(maxContentUpdates * 3);
+        // Budget the actual colored row, not just the number of callbacks:
+        // no patch exceeds 512 bytes and this fixture stays under 8 KiB/s.
+        const largestPatchBytes = Math.max(
+          ...contentWrites.map((chunk) => Buffer.byteLength(chunk)),
+        );
+        expect(largestPatchBytes).toBeLessThanOrEqual(512);
+        expect(bytes).toBeLessThanOrEqual(noAnimation ? 256 : 8 * 1024);
         // Enabled shimmer must actually update; a colorless no-op is not evidence.
         if (!noAnimation) expect(contentWrites.length).toBeGreaterThan(2);
         expect(bytes).toBeGreaterThan(0);
         expect(writes.join("")).not.toContain("\u001b[3J");
+        expect(writes.join("")).not.toContain("\u001b[2J");
 
         app.rerender(view("hidden"));
         await wait(200);
@@ -150,6 +161,7 @@ describe("working indicator real Ink stdout", () => {
               writes: writes.length,
               contentUpdates: contentWrites.length,
               bytes,
+              largestPatchBytes,
               hiddenWrites: 0,
               endedWrites: 0,
               postUnmountWrites: 0,

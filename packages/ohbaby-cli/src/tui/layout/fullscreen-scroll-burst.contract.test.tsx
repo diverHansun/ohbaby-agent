@@ -133,7 +133,7 @@ describe("fullscreen scrolling input bursts", () => {
       const before = h.firstRow();
       h.input.push("\u001b[<64;3;2M".repeat(5));
       await h.drain();
-      expect(h.firstRow()).toBe(before - 15);
+      expect(h.firstRow()).toBe(before - 10);
     } finally {
       await h.close();
     }
@@ -159,7 +159,7 @@ describe("fullscreen scrolling input bursts", () => {
       const before = h.firstRow();
       for (let index = 0; index < 5; index++) h.input.push("\u001b[<64;3;2M");
       await h.drain();
-      expect(h.firstRow()).toBe(before - 15);
+      expect(h.firstRow()).toBe(before - 10);
     } finally {
       await h.close();
     }
@@ -171,7 +171,7 @@ describe("fullscreen scrolling input bursts", () => {
       const before = h.firstRow();
       h.input.push("\u001b[<64;3;2M".repeat(3) + "\u001b[<65;3;2M".repeat(2));
       await h.drain();
-      expect(h.firstRow()).toBe(before - 3);
+      expect(h.firstRow()).toBe(before - 2);
     } finally {
       await h.close();
     }
@@ -183,7 +183,7 @@ describe("fullscreen scrolling input bursts", () => {
       const before = h.firstRow();
       h.input.push("\u001b[<64;3;2M".repeat(5));
       await h.drain();
-      const reading = before - 15;
+      const reading = before - 10;
       expect(h.firstRow()).toBe(reading);
       for (const rows of [123, 126, 130]) {
         h.app.rerender(scene(rows));
@@ -207,7 +207,7 @@ describe("fullscreen scrolling input bursts", () => {
       const before = h.firstRow();
       h.input.push("\u001b[<64;3;19M");
       await h.drain();
-      expect(h.firstRow()).toBe(before - 3);
+      expect(h.firstRow()).toBe(before - 2);
     } finally {
       await h.close();
     }
