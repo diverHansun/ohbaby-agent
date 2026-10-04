@@ -35,7 +35,7 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_STARTUP_INTENT: DaemonStartupIntent = {
   startupSessionMode: { type: "fresh" },
 };
-const SSE_RECONNECT_DELAY_MS = 50;
+const SSE_RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
 export interface RemoteDaemonClientOptions {
   readonly authToken?: string;
@@ -180,8 +180,10 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   private sessionRecoveryVersion = 0;
   private subagentWatchSequence = 0;
   private permissionConnectionLive = false;
+  private permissionConnectionHealthySince?: number;
   private abortController: AbortController | undefined;
   private initializePromise: Promise<void> | undefined;
+  private initializeController: AbortController | undefined;
   private lastEventId: string | undefined;
   private sseLoop: Promise<void> | undefined;
 
@@ -217,11 +219,16 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     };
   }
 
-  getSessionIndex(): ReturnType<UiBackendClient["getSessionIndex"]> {
-    return this.rpc("getSessionIndex", []);
+  getSessionIndex(options?: {
+    readonly signal?: AbortSignal;
+  }): ReturnType<UiBackendClient["getSessionIndex"]> {
+    return this.rpc("getSessionIndex", [], options);
   }
-  async getSelectedSessionId(): Promise<string | null> {
+  async getSelectedSessionId(options?: {
+    readonly signal?: AbortSignal;
+  }): Promise<string | null> {
     await this.ensureInitialized();
+    options?.signal?.throwIfAborted();
     return this.permissionBinding?.rootSessionId ?? null;
   }
   async createSession(
@@ -586,6 +593,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
 
   async dispose(): Promise<void> {
     this.closeAdmission();
+    this.initializeController?.abort();
     this.handlers.clear();
     this.permissionHandlers.clear();
     const pendingLoop = this.sseLoop;
@@ -654,21 +662,39 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     if (this.startupIntent === undefined) {
       return;
     }
-    this.initializePromise ??= this.rpc<
-      | (UiPermissionBinding & {
-          runtimeEpoch?: string;
-          sessionRecoveryVersion?: number;
+    if (!this.initializePromise) {
+      const controller = new AbortController();
+      this.initializeController = controller;
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, 10_000);
+      this.initializePromise = this.rpc<
+        | (UiPermissionBinding & {
+            runtimeEpoch?: string;
+            sessionRecoveryVersion?: number;
+          })
+        | undefined
+      >("initializeClient", [this.startupIntent], {
+        skipInitialize: true,
+        signal: controller.signal,
+      })
+        .then((binding) => {
+          this.permissionBinding = binding;
+          this.sessionRecoveryVersion =
+            binding?.runtimeEpoch === binding?.permissionEpoch
+              ? (binding?.sessionRecoveryVersion ?? 0)
+              : 0;
         })
-      | undefined
-    >("initializeClient", [this.startupIntent], {
-      skipInitialize: true,
-    }).then((binding) => {
-      this.permissionBinding = binding;
-      this.sessionRecoveryVersion =
-        binding?.runtimeEpoch === binding?.permissionEpoch
-          ? (binding?.sessionRecoveryVersion ?? 0)
-          : 0;
-    });
+        .catch((error: unknown) => {
+          this.initializePromise = undefined;
+          throw error;
+        })
+        .finally(() => {
+          clearTimeout(timeout);
+          if (this.initializeController === controller)
+            this.initializeController = undefined;
+        });
+    }
     await this.initializePromise;
   }
 
@@ -695,31 +721,45 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
 
   private abortSseLoop(): void {
     this.permissionConnectionLive = false;
+    this.permissionConnectionHealthySince = undefined;
     this.abortController?.abort();
     this.abortController = undefined;
     this.sseLoop = undefined;
   }
 
   private async runSseReconnectLoop(signal: AbortSignal): Promise<void> {
-    await this.ensureInitialized();
+    const cancelled = (): boolean => signal.aborted;
+    let failures = 0;
     while (
       !signal.aborted &&
       (this.handlers.size > 0 || this.permissionHandlers.size > 0)
     ) {
       try {
+        await this.ensureInitialized();
+        if (cancelled()) return;
         await this.openSseConnection(signal);
-      } catch (error) {
-        if (isAbortError(error)) {
-          return;
-        }
+      } catch {
+        if (cancelled()) return;
       }
+      // A brief hello does not make repeated connection failures healthy.
+      if (
+        this.permissionConnectionHealthySince !== undefined &&
+        Date.now() - this.permissionConnectionHealthySince >= 1_000
+      )
+        failures = 0;
+      const reconnectDelay =
+        SSE_RECONNECT_DELAYS_MS[
+          Math.min(failures, SSE_RECONNECT_DELAYS_MS.length - 1)
+        ] ?? 30_000;
+      failures += 1;
       this.permissionConnectionLive = false;
+      this.permissionConnectionHealthySince = undefined;
       this.emitSessionResync(true);
       this.permissionFailure(
         new Error("Permission event connection interrupted"),
       );
       if (this.handlers.size > 0 || this.permissionHandlers.size > 0) {
-        await delay(SSE_RECONNECT_DELAY_MS, signal);
+        await delay(reconnectDelay, signal);
       }
     }
   }
@@ -802,6 +842,7 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
     const event = parseDaemonSseEvent(JSON.parse(data) as unknown);
     if (event.type === "hello") {
       this.permissionConnectionLive = true;
+      this.permissionConnectionHealthySince ??= Date.now();
       if (
         this.permissionBinding?.permissionEpoch === event.permissionEpoch &&
         event.bindingGeneration < this.permissionBinding.bindingGeneration

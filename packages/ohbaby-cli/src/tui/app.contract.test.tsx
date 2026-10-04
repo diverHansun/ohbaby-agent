@@ -686,7 +686,7 @@ describe("OhbabyTerminalApp", () => {
     await flush();
 
     expect(app.lastFrame()).toContain("Heading");
-    expect(app.lastFrame()).toContain("-------");
+    expect(app.lastFrame()).not.toContain("-------");
     expect(app.lastFrame()).toContain("- item");
     expect(app.lastFrame()).not.toContain("# Heading");
     expect(app.lastFrame()).not.toContain("**item**");
@@ -1420,7 +1420,7 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).not.toContain("tool result");
     expect(app.lastFrame()).not.toContain("result hidden");
     expect(app.lastFrame()).not.toContain("output: D:/Projects");
-    expect(app.lastFrame()).not.toContain("D:/Projects");
+    expect(app.lastFrame()).toContain("D:/Projects");
   });
 
   it("hides raw web search result bodies in tool rendering", async () => {
@@ -1522,9 +1522,8 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain(
-      "  Edit src/app.ts failed: permission denied",
-    );
+    expect(app.lastFrame()).toContain("  Edit src/app.ts");
+    expect(app.lastFrame()).toContain("failed: permission denied");
     expect(app.lastFrame()).not.toContain("  Error permission denied");
   });
 
@@ -1736,7 +1735,7 @@ describe("OhbabyTerminalApp", () => {
 
     expect(client.submitPromptAccepted).toHaveBeenCalledTimes(1);
     expect(app.lastFrame()).toContain("> second");
-    expect(app.lastFrame()).toContain("Submission outcome unknown");
+    expect(app.lastFrame()).toContain("Confirming submission…");
   });
 
   it("shows queued state for prompts submitted while a run is active", async () => {
@@ -1865,7 +1864,7 @@ describe("OhbabyTerminalApp", () => {
     await flush();
     await waitForFrame(
       app,
-      (frame) => !frame.includes("Submission outcome unknown"),
+      (frame) => !frame.includes("Confirming submission…"),
     );
     app.stdin.write("second");
     app.stdin.write("\r");
@@ -5477,7 +5476,7 @@ function createFakeClient(
     getSelectedSessionId: () => Promise.resolve(sourceState.activeSessionId),
     getSessionIndex: () =>
       Promise.resolve(
-        initialSnapshot.sessions.map(
+        sourceState.snapshot.sessions.map(
           ({ messages: _messages, ...entry }) => entry,
         ),
       ),
@@ -6923,4 +6922,171 @@ it("keeps the default in-process TUI header quiet during a healthy entry check",
     resume?.();
     await client.dispose();
   }
+});
+
+it("Ctrl+O toggles loaded tool output without history requests, preserves draft cursor and resets for a different session", async () => {
+  const initial = snapshot();
+  const toolMessage = {
+    createdAt: "2026-10-04T00:00:00Z",
+    id: "saved-tool",
+    role: "assistant" as const,
+    status: "completed" as const,
+    parts: [
+      {
+        type: "tool-call" as const,
+        call: {
+          id: "read-1",
+          name: "read",
+          input: { file_path: "saved.txt" },
+          status: "completed" as const,
+        },
+      },
+      {
+        type: "tool-result" as const,
+        result: {
+          callId: "read-1",
+          output: "SAVED-READ-BODY",
+          details: { kind: "read" as const, startLine: 1, shownLineCount: 1 },
+        },
+      },
+    ],
+  };
+  const withTool = {
+    ...initial,
+    sessions: [{ ...initial.sessions[0], messages: [toolMessage] }],
+  };
+  const client = createFakeClient(withTool);
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("Read saved.txt"));
+  expect(app.lastFrame()).not.toContain("SAVED-READ-BODY");
+  app.stdin.write("draft");
+  await flush();
+  app.stdin.write("\u001b[D");
+  await flush();
+  const getSessionHistory = client.getSessionHistory;
+  if (getSessionHistory === undefined) throw new Error("Missing history spy");
+  const historyCalls = vi.mocked(getSessionHistory).mock.calls.length;
+  app.stdin.write("\u000f");
+  await waitForFrame(app, (frame) => frame.includes("SAVED-READ-BODY"));
+  expect(vi.mocked(getSessionHistory).mock.calls).toHaveLength(historyCalls);
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+  app.stdin.write("X");
+  await flush();
+  expect(app.lastFrame()).toContain("drafXt");
+  app.stdin.write("\u000f");
+  await flush();
+  expect(app.lastFrame()).not.toContain("SAVED-READ-BODY");
+  app.stdin.write("\u000f");
+  await flush();
+  expect(app.lastFrame()).toContain("SAVED-READ-BODY");
+  client.installSourceSnapshot({
+    ...initial,
+    activeSessionId: "session_2",
+    sessions: [
+      { ...initial.sessions[0], id: "session_2", messages: [toolMessage] },
+    ],
+  });
+  await waitForFrame(
+    app,
+    (frame) =>
+      frame.includes("Read saved.txt") && !frame.includes("SAVED-READ-BODY"),
+  );
+  app.unmount();
+});
+
+it("Ctrl+O is ignored in an exclusive command panel and is never deferred", async () => {
+  const base = snapshot();
+  const message = {
+    ...base.sessions[0].messages[0],
+    parts: [
+      {
+        type: "tool-call" as const,
+        call: {
+          id: "read-panel",
+          name: "read",
+          input: { file_path: "saved.txt" },
+          status: "completed" as const,
+        },
+      },
+      {
+        type: "tool-result" as const,
+        result: { callId: "read-panel", output: "EXCLUSIVE-SAVED-READ" },
+      },
+    ],
+  };
+  const initial = {
+    ...base,
+    sessions: [{ ...base.sessions[0], messages: [message] }],
+  };
+  const client = createFakeClient(initial, displayCommandCatalog);
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) => frame.includes("Read saved.txt"));
+  app.stdin.write("/status");
+  app.stdin.write("\r");
+  await waitForFrame(app, (frame) => frame.includes("Loading..."));
+  app.stdin.write("\u000f");
+  await flush();
+  app.stdin.write("\u001b");
+  await waitForFrame(app, (frame) => !frame.includes("Loading..."));
+  expect(app.lastFrame()).not.toContain("EXCLUSIVE-SAVED-READ");
+  app.stdin.write("\u000f");
+  await waitForFrame(app, (frame) => frame.includes("EXCLUSIVE-SAVED-READ"));
+  app.unmount();
+});
+
+it("Ctrl+O before any session keeps the mode when the first session binds automatically", async () => {
+  const base = snapshot();
+  const client = createFakeClient({
+    ...base,
+    activeSessionId: null,
+    sessions: [],
+  });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await flush();
+  app.stdin.write("\u000f");
+  await flush();
+  const toolMessage = {
+    createdAt: "2026-10-04T00:00:00Z",
+    id: "late-tool",
+    role: "assistant" as const,
+    parts: [
+      {
+        type: "tool-call" as const,
+        call: {
+          id: "late-read",
+          name: "read",
+          input: { path: "late.txt" },
+          status: "completed" as const,
+        },
+      },
+      {
+        type: "tool-result" as const,
+        result: { callId: "late-read", output: "AUTOMATIC-BIND-BODY" },
+      },
+    ],
+  };
+  client.installSourceSnapshot({
+    ...base,
+    sessions: [{ ...base.sessions[0], messages: [toolMessage] }],
+  });
+  await waitForFrame(app, (frame) => frame.includes("AUTOMATIC-BIND-BODY"));
+  app.stdin.write("\u000f");
+  await flush();
+  expect(app.lastFrame()).not.toContain("AUTOMATIC-BIND-BODY");
+  app.unmount();
 });

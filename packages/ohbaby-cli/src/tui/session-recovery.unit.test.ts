@@ -805,3 +805,196 @@ it("keeps invalidated history readable after a failed refresh, then clears stale
   ).toMatchObject({ text: "corrected page" });
   recovery.dispose();
 });
+
+it("automatically continues after the SDK fast cycle without input", async () => {
+  vi.useFakeTimers();
+  const { client, recovery } = setup({
+    getSessionView: vi.fn().mockRejectedValue(new Error("offline")),
+  });
+  try {
+    await recovery.start();
+    await vi.advanceTimersByTimeAsync(850);
+    expect(recovery.getState().sync.status).toBe("error");
+    expect(client.getSessionView).toHaveBeenCalledTimes(4);
+    client.getSessionView.mockResolvedValue(view());
+    await vi.advanceTimersByTimeAsync(999);
+    expect(client.getSessionView).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(recovery.getState().sync.status).toBe("ready");
+  } finally {
+    recovery.dispose();
+    vi.useRealTimers();
+  }
+});
+
+it("aborts a stalled identity read before cooling down and retries automatically", async () => {
+  vi.useFakeTimers();
+  let aborted = false;
+  const identity = vi
+    .fn()
+    .mockImplementationOnce(
+      ({ signal }: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              aborted = true;
+              reject(new Error("aborted"));
+            },
+            { once: true },
+          );
+        }),
+    )
+    .mockResolvedValue({ permissionEpoch: "epoch", requests: [] });
+  const { recovery } = setup({
+    getSelectedSessionId: vi.fn().mockResolvedValue(null),
+    getPermissionSnapshot: identity,
+  });
+  try {
+    const startup = recovery.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await startup;
+    expect(aborted).toBe(true);
+    expect(identity).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(recovery.getState().runtimeEpoch).toBe("epoch");
+    recovery.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    recovery.dispose();
+    vi.useRealTimers();
+  }
+});
+
+it("keeps null receipts unknown and only queries the original request during cooldown", async () => {
+  vi.useFakeTimers();
+  const { client, recovery } = setup(
+    {},
+    {
+      pending: [
+        { clientRequestId: "request", sessionId: "a", runtimeEpoch: "epoch" },
+      ],
+    },
+  );
+  try {
+    await recovery.start();
+    await tick();
+    expect(recovery.getState().pending).toHaveLength(1);
+    client.getPromptReceipt.mockResolvedValue({
+      runtimeEpoch: "epoch",
+      clientRequestId: "request",
+      receipt: { clientRequestId: "request", sessionId: "a", promptId: "p" },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(recovery.getState().pending).toHaveLength(0);
+    expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+    expect(
+      client.getPromptReceipt.mock.calls.every(
+        ([query]) =>
+          (query as { clientRequestId: string }).clientRequestId === "request",
+      ),
+    ).toBe(true);
+  } finally {
+    recovery.dispose();
+    vi.useRealTimers();
+  }
+});
+
+it("cools down unchanged receipts and cancels continuation on disconnect and dispose", async () => {
+  vi.useFakeTimers();
+  const { client, recovery } = setup(
+    {},
+    {
+      pending: [
+        { clientRequestId: "request", sessionId: "a", runtimeEpoch: "epoch" },
+      ],
+    },
+  );
+  try {
+    await recovery.start();
+    await tick();
+    const initial = client.getPromptReceipt.mock.calls.length;
+    for (const delay of [1_000, 2_000, 5_000, 10_000, 30_000]) {
+      const count = client.getPromptReceipt.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(client.getPromptReceipt).toHaveBeenCalledTimes(count);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.getPromptReceipt).toHaveBeenCalledTimes(count + 1);
+    }
+    expect(client.getPromptReceipt).toHaveBeenCalledTimes(initial + 5);
+    recovery.receive({
+      type: "session.resync-required",
+      disconnected: true,
+      runtimeEpoch: "epoch",
+      sessionId: "a",
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(client.getPromptReceipt).toHaveBeenCalledTimes(initial + 5);
+    recovery.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    recovery.dispose();
+    vi.useRealTimers();
+  }
+});
+
+it("tails an in-flight control read after a newer invalidation without installing its stale result", async () => {
+  const { client, recovery } = setup();
+  await recovery.start();
+  await tick();
+  let finish!: (value: unknown) => void;
+  client.getSessionControl.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  client.getSessionControl.mockResolvedValue({
+    runtimeEpoch: "epoch",
+    sessionId: "a",
+    rootSessionId: "a",
+    runId: "new-run",
+    driver: "user",
+  });
+  const first = recovery.refreshControl();
+  const second = recovery.refreshControl();
+  const third = recovery.refreshControl();
+  const calls = client.getSessionControl.mock.calls.length;
+  expect(calls).toBe(2);
+  finish({
+    runtimeEpoch: "epoch",
+    sessionId: "a",
+    rootSessionId: "a",
+    runId: "stale-run",
+    driver: "user",
+  });
+  await Promise.all([first, second, third]);
+  expect(client.getSessionControl).toHaveBeenCalledTimes(calls + 1);
+  expect(recovery.getState().control?.runId).toBe("new-run");
+  recovery.dispose();
+});
+
+it("tails an in-flight index read after invalidation instead of clearing the newer dirty state", async () => {
+  const { client, recovery, store } = setup();
+  await recovery.start();
+  await tick();
+  let finish!: (value: unknown) => void;
+  client.getSessionIndex.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  client.getSessionIndex.mockResolvedValue([
+    { ...view().session, title: "fresh" },
+  ]);
+  recovery.receive({ type: "session.index.invalidated" });
+  recovery.receive({ type: "session.index.invalidated" });
+  recovery.receive({ type: "session.index.invalidated" });
+  expect(client.getSessionIndex).toHaveBeenCalledTimes(2);
+  finish([{ ...view().session, title: "stale" }]);
+  await tick();
+  expect(client.getSessionIndex).toHaveBeenCalledTimes(3);
+  expect(store.getState().sessions[0]?.title).toBe("fresh");
+  recovery.dispose();
+});

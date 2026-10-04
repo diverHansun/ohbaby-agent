@@ -45,6 +45,11 @@ export function parsePermissionBinding(value: unknown): UiPermissionBinding {
   };
 }
 
+const initializedIntents = new WeakMap<
+  DaemonClientViewCoordinator,
+  Map<string, string>
+>();
+
 export async function initializePermissionClient(
   backend: UiBackendClient,
   views: DaemonClientViewCoordinator,
@@ -52,6 +57,12 @@ export async function initializePermissionClient(
   intent: unknown,
   epoch: string,
 ): Promise<UiPermissionBinding> {
+  const parsedIntent = parseDaemonStartupIntent(intent);
+  const intentKey = JSON.stringify(parsedIntent);
+  const intents = initializedIntents.get(views) ?? new Map<string, string>();
+  initializedIntents.set(views, intents);
+  if (views.isRegistered(clientId) && intents.get(clientId) === intentKey)
+    return views.binding(clientId, epoch);
   const attempt = views.beginRegistration(clientId);
   const previous = views.isRegistered(clientId)
     ? views.binding(clientId, epoch)
@@ -59,11 +70,8 @@ export async function initializePermissionClient(
   const sessions = await backend.getSessionIndex();
   views.assertRegistration(clientId, attempt);
   if (previous) views.assertBinding(clientId, previous, epoch);
-  views.initializeClient(
-    clientId,
-    { sessions },
-    parseDaemonStartupIntent(intent),
-  );
+  views.initializeClient(clientId, { sessions }, parsedIntent);
+  intents.set(clientId, intentKey);
   const binding = views.binding(clientId, epoch);
   if (binding.rootSessionId)
     void backend

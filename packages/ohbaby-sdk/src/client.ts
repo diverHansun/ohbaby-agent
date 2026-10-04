@@ -113,8 +113,12 @@ export interface UiQueryClient
   extends Partial<UiSessionRecoveryClient>, Partial<UiSubagentReadClient> {
   /** Explicit selection/startup barrier; never called by read endpoints. */
   initializeSession?(sessionId: string): Promise<void>;
-  getSelectedSessionId(): Promise<string | null>;
-  getSessionIndex(): Promise<readonly UiSessionIndexEntry[]>;
+  getSelectedSessionId(options?: {
+    readonly signal?: AbortSignal;
+  }): Promise<string | null>;
+  getSessionIndex(options?: {
+    readonly signal?: AbortSignal;
+  }): Promise<readonly UiSessionIndexEntry[]>;
   getPermissionSnapshot(
     input: UiPermissionSnapshotQuery,
   ): Promise<UiPermissionSnapshot>;

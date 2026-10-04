@@ -162,7 +162,7 @@ describe("MessageRow", () => {
     expect(app.lastFrame()).not.toContain("output truncated");
   });
 
-  it("renders a paired completed tool call as one tool line", () => {
+  it("renders a paired completed tool call with inline saved output", () => {
     const theme = createTheme("dark", 3);
     const message = assistantMessage([
       {
@@ -182,10 +182,11 @@ describe("MessageRow", () => {
     const rendered = renderMessageParts(message, 80, theme);
     expect(rendered[0]).toMatchObject({
       kind: "text",
-      segments: [
-        { color: theme.tool.name, text: "Bash" },
-        { color: theme.tool.arg, text: " pnpm test" },
-      ],
+      text: "Bash pnpm test\n  ok",
+    });
+    expect(rendered[0].kind === "text" && rendered[0].segments?.[0]).toEqual({
+      color: theme.tool.name,
+      text: "Bash",
     });
 
     const app = render(<MessageRow contentWidth={80} message={message} />);
@@ -221,7 +222,8 @@ describe("MessageRow", () => {
     }
     expect(first.segments[0]).toEqual({ color: theme.tool.name, text: "Bash" });
     expect(first.segments[1]?.color).toBe(theme.tool.arg);
-    expect(first.segments[1]?.text).toContain("\n");
+    expect(first.text).toContain("\n");
+    expect(first.text).toContain("…");
   });
 
   it("keeps failed suffix color when a tool error wraps", () => {
@@ -258,7 +260,7 @@ describe("MessageRow", () => {
       .map((segment) => segment.text)
       .join("");
     expect(failedText).toContain("\n");
-    expect(failedText).toContain("Permission denied");
+    expect(failedText.replace(/\s+/gu, " ")).toContain("Permission denied");
   });
 
   it("keeps completed tool rows aligned with the running spinner prefix", () => {
@@ -494,3 +496,48 @@ it.each(["web_search", "web_fetch"])(
     });
   },
 );
+
+it("bounds executing long tool summaries and sanitizes the actual spinner segments", () => {
+  const theme = createTheme("dark", 3);
+  const message = assistantMessage([
+    {
+      type: "tool-call",
+      call: {
+        ...toolCall("running-long"),
+        input: {
+          command:
+            "long-command ".repeat(30) + "\u001b[2J\u001b]52;c;private\u0007",
+        },
+        status: "running",
+        execution: {
+          createdAt: 1,
+          phase: "executing",
+          phaseStartedAt: 1,
+          executionStartedAt: 1,
+        },
+      },
+    },
+  ]);
+  const parts = renderMessageParts(message, 24, theme);
+  const spinner = parts[0];
+  expect(spinner.kind).toBe("spinner");
+  if (spinner.kind !== "spinner") throw new Error("spinner expected");
+  const actual = spinner.segments?.map((segment) => segment.text).join("");
+  expect(actual).toBe(spinner.label);
+  expect(actual).not.toContain("[2J");
+  expect(actual).not.toContain("52;");
+  expect(spinner.label.split("\n")).toHaveLength(2);
+});
+
+it("shows saved orphan result output instead of silently hiding older records", () => {
+  const theme = createTheme("dark", 3);
+  const message = assistantMessage([
+    {
+      type: "tool-result",
+      result: { callId: "legacy-unpaired", output: "SAVED-ORPHAN-BODY" },
+    },
+  ]);
+  expect(renderMessageParts(message, 60, theme)[0]).toMatchObject({
+    text: "SAVED-ORPHAN-BODY",
+  });
+});

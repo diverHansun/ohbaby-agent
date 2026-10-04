@@ -518,7 +518,7 @@ describe("createRemoteUiBackendClient", () => {
     client.subscribeEvents((event) => {
       if (event.type === "notice.emitted") events.push(event);
     });
-    await vi.waitUntil(() => events.length === 2, { timeout: 500 });
+    await vi.waitUntil(() => events.length === 2, { timeout: 2500 });
     await client.dispose();
 
     expect(events).toEqual([notice("notice_1"), notice("notice_2")]);
@@ -678,7 +678,7 @@ it("keeps permission events and reconnect recovery independent of failed or pend
       received.some((event) => event.type === "permission.resolved"),
     );
     controller.close();
-    await vi.waitUntil(() => connections === 2);
+    await vi.waitUntil(() => connections === 2, { timeout: 2500 });
     await vi.waitUntil(() =>
       received.some(
         (event) =>
@@ -790,3 +790,130 @@ it.each(["selectSession", "createSession", "submitPromptAccepted"] as const)(
     }
   },
 );
+
+it("releases failed initialization and retries with the same client and startup intent", async () => {
+  const calls: { clientId: string; method: string; params: unknown[] }[] = [];
+  const fetcher = vi.fn((_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(requireStringBody(init)) as {
+      id: string;
+      clientId: string;
+      method: string;
+      params: unknown[];
+    };
+    calls.push(body);
+    if (calls.length === 1)
+      return Promise.resolve(new Response("unavailable", { status: 503 }));
+    return Promise.resolve(
+      Response.json({
+        id: body.id,
+        ok: true,
+        result:
+          body.method === "initializeClient"
+            ? {
+                permissionEpoch: "epoch",
+                runtimeEpoch: "epoch",
+                rootSessionId: null,
+                bindingGeneration: 1,
+                sessionRecoveryVersion: 1,
+              }
+            : [],
+      }),
+    );
+  });
+  const client = createRemoteUiBackendClient({
+    clientId: "same-client",
+    fetch: fetcher,
+    port: 4096,
+    startupIntent: { startupSessionMode: { type: "fresh" } },
+  });
+  await expect(client.getSessionIndex()).rejects.toThrow("503");
+  await expect(client.getSessionIndex()).resolves.toEqual([]);
+  const bootstrap = calls.filter((call) => call.method === "initializeClient");
+  expect(bootstrap).toHaveLength(2);
+  expect(bootstrap[0].clientId).toBe(bootstrap[1].clientId);
+  expect(bootstrap[0].params).toEqual(bootstrap[1].params);
+  await client.dispose();
+});
+
+it("backs off persistent bootstrap refusal in the single SSE loop with stable startup identity", async () => {
+  vi.useFakeTimers();
+  const calls: { clientId: string; params: unknown[] }[] = [];
+  const client = createRemoteUiBackendClient({
+    clientId: "refused-client",
+    port: 4096,
+    startupIntent: { startupSessionMode: { type: "fresh" } },
+    fetch: (_url, init) => {
+      calls.push(
+        JSON.parse(requireStringBody(init)) as {
+          clientId: string;
+          params: unknown[];
+        },
+      );
+      return Promise.resolve(new Response("forbidden", { status: 403 }));
+    },
+  });
+  const unsubscribe = client.subscribeEvents(() => undefined);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(1);
+    for (const [index, delay] of [
+      1000, 2000, 5000, 10000, 30000, 30000,
+    ].entries()) {
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(calls).toHaveLength(index + 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toHaveLength(index + 2);
+    }
+    expect(new Set(calls.map((call) => call.clientId))).toEqual(
+      new Set(["refused-client"]),
+    );
+    expect(
+      calls.every(
+        (call) =>
+          JSON.stringify(call.params) === JSON.stringify(calls[0]?.params),
+      ),
+    ).toBe(true);
+  } finally {
+    unsubscribe();
+    await client.dispose();
+    vi.useRealTimers();
+  }
+});
+
+it("keeps reconnect backoff across short-lived hello connections", async () => {
+  vi.useFakeTimers();
+  let connections = 0;
+  const client = createRemoteUiBackendClient({
+    clientId: "hello-client",
+    port: 4096,
+    fetch: () => {
+      connections += 1;
+      return Promise.resolve(
+        sseResponse([
+          sseFrame({
+            type: "hello",
+            clientId: "hello-client",
+            permissionEpoch: "epoch",
+            rootSessionId: null,
+            bindingGeneration: 1,
+          }),
+        ]),
+      );
+    },
+  });
+  const stop = client.subscribeEvents(() => undefined);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connections).toBe(1);
+    for (const [index, wait] of [1000, 2000, 5000, 10000, 30000].entries()) {
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect(connections).toBe(index + 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(connections).toBe(index + 2);
+    }
+  } finally {
+    stop();
+    await client.dispose();
+    vi.useRealTimers();
+  }
+});

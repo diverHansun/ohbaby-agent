@@ -54,7 +54,9 @@ export function clampRenderedPartsToTail(
 }
 
 function partLines(part: RenderedPart): number {
-  return part.kind === "spinner" ? 1 : part.text.split("\n").length;
+  return part.kind === "spinner"
+    ? part.label.split("\n").length
+    : part.text.split("\n").length;
 }
 
 function sliceTextPartTail(
@@ -62,7 +64,11 @@ function sliceTextPartTail(
   lineCount: number,
 ): RenderedPart | null {
   if (part.kind === "spinner") {
-    return null;
+    const { segments: _segments, ...plainPart } = part;
+    return {
+      ...plainPart,
+      label: part.label.split("\n").slice(-lineCount).join("\n"),
+    };
   }
 
   const text = part.text.split("\n").slice(-lineCount).join("\n");

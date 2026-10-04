@@ -626,7 +626,7 @@ export function Prompt({
         }
 
         if (!canSubmit && !currentInput.trim().startsWith("/")) {
-          setError("Session is syncing; draft kept. Ctrl+R retries recovery.");
+          setError("Session is syncing automatically; draft kept.");
           return;
         }
         if (currentQueuedEdit) {

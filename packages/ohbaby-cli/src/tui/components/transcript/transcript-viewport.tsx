@@ -14,6 +14,7 @@ import { LiveTail } from "./live-tail.js";
 import { NoticeLane } from "./notice-lane.js";
 
 export interface TranscriptViewportProps {
+  readonly toolsExpanded?: boolean;
   readonly commandNotices: readonly TuiCommandNotice[];
   readonly committedItems: readonly TranscriptItem[];
   readonly liveMessage: UiMessage | null;
@@ -24,6 +25,7 @@ export interface TranscriptViewportProps {
 }
 
 export function TranscriptViewport({
+  toolsExpanded = false,
   commandNotices,
   committedItems,
   liveMessage,
@@ -34,9 +36,16 @@ export function TranscriptViewport({
 }: TranscriptViewportProps): ReactElement {
   return (
     <Box flexDirection="column">
-      <CommittedTranscript items={committedItems} />
+      <CommittedTranscript
+        items={committedItems}
+        toolsExpanded={toolsExpanded}
+      />
       <CommandNoticeLane commandNotices={commandNotices} />
-      <LiveTail message={liveMessage} reasoning={liveReasoning} />
+      <LiveTail
+        message={liveMessage}
+        reasoning={liveReasoning}
+        toolsExpanded={toolsExpanded}
+      />
       <WorkingSpinner runtime={runtime} modelActivity={modelActivity} />
       <NoticeLane notices={notices} />
     </Box>

@@ -1,108 +1,69 @@
-import { highlightCode } from "./highlight.js";
-import { wrapAnsi } from "./wrap.js";
+import {
+  Markdown,
+  setCapabilityOverrides,
+  type MarkdownTheme,
+} from "@earendil-works/pi-tui";
+import chalk, { type ForegroundColorName } from "chalk";
+import type { Theme } from "../theme/tokens.js";
+import { sanitizeTerminalText, wrapAnsi } from "./wrap.js";
 
-const FENCE_PATTERN = /^```(\S*)\s*$/u;
-const HEADING_PATTERN = /^(#{1,6})\s+(.+)$/u;
-const UNORDERED_PATTERN = /^\s*[-*+]\s+(.+)$/u;
-const ORDERED_PATTERN = /^\s*(\d+)[.)]\s+(.+)$/u;
-const QUOTE_PATTERN = /^\s*>\s?(.+)$/u;
+// This app consumes Pi only as a text renderer. Keep URLs visible for native
+// terminal copying instead of emitting terminal-dependent OSC link controls.
+setCapabilityOverrides({ hyperlinks: false });
 
 export interface MarkdownRenderOptions {
   readonly width: number;
+  readonly theme?: Theme;
+}
+
+function markdownTheme(theme?: Theme): MarkdownTheme {
+  const color =
+    (value: string | undefined) =>
+    (text: string): string => {
+      if (!value) return text;
+      return value.startsWith("#")
+        ? chalk.hex(value)(text)
+        : chalk[value as ForegroundColorName](text);
+    };
+  return {
+    heading: (text) => chalk.bold(color(theme?.text.heading)(text)),
+    link: color(theme?.text.link),
+    linkUrl: color(theme?.text.muted),
+    code: (text) => color(theme?.text.strong)(`\`${text}\``),
+    codeBlock: (text) => text,
+    codeBlockBorder: color(theme?.text.muted),
+    quote: color(theme?.text.normal),
+    quoteBorder: color(theme?.text.muted),
+    hr: color(theme?.text.muted),
+    listBullet: color(theme?.text.muted),
+    bold: chalk.bold,
+    italic: chalk.italic,
+    strikethrough: chalk.strikethrough,
+    underline: chalk.underline,
+    codeBlockIndent: "  ",
+  };
 }
 
 export function mdToAnsi(
   markdown: string,
   options: MarkdownRenderOptions,
 ): string[] {
-  const lines: string[] = [];
-  const sourceLines = markdown.replace(/\r\n/gu, "\n").split("\n");
-  let inFence = false;
-  let fenceLanguage = "";
-
-  for (const rawLine of sourceLines) {
-    const fence = FENCE_PATTERN.exec(rawLine);
-    if (fence) {
-      if (inFence) {
-        lines.push("```");
-        inFence = false;
-        fenceLanguage = "";
-      } else {
-        inFence = true;
-        fenceLanguage = fence[1];
-        lines.push(fenceLanguage === "" ? "```" : `\`\`\`${fenceLanguage}`);
-      }
-      continue;
-    }
-
-    if (inFence) {
-      for (const highlighted of highlightCode(rawLine)) {
-        lines.push(
-          ...wrapAnsi(highlighted, Math.max(1, options.width - 2)).map(
-            (line) => `  ${line}`,
-          ),
-        );
-      }
-      continue;
-    }
-
-    if (rawLine.trim() === "") {
-      lines.push("");
-      continue;
-    }
-
-    const heading = HEADING_PATTERN.exec(rawLine);
-    if (heading) {
-      const text = normalizeInlineMarkdown(heading[2]);
-      lines.push(...wrapAnsi(text, options.width));
-      if (heading[1].length === 1) {
-        lines.push("-".repeat(Math.min(text.length, options.width)));
-      }
-      continue;
-    }
-
-    const unordered = UNORDERED_PATTERN.exec(rawLine);
-    if (unordered) {
-      lines.push(
-        ...wrapAnsi(
-          `- ${normalizeInlineMarkdown(unordered[1])}`,
-          options.width,
-        ),
-      );
-      continue;
-    }
-
-    const ordered = ORDERED_PATTERN.exec(rawLine);
-    if (ordered) {
-      lines.push(
-        ...wrapAnsi(
-          `${ordered[1]}. ${normalizeInlineMarkdown(ordered[2])}`,
-          options.width,
-        ),
-      );
-      continue;
-    }
-
-    const quote = QUOTE_PATTERN.exec(rawLine);
-    if (quote) {
-      lines.push(
-        ...wrapAnsi(`> ${normalizeInlineMarkdown(quote[1])}`, options.width),
-      );
-      continue;
-    }
-
-    lines.push(...wrapAnsi(normalizeInlineMarkdown(rawLine), options.width));
+  const width = Math.max(1, Math.floor(options.width));
+  const source = sanitizeTerminalText(markdown);
+  try {
+    // Only invoke the public text component. Ink owns terminal IO and input.
+    const rendered = new Markdown(
+      source,
+      0,
+      0,
+      markdownTheme(options.theme),
+      undefined,
+      { preserveOrderedListMarkers: true, renderLatex: false },
+    ).render(width);
+    // Pi may emit terminal-dependent OSC links and pads its component lines.
+    // Keep only safe styles at our display boundary and enforce narrow widths.
+    return rendered.flatMap((line) => wrapAnsi(line.trimEnd(), width));
+  } catch {
+    return wrapAnsi(source, width);
   }
-
-  return lines;
-}
-
-function normalizeInlineMarkdown(input: string): string {
-  return input
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/gu, "$1 ($2)")
-    .replace(/`([^`]+)`/gu, "$1")
-    .replace(/\*\*([^*]+)\*\*/gu, "$1")
-    .replace(/__([^_]+)__/gu, "$1")
-    .replace(/\*([^*]+)\*/gu, "$1")
-    .replace(/_([^_]+)_/gu, "$1");
 }

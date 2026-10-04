@@ -13,11 +13,9 @@ import { visibleWidth, wrapAnsi } from "../../render/wrap.js";
 import type { TuiReasoningViewState } from "../../store/snapshot.js";
 import { useTheme, type Theme } from "../../theme/index.js";
 import { Spinner } from "../spinner.js";
-import {
-  renderToolLabel,
-  renderToolLabelParts,
-  renderToolPart,
-} from "./parts/tool-part.js";
+import { renderToolLabelParts, renderToolPart } from "./parts/tool-part.js";
+
+import { renderToolDisplay } from "./parts/tool-display.js";
 
 const OUTPUT_TRUNCATED_LABEL = "output truncated";
 
@@ -27,6 +25,7 @@ export interface MessageRowProps {
   readonly contentWidth: number;
   readonly message: UiMessage;
   readonly reasoning?: TuiReasoningViewState;
+  readonly toolsExpanded?: boolean;
 }
 
 export type PairedMessagePart =
@@ -47,6 +46,7 @@ export function MessageRow({
   contentWidth,
   message,
   reasoning,
+  toolsExpanded = false,
 }: MessageRowProps): ReactElement {
   const theme = useTheme();
   const partWidth = Math.max(
@@ -58,6 +58,7 @@ export function MessageRow({
     partWidth,
     theme,
     reasoning,
+    toolsExpanded,
   );
 
   return (
@@ -174,27 +175,33 @@ export function renderMessageParts(
   partWidth: number,
   theme: Theme,
   _reasoning?: TuiReasoningViewState,
+  toolsExpanded = false,
 ): readonly (RenderedMessagePart | RenderedSpinnerPart)[] {
   const rendered: (RenderedMessagePart | RenderedSpinnerPart)[] = [];
 
   for (const part of pairToolCallResult(message.parts)) {
     if (
       part.kind === "tool" &&
-      (part.result?.execution ?? part.call.execution)?.phase === "executing" &&
-      (part.result?.execution ?? part.call.execution)?.endedAt === undefined
+      part.result === undefined &&
+      part.call.execution?.phase === "executing" &&
+      part.call.execution.endedAt === undefined
     ) {
+      const label = renderToolDisplay(
+        part.call,
+        undefined,
+        Math.max(1, partWidth - 2),
+        toolsExpanded,
+        theme,
+      )
+        .map((line) => line.text)
+        .join("\n");
       rendered.push({
         index: part.index,
         kind: "spinner",
-        execution: part.result?.execution ?? part.call.execution,
+        execution: part.call.execution,
         callId: part.call.id,
-        label: renderToolLabel(part.call, part.result),
-        segments: renderToolLabelSegments(
-          part.call,
-          part.result,
-          theme,
-          renderToolLabel(part.call, part.result),
-        ),
+        label,
+        segments: renderToolLabelSegments(part.call, part.result, theme, label),
       });
       continue;
     }
@@ -205,6 +212,7 @@ export function renderMessageParts(
       part,
       Math.max(1, partWidth - indent),
       theme,
+      toolsExpanded,
     );
     if (renderedPart.text === "") {
       continue;
@@ -329,22 +337,74 @@ function renderPairedMessagePart(
   part: PairedMessagePart,
   partWidth: number,
   theme: Theme,
+  toolsExpanded: boolean,
 ): {
   readonly segments?: readonly RenderedTextSegment[];
   readonly text: string;
 } {
   if (part.kind === "tool") {
-    const text = wrapAnsi(
-      renderToolLabel(part.call, part.result),
+    const lines = renderToolDisplay(
+      part.call,
+      part.result,
       partWidth,
-    ).join("\n");
+      toolsExpanded,
+      theme,
+    );
+    const segments: RenderedTextSegment[] = [];
+    const name = renderToolLabelParts(part.call, part.result).name;
+    lines.forEach((line, index) => {
+      if (index === 0 && line.text.startsWith(name)) {
+        segments.push({
+          color: toolNameColor(part.call.name, theme),
+          text: name,
+        });
+        segments.push({
+          color: line.color,
+          text: line.text.slice(name.length),
+        });
+      } else
+        segments.push({
+          color: line.color,
+          dimColor: line.dimColor,
+          text: line.text,
+        });
+      if (index < lines.length - 1)
+        segments.push({
+          color: line.color,
+          dimColor: line.dimColor,
+          text: "\n",
+        });
+    });
+    return { segments, text: lines.map((line) => line.text).join("\n") };
+  }
+
+  if (part.part.type === "tool-result") {
+    const result = part.part.result;
+    const body = result.output === "" ? [] : wrapAnsi(result.output, partWidth);
+    const shown =
+      toolsExpanded || body.length <= 5
+        ? body
+        : [
+            ...body.slice(0, 5),
+            ...wrapAnsi(
+              `… ${String(body.length - 5)} lines omitted`,
+              partWidth,
+            ),
+          ];
     return {
-      segments: renderToolLabelSegments(part.call, part.result, theme, text),
-      text,
+      text: [
+        ...(result.error ? wrapAnsi(`failed: ${result.error}`, partWidth) : []),
+        ...shown,
+        ...(result.outputAvailable === false && !result.error
+          ? wrapAnsi("Output unavailable", partWidth)
+          : []),
+      ].join("\n"),
     };
   }
 
-  return { text: renderSingleMessagePart(message, part.part, partWidth) };
+  return {
+    text: renderSingleMessagePart(message, part.part, partWidth, theme),
+  };
 }
 
 function renderToolLabelSegments(
@@ -447,11 +507,12 @@ function renderSingleMessagePart(
   message: UiMessage,
   part: UiMessagePart,
   partWidth: number,
+  theme: Theme,
 ): string {
   switch (part.type) {
     case "text":
       return message.role === "assistant"
-        ? mdToAnsi(part.text, { width: partWidth }).join("\n")
+        ? mdToAnsi(part.text, { width: partWidth, theme }).join("\n")
         : wrapAnsi(part.text, partWidth).join("\n");
     case "reasoning":
       return part.saveState === "failed" ? "Reasoning could not be saved" : "";

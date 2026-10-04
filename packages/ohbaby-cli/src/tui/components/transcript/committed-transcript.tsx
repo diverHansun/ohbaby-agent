@@ -7,6 +7,7 @@ import { PromptCompletion } from "./prompt-completion.js";
 import { MessageRow } from "../message/message-row.js";
 
 export interface CommittedTranscriptProps {
+  readonly toolsExpanded?: boolean;
   readonly items: readonly TranscriptItem[];
 }
 
@@ -18,6 +19,7 @@ interface StaticTranscriptDecisionInput {
 
 export const CommittedTranscript = memo(function CommittedTranscript({
   items,
+  toolsExpanded = false,
 }: CommittedTranscriptProps): ReactElement {
   const layout = useTuiLayout();
   const { stdout } = useStdout();
@@ -26,7 +28,7 @@ export const CommittedTranscript = memo(function CommittedTranscript({
   });
 
   if (useStatic) {
-    return <ReplayableTranscript items={items} />;
+    return <ReplayableTranscript items={items} toolsExpanded={toolsExpanded} />;
   }
 
   return (
@@ -39,6 +41,7 @@ export const CommittedTranscript = memo(function CommittedTranscript({
             bottomMargin={item.spacing ? 1 : 0}
             contentWidth={layout.contentWidth}
             key={item.id}
+            toolsExpanded={toolsExpanded}
             message={item.message}
           />
         ),

@@ -138,6 +138,75 @@ describe("TUI main chain with real in-process backend", () => {
     app.unmount();
   });
 
+  it("projects a real Write through permission, execution, snapshot and Ctrl+O without changing its content", async () => {
+    const workdir = await tempWorkspace("ohbaby-cli-tool-detail");
+    const content = Array.from(
+      { length: 30 },
+      (_, index) => `SOURCE-LINE-${index + 1}`,
+    ).join("\n");
+    const client = createInProcessUiBackendClient({
+      workdir,
+      llmClient: createSequentialFakeLLMClient([
+        [
+          writeToolCallEvent({
+            callId: "detail-write",
+            content,
+            filePath: "detail.txt",
+          }),
+        ],
+        [{ textDelta: "Write detail complete.", finishReason: "stop" }],
+      ]),
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    try {
+      await waitForFrame(app, promptIsReady);
+      app.stdin.write("create detail file");
+      app.stdin.write("\r");
+      await waitForFrame(app, (frame) => frame.includes("Permission:"));
+      app.stdin.write("\r");
+      const compact = await waitForFrame(app, (frame) =>
+        frame.includes("Write detail complete."),
+      );
+      expect(compact).toContain("SOURCE-LINE-1");
+      expect(compact).not.toContain("SOURCE-LINE-30");
+      expect(compact).not.toContain("@@");
+      const sessionId = await client.getSelectedSessionId();
+      expect(sessionId).not.toBeNull();
+      const view = await client.getSessionView({ sessionId: sessionId! });
+      const result = view.session.messages
+        .flatMap((message) => message.parts)
+        .find(
+          (part) =>
+            part.type === "tool-result" &&
+            part.result.callId === "detail-write",
+        );
+      expect(
+        result?.type === "tool-result" ? result.result.details : undefined,
+      ).toMatchObject({ kind: "mutation", created: true });
+      app.stdin.write("draft stays");
+      app.stdin.write("\u000f");
+      const expanded = await waitForFrame(app, (frame) =>
+        frame.includes("SOURCE-LINE-30"),
+      );
+      expect(expanded).toContain("draft stays");
+      expect(expanded).not.toContain("@@");
+      app.stdin.write("\u000f");
+      await waitForFrame(
+        app,
+        (frame) =>
+          !frame.includes("SOURCE-LINE-30") && frame.includes("SOURCE-LINE-1"),
+      );
+      expect(await readFile(join(workdir, "detail.txt"), "utf8")).toBe(content);
+    } finally {
+      app.unmount();
+    }
+  });
+
   it("aborts a pending permission run with Ctrl+C and can submit again", async () => {
     const workdir = await tempWorkspace("ohbaby-cli-abort");
     await mkdir(join(workdir, "src"));

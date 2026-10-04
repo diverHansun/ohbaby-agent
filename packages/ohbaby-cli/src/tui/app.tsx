@@ -104,6 +104,10 @@ export function OhbabyTerminalApp({
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
   const keyboardCommandSequenceRef = useRef(0);
   const [queueInputMode, setQueueInputMode] = useState(false);
+  const [toolView, setToolView] = useState<{
+    sessionId: string | null;
+    expanded: boolean;
+  }>({ sessionId: null, expanded: false });
   const catalogRequestSequenceRef = useRef(0);
   const contextRefreshSequenceRef = useRef(0);
   const contextNoticeSequenceRef = useRef(0);
@@ -151,6 +155,17 @@ export function OhbabyTerminalApp({
   );
   useEffect(() => {
     if (activeSessionId !== null) setPendingReasoning(null);
+  }, [activeSessionId]);
+  const toolsExpanded =
+    toolView.sessionId === activeSessionId && toolView.expanded;
+  useEffect(() => {
+    setToolView((view) => ({
+      sessionId: activeSessionId,
+      expanded:
+        view.sessionId === null && activeSessionId !== null
+          ? view.expanded
+          : false,
+    }));
   }, [activeSessionId]);
   const activeContextWindowUsage = useTuiStoreSelector(
     store,
@@ -618,6 +633,19 @@ export function OhbabyTerminalApp({
 
       if (
         !hasDialog &&
+        !queueInputMode &&
+        key.ctrl &&
+        (value === "o" || value === "\u000f")
+      ) {
+        setToolView((view) => ({
+          sessionId: activeSessionId,
+          expanded: !(view.sessionId === activeSessionId && view.expanded),
+        }));
+        return;
+      }
+
+      if (
+        !hasDialog &&
         activeTodoList !== null &&
         activeTodoList.todos.length > 0 &&
         !queueInputMode &&
@@ -657,10 +685,6 @@ export function OhbabyTerminalApp({
         return;
       }
 
-      if (key.ctrl && value === "r") {
-        recoveryRef.current?.retry();
-        return;
-      }
       if (key.ctrl && value === "x") {
         recoveryRef.current?.discardPending(
           recoveryState.pending.map((item) => item.clientRequestId),
@@ -807,6 +831,7 @@ export function OhbabyTerminalApp({
         eventDispatcher.dispatch(tuiEvent);
         if (isNewSessionSelectionEvent(tuiEvent)) {
           installedSessionId = undefined;
+          setToolView({ sessionId: null, expanded: false });
           resetTranscriptSurface("new-session");
           recovery.select(null);
         }
@@ -957,6 +982,7 @@ export function OhbabyTerminalApp({
               <TranscriptViewportContainer
                 key={screenGeneration}
                 store={store}
+                toolsExpanded={toolsExpanded}
                 waitingForSubagents={subagentState.list?.waiting}
               />
             </DurationDiagnosticContext.Provider>
@@ -967,11 +993,21 @@ export function OhbabyTerminalApp({
               permissionSync={permissionSync.state}
               onRetryPermissions={permissionSync.retry}
               approvalRetryHint={
-                recoveryState.error ||
-                recoveryState.sync.status === "error" ||
-                recoveryState.pending.length > 0
-                  ? "Ctrl+R retry recovery"
-                  : undefined
+                recoveryState.error
+                  ? undefined
+                  : recoveryState.connected === false
+                    ? "Reconnecting…"
+                    : recoveryState.pending.length > 0
+                      ? recoveryState.pending.some(
+                          (item) =>
+                            item.runtimeEpoch !== undefined &&
+                            item.runtimeEpoch !== recoveryState.runtimeEpoch,
+                        )
+                        ? "Submission unconfirmed"
+                        : "Confirming submission…"
+                      : recoveryState.sync.status === "error"
+                        ? "Syncing session…"
+                        : undefined
               }
               approvalStatus={
                 runtime.kind === "error"
@@ -1070,21 +1106,24 @@ export function OhbabyTerminalApp({
                 : (catalogError ??
                   recoveryState.error ??
                   executionRecoveryLabel ??
-                  (recoveryState.sync.status === "error"
-                    ? `Sync failed: ${recoveryState.sync.error ?? "unknown"} · Ctrl+R retry`
-                    : !recoveryState.initialized ||
-                        recoveryState.runtimeEpoch === undefined ||
-                        recoveryState.sync.status === "syncing"
-                      ? "Syncing session… draft kept"
-                      : recoveryState.pending.length > 0
-                        ? recoveryState.pending.some(
-                            (item) =>
-                              item.runtimeEpoch !== undefined &&
-                              item.runtimeEpoch !== recoveryState.runtimeEpoch,
-                          )
-                          ? "Previous runtime submission unconfirmed · Ctrl+X forget all (may still run)"
-                          : "Submission outcome unknown · Ctrl+R query · Ctrl+X forget all (may still run)"
-                        : runtimeStatusLabel))
+                  (recoveryState.connected === false
+                    ? `Reconnecting…${recoveryState.sync.error ? ` ${recoveryState.sync.error}` : ""}`
+                    : recoveryState.sync.status === "error"
+                      ? `Syncing session… ${recoveryState.sync.error ?? ""}`
+                      : !recoveryState.initialized ||
+                          recoveryState.runtimeEpoch === undefined ||
+                          recoveryState.sync.status === "syncing"
+                        ? "Syncing session…"
+                        : recoveryState.pending.length > 0
+                          ? recoveryState.pending.some(
+                              (item) =>
+                                item.runtimeEpoch !== undefined &&
+                                item.runtimeEpoch !==
+                                  recoveryState.runtimeEpoch,
+                            )
+                            ? "Submission unconfirmed · Ctrl+X forget all (may still run)"
+                            : "Confirming submission… · Ctrl+X forget all (may still run)"
+                          : runtimeStatusLabel))
             }
           />
         </Box>
@@ -1108,10 +1147,12 @@ function HeaderContainer({
 
 function TranscriptViewportContainer({
   store,
+  toolsExpanded,
   waitingForSubagents,
 }: {
   readonly store: TuiStore;
   readonly waitingForSubagents?: boolean;
+  readonly toolsExpanded?: boolean;
 }): ReactElement {
   const activeSessionId = useTuiStoreSelector(
     store,
@@ -1144,6 +1185,7 @@ function TranscriptViewportContainer({
         key={activeSessionId ?? "none"}
         commandNotices={commandNotices}
         committedItems={committedItems}
+        toolsExpanded={toolsExpanded}
         liveMessage={liveMessage}
         liveReasoning={liveReasoning}
         notices={notices}

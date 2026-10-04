@@ -15,6 +15,8 @@ const NESTED_SIGNAL_ARGUMENTS = new Map<PropertyKey, number>([
   ["submitPromptAndWait", 1],
   ["waitForPrompt", 1],
   ["getPermissionSnapshot", 0],
+  ["getSelectedSessionId", 0],
+  ["getSessionIndex", 0],
   ["getSessionView", 0],
   ["getSessionHistory", 0],
   ["getSessionControl", 0],

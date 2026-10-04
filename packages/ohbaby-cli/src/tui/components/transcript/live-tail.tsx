@@ -8,6 +8,7 @@ import { useTheme } from "../../theme/index.js";
 import { clampRenderedPartsToTail } from "./live-tail-window.js";
 
 export interface LiveTailProps {
+  readonly toolsExpanded?: boolean;
   readonly message: UiMessage | null;
   readonly reasoning?: TuiReasoningViewState;
 }
@@ -15,6 +16,7 @@ export interface LiveTailProps {
 export const LiveTail = memo(function LiveTail({
   message,
   reasoning,
+  toolsExpanded = false,
 }: LiveTailProps): ReactElement | null {
   const layout = useTuiLayout();
   const liveTailRef = useContext(LiveTailRefContext);
@@ -28,7 +30,13 @@ export const LiveTail = memo(function LiveTail({
     1,
     layout.contentWidth - (message.role === "user" ? 2 : 0),
   );
-  const rendered = renderMessageParts(message, partWidth, theme, reasoning);
+  const rendered = renderMessageParts(
+    message,
+    partWidth,
+    theme,
+    reasoning,
+    toolsExpanded,
+  );
   const window = clampRenderedPartsToTail(
     rendered,
     Math.max(0, layout.liveTailRows - (liveTailRef ? 1 : 0)),

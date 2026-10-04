@@ -1,8 +1,15 @@
 import { stripVTControlCharacters } from "node:util";
 import { EventEmitter } from "node:events";
-import { Box, render, Text, useBoxMetrics, type DOMElement } from "ink";
+import {
+  Box,
+  render,
+  Text,
+  useBoxMetrics,
+  useInput,
+  type DOMElement,
+} from "ink";
 import type { UiMessage } from "ohbaby-sdk";
-import { useRef, type ReactElement } from "react";
+import { useRef, useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "../../layout/app-shell.js";
 import { LiveTail } from "./live-tail.js";
@@ -36,8 +43,13 @@ class FakeStdin extends EventEmitter {
   pause(): this {
     return this;
   }
-  read(): null {
-    return null;
+  readonly inputChunks: string[] = [];
+  read(): string | null {
+    return this.inputChunks.shift() ?? null;
+  }
+  pushInput(value: string): void {
+    this.inputChunks.push(value);
+    this.emit("readable");
   }
   unref(): this {
     return this;
@@ -293,4 +305,113 @@ describe("replayable committed output", () => {
       }
     },
   );
+});
+
+it("Ctrl+O replays a changed tool projection exactly once, preserves input state and stays quiet for identical projections", async () => {
+  const stdout = new FakeStdout();
+  const stdin = new FakeStdin();
+  function Scene({
+    hasTool,
+    tickValue = 0,
+  }: {
+    hasTool: boolean;
+    tickValue?: number;
+  }): ReactElement {
+    const [expanded, setExpanded] = useState(false);
+    const [draft, setDraft] = useState("draft");
+    useInput((input, key) => {
+      if (key.ctrl && input === "o") setExpanded((value) => !value);
+      else if (!key.ctrl) setDraft((value) => `${value}${input}`);
+    });
+    const tool: UiMessage = {
+      ...message(""),
+      parts: [
+        {
+          type: "tool-call",
+          call: {
+            id: "bash-1",
+            name: "bash",
+            input: { command: "test" },
+            status: "completed",
+          },
+        },
+        {
+          type: "tool-result",
+          result: {
+            callId: "bash-1",
+            output: Array.from(
+              { length: 30 },
+              (_, i) => `TOOL-LINE-${String(i).padStart(2, "0")}`,
+            ).join("\n"),
+          },
+        },
+      ],
+    };
+    return (
+      <ThemeProvider>
+        <AppShell>
+          <ReplayableTranscript
+            toolsExpanded={expanded}
+            items={[
+              {
+                id: "history",
+                messageId: "history",
+                message: hasTool ? tool : message("UNCHANGED"),
+                spacing: true,
+              },
+            ]}
+          />
+          <Text>
+            {draft} cursor=5 activity={tickValue}
+          </Text>
+        </AppShell>
+      </ThemeProvider>
+    );
+  }
+  const app = render(<Scene hasTool={false} />, {
+    exitOnCtrlC: false,
+    patchConsole: false,
+    incrementalRendering: true,
+    stdin: stdin as unknown as NodeJS.ReadStream,
+    stdout: stdout as unknown as NodeJS.WriteStream,
+  });
+  const press = () => {
+    stdin.pushInput("\u000f");
+  };
+  try {
+    await tick();
+    let baseline = stdout.chunks.length;
+    press();
+    await tick();
+    expect(stdout.chunks.slice(baseline).join("")).not.toContain(
+      CLEAR_SCROLLBACK,
+    );
+    app.rerender(<Scene hasTool />);
+    await tick();
+    expect(stdout.chunks.join("")).toContain("TOOL-LINE-00");
+    baseline = stdout.chunks.length;
+    press();
+    await tick();
+    let switched = stdout.chunks.slice(baseline).join("");
+    expect(switched.split(CLEAR_SCROLLBACK)).toHaveLength(2);
+    expect(
+      switched.slice(switched.lastIndexOf(CLEAR_SCROLLBACK)),
+    ).not.toContain("TOOL-LINE-00");
+    expect(switched).toContain("draft cursor=5");
+    baseline = stdout.chunks.length;
+    press();
+    await tick();
+    switched = stdout.chunks.slice(baseline).join("");
+    expect(switched.split(CLEAR_SCROLLBACK)).toHaveLength(2);
+    expect(switched).toContain("TOOL-LINE-00");
+    baseline = stdout.chunks.length;
+    app.rerender(<Scene hasTool tickValue={1} />);
+    await tick();
+    const ordinary = stdout.chunks.slice(baseline).join("");
+    expect(ordinary).not.toContain(CLEAR_SCROLLBACK);
+    expect(ordinary).not.toContain("TOOL-LINE-00");
+    expect(ordinary).toContain("1");
+  } finally {
+    app.unmount();
+  }
 });

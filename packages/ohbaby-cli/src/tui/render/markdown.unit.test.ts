@@ -11,10 +11,9 @@ describe("mdToAnsi", () => {
 
     expect(lines).toEqual([
       "Title",
-      "-----",
       "",
       "- first item",
-      "> quoted",
+      "│ quoted",
       "",
       "```ts",
       "  const x = 1;",
@@ -34,5 +33,41 @@ describe("mdToAnsi", () => {
       "sentence for",
       "wrapping.",
     ]);
+  });
+});
+
+describe("Pi Markdown display boundary", () => {
+  it("keeps inline code distinguishable without color", () => {
+    expect(mdToAnsi("Run `pnpm test` now.", { width: 80 }).join("\n")).toBe(
+      "Run `pnpm test` now.",
+    );
+  });
+  it.each([1, 8, 24, 58, 78, 118])(
+    "keeps tables, code and links within %i columns",
+    (width) => {
+      const source =
+        "## 中文 👨‍👩‍👧‍👦\n\n| 名称 | Value |\n| --- | --- |\n| 中文 | `alpha_beta` |\n\n1. first\n   - nested\n\n[docs](https://example.com/long/path)\n\n```ts\n\tconst 中文 = '👩‍💻';\n  final line";
+      const lines = mdToAnsi(source, { width });
+      expect(lines.length).toBeGreaterThan(5);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      if (width >= 24) {
+        expect(lines.join("\n")).toContain("alpha_beta");
+        expect(lines.join("\n")).toContain("example.com");
+        expect(lines.join("\n")).toContain("final line");
+      }
+      expect(lines.join("\n")).not.toContain("\u001b]");
+    },
+  );
+  it("handles streaming incomplete structures without dropping text or executing controls", () => {
+    for (const source of [
+      "**unfinished",
+      "```ts\nconst x = 1;",
+      "safe\u001b[2J\u001b]52;c;abc\u0007text",
+    ]) {
+      const output = mdToAnsi(source, { width: 40 }).join("\n");
+      expect(output).not.toContain("\u001b[2J");
+      expect(output).not.toContain("\u001b]");
+      expect(output).toMatch(/unfinished|const x = 1;|safetext/u);
+    }
   });
 });

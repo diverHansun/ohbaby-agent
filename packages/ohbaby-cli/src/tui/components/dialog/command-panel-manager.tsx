@@ -289,11 +289,12 @@ function HelpPanel({
       : [];
 
   if (commands.length === 0) {
-    return <Text dimColor>No commands</Text>;
+    return <Text dimColor>No commands{"\nCtrl+O Toggle tool output"}</Text>;
   }
 
   return (
     <Box flexDirection="column">
+      <Text dimColor>Ctrl+O Toggle tool output</Text>
       {commands.map((command, index) =>
         isRecord(command) ? (
           <HelpCommand command={command} key={String(index)} />

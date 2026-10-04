@@ -49,6 +49,7 @@ export interface TuiRecoveryState {
   readonly sync: SessionSyncState;
   readonly control: UiSessionControl | null;
   readonly initialized: boolean;
+  readonly connected?: boolean;
   readonly runtimeEpoch?: string;
   readonly historyStale?: boolean;
   readonly historyReasoningMissing?: boolean;
@@ -84,6 +85,7 @@ export function createTuiSessionRecovery(options: {
   const { client, store } = options;
   const recoveryClient = client as CoreAPI & UiSessionRecoveryClient;
   const submissionsInFlight = new Set<string>();
+  const submissionSelections = new Map<string, number>();
   let connected = true;
   let backendEpoch: string | undefined;
   let disposed = false,
@@ -103,6 +105,7 @@ export function createTuiSessionRecovery(options: {
     sync: { status: "idle", scope: null, attempts: 0 },
     control: null,
     initialized: false,
+    connected: true,
     pending: options.pending ?? [],
   };
   const supported =
@@ -110,10 +113,119 @@ export function createTuiSessionRecovery(options: {
     typeof client.getSessionHistory === "function" &&
     typeof client.getSessionControl === "function" &&
     typeof client.getPromptReceipt === "function";
+  let started = false;
+  let continuation: ReturnType<typeof setTimeout> | undefined;
+  let failures = 0;
+  let healthySince: number | undefined;
+  let roundBusy = false;
+  let indexDirty = true;
+  let controlDirty = false;
+  const reads = new Map<
+    string,
+    { controller: AbortController; work: Promise<unknown> }
+  >();
+  function cancelReads(viewOnly = false): void {
+    clearTimeout(continuation);
+    continuation = undefined;
+    for (const [key, read] of reads) {
+      if (
+        !viewOnly ||
+        key.startsWith("control:") ||
+        key.startsWith("history:") ||
+        key.startsWith("receipt:")
+      )
+        read.controller.abort();
+    }
+  }
+  function read<T>(
+    key: string,
+    query: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const existing = reads.get(key);
+    if (existing) return existing.work as Promise<T>;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, 10_000);
+    const work = (async (): Promise<T> => {
+      controller.signal.throwIfAborted();
+      const result = await query(controller.signal);
+      controller.signal.throwIfAborted();
+      return result;
+    })().finally(() => {
+      clearTimeout(timer);
+      if (reads.get(key)?.controller === controller) reads.delete(key);
+      schedule();
+    });
+    reads.set(key, { controller, work });
+    return work;
+  }
+  function needsRecovery(): boolean {
+    return (
+      !state.initialized ||
+      indexDirty ||
+      backendEpoch === undefined ||
+      (scope !== null &&
+        (state.sync.status !== "ready" ||
+          state.control === null ||
+          controlDirty)) ||
+      state.pending.some(
+        (pending) =>
+          !submissionsInFlight.has(pending.clientRequestId) &&
+          pendingPromptBlocks(pending, scope?.sessionId ?? null, backendEpoch),
+      )
+    );
+  }
+  function schedule(): void {
+    if (!started || disposed || !connected || !supported || roundBusy) return;
+    if (!needsRecovery()) {
+      healthySince ??= Date.now();
+      if (Date.now() - healthySince >= 1_000) failures = 0;
+      clearTimeout(continuation);
+      continuation = undefined;
+      return;
+    }
+    if (healthySince !== undefined && Date.now() - healthySince >= 1_000)
+      failures = 0;
+    healthySince = undefined;
+    if (state.sync.status === "syncing" || reads.size > 0) {
+      clearTimeout(continuation);
+      continuation = undefined;
+      return;
+    }
+    if (continuation) return;
+    const delays = [1_000, 2_000, 5_000, 10_000, 30_000];
+    continuation = setTimeout(
+      () => {
+        continuation = undefined;
+        failures += 1;
+        void recover();
+      },
+      delays[Math.min(failures, delays.length - 1)],
+    );
+  }
+  async function recover(): Promise<void> {
+    if (roundBusy || disposed || !connected) return;
+    roundBusy = true;
+    try {
+      await refreshEpoch();
+      if (!state.initialized || indexDirty)
+        await refreshIndex(!state.initialized);
+      if (isConnected() && backendEpoch !== undefined) {
+        if (state.sync.status === "error") sync.retry();
+        if (state.control === null || controlDirty) await refreshControl();
+        await reconcileReceipts();
+      }
+    } finally {
+      roundBusy = false;
+      schedule();
+    }
+  }
   function publish(patch: Partial<TuiRecoveryState>): void {
     if (disposed) return;
     state = { ...state, ...patch };
     options.onChange?.(state);
+    schedule();
   }
   function savePending(pending: readonly PendingTuiPrompt[]): void {
     options.savePending?.(pending);
@@ -153,8 +265,18 @@ export function createTuiSessionRecovery(options: {
     const current = scope,
       ticket = ++controlTicket,
       generation = selection;
+    controlDirty = true;
+    const existing = reads.get(`control:${String(generation)}`);
+    if (existing) {
+      await existing.work.catch(() => undefined);
+      if (isConnected() && ticket === controlTicket && generation === selection)
+        await refreshControl();
+      return;
+    }
     try {
-      const control = await recoveryClient.getSessionControl(current);
+      const control = await read(`control:${String(generation)}`, (signal) =>
+        recoveryClient.getSessionControl({ ...current, signal }),
+      );
       if (
         !isConnected() ||
         ticket !== controlTicket ||
@@ -166,6 +288,7 @@ export function createTuiSessionRecovery(options: {
           control.bindingGeneration !== current.bindingGeneration)
       )
         return;
+      controlDirty = false;
       publish({ control });
     } catch {
       if (ticket === controlTicket && generation === selection)
@@ -177,8 +300,10 @@ export function createTuiSessionRecovery(options: {
     metadata?: Pick<UiSessionScope, "runtimeEpoch" | "bindingGeneration">,
   ): void {
     if (disposed || !supported) return;
+    cancelReads(true);
     ++selection;
     ++controlTicket;
+    controlDirty = false;
     const preserveHistory =
       sessionId !== null && scope?.sessionId === sessionId && older.length > 0;
     if (!preserveHistory) older = [];
@@ -201,47 +326,80 @@ export function createTuiSessionRecovery(options: {
     void refreshControl();
   }
   async function refreshIndex(selectCurrent = false): Promise<void> {
+    indexDirty = true;
     const ticket = ++indexTicket,
       generation = selection;
+    const existing = [reads.get("selected"), reads.get("index")].filter(
+      (read) => read !== undefined,
+    );
+    if (existing.length > 0) {
+      await Promise.allSettled(existing.map((read) => read.work));
+      if (isConnected() && ticket === indexTicket && generation === selection)
+        await refreshIndex(selectCurrent);
+      return;
+    }
     try {
       const [selected, index] = await Promise.all([
-        client.getSelectedSessionId(),
-        client.getSessionIndex(),
+        read("selected", (signal) => client.getSelectedSessionId({ signal })),
+        read("index", (signal) => client.getSessionIndex({ signal })),
       ]);
-      if (disposed || ticket !== indexTicket) return;
+      if (!isConnected() || ticket !== indexTicket || generation !== selection)
+        return;
+      indexDirty = false;
       store.setSessionIndex(index);
       if (selectCurrent && generation === selection) select(selected);
       publish({ initialized: true, error: undefined });
     } catch (error) {
-      publish({ error: String(error) });
+      if (isConnected() && ticket === indexTicket && generation === selection)
+        publish({ error: String(error) });
     }
   }
   async function reconcileReceipts(): Promise<Map<string, UiPromptReceipt>> {
     const receipts = new Map<string, UiPromptReceipt>();
-    if (!supported) return receipts;
+    if (!supported || !isConnected() || backendEpoch === undefined)
+      return receipts;
+    const generation = selection;
+    const epoch = backendEpoch;
     for (const pending of [...state.pending]) {
+      if (!pendingPromptBlocks(pending, scope?.sessionId ?? null, backendEpoch))
+        continue;
       if (
-        backendEpoch !== undefined &&
         pending.runtimeEpoch !== undefined &&
         pending.runtimeEpoch !== backendEpoch
       )
         continue;
       try {
-        const result = await recoveryClient.getPromptReceipt(pending);
+        const result = await read(
+          `receipt:${pending.clientRequestId}`,
+          (signal) => recoveryClient.getPromptReceipt({ ...pending, signal }),
+        );
         if (
           disposed ||
+          !connected ||
+          backendEpoch !== epoch ||
+          generation !== selection ||
           result.clientRequestId !== pending.clientRequestId ||
           (pending.runtimeEpoch !== undefined &&
             pending.runtimeEpoch !== result.runtimeEpoch)
         )
           continue;
-        if (result.receipt?.clientRequestId === pending.clientRequestId) {
+        if (
+          result.receipt?.clientRequestId === pending.clientRequestId &&
+          (pending.sessionId === undefined ||
+            result.receipt.sessionId === pending.sessionId)
+        ) {
           receipts.set(pending.clientRequestId, result.receipt);
+          const mayBind =
+            pending.sessionId === undefined &&
+            scope === null &&
+            submissionSelections.get(pending.clientRequestId) === selection;
+          submissionSelections.delete(pending.clientRequestId);
           savePending(
             state.pending.filter(
               (item) => item.clientRequestId !== pending.clientRequestId,
             ),
           );
+          if (mayBind) select(result.receipt.sessionId);
         }
       } catch {
         /* Unknown outcomes remain queryable with their original identity. */
@@ -255,9 +413,12 @@ export function createTuiSessionRecovery(options: {
   async function refreshEpoch(): Promise<void> {
     if (!canAdoptRuntimeEpoch()) return;
     try {
-      const snapshot = await client.getPermissionSnapshot({
-        rootSessionId: null,
-      });
+      const snapshot = await read("epoch", (signal) =>
+        client.getPermissionSnapshot({
+          rootSessionId: null,
+          signal,
+        }),
+      );
       if (canAdoptRuntimeEpoch()) {
         backendEpoch = snapshot.permissionEpoch;
         publish({ runtimeEpoch: backendEpoch });
@@ -276,41 +437,44 @@ export function createTuiSessionRecovery(options: {
         });
         return;
       }
+      started = true;
       await Promise.all([refreshIndex(true), refreshEpoch()]);
       void reconcileReceipts();
+      schedule();
     },
     select,
     refreshControl,
     reconcileReceipts,
     retry(): void {
-      void refreshEpoch();
-      sync.retry();
-      void refreshControl();
-      void reconcileReceipts();
+      void recover();
     },
     receive(event: UiEvent): boolean {
       if (event.type === "snapshot.replaced") return true;
       if (event.type === "session.resync-required") {
         if (event.disconnected) {
+          cancelReads();
           connected = false;
           ++controlTicket;
           sync.disconnect();
-          publish({ control: null });
+          publish({ control: null, connected: false });
           return true;
         }
         if (event.unsupported) {
+          cancelReads();
           connected = false;
           ++controlTicket;
           sync.disconnect();
           publish({
             control: null,
             error: "SESSION_RECOVERY_UNSUPPORTED: upgrade the backend",
+            connected: false,
           });
           return true;
         }
+        cancelReads();
         connected = true;
         backendEpoch = event.runtimeEpoch;
-        publish({ runtimeEpoch: backendEpoch });
+        publish({ runtimeEpoch: backendEpoch, connected: true });
         connection =
           event.connectionGeneration ??
           `${event.runtimeEpoch}:${String(event.bindingGeneration ?? 0)}`;
@@ -402,10 +566,11 @@ export function createTuiSessionRecovery(options: {
             event.bindingGeneration === scope.bindingGeneration)
         ) {
           if (event.reason === "connection interrupted") {
+            cancelReads();
             connected = false;
             ++controlTicket;
             sync.disconnect();
-            publish({ control: null });
+            publish({ control: null, connected: false });
           } else {
             sync.receive(event);
             void refreshControl();
@@ -458,11 +623,14 @@ export function createTuiSessionRecovery(options: {
       const generation = selection,
         current = scope;
       try {
-        const page = await recoveryClient.getSessionHistory({
-          ...current,
-          before: historyBefore ?? view.history.before,
-          limit: 50,
-        });
+        const page = await read(`history:${String(generation)}`, (signal) =>
+          recoveryClient.getSessionHistory({
+            ...current,
+            before: historyBefore ?? view.history.before,
+            limit: 50,
+            signal,
+          }),
+        );
         const latest = sync.getState().view;
         if (
           disposed ||
@@ -504,13 +672,17 @@ export function createTuiSessionRecovery(options: {
         );
         options.onHistory?.();
       } catch (error) {
-        publish({ error: `History unavailable: ${String(error)}` });
+        if (isConnected() && generation === selection)
+          publish({ error: `History unavailable: ${String(error)}` });
       } finally {
         if (generation === selection) historyBusy = false;
       }
     },
     discardPending(clientRequestIds): void {
       const ids = new Set(clientRequestIds);
+      for (const id of ids) {
+        if (!submissionsInFlight.has(id)) submissionSelections.delete(id);
+      }
       savePending(
         state.pending.filter(
           (item) =>
@@ -527,8 +699,15 @@ export function createTuiSessionRecovery(options: {
       )
         throw new Error("Stop unavailable: current run could not be confirmed");
       const generation = selection;
-      await refreshControl();
-      if (!isConnected() || generation !== selection || !readControl()?.runId)
+      const refreshing = refreshControl();
+      const stopTicket = controlTicket;
+      await refreshing;
+      if (
+        stopTicket !== controlTicket ||
+        !isConnected() ||
+        generation !== selection ||
+        !readControl()?.runId
+      )
         throw new Error("Stop unavailable: current run could not be confirmed");
       if (readControl()?.runId !== expectedRunId)
         throw new Error(
@@ -565,6 +744,7 @@ export function createTuiSessionRecovery(options: {
       };
       savePending([...state.pending, pending]);
       submissionsInFlight.add(pending.clientRequestId);
+      submissionSelections.set(pending.clientRequestId, generation);
       try {
         const receipt = await client.submitPromptAccepted(text, {
           clientRequestId: pending.clientRequestId,
@@ -572,6 +752,7 @@ export function createTuiSessionRecovery(options: {
           reasoning,
         });
         submissionsInFlight.delete(pending.clientRequestId);
+        submissionSelections.delete(pending.clientRequestId);
         savePending(
           state.pending.filter(
             (item) => item.clientRequestId !== pending.clientRequestId,
@@ -583,6 +764,7 @@ export function createTuiSessionRecovery(options: {
       } catch (error) {
         submissionsInFlight.delete(pending.clientRequestId);
         if (isDefiniteSubmissionRejection(error)) {
+          submissionSelections.delete(pending.clientRequestId);
           savePending(
             state.pending.filter(
               (item) => item.clientRequestId !== pending.clientRequestId,
@@ -598,11 +780,12 @@ export function createTuiSessionRecovery(options: {
           return receipt;
         }
         throw new Error(
-          "Submission outcome unknown; press Ctrl+R to query the original receipt. Do not resend.",
+          "Submission outcome unknown; automatically checking the original receipt. Do not resend.",
         );
       }
     },
     dispose(): void {
+      cancelReads();
       disposed = true;
       ++selection;
       ++controlTicket;

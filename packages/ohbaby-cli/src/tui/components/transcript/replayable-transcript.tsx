@@ -18,9 +18,11 @@ const CLEAR_TRANSCRIPT = "\u001b[2J\u001b[3J\u001b[H";
 export function ReplayableTranscript({
   items,
   identity,
+  toolsExpanded = false,
 }: {
   readonly items: readonly TranscriptItem[];
   readonly identity?: string;
+  readonly toolsExpanded?: boolean;
 }): ReactElement {
   const layout = useTuiLayout();
   const theme = useTheme();
@@ -45,7 +47,7 @@ export function ReplayableTranscript({
           fingerprint: string;
         }
       >(),
-    [layout.contentWidth, theme],
+    [layout.contentWidth, theme, toolsExpanded],
   );
   const fingerprints = items.map((item) => {
     const cached = projections.get(item.message);
@@ -70,6 +72,8 @@ export function ReplayableTranscript({
               layout.contentWidth - (item.message.role === "user" ? 2 : 0),
             ),
             theme,
+            undefined,
+            toolsExpanded,
           ),
     });
     projections.set(item.message, { item, fingerprint });
@@ -101,6 +105,7 @@ export function ReplayableTranscript({
         ) : (
           <MessageRow
             key={item.id}
+            toolsExpanded={toolsExpanded}
             message={item.message}
             contentWidth={layout.contentWidth}
             bottomMargin={item.spacing ? 1 : 0}

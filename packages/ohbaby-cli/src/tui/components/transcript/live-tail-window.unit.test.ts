@@ -139,3 +139,17 @@ function spinnerPart(index: number): RenderedPart {
     label: "Running tool...",
   };
 }
+
+it("clips wrapped running labels within the live row budget", () => {
+  const part: RenderedPart = {
+    index: 0,
+    kind: "spinner",
+    label: "one\ntwo\nthree\nfour",
+    segments: [{ text: "one\ntwo\nthree\nfour", color: "cyan" }],
+  };
+  const window = clampRenderedPartsToTail([part], 3);
+  expect(window.hiddenLineCount).toBe(2);
+  expect(window.parts).toEqual([
+    { index: 0, kind: "spinner", label: "three\nfour" },
+  ]);
+});
