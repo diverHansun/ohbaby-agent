@@ -73,6 +73,9 @@ def scenario(columns, rows, theme="dark", color="1"):
         assert b"READ-BODY-ONLY-EXPANDED" not in output, "read body is not compact"
         assert b"EXIT-FAILURE-REASON" in output, "failure reason missing"
         assert b"MARKDOWN-END" in output
+        assert b"Subagent Status" in output
+        assert b"PRIVATE-STATUS" not in output and b"PRIVATE-SESSION" not in output
+        assert b"LIST-DETAIL-EXPANDED" not in output
         draft = "保留草稿 👨‍👩‍👧‍👦 é"
         key(draft)
         before = len(output)
@@ -88,6 +91,8 @@ def scenario(columns, rows, theme="dark", color="1"):
         assert b"SHELL-0-001" in expanded and b"READ-BODY-ONLY-EXPANDED" in expanded
         assert expanded.index(b"SHELL-0-001") < expanded.index(b"READ-BODY-ONLY-EXPANDED") < expanded.index(b"MARKDOWN-END")
         assert b"NEW-LINE-30" in expanded
+        assert b"LIST-DETAIL-EXPANDED" in expanded
+        assert b"PRIVATE-STATUS" not in expanded and b"PRIVATE-SESSION" not in expanded
         assert b"@@ -8,3 +8,3 @@" in expanded
         before = len(output)
         command("refresh")
@@ -130,6 +135,7 @@ def scenario(columns, rows, theme="dark", color="1"):
         assert any(item.get("exited") and not item.get("raw") for item in reports), "raw mode not restored"
         assert b"\x1b[?25h" in output, "cursor not restored"
         assert b"INTERNAL_OBSERVATION_DO_NOT_DISPLAY" not in output
+        assert b"Option:" not in output, "approval duplicates its actionable choices"
         result = {"columns": columns, "rows": rows, "theme": theme, "color": color, "expansionMs": expansion_ms, "exit": process.returncode, "bytes": len(output),
                   "scrollbackClears": output.count(b"\x1b[3J"), "reports": [{**item, "submitted": [f"{len(text)} chars" for text in item["submitted"]]} if "submitted" in item else item for item in reports], "passed": True}
         print(json.dumps(result, ensure_ascii=False), flush=True)

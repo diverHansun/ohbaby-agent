@@ -248,7 +248,7 @@ it("reads long labels while pending within a bounded window and explains session
   }
   expect(frames).toContain("body-29");
   expect(frames).toContain("label-19");
-  expect(frames).toContain("this subagent session (child)");
+  expect(frames).toContain("this subagent session");
   expect(frames).not.toContain("[allow]");
   app.unmount();
   app.cleanup();
@@ -434,6 +434,153 @@ it("keeps Ctrl+R recovery distinct from R approval sync retry", async () => {
   app.stdin.write("r");
   await flush();
   expect(retry).toHaveBeenCalledOnce();
+  app.unmount();
+  app.cleanup();
+});
+
+it("shows one actionable choice list without static options or internal session IDs", async () => {
+  const app = render(
+    <PermissionDialog
+      client={{ respondPermission: vi.fn() } as unknown as CoreAPI}
+      request={{
+        ...request,
+        sessionId: "session_private_root",
+        rootSessionId: "session_private_root",
+        choices: [
+          request.choices[0],
+          { id: "allow_always", intent: "allow", label: "Always allow" },
+          { id: "deny", intent: "deny", label: "Reject" },
+        ],
+      }}
+      ready
+      context={context}
+      onResync={vi.fn()}
+    />,
+  );
+  await flush();
+  const frame = app.lastFrame() ?? "";
+  expect(frame.match(/Allow once/gu)).toHaveLength(1);
+  expect(frame).toContain("Allow matching requests in this session");
+  expect(frame).not.toContain("Option:");
+  expect(frame).not.toContain("session_private_root");
+  expect(frame).not.toContain("PgUp/PgDn");
+  expect(frame).not.toMatch(/\d+–\d+\/\d+/u);
+  app.stdin.write("\u001b[B");
+  await flush();
+  expect(app.lastFrame()).toContain("Run command");
+  app.unmount();
+  app.cleanup();
+});
+
+it("keeps the operation visible when choosing a short option beneath a truncated title", async () => {
+  const app = render(
+    <PermissionDialog
+      client={{ respondPermission: vi.fn() } as unknown as CoreAPI}
+      request={{
+        ...request,
+        title: "Long operation ".repeat(20),
+        choices: [
+          request.choices[0],
+          { id: "deny", intent: "deny", label: "Reject" },
+        ],
+      }}
+      ready
+      context={context}
+      onResync={vi.fn()}
+      maxHeight={9}
+    />,
+  );
+  await flush();
+  app.stdin.write("\u001b[B");
+  await flush();
+  expect(app.lastFrame()).toContain("Run command");
+  expect(app.lastFrame()).toContain("> Reject");
+  app.unmount();
+  app.cleanup();
+});
+it("keeps a custom single-line persistent approval label reachable", async () => {
+  const originalLabel = "Allow only the matching workspace requests";
+  const app = render(
+    <PermissionDialog
+      client={{ respondPermission: vi.fn() } as unknown as CoreAPI}
+      request={{
+        ...request,
+        choices: [
+          { id: "allow_always", intent: "allow", label: originalLabel },
+        ],
+      }}
+      ready
+      context={context}
+      onResync={vi.fn()}
+    />,
+  );
+  await flush();
+  expect(app.lastFrame()).toContain(originalLabel);
+  expect(app.lastFrame()).toContain("Allow matching requests in this session");
+  app.unmount();
+  app.cleanup();
+});
+
+it("does not truncate a fitting error by appending the reading range", async () => {
+  const syncError =
+    "Approval sync failed: expected session generation 9876543210 end";
+  const app = render(
+    <LayoutProvider value={computeLayoutMetrics({ columns: 80, rows: 24 })}>
+      <PermissionDialog
+        client={{ respondPermission: vi.fn() } as unknown as CoreAPI}
+        request={{
+          ...request,
+          description: Array.from(
+            { length: 20 },
+            (_, i) => `detail-${String(i)}`,
+          ).join("\n"),
+        }}
+        ready={false}
+        syncError={syncError}
+        context={context}
+        onResync={vi.fn()}
+        maxHeight={9}
+      />
+    </LayoutProvider>,
+  );
+  await flush();
+  expect(app.lastFrame()).toContain(syncError);
+  app.stdin.write("\u001b[6~");
+  await flush();
+  expect(app.lastFrame()).toContain(syncError);
+  app.unmount();
+  app.cleanup();
+});
+
+it("keeps the reading position when a short response error occurs", async () => {
+  const app = render(
+    <PermissionDialog
+      client={
+        {
+          respondPermission: vi
+            .fn()
+            .mockRejectedValue(new Error("Connection failed")),
+        } as unknown as CoreAPI
+      }
+      request={{
+        ...request,
+        description: Array.from(
+          { length: 20 },
+          (_, i) => `detail-${String(i)}`,
+        ).join("\n"),
+      }}
+      ready
+      context={context}
+      onResync={vi.fn()}
+      maxHeight={9}
+    />,
+  );
+  await flush();
+  app.stdin.write("\r");
+  await flush();
+  expect(app.lastFrame()).toContain("detail-0");
+  expect(app.lastFrame()).toContain("Error: Connection failed");
+  expect(app.lastFrame()?.match(/Error: Connection failed/gu)).toHaveLength(1);
   app.unmount();
   app.cleanup();
 });

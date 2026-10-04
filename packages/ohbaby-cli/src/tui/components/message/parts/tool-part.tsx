@@ -57,6 +57,7 @@ function formatToolName(name: string): string {
 }
 
 function formatPrimaryInput(call: UiToolCall): string {
+  if (call.name === "subagent_status") return "";
   const input = call.input;
   // Subagent prompts are runtime instructions, not user-facing task titles.
   const keys = call.name.startsWith("subagent_")

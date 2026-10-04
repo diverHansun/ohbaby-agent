@@ -1580,8 +1580,8 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("Permission: Write file");
     expect(app.lastFrame()).not.toContain("status: waiting");
     expect(app.lastFrame()).not.toContain("permission_raw_123");
-    expect(app.lastFrame()).toContain("Enter select");
-    expect(app.lastFrame()).toContain("Esc=reject");
+    expect(app.lastFrame()).toContain("Enter confirm");
+    expect(app.lastFrame()).toContain("Esc reject");
     expect(app.lastFrame()).toContain("> Allow once");
     expect(app.lastFrame()).toContain("  Reject");
   });

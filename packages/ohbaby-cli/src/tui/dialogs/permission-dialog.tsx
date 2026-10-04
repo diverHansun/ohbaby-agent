@@ -99,7 +99,7 @@ export function PermissionDialog({
       : `Subagent: ${request.sourceLabel ?? request.sessionId}`;
   const label = (choice: UiPermissionRequest["choices"][number]): string =>
     choice.id === "allow_always"
-      ? `Allow matching requests in ${request.sessionId === request.rootSessionId ? "this session" : "this subagent session"} (${request.sessionId})`
+      ? `Allow matching requests in ${request.sessionId === request.rootSessionId ? "this session" : "this subagent session"}`
       : choice.label;
   const titleLine = `Permission: ${request.title}`;
   const sourceLine = `From: ${source}`;
@@ -110,31 +110,43 @@ export function PermissionDialog({
   const starts: number[] = [];
   const body = [...heading];
   for (const choice of request.choices) {
-    starts.push(body.length);
-    body.push(
-      ...wrapAnsi(
-        `Option: ${choice.label}${choice.id === "allow_always" ? `\nScope: ${label(choice)}` : ""}`,
-        width,
-      ),
-    );
+    const choiceStart = body.length;
+    // Only overflow needs a second reading surface. Ordinary options belong
+    // exclusively to the actionable list below the operation.
+    const choiceLabel = label(choice);
+    if (summary(`> ${choiceLabel}`, width) !== `> ${choiceLabel}`)
+      body.push(...wrapAnsi(choiceLabel, width));
+    if (choice.label !== choiceLabel && choice.label !== "Always allow")
+      body.push(...wrapAnsi(choice.label, width));
+    starts.push(body.length > choiceStart ? choiceStart : 0);
   }
   for (const line of fullChrome) body.push(...wrapAnsi(line, width));
   const errorStart = body.length;
-  if (error || syncError)
-    body.push(...wrapAnsi(`Error: ${error ?? syncError ?? ""}`, width));
+  const errorText =
+    error || syncError ? `Error: ${error ?? syncError ?? ""}` : "";
+  if (errorText && (expired || summary(errorText, width) !== errorText))
+    body.push(...wrapAnsi(errorText, width));
   const deny = request.choices.find((c) => c.intent === "deny");
   const available =
     ready && !!context && !expired && request.choices.length > 0;
-  const hints = wrapAnsi(
-    `${available && !pending ? `Enter select · ${deny ? "Esc=reject" : "Esc does not submit"} · ↑↓ move · ` : ""}PgUp/PgDn read${controllableRun ? " · Ctrl+C stop" : ""}${retryHint ? ` · ${retryHint}` : ""}`,
-    width,
-  );
+  const hintText = (overflow: boolean): string =>
+    [
+      available && !pending
+        ? `↑↓ choose · Enter confirm${deny ? " · Esc reject" : ""}`
+        : "",
+      overflow ? "PgUp/PgDn read" : "",
+      controllableRun ? "Ctrl+C stop" : "",
+      retryHint,
+    ]
+      .filter(Boolean)
+      .join(" · ");
   const choiceRows = Math.min(3, request.choices.length);
-  const readingRows = Math.max(
-    1,
-    maxHeight - 2 - 1 - choiceRows - hints.length,
-  );
-  const tooSmall = maxHeight < 2 + 1 + choiceRows + hints.length + 1;
+  const baseHints = wrapAnsi(hintText(false), width);
+  const overflow =
+    body.length > Math.max(1, maxHeight - 3 - choiceRows - baseHints.length);
+  const hints = overflow ? wrapAnsi(hintText(true), width) : baseHints;
+  const readingRows = Math.max(1, maxHeight - 3 - choiceRows - hints.length);
+  const tooSmall = maxHeight < 3 + choiceRows + hints.length + 1;
   const start = Math.max(0, Math.min(offset, body.length - readingRows));
   const choiceStart = Math.max(
     0,
@@ -180,8 +192,10 @@ export function PermissionDialog({
       : request.choices.find((c) => c.id === selectedRef.current);
     if (!choice) {
       if (key.escape) {
-        setError("No reject option. Choose an option explicitly.");
-        setOffset(body.length);
+        const message = "No reject option. Choose an option explicitly.";
+        setError(message);
+        if (summary(`Error: ${message}`, width) !== `Error: ${message}`)
+          setOffset(body.length);
       }
       return;
     }
@@ -200,7 +214,8 @@ export function PermissionDialog({
         setError(message);
         pendingRef.current = false;
         setPending(false);
-        setOffset(body.length);
+        if (summary(`Error: ${message}`, width) !== `Error: ${message}`)
+          setOffset(body.length);
         if (
           typeof caught === "object" &&
           caught !== null &&
@@ -208,6 +223,7 @@ export function PermissionDialog({
           caught.code === "PERMISSION_NOT_PENDING"
         ) {
           setExpired(true);
+          setOffset(body.length);
           onResync();
         }
       });
@@ -224,7 +240,9 @@ export function PermissionDialog({
     );
   const visibleError = error ?? syncError;
   const status = visibleError
-    ? `Error: ${visibleError}${expired ? " · Synchronizing approvals..." : ""}`
+    ? expired
+      ? "Synchronizing approvals..."
+      : `Error: ${visibleError}`
     : pending
       ? "sending..."
       : !ready || !context || expired
@@ -245,12 +263,19 @@ export function PermissionDialog({
           {line || " "}
         </Text>
       ))}
-      <Text
-        dimColor={!visibleError}
-        color={visibleError ? theme.status.error : undefined}
-      >
-        {summary(status ? `${status} · ${range}` : range, width)}
-      </Text>
+      {status || overflow ? (
+        <Text
+          dimColor={!visibleError}
+          color={visibleError ? theme.status.error : undefined}
+        >
+          {summary(
+            [status, overflow && !visibleError ? range : ""]
+              .filter(Boolean)
+              .join(" · "),
+            width,
+          )}
+        </Text>
+      ) : null}
       {request.choices
         .slice(choiceStart, choiceStart + choiceRows)
         .map((choice) => (

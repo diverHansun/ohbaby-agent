@@ -121,6 +121,21 @@ const tools = Array.from({ length: 20 }, (_, i) => {
 const messages = [
   ...backend.view.session.messages,
   ...tools,
+  tool(
+    25,
+    "subagent_status",
+    { subagent_id: "PRIVATE-STATUS-ARG" },
+    JSON.stringify({
+      items: [
+        {
+          subagentId: "PRIVATE-STATUS-ID",
+          sessionId: "PRIVATE-SESSION-ID",
+          status: "running",
+        },
+      ],
+    }),
+  ),
+  tool(26, "list", { path: "src/" }, "LIST-DETAIL-EXPANDED\nsrc/config.ts"),
   {
     id: "markdown",
     role: "assistant" as const,

@@ -60,10 +60,17 @@ export function renderToolDisplay(
         ? theme.status.waiting
         : theme.tool.failed,
     );
+  // Status results are machine receipts (IDs, scopes and execution arrays).
+  // The existing Subagents browser owns these details, including under Ctrl+O.
+  // Run/close results may contain failures without result.error: retain them.
+  if (call.name === "subagent_status") return rows;
   if (details?.kind === "mutation" && details.dryRun)
     body("Dry run", theme.status.waiting);
   if (details?.kind === "bash" && details.jobId && details.status === "running")
-    body(`Started in background · ${details.jobId}`, theme.status.waiting);
+    body(
+      `Started in background${expanded ? ` · ${details.jobId}` : ""}`,
+      theme.status.waiting,
+    );
   if (
     details?.kind === "search" &&
     (details.scanComplete === false || details.displayLimited === true)
@@ -107,16 +114,29 @@ export function renderToolDisplay(
   } else if (details?.kind === "mutation" && details.diff !== undefined) {
     content = renderDiff(details.diff, bodyWidth, expanded, theme);
   } else if (
-    !["read", "glob", "grep", "web_search", "web_fetch"].includes(call.name) ||
+    !["read", "list", "glob", "grep", "web_search", "web_fetch"].includes(
+      call.name,
+    ) ||
     expanded
   ) {
+    const redundantBackgroundReceipt =
+      !expanded &&
+      details?.kind === "bash" &&
+      details.status === "running" &&
+      details.jobId !== undefined &&
+      result.output === "Command is still running with no output.";
     content =
-      result.output === ""
+      result.output === "" || redundantBackgroundReceipt
         ? []
         : wrapAnsi(safeText(result.output), bodyWidth).map((text) => ({
             text,
           }));
-    content = preview(content, 5, expanded, call.name === "bash");
+    content = preview(
+      content,
+      5,
+      expanded,
+      ["bash", "task_output"].includes(call.name),
+    );
   }
   for (const line of content) {
     for (const wrapped of wrapAnsi(line.text, bodyWidth))
@@ -200,11 +220,14 @@ function limitTitle(rows: string[], budget: number, width: number): string[] {
 }
 
 function primaryInput(call: UiToolCall): string {
+  if (call.name === "subagent_status") return "";
   const keys = call.name.startsWith("subagent_")
     ? ["name", "subagent_id"]
-    : ["grep", "glob"].includes(call.name)
-      ? ["pattern", "query", "path", "file_path"]
-      : ["command", "file_path", "path", "pattern", "query"];
+    : ["task_output", "task_kill"].includes(call.name)
+      ? ["job_id"]
+      : ["grep", "glob"].includes(call.name)
+        ? ["pattern", "query", "path", "file_path"]
+        : ["command", "file_path", "path", "pattern", "query"];
   const values = keys.flatMap((key) =>
     typeof call.input[key] === "string" && call.input[key] !== ""
       ? [safeText(call.input[key])]

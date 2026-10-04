@@ -61,7 +61,9 @@ describe("improve-2 complete TUI interaction", () => {
         await tick();
         expect(backend.responses).toEqual([]);
         expect(backend.requests[0]?.id).toBe("no-deny");
-        expect(stdout.chunks.slice(outputStart).join("")).toContain("Esc");
+        expect(stdout.chunks.slice(outputStart).join("")).toContain(
+          "Choose an option explicitly",
+        );
         stdin.send("\r");
         await tick();
         expect(backend.responses).toEqual([
@@ -100,7 +102,7 @@ describe("improve-2 complete TUI interaction", () => {
         await tick();
         const approvalFrame = stripVTControlCharacters(
           stdout.chunks
-            .filter((chunk) => chunk.includes("Enter select"))
+            .filter((chunk) => chunk.includes("Enter confirm"))
             .at(-1) ?? "",
         );
         expect(approvalFrame).toContain("Approval detail 1");

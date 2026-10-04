@@ -78,7 +78,7 @@ it("does not expose subagent prompts and uses only declared name or object field
     renderToolLabel(
       toolCall("subagent_status", "completed", { subagent_id: "agent-1" }).call,
     ),
-  ).toBe("Subagent Status agent-1");
+  ).toBe("Subagent Status");
 });
 
 it("labels failure and approval independently of color", () => {

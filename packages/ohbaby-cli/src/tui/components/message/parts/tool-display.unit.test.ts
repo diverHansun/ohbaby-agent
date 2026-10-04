@@ -279,6 +279,97 @@ it("keeps saved web search bodies in the expanded projection", () => {
   ).toContain("SAVED-WEB-BODY");
 });
 
+it("keeps directory listings compact and preserves their saved bodies on expansion", () => {
+  const result = { output: "src/\n.env\npackage.json" };
+  expect(text(display("list", { path: "." }, result))).toBe("List .");
+  expect(text(display("list", { path: "." }, result, true))).toContain(
+    "package.json",
+  );
+  expect(
+    text(
+      display("list", { path: "." }, { ...result, error: "Permission denied" }),
+    ),
+  ).toContain("Permission denied");
+});
+
+it.each([false, true])(
+  "keeps subagent status internals out of the transcript (expanded=%s)",
+  (expanded) => {
+    const result = {
+      output:
+        '{"items":[{"subagentId":"internal-agent","sessionId":"internal-session","status":"running"}],"executions":[]}',
+    };
+    expect(
+      text(
+        display(
+          "subagent_status",
+          { subagent_id: "internal-agent" },
+          result,
+          expanded,
+        ),
+      ),
+    ).toBe("Subagent Status");
+    expect(
+      text(
+        display(
+          "subagent_status",
+          {},
+          { ...result, error: "Status lookup failed" },
+          expanded,
+        ),
+      ),
+    ).toContain("Status lookup failed");
+  },
+);
+
+it("preserves foreground subagent failures and result text until typed display facts exist", () => {
+  const result = {
+    output:
+      "status: failed\n<subagent_error>\nThe child failed to start\n</subagent_error>",
+  };
+  expect(text(display("subagent_run", { name: "Review" }, result))).toContain(
+    "The child failed to start",
+  );
+});
+
+it("shows one background receipt without hiding actual command output", () => {
+  const details = {
+    kind: "bash" as const,
+    status: "running" as const,
+    jobId: "internal-job-id",
+  };
+  const result = {
+    details,
+    output: "Command is still running with no output.",
+  };
+  expect(text(display("bash", { command: "sleep 10" }, result))).toBe(
+    "Bash sleep 10\n  Started in background",
+  );
+  expect(
+    text(display("bash", { command: "sleep 10" }, result, true)),
+  ).toContain("internal-job-id");
+  expect(
+    text(
+      display(
+        "bash",
+        { command: "test" },
+        { details, output: "captured output" },
+      ),
+    ),
+  ).toContain("captured output");
+});
+
+it("previews recent task output without repeating polling control arguments", () => {
+  const input = { job_id: "job-123", block: true, wait_ms: 12000 };
+  const result = { output: "old\n1\n2\n3\n4\nnew" };
+  const compact = text(display("task_output", input, result));
+  expect(compact).toContain("Task Output job-123");
+  expect(compact).not.toContain("wait_ms");
+  expect(compact).not.toContain("old");
+  expect(compact).toContain("new");
+  expect(text(display("task_output", input, result, true))).toContain("old");
+});
+
 it.each([
   ["read", { path: "alpha\nbeta\tgamma" }],
   ["grep", { pattern: "alpha\nbeta\tgamma", path: "src" }],
