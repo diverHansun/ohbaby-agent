@@ -562,7 +562,11 @@ function verifyNewSessionDatabase(databasePath, workspacePath, evidence) {
 }
 
 async function verifyDiagnostics(logFilePath, output, forbiddenValues = []) {
-  if (output.stderr !== "") {
+  // serve reports its network policy on stderr before accepting requests.
+  // Permit that one normal status line, never blocked policies or extra output.
+  const networkStatus =
+    /^Network: (?:following system settings|using environment proxy settings; system proxy settings are overridden|system proxy discovery unavailable) — [^\r\n]+\r?\n$/u;
+  if (!networkStatus.test(output.stderr)) {
     throw new Error("compiled serve wrote unexpected stderr output");
   }
   if (
