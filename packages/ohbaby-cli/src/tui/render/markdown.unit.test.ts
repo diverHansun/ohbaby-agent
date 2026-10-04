@@ -21,6 +21,26 @@ describe("mdToAnsi", () => {
     ]);
   });
 
+  it.each([
+    {
+      name: "emphasis spanning a soft line break",
+      source: "*first\nsecond*\n",
+      expected: ["first", "second"],
+    },
+    {
+      name: "inline links spanning a soft line break",
+      source: "[multi\nline](https://example.com)\n",
+      expected: ["multi", "line (https://example.com)"],
+    },
+    {
+      name: "reference links whose definition is in a later block",
+      source: "[read docs][ref]\n\n[ref]: https://example.com/docs",
+      expected: ["read docs (https://example.com/docs)", ""],
+    },
+  ])("preserves whole-document semantics for $name", ({ source, expected }) => {
+    expect(mdToAnsi(source, { width: 80 })).toEqual(expected);
+  });
+
   it("wraps output lines to the supplied visible width", () => {
     const lines = mdToAnsi("A very long assistant sentence for wrapping.", {
       width: 12,

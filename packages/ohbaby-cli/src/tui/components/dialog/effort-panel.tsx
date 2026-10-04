@@ -105,6 +105,8 @@ export function EffortPanel({
   }, [client, sessionId, pendingReasoning, sessionReasoning]);
 
   useInput((_value, key) => {
+    if (key.shift && (key.pageUp || key.pageDown || key.home || key.end))
+      return;
     if (key.escape) {
       onClose();
       return;

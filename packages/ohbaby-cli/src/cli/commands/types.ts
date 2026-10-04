@@ -93,6 +93,8 @@ export interface CliCommandRuntime {
   readonly openUrl: (url: string) => Promise<void>;
   readonly readDaemonStatus: () => Promise<CliDaemonState | undefined>;
   readonly readStdin: () => Promise<string>;
+  /** Terminal capability probes that must finish before Ink owns stdin. */
+  readonly prepareTerminalUi?: () => Promise<void>;
   readonly renderTerminalUi: (options: {
     readonly reportDurationClockAnomaly?: (identity: string) => void;
     readonly pendingPromptWorkspace?: string;

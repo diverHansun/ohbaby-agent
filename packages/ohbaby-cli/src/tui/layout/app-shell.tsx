@@ -11,10 +11,45 @@ import {
   LiveTailRefContext,
   TodoPanelRefContext,
 } from "./context.js";
+import { FullscreenShell } from "./fullscreen-shell.js";
 import { computeLayoutMetrics } from "./metrics.js";
 
-/** Budget the live tail from the whole measured dynamic frame. */
 export function AppShell({
+  children,
+  output,
+  fullscreen = false,
+  priorityDock = false,
+  identity,
+  scrollEnabled = true,
+}: {
+  readonly children: ReactNode;
+  readonly output?: ReactNode;
+  readonly fullscreen?: boolean;
+  readonly priorityDock?: boolean;
+  readonly identity?: string;
+  readonly scrollEnabled?: boolean;
+}): ReactElement {
+  if (fullscreen)
+    return (
+      <FullscreenShell
+        priorityDock={priorityDock}
+        output={output}
+        identity={identity}
+        scrollEnabled={scrollEnabled}
+      >
+        {children}
+      </FullscreenShell>
+    );
+  return (
+    <LegacyAppShell>
+      {output}
+      {children}
+    </LegacyAppShell>
+  );
+}
+
+/** Budget the live tail from the whole measured dynamic frame. */
+function LegacyAppShell({
   children,
 }: {
   readonly children: ReactNode;

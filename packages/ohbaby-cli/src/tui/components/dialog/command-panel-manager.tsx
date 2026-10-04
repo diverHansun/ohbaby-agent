@@ -48,6 +48,7 @@ interface SkillsSelection {
 }
 
 export interface CommandPanelManagerProps {
+  readonly fullscreen?: boolean;
   readonly catalog: UiCommandCatalog | null;
   readonly client: CoreAPI;
   readonly contextWindowUsage: UiContextWindowUsage | null;
@@ -60,6 +61,7 @@ export interface CommandPanelManagerProps {
 }
 
 export function CommandPanelManager({
+  fullscreen = false,
   catalog,
   client,
   contextWindowUsage,
@@ -72,6 +74,9 @@ export function CommandPanelManager({
 }: CommandPanelManagerProps): ReactElement | null {
   const theme = useTheme();
   const layout = useTuiLayout();
+  const overlayBodyRows = fullscreen
+    ? Math.max(1, layout.rows - (layout.rows < 20 ? 5 : 10))
+    : undefined;
   const skillsVisibleLines = resolveSkillsPanelVisibleLines(layout.rows);
   const skills = panelSkills(panel);
   const maxSkillIndex = Math.max(0, skills.length - 1);
@@ -106,6 +111,8 @@ export function CommandPanelManager({
 
   useInput(
     (_value, key) => {
+      if (key.shift && (key.pageUp || key.pageDown || key.home || key.end))
+        return;
       if (key.escape) {
         onClose();
         return;
@@ -166,12 +173,23 @@ export function CommandPanelManager({
         <ConnectPanel client={client} onClose={onClose} runtime={runtime} />
       );
     return (
-      <OverlayCard title={panelTitle(panel.kind)}>{panelBody}</OverlayCard>
+      <OverlayCard
+        title={panelTitle(panel.kind)}
+        compact={fullscreen && layout.rows < 20}
+        bodyRows={overlayBodyRows}
+      >
+        {panelBody}
+      </OverlayCard>
     );
   }
 
   return (
-    <OverlayCard title={panelTitle(panel.kind)}>
+    <OverlayCard
+      title={panelTitle(panel.kind)}
+      compact={fullscreen && layout.rows < 20}
+      bodyRows={overlayBodyRows}
+      scrollable={panel.kind !== "skills"}
+    >
       {panel.status === "loading" ? (
         <Text dimColor>Loading...</Text>
       ) : panel.status === "error" ? (

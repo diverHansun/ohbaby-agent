@@ -44,6 +44,8 @@ export function SelectOneDialog({
   };
 
   useInput((value, key) => {
+    if (key.shift && (key.pageUp || key.pageDown || key.home || key.end))
+      return;
     if (pending) {
       return;
     }

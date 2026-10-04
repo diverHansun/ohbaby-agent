@@ -72,7 +72,7 @@ export function TodoPanel({
   // In a short terminal, keep approval choices and the saved draft in view.
   // The expanded state is retained and restored when the dialog closes.
   const completed = todos.filter((todo) => todo.status === "completed").length;
-  if (summaryOnly || !expanded) {
+  if (summaryOnly || !expanded || (budget !== undefined && budget < 3)) {
     return (
       <Box ref={panelRef}>
         <Text color={theme.text.dim}>

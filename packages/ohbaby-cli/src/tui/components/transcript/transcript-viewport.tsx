@@ -1,6 +1,7 @@
 import { Box, useStdout } from "ink";
 import type { UiModelRequest, UiMessage, UiNotice } from "ohbaby-sdk";
-import type { ReactElement } from "react";
+import { useContext, type ReactElement } from "react";
+import { TranscriptDocumentContext } from "../../layout/context.js";
 import type {
   TuiCommandNotice,
   TuiReasoningViewState,
@@ -11,6 +12,7 @@ import { WorkingSpinner } from "../working-spinner.js";
 import { CommandNoticeLane } from "./command-notice-lane.js";
 import {
   CommittedTranscript,
+  transcriptAnchorId,
   shouldUseStaticTranscript,
 } from "./committed-transcript.js";
 import { ReplayableTranscript } from "./replayable-transcript.js";
@@ -39,9 +41,12 @@ export function TranscriptViewport({
   modelActivity,
 }: TranscriptViewportProps): ReactElement {
   const { stdout } = useStdout();
-  const useStatic = shouldUseStaticTranscript({
-    isTTY: "isTTY" in stdout && stdout.isTTY === true,
-  });
+  const fullDocument = useContext(TranscriptDocumentContext);
+  const useStatic =
+    !fullDocument &&
+    shouldUseStaticTranscript({
+      isTTY: "isTTY" in stdout && stdout.isTTY === true,
+    });
   return (
     <Box flexDirection="column">
       {useStatic ? (
@@ -60,6 +65,23 @@ export function TranscriptViewport({
           />
           <CommandNoticeLane commandNotices={commandNotices} />
           <LiveTail
+            anchorId={
+              liveMessage
+                ? transcriptAnchorId(
+                    liveMessage.id,
+                    committedItems
+                      .filter(
+                        (item) =>
+                          !item.promptCompletion &&
+                          item.messageId === liveMessage.id,
+                      )
+                      .reduce(
+                        (count, item) => count + item.message.parts.length,
+                        0,
+                      ),
+                  )
+                : undefined
+            }
             message={liveMessage}
             reasoning={liveReasoning}
             toolsExpanded={toolsExpanded}

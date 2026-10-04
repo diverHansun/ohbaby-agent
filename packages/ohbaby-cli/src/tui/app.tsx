@@ -65,6 +65,7 @@ import {
 } from "./store/selectors/transcript.js";
 import { createCoalescedTuiEventDispatcher } from "./store/stream-coalescer.js";
 import { ThemeProvider } from "./theme/index.js";
+import type { ExitTranscript } from "./exit-transcript.js";
 import type {
   TuiCommandCatalog,
   TuiStore,
@@ -81,6 +82,10 @@ const EMPTY_INITIAL_NOTICES: readonly string[] = [];
 type TranscriptSurfaceResetReason = "new-session" | "switch-session";
 
 export interface TerminalUiOptions {
+  /** Internal exit snapshot; emitted after pending stream events are flushed. */
+  readonly onExitTranscript?: (transcript: ExitTranscript) => void;
+  /** A fixed transcript viewport and dock, owned by Ink alternate screen. */
+  readonly fullscreen?: boolean;
   readonly reportDurationClockAnomaly?: (identity: string) => void;
   readonly pendingPromptWorkspace?: string;
   readonly clearOnStart?: boolean;
@@ -93,6 +98,8 @@ export interface TerminalUiOptions {
 }
 
 export function OhbabyTerminalApp({
+  fullscreen = false,
+  onExitTranscript,
   clearOnStart = false,
   pendingPromptWorkspace,
   client,
@@ -140,7 +147,7 @@ export function OhbabyTerminalApp({
   const store = storeRef.current;
   const { exit } = useApp();
   const { write: writeStdout } = useStdout();
-  if (clearOnStart && !didClearOnStartRef.current) {
+  if (!fullscreen && clearOnStart && !didClearOnStartRef.current) {
     writeStdout(NEW_SESSION_CLEAR_SEQUENCE);
     didClearOnStartRef.current = true;
   }
@@ -158,6 +165,8 @@ export function OhbabyTerminalApp({
   }, [activeSessionId]);
   const toolsExpanded =
     toolView.sessionId === activeSessionId && toolView.expanded;
+  const exitTranscriptRef = useRef({ onExitTranscript, toolsExpanded });
+  exitTranscriptRef.current = { onExitTranscript, toolsExpanded };
   useEffect(() => {
     setToolView((view) => ({
       sessionId: activeSessionId,
@@ -351,7 +360,7 @@ export function OhbabyTerminalApp({
     (todoChoices[todoIdentity] ?? !todoBinding?.stopped);
   const todoExpanded = todoBinding?.stopped
     ? todoShown
-    : todoIdentity !== null && (todoChoices[todoIdentity] ?? true);
+    : todoIdentity !== null && (todoChoices[todoIdentity] ?? false);
   const presentedTodos =
     activeTodoList &&
     todoIdentity !== null &&
@@ -458,11 +467,11 @@ export function OhbabyTerminalApp({
         submissionGenerationRef.current += 1;
         setSubmissionContextGeneration(submissionGenerationRef.current);
       }
-      writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
+      if (!fullscreen) writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
       setScreenGeneration((current) => current + 1);
       setActiveCommandPanel(null);
     },
-    [setActiveCommandPanel, writeStdout],
+    [fullscreen, setActiveCommandPanel, writeStdout],
   );
   useEffect(() => {
     if (
@@ -500,9 +509,9 @@ export function OhbabyTerminalApp({
     subagents.select();
     // The browser unmounts Static history. Re-entering the root must replace
     // that terminal projection before the newly mounted Static prints it.
-    writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
+    if (!fullscreen) writeStdout(SESSION_VIEW_CLEAR_SEQUENCE);
     setSubagentBrowserOpen(false);
-  }, [subagents, writeStdout]);
+  }, [fullscreen, subagents, writeStdout]);
   const closeCommandPanel = useCallback((): void => {
     setActiveCommandPanel(null);
   }, [setActiveCommandPanel]);
@@ -871,6 +880,23 @@ export function OhbabyTerminalApp({
     subscribeEvents,
   ]);
 
+  // Registered after the event subscription so its cleanup flushes pending
+  // deltas before we take the final snapshot. No writes while alternate is active.
+  useEffect(
+    () => (): void => {
+      const state = store.getState();
+      const { onExitTranscript: capture, toolsExpanded: expanded } =
+        exitTranscriptRef.current;
+      capture?.({
+        committedItems: state.committedItems,
+        liveMessage: state.liveMessage,
+        liveReasoning: selectLiveReasoning(state),
+        toolsExpanded: expanded,
+      });
+    },
+    [store],
+  );
+
   useEffect(() => {
     const panel = commandPanelRef.current;
     if (panel !== null && panel.sessionId !== activeSessionId) {
@@ -945,47 +971,62 @@ export function OhbabyTerminalApp({
 
   return (
     <ThemeProvider>
-      <AppShell>
-        {permissions.length === 0 ? <HeaderContainer store={store} /> : null}
-        {subagentBrowserOpen ? (
+      <AppShell
+        priorityDock={hasDialog}
+        fullscreen={fullscreen}
+        identity={`${activeSessionId ?? "empty"}:${String(screenGeneration)}:${String(subagentBrowserOpen)}`}
+        scrollEnabled={!subagentBrowserOpen}
+        output={
           <>
-            {permissions.length > 0 ? (
-              <Text dimColor>
-                Approval pending · Ctrl+G close browser to review
-              </Text>
-            ) : null}
-            <SubagentBrowser
-              reader={subagents}
-              state={subagentState}
-              onClose={closeSubagentBrowser}
-            />
-          </>
-        ) : (
-          <>
-            {permissions.length === 0 && client.listSubagentExecutions ? (
-              <Text dimColor>
-                Ctrl+G subagents · {subagentState.list?.executions.length ?? 0}{" "}
-                executions
-              </Text>
-            ) : null}
             {permissions.length === 0 ? (
-              <SubagentWait
-                state={subagentState}
-                run={recoveryState.sync.view?.runs.find(
-                  (run) => run.id === recoveryState.control?.runId,
-                )}
-              />
+              <HeaderContainer store={store} />
             ) : null}
-            <DurationDiagnosticContext.Provider
-              value={reportDurationClockAnomaly}
-            >
-              <TranscriptViewportContainer
-                key={screenGeneration}
-                store={store}
-                toolsExpanded={toolsExpanded}
-                waitingForSubagents={subagentState.list?.waiting}
-              />
-            </DurationDiagnosticContext.Provider>
+            {subagentBrowserOpen ? (
+              <>
+                {permissions.length > 0 ? (
+                  <Text dimColor>
+                    Approval pending · Ctrl+G close browser to review
+                  </Text>
+                ) : null}
+                <SubagentBrowser
+                  reader={subagents}
+                  state={subagentState}
+                  onClose={closeSubagentBrowser}
+                />
+              </>
+            ) : (
+              <>
+                {permissions.length === 0 && client.listSubagentExecutions ? (
+                  <Text dimColor>
+                    Ctrl+G subagents ·{" "}
+                    {subagentState.list?.executions.length ?? 0} executions
+                  </Text>
+                ) : null}
+                {permissions.length === 0 ? (
+                  <SubagentWait
+                    state={subagentState}
+                    run={recoveryState.sync.view?.runs.find(
+                      (run) => run.id === recoveryState.control?.runId,
+                    )}
+                  />
+                ) : null}
+                <DurationDiagnosticContext.Provider
+                  value={reportDurationClockAnomaly}
+                >
+                  <TranscriptViewportContainer
+                    key={screenGeneration}
+                    store={store}
+                    toolsExpanded={toolsExpanded}
+                    waitingForSubagents={subagentState.list?.waiting}
+                  />
+                </DurationDiagnosticContext.Provider>
+              </>
+            )}
+          </>
+        }
+      >
+        {!subagentBrowserOpen ? (
+          <>
             <DialogManager
               client={client}
               interactions={interactions}
@@ -1022,6 +1063,7 @@ export function OhbabyTerminalApp({
               )}
             />
             <CommandPanelManager
+              fullscreen={fullscreen}
               catalog={catalog}
               client={client}
               contextWindowUsage={activeContextWindowUsage}
@@ -1055,13 +1097,13 @@ export function OhbabyTerminalApp({
               <CatalogInvalidation store={store} />
             ) : null}
           </>
-        )}
+        ) : null}
         <Box
           display={subagentBrowserOpen ? "none" : "flex"}
           flexDirection="column"
         >
           <Prompt
-            footerOnly={permissions.length > 0}
+            footerOnly={hasDialog}
             onQueueModeChange={setQueueInputMode}
             activeSessionId={activeSessionId}
             activeRunId={recoveryState.control?.runId ?? undefined}

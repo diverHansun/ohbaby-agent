@@ -8,7 +8,8 @@ import type {
   UiRunStatus,
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { OverlayBodyRowsContext } from "./overlay-card.js";
 import { useTheme } from "../../theme/index.js";
 
 type ConnectFieldKey =
@@ -90,6 +91,7 @@ export function ConnectPanel({
   onClose,
 }: ConnectPanelProps): ReactElement {
   const theme = useTheme();
+  const bodyRows = useContext(OverlayBodyRowsContext);
   const [draft, setDraft] = useState<ConnectDraft>(EMPTY_DRAFT);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [editingField, setEditingField] = useState<ConnectFieldKey | null>(
@@ -242,6 +244,8 @@ export function ConnectPanel({
 
   useInput(
     (value, key) => {
+      if (key.shift && (key.pageUp || key.pageDown || key.home || key.end))
+        return;
       const isReturn = key.return || value === "\r" || value === "\n";
       const activeEditingField = editingFieldRef.current;
       if (activeEditingField !== null) {
@@ -320,19 +324,32 @@ export function ConnectPanel({
     { isActive: true },
   );
 
+  const fieldRows =
+    bodyRows === undefined
+      ? CONNECT_FIELDS.length
+      : Math.max(
+          1,
+          bodyRows -
+            2 -
+            (editingField === "interfaceProvider" ? PROTOCOLS.length : 0) -
+            (urlPathWarning ? 1 : 0),
+        );
+  const fieldStart = Math.max(0, selectedIndex - fieldRows + 1);
   return (
     <Box flexDirection="column">
-      <Box flexDirection="column" marginTop={1}>
-        {CONNECT_FIELDS.map((field, index) => (
-          <ConnectFieldRow
-            draft={draft}
-            editValue={editValue}
-            editingField={editingField}
-            field={field}
-            isSelected={index === selectedIndex}
-            key={field.key}
-          />
-        ))}
+      <Box flexDirection="column" marginTop={bodyRows === undefined ? 1 : 0}>
+        {CONNECT_FIELDS.slice(fieldStart, fieldStart + fieldRows).map(
+          (field, index) => (
+            <ConnectFieldRow
+              draft={draft}
+              editValue={editValue}
+              editingField={editingField}
+              field={field}
+              isSelected={fieldStart + index === selectedIndex}
+              key={field.key}
+            />
+          ),
+        )}
       </Box>
       {editingField === "interfaceProvider" ? (
         <Box flexDirection="column" marginLeft={2}>
@@ -349,9 +366,25 @@ export function ConnectPanel({
         </Box>
       ) : null}
       {urlPathWarning ? (
-        <Text color={theme.status.warning}>{urlPathWarning}</Text>
+        <Text
+          wrap={bodyRows === undefined ? "wrap" : "truncate-end"}
+          color={theme.status.warning}
+        >
+          {urlPathWarning}
+        </Text>
       ) : null}
-      <Box marginTop={1}>
+      {bodyRows !== undefined ? (
+        <Text dimColor wrap="truncate-end">
+          ↑↓ fields · Enter edit · Esc back · {fieldStart + 1}–
+          {Math.min(CONNECT_FIELDS.length, fieldStart + fieldRows)}/
+          {CONNECT_FIELDS.length}
+        </Text>
+      ) : null}
+      <Box
+        marginTop={bodyRows === undefined ? 1 : 0}
+        height={bodyRows === undefined ? undefined : 1}
+        overflow="hidden"
+      >
         <ConnectStatusLine saveState={saveState} />
       </Box>
     </Box>
@@ -372,6 +405,7 @@ function ConnectFieldRow({
   readonly isSelected: boolean;
 }): ReactElement {
   const theme = useTheme();
+  const compact = useContext(OverlayBodyRowsContext) !== undefined;
   const isEditing = editingField === field.key;
   const rawValue = isEditing
     ? editValue
@@ -384,6 +418,7 @@ function ConnectFieldRow({
 
   return (
     <Text
+      wrap={compact ? "truncate-middle" : "wrap"}
       color={
         isEditing ? theme.editing : isSelected ? theme.text.strong : undefined
       }

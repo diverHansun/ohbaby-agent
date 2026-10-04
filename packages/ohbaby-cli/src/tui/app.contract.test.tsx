@@ -286,7 +286,7 @@ describe("OhbabyTerminalApp", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
-  it("defaults to expanded Tasks and preserves a collapsed summary through approvals", async () => {
+  it("defaults to a Tasks summary and preserves the chosen summary through approvals", async () => {
     const todos = Array.from({ length: 10 }, (_, index) => ({
       content: `todo ${String(index + 1)}`,
       status: index === 0 ? ("in_progress" as const) : ("pending" as const),
@@ -312,6 +312,10 @@ describe("OhbabyTerminalApp", () => {
       />,
     );
 
+    await flush();
+    expect(app.lastFrame()).toContain("Tasks 0/10 completed · Ctrl+T expand");
+    expect(app.lastFrame()).not.toContain("todo 10");
+    app.stdin.write("\u0014");
     await flush();
     expect(app.lastFrame()).toContain("todo 10");
     expect(app.lastFrame()).toContain("Tasks 0/10 completed");
@@ -401,6 +405,8 @@ describe("OhbabyTerminalApp", () => {
         subscribeEvents={client.subscribeEvents}
       />,
     );
+    await waitForFrame(app, (frame) => frame.includes("Tasks 0/1 completed"));
+    app.stdin.write("\u0014");
     await waitForFrame(app, (frame) => frame.includes("unfinished task"));
     client.emit({
       type: "runtime.updated",
@@ -467,6 +473,8 @@ describe("OhbabyTerminalApp", () => {
         subscribeEvents={client.subscribeEvents}
       />,
     );
+    await waitForFrame(app, (frame) => frame.includes("Tasks 0/1 completed"));
+    app.stdin.write("\u0014");
     await waitForFrame(app, (frame) => frame.includes("parent task"));
     app.stdin.write("\u0014");
     await flush();
@@ -517,7 +525,8 @@ describe("OhbabyTerminalApp", () => {
       },
     });
     await flush();
-    expect(app.lastFrame()).toContain("parent task");
+    expect(app.lastFrame()).toContain("Tasks 0/1 completed · Ctrl+T expand");
+    expect(app.lastFrame()).not.toContain("parent task");
     app.unmount();
   });
 

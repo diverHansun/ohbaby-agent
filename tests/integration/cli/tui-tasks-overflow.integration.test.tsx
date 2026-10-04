@@ -10,14 +10,17 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { OhbabyTerminalApp } from "../../../packages/ohbaby-cli/src/tui/app.js";
 import { createTuiReviewBackend } from "./fixtures/tui-improve1-backend.js";
+import { SHIMMER_INTERVAL_MS } from "../../../packages/ohbaby-cli/src/tui/components/shimmer-text.js";
 
 describe("TUI expanded Tasks viewport", () => {
-  it("makes every physical task row reachable without changing draft or ordinary PageUp", async () => {
+  it("separates Tasks paging, draft cursor navigation and empty-draft history loading", async () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), "tui-tasks-"));
     const backend = createTuiReviewBackend();
     const originalHistory = backend.client.getSessionHistory;
     let historyLoads = 0;
-    backend.client.getSessionHistory = (input) => {
+    backend.client.getSessionHistory = (
+      input: Parameters<typeof originalHistory>[0],
+    ): ReturnType<typeof originalHistory> => {
       historyLoads++;
       return originalHistory(input);
     };
@@ -56,7 +59,8 @@ describe("TUI expanded Tasks viewport", () => {
     try {
       await tick();
       await tick();
-      stdin.send("draft one\ndraft two\ndraft three\ndraft four\ndraft five");
+      const draft = "draft one\ndraft two\ndraft three\ndraft four\ndraft five";
+      stdin.send(draft);
       await tick();
       const baseline = stdout.chunks.length;
       stdin.send("\u0014");
@@ -81,7 +85,16 @@ describe("TUI expanded Tasks viewport", () => {
       expect(stdout.chunks.slice(quiet).join("")).toBe("");
       stdin.send("\x1b[5~");
       await tick();
-      expect(historyLoads).toBe(1);
+      expect(historyLoads).toBe(0);
+      expect(stdout.chunks.slice(quiet).join("")).not.toContain("\x1b[3J");
+      // PgUp must move the draft cursor up one row, not page Tasks or history.
+      stdin.send("!");
+      await tick();
+      expect(stdout.text()).toContain("draft four!");
+      stdin.send("\x7f");
+      await tick();
+      stdin.send("\x1b[6~");
+      await tick();
       const interval = vi.spyOn(globalThis, "setInterval");
       const animationStart = stdout.chunks.length;
       try {
@@ -107,7 +120,9 @@ describe("TUI expanded Tasks viewport", () => {
           ],
         });
         await new Promise((resolve) => setTimeout(resolve, 400));
-        expect(interval.mock.calls.some((call) => call[1] === 150)).toBe(true);
+        expect(
+          interval.mock.calls.some((call) => call[1] === SHIMMER_INTERVAL_MS),
+        ).toBe(true);
         expect(stdout.chunks.slice(animationStart).join("")).not.toContain(
           "\x1b[3J",
         );
@@ -121,6 +136,12 @@ describe("TUI expanded Tasks viewport", () => {
       await tick();
       expect(stdout.text()).toContain("Tasks 0/20 completed · Ctrl+T expand");
       expect(stdout.text()).toContain("draft five");
+      stdin.send("\r");
+      await tick();
+      expect(backend.submitted).toEqual([draft]);
+      stdin.send("\x1b[5~");
+      await tick();
+      expect(historyLoads).toBe(1);
     } finally {
       app.unmount();
       await rm(workspace, { recursive: true, force: true });

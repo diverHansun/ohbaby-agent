@@ -6,9 +6,11 @@ import { stripVTControlCharacters } from "node:util";
 const cliRequire = createRequire(
   new URL("../../../../packages/ohbaby-cli/package.json", import.meta.url),
 );
-export const { render, Box, useBoxMetrics } = await import(
+// SAFETY: the dynamic import resolves this same pinned CLI dependency.
+// Its type-only entry prevents `any` from leaking into process-level tests.
+export const { render, Box, useBoxMetrics } = (await import(
   cliRequire.resolve("ink")
-);
+)) as typeof import("../../../../packages/ohbaby-cli/node_modules/ink/build/index.js");
 
 export class TerminalOutput extends EventEmitter {
   columns = 80;

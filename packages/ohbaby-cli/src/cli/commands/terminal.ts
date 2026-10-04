@@ -106,6 +106,7 @@ export function createTerminalCommand(
         unmount?.();
       });
       try {
+        await runtime.prepareTerminalUi?.();
         const instance = runtime.renderTerminalUi({
           reportDurationClockAnomaly: host.reportDurationClockAnomaly,
           clearOnStart: resume === undefined && args.continue !== true,
@@ -121,7 +122,11 @@ export function createTerminalCommand(
               }),
         });
         unmount = instance.unmount;
-        await Promise.race([instance.waitUntilExit?.(), shutdown.interrupted]);
+        const exited = instance.waitUntilExit?.();
+        await Promise.race([exited, shutdown.interrupted]);
+        // A signal starts unmount, but Ink still needs to restore the terminal
+        // and drain the final transcript before bin.ts may exit the process.
+        await exited;
       } finally {
         try {
           await shutdown.dispose();

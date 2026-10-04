@@ -156,6 +156,8 @@ export function PermissionDialog({
     ),
   );
   useInput((_, key) => {
+    if (key.shift && (key.pageUp || key.pageDown || key.home || key.end))
+      return;
     if (key.pageUp || key.pageDown) {
       setOffset(
         Math.max(

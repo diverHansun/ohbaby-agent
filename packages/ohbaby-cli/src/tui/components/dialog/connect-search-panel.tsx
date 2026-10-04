@@ -6,7 +6,8 @@ import type {
   UiSetSearchApiKeyResult,
 } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
+import { OverlayBodyRowsContext } from "./overlay-card.js";
 import { useTheme } from "../../theme/index.js";
 
 type SearchFieldKey = "provider" | "apiKeyEnv" | "apiKey";
@@ -58,6 +59,7 @@ export function ConnectSearchPanel({
   onClose,
   runtime,
 }: ConnectSearchPanelProps): ReactElement {
+  const bodyRows = useContext(OverlayBodyRowsContext);
   const [draft, setDraft] = useState<SearchDraft>(EMPTY_DRAFT);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [editingField, setEditingField] = useState<SearchFieldKey | null>(null);
@@ -197,6 +199,8 @@ export function ConnectSearchPanel({
 
   useInput(
     (value, key) => {
+      if (key.shift && (key.pageUp || key.pageDown || key.home || key.end))
+        return;
       const isReturn = key.return || value === "\r" || value === "\n";
       const activeEditingField = editingFieldRef.current;
       if (activeEditingField !== null) {
@@ -250,21 +254,35 @@ export function ConnectSearchPanel({
     { isActive: true },
   );
 
+  const fieldRows =
+    bodyRows === undefined ? SEARCH_FIELDS.length : Math.max(1, bodyRows - 2);
+  const fieldStart = Math.max(0, selectedIndex - fieldRows + 1);
   return (
     <Box flexDirection="column">
-      <Box flexDirection="column" marginTop={1}>
-        {SEARCH_FIELDS.map((field, index) => (
-          <SearchFieldRow
-            draft={draft}
-            editValue={editValue}
-            editingField={editingField}
-            field={field}
-            isSelected={index === selectedIndex}
-            key={field.key}
-          />
-        ))}
+      <Box flexDirection="column" marginTop={bodyRows === undefined ? 1 : 0}>
+        {SEARCH_FIELDS.slice(fieldStart, fieldStart + fieldRows).map(
+          (field, index) => (
+            <SearchFieldRow
+              draft={draft}
+              editValue={editValue}
+              editingField={editingField}
+              field={field}
+              isSelected={fieldStart + index === selectedIndex}
+              key={field.key}
+            />
+          ),
+        )}
       </Box>
-      <Box marginTop={1}>
+      {bodyRows !== undefined ? (
+        <Text dimColor wrap="truncate-end">
+          ↑↓ fields · Enter edit · Esc back
+        </Text>
+      ) : null}
+      <Box
+        marginTop={bodyRows === undefined ? 1 : 0}
+        height={bodyRows === undefined ? undefined : 1}
+        overflow="hidden"
+      >
         <SearchStatusLine isRunning={isRunning} saveState={saveState} />
       </Box>
     </Box>
@@ -285,6 +303,7 @@ function SearchFieldRow({
   readonly isSelected: boolean;
 }): ReactElement {
   const theme = useTheme();
+  const compact = useContext(OverlayBodyRowsContext) !== undefined;
   const isEditing = editingField === field.key;
   const rawValue = isEditing ? editValue : draft[field.key];
   const displayValue = field.secret ? maskSecret(rawValue) : rawValue;
@@ -293,6 +312,7 @@ function SearchFieldRow({
 
   return (
     <Text
+      wrap={compact ? "truncate-middle" : "wrap"}
       color={
         isEditing ? theme.editing : isSelected ? theme.text.strong : undefined
       }

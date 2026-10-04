@@ -1,13 +1,25 @@
 import type { UiToolExecution } from "ohbaby-sdk";
 import { useExecutionDuration } from "../execution-duration.js";
-import { Box, Text } from "ink";
+import { Box, Text, measureElement, type DOMElement } from "ink";
+import {
+  TranscriptAnchorContext,
+  TranscriptWindowContext,
+} from "../../layout/context.js";
 import type {
   UiMessage,
   UiMessagePart,
   UiToolCall,
   UiToolResult,
 } from "ohbaby-sdk";
-import type { ReactElement } from "react";
+import {
+  memo,
+  useCallback,
+  useContext,
+  useRef,
+  useState,
+  useLayoutEffect,
+  type ReactElement,
+} from "react";
 import { mdToAnsi } from "../../render/markdown.js";
 import { visibleWidth, wrapAnsi } from "../../render/wrap.js";
 import type { TuiReasoningViewState } from "../../store/snapshot.js";
@@ -20,6 +32,7 @@ import { renderToolDisplay } from "./parts/tool-display.js";
 const OUTPUT_TRUNCATED_LABEL = "output truncated";
 
 export interface MessageRowProps {
+  readonly anchorId?: string;
   /** Bottom margin rows; 0 for transcript fragments that continue below. */
   readonly bottomMargin?: number;
   readonly contentWidth: number;
@@ -41,7 +54,8 @@ export type PairedMessagePart =
       readonly result?: UiToolResult;
     };
 
-export function MessageRow({
+export const MessageRow = memo(function MessageRow({
+  anchorId,
   bottomMargin = 1,
   contentWidth,
   message,
@@ -49,6 +63,64 @@ export function MessageRow({
   toolsExpanded = false,
 }: MessageRowProps): ReactElement {
   const theme = useTheme();
+  const anchors = useContext(TranscriptAnchorContext);
+  const window = useContext(TranscriptWindowContext);
+  const element = useRef<DOMElement | null>(null);
+  const [measured, setMeasured] = useState<{
+    message: UiMessage;
+    width: number;
+    theme: Theme;
+    expanded: boolean;
+    height: number;
+  }>();
+  const valid =
+    measured?.message === message &&
+    measured.width === contentWidth &&
+    measured.theme === theme &&
+    measured.expanded === toolsExpanded;
+  const geometry = element.current
+    ? measureElement(element.current)
+    : undefined;
+  // Keep a measured spacer and anchor for sealed offscreen messages. Their
+  // complete content is still available; mounting it again needs no network IO.
+  const hidden = Boolean(
+    anchorId &&
+    message.status !== "streaming" &&
+    window &&
+    geometry &&
+    valid &&
+    (geometry.y + geometry.height < window.top - window.height ||
+      geometry.y > window.top + window.height * 2),
+  );
+  useLayoutEffect(() => {
+    if (!anchorId || !window || !element.current || valid) return;
+    setMeasured({
+      message,
+      width: contentWidth,
+      theme,
+      expanded: toolsExpanded,
+      height: measureElement(element.current).height,
+    });
+  });
+  const register = useCallback(
+    (node: DOMElement | null): void => {
+      element.current = node;
+      const id = anchorId ?? message.id;
+      if (node) anchors?.set(id, node);
+      else anchors?.delete(id);
+    },
+    [anchors, anchorId, message.id],
+  );
+  if (hidden && measured)
+    return (
+      <Box
+        ref={register}
+        height={measured.height}
+        marginBottom={bottomMargin}
+        flexShrink={0}
+      />
+    );
+
   const partWidth = Math.max(
     1,
     contentWidth - (message.role === "user" ? 2 : 0),
@@ -62,11 +134,11 @@ export function MessageRow({
   );
 
   return (
-    <Box flexDirection="column" marginBottom={bottomMargin}>
+    <Box ref={register} flexDirection="column" marginBottom={bottomMargin}>
       <MessageParts message={message} parts={renderedParts} />
     </Box>
   );
-}
+});
 
 export function MessageParts({
   message,
@@ -319,12 +391,16 @@ function renderTextPart(
           <Text color={part.gutterColor}>{"│ "}</Text>
           <Text color={part.color} dimColor={part.dimColor}>
             {line}
-            {" ".repeat(
-              Math.max(
-                0,
-                (part.width ?? visibleWidth(line)) - visibleWidth(line),
-              ),
-            )}
+            {/* Pad only to extend a fill; bare trailing spaces would just
+                pollute copied text. */}
+            {part.backgroundColor === undefined
+              ? ""
+              : " ".repeat(
+                  Math.max(
+                    0,
+                    (part.width ?? visibleWidth(line)) - visibleWidth(line),
+                  ),
+                )}
           </Text>
         </Text>
       ))}

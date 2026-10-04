@@ -29,7 +29,14 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        projectService: true,
+        // Project service is shared across files: keep the same narrow
+        // default-project allowlist regardless of which file ESLint visits first.
+        projectService: {
+          allowDefaultProject: [
+            "tests/integration/cli/tui-tasks-overflow.integration.test.tsx",
+            "tests/integration/cli/fixtures/tui-improve1-terminal.ts",
+          ],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },

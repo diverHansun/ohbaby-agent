@@ -16,7 +16,7 @@ const report = (value: unknown): void => {
   writeSync(reportFd, `${JSON.stringify(value)}\n`);
 };
 const workspace = await mkdtemp(path.join(os.tmpdir(), "tui-improve4-stream-"));
-const backend = createTuiReviewBackend(30);
+const backend = createTuiReviewBackend(2);
 let history = backend.view.session.messages;
 let run = {
   id: "review-run",
@@ -33,6 +33,7 @@ let stream: UiMessage = {
   parts: [],
 };
 backend.update({ runs: [run], todo: { status: "ready", value: null } });
+process.stdout.write("SHELL-SENTINEL\n");
 const app = renderTerminalUi({
   client: backend.client,
   subscribeEvents: backend.subscribeEvents,
@@ -60,6 +61,48 @@ control.on("line", (line) => {
     };
     backend.update({
       session: { ...backend.view.session, messages: [...history, stream] },
+    });
+  }
+  if (command.action === "start-prose") {
+    history = backend.view.session.messages;
+    stream = {
+      ...stream,
+      id: "prose",
+      status: "streaming",
+      parts: [],
+      createdAt: "2026-10-04T00:00:01.500Z",
+    };
+    run = {
+      ...run,
+      id: "review-prose-run",
+      startedAt: stream.createdAt,
+      updatedAt: stream.createdAt,
+      status: { kind: "running", runId: "review-prose-run" },
+    };
+    backend.emit({ type: "run.updated", run });
+  }
+  if (command.action === "prose" || command.action === "start-prose") {
+    stream = {
+      ...stream,
+      parts: [
+        {
+          type: "text",
+          text:
+            "PROSE-FIRST " +
+            Array.from(
+              { length: 100 },
+              (_, index) =>
+                `段落${String(index).padStart(3, "0")}自动换行的正文需要完整保留。`,
+            ).join("") +
+            " PROSE-LAST " +
+            "more tokens ".repeat(command.count ?? 0) +
+            `PROSE-${String(command.count ?? 0)}`,
+        },
+      ],
+    };
+    backend.update({
+      session: { ...backend.view.session, messages: [...history, stream] },
+      runs: [run],
     });
   }
   for (const kind of ["table", "list"] as const) {
@@ -134,13 +177,27 @@ control.on("line", (line) => {
   }
   if (command.action === "approval")
     backend.approve({ id: "stream-approval", description: "STREAM-APPROVAL" });
+  if (command.action === "tasks")
+    backend.update({
+      todo: {
+        status: "ready",
+        value: {
+          sessionId: "review-session",
+          visible: true,
+          todos: Array.from({ length: 20 }, (_, index) => ({
+            content: `TASK-${String(index).padStart(2, "0")}`,
+            status: "pending",
+          })),
+        },
+      },
+    });
   if (command.action === "refresh") backend.update();
   if (command.action === "inspect")
     report({ responses: backend.responses, submitted: backend.submitted });
   if (command.action === "quit") app.unmount();
 });
 const ready = setTimeout(() => report({ ready: true }), 600);
-const timeout = setTimeout(() => app.unmount(), 60000);
+const timeout = setTimeout(() => app.unmount(), 90000);
 try {
   await app.waitUntilExit();
 } finally {
@@ -153,4 +210,5 @@ try {
     raw: process.stdin.isRaw,
     submitted: backend.submitted,
   });
+  process.stdout.write("SHELL-RESTORED\n");
 }

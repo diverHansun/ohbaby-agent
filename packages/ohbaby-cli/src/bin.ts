@@ -23,6 +23,7 @@ import { createStdoutRenderer } from "./cli/stdout-renderer.js";
 import { getCliPackageVersion } from "./package-version.js";
 import { readServeCoexistenceNotice } from "./serve-awareness.js";
 import { renderTerminalUi } from "./tui/index.js";
+import { prepareTerminalUi } from "./tui/prepare.js";
 import type {
   DiagnosticEventDefinition,
   LoadRuntimeEnvOptions,
@@ -228,12 +229,17 @@ function requireFunction(
   return value as (...args: unknown[]) => unknown;
 }
 
+type RuntimeExportFunction = (...args: unknown[]) => unknown;
+
 function optionalRuntimeExport(
   runtimeModule: Record<string, unknown>,
   name: string,
-): unknown {
-  return Object.prototype.hasOwnProperty.call(runtimeModule, name)
+): RuntimeExportFunction | undefined {
+  const value = Object.prototype.hasOwnProperty.call(runtimeModule, name)
     ? runtimeModule[name]
+    : undefined;
+  return typeof value === "function"
+    ? (value as RuntimeExportFunction)
     : undefined;
 }
 
@@ -666,6 +672,7 @@ export async function runOhbabyCli(
     readStdin() {
       return readStdin(stdin);
     },
+    prepareTerminalUi,
     renderTerminalUi,
     setExitCode(code) {
       exitCode = code;

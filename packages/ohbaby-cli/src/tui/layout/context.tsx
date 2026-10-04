@@ -13,6 +13,16 @@ export const TodoPanelRefContext = createContext<
   RefObject<DOMElement | null> | undefined
 >(undefined);
 
+export const TranscriptAnchorContext = createContext<
+  Map<string, DOMElement> | undefined
+>(undefined);
+
+export const TranscriptWindowContext = createContext<
+  { top: number; height: number } | undefined
+>(undefined);
+
+export const TranscriptDocumentContext = createContext(false);
+
 const LayoutContext = createContext<TuiLayoutMetrics>(DEFAULT_METRICS);
 
 export interface LayoutProviderProps {
