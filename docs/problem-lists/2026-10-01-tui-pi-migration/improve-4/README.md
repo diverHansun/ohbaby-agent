@@ -6,4 +6,8 @@
 
 范围：权限选项重复与过多提示、subagent_status 原始 JSON、工具预览降噪，以及长回复生成中前文没有进入终端回滚区。记录见 [实施与验收](05-implementation-acceptance.md)。
 
+用户再次实测反馈后的逐 token 闪屏、PgUp/PgDn 光标与等待动画改动，见 [补充排查与验收](06-stream-render-cursor-animation.md)。
+
+再次反馈后的根因复现、独立输出 viewport/dock、应用内滚动、退出回显和改动整理见 [独立输出区收尾](07-independent-transcript-viewport.md)。06 文档中的 Markdown 分段和 ANSI 改写是已被替换的中间方案。
+
 实际 GUI 滚动体验与进程自动化分开验收；电脑控制无法访问系统 Terminal，不能以 PTY 结果替代鼠标滚轮、触控板和中文 IME 验证。
