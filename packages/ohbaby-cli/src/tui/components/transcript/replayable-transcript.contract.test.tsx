@@ -404,6 +404,9 @@ it("Ctrl+O replays a changed tool projection exactly once, preserves input state
     switched = stdout.chunks.slice(baseline).join("");
     expect(switched.split(CLEAR_SCROLLBACK)).toHaveLength(2);
     expect(switched).toContain("TOOL-LINE-00");
+    expect(switched.slice(0, switched.indexOf(CLEAR_SCROLLBACK))).not.toContain(
+      "TOOL-LINE-",
+    );
     baseline = stdout.chunks.length;
     app.rerender(<Scene hasTool tickValue={1} />);
     await tick();

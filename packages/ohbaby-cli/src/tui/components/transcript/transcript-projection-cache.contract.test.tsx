@@ -73,6 +73,7 @@ const tick = (): Promise<void> =>
 describe("committed projection cost", () => {
   it("reuses immutable message projections while still detecting replacements", async () => {
     const project = vi.spyOn(messageRows, "renderMessageParts");
+    const stringify = vi.spyOn(JSON, "stringify");
     const stdout = new FakeStdout();
     const messages = Array.from({ length: 200 }, (_, index) => ({
       ...message(`**history ${String(index)}**\nbody`),
@@ -97,12 +98,20 @@ describe("committed projection cost", () => {
     try {
       await tick();
       const initialCalls = project.mock.calls.length;
+      const initialSerializations = stringify.mock.calls.length;
       const initialWrites = stdout.chunks.length;
       for (let i = 0; i < 3; i++) {
         app.rerender(node([...messages]));
         await tick();
       }
       expect(project.mock.calls.length).toBe(initialCalls);
+      expect(
+        stringify.mock.calls
+          .slice(initialSerializations)
+          .filter(
+            ([value]) => value && typeof value === "object" && "part" in value,
+          ),
+      ).toHaveLength(0);
       expect(stdout.chunks.slice(initialWrites).join("")).toBe("");
       const changed = [...messages];
       changed[0] = { ...message("corrected history"), id: "0" };
@@ -115,6 +124,7 @@ describe("committed projection cost", () => {
     } finally {
       app.unmount();
       project.mockRestore();
+      stringify.mockRestore();
     }
   });
 });
