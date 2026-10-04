@@ -2,7 +2,13 @@ import { expect, it, vi } from "vitest";
 import { createTerminalCommand } from "./terminal.js";
 import type { CliCommandRuntime } from "./types.js";
 
-it.each(["SIGINT", "SIGTERM", "SIGHUP"] as const)(
+// Windows intentionally does not register SIGHUP in createCliHostShutdown.
+const exitSignals =
+  process.platform === "win32"
+    ? (["SIGINT", "SIGTERM"] as const)
+    : (["SIGINT", "SIGTERM", "SIGHUP"] as const);
+
+it.each(exitSignals)(
   "waits for terminal restoration and transcript drain before host teardown on %s",
   async (signal) => {
     const order: string[] = [];
