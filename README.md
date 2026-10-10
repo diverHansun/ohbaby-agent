@@ -109,6 +109,13 @@ Port `4096` is used by default. If that default is already occupied, ohbaby auto
 chooses an available port and prints the URL to open. Passing an explicit `--port` remains
 strict, so `ohbaby serve --port 4096` fails clearly when that port is in use.
 
+To check or stop the local daemon:
+
+```bash
+ohbaby serve status  # show the daemon status and URL
+ohbaby serve stop    # stop the daemon explicitly
+```
+
 <p align="center">
   <img src="assets/images/ohbaby-web.png" alt="ohbaby-agent local web UI" width="760">
 </p>
