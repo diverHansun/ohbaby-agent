@@ -30,3 +30,19 @@ API Key 详情见 `.env`。
 | 模型 | 文档 | message-interface |
 | --- | --- | --- |
 | `qwen3.8-flash` | [OpenAI Chat Completions](https://docs.bailian.console.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)<br>[Anthropic Messages](https://docs.bailian.console.aliyun.com/zh/model-studio/anthropic-api-messages) | `openai-compatible`, `anthropic` |
+
+## DeepSeek
+
+- Provider：`deepseek`
+- API Key：`DEEPSEEK_API_KEY`
+
+官方模型与能力表见 [Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing)。两个模型都支持三种请求格式：Chat Completions（`openai-compatible`）、Responses API（`openai-responses`）、Anthropic Messages（`anthropic`）。
+
+| 模型 | 文档 | message-interface |
+| --- | --- | --- |
+| `deepseek-flash` | [Chat Completions](https://api-docs.deepseek.com/)<br>[Responses API](https://api-docs.deepseek.com/guides/responses_api)<br>[Anthropic API](https://api-docs.deepseek.com/guides/anthropic_api) | `openai-compatible`, `openai-responses`, `anthropic` |
+| `deepseek-v4-pro` | [Chat Completions](https://api-docs.deepseek.com/)<br>[Responses API](https://api-docs.deepseek.com/guides/responses_api)<br>[Anthropic API](https://api-docs.deepseek.com/guides/anthropic_api) | `openai-compatible`, `openai-responses`, `anthropic` |
+
+## deepseek
+
+- Provider:`deepseek`
