@@ -39,7 +39,7 @@ interface McpStdioConfig {
   command: string                    // 可执行文件（如 "npx", "node", "python"）
   args?: string[]                    // 参数列表（如 ["-y", "firecrawl-mcp"]）
 
-  env?: Record<string, string>       // 环境变量
+  env?: Record<string, string>       // 显式环境覆盖；代理键按逻辑键规范化
   cwd?: string                       // 工作目录
   enabled?: boolean                  // 是否启用（默认true）
   trust?: boolean                    // 是否信任（默认false）
@@ -195,7 +195,7 @@ export type McpServersConfig = z.infer<typeof McpServersConfigSchema>
 |------|------|------|------|
 | command | string | 是 | 可执行文件（如 "npx", "node", "python"） |
 | args | string[] | 否 | 命令参数数组（如 ["-y", "firecrawl-mcp"]） |
-| env | Record<string, string> | 否 | 进程环境变量 |
+| env | Record<string, string> | 否 | 显式子进程环境覆盖；默认只继承 SDK 安全环境和代理白名单 |
 | cwd | string | 否 | 进程工作目录 |
 
 ### 4.3 HTTP/SSE特有字段
@@ -416,3 +416,9 @@ export const PROJECT_MCP_CONFIG_FILE = 'settings.json'
 - 验证规则明确
 - 配置示例覆盖常见场景
 - 类型定义符合TypeScript规范
+
+## env 运行时边界
+
+stdio 的 `env` 不代表全量继承 `process.env`。SDK 默认安全变量继续继承，其他普通变量只有显式配置才进入子进程。代理设置以安装快照为基础，`env` 的非空同名逻辑键优先（跨层大写也优于基础层小写），同层小写优先，`ALL_PROXY` 后备。显式代理整组覆盖系统，不补另一协议；空白代理覆盖恢复继承。只有 `NO_PROXY` 仍跟随系统；`NO_PROXY=*` 明确全绕过。Windows 处理任意大小写代理别名，POSIX 生成同值大小写别名。
+
+系统读取失败、PAC 或不可等价转换的 bypass 让当前 stdio 连接失败。常见 `*.local` / `<local>` 自动系统配置必然失败；需要显式代理覆盖或明确全绕过。重连读取当前完成快照，已连接进程不热改环境。详细转换范围见 [MCP 接口](../../mcp/dfd-interface.md)。

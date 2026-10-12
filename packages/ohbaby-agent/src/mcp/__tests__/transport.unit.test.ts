@@ -30,7 +30,10 @@ describe("createTransport", () => {
       }
     )._serverParams;
 
-    expect(serverParams.env).toEqual({ MCP_ALLOWED: "yes" });
+    expect(serverParams.env).toMatchObject({
+      MCP_ALLOWED: "yes",
+      NO_PROXY: "localhost,127.0.0.1,::1,127.0.0.0/8",
+    });
     expect(serverParams.env).not.toHaveProperty("OHBABY_MCP_SECRET");
   });
 });

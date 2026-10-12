@@ -6,6 +6,7 @@ import {
   createProxyPolicy,
   isLoopback,
   proxyEnvironment,
+  readProxyEnvironment,
   ProxyConfigurationError,
   type ProxyPolicy,
 } from "./policy.js";
@@ -30,7 +31,43 @@ export interface SystemProxyInstallation {
   dispose(): Promise<void>;
 }
 
+export interface ProxyConfigurationSnapshot {
+  readonly env: Readonly<NodeJS.ProcessEnv>;
+  readonly system?: Readonly<SystemProxySettings>;
+  readonly error?: string;
+}
+
 let installed = false;
+let configurationSnapshot: ProxyConfigurationSnapshot | undefined;
+
+/** Only an explicit installation discovers system settings. */
+export function getProxyConfigurationSnapshot(): ProxyConfigurationSnapshot {
+  return (
+    configurationSnapshot ??
+    Object.freeze({ env: Object.freeze(readProxyEnvironment(process.env)) })
+  );
+}
+
+function snapshot(
+  env: NodeJS.ProcessEnv,
+  system?: SystemProxySettings,
+  error?: string,
+): ProxyConfigurationSnapshot {
+  return Object.freeze({
+    env,
+    ...(system
+      ? {
+          system: Object.freeze({
+            ...system,
+            ...(system.bypass
+              ? { bypass: Object.freeze([...system.bypass]) }
+              : {}),
+          }),
+        }
+      : {}),
+    ...(error ? { error } : {}),
+  });
+}
 
 /** Explicit CLI-owned installation; importing ohbaby-agent never changes globals. */
 export async function installSystemProxy(
@@ -41,11 +78,7 @@ export async function installSystemProxy(
   const sourceEnv = options.env ?? process.env;
   // Read named properties before copying: process.env is case-insensitive on
   // Windows, whereas a spread into an ordinary object would lose that behavior.
-  const env = Object.fromEntries(
-    ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"].flatMap((name) =>
-      [name, name.toLowerCase()].map((key) => [key, sourceEnv[key]]),
-    ),
-  );
+  const env = Object.freeze(readProxyEnvironment(sourceEnv));
   const read = options.readSystem ?? readSystemProxy;
   const previous = {
     http: http.globalAgent,
@@ -66,10 +99,13 @@ export async function installSystemProxy(
   const refresh = async (): Promise<void> => {
     let policy: ProxyPolicy;
     let nextFingerprint: string;
+    let nextSnapshot: ProxyConfigurationSnapshot;
+    let settings: SystemProxySettings | undefined;
     try {
-      const settings: SystemProxySettings = proxyEnvironment(env).explicit
+      settings = proxyEnvironment(env).explicit
         ? { source: "unavailable" }
         : await read();
+      nextSnapshot = snapshot(env, settings);
       policy = createProxyPolicy(env, settings);
       nextFingerprint = JSON.stringify([proxyEnvironment(env), settings]);
     } catch (error) {
@@ -79,6 +115,7 @@ export async function installSystemProxy(
         error instanceof SystemProxyReadError
           ? error.message
           : "System proxy configuration is unavailable or unsupported";
+      nextSnapshot = snapshot(env, settings, settings ? undefined : detail);
       policy = {
         status: `Network: blocked; ${detail}`,
         route(url): string | undefined {
@@ -88,7 +125,9 @@ export async function installSystemProxy(
       };
       nextFingerprint = policy.status;
     }
-    if (disposed || nextFingerprint === fingerprint) return;
+    if (disposed) return;
+    configurationSnapshot = nextSnapshot;
+    if (nextFingerprint === fingerprint) return;
     const old = current;
     current = new TransportGeneration(policy);
     fingerprint = nextFingerprint;
@@ -139,6 +178,7 @@ export async function installSystemProxy(
       if (http.globalAgent === httpRouter) http.globalAgent = previous.http;
       if (https.globalAgent === httpsRouter) https.globalAgent = previous.https;
       current?.retire();
+      configurationSnapshot = undefined;
       installed = false;
       return Promise.resolve();
     },

@@ -1,3 +1,4 @@
+import { mergeChildProxyEnvironment } from "../../utils/network-proxy/child-environment.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -16,7 +17,11 @@ export function createTransport(config: McpServerConfig): McpTransport {
       args: config.args,
       command: config.command,
       cwd: config.cwd,
-      env: config.env,
+      env: Object.fromEntries(
+        Object.entries(mergeChildProxyEnvironment({}, config.env)).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+      ),
       stderr: "pipe",
     });
   }

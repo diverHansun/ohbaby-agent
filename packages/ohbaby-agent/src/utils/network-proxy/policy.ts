@@ -26,19 +26,42 @@ export function isLoopback(host: string): boolean {
   );
 }
 
+export const PROXY_ENVIRONMENT_KEYS = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+] as const;
+
+export function proxyEnvironmentValue(
+  env: NodeJS.ProcessEnv,
+  name: string,
+): string | undefined {
+  const lower = env[name.toLowerCase()]?.trim();
+  const upper = env[name]?.trim();
+  if (lower) return lower;
+  if (upper) return upper;
+  return undefined;
+}
+
+export function readProxyEnvironment(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    PROXY_ENVIRONMENT_KEYS.flatMap((name) =>
+      [name, name.toLowerCase()].map((key) => [key, env[key]]),
+    ),
+  );
+}
+
 export function proxyEnvironment(env: NodeJS.ProcessEnv): {
   http?: string;
   https?: string;
   bypass: string[];
   explicit: boolean;
 } {
-  const get = (name: string): string | undefined => {
-    const lower = env[name.toLowerCase()]?.trim();
-    const upper = env[name]?.trim();
-    if (lower) return lower;
-    if (upper) return upper;
-    return undefined;
-  };
+  const get = (name: string): string | undefined =>
+    proxyEnvironmentValue(env, name);
   const all = get("ALL_PROXY");
   const http = get("HTTP_PROXY") ?? all;
   const https = get("HTTPS_PROXY") ?? all;
@@ -50,7 +73,7 @@ export function proxyEnvironment(env: NodeJS.ProcessEnv): {
   };
 }
 
-function proxyUrl(value: string | undefined): string | undefined {
+export function proxyUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;
   try {
     const url = new URL(value);

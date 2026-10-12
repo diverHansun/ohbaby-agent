@@ -32,3 +32,7 @@
 | [05 实施与验收](./improve-1/05-implementation-acceptance.md) | 实际代码、测试证据、审核处理、平台边界 |
 
 规划阶段的探针见 [01 §1.7](./improve-1/01-problem-analysis-and-current-state.md#17-本轮实测补充传输可行性不是产品完成)。本次实施没有改变操作系统代理设置；真实 API 和编译 CLI 结果分别保存在 05 链接的 2026-10-02 脱敏证据中。等待用户审查本地提交，不进行 merge 或 push。
+
+## 后续子进程环境议题
+
+Shell 与 MCP stdio 的同源代理环境传递和严格 bypass 转换另见 [2026-10-11 Shell / Glob 议题的 improve-1 网络方案](../2026-10-11-shell-and-glob/improve-1/02-optimization-plan-and-change-scope.md)。本目录原有 05 保留当时的主进程路由验收范围，不改写为后续子进程成果。

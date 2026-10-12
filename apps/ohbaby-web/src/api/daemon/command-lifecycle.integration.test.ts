@@ -423,6 +423,10 @@ describe("real command acceptance and Web consumers", () => {
         "provisional title did not reach sidebar index",
       );
       await waitFor(f.titleStarted, "title generation did not start");
+      await waitFor(() => {
+        const control = f.runtime.store.getSnapshot().sessionControl;
+        return control?.sessionId === sessionId && Boolean(control.runId);
+      }, "running task control did not reach the client");
       await f.runtime.abortSession(sessionId);
       await f.runtime.createSession();
       const selected = required(

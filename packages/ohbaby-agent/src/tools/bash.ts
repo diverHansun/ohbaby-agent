@@ -1,3 +1,4 @@
+import { mergeChildProxyEnvironment } from "../utils/network-proxy/child-environment.js";
 import { withToolAdmission } from "../core/tool-scheduler/tool-admission.js";
 import type {
   ChildProcess,
@@ -69,12 +70,16 @@ function stateEnvironment(input: {
   readonly shellPath: string;
 }): NodeJS.ProcessEnv {
   return {
-    ...process.env,
-    GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT ?? "0",
-    NO_COLOR: "1",
-    SHELL: input.shellPath,
-    TERM: "dumb",
-    ...input.env,
+    ...mergeChildProxyEnvironment(
+      {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT ?? "0",
+        NO_COLOR: "1",
+        SHELL: input.shellPath,
+        TERM: "dumb",
+      },
+      input.env,
+    ),
     OHBABY_CALL_ID: input.callId,
     OHBABY_MESSAGE_ID: input.messageId,
     OHBABY_SESSION_ID: input.sessionId,
@@ -177,6 +182,14 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
         let snapshot: ShellJobSnapshot;
         try {
           throwIfCancelled(context.signal);
+          const env = stateEnvironment({
+            callId: context.callId,
+            cwd: commandContext.cwd,
+            env: commandContext.env,
+            messageId: context.messageId,
+            sessionId: context.sessionId,
+            shellPath,
+          });
           snapshot = registry.start({
             owner: context.owner ?? {
               sessionId: context.sessionId,
@@ -197,14 +210,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
               return spawn(spawnFile, spawnArgs, {
                 cwd: commandContext.cwd,
                 detached: shouldDetach(),
-                env: stateEnvironment({
-                  callId: context.callId,
-                  cwd: commandContext.cwd,
-                  env: commandContext.env,
-                  messageId: context.messageId,
-                  sessionId: context.sessionId,
-                  shellPath,
-                }),
+                env,
                 windowsHide: true,
               });
             },

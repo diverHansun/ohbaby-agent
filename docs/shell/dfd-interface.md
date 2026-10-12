@@ -284,3 +284,19 @@ ctx.abort.addEventListener('abort', abortHandler, { once: true })
 - [x] 数据责任边界清晰
 - [x] 接口定义与 data-model.md 中的类型一致
 - [x] 使用示例覆盖主要使用场景
+
+## Bash 启动网络配置
+
+Bash Tool 在 `registry.start()` 前构造并验证代理环境；错误时不创建 running job、不 spawn，并释放已经 retain 的 environment。普通命令环境继续覆盖非交互默认值，`OHBABY_CALL_ID` / `OHBABY_MESSAGE_ID` / `OHBABY_SESSION_ID` / `OHBABY_WORKDIR` 由执行上下文最后写入。取消、并发和 cleanup 继续由现有机制管理。
+
+网络配置错误只阻止本次 Bash / stdio 启动；Read / Glob / Grep 的本地工作和内部 rg 不进入这道门禁。代理端口不可达由实际命令原生返回失败，不增加启动探活、重试或直连回退。
+
+### 子进程代理环境契约
+
+Shell 和 MCP stdio 在每次新启动时读取 `network-proxy` 当前已完成的配置快照。安装时捕获的进程显式代理变量作为基础，该次 `context.env` / `config.env` 的非空同名逻辑键优先；同层小写优先大写。`ALL_PROXY` 补齐缺少的协议，只要存在显式 HTTP / HTTPS / ALL 代理，就整组使用环境配置，不从系统补另一协议。空白覆盖值恢复继承，普通环境变量空串保持原值。
+
+只有 `NO_PROXY` 时仍跟随系统；`NO_PROXY=*` 明确全部绕过，允许在系统读取失败时启动。POSIX 输出同值大小写代理别名；Windows 按大小写不敏感键处理并输出单一逻辑键。构造时先清除旧代理别名；系统值不会写回 `process.env`。显式外部客户端原生代理协议保留，HTTP(S) URL 继续校验；这不新增主 Node SOCKS 支持。
+
+自动系统 bypass 支持字面 IP 和规范化 IPv4 CIDR（curl 7.86+）；固定绕过包含 localhost、127.0.0.1、::1 和 127/8。映射 IPv6 系统字面规则生成 curl 的点分与十六进制两种别名。IPv6 CIDR、精确裸域、仅子域、通配域、host:port 与 `<local>` 无法保证等价，本次启动明确失败。常见 `*.local` / `<local>` 配置在自动系统路径下必然失败；错误提示显式设置所需协议的 `HTTP_PROXY` / `HTTPS_PROXY`（可附加 `NO_PROXY`），或选择 `NO_PROXY=*`。只设置普通 `NO_PROXY` 不能绕开转换失败。不执行 PAC，不丢弃规则，不启动本地转发服务。
+
+刷新完成后原子替换快照；系统关闭或读取失败不继续沿用旧成功值。已有子进程保留启动环境，重连或新启动使用新快照。卸载清空安装快照；嵌入方未安装时只继承显式 env，不自动读取系统设置。变量传递不构成网络沙箱；不读取变量的程序不在透明接管承诺内。

@@ -96,9 +96,10 @@ export class McpClient implements McpClientLike {
       return;
     }
 
-    const sdkClient = this.createSdkClient();
-    const transport = this.createTransport(this.config);
+    let sdkClient: McpSdkClient | undefined;
     try {
+      sdkClient = this.createSdkClient();
+      const transport = this.createTransport(this.config);
       await sdkClient.connect(transport, { timeout: this.config.timeout });
       this.sdkClient = sdkClient;
       this.metadata = this.readServerMetadata(sdkClient);
@@ -106,7 +107,7 @@ export class McpClient implements McpClientLike {
       const tools = await this.refreshTools();
       this.status = { status: "connected", toolCount: tools.length };
     } catch (error) {
-      await this.closeAfterFailedConnect(sdkClient);
+      if (sdkClient) await this.closeAfterFailedConnect(sdkClient);
       this.sdkClient = null;
       this.tools = null;
       if (this.status.status !== "failed") {

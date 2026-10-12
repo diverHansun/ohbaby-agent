@@ -517,3 +517,53 @@ describe("McpClient", () => {
     expect(client.getStatus()).toEqual({ status: "disconnected" });
   });
 });
+
+describe("MCP construction failures", () => {
+  it("records transport construction failure and closes the already created SDK client", async () => {
+    const sdk = createSdkClientFixture();
+    const client = new McpClient(
+      "broken",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => sdk.client,
+        createTransport: (): McpTransport => {
+          throw new Error("System PAC proxy is not supported");
+        },
+      },
+    );
+    await expect(client.connect()).rejects.toThrow(/System PAC/);
+    expect(client.getStatus()).toEqual({
+      status: "failed",
+      error: "System PAC proxy is not supported",
+    });
+    expect(sdk.close).toHaveBeenCalledTimes(1);
+    expect(sdk.connect).not.toHaveBeenCalled();
+  });
+  it("records SDK construction failure in the same connection error boundary", async () => {
+    const client = new McpClient(
+      "broken",
+      {
+        args: [],
+        command: "node",
+        enabled: true,
+        timeout: 5000,
+        trust: false,
+        type: "stdio",
+      },
+      {
+        createSdkClient: (): McpSdkClient => {
+          throw new Error("SDK initialization failed");
+        },
+      },
+    );
+    await expect(client.connect()).rejects.toThrow(/SDK initialization failed/);
+    expect(client.getStatus().status).toBe("failed");
+  });
+});

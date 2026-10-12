@@ -863,3 +863,15 @@ afterEach(async () => {
 - 覆盖率要求明确
 - 测试用例与goals-duty.md定义的职责对应
 - 性能测试覆盖关键场景
+
+## MCP 子进程代理回归
+
+环境优先级、大小写规范化、显式原生协议、绕过转换与脱敏错误见 `packages/ohbaby-agent/src/utils/network-proxy/child-environment.unit.test.ts`；原子刷新、读取失败、恢复、卸载见 `snapshot.integration.test.ts`。Bash unit 验证配置失败不创建 job / spawn、retain 释放及生成的执行身份优先级；MCP client unit 验证构造错误进入 failed 状态和资源清理。
+
+真实组件集成集中在 `tests/integration/network-proxy/child-routing.integration.test.ts`：Node HTTP / HTTPS、主 Shell 与带委派 owner 的 Shell、真实 stdio MCP fixture 的 curl 都请求本地受控代理；HTTPS 通过测试 CA 验证 CONNECT。集成同时验证代理切换、MCP 重连、后台进程保留环境、SDK 安全变量与无关 secret 隔离、严格 bypass 失败、PAC / malformed / 读取失败、显式覆盖 / 全绕过、curl IPv4 CIDR / ::1 / 映射 IPv6 以及不可达代理不回退。委派 owner 测试验证启动边界，不冒充真实模型触发的 subagent E2E。
+
+```sh
+pnpm exec vitest run packages/ohbaby-agent/src/utils/network-proxy packages/ohbaby-agent/src/tools/bash.unit.test.ts packages/ohbaby-agent/src/mcp/__tests__/transport.unit.test.ts packages/ohbaby-agent/src/mcp/__tests__/client.unit.test.ts tests/integration/network-proxy
+```
+
+常规测试不访问真实模型或公共网站，不修改开发机系统代理。Windows 使用 `curl.exe`；macOS / Windows 静态读取、Linux env 的实际平台验收分别记录，mocked platform 不能替代实机结果。IPv4 CIDR 的 curl 基线为 7.86+；IPv6 CIDR明确拒绝。127/8 中未配置本地别名的地址允许命令返回 OS 原生连接错误，代理零访问仍证明其绕过，不能写成成功连接。

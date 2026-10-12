@@ -14,6 +14,8 @@ import type {
 import type { CommandContext } from "../sandbox/index.js";
 import type { Tool } from "../core/tool-scheduler/index.js";
 import { createBashTool, type SpawnCommand } from "./bash.js";
+import { installSystemProxy } from "../utils/network-proxy/index.js";
+import { ShellJobRegistry } from "./shell-job-registry.js";
 import { createBuiltinTools } from "./index.js";
 
 class FakeChildProcess extends EventEmitter {
@@ -432,6 +434,40 @@ describe("bash builtin tool", () => {
     });
   });
 
+  it("preserves generated execution identity over command context overrides", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+    const bash = createBashTool({
+      spawn,
+      preflight: () => Promise.resolve({ cdTargets: [], resolvedPaths: [] }),
+      shell: {
+        acceptable: () => "/bin/bash",
+        killTree: (): Promise<void> => Promise.resolve(),
+      },
+    });
+    await bash.execute(
+      { command: "echo hello", run_in_background: true },
+      createContext(
+        {},
+        {
+          cwd: "/tmp",
+          env: {
+            OHBABY_CALL_ID: "wrong",
+            OHBABY_MESSAGE_ID: "wrong",
+            OHBABY_SESSION_ID: "wrong",
+            OHBABY_WORKDIR: "wrong",
+          },
+          kind: "host-local",
+        },
+      ),
+    );
+    expect(spawn.mock.calls[0]?.[2].env?.OHBABY_CALL_ID).toBe("call_1");
+    expect(spawn.mock.calls[0]?.[2].env?.OHBABY_MESSAGE_ID).toBe("message_1");
+    expect(spawn.mock.calls[0]?.[2].env?.OHBABY_SESSION_ID).toBe("session_1");
+    expect(spawn.mock.calls[0]?.[2].env?.OHBABY_WORKDIR).toBe("/tmp");
+    child.emitExit(0, null);
+  });
+
   it("lets command context env override non-interactive defaults", async () => {
     const child = new FakeChildProcess();
     const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
@@ -708,5 +744,82 @@ describe("bash builtin tool", () => {
       },
     });
     expect(killTree).toHaveBeenCalledWith(child);
+  });
+});
+
+describe("Bash proxy startup", () => {
+  it("fails before registration and spawn and releases retained environment on discovery failure", async () => {
+    const installation = await installSystemProxy({
+      env: {},
+      readSystem: () => Promise.reject(new Error("private failure")),
+    });
+    const release = vi.fn();
+    const retain = vi.fn(() => release);
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+    const registry = new ShellJobRegistry({
+      killTree: (): Promise<void> => Promise.resolve(),
+    });
+    const start = vi.spyOn(registry, "start");
+    try {
+      const context = createEnvironmentContext();
+      if (!context.environment) throw new Error("Missing environment fixture");
+      const bash = createBashTool({
+        registry,
+        spawn,
+        preflight: () => Promise.resolve({ cdTargets: [], resolvedPaths: [] }),
+        shell: {
+          acceptable: () => "/bin/bash",
+          killTree: (): Promise<void> => Promise.resolve(),
+        },
+      });
+      await expect(
+        bash.execute(
+          { command: "echo hello", run_in_background: true },
+          { ...context, environment: { ...context.environment, retain } },
+        ),
+      ).rejects.toThrow(/configuration unavailable/);
+      expect(spawn).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      await installation.dispose();
+    }
+  });
+  it("uses the completed system snapshot and context uppercase override over parent lowercase", async () => {
+    const installation = await installSystemProxy({
+      env: { http_proxy: "http://base:1" },
+    });
+    try {
+      const child = new FakeChildProcess();
+      const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
+      const bash = createBashTool({
+        spawn,
+        preflight: () => Promise.resolve({ cdTargets: [], resolvedPaths: [] }),
+        shell: {
+          acceptable: () => "/bin/bash",
+          killTree: (): Promise<void> => Promise.resolve(),
+        },
+      });
+      const result = await bash.execute(
+        { command: "echo hello", run_in_background: true },
+        createContext(
+          {},
+          {
+            cwd: "/tmp",
+            env: { HTTP_PROXY: "http://override:2" },
+            kind: "host-local",
+          },
+        ),
+      );
+      expect(result.metadata?.status).toBe("running");
+      expect(spawn.mock.calls[0]?.[2].env).toMatchObject({
+        HTTP_PROXY: "http://override:2/",
+        http_proxy: "http://override:2/",
+      });
+      child.emitExit(0, null);
+    } finally {
+      await installation.dispose();
+    }
   });
 });
