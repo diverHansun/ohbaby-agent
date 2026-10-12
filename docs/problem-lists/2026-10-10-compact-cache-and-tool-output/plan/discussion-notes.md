@@ -1041,7 +1041,7 @@ ohbaby 的现状：`UiContextWindowUsage`（`packages/ohbaby-sdk/src/context-win
 
 ### 17.9 两种容量失败分流（已确认）
 
-> 更正：模式 A 的保护范围、遗漏记录及缓存结论以 §17.10 为准。本节当时的“八家都丢输入重试”“Kimi 的预收缩属于模式 B”“只有 gemini 检查缩小”均已被重新核对纠正，详见 03 §5.2；保留下面原文用于追踪讨论过程。
+> 更正：模式 A 的保护范围、遗漏记录及缓存结论以 §17.10 为准。本节当时的“八家都丢输入重试”“Kimi 的预收缩属于模式 B”“只有 gemini 检查缩小”“两家保留段预算都按窗口比例、天然不会卡死”均已被重新核对纠正，详见 03 §5.2 与 §5.5；保留下面原文用于追踪讨论过程。
 
 用户指出：**分清窗口为什么超了、采用对应策略，是关键。** 主代理查完 code-cli 下九个参考项目后确认，这确实是两种病：
 
@@ -1111,3 +1111,68 @@ ohbaby 的现状：`UiContextWindowUsage`（`packages/ohbaby-sdk/src/context-win
 参考核查：并非其他项目都不裁剪。DSH 的 base bundle 默认装载 pruner，Reasonix 压力／超窗维护也先 prune，且摘要失败后已提交的裁剪仍留存。OpenCode 旧路径有默认关闭的 prune，写标记后投影占位，原正文仍存库；新 core 未接 prune 实现。Pi 和 OpenCode 的摘要序列化还有 2000 字符正文限长；Gemini 在摘要前裁工具响应；Codex remote-v2 超窗时改请求副本的工具正文。ZCode 与本地 claude-code 重建版有默认关闭／受门控的 microcompact。具体路径、触发时机与数据层区别见 03 §5.3。ohbaby 选择取消前置裁剪，依据是本轮对前缀稳定、信息保留及提交原子性的要求，不是行业统一做法；实际费用仍待实网验证。
 
 同步：00 §2，02 §3.1／§9／§9.1／新增 §9.2，03 新增 §5.3，04 C1／E5／清扫要求，context-design/02、03。只更新规划，未改业务代码；问题四及后续预算／成功条件仍待确认。
+
+### 17.13 问题四：压完又触发与内置模型档位表（已确认）
+
+用户确认：(a) 本轮不做保留头尾的工具正文 prune，现有机制即可；(b) 不能硬编码模型档位表做兜底，学习 kimi；要求查清引入时间并修复。子代理按 SWE 原则复核了两个决定的清理边界与风险，两处修正已采纳。
+
+**引入时间**：`BUILTIN_PROFILE_RULES` 于 2026-05-25 随 commit `66902371`（feat: add model profiles for token budgeting）引入；探测机制雏形 2026-06-08/09 出现（`cad19d94`），2026-09-17 成熟（`f07793c9`）。`resolve` 优先级（user > builtin > fallback）从未随探测机制重排，真实探测值经 `defaultLimit` 进入 fallback 后仍被 builtin 前缀命中覆盖。属两个机制先后演化的遗留，不是单次引入的错误。
+
+**决定 1：无进展地板（improve-4）**
+
+1. 每次成功压缩提交后，把压后绝对占用记为地板；自动压力触发仅在占用严格大于地板时允许再压。地板只在成功压缩后更新，不随轮次重置，涨过即解锁。
+2. 压后仍高于触发线不算失败，会话继续干活；真「压完不降」才按 C4 无收益失败终止运行。手动与溢出恢复（force）不受地板限制，与 kimi 一致（kimi 的 `checkAutoCompaction` 只拦自动路径，溢出路径直调）。
+3. 地板是一个占用数值，替代 `THRASH_*` 抖动锁；同批删除 `core/context/compaction-policy.ts:84` 的 `thrashLocked` 参数、`core/context/events.ts:133`、`core/context/types.ts:275-277` 的锁条目，不留脚手架。
+4. 单轮可多次压缩（已确认删除 `MAX_COMPACTION_PER_TURN`），由「地板要求真实增长 ＋ 无收益失败终止」共同约束，不设次数帽。与 kimi 的差异：kimi 保留 `maxCompactionPerTurn`，因为它没有失败终止机制；ohbaby 有，所以不需要。
+
+**决定 2：删除内置模型档位表（improve-1）**
+
+1. 删除 `BUILTIN_PROFILE_RULES` 前缀匹配及只为其服务的 `findBuiltinProfile`、`modelKeyCandidates`、`inferProvider`；`resolve` 优先级改为 user > fallback（`defaultLimit` = 已解析的真实窗口）。
+2. `maxOutputTokens` 只来自 `llmParams.maxTokens`（必填用户配置）；`apply-active-model-config.ts:298-303` 的 builtin 回填整段删除；writer 的 `DEFAULT_MAX_TOKENS = 4096` 与 modelProfiles 的 `DEFAULT_MAX_OUTPUT_TOKENS = 8192` 统一为一个常量。
+3. registry 结构保留：user profile 的 id／provider+model／bare 三层 key 承载「同名不同 provider」语义，仍被配置路由使用。只删 builtin 层；`list()` 全仓零调用，与 `dedupeProfiles` 同删。
+4. 行为改变记录：connect 未配 maxOutput 时不再获得 builtin 拍脑袋输出上限（如 gpt-5 的 128K），改走统一缺省，用户可显式配 `maxTokens` 覆盖；未配 `models[]` 的模型不再被前缀表劫持，探测值真正生效。
+5. 模型能力三层：用户显式配置（`models[]` 窗口必填）> provider 探测（`probeContextWindow` 已有）> 默认值兜底。未知模型不猜前缀。探测结果不含 `maxOutputTokens`（单测明确忽略 `max_tokens`），不扩大探测范围。
+
+**参考核查**：kimi 无通用硬编码档位表，模型能力 = models.dev 公共目录＋各家 `/models` 动态发现＋用户配置＋默认值三层；唯一硬编码是 Anthropic 输出 clamp 表；未知模型缺窗口硬报错；运行时从溢出错误学习窗口（`min(配置, 观测)`）。opencode 走 models.dev 动态目录无前缀表；ZCode 的 contextWindow／maxOutputTokens 是用户可选字段；pi 的 contextWindow 来自显式模型配置。三家一致：不猜前缀，能力来自目录／探测／用户。
+
+同步：00 §4／§6，02 §4.1／§4.3／§7／§9／§9.1／新增 §9.3，03 新增 §5.4 模型能力来源对照，04 A2／D1／E3，context-design/02、03。只更新规划，未改业务代码；问题五（模式 B 下界）、问题六（两请求预算与网络失败混合）及三个小条目仍待讨论。
+
+### 17.14 问题五：模式 B 下界——最近一个完整交互组、一次按缺口算（已确认）
+
+用户确认三点：(1) 下限 = 最近一个完整交互组；(2) 收缩一次按缺口算、不循环；(3) “何时出现”措辞修正（不只小窗口，大窗口配大输出预留也会撞）。并要求调查 code-cli/ 下项目处理“压后重建请求仍超窗”（场景 X）的做法来借鉴，思路不一致则讨论。
+
+**调查结论**（九家，见 03 §5.5）：
+
+- “失败保留原历史＋可执行提示”是共同底线，我们一致。
+- “按缺口一次算收缩保留段”无人完整做过：Reasonix 真重测量循环，但对固定 16% 窗口预算、可缩到零尾段（`tailFloor=0`）、且不处理场景 X；DSH 循环折更老段（≤2 次）；opencode 旧路径一次算但下限零尾段、用于初选。
+- 多数项目压后不做本地收缩，照发超窗请求靠 provider 报错兜底再压／报错；pi 的 `estimatedTokensAfter` 只上报不拦截。
+- 没有任何项目在配置期拒绝小窗口。
+
+**决定**（三点按建议保留，不与参考项目相反，只是更早干预／更保守／更简单）：
+
+1. **下限 = 最近一个完整交互组**：不拆 call/result、对齐合法边界的最后一组，未闭合调用整组向前扩展。缩到只剩它仍装不下 → 失败、保留原历史。比参考项目（多家允许零尾段）保守，符合 §17.4 已确认的“不整组交给摘要、不保留空尾段”。
+2. **收缩一次按缺口算**：`保留预算 = max(0, 窗口 − system − tools − 摘要 − 安全余量 − 本次普通请求输出预留)`，取 `min(20K, 该值)` 再对齐边界，不循环递减。算出的预算小于最近一组体积则直接失败。与模式 A“按估算一次裁够”同风格。
+3. **本地判定保留**：压后本地检查装不下 → 收缩／失败，不照发撞 provider。依据：ohbaby 的“压后容量检查”是已确认的提交门槛（C4／D4／E8），省一次注定失败的请求，给用户可执行提示而非裸报错。
+
+**旧表述修正**：02 §5.4 原“借鉴 Reasonix 的 `planCompaction` 重测量循环”改为——Reasonix 的循环不对“装得下”收缩（对固定预算、可零尾段），不学循环，只记“存在收缩保留段先例”；Pi 的固定预算（`keepRecentTokens: 20000`）只借鉴保留段口径。§17.9 的“两家保留段预算都按窗口比例、天然不会卡死”已过时（kimi 固定 20K 只保 user 消息，裁窗口比例的是其摘要输入副本）。
+
+同步：00 §3，02 §5.4，03 新增 §5.5，04 E8，context-design/02、03。只更新规划，未改业务代码；问题六及三个小条目仍待讨论。
+
+### 17.15 问题六：两个请求预算与混合网络失败／溢出恢复（已确认）
+
+用户确认四点：(1) 普通请求不设输出上限时，/connect 保留 maxTokens 字段、默认 8192、用户可覆盖；(2) 模式 B 容量检查的“本次普通请求输出预留”= 全量 config.maxTokens，不套 50% 帽子；(3) force compact 加一次性标志，置位在调用压缩之前、失败也生效，防死循环；(4) 溢出学习窗口（kimi `observeContextOverflow`）这轮不做。
+
+**官网核实（输出上限字段必填性）**：必填的只有 Anthropic Messages 原生 API 与百炼的 Anthropic 兼容端点；其余（OpenAI Responses／Chat、DeepSeek Chat、GLM、百炼 OpenAI 兼容）均可选。ohbaby 必须支持 anthropic 协议（`max_tokens` 必填），因此不能走“省略字段让服务端默认”，保留字段、默认 8192。§9.3 此前“两个缺省常量统一”落实为统一到 8192。
+
+**参考项目调查（网络重试＋溢出恢复，十家）**：
+
+- 没有一个项目让同一失败从两个入口各拿一次额度。防双付四类机制：①分类隔离（溢出标不可重试，只进 force compact 入口）；②单一入口／信号；③一次性标志先置位不回滚；④单飞／互斥。
+- SDK 隐式重试：kimi／pi／claude-code／opencode／ZCode 全部显式 `maxRetries: 0`，把重试收进应用层。
+- 摘要重试都是“每次压缩调用新建的局部计数”，不是全局共享额度。
+- 溢出学习窗口只有 Reasonix（真解析错误数值、`min(配置,观测)`、内存态单日过期）与 kimi（本地估算×0.85、memory-only）两家，其余八家“未找到”。Reasonix 防双付其实靠输入哈希收据（`context_receipt`），过重不采用。
+
+**落地机制**：1) 溢出错误标“不可重试”，只进 force compact 入口（借鉴 kimi `retry.ts`、pi `agent-session.ts`）；2) 摘要网络重试 = 每次压缩调用局部计数、额度 1 次；3) 三个 provider 建 client 时显式 `maxRetries: 0`；4) force compact 一次性标志：置位在调用前、失败也生效（借鉴 ZCode／pi／opencode 新路径）；5) compact 成功后重发的普通请求不挂恢复钩子，二次溢出直接结束运行（借鉴 opencode 新路径 `runner/llm.ts:364-376`，对应 E4）；6) 学习窗口不做。
+
+**预算落地**：摘要独立 maxTokens = 无 thinking 16K／fixed 16K＋B／effort＋adaptive 32K，用 per-request override（`streaming` options.maxTokens）发送、不影响普通请求；改摘要 maxTokens 不破坏缓存（缓存身份 = 会话＋作用域指纹，不含 maxTokens）。模式 B 的普通请求输出预留 = 全量 config.maxTokens，不套 `maxOutputReservation` 的 50% 帽子（该帽子只留在触发判断 usageRatio）。
+
+同步：00 §4／§6，02 §4.1／§5.4／§7／§9.3，03 新增 §5.6，04 C3／E4，context-design/02、03。只更新规划，未改业务代码；三个小条目仍待讨论。

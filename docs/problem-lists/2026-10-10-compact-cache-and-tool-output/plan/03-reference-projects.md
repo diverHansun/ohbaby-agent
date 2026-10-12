@@ -53,7 +53,7 @@ ohbaby 最终选择：正文基础 16K；fixed 加已有 B；effort／adaptive �
 | Codex `codex-rs/prompts/templates/compact/prompt.md:1` | 进展、决策、约束、下一步、关键引用 | 不是 remote-v2 服务端完整提示词 |
 | 本地 claude-code `src/services/compact/prompt.ts:62` | 用户纠正、文件与决策、未完成任务、授权来源区别 | 不照搬长篇复述或无条件不再提问 |
 | ZCode `core/src/compact/prompt.ts:14` | 全对话目标与限制、错误修复、当前工作 | 不为 ohbaby 另造九节强制校验协议 |
-| Pi `compaction.ts:431`、`:880` | 长用户轮内合法切分、旧摘要更新 | 不照搬额外轮次摘要；它没有 ohbaby 的固定 20K 预算 |
+| Pi `compaction.ts:431`、`:880` | 长用户轮内合法切分、旧摘要更新 | 不照搬额外轮次摘要；其保留段口径 `keepRecentTokens:20000`（`settings-defaults.ts:11`）与 ohbaby 相同，但选择与切分细节不照搬 |
 | Reasonix `internal/agent/compact_incremental_test.go:65` | 连续压缩后仅一份主摘要 | 只作参考测试，不等于 ohbaby 已满足 |
 
 保留完整调用与结果是可借的不变量，参考项目对保留哪些消息、是否允许超预算并不统一。ohbaby 采用固定 20K 预算、切点对齐合法边界、最新超大组整组保留的做法，不声称这些数字来自行业共识。
@@ -113,7 +113,7 @@ DSH 也有基于估算的缩小检查，撤回“只有 gemini 检查”的说�
 
 ### 模式 B 与模式 A 的区别
 
-此前将 Kimi 的 `preShrinkHistoryToWindowBudget` 用作模式 B 的依据是错误的：它裁剪的是**发给摘要模型的输入副本**，属于模式 A。Reasonix 的 `planCompaction` 保留段重测量思路可参考，但不能由比例预算推出“小窗口天然不会卡死”。固定开销和不可拆组仍可能使请求无法发送。
+此前将 Kimi 的 `preShrinkHistoryToWindowBudget` 用作模式 B 的依据是错误的：它裁剪的是**发给摘要模型的输入副本**，属于模式 A。Reasonix 的 `planCompaction` 证明“收缩保留段”这一先例存在，但它的循环对固定比例预算、可缩到零尾段，也不处理场景 X，ohbaby 只记先例、不学循环；也不能由比例预算推出“小窗口天然不会卡死”。固定开销和不可拆组仍可能使请求无法发送。
 
 ### ohbaby 的采用方式与缓存代价
 
@@ -138,6 +138,67 @@ DSH 也有基于估算的缩小检查，撤回“只有 gemini 检查”的说�
 | ZCode／本地 claude-code 重建版 | 都有 microcompact，把旧工具正文变成占位符，当前配置默认关闭或受功能门控。ZCode 写回活动历史；重建版的本地路径改请求视图。不能据此声称官方 Claude Code 的默认行为。 | `ZCode/apps/zcode-cli/packages/core/src/runtime/methods/microcompact.ts:73-88`、`:105-111`；`claude-code/src/services/compact/timeBasedMCConfig.ts:34-38`、`microCompact.ts:444-525` |
 
 ohbaby 选择取消前置 prune，是为了保持已发送工具正文稳定、尽量复用已有前缀，并避免摘要失败时留下先前裁剪已提交的半成品；不是因为参考项目都不裁剪。其他实现优先减少输入量，有各自的适用场景，未做同模型实网对照前不宣称哪种必然更省钱。保留工具首次返回时已有分页／必要限长，真正超窗走已确认的模式 A／B。
+
+## 5.4 模型能力来源：不猜前缀
+
+2026-10-12 针对问题四重新核对。ohbaby 的 `BUILTIN_PROFILE_RULES`（12 条 provider／model 前缀→窗口／输出规则，2026-05-25 随 `66902371` 引入）与已有 `probeContextWindow` 探测平行且优先级排反，属演化遗留。参考项目均不猜前缀：
+
+| 项目 | 能力来源 | 源码依据 |
+| --- | --- | --- |
+| kimi-code | 无通用硬编码档位表。运行时拉 models.dev 公共目录（10 分钟缓存），构建期内联快照兜底，源码不提交数据；各家 `/models` 动态发现；用户 `config.toml` 可覆盖；默认 262144。唯一硬编码是 Anthropic 家族输出 clamp 表（只管输出、只覆盖 Claude、用户可覆盖）。未知模型缺窗口硬报错；另有运行时从超窗错误学习窗口（本地估算×0.85 收紧、内存态不落盘；ohbaby 不采用，见 §5.6）。 | `packages/agent-core-v2/src/app/kosongConfig/modelsDevUpstream.ts:17,73`；`configSection.ts:165-167`；`envOverlay.ts:13`；`providers/anthropic.ts:199-233`；`llm-adapter/model/catalog-service.ts:350-355`；`fullCompactionService.ts:320-331` |
+| opencode | 走 models.dev 动态目录，无前缀表。 | `packages/core/src/models-dev.ts` |
+| ZCode | contextWindow／maxOutputTokens 是用户可填的可选字段，不在代码里猜。 | `packages/ui/src/settings/model-provider-section/ProviderModelMetadata.ts:53-60`、`:130` |
+| pi | contextWindow 来自显式模型配置（可选字段，经 provider-composer 合成，非测试假模型）。 | `packages/coding-agent/src/core/model-config.ts:43`；`provider-composer.ts:197` |
+
+ohbaby 选择：删除 `BUILTIN_PROFILE_RULES` 前缀匹配，能力来源改为用户显式配置（`models[]` 窗口必填）> provider 探测（已有 `probeContextWindow`）> 默认值兜底三层；`maxOutputTokens` 只来自 `llmParams.maxTokens`；未知模型不猜前缀。探测结果不含 `maxOutputTokens`（单测明确忽略 `max_tokens`），不扩大探测范围。清理边界见 02 §9.3。kimi 的溢出学习窗口（`observeContextOverflow`）本轮不采用，见 §5.6。
+
+## 5.5 模式 B：压后仍装不下，参考项目怎么做
+
+2026-10-12 针对问题五核对。场景 X＝压后重建普通请求仍超窗，各项目处理不一，无人完整做过“按缺口一次算收缩保留段”：
+
+| 项目 | 压后超窗怎么处理 | 下限与预算口径 | 源码依据 |
+| --- | --- | --- | --- |
+| Reasonix | `planCompaction` 真重测量循环，把保留尾段预算从固定值逐步缩到装得下 | 对固定 16% 窗口预算，可缩到零尾段（`tailFloor=0`），且不处理场景 X | `internal/agent/compact.go`、`compact_fold_input.go` |
+| DSH | 循环把更老段折进摘要（≤2 次），仍放不下则失败 | 无保留段下限概念，折的是完整段 | `packages/compaction/compaction-basic/src/index.ts` |
+| opencode 旧路径 | 初选时一次按预算算尾段，超窗则失败 | 下限是零尾段，用于初选，非“装不下再收缩” | `packages/opencode/src/session/compaction.ts` |
+| pi | `estimatedTokensAfter` 只上报估算，不拦截、不收缩 | `keepRecentTokens: 20000` 是保留段固定口径 | `packages/coding-agent/src/core/compaction/compaction.ts` |
+| kimi / codex / ZCode / claude-code 重建版 | 压后多照发，超窗靠 provider 报错兜底再压／报错 | 无本地“装不下再收缩”步骤 | kimi `fullCompactionService.ts`、codex `compact.rs` 等 |
+
+共同底线：**失败保留原历史＋可执行提示**，我们一致。差异在“谁先发现、怎么收”：
+
+- 多家允许保留段缩到零（Reasonix、opencode 旧路径），ohbaby 设下限＝最近一个完整交互组，更保守，与已确认的“不整组交给摘要、不保留空尾段”一致（见 [讨论记录 §17.4](./discussion-notes.md)）。
+- 无人按缺口一次算：Reasonix 是循环、DSH 是循环折段、opencode 是一次算但下限零尾段。ohbaby 用“一次按缺口算 + 明确下限”是更早干预、更保守、也更简单。
+- 多数项目不本地收缩、照发撞 provider；ohbaby 本地判定，省一次注定失败的请求，直接给可执行提示。
+
+ohbaby 的三点选择因此不与参考项目相反，只是介入更早、规则更简单：下限＝最近完整交互组、一次按缺口算不循环、本地判定保留。缓存侧无额外代价——收缩不改变摘要请求体，缓存身份不变（见 02 §5.4）。
+
+## 5.6 网络重试与溢出恢复：参考项目怎么不双花
+
+2026-10-12 针对问题六核对。十家项目里**没有一个让同一失败从两个入口各拿一次额度**，防双付靠四类机制：
+
+1. **分类隔离**：把 overflow 标成不可重试，使它永远进不了普通重试通道，只能进 force-compact 专用入口。kimi `human/llm/requester/retry.ts:39-49`、pi `agent-session.ts:3709-3713`、opencode `session/retry.ts:87`、ZCode `failure-classifier.ts:236-245`、gemini `utils/retry.ts:192-199`。
+2. **单一入口／信号**：codex 只有一个 token 状态信号，pi 只有 `_handlePostAgentRun` 一个分派点。
+3. **一次性标志先置位、不回滚**：pi `_overflowRecoveryAttempted`、ZCode `reactiveCompactAttemptedInCurrentModelStep`、codex guardian `guardian_budget_compacted`；opencode 新路径是“恢复后重发不挂恢复钩子，二次溢出直接 die”（`runner/llm.ts:364-376`）。
+4. **单飞／互斥**：kimi `_compacting`、Reasonix `compactionGate`。
+
+下表“摘要重试”为每次压缩调用的尝试口径（含首次），各项目计数范围不一，不逐一换算成“额外重试次数”：
+
+| 项目 | 摘要重试（每次压缩） | 溢出恢复次数 | 防重复机制 |
+| --- | --- | --- | --- |
+| kimi | 每次压缩至多 5 次总尝试（含首次与恢复路径，共一个计数） | 连续 3 次，之后结束回合 | 溢出不可重试 + `_compacting` 互斥 + 首匹配处理器 |
+| codex | 每次压缩 5 次（provider 配置） | 每 step 1 次 | `guardian_budget_compacted` 一次性 |
+| opencode 旧 | 每次调用 5 次（与普通同策略） | 无上限、无标志 | 单 trunk + 溢出不可重试 |
+| opencode 新 | runner 0 次（HTTP 层网络 0 次） | 整个 turn 1 次 | 恢复后路径不挂恢复钩子 |
+| pi | 每次压缩 3 次 | 每 run 1 次 | one-shot 标志（不回滚） |
+| ZCode | auto 3 次 / 溢出与手动 1 次 | 每 step 1 次 | 置位前置的一次性标志 + 内层防放大标记 |
+| Reasonix | 摘要一次即止；5 分钟墙钟 | 每次采样 1 次恢复 | `retries` 计数 + 单飞闩 + 输入哈希收据 |
+| deepseek-harness | 摘要 0 次 | 每 agent 1 次 | 入口独立 + 持久削减才算成功 |
+| claude-code 重建版 | 每次压缩 11 次（同普通策略） | 每 turn 1 次 reactive | `hasAttemptedReactiveCompact` + 熔断 3 次 |
+| gemini | 每次调用 5 次 | 无溢出压缩 | 粘性标志（仅覆盖一种失败形态） |
+
+SDK 隐式重试：kimi、pi、claude-code、opencode、ZCode 全部显式 `maxRetries: 0`，把重试收进应用层；gemini 的 SDK 无 retry 选项而天然没有；codex、Reasonix 是自研 HTTP 层。ohbaby 用官方 SDK，必须照 kimi `requester/bases/anthropic/requester.ts:91` 显式关掉，否则“SDK 2 次＋应用层 1 次”隐形超发。
+
+**溢出学习窗口**：只有 DeepSeek-Reasonix 真从错误解析真实窗口、取 `min(配置,观测)` 且只收紧（`context_recovery.go:23-30` → `output_budget.go:372-389`、`:410-425`），但内存态、单日过期、不落盘；kimi 的 `observeContextOverflow` 是本地估算×0.85、memory-only。其余八家“未找到”。ohbaby 本轮不做，靠模式 A/B＋force compact 一次＋结束运行兜底，不引入“错误解析＋写回配置＋持久化”一整条链。
 
 ## 6. 调查与审查边界
 
