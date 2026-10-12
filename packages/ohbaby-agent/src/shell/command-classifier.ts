@@ -1,4 +1,10 @@
-import type { CommandDetail, ParsedCommand } from "../utils/index.js";
+import type { ShellAnalysisResult } from "./analysis/types.js";
+export interface ShellCommandFacts {
+  readonly root: string;
+  readonly tokens: readonly string[];
+  readonly writesFiles?: boolean;
+  readonly sudo?: boolean;
+}
 import { gitSubcommand } from "./git-args.js";
 
 export type ShellCommandClass = "readonly" | "mutating" | "dangerous";
@@ -70,8 +76,8 @@ function normalizeRoot(root: string): string {
   return root.toLowerCase().replace(/\.exe$/u, "");
 }
 
-function commandArgs(detail: CommandDetail): readonly string[] {
-  return detail.tokens.slice(detail.rootIndex + 1);
+function commandArgs(detail: ShellCommandFacts): readonly string[] {
+  return detail.tokens.slice(1);
 }
 
 function maxShellCommandClass(
@@ -81,17 +87,6 @@ function maxShellCommandClass(
   return SHELL_COMMAND_CLASS_RANK[right] > SHELL_COMMAND_CLASS_RANK[left]
     ? right
     : left;
-}
-
-function hasWrapper(detail: CommandDetail, wrapper: string): boolean {
-  return detail.tokens
-    .slice(0, detail.rootIndex)
-    .map(normalizeRoot)
-    .includes(wrapper);
-}
-
-function hasRedirection(detail: CommandDetail): boolean {
-  return detail.tokens.some((token) => /^[&\d]*>{1,2}/u.test(token));
 }
 
 function hasUnixRecursiveForce(args: readonly string[]): boolean {
@@ -119,9 +114,9 @@ function rmCommandClass(args: readonly string[]): ShellCommandClass {
 }
 
 export function classifyShellCommandDetail(
-  detail: CommandDetail,
+  detail: ShellCommandFacts,
 ): ShellCommandClass {
-  if (hasWrapper(detail, "sudo")) {
+  if (detail.sudo) {
     return "dangerous";
   }
 
@@ -130,12 +125,20 @@ export function classifyShellCommandDetail(
   if (DANGEROUS_ROOTS.has(root)) {
     return "dangerous";
   }
+  if (
+    root === "find" &&
+    args.some((arg) =>
+      ["-delete", "-exec", "-execdir", "-ok", "-okdir"].includes(arg),
+    )
+  )
+    return "mutating";
   if (root === "rm") {
     return rmCommandClass(args);
   }
   if (root === "chmod") {
     return chmodCommandClass(args);
   }
+  if (detail.writesFiles) return "mutating";
   if (root === "git") {
     return gitCommandClass(args);
   }
@@ -146,7 +149,7 @@ export function classifyShellCommandDetail(
     return "mutating";
   }
   if (root === "echo" || root === "write-host") {
-    return hasRedirection(detail) ? "mutating" : "readonly";
+    return "readonly";
   }
   if (MUTATING_ROOTS.has(root)) {
     return "mutating";
@@ -157,14 +160,17 @@ export function classifyShellCommandDetail(
   return "mutating";
 }
 
-export function classifyShellCommand(parsed: ParsedCommand): ShellCommandClass {
-  if (parsed.hasError || parsed.details.length === 0) {
+export function classifyShellCommand(
+  analysis: ShellAnalysisResult | undefined,
+): ShellCommandClass {
+  if (!analysis || analysis.commands.length === 0) {
     return "mutating";
   }
 
-  let result: ShellCommandClass = "readonly";
-  for (const detail of parsed.details) {
-    result = maxShellCommandClass(result, classifyShellCommandDetail(detail));
+  let result: ShellCommandClass =
+    analysis.completeness === "incomplete" ? "mutating" : "readonly";
+  for (const detail of analysis.commands) {
+    result = maxShellCommandClass(result, detail.danger);
   }
   return result;
 }

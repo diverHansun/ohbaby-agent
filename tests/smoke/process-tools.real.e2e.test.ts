@@ -64,6 +64,7 @@ describe.runIf(enabled)("real compiled CLI tool transport", () => {
         : [
             "COMPOUND_alpha_7261",
             "COMPOUND_beta_7261",
+            "COMPOUND_CHILD_gamma_7261",
             "glob-alpha-7261.txt",
             "glob-beta-7261.txt",
           ];
@@ -75,6 +76,7 @@ describe.runIf(enabled)("real compiled CLI tool transport", () => {
           )
         : [
             "for value in alpha beta; do printf 'COMPOUND_%s_7261\\n' \"$value\"; done",
+            "printf 'COMPOUND_CHILD_%s_7261\\n' \"$(printf gamma)\"",
           ];
     const approvals: {
       sessionId: string;
@@ -82,6 +84,7 @@ describe.runIf(enabled)("real compiled CLI tool transport", () => {
       callIdHash: string;
       marker: string;
       allowed: boolean;
+      choices: string[];
     }[] = [];
     const permissionErrors: string[] = [];
     const pending = new Set<Promise<void>>();
@@ -145,7 +148,9 @@ describe.runIf(enabled)("real compiled CLI tool transport", () => {
       );
       if (batch !== "network") {
         await mkdir(join(workspace, "fixtures"));
-        for (const marker of markers.slice(2))
+        for (const marker of markers.filter((value) =>
+          value.startsWith("glob-"),
+        ))
           await writeFile(join(workspace, "fixtures", marker), "fixture\n");
       }
       child = spawn(
@@ -233,7 +238,14 @@ describe.runIf(enabled)("real compiled CLI tool transport", () => {
             marker:
               markers.find((marker) => command.includes(marker)) ?? "compound",
             allowed,
+            choices: event.request.choices.map((choice) => choice.id),
           });
+          if (
+            batch === "shell-glob" &&
+            allowed &&
+            event.request.choices.some((choice) => choice.id === "allow_always")
+          )
+            permissionErrors.push("INCOMPLETE_COMMAND_OFFERED_ALWAYS");
           const choice = event.request.choices.find((item) =>
             allowed ? item.id === "allow_once" : item.intent === "deny",
           );
@@ -258,7 +270,7 @@ describe.runIf(enabled)("real compiled CLI tool transport", () => {
       const prompt =
         batch === "network"
           ? `Controlled proxy acceptance. Use only select_tools, bash, subagent_run. First execute bash command exactly ${JSON.stringify(commands[0])} with timeout=45000. Then activate subagent_run and call it exactly once with role=generic, mode=foreground. Child prompt: execute bash command exactly ${JSON.stringify(commands[1])} with timeout=45000; only select_tools and bash allowed, no skill or other tools and no retries; report the actual output. After child returns, report both actual output markers. Do not alter commands or infer results.`
-          : `Controlled shell and glob acceptance. Only select_tools, bash and glob permitted, no subagents or skills. Execute bash command exactly ${JSON.stringify(commands[0])} with timeout=5000. Then call glob with pattern=fixtures/*.txt in this workspace. Report both actual shell lines and both filenames returned. Do not guess results or change the command.`;
+          : `Controlled shell and glob acceptance. Only select_tools, bash, glob and subagent_run permitted, no skills. Execute bash command exactly ${JSON.stringify(commands[0])} with timeout=5000. Then activate subagent_run and call it exactly once with role=generic, mode=foreground. Child prompt: execute bash command exactly ${JSON.stringify(commands[1])} with timeout=5000; only select_tools and bash allowed, no skills, no retries; report the actual output. After child returns, call glob with pattern=fixtures/*.txt in this workspace. Report all three actual shell output lines and both filenames returned. Do not guess results or change commands.`;
       const completion = await client.submitPromptAndWait(prompt, {
         signal: AbortSignal.timeout(360000),
       });
@@ -332,19 +344,17 @@ describe.runIf(enabled)("real compiled CLI tool transport", () => {
             .map((item) => item.callIdHash),
         ).size,
       ).toBe(commands.length);
-      if (batch === "network") {
-        expect(new Set(approvals.map((item) => item.sessionId)).size).toBe(2);
-        expect(
-          approvals.every(
-            (item) => item.rootSessionId === completion.prompt.sessionId,
-          ),
-        ).toBe(true);
-        expect(
-          approvals.some(
-            (item) => item.sessionId === completion.prompt.sessionId,
-          ),
-        ).toBe(true);
-      }
+      expect(new Set(approvals.map((item) => item.sessionId)).size).toBe(2);
+      expect(
+        approvals.every(
+          (item) => item.rootSessionId === completion.prompt.sessionId,
+        ),
+      ).toBe(true);
+      expect(
+        approvals.some(
+          (item) => item.sessionId === completion.prompt.sessionId,
+        ),
+      ).toBe(true);
       evidence.passed = true;
       phase = "verified";
     } finally {

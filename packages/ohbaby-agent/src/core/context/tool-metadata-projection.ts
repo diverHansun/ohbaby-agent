@@ -128,8 +128,15 @@ export function projectToolMetadataForModel(
         "replacementCount",
         "dryRun",
       ]);
-    case "list":
     case "glob":
+      return copyMetadataFields(metadata, [
+        "count",
+        "truncated",
+        "scanComplete",
+        "displayLimited",
+        "stopReason",
+      ]);
+    case "list":
       return copyMetadataFields(metadata, [
         "count",
         "truncated",

@@ -142,9 +142,12 @@ const EditParams = z.object({
 ```typescript
 const GlobParams = z.object({
   pattern: z.string().describe('glob 匹配模式，如 "**/*.ts"'),
-  path: z.string().optional().describe('搜索的基础路径'),
+  path: z.string().optional().describe('已授权的搜索根'),
+  limit: z.number().int().min(1).optional().describe('默认返回 100 个匹配'),
 })
 ```
+
+模式为 rg 根相对 glob；支持字符类，字面 `[id]` 写为 `[[]id]`。绝对或根外模式失败，Windows 分隔符规范化为 `/`。
 
 ### 3.5 grep 工具
 
@@ -281,13 +284,18 @@ interface BashMetadata extends BaseMetadata {
 }
 ```
 
-**glob/grep 工具**：
+**glob 工具**：
 ```typescript
-interface SearchMetadata extends BaseMetadata {
-  matchCount: number         // 匹配数量
-  searchPath: string         // 搜索路径
+interface GlobMetadata {
+  count: number
+  truncated: boolean
+  scanComplete: boolean
+  displayLimited: boolean
+  stopReason?: 'match-limit' | 'output-limit' | 'record-limit' | 'stdout-limit'
 }
 ```
+
+count 为已采集的返回路径数；displayLimited 表示正文少于采集结果。恰好 limit 且正常结束为完整，观察到 limit+1 才数量截断。正常空扫描才显示无匹配；错误与取消不伪装成功。不提供 visitedFileCount。Grep 的文本/JSON 协议与完整性合同见 [工具接口](dfd-interface.md)，不与 Glob 的 NUL 路径协议共用解析器。
 
 ---
 

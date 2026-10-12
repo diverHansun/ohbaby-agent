@@ -1,5 +1,5 @@
-import { computeShellArityKey } from "../shell/analysis/index.js";
-import { matchesPattern, parseCommand } from "../utils/index.js";
+import type { ShellAnalysisResult } from "../shell/analysis/types.js";
+import { matchesPattern } from "../utils/index.js";
 import { parsePermissionPattern } from "./rule.js";
 import type {
   PermissionCall,
@@ -37,22 +37,19 @@ function normalizeCommand(command: string): string {
   return command.trim().replace(/\s+/g, " ");
 }
 
-function bashCommandPattern(command: string, fallbackName: string): string {
+export function bashCommandPattern(
+  command: string,
+  fallbackName: string,
+  shellAnalysis?: ShellAnalysisResult,
+): string {
   const normalized = normalizeCommand(command).toLowerCase();
-  if (!normalized) {
-    return canonicalToolName(fallbackName);
-  }
-
-  const parsed = parseCommand(command);
-  if (parsed.details.length === 1) {
-    const detail = parsed.details[0];
-    const root = detail.root.toLowerCase().replace(/\.exe$/u, "");
-    if (root === "docker" || root === "git") {
-      return computeShellArityKey(detail.tokens.slice(detail.rootIndex));
-    }
-  }
-  if (parsed.details.length > 1) {
-    return normalized;
+  if (!normalized) return canonicalToolName(fallbackName);
+  if (
+    shellAnalysis?.completeness === "complete" &&
+    shellAnalysis.commands.length === 1
+  ) {
+    const item = shellAnalysis.commands[0];
+    if (item.root === "docker" || item.root === "git") return item.arityKey;
   }
   return normalized;
 }
@@ -152,7 +149,10 @@ export function generatePermissionPattern(
 
   if (input.type === "bash") {
     const command = getStringParam(input.params, ["command"]) ?? input.name;
-    const pattern = bashCommandPattern(command, input.name);
+    const pattern =
+      input.shellAnalysis?.completeness === "complete"
+        ? bashCommandPattern(command, input.name, input.shellAnalysis)
+        : command;
     return `bash(${pattern || canonicalToolName(input.name)})`;
   }
 
@@ -253,9 +253,15 @@ export function matchesPermissionRule(
     if (!command) {
       return false;
     }
-    const parsed = parseCommand(command);
-    const arityPattern = bashCommandPattern(command, call.toolName);
-    if (rule.decision === "allow" && parsed.details.length > 1) {
+    const arityPattern = bashCommandPattern(
+      command,
+      call.toolName,
+      call.shellAnalysis,
+    );
+    if (
+      rule.decision === "allow" &&
+      (call.shellAnalysis?.commands.length ?? 0) > 1
+    ) {
       return pattern === arityPattern;
     }
     return pattern === arityPattern || matchesPattern(arityPattern, pattern);

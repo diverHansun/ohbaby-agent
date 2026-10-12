@@ -1,3 +1,5 @@
+import type { ShellAnalysisResult } from "../../shell/analysis/types.js";
+import type { ShellExecutionBinding } from "../../shell/execution.js";
 import type { ResourceAccess, ResourceLease } from "./resources.js";
 import type { BusInstance } from "../../bus/index.js";
 import type {
@@ -91,6 +93,7 @@ export interface ToolExecutionEnvironment {
 }
 
 export interface ToolExecutionContext {
+  readonly shellExecution?: ShellExecutionBinding;
   /** Trusted tool cleanup owner reports process lifetime independently of its result. */
   readonly reportCleanup?: (
     state: "in-progress" | "unconfirmed" | "confirmed",
@@ -245,6 +248,7 @@ export type PermissionResponse = "once" | "always" | "reject" | "cancel";
 export interface PermissionPort {
   readonly state?: PermissionStateStore;
   ask(input: {
+    readonly shellAnalysis?: ShellAnalysisResult;
     readonly runId: string;
     readonly contextScopeId?: string;
     readonly signal: AbortSignal;

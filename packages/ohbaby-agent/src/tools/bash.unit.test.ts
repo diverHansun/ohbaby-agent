@@ -259,20 +259,19 @@ describe("bash builtin tool", () => {
     });
   });
 
-  it("rejects unsupported shell syntax before spawning", async () => {
-    const spawn = vi.fn();
+  it("passes incomplete shell syntax unchanged after trusted preparation", async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn<SpawnCommand>(() => child as unknown as ChildProcess);
     const bash = getBashTool({
-      shell: {
-        acceptable: () => "/bin/bash",
-        killTree: vi.fn(),
-      },
+      shell: { acceptable: () => "/bin/bash", killTree: vi.fn() },
       spawn,
     });
-
-    await expect(
-      bash.execute({ command: "echo $(rm -rf /tmp)" }, createContext()),
-    ).rejects.toThrow("Unsupported shell syntax");
-    expect(spawn).not.toHaveBeenCalled();
+    const command = "echo $(printf safe)";
+    const pending = bash.execute({ command }, createContext());
+    await waitForSpawn(spawn);
+    child.emit("exit", 0, null);
+    await expect(pending).resolves.toMatchObject({ metadata: { exitCode: 0 } });
+    expect(spawn.mock.calls[0]?.[1]).toEqual(["-lc", command]);
   });
 
   it("does not spawn when cancellation arrives during preflight", async () => {

@@ -1,3 +1,4 @@
+import { analyzeShellCommand } from "../shell/analysis/index.js";
 import { describe, expect, it } from "vitest";
 import { createBus } from "../bus/index.js";
 import {
@@ -721,7 +722,7 @@ describe("PermissionManager", () => {
 });
 
 describe("permission patterns", () => {
-  it("generates patterns for tool, bash, skill, and fallback requests", () => {
+  it("generates patterns for tool, bash, skill, and fallback requests", async () => {
     expect(
       generatePermissionPattern({
         name: "edit",
@@ -733,6 +734,10 @@ describe("permission patterns", () => {
       generatePermissionPattern({
         name: "git",
         params: { command: "git push origin main" },
+        shellAnalysis: await analyzeShellCommand(
+          "git push origin main",
+          "bash",
+        ),
         type: "bash",
       }),
     ).toBe("bash(git push *)");
@@ -785,6 +790,7 @@ describe("permission patterns", () => {
       baseAskInput({
         category: "dangerous",
         params: { command: "git status" },
+        shellAnalysis: await analyzeShellCommand("git status", "bash"),
         toolName: "bash",
       }),
     );
@@ -805,6 +811,10 @@ describe("permission patterns", () => {
         category: "dangerous",
         messageId: "message_2",
         params: { command: "git push origin main" },
+        shellAnalysis: await analyzeShellCommand(
+          "git push origin main",
+          "bash",
+        ),
         toolName: "bash",
       }),
     );
@@ -841,6 +851,7 @@ describe("permission patterns", () => {
       baseAskInput({
         category: "dangerous",
         params: { command: "git status" },
+        shellAnalysis: await analyzeShellCommand("git status", "bash"),
         toolName: "bash",
       }),
     );
@@ -853,6 +864,10 @@ describe("permission patterns", () => {
         category: "dangerous",
         messageId: "message_2",
         params: { command: "git status && rm -rf build" },
+        shellAnalysis: await analyzeShellCommand(
+          "git status && rm -rf build",
+          "bash",
+        ),
         toolName: "bash",
       }),
     );
@@ -871,6 +886,7 @@ describe("permission patterns", () => {
         category: "dangerous",
         messageId: "message_3",
         params: { command: "docker ps" },
+        shellAnalysis: await analyzeShellCommand("docker ps", "bash"),
         toolName: "bash",
       }),
     );
@@ -883,6 +899,10 @@ describe("permission patterns", () => {
         category: "dangerous",
         messageId: "message_4",
         params: { command: "docker ps && rm -rf build" },
+        shellAnalysis: await analyzeShellCommand(
+          "docker ps && rm -rf build",
+          "bash",
+        ),
         toolName: "bash",
       }),
     );
@@ -901,6 +921,7 @@ describe("permission patterns", () => {
       generatePermissionPattern({
         name: "bash",
         params: { command: "sudo git status" },
+        shellAnalysis: await analyzeShellCommand("sudo git status", "bash"),
         type: "bash",
       }),
     ).toBe("bash(git status *)");
@@ -908,6 +929,10 @@ describe("permission patterns", () => {
       generatePermissionPattern({
         name: "bash",
         params: { command: "env FOO=bar git status" },
+        shellAnalysis: await analyzeShellCommand(
+          "env FOO=bar git status",
+          "bash",
+        ),
         type: "bash",
       }),
     ).toBe("bash(git status *)");
@@ -915,6 +940,7 @@ describe("permission patterns", () => {
       generatePermissionPattern({
         name: "bash",
         params: { command: "command git status" },
+        shellAnalysis: await analyzeShellCommand("command git status", "bash"),
         type: "bash",
       }),
     ).toBe("bash(git status *)");
@@ -934,6 +960,7 @@ describe("permission patterns", () => {
       baseAskInput({
         category: "dangerous",
         params: { command: "sudo git status" },
+        shellAnalysis: await analyzeShellCommand("sudo git status", "bash"),
         toolName: "bash",
       }),
     );
@@ -954,6 +981,7 @@ describe("permission patterns", () => {
         category: "dangerous",
         messageId: "message_2",
         params: { command: "sudo rm -rf /" },
+        shellAnalysis: await analyzeShellCommand("sudo rm -rf /", "bash"),
         toolName: "bash",
       }),
     );
@@ -972,6 +1000,10 @@ describe("permission patterns", () => {
         category: "dangerous",
         messageId: "message_3",
         params: { command: "env FOO=bar git push origin main" },
+        shellAnalysis: await analyzeShellCommand(
+          "env FOO=bar git push origin main",
+          "bash",
+        ),
         toolName: "bash",
       }),
     );
@@ -985,7 +1017,7 @@ describe("permission patterns", () => {
     await expect(wrappedPush).resolves.toBe("once");
   });
 
-  it("matches exact, wildcard, and parent directory approval patterns", () => {
+  it("matches exact, wildcard, and parent directory approval patterns", async () => {
     expect(
       matchPermissionPattern(
         "edit(src/components/**)",
@@ -1012,12 +1044,14 @@ describe("permission patterns", () => {
         generatePermissionPattern({
           name: "rm",
           params: { command: "rm -rf /" },
+          shellAnalysis: await analyzeShellCommand("rm -rf /", "bash"),
           type: "bash",
         }),
         new Set([
           generatePermissionPattern({
             name: "rm",
             params: { command: "rm -rf ./tmp" },
+            shellAnalysis: await analyzeShellCommand("rm -rf ./tmp", "bash"),
             type: "bash",
           }),
         ]),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCommand } from "../utils/index.js";
+import { analyzeShellCommand } from "./analysis/index.js";
 import {
   classifyShellCommand,
   type ShellCommandClass,
@@ -37,8 +37,10 @@ describe("classifyShellCommand", () => {
     ["ls; mkdir foo", "mutating"],
   ] as readonly (readonly [string, ShellCommandClass])[])(
     "classifies %s as %s",
-    (command, expected) => {
-      expect(classifyShellCommand(parseCommand(command))).toBe(expected);
+    async (command, expected) => {
+      expect(
+        classifyShellCommand(await analyzeShellCommand(command, "bash")),
+      ).toBe(expected);
     },
   );
 });

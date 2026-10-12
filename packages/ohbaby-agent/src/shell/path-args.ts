@@ -1,14 +1,8 @@
-import type { CommandDetail } from "../utils/index.js";
-import {
-  candidatePathFromToken,
-  normalizeOptionName,
-  optionValue,
-  stripRedirectionPrefix,
-} from "../utils/path-strings.js";
-import { gitGlobalPathArgs } from "./git-args.js";
+import type { ShellCommandFacts } from "./command-classifier.js";
+import { gitGlobalPathArgs, normalizeGitArgs } from "./git-args.js";
 import { resolveShellExecutionTarget } from "./interpreters.js";
 
-const PATH_ARGUMENT_COMMANDS = new Set([
+const PATH_COMMANDS = new Set([
   "cat",
   "copy",
   "cp",
@@ -30,8 +24,6 @@ const PATH_ARGUMENT_COMMANDS = new Set([
   "touch",
   "type",
   "xcopy",
-]);
-const POWERSHELL_PATH_COMMANDS = new Set([
   "add-content",
   "clear-content",
   "copy-item",
@@ -43,16 +35,7 @@ const POWERSHELL_PATH_COMMANDS = new Set([
   "remove-item",
   "set-content",
 ]);
-const SEARCH_COMMANDS = new Set(["grep", "rg", "select-string"]);
-const DOWNLOAD_COMMANDS = new Set([
-  "curl",
-  "wget",
-  "iwr",
-  "irm",
-  "invoke-restmethod",
-  "invoke-webrequest",
-]);
-const DIRECTORY_COMMANDS = new Set([
+const DIRECTORIES = new Set([
   "cd",
   "chdir",
   "push-location",
@@ -60,17 +43,15 @@ const DIRECTORY_COMMANDS = new Set([
   "set-location",
   "sl",
 ]);
-const PATH_VALUE_OPTIONS = new Set([
-  "-c",
-  "-f",
-  "-literalpath",
-  "-o",
-  "-outfile",
-  "-path",
-  "--output",
-  "--output-document",
+const DOWNLOADS = new Set([
+  "curl",
+  "wget",
+  "iwr",
+  "irm",
+  "invoke-restmethod",
+  "invoke-webrequest",
 ]);
-const SCRIPT_PATH_VALUE_OPTIONS = new Set([
+const SCRIPT_PATH_OPTIONS = new Set([
   "--cache-dir",
   "--config",
   "--env-file",
@@ -88,408 +69,154 @@ const SEARCH_PATTERN_OPTIONS = new Set([
   "--pattern",
   "--regexp",
 ]);
-const NON_PATH_OPTIONS_WITH_VALUE = new Set([
-  "-aftercontext",
-  "-beforecontext",
-  "-context",
-  "-encoding",
-  "-exclude",
-  "-filter",
+const SEARCH_VALUE_OPTIONS = new Set([
   "-g",
-  "-include",
-  "-inputobject",
-  "-itemtype",
   "-m",
-  "-n",
-  "-totalcount",
+  "-A",
+  "-B",
+  "-C",
+  "--glob",
+  "--max-count",
   "--after-context",
   "--before-context",
   "--context",
   "--encoding",
-  "--exclude",
-  "--glob",
   "--include",
-  "--max-count",
+  "--exclude",
 ]);
-const PATH_PREFIX_PATTERN =
-  /^(?:\.{1,2}(?:[\\/]|$)|~(?:[\\/]|$)|[\\/]|[A-Za-z]:[\\/])/u;
-const PATH_SUFFIX_PATTERN = /^[\w.-]+(?:[\\/][\w .-]+)+$/u;
-const FIND_LEADING_OPTIONS = new Set(["-H", "-L", "-P"]);
-const DIRECT_EXECUTABLE_PREFIX_PATTERN =
-  /^(?:\.{1,2}[\\/]|~[\\/]|[\\/]|[A-Za-z]:[\\/])/u;
-const DIRECTORY_PATH_OPTIONS = new Set(["-literalpath", "-path"]);
-
+const POWERSHELL_VALUE_OPTIONS = new Set([
+  "-totalcount",
+  "-tail",
+  "-encoding",
+  "-filter",
+  "-include",
+  "-exclude",
+  "-inputobject",
+  "-itemtype",
+]);
+const PATH_OPTIONS = new Set(["-path", "-literalpath"]);
+const URL_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//iu;
 export interface ShellPathFacts {
   readonly executedScript?: string;
   readonly inlineEval?: boolean;
   readonly interpreter?: string;
   readonly pathArgs: readonly string[];
+  readonly downloadTargets?: readonly string[];
 }
-
-function normalizeRoot(root: string): string {
-  return root.toLowerCase().replace(/\.exe$/u, "");
-}
-
-function isOption(token: string): boolean {
-  return token.startsWith("-") || /^\/[A-Za-z](?::|$)/u.test(token);
-}
-
-function isStandaloneRedirection(token: string): boolean {
-  return /^(?:\d+|&)?[<>]{1,2}$/u.test(token);
-}
-
-function addCandidate(paths: Set<string>, token: string | undefined): void {
-  if (!token) {
-    return;
-  }
-  const candidate = candidatePathFromToken(token);
-  if (candidate) {
-    paths.add(candidate);
-  }
-}
-
-function looksLikePathArg(token: string): boolean {
-  const candidate = candidatePathFromToken(token);
-  if (!candidate) {
-    return false;
-  }
+function looksLikePath(value: string): boolean {
   return (
-    candidate === "." ||
-    candidate === ".." ||
-    PATH_PREFIX_PATTERN.test(candidate) ||
-    PATH_SUFFIX_PATTERN.test(candidate)
+    /^(?:\.{1,2}(?:[\\/]|$)|~(?:[\\/]|$)|[\\/]|[A-Za-z]:[\\/])/u.test(value) ||
+    /^[\w.-]+[\\/]/u.test(value)
   );
 }
-
-function addRedirectionTargets(
-  paths: Set<string>,
-  args: readonly string[],
-): Set<number> {
-  const consumed = new Set<number>();
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index];
-    if (isStandaloneRedirection(token) && args[index + 1]) {
-      addCandidate(paths, args[index + 1]);
-      consumed.add(index);
-      consumed.add(index + 1);
-      index += 1;
-      continue;
-    }
-    const stripped = stripRedirectionPrefix(token);
-    if (stripped !== token && stripped.length > 0) {
-      addCandidate(paths, token);
-      consumed.add(index);
-    }
-  }
-  return consumed;
-}
-
-function consumeOptionValue(
-  paths: Set<string>,
-  args: readonly string[],
-  index: number,
-  pathOptions = PATH_VALUE_OPTIONS,
-): number {
-  const token = args[index];
-  const optionName = normalizeOptionName(token);
-  const inlineValue = optionValue(token);
-  if (inlineValue !== null) {
-    if (pathOptions.has(optionName)) {
-      addCandidate(paths, inlineValue);
-    }
-    return index;
-  }
-  if (pathOptions.has(optionName) && args[index + 1]) {
-    addCandidate(paths, args[index + 1]);
-    return index + 1;
-  }
-  if (NON_PATH_OPTIONS_WITH_VALUE.has(optionName) && args[index + 1]) {
-    return index + 1;
-  }
-
-  return index;
-}
-
-function addAllPositionalPaths(
-  paths: Set<string>,
-  args: readonly string[],
-  consumed: ReadonlySet<number>,
-): void {
-  for (let index = 0; index < args.length; index += 1) {
-    if (consumed.has(index)) {
-      continue;
-    }
-    const token = args[index];
-    if (isOption(token)) {
-      index = consumeOptionValue(paths, args, index);
-      continue;
-    }
-    addCandidate(paths, token);
-  }
-}
-
-function looksLikeDirectExecutableRoot(root: string): boolean {
-  return DIRECT_EXECUTABLE_PREFIX_PATTERN.test(root);
-}
-
-function addScriptArgumentPaths(
-  paths: Set<string>,
-  args: readonly string[],
-  consumed: ReadonlySet<number>,
-  startIndex: number,
-): void {
-  for (let index = startIndex; index < args.length; index += 1) {
-    if (consumed.has(index)) {
-      continue;
-    }
-
-    const token = args[index];
-    if (isOption(token)) {
-      const optionName = normalizeOptionName(token);
-      const inlineValue = optionValue(token);
-      if (SCRIPT_PATH_VALUE_OPTIONS.has(optionName)) {
-        if (inlineValue !== null) {
-          addCandidate(paths, inlineValue);
-        } else {
-          addCandidate(paths, args[index + 1]);
-          index += 1;
-        }
-        continue;
-      }
-      if (NON_PATH_OPTIONS_WITH_VALUE.has(optionName) && inlineValue === null) {
-        index += 1;
-      }
-      continue;
-    }
-
-    if (looksLikePathArg(token)) {
-      addCandidate(paths, token);
-    }
-  }
-}
-
-function addSearchCommandPaths(
-  paths: Set<string>,
-  args: readonly string[],
-  consumed: ReadonlySet<number>,
-  root: string,
-): void {
-  let hasPattern = root === "rg" && args.includes("--files");
-  for (let index = 0; index < args.length; index += 1) {
-    if (consumed.has(index)) {
-      continue;
-    }
-    const token = args[index];
-    if (isOption(token)) {
-      const optionName = normalizeOptionName(token);
-      const inlineValue = optionValue(token);
-      if (PATH_VALUE_OPTIONS.has(optionName)) {
-        if (inlineValue !== null) {
-          addCandidate(paths, inlineValue);
-        } else {
-          addCandidate(paths, args[index + 1]);
-          index += 1;
-        }
-        continue;
-      }
-      if (SEARCH_PATTERN_OPTIONS.has(optionName)) {
-        hasPattern = true;
-        if (inlineValue === null) {
-          index += 1;
-        }
-        continue;
-      }
-      index = consumeOptionValue(paths, args, index);
-      continue;
-    }
-    if (!hasPattern) {
-      hasPattern = true;
-      continue;
-    }
-    addCandidate(paths, token);
-  }
-}
-
-function addModeThenPathArgs(
-  paths: Set<string>,
-  args: readonly string[],
-  consumed: ReadonlySet<number>,
-): void {
-  let skippedMode = false;
-  for (let index = 0; index < args.length; index += 1) {
-    if (consumed.has(index)) {
-      continue;
-    }
-    const token = args[index];
-    if (isOption(token)) {
-      index = consumeOptionValue(paths, args, index);
-      continue;
-    }
-    if (!skippedMode) {
-      skippedMode = true;
-      continue;
-    }
-    addCandidate(paths, token);
-  }
-}
-
-function addDownloadOutputPaths(
-  paths: Set<string>,
-  args: readonly string[],
-  consumed: ReadonlySet<number>,
-): void {
-  for (let index = 0; index < args.length; index += 1) {
-    if (consumed.has(index) || !isOption(args[index])) {
-      continue;
-    }
-    index = consumeOptionValue(paths, args, index);
-  }
-}
-
-function compactDirectoryTarget(root: string): string | null {
-  const normalized = normalizeRoot(root);
-  if (normalized === "cd.." || normalized === "chdir..") {
-    return "..";
-  }
-  if (normalized === "cd." || normalized === "chdir.") {
-    return ".";
-  }
-  if (normalized.startsWith("cd\\") || normalized.startsWith("cd/")) {
-    return root.slice(2);
-  }
-  if (normalized.startsWith("chdir\\") || normalized.startsWith("chdir/")) {
-    return root.slice(5);
-  }
-
-  return null;
-}
-
-function addDirectoryTargetPaths(
-  paths: Set<string>,
-  args: readonly string[],
-  consumed: ReadonlySet<number>,
-): void {
-  for (let index = 0; index < args.length; index += 1) {
-    if (consumed.has(index)) {
-      continue;
-    }
-    const token = args[index];
-    const lower = token.toLowerCase();
-    if (lower === "/d" || token === "-L" || token === "-P" || token === "--") {
-      continue;
-    }
-    if (isOption(token)) {
-      const optionName = normalizeOptionName(token);
-      const inlineValue = optionValue(token);
-      if (DIRECTORY_PATH_OPTIONS.has(optionName)) {
-        if (inlineValue !== null) {
-          addCandidate(paths, inlineValue);
-        } else {
-          addCandidate(paths, args[index + 1]);
-          index += 1;
-        }
-        return;
-      }
-      continue;
-    }
-    if (token !== "-") {
-      addCandidate(paths, token);
-    }
-    return;
-  }
-}
-
-function addFindPaths(
-  paths: Set<string>,
-  args: readonly string[],
-  consumed: ReadonlySet<number>,
-): void {
-  for (let index = 0; index < args.length; index += 1) {
-    if (consumed.has(index)) {
-      continue;
-    }
-    const token = args[index];
-    if (FIND_LEADING_OPTIONS.has(token)) {
-      continue;
-    }
-    if (token === "!" || token === "(" || isOption(token)) {
-      break;
-    }
-    addCandidate(paths, token);
-  }
-}
-
-export function extractShellPathFacts(detail: CommandDetail): ShellPathFacts {
-  const root = normalizeRoot(detail.root);
-  const args = detail.tokens.slice(detail.rootIndex + 1);
+/** Command-specific argv semantics only. Shell structure and redirection come from the AST. */
+export function extractShellPathFacts(
+  command: ShellCommandFacts,
+): ShellPathFacts {
+  const root = command.root;
+  const args = command.tokens.slice(1);
+  const execution = resolveShellExecutionTarget(command.tokens);
   const paths = new Set<string>();
-  const redirectionConsumed = addRedirectionTargets(paths, args);
-  const consumed = redirectionConsumed;
-  const execution = resolveShellExecutionTarget(
-    detail.tokens.slice(detail.rootIndex),
-  );
-  const scriptArgIndex =
-    execution.scriptTokenIndex === undefined
-      ? undefined
-      : execution.scriptTokenIndex - 1;
-
-  const compactTarget = compactDirectoryTarget(detail.root);
-  if (compactTarget) {
-    addCandidate(paths, compactTarget);
-  } else if (DIRECTORY_COMMANDS.has(root)) {
-    addDirectoryTargetPaths(paths, args, consumed);
-  } else if (execution.executedScript) {
-    const startIndex =
-      scriptArgIndex === undefined ? 0 : Math.max(scriptArgIndex + 1, 0);
-    addScriptArgumentPaths(paths, args, consumed, startIndex);
-  } else if (looksLikeDirectExecutableRoot(detail.root)) {
-    addScriptArgumentPaths(paths, args, consumed, 0);
-  } else if (SEARCH_COMMANDS.has(root)) {
-    addSearchCommandPaths(paths, args, consumed, root);
-  } else if (root === "chmod" || root === "chown") {
-    addModeThenPathArgs(paths, args, consumed);
-  } else if (root === "find") {
-    addFindPaths(paths, args, consumed);
-  } else if (DOWNLOAD_COMMANDS.has(root)) {
-    addDownloadOutputPaths(paths, args, consumed);
-  } else if (
-    PATH_ARGUMENT_COMMANDS.has(root) ||
-    POWERSHELL_PATH_COMMANDS.has(root)
-  ) {
-    addAllPositionalPaths(paths, args, consumed);
-  } else if (root === "git") {
-    for (const gitPathArg of gitGlobalPathArgs(args)) {
-      addCandidate(paths, gitPathArg);
-    }
-    for (let index = 0; index < args.length; index += 1) {
-      if (args[index] === "-C") {
-        addCandidate(paths, args[index + 1]);
-        index += 1;
-      } else if (!isOption(args[index]) && looksLikePathArg(args[index])) {
-        addCandidate(paths, args[index]);
+  const downloads: string[] = [];
+  const add = (value: string | undefined): void => {
+    if (value && !URL_PATTERN.test(value)) paths.add(value);
+  };
+  const directScript = looksLikePath(command.tokens[0] ?? "")
+    ? command.tokens[0]
+    : undefined;
+  const scripted = execution.executedScript ?? directScript;
+  if (root === "git") {
+    for (const value of gitGlobalPathArgs(args)) add(value);
+    for (const value of normalizeGitArgs(args))
+      if (looksLikePath(value)) add(value);
+  } else if (DOWNLOADS.has(root)) {
+    for (let i = 0; i < args.length; i += 1) {
+      const token = args[i];
+      const name = token.split("=", 1)[0].toLowerCase();
+      if (
+        (root === "wget" ? token === "-O" : token === "-o") ||
+        ["--output", "--output-document", "-outfile"].includes(name)
+      ) {
+        const value = token.includes("=")
+          ? token.slice(token.indexOf("=") + 1)
+          : args[++i];
+        if (value) {
+          add(value);
+          downloads.push(value);
+        }
       }
     }
+  } else if (root === "find") {
+    for (const value of args) {
+      if (["-H", "-L", "-P"].includes(value)) continue;
+      if (value === "!" || value === "(" || value.startsWith("-")) break;
+      add(value);
+    }
+  } else {
+    const search = ["grep", "rg", "select-string"].includes(root);
+    let hasPattern = root === "rg" && args.includes("--files");
+    let skippedMode = false;
+    let positional = false;
+    const scriptStart = execution.scriptTokenIndex ?? 0;
+    for (let i = scripted ? scriptStart : 0; i < args.length; i += 1) {
+      const token = args[i];
+      if (!token) continue;
+      if (token === "--") {
+        positional = true;
+        continue;
+      }
+      const name = token.split("=", 1)[0].toLowerCase();
+      const inline = token.includes("=")
+        ? token.slice(token.indexOf("=") + 1)
+        : undefined;
+      if (!positional && token.startsWith("-")) {
+        if (
+          PATH_OPTIONS.has(name) ||
+          (scripted && SCRIPT_PATH_OPTIONS.has(name)) ||
+          (search && ["-f", "--file"].includes(name))
+        ) {
+          add(inline ?? args[++i]);
+          if (DIRECTORIES.has(root)) break;
+        } else if (search && SEARCH_PATTERN_OPTIONS.has(name)) {
+          hasPattern = true;
+          if (inline === undefined) i += 1;
+        } else if (
+          (search && SEARCH_VALUE_OPTIONS.has(token.split("=", 1)[0])) ||
+          POWERSHELL_VALUE_OPTIONS.has(name) ||
+          (["head", "tail"].includes(root) &&
+            ["-n", "-c", "--lines", "--bytes"].includes(name))
+        ) {
+          if (inline === undefined) i += 1;
+        }
+        continue;
+      }
+      if (DIRECTORIES.has(root)) {
+        if (token !== "-") add(token);
+        break;
+      }
+      if (search && !hasPattern) {
+        hasPattern = true;
+        continue;
+      }
+      if ((root === "chmod" || root === "chown") && !skippedMode) {
+        skippedMode = true;
+        continue;
+      }
+      if (
+        PATH_COMMANDS.has(root) ||
+        search ||
+        root === "chmod" ||
+        root === "chown" ||
+        (scripted && looksLikePath(token))
+      )
+        add(token);
+    }
   }
-
   return {
-    executedScript:
-      execution.executedScript ??
-      (looksLikeDirectExecutableRoot(detail.root) ? detail.root : undefined),
+    executedScript: execution.executedScript ?? directScript,
     inlineEval: execution.inlineEval,
     interpreter: execution.interpreter,
     pathArgs: [...paths],
+    downloadTargets: downloads,
   };
-}
-
-export function extractShellPathArgs(detail: CommandDetail): readonly string[] {
-  const facts = extractShellPathFacts(detail);
-  const paths = new Set<string>();
-  if (facts.executedScript) {
-    addCandidate(paths, facts.executedScript);
-  }
-  for (const pathArg of facts.pathArgs) {
-    addCandidate(paths, pathArg);
-  }
-
-  return [...paths];
 }

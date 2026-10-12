@@ -7,10 +7,10 @@ afterEach(() => {
 
 describe("Windows shell detection process launching", () => {
   it("hides the fallback which/where lookup window", async () => {
-    const git = "C:\\Program Files\\Git\\cmd\\git.exe";
-    const bash = "C:\\Program Files\\Git\\bin\\bash.exe";
+    const pwsh = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+
     const execFileSync = vi.fn((..._args: unknown[]) =>
-      Buffer.from(`${git}\r\n`, "utf8"),
+      Buffer.from(`${pwsh}\r\n`, "utf8"),
     );
     vi.doMock("node:child_process", async (importOriginal) => {
       const actual =
@@ -22,10 +22,10 @@ describe("Windows shell detection process launching", () => {
     expect(
       resolveAcceptableShell({
         env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe" },
-        existsSync: (candidate) => candidate === bash,
+        existsSync: (candidate) => candidate === pwsh,
         platform: "win32",
       }),
-    ).toBe(bash);
+    ).toBe(pwsh);
 
     expect(execFileSync.mock.calls[0]?.[2]).toEqual(
       expect.objectContaining({ windowsHide: true }),

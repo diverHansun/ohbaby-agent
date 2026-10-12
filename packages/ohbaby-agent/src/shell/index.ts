@@ -22,13 +22,11 @@ export {
 } from "./command-classifier.js";
 export {
   analyzeShellCommand,
-  analyzeShellCommandLight,
   computeShellArityKey,
   type ShellAnalysisResult,
   type ShellCommandAnalysis,
 } from "./analysis/index.js";
 export {
-  deriveGitBashPath,
   isBlacklistedShell,
   resolveAcceptableShell,
   resolvePreferredShell,

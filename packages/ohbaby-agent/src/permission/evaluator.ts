@@ -123,6 +123,16 @@ export function evaluatePermission(
     return allow();
   }
 
+  if (
+    call.toolName.trim().toLowerCase() === "bash" &&
+    call.shellAnalysis?.completeness !== "complete"
+  ) {
+    return ask(
+      "Shell analysis is incomplete; approve this original command once.",
+      { rememberable: false },
+    );
+  }
+
   const invariantDecision = evaluateInvariantDecision(call, classification);
   if (invariantDecision) {
     return invariantDecision;

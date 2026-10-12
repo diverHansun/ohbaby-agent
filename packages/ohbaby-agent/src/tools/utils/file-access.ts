@@ -1,6 +1,7 @@
 import { resolveWritablePreview } from "./text-files.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { ToolAdmission } from "../../core/tool-scheduler/tool-admission.js";
 import { withToolAdmission } from "../../core/tool-scheduler/tool-admission.js";
 import type { ResourceAccess } from "../../core/tool-scheduler/resources.js";
 import type {
@@ -42,7 +43,11 @@ async function readTarget(
 }
 
 type FileAccessKind = "read" | "write" | "tree" | "search";
-export function withFileAccess(tool: Tool, kind: FileAccessKind): Tool {
+export function withFileAccess(
+  tool: Tool,
+  kind: FileAccessKind,
+  lifecycle: Pick<ToolAdmission, "cleanupOwner"> = {},
+): Tool {
   const param = kind === "read" || kind === "write" ? "file_path" : "path";
   function input(params: Record<string, unknown>): string {
     return params[param] === undefined && param === "path"
@@ -58,6 +63,7 @@ export function withFileAccess(tool: Tool, kind: FileAccessKind): Tool {
     };
   }
   return withToolAdmission(tool, {
+    ...lifecycle,
     async plan(params, context) {
       const value = input(params);
       // This permissive identity lookup tolerates targets created by predecessors.

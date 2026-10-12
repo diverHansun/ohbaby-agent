@@ -9,10 +9,6 @@ export function stripMatchingQuotes(value: string): string {
   return value;
 }
 
-export function stripRedirectionPrefix(token: string): string {
-  return token.replace(/^(?:\d+|&)?[<>]+/u, "");
-}
-
 export function normalizeOptionName(token: string): string {
   const equalsIndex = token.indexOf("=");
   const colonIndex = token.indexOf(":");
@@ -32,12 +28,6 @@ export function optionValue(token: string): string | null {
   }
 
   return null;
-}
-
-export function candidatePathFromToken(token: string): string | null {
-  const normalized = stripMatchingQuotes(stripRedirectionPrefix(token));
-  const value = optionValue(normalized) ?? normalized;
-  return value.length > 0 ? value : null;
 }
 
 export function msysPathToWindowsPath(target: string): string | null {

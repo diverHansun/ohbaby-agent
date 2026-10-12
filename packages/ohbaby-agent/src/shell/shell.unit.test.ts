@@ -2,11 +2,8 @@ import type { ChildProcess } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
   Shell,
-  deriveGitBashPath,
-  isBlacklistedShell,
   killTreeWithPlatform,
   probeProcessTree,
-  resolveAcceptableShell,
   resolvePreferredShell,
 } from "./index.js";
 
@@ -18,102 +15,6 @@ describe("shell detection", () => {
         platform: "linux",
       }),
     ).toBe("/usr/bin/fish");
-  });
-
-  it("filters blacklisted shells for acceptable shell selection", () => {
-    expect(
-      resolveAcceptableShell({
-        env: { SHELL: "/usr/bin/fish" },
-        existsSync: () => false,
-        platform: "linux",
-        which: () => undefined,
-      }),
-    ).toBe("/bin/bash");
-    expect(isBlacklistedShell("C:\\tools\\Nu.exe", "win32")).toBe(true);
-    expect(isBlacklistedShell("/bin/bash", "linux")).toBe(false);
-  });
-
-  it("detects Windows Git Bash from a git.exe path before falling back to COMSPEC", () => {
-    const git = "C:\\Program Files\\Git\\cmd\\git.exe";
-    const bash = "C:\\Program Files\\Git\\bin\\bash.exe";
-
-    expect(deriveGitBashPath(git)).toBe(bash);
-    expect(
-      resolveAcceptableShell({
-        env: {
-          COMSPEC: "C:\\Windows\\System32\\cmd.exe",
-          SHELL: "/usr/bin/bash",
-        },
-        existsSync: (candidate) => candidate === bash,
-        platform: "win32",
-        which: (command) => (command === "git" ? git : undefined),
-      }),
-    ).toBe(bash);
-    expect(
-      resolveAcceptableShell({
-        env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe" },
-        existsSync: () => false,
-        platform: "win32",
-        which: () => undefined,
-      }),
-    ).toBe("C:\\Windows\\System32\\cmd.exe");
-  });
-
-  it("honors an explicitly configured existing Windows PowerShell shell", () => {
-    const powershell =
-      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-
-    expect(
-      resolveAcceptableShell({
-        env: { COMSPEC: "C:\\Windows\\System32\\cmd.exe", SHELL: powershell },
-        existsSync: (candidate) => candidate === powershell,
-        platform: "win32",
-        which: () => undefined,
-      }),
-    ).toBe(powershell);
-    expect(
-      resolveAcceptableShell({
-        env: { SHELL: "pwsh.exe" },
-        existsSync: () => false,
-        platform: "win32",
-        which: (command) =>
-          command === "pwsh.exe"
-            ? "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
-            : undefined,
-      }),
-    ).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe");
-  });
-
-  it("ignores unsupported Windows SHELL values before fallback selection", () => {
-    const git = "C:\\Program Files\\Git\\cmd\\git.exe";
-    const bash = "C:\\Program Files\\Git\\bin\\bash.exe";
-
-    expect(
-      resolveAcceptableShell({
-        env: {
-          COMSPEC: "C:\\Windows\\System32\\cmd.exe",
-          SHELL: "C:\\Tools\\fish.exe",
-        },
-        existsSync: (candidate) =>
-          candidate === "C:\\Tools\\fish.exe" || candidate === bash,
-        platform: "win32",
-        which: (command) => (command === "git" ? git : undefined),
-      }),
-    ).toBe(bash);
-  });
-
-  it("falls back to platform defaults when SHELL is empty", () => {
-    expect(resolvePreferredShell({ env: {}, platform: "darwin" })).toBe(
-      "/bin/zsh",
-    );
-    expect(
-      resolveAcceptableShell({
-        env: {},
-        existsSync: () => false,
-        platform: "linux",
-        which: () => undefined,
-      }),
-    ).toBe("/bin/bash");
   });
 
   it("exposes cached namespace helpers", () => {

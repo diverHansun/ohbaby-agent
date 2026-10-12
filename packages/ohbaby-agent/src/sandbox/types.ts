@@ -56,7 +56,8 @@ export interface PreflightResult {
   readonly denylistHits: readonly PreflightDenylistHit[];
   readonly sensitivePaths: readonly PreflightSensitivePath[];
   readonly overallDanger: PreflightCommand["danger"];
-  readonly parseError?: string;
+  readonly completeness: "complete" | "incomplete";
+  readonly incompleteReasons: readonly string[];
 }
 
 export interface SandboxPreflightInput {
@@ -67,7 +68,7 @@ export interface SandboxPreflightInput {
 }
 
 export interface SandboxShellAnalysisPreflightInput {
-  readonly shell: ShellAnalysisResult;
+  readonly shellAnalysis: ShellAnalysisResult;
   readonly trustedRoots?: readonly string[];
   readonly workdir: string;
 }

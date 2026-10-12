@@ -1,3 +1,4 @@
+import { analyzeShellCommand } from "../shell/analysis/index.js";
 import { describe, expect, it } from "vitest";
 import { classifyPermissionCall } from "./classifier.js";
 import type { PermissionCall } from "./types.js";
@@ -86,23 +87,32 @@ describe("permission classifier", () => {
     });
   });
 
-  it("delegates bash commands to shell command classification", () => {
+  it("delegates bash commands to shell command classification", async () => {
     expect(
-      classifyPermissionCall(call("bash", { command: "git status" })),
+      classifyPermissionCall({
+        ...call("bash", { command: "git status" }),
+        shellAnalysis: await analyzeShellCommand("git status", "bash"),
+      }),
     ).toMatchObject({
       bash: "readonly",
       category: "dangerous",
       kind: "bash-readonly",
     });
     expect(
-      classifyPermissionCall(call("bash", { command: "npm install" })),
+      classifyPermissionCall({
+        ...call("bash", { command: "npm install" }),
+        shellAnalysis: await analyzeShellCommand("npm install", "bash"),
+      }),
     ).toMatchObject({
       bash: "mutating",
       category: "dangerous",
       kind: "bash-mutating",
     });
     expect(
-      classifyPermissionCall(call("bash", { command: "rm -rf foo" })),
+      classifyPermissionCall({
+        ...call("bash", { command: "rm -rf foo" }),
+        shellAnalysis: await analyzeShellCommand("rm -rf foo", "bash"),
+      }),
     ).toMatchObject({
       bash: "dangerous",
       category: "dangerous",

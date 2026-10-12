@@ -9,7 +9,7 @@ describe("shell command analysis", () => {
     );
 
     expect(result).toMatchObject({ shellKind: "bash" });
-    expect(result.commands).toEqual([
+    expect(result.commands).toMatchObject([
       {
         arityKey: "cat *",
         danger: "readonly",
@@ -62,7 +62,7 @@ describe("shell command analysis", () => {
       "bash",
     );
 
-    expect(result.parseError).toBeDefined();
+    expect(result.completeness).toBe("incomplete");
     expect(result.commands[0]).toMatchObject({
       hasDynamic: true,
       root: "cat",
@@ -146,7 +146,7 @@ describe("shell command analysis", () => {
   it("identifies interpreter and direct script execution without treating ordinary script args as paths", async () => {
     const result = await analyzeShellCommand(
       [
-        "python ~/.agents/skills/crawl/scripts/run.py data.json",
+        "python /home/me/.agents/skills/crawl/scripts/run.py data.json",
         "node scripts/build.js --watch",
         "./tools/run.sh out",
         "bash setup.sh deploy --prod",
@@ -155,7 +155,7 @@ describe("shell command analysis", () => {
     );
 
     expect(result.commands[0]).toMatchObject({
-      executedScript: "~/.agents/skills/crawl/scripts/run.py",
+      executedScript: "/home/me/.agents/skills/crawl/scripts/run.py",
       interpreter: "python",
       pathArgs: [],
       root: "python",
@@ -231,7 +231,7 @@ describe("shell command analysis", () => {
     const result = await analyzeShellCommand(
       [
         "python run.py ../outside/input.json",
-        "python run.py --output-dir C:\\Users\\u\\AppData\\Local\\Temp\\crawl4ai",
+        "python run.py --output-dir 'C:\\Users\\u\\AppData\\Local\\Temp\\crawl4ai'",
         "node build.js --out dist --watch",
       ].join(" && "),
       "bash",
@@ -263,13 +263,13 @@ describe("shell command analysis", () => {
       pathArgs: [],
       root: "python",
     });
-    expect(result.commands[0]).not.toHaveProperty("executedScript");
+    expect(result.commands[0].executedScript).toBeUndefined();
     expect(result.commands[1]).toMatchObject({
       inlineEval: true,
       interpreter: "node",
       pathArgs: [],
       root: "node",
     });
-    expect(result.commands[1]).not.toHaveProperty("executedScript");
+    expect(result.commands[1].executedScript).toBeUndefined();
   });
 });

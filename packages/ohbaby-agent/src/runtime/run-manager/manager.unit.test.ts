@@ -56,6 +56,8 @@ const policy: RunDefaultsPolicy = {
 function emptyPreflight(): PreflightResult {
   return {
     commands: [],
+    completeness: "complete",
+    incompleteReasons: [],
     denylistHits: [],
     externalPaths: [],
     internalPaths: [],

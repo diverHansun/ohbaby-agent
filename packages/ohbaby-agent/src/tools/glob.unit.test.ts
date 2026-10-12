@@ -88,6 +88,12 @@ describe("glob file tool", () => {
       displayLimited: true,
     });
     expect(result.output).toContain("[results truncated]");
+    const realPaths = new Set(
+      Array.from({ length: 50 }, (_, i) => `${directory}/${String(i)}.txt`),
+    );
+    for (const line of (result.output ?? "").split("\n"))
+      if (line && !line.includes("[results truncated]"))
+        expect(realPaths.has(line)).toBe(true);
   });
 
   it("finds matching files while applying default ignores", async () => {
@@ -134,9 +140,87 @@ describe("glob file tool", () => {
     expect(result.output).toContain("src/z-target.ts");
     expect(result.metadata).toMatchObject({
       count: 1,
-      truncated: true,
-      scanComplete: false,
+      truncated: false,
+      scanComplete: true,
       displayLimited: false,
     });
+  });
+  it("supports mature rg globs anchored to the selected root", async () => {
+    for (const file of [
+      "a.ts",
+      "b.tsx",
+      "sub/a.ts",
+      "app/[id]/page.tsx",
+      ".hidden.ts",
+      "dist/ignored.ts",
+    ])
+      await writeFile(tempRoot, file, "");
+    const context = createTestContext(tempRoot);
+    const root = await createGlobTool().execute(
+      { pattern: "*.{ts,tsx}" },
+      context,
+    );
+    expect(root.metadata?.count).toBe(3);
+    expect(root.output).not.toContain("sub/a.ts");
+    const literal = await createGlobTool().execute(
+      { pattern: "app/[[]id]/*.tsx" },
+      context,
+    );
+    expect(literal.output).toBe("app/[id]/page.tsx");
+  });
+  it("rejects root-escaping patterns and reports real pattern errors", async () => {
+    for (const pattern of [
+      "/x.ts",
+      "../*.ts",
+      "C:\\x.ts",
+      "\\\\server\\share\\*.ts",
+      "[",
+    ])
+      await expect(
+        createGlobTool().execute({ pattern }, createTestContext(tempRoot)),
+      ).rejects.toThrow();
+  });
+  it("keeps newline filenames as one escaped result and distinguishes N from N+1", async () => {
+    await writeFile(tempRoot, "line\nbreak.ts", "");
+    const exactPattern = await createGlobTool().execute(
+      { pattern: "line\nbreak.ts" },
+      createTestContext(tempRoot),
+    );
+    expect(exactPattern.output).toBe('"line\\nbreak.ts"');
+    expect(exactPattern.metadata).toMatchObject({
+      count: 1,
+      scanComplete: true,
+    });
+    const exact = await createGlobTool().execute(
+      { pattern: "*.ts", limit: 1 },
+      createTestContext(tempRoot),
+    );
+    expect(exact.metadata).toMatchObject({
+      count: 1,
+      scanComplete: true,
+      truncated: false,
+    });
+    expect(exact.output).toBe('"line\\nbreak.ts"');
+    await writeFile(tempRoot, "other.ts", "");
+    const limited = await createGlobTool().execute(
+      { pattern: "*.ts", limit: 1 },
+      createTestContext(tempRoot),
+    );
+    expect(limited.metadata).toMatchObject({
+      count: 1,
+      scanComplete: false,
+      truncated: true,
+      stopReason: "match-limit",
+    });
+    expect(limited.output).toContain("incomplete");
+  });
+  it("requires a directory search root before starting rg", async () => {
+    await writeFile(tempRoot, "plain.txt", "");
+    await expect(
+      createGlobTool().execute(
+        { pattern: "*", path: "plain.txt" },
+        createTestContext(tempRoot),
+      ),
+    ).rejects.toThrow("directory");
   });
 });

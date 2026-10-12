@@ -12,10 +12,16 @@ export interface ShellCommandAnalysis {
   readonly arityKey: string;
   readonly danger: ShellCommandClass;
   readonly hasDynamic: boolean;
+  /** Lexical cwd relative to the initial cwd; absent when control flow makes it unknown. */
+  readonly cwd?: string;
+  readonly cdTarget?: string;
+  readonly pipelineId?: number;
+  readonly downloadTargets?: readonly string[];
 }
 
 export interface ShellAnalysisResult {
   readonly shellKind: ShellKind;
   readonly commands: readonly ShellCommandAnalysis[];
-  readonly parseError?: string;
+  readonly completeness: "complete" | "incomplete";
+  readonly incompleteReasons: readonly string[];
 }

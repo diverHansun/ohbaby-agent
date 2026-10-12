@@ -164,20 +164,15 @@
 
 ### 2.4 glob 工具
 
-**场景 16：简单模式匹配**
-- 前置条件：存在 .ts 文件
-- 操作：调用 glob({ pattern: '**/*.ts' })
-- 预期结果：返回所有 .ts 文件
+- 实际 rg 根层/递归/brace/字符类/问号、字面 `[id]` 与非法模式；绝对和规范化后绝对模式拒绝且不 spawn。
+- hidden、ignore/config 不改变范围、五类固定排除、普通文件、内部 symlink 不跟随、显式根 canonicalization 与目录读锁。
+- N-1 / N / N+1：精确 limit 完整，第 limit+1 才 match-limit；无结果与未完成分别表达。
+- Unicode、空格、换行和控制字符路径；逐字节 chunk 的 UTF-8/NUL 边界；无效 UTF-8 与未结束帧明确失败。
+- 个别路径、stdout/stderr 预算、spawn/退出 2/权限诊断、正常退出 0/1、取消及物理进程清理。
+- 正文展示只留下完整路径行；模型投影保留 count/truncated/scanComplete/displayLimited/stopReason，list 语义不变。
+- 超过旧 10,000 个已访问文件仍可找出稀疏后续结果；已安装产物脱离系统 PATH 使用 bundled rg。
 
-**场景 17：指定路径搜索**
-- 前置条件：src 目录下有文件
-- 操作：调用 glob({ pattern: '*.ts', path: './src' })
-- 预期结果：只返回 src 目录下的 .ts 文件
-
-**场景 18：结果数量超限**
-- 前置条件：匹配文件超过 100 个
-- 操作：调用 glob({ pattern: '**/*' })
-- 预期结果：返回 100 个文件，metadata.truncated = true
+对应就近测试为 `tools/glob.unit.test.ts`、`tools/utils/ripgrep-files.unit.test.ts`；跨模块与真实文件树在 `tests/integration/shell-tools/`，安装产物沿现有 packaging smoke。
 
 ### 2.5 grep 工具
 

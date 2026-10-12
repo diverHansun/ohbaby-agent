@@ -17,11 +17,4 @@ export {
   type FormatOptions,
 } from "./format.js";
 export { truncateIfTooLong } from "./truncate.js";
-export {
-  detectPaths,
-  getCommandRoots,
-  matchesPattern,
-  parseCommand,
-  type CommandDetail,
-  type ParsedCommand,
-} from "./command-parser/index.js";
+export { matchesPattern } from "./string-match.js";

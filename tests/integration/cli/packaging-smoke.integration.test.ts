@@ -705,6 +705,12 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
     packDestination,
     packageDirectory: join(repoRoot, "packages", "ohbaby-agent"),
   });
+  expect(agentPack.packageJson.dependencies).not.toHaveProperty(
+    "tree-sitter-bash",
+  );
+  expect(agentPack.packageJson.dependencies).not.toHaveProperty(
+    "tree-sitter-powershell",
+  );
   const serverPack = await packWorkspacePackage({
     packDestination,
     packageDirectory: join(repoRoot, "packages", "ohbaby-server"),
@@ -838,8 +844,41 @@ async function runPackedCliSmoke(tempRoot: string): Promise<void> {
   const installedSearch = JSON.parse(grepResult.stdout) as {
     searched: boolean;
     binary: string;
+    parsed: boolean;
+    globbed: boolean;
+    grammarAssets: string;
   };
   expect(installedSearch.searched).toBe(true);
+  expect(installedSearch.parsed).toBe(true);
+  expect(installedSearch.globbed).toBe(true);
+  for (const grammar of ["bash", "powershell"] as const) {
+    const asset = join(
+      installedSearch.grammarAssets,
+      `tree-sitter-${grammar}.wasm`,
+    );
+    const hiddenAsset = `${asset}.missing-test`;
+    await rename(asset, hiddenAsset);
+    try {
+      const parserMissing = await runCommand({
+        command: process.execPath,
+        args: [
+          grepSmokePath,
+          "--expect-parser-unavailable",
+          ...(grammar === "powershell" ? ["--powershell"] : []),
+        ],
+        cwd: cliCwd,
+        env: isolatedEnv,
+        timeoutMs: 30_000,
+      });
+      expectSuccess(
+        parserMissing,
+        "start installed runtime with missing grammar asset",
+      );
+      expect(JSON.parse(parserMissing.stdout).parserUnavailable).toBe(true);
+    } finally {
+      await rename(hiddenAsset, asset);
+    }
+  }
   const platformPackage = dirname(dirname(installedSearch.binary));
   expect(platformPackage.startsWith(await realpath(installedCliPackage))).toBe(
     true,

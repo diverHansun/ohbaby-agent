@@ -15,7 +15,6 @@ import { ToolParameterError } from "./params.js";
 export const DEFAULT_READ_LIMIT = 2_000;
 export const DEFAULT_SEARCH_LIMIT = 100;
 export const MAX_READ_LIMIT = 20_000;
-export const MAX_SEARCH_VISITED_FILES = 10_000;
 export const TEXT_FILE_SAMPLE_BYTES = 4_096;
 
 export const FILE_PATH_SCHEMA = {

@@ -50,27 +50,31 @@ export function resolveSandboxPathArg(input: {
   readonly arg: string;
   readonly shellKind: ShellKind;
   readonly workdir: string;
+  /** Already decoded by the AST; never reinterpret quoting or shell expansion. */
+  readonly literal?: boolean;
 }): string | undefined {
-  const target = stripMatchingQuotes(input.arg.trim());
+  const target = input.literal
+    ? input.arg
+    : stripMatchingQuotes(input.arg.trim());
   if (
     !target ||
     URL_PATTERN.test(target) ||
-    COMMAND_SUBSTITUTION_PATTERN.test(target)
+    (!input.literal && COMMAND_SUBSTITUTION_PATTERN.test(target))
   ) {
     return undefined;
   }
-  if (target === "~") {
+  if (!input.literal && target === "~") {
     return os.homedir();
   }
-  if (target.startsWith("~/") || target.startsWith("~\\")) {
+  if (!input.literal && (target.startsWith("~/") || target.startsWith("~\\"))) {
     return path.resolve(os.homedir(), target.slice(2));
   }
 
-  const expanded = expandKnownHomeVariable(target);
+  const expanded = input.literal ? undefined : expandKnownHomeVariable(target);
   if (expanded) {
     return expanded;
   }
-  if (classifyShellPathPattern(target) === "dynamic") {
+  if (!input.literal && classifyShellPathPattern(target) === "dynamic") {
     return undefined;
   }
 

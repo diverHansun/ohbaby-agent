@@ -16,6 +16,7 @@ import {
   PermissionEvent,
 } from "../../../packages/ohbaby-agent/src/permission/index.js";
 import type { PermissionInfo } from "../../../packages/ohbaby-agent/src/permission/index.js";
+import { createBashTool } from "../../../packages/ohbaby-agent/src/tools/bash.js";
 
 function createEditTool(
   execute: Tool["execute"] = (): ToolExecutionResult => ({ output: "edited" }),
@@ -486,14 +487,11 @@ describe("tool approval execution identity and cancellation", () => {
     async (choice) => {
       const fixture = permissionFixture();
       const execute = vi.fn(() => ({ output: "executed" }));
-      fixture.scheduler.register({
-        name: "bash",
-        category: "dangerous",
-        source: "builtin",
-        description: "shell",
-        parametersJsonSchema: {},
-        execute,
+      const bash = createBashTool({
+        shell: { acceptable: () => "/bin/bash", killTree: vi.fn() },
       });
+      vi.spyOn(bash, "execute").mockImplementation(execute);
+      fixture.scheduler.register(bash);
       fixture.bus.subscribe(PermissionEvent.Updated, ({ info }) => {
         if (fixture.updates.length === 1)
           fixture.permission.respond(info.sessionId, info.id, { type: choice });
@@ -512,7 +510,7 @@ describe("tool approval execution identity and cancellation", () => {
         await fixture.scheduler.execute({
           ...actualCall,
           toolName: "bash",
-          params: { command: "cat /outside/report.txt" },
+          params: { command: "rm /outside/report.txt" },
           environment: externalEnvironment(),
         }),
       ).toMatchObject({ status: "rejected" });

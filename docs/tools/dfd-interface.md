@@ -243,31 +243,15 @@ const result = await ReadTool.execute(
 
 ### 4.4 glob 工具
 
-**名称**：`glob`
+`glob({pattern, path?, limit?})` 使用 bundled rg 的根相对 glob，limit 默认 100。参数通过 argv 传递，不经过 Shell。支持 `* ? ** {a,b} [ab]`；`*.ts` 仅查根层，`**/*.ts` 递归。字面 `[id]` 目录写作 `app/[[]id]/*.tsx`。
 
-**描述**：使用模式匹配搜索文件
+搜索根按现有授权与 canonicalization 处理。模式规范化前后都拒绝绝对、盘符/UNC、根外 `..` 和 NUL；Windows 输入分隔符统一为 `/`。前导 `./` 移除，前导 `!` 是文件名字符。非法 rg 模式明确失败。
 
-**参数**：
-```typescript
-{
-  pattern: string        // 必需，glob 模式
-  path?: string          // 可选，基础路径
-}
-```
+rg 包含隐藏普通文件，不读 ignore/config，始终排除 `.git / dist / node_modules / out / target`，不跟随内部 symlink。路径以 NUL 分帧，跨 chunk 保留 UTF-8 边界；不可靠编码、未完成帧和遍历错误明确失败。展示控制字符采用 JSON 转义，展示预算只保留完整路径行。
 
-**返回**：
-```typescript
-{
-  content: string        // 文件列表（每行一个）
-  metadata: {
-    matchCount: number
-    truncated?: boolean
-    totalCount?: number
-  }
-}
-```
+只在看到第 limit+1 个匹配后数量截断。正常空结果才写 `No files matched.`；提前停止写明不完整及缩小范围。metadata 为 count、truncated、scanComplete、displayLimited、stopReason，模型投影保留全部字段。count 是采集的返回路径数量，displayLimited 表示正文展示少于这些结果；展示 clipping 与扫描完成性分开。
 
----
+目录读锁在 rg close 与必要进程树清理之后才释放。取消保留既有取消状态；超限有 stopReason；清理不确定使用既有 cleanup 事实，不能假装完成。close 尚未到达且清理无法确认时，已有资源 lease 标记 unconfirmed，冲突写入会明确报资源不可用。close 后最后的进程组探测仍无法确认时返回清理错误；沿用既有操作结算释放行为，本批不增加持久进程组隔离或新资源平台。单帧 4 MiB、stdout 16 MiB、stderr 64 KiB，展示采用现有 8,000 token 近似预算；不再使用已访问 10,000 文件上限或伪造 visitedFileCount。
 
 ### 4.5 grep 工具
 

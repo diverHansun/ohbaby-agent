@@ -1,3 +1,4 @@
+import { analyzeShellCommand } from "../shell/analysis/index.js";
 import { describe, expect, it } from "vitest";
 import { evaluatePermission } from "./evaluator.js";
 import type {
@@ -84,7 +85,7 @@ describe("permission evaluator", () => {
     },
   );
 
-  it("includes actionable reasons for skill and shell asks", () => {
+  it("includes actionable reasons for skill and shell asks", async () => {
     const skillDecision = evaluatePermission(
       call("skill", { name: "review" }),
       state({ level: "default", mode: "auto" }),
@@ -93,14 +94,17 @@ describe("permission evaluator", () => {
     expect(skillDecision.reason).toMatch(/review/);
 
     const bashDecision = evaluatePermission(
-      call("bash", { command: "rm -rf foo" }),
+      {
+        ...call("bash", { command: "rm -rf foo" }),
+        shellAnalysis: await analyzeShellCommand("rm -rf foo", "bash"),
+      },
       state({ level: "default", mode: "auto" }),
     );
     expect(bashDecision.type).toBe("ask");
     expect(bashDecision.reason).toMatch(/dangerous/i);
   });
 
-  it("uses session rules before level fallback", () => {
+  it("uses session rules before level fallback", async () => {
     const allowSrc = rule({ pattern: "src/**", tool: "edit" });
     const denyRm = rule({
       decision: "deny",
@@ -123,7 +127,10 @@ describe("permission evaluator", () => {
     ).toBe("ask");
     expect(
       evaluatePermission(
-        call("bash", { command: "rm -rf foo" }),
+        {
+          ...call("bash", { command: "rm -rf foo" }),
+          shellAnalysis: await analyzeShellCommand("rm -rf foo", "bash"),
+        },
         state({ level: "full-access", mode: "auto", rules: [denyRm] }),
       ),
     ).toEqual({ reason: "blocked rm", type: "deny" });

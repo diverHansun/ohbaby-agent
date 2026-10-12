@@ -1,6 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
+  define: { OHBABY_SHELL_GRAMMAR_ASSETS: JSON.stringify("./assets/") },
   entry: ["src/index.ts"],
   format: ["esm"],
   dts: false,

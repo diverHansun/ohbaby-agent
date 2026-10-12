@@ -1,10 +1,39 @@
 import { createRequire } from "node:module";
 import { writeFile } from "node:fs/promises";
-const { createInProcessUiBackendClient } = await import("ohbaby-agent");
+import { fileURLToPath } from "node:url";
+const { createInProcessUiBackendClient, analyzeShellCommand } =
+  await import("ohbaby-agent");
+const grammar = process.argv.includes("--powershell") ? "powershell" : "bash";
+if (process.argv.includes("--expect-parser-unavailable")) {
+  try {
+    await analyzeShellCommand("echo installed", grammar);
+  } catch (error) {
+    if (!String(error).includes("Shell analysis unavailable")) throw error;
+    console.log(JSON.stringify({ parserUnavailable: true }));
+    process.exit(0);
+  }
+  throw new Error(
+    "Installed grammar unexpectedly loaded after its asset was removed.",
+  );
+}
+const bashAnalysis = await analyzeShellCommand(
+  'cat "literal; filename"',
+  "bash",
+);
+const powershellAnalysis = await analyzeShellCommand(
+  "Get-Content -LiteralPath 'packaged-search.txt'",
+  "powershell",
+);
+if (
+  bashAnalysis.completeness !== "complete" ||
+  powershellAnalysis.completeness !== "complete"
+)
+  throw new Error("Installed grammars did not load reliably.");
 const expectUnavailable = process.argv.includes("--expect-unavailable");
 await writeFile("packaged-search.txt", "PACKAGED_RG_OK\n");
 let toolSeen = false;
 let delivered = false;
+let globDelivered = false;
 const toolResults = [];
 const llmClient = {
   config: {
@@ -33,6 +62,12 @@ const llmClient = {
           expectUnavailable ? "Search unavailable" : "PACKAGED_RG_OK",
         ),
       );
+      globDelivered ||= request.messages.some(
+        (message) =>
+          message.role === "tool" &&
+          message.callId === "pack-glob" &&
+          String(message.content).includes("packaged-search.txt"),
+      );
       const events = [];
       if (!request.tools?.length)
         events.push({ textDelta: "Packaging check", finishReason: "stop" });
@@ -41,6 +76,16 @@ const llmClient = {
         events.push({
           finishReason: "tool_calls",
           toolCallDeltas: [
+            ...(expectUnavailable
+              ? []
+              : [
+                  {
+                    id: "pack-glob",
+                    index: 1,
+                    name: "glob",
+                    argumentsDelta: JSON.stringify({ pattern: "*.txt" }),
+                  },
+                ]),
             {
               id: "pack-grep",
               index: 0,
@@ -70,7 +115,12 @@ try {
   const result = await backend.submitPromptAndWait("Verify installed grep", {
     signal: AbortSignal.timeout(15000),
   });
-  if (result.prompt.status !== "succeeded" || !toolSeen || !delivered)
+  if (
+    result.prompt.status !== "succeeded" ||
+    !toolSeen ||
+    !delivered ||
+    (!expectUnavailable && !globDelivered)
+  )
     throw new Error(
       `Installed bundled search failed: ${JSON.stringify({
         prompt: result.prompt,
@@ -88,6 +138,11 @@ try {
       searched: !expectUnavailable,
       unavailable: expectUnavailable,
       delivered: true,
+      parsed: true,
+      globbed: globDelivered,
+      grammarAssets: fileURLToPath(
+        new URL("./assets/", import.meta.resolve("ohbaby-agent")),
+      ),
       binary,
     }),
   );

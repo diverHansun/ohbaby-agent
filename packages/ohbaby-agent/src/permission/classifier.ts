@@ -1,5 +1,4 @@
 import { classifyShellCommand } from "../shell/command-classifier.js";
-import { parseCommand } from "../utils/index.js";
 import type { PermissionCall, PermissionToolCategory } from "./types.js";
 
 export type PermissionCallKind =
@@ -60,18 +59,13 @@ function labelFromParams(
     : fallback;
 }
 
-function bashCommand(call: PermissionCall): string {
-  const command = call.params.command;
-  return typeof command === "string" ? command : "";
-}
-
 export function classifyPermissionCall(
   call: PermissionCall,
 ): PermissionClassification {
   const toolName = canonicalToolName(call.toolName);
 
   if (toolName === "bash") {
-    const bash = classifyShellCommand(parseCommand(bashCommand(call)));
+    const bash = classifyShellCommand(call.shellAnalysis);
     return {
       bash,
       category: "dangerous",

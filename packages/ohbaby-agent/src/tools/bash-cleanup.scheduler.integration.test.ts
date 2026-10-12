@@ -31,7 +31,11 @@ class Child extends EventEmitter {
 }
 
 function fixture(
-  options: { createJobId?: () => string; stdinEndError?: Error } = {},
+  options: {
+    createJobId?: () => string;
+    stdinEndError?: Error;
+    onExecutionFact?: (fact: ToolExecutionFact) => void;
+  } = {},
 ): {
   scheduler: ReturnType<typeof createToolScheduler>;
   registry: ShellJobRegistry;
@@ -77,6 +81,7 @@ function fixture(
     }),
     onExecutionFact: (fact) => {
       facts.push(fact);
+      options.onExecutionFact?.(fact);
     },
   });
   const bash = createBashTool({
@@ -145,7 +150,16 @@ afterEach(() => vi.useRealTimers());
 
 describe("Bash cleanup through scheduler", () => {
   it("hands off cancellation before an unresolved kill, errors queued/new source work, and recovers without replay", async () => {
-    const f = fixture();
+    let resolveSourceWait: (() => void) | undefined;
+    const sourceWait = new Promise<void>((resolve) => {
+      resolveSourceWait = resolve;
+    });
+    const f = fixture({
+      onExecutionFact: (fact) => {
+        if (fact.owner.callId === "queued" && fact.reason === "source-cleanup")
+          resolveSourceWait?.();
+      },
+    });
     const controller = new AbortController();
     const first = f.scheduler.execute(
       f.request("old", { signal: controller.signal }),
@@ -171,7 +185,8 @@ describe("Bash cleanup through scheduler", () => {
       const queued = f.scheduler.execute(
         f.request("queued", { sessionId: "child-old", runId: "run-2" }),
       );
-      await vi.advanceTimersByTimeAsync(0);
+      // Preparation includes real filesystem I/O; fake clock ticks cannot await it.
+      await sourceWait;
       expect(
         f.facts.some(
           (fact) =>

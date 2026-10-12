@@ -4,9 +4,10 @@ import {
   analyzeShellCommand,
   type ShellCommandAnalysis,
 } from "../shell/index.js";
+import { resolveAnalyzedPath } from "../shell/preflight.js";
 import { classifySandboxPath } from "./boundary.js";
 import { classifyDenylistedPath, classifySensitivePath } from "./denylist.js";
-import { canonicalizeSandboxPath, resolveSandboxPathArg } from "./paths.js";
+import { canonicalizeSandboxPath } from "./paths.js";
 import type {
   PreflightCommand,
   PreflightDenylistHit,
@@ -78,7 +79,7 @@ function commandPathFacts(
 export async function preflightSandboxShellAnalysis(
   input: SandboxShellAnalysisPreflightInput,
 ): Promise<PreflightResult> {
-  const commands = input.shell.commands.map(toPreflightCommand);
+  const commands = input.shellAnalysis.commands.map(toPreflightCommand);
   const internalPaths: PreflightInternalPath[] = [];
   const externalPaths: PreflightExternalPath[] = [];
   const denylistHits: PreflightDenylistHit[] = [];
@@ -95,11 +96,12 @@ export async function preflightSandboxShellAnalysis(
   for (const command of commands) {
     overallDanger = maxDanger(overallDanger, command.danger);
     for (const fact of commandPathFacts(command)) {
-      const resolvedPath = resolveSandboxPathArg({
-        arg: fact.original,
-        shellKind: input.shell.shellKind,
-        workdir: input.workdir,
-      });
+      const resolvedPath = resolveAnalyzedPath(
+        command,
+        fact.original,
+        input.workdir,
+        input.shellAnalysis.shellKind,
+      );
       if (!resolvedPath) {
         continue;
       }
@@ -155,9 +157,10 @@ export async function preflightSandboxShellAnalysis(
     externalPaths,
     internalPaths,
     overallDanger,
-    parseError: input.shell.parseError,
+    completeness: input.shellAnalysis.completeness,
+    incompleteReasons: input.shellAnalysis.incompleteReasons,
     sensitivePaths,
-    shellKind: input.shell.shellKind,
+    shellKind: input.shellAnalysis.shellKind,
   };
 }
 
@@ -166,7 +169,7 @@ export async function preflightSandboxCommand(
 ): Promise<PreflightResult> {
   const shell = await analyzeShellCommand(input.command, input.shellKind);
   return preflightSandboxShellAnalysis({
-    shell,
+    shellAnalysis: shell,
     trustedRoots: input.trustedRoots,
     workdir: input.workdir,
   });

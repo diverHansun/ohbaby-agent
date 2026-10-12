@@ -14,7 +14,9 @@ import type {
   PreflightResult,
   PreflightSensitivePath,
 } from "../../sandbox/index.js";
-import { detectShellKind, Shell } from "../../shell/index.js";
+import { ShellPreflightError } from "../../shell/preflight.js";
+import type { ShellAnalysisResult } from "../../shell/analysis/types.js";
+import type { BashPreparation } from "../../shell/execution.js";
 import { canonicalizePathTarget } from "../../utils/path-canonicalize.js";
 import {
   DEFAULT_TOOL_SCHEDULER_CONFIG,
@@ -80,6 +82,7 @@ interface PreparedCall extends ScheduledCall {
   permissionContext: ToolPermissionContext;
   owner: ToolExecutionOwner;
   permissionSnapshot?: PermissionAdmissionSnapshot;
+  shellPreparation?: BashPreparation;
 }
 
 interface PermissionAdmissionSnapshot {
@@ -108,6 +111,7 @@ function permissionStillAuthorized(
 }
 
 interface ToolPermissionContext {
+  readonly shellAnalysis?: ShellAnalysisResult;
   readonly accessIdentity?: string;
   readonly environment?: ToolExecutionEnvironment;
   readonly externalRead: boolean;
@@ -117,7 +121,6 @@ interface ToolPermissionContext {
   readonly externalWrite: boolean;
   readonly externalWritePath?: string;
   readonly preflight?: PreflightResult;
-  readonly preflightError?: unknown;
   readonly requireExplicitApproval: boolean;
   readonly params: Record<string, unknown>;
 }
@@ -906,6 +909,7 @@ export function createToolScheduler(
           runId: call.runId,
           contextScopeId: call.contextScopeId,
           environment,
+          shellExecution: prepared.shellPreparation?.shellExecution,
           messageId: call.messageId,
           sessionId: call.sessionId,
           signal: controller.signal,
@@ -1003,6 +1007,7 @@ export function createToolScheduler(
   async function askPermission(
     call: ToolCall,
     input: {
+      readonly shellAnalysis?: ShellAnalysisResult;
       readonly category?: ToolCategory;
       readonly metadata?: Record<string, unknown>;
       readonly params: Record<string, unknown>;
@@ -1036,6 +1041,7 @@ export function createToolScheduler(
       metadata: input.metadata,
       reason: input.reason,
       rememberable: input.rememberable,
+      shellAnalysis: input.shellAnalysis,
     });
   }
 
@@ -1064,6 +1070,7 @@ export function createToolScheduler(
                   ? "subagent"
                   : call.category,
               params: context.params,
+              shellAnalysis: context.shellAnalysis,
               sessionId: call.sessionId,
               messageId: call.messageId,
             },
@@ -1098,6 +1105,7 @@ export function createToolScheduler(
     decision: Extract<PermissionDecision, { readonly type: "ask" }>,
     params: Record<string, unknown>,
     input: {
+      readonly shellAnalysis?: ShellAnalysisResult;
       readonly category?: ToolCategory;
       readonly metadata?: Record<string, unknown>;
       readonly onResponse?: (response: PermissionResponse) => Promise<void>;
@@ -1123,6 +1131,7 @@ export function createToolScheduler(
             params,
             reason: input.reason ?? decision.reason,
             rememberable: decision.rememberable,
+            shellAnalysis: input.shellAnalysis,
             toolName: input.toolName,
           }),
         controller.signal,
@@ -1320,6 +1329,7 @@ export function createToolScheduler(
       const result = await confirmPermission(call, decision, params, {
         category: "dangerous",
         metadata: { preflight },
+        shellAnalysis: context.shellAnalysis,
         onResponse: async (response) => {
           if (response === "always") {
             await trustExternalPath(externalPath);
@@ -1385,6 +1395,7 @@ export function createToolScheduler(
       const result = await confirmPermission(call, decision, params, {
         category: "dangerous",
         metadata: { preflight },
+        shellAnalysis: context.shellAnalysis,
         reason: `Sensitive path access requires confirmation: ${sensitivePath.absolutePath}`,
         toolName: "sensitive_path",
       });
@@ -1594,6 +1605,7 @@ export function createToolScheduler(
       contextScopeId: prepared.call.contextScopeId,
       signal: prepared.controller.signal,
       environment,
+      shellExecution: prepared.shellPreparation?.shellExecution,
       owner: prepared.owner,
     };
   }
@@ -1674,6 +1686,7 @@ export function createToolScheduler(
           category:
             call.category === "subagent-control" ? "subagent" : call.category,
           params: prepared.permissionContext.params,
+          shellAnalysis: prepared.permissionContext.shellAnalysis,
           sessionId: call.sessionId,
           messageId: call.messageId,
         },
@@ -1815,38 +1828,19 @@ export function createToolScheduler(
     request: ToolCallRequest,
     category: ToolCategory,
     tool: Tool,
+    shellPreparation?: BashPreparation,
   ): Promise<ToolPermissionContext> {
     const requireExplicitApproval = tool.requireExplicitApproval === true;
-    if (tool.name === "bash" && request.environment?.preflight) {
-      const command =
-        typeof request.params.command === "string"
-          ? request.params.command
-          : "";
-      try {
-        const shellKind = detectShellKind(Shell.acceptable());
-        const preflight = await request.environment.preflight(
-          command,
-          shellKind,
-        );
-        return {
-          environment: request.environment,
-          externalRead: false,
-          externalWrite: false,
-          preflight,
-          requireExplicitApproval,
-          params: request.params,
-        };
-      } catch (error) {
-        if (error instanceof ToolDeliveryError) throw error;
-        return {
-          environment: request.environment,
-          externalRead: false,
-          externalWrite: false,
-          preflightError: error,
-          requireExplicitApproval,
-          params: request.params,
-        };
-      }
+    if (tool.name === "bash") {
+      return {
+        environment: request.environment,
+        externalRead: false,
+        externalWrite: false,
+        requireExplicitApproval,
+        params: request.params,
+        shellAnalysis: shellPreparation?.shellAnalysis,
+        preflight: shellPreparation?.sandboxPreflight,
+      };
     }
 
     if (!request.environment) {
@@ -2096,15 +2090,12 @@ export function createToolScheduler(
     if (isCancelled(prepared.call)) {
       return makeCancelledResult(prepared.call);
     }
-    if (prepared.permissionContext.preflightError !== undefined) {
-      transition(prepared.call, "error");
-      return makeResult(prepared.call, "error", {
-        error: createError(
-          "ExecutionError",
-          `Bash preflight failed: ${errorMessage(prepared.permissionContext.preflightError)}`,
-          prepared.permissionContext.preflightError,
-        ),
-      });
+    const permissionDecision = await evaluatePermissionOnly(
+      prepared.call,
+      prepared.permissionContext,
+    );
+    if ("status" in permissionDecision) {
+      return permissionDecision;
     }
     const externalPermissionResult = await confirmExternalPreflightPermissions(
       prepared.call,
@@ -2120,13 +2111,6 @@ export function createToolScheduler(
     if (externalReadResult) {
       return externalReadResult;
     }
-    const permissionDecision = await evaluatePermissionOnly(
-      prepared.call,
-      prepared.permissionContext,
-    );
-    if ("status" in permissionDecision) {
-      return permissionDecision;
-    }
     if (permissionDecision.type === "allow") {
       const externalWriteResult = await confirmExternalWritePermission(
         prepared.call,
@@ -2141,6 +2125,7 @@ export function createToolScheduler(
         prepared.call,
         permissionDecision,
         prepared.permissionContext.params,
+        { shellAnalysis: prepared.permissionContext.shellAnalysis },
       );
       if (permissionResult) {
         return permissionResult;
@@ -2194,6 +2179,12 @@ export function createToolScheduler(
       }
       if (isStopped(prepared.call, prepared.controller))
         return makeCancelledResult(prepared.call);
+      const prepareShell = trustedToolAdmission(prepared.tool)?.prepareShell;
+      if (prepareShell)
+        prepared.shellPreparation = await waitForAbortable(
+          () => prepareShell(prepared.request.params, contextFor(prepared)),
+          prepared.controller.signal,
+        );
       for (;;) {
         // Capture the policy that this preparation authorizes before any await.
         // Only appended allow rules (such as this call's remembered approval)
@@ -2207,6 +2198,7 @@ export function createToolScheduler(
               prepared.request,
               prepared.category,
               prepared.tool,
+              prepared.shellPreparation,
             ),
           prepared.controller.signal,
         );
@@ -2219,6 +2211,7 @@ export function createToolScheduler(
                 prepared.request,
                 prepared.category,
                 prepared.tool,
+                prepared.shellPreparation,
               ),
             prepared.controller.signal,
           );
@@ -2250,6 +2243,12 @@ export function createToolScheduler(
         isSchedulerAbortError(error)
       )
         return makeCancelledResult(prepared.call);
+      if (error instanceof ShellPreflightError) {
+        transition(prepared.call, "rejected");
+        return makeResult(prepared.call, "rejected", {
+          error: createError("PermissionDeniedError", error.message, error),
+        });
+      }
       transition(prepared.call, "error");
       return makeResult(prepared.call, "error", {
         error: createError("ExecutionError", errorMessage(error)),

@@ -315,6 +315,8 @@ function sandboxLease(input: SandboxAcquireInput): SandboxLease {
     preflight: () =>
       Promise.resolve({
         commands: [],
+        completeness: "complete",
+        incompleteReasons: [],
         denylistHits: [],
         externalPaths: [],
         internalPaths: [],

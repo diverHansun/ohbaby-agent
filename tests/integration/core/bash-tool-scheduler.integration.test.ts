@@ -58,6 +58,7 @@ function createHarness(spawn: SpawnCommand = vi.fn()) {
     },
   });
   const permissionUpdates: string[] = [];
+  const permissionTypes: string[] = [];
 
   scheduler.register(
     createBashTool({
@@ -70,10 +71,11 @@ function createHarness(spawn: SpawnCommand = vi.fn()) {
   );
   bus.subscribe(PermissionEvent.Updated, (event) => {
     permissionUpdates.push(event.info.callId);
+    permissionTypes.push(event.info.type);
     permission.respond(event.info.sessionId, event.info.id, { type: "once" });
   });
 
-  return { permissionState, permissionUpdates, scheduler };
+  return { permissionState, permissionUpdates, permissionTypes, scheduler };
 }
 
 function request(
@@ -168,7 +170,8 @@ describe("bash tool scheduler integration", () => {
         return child as unknown as ChildProcess;
       },
     );
-    const { permissionUpdates, scheduler } = createHarness(spawn);
+    const { permissionUpdates, permissionTypes, scheduler } =
+      createHarness(spawn);
 
     await expect(
       scheduler.execute(request("bash_escape", "cd .. && pwd")),
@@ -179,7 +182,8 @@ describe("bash tool scheduler integration", () => {
       },
       status: "success",
     });
-    expect(permissionUpdates).toEqual(["bash_escape"]);
+    expect(permissionUpdates).toEqual(["bash_escape", "bash_escape"]);
+    expect(permissionTypes).toEqual(["external_directory", "bash"]);
     expect(spawn).toHaveBeenCalledOnce();
   });
 

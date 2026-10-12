@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { BLACKLISTED_SHELLS } from "./constants.js";
 
-const WINDOWS_SUPPORTED_SHELLS = new Set([
+const SUPPORTED_SHELLS = new Set([
   "bash",
   "cmd",
   "command",
@@ -12,23 +12,21 @@ const WINDOWS_SUPPORTED_SHELLS = new Set([
   "sh",
   "zsh",
 ]);
-
 export interface ShellDetectionInput {
   readonly env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   readonly existsSync?: (candidate: string) => boolean;
   readonly platform?: NodeJS.Platform;
   readonly which?: (command: string) => string | undefined;
 }
-
 function shellName(shellPath: string, platform: NodeJS.Platform): string {
-  const basename =
+  return (
     platform === "win32"
-      ? path.win32.basename(shellPath, ".exe")
-      : path.basename(shellPath);
-
-  return basename.toLowerCase();
+      ? path.win32.basename(shellPath)
+      : path.basename(shellPath)
+  )
+    .toLowerCase()
+    .replace(/\.exe$/u, "");
 }
-
 function defaultWhich(command: string): string | undefined {
   try {
     return execFileSync(
@@ -44,114 +42,66 @@ function defaultWhich(command: string): string | undefined {
     return undefined;
   }
 }
-
-function defaultShell(
-  platform: NodeJS.Platform,
-  env: ShellDetectionInput["env"],
-): string {
-  if (platform === "win32") {
-    return env?.COMSPEC ?? "cmd.exe";
-  }
-  if (platform === "darwin") {
-    return "/bin/zsh";
-  }
-
-  return "/bin/bash";
-}
-
-function resolveConfiguredWindowsShell(
-  shell: string | undefined,
-  input: {
-    readonly existsSync: (candidate: string) => boolean;
-    readonly platform: NodeJS.Platform;
-    readonly which: (command: string) => string | undefined;
-  },
-): string | undefined {
-  if (!shell || isBlacklistedShell(shell, input.platform)) {
-    return undefined;
-  }
-  if (!WINDOWS_SUPPORTED_SHELLS.has(shellName(shell, input.platform))) {
-    return undefined;
-  }
-  if (input.existsSync(shell)) {
-    return shell;
-  }
-  if (
-    !path.win32.isAbsolute(shell) &&
-    !shell.includes("/") &&
-    !shell.includes("\\")
-  ) {
-    return input.which(shell);
-  }
-
-  return undefined;
-}
-
 export function isBlacklistedShell(
   shellPath: string,
   platform: NodeJS.Platform = process.platform,
 ): boolean {
   return BLACKLISTED_SHELLS.has(shellName(shellPath, platform));
 }
-
-export function deriveGitBashPath(gitPath: string): string {
-  const normalized = path.win32.normalize(gitPath);
-  const lower = normalized.toLowerCase();
-  if (lower.endsWith("\\cmd\\git.exe")) {
-    return path.win32.join(
-      path.win32.dirname(normalized),
-      "..",
-      "bin",
-      "bash.exe",
-    );
-  }
-
-  return path.win32.join(path.win32.dirname(normalized), "bash.exe");
-}
-
 export function resolvePreferredShell(input: ShellDetectionInput = {}): string {
-  const platform = input.platform ?? process.platform;
-  const env = input.env ?? process.env;
-  const shell = env.SHELL;
-  if (shell) {
-    return shell;
-  }
-
-  return defaultShell(platform, env);
+  const shell = (input.env ?? process.env).SHELL;
+  return shell && shell.length > 0 ? shell : resolveAcceptableShell(input);
 }
-
 export function resolveAcceptableShell(
   input: ShellDetectionInput = {},
 ): string {
   const platform = input.platform ?? process.platform;
   const env = input.env ?? process.env;
-  const existsSync = input.existsSync ?? fs.existsSync;
+  const exists = input.existsSync ?? fs.existsSync;
   const which = input.which ?? defaultWhich;
-  if (platform === "win32") {
-    const configuredShell = resolveConfiguredWindowsShell(env.SHELL, {
-      existsSync,
-      platform,
-      which,
-    });
-    if (configuredShell) {
-      return configuredShell;
-    }
-
-    const gitPath = which("git");
-    if (gitPath) {
-      const bashPath = deriveGitBashPath(gitPath);
-      if (existsSync(bashPath)) {
-        return bashPath;
-      }
-    }
-
-    return defaultShell(platform, env);
-  }
-
   const shell = env.SHELL;
-  if (shell && !isBlacklistedShell(shell, platform)) {
-    return shell;
+  // MSYS login paths are inherited preferences, not native Windows executables.
+  const msysPreference = platform === "win32" && shell?.startsWith("/");
+  if (
+    shell &&
+    !msysPreference &&
+    SUPPORTED_SHELLS.has(shellName(shell, platform))
+  ) {
+    const bare = !shell.includes("/") && !shell.includes("\\");
+    const resolved = bare ? which(shell) : exists(shell) ? shell : undefined;
+    if (!resolved) throw new Error(`Configured shell is unavailable: ${shell}`);
+    if (
+      platform === "win32" &&
+      /\\(?:system32|syswow64|sysnative)\\(?:bash|wsl)\.exe$/iu.test(resolved)
+    )
+      throw new Error(
+        `WSL launchers are unsupported: ${resolved}. Configure a native Git Bash executable path.`,
+      );
+    return resolved;
   }
-
-  return defaultShell(platform, env);
+  if (platform === "win32") {
+    const pwsh = which("pwsh.exe");
+    if (pwsh) return pwsh;
+    const powershell = which("powershell.exe");
+    if (powershell) return powershell;
+    const systemPowerShell = path.win32.join(
+      env.SystemRoot ?? env.SYSTEMROOT ?? "C:\\Windows",
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe",
+    );
+    if (exists(systemPowerShell)) return systemPowerShell;
+    throw new Error(
+      "Shell unavailable: neither pwsh.exe nor Windows PowerShell was found.",
+    );
+  }
+  if (platform === "darwin") {
+    if (exists("/bin/zsh")) return "/bin/zsh";
+    throw new Error("Shell unavailable: /bin/zsh was not found.");
+  }
+  const bash = which("bash") ?? (exists("/bin/bash") ? "/bin/bash" : undefined);
+  if (bash) return bash;
+  if (exists("/bin/sh")) return "/bin/sh";
+  throw new Error("Shell unavailable: neither bash nor /bin/sh was found.");
 }

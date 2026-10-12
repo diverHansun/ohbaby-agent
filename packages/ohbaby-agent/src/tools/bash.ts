@@ -8,6 +8,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import type {
   Tool,
   ToolExecutionResult,
+  ToolExecutionContext,
 } from "../core/tool-scheduler/index.js";
 import {
   detectShellKind,
@@ -15,7 +16,9 @@ import {
   shellArgs,
   Shell,
 } from "../shell/index.js";
-import { parseCommand } from "../utils/index.js";
+import { analyzeShellCommand } from "../shell/analysis/index.js";
+import type { BashPreparation } from "../shell/execution.js";
+import { preflightSandboxShellAnalysis } from "../sandbox/preflight.js";
 import { resolveCommandContext } from "./utils/context.js";
 import {
   DEFAULT_SHELL_JOB_TIMEOUT_MS,
@@ -109,11 +112,68 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
         shell.killTree(child),
     });
 
+  function commandContextFor(
+    context: ToolExecutionContext,
+  ): ReturnType<typeof resolveCommandContext> {
+    if (!context.environment && !("resolveCommandContext" in context))
+      return { cwd: process.cwd(), kind: "host-local" };
+    return resolveCommandContext(context);
+  }
+  async function prepareShell(
+    params: Record<string, unknown>,
+    context: ToolExecutionContext,
+  ): Promise<BashPreparation> {
+    throwIfCancelled(context.signal);
+    const command = getStringParam(params, "command");
+    const commandContext = commandContextFor(context);
+    const shellPath = shell.acceptable();
+    const shellAnalysis = await analyzeShellCommand(
+      command,
+      detectShellKind(shellPath),
+    );
+    const shellPreflight = await runPreflight({
+      command,
+      cwd: commandContext.cwd,
+      shellAnalysis,
+    });
+    const sandboxPreflight = await preflightSandboxShellAnalysis({
+      shellAnalysis,
+      workdir: commandContext.cwd,
+      trustedRoots: context.environment
+        ?.trustedRoots?.()
+        .map((root) => root.path),
+    });
+    throwIfCancelled(context.signal);
+    return {
+      shellAnalysis,
+      shellPreflight,
+      sandboxPreflight,
+      shellExecution: {
+        command,
+        shell: shellPath,
+        args: shellArgs(shellPath, command),
+        cwd: commandContext.cwd,
+        commandPrefix: [...(commandContext.commandPrefix ?? [])],
+        metadata: {
+          cdTargets: shellPreflight.cdTargets,
+          resolvedPaths: shellPreflight.resolvedPaths,
+          paths: shellAnalysis.commands.flatMap((item) => item.pathArgs),
+          roots: shellAnalysis.commands.map((item) => item.root),
+        },
+      },
+    };
+  }
+  let interpreterDescription: string;
+  try {
+    interpreterDescription = `${shell.acceptable()} (${process.platform})`;
+  } catch (error) {
+    interpreterDescription = `unavailable (${error instanceof Error ? error.message : String(error)})`;
+  }
+
   return withToolAdmission(
     {
       name: "bash",
-      description:
-        "Run a shell command in the execution workspace. Set run_in_background=true to return a job_id immediately. timeout is the maximum lifetime of the shell job for both foreground and background commands; the default is 120000ms and the maximum is 600000ms.",
+      description: `Run a shell command using ${interpreterDescription} in the execution workspace. Commands execute unchanged; no interpreter fallback occurs after preparation. On Windows, select Git Bash only with a usable native full SHELL path; WSL launchers are unsupported. Set run_in_background=true to return a job_id immediately. timeout is the maximum lifetime of the shell job for both foreground and background commands; the default is 120000ms and the maximum is 600000ms.`,
       parametersJsonSchema: {
         additionalProperties: false,
         properties: {
@@ -145,12 +205,6 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             'Expected parameter "run_in_background" to be a boolean.',
           );
         }
-        const parsed = parseCommand(command);
-        if (parsed.hasError) {
-          throw new ToolParameterError(
-            "Unsupported shell syntax in bash command.",
-          );
-        }
         throwIfCancelled(context.signal);
 
         if (
@@ -161,18 +215,19 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             "Bash requires a trusted execution owner for interactive or scoped execution.",
           );
         }
-        const commandContext = resolveCommandContext(context);
-        const shellPath = shell.acceptable();
+        const prepared = context.shellExecution
+          ? { shellExecution: context.shellExecution }
+          : await prepareShell(params, context);
+        const binding = prepared.shellExecution;
+        if (binding.command !== command)
+          throw new Error(
+            "Bash command differs from its prepared original command.",
+          );
+        const commandContext = commandContextFor(context);
+        const shellPath = binding.shell;
         const shellKind = detectShellKind(shellPath);
-        const preflight = await runPreflight({
-          command,
-          cwd: commandContext.cwd,
-          parsed,
-          shellKind,
-        });
-        throwIfCancelled(context.signal);
-        const args = shellArgs(shellPath, command);
-        const commandPrefix = commandContext.commandPrefix ?? [];
+        const args = binding.args;
+        const commandPrefix = binding.commandPrefix;
         const spawnFile = commandPrefix[0] ?? shellPath;
         const spawnArgs =
           commandPrefix.length > 0
@@ -184,7 +239,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
           throwIfCancelled(context.signal);
           const env = stateEnvironment({
             callId: context.callId,
-            cwd: commandContext.cwd,
+            cwd: binding.cwd,
             env: commandContext.env,
             messageId: context.messageId,
             sessionId: context.sessionId,
@@ -194,7 +249,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             owner: context.owner ?? {
               sessionId: context.sessionId,
               rootSessionId: context.sessionId,
-              workspaceKey: commandContext.cwd,
+              workspaceKey: binding.cwd,
               scopeKey: context.environment?.scopeKey,
               runId: context.runId,
               messageId: context.messageId,
@@ -208,7 +263,7 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             child: (): ChildProcess => {
               throwIfCancelled(context.signal);
               return spawn(spawnFile, spawnArgs, {
-                cwd: commandContext.cwd,
+                cwd: binding.cwd,
                 detached: shouldDetach(),
                 env,
                 windowsHide: true,
@@ -216,11 +271,8 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
             },
             contextScopeId: context.contextScopeId,
             metadata: {
-              cdTargets: preflight.cdTargets,
-              cwd: commandContext.cwd,
-              paths: parsed.details.flatMap((detail) => [...detail.paths]),
-              resolvedPaths: preflight.resolvedPaths,
-              roots: parsed.roots,
+              ...binding.metadata,
+              cwd: binding.cwd,
               shell: shellPath,
               shellKind,
             },
@@ -274,6 +326,6 @@ export function createBashTool(options: BashToolOptions = {}): Tool {
         }
       },
     },
-    { cleanupOwner: "tool" },
+    { cleanupOwner: "tool", prepareShell },
   );
 }

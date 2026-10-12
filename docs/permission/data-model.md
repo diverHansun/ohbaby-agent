@@ -117,3 +117,13 @@ pending -> 首个合法回答或撤销 -> 移除条目和 listener
 ```
 
 任何 pending ID 都可进入终态，没有 current 阶段。同一调用后续审批使用新的 permissionId。正常执行结束按 runId 撤销；来源、根或祖先删除按冻结链撤销。`clearSession()` 清目标 session 规则，`dispose()` 完成所有 pending 等待。进程结束不恢复 Promise 或旧 ID。
+
+## Shell 成熟分析接线（improve-2）
+
+PermissionCall、PermissionAskInput、PermissionPatternInput 和现有 PermissionPort.ask 可选接收可信 `shellAnalysis`。它来自 Bash 实例的准备入口，params/metadata 同名字段不能替代。缺失时保守视为 incomplete，权限模块不自行猜方言或重跑 parser，也不接收 AST/env。
+
+判定顺序为明确 deny → default incomplete 整条 ask → 其他既有规则。incomplete 的 `rememberable: false` 同时阻止历史宽 allow、manager 二次判断、其他 Always 的自动批准及非法长期回复；非法 Always 保留 pending，用户可继续 Once / Reject。Full Access 保留既有意图，deny 仍优先。
+
+分类聚合 commands 的 danger，不完整至少 mutating。单条完整 git/docker 延续 arityKey；普通命令使用完整规范化文本，多命令 allow 要整体匹配，不将 npm run test 扩成 npm *。不完整审批展示原始命令，不能生成可长期保存的规则。
+
+主代理与子代理走同一入口，原有根会话归属、TUI/Web 主会话审批及 owner 清理保持。回归覆盖 `tests/integration/shell-tools/analysis-permission.integration.test.ts`、`bash-binding.integration.test.ts` 及既有权限/scheduler 测试，包括排队新 deny、Full Access 变化重试、回复时复核与固定执行参数。完整数据流见 [Shell 架构](../shell/architecture.md)。

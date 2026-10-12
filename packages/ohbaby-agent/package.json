@@ -30,14 +30,16 @@
     "!dist/**/*.contract.test.d.ts.map",
     "!dist/**/*.integration.test.d.ts",
     "!dist/**/*.integration.test.d.ts.map",
-    "README.md"
+    "README.md",
+    "dist/assets/*.wasm",
+    "dist/assets/SHELL-GRAMMAR-LICENSES.txt"
   ],
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:inspect": "tsx watch --inspect src/index.ts",
     "prompt:generate": "node scripts/generate-system-prompt-assets.mjs",
     "prompt:check": "node scripts/generate-system-prompt-assets.mjs --check",
-    "build": "pnpm run prompt:check && rimraf dist && tsup && tsc -b --force",
+    "build": "pnpm run prompt:check && rimraf dist && tsup && node scripts/copy-shell-assets.mjs && tsc -b --force",
     "typecheck": "tsc -b",
     "clean": "rimraf dist coverage"
   },
@@ -56,7 +58,12 @@
     "ohbaby-sdk": "workspace:*",
     "openai": "^7.13.0",
     "undici": "^7",
+    "web-tree-sitter": "0.25.10",
     "yaml": "^2.8.1",
     "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "tree-sitter-bash": "0.25.0",
+    "tree-sitter-powershell": "0.25.10"
   }
 }

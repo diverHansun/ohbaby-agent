@@ -4,7 +4,7 @@
 
 本议题解决两类问题：ohbaby 主进程的系统代理适配没有传到 Shell / MCP 子进程；Shell 的轻量分析器会拒绝有效命令，Glob 的手写匹配与遍历存在语法和完成性缺口。
 
-用户明确要求先实施网络，再实施 Shell / Glob，两批分别测试、审查和提交。improve-1 的改动及实际证据见 [实施验收](improve-1/05-implementation-acceptance.md)；improve-2 随后实施。未验证的平台如实列出，不用单元模拟替代真机结果。
+用户明确要求先实施网络，再实施 Shell / Glob，两批分别测试、审查和提交。两批均已实施；改动及实际证据分别见 [improve-1 实施验收](improve-1/05-implementation-acceptance.md)与 [improve-2 实施验收](improve-2/05-implementation-acceptance.md)。未验证的平台如实列出，不用单元模拟替代真机结果。
 
 ## 文档地图
 

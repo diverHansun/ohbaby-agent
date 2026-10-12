@@ -87,6 +87,7 @@ function createInfo(
     name,
     params: input.params,
     type,
+    shellAnalysis: input.shellAnalysis,
   });
   return {
     id,
@@ -434,6 +435,8 @@ export function createPermissionManager(
       if (isRevoking(input)) return Promise.resolve("cancel");
       if (isAborted(input.signal)) return Promise.resolve("cancel");
       const decision = evaluatePermission(input, state.getState());
+      if (decision.type === "ask" && decision.rememberable === false)
+        input = { ...input, rememberable: false };
       if (decision.type === "deny")
         return Promise.reject(new PermissionRejectedError(input.callId));
       const allowRule =

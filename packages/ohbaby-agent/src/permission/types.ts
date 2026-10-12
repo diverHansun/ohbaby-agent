@@ -1,3 +1,4 @@
+import type { ShellAnalysisResult } from "../shell/analysis/types.js";
 export type PermissionType =
   | "tool"
   | "bash"
@@ -94,6 +95,7 @@ export interface PermissionStateStore {
 }
 
 export interface PermissionCall {
+  readonly shellAnalysis?: ShellAnalysisResult;
   readonly sessionId: string;
   readonly messageId: string;
   readonly callId: string;
@@ -152,6 +154,7 @@ export interface PermissionInfo extends PermissionIdentity {
 }
 
 export interface PermissionAskInput {
+  readonly shellAnalysis?: ShellAnalysisResult;
   readonly runId: string;
   readonly source: PermissionSource;
   readonly signal: AbortSignal;
@@ -190,6 +193,7 @@ export interface PermissionManager {
 }
 
 export interface PermissionPatternInput {
+  readonly shellAnalysis?: ShellAnalysisResult;
   readonly type: PermissionType;
   readonly name: string;
   readonly params: Record<string, unknown>;

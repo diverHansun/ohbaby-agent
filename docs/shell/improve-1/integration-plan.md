@@ -149,3 +149,7 @@ packages/ohbaby-agent/src/shell/analysis/powershell.ts
 7. `fix(sandbox): tighten approved external execution`
 
 如果任一阶段发现现有架构无法支持，不继续硬写代码，应停止并回到设计讨论。
+
+## 后续承接
+
+本文保留 improve-1 的历史规划与验收上下文。当前成熟 AST、完整性、固定执行参数、无旧 parser fallback 的行为由 [Shell 当前架构](../architecture.md)  承接；历史内容不作为当前接口合同。

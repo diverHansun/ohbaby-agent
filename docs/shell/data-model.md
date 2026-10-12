@@ -1,216 +1,32 @@
-# shell 模块 data-model.md
+# Shell 数据模型
 
-本文档定义 `shell` 模块的核心数据类型与概念。
+## 分析结果
 
----
+`ShellAnalysisResult` 包含真实 `shellKind`、`commands`、`completeness: complete | incomplete` 和 `incompleteReasons`。complete 只表示本次抽取的调用结构与必要事实可靠，不代表知道程序的所有副作用。
 
-## 一、Core Concepts（核心概念）
+每条 `ShellCommandAnalysis` 保存 source、tokens、root、pathArgs、arityKey、danger 和 hasDynamic。可选字段包括 executedScript、inlineEval、interpreter、cdTarget、pipelineId、downloadTargets，以及相对于初始工作目录的 cwd。cwd 缺失代表当前目录不能可靠确定，不能用初始 cwd 猜测相对路径。
 
-### 1.1 Shell Path（Shell 路径）
+风险为 readonly、mutating、dangerous；聚合时 incomplete 至少为 mutating，可靠的 dangerous 事实仍保留。所有 AST 文件输出重定向至少为 mutating。
 
-Shell 程序的可执行文件路径。
+## 内部执行绑定
 
-**示例**：
-- Linux: `/bin/bash`, `/bin/sh`
-- macOS: `/bin/zsh`, `/bin/bash`
-- Windows: `C:\Program Files\Git\bin\bash.exe`, `C:\Windows\System32\cmd.exe`
+`ShellExecutionBinding` 是内部准备结果，包含原始 command、shell、args、cwd 和 commandPrefix。它经 `ToolExecutionContext.shellExecution` 传入 Bash，来自工具实例的可信准备入口，不能来自模型 params 或 metadata。执行前校验 command；不重新选择解释器、argv、cwd 或前缀。
 
-### 1.2 Shell Blacklist（Shell 黑名单）
+`BashPreparation` 组合 shellAnalysis、执行绑定、Shell 政策结果和 sandbox 路径结果，仅在 scheduler 与 Bash 内部使用。权限层直接接收 shellAnalysis，不保存另一份命令或包装 facts。
 
-不兼容 POSIX 语法的 shell 列表，这些 shell 不能用于执行 AI 生成的命令。
+执行绑定还携带原有 job metadata 的窄投影：cdTargets、resolvedPaths、paths、roots。它只用于结果展示，不参与权限分析；直接调用与 scheduler 调用保留同一元数据合同。
 
-**当前黑名单**：
-- `fish`: 语法不兼容（不支持 `&&`、使用 `set` 替代 `export`）
-- `nu` / `nushell`: 结构化 shell，语法完全不同
+AST 已解码的路径按字面值解析，保留引号字符、首尾空白、单引号内的 `$HOME` 和 `~`。不对它们再次做引号剥离或 home 展开；未引用的 tilde 展开标为 incomplete。
 
-### 1.3 Process Tree（进程树）
+## 错误与生命周期
 
-主进程及其所有子进程构成的树形结构。清理进程时需要递归终止整个进程树。
+| 来源 | 行为 |
+| --- | --- |
+| 分析不完整 | default 整条询问一次，禁止 Always |
+| 静态政策或规则拒绝 | PermissionDeniedError，不启动进程 |
+| 解释器、parser/WASM、路径 I/O 准备错误 | 明确失败，不制造误导审批或 running job |
+| 实际命令失败 | 保留 exitCode、signal、stderr 和既有执行结果 |
 
-```
-主进程 (PID: 1234)
-├── 子进程 A (PID: 1235)
-│   └── 子进程 A1 (PID: 1237)
-└── 子进程 B (PID: 1236)
-```
+`ShellPreflightResult` 提供 cdTargets 和 resolvedPaths。sandbox 的 `PreflightResult` 保留 internal/external/sensitive/denylist 路径事实，并用 completeness、incompleteReasons 表达分析边界。
 
-### 1.4 Kill Options（终止选项）
-
-控制进程终止行为的选项。
-
-**exited 回调**：在尝试杀死进程前检查进程是否已退出，避免对已退出进程发送信号。
-
----
-
-## 二、Data Types（数据类型）
-
-### 2.1 核心类型
-
-```typescript
-// Shell 路径类型
-type ShellPath = string
-
-// 进程终止选项
-interface KillTreeOptions {
-  /**
-   * 检查进程是否已退出的回调函数
-   * 返回 true 表示进程已退出，无需发送信号
-   */
-  exited?: () => boolean
-}
-```
-
-### 2.2 平台类型
-
-```typescript
-// 支持的平台
-type Platform = 'win32' | 'darwin' | 'linux'
-
-// 平台到默认 shell 的映射
-const DEFAULT_SHELLS: Record<Platform, string> = {
-  win32: 'cmd.exe',      // 回退值，优先使用 Git Bash
-  darwin: '/bin/zsh',
-  linux: '/bin/bash',
-}
-```
-
-### 2.3 黑名单类型
-
-```typescript
-// Shell 黑名单（不可变集合）
-const BLACKLIST: ReadonlySet<string> = new Set([
-  'fish',
-  'nu',
-  'nushell',
-])
-```
-
----
-
-## 三、Constants（常量定义）
-
-```typescript
-// SIGKILL 前的等待时间（毫秒）
-// 给进程优雅退出的机会
-const SIGKILL_TIMEOUT_MS = 200
-
-// Shell 黑名单
-const BLACKLIST = new Set(['fish', 'nu', 'nushell'])
-
-// 平台默认 shell
-const DEFAULT_SHELLS = {
-  win32: 'cmd.exe',
-  darwin: '/bin/zsh',
-  linux: '/bin/bash',
-}
-
-// Git Bash 相对路径（从 git.exe 推导）
-// git.exe: .../Git/cmd/git.exe
-// bash.exe: .../Git/bin/bash.exe
-const GIT_BASH_RELATIVE_PATH = '../../bin/bash.exe'
-```
-
----
-
-## 四、Shell 检测规则
-
-### 4.1 preferred() 规则
-
-| 优先级 | 来源 | 条件 |
-|--------|------|------|
-| 1 | `$SHELL` 环境变量 | 存在即使用 |
-| 2 | 平台默认 | 按平台返回默认值 |
-
-### 4.2 acceptable() 规则
-
-| 优先级 | 来源 | 条件 |
-|--------|------|------|
-| 1 | `$SHELL` 环境变量 | 存在且不在黑名单 |
-| 2 | Git Bash (Windows) | 检测到 git.exe 并推导出 bash.exe |
-| 3 | 平台默认 | 按平台返回默认值 |
-
-### 4.3 黑名单检查规则
-
-```typescript
-// 从 shell 路径提取 shell 名称
-function getShellName(shellPath: string): string {
-  if (process.platform === 'win32') {
-    return path.win32.basename(shellPath, '.exe').toLowerCase()
-  }
-  return path.basename(shellPath).toLowerCase()
-}
-
-// 检查是否在黑名单
-function isBlacklisted(shellPath: string): boolean {
-  return BLACKLIST.has(getShellName(shellPath))
-}
-```
-
----
-
-## 五、进程终止信号
-
-### 5.1 Unix 信号
-
-| 信号 | 含义 | 用途 |
-|------|------|------|
-| SIGTERM | 终止请求 | 请求进程优雅退出 |
-| SIGKILL | 强制终止 | 立即杀死进程，不可被捕获 |
-
-### 5.2 Windows 等效操作
-
-| 操作 | 命令 |
-|------|------|
-| 强制终止进程树 | `taskkill /pid <PID> /f /t` |
-
-参数说明：
-- `/pid <PID>`: 指定进程 ID
-- `/f`: 强制终止
-- `/t`: 终止子进程树
-
----
-
-## 六、Lifecycle（生命周期）
-
-### 6.1 Shell 检测生命周期
-
-```
-应用启动
-    │
-    ├─ Shell.acceptable() 首次调用
-    │      └─ 执行检测逻辑
-    │      └─ 缓存结果 (lazy)
-    │
-    └─ 后续调用
-           └─ 返回缓存结果
-```
-
-### 6.2 进程终止生命周期
-
-```
-killTree(proc) 调用
-    │
-    ├─ 检查 exited() 回调
-    │      └─ 已退出 → 立即返回
-    │
-    ├─ [Windows] taskkill
-    │      └─ 等待命令完成 → 返回
-    │
-    └─ [Unix/macOS]
-           ├─ 发送 SIGTERM 到进程组
-           ├─ 等待 200ms
-           ├─ 检查 exited() 回调
-           │      └─ 已退出 → 返回
-           └─ 发送 SIGKILL 到进程组 → 返回
-```
-
----
-
-## 七、文档自检
-
-- [x] 核心概念定义清晰，无歧义
-- [x] 数据类型简洁，覆盖模块需求
-- [x] 常量定义完整
-- [x] 检测规则明确
-- [x] 信号和生命周期说明清晰
-- [x] 不存在"为了设计而设计"的抽象
+进程树仍使用原有 `KillTreeResult` 的 confirmed/unconfirmed 证据、一次终止尝试及有界观察。ShellJobRegistry 的 jobId、running/completed/failed/cancelled/timed_out 与前后台清理合同不变。

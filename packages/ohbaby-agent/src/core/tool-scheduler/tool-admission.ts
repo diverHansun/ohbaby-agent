@@ -1,3 +1,4 @@
+import type { BashPreparation } from "../../shell/execution.js";
 import type { CapacityKind } from "./concurrency.js";
 import { withResources, type ResourceAccess } from "./resources.js";
 import type {
@@ -11,6 +12,11 @@ export interface ResolvedToolAccess {
   readonly params?: Record<string, unknown>;
 }
 export interface ToolAdmission {
+  /** Builtin Bash only: bind its actual injected interpreter and mature analysis. */
+  readonly prepareShell?: (
+    params: Record<string, unknown>,
+    context: ToolExecutionContext,
+  ) => Promise<BashPreparation>;
   readonly cleanupOwner?: "tool";
   /** After cancellation, local request settlement cannot prove remote work stopped. */
   readonly settlementConfirmsCleanup?: false;

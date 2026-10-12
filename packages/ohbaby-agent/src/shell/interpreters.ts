@@ -242,9 +242,13 @@ function resolvePowerShell(tokens: readonly string[]): ShellExecutionTarget {
   return { interpreter: executable };
 }
 
-function shellOptionIsInlineEval(token: string): boolean {
+function shellOptionIsInlineEval(token: string, executable: string): boolean {
   const optionName = normalizeOptionName(token);
-  if (optionName === "-c" || optionName === "/c" || optionName === "-command") {
+  if (
+    optionName === "-c" ||
+    (optionName === "/c" && executable === "cmd") ||
+    optionName === "-command"
+  ) {
     return true;
   }
   return /^-[^-].*c/u.test(token);
@@ -266,10 +270,13 @@ function resolveShell(tokens: readonly string[]): ShellExecutionTarget {
           }
         : { interpreter: executable };
     }
-    if (shellOptionIsInlineEval(token)) {
+    if (shellOptionIsInlineEval(token, executable)) {
       return { inlineEval: true, interpreter: executable };
     }
-    if (token.startsWith("-") || token.startsWith("/")) {
+    if (
+      token.startsWith("-") ||
+      (executable === "cmd" && token.startsWith("/"))
+    ) {
       if (!hasInlineValue(token) && SHELL_OPTION_VALUE_FLAGS.has(optionName)) {
         index += 1;
       }
@@ -294,6 +301,8 @@ export function resolveShellExecutionTarget(
   }
 
   const executable = normalizeExecutableName(tokens[0]);
+  if (executable === "source" || tokens[0] === ".")
+    return tokens[1] ? { executedScript: tokens[1], scriptTokenIndex: 1 } : {};
   if (isPython(executable)) {
     return resolvePython(tokens);
   }

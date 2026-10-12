@@ -1,3 +1,4 @@
+import { analyzeShellCommand } from "../../shell/analysis/index.js";
 import type {
   ChildProcess,
   SpawnOptionsWithoutStdio,
@@ -119,6 +120,8 @@ function createPreflight(
 ): PreflightResult {
   return {
     commands: [],
+    completeness: "complete",
+    incompleteReasons: [],
     denylistHits: [],
     externalPaths: [],
     internalPaths: [],
@@ -172,6 +175,30 @@ function createTool(input: {
     source: input.source ?? "builtin",
     timeoutOwner: input.timeoutOwner,
   };
+  if (input.name === "bash")
+    return withToolAdmission(tool, {
+      ...input.admission,
+      async prepareShell(params, context) {
+        const command =
+          typeof params.command === "string" ? params.command : "";
+        const shellAnalysis = await analyzeShellCommand(command, "bash");
+        const sandboxPreflight = context.environment?.preflight
+          ? await context.environment.preflight(command, "bash")
+          : createPreflight();
+        return {
+          shellAnalysis,
+          sandboxPreflight,
+          shellPreflight: { cdTargets: [], resolvedPaths: [] },
+          shellExecution: {
+            command,
+            cwd: context.environment?.workdir ?? process.cwd(),
+            shell: "/bin/bash",
+            args: ["-lc", command],
+            commandPrefix: [],
+          },
+        };
+      },
+    });
   return input.admission ? withToolAdmission(tool, input.admission) : tool;
 }
 
