@@ -85,7 +85,7 @@ export function createContextSummaryClient(
       let summary = "";
       let completedNormally = false;
       const requests: SummaryRequestRecord[] = [];
-      let attemptedToolCall = false;
+      let summaryFailure: string | undefined;
       try {
         for await (const response of streamResponse(
           llmClient,
@@ -117,7 +117,13 @@ export function createContextSummaryClient(
             (response.parsedToolCalls?.length ?? 0) > 0 ||
             response.finishReason === "tool_calls"
           ) {
-            attemptedToolCall = true;
+            summaryFailure = "Context compact summary attempted a tool call";
+          } else if (
+            response.finishReason !== undefined &&
+            response.finishReason !== "stop"
+          ) {
+            summaryFailure ??=
+              "Context compact summary did not finish normally";
           }
           if (response.isComplete) {
             completedNormally = response.finishReason === "stop";
@@ -125,15 +131,14 @@ export function createContextSummaryClient(
           }
         }
       } catch (error) {
-        if (attemptedToolCall && !input.signal?.aborted)
-          throw new Error("Context compact summary attempted a tool call", {
+        if (summaryFailure && !input.signal?.aborted)
+          throw new Error(summaryFailure, {
             cause: error,
           });
         throw error;
       }
       throwIfSummaryAborted(input.signal);
-      if (attemptedToolCall)
-        throw new Error("Context compact summary attempted a tool call");
+      if (summaryFailure) throw new Error(summaryFailure);
       if (!completedNormally)
         throw new Error("Context compact summary did not finish normally");
       const text = redactPromptSecrets(summary).trim();
