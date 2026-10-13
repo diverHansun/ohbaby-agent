@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -91,6 +98,34 @@ describe("resolveWorkspaceScope", () => {
     await expect(resolveWorkspaceScope(nested)).resolves.toBe(
       await resolveWorkspaceScope(root),
     );
+  });
+
+  it("keeps symlink and real workspace requests on the same backend", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ohbaby-workspace-symlink-"));
+    cleanupDirs.push(root);
+    const workspace = join(root, "workspace");
+    const alias = join(root, "alias");
+    await mkdir(workspace);
+    await symlink(workspace, alias, "dir");
+    const canonical = await realpath(workspace);
+    const store = new InstanceStore({
+      resolveScope: resolveWorkspaceScope,
+      create: (
+        scopeKey: string,
+      ): Promise<{ readonly scopeKey: string; dispose(): void }> =>
+        Promise.resolve({ scopeKey, dispose: () => undefined }),
+    });
+    try {
+      const [direct, linked] = await Promise.all([
+        store.load(workspace),
+        store.load(alias),
+      ]);
+      expect(linked).toBe(direct);
+      expect(linked.scopeKey).toBe(canonical);
+      expect(store.loadedScopeKeys()).toEqual([canonical]);
+    } finally {
+      await store.disposeAll();
+    }
   });
 
   it("rejects missing, relative, unavailable, and non-directory inputs", async () => {

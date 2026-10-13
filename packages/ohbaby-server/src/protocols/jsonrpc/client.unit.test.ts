@@ -69,6 +69,73 @@ function requireStringBody(init: RequestInit | undefined): string {
 }
 
 describe("createRemoteUiBackendClient", () => {
+  it.each(["headers", "body"])(
+    "cancels compact command transport during %s without serializing the signal",
+    async (phase) => {
+      let requestSignal: AbortSignal | null | undefined;
+      let rejectRequest!: (error: Error) => void;
+      let started!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let params: unknown;
+      const client = createRemoteUiBackendClient({
+        clientId: "client_1",
+        fetch: (_url, init) => {
+          const request = JSON.parse(requireStringBody(init)) as {
+            id: string;
+            method: string;
+            params: unknown;
+          };
+          if (request.method === "initializeClient")
+            return Promise.resolve(Response.json({ id: request.id, ok: true }));
+          requestSignal = init?.signal;
+          params = request.params;
+          if (phase === "body") {
+            return Promise.resolve(
+              new Response(
+                new ReadableStream({
+                  start(controller): void {
+                    rejectRequest = (error): void => {
+                      controller.error(error);
+                    };
+                    started();
+                  },
+                }),
+              ),
+            );
+          }
+          started();
+          return new Promise<Response>((_, reject) => {
+            rejectRequest = reject;
+          });
+        },
+        port: 4096,
+        startupIntent: undefined,
+      });
+      const invocation = {
+        clientInvocationId: "compact",
+        commandId: "compact",
+        path: ["compact"],
+        raw: "/compact",
+        rawArgs: "",
+        argv: [],
+        surface: "tui" as const,
+      };
+      const controller = new AbortController();
+      const request = client.executeCommand(invocation, {
+        signal: controller.signal,
+      });
+      await ready;
+      controller.abort();
+      expect(requestSignal?.aborted).toBe(true);
+      expect(params).toEqual([invocation]);
+      rejectRequest(new DOMException("Aborted", "AbortError"));
+      await expect(request).rejects.toMatchObject({ name: "AbortError" });
+      await client.dispose();
+    },
+  );
+
   it("rejects an old daemon's empty command completion without retrying", async () => {
     const fetcher = vi.fn((_url: unknown, init?: RequestInit) => {
       const body = JSON.parse(requireStringBody(init)) as { id: string };

@@ -2,7 +2,10 @@ import {
   mergeReasoningIntent,
   type ReasoningIntent,
 } from "../../services/interface-providers/reasoning.js";
-import type { RunLedgerRecord } from "../run-ledger/index.js";
+import {
+  SessionRunBusyError,
+  type RunLedgerRecord,
+} from "../run-ledger/index.js";
 import { scopedSessionKey } from "../../utils/scoped-session.js";
 import {
   ConcurrencyRejectedError,
@@ -173,6 +176,32 @@ export class RunManager {
       void record.completion.catch(() => undefined);
 
       return cloneRunRecord(record);
+    });
+  }
+
+  /** Manual context work must claim the same scope as create(), without queuing. */
+  async withIdleSession<T>(
+    input: { readonly sessionId: string; readonly contextScopeId?: string },
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const lockKey = scopedSessionKey(input);
+    const activeRunIds = this.activeRunIds(input);
+    if (this.sessionLocks.has(lockKey) || activeRunIds.length > 0) {
+      throw new SessionRunBusyError(input.sessionId, activeRunIds);
+    }
+    // withSessionLock claims synchronously, before its first await. A create
+    // arriving after this check cannot enter until the operation has settled.
+    return this.withSessionLock(lockKey, async () => {
+      const recordedRuns = (
+        await this.deps.runLedger.getActiveRuns(input.sessionId)
+      ).filter((run) => scopedSessionKey(run) === lockKey);
+      if (recordedRuns.length > 0) {
+        throw new SessionRunBusyError(
+          input.sessionId,
+          recordedRuns.map((run) => run.runId),
+        );
+      }
+      return operation();
     });
   }
 

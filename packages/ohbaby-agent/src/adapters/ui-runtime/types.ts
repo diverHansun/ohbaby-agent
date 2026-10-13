@@ -55,6 +55,7 @@ export interface UiRuntimeComposition {
     readonly title: string;
   }): Promise<void>;
   compactSession(input: {
+    readonly signal?: AbortSignal;
     readonly reasoning?: ReasoningConfig;
     readonly force?: boolean;
     readonly projectRoot: string;

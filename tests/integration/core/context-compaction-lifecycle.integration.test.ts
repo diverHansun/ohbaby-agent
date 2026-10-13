@@ -186,4 +186,179 @@ describe("Context compaction through Lifecycle", () => {
       expect(prepared.usage.currentTokens).toBeLessThan(34000);
     }
   });
+  it("continues one run through four automatic compactions as completed tool results grow", async () => {
+    const bus = createBus();
+    const messages = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    for (let index = 0; index < 8; index++) {
+      const message = await messages.createMessage({
+        sessionId: "s",
+        role: "assistant",
+        agent: "primary",
+      });
+      await messages.appendPart(message.id, {
+        type: "text",
+        text: `${index}:` + "x".repeat(6000),
+      });
+    }
+    let step = 0;
+    let summaries = 0;
+    const purposes: string[] = [];
+    const llm: LLMClientInstance = {
+      config: {
+        provider: "test",
+        interfaceProvider: "openai-compatible",
+        model: "m",
+        apiKeyEnv: "UNUSED_TEST_KEY",
+        baseUrl: "https://example.invalid/v1",
+        temperature: 0,
+        maxTokens: 1024,
+      },
+      provider: {
+        id: "test",
+        kind: "openai-compatible",
+        client: {},
+        isAbortError: () => false,
+        async streamResponse(request) {
+          purposes.push(request.purpose ?? "unknown");
+          return (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+            if (request.purpose === "context-summary") {
+              summaries++;
+              yield {
+                textDelta: "Task checkpoint; preserve completed read results",
+                finishReason: "stop",
+              };
+            } else if (++step <= 3) {
+              yield {
+                toolCallDeltas: [
+                  {
+                    id: `read-${step}`,
+                    index: 0,
+                    name: "read",
+                    argumentsDelta: "{}",
+                  },
+                ],
+                finishReason: "tool_calls",
+              };
+            } else {
+              yield {
+                textDelta: "Completed after repeated compaction",
+                finishReason: "stop",
+              };
+            }
+          })();
+        },
+      },
+    };
+    const context = createContextManager({
+      bus,
+      messageManager: messages,
+      memory: { load: async () => ({ global: "", project: "", merged: "" }) },
+      systemPromptProvider: { build: async () => "" },
+      tokenCounter: {
+        ...createHeuristicTokenCounter({ defaultLimit: 128000 }),
+        estimateTokens: (text) => text.length,
+      },
+      compressionThreshold: 0,
+      llmClient: createContextSummaryClient(llm),
+    });
+    const executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>(
+      async (batch) => {
+        const results = [];
+        for (const [index, call] of batch.calls.entries()) {
+          const result = {
+            callId: call.callId,
+            status: "success" as const,
+            output: `${call.callId}:` + "y".repeat(30000),
+            execution: {
+              runId: call.runId,
+              phase: "ended" as const,
+              createdAt: 1,
+              phaseStartedAt: 2,
+              endedAt: 2,
+              outcome: "success" as const,
+            },
+          };
+          await batch.observer?.onCallSettled(call, index, result);
+          results.push(result);
+        }
+        return results;
+      },
+    );
+    const lifecycle = new Lifecycle({
+      contextManager: context,
+      messageManager: messages,
+      llmClient: llm,
+      toolScheduler: { executeBatch } as unknown as ToolSchedulerInstance,
+      resolveTools: async () => ({
+        requestTools: [{ name: "read", inputSchema: { type: "object" } }],
+        definitions: [
+          {
+            name: "read",
+            description: "Read fixture",
+            parameters: { type: "object" },
+            category: "readonly",
+            source: "builtin",
+          },
+        ],
+      }),
+    });
+    const events: LifecycleEvent[] = [];
+    const run = lifecycle.run({
+      runId: "one-run",
+      sessionId: "s",
+      modelId: "m",
+      directory: "/repo",
+    });
+    for (;;) {
+      const next = await run.next();
+      if (next.done) {
+        expect(next.value).toMatchObject({
+          success: true,
+          finalResponse: "Completed after repeated compaction",
+        });
+        break;
+      }
+      events.push(next.value);
+    }
+    expect(summaries).toBe(4);
+    expect(purposes).toEqual(
+      Array.from({ length: 4 }, () => ["context-summary", "agent-step"]).flat(),
+    );
+    expect(executeBatch).toHaveBeenCalledTimes(3);
+    expect(
+      executeBatch.mock.calls.flatMap(([batch]) =>
+        batch.calls.map((call) => call.runId),
+      ),
+    ).toEqual(["one-run", "one-run", "one-run"]);
+    expect(
+      events.filter(
+        (event) =>
+          event.type === "context:prepared" &&
+          event.compaction?.status === "compacted",
+      ),
+    ).toHaveLength(4);
+    const history = await messages.listBySession("s");
+    const summaryParts = history
+      .flatMap((message) => message.parts)
+      .filter((part) => part.metadata?.kind === "context-summary");
+    expect(summaryParts).toHaveLength(4);
+    expect(
+      summaryParts.filter((part) => part.time?.compacted === undefined),
+    ).toHaveLength(1);
+    const tools = history
+      .flatMap((message) => message.parts)
+      .filter((part) => part.type === "tool");
+    expect(tools).toHaveLength(3);
+    expect(
+      tools.every(
+        (part) =>
+          part.type === "tool" &&
+          part.state.status === "completed" &&
+          part.state.output.length > 30000,
+      ),
+    ).toBe(true);
+  });
 });

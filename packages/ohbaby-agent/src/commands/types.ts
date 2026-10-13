@@ -120,6 +120,7 @@ export interface CommandCompactProvider {
   compactSession(input: {
     readonly sessionId?: string;
     readonly force?: boolean;
+    readonly signal?: AbortSignal;
   }): Promise<UiCompactSessionResult> | UiCompactSessionResult;
 }
 
@@ -146,6 +147,7 @@ export interface CommandRunContext {
   readonly clientInvocationId: string;
   readonly sessionId?: string;
   readonly surface: UiCommandSurface;
+  readonly signal?: AbortSignal;
   emitOutput(output: UiCommandOutput): void;
   emitAction(action: UiCommandAction): void;
   fail(error: UiCommandError): void;
@@ -227,7 +229,10 @@ export interface CommandService {
   listCommands(query: {
     readonly surface?: UiCommandSurface;
   }): Promise<UiCommandCatalog>;
-  executeCommand(invocation: UiCommandInvocation): Promise<UiCommandCompletion>;
+  executeCommand(
+    invocation: UiCommandInvocation,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<UiCommandCompletion>;
   abortCommandRun(commandRunId: string, reason?: string): number;
 }
 

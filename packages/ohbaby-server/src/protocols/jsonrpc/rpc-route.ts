@@ -484,9 +484,12 @@ export async function callDaemonBackend(input: {
       });
     }
     case "compactSession":
-      return backend.compactSession(
-        request.params[0] as Parameters<UiBackendClient["compactSession"]>[0],
-      );
+      return backend.compactSession({
+        ...(request.params[0] as Parameters<
+          UiBackendClient["compactSession"]
+        >[0]),
+        signal: input.signal,
+      });
     case "updateSessionReasoning":
       return backend.updateSessionReasoning(
         request.params[0] as Parameters<
@@ -687,6 +690,7 @@ export async function callDaemonBackend(input: {
           createSessionId,
           permissionRouter,
           invocation,
+          signal: input.signal,
         });
         return {
           ...completion,

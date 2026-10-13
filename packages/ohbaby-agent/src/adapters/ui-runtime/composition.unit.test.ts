@@ -1134,7 +1134,7 @@ describe("createUiRuntimeComposition skill tools", () => {
     },
   );
 
-  it("keeps mask timing stable for an oversized ordinary output preference", async () => {
+  it("does not announce compaction without eligible older history for an oversized output preference", async () => {
     const bus = createBus();
     const workdir = await tempWorkdir();
     const messageManager = createMessageManager({

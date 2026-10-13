@@ -819,7 +819,12 @@ describe("createRemoteUiBackendClient", () => {
         method: "submitPromptAccepted",
       },
       { args: [], method: "getSnapshot" },
-      { args: [compactOptions], method: "compactSession" },
+      {
+        args: [
+          { ...compactOptions, signal: expect.any(AbortSignal) as AbortSignal },
+        ],
+        method: "compactSession",
+      },
       { args: [], method: "getCurrentModel" },
       { args: [probeInput], method: "probeModelContextWindow" },
       { args: [connectInput], method: "connectModel" },

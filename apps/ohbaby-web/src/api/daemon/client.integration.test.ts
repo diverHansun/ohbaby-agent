@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
 import {
   recoveryBinding,
   sessionViewFromSnapshot,
@@ -1017,6 +1018,186 @@ it("releases locally rejected skill registration with an accurate entry error", 
     store.beginCommand(invocation);
   }).not.toThrow();
   await client.close();
+});
+
+it.each(["success", "failure"])(
+  "honors caller cancellation while retaining a late command %s",
+  async (outcome) => {
+    vi.useFakeTimers();
+    const store = createOhbabyWebStore();
+    const invocation = {
+      clientInvocationId: "compact-stop",
+      commandId: "compact",
+      path: ["compact"],
+      raw: "/compact",
+      rawArgs: "",
+      argv: [],
+      surface: "tui",
+    };
+    let requestSignal: AbortSignal | null | undefined;
+    let rejectRequest!: (error: Error) => void;
+    const client = createBrowserDaemonClient({
+      config: { baseUrl: "http://localhost", clientId: "owner", token: "test" },
+      store,
+      fetch: (_input, init) => {
+        requestSignal = init?.signal;
+        return new Promise<Response>((_, reject) => {
+          rejectRequest = reject;
+        });
+      },
+    });
+    try {
+      store.beginCommand(invocation);
+      const controller = new AbortController();
+      const pending = client
+        .executeCommand(invocation, { signal: controller.signal })
+        .catch((error: unknown) => error);
+      controller.abort();
+      expect(requestSignal?.aborted).toBe(true);
+      rejectRequest(new DOMException("Aborted", "AbortError"));
+      expect(await pending).toMatchObject({ name: "AbortError" });
+      expect(
+        store
+          .getSnapshot()
+          .view.commandNotices.some((notice) => notice.kind === "error"),
+      ).toBe(false);
+      store.applyEvent(
+        outcome === "success"
+          ? {
+              type: "command.result.delivered",
+              clientInvocationId: invocation.clientInvocationId,
+              commandRunId: "compact-command",
+              timestamp: 1,
+              output: {
+                kind: "data",
+                subject: "session.compact",
+                data: { result: { status: "compacted" } },
+              },
+            }
+          : {
+              type: "command.failed",
+              clientInvocationId: invocation.clientInvocationId,
+              commandRunId: "compact-command",
+              timestamp: 1,
+              error: { code: "FAILED", message: "summary failed" },
+            },
+        1,
+      );
+      const notices = store.getSnapshot().view.commandNotices;
+      expect(notices).toHaveLength(1);
+      expect(notices[0]?.kind).toBe(
+        outcome === "success" ? "success" : "error",
+      );
+      expect(
+        store.getCommandFeedback(invocation.clientInvocationId),
+      ).toBeDefined();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(store.getSnapshot().view.commandNotices).toEqual(notices);
+      expect(
+        store.getCommandFeedback(invocation.clientInvocationId),
+      ).toBeUndefined();
+    } finally {
+      await client.close();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it("refreshes usage independently after aborting an in-flight HTTP body and retains the durable summary event", async () => {
+  const store = createOhbabyWebStore();
+  const session = {
+    id: "s",
+    title: "session",
+    createdAt: "0",
+    updatedAt: "0",
+    messages: [],
+  };
+  store.replaceSnapshot(
+    {
+      activeSessionId: "s",
+      permission: { level: "default", mode: "auto", sessionRules: [] },
+      permissions: [],
+      runs: [],
+      sessions: [session],
+      status: { kind: "idle" },
+    },
+    0,
+  );
+  const summary = {
+    id: "summary",
+    createdAt: "1",
+    role: "system" as const,
+    parts: [
+      {
+        type: "text" as const,
+        text: "Compacted (estimated): 92 -> 12 tokens",
+        metadata: { kind: "context-compaction" },
+      },
+    ],
+  };
+  const usage = {
+    sessionId: "s",
+    modelId: "fake",
+    currentTokens: 12,
+    contextWindowTokens: 100,
+    contextWindowRatio: 0.12,
+    estimatedAt: "1",
+  };
+  let responseStarted!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    responseStarted = resolve;
+  });
+  const server = createServer((request, response) => {
+    if (request.url?.endsWith("/compact")) {
+      // Model a durable event received before the HTTP result body finishes.
+      store.applyEvent(
+        { type: "message.updated", sessionId: "s", message: summary },
+        1,
+      );
+      response.writeHead(200, { "content-type": "application/json" });
+      response.write('{"ok":true,"compact":');
+      responseStarted();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true, usage }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string")
+    throw new Error("Missing HTTP port");
+  const client = createBrowserDaemonClient({
+    config: {
+      baseUrl: `http://127.0.0.1:${String(address.port)}`,
+      clientId: "owner",
+      token: "test",
+    },
+    store,
+  });
+  try {
+    const controller = new AbortController();
+    const pending = client
+      .compactSession({ sessionId: "s", signal: controller.signal })
+      .catch((error: unknown) => error);
+    await ready;
+    controller.abort();
+    expect(await pending).toMatchObject({ name: "AbortError" });
+    expect(await client.getContextWindowUsage({ sessionId: "s" })).toEqual(
+      usage,
+    );
+    expect(store.getSnapshot().view.snapshot?.sessions[0]?.messages).toEqual([
+      summary,
+    ]);
+  } finally {
+    await client.close();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      }),
+    );
+  }
 });
 
 it.each(["response loss", "timeout"])(

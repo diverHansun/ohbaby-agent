@@ -94,20 +94,6 @@ describe("runtime model admission", () => {
     two.release();
     (await f.controller.acquireRuntime()).release();
   });
-  it("lets a manual summary join its active old run and keeps it alive through summary cleanup", async () => {
-    const f = fixture();
-    const old = await f.controller.acquireRuntime();
-    f.save("B");
-    const summary = await f.controller.acquireRuntime(true);
-    expect(summary.runtime).toBe(old.runtime);
-    old.release();
-    await expect(f.controller.acquireRuntime()).rejects.toBeInstanceOf(
-      RuntimeSwitchPendingError,
-    );
-    summary.release();
-    (await f.controller.acquireRuntime()).release();
-    expect(f.created).toEqual(["A", "B"]);
-  });
   it("does not fall back to A when a newly saved configuration cannot initialize", async () => {
     let version = "A";
     const dispose = vi.fn((): Promise<void> => Promise.resolve());

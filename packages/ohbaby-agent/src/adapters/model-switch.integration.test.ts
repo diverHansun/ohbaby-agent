@@ -1,4 +1,5 @@
 import * as composition from "./ui-runtime/composition.js";
+import { RuntimeSwitchPendingError } from "./ui-inprocess/runtime-controller.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -189,7 +190,7 @@ describe("shared model configuration admission", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
-  it("waits for a real background shell before manual summary and keeps its model until summary settles", async () => {
+  it("rejects manual summary while a background shell blocks model switching, then preserves the retried summary model", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-summary-switch-"));
     vi.stubEnv("HOME", directory);
     vi.stubEnv("USERPROFILE", directory);
@@ -357,7 +358,9 @@ describe("shared model configuration admission", () => {
       expect((await client.getSnapshot()).status.kind).toBe("idle");
       expect(activities[0]()).toEqual(["background shell jobs"]);
       await client.connectModel({ ...input, model: "B" });
-      summary = client.compactSession({ sessionId: "session", force: true });
+      await expect(
+        client.compactSession({ sessionId: "session", force: true }),
+      ).rejects.toBeInstanceOf(RuntimeSwitchPendingError);
       await vi.waitFor(() => {
         expect(
           waitingNotices.some((notice) =>
@@ -368,6 +371,10 @@ describe("shared model configuration admission", () => {
       expect(summaryModels).toEqual([]);
       expect(disposed).toEqual([]);
       await writeFile(join(workdir, ".release-background"), "release");
+      await vi.waitFor(() => {
+        expect(activities[0]()).toEqual([]);
+      });
+      summary = client.compactSession({ sessionId: "session", force: true });
       await summaryStarted.promise;
       expect(summaryModels).toEqual(["B"]);
       expect(disposed).toEqual(["A"]);

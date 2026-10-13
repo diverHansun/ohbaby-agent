@@ -5,6 +5,7 @@ export type UiCompactSessionStatus =
   | "inflated";
 
 export interface UiCompactSessionOptions {
+  readonly signal?: AbortSignal;
   readonly sessionId?: string;
   readonly force?: boolean;
 }

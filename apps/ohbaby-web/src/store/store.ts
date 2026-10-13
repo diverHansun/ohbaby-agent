@@ -39,6 +39,7 @@ export interface OhbabyWebStore {
   ): { readonly error?: UiCommandError } | undefined;
   completeCommand(completion: UiCommandCompletion): void;
   failCommand(clientInvocationId: string, message: string): void;
+  stopCommandWait(clientInvocationId: string): void;
   consumeCommand(clientInvocationId: string): void;
   clearCommands(): void;
   setSessionSync(state: SessionSyncState): void;
@@ -310,6 +311,26 @@ export function createOhbabyWebStore(): OhbabyWebStore {
       commandError(id, message);
       releaseCommand(id);
       publish(snapshot);
+    },
+    stopCommandWait(id): void {
+      const command = commands.get(id);
+      if (!command) return;
+      clearTimeout(command.timer);
+      // Cancellation loses the HTTP completion, not any already committed effect.
+      // Keep accepting late events for a bounded period without declaring failure.
+      command.timer = setTimeout(() => {
+        releaseCommand(id);
+      }, 60_000);
+      (command.timer as unknown as { unref?: () => void }).unref?.();
+      publish({
+        ...snapshot,
+        view: {
+          ...snapshot.view,
+          commandNotices: snapshot.view.commandNotices.filter(
+            (notice) => notice.id !== id || notice.kind !== "running",
+          ),
+        },
+      });
     },
     consumeCommand(id): void {
       const command = commands.get(id);

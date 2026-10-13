@@ -63,6 +63,7 @@ export interface PromptProps {
   readonly pendingReasoning?: PendingReasoningSelection | null;
   readonly catalog: TuiCommandCatalog | null;
   readonly client: CoreAPI;
+  readonly executeCommand?: CoreAPI["executeCommand"];
   readonly contextWindowUsage?: string;
   readonly projectRoot?: string;
   readonly model?: UiCurrentModelConfig | null;
@@ -98,6 +99,7 @@ export function Prompt({
   pendingReasoning,
   catalog,
   client,
+  executeCommand,
   contextWindowUsage = "",
   projectRoot,
   model,
@@ -788,6 +790,7 @@ export function Prompt({
             ownsContext,
             preserveUnsent,
             { sessionId: sourceSession, creationGeneration },
+            executeCommand,
           );
           prepareCount(-1);
         };
@@ -1120,6 +1123,7 @@ async function submitInput(
     readonly sessionId: string | null;
     readonly creationGeneration: number;
   },
+  executeCommand?: CoreAPI["executeCommand"],
 ): Promise<void> {
   const text = input.trim();
 
@@ -1234,6 +1238,7 @@ async function submitInput(
         client,
         setError,
         onCommandPanelOpen,
+        executeCommand,
       );
       return;
     }
@@ -1252,6 +1257,7 @@ async function submitInput(
     client,
     setError,
     onCommandPanelOpen,
+    executeCommand,
   );
 }
 
@@ -1265,6 +1271,7 @@ function executeCommandInvocation(
         readonly kind: CommandPanelKind;
       }) => void)
     | undefined,
+  executeCommand?: CoreAPI["executeCommand"],
 ): void {
   const interactiveKind = interactivePanelKindForCommandId(
     invocation.commandId,
@@ -1279,7 +1286,17 @@ function executeCommandInvocation(
     onCommandPanelOpen?.({ invocation, kind: displayKind });
   }
 
-  void client.executeCommand(invocation).catch((caught: unknown) => {
+  void (
+    executeCommand
+      ? executeCommand(invocation)
+      : client.executeCommand(invocation)
+  ).catch((caught: unknown) => {
+    // Cancellation only stops waiting; authoritative command events still report its result.
+    if (
+      (caught instanceof Error || caught instanceof DOMException) &&
+      caught.name === "AbortError"
+    )
+      return;
     setError(formatError(caught));
   });
 }

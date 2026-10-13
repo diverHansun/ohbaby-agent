@@ -2477,3 +2477,149 @@ it("returns durable error details when a committed failure has the same message"
     errorData: { code: "DURABLE_FAILURE" },
   });
 });
+
+describe("idle session operations", () => {
+  it("rejects busy and duplicate operations immediately without cancelling the run", async () => {
+    const lifecycle = new BlockingLifecycle();
+    const { manager } = createManager(lifecycle);
+    const run = await manager.create({
+      directory: "/tmp",
+      modelId: "fake",
+      sessionId: "one",
+      triggerSource: "user",
+    });
+    const signal = await lifecycle.started.promise;
+    try {
+      await expect(
+        manager.withIdleSession({ sessionId: "one" }, () =>
+          Promise.resolve("bad"),
+        ),
+      ).rejects.toBeInstanceOf(SessionRunBusyError);
+      expect(signal?.aborted).toBe(false);
+      expect(manager.get(run.runId)?.status).toBe("running");
+    } finally {
+      lifecycle.finish.resolve(undefined);
+      await manager.waitForCompletion(run.runId);
+    }
+    const gate = createDeferred();
+    const entered = createDeferred();
+    const first = manager.withIdleSession({ sessionId: "one" }, async () => {
+      entered.resolve();
+      await gate.promise;
+    });
+    await entered.promise;
+    try {
+      await expect(
+        manager.withIdleSession({ sessionId: "one" }, () =>
+          Promise.resolve("bad"),
+        ),
+      ).rejects.toBeInstanceOf(SessionRunBusyError);
+      await expect(
+        manager.withIdleSession({ sessionId: "two" }, () =>
+          Promise.resolve("other"),
+        ),
+      ).resolves.toBe("other");
+      await expect(
+        manager.withIdleSession(
+          { sessionId: "one", contextScopeId: "child" },
+          () => Promise.resolve("scope"),
+        ),
+      ).resolves.toBe("scope");
+    } finally {
+      gate.resolve();
+      await first;
+    }
+  });
+
+  it("rejects manual admission while create is still claiming its run", async () => {
+    const { manager, ledger } = createManager(new SessionLifecycle());
+    const entered = createDeferred();
+    const release = createDeferred();
+    const claim = ledger.claimPendingRun.bind(ledger);
+    ledger.claimPendingRun = async (input): Promise<RunLedgerRecord> => {
+      entered.resolve();
+      await release.promise;
+      return claim(input);
+    };
+    const creating = manager.create({
+      directory: "/tmp",
+      modelId: "fake",
+      sessionId: "one",
+      triggerSource: "user",
+    });
+    await entered.promise;
+    try {
+      await expect(
+        manager.withIdleSession({ sessionId: "one" }, () =>
+          Promise.resolve("bad"),
+        ),
+      ).rejects.toBeInstanceOf(SessionRunBusyError);
+      expect(await ledger.getActiveRuns("one")).toEqual([]);
+    } finally {
+      release.resolve();
+    }
+    await expect(
+      manager.waitForCompletion((await creating).runId),
+    ).resolves.toMatchObject({ status: "succeeded" });
+  });
+
+  it("rejects a live run recorded by another owner while allowing other scopes", async () => {
+    const { manager, ledger } = createManager(new SessionLifecycle());
+    await ledger.claimPendingRun({
+      sessionId: "one",
+      runId: "other_owner",
+      triggerSource: "user",
+    });
+    await ledger.markRunning("other_owner");
+    await expect(
+      manager.withIdleSession({ sessionId: "one" }, () =>
+        Promise.resolve("bad"),
+      ),
+    ).rejects.toMatchObject({ activeRunIds: ["other_owner"] });
+    await expect(
+      manager.withIdleSession(
+        { sessionId: "one", contextScopeId: "child" },
+        () => Promise.resolve("child"),
+      ),
+    ).resolves.toBe("child");
+    await ledger.markSucceeded("other_owner");
+    await expect(
+      manager.withIdleSession({ sessionId: "one" }, () =>
+        Promise.resolve("retry"),
+      ),
+    ).resolves.toBe("retry");
+  });
+
+  it("holds the existing create lock through failure, then releases it for a waiting run", async () => {
+    const { manager, ledger } = createManager(new SessionLifecycle());
+    const gate = createDeferred();
+    const entered = createDeferred();
+    const operation = manager.withIdleSession(
+      { sessionId: "one" },
+      async () => {
+        entered.resolve();
+        await gate.promise;
+        throw new Error("summary failed");
+      },
+    );
+    const failure = expect(operation).rejects.toThrow("summary failed");
+    await entered.promise;
+    const run = manager.create({
+      directory: "/tmp",
+      modelId: "fake",
+      sessionId: "one",
+      triggerSource: "user",
+    });
+    expect(await ledger.getActiveRuns("one")).toEqual([]);
+    gate.resolve();
+    await failure;
+    await expect(
+      manager.waitForCompletion((await run).runId),
+    ).resolves.toMatchObject({ status: "succeeded" });
+    await expect(
+      manager.withIdleSession({ sessionId: "one" }, () =>
+        Promise.resolve("retry"),
+      ),
+    ).resolves.toBe("retry");
+  });
+});

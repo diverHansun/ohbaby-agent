@@ -505,12 +505,14 @@ export class DaemonHttpClient {
   compactSession(
     sessionId: string,
     input: CompactSessionRequest = {},
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<CompactSessionResponse> {
     return this.request(
       `/v1/sessions/${encodeURIComponent(sessionId)}/compact`,
       {
         body: input,
         method: "POST",
+        signal: options.signal,
       },
     );
   }

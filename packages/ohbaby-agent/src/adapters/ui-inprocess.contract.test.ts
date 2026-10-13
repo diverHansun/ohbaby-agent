@@ -2892,7 +2892,7 @@ describe("createInProcessUiBackendClient", () => {
       id: "session_child",
       isSubagent: false,
       projectId: "project_1",
-      projectRoot: "D:/repo",
+      projectRoot: process.cwd(),
       stats: { messageCount: 1 },
       status: "active",
       title: "Primary before role change",
@@ -2906,7 +2906,7 @@ describe("createInProcessUiBackendClient", () => {
       isSubagent: true,
       parentId: "session_parent",
       projectId: "project_1",
-      projectRoot: "D:/repo",
+      projectRoot: process.cwd(),
       stats: { messageCount: 1 },
       status: "active",
       title: "Child",
@@ -2925,7 +2925,7 @@ describe("createInProcessUiBackendClient", () => {
             createdAt: "2026-08-22T00:00:00.000Z",
             id: "session_child",
             messages: [],
-            projectRoot: "D:/repo",
+            projectRoot: process.cwd(),
             title: "Child",
             updatedAt: "2026-08-22T00:00:00.000Z",
           },
@@ -11955,4 +11955,228 @@ it("coalesces cold entry while first view and control reads wait outside the own
     unsubscribe();
     await client.dispose();
   }
+});
+
+async function createManualAdmissionFixture(input: {
+  readonly beforePromptSubmit?: () => Promise<void>;
+  readonly stream: (
+    request: InterfaceProviderRequest,
+  ) => Promise<AsyncIterable<InterfaceProviderStreamEvent>>;
+}): Promise<{
+  readonly bus: BusInstance;
+  readonly client: ReturnType<typeof createInProcessUiBackendClient>;
+  readonly messageManager: MessageManager;
+}> {
+  const bus = createBus();
+  const messageManager = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+  });
+  for (const sessionId of ["manual_one", "manual_two"]) {
+    for (const role of ["user", "assistant", "user"] as const) {
+      await addCoreTextMessage(messageManager, {
+        sessionId,
+        role,
+        text: "old context ".repeat(5000),
+      });
+    }
+  }
+  const fake = createFakeLLMClient([]);
+  const client = createInProcessUiBackendClient({
+    bus,
+    messageManager,
+    beforePromptSubmit: input.beforePromptSubmit,
+    initialSnapshot: {
+      activeSessionId: "manual_one",
+      permissions: [],
+      runs: [],
+      status: { kind: "idle" },
+      sessions: ["manual_one", "manual_two"].map((id) => ({
+        id,
+        title: "Existing",
+        messages: [],
+        createdAt: "2026-05-20T00:00:00.000Z",
+        updatedAt: "2026-05-20T00:00:00.000Z",
+      })),
+    },
+    llmClient: {
+      ...fake,
+      provider: { ...fake.provider, streamResponse: input.stream },
+    },
+  });
+  return { bus, client, messageManager };
+}
+
+function manualSummaryStream(): AsyncIterable<InterfaceProviderStreamEvent> {
+  return createProviderStream([
+    {
+      textDelta: "<state_snapshot>summary</state_snapshot>",
+      finishReason: "stop",
+    },
+  ]);
+}
+
+describe("manual compact admission", () => {
+  it("rejects a preparing prompt immediately before any run exists", async () => {
+    const preparing = createDeferred<undefined>();
+    const release = createDeferred<undefined>();
+    const requests: InterfaceProviderRequest[] = [];
+    const { client } = await createManualAdmissionFixture({
+      beforePromptSubmit: async () => {
+        preparing.resolve(undefined);
+        await release.promise;
+      },
+      stream: (request) => {
+        requests.push(request);
+        return Promise.resolve(manualSummaryStream());
+      },
+    });
+    const prompt = client.submitPromptAndWait("continue", {
+      sessionId: "manual_one",
+    });
+    await preparing.promise;
+    try {
+      await expect(
+        withTimeout(
+          client.compactSession({ sessionId: "manual_one" }),
+          250,
+          "compact waited for prompt",
+        ),
+      ).rejects.toThrow(/busy|active run/i);
+      expect(requests).toHaveLength(0);
+    } finally {
+      release.resolve(undefined);
+      await prompt;
+      await client.dispose();
+    }
+  });
+
+  it("rejects duplicate compact without blocking other sessions and admits a prompt after compact settles", async () => {
+    const started = createDeferred<undefined>();
+    const release = createDeferred<undefined>();
+    let calls = 0;
+    const { client } = await createManualAdmissionFixture({
+      stream: async () => {
+        calls += 1;
+        if (calls === 1) {
+          started.resolve(undefined);
+          await release.promise;
+        }
+        return manualSummaryStream();
+      },
+    });
+    const first = client.compactSession({ sessionId: "manual_one" });
+    await started.promise;
+    const duplicate = client.compactSession({ sessionId: "manual_one" });
+    try {
+      await expect(
+        withTimeout(duplicate, 250, "duplicate compact queued"),
+      ).rejects.toThrow(/busy|active run/i);
+      await expect(
+        client.compactSession({ sessionId: "manual_two" }),
+      ).resolves.toMatchObject({ status: "compacted" });
+      expect(calls).toBe(2);
+      const queued = await client.submitPromptAccepted("continue", {
+        sessionId: "manual_one",
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(calls).toBe(2);
+      release.resolve(undefined);
+      await first;
+      await client.waitForPrompt(queued.promptId);
+    } finally {
+      release.resolve(undefined);
+      await first;
+      await duplicate.catch(() => undefined);
+    }
+    expect(calls).toBe(3);
+    await client.dispose();
+  });
+
+  it("rejects compact during a live run without aborting its provider", async () => {
+    const started = createDeferred<AbortSignal | undefined>();
+    let calls = 0;
+    const { client } = await createManualAdmissionFixture({
+      stream: (request) => {
+        calls += 1;
+        started.resolve(request.signal);
+        return Promise.resolve(createAbortableProviderStream(request.signal));
+      },
+    });
+    const prompt = client.submitPromptAndWait("keep working", {
+      sessionId: "manual_one",
+    });
+    const signal = await started.promise;
+    const control = await client.getSessionControl({ sessionId: "manual_one" });
+    if (!control.runId) throw new Error("Expected an active prompt run");
+    try {
+      await expect(
+        withTimeout(
+          client.compactSession({ sessionId: "manual_one" }),
+          250,
+          "compact waited for run",
+        ),
+      ).rejects.toThrow(/busy|active run/i);
+      expect(signal?.aborted).toBe(false);
+      expect(calls).toBe(1);
+    } finally {
+      await client.abortRun(control.runId);
+      await prompt;
+      await client.dispose();
+    }
+  });
+
+  it("keeps a committed success when Stop arrives before the manual result refresh", async () => {
+    const controller = new AbortController();
+    const { bus, client } = await createManualAdmissionFixture({
+      stream: () => Promise.resolve(manualSummaryStream()),
+    });
+    bus.subscribe(contextModule.ContextEvent.CompactionFinished, (event) => {
+      if (event.status === "compacted") controller.abort();
+    });
+    try {
+      await expect(
+        client.compactSession({
+          sessionId: "manual_one",
+          signal: controller.signal,
+        }),
+      ).resolves.toMatchObject({ status: "compacted" });
+      expect(controller.signal.aborted).toBe(true);
+      expect((await client.getSnapshot()).runs).toEqual([]);
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it("passes manual cancellation to the summary provider and leaves history unchanged", async () => {
+    const started = createDeferred<AbortSignal | undefined>();
+    let calls = 0;
+    const { client, messageManager } = await createManualAdmissionFixture({
+      stream: (request) => {
+        calls += 1;
+        if (calls > 1) return Promise.resolve(manualSummaryStream());
+        started.resolve(request.signal);
+        return Promise.resolve(createAbortableProviderStream(request.signal));
+      },
+    });
+    const before = await messageManager.listBySession("manual_one");
+    const controller = new AbortController();
+    const compact = client.compactSession({
+      sessionId: "manual_one",
+      signal: controller.signal,
+    });
+    const failure = expect(
+      withTimeout(compact, 500, "manual Stop did not reach summary"),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    const signal = await started.promise;
+    controller.abort();
+    await failure;
+    expect(signal?.aborted).toBe(true);
+    expect(await messageManager.listBySession("manual_one")).toEqual(before);
+    await expect(
+      client.compactSession({ sessionId: "manual_one" }),
+    ).resolves.toMatchObject({ status: "compacted" });
+    expect((await client.getSnapshot()).runs).toEqual([]);
+    await client.dispose();
+  });
 });

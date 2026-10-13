@@ -501,9 +501,12 @@ function withStartupRecovery(
     },
     async executeCommand(
       invocation,
+      execution,
     ): ReturnType<UiBackendClient["executeCommand"]> {
       await ready();
-      return client.executeCommand(invocation);
+      return execution === undefined
+        ? client.executeCommand(invocation)
+        : client.executeCommand(invocation, execution);
     },
     respondPermission(
       requestId,

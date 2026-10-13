@@ -259,6 +259,7 @@ export function createCommandService(
 
     async executeCommand(
       invocation: UiCommandInvocation,
+      execution?: { readonly signal?: AbortSignal },
     ): Promise<UiCommandCompletion> {
       const commandRunId = createCommandRunId();
       const context = createCommandRunContext({
@@ -266,6 +267,7 @@ export function createCommandService(
         clientInvocationId: invocation.clientInvocationId,
         sessionId: invocation.sessionId,
         surface: invocation.surface,
+        signal: execution?.signal,
         options,
       });
 
@@ -307,6 +309,7 @@ export function createCommandService(
       }
 
       try {
+        execution?.signal?.throwIfAborted();
         await handler.execute(invocation, context);
       } catch (error) {
         context.fail({

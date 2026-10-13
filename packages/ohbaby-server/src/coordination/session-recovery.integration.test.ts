@@ -188,6 +188,57 @@ async function setup(
 const query = `runtimeEpoch=${epoch}&bindingGeneration=1`;
 
 describe("source session recovery HTTP/RPC/SSE", () => {
+  it("cancels a manual compact command when its RPC request is stopped", async () => {
+    const { backend, server } = await setup();
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let stopped!: () => void;
+    const cancelled = new Promise<void>((resolve) => {
+      stopped = resolve;
+    });
+    backend.executeCommand = async (_invocation, options) => {
+      started();
+      return new Promise((_, reject) => {
+        options?.signal?.addEventListener(
+          "abort",
+          () => {
+            stopped();
+            reject(new DOMException("Compaction stopped", "AbortError"));
+          },
+          { once: true },
+        );
+      });
+    };
+    const remote = createRemoteUiBackendClient({
+      authToken: "recovery-token",
+      clientId: "client",
+      port: server.port,
+      startupIntent: { resumeSessionId: "root" },
+    });
+    cleanups.push(async () => remote.dispose());
+    const controller = new AbortController();
+    const command = remote.executeCommand(
+      {
+        clientInvocationId: "stop-compact",
+        commandId: "compact",
+        path: ["compact"],
+        argv: [],
+        raw: "/compact",
+        rawArgs: "",
+        surface: "tui",
+        sessionId: "root",
+      },
+      { signal: controller.signal },
+    );
+    await ready;
+    controller.abort();
+    await expect(command).rejects.toMatchObject({ name: "AbortError" });
+    await cancelled;
+    expect(backend.abortRun).not.toHaveBeenCalled();
+  });
+
   it("marks malformed prompt input as definitely rejected before admission", async () => {
     const { request, backend } = await setup();
     backend.submitPromptAccepted = vi.fn(() =>

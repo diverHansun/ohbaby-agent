@@ -1219,40 +1219,44 @@ export async function createUiRuntimeComposition(
     },
 
     async compactSession(input): Promise<CompactResult> {
-      const reasoning =
-        runManager.getActiveReasoning(input.sessionId) ??
-        mergeReasoningIntent(
-          options.llmClient.config.reasoning,
-          input.reasoning,
-        );
-      const resolved = await resolvePrimaryContextTools({
-        operation: "manually compact context",
-        sessionId: input.sessionId,
-      });
-      const result = await contextManager.compact(input.sessionId, {
-        requestSettings: resolvePreparedRequestSettings(options.llmClient, {
+      return runManager.withIdleSession(input, async () => {
+        input.signal?.throwIfAborted();
+        const reasoning =
+          runManager.getActiveReasoning(input.sessionId) ??
+          mergeReasoningIntent(
+            options.llmClient.config.reasoning,
+            input.reasoning,
+          );
+        const resolved = await resolvePrimaryContextTools({
+          operation: "manually compact context",
+          sessionId: input.sessionId,
+        });
+        const result = await contextManager.compact(input.sessionId, {
+          signal: input.signal,
+          requestSettings: resolvePreparedRequestSettings(options.llmClient, {
+            reasoning,
+          }),
+          modelOrigin: {
+            provider: options.llmClient.config.provider,
+            model: options.llmClient.config.model,
+            protocol: options.llmClient.config.interfaceProvider,
+            endpoint: options.llmClient.config.baseUrl,
+          },
           reasoning,
-        }),
-        modelOrigin: {
-          provider: options.llmClient.config.provider,
-          model: options.llmClient.config.model,
-          protocol: options.llmClient.config.interfaceProvider,
-          endpoint: options.llmClient.config.baseUrl,
-        },
-        reasoning,
-        agentName: resolved.agentName,
-        directory: input.projectRoot,
-        force: input.force ?? true,
-        isSubagent: false,
-        modelId: options.llmClient.config.model,
-        toolNames: resolved.toolNames,
-        tools: resolved.tools,
+          agentName: resolved.agentName,
+          directory: input.projectRoot,
+          force: input.force ?? true,
+          isSubagent: false,
+          modelId: options.llmClient.config.model,
+          toolNames: resolved.toolNames,
+          tools: resolved.tools,
+        });
+        const notice = noticeFromCompactResult(input.sessionId, result);
+        if (notice) {
+          options.onNotice?.(notice);
+        }
+        return result;
       });
-      const notice = noticeFromCompactResult(input.sessionId, result);
-      if (notice) {
-        options.onNotice?.(notice);
-      }
-      return result;
     },
 
     async getContextUsage(

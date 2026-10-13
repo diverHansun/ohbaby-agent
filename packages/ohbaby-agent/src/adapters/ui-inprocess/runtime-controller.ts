@@ -45,9 +45,10 @@ export class InProcessRuntimeController {
   private runtimeVersion: string | undefined;
 
   /** A rejected admission stays in the durable submission queue, outside runtime activity. */
-  async acquireRuntime(
-    useCurrent = false,
-  ): Promise<{ runtime: UiRuntimeComposition; release: () => void }> {
+  async acquireRuntime(): Promise<{
+    runtime: UiRuntimeComposition;
+    release: () => void;
+  }> {
     const previous = this.admissionBarrier;
     let unlock!: () => void;
     this.admissionBarrier = new Promise<void>((resolve) => {
@@ -62,9 +63,7 @@ export class InProcessRuntimeController {
         const runtime = await this.getRuntimeForPrompt();
         const admitted = await this.coordinate(async () => {
           if (this.isClosed()) throw new Error("Runtime is shutting down");
-          const version = useCurrent
-            ? this.runtimeVersion
-            : await this.options.getConfigVersion?.();
+          const version = await this.options.getConfigVersion?.();
           if (this.runtimeVersion !== version) {
             const reasons = [...runtime.getActivityReasons()];
             if (this.admittedWork > 0)
