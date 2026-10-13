@@ -1,6 +1,6 @@
 # improve-6：子代理接入补完与整轮收口
 
-> 状态：**逐项决定已确认，待实施**。编写日期：2026-10-13。代码基线：`16737a72`（improve-1～5 全部实施完毕）。
+> 状态：**已实施，测试、真实 API／Web／CLI 与独立审查完成，待用户审查**。编写日期：2026-10-13。代码基线：`16737a72`（improve-1～5 全部实施完毕）。
 > 上游规划是 [plan/](../plan/README.md)。本目录不重开已确认的压缩策略，只收口前五批留下的**跨实例接入缺口**与**跨模块小尾巴**。
 > 2026-10-13 已确认：保持收尾性质，子代理独立选模型与跨 provider 另开议题；本批修 S1 标记回放、补 S3 关键测试、保留 S5 通用失败处理并清理 X1 四个 agent 级模型字段。S4 子代理占用视图及缓存扩展、X2 归档资源回收均不在本批。
 
@@ -30,7 +30,7 @@
 | [01-problem-analysis-and-current-state.md](./01-problem-analysis-and-current-state.md) | 子代理接入现状、缺口与代码锚点 |
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 改动契约：阶段、改动面、边界、风险 |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 测试与验收，含“故意改坏要变红”的故障注入项 |
-| `05-implementation-acceptance.md` | **预留位置**：本批实施完成后由验收会话写入，规划期不存在 |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实施取舍、测试／故障注入、真实 API 与 Web／CLI 证据、审查和本地提交 |
 
 **03 跳过**：本批是收尾性质，没有引入新的外部做法。前五批的参考项目调查见 [plan/03](../plan/03-reference-projects.md) 与各批 `03-reference-projects.md`，本批不重复。
 

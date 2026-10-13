@@ -274,7 +274,7 @@ type CompactionTerminalOutcome =
 
 计量直接使用自有消息和扁平工具定义。已有原生状态时，重复的 reasoningText 不再另计；原生状态中的可读推理正文仍按文本估算，只有包含不透明推理数据时才额外加一次既有 usage／输出上限代理值。密文、签名与完整原生 JSON 不进入通用文本计量。三协议转换由 provider 负责，Context 不定义三套请求格式。
 
-`ContextUsage.usageRatio` 仍表示输入预算占用，供 mask／thrash 等已有规则使用。自动 summary 与 UI 则都使用 `currentTokens / contextLimit`，其中 `contextLimit` 是完整窗口。两种比例用途不同。
+当时 `ContextUsage.usageRatio` 表示输入预算占用，供 mask／thrash 使用。上述两种机制已分别在本次 Compact 议题的 improve-5／improve-4 退出，不能据此历史段落推断当前仍有对应流程；实际改动见各批 05。自动 summary 与 UI 使用 `currentTokens / contextLimit`，其中 `contextLimit` 是完整窗口。
 
 ## Compact 议题 improve-3：摘要请求记录与预算（历史记录）
 
