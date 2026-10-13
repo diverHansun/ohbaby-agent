@@ -157,7 +157,12 @@ async function setup(
     bus,
     messageManager,
     llmClient: {
-      generateSummary: (): Promise<string> => Promise.resolve("unused"),
+      generateSummary: (input) =>
+        Promise.resolve({
+          text: "unused",
+          summaryMessageId: input.summaryMessageId,
+          requests: [],
+        }),
     },
     memory: {
       load: () => Promise.resolve({ global: "", project: "", merged: "" }),

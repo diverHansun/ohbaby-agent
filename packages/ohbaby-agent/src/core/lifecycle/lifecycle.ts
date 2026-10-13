@@ -15,6 +15,7 @@ import {
   ToolCallParseError,
   isRetryableProviderError,
   streamResponse,
+  resolvePreparedRequestSettings,
   providerErrorStatus,
 } from "../llm-client/index.js";
 import type {
@@ -1365,6 +1366,7 @@ export class Lifecycle {
         requestClient,
         [...input.request.messages],
         {
+          preparedSettings: input.request.settings,
           purpose: "agent-step",
           ...(currentRunInputs
             ? {
@@ -1695,6 +1697,10 @@ export class Lifecycle {
     });
     const prepared = this.deps.contextManager.prepareTurn({
       ...prepareInput,
+      requestSettings: resolvePreparedRequestSettings(this.deps.llmClient, {
+        modelId: input.modelId,
+        reasoning: input.reasoning,
+      }),
       modelOrigin: {
         provider: this.deps.llmClient.config.provider,
         model: input.modelId,

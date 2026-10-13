@@ -1,3 +1,4 @@
+import { resolvePreparedRequestSettings } from "../../core/llm-client/streaming.js";
 import { describe, expect, it, vi } from "vitest";
 import { createBus } from "../../bus/index.js";
 import type { ContextManager } from "../../core/context/index.js";
@@ -130,12 +131,23 @@ describe("auxiliary token usage isolation", () => {
     await expect(
       summaryClient.generateSummary({
         contextScopeId: "subagent_1",
-        history: [],
-        prompt: "summarize",
+        request: {
+          messages: [
+            { role: "system", content: "system" },
+            { role: "user", content: "summarize" },
+          ],
+          tools: undefined,
+          settings: {
+            ...resolvePreparedRequestSettings(llmClient),
+            maxTokens: 16384,
+          },
+        },
+        summaryMessageId: "summary",
+        compactionId: "compact",
+        attempt: 1,
         sessionId: "child_session",
-        systemPrompt: "system",
       }),
-    ).resolves.toBe("summary");
+    ).resolves.toMatchObject({ text: "summary" });
     await expect(
       generateSessionTitle({
         firstUserMessage: "Name this child task",

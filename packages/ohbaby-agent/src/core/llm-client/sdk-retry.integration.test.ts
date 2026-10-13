@@ -1,4 +1,11 @@
 import OpenAI from "openai";
+import { createBus } from "../../bus/index.js";
+import { createContextSummaryClient } from "../../adapters/ui-runtime/prompt-context.js";
+import { createContextManager } from "../context/context-manager.js";
+import {
+  createInMemoryMessageStore,
+  createMessageManager,
+} from "../message/index.js";
 import { createAnthropicProvider } from "../../services/interface-providers/anthropic.js";
 import { createOpenAIResponsesProvider } from "../../services/interface-providers/openai-responses.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +15,7 @@ import {
   ProviderRetryExhaustedError,
   ProviderStreamInterruptedError,
 } from "./retry.js";
-import { streamResponse } from "./streaming.js";
+import { resolvePreparedRequestSettings, streamResponse } from "./streaming.js";
 import type { LLMClientInstance, StreamingResponse } from "./types.js";
 
 // Exercise the installed SDK, production adapter and project retry loop together.
@@ -462,4 +469,76 @@ describe("installed SDK and project retry boundaries", () => {
     expect(f.attempts).toHaveLength(1);
     expect(f.providerCalls()).toBe(1);
   });
+});
+
+describe.each(protocols)("%s Context summary HTTP budget", (protocol) => {
+  it.each([
+    { failures: 0, fault: "503", attempts: 1, status: "compacted" },
+    { failures: 1, fault: "503", attempts: 2, status: "compacted" },
+    { failures: 2, fault: "503", attempts: 2, status: "failed" },
+    { failures: 1, fault: "ECONNRESET", attempts: 2, status: "compacted" },
+  ] as const)(
+    "limits $failures initial $fault failures to $attempts actual HTTP requests",
+    async ({ failures, fault, attempts, status }) => {
+      const f = fixture((attempt) => {
+        if (attempt > failures) return success(protocol);
+        if (fault === "ECONNRESET") {
+          throw Object.assign(new Error("socket reset before first byte"), {
+            code: "ECONNRESET",
+          });
+        }
+        return unavailable();
+      }, protocol);
+      const bus = createBus();
+      const messageManager = createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      });
+      for (let index = 0; index < 8; index++) {
+        const message = await messageManager.createMessage({
+          sessionId: "summary-budget",
+          agent: "build",
+          role: index % 2 === 0 ? "user" : "assistant",
+        });
+        await messageManager.appendPart(message.id, {
+          type: "text",
+          text: `${String(index)}: ${"Old long history. ".repeat(450)}`,
+        });
+      }
+      const manager = createContextManager({
+        bus,
+        messageManager,
+        llmClient: createContextSummaryClient(f.client),
+        memory: {
+          load: () => Promise.resolve({ global: "", project: "", merged: "" }),
+        },
+        systemPromptProvider: { build: () => Promise.resolve("Stable system") },
+        tokenCounter: {
+          estimateTokens: (text) => text.length,
+          getLimit: () => 128000,
+        },
+      });
+      const compact = manager.compact("summary-budget", {
+        directory: "/repo",
+        force: true,
+        modelId: "fixture",
+        toolNames: [],
+        tools: undefined,
+        requestSettings: resolvePreparedRequestSettings(f.client),
+      });
+      await vi.runAllTimersAsync();
+      const result = await compact;
+      expect(result.status).toBe(status);
+      expect(f.attempts).toHaveLength(attempts);
+      expect(f.attempts.map((attempt) => attempt.providerCall)).toEqual(
+        attempts === 1 ? [1] : [1, 2],
+      );
+      if (status === "compacted") {
+        expect(result.compression?.requests).toHaveLength(attempts);
+        expect(
+          result.compression?.requests?.map((request) => request.attempt),
+        ).toEqual(attempts === 1 ? [1] : [1, 2]);
+      }
+    },
+  );
 });

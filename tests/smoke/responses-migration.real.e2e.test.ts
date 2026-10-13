@@ -313,8 +313,12 @@ function createTokenCounter(): TokenCounter {
 
 function createSummaryClient(): ContextLLMClient {
   return {
-    generateSummary: () =>
-      Promise.resolve("<state_snapshot>unused smoke summary</state_snapshot>"),
+    generateSummary: (input) =>
+      Promise.resolve({
+        text: "<state_snapshot>unused smoke summary</state_snapshot>",
+        summaryMessageId: input.summaryMessageId,
+        requests: [],
+      }),
   };
 }
 

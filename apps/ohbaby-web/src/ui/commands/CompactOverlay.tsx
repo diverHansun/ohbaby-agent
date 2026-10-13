@@ -117,10 +117,6 @@ export function CompactOverlayBody(props: {
                 ? formatTokenCount(result.compression.savedTokens)
                 : "none",
             ],
-            [
-              "pruned",
-              result.prune ? String(result.prune.prunedCount) : "none",
-            ],
           ]}
         />
       ) : null}

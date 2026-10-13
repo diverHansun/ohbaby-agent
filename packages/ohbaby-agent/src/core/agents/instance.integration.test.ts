@@ -146,11 +146,11 @@ function createLongTaskLLMClient(input: {
 function createSmallBudgetTokenCounter(): TokenCounter {
   return {
     estimateTokens(content: string): number {
-      return Math.max(1, Math.ceil(content.length / 12));
+      return Math.max(1, Math.ceil(content.length));
     },
     getBudget(modelId, options): TokenBudget {
       const usedInputTokens = options?.usedInputTokens ?? 0;
-      const contextWindowTokens = 260;
+      const contextWindowTokens = 32000;
       const reservedOutputTokens = options?.requestedOutputTokens ?? 32;
       const safetyMarginTokens = options?.safetyMarginTokens ?? 16;
       const inputBudgetTokens =
@@ -169,7 +169,7 @@ function createSmallBudgetTokenCounter(): TokenCounter {
       };
     },
     getLimit(): number {
-      return 260;
+      return 32000;
     },
   };
 }
@@ -367,8 +367,6 @@ function instrumentContextManager(manager: ContextManager): {
         const prepared = await originalPrepare(input);
         if (prepared.compaction?.status === "compacted") {
           successfulReductionStatuses.push(prepared.compaction.status);
-        } else if (prepared.compaction?.status === "pruned") {
-          successfulReductionStatuses.push(prepared.compaction.status);
         }
         return prepared;
       },
@@ -491,10 +489,15 @@ describe("AgentInstance long task integration", () => {
       bus,
       compactionThresholds: {
         mask: 0.45,
-        summary: 0.55,
+        summary: 0.15,
       },
       llmClient: {
-        generateSummary: () => Promise.resolve("compact long subagent history"),
+        generateSummary: (input) =>
+          Promise.resolve({
+            text: "compact long subagent history",
+            summaryMessageId: input.summaryMessageId,
+            requests: [],
+          }),
       },
       memory: {
         load: () => Promise.resolve({ global: "", merged: "", project: "" }),

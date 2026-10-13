@@ -14,7 +14,13 @@ import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 async function setup(
   limit = 10000,
   kind: "user-steer" | "subagent-status" | "subagent-result" = "user-steer",
-) {
+): Promise<{
+  context: ReturnType<typeof createContextManager>;
+  messages: ReturnType<typeof createMessageManager>;
+  protectedInput: MessageWithParts;
+  collected: unknown[];
+  counter: { estimateTokens: (text: string) => number; getLimit: () => number };
+}> {
   const messages = createMessageManager({
     bus: createBus(),
     store: createInMemoryMessageStore(),
@@ -52,8 +58,7 @@ async function setup(
     (message) => message.info.id === input.id,
   );
   if (!protectedInput) throw new Error("Input missing");
-  const summaries: readonly MessageWithParts[][] = [];
-  const collected: MessageWithParts[][] = [];
+  const collected: unknown[] = [];
   const counter = {
     estimateTokens: (text: string): number => text.length,
     getLimit: (): number => limit,
@@ -68,14 +73,17 @@ async function setup(
     tokenCounter: counter,
     llmClient: {
       generateSummary: (input) => {
-        collected.push([...input.history]);
-        return Promise.resolve("condensed history");
+        collected.push(input.request);
+        return Promise.resolve({
+          text: "condensed history",
+          summaryMessageId: input.summaryMessageId,
+          requests: [],
+        });
       },
     },
     maskEnabled: false,
     compressionPreserveRatio: 0.1,
   });
-  void summaries;
   return { context, messages, protectedInput, collected, counter };
 }
 const prepare = {
@@ -110,7 +118,7 @@ describe("durable inputs in prepared context", () => {
         ),
       ).toHaveLength(1);
       expect(collected.length).toBeGreaterThan(0);
-      expect(JSON.stringify(collected)).not.toContain("UNSENT-STEER-ORIGINAL");
+      expect(JSON.stringify(collected)).toContain("UNSENT-STEER-ORIGINAL");
       expect(prepared.sentHeuristic).toBe(
         estimatePreparedRequestHeuristic(prepared.request, counter),
       );
@@ -234,6 +242,9 @@ it("rejects an oversized batch of individually fitting durable results without l
         .join(""),
     ),
   ).toEqual(bodies);
-  expect(JSON.stringify(collected)).not.toContain("RESULT-A:");
-  expect(JSON.stringify(collected)).not.toContain("RESULT-B:");
+  expect(
+    collected.every(
+      (request) => (request as { inputIds?: string[] }).inputIds?.length === 1,
+    ),
+  ).toBe(true);
 });

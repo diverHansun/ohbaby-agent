@@ -122,13 +122,17 @@ async function main(): Promise<void> {
   const context = createContextManager({
     bus: createBus(),
     llmClient: {
-      generateSummary: () => Promise.resolve("crash-summary"),
+      generateSummary: (input) =>
+        Promise.resolve({
+          text: "crash-summary",
+          summaryMessageId: input.summaryMessageId,
+          requests: [],
+        }),
     },
     memory: {
       load: () => Promise.resolve({ global: "", merged: "", project: "" }),
     },
     messageManager,
-    pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
     systemPromptProvider: {
       build: () => Promise.resolve("stable"),
     },

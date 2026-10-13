@@ -23,13 +23,6 @@ const CompressionResultSchema = z.discriminatedUnion("status", [
   CompressionMetricsSchema.extend({ status: z.literal("inflated") }),
 ]);
 
-const PruneResultSchema = z.object({
-  prunedCount: z.number(),
-  freedTokens: z.number(),
-  protectedCount: z.number(),
-  totalScanned: z.number(),
-});
-
 const ContextUsageSchema = z.object({
   currentTokens: z.number(),
   contextLimit: z.number(),
@@ -62,7 +55,6 @@ const CompactionAttemptOutcomeSchema = z.union([
 
 const CompactStatusSchema = z.union([
   z.literal("not-needed"),
-  z.literal("pruned"),
   z.literal("compacted"),
   z.literal("failed"),
   z.literal("inflated"),
@@ -80,7 +72,7 @@ export const ContextEvent = {
     ScopedContextIdentitySchema.extend({
       attemptId: z.string(),
       outcome: CompactionAttemptOutcomeSchema,
-      rung: z.union([z.literal("prune"), z.literal("summary")]).optional(),
+      rung: z.literal("summary").optional(),
       status: CompactStatusSchema,
     }),
   ),
@@ -98,13 +90,6 @@ export const ContextEvent = {
     ScopedContextIdentitySchema.extend({
       attemptId: z.string(),
       result: CompressionResultSchema,
-    }),
-  ),
-  Pruned: BusEvent.define(
-    "context.pruned",
-    ScopedContextIdentitySchema.extend({
-      attemptId: z.string(),
-      result: PruneResultSchema,
     }),
   ),
   TurnPrepared: BusEvent.define(

@@ -271,7 +271,24 @@ export interface ModelRequestRecord {
   readonly endedAt?: number;
   readonly outcome: "running" | "success" | "error" | "aborted";
 }
-export interface ModelRequestObservation {
+export interface ModelRequestObservation<T = ModelRequestRecord> {
   readonly type: "request-started" | "first-text" | "request-ended";
-  readonly request: ModelRequestRecord;
+  readonly request: T;
 }
+
+/** Resolved ordinary-request settings, snapshotted before context maintenance. */
+export type PreparedRequestSettings = Readonly<
+  Pick<
+    import("../../services/interface-providers/types.js").InterfaceProviderRequest,
+    "model" | "temperature" | "reasoning" | "maxTokens"
+  >
+>;
+
+/** A compact attempt owns a future summary, without inventing an ordinary run. */
+export type SummaryRequestRecord = Omit<
+  ModelRequestRecord,
+  "runId" | "step" | "purpose"
+> & {
+  readonly compactionId: string;
+  readonly purpose: "context-summary";
+};

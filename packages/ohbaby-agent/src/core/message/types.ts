@@ -235,6 +235,7 @@ export interface CommitCompactionInput {
   readonly contextScopeId?: string;
   readonly sessionId: string;
   readonly summary?: {
+    readonly messageId?: string;
     readonly agent: string;
     readonly text: string;
   };

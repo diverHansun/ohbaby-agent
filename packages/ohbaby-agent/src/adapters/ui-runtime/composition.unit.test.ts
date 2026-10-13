@@ -680,6 +680,14 @@ describe("createUiRuntimeComposition skill tools", () => {
       tools,
     });
     expect(compact).toHaveBeenCalledWith("session_1", {
+      requestSettings: {
+        model: "fake-model",
+        maxTokens: 128,
+        temperature: 0,
+        reasoning: expect.objectContaining({ mode: "none" }) as {
+          mode: "none";
+        },
+      },
       modelOrigin: {
         provider: "fake",
         model: "fake-model",

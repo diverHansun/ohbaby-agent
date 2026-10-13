@@ -1,10 +1,6 @@
-export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant for an AI coding agent. Output only the requested structured summary.
-
-Do not continue the conversation. Do not answer questions from the conversation. Do not call or suggest tools. Write in the same language as the user's latest substantive instructions.`;
-
 export const COMPRESSION_PROMPT = `Read the conversation history above and create a compact checkpoint that another coding agent can use to continue the work.
 
-Target length: 15-30% of the compressed history, and never more than one third unless critical exact details require it.
+Output only the summary, without tools or continuing the conversation. Keep the entire summary under 16384 tokens; this is a ceiling, not a target. Write in the language of the latest substantive user instructions.
 
 Use this exact format:
 
@@ -38,11 +34,3 @@ Rules:
 - Never include credentials, tokens, passwords, secret values, or private keys.
 - Do not mention summarization, compression, compacting, or that this is a summary.
 - Do not invent completed work or test results.`;
-
-export const AGGRESSIVE_COMPRESSION_PROMPT = `${COMPRESSION_PROMPT}
-
-CRITICAL: The previous summary was too long. Compress aggressively:
-- Keep only details required to continue safely.
-- Prefer terse bullets over prose.
-- Drop historical chatter, repeated failures, and obsolete branches.
-- Keep exact commands/errors only when they affect the next action.`;

@@ -23,7 +23,6 @@ Bus is the internal domain event bus. This catalog records scope, required conte
 | context.compaction.finished | Context | session | domain, tests | low | sessionId, attemptId, outcome, status | complete | no | Terminates one scoped compaction attempt exactly once; contextScopeId is omitted only for primary. |
 | context.compaction.progress | Context | session | domain, tests | low | sessionId, attemptId, attempt, estimatedHistoryTokens | complete | no | Records bounded history estimates; contextScopeId is omitted only for primary. |
 | context.compressed | Context | session | domain, tests | low | sessionId, attemptId, result | complete | no | Internal domain event; contextScopeId is omitted only for primary. |
-| context.pruned | Context | session | domain, tests | low | sessionId, attemptId, result | complete | no | Internal domain event; contextScopeId is omitted only for primary. |
 | context.turn-prepared | Context | session | domain, tests | medium | sessionId, usage, tookMs | complete | no | Run stream owns user-visible context events; contextScopeId is omitted only for primary. |
 | context.compact-skipped | Context | session | domain, tests | low | sessionId, attemptId, reason, usage | complete | no | Internal domain event; contextScopeId is omitted only for primary. |
 | context.masked | Context | session | domain, tests | medium | sessionId, enabled, maskedPartIds, maskedTokens, cutoff, usageRatio | complete | no | Internal projection telemetry; contextScopeId is omitted only for primary. |

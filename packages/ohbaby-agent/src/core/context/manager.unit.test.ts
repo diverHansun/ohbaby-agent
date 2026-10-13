@@ -30,7 +30,6 @@ import type {
   TokenCounter,
 } from "./types.js";
 import { isActivePart } from "./filters.js";
-import { serializeHistory } from "./serialization.js";
 import { serializeForLlm } from "./serializer.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
 import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
@@ -59,7 +58,6 @@ interface ContextFixture {
   readonly measurements: readonly PreparedModelRequest[];
   readonly masked: readonly unknown[];
   readonly memory: MemoryReader;
-  readonly pruned: readonly unknown[];
   readonly systemPromptProvider: SystemPromptProvider;
   readonly turnPrepared: readonly unknown[];
 }
@@ -120,7 +118,7 @@ function createTokenCounter(): TokenCounter {
       return content.length;
     },
     getLimit(): number {
-      return 100;
+      return 10_000;
     },
   };
 }
@@ -201,8 +199,6 @@ function createManager(
       typeof createContextManager
     >[0]["maskConfig"];
     readonly maxCompactionsPerTurn?: number;
-    readonly pruneProtectTokens?: number;
-    readonly pruneMinimumTokens?: number;
     readonly systemPromptProvider?: SystemPromptProvider;
     readonly thrashWindow?: number;
   } = {},
@@ -214,7 +210,6 @@ function createManager(
   const compressed: unknown[] = [];
   const masked: unknown[] = [];
   const measurements: PreparedModelRequest[] = [];
-  const pruned: unknown[] = [];
   const turnPrepared: unknown[] = [];
   const memory =
     options.memory ??
@@ -238,9 +233,11 @@ function createManager(
     llmClient:
       options.llmClient ??
       ({
-        generateSummary: vi
-          .fn()
-          .mockResolvedValue("<state_snapshot>short</state_snapshot>"),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "<state_snapshot>short</state_snapshot>",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       } satisfies ContextLLMClient),
     now: options.now ?? createClock(),
     onRequestMeasured: (request) => measurements.push(request),
@@ -248,8 +245,6 @@ function createManager(
     maskEnabled: options.maskEnabled,
     maskConfig: options.maskConfig,
     maxCompactionsPerTurn: options.maxCompactionsPerTurn,
-    pruneProtectTokens: options.pruneProtectTokens ?? 10,
-    pruneMinimumTokens: options.pruneMinimumTokens ?? 5,
     thrashWindow: options.thrashWindow,
   });
   const manager: FixtureContextManager = {
@@ -282,9 +277,6 @@ function createManager(
   bus.subscribe(ContextEvent.CompactSkipped, (payload) => {
     compactSkipped.push(payload);
   });
-  bus.subscribe(ContextEvent.Pruned, (payload) => {
-    pruned.push(payload);
-  });
   bus.subscribe(ContextEvent.Masked, (payload) => {
     masked.push(payload);
   });
@@ -301,7 +293,6 @@ function createManager(
     manager,
     measurements,
     memory,
-    pruned,
     systemPromptProvider,
     turnPrepared,
   };
@@ -1084,7 +1075,11 @@ describe("ContextManager", () => {
     const marker = "runtime-compaction-marker";
     const { manager, measurements } = createManager({
       llmClient: {
-        generateSummary: vi.fn().mockResolvedValue("## Goal\nshort summary"),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "## Goal\nshort summary",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       },
       memory: {
         load: vi
@@ -2028,7 +2023,7 @@ describe("ContextManager", () => {
     });
   });
 
-  it("lets mask delay prune-summary when reduced usage drops below the threshold", async () => {
+  it("lets mask delay summary when reduced usage drops below the threshold", async () => {
     const messageManager = createMessageManagerFixture();
     await addCompletedToolMessage(messageManager, {
       sessionId: "session_1",
@@ -2041,7 +2036,11 @@ describe("ContextManager", () => {
     });
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("<state_snapshot>short</state_snapshot>");
+      .mockResolvedValue({
+        text: "<state_snapshot>short</state_snapshot>",
+        summaryMessageId: "summary",
+        requests: [],
+      });
     const { manager } = createManager({
       compressionThreshold: 0.5,
       llmClient: { generateSummary },
@@ -2087,88 +2086,7 @@ describe("ContextManager", () => {
     expect(generateSummary).not.toHaveBeenCalled();
   });
 
-  it("stops after prune when usage no longer needs prune-summary", async () => {
-    const messageManager = createMessageManagerFixture();
-    await addCompletedToolMessage(messageManager, {
-      sessionId: "session_1",
-      output: "old tool output ".repeat(800),
-    });
-    for (const [index, role] of ["user", "assistant", "user"].entries()) {
-      await addTextMessage(messageManager, {
-        sessionId: "session_1",
-        role: role as "user" | "assistant",
-        text: `${String(index)} ${"recent text ".repeat(300)}`,
-      });
-    }
-    const generateSummary = vi
-      .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("<state_snapshot>short</state_snapshot>");
-    const commitCompaction = vi.spyOn(messageManager, "commitCompaction");
-    const onCompactionStarted = vi.fn();
-    const tokenCounter = {
-      estimateTokens: (content: string): number => content.length,
-      getBudget(
-        _modelId: string,
-        options?: Parameters<NonNullable<TokenCounter["getBudget"]>>[1],
-      ): ReturnType<NonNullable<TokenCounter["getBudget"]>> {
-        const usedInputTokens = options?.usedInputTokens ?? 0;
-        const inputBudgetTokens = 20_000;
-        return {
-          contextWindowTokens: 24_000,
-          inputBudgetTokens,
-          maxOutputTokens: 2_000,
-          modelId: "model-a",
-          remainingInputTokens: Math.max(
-            0,
-            inputBudgetTokens - usedInputTokens,
-          ),
-          reservedOutputTokens: 2_000,
-          safetyMarginTokens: 2_000,
-          usageRatio: usedInputTokens / inputBudgetTokens,
-          usedInputTokens,
-        };
-      },
-      getLimit: (): number => 24_000,
-    } satisfies TokenCounter;
-    const tools = [{ name: "read_file", inputSchema: { type: "object" } }];
-    const { manager } = createManager({
-      compressionThreshold: 0.8,
-      llmClient: { generateSummary },
-      messageManager,
-      pruneMinimumTokens: 1,
-      pruneProtectTokens: 0,
-      tokenCounter,
-    });
-
-    const prepared = await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      onCompactionStarted,
-      sessionId: "session_1",
-      tools,
-    });
-
-    expect(prepared.compaction?.status).toBe("pruned");
-    expect(prepared.usage.usageRatio).toBeGreaterThanOrEqual(0.5);
-    expect(prepared.usage.usageRatio).toBeLessThan(0.8);
-    expect(prepared.sentHeuristic).toBe(
-      estimatePreparedRequestHeuristic(prepared.request, tokenCounter),
-    );
-    expect(prepared.sentHeuristic).toBeGreaterThan(
-      estimatePreparedRequestHeuristic(
-        { messages: prepared.request.messages, tools: undefined },
-        tokenCounter,
-      ),
-    );
-    expect(onCompactionStarted).toHaveBeenCalledTimes(1);
-    expect(commitCompaction).toHaveBeenCalled();
-    expect(onCompactionStarted.mock.invocationCallOrder[0]).toBeLessThan(
-      commitCompaction.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    );
-    expect(generateSummary).not.toHaveBeenCalled();
-  });
-
-  it("reduces prune-summary attempts across a ten-step tool-output loop when mask is enabled", async () => {
+  it("reduces summary attempts across a ten-step tool-output loop when mask is enabled", async () => {
     function isMaskedEvent(event: unknown): event is {
       readonly enabled: true;
       readonly maskedPartIds: readonly string[];
@@ -2206,9 +2124,13 @@ describe("ContextManager", () => {
       });
       const generateSummary = vi
         .fn<ContextLLMClient["generateSummary"]>()
-        .mockResolvedValue("<state_snapshot>short</state_snapshot>");
+        .mockResolvedValue({
+          text: "<state_snapshot>short</state_snapshot>",
+          summaryMessageId: "summary",
+          requests: [],
+        });
       const { manager, masked } = createManager({
-        compressionThreshold: 0.8,
+        compressionThreshold: 0.5,
         llmClient: { generateSummary },
         maskConfig: {
           minPartTokens: 1,
@@ -2218,15 +2140,13 @@ describe("ContextManager", () => {
         },
         maskEnabled,
         messageManager,
-        pruneMinimumTokens: 1,
-        pruneProtectTokens: 100_000,
         tokenCounter: {
           estimateTokens: (content: string) => content.length,
           getBudget(_modelId, options) {
             const usedInputTokens = options?.usedInputTokens ?? 0;
-            const inputBudgetTokens = 20_000;
+            const inputBudgetTokens = 35_000;
             return {
-              contextWindowTokens: 24_000,
+              contextWindowTokens: 40_000,
               inputBudgetTokens,
               maxOutputTokens: 2_000,
               modelId: "model-a",
@@ -2240,7 +2160,7 @@ describe("ContextManager", () => {
               usedInputTokens,
             };
           },
-          getLimit: () => 24_000,
+          getLimit: () => 40_000,
         },
       });
 
@@ -2297,7 +2217,7 @@ describe("ContextManager", () => {
       sessionId: "session_1",
     });
 
-    expect(wireEstimateCalls).toBe(4);
+    expect(wireEstimateCalls).toBe(5);
   });
 
   it("commits expected part snapshots without reloading memory", async () => {
@@ -2331,7 +2251,11 @@ describe("ContextManager", () => {
     });
     const { manager, measurements } = createManager({
       llmClient: {
-        generateSummary: vi.fn().mockResolvedValue("## Goal\nshort"),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "## Goal\nshort",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       },
       memory,
       messageManager,
@@ -2383,10 +2307,14 @@ describe("ContextManager", () => {
     }
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("## Goal\nshort");
+      .mockResolvedValue({
+        text: "## Goal\nshort",
+        summaryMessageId: "summary",
+        requests: [],
+      });
     const onCompactionStarted = vi.fn();
     const { manager } = createManager({
-      compressionThreshold: 0.5,
+      compressionThreshold: 0.02,
       llmClient: { generateSummary },
       messageManager,
     });
@@ -2404,39 +2332,6 @@ describe("ContextManager", () => {
     expect(onCompactionStarted.mock.invocationCallOrder[0]).toBeLessThan(
       generateSummary.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
-  });
-
-  it("keeps prepareTurn prune-only path to one history read", async () => {
-    const messageManager = createMessageManagerFixture();
-    const memory: MemoryReader = {
-      load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
-    };
-    await addCompletedToolMessage(messageManager, {
-      sessionId: "session_1",
-      output: "x".repeat(80),
-    });
-    await addTextMessage(messageManager, {
-      sessionId: "session_1",
-      role: "user",
-      text: "small",
-    });
-    const listBySession = vi.spyOn(messageManager, "listBySession");
-    const { manager } = createManager({
-      compressionThreshold: 0.5,
-      memory,
-      messageManager,
-      pruneMinimumTokens: 1,
-      pruneProtectTokens: 0,
-    });
-
-    const prepared = await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-
-    expect(prepared.compaction?.status).toBe("pruned");
-    expect(listBySession).toHaveBeenCalledTimes(1);
   });
 
   it("skips memory for subagent context and degrades to empty memory on load failure", async () => {
@@ -2511,7 +2406,7 @@ describe("ContextManager", () => {
     });
   });
 
-  it("does not auto summarize before 95 percent of the full window when input budget is almost exhausted", () => {
+  it("does not auto summarize before 90 percent of the full window when input budget is almost exhausted", () => {
     const usage = getContextUsage(96_500, "large-model", {
       getBudget(_modelId, options) {
         const usedInputTokens = options?.usedInputTokens ?? 0;
@@ -2541,10 +2436,10 @@ describe("ContextManager", () => {
     ).toBe("mask");
   });
 
-  it.each([94_999, 95_000, 95_001])(
-    "uses full-window occupancy at the 95 percent boundary: %i",
+  it.each([89_999, 90_000, 90_001])(
+    "uses full-window occupancy at the 90 percent boundary: %i",
     (currentTokens) => {
-      expect(COMPRESSION_THRESHOLD).toBe(0.95);
+      expect(COMPRESSION_THRESHOLD).toBe(0.9);
       expect(
         decideCompactionRung({
           force: false,
@@ -2557,7 +2452,7 @@ describe("ContextManager", () => {
             usageRatio: currentTokens / 90_000,
           },
         }),
-      ).toBe(currentTokens < 95_000 ? "mask" : "prune-summary");
+      ).toBe(currentTokens < 90_000 ? "mask" : "summary");
     },
   );
 
@@ -2600,7 +2495,7 @@ describe("ContextManager", () => {
           usageRatio: 0.9,
         },
       }),
-    ).toBe("mask");
+    ).toBe("summary");
     expect(
       decideCompactionRung({
         force: false,
@@ -2687,7 +2582,7 @@ describe("ContextManager", () => {
           usageRatio: 0.98,
         },
       }),
-    ).toBe("prune-summary");
+    ).toBe("summary");
   });
 
   it("does not expose legacy compress or prune APIs", () => {
@@ -2856,51 +2751,6 @@ describe("ContextManager", () => {
     );
   });
 
-  it("prunes old completed tool output while protecting recent output", async () => {
-    const messageManager = createMessageManagerFixture();
-    const oldMessage = await messageManager.createMessage({
-      sessionId: "session_1",
-      role: "assistant",
-      agent: "test",
-    });
-    await messageManager.appendPart(oldMessage.id, {
-      type: "tool",
-      callId: "old_call",
-      tool: "read_file",
-      state: { status: "completed", input: {}, output: "old-output" },
-    });
-    const recentMessage = await messageManager.createMessage({
-      sessionId: "session_1",
-      role: "assistant",
-      agent: "test",
-    });
-    await messageManager.appendPart(recentMessage.id, {
-      type: "tool",
-      callId: "recent_call",
-      tool: "read_file",
-      state: { status: "completed", input: {}, output: "recent-output" },
-    });
-    const { manager, pruned } = createManager({ messageManager });
-
-    const result = await manager.compact("session_1", {
-      directory: "D:/repo",
-      force: true,
-      modelId: "model-a",
-    });
-
-    expect(result.prune).toEqual({
-      freedTokens: 10,
-      protectedCount: 1,
-      prunedCount: 1,
-      totalScanned: 2,
-    });
-
-    const history = await messageManager.listBySession("session_1");
-    expect(history[0]?.parts[0]?.time?.compacted).toBeDefined();
-    expect(history[1]?.parts[0]?.time?.compacted).toBeUndefined();
-    expect(pruned).toHaveLength(1);
-  });
-
   it("compresses older history into a synthetic summary message", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {
@@ -2934,7 +2784,10 @@ describe("ContextManager", () => {
     expect(result.status).toBe("compacted");
     expect(result.compression).toMatchObject({
       status: "compressed",
-      summaryMessageId: "message_5",
+      summaryMessageId:
+        result.compression?.status === "compressed"
+          ? result.compression.summaryMessageId
+          : "",
     });
     expect(result.compression?.savedTokens).toBeGreaterThan(0);
     const history = await messageManager.listBySession("session_1");
@@ -2944,7 +2797,13 @@ describe("ContextManager", () => {
     expect(history[2]?.parts[0]?.time?.compacted).toBe(compactedAt);
     expect(history[3]?.parts[0]?.time?.compacted).toBeUndefined();
     expect(history.at(-1)).toMatchObject({
-      info: { id: "message_5", role: "assistant" },
+      info: {
+        id:
+          result.compression?.status === "compressed"
+            ? result.compression.summaryMessageId
+            : "",
+        role: "assistant",
+      },
       parts: [
         {
           metadata: { kind: "context-summary" },
@@ -2961,146 +2820,19 @@ describe("ContextManager", () => {
       }),
     ).resolves.toMatchObject({
       hasSummary: true,
-      history: [{ info: { id: "message_5" } }, { info: { id: "message_4" } }],
+      history: [
+        {
+          info: {
+            id:
+              result.compression?.status === "compressed"
+                ? result.compression.summaryMessageId
+                : "",
+          },
+        },
+        { info: { id: "message_4" } },
+      ],
     });
     expect(compressed).toHaveLength(1);
-  });
-
-  it("compacts by pruning only when pruned context fits the model window", async () => {
-    const messageManager = createMessageManagerFixture();
-    const memory: MemoryReader = {
-      load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
-    };
-    const oldMessage = await messageManager.createMessage({
-      sessionId: "session_1",
-      role: "assistant",
-      agent: "test",
-    });
-    await messageManager.appendPart(oldMessage.id, {
-      type: "tool",
-      callId: "old_call",
-      tool: "read",
-      state: { status: "completed", input: {}, output: "x".repeat(80) },
-    });
-    await addTextMessage(messageManager, {
-      sessionId: "session_1",
-      role: "user",
-      text: "small",
-    });
-    const { manager } = createManager({
-      compressionThreshold: 0.5,
-      memory,
-      messageManager,
-      pruneMinimumTokens: 1,
-      pruneProtectTokens: 0,
-    });
-
-    const result = await manager.compact("session_1", {
-      directory: "D:/repo",
-      modelId: "model-a",
-    });
-
-    expect(result.status).toBe("pruned");
-    expect(result.prune).toMatchObject({ prunedCount: 1 });
-    expect(result.usageAfter.currentTokens).toBeLessThan(
-      result.usageBefore.currentTokens,
-    );
-    const context = await manager.assemble("session_1", "D:/repo", {
-      isSubagent: false,
-      toolNames: [],
-    });
-    expect(context.history).toHaveLength(1);
-    expect(context.history[0]?.info.role).toBe("user");
-  });
-
-  it("keeps compact prune-only path to one history read", async () => {
-    const messageManager = createMessageManagerFixture();
-    const memory: MemoryReader = {
-      load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
-    };
-    await addCompletedToolMessage(messageManager, {
-      sessionId: "session_1",
-      output: "x".repeat(80),
-    });
-    await addTextMessage(messageManager, {
-      sessionId: "session_1",
-      role: "user",
-      text: "small",
-    });
-    const listBySession = vi.spyOn(messageManager, "listBySession");
-    const { manager } = createManager({
-      compressionThreshold: 0.5,
-      memory,
-      messageManager,
-      pruneMinimumTokens: 1,
-      pruneProtectTokens: 0,
-    });
-
-    const result = await manager.compact("session_1", {
-      directory: "D:/repo",
-      modelId: "model-a",
-    });
-
-    expect(result.status).toBe("pruned");
-    expect(listBySession).toHaveBeenCalledTimes(1);
-  });
-
-  it("ignores retained usage metadata when compact resolves through prune only", async () => {
-    const messageManager = createMessageManagerFixture();
-    const memory: MemoryReader = {
-      load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
-    };
-    const oldMessage = await messageManager.createMessage({
-      sessionId: "session_1",
-      role: "assistant",
-      agent: "test",
-    });
-    await messageManager.appendPart(oldMessage.id, {
-      type: "tool",
-      callId: "old_call",
-      tool: "read",
-      state: { status: "completed", input: {}, output: "x".repeat(80) },
-    });
-    await addTextMessage(messageManager, {
-      sessionId: "session_1",
-      role: "assistant",
-      text: "small",
-      metadata: {
-        keep: true,
-        tokenUsage: {
-          completionTokens: 0,
-          promptTokens: 1_000,
-          totalTokens: 1_000,
-        },
-      },
-    });
-    const generateSummary = vi.fn<ContextLLMClient["generateSummary"]>();
-    const { manager } = createManager({
-      compressionThreshold: 0.5,
-      llmClient: { generateSummary },
-      memory,
-      messageManager,
-      pruneMinimumTokens: 1,
-      pruneProtectTokens: 0,
-    });
-
-    const result = await manager.compact("session_1", {
-      directory: "D:/repo",
-      modelId: "model-a",
-    });
-
-    expect(result.status).toBe("pruned");
-    expect(generateSummary).not.toHaveBeenCalled();
-    expect(result.usageAfter.currentTokens).toBeLessThan(100);
-    const history = await messageManager.listBySession("session_1");
-    expect(history[1]?.parts[0]?.metadata).toEqual({
-      keep: true,
-      tokenUsage: {
-        completionTokens: 0,
-        promptTokens: 1_000,
-        totalTokens: 1_000,
-      },
-    });
   });
 
   it("compacts by summarizing older history and re-injecting the summary into assembled context", async () => {
@@ -3136,7 +2868,10 @@ describe("ContextManager", () => {
     expect(result.status).toBe("compacted");
     expect(result.compression).toMatchObject({
       status: "compressed",
-      summaryMessageId: "message_5",
+      summaryMessageId:
+        result.compression?.status === "compressed"
+          ? result.compression.summaryMessageId
+          : "",
     });
     const context = await manager.assemble("session_1", "D:/repo", {
       isSubagent: false,
@@ -3145,14 +2880,20 @@ describe("ContextManager", () => {
     expect(context.hasSummary).toBe(true);
     expect(context.history).toMatchObject([
       {
-        info: { id: "message_5", role: "assistant" },
+        info: {
+          id:
+            result.compression?.status === "compressed"
+              ? result.compression.summaryMessageId
+              : "",
+          role: "assistant",
+        },
         parts: [{ text: "<state_snapshot>short</state_snapshot>" }],
       },
       { info: { id: "message_4", role: "assistant" } },
     ]);
   });
 
-  it("summarizes the active history after same-pass pruning", async () => {
+  it("summarizes complete active history without a preceding prune", async () => {
     const messageManager = createMessageManagerFixture();
     const memory: MemoryReader = {
       load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
@@ -3189,13 +2930,15 @@ describe("ContextManager", () => {
     });
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("## Goal\nshort");
+      .mockResolvedValue({
+        text: "## Goal\nshort",
+        summaryMessageId: "summary",
+        requests: [],
+      });
     const { manager } = createManager({
       llmClient: { generateSummary },
       memory,
       messageManager,
-      pruneMinimumTokens: 1,
-      pruneProtectTokens: 0,
     });
 
     const result = await manager.compact("session_1", {
@@ -3206,14 +2949,14 @@ describe("ContextManager", () => {
 
     expect(result.status).toBe("compacted");
     const summaryInput = generateSummary.mock.calls[0][0];
-    expect(
-      summaryInput.history.some((message) => message.info.id === oldMessage.id),
-    ).toBe(false);
+    expect(JSON.stringify(summaryInput.request.messages)).toContain(
+      "old-pruned.txt",
+    );
     const summaryPart = (await messageManager.listBySession("session_1")).at(-1)
       ?.parts[0];
     const summary = summaryPart?.type === "text" ? summaryPart.text : "";
-    expect(summary).not.toContain("old-pruned.txt");
-    expect(summary).not.toContain("<read-files>");
+    expect(summary).toContain("old-pruned.txt");
+    expect(summary).toContain("<read-files>");
   });
 
   it("retains token usage metadata after compaction because estimation no longer consumes it", async () => {
@@ -3248,7 +2991,11 @@ describe("ContextManager", () => {
     });
     const { manager } = createManager({
       llmClient: {
-        generateSummary: vi.fn().mockResolvedValue("## Goal\nshort"),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "## Goal\nshort",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       },
       messageManager,
     });
@@ -3309,9 +3056,11 @@ describe("ContextManager", () => {
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
       .mockImplementation((input) =>
-        Promise.resolve(
-          "s".repeat(Math.max(1, serializeHistory(input.history).length - 1)),
-        ),
+        Promise.resolve({
+          text: "s".repeat(JSON.stringify(input.request.messages).length),
+          summaryMessageId: input.summaryMessageId,
+          requests: [],
+        }),
       );
     const { manager } = createManager({
       llmClient: { generateSummary },
@@ -3331,57 +3080,15 @@ describe("ContextManager", () => {
     expect(await summaryMessageCount(messageManager, "session_1")).toBe(0);
   });
 
-  it("returns pruned when a projected summary would be worse than prune-only context", async () => {
+  it("appends the summary instruction while preserving the normal system prompt", async () => {
     const messageManager = createMessageManagerFixture();
-    await addCompletedToolMessage(messageManager, {
-      sessionId: "session_1",
-      output: "tool output ".repeat(20),
-    });
-    for (const [index, role] of [
-      "user",
-      "assistant",
-      "user",
-      "assistant",
-    ].entries()) {
-      await addTextMessage(messageManager, {
-        sessionId: "session_1",
-        role: role as "user" | "assistant",
-        text: `${String(index)} ${"x".repeat(80)}`,
+    const generateSummary = vi
+      .fn<ContextLLMClient["generateSummary"]>()
+      .mockResolvedValue({
+        text: "## Goal\nshort",
+        summaryMessageId: "summary",
+        requests: [],
       });
-    }
-    const generateSummary = vi
-      .fn<ContextLLMClient["generateSummary"]>()
-      .mockImplementation((input) =>
-        Promise.resolve(
-          "s".repeat(Math.max(1, serializeHistory(input.history).length - 1)),
-        ),
-      );
-    const { manager } = createManager({
-      llmClient: { generateSummary },
-      messageManager,
-      pruneMinimumTokens: 1,
-      pruneProtectTokens: 0,
-    });
-
-    const result = await manager.compact("session_1", {
-      directory: "D:/repo",
-      force: true,
-      modelId: "model-a",
-    });
-
-    expect(result.status).toBe("pruned");
-    expect(result.usageAfter.currentTokens).toBeLessThan(
-      result.usageBefore.currentTokens,
-    );
-    expect(result.prune?.prunedCount).toBe(1);
-    expect(await summaryMessageCount(messageManager, "session_1")).toBe(0);
-  });
-
-  it("passes the structured summarization system prompt to the summary client", async () => {
-    const messageManager = createMessageManagerFixture();
-    const generateSummary = vi
-      .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("## Goal\nshort");
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
@@ -3410,18 +3117,24 @@ describe("ContextManager", () => {
 
     expect(generateSummary).toHaveBeenCalledTimes(1);
     const summaryInput = generateSummary.mock.calls[0][0];
-    expect(summaryInput.prompt).toContain("## Goal");
-    expect(summaryInput.systemPrompt).toContain(
-      "context summarization assistant",
-    );
+    expect(summaryInput.request.messages.at(-1)?.content).toContain("## Goal");
+    expect(summaryInput.request.messages[0].content).toContain("system prompt");
   });
 
-  it("retries with an aggressive prompt when the first summary is inflated", async () => {
+  it("does not redo an inflated summary with another prompt", async () => {
     const messageManager = createMessageManagerFixture();
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValueOnce("x".repeat(200))
-      .mockResolvedValueOnce("short");
+      .mockResolvedValueOnce({
+        text: "x".repeat(200),
+        summaryMessageId: "summary",
+        requests: [],
+      })
+      .mockResolvedValueOnce({
+        text: "short",
+        summaryMessageId: "summary",
+        requests: [],
+      });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
@@ -3448,10 +3161,9 @@ describe("ContextManager", () => {
       modelId: "model-a",
     });
 
-    expect(result.status).toBe("compacted");
-    expect(result.compression?.status).toBe("compressed");
-    expect(generateSummary).toHaveBeenCalledTimes(2);
-    expect(generateSummary.mock.calls[1][0].prompt).toContain("CRITICAL");
+    expect(result.status).toBe("inflated");
+    expect(result.compression?.status).toBe("inflated");
+    expect(generateSummary).toHaveBeenCalledTimes(1);
   });
 
   it("fails summary overflow once and preserves scoped history without retiring unread parts", async () => {
@@ -3465,11 +3177,14 @@ describe("ContextManager", () => {
           code: "context_length_exceeded",
         }),
       )
-      .mockResolvedValueOnce("would succeed with missing history");
+      .mockResolvedValueOnce({
+        text: "would succeed with missing history",
+        summaryMessageId: "summary",
+        requests: [],
+      });
     const { compactionProgress, manager } = createManager({
       llmClient: { generateSummary },
       messageManager,
-      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
     });
     const result = await manager.compact("session_1", {
       contextScopeId: "child_1",
@@ -3506,7 +3221,6 @@ describe("ContextManager", () => {
     const { manager } = createManager({
       llmClient: { generateSummary },
       messageManager,
-      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
     });
 
     const result = await manager.compact("session_1", {
@@ -3533,7 +3247,6 @@ describe("ContextManager", () => {
     const { compactionFinished, manager } = createManager({
       llmClient: { generateSummary },
       messageManager,
-      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
     });
 
     await expect(
@@ -3557,12 +3270,15 @@ describe("ContextManager", () => {
       .fn<ContextLLMClient["generateSummary"]>()
       .mockImplementation(() => {
         controller.abort(new DOMException("cancelled", "AbortError"));
-        return Promise.resolve("short summary");
+        return Promise.resolve({
+          text: "short summary",
+          summaryMessageId: "summary",
+          requests: [],
+        });
       });
     const { manager } = createManager({
       llmClient: { generateSummary },
       messageManager,
-      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
     });
 
     await expect(
@@ -3597,9 +3313,13 @@ describe("ContextManager", () => {
     }
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("x".repeat(10_000));
+      .mockResolvedValue({
+        text: "x".repeat(10_000),
+        summaryMessageId: "summary",
+        requests: [],
+      });
     const { compactSkipped, manager } = createManager({
-      compressionThreshold: 0.5,
+      compressionThreshold: 0.02,
       llmClient: { generateSummary },
       maxCompactionsPerTurn: 10,
       messageManager,
@@ -3615,7 +3335,7 @@ describe("ContextManager", () => {
       modelId: "model-a",
       sessionId: "session_1",
     });
-    expect(generateSummary).toHaveBeenCalledTimes(4);
+    expect(generateSummary).toHaveBeenCalledTimes(2);
 
     await manager.prepareTurn({
       directory: "D:/repo",
@@ -3623,7 +3343,7 @@ describe("ContextManager", () => {
       sessionId: "session_1",
     });
 
-    expect(generateSummary).toHaveBeenCalledTimes(4);
+    expect(generateSummary).toHaveBeenCalledTimes(2);
     expect(compactSkipped.at(-1)).toMatchObject({
       reason: "thrash-locked",
       sessionId: "session_1",
@@ -3635,7 +3355,7 @@ describe("ContextManager", () => {
       modelId: "model-a",
       sessionId: "session_1",
     });
-    expect(generateSummary).toHaveBeenCalledTimes(6);
+    expect(generateSummary).toHaveBeenCalledTimes(3);
 
     await addTextMessage(messageManager, {
       sessionId: "session_1",
@@ -3647,64 +3367,41 @@ describe("ContextManager", () => {
       modelId: "model-a",
       sessionId: "session_1",
     });
-    expect(generateSummary).toHaveBeenCalledTimes(8);
+    expect(generateSummary).toHaveBeenCalledTimes(4);
   });
 
   it.each([8000, 10000])(
-    "preserves thrash unlock growth with %i output tokens, including zero input budget",
+    "rejects summary capacity before sending with %i ordinary output",
     async (output) => {
       const messageManager = createMessageManagerFixture();
-      for (const role of ["user", "assistant", "user", "assistant"] as const) {
+      for (const role of ["user", "assistant", "user", "assistant"] as const)
         await addTextMessage(messageManager, {
           sessionId: "session_1",
           role,
           text: "x".repeat(300),
         });
-      }
       const counter = createHeuristicTokenCounter({
         defaultLimit: 10000,
         defaultMaxOutputTokens: output,
       });
-      const generateSummary = vi
-        .fn<ContextLLMClient["generateSummary"]>()
-        .mockResolvedValue("x".repeat(10000));
-      const { manager, compactSkipped } = createManager({
+      const generateSummary = vi.fn<ContextLLMClient["generateSummary"]>();
+      const { manager } = createManager({
         messageManager,
+        tokenCounter: counter,
         llmClient: { generateSummary },
-        maxCompactionsPerTurn: 10,
-        compressionThreshold: 0.1,
-        pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
-        tokenCounter: {
-          ...counter,
-          estimateTokens: (text) => text.length,
-          getBudget: (model, options) =>
-            counter.getBudget(model, { ...options, safetyMarginTokens: 0 }),
-        },
       });
-      const prepare = (): ReturnType<typeof manager.prepareTurn> =>
-        manager.prepareTurn({
-          sessionId: "session_1",
-          directory: "D:/repo",
-          modelId: "custom",
-        });
-      await prepare();
-      await prepare();
-      expect(generateSummary).toHaveBeenCalledTimes(4);
-      await addTextMessage(messageManager, {
+      const result = await manager.prepareTurn({
         sessionId: "session_1",
-        role: "user",
-        text: "y".repeat(120),
+        directory: "/repo",
+        modelId: "custom",
       });
-      await prepare();
-      expect(generateSummary).toHaveBeenCalledTimes(4);
-      expect(compactSkipped.at(-1)).toMatchObject({ reason: "thrash-locked" });
-      await addTextMessage(messageManager, {
-        sessionId: "session_1",
-        role: "assistant",
-        text: "z".repeat(500),
-      });
-      await prepare();
-      expect(generateSummary).toHaveBeenCalledTimes(6);
+      expect(result.compaction?.status).toBe("failed");
+      expect(generateSummary).not.toHaveBeenCalled();
+      expect(
+        (await messageManager.listBySession("session_1"))
+          .flatMap((m) => m.parts)
+          .every((p) => p.time?.compacted === undefined),
+      ).toBe(true);
     },
   );
 
@@ -3724,9 +3421,13 @@ describe("ContextManager", () => {
     }
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("x".repeat(10_000));
+      .mockResolvedValue({
+        text: "x".repeat(10_000),
+        summaryMessageId: "summary",
+        requests: [],
+      });
     const { manager } = createManager({
-      compressionThreshold: 0.5,
+      compressionThreshold: 0.02,
       llmClient: { generateSummary },
       maxCompactionsPerTurn: 10,
       messageManager,
@@ -3757,7 +3458,7 @@ describe("ContextManager", () => {
       modelId: "model-a",
       sessionId: "session_1",
     });
-    expect(generateSummary).toHaveBeenCalledTimes(4);
+    expect(generateSummary).toHaveBeenCalledTimes(2);
 
     manager.disposeSession("session_1");
     const resetUsage = manager.getUsage({
@@ -3774,7 +3475,7 @@ describe("ContextManager", () => {
     expect(resetUsage.currentTokens).toBeLessThan(
       calibratedUsage.currentTokens,
     );
-    expect(generateSummary).toHaveBeenCalledTimes(6);
+    expect(generateSummary).toHaveBeenCalledTimes(3);
   });
 
   it("counts forced prepareTurn compactions but not manual compact calls", async () => {
@@ -3793,9 +3494,13 @@ describe("ContextManager", () => {
     }
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("x".repeat(10_000));
+      .mockResolvedValue({
+        text: "x".repeat(10_000),
+        summaryMessageId: "summary",
+        requests: [],
+      });
     const { compactSkipped, manager } = createManager({
-      compressionThreshold: 0.5,
+      compressionThreshold: 0.02,
       llmClient: { generateSummary },
       maxCompactionsPerTurn: 1,
       messageManager,
@@ -3813,7 +3518,7 @@ describe("ContextManager", () => {
       modelId: "model-a",
       sessionId: "session_1",
     });
-    expect(generateSummary).toHaveBeenCalledTimes(2);
+    expect(generateSummary).toHaveBeenCalledTimes(1);
     expect(compactSkipped.at(-1)).toMatchObject({
       reason: "per-turn-cap",
       sessionId: "session_1",
@@ -3830,10 +3535,10 @@ describe("ContextManager", () => {
       modelId: "model-a",
       sessionId: "session_1",
     });
-    expect(generateSummary).toHaveBeenCalledTimes(6);
+    expect(generateSummary).toHaveBeenCalledTimes(3);
   });
 
-  it("caps automatic prune-summary attempts per turn", async () => {
+  it("caps automatic summary attempts per turn", async () => {
     const messageManager = createMessageManagerFixture();
     for (const [index, role] of [
       "user",
@@ -3849,9 +3554,13 @@ describe("ContextManager", () => {
     }
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("x".repeat(10_000));
+      .mockResolvedValue({
+        text: "x".repeat(10_000),
+        summaryMessageId: "summary",
+        requests: [],
+      });
     const { compactSkipped, manager } = createManager({
-      compressionThreshold: 0.5,
+      compressionThreshold: 0.02,
       llmClient: { generateSummary },
       maxCompactionsPerTurn: 2,
       messageManager,
@@ -3869,7 +3578,7 @@ describe("ContextManager", () => {
       modelId: "model-a",
       sessionId: "session_1",
     });
-    expect(generateSummary).toHaveBeenCalledTimes(4);
+    expect(generateSummary).toHaveBeenCalledTimes(2);
 
     await manager.prepareTurn({
       directory: "D:/repo",
@@ -3877,7 +3586,7 @@ describe("ContextManager", () => {
       sessionId: "session_1",
     });
 
-    expect(generateSummary).toHaveBeenCalledTimes(4);
+    expect(generateSummary).toHaveBeenCalledTimes(2);
     expect(compactSkipped.at(-1)).toMatchObject({
       reason: "per-turn-cap",
       sessionId: "session_1",
@@ -3889,10 +3598,10 @@ describe("ContextManager", () => {
       modelId: "model-a",
       sessionId: "session_1",
     });
-    expect(generateSummary).toHaveBeenCalledTimes(6);
+    expect(generateSummary).toHaveBeenCalledTimes(3);
   });
 
-  it("does not summarize same-pass pruned file paths in compress summaries", async () => {
+  it("includes file operations from the complete active history", async () => {
     const messageManager = createMessageManagerFixture();
     const assistant = await messageManager.createMessage({
       sessionId: "session_1",
@@ -3931,7 +3640,11 @@ describe("ContextManager", () => {
     });
     const { manager } = createManager({
       llmClient: {
-        generateSummary: vi.fn().mockResolvedValue("## Goal\nshort"),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "## Goal\nshort",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       },
       messageManager,
     });
@@ -3947,7 +3660,7 @@ describe("ContextManager", () => {
       .find(isContextSummaryPart);
     const summaryText = summaryPart?.type === "text" ? summaryPart.text : "";
 
-    expect(summaryText).not.toContain("src/a.ts");
+    expect(summaryText).toContain("src/a.ts");
     expect(summaryText).toContain(
       "<modified-files>\n- src/b.ts\n</modified-files>",
     );
@@ -3990,7 +3703,11 @@ describe("ContextManager", () => {
     });
     const { manager } = createManager({
       llmClient: {
-        generateSummary: vi.fn().mockResolvedValue("## Goal\nshort"),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "## Goal\nshort",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       },
       messageManager,
     });
@@ -4011,9 +3728,11 @@ describe("ContextManager", () => {
 
   it("skips compression below threshold unless forced", async () => {
     const messageManager = createMessageManagerFixture();
-    const generateSummary = vi
-      .fn()
-      .mockResolvedValue("<state_snapshot>short</state_snapshot>");
+    const generateSummary = vi.fn().mockResolvedValue({
+      text: "<state_snapshot>short</state_snapshot>",
+      summaryMessageId: "summary",
+      requests: [],
+    });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
@@ -4108,7 +3827,11 @@ describe("ContextManager", () => {
     });
     const inflated = createManager({
       llmClient: {
-        generateSummary: vi.fn().mockResolvedValue("x".repeat(200)),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "x".repeat(200),
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       },
       messageManager: inflatedMessageManager,
     });
@@ -4128,50 +3851,5 @@ describe("ContextManager", () => {
     await expect(
       inflatedMessageManager.listBySession("session_inflated"),
     ).resolves.toHaveLength(3);
-  });
-
-  it("skips prune when candidate output is below the minimum freed-token threshold", async () => {
-    const messageManager = createMessageManagerFixture();
-    const oldMessage = await messageManager.createMessage({
-      sessionId: "session_1",
-      role: "assistant",
-      agent: "test",
-    });
-    await messageManager.appendPart(oldMessage.id, {
-      type: "tool",
-      callId: "old_call",
-      tool: "read_file",
-      state: { status: "completed", input: {}, output: "old-output" },
-    });
-    const recentMessage = await messageManager.createMessage({
-      sessionId: "session_1",
-      role: "assistant",
-      agent: "test",
-    });
-    await messageManager.appendPart(recentMessage.id, {
-      type: "tool",
-      callId: "recent_call",
-      tool: "read_file",
-      state: { status: "completed", input: {}, output: "recent-output" },
-    });
-    const { manager } = createManager({
-      messageManager,
-      pruneMinimumTokens: 50,
-    });
-
-    const result = await manager.compact("session_1", {
-      directory: "D:/repo",
-      force: true,
-      modelId: "model-a",
-    });
-
-    expect(result.prune).toEqual({
-      freedTokens: 0,
-      protectedCount: 1,
-      prunedCount: 0,
-      totalScanned: 2,
-    });
-    const history = await messageManager.listBySession("session_1");
-    expect(history[0]?.parts[0]?.time?.compacted).toBeUndefined();
   });
 });

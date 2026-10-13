@@ -1159,7 +1159,6 @@ function formatDataCommandOutput(
       const status = result ? getString(result, "status") : undefined;
       switch (status) {
         case "compacted":
-        case "pruned":
           return "Compacted";
         case "failed":
           return "Compact failed";

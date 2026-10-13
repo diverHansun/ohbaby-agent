@@ -132,7 +132,12 @@ function createHarness(isSubagent: boolean): ReferenceHarness {
     harness.contextManager = createContextManager({
       bus,
       llmClient: {
-        generateSummary: () => Promise.resolve("reference-summary"),
+        generateSummary: (input) =>
+          Promise.resolve({
+            text: "reference-summary",
+            summaryMessageId: input.summaryMessageId,
+            requests: [],
+          }),
       },
       maskEnabled: false,
       memory: {
@@ -145,7 +150,6 @@ function createHarness(isSubagent: boolean): ReferenceHarness {
       },
       messageManager: harness.messageManager,
       now,
-      pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
       systemPromptProvider: {
         build: () => Promise.resolve(SYSTEM_PROMPT),
       },

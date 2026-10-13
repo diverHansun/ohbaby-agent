@@ -578,7 +578,7 @@ describe("lifecycle tool scheduler integration", () => {
       expect(
         requests[1]?.messages.slice(0, requests[0]?.messages.length),
       ).toEqual(requests[0]?.messages);
-      expect(measurements.at(-1)).toEqual({
+      expect(measurements.at(-1)).toMatchObject({
         messages: requests[1]?.messages,
         tools: requests[1]?.tools,
       });
@@ -1294,11 +1294,11 @@ describe("lifecycle tool scheduler integration", () => {
     expect(firstNames).toEqual(["read"]);
     expect(secondNames).toEqual(["read", "mcp_s6_server_t6_search"]);
     expect(epochs).toEqual([0, 1]);
-    expect(firstPreparedRequest).toEqual({
+    expect(firstPreparedRequest).toMatchObject({
       messages: requests[0]?.messages,
       tools: requests[0]?.tools,
     });
-    expect(measurements.at(-1)).toEqual({
+    expect(measurements.at(-1)).toMatchObject({
       messages: requests[1]?.messages,
       tools: requests[1]?.tools,
     });

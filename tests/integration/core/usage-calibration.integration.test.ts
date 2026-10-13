@@ -261,7 +261,11 @@ async function runProtocol(
       llmClient: {
         generateSummary: vi
           .fn<ContextLLMClient["generateSummary"]>()
-          .mockResolvedValue("unused"),
+          .mockImplementation(async (input) => ({
+            text: "unused",
+            summaryMessageId: input.summaryMessageId,
+            requests: [],
+          })),
       },
       memory: {
         load: () => Promise.resolve({ global: "", project: "", merged: "" }),
@@ -744,7 +748,14 @@ describe("usage calibration across native provider streams", () => {
       });
       const contextManager = createContextManager({
         bus,
-        llmClient: { generateSummary: () => Promise.resolve("unused") },
+        llmClient: {
+          generateSummary: (input) =>
+            Promise.resolve({
+              text: "unused",
+              summaryMessageId: input.summaryMessageId,
+              requests: [],
+            }),
+        },
         memory: {
           load: () => Promise.resolve({ global: "", project: "", merged: "" }),
         },

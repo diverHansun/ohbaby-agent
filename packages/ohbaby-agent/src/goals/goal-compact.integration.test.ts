@@ -138,7 +138,12 @@ describe("goals x compact (integration)", () => {
     contextManager = createContextManager({
       bus: createBus(),
       llmClient: {
-        generateSummary: () => Promise.resolve(DISTORTED_SUMMARY),
+        generateSummary: (input) =>
+          Promise.resolve({
+            text: DISTORTED_SUMMARY,
+            summaryMessageId: input.summaryMessageId,
+            requests: [],
+          }),
       },
       memory,
       messageManager,

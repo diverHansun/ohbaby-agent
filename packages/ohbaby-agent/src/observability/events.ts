@@ -1,5 +1,33 @@
 import { defineDiagnosticEvent, diagnosticField } from "./logger.js";
 
+const unusedSummaryReasons = [
+  "aborted",
+  "failed",
+  "inflated",
+  "stale",
+  "summary-body-limit",
+] as const;
+export type UnusedSummaryReason = (typeof unusedSummaryReasons)[number];
+
+export const contextSummaryUnused = defineDiagnosticEvent({
+  component: "llm",
+  event: "llm.context_summary.unused",
+  fields: {
+    // Stable diagnostic fingerprints of the request and compaction identities.
+    operationId: diagnosticField.externalId("operation"),
+    compactionId: diagnosticField.externalId("operation"),
+    attempt: diagnosticField.integer(),
+    reason: diagnosticField.stringEnum(unusedSummaryReasons),
+    inputTokens: diagnosticField.optional(diagnosticField.integer()),
+    outputTokens: diagnosticField.optional(diagnosticField.integer()),
+    totalTokens: diagnosticField.optional(diagnosticField.integer()),
+    reasoningTokens: diagnosticField.optional(diagnosticField.integer()),
+    cacheReadTokens: diagnosticField.optional(diagnosticField.integer()),
+    cacheWriteTokens: diagnosticField.optional(diagnosticField.integer()),
+  },
+  level: "warn",
+});
+
 export const diagnosticsStarted = defineDiagnosticEvent({
   component: "diagnostics",
   event: "diagnostics.started",

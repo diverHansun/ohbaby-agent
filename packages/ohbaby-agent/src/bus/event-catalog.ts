@@ -276,18 +276,6 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
       "Internal domain event; contextScopeId is omitted only for primary.",
   },
   {
-    event: ContextEvent.Pruned,
-    owner: "Context",
-    scope: "session",
-    audience: ["domain", "tests"],
-    frequency: "low",
-    requiredContext: ["sessionId", "attemptId", "result"],
-    contextStatus: "complete",
-    uiVisible: "no",
-    decision:
-      "Internal domain event; contextScopeId is omitted only for primary.",
-  },
-  {
     event: ContextEvent.TurnPrepared,
     owner: "Context",
     scope: "session",

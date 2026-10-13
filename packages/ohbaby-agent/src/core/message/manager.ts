@@ -265,6 +265,7 @@ export function createMessageManager(
         input.summary === undefined
           ? undefined
           : allocateMessageRecord({
+              id: input.summary.messageId,
               agent: input.summary.agent,
               ...(input.contextScopeId === undefined
                 ? {}

@@ -954,6 +954,7 @@ export function createInProcessUiBackendClient(
         (usesPersistentStateStore() ? undefined : (): string => runIds.next());
 
       const runtime = await createUiRuntimeComposition({
+        logger: options.logger,
         agentManager: options.agentManager,
         bus,
         ...(options.createSubagentId

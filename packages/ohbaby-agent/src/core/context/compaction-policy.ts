@@ -35,9 +35,11 @@ export function getContextUsage(
   currentTokens: number,
   modelId: string,
   tokenCounter: Pick<TokenCounter, "getLimit" | "getBudget">,
+  requestedOutputTokens?: number,
 ): ContextUsage {
   const budget = tokenCounter.getBudget?.(modelId, {
     usedInputTokens: currentTokens,
+    ...(requestedOutputTokens === undefined ? {} : { requestedOutputTokens }),
   });
 
   if (budget) {
@@ -65,7 +67,7 @@ export function getContextUsage(
   };
 }
 
-export type CompactionRung = "none" | "mask" | "prune-summary" | "force";
+export type CompactionRung = "none" | "mask" | "summary" | "force";
 
 // Retain the legacy mask/thrash formula; capacity checks use the full reservation.
 const LEGACY_OUTPUT_RESERVATION_RATIO = 0.5;
@@ -88,6 +90,7 @@ export function getCompactionPressureRatio(usage: ContextUsage): number {
 export function decideCompactionRung(input: {
   readonly usage: ContextUsage;
   readonly compactionCount?: number;
+  readonly capacityPressure?: boolean;
   readonly force: boolean;
   readonly maxPerTurn?: number;
   readonly thresholds?: CompactionThresholds;
@@ -100,14 +103,17 @@ export function decideCompactionRung(input: {
     return "none";
   }
   const thresholds = input.thresholds ?? DEFAULT_COMPACTION_THRESHOLDS;
-  if (needsSummaryCompaction(input.usage, thresholds)) {
+  if (
+    input.capacityPressure === true ||
+    needsSummaryCompaction(input.usage, thresholds)
+  ) {
     if (
       (input.compactionCount ?? 0) >=
       (input.maxPerTurn ?? Number.POSITIVE_INFINITY)
     ) {
       return "mask";
     }
-    return "prune-summary";
+    return "summary";
   }
   if (getCompactionPressureRatio(input.usage) >= thresholds.mask) {
     return "mask";

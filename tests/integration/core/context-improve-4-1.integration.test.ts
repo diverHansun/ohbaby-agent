@@ -132,7 +132,11 @@ describe("context improve-4.1 integration", () => {
       llmClient: {
         generateSummary: vi
           .fn<ContextLLMClient["generateSummary"]>()
-          .mockResolvedValue("summary"),
+          .mockImplementation(async (input) => ({
+            text: "summary",
+            summaryMessageId: input.summaryMessageId,
+            requests: [],
+          })),
       },
       memory: {
         load: vi
@@ -291,7 +295,11 @@ describe("context improve-4.1 integration", () => {
       llmClient: {
         generateSummary: vi
           .fn<ContextLLMClient["generateSummary"]>()
-          .mockResolvedValue("summary"),
+          .mockImplementation(async (input) => ({
+            text: "summary",
+            summaryMessageId: input.summaryMessageId,
+            requests: [],
+          })),
       },
       memory: {
         load: vi
@@ -378,7 +386,10 @@ describe("context improve-4.1 integration", () => {
     expect({
       messages: requests[0]?.messages,
       tools: requests[0]?.tools,
-    }).toEqual(regularMeasurement);
+    }).toEqual({
+      messages: regularMeasurement?.messages,
+      tools: regularMeasurement?.tools,
+    });
     expect(JSON.stringify(requests[0]?.messages)).toContain(
       "Available tools: read_file",
     );
@@ -393,7 +404,10 @@ describe("context improve-4.1 integration", () => {
     expect({
       messages: requests[1]?.messages,
       tools: requests[1]?.tools,
-    }).toEqual(finalMeasurement);
+    }).toEqual({
+      messages: finalMeasurement?.messages,
+      tools: finalMeasurement?.tools,
+    });
     expect(JSON.stringify(requests[1]?.messages)).toContain(
       "Available tools: read_file",
     );

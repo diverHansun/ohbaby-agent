@@ -3295,7 +3295,7 @@ describe("createInProcessUiBackendClient", () => {
           [{ textDelta: "Fresh answer", finishReason: "stop" }],
         ],
         requests,
-        { contextWindowTokens: 4_096 },
+        { contextWindowTokens: 32_768, maxTokens: 30_000 },
       ),
       messageManager,
     });
@@ -5471,7 +5471,7 @@ describe("createInProcessUiBackendClient", () => {
       initialSnapshot: createInitialSnapshotWithTwoSessions(),
       llmClient: createFakeLLMClient(
         [{ textDelta: "## Goal\nshort", finishReason: "stop" }],
-        { contextWindowTokens: 1_000 },
+        { contextWindowTokens: 32_768, maxTokens: 30_000 },
       ),
       messageManager,
     });
@@ -5508,7 +5508,7 @@ describe("createInProcessUiBackendClient", () => {
       initialSnapshot: createInitialSnapshotWithTwoSessions(),
       llmClient: createFakeLLMClient(
         [{ textDelta: "## Goal\nshort", finishReason: "stop" }],
-        { contextWindowTokens: 1_000 },
+        { contextWindowTokens: 32_768, maxTokens: 30_000 },
       ),
       messageManager,
     });
@@ -5601,10 +5601,11 @@ describe("createInProcessUiBackendClient", () => {
       ...baseClient,
       config: {
         ...baseClient.config,
-        contextWindowTokens: 1_000,
+        contextWindowTokens: 32_768,
+        maxTokens: 30_000,
         modelProfiles: baseClient.config.modelProfiles?.map((profile) => ({
           ...profile,
-          contextWindowTokens: 1000,
+          contextWindowTokens: 32_768,
         })),
       },
     };

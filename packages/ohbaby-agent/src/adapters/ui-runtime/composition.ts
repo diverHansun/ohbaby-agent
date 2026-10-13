@@ -1,3 +1,4 @@
+import type { Logger } from "../../observability/logger.js";
 import {
   collectCleanup,
   createShutdownOptions,
@@ -40,7 +41,10 @@ import {
   type DisplayReasoningOwner,
 } from "../../core/lifecycle/index.js";
 import type { ResolvedStepTools } from "../../core/lifecycle/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import {
+  resolvePreparedRequestSettings,
+  type LLMClientInstance,
+} from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
 import { createMemoryLoader } from "../../core/memory/index.js";
 import {
@@ -160,6 +164,7 @@ const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
 };
 
 export interface UiRuntimeCompositionOptions {
+  readonly logger?: Logger;
   readonly agentManager?: AgentManager;
   readonly createSubagentId?: () => string;
   readonly bus: BusInstance;
@@ -632,6 +637,7 @@ export async function createUiRuntimeComposition(
       ),
       bus: options.bus,
       llmClient: createContextSummaryClient(options.llmClient),
+      logger: options.logger,
       memory: createMemoryLoader(),
       messageManager: options.messageManager,
       now: options.now,
@@ -1221,6 +1227,9 @@ export async function createUiRuntimeComposition(
         sessionId: input.sessionId,
       });
       const result = await contextManager.compact(input.sessionId, {
+        requestSettings: resolvePreparedRequestSettings(options.llmClient, {
+          reasoning,
+        }),
         modelOrigin: {
           provider: options.llmClient.config.provider,
           model: options.llmClient.config.model,

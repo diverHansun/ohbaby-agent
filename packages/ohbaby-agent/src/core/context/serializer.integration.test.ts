@@ -611,7 +611,11 @@ describe("serializeForLlm database metadata projection", () => {
       createContextManager({
         bus: createBus(),
         llmClient: {
-          generateSummary: vi.fn().mockResolvedValue("summary"),
+          generateSummary: vi.fn().mockResolvedValue({
+            text: "summary",
+            summaryMessageId: "summary",
+            requests: [],
+          }),
         },
         memory: {
           load: vi
@@ -658,11 +662,19 @@ describe("serializeForLlm database metadata projection", () => {
       idGenerator: createMessageIds("reopened_"),
       now: createClock(),
     });
-    const rebuildRuntimeContext = vi.fn().mockResolvedValue("replacement");
+    const rebuildRuntimeContext = vi.fn().mockResolvedValue({
+      text: "replacement",
+      summaryMessageId: "summary",
+      requests: [],
+    });
     const reopenedContextManager = createContextManager({
       bus: createBus(),
       llmClient: {
-        generateSummary: vi.fn().mockResolvedValue("summary"),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "summary",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       },
       memory: {
         load: vi
@@ -752,11 +764,19 @@ describe("serializeForLlm database metadata projection", () => {
       "inspect caching",
     );
 
-    const buildRuntimeContext = vi.fn().mockResolvedValue("new runtime");
+    const buildRuntimeContext = vi.fn().mockResolvedValue({
+      text: "new runtime",
+      summaryMessageId: "summary",
+      requests: [],
+    });
     const contextManager = createContextManager({
       bus: createBus(),
       llmClient: {
-        generateSummary: vi.fn().mockResolvedValue("summary"),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "summary",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       },
       memory: {
         load: vi

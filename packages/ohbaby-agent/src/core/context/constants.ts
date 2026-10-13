@@ -1,4 +1,4 @@
-export const COMPRESSION_THRESHOLD = 0.95;
+export const COMPRESSION_THRESHOLD = 0.9;
 export const COMPRESSION_PRESERVE_RATIO = 0.3;
 export const KEEP_RECENT_TOKENS = 20_000;
 export const MASK_EXEMPT_TOOL_PREFIXES = [
@@ -12,8 +12,6 @@ export const MASK_MIN_PRUNABLE_TOKENS = 20_000;
 export const MASK_MIN_USAGE_RATIO = 0.5;
 export const MASK_PLACEHOLDER_PREFIX = "[Old tool result cleared";
 export const MASK_PROTECTION_TOKENS = 40_000;
-export const PRUNE_PROTECT_TOKENS = 40_000;
-export const PRUNE_MINIMUM_TOKENS = 20_000;
 export const SUMMARY_AGENT_NAME = "context";
 export const THRASH_WINDOW = 2;
 export const THRASH_MIN_SAVINGS_RATIO = 0.1;
@@ -29,3 +27,6 @@ export const DEFAULT_COMPACTION_THRESHOLDS: CompactionThresholds = {
   mask: MASK_MIN_USAGE_RATIO,
   summary: COMPRESSION_THRESHOLD,
 };
+
+export const SUMMARY_BODY_TOKENS = 16_384;
+export const MAX_SUMMARY_PROVIDER_ATTEMPTS = 2;
