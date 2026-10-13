@@ -46,6 +46,37 @@ async function drainRequest(request: IncomingMessage): Promise<void> {
 }
 
 describe("openai-compatible provider", () => {
+  it.each([
+    ["openai", "gpt-4.1", "agent-step", 8192, "max_completion_tokens"],
+    ["openai", "o3", "context-summary", 32768, "max_completion_tokens"],
+    ["deepseek", "deepseek-flash", "agent-step", 8192, "max_tokens"],
+    ["deepseek", "deepseek-flash", "context-summary", 16384, "max_tokens"],
+  ] as const)(
+    "sends the %s %s %s output budget through %s tokens using %s",
+    async (id, model, purpose, maxTokens, field) => {
+      const provider = createOpenAICompatibleProvider({
+        id,
+        apiKey: "test-key",
+        baseUrl: "http://localhost:1",
+      });
+      const create = vi
+        .spyOn(provider.client.chat.completions, "create")
+        .mockResolvedValue(createChunkStream([]) as never);
+      await provider.streamResponse({
+        model,
+        messages: [{ role: "user", content: "Reply OK." }],
+        maxTokens,
+        purpose,
+        promptCache: { strategy: "observe-only", reason: "test" },
+      });
+      const body = create.mock.calls[0][0];
+      expect(body[field]).toBe(maxTokens);
+      expect(
+        body[field === "max_tokens" ? "max_completion_tokens" : "max_tokens"],
+      ).toBeUndefined();
+    },
+  );
+
   it("preserves role-specific empty, absent, null and multimodal input without normalizing values", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "test",
@@ -260,7 +291,7 @@ describe("openai-compatible provider", () => {
         model: "gpt-4",
         messages: [{ role: "user", content: "Hello" }],
         temperature: 0.7,
-        max_tokens: 128,
+        max_completion_tokens: 128,
         stream: true,
         stream_options: { include_usage: true },
         tools: [

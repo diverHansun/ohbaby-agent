@@ -75,7 +75,9 @@ function buildRequestParams(
     ...(request.temperature !== undefined
       ? { temperature: request.temperature }
       : {}),
-    max_tokens: request.maxTokens,
+    ...(options.id === "openai"
+      ? { max_completion_tokens: request.maxTokens }
+      : { max_tokens: request.maxTokens }),
     stream: true,
     stream_options: { include_usage: true },
   };
