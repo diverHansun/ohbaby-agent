@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import type { UiBackendClient, UiGoal } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CompactOverlayBody } from "./CompactOverlay.js";
 import {
   ConnectModelOverlayBody,
@@ -46,6 +46,8 @@ export function StructuredCommandOverlay(props: {
 }): ReactElement {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLElement | null>(null);
+  // Only compact reports busy; a stray backdrop click must not cancel its request.
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (dialogRef.current?.contains(document.activeElement)) {
       return;
@@ -67,7 +69,7 @@ export function StructuredCommandOverlay(props: {
   return (
     <div
       className="ohb-structured-overlay"
-      onClick={props.onClose}
+      onClick={busy ? undefined : props.onClose}
       role="presentation"
     >
       <section
@@ -86,7 +88,7 @@ export function StructuredCommandOverlay(props: {
           <button
             onClick={props.onClose}
             ref={closeButtonRef}
-            title="Close overlay"
+            title={busy ? "Stop compaction and close" : "Close overlay"}
             type="button"
           >
             <X size={16} />
@@ -106,6 +108,7 @@ export function StructuredCommandOverlay(props: {
         ) : (
           <CompactOverlayBody
             client={props.client}
+            onBusyChange={setBusy}
             sessionId={props.sessionId}
           />
         )}

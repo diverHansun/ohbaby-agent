@@ -3832,6 +3832,7 @@ describe("OhbabyWebApp slash command interactions", () => {
 
     expect(fake.compactSession).toHaveBeenCalledWith({
       sessionId: "session_1",
+      signal: expect.any(AbortSignal) as AbortSignal,
     });
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
