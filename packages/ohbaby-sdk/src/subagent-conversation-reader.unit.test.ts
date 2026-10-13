@@ -430,6 +430,107 @@ describe("subagent conversation reader", () => {
     reader.dispose();
   });
 
+  it.each([true, false])(
+    "keeps a runless compaction notice inside its delegation segment (request facts %s)",
+    (withRequest) => {
+      const first = {
+        ...execution("a", 1),
+        startedAt: 1000,
+        completedAt: 2000,
+      };
+      const second = { ...execution("b", 2), startedAt: 2000 };
+      const notice: UiMessage = {
+        id: "summary-a",
+        role: "system",
+        createdAt: new Date(withRequest ? 2000 : 1500).toISOString(),
+        parts: [
+          {
+            type: "text",
+            text: "Context compacted",
+            metadata: { kind: "context-compaction" },
+          },
+        ],
+        ...(withRequest
+          ? {
+              modelRequests: [
+                {
+                  purpose: "context-summary" as const,
+                  requestId: "request-summary",
+                  messageId: "summary-a",
+                  compactionId: "compact-a",
+                  attempt: 1,
+                  startedAt: 1500,
+                  endedAt: 1900,
+                  outcome: "success" as const,
+                },
+              ],
+            }
+          : {}),
+      };
+      const timed = (id: string, at: number, runId: string): UiMessage => ({
+        ...message(id, "", runId),
+        createdAt: new Date(at).toISOString(),
+      });
+      const ordered = compareSubagentMessages(
+        [
+          timed("parent-a", 900, "run-a"),
+          timed("body-a", 1100, "run-a"),
+          notice,
+          timed("parent-b", 950, "run-b"),
+          timed("body-b", 2200, "run-b"),
+        ],
+        [second, first],
+      );
+      expect(ordered.map((item) => item.id)).toEqual([
+        "parent-a",
+        "body-a",
+        "summary-a",
+        "parent-b",
+        "body-b",
+      ]);
+      expect(
+        ordered.find((item) => item.id === "summary-a"),
+      ).not.toHaveProperty("runId");
+    },
+  );
+
+  it("does not assign a compaction notice to a legacy execution without a child run", () => {
+    const active = { ...execution("a", 1), startedAt: 1000, completedAt: 2000 };
+    const legacy = {
+      ...execution("legacy", 2),
+      childRunId: undefined,
+      startedAt: 1200,
+    };
+    const notice: UiMessage = {
+      id: "summary-a",
+      role: "system",
+      createdAt: new Date(1500).toISOString(),
+      parts: [
+        {
+          type: "text",
+          text: "Context compacted",
+          metadata: { kind: "context-compaction" },
+        },
+      ],
+    };
+    const parentLegacy = { ...message("parent-legacy", ""), runId: undefined };
+    const ordered = compareSubagentMessages(
+      [
+        message("parent-a", ""),
+        { ...message("body-a", ""), createdAt: new Date(1100).toISOString() },
+        notice,
+        parentLegacy,
+      ],
+      [active, legacy],
+    );
+    expect(ordered.map((item) => item.id)).toEqual([
+      "parent-a",
+      "body-a",
+      "summary-a",
+      "parent-legacy",
+    ]);
+  });
+
   it("sorts parent before its process and preserves delegation segments", () => {
     const first = execution("a", 1);
     const second = execution("b", 2);

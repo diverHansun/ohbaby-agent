@@ -217,6 +217,11 @@ export function messageToUiMessage(
     return {
       createdAt: toIsoString(message.info.time.created),
       id: message.info.id,
+      ...(message.info.contextScopeId !== undefined &&
+      message.info.role === "assistant" &&
+      message.info.modelRequests !== undefined
+        ? { modelRequests: message.info.modelRequests }
+        : {}),
       parts: [
         {
           text: `${estimate}${omission}`,

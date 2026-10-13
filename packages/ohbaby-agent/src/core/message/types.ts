@@ -298,11 +298,20 @@ export interface StoreModelStepInput extends CommitModelStepInput {
   readonly toolPartIds: readonly string[];
 }
 
+/** Read-only execution association for summaries, which deliberately have no runId. */
+export interface RunSummaryWindow {
+  readonly startedAt: number;
+  readonly completedAt?: number;
+  readonly nextStartedAt?: number;
+}
+
 export interface MessagePageOptions {
   readonly limit?: number;
   readonly before?: string;
   readonly after?: string;
   readonly scope?: MessageScopeFilter;
+  /** Only valid for a run page with an explicit scope. Includes retired summaries. */
+  readonly includeRunSummaries?: RunSummaryWindow;
 }
 
 export interface MessagePage {

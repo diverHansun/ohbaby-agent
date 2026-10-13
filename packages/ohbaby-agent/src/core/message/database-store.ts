@@ -203,8 +203,33 @@ export function createDatabaseMessageStore(
         }
       }
       if (runId !== undefined) {
-        clauses.push("json_extract(data, '$.runId') = ?");
         params.push(runId);
+        const window = options.includeRunSummaries;
+        if (window === undefined) {
+          clauses.push("json_extract(data, '$.runId') = ?");
+        } else {
+          // Request start belongs to the execution even when the summary commit
+          // and the following execution start share a millisecond.
+          const at = `COALESCE((SELECT json_extract(request.value, '$.startedAt')
+            FROM json_each(${schema.message.tableName}.data, '$.modelRequests') AS request
+            WHERE json_extract(request.value, '$.purpose') = 'context-summary' LIMIT 1), created_at)`;
+          const bounds = [`${at} >= ?`];
+          params.push(window.startedAt);
+          if (window.completedAt !== undefined) {
+            bounds.push(`${at} <= ?`);
+            params.push(window.completedAt);
+          }
+          if (window.nextStartedAt !== undefined) {
+            bounds.push(`${at} < ?`);
+            params.push(window.nextStartedAt);
+          }
+          clauses.push(`(json_extract(data, '$.runId') = ? OR
+            (json_extract(data, '$.runId') IS NULL AND ${bounds.join(" AND ")}
+             AND EXISTS (SELECT 1 FROM ${schema.part.tableName} AS summary
+               WHERE summary.message_id = ${schema.message.tableName}.id
+               AND summary.type = 'text'
+               AND json_extract(summary.data, '$.metadata.kind') = 'context-summary')))`);
+        }
       }
       if (cursor !== undefined) {
         clauses.push(

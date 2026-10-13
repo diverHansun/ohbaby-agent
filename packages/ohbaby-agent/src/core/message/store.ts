@@ -31,8 +31,13 @@ import type {
   UpdatePartCondition,
   StoreCompactionInput,
   TextPart,
+  RunSummaryWindow,
 } from "./types.js";
-import { isModelContextPart, MODEL_CONTEXT_RUNTIME_KIND } from "./origin.js";
+import {
+  isContextSummaryPart,
+  isModelContextPart,
+  MODEL_CONTEXT_RUNTIME_KIND,
+} from "./origin.js";
 
 export function createInMemoryMessageStore(): MessageStore {
   const messages = new Map<string, Message>();
@@ -98,7 +103,11 @@ export function createInMemoryMessageStore(): MessageStore {
           message.sessionId === sessionId &&
           (options.scope === undefined ||
             message.contextScopeId === options.scope.contextScopeId) &&
-          (runId === undefined || message.runId === runId) &&
+          (runId === undefined ||
+            message.runId === runId ||
+            (message.runId === undefined &&
+              options.includeRunSummaries !== undefined &&
+              summaryInWindow(message, options.includeRunSummaries))) &&
           (cursor === undefined ||
             (direction === "before"
               ? message.time.created < cursor.createdAt ||
@@ -117,6 +126,24 @@ export function createInMemoryMessageStore(): MessageStore {
         parts: listPartsForMessage(message.id),
       }));
     return makeMessagePage(sessionId, options, entries, limit, runId);
+  }
+
+  function summaryInWindow(
+    message: Message,
+    window: RunSummaryWindow,
+  ): boolean {
+    const at =
+      message.role === "assistant"
+        ? (message.modelRequests?.find(
+            (request) => request.purpose === "context-summary",
+          )?.startedAt ?? message.time.created)
+        : message.time.created;
+    return (
+      at >= window.startedAt &&
+      (window.completedAt === undefined || at <= window.completedAt) &&
+      (window.nextStartedAt === undefined || at < window.nextStartedAt) &&
+      listPartsForMessage(message.id).some(isContextSummaryPart)
+    );
   }
 
   return {

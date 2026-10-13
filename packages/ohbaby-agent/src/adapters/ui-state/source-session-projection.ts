@@ -544,12 +544,13 @@ export class SourceSessionProjection {
     runId: string,
     before?: string,
     limit?: number,
+    includeRunSummaries?: import("../../core/message/types.js").RunSummaryWindow,
   ): Promise<UiSessionHistory> {
     return this.owner.run(sessionId, async () => {
       const page = await this.options.messageManager.listPageByRun(
         sessionId,
         runId,
-        { before, limit, scope: { contextScopeId } },
+        { before, limit, scope: { contextScopeId }, includeRunSummaries },
       );
       const messages = page.messages
         .map((record) =>

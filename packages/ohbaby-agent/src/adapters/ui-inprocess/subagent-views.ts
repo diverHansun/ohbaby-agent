@@ -10,6 +10,7 @@ import type {
   SubagentExecutionStore,
 } from "../../agents/subagents/execution-store.js";
 import type { SourceSessionProjection } from "../ui-state/source-session-projection.js";
+import { subagentSummaryWindow } from "./subagent-summary-window.js";
 
 export const projectSubagentExecution = (
   record: SubagentExecutionRecord,
@@ -127,6 +128,7 @@ export function createSubagentViewReader(options: {
               record.childRunId,
               input.before,
               limit,
+              await subagentSummaryWindow(record, options.executions),
             )
           : undefined;
       if (!history && input.before)

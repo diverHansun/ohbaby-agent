@@ -620,117 +620,150 @@ describe("createPersistentUiStateStore", () => {
     expect(JSON.stringify(messages)).not.toContain("raw summary text");
   });
 
-  it("keeps every compaction notice after an inherited summary retires", async () => {
-    const messageManager = createMessageManager({
-      bus: createBus(),
-      store: createDatabaseMessageStore(),
-      idGenerator: createDeterministicMessageIds(),
-      now: createClock(2_000),
-    });
-    const sessionManager = createSessionManager({
-      bus: createBus(),
-      createSessionId: () => "session_1",
-      messageCleaner: {
-        removeMessages(sessionId: string) {
-          return messageManager.removeMessages(sessionId);
-        },
-      },
-      now: createClock(1_000),
-      projectResolver: PROJECT_RESOLVER,
-      store: createDatabaseSessionStore(),
-    });
-    const session = await sessionManager.create("D:/repo", {
-      title: "Compacted twice",
-    });
-    const compactUser = async (text: string): Promise<Part> => {
-      const user = await messageManager.createMessage({
-        agent: "default",
-        role: "user",
-        sessionId: session.id,
+  it.each([undefined, "child-scope"])(
+    "keeps every compaction notice after an inherited summary retires [scope=%s]",
+    async (contextScopeId) => {
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createDatabaseMessageStore(),
+        idGenerator: createDeterministicMessageIds(),
+        now: createClock(2_000),
       });
-      return messageManager.appendPart(user.id, { text, type: "text" });
-    };
-    const commit = async (
-      id: string,
-      expectedParts: readonly Part[],
-      before: number,
-      after: number,
-    ): Promise<TextPart> => {
-      const result = await messageManager.commitCompaction({
-        compactedAt: before,
-        expectedParts,
-        sessionId: session.id,
-        summary: {
-          messageId: id,
-          agent: SUMMARY_AGENT_NAME,
-          text: `raw summary body ${id}`,
-          modelRequests: [
+      const sessionManager = createSessionManager({
+        bus: createBus(),
+        createSessionId: () => "session_1",
+        messageCleaner: {
+          removeMessages(sessionId: string) {
+            return messageManager.removeMessages(sessionId);
+          },
+        },
+        now: createClock(1_000),
+        projectResolver: PROJECT_RESOLVER,
+        store: createDatabaseSessionStore(),
+      });
+      const session = await sessionManager.create("D:/repo", {
+        title: "Compacted twice",
+      });
+      const compactUser = async (text: string): Promise<Part> => {
+        const user = await messageManager.createMessage({
+          agent: "default",
+          role: "user",
+          sessionId: session.id,
+          contextScopeId,
+        });
+        return messageManager.appendPart(user.id, { text, type: "text" });
+      };
+      const commit = async (
+        id: string,
+        expectedParts: readonly Part[],
+        before: number,
+        after: number,
+      ): Promise<TextPart> => {
+        const result = await messageManager.commitCompaction({
+          compactedAt: before,
+          contextScopeId,
+          expectedParts,
+          sessionId: session.id,
+          summary: {
+            messageId: id,
+            agent: SUMMARY_AGENT_NAME,
+            text: `raw summary body ${id}`,
+            modelRequests: [
+              {
+                requestId: `request_${id}`,
+                compactionId: `compaction_${id}`,
+                messageId: id,
+                attempt: 1,
+                purpose: "context-summary",
+                startedAt: 1,
+                endedAt: 2,
+                outcome: "success",
+              },
+            ],
+            metadata: { usageBeforeTokens: before, usageAfterTokens: after },
+          },
+        });
+        if (result?.summary === undefined) throw new Error("commit failed");
+        return result.summary.part;
+      };
+      const firstSummary = await commit(
+        "summary_1",
+        [await compactUser("first old prompt")],
+        90_000,
+        20_000,
+      );
+      await commit(
+        "summary_2",
+        [firstSummary, await compactUser("second old prompt")],
+        95_000,
+        25_000,
+      );
+      const store = createPersistentUiStateStore({
+        messageManager,
+        projectRoot: "D:/repo",
+        runLedger: createDatabaseRunLedger(),
+        sessionManager,
+      });
+
+      const messages = (await store.readSnapshot()).sessions[0]?.messages ?? [];
+
+      expect(messages).toEqual([
+        expect.objectContaining({
+          id: "summary_1",
+          role: "system",
+          parts: [
             {
-              requestId: `request_${id}`,
-              compactionId: `compaction_${id}`,
-              messageId: id,
-              attempt: 1,
-              purpose: "context-summary",
-              startedAt: 1,
-              endedAt: 2,
-              outcome: "success",
+              text: "Compacted (estimated): 90,000 -> 20,000 tokens",
+              type: "text",
+              metadata: { kind: "context-compaction" },
             },
           ],
-          metadata: { usageBeforeTokens: before, usageAfterTokens: after },
-        },
-      });
-      if (result?.summary === undefined) throw new Error("commit failed");
-      return result.summary.part;
-    };
-    const firstSummary = await commit(
-      "summary_1",
-      [await compactUser("first old prompt")],
-      90_000,
-      20_000,
-    );
-    await commit(
-      "summary_2",
-      [firstSummary, await compactUser("second old prompt")],
-      95_000,
-      25_000,
-    );
-    const store = createPersistentUiStateStore({
-      messageManager,
-      projectRoot: "D:/repo",
-      runLedger: createDatabaseRunLedger(),
-      sessionManager,
-    });
-
-    const messages = (await store.readSnapshot()).sessions[0]?.messages ?? [];
-
-    expect(messages).toEqual([
-      expect.objectContaining({
-        id: "summary_1",
-        role: "system",
-        parts: [
+        }),
+        expect.objectContaining({
+          id: "summary_2",
+          role: "system",
+          parts: [
+            {
+              text: "Compacted (estimated): 95,000 -> 25,000 tokens",
+              type: "text",
+              metadata: { kind: "context-compaction" },
+            },
+          ],
+        }),
+      ]);
+      if (contextScopeId === undefined) {
+        expect(JSON.stringify(messages)).not.toMatch(
+          /raw summary body|old prompt|modelRequests|context-summary/u,
+        );
+      } else {
+        expect(messages[0]?.modelRequests).toEqual([
           {
-            text: "Compacted (estimated): 90,000 -> 20,000 tokens",
-            type: "text",
-            metadata: { kind: "context-compaction" },
+            requestId: "request_summary_1",
+            compactionId: "compaction_summary_1",
+            messageId: "summary_1",
+            attempt: 1,
+            purpose: "context-summary",
+            startedAt: 1,
+            endedAt: 2,
+            outcome: "success",
           },
-        ],
-      }),
-      expect.objectContaining({
-        id: "summary_2",
-        role: "system",
-        parts: [
-          {
-            text: "Compacted (estimated): 95,000 -> 25,000 tokens",
-            type: "text",
-            metadata: { kind: "context-compaction" },
-          },
-        ],
-      }),
-    ]);
-    expect(JSON.stringify(messages)).not.toMatch(
-      /raw summary body|old prompt|modelRequests|context-summary/u,
-    );
-  });
+        ]);
+        expect(messages[1]?.modelRequests?.[0]).toMatchObject({
+          messageId: "summary_2",
+          purpose: "context-summary",
+          startedAt: 1,
+        });
+        for (const notice of messages) {
+          expect(notice).not.toHaveProperty("runId");
+          expect(notice.modelRequests?.[0]).not.toHaveProperty("runId");
+          expect(notice.modelRequests?.[0]).not.toHaveProperty("step");
+        }
+        expect(JSON.stringify(messages)).not.toMatch(
+          /raw summary body|old prompt/u,
+        );
+      }
+    },
+  );
 
   it("omits compacted message parts from persistent UI snapshots", async () => {
     const messageManager = createMessageManager({
