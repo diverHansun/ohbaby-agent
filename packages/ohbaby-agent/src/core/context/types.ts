@@ -126,9 +126,6 @@ export type CompressionStatus =
   | "inflated";
 
 export type CompressionSkipReason = "stale" | "too-short";
-export type CompressionFailureReason =
-  | "summary-overflow-exhausted"
-  | "summary-overflow-minimum";
 
 interface CompressionMetrics {
   readonly originalTokens: number;
@@ -148,7 +145,6 @@ export type CompressionResult =
   | (CompressionMetrics & {
       readonly status: "failed";
       readonly error: string;
-      readonly reason?: CompressionFailureReason;
     })
   | (CompressionMetrics & { readonly status: "inflated" });
 

@@ -33,8 +33,8 @@
 
 | 场景 | 预期验证 |
 |------|---------|
-| 默认构造 | 返回对象可赋给 `core/context` 的 `TokenCounter`；`estimateTokens("abcd") = 1`；`getLimit("gpt-4") = 8_192` |
-| 配置 defaultLimit | 未知模型 `getLimit` 返回配置值；已知模型（如 `gpt-4o`）仍返回内置 `128_000` |
+| 默认构造 | 返回对象可赋给 `core/context` 的 `TokenCounter`；`estimateTokens("abcd") = 1`；`getLimit("gpt-4") = 128_000` |
+| 配置 defaultLimit | 所有无显式 profile 的模型 `getLimit` 返回配置值，不被 `gpt-4o` 等前缀覆盖 |
 | 注册自定义 profile | `getLimit` 返回自定义 context 窗口；`getBudget` 返回符合该 profile 的预算（input/output/safety margin 等字段） |
 
 **验证方式：** 检查端口结构兼容性，并对 `getLimit` / `getBudget` 的解析结果做断言。模型 profile 自身的解析细节在 `modelProfiles` 的测试中覆盖，此处只验证经由 counter 的透传是否正确。
@@ -106,7 +106,7 @@ describe('tokenCounting', () => {
 
 2. **权重固定处用精确值，模型表演进处用宽松断言**
    - 文本估算权重固定，可断言精确值
-   - 模型限额可能随内置表演进，断言时优先用 `toBeGreaterThanOrEqual` 等范围
+   - 模型限额按显式 profile／配置默认值断言，不再依赖内置前缀表
 
 3. **保持测试数据的现实性**
    - 使用真实的模型标识与文本示例

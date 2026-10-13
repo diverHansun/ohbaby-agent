@@ -35,7 +35,7 @@ describe("tokenCounting", () => {
       const counter: TokenCounter = createHeuristicTokenCounter();
 
       expect(counter.estimateTokens("abcd")).toBe(1);
-      expect(counter.getLimit("gpt-4")).toBe(8_192);
+      expect(counter.getLimit("gpt-4")).toBe(128_000);
     });
 
     it("uses a configured default context window for unknown model ids", () => {
@@ -44,7 +44,7 @@ describe("tokenCounting", () => {
       });
 
       expect(counter.getLimit("custom-large-context-model")).toBe(256_000);
-      expect(counter.getLimit("gpt-4o")).toBe(128_000);
+      expect(counter.getLimit("gpt-4o")).toBe(256_000);
     });
 
     it("uses registered model profiles for context limits and token budgets", () => {
@@ -68,10 +68,10 @@ describe("tokenCounting", () => {
         }),
       ).toMatchObject({
         contextWindowTokens: 250_000,
-        inputBudgetTokens: 232_000,
+        inputBudgetTokens: 228_000,
         maxOutputTokens: 16_000,
-        remainingInputTokens: 212_000,
-        reservedOutputTokens: 16_000,
+        remainingInputTokens: 208_000,
+        reservedOutputTokens: 20_000,
         safetyMarginTokens: 2_000,
       });
     });

@@ -9,7 +9,7 @@
 3. primary、child/sibling scope 是否隔离？
 4. 部分写、并发、abort 和 hard crash 后 durable truth 是否可恢复？
 5. 同 run/epoch 的 system、runtime、tools 前缀是否稳定？
-6. summary 请求自身超窗时能否有界缩小，而不是无限失败？
+6. summary 请求自身超窗时是否直接失败，且未读原文不被错误退场？
 7. Context event 是否属于正确 scope/attempt，且不会冒充 durable truth？
 
 ## 二、分层职责
@@ -28,7 +28,7 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
 - measured `{ messages, tools }` 与 adapter 实际输入深等价。
 - `PreparedModelRequest` 创建后不可被 MCP load、permission change、retry 或调用方 mutation 改写。
-- `ContextUsage.usageRatio` 保留 input budget 口径；summary 独立使用 `currentTokens / contextLimit >= 0.95`，与 UI 完整窗口占用一致，输入预算不足不提前摘要。
+- `ContextUsage.usageRatio` 使用完整输出预留后的 input budget；mask/thrash 局部使用原半窗压力比以保持时序；summary 独立使用 `currentTokens / contextLimit >= 0.95`，与 UI 完整窗口占用一致，输入预算不足不提前摘要。
 - cache read/write/uncached 是 inclusive input breakdown，不改变窗口占用总量。
 - summary 与被替代原文不同时 active；失败不声称成功。
 - 同 initiating message 的 runtime part 基数不超过 1，包括并发/多 manager/restart。
@@ -60,7 +60,7 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 ### 4.3 Compaction/failure
 
 - summary 非 overflow 失败、inflated、stream abort；
-- summary request context overflow 后按完整 turn/API round 严格缩小，清前导 orphan tool result，有 max/abort；
+- summary request context overflow 首次失败即停止，预设第二次成功也不能调用；隔离 prune 后，SQLite 重开原 parts 完全不变；
 - create summary、append part、第 N 个 compacted update、prune 第 N 个 update、commit 后 event 前故障；
 - hard SIGKILL 等待 marker 精确内容，不只等待文件存在；
 - auto+auto、manual+auto、manual+manual、manual+prompt；
@@ -148,3 +148,10 @@ test:context:eval
 ## 九、验收关系
 
 本文件描述长期模块规则；联合回归的可执行 ID 与最终门以 `improve-4-to-5-regression/04-test-and-acceptance.md` 为准。实施完成后实际证据、偏差和剩余风险写入同目录的 `05-implementation-acceptance.md`，不得回写本文件伪造测试进度。
+
+## improve-1 新增回归（2026-10-13）
+
+- 尾段计数严格对照正式请求投影，覆盖工具 metadata、活动 reasoning、展示副本和原生 opaque 状态；逐消息切点也接受同一 Map。
+- 输出超过半窗与输入预算为零时，完整预留不缩小，mask/thrash 仍按旧阈值触发和解锁。
+- 正常摘要成功后的精确退场 part IDs 等于发送历史；超窗失败没有缩水请求或摘要提交。
+- usage reasoning 保持可选、缺失不填零、总量不重复相加；本批真实三协议服务结果见[验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-1/05-implementation-acceptance.md)。

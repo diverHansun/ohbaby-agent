@@ -1088,7 +1088,52 @@ describe("createUiRuntimeComposition skill tools", () => {
     );
   });
 
-  it("does not reserve an oversized fallback output budget for unknown models", async () => {
+  it.each([false, true])(
+    "reserves the configured ordinary output with a user profile present=%s",
+    async (withProfile) => {
+      const bus = createBus();
+      const workdir = await tempWorkdir();
+      const messageManager = createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      });
+      const composition = await createUiRuntimeComposition({
+        agentManager: new AgentManager(),
+        bus,
+        messageManager,
+        llmClient: fakeLlmClient({
+          model: "gpt-5",
+          maxTokens: 16_000,
+          contextWindowTokens: 96_000,
+          modelProfiles: withProfile
+            ? [
+                {
+                  model: "gpt-5",
+                  contextWindowTokens: 80_000,
+                  maxOutputTokens: 32_000,
+                },
+              ]
+            : [],
+        }),
+        mcpManager: { getAllTools: () => Promise.resolve([]) },
+        permissionState: createPermissionState({
+          bus,
+          initialLevel: "full-access",
+        }),
+        skillRegistry: createMutableSkillRegistry([]),
+        workdir,
+      });
+      const usage = await composition.getContextUsage({
+        sessionId: "session_budget",
+        projectRoot: workdir,
+      });
+      expect(usage.reservedOutputTokens).toBe(16_000);
+      expect(usage.contextLimit).toBe(withProfile ? 80_000 : 96_000);
+      expect(usage.inputBudgetTokens).toBe(withProfile ? 62_976 : 78_976);
+    },
+  );
+
+  it("keeps mask timing stable for an oversized ordinary output preference", async () => {
     const bus = createBus();
     const workdir = await tempWorkdir();
     const messageManager = createMessageManager({

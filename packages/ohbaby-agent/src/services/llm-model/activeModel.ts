@@ -1,4 +1,4 @@
-import { activeModelProfiles } from "../../config/llm/model-profile.js";
+import { activeModelBudgetProfiles } from "../../config/llm/model-profile.js";
 import type { LLMConfig, InterfaceProviderKind } from "../../config/index.js";
 import {
   createModelProfileRegistry,
@@ -19,7 +19,9 @@ export interface ActiveModelSummary {
 export function summarizeActiveModel(config: LLMConfig): ActiveModelSummary {
   const registry = createModelProfileRegistry({
     defaultProvider: config.provider,
-    userProfiles: activeModelProfiles(config),
+    fallbackContextWindowTokens: config.contextWindowTokens,
+    fallbackMaxOutputTokens: config.maxTokens,
+    userProfiles: activeModelBudgetProfiles(config),
   });
   const profile = registry.resolve(config.model, config.provider);
   const label = profile.label ?? config.model;

@@ -19,12 +19,6 @@ const CompressionResultSchema = z.discriminatedUnion("status", [
   CompressionMetricsSchema.extend({
     status: z.literal("failed"),
     error: z.string(),
-    reason: z
-      .union([
-        z.literal("summary-overflow-exhausted"),
-        z.literal("summary-overflow-minimum"),
-      ])
-      .optional(),
   }),
   CompressionMetricsSchema.extend({ status: z.literal("inflated") }),
 ]);
@@ -95,8 +89,7 @@ export const ContextEvent = {
     ScopedContextIdentitySchema.extend({
       attemptId: z.string(),
       attempt: z.number().int().positive(),
-      droppedRounds: z.number().int().nonnegative(),
-      // Readable-history retry score, not the complete summary request token estimate.
+      // Model history projection estimate; excludes system/tools request overhead.
       estimatedHistoryTokens: z.number().nonnegative(),
     }),
   ),

@@ -35,7 +35,7 @@ durable MessageStore
 currentTokens / contextLimit >= 0.95
 ```
 
-- contextLimit 来自模型连接时探测的窗口，失败时沿用配置／默认回退；mask 和 thrash 继续使用 input budget。
+- contextLimit 来自模型连接时探测的窗口，失败时沿用配置／默认回退；容量预留使用本次普通请求完整 maxTokens，不套半窗帽；mask 和 thrash 通过局部压力比保留旧触发时序。
 - cached input 仍占用输入窗口；cache hit 不等于释放 token。
 - 迁移 improve-6 按用户要求删除 4096 提前摘要条件；超限后 force 恢复保留。
 
@@ -90,7 +90,7 @@ durable store 是事实源。Context event 只用于观测，发布或订阅失�
 
 ### D4：选择 compaction rung
 
-`decideCompactionRung()` 根据 `force`、完整窗口占用率、mask 的输入预算占用率、thrash lock 和 per-turn cap 返回 `none | mask | prune-summary | force`。策略不访问数据库、LLM、UI 或 MCP。
+`decideCompactionRung()` 根据 `force`、完整窗口占用率、mask 的旧半窗预留压力比、thrash lock 和 per-turn cap 返回 `none | mask | prune-summary | force`。策略不访问数据库、LLM、UI 或 MCP。
 
 ### D5：执行 mask、prune 与 summary
 
@@ -153,3 +153,7 @@ calibration factor、mask cutoff、thrash lock 与 per-turn compaction count 按
 - `CompactResult`
 
 接口的实际 TypeScript 定义以 `packages/ohbaby-agent/src/core/context/types.ts` 为准；本文记录语义和责任，不复制全部字段。
+
+## improve-1 计量与退场修复（2026-10-13）
+
+尾段与完整请求复用正式模型消息投影及 TokenCounter，包含工具 metadata、活动兼容 reasoning 和实际回传的原生状态；展示 reasoning 不重复计数。摘要超窗直接失败，不能缩小输入后仍按原集合退场。前置 prune 与无收益 aggressive 重试保持现状，后续批次再替换。详见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-1/05-implementation-acceptance.md)。

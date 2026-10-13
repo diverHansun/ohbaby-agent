@@ -257,7 +257,6 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
       "attemptId",
       "attempt",
       "estimatedHistoryTokens",
-      "droppedRounds",
     ],
     contextStatus: "complete",
     uiVisible: "no",

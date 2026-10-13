@@ -86,10 +86,8 @@ read scoped active history
 find legal turn cut point
   ↓
 generate summary candidate
-  ├─ explicit context overflow → drop oldest complete turn/API round,
-  │                              clean leading orphan tool results,
-  │                              retry with progress/max/abort bounds
-  └─ other failure → terminal failed
+  └─ generation failure (including context overflow) → terminal failed,
+                                                      no shrunken retry
   ↓
 validate candidate is smaller and tool pairing legal
   ↓
@@ -219,7 +217,7 @@ disposeSession(sessionId: string): void
 
 - 所有 event：`sessionId` + primary/child scope identity；primary wire payload 可省略 `contextScopeId`，但只表示 primary；
 - compaction progress/terminal：另有相同 `attemptId`；
-- summary attempt progress 的最小 payload 为 `attempt/estimatedHistoryTokens/droppedRounds`，其中 token 值只估算 history，round 数为累计值，不含正文；
+- summary attempt progress 的最小 payload 为 `attempt/estimatedHistoryTokens`，其中 token 值按正式投影估算 history，不含固定 system/tools 请求开销和正文；已删除缩水恢复专属 droppedRounds；
 - terminal outcome：`success | failed | inflated | skipped | aborted`；
 - `context.compaction.started` 与 `context.compaction.finished` 建立一次 attempt 的开始/唯一终态；`success` 另带具体 rung，prune/summary 细节仍由同 attempt 的领域事件携带；
 - durable commit 先于 success event；event 失败不回滚；replay 不补发。
@@ -230,7 +228,7 @@ disposeSession(sessionId: string): void
 |---|---|---|
 | 普通 Provider transient | Lifecycle/adapter | 按既有 retry/abort 策略 |
 | 原请求 context overflow | Lifecycle + Context | force prepare/compact 后发送新 request |
-| Summary request context overflow | Context + summary client | 最多 4 次 manager 摘要逻辑尝试（客户端空摘要／通用请求重试另计）；完整 user round 收缩；最近 user round floor；abort 立即终止 |
+| Summary request context overflow | Context + summary client | 直接 terminal failed，不缩小历史后重试、不追加摘要退场；前置 prune 仍独立保留，abort 立即终止 |
 | Summary 非 overflow 失败 | Context | terminal failed，原文保持 active |
 | Durable commit 失败 | Message adapter/Context | 不报告 success；重建必须得到唯一合法 view |
 | Event subscriber 失败 | Bus/observer | 记录但不改变 durable truth |

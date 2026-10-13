@@ -3,6 +3,8 @@ import type { MessageWithParts } from "../message/index.js";
 import type { ContextUsage } from "./types.js";
 import { createMaskConfig, reduceForModel } from "./projection.js";
 import { serializeForLlm } from "./serializer.js";
+import { decideCompactionRung, getContextUsage } from "./compaction-policy.js";
+import { createHeuristicTokenCounter } from "../../services/llm-model/tokenCounting.js";
 
 const USAGE: ContextUsage = {
   contextLimit: 1_000,
@@ -183,6 +185,57 @@ function reasoningAssistantMessage(id: string, text: string): MessageWithParts {
 }
 
 describe("reduceForModel", () => {
+  it.each([800, 1000])(
+    "keeps mask timing when output reserves %i of a 1000-token window",
+    (output) => {
+      const counter = createHeuristicTokenCounter({
+        defaultLimit: 1000,
+        defaultMaxOutputTokens: output,
+      });
+      // Explicit zero safety isolates the old half-window trigger from safety margin.
+      const budgetCounter = {
+        ...counter,
+        getBudget: (
+          model: string,
+          options?: { usedInputTokens?: number },
+        ): ReturnType<typeof counter.getBudget> =>
+          counter.getBudget(model, { ...options, safetyMarginTokens: 0 }),
+      };
+      const history = [
+        assistantToolMessage({
+          id: "old_read",
+          tool: "read",
+          output: "x".repeat(80),
+        }),
+        userMessage("latest", "continue"),
+      ];
+      for (const currentTokens of [249, 250]) {
+        const usage = getContextUsage(currentTokens, "custom", budgetCounter);
+        expect(usage.reservedOutputTokens).toBe(output);
+        expect(usage.inputBudgetTokens).toBe(1000 - output);
+        expect(decideCompactionRung({ usage, force: false })).toBe(
+          currentTokens === 249 ? "none" : "mask",
+        );
+        const result = reduceForModel({
+          history,
+          usage,
+          tokenCounter: TOKEN_COUNTER,
+          cutoff: 0,
+          sessionId: "session_1",
+          config: createMaskConfig({
+            enabled: true,
+            minPartTokens: 1,
+            minPrunableTokens: 1,
+            protectionTokens: 1,
+          }),
+        });
+        expect(result.event.usageRatio).toBe(currentTokens / 500);
+        expect(result.event.maskedPartIds).toEqual(
+          currentTokens === 249 ? [] : ["part_old_read"],
+        );
+      }
+    },
+  );
   it("dark ships masking by reporting candidates without changing history", () => {
     const history = [
       assistantToolMessage({

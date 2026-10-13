@@ -5,7 +5,7 @@ import {
 } from "./modelProfiles.js";
 
 describe("modelProfiles", () => {
-  it("resolves built-in profiles, user overrides, and fallback profiles", () => {
+  it("resolves user profiles before detected or default fallback values", () => {
     const registry = createModelProfileRegistry({
       fallbackContextWindowTokens: 64_000,
       userProfiles: [
@@ -31,9 +31,9 @@ describe("modelProfiles", () => {
       source: "user",
     });
     expect(registry.resolve("gpt-4.1-mini", "openai")).toMatchObject({
-      contextWindowTokens: 1_000_000,
+      contextWindowTokens: 64_000,
       provider: "openai",
-      source: "builtin",
+      source: "fallback",
     });
     expect(registry.resolve("missing-model", "custom")).toMatchObject({
       contextWindowTokens: 64_000,
@@ -72,26 +72,46 @@ describe("modelProfiles", () => {
     });
   });
 
-  it("matches namespaced built-in model names through proxy providers", () => {
-    const registry = createModelProfileRegistry({
-      defaultProvider: "zenmux",
-    });
+  it.each([
+    "gpt-5",
+    "claude-sonnet-4.6",
+    "anthropic/claude-sonnet-4.6",
+    "openai/gpt-4o",
+  ])(
+    "does not override detected limits or infer a provider for %s",
+    (model) => {
+      const registry = createModelProfileRegistry({
+        fallbackContextWindowTokens: 96_000,
+      });
+      expect(registry.resolve(model)).toMatchObject({
+        contextWindowTokens: 96_000,
+        maxOutputTokens: 8_192,
+        provider: "custom",
+        source: "fallback",
+      });
+    },
+  );
 
-    expect(
-      registry.resolve("anthropic/claude-sonnet-4.6", "zenmux"),
-    ).toMatchObject({
-      contextWindowTokens: 200_000,
-      maxOutputTokens: 8_192,
-      model: "anthropic/claude-sonnet-4.6",
-      source: "builtin",
-    });
-    expect(registry.resolve("openai/gpt-4o", "openrouter")).toMatchObject({
-      contextWindowTokens: 128_000,
-      maxOutputTokens: 16_384,
-      model: "openai/gpt-4o",
-      source: "builtin",
-    });
-  });
+  it.each([
+    { kind: "no thinking", requested: 16_384, inputBudget: 82_592 },
+    { kind: "fixed B of 32K", requested: 49_152, inputBudget: 49_824 },
+    { kind: "effort-only", requested: 32_768, inputBudget: 66_208 },
+  ])(
+    "reserves the full explicit $kind request independently of ordinary preference",
+    ({ requested, inputBudget }) => {
+      const registry = createModelProfileRegistry({
+        fallbackContextWindowTokens: 100_000,
+        fallbackMaxOutputTokens: 4_096,
+      });
+      const budget = registry.calculateBudget("custom", {
+        requestedOutputTokens: requested,
+        usedInputTokens: 20_000,
+      });
+      expect(budget.reservedOutputTokens).toBe(requested);
+      expect(budget.inputBudgetTokens).toBe(inputBudget);
+      expect(budget.remainingInputTokens).toBe(inputBudget - 20_000);
+    },
+  );
 
   it("calculates input token budgets with output reservation and safety margin", () => {
     const budget = calculateTokenBudget(
@@ -112,18 +132,18 @@ describe("modelProfiles", () => {
 
     expect(budget).toEqual({
       contextWindowTokens: 64_000,
-      inputBudgetTokens: 54_808,
+      inputBudgetTokens: 51_000,
       maxOutputTokens: 8_192,
       modelId: "custom:chat",
-      remainingInputTokens: 44_808,
-      reservedOutputTokens: 8_192,
+      remainingInputTokens: 41_000,
+      reservedOutputTokens: 12_000,
       safetyMarginTokens: 1_000,
-      usageRatio: 10_000 / 54_808,
+      usageRatio: 10_000 / 51_000,
       usedInputTokens: 10_000,
     });
   });
 
-  it("caps output reservation so an oversized max output does not erase the input budget", () => {
+  it("reserves the complete ordinary output even when no input budget remains", () => {
     const budget = calculateTokenBudget(
       {
         contextWindowTokens: 128_000,
@@ -139,8 +159,9 @@ describe("modelProfiles", () => {
       },
     );
 
-    expect(budget.inputBudgetTokens).toBe(63_488);
-    expect(budget.reservedOutputTokens).toBe(63_488);
-    expect(budget.usageRatio).toBe(64 / 63_488);
+    expect(budget.inputBudgetTokens).toBe(0);
+    expect(budget.remainingInputTokens).toBe(0);
+    expect(budget.reservedOutputTokens).toBe(128_000);
+    expect(budget.usageRatio).toBe(1);
   });
 });

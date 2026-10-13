@@ -12,7 +12,7 @@ import {
 import { getModelJsonPath } from "./loaders.js";
 import { resolve } from "node:path";
 import { runtimeEnvValue } from "../../utils/managed-runtime-env.js";
-import { createModelProfileRegistry } from "../../services/llm-model/modelProfiles.js";
+import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../services/llm-model/modelProfiles.js";
 import { getGlobalEnvPath } from "../../utils/project-env.js";
 import type { InterfaceProviderKind, ReasoningConfig } from "./types.js";
 import { ConfigError } from "./types.js";
@@ -185,7 +185,10 @@ export async function probeActiveModelContextWindow(
       baseUrl,
       model,
       interfaceProvider,
-      maxTokens: input.maxOutputTokens ?? current?.llmParams.maxTokens ?? 4096,
+      maxTokens:
+        input.maxOutputTokens ??
+        current?.llmParams.maxTokens ??
+        DEFAULT_MAX_OUTPUT_TOKENS,
       modelProfiles: hasExplicitProfile
         ? current?.models
         : probe.reasoningCapabilities
@@ -295,13 +298,6 @@ export async function applyActiveModelConfig(
     apiKey.warning,
   );
 
-  const profile = createModelProfileRegistry({
-    defaultProvider: provider,
-  }).resolve(model, provider);
-  const resolvedMaxOutputTokens =
-    maxOutputTokens ??
-    (profile.source === "fallback" ? undefined : profile.maxOutputTokens);
-
   const writeResult = await setActiveLLMConfig({
     provider,
     model,
@@ -310,11 +306,11 @@ export async function applyActiveModelConfig(
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     ...(explicitApiKey === undefined ? {} : { apiKey: explicitApiKey }),
     contextWindowTokens: resolvedContextWindow.contextWindowTokens,
-    ...(resolvedMaxOutputTokens === undefined
+    ...(maxOutputTokens === undefined
       ? {}
       : {
-          maxOutputTokens: resolvedMaxOutputTokens,
-          maxTokens: resolvedMaxOutputTokens,
+          maxOutputTokens,
+          maxTokens: maxOutputTokens,
         }),
     updateActiveModelProfile: true,
     clearTemperature: true,
@@ -341,7 +337,7 @@ export async function applyActiveModelConfig(
       envPath,
       projectRoot: input.projectRoot,
       contextWindowTokens: resolvedContextWindow.contextWindowTokens,
-      maxOutputTokens: resolvedMaxOutputTokens,
+      maxOutputTokens,
       version,
       onDiscovery: input.onDiscovery,
     });
@@ -368,9 +364,7 @@ export async function applyActiveModelConfig(
     model,
     contextWindowTokens: resolvedContextWindow.contextWindowTokens,
     contextWindowSource: resolvedContextWindow.contextWindowSource,
-    ...(resolvedMaxOutputTokens === undefined
-      ? {}
-      : { maxOutputTokens: resolvedMaxOutputTokens }),
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     modelJsonPath: writeResult.modelJsonPath,
     envPath,
     saved: true,
@@ -575,7 +569,7 @@ function startModelDiscovery(input: {
             model: input.model,
             baseUrl: input.baseUrl,
             interfaceProvider: input.interfaceProvider,
-            maxTokens: input.maxOutputTokens ?? 4096,
+            maxTokens: input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
             modelProfiles: exactProfiles,
           }).capability;
           const activeCapabilities =

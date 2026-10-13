@@ -382,6 +382,14 @@ describe("atomic context compaction", () => {
     expect(
       recovered.filter((message) => message.parts.some(isContextSummaryPart)),
     ).toHaveLength(1);
+    const sentPartIds = generateSummary.mock.calls[0][0].history.flatMap(
+      (message) => message.parts.map((part) => part.id),
+    );
+    const retiredPartIds = recovered
+      .flatMap((message) => message.parts)
+      .filter((part) => part.time?.compacted !== undefined)
+      .map((part) => part.id);
+    expect(retiredPartIds.sort()).toEqual(sentPartIds.sort());
     const replayBus = createBus();
     const replayEvents: unknown[] = [];
     replayBus.subscribe(ContextEvent.CompactionStarted, (event) => {
@@ -413,7 +421,7 @@ describe("atomic context compaction", () => {
     expect(generateSummary).toHaveBeenCalledOnce();
   });
 
-  it("persists one legal view after summary overflow shrinks and retries", async () => {
+  it("leaves every original part active after summary overflow without a shrunken retry", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-context-overflow-"));
     cleanupPaths.push(directory);
     const dbPath = join(directory, "agent.db");
@@ -426,6 +434,7 @@ describe("atomic context compaction", () => {
     });
     await appendTextHistory(messageManager, "session_1");
     await appendTextHistory(messageManager, "session_1");
+    const original = await messageManager.listBySession("session_1");
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
       .mockRejectedValueOnce(
@@ -437,27 +446,16 @@ describe("atomic context compaction", () => {
     const contextManager = createManager(messageManager, { generateSummary });
 
     await expect(compact(contextManager, "session_1")).resolves.toMatchObject({
-      status: "compacted",
+      status: "failed",
+      compression: { status: "failed", error: "context length exceeded" },
     });
-    expect(generateSummary).toHaveBeenCalledTimes(2);
-    expect(generateSummary.mock.calls[1]?.[0].history.length).toBeLessThan(
-      generateSummary.mock.calls[0]?.[0].history.length ?? 0,
-    );
+    expect(generateSummary).toHaveBeenCalledOnce();
 
     const recovered = await reopenHistory(dbPath, "session_1");
     expect(
       recovered.filter((message) => message.parts.some(isContextSummaryPart)),
-    ).toHaveLength(1);
-    expect(
-      recovered
-        .filter((message) => message.parts.some(isContextSummaryPart))
-        .flatMap((message) => message.parts)
-        .some(
-          (part) =>
-            part.type === "text" &&
-            part.text.includes("overflow-recovered-summary"),
-        ),
-    ).toBe(true);
+    ).toHaveLength(0);
+    expect(recovered).toEqual(original);
   });
 
   it("rolls back every prune mark when a later mark fails", async () => {

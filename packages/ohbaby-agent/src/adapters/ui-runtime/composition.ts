@@ -14,7 +14,7 @@ import { collectExecutionFacts } from "../../agents/subagents/execution-facts.js
 import { createStorage } from "../../services/storage/index.js";
 import { PermissionEvent } from "../../permission/events.js";
 import { randomUUID } from "node:crypto";
-import { activeModelProfiles } from "../../config/llm/model-profile.js";
+import { activeModelBudgetProfiles } from "../../config/llm/model-profile.js";
 import {
   mergeReasoningIntent,
   type ReasoningIntent,
@@ -648,7 +648,8 @@ export async function createUiRuntimeComposition(
       systemPromptProvider,
       tokenCounter: createHeuristicTokenCounter({
         defaultLimit: options.llmClient.config.contextWindowTokens,
-        profiles: activeModelProfiles(options.llmClient.config),
+        defaultMaxOutputTokens: options.llmClient.config.maxTokens,
+        profiles: activeModelBudgetProfiles(options.llmClient.config),
         provider: options.llmClient.config.provider,
       }),
     });

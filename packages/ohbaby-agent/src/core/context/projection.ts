@@ -1,3 +1,4 @@
+import { getCompactionPressureRatio } from "./compaction-policy.js";
 import { getMessageOrigin } from "../message/origin.js";
 import { hasNativeDependencies } from "./native-context.js";
 import {
@@ -113,7 +114,7 @@ export function reduceForModel(input: {
       0,
     ),
     cutoff,
-    usageRatio: input.usage.usageRatio,
+    usageRatio: getCompactionPressureRatio(input.usage),
     ...(selected.length === 0 && skippedReason !== undefined
       ? { skippedReason }
       : {}),
@@ -235,7 +236,7 @@ function skippedReasonForReduction(input: {
   readonly config: MaskConfig;
   readonly usage: ContextUsage;
 }): MaskSkippedReason | undefined {
-  if (input.usage.usageRatio < input.config.minUsageRatio) {
+  if (getCompactionPressureRatio(input.usage) < input.config.minUsageRatio) {
     return "below-threshold";
   }
   if (input.candidateCount === 0) {

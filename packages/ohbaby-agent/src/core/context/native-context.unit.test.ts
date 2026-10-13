@@ -11,7 +11,10 @@ import {
   estimateContextOccupancyComposition,
 } from "./token-estimation.js";
 import { createMaskConfig, reduceForModel } from "./projection.js";
-import { findCutPoint } from "./compaction-policy.js";
+import {
+  estimateHistoryForCompaction,
+  findCutPoint,
+} from "./compaction-policy.js";
 
 const origin: ModelOrigin = {
   provider: "openai",
@@ -105,6 +108,44 @@ function textMessage(
 const counter = { estimateTokens: (text: string): number => text.length };
 
 describe("native request occupancy", () => {
+  it("uses the same native replay estimate for history and request, ignoring display copies and ciphertext length", () => {
+    const history = [nativeMessage()];
+    const estimate = (): number =>
+      estimateHistoryForCompaction(history, counter, origin);
+    const expected = estimatePreparedRequestHeuristic(
+      {
+        messages: serializeHistoryMessages(history, undefined, origin),
+        tools: undefined,
+      },
+      counter,
+    );
+    expect(estimate()).toBe(expected);
+    history[0] = {
+      ...history[0],
+      parts: [
+        ...history[0].parts,
+        {
+          type: "reasoning",
+          text: "display-only ".repeat(1000),
+          id: "display",
+          messageId: "m1",
+          sessionId: "s",
+          orderIndex: 2,
+        },
+      ],
+    };
+    const native = history[0].parts[0];
+    if (
+      native.type !== "model-state" ||
+      native.modelState.output.protocol !== "openai-responses"
+    )
+      throw new Error("fixture");
+    for (const item of native.modelState.output.items) {
+      if (item.type === "reasoning")
+        item.encrypted_content = "cipher".repeat(10_000);
+    }
+    expect(estimate()).toBe(expected);
+  });
   it.each([0, 80])(
     "counts one opaque response proxy of %i plus readable reasoning once",
     (tokens) => {

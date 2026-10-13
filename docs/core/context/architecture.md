@@ -151,13 +151,13 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队；R3/R4 通过 store
 2. logical compaction 从 snapshot 到 terminal 持有 scope lease；`prepareTurn()` 内部直接执行 compaction core，不重复进入 lane，因此不会嵌套死锁。
 3. candidate await 后把选中 Part 的原快照交给 `commitCompaction()`；store 在任何写入前原子深比较当前值。被选中 Part 已修改、删除或 compacted 时以 `CompressionResult { status: "skipped", reason: "stale" }` 结束并重读最新 view；安全追加到尾部的消息不误伤旧 prefix summary。
 4. failpoint 已证明旧的 summary/mark 多步写存在部分终态窗口；当前由窄的 `commitCompaction()` 端口修复，SQLite 使用 `BEGIN IMMEDIATE`，in-memory 在写前完整校验，不做 catch-only rollback。子进程在首个 part update 后被 `SIGKILL` 的 reopen 测试确认 SQLite 会回滚整个未提交事务。
-5. summary request 自身 overflow 已使用单一路径恢复：manager 最多进行 4 次摘要逻辑尝试，客户端空摘要／通用请求重试另计；发生 overflow 后从最旧 user round 裁到下一个 user 边界；保留最近 user round，非 overflow 不进入该重试，abort signal 贯通主/子代理共用 Lifecycle 与 summary client。
+5. summary request 自身 overflow 直接失败，不缩小摘要输入后重试。成功退场范围必须等于实际发送的历史范围；前置 prune 仍是独立旧路径，后续批次再删除。abort signal 贯通主/子代理共用 Lifecycle 与 summary client。
 
 ## 八、事件与 UI projection
 
 - 所有 Context event 具有 session/scope identity；primary wire payload 可省略 scope，但消费者归一为 primary。
 - compaction progress/terminal event 具有 `attemptId`，每个 accepted attempt 只有一个 terminal outcome。
-- summary 每次 Provider attempt 只观测 `attempt/estimatedHistoryTokens/droppedRounds`；token 值明确只是 history heuristic，round 数为累计值，不记录 message 正文或额外通用状态。
+- summary 每次 Provider attempt 只观测 `attempt/estimatedHistoryTokens`；token 值来自正式 history 投影的 heuristic，不含固定请求开销，不记录 message 正文或额外通用状态。
 - durable commit 先于 success event；subscriber 错误不得回滚已提交状态。
 - primary UI 只消费 `UiContextWindowUsage` tracker；child scope 不显示 session-only 聚合的伪精确窗口。
 - `ContextUsage` 继续只承载窗口控制总量；七类 `ContextOccupancyComposition` 是最终 `PreparedTurn` 的 optional 解释字段，不参与 compaction 决策。

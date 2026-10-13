@@ -59,7 +59,6 @@ export type {
   CompactResult,
   CompactStatus,
   CompressionResult,
-  CompressionFailureReason,
   CompressionSkipReason,
   CompressionStatus,
   ContextAssemblyOptions,

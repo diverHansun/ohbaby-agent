@@ -5,7 +5,6 @@ import {
   COMPRESSION_PRESERVE_RATIO,
   DEFAULT_COMPACTION_THRESHOLDS,
   MAX_COMPACTION_PER_TURN,
-  MAX_SUMMARY_PROVIDER_ATTEMPTS,
   PRUNE_MINIMUM_TOKENS,
   PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
@@ -22,11 +21,10 @@ import {
 import { ContextEvent } from "./events.js";
 import { appendFileOpsSummary, extractFileOps } from "./file-ops.js";
 import { isActivePart } from "./filters.js";
-import { getCompletedToolOutput, serializeHistory } from "./serialization.js";
+import { getCompletedToolOutput } from "./serialization.js";
 import { createMaskConfig, reduceForModel } from "./projection.js";
 import { serializeForLlm, serializeHistoryMessages } from "./serializer.js";
 import { createScopedExclusiveLane } from "./scoped-exclusive-lane.js";
-import { shrinkSummaryHistory } from "./summary-overflow.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
 import {
   estimateContextOccupancyComposition,
@@ -35,6 +33,7 @@ import {
 import {
   decideCompactionRung,
   getContextUsage,
+  getCompactionPressureRatio,
   getHistoryToCompress,
   needsSummaryCompaction,
 } from "./compaction-policy.js";
@@ -60,10 +59,7 @@ import type {
   PruneResult,
   TokenCounter,
 } from "./types.js";
-import {
-  isContextOverflowError,
-  type ModelMessage,
-} from "../llm-client/index.js";
+import type { ModelMessage } from "../llm-client/index.js";
 import {
   isModelContextPart,
   type MessageWithParts,
@@ -393,7 +389,10 @@ export function createContextManager(
     if (state?.lockedAtUsageRatio === undefined) {
       return false;
     }
-    if (usage.usageRatio >= state.lockedAtUsageRatio + thrashUnlockDelta) {
+    if (
+      getCompactionPressureRatio(usage) >=
+      state.lockedAtUsageRatio + thrashUnlockDelta
+    ) {
       thrashLocks.delete(key);
       return false;
     }
@@ -427,7 +426,7 @@ export function createContextManager(
     thrashLocks.set(key, {
       recentSavingsRatios,
       ...(shouldLock
-        ? { lockedAtUsageRatio: input.usageBefore.usageRatio }
+        ? { lockedAtUsageRatio: getCompactionPressureRatio(input.usageBefore) }
         : {}),
     });
   }
@@ -819,6 +818,7 @@ export function createContextManager(
     modelOrigin?: AssembledContext["modelOrigin"],
     reasoning?: PrepareTurnInput["reasoning"],
     modelId?: string,
+    activeReasoningByMessageId?: ReadonlyMap<string, string>,
   ): Promise<SummaryCandidate> {
     const activeHistory = getActiveHistory(rawHistory).filter(
       (message) => !isSummaryMessage(message),
@@ -827,6 +827,7 @@ export function createContextManager(
       activeHistory,
       options.tokenCounter,
       modelOrigin,
+      activeReasoningByMessageId,
     );
     if (activeHistory.length <= 2) {
       return {
@@ -842,12 +843,14 @@ export function createContextManager(
       history: activeHistory,
       preserveRatio: compressionPreserveRatio,
       modelOrigin,
+      activeReasoningByMessageId,
       tokenCounter: options.tokenCounter,
     });
     const originalTokens = estimateHistoryForCompaction(
       historyToCompress,
       options.tokenCounter,
       modelOrigin,
+      activeReasoningByMessageId,
     );
     if (historyToCompress.length === 0 || originalTokens === 0) {
       return {
@@ -859,90 +862,44 @@ export function createContextManager(
       };
     }
 
-    let summaryHistory = historyToCompress;
     let snapshot = "";
     let newTokens = originalTokens;
-    let providerAttempts = 0;
-    let droppedRounds = 0;
     const prompts = [COMPRESSION_PROMPT, AGGRESSIVE_COMPRESSION_PROMPT];
-    for (const prompt of prompts) {
-      let generatedForPrompt = false;
-      while (providerAttempts < MAX_SUMMARY_PROVIDER_ATTEMPTS) {
-        providerAttempts += 1;
-        options.bus.publish(ContextEvent.CompactionProgress, {
-          ...identity,
-          attempt: providerAttempts,
-          droppedRounds,
-          estimatedHistoryTokens: tokenCount(
-            options.tokenCounter,
-            serializeHistory(summaryHistory, { includeModelContext: false }),
-          ),
+    for (const [index, prompt] of prompts.entries()) {
+      options.bus.publish(ContextEvent.CompactionProgress, {
+        ...identity,
+        attempt: index + 1,
+        estimatedHistoryTokens: originalTokens,
+      });
+      try {
+        snapshot = await options.llmClient.generateSummary({
+          modelId,
+          ...scopedEventIdentity(identity.sessionId, identity.contextScopeId),
+          prompt,
+          systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
+          history: historyToCompress,
+          ...(reasoning === undefined ? {} : { reasoning }),
+          ...(signal === undefined ? {} : { signal }),
         });
-        try {
-          snapshot = await options.llmClient.generateSummary({
-            modelId,
-            ...scopedEventIdentity(identity.sessionId, identity.contextScopeId),
-            prompt,
-            systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
-            history: summaryHistory,
-            ...(reasoning === undefined ? {} : { reasoning }),
-            ...(signal === undefined ? {} : { signal }),
-          });
-          if (snapshot.trim() === "")
-            return {
-              status: "failed",
-              originalTokens,
-              newTokens: originalTokens,
-              savedTokens: 0,
-              error:
-                "Summary response was empty; original history remains active",
-            };
-          generatedForPrompt = true;
-          break;
-        } catch (error) {
-          if (isAbortError(error)) {
-            throw error;
-          }
-          if (!isContextOverflowError(error)) {
-            return {
-              status: "failed",
-              originalTokens,
-              newTokens: originalTokens,
-              savedTokens: 0,
-              error: errorToMessage(error),
-            };
-          }
-          if (providerAttempts >= MAX_SUMMARY_PROVIDER_ATTEMPTS) {
-            return {
-              status: "failed",
-              originalTokens,
-              newTokens: originalTokens,
-              savedTokens: 0,
-              error: `Summary context overflow recovery exhausted after ${String(providerAttempts)} attempts`,
-              reason: "summary-overflow-exhausted",
-            };
-          }
-          const shrink = shrinkSummaryHistory({
-            history: summaryHistory,
-            tokenCounter: options.tokenCounter,
-          });
-          if (shrink === undefined) {
-            return {
-              status: "failed",
-              originalTokens,
-              newTokens: originalTokens,
-              savedTokens: 0,
-              error:
-                "Summary context overflow recovery stopped to preserve the most recent user round",
-              reason: "summary-overflow-minimum",
-            };
-          }
-          summaryHistory = shrink.history;
-          droppedRounds += shrink.droppedRounds;
-        }
-      }
-      if (!generatedForPrompt) {
-        break;
+        if (snapshot.trim() === "")
+          return {
+            status: "failed",
+            originalTokens,
+            newTokens: originalTokens,
+            savedTokens: 0,
+            error:
+              "Summary response was empty; original history remains active",
+          };
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        // Never retire history that the successful summary request did not read.
+        return {
+          status: "failed",
+          originalTokens,
+          newTokens: originalTokens,
+          savedTokens: 0,
+          error: errorToMessage(error),
+        };
       }
       snapshot = appendFileOpsSummary(
         snapshot,
@@ -1302,6 +1259,7 @@ export function createContextManager(
       afterPrune.modelOrigin,
       req.reasoning,
       req.modelId,
+      req.activeReasoningByMessageId,
     );
     req.signal?.throwIfAborted();
     if (candidate.status !== "candidate") {

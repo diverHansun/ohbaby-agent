@@ -231,6 +231,29 @@ describe("request reasoning resolution", () => {
       ),
     ).toEqual({ thinking: { type: "disabled" } });
   });
+  it.each([32_768, 65_536])(
+    "preserves fixed thinking budget %i without a 32K cap",
+    (thinkingBudget) => {
+      const input = {
+        ...custom({
+          ...effort,
+          wire: "anthropic-budget",
+          budgets: { medium: thinkingBudget },
+          minBudgetTokens: 1024,
+        }),
+        interfaceProvider: "anthropic" as const,
+        maxTokens: 16_384 + thinkingBudget,
+      };
+      expect(toAnthropicReasoningWire(resolveRequestReasoning(input))).toEqual({
+        thinking: { type: "enabled", budget_tokens: thinkingBudget },
+      });
+      for (const maxTokens of [thinkingBudget - 1, thinkingBudget]) {
+        expect(() => resolveRequestReasoning({ ...input, maxTokens })).toThrow(
+          /budget.*maxTokens/i,
+        );
+      }
+    },
+  );
 });
 
 describe("Stage C reliable defaults and service defaults", () => {

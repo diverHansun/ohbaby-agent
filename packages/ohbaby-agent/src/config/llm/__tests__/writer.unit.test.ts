@@ -134,6 +134,7 @@ describe("setActiveLLMConfig", () => {
     const modelJsonWrite = findWriteCall((file) => file.includes("model.json"));
     const modelJson = parseModelJsonWrite(modelJsonWrite);
 
+    expect(modelJson.llmParams.maxTokens).toBe(8192);
     expect(modelJson.apiConfig).toEqual({
       baseUrl: "http://127.0.0.1:1234/v1",
       interfaceProvider: "openai-compatible",

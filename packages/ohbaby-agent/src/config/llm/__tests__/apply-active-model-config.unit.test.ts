@@ -137,6 +137,27 @@ describe("applyActiveModelConfig", () => {
     );
   });
 
+  it.each(["gpt-5", "unknown-model"])(
+    "uses the ordinary default instead of model-name output limits for %s",
+    async (model) => {
+      await applyActiveModelConfig({
+        provider: "local",
+        model,
+        baseUrl: "http://localhost:1234/v1",
+        interfaceProvider: "openai-compatible",
+        projectRoot: tempRoot,
+        modelJsonPath,
+        envPath,
+      });
+      const saved = JSON.parse(await fs.readFile(modelJsonPath, "utf8")) as {
+        llmParams: { maxTokens: number };
+        models: { maxOutputTokens?: number }[];
+      };
+      expect(saved.llmParams.maxTokens).toBe(8192);
+      expect(saved.models[0].maxOutputTokens).toBeUndefined();
+    },
+  );
+
   it("rejects an unknown interface provider before probing or writing", async () => {
     const input: Record<string, unknown> = {
       apiKey: "sk-test-secret",
@@ -195,7 +216,6 @@ describe("applyActiveModelConfig", () => {
       contextWindowSource: "detected",
       contextWindowTokens: 200_000,
       interfaceProvider: "anthropic",
-      maxOutputTokens: 8_192,
       model: "anthropic/claude-sonnet-4.6",
       modelJsonPath,
       provider: "zenmux",
@@ -220,7 +240,6 @@ describe("applyActiveModelConfig", () => {
           provider: "zenmux",
           model: "anthropic/claude-sonnet-4.6",
           contextWindowTokens: 200_000,
-          maxOutputTokens: 8_192,
         },
       ],
     });

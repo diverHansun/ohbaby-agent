@@ -16,9 +16,10 @@ LLM 的基本上下文计量单位。当前实现使用保守启发式估算：
 
 模型允许的最大 context 窗口及其输入/输出预算由 `modelProfiles` 注册表负责解析，tokenCounting 通过 `HeuristicTokenCounter` 的 `getLimit` / `getBudget` 暴露：
 
-- 内置常见模型的保守限额（如 `gpt-4` → `8_192`、`gpt-3.5-turbo` → `4_096`、`gpt-4o` → `128_000`、`claude-` → `200_000`、`deepseek-` → `64_000`、`glm-4` → `128_000`、`gpt-5` → `400_000`）。
-- 未知模型回退到 `defaultLimit`（缺省 `128_000`，可通过选项覆盖）。
-- 空模型标识回退到 `4_096`。
+- 用户显式 profile 优先；否则使用 `defaultLimit`（生产入口传入探测／配置窗口，缺省 `128_000`），不按模型名前缀推断。
+- 空模型标识仍回退到 `4_096`。
+- 普通输出偏好来自 `llmParams.maxTokens`，缺省 `8_192`，不代表独立探测到的模型硬上限。
+- `getBudget` 的显式 `requestedOutputTokens` 优先于普通偏好，完整保留该额度；输入预算为 `max(0, contextWindow − reservedOutput − safetyMargin)`。不套半窗帽、不默默降低发送额度。
 
 `TokenBudget` / `TokenBudgetOptions` 的结构定义在 `modelProfiles.ts`，本模块不复制其字段。
 
