@@ -156,6 +156,45 @@ describe("adaptMcpTool", () => {
     ).toBe(4);
   });
 
+  it("preserves error metadata without duplicating it in serialized error details", async () => {
+    const { callTool, client } = createMockClient();
+    callTool.mockResolvedValue({
+      isError: true,
+      content: [{ type: "text", text: "Record not found" }],
+      structuredContent: { reason: "missing", recordId: "record-42" },
+    });
+    const tool = adaptMcpTool(
+      { inputSchema: { type: "object" }, name: "lookup" },
+      client,
+    );
+    const error: unknown = await tool
+      .execute(
+        {},
+        {
+          callId: "call-error",
+          messageId: "message",
+          sessionId: "session",
+          signal: new AbortController().signal,
+        },
+      )
+      .catch((error: unknown) => error);
+    expect(error).toMatchObject({
+      name: "McpToolExecutionError",
+      metadata: {
+        isError: true,
+        source: "mcp",
+        server: "server-name",
+        tool: "lookup",
+        contentTypes: ["text"],
+        structuredContent: { reason: "missing", recordId: "record-42" },
+      },
+    });
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("Record not found");
+    expect(JSON.stringify(error)).not.toContain("metadata");
+    expect(JSON.stringify(error)).not.toContain("record-42");
+  });
+
   it("forwards execution to the original MCP tool name", async () => {
     const { callTool, client } = createMockClient();
     const tool = adaptMcpTool(
@@ -194,12 +233,14 @@ describe("adaptMcpTool", () => {
 });
 
 describe("transformMcpResult", () => {
-  it("transforms text, image, and resource content into scheduler output", () => {
+  it("renders media as inline text and preserves resource URIs without inventing recovery paths", () => {
     const output = transformMcpResult(
       {
         content: [
           { text: "Line 1", type: "text" },
           { data: "abc123", mimeType: "image/png", type: "image" },
+          { data: "audio123", mimeType: "audio/wav", type: "audio" },
+          { type: "resource_link", uri: "mcp://records/42", name: "record" },
           {
             resource: {
               text: "File text",
@@ -216,8 +257,10 @@ describe("transformMcpResult", () => {
     expect(output.output).toContain("![Image](data:image/png;base64,abc123)");
     expect(output.output).toContain("[Resource: file:///tmp/example.txt]");
     expect(output.output).toContain("File text");
+    expect(output.output).toContain("[Audio: data:audio/wav;base64,audio123]");
+    expect(output.output).toContain("[Resource: mcp://records/42]");
     expect(output.metadata).toMatchObject({
-      contentTypes: ["text", "image", "resource"],
+      contentTypes: ["text", "image", "audio", "resource_link", "resource"],
       hasImage: true,
       server: "server",
       source: "mcp",

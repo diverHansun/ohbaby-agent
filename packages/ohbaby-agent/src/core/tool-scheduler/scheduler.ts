@@ -1752,6 +1752,10 @@ export function createToolScheduler(
         return makeCancelledResult(call);
       transition(call, "error");
       return makeResult(call, "error", {
+        metadata:
+          isRecord(error) && isRecord(error.metadata)
+            ? { ...error.metadata, uiToolSource: tool.source }
+            : undefined,
         error: createError(
           "ExecutionError",
           error instanceof ResourceUnavailableError

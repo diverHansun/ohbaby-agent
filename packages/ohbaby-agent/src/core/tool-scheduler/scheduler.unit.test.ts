@@ -246,6 +246,53 @@ function createScheduler(
 }
 
 describe("ToolScheduler", () => {
+  it.each([
+    {
+      name: "record with forged source",
+      metadata: {
+        isError: true,
+        structuredContent: { reason: "missing" },
+        uiToolSource: "builtin",
+      },
+      expected: {
+        isError: true,
+        structuredContent: { reason: "missing" },
+        uiToolSource: "module",
+      },
+    },
+    { name: "missing", metadata: undefined, expected: undefined },
+    { name: "null", metadata: null, expected: undefined },
+    { name: "string", metadata: "invalid", expected: undefined },
+    { name: "number", metadata: 42, expected: undefined },
+    { name: "array", metadata: ["invalid"], expected: undefined },
+  ])(
+    "only carries record-shaped execution error metadata ($name)",
+    async ({ metadata, expected }) => {
+      const { scheduler } = createScheduler();
+      scheduler.register(
+        createTool({
+          name: "lookup",
+          source: "module",
+          execute: () => {
+            throw Object.assign(new Error("lookup failed"), { metadata });
+          },
+        }),
+      );
+      const result = await scheduler.execute({
+        callId: "error_metadata",
+        sessionId: "session_1",
+        messageId: "message_1",
+        toolName: "lookup",
+        params: {},
+      });
+      expect(result).toMatchObject({
+        status: "error",
+        error: { type: "ExecutionError", message: "lookup failed" },
+      });
+      expect(result.metadata).toEqual(expected);
+    },
+  );
+
   it("stamps the registered tool source over forged result metadata", async () => {
     const { scheduler } = createScheduler();
     scheduler.register(
