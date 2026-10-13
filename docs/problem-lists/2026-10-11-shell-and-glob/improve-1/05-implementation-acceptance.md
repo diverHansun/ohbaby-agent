@@ -55,3 +55,5 @@ OHBABY_RUN_REAL_PROCESS_TOOLS=1 OHBABY_REAL_PROCESS_BATCH=network pnpm exec vite
 ## 2026-10-13 Windows 测试修正
 
 Windows CI 揭示两项 child environment 测试和一项 Bash 启动测试错误地要求大小写双键。生产实现的 Windows 单键契约保留；测试已补齐三平台覆盖。完整原因、Glob 同期修正与验证结果见 [improve-2 后续验收](../improve-2/05-implementation-acceptance.md#2026-10-13-windows-ci-修正)。
+
+后续 [CI 38328079680](https://github.com/diverHansun/ohbaby-agent/actions/runs/38328079680) 的 Windows 已通过单元、Glob 清理契约和权限集成，继续执行网络步骤时发现 `snapshot.integration.test.ts` 仍读取仅 POSIX 提供的小写键。将刷新／失败／恢复／销毁用例参数化为三平台，先在本机复现 win32 失败，再改为检查全平台大写键；网络目录 6 文件、72 项通过。未修改代理生产逻辑。
