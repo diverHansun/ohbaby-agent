@@ -308,7 +308,9 @@ export function renderMessageParts(
         message.role === "user"
           ? theme.role.user
           : pairedPartColor(part, theme),
-      dimColor: false,
+      dimColor:
+        part.kind === "part" &&
+        part.part.metadata?.kind === "context-compaction",
       gutterColor:
         message.role === "user" ? theme.message.userGutter : undefined,
       indent,

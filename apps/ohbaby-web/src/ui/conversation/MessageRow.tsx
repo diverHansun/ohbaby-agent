@@ -18,6 +18,9 @@ export function MessageRow(props: {
     (item) => item.childUserMessageId === props.message.id,
   );
   const isUser = props.message.role === "user";
+  const isCompaction = props.message.parts.some(
+    (part) => part.metadata?.kind === "context-compaction",
+  );
   const visibleParts = filterTodoToolParts(props.message.parts);
   const pairedParts = pairToolParts(visibleParts);
   const firstText = pairedParts.findIndex(
@@ -33,7 +36,7 @@ export function MessageRow(props: {
   return (
     <article
       aria-label={`${messageRoleLabel(props.message.role)} message`}
-      className={`ohb-message ohb-message-${props.message.role}`}
+      className={`ohb-message ohb-message-${props.message.role}${isCompaction ? " ohb-message-compaction" : ""}`}
     >
       <div
         className={`ohb-message-body ${
