@@ -2,7 +2,7 @@
 
 > 性质：修 bug ＋ 计量，可最快单独合入，不受其他批次进度阻塞。
 > 本批规划日期：2026-10-12。代码基线 git HEAD：`c5cfda2689fd48dec5c8002bffe626bfca354caf`（整体 plan 的调查基线是 `24c70034`，此后只有 TUI／CLI 测试等提交，本批涉及的文件已按当前 HEAD 复核）。
-> 状态：**尚未实施**。本目录只写规划与验收目标，不含已通过结论，也没有 `05-implementation-acceptance.md`（实施完成后由验收模式创建）。
+> 状态：**已实施，等待用户审查**（2026-10-13）。测试证据、Pi 复审、规划差异与已知限制见 [05-implementation-acceptance.md](./05-implementation-acceptance.md)；00～04 保留规划原文。
 
 ## 本批要解决什么
 
@@ -43,7 +43,7 @@
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 本批改动面与实施契约 | 最详，给后续开发会话 |
 | [03-reference-projects.md](./03-reference-projects.md) | 外部参考（模型能力来源） | 只借思路，不照搬 |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 测试与验收目标 | 映射整体 plan 的 A1～A5 |
-| `05-implementation-acceptance.md` | 实施完成后由验收模式写入 | 规划期不存在 |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实施与验收结果 | 含测试、实网、审查与残余限制 |
 
 ## 与其他批的接口约定
 
