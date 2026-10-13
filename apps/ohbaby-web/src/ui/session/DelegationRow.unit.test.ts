@@ -200,3 +200,35 @@ it("labels each delegation with its own task even for the same named instance", 
     "Researcher",
   );
 });
+
+it("shows an accepted failed child as Failed and keeps the conversation entry available", () => {
+  (
+    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const onOpen = vi.fn();
+  const failed = {
+    ...execution,
+    status: "failed" as const,
+    error: "Context compaction failed",
+  };
+  try {
+    act(() => {
+      root.render(
+        createElement(DelegationRow, { call, execution: failed, onOpen }),
+      );
+    });
+    const button = container.querySelector<HTMLButtonElement>("button");
+    expect(container.textContent).toContain("Failed");
+    expect(button?.disabled).toBe(false);
+    act(() => button?.click());
+    expect(onOpen).toHaveBeenCalledWith(failed, button);
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  }
+});

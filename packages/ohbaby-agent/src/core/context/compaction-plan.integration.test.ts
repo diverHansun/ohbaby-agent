@@ -7,6 +7,7 @@ import {
   isContextSummaryPart,
   type CoreMessage,
   type MessageManager,
+  type MessageWithParts,
 } from "../message/index.js";
 import { createContextManager } from "./context-manager.js";
 import { ContextEvent } from "./events.js";
@@ -31,6 +32,7 @@ async function fixture(
   window = 128000,
   sizes = Array<number>(8).fill(6000),
   compressionThreshold?: number,
+  contextScopeId?: string,
 ): Promise<{
   manager: ReturnType<typeof createContextManager>;
   messages: MessageManager;
@@ -39,6 +41,8 @@ async function fixture(
   requests: PreparedModelRequest[];
   bus: ReturnType<typeof createBus>;
   setWindow: (value: number) => void;
+  input: PrepareTurnInput;
+  history: () => ReturnType<MessageManager["listBySession"]>;
 }> {
   const bus = createBus();
   const messages = createMessageManager({
@@ -48,7 +52,8 @@ async function fixture(
   async function append(text: string, summary = false): Promise<CoreMessage> {
     const message = await messages.createMessage({
       sessionId: "s",
-      agent: "primary",
+      agent: contextScopeId === undefined ? "primary" : "explore",
+      contextScopeId,
       role: "assistant",
     });
     await messages.appendPart(message.id, {
@@ -111,6 +116,13 @@ async function fixture(
     generate,
     requests,
     bus,
+    input: {
+      ...input,
+      contextScopeId,
+      isSubagent: contextScopeId !== undefined,
+      agentName: contextScopeId === undefined ? "primary" : "explore",
+    },
+    history: () => messages.listBySession("s", { contextScopeId }),
     setWindow: (value: number): void => {
       currentWindow = value;
     },
@@ -118,6 +130,26 @@ async function fixture(
 }
 
 const entries = ["manual", "automatic", "force"] as const;
+const scopes = [undefined, "child_scope"] as const;
+const scopedEntries = entries.flatMap((entry) =>
+  scopes.map((scope) => ({ entry, scope })),
+);
+
+function expectOriginalPartsPreserved(
+  before: readonly MessageWithParts[],
+  after: readonly MessageWithParts[],
+): void {
+  for (const original of before) {
+    const stored = after.find(
+      (message) => message.info.id === original.info.id,
+    );
+    // Compaction changes retirement metadata; IDs and complete original content
+    // (including tool input/result state) must remain available in the store.
+    const content = (message: MessageWithParts | undefined): unknown =>
+      message?.parts.map(({ time: _time, ...part }) => part);
+    expect(content(stored)).toEqual(content(original));
+  }
+}
 
 async function invokeCompaction(
   f: Awaited<ReturnType<typeof fixture>>,
@@ -125,9 +157,9 @@ async function invokeCompaction(
   options: Partial<PrepareTurnInput> = {},
 ): Promise<CompactResult> {
   if (entry === "manual")
-    return f.manager.compact("s", { ...input, ...options });
+    return f.manager.compact("s", { ...f.input, ...options });
   const result = await f.manager.prepareTurn({
-    ...input,
+    ...f.input,
     ...options,
     force: entry === "force",
   });
@@ -229,17 +261,18 @@ describe("compaction candidate plan", () => {
     ).toEqual(protectedInput.parts);
   });
 
-  it.each(entries)(
-    "replaces every active old summary and stores the successful request on the new summary [%s]",
-    async (entry) => {
-      const f = await fixture(128000, Array<number>(8).fill(6000), 0);
+  it.each(scopedEntries)(
+    "replaces every active old summary and stores the successful request on the new summary [$entry, scope=$scope]",
+    async ({ entry, scope }) => {
+      const f = await fixture(128000, Array<number>(8).fill(6000), 0, scope);
       await f.append("old constraint A", true);
       await f.append("old constraint B", true);
+      const before = await f.history();
       const result = await invokeCompaction(f, entry);
       expect(result.status).toBe("compacted");
       expect(JSON.stringify(f.requests[0])).toContain("old constraint A");
       expect(JSON.stringify(f.requests[0])).toContain("old constraint B");
-      const history = await f.messages.listBySession("s");
+      const history = await f.history();
       const active = history
         .flatMap((message) => message.parts)
         .filter((part) => part.time?.compacted === undefined);
@@ -252,29 +285,56 @@ describe("compaction candidate plan", () => {
       expect(summary?.info).toMatchObject({
         modelRequests: [{ purpose: "context-summary", outcome: "success" }],
       });
-      expect(active.filter((part) => !isContextSummaryPart(part))).toHaveLength(
-        3,
+      expect(
+        active
+          .filter((part) => !isContextSummaryPart(part))
+          .map((part) => part.id),
+      ).toEqual(
+        before
+          .slice(5, 8)
+          .flatMap((message) => message.parts.map((part) => part.id)),
       );
+      expect(summary?.parts[0]).toMatchObject({
+        metadata: {
+          keptIds: before.slice(5, 8).map((message) => message.info.id),
+          readIds: expect.arrayContaining(
+            before.map((message) => message.info.id),
+          ) as unknown,
+          omittedPartIds: [],
+        },
+      });
+      expect(
+        history
+          .slice(8, 10)
+          .flatMap((message) => message.parts)
+          .every((part) => part.time?.compacted !== undefined),
+      ).toBe(true);
+      expect(summary?.parts[0].metadata?.readIds).toHaveLength(before.length);
+      expectOriginalPartsPreserved(before, history);
     },
   );
 
-  it.each(entries)(
-    "trims only older groups for summary capacity and persists exact omitted part IDs [%s]",
-    async (entry) => {
-      const f = await fixture(40000, Array<number>(8).fill(6000), 0);
+  it.each(scopedEntries)(
+    "trims only older groups for summary capacity and persists exact omitted part IDs [$entry, scope=$scope]",
+    async ({ entry, scope }) => {
+      const f = await fixture(40000, Array<number>(8).fill(6000), 0, scope);
       await f.append("inherited constraint", true);
-      const before = await f.messages.listBySession("s");
+      const before = await f.history();
       const result = await invokeCompaction(f, entry);
       expect(result.status).toBe("compacted");
       expect(f.requests).toHaveLength(1);
       const sent = JSON.stringify(f.requests[0]);
       expect(sent).toContain("inherited constraint");
+      // 48K history + 16K summary reservation exceeds 40K: the first five
+      // complete 6K groups are omitted; the final three remain readable.
       const omitted = before
-        .flatMap((message) => message.parts)
-        .filter((part) => part.type === "text" && !sent.includes(part.text))
-        .map((part) => part.id);
-      expect(omitted.length).toBeGreaterThan(0);
-      const history = await f.messages.listBySession("s");
+        .slice(0, 5)
+        .flatMap((message) => message.parts.map((part) => part.id));
+      for (const message of before.slice(0, 5))
+        expect(sent).not.toContain((message.parts[0] as { text: string }).text);
+      for (const message of before.slice(5))
+        expect(sent).toContain((message.parts[0] as { text: string }).text);
+      const history = await f.history();
       const summary = history
         .flatMap((message) => message.parts)
         .find(
@@ -285,9 +345,31 @@ describe("compaction candidate plan", () => {
         metadata: {
           omittedPartIds: omitted,
           omissionReason: "summary-capacity",
+          keptIds: before.slice(5, 8).map((message) => message.info.id),
+          readIds: expect.arrayContaining(
+            before.slice(5).map((message) => message.info.id),
+          ) as unknown,
         },
       });
+      expect(summary?.metadata?.readIds).toHaveLength(4);
       expect(result).toMatchObject({ omittedParts: omitted.length });
+      expectOriginalPartsPreserved(before, history);
+      expect(
+        history.slice(0, before.length).map((message) => message.info.id),
+      ).toEqual(before.map((message) => message.info.id));
+      expect(
+        history
+          .flatMap((message) => message.parts)
+          .filter(
+            (part) =>
+              !isContextSummaryPart(part) && part.time?.compacted === undefined,
+          )
+          .map((part) => part.id),
+      ).toEqual(
+        before
+          .slice(5, 8)
+          .flatMap((message) => message.parts.map((part) => part.id)),
+      );
       expect(summary?.type === "text" ? summary.text : "").toContain("omitted");
       expect(
         history
@@ -298,12 +380,13 @@ describe("compaction candidate plan", () => {
     },
   );
 
-  it.each(entries)(
-    "uses the full ordinary output reservation to shrink the tail once without another summary request [%s]",
-    async (entry) => {
-      const f = await fixture(128000, Array<number>(8).fill(6000), 0);
+  it.each(scopedEntries)(
+    "uses the full ordinary output reservation to shrink the tail once without another summary request [$entry, scope=$scope]",
+    async ({ entry, scope }) => {
+      const f = await fixture(128000, Array<number>(8).fill(6000), 0, scope);
+      const before = await f.history();
       const result = await invokeCompaction(f, entry, {
-        ...input,
+        ...f.input,
         requestSettings: { model: "m", maxTokens: 114000 },
       });
       expect(result.status).toBe("compacted");
@@ -311,14 +394,44 @@ describe("compaction candidate plan", () => {
       expect(
         result.usageAfter.currentTokens + 114000 + 1024,
       ).toBeLessThanOrEqual(128000);
-      const active = (await f.messages.listBySession("s"))
+      const active = (await f.history())
         .flatMap((message) => message.parts)
         .filter(
           (part) =>
             part.time?.compacted === undefined && !isContextSummaryPart(part),
         );
-      expect(active).toHaveLength(2);
+      expect(active.map((part) => part.id)).toEqual(
+        before
+          .slice(6)
+          .flatMap((message) => message.parts.map((part) => part.id)),
+      );
+      const history = await f.history();
+      expect(
+        history.slice(0, before.length).map((message) => message.info.id),
+      ).toEqual(before.map((message) => message.info.id));
+      expect(
+        history
+          .slice(0, 6)
+          .flatMap((message) => message.parts)
+          .every((part) => part.time?.compacted !== undefined),
+      ).toBe(true);
       expect(result.omittedParts ?? 0).toBe(0);
+      expect(
+        history.flatMap((message) => message.parts).find(isContextSummaryPart),
+      ).toMatchObject({
+        metadata: {
+          keptIds: before.slice(6).map((message) => message.info.id),
+          readIds: expect.arrayContaining(
+            before.map((message) => message.info.id),
+          ) as unknown,
+          omittedPartIds: [],
+        },
+      });
+      expect(
+        history.flatMap((message) => message.parts).find(isContextSummaryPart)
+          ?.metadata?.readIds,
+      ).toHaveLength(before.length);
+      expectOriginalPartsPreserved(before, history);
     },
   );
 
@@ -547,35 +660,210 @@ describe("compaction candidate plan", () => {
     ).toBe(true);
   });
 
-  it("allows three automatic successes with growth and suppresses pressure at the successful occupancy floor", async () => {
-    const f = await fixture(64000, Array<number>(8).fill(6000), 0);
-    const started = vi.fn();
-    for (let round = 0; round < 3; round++) {
+  it.each(scopes)(
+    "allows three automatic successes with growth and suppresses pressure at the successful occupancy floor [scope=%s]",
+    async (scope) => {
+      const f = await fixture(64000, Array<number>(8).fill(6000), 0, scope);
+      const started = vi.fn();
+      for (let round = 0; round < 4; round++) {
+        expect(
+          (
+            await f.manager.prepareTurn({
+              ...f.input,
+              force: false,
+              onCompactionStarted: started,
+            })
+          ).compaction?.status,
+        ).toBe("compacted");
+        const count = started.mock.calls.length;
+        expect(
+          (
+            await f.manager.prepareTurn({
+              ...f.input,
+              force: false,
+              onCompactionStarted: started,
+            })
+          ).compaction,
+        ).toBeUndefined();
+        expect(started).toHaveBeenCalledTimes(count);
+        if (round < 3)
+          for (let i = 0; i < 5; i++) await f.append("growth".repeat(1000));
+      }
+      expect(f.generate).toHaveBeenCalledTimes(4);
       expect(
-        (
-          await f.manager.prepareTurn({
-            ...input,
-            force: false,
-            onCompactionStarted: started,
-          })
-        ).compaction?.status,
-      ).toBe("compacted");
-      const count = started.mock.calls.length;
-      expect(
-        (
-          await f.manager.prepareTurn({
-            ...input,
-            force: false,
-            onCompactionStarted: started,
-          })
-        ).compaction,
-      ).toBeUndefined();
-      expect(started).toHaveBeenCalledTimes(count);
-      if (round < 2)
-        for (let i = 0; i < 5; i++) await f.append("growth".repeat(1000));
+        (await f.history())
+          .flatMap((message) => message.parts)
+          .filter(
+            (part) =>
+              isContextSummaryPart(part) && part.time?.compacted === undefined,
+          ),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("keeps the automatic occupancy floor separate for sibling scopes in one child session", async () => {
+    const f = await fixture(64000, [30000, 30000, 30000], 0.3, "scope_a");
+    for (let index = 0; index < 4; index++) {
+      const message = await f.messages.createMessage({
+        sessionId: "s",
+        contextScopeId: "scope_b",
+        agent: "explore",
+        role: "assistant",
+      });
+      await f.messages.appendPart(message.id, {
+        type: "text",
+        text: `b${String(index)}:` + "b".repeat(6000),
+      });
     }
-    expect(f.generate).toHaveBeenCalledTimes(3);
+    const scopeBBefore = await f.messages.listBySession("s", {
+      contextScopeId: "scope_b",
+    });
+    const a = await f.manager.prepareTurn({ ...f.input, force: false });
+    expect(a.compaction?.status).toBe("compacted");
+    expect(a.usage.currentTokens).toBeGreaterThan(30000);
+    const scopeAAfter = await f.history();
+    const b = await f.manager.prepareTurn({
+      ...f.input,
+      contextScopeId: "scope_b",
+      force: false,
+    });
+    expect(b.compaction?.status).toBe("compacted");
+    // B's 24K history is above the 19.2K auto threshold, below A's 30K floor.
+    expect(b.compaction?.usageBefore.currentTokens).toBeGreaterThan(19200);
+    expect(b.compaction?.usageBefore.currentTokens).toBeLessThan(
+      a.usage.currentTokens,
+    );
+    const scopeBAfter = await f.messages.listBySession("s", {
+      contextScopeId: "scope_b",
+    });
+    expect(
+      scopeBAfter
+        .filter((message) =>
+          message.parts.some(
+            (part) =>
+              part.time?.compacted === undefined && !isContextSummaryPart(part),
+          ),
+        )
+        .map((message) => message.info.id),
+    ).toEqual(scopeBBefore.slice(1).map((message) => message.info.id));
+    expect(await f.history()).toEqual(scopeAAfter);
+    const repeated = await f.manager.prepareTurn({
+      ...f.input,
+      contextScopeId: "scope_b",
+      force: false,
+    });
+    expect(repeated.compaction).toBeUndefined();
+    expect(f.generate).toHaveBeenCalledTimes(2);
   });
+
+  it("bypasses the same child scope floor through the shared manual entry without growth", async () => {
+    const f = await fixture(
+      64000,
+      Array<number>(8).fill(6000),
+      0,
+      "child_scope",
+    );
+    expect(
+      (await f.manager.prepareTurn({ ...f.input, force: false })).compaction
+        ?.status,
+    ).toBe("compacted");
+    const before = await f.history();
+    const skipped: string[] = [];
+    f.bus.subscribe(ContextEvent.CompactSkipped, (event) => {
+      skipped.push(event.reason);
+    });
+    expect(
+      (await f.manager.prepareTurn({ ...f.input, force: false })).compaction,
+    ).toBeUndefined();
+    expect(skipped).toEqual(["not-needed"]);
+    const manual = await f.manager.compact("s", f.input);
+    // The unchanged successful tail has no older group to summarize. The manual
+    // entry still evaluates it instead of returning at the automatic floor.
+    expect(manual).toMatchObject({
+      status: "not-needed",
+      compression: { status: "skipped", reason: "too-short" },
+    });
+    expect(skipped).toEqual(["not-needed", "too-short"]);
+    expect(await f.history()).toEqual(before);
+  });
+
+  it.each([
+    {
+      name: "latest oversized complete group",
+      sizes: [10000, 10000, 30000],
+      toolIndex: 2,
+      status: "completed",
+      keptIndices: [2],
+    },
+    {
+      name: "unfinished dependency and newer whole groups",
+      sizes: [30000, 500, 30000],
+      toolIndex: 1,
+      status: "pending",
+      keptIndices: [1, 2],
+    },
+  ] as const)(
+    "allows the 20K tail budget to expand for $name in a child scope",
+    async ({ sizes, toolIndex, status, keptIndices }) => {
+      const f = await fixture(128000, [...sizes], 0, "child_scope");
+      const initial = await f.history();
+      const toolOwner = initial[toolIndex];
+      await f.messages.appendPart(toolOwner.info.id, {
+        type: "tool",
+        tool: "read",
+        callId: "paired-read",
+        state:
+          status === "completed"
+            ? {
+                status: "completed",
+                input: { path: "tail.ts" },
+                output: "paired result",
+              }
+            : { status: "pending", input: { path: "tail.ts" }, raw: "{}" },
+      });
+      const before = await f.history();
+      const result = await f.manager.compact("s", f.input);
+      expect(result.status).toBe("compacted");
+      const expectedKept = keptIndices.map((index) => before[index]);
+      const after = await f.history();
+      const active = after.filter((message) =>
+        message.parts.some(
+          (part) =>
+            !isContextSummaryPart(part) && part.time?.compacted === undefined,
+        ),
+      );
+      expect(active.map((message) => message.info.id)).toEqual(
+        expectedKept.map((message) => message.info.id),
+      );
+      expect(
+        active.flatMap((message) => message.parts.map((part) => part.id)),
+      ).toEqual(
+        expectedKept.flatMap((message) => message.parts.map((part) => part.id)),
+      );
+      expect(
+        after.slice(0, before.length).map((message) => message.info.id),
+      ).toEqual(before.map((message) => message.info.id));
+      expect(
+        active.find((message) => message.info.id === toolOwner.info.id)?.parts,
+      ).toEqual(before[toolIndex].parts);
+      expectOriginalPartsPreserved(before, after);
+      expect(
+        after.flatMap((message) => message.parts).find(isContextSummaryPart),
+      ).toMatchObject({
+        metadata: {
+          keptIds: expectedKept.map((message) => message.info.id),
+          omittedPartIds: [],
+        },
+      });
+      expect(result.usageAfter.currentTokens).toBeGreaterThan(20000);
+      const request = await f.manager.prepareTurn({ ...f.input, force: false });
+      const wire = JSON.stringify(request.request.messages);
+      if (status === "completed") {
+        expect(wire).toContain("paired-read");
+        expect(wire).toContain("paired result");
+      }
+    },
+  );
 
   it.each(["window", "output", "force"] as const)(
     "does not let the occupancy floor suppress a changed %s condition",

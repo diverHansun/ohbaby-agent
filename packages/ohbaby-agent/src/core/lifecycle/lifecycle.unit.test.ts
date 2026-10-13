@@ -4461,39 +4461,118 @@ it("preserves the complete protocol reasoning after the real 256-segment display
 });
 
 describe("compaction failure boundaries", () => {
-  it("permits a fresh force recovery after a completed tool step", async () => {
+  it("keeps a twice-overflowing child isolated while its parent and sibling continue in the same runtime", async () => {
+    const sessionId = "shared-session";
     const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    for (const [contextScopeId, text] of [
+      [undefined, "Parent task"],
+      ["failed-child", "Failing child task"],
+      ["sibling", "Sibling task"],
+    ] as const) {
+      const message = await messageManager.createMessage({
+        sessionId,
+        contextScopeId,
+        agent: "build",
+        role: "user",
+      });
+      await messageManager.appendPart(message.id, { type: "text", text });
+    }
+    const primaryBefore = await messageManager.listBySession(sessionId, {
+      contextScopeId: undefined,
+    });
+    const siblingBefore = await messageManager.listBySession(sessionId, {
+      contextScopeId: "sibling",
+    });
+    const prepareTurn = vi.fn<ContextManager["prepareTurn"]>(async (input) => {
+      const messages = await messageManager.toModelMessages(input.sessionId, {
+        contextScopeId: input.contextScopeId,
+      });
+      const prepared = preparedTurn(messages);
+      return input.force
+        ? compactedTurn(
+            preparedTurn([
+              { role: "user", content: "Recovered failing child task" },
+            ]),
+          )
+        : prepared;
+    });
     const overflow = Object.assign(new Error("context length exceeded"), {
       code: "context_length_exceeded",
     });
-    const prepareTurn = vi.fn<ContextManager["prepareTurn"]>((input) =>
-      Promise.resolve(
-        input.force ? compactedTurn(preparedTurn([])) : preparedTurn([]),
-      ),
-    );
+    let childResult: LifecycleResult | undefined;
+    let siblingResult: LifecycleResult | undefined;
+    const childEvents: LifecycleEvent[] = [];
     const executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>(
-      ({ calls }) =>
-        Promise.resolve(
-          calls.map((call) => ({
+      async (batch) => {
+        const parentBeforeChild = await messageManager.listBySession(
+          sessionId,
+          { contextScopeId: undefined },
+        );
+        const childLoop = lifecycle.run({
+          sessionId,
+          runId: "child-run",
+          contextScopeId: "failed-child",
+          isSubagent: true,
+          agent: "build",
+          directory: "/repo",
+          modelId: "fake-model",
+        });
+        let next = await childLoop.next();
+        while (!next.done) {
+          childEvents.push(next.value);
+          next = await childLoop.next();
+        }
+        childResult = next.value;
+        expect(
+          await messageManager.listBySession(sessionId, {
+            contextScopeId: undefined,
+          }),
+        ).toEqual(parentBeforeChild);
+        expect(
+          await messageManager.listBySession(sessionId, {
+            contextScopeId: "sibling",
+          }),
+        ).toEqual(siblingBefore);
+        siblingResult = (
+          await consumeLifecycleEvents(
+            lifecycle.run({
+              sessionId,
+              runId: "sibling-run",
+              contextScopeId: "sibling",
+              isSubagent: true,
+              directory: "/repo",
+              modelId: "fake-model",
+            }),
+          )
+        ).result;
+        return deliverFixtureResults(
+          batch,
+          batch.calls.map((call) => ({
             callId: call.callId,
-            output: "ok",
             status: "success" as const,
+            output: "Child failed; sibling completed",
           })),
-        ),
+        );
+      },
     );
     const lifecycle = new Lifecycle({
+      messageManager,
       contextManager: createContextManagerMock(prepareTurn),
       llmClient: createScriptedFakeLLMClient(
         [
-          { error: overflow },
           {
             events: [
               {
                 toolCallDeltas: [
                   {
                     index: 0,
-                    id: "recovered-tool",
-                    name: "read",
+                    id: "launch-children",
+                    name: "subagent_run",
                     argumentsDelta: "{}",
                   },
                 ],
@@ -4502,38 +4581,210 @@ describe("compaction failure boundaries", () => {
             ],
           },
           { error: overflow },
+          { error: overflow },
           {
-            events: [
-              { textDelta: "Both steps recovered", finishReason: "stop" },
-            ],
+            events: [{ textDelta: "Sibling completed", finishReason: "stop" }],
           },
+          { events: [{ textDelta: "Parent continued", finishReason: "stop" }] },
         ],
         requests,
       ),
-      messageManager: createMessageManager({
-        bus: createBus(),
-        store: createInMemoryMessageStore(),
-      }),
       toolScheduler: { executeBatch } as unknown as ToolSchedulerInstance,
     });
-    const { result } = await consumeLifecycleEvents(
-      lifecycle.run({
-        runId: "run",
-        sessionId: "session",
-        directory: "/repo",
-        modelId: "fake-model",
-      }),
-    );
-    expect(result).toMatchObject({
-      success: true,
-      finalResponse: "Both steps recovered",
+    const parentResult = (
+      await consumeLifecycleEvents(
+        lifecycle.run({
+          sessionId,
+          runId: "parent-run",
+          directory: "/repo",
+          modelId: "fake-model",
+        }),
+      )
+    ).result;
+    expect(childResult).toMatchObject({
+      success: false,
+      terminalReason: "context_overflow",
+      finishReason: "error",
+    });
+    expect(childEvents.at(-1)).toMatchObject({
+      type: "turn:end",
+      contextScopeId: "failed-child",
+      finishReason: "error",
     });
     expect(
-      prepareTurn.mock.calls.filter(([input]) => input.force),
+      childEvents.every((event) => event.contextScopeId === "failed-child"),
+    ).toBe(true);
+    expect(prepareTurn.mock.calls.filter(([input]) => input.force)).toEqual([
+      [
+        expect.objectContaining({
+          sessionId,
+          contextScopeId: "failed-child",
+          isSubagent: true,
+          agentName: "build",
+          modelId: "fake-model",
+        }),
+      ],
+    ]);
+    expect(siblingResult).toMatchObject({
+      success: true,
+      finalResponse: "Sibling completed",
+    });
+    expect(parentResult).toMatchObject({
+      success: true,
+      finalResponse: "Parent continued",
+    });
+    expect(requests).toHaveLength(5);
+    expect(requests[1].messages).toContainEqual({
+      role: "user",
+      content: "Failing child task",
+    });
+    expect(requests[2].messages).toContainEqual({
+      role: "user",
+      content: "Recovered failing child task",
+    });
+    expect(requests[3].messages).toContainEqual({
+      role: "user",
+      content: "Sibling task",
+    });
+    expect(JSON.stringify(requests[4].messages)).not.toContain(
+      "Failing child task",
+    );
+    const parentHistory = await messageManager.listBySession(sessionId, {
+      contextScopeId: undefined,
+    });
+    const siblingHistory = await messageManager.listBySession(sessionId, {
+      contextScopeId: "sibling",
+    });
+    expect(parentHistory[0]).toEqual(primaryBefore[0]);
+    expect(siblingHistory[0]).toEqual(siblingBefore[0]);
+    expect(
+      parentHistory
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "text")
+        .map((part) => part.text),
+    ).toContain("Parent continued");
+    expect(
+      siblingHistory
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "text")
+        .map((part) => part.text),
+    ).toContain("Sibling completed");
+    const childHistory = await messageManager.listBySession(sessionId, {
+      contextScopeId: "failed-child",
+    });
+    expect(
+      childHistory.filter((message) => message.info.role === "assistant"),
     ).toHaveLength(2);
-    expect(requests).toHaveLength(4);
-    expect(executeBatch).toHaveBeenCalledOnce();
+    expect(
+      childHistory
+        .filter((message) => message.info.role === "assistant")
+        .every(
+          (message) =>
+            message.info.role === "assistant" &&
+            message.info.finish === "error",
+        ),
+    ).toBe(true);
   });
+
+  it.each([false, true])(
+    "permits a fresh force recovery after a completed tool step (child=%s)",
+    async (isSubagent) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const overflow = Object.assign(new Error("context length exceeded"), {
+        code: "context_length_exceeded",
+      });
+      const prepareTurn = vi.fn<ContextManager["prepareTurn"]>((input) =>
+        Promise.resolve(
+          input.force ? compactedTurn(preparedTurn([])) : preparedTurn([]),
+        ),
+      );
+      const executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>(
+        ({ calls }) =>
+          Promise.resolve(
+            calls.map((call) => ({
+              callId: call.callId,
+              output: "ok",
+              status: "success" as const,
+            })),
+          ),
+      );
+      const lifecycle = new Lifecycle({
+        contextManager: createContextManagerMock(prepareTurn),
+        llmClient: createScriptedFakeLLMClient(
+          [
+            { error: overflow },
+            {
+              events: [
+                {
+                  toolCallDeltas: [
+                    {
+                      index: 0,
+                      id: "recovered-tool",
+                      name: "read",
+                      argumentsDelta: "{}",
+                    },
+                  ],
+                  finishReason: "tool_calls",
+                },
+              ],
+            },
+            { error: overflow },
+            {
+              events: [
+                { textDelta: "Both steps recovered", finishReason: "stop" },
+              ],
+            },
+          ],
+          requests,
+        ),
+        messageManager: createMessageManager({
+          bus: createBus(),
+          store: createInMemoryMessageStore(),
+        }),
+        toolScheduler: { executeBatch } as unknown as ToolSchedulerInstance,
+      });
+      const { result } = await consumeLifecycleEvents(
+        lifecycle.run({
+          runId: "run",
+          sessionId: "session",
+          directory: "/repo",
+          modelId: "fake-model",
+          ...(isSubagent ? { contextScopeId: "child-scope", isSubagent } : {}),
+        }),
+      );
+      expect(result).toMatchObject({
+        success: true,
+        finalResponse: "Both steps recovered",
+      });
+      expect(
+        prepareTurn.mock.calls.filter(([input]) => input.force),
+      ).toHaveLength(2);
+      if (isSubagent) {
+        expect(prepareTurn.mock.calls.filter(([input]) => input.force)).toEqual(
+          [
+            [
+              expect.objectContaining({
+                contextScopeId: "child-scope",
+                isSubagent: true,
+                sessionId: "session",
+                modelId: "fake-model",
+              }),
+            ],
+            [
+              expect.objectContaining({
+                contextScopeId: "child-scope",
+                isSubagent: true,
+                sessionId: "session",
+                modelId: "fake-model",
+              }),
+            ],
+          ],
+        );
+      }
+      expect(requests).toHaveLength(4);
+      expect(executeBatch).toHaveBeenCalledOnce();
+    },
+  );
 
   it.each(["failed", "inflated"] as const)(
     "ends the run on %s automatic compaction before ordinary provider admission",
@@ -4581,9 +4832,16 @@ describe("compaction failure boundaries", () => {
     },
   );
 
-  it.each(["failed", "inflated", "not-needed"] as const)(
-    "does not resend an overflowed request when force returns %s",
-    async (status) => {
+  it.each([
+    ["failed", false],
+    ["inflated", false],
+    ["not-needed", false],
+    ["failed", true],
+    ["inflated", true],
+    ["not-needed", true],
+  ] as const)(
+    "does not resend an overflowed request when force returns %s (child=%s)",
+    async (status, isSubagent) => {
       const requests: InterfaceProviderRequest[] = [];
       const prepareTurn = vi
         .fn<ContextManager["prepareTurn"]>()
@@ -4626,6 +4884,7 @@ describe("compaction failure boundaries", () => {
           sessionId: "session",
           directory: "/repo",
           modelId: "fake-model",
+          ...(isSubagent ? { contextScopeId: "child-scope", isSubagent } : {}),
         }),
       );
       expect(result.success).toBe(false);
@@ -4675,75 +4934,79 @@ describe("compaction failure boundaries", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("does not award another force recovery after the same step's input snapshot changes", async () => {
-    const requests: InterfaceProviderRequest[] = [];
-    const initial = preparedTurn([{ role: "user", content: "Continue" }]);
-    const recovered: PreparedTurn = {
-      ...initial,
-      compaction: {
-        status: "compacted",
-        usageBefore: { ...SESSION_USAGE, currentTokens: 500 },
-        usageAfter: SESSION_USAGE,
-      },
-    };
-    const prepareTurn = vi
-      .fn<ContextManager["prepareTurn"]>()
-      .mockResolvedValueOnce(initial)
-      .mockResolvedValueOnce(recovered)
-      .mockResolvedValue(initial);
-    const overflow = Object.assign(new Error("context length exceeded"), {
-      code: "context_length_exceeded",
-    });
-    let admissions = 0;
-    const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(prepareTurn),
-      llmClient: createScriptedFakeLLMClient(
-        [
-          { error: overflow },
-          { error: overflow },
-          {
-            events: [
-              { textDelta: "Must not recover twice", finishReason: "stop" },
-            ],
-          },
-        ],
-        requests,
-      ),
-      messageManager: createMessageManager({
-        bus: createBus(),
-        store: createInMemoryMessageStore(),
-      }),
-      toolScheduler: {
-        executeBatch: vi.fn(),
-      } as unknown as ToolSchedulerInstance,
-    });
-    const { result } = await consumeLifecycleEvents(
-      lifecycle.run({
-        runId: "run",
-        sessionId: "session",
-        directory: "/repo",
-        modelId: "fake-model",
-        currentRunInputs: {
-          beforeStep: () => Promise.resolve([]),
-          beforeFinish: () => Promise.resolve("finish"),
-          admitRequestAttempt: () => {
-            if (++admissions === 2)
-              return Promise.reject(new RuntimeInputSnapshotChangedError());
-            return Promise.resolve();
-          },
-          confirmRequestSuccess: () => Promise.resolve(),
+  it.each([false, true])(
+    "does not award another force recovery after the same step's input snapshot changes (child=%s)",
+    async (isSubagent) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const initial = preparedTurn([{ role: "user", content: "Continue" }]);
+      const recovered: PreparedTurn = {
+        ...initial,
+        compaction: {
+          status: "compacted",
+          usageBefore: { ...SESSION_USAGE, currentTokens: 500 },
+          usageAfter: SESSION_USAGE,
         },
-      }),
-    );
-    expect(result).toMatchObject({
-      success: false,
-      terminalReason: "context_overflow",
-    });
-    expect(
-      prepareTurn.mock.calls.filter(([input]) => input.force),
-    ).toHaveLength(1);
-    expect(requests).toHaveLength(2);
-  });
+      };
+      const prepareTurn = vi
+        .fn<ContextManager["prepareTurn"]>()
+        .mockResolvedValueOnce(initial)
+        .mockResolvedValueOnce(recovered)
+        .mockResolvedValue(initial);
+      const overflow = Object.assign(new Error("context length exceeded"), {
+        code: "context_length_exceeded",
+      });
+      let admissions = 0;
+      const lifecycle = new Lifecycle({
+        contextManager: createContextManagerMock(prepareTurn),
+        llmClient: createScriptedFakeLLMClient(
+          [
+            { error: overflow },
+            { error: overflow },
+            {
+              events: [
+                { textDelta: "Must not recover twice", finishReason: "stop" },
+              ],
+            },
+          ],
+          requests,
+        ),
+        messageManager: createMessageManager({
+          bus: createBus(),
+          store: createInMemoryMessageStore(),
+        }),
+        toolScheduler: {
+          executeBatch: vi.fn(),
+        } as unknown as ToolSchedulerInstance,
+      });
+      const { result } = await consumeLifecycleEvents(
+        lifecycle.run({
+          runId: "run",
+          sessionId: "session",
+          directory: "/repo",
+          modelId: "fake-model",
+          ...(isSubagent ? { contextScopeId: "child-scope", isSubagent } : {}),
+          currentRunInputs: {
+            beforeStep: () => Promise.resolve([]),
+            beforeFinish: () => Promise.resolve("finish"),
+            admitRequestAttempt: () => {
+              if (++admissions === 2)
+                return Promise.reject(new RuntimeInputSnapshotChangedError());
+              return Promise.resolve();
+            },
+            confirmRequestSuccess: () => Promise.resolve(),
+          },
+        }),
+      );
+      expect(result).toMatchObject({
+        success: false,
+        terminalReason: "context_overflow",
+      });
+      expect(
+        prepareTurn.mock.calls.filter(([input]) => input.force),
+      ).toHaveLength(1);
+      expect(requests).toHaveLength(2);
+    },
+  );
 });
 
 describe("same-run durable input continuation", () => {

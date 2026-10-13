@@ -336,3 +336,43 @@ it("keeps the selected execution reachable in a short-terminal list", async () =
   app.unmount();
   reader.dispose();
 });
+
+it("keeps the failure reason readable in a failed child execution detail", () => {
+  const reader = createSubagentReader({}, "root");
+  const state: UiSubagentReaderState = {
+    loading: false,
+    selectedId: "execution",
+    view: {
+      execution: {
+        executionId: "execution",
+        subagentId: "agent",
+        rootSessionId: "root",
+        rootRunId: "run",
+        status: "failed",
+        createdAt: 1,
+        updatedAt: 2,
+        resultStored: false,
+        delivery: "processed",
+      },
+      readOnly: true,
+      reasoningMissing: false,
+      history: { hasMore: false },
+      messages: [],
+      error: "Context overflow after forced compaction retry",
+    },
+  };
+  const app = render(
+    <AppShell>
+      <SubagentBrowser reader={reader} state={state} onClose={vi.fn()} />
+    </AppShell>,
+  );
+  try {
+    expect(app.lastFrame()).toContain("failed");
+    expect(app.lastFrame()).toContain(
+      "Context overflow after forced compaction retry",
+    );
+  } finally {
+    app.unmount();
+    reader.dispose();
+  }
+});
