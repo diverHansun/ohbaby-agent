@@ -1,6 +1,6 @@
 # improve-4：滚动摘要、保留段与原子切换
 
-> 状态：规划细化，**尚未实施**。
+> 状态：代码已实施，验收见 [05](./05-implementation-acceptance.md)；仅本地分支，待用户审查。
 > 编写日期：2026-10-12。代码调查基线 `24c70034`（沿用 [plan](../plan/README.md) 快照），编写时仓库 HEAD `c5cfda26`。
 > 上游规划是 [plan/](../plan/README.md)。本目录把 plan 第四批细化成可施工的规划，规则以 plan [00](../plan/00-discussion.md)、[02](../plan/02-optimization-plan-and-change-scope.md)、[04](../plan/04-test-and-acceptance.md) 和 [context-design/02](../plan/context-design/02-change-spec.md) 的最新结论为准，不新增也不改动已确认的预算、尾段和缓存规则。
 
@@ -34,7 +34,7 @@
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 改动契约：阶段、改动面、契约、风险（最详） |
 | [03-reference-projects.md](./03-reference-projects.md) | 借鉴 pi／kimi／ZCode 等，写清不照搬的部分 |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 测试与验收，映射 plan 用例 ID |
-| `05-implementation-acceptance.md` | **待本批实施完成后**由验收模式写入；规划期不存在 |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实施、测试、真实服务、独立审查与本地提交记录 |
 
 ## 明确不在本批
 

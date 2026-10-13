@@ -1,6 +1,6 @@
 # Context 模块：测试策略
 
-当前契约已同步 [Compact 议题第 3 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-3/02-optimization-plan-and-change-scope.md)（2026-10-13）。文末先前批次章节保留为历史记录；与当前正文冲突时，以当前正文及第 3 批说明为准。第 4 批尾段／终止策略和第 5 批 mask 清理尚未实施。
+当前契约已同步 [Compact 议题第 4 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/02-optimization-plan-and-change-scope.md)（2026-10-13），执行证据见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/05-implementation-acceptance.md)。文末先前批次章节仅保留历史设计；与当前正文冲突时，以当前正文为准。第 5 批 mask 清理及全入口回归尚未实施。
 
 本文定义 Context 的长期测试职责。improve-4～5 联合回归的完整 ID、故障矩阵和发布门见 [04-test-and-acceptance.md](./improve-4-to-5-regression/04-test-and-acceptance.md)。
 
@@ -11,7 +11,7 @@
 3. primary、child/sibling scope 是否隔离？
 4. 部分写、并发、abort 和 hard crash 后 durable truth 是否可恢复？
 5. 同 run/epoch 的 system、runtime、tools 前缀是否稳定？
-6. summary 请求自身超窗时是否直接失败，且未读原文不被错误退场？
+6. 模式 A/B 是否保护必留内容、保持工具配对，且未读又未保留的原文仅随成功摘要明确记为遗漏？
 7. Context event 是否属于正确 scope/attempt，且不会冒充 durable truth？
 
 ## 二、分层职责
@@ -30,13 +30,13 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
 - measured `{ messages, tools }` 与 adapter 实际输入深等价。
 - `PreparedModelRequest` 创建后不可被 MCP load、permission change、retry 或调用方 mutation 改写。
-- `ContextUsage.usageRatio` 使用完整输出预留后的 input budget；mask/thrash 局部使用原半窗压力比以保持时序；summary 使用 `currentTokens / contextLimit >= 0.90`，并验证 `ordinaryInput >= ordinaryInputBudget || summaryInput + ordinaryMaxTokens >= summaryInputBudget`；容量压力与占用率共同走 summary，仍受旧次数／thrash guard。
+- `ContextUsage.usageRatio` 使用完整输出预留后的 input budget；只有 mask 使用旧半窗压力比。summary 使用 `currentTokens / contextLimit >= 0.90`，并验证 `ordinaryInput >= ordinaryInputBudget || summaryInput + ordinaryMaxTokens >= summaryInputBudget`；成功地板只抑制相同容量且未增长的自动重复触发。
 - cache read/write/uncached 是 inclusive input breakdown，不改变窗口占用总量。
 - summary 与被替代原文不同时 active；失败不声称成功。
 - 同 initiating message 的 runtime part 基数不超过 1，包括并发/多 manager/restart。
-- 同 scope compaction/prompt mutation 串行，store 在提交事务内校验 selected-Part snapshots；异 scope 可并发。
+- 同 scope compaction/prompt mutation 串行，store 在实际写入口检查 Stop 并校验退场 parts 和相关完整 messages；冲突返回 failed，异 scope 可并发，新建独立输入消息不误冲突。
 - restart 后 canonical model view 与 deterministic repair 等价；恢复零 LLM、零历史 event。
-- primary/subagent 的 history、calibration、mask、thrash、tool epoch、cache identity 和 event 不串。
+- primary/subagent 的 history、calibration、mask、compaction floor、tool epoch、cache identity 和 event 不串。
 
 ## 四、重点场景
 
@@ -44,7 +44,7 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
 - ordinary primary/subagent step；
 - final-step `tailDirectives` 只出现一次且 tools=`[]`；
-- overflow → force prepare → retry 发送新 request；
+- overflow → 一次 force prepare → 容量与收益通过后发送新 request；同一步输入快照重入不重新获额，二次 overflow 终止；
 - prepare 后 lazy MCP/permission change 不改当前 request，只改下一 request；
 - active reasoning/tool loop 不修改已发送 prefix。
 
@@ -53,24 +53,28 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 | 输入 | 预期 |
 |---|---|
 | 完整窗口占用 `0.89999` 且普通输入、摘要输入加普通 maxTokens 均未到边界 | 不进入 summary |
-| 完整窗口占用 `0.90` | `summary`（仍受旧次数／thrash 规则） |
-| 占用 `<0.90`、普通输入到自身预算或摘要输入加普通 maxTokens 到摘要预算 | `summary`，仍受旧次数／thrash guard |
-| 上述容量压力 + thrash locked | `none` |
-| 上述容量压力 + per-turn cap 已到 | `mask`，不调用摘要 Provider |
+| 完整窗口占用 `0.90`，无成功地板抑制 | `summary` |
+| 占用 `<0.90`、普通输入到自身预算或摘要输入加普通 maxTokens 到摘要预算 | `summary`，仍检查同容量成功地板 |
+| 成功后仍高于触发线，相同容量且占用未高于地板 | `none`，不重复调用摘要 |
+| 占用严格高于地板或窗口／输出预留等容量条件变化 | 重新判断触发与完整容量，不受旧地板阻挡 |
 | ordinaryMaxTokens 小于 summaryMaxTokens，当前输入均放得下但摘要输入加普通 maxTokens 到界 | 在发送普通请求前触发 summary |
-| 摘要完整输入已超过自身可用容量 | Provider 零调用，原历史不变 |
+| 摘要完整输入已超过自身可用容量 | 模式 A 只裁请求副本的较老可裁完整组；仍放不下则 Provider 零调用、原历史不变 |
 | ratio `>=0.50` 且未进 summary | `mask` |
-| 显式 `force=true` | `force`，绕过旧 thrash lock／per-turn cap |
+| 手动 compact／显式 `force=true` | 豁免成功地板，但仍受容量、收益、保护集合及请求总额度约束 |
 
 ### 4.3 Compaction/failure
 
-- summary 非 overflow 失败、inflated、stream abort；
-- summary request context overflow 首次失败即停止，预设第二次成功也不能调用；SQLite 重开原 parts 完全不变；
+- 64K／200K／1M 窗口均使用固定 20,000-token 尾段，保留完整组、未闭合依赖和至少最近一组；全部活动旧摘要进入新的单滚动摘要；
+- 模式 A 的本地超窗与 Provider overflow、transient/overflow 混合顺序共用最多两次实际请求；保护旧摘要、近期内容与新输入，不拆工具配对；
+- 模式 B 覆盖输入单独可放、加普通输出才超窗，固定材料及受保护输入只计一次；不另发摘要，最近完整组仍装不下则零提交；
+- 最终正文包含宿主文件操作和遗漏说明，合计不超过 16,384 tokens；遗漏精确 part IDs、原因和成功 request ownership 随摘要同事务保存，SQLite 重开可查；
+- 无旧段不请求摘要但检查普通容量；摘要失败、无收益、abort 不提交候选，自动最终失败终止运行，保留原历史与已完成工具结果；
 - create summary、append part、第 N 个 compacted update、commit 后 event 前故障；
 - hard SIGKILL 等待 marker 精确内容，不只等待文件存在；
 - auto+auto、manual+auto、manual+manual、manual+prompt；
 - primary 与 child 同时 compact；
-- repeated compaction 不重复展开旧 summary。
+- 排队 Stop 零写入、提交后 Stop 保留成功；退场 parts 或相关工具组变化时冲突失败，新输入消息保持 active；
+- 同一 run 随占用增长连续成功三次，无增长不重复触发；不展开已经退场的旧 summary。
 
 ### 4.4 Scope/event/replay
 
@@ -152,7 +156,7 @@ test:context:eval
 
 ## 九、验收关系
 
-本文件描述长期模块规则；联合回归的可执行 ID 与最终门以 `improve-4-to-5-regression/04-test-and-acceptance.md` 为准。实施完成后实际证据、偏差和剩余风险写入同目录的 `05-implementation-acceptance.md`，不得回写本文件伪造测试进度。
+本文件描述长期模块规则，不表示所有门禁已经运行。既有联合回归见 `improve-4-to-5-regression/04-test-and-acceptance.md`；本次 Compact 议题的可执行范围与实际证据分别见[第 4 批测试合同](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/04-test-and-acceptance.md)和[实施验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/05-implementation-acceptance.md)。未完成的全量、真实 Provider 和第 5 批全入口回归不得在此写成通过。
 
 ## improve-1 新增回归（2026-10-13）（历史记录）
 
@@ -165,7 +169,7 @@ test:context:eval
 
 `serializer.integration.test.ts` 用真实 MCP adapter、scheduler、lifecycle 和 SQLite 验证 error metadata 接回、错误与结构化内容不重复、两个大结果完整、预算变化下的稳定性、普通／摘要工具投影及计数在重开后相同；另验 aborted 部分输出与错误各一次。adapter 单测覆盖媒体文本表达和 resource URI，scheduler 单测覆盖非法 metadata 及注册来源。Read 多字节分页与子代理文件引用／Read 授权沿用既有回归。真实独立服务的分页、工具错误、子代理与重启结果见 [本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-2/05-implementation-acceptance.md)。
 
-## Compact 议题 improve-3 回归职责
+## Compact 议题 improve-3 回归职责（历史记录）
 
 - 验证摘要派生自普通 prepared：system、tools、model、reasoning、tail directives、native state 和同一 mask 投影保持，只有追加 user 指令、输出预算与 purpose 为允许差异；不使用 transcript 重建。
 - 容量测试同时覆盖等于边界、比边界少 1、普通输出小于摘要输出，以及 thrash/cap 不被容量压力绕过；摘要实际发送只按独立 summaryInputBudget 校验，单次巨型输入跨窗时零 Provider 调用。提前预留仅使用已申请普通 maxTokens，不引入预测增长或新 ratio。

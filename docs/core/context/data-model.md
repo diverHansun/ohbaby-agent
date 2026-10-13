@@ -1,6 +1,6 @@
 # Context 模块：数据模型
 
-当前契约已同步 [Compact 议题第 3 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-3/02-optimization-plan-and-change-scope.md)（2026-10-13）。文末先前批次章节保留为历史记录；与当前正文冲突时，以当前正文及第 3 批说明为准。第 4 批尾段／终止策略和第 5 批 mask 清理尚未实施。
+当前契约已同步 [Compact 议题第 4 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/02-optimization-plan-and-change-scope.md)（2026-10-13），执行证据见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/05-implementation-acceptance.md)。文末先前批次章节仅保留历史设计；与当前正文冲突时，以当前正文为准。第 5 批 mask 清理及全入口回归尚未实施。
 
 本文定义 Context 数据结构的语义、所有权和生命周期。TypeScript 字段以 `packages/ohbaby-agent/src/core/context/types.ts` 为准；这里解释字段为何存在、何时稳定、能否持久化。
 
@@ -17,7 +17,7 @@ interface ContextIdentity {
 
 - primary 的 `contextScopeId` 缺省，但只表示 primary scope；
 - subagent 必须带显式 scope；
-- key、event、calibration、mask、thrash、compaction 和 cache observation 使用同一身份语义；
+- key、event、calibration、mask、compaction floor 和 cache observation 使用同一身份语义；
 - 缺省 scope 不能解释为“聚合整个 session”。
 
 ## 二、请求数据模型
@@ -72,7 +72,7 @@ interface PreparedModelRequest {
 - 创建后深冻结，retry/lazy MCP/permission change 不得原地修改；
 - `settings` 固定 model、temperature、已解析 reasoning 与输出 maxTokens；`inputIds` 固定本次纳入的 run 输入；
 - cache policy 是 adapter capability，不强塞入该值对象；`context-summary` 沿用普通请求的 scope key 与 capability 策略；
-- summary 派生值保留同一 mask 投影及上述字段，只追加 user 指令并覆盖输出 maxTokens；原对象保持不变。
+- summary 派生值保留同一 mask 投影及上述字段，追加 user 指令并覆盖输出 maxTokens；模式 A 只允许裁派生请求中的较老可裁完整组，原对象保持不变。
 
 ### 2.4 `PreparedTurn`
 
@@ -148,26 +148,26 @@ type CompressionStatus = "compressed" | "skipped" | "failed" | "inflated"
 type CompactStatus = "not-needed" | "compacted" | "failed" | "inflated"
 ```
 
-- `compressed/compacted`：候选已经 durable commit，且下一真实投影变小；
-- `inflated`：候选不比被替代输入小，不得提交；
-- `failed`：生成或提交失败，不得声称完成；
-- `skipped/not-needed`：未达到条件或没有合法 cut point。
+- `compressed/compacted`：候选已经 durable commit，提交前完整普通请求通过容量检查且占用严格下降；事后 Stop 不改变成功事实；
+- `inflated`：候选完整请求占用未下降，不得提交，自动运行终止；
+- `failed`：生成、容量检查或提交失败（包括快照冲突），不得声称完成；
+- `skipped/not-needed`：未达到触发条件、受成功地板抑制，或没有可压旧段；无旧段时仍检查普通请求容量，装不下则外层 `CompactResult.status` 为 `failed`，但不记为摘要请求失败。
 
 ### 4.2 Summary candidate
 
 candidate 是进程内值对象：
 
 ```text
-historyToCompress
-snapshot
-originalTokens
-newTokens
-savedTokens
-summaryMessageId
+compactionId / summaryMessageId
+sourceHistory / expectedMessages
+readIds / keptIds / protectedInputIds / omittedPartIds
+historyToCompress / compactedPartSnapshot
+summaryBody / snapshot
+originalTokens / newTokens / savedTokens
 requests: readonly SummaryRequestRecord[]
 ```
 
-它不是事实。只有在 scope lease、selected-Part snapshot 校验和 durable commit 成功后，才成为 active summary。
+它不是事实。读取、保留与遗漏集合随模式 A/B 更新；固定 20,000-token 尾段保留完整组，最终正文含文件操作与遗漏说明且不超过 16,384 tokens。只有 message/part 快照校验和 durable commit 成功后，才成为 active summary。
 
 ### 4.3 Durable compaction state
 
@@ -177,9 +177,11 @@ requests: readonly SummaryRequestRecord[]
 |---|---|---|
 | 原始 user/assistant/tool history | Message + Part | MessageStore |
 | Summary | assistant Message + text Part + summary metadata | MessageStore |
+| 成功摘要请求 | 摘要 assistant `modelRequests` | MessageStore |
+| 读取／保留 message IDs、受保护 input IDs、遗漏 part IDs 与原因 | 摘要正文 Part `metadata` | MessageStore |
 | 被摘要替代的原文标记 | `Part.time.compacted` | MessageStore |
 
-Message port 已提供一次性 atomic compaction commit；Context 不接管数据库事务细节。独立 prune 写标记路径已删除，历史已持久化的 compacted marks 仍按既有语义读取。
+Message port 一次提交上述摘要状态与退场标记；`metadata.kind` 固定为 `context-summary`，遗漏原因用 `summary-capacity`。`ModelRequestRecord` 由 `purpose` 判别：普通 `agent-step` 保留必填 `runId/messageId/step`，`context-summary` 使用 `compactionId` 与预分配摘要 `messageId`，不伪造 run。成功记录随摘要落库，失败、中断和未应用记录只留日志，usage 缺失不补零。Context 不接管数据库事务细节；历史 compacted marks 仍正常读取。
 
 ## 五、Ephemeral scoped state
 
@@ -187,9 +189,9 @@ Message port 已提供一次性 atomic compaction commit；Context 不接管数�
 |---|---|---|
 | calibration factor | session + scope | 重置为 `1.0` |
 | mask cutoff | session + scope | 重算 |
-| thrash lock | session + scope | 重置 |
-| per-turn compaction count | session + scope | 新 turn/reset |
-| mutation lane owner/queue | session + scope | 进程内；store 事务内的 selected-Part snapshot precondition 防跨 manager stale commit |
+| compaction floor | session + scope | 重启清空；同进程跨 run 保留成功后绝对占用和容量签名，容量变化重新判断 |
+| force recovery step | Lifecycle run + model step | 新运行／新 step 重新获额，同一步输入快照重入不重置 |
+| mutation lane owner/queue | session + scope | 进程内；store 事务内的 message/part snapshot precondition 防跨 manager stale commit |
 | UI context window tracker | primary session | projection，可从后续请求重建；total-only 更新清旧 composition |
 | UI prompt-cache tracker | primary session | 进程内 session 累计；compact/换模型不清，归档/删除/dispose 清理 |
 
@@ -258,17 +260,14 @@ type CompactionTerminalOutcome =
 | `ContextUsage` | Context | one measurement | prepared request heuristic + budget |
 | `ContextOccupancyComposition` | Context | one final prepare | final context/request + step-local tool provenance |
 | Summary candidate | ContextLLMClient | one compaction attempt | 非事实，提交前可丢弃 |
-| Atomic compaction commit | MessageManager/MessageStore | one durable transaction | 可选 summary + 全部 compacted marks；全成或全不成 |
+| Atomic compaction commit | MessageManager/MessageStore | one durable transaction | summary + 成功 requests + metadata + 全部 compacted marks；全成或全不成 |
 | Context event | Context/adapter | in-process | 非事实，best effort |
 | UI window | tracker | primary projection | 可重建 projection |
 | UI prompt-cache usage | UI adapter tracker | primary session、in-process | provider usage 的累计 projection；非窗口事实 |
 
-`CompressionResult.status="skipped"` 时，`reason` 对当前可观测分支显式区分：
+`CompressionResult.status="skipped"` 的当前无旧段分支使用 `too-short`。类型中的旧 `stale` reason 仍保留，但当前提交冲突返回 `failed/error`，不再表示无需压缩；无关新输入消息仍可并存。
 
-- `too-short`：active history 不足以生成有效 summary；
-- `stale`：summary Provider await 期间被选中的 Part 已修改、删除或 compacted，候选未提交；无关尾部 append 不使旧 prefix 候选失效。
-
-`CompressionResult` 是按 `status` 判别的 union，而不是一组可任意组合的 optional 字段：`compressed` 必有 `summaryMessageId`，`skipped` 必有 skip `reason`，`failed` 必有 `error`。summary overflow 直接返回 failed/error，不再有缩水恢复专属 reason。
+`CompressionResult` 按 `status` 判别：`compressed` 必有 `summaryMessageId`，可携带 requests 与遗漏数量；`skipped` 必有 `reason`，`failed` 必有 `error`。摘要 overflow 进入模式 A，并与 transient retry 共用两次实际请求额度；可裁材料或额度耗尽时失败。模式 B 只重算本地候选，不增加摘要请求。
 
 ## 迁移 improve-6：自有结构与估算用途（历史记录）
 
@@ -278,7 +277,7 @@ type CompactionTerminalOutcome =
 
 `ContextUsage.usageRatio` 仍表示输入预算占用，供 mask／thrash 等已有规则使用。自动 summary 与 UI 则都使用 `currentTokens / contextLimit`，其中 `contextLimit` 是完整窗口。两种比例用途不同。
 
-## Compact 议题 improve-3：摘要请求记录与预算
+## Compact 议题 improve-3：摘要请求记录与预算（历史记录）
 
 `SummaryRequestResult { text, summaryMessageId, requests }` 的 requests 是 `SummaryRequestRecord[]`。记录沿用普通请求的 requestId、messageId、attempt、inputIds、时间、outcome 与可选 usage，新增 compactionId，purpose 固定为 `context-summary`，不包含虚构 runId/step。usage 缺失保持未知，cache 使用既有 inclusive input breakdown。成功 `CompressionResult.requests` 返回 records；本批不写入 durable assistant.modelRequests，失败或未应用记录只保留日志观测。其持久化与统计归属留到第 4 批。
 
