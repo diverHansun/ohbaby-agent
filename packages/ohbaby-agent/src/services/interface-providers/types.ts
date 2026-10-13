@@ -31,6 +31,8 @@ export type InterfaceProviderPromptCache =
       >;
       readonly key?: never;
       readonly reason: string;
+      /** Last historical ModelMessage index; excludes an appended summary instruction. */
+      readonly messageBoundary?: number;
     };
 
 export type InterfaceProviderFinishReason =

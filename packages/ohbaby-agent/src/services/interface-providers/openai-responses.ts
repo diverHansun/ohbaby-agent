@@ -168,6 +168,7 @@ export function createOpenAIResponsesProvider(
   const client = new OpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseUrl,
+    maxRetries: 0,
   });
   return {
     id: options.id,

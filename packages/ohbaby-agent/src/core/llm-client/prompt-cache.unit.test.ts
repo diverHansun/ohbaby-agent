@@ -190,6 +190,84 @@ describe("prompt cache capability resolver", () => {
 });
 
 describe("scoped prompt cache identity", () => {
+  it.each([undefined, "child-scope"])(
+    "shares the normal scoped Chat cache key with summaries (%s)",
+    (contextScopeId) => {
+      const base = {
+        baseUrl: "https://api.openai.com/v1",
+        interfaceProvider: "openai-compatible" as const,
+        policy: "auto" as const,
+        provider: "openai",
+        sessionId: "session-a",
+        contextScopeId,
+      };
+      const normal = resolvePromptCacheRequest({
+        ...base,
+        purpose: "agent-step",
+      });
+      const summary = resolvePromptCacheRequest({
+        ...base,
+        purpose: "context-summary",
+      });
+      expect(normal.strategy).toBe("openai-keyed-implicit");
+      expect(summary.key).toBe(normal.key);
+      expect(summary.strategy).toBe(normal.strategy);
+    },
+  );
+
+  it.each([
+    ["https://api.anthropic.com", "anthropic-top-level-auto"],
+    ["https://zenmux.ai/api/anthropic/v1", "anthropic-explicit-last-block"],
+  ])(
+    "locates the summary's real historical boundary for %s",
+    (baseUrl, strategy) => {
+      const summary = resolvePromptCacheRequest({
+        baseUrl,
+        interfaceProvider: "anthropic",
+        policy: "auto",
+        provider: "fixture",
+        purpose: "context-summary",
+        sessionId: "session-a",
+        messages: [
+          { role: "system", content: "Stable system" },
+          { role: "user", content: "Real history" },
+          { role: "user", content: "Summarize" },
+        ],
+      });
+      expect(summary).toMatchObject({ strategy, messageBoundary: 1 });
+    },
+  );
+
+  it.each(["https://api.anthropic.com", "https://zenmux.ai/api/anthropic/v1"])(
+    "does not turn the summary instruction into a cache target without eligible history (%s)",
+    (baseUrl) => {
+      expect(
+        resolvePromptCacheRequest({
+          baseUrl,
+          interfaceProvider: "anthropic",
+          policy: "auto",
+          provider: "fixture",
+          purpose: "context-summary",
+          sessionId: "session-a",
+          messages: [{ role: "user", content: "Summarize" }],
+        }).strategy,
+      ).toBe("observe-only");
+    },
+  );
+
+  it("keeps summary Responses requests observe-only", () => {
+    expect(
+      resolvePromptCacheRequest({
+        baseUrl: "https://api.openai.com/v1",
+        interfaceProvider: "openai-responses",
+        policy: "enabled",
+        provider: "openai",
+        purpose: "context-summary",
+        sessionId: "session-a",
+      }).strategy,
+    ).toBe("observe-only");
+  });
+
   it("is stable within a primary session and across provider-irrelevant changes", () => {
     const first = createScopedPromptCacheKey({ sessionId: "session secret" });
     const second = createScopedPromptCacheKey({ sessionId: "session secret" });
@@ -356,7 +434,7 @@ describe("scoped prompt cache identity", () => {
     ).toBe(1);
   });
 
-  it("forces auxiliary and legacy calls to observe-only", () => {
+  it("keeps session-title, legacy, and unidentified calls observe-only", () => {
     const base = {
       baseUrl: "https://api.openai.com/v1",
       interfaceProvider: "openai-compatible" as const,
@@ -366,16 +444,12 @@ describe("scoped prompt cache identity", () => {
     };
     expect(resolvePromptCacheRequest(base).strategy).toBe("observe-only");
     expect(
-      resolvePromptCacheRequest({ ...base, purpose: "context-summary" })
-        .strategy,
-    ).toBe("observe-only");
-    expect(
       resolvePromptCacheRequest({ ...base, purpose: "session-title" }).strategy,
     ).toBe("observe-only");
     expect(
       resolvePromptCacheRequest({
         ...base,
-        purpose: "agent-step",
+        purpose: "context-summary",
         sessionId: undefined,
       }).strategy,
     ).toBe("observe-only");

@@ -11,6 +11,7 @@ import { createOpenAICompatibleProvider } from "./openai-compatible.js";
 import { createOpenAIResponsesProvider } from "./openai-responses.js";
 import type {
   InterfaceProviderPromptCache,
+  LLMRequestPurpose,
   InterfaceProviderStreamEvent,
   ModelMessage,
 } from "./types.js";
@@ -35,11 +36,12 @@ function wirePromptCache(input: {
   readonly messages: readonly ModelMessage[];
   readonly policy?: PromptCachePolicy;
   readonly provider: string;
+  readonly purpose?: LLMRequestPurpose;
 }): InterfaceProviderPromptCache {
   return resolvePromptCacheRequest({
     ...input,
     policy: input.policy ?? "auto",
-    purpose: "agent-step",
+    purpose: input.purpose ?? "agent-step",
     sessionId: "contract-session",
   });
 }
@@ -63,6 +65,247 @@ function customToolNames(tools: MessageCreateParams["tools"]): string[] {
 }
 
 describe("prompt-cache wire contract", () => {
+  it("shares the scoped Chat key and unchanged history/tools with a summary", async () => {
+    const baseUrl = "https://api.openai.com/v1";
+    const provider = createOpenAICompatibleProvider({
+      id: "openai",
+      apiKey: "test-key",
+      baseUrl,
+    });
+    const create = vi
+      .spyOn(provider.client.chat.completions, "create")
+      .mockResolvedValue(
+        emptyStream<ChatCompletionChunk>() as unknown as Awaited<
+          ReturnType<typeof provider.client.chat.completions.create>
+        >,
+      );
+    const history: ModelMessage[] = [
+      { role: "system", content: "Stable system" },
+      { role: "user", content: "Actual history" },
+    ];
+    for (const purpose of ["agent-step", "context-summary"] as const) {
+      const messages: ModelMessage[] =
+        purpose === "agent-step"
+          ? history
+          : [...history, { role: "user", content: "Summarize" }];
+      await provider.streamResponse({
+        purpose,
+        maxTokens: 16384,
+        model: "gpt-5.6",
+        messages,
+        tools: [
+          { name: "lookup", inputSchema: { type: "object", properties: {} } },
+        ],
+        promptCache: wirePromptCache({
+          baseUrl,
+          interfaceProvider: "openai-compatible",
+          messages,
+          provider: "openai",
+          purpose,
+        }),
+      });
+    }
+    const normal = create.mock.calls[0][0];
+    const summary = create.mock.calls[1][0];
+    expect(summary.prompt_cache_key).toEqual(expect.any(String));
+    expect(summary.prompt_cache_key).toBe(normal.prompt_cache_key);
+    expect(summary.messages).toEqual([
+      ...normal.messages,
+      { role: "user", content: "Summarize" },
+    ]);
+    expect(summary.tools).toEqual(normal.tools);
+  });
+
+  it.each([
+    ["anthropic", "https://api.anthropic.com", 2],
+    ["zenmux", "https://zenmux.ai/api/anthropic/v1", 1],
+  ] as const)(
+    "%s summary marks real grouped tool history and preserves native blocks",
+    async (id, baseUrl, markerCount) => {
+      const provider = createAnthropicProvider({
+        id,
+        apiKey: "test-key",
+        baseUrl,
+      });
+      const stream = vi
+        .spyOn(provider.client.messages, "stream")
+        .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+      const nativeBlocks = [
+        {
+          type: "thinking" as const,
+          thinking: "Native reasoning",
+          signature: "opaque-signature",
+        },
+        { type: "text" as const, text: "Native answer" },
+        {
+          type: "tool_use" as const,
+          id: "call-a",
+          name: "lookup",
+          input: { query: "a" },
+        },
+        {
+          type: "tool_use" as const,
+          id: "call-b",
+          name: "lookup",
+          input: { query: "b" },
+        },
+      ];
+      const history: ModelMessage[] = [
+        { role: "system", content: "Stable system" },
+        { role: "user", content: "Read both" },
+        {
+          role: "assistant",
+          content: "Native answer",
+          toolCalls: [
+            {
+              callId: "call-a",
+              name: "lookup",
+              argumentsJson: '{"query":"a"}',
+            },
+            {
+              callId: "call-b",
+              name: "lookup",
+              argumentsJson: '{"query":"b"}',
+            },
+          ],
+          modelState: {
+            version: 1,
+            estimate: { tokens: 5, source: "output" },
+            origin: {
+              provider: id,
+              model: "claude-fixture",
+              protocol: "anthropic",
+              endpoint: baseUrl,
+            },
+            output: { protocol: "anthropic", items: nativeBlocks },
+          },
+        },
+        { role: "tool", callId: "call-a", content: "Result a" },
+        { role: "tool", callId: "call-b", content: "Result b" },
+      ];
+      const before = structuredClone(history);
+      for (const purpose of ["agent-step", "context-summary"] as const) {
+        const messages: ModelMessage[] =
+          purpose === "agent-step"
+            ? history
+            : [...history, { role: "user", content: "Summarize" }];
+        await provider.streamResponse({
+          purpose,
+          maxTokens: 16384,
+          model: "claude-fixture",
+          messages,
+          tools: [
+            {
+              name: "lookup",
+              inputSchema: {
+                type: "object",
+                properties: { query: { type: "string" } },
+              },
+            },
+          ],
+          promptCache: wirePromptCache({
+            baseUrl,
+            interfaceProvider: "anthropic",
+            messages,
+            provider: id,
+            purpose,
+          }),
+        });
+      }
+      const normal = stream.mock.calls[0][0];
+      const summary = stream.mock.calls[1][0];
+      expect(summary).not.toHaveProperty("cache_control");
+      expect(summary.system).toEqual(normal.system);
+      expect(summary.tools).toEqual(normal.tools);
+      expect(summary.messages).toEqual([
+        { role: "user", content: "Read both" },
+        { role: "assistant", content: nativeBlocks },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "call-a", content: "Result a" },
+            {
+              type: "tool_result",
+              tool_use_id: "call-b",
+              content: "Result b",
+              cache_control: { type: "ephemeral" },
+            },
+          ],
+        },
+        { role: "user", content: "Summarize" },
+      ]);
+      expect(JSON.stringify(summary).match(/cache_control/gu)).toHaveLength(
+        markerCount,
+      );
+      expect(history).toEqual(before);
+    },
+  );
+
+  it.each(["https://api.anthropic.com", "https://zenmux.ai/api/anthropic/v1"])(
+    "marks history before a native thinking-only tail for %s summaries",
+    async (baseUrl) => {
+      const provider = createAnthropicProvider({
+        id: "fixture",
+        apiKey: "test-key",
+        baseUrl,
+      });
+      const stream = vi
+        .spyOn(provider.client.messages, "stream")
+        .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+      const thinking = {
+        type: "thinking" as const,
+        thinking: "Still thinking",
+        signature: "signed",
+      };
+      const messages: ModelMessage[] = [
+        { role: "user", content: "Actual history" },
+        {
+          role: "assistant",
+          content: "",
+          modelState: {
+            version: 1,
+            estimate: { tokens: 5, source: "output" },
+            origin: {
+              provider: "fixture",
+              model: "claude-fixture",
+              protocol: "anthropic",
+              endpoint: baseUrl,
+            },
+            output: { protocol: "anthropic", items: [thinking] },
+          },
+        },
+        { role: "user", content: "Summarize" },
+      ];
+      await provider.streamResponse({
+        purpose: "context-summary",
+        maxTokens: 16384,
+        model: "claude-fixture",
+        messages,
+        promptCache: wirePromptCache({
+          baseUrl,
+          interfaceProvider: "anthropic",
+          messages,
+          provider: "fixture",
+          purpose: "context-summary",
+        }),
+      });
+      expect(stream.mock.calls[0][0].messages).toEqual([
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Actual history",
+              cache_control: { type: "ephemeral" },
+            },
+          ],
+        },
+        { role: "assistant", content: [thinking] },
+        { role: "user", content: "Summarize" },
+      ]);
+    },
+  );
+
   it("sends an opaque key and usage request only for keyed OpenAI strategy", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "openai",
@@ -163,9 +406,16 @@ describe("prompt-cache wire contract", () => {
     });
   });
 
-  it.each(["auto", "enabled", "disabled"] as const)(
-    "keeps Responses cache and continuation controls absent for %s policy",
-    async (policy) => {
+  it.each(
+    (["auto", "enabled", "disabled"] as const).flatMap((policy) =>
+      (["agent-step", "context-summary"] as const).map((purpose) => ({
+        policy,
+        purpose,
+      })),
+    ),
+  )(
+    "keeps Responses cache and continuation controls absent for $policy/$purpose",
+    async ({ policy, purpose }) => {
       const provider = createOpenAIResponsesProvider({
         id: "openai",
         apiKey: "test-key",
@@ -179,15 +429,20 @@ describe("prompt-cache wire contract", () => {
           >,
         );
 
+      const messages: ModelMessage[] = [{ role: "user", content: "Hello" }];
+      if (purpose === "context-summary")
+        messages.push({ role: "user", content: "Summarize" });
       await provider.streamResponse({
+        purpose,
         maxTokens: 128,
-        messages: [{ role: "user", content: "Hello" }],
+        messages,
         model: "gpt-5.6",
         promptCache: wirePromptCache({
           baseUrl: "https://api.openai.com/v1",
           interfaceProvider: "openai-responses",
-          messages: [{ role: "user", content: "Hello" }],
+          messages,
           policy,
+          purpose,
           provider: "openai",
         }),
         temperature: 0,
@@ -204,7 +459,13 @@ describe("prompt-cache wire contract", () => {
 
       const params = create.mock.calls[0]?.[0] as Record<string, unknown>;
       expect(params).toEqual({
-        input: [{ role: "user", content: "Hello" }],
+        input:
+          purpose === "context-summary"
+            ? [
+                { role: "user", content: "Hello" },
+                { role: "user", content: "Summarize" },
+              ]
+            : [{ role: "user", content: "Hello" }],
         max_output_tokens: 128,
         model: "gpt-5.6",
         store: false,

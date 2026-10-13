@@ -435,6 +435,7 @@ export function createOpenAICompatibleProvider(
   const client = new OpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseUrl,
+    maxRetries: 0,
   });
 
   return {
