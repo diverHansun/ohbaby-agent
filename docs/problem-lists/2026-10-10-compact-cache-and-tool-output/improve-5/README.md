@@ -1,6 +1,6 @@
 # improve-5 · 入口贯通、旧机制退出与跨入口回归
 
-> 状态：规划稿，**尚未实施**。撰写日期 2026-10-12；代码基线为撰写时的 HEAD `c5cfda26`，业务代码未改。
+> 状态：已实施，待用户审查；本地分支 `codex/context-improve-5` 基于 improve-4 的 `84b9a71e`。实际测试与边界见 [05 实施验收](./05-implementation-acceptance.md)。00–04 保留 2026-10-12 的规划原貌及其调查基线 `c5cfda26`。
 > 本批是[议题](../README.md)五批实施里的最后一批，按[plan/00](../plan/00-discussion.md)、[plan/02](../plan/02-optimization-plan-and-change-scope.md)、[plan/04](../plan/04-test-and-acceptance.md)与 [context-design/02](../plan/context-design/02-change-spec.md) 细化。
 > 规划基线口径：前四批的改动**按设计假定已交付**（见下表），本批不重复它们，只做入口贯通、跨批契约复核和剩余旧机制清扫。
 
@@ -28,9 +28,9 @@
 | [02-optimization-plan-and-change-scope.md](./02-optimization-plan-and-change-scope.md) | 执行契约：分阶段、改动面、迁移与回滚（最详） |
 | [03-reference-projects.md](./03-reference-projects.md) | 参考项目实际做法与本批取舍（真参考，短） |
 | [04-test-and-acceptance.md](./04-test-and-acceptance.md) | 跨入口回归、旧库重开、多次压缩、清扫断言与实网收尾 |
-| `05-implementation-acceptance.md` | 本批实施完成后由验收会话写入，规划期不存在 |
+| [05-implementation-acceptance.md](./05-implementation-acceptance.md) | 实际实施、全仓测试、三协议实网、真实 Web 与审查记录 |
 
-本批**不建** `05`；实施完成后再走一次本 skill 的验收模式。
+规划期未建立 05；本次实施后另行记录实际结果，未用结果反写原方案。
 
 ## 不在本批
 
@@ -38,4 +38,4 @@
 
 ## 实施契约声明
 
-02 是给后续实施会话／开发者的执行契约，04 是验收契约。本规划会话不改业务代码，不在本目录写自检记录。实网测试是**每批的收尾动作**，本批文档不声称任何新行为已通过。
+02 是给后续实施会话／开发者的执行契约，04 是验收契约。00–04 是规划合同，不作为测试通过的证据。实网测试是**每批的收尾动作**；本次实际结果和未覆盖范围见 05。

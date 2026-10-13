@@ -1,13 +1,13 @@
 # Context 模块：测试策略
 
-当前契约已同步 [Compact 议题第 4 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/02-optimization-plan-and-change-scope.md)（2026-10-13），执行证据见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/05-implementation-acceptance.md)。文末先前批次章节仅保留历史设计；与当前正文冲突时，以当前正文为准。第 5 批 mask 清理及全入口回归尚未实施。
+当前契约已同步 [Compact 议题第 5 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/02-optimization-plan-and-change-scope.md)（2026-10-13）。测试范围见[本批测试与验收标准](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/04-test-and-acceptance.md)，实际结果见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/05-implementation-acceptance.md)。文末先前批次章节仅保留历史设计；与当前正文冲突时，以当前正文为准。
 
 本文定义 Context 的长期测试职责。improve-4～5 联合回归的完整 ID、故障矩阵和发布门见 [04-test-and-acceptance.md](./improve-4-to-5-regression/04-test-and-acceptance.md)。
 
 ## 一、测试回答什么
 
 1. 测量和 Provider 是否消费同一 `PreparedModelRequest`？
-2. mask/summary/retry/restart 后模型可见 history 是否唯一、tool pairing 是否合法？
+2. summary/retry/restart 后模型可见 history 是否唯一、tool pairing 是否合法？
 3. primary、child/sibling scope 是否隔离？
 4. 部分写、并发、abort 和 hard crash 后 durable truth 是否可恢复？
 5. 同 run/epoch 的 system、runtime、tools 前缀是否稳定？
@@ -18,7 +18,7 @@
 
 | 层 | 典型对象 | 目标 |
 |---|---|---|
-| unit | compaction policy、cut point、projection、usage、serializer、reference reducer | 快速验证纯逻辑和边界 |
+| unit | compaction policy、cut point、usage、serializer、reference reducer | 快速验证纯逻辑和边界 |
 | contract | `PreparedModelRequest`、Context event、Message atomic/idempotent port、Provider cache usage | 防止消费者可见语义漂移 |
 | integration | Context + MessageStore + Lifecycle + ToolScheduler/MCP + Bus | 验证真实数据流、并发和重建 |
 | smoke/e2e | build、serve/Web、真实 Provider | 验证发布产物和外部 capability |
@@ -30,13 +30,13 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
 - measured `{ messages, tools }` 与 adapter 实际输入深等价。
 - `PreparedModelRequest` 创建后不可被 MCP load、permission change、retry 或调用方 mutation 改写。
-- `ContextUsage.usageRatio` 使用完整输出预留后的 input budget；只有 mask 使用旧半窗压力比。summary 使用 `currentTokens / contextLimit >= 0.90`，并验证 `ordinaryInput >= ordinaryInputBudget || summaryInput + ordinaryMaxTokens >= summaryInputBudget`；成功地板只抑制相同容量且未增长的自动重复触发。
+- `ContextUsage.usageRatio` 使用完整输出预留后的 input budget；无半窗触发计算。summary 使用 `currentTokens / contextLimit >= 0.90`，并验证 `ordinaryInput >= ordinaryInputBudget || summaryInput + ordinaryMaxTokens >= summaryInputBudget`；成功地板只抑制相同容量且未增长的自动重复触发。
 - cache read/write/uncached 是 inclusive input breakdown，不改变窗口占用总量。
 - summary 与被替代原文不同时 active；失败不声称成功。
 - 同 initiating message 的 runtime part 基数不超过 1，包括并发/多 manager/restart。
 - 同 scope compaction/prompt mutation 串行，store 在实际写入口检查 Stop 并校验退场 parts 和相关完整 messages；冲突返回 failed，异 scope 可并发，新建独立输入消息不误冲突。
 - restart 后 canonical model view 与 deterministic repair 等价；恢复零 LLM、零历史 event。
-- primary/subagent 的 history、calibration、mask、compaction floor、tool epoch、cache identity 和 event 不串。
+- primary/subagent 的 history、calibration、compaction floor、tool epoch、cache identity 和 event 不串。
 
 ## 四、重点场景
 
@@ -59,7 +59,6 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 | 占用严格高于地板或窗口／输出预留等容量条件变化 | 重新判断触发与完整容量，不受旧地板阻挡 |
 | ordinaryMaxTokens 小于 summaryMaxTokens，当前输入均放得下但摘要输入加普通 maxTokens 到界 | 在发送普通请求前触发 summary |
 | 摘要完整输入已超过自身可用容量 | 模式 A 只裁请求副本的较老可裁完整组；仍放不下则 Provider 零调用、原历史不变 |
-| ratio `>=0.50` 且未进 summary | `mask` |
 | 手动 compact／显式 `force=true` | 豁免成功地板，但仍受容量、收益、保护集合及请求总额度约束 |
 
 ### 4.3 Compaction/failure
@@ -71,9 +70,9 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 - 无旧段不请求摘要但检查普通容量；摘要失败、无收益、abort 不提交候选，自动最终失败终止运行，保留原历史与已完成工具结果；
 - create summary、append part、第 N 个 compacted update、commit 后 event 前故障；
 - hard SIGKILL 等待 marker 精确内容，不只等待文件存在；
-- auto+auto、manual+auto、manual+manual、manual+prompt；
+- auto+auto、manual+auto、manual+manual、manual+prompt；后端手动准入拒绝忙和重复请求，不等待、不停止工具；
 - primary 与 child 同时 compact；
-- 排队 Stop 零写入、提交后 Stop 保留成功；退场 parts 或相关工具组变化时冲突失败，新输入消息保持 active；
+- 既有 mutation lane 等待期间 Stop 零写入，手动／自动都能在摘要网络重试等待中取消；提交后 Stop 保留成功；退场 parts 或相关工具组变化时冲突失败，新输入消息保持 active；
 - 同一 run 随占用增长连续成功三次，无增长不重复触发；不展开已经退场的旧 summary。
 
 ### 4.4 Scope/event/replay
@@ -82,7 +81,8 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 - sibling event 交错可按 session/scope/attempt 唯一分组；
 - accepted attempt 的 progress/terminal 共用 ID 且 terminal 恰好一次；
 - event publish/subscriber 失败不回滚 durable commit；
-- reopen 不重发 event、不调用 summary LLM。
+- reopen 不重发 event、不调用 summary LLM；旧摘要、完整工具原文及 `time.compacted` 均按原契约读取，退场内容不复活。
+- `CompactionThresholds` 仅含 summary；类型检查与事件目录契约共同覆盖常量、导出、调用方和登记的一致性。
 
 ### 4.5 Memory/prefix/cache
 
@@ -156,7 +156,7 @@ test:context:eval
 
 ## 九、验收关系
 
-本文件描述长期模块规则，不表示所有门禁已经运行。既有联合回归见 `improve-4-to-5-regression/04-test-and-acceptance.md`；本次 Compact 议题的可执行范围与实际证据分别见[第 4 批测试合同](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/04-test-and-acceptance.md)和[实施验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/05-implementation-acceptance.md)。未完成的全量、真实 Provider 和第 5 批全入口回归不得在此写成通过。
+本文件描述长期模块规则，不表示所有门禁已经运行。既有联合回归见 `improve-4-to-5-regression/04-test-and-acceptance.md`；本次 Compact 议题的执行范围见[第 5 批测试合同](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/04-test-and-acceptance.md)。实际命令、实网结果与未覆盖范围由本批验收记录说明。
 
 ## improve-1 新增回归（2026-10-13）（历史记录）
 

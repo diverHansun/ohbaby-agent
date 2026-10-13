@@ -1,6 +1,6 @@
 # Context 模块：数据流与接口
 
-当前契约已同步 [Compact 议题第 4 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/02-optimization-plan-and-change-scope.md)（2026-10-13），执行证据见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/05-implementation-acceptance.md)。文末先前批次章节仅保留历史设计；与当前正文冲突时，以当前正文为准。第 5 批 mask 清理及全入口回归尚未实施。
+当前契约已同步 [Compact 议题第 5 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/02-optimization-plan-and-change-scope.md)（2026-10-13）。测试范围见[本批测试与验收标准](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/04-test-and-acceptance.md)，实际结果见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/05-implementation-acceptance.md)。文末先前批次章节仅保留历史设计；与当前正文冲突时，以当前正文为准。
 
 本文以实际请求和状态转换为主线，说明 Context 与 Message、Lifecycle、MCP、Provider、Bus 和 UI 的交互。接口签名以 `types.ts` 为准。
 
@@ -40,7 +40,7 @@ Context 不访问 MCP registry、UI state 或 Provider transport；这些 adapte
    4b. serialize messages + tools；固定 resolved request settings 与 inputIds
    4c. measure ContextUsage
    4d. decideCompactionRung()
-   4e. 普通与摘要共用 mask 投影；如需要，从 prepared 分叉 summary，模式 A/B 校验后原子提交，再重新 assemble/measure
+   4e. 普通与摘要共用完整历史投影；如需要，从 prepared 分叉 summary，模式 A/B 校验后原子提交，再重新 assemble/measure
    4f. freeze PreparedModelRequest
 5. onRequestMeasured(request)
 6. Lifecycle 在压缩失败／无收益时终止本次运行，否则把同一 request 交给 Provider adapter
@@ -75,7 +75,6 @@ measure usage
   ├─ force=true ───────────────────────────────→ force
   ├─ 同容量且占用不高于成功地板 ───────────────→ none
   ├─ capacityPressure 或窗口占用>=0.90 ──────→ summary
-  ├─ 旧 mask 压力比>=0.50 ────────────────────→ mask
   └─ otherwise ───────────────────────────────→ none
 ```
 
@@ -86,7 +85,7 @@ capacityPressure = ordinaryInput >= ordinaryInputBudget
                 || summaryInput + ordinaryMaxTokens >= summaryInputBudget
 ```
 
-`summaryInput` 包含普通 prepared 的同一 mask 投影、system/tools、历史和追加摘要指令。加上 `ordinaryMaxTokens` 是提前预留已申请的普通输出，不是预测增长。普通与摘要实际发送各用自身独立预算；摘要发送前不再扣一次普通输出，超窗时由模式 A 裁请求副本中的较老可裁完整组。
+`summaryInput` 包含普通 prepared 的同一完整历史投影、system/tools、历史和追加摘要指令。加上 `ordinaryMaxTokens` 是提前预留已申请的普通输出，不是预测增长。普通与摘要实际发送各用自身独立预算；摘要发送前不再扣一次普通输出，超窗时由模式 A 裁请求副本中的较老可裁完整组。
 
 容量压力不转换为 force。成功后按 scope 保存绝对占用地板，同容量且未增长时不重复自动压缩；窗口、输出预留等容量条件变化后重新判断。手动与 force 豁免地板，旧次数帽和 thrash lock 已删除。
 
@@ -123,17 +122,19 @@ R3 failpoint 已证明旧的 `createMessage → appendPart → updatePart*` 会�
 ## 五、手动 compact 与 prompt 并发
 
 ```text
-manual compact accepted ─┐
-prompt accepted ─────────┼─→ per-(session,scope) mutation lane
-auto compact ────────────┘
+CLI 命令 / Web RPC → 后端手动准入 → compact() → mutation lane ─┐
+  └─ 活跃 run / 正在压缩 / 运行时切换：立即 busy              │
+automatic / force → 当前运行的 prepareTurn() → mutation lane ─┤
+                                                            ↓
+                                                      runCompaction()
 ```
 
-- UI 接纳不等于立即写 Context；
-- logical compaction 从 snapshot 到 terminal 持有 scope lease；
-- prompt 的 durable Context mutation 排在同 scope manual compact 之后；
-- auto compact 在已有 prompt owner 内复用/转交 owner token，避免嵌套死锁；
+- 手动准入与独占资格衔接，忙或重复请求不排队、不取消正在执行的工具；子代理会话不能走主会话手动入口；
+- 已接纳的手动操作和运行内 prepare 都在自己的 scope mutation lane 内调用共用核心，不从内部再次调用公开 `compact()`；
+- `CompactOptions.signal` 沿用已有 Stop 信号，获得 lane 后先检查取消；提交前 Stop 不写入，提交后 Stop 保留成功；
+- 手动成功只报告结果和刷新占用，不发起普通请求；自动成功重建请求后继续；
 - 不同 scope 的 lane 互不阻塞；
-- store 事务内的 message/part snapshot precondition 防御多 manager 和遗漏入口；新建独立输入消息不构成冲突，不用全局 mutex 或持久化 revision 字段。
+- store 事务内的 message/part 快照检查防御多 manager 和遗漏入口；新建独立输入消息不构成冲突，不用全局 mutex 或持久化 revision 字段。
 
 ## 六、restart/replay
 
@@ -154,8 +155,8 @@ compare live/resumed model view
 - summary LLM 调用数为 0；
 - 历史 observable event 数为 0；
 - deterministic tool repair 与 live view 等价；
-- calibration/mask/compaction floor 等明确 ephemeral 状态可重置；
-- 若未来采用 durable operation marker，current lifecycle unmatched begin 是 busy，prior lifecycle 才是 stale/orphan。
+- calibration/compaction floor 等明确 ephemeral 状态可重置；
+- 已有 `time.compacted` 继续控制活动投影；旧摘要与原文仍可读取，退场内容不会因清理 mask 而重新进入窗口。
 
 ## 七、公共接口
 
@@ -243,7 +244,7 @@ disposeSession(sessionId: string): void
 - compaction progress/terminal：另有相同 `attemptId`；
 - summary attempt progress 的最小 payload 为 `attempt/estimatedHistoryTokens`，其中 token 值按正式投影估算 history，不含固定 system/tools 请求开销和正文；已删除缩水恢复专属 droppedRounds；
 - terminal outcome：`success | failed | inflated | skipped | aborted`；
-- `context.compaction.started` 与 `context.compaction.finished` 建立一次 attempt 的开始/唯一终态；`success` 另带具体 rung，summary 细节仍由同 attempt 的领域事件携带；prune 事件及消费者已删除；
+- `context.compaction.started` 与 `context.compaction.finished` 建立一次 attempt 的开始/唯一终态；`success` 另带具体 rung，summary 细节仍由同 attempt 的领域事件携带；mask／prune 事件及专属消费者已删除；
 - durable commit 先于 success event；event 失败不回滚；replay 不补发。
 
 ## 九、错误分类

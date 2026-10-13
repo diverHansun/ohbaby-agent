@@ -1,12 +1,12 @@
 # Context 模块：目标与职责
 
-当前契约已同步 [Compact 议题第 4 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/02-optimization-plan-and-change-scope.md)（2026-10-13），执行证据见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/05-implementation-acceptance.md)。文末先前批次章节仅保留历史设计；与当前正文冲突时，以当前正文为准。第 5 批 mask 清理及全入口回归尚未实施。
+当前契约已同步 [Compact 议题第 5 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/02-optimization-plan-and-change-scope.md)（2026-10-13）。测试范围见[本批测试与验收标准](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/04-test-and-acceptance.md)，实际结果见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/05-implementation-acceptance.md)。文末先前批次章节仅保留历史设计；与当前正文冲突时，以当前正文为准。
 
 本文定义 `packages/ohbaby-agent/src/core/context/` 的模块目标、责任边界与当前行为契约。联合回归的实施与验收以 [improve-4-to-5-regression](./improve-4-to-5-regression/README.md) 为补充契约。
 
 ## 一、模块定位
 
-Context 把 durable Message history、run-local System/Memory snapshot、当次 ordered tools 和 ephemeral directives 投影为模型可见请求，并在输入预算不足时执行可解释、可恢复的 mask/summary。独立 prune 写入路径及其事件、返回值和消费者已移除。
+Context 把 durable Message history、run-local System/Memory snapshot、当次 ordered tools 和 ephemeral directives 投影为模型可见请求，并在达到占用阈值或出现容量压力时执行可解释、可恢复的摘要压缩。mask 与独立 prune 路径及其专属配置、事件和消费者已移除。
 
 ```text
 durable MessageStore
@@ -39,21 +39,21 @@ currentTokens / contextLimit >= 0.90
 或 summaryInput + ordinaryMaxTokens >= summaryInputBudget
 ```
 
-- contextLimit 来自模型连接时探测的窗口，失败时沿用配置／默认回退；容量预留使用本次普通请求完整 maxTokens，不套半窗帽；只有 mask 保留旧半窗压力比。
+- contextLimit 来自模型连接时探测的窗口，失败时沿用配置／默认回退；容量预留使用本次普通请求完整 maxTokens，不套半窗帽；旧 mask 压力比已删除。
 - cached input 仍占用输入窗口；cache hit 不等于释放 token。
 - 普通／摘要输入预算各自扣除自身完整输出预留和 safety margin；summaryInput 包含追加指令与固定 system/tools。自动触发额外预留普通请求已申请的最大输出：`summaryInput + ordinaryMaxTokens >= summaryInputBudget`。这不是未来增长预测，不加新 ratio，也不恢复旧 4096 提前摘要条件。
 - 容量压力与 0.90 占用率共同进入 summary 分支；同容量且占用不高于成功地板时抑制自动重复压缩，容量变化重新判断，手动与 force 豁免。次数帽与 thrash lock 已移除。摘要超窗由模式 A 裁请求副本的较老完整组，摘要成功后普通请求仍超窗由模式 B 收缩保留尾段；保护集合之外已无空间则失败。
 
 ### G3：合法且唯一的模型视图
 
-mask、summary、abort、retry 和 restart 后，模型只看到一个合法视图：被 summary 替代的原文与 summary 不得同时 active；tool call/result 必须配对，或显式投影为 interrupted/unknown。
+summary、abort、retry 和 restart 后，模型只看到一个合法视图：被 summary 替代的原文与 summary 不得同时 active；tool call/result 必须配对，或显式投影为 interrupted/unknown。
 
 ### G4：主/子代理同契约、按 scope 隔离
 
 primary 与 subagent 都通过同一 `ContextManager`/Lifecycle 链路。隔离身份是 `sessionId + contextScopeId`：
 
 - primary 的 `contextScopeId` 缺省，语义上是 primary scope，不表示“所有 scope”；
-- child/sibling scope 的 history、calibration、mask、compaction floor、tool epoch 与 cache identity 互不污染；
+- child/sibling scope 的 history、calibration、compaction floor、tool epoch 与 cache identity 互不污染；
 - subagent 不自动加载 `OHBABY.md` Memory。
 
 ### G5：稳定前缀与正确权限
@@ -90,25 +90,24 @@ durable store 是事实源。摘要正文、成功请求 records、遗漏 metada
 - 把 system、active history、active reasoning、tail directives 序列化为 Provider messages；
 - 把调用方已经解析的 ordered tools 放入同一请求；
 - 对同一个 wire heuristic 计算 `ContextUsage`；
-- 仅在最终 compaction/reduction 投影确定后，用同一步 tool definitions 对七类 `ContextOccupancyComposition` 估算一次；provenance 不足时省略而不猜测；
+- 仅在最终 compaction 投影确定后，用同一步 tool definitions 对七类 `ContextOccupancyComposition` 估算一次；provenance 不足时省略而不猜测；
 - 返回深冻结的 `PreparedModelRequest`。
 
 ### D4：选择 compaction rung
 
-Context 先按 scope 检查成功占用地板；`decideCompactionRung()` 根据 `force`、容量压力、完整窗口占用率与 mask 的旧半窗预留压力比返回 `none | mask | summary | force`。纯策略不访问数据库、LLM、UI 或 MCP。
+Context 先按 scope 检查成功占用地板；`decideCompactionRung()` 根据 `force`、容量压力、完整窗口占用率返回 `none | summary | force`。纯策略不访问数据库、LLM、UI 或 MCP。
 
-### D5：执行 mask 与 prepared summary 分叉
+### D5：生成并提交 prepared summary
 
-- mask 只改变模型投影，不删除 durable part；
-- 摘要从普通请求的同一 mask 投影分叉，继承 system、tools、模型可见历史、tail directives、model 与 reasoning；追加 user 指令并独立预留输出。全部活动旧摘要参加新的单滚动摘要；固定 20,000-token 原文尾段按完整组保留，至少留最近一组并保护未闭合依赖；
+- 普通请求保持已保存工具结果的完整正文；摘要从同一 prepared 请求分叉，继承 system、tools、模型可见历史、tail directives、model 与 reasoning；追加 user 指令并独立预留输出。全部活动旧摘要参加新的单滚动摘要；固定 20,000-token 原文尾段按完整组保留，至少留最近一组并保护未闭合依赖；
 - 模式 A 只裁摘要请求副本中较老可裁完整组；模式 B 在摘要成功后，按普通完整请求的剩余空间一次收缩尾段，不再请求摘要。两者都更新读取／保留／遗漏集合；最终正文含文件操作和遗漏说明，合计不超过 16,384 tokens；
 - 候选需通过完整普通请求容量与严格降占用检查，再把 summary、成功 `modelRequests`、遗漏 metadata 和精确退场关系提交到 MessageStore；无可压旧段不发摘要但仍检查普通容量，无收益或最终失败由 Lifecycle 终止本次自动运行；
-- manual `compact()` 与 automatic `prepareTurn()` 使用同一请求投影和计量口径；摘要 Provider purpose 为 `context-summary`，cache 身份及能力策略继承普通请求。
+- manual `compact()` 与 automatic／force `prepareTurn()` 汇入内部 `runCompaction`，使用同一请求投影和计量口径。手动由后端先取得空闲独占资格，忙或重复请求立即拒绝，不排队、不停止工具；运行内自动与 force 直接在安全请求边界进入，不重复获取 mutation lane；摘要 Provider purpose 为 `context-summary`，cache 身份及能力策略继承普通请求。
 - Context 独占摘要重试，transient retry 与模式 A 的 overflow 恢复共用最多两次实际请求；摘要流层与三个 SDK 的隐式重试均为 0。abort、空白、length、工具调用和协议缺终态不重试；普通请求 overflow 由 Lifecycle 每个 model step 最多 force 恢复一次，同一步快照变化不重新获额。
 
 ### D6：维护 scoped ephemeral 状态
 
-calibration factor、mask cutoff 与成功 compaction floor 按 `sessionId + contextScopeId` 管理。地板在同进程跨 run 保留；`disposeScope()` 只清一个 child scope，`disposeSession()` 清理整个 session。
+calibration factor 与成功 compaction floor 按 `sessionId + contextScopeId` 管理。地板在同进程跨 run 保留；`disposeScope()` 只清一个 child scope，`disposeSession()` 清理整个 session。
 
 ### D7：发布 Context 观测事件
 

@@ -1,6 +1,6 @@
 # Context 模块：数据模型
 
-当前契约已同步 [Compact 议题第 4 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/02-optimization-plan-and-change-scope.md)（2026-10-13），执行证据见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-4/05-implementation-acceptance.md)。文末先前批次章节仅保留历史设计；与当前正文冲突时，以当前正文为准。第 5 批 mask 清理及全入口回归尚未实施。
+当前契约已同步 [Compact 议题第 5 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/02-optimization-plan-and-change-scope.md)（2026-10-13）。测试范围见[本批测试与验收标准](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/04-test-and-acceptance.md)，实际结果见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-5/05-implementation-acceptance.md)。文末先前批次章节仅保留历史设计；与当前正文冲突时，以当前正文为准。
 
 本文定义 Context 数据结构的语义、所有权和生命周期。TypeScript 字段以 `packages/ohbaby-agent/src/core/context/types.ts` 为准；这里解释字段为何存在、何时稳定、能否持久化。
 
@@ -17,7 +17,7 @@ interface ContextIdentity {
 
 - primary 的 `contextScopeId` 缺省，但只表示 primary scope；
 - subagent 必须带显式 scope；
-- key、event、calibration、mask、compaction floor 和 cache observation 使用同一身份语义；
+- key、event、calibration、compaction floor 和 cache observation 使用同一身份语义；
 - 缺省 scope 不能解释为“聚合整个 session”。
 
 ## 二、请求数据模型
@@ -72,7 +72,7 @@ interface PreparedModelRequest {
 - 创建后深冻结，retry/lazy MCP/permission change 不得原地修改；
 - `settings` 固定 model、temperature、已解析 reasoning 与输出 maxTokens；`inputIds` 固定本次纳入的 run 输入；
 - cache policy 是 adapter capability，不强塞入该值对象；`context-summary` 沿用普通请求的 scope key 与 capability 策略；
-- summary 派生值保留同一 mask 投影及上述字段，追加 user 指令并覆盖输出 maxTokens；模式 A 只允许裁派生请求中的较老可裁完整组，原对象保持不变。
+- summary 派生值保留同一完整历史投影及上述字段，追加 user 指令并覆盖输出 maxTokens；模式 A 只允许裁派生请求中的较老可裁完整组，原对象保持不变。
 
 ### 2.4 `PreparedTurn`
 
@@ -88,7 +88,7 @@ interface PreparedTurn {
 }
 ```
 
-`request` 与 `usage/sentHeuristic` 必须来自同一次投影。`compaction` 解释本次 prepare 是否改变了 active view。`composition` 是对 compaction/reduction 后最终请求的解释性估算，不进入 `ContextUsage`，也不改变阈值或预算语义。
+`request` 与 `usage/sentHeuristic` 必须来自同一次投影。`compaction` 解释本次 prepare 是否改变了 active view。`composition` 是对 compaction 后最终请求的解释性估算，不进入 `ContextUsage`，也不改变阈值或预算语义。
 
 ### 2.5 `ContextOccupancyComposition`
 
@@ -188,7 +188,6 @@ Message port 一次提交上述摘要状态与退场标记；`metadata.kind` 固
 | 状态 | Key | 重启语义 |
 |---|---|---|
 | calibration factor | session + scope | 重置为 `1.0` |
-| mask cutoff | session + scope | 重算 |
 | compaction floor | session + scope | 重启清空；同进程跨 run 保留成功后绝对占用和容量签名，容量变化重新判断 |
 | force recovery step | Lifecycle run + model step | 新运行／新 step 重新获额，同一步输入快照重入不重置 |
 | mutation lane owner/queue | session + scope | 进程内；store 事务内的 message/part snapshot precondition 防跨 manager stale commit |
@@ -247,7 +246,7 @@ type CompactionTerminalOutcome =
   | "aborted"
 ```
 
-`success` 另带 rung/result 说明 mask 或 summary。事件是 ephemeral observation：不持久化、不在 replay 时重发、不反向修改 durable data。
+`success` 另带 `rung: "summary"` 与压缩结果。事件是 ephemeral observation：不持久化、不在 replay 时重发、不反向修改 durable data。
 
 ## 八、生命周期与所有权总表
 
