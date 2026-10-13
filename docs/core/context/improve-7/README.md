@@ -1,6 +1,6 @@
 # Context improve-7 · 压缩与工具输出变更记录入口
 
-> 状态：议题 improve-1、improve-2 已实施并完成测试，待用户审查；后续批次待实施。更新：2026-10-13。
+> 状态：议题 improve-1～3 已实施并完成测试，待用户审查；后续批次待实施。更新：2026-10-13。
 
 - [整体规划](../../../problem-lists/2026-10-10-compact-cache-and-tool-output/plan/README.md)
 - [Context 模块设计](../../../problem-lists/2026-10-10-compact-cache-and-tool-output/plan/context-design/README.md)
@@ -11,3 +11,5 @@
 
 - [improve-1 实施验收](../../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-1/05-implementation-acceptance.md)：计数与完整预算、可选 reasoning usage、危险缩水分支清理及真实服务验证。
 - [improve-2 实施验收](../../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-2/05-implementation-acceptance.md)：MCP 错误 metadata 接线、工具结果稳定投影、分页／子代理引用及重启回放验证。
+
+- [improve-3 实施验收](../../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-3/05-implementation-acceptance.md)：prepared 摘要分叉、缓存与单一重试、容量提前保护、prune 清理及三协议实网／Pi 审查。

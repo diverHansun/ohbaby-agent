@@ -1,5 +1,7 @@
 # Context 模块：架构
 
+当前契约已同步 [Compact 议题第 3 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-3/02-optimization-plan-and-change-scope.md)（2026-10-13）。文末先前批次章节保留为历史记录；与当前正文冲突时，以当前正文及第 3 批说明为准。第 4 批尾段／终止策略和第 5 批 mask 清理尚未实施。
+
 本文描述 Context 的当前结构、依赖方向和 improve-4～5 联合回归的目标边界。目标不是把 `ContextManager` 机械拆成很多类，而是让请求投影、策略、持久化与观测之间的数据流单向且可验证。
 
 ## 一、架构总览
@@ -37,7 +39,7 @@ run snapshot + dynamic request inputs + step-local tool definitions
           ↓
 canonical model projection
           ↓
-PreparedModelRequest { messages, tools }
+PreparedModelRequest { messages, tools, settings?, inputIds? }
           ├─→ wire heuristic / ContextUsage
           ├─→ final attribution / ContextOccupancyComposition?
           └─→ Lifecycle provider request
@@ -58,7 +60,7 @@ packages/ohbaby-agent/src/core/context/
 ├── constants.ts                 # 当前阈值与保护预算
 ├── serializer.ts                # durable history → ModelMessage
 ├── failed-history.ts            # 失败正文/事实选择，普通请求与摘要共用
-├── serialization.ts             # summary 输入与诊断序列化
+├── serialization.ts             # 可读历史评分与诊断（非摘要发送源）
 ├── projection.ts                # mask/reduction 纯投影
 ├── token-estimation.ts          # messages + tools wire heuristic
 ├── summary.ts                   # summary 识别/分区
@@ -80,8 +82,8 @@ packages/ohbaby-agent/src/core/context/
 |---|---|---|---|
 | Request projection | durable/UI/provider message shape | serializer + projection pure functions | 不写 store、不调 Provider |
 | Compaction policy | threshold、floor、thrash、cap | `decideCompactionRung()` | 纯函数、输入显式 |
-| Summary candidate | prompt、LLM、overflow shrink | `ContextLLMClient` + candidate functions | 候选不是提交事实 |
-| Durable commit | summary 与 compacted marks | `MessageManager.commitCompaction()` + store transaction | summary/prune marks 一次原子提交；事件在提交后发布 |
+| Summary candidate | prepared 分叉、输出预算、有限 transient retry | `ContextLLMClient` + candidate functions | 候选不是提交事实 |
+| Durable commit | summary 与 compacted marks | `MessageManager.commitCompaction()` + store transaction | summary 与替代 marks 一次原子提交；事件在提交后发布 |
 | Scoped coordinator | auto/manual/prompt mutation order | per-scope exclusive lane + pre-commit revision check | key=`sessionId+scope`，异 scope 并发 |
 | Observation | progress/window/cache event | Bus + tracker | 不回滚、不重放 durable truth |
 
@@ -95,10 +97,12 @@ packages/ohbaby-agent/src/core/context/
 
 ### 4.2 Prepared request
 
-`PreparedModelRequest` 只包含 Provider 会消费的：
+`PreparedModelRequest` 固定同一次请求的模型输入、设置与输入归属：
 
 ```typescript
 interface PreparedModelRequest {
+  readonly settings?: PreparedRequestSettings
+  readonly inputIds?: readonly string[]
   readonly messages: readonly ModelMessage[]
   readonly tools: readonly ModelToolDefinition[] | undefined
 }
@@ -108,6 +112,7 @@ interface PreparedModelRequest {
 - `tools` 是当次已解析、已排序、已做 permission/admission 的 schema 快照。
 - `onRequestMeasured` 接收 detached/frozen 请求；Provider 发送同一快照。
 - final-step 从完整 tool set 派生 system tool names，但发送的 `tools` 为 `[]`。
+- `settings` 固定已解析 model、temperature、reasoning 与 maxTokens；`inputIds` 固定本请求纳入的 run 输入。摘要从同一普通请求 mask 投影分叉，保留完整 messages/tools/settings，只在尾部追加 user 指令并覆盖摘要输出预算；不再把历史拼成独立 transcript。
 
 ### 4.3 Tools 不进入 AssembledContext
 
@@ -126,12 +131,21 @@ remainingInput = inputBudget - currentInput
 ```text
 force=true                         → force
 thrash locked                      → none
-currentInput/contextWindow>=0.95  → prune-summary（受 per-turn cap）
+capacityPressure 或完整窗口占用>=0.90 → summary（受旧 per-turn cap；到上限转 mask）
 input-budget ratio>=0.50           → mask
 otherwise                          → none
 ```
 
-summary rung 先应用模型投影/prune，再生成候选；只有下一次真实投影与相同 model/tools/tail directives 下确实变小，才能报告 `compacted`。
+```text
+ordinaryInputBudget = contextWindow - ordinaryMaxTokens - safetyMargin
+summaryInputBudget = contextWindow - summaryMaxTokens - safetyMargin
+capacityPressure = ordinaryInput >= ordinaryInputBudget
+                || summaryInput + ordinaryMaxTokens >= summaryInputBudget
+```
+
+`summaryInput` 包含普通 prepared 的同一 mask 投影、system/tools、完整历史和追加摘要指令。加上 `ordinaryMaxTokens` 是在发送普通请求前为其已申请的最大输出预留空间，不是预测实际未来增长，也不另加比例。普通与摘要实际发送仍各用自身独立预算；摘要发送前只检查 `summaryInput > summaryInputBudget`，不再扣一次普通输出。单次巨型输入仍可能直接跨过摘要容量并失败。
+
+容量压力和占用率触发共享旧次数／thrash 保护；只有显式 force 绕过。第 4 批才移除旧 guard。summary rung 从普通请求的同一 mask 投影创建摘要请求，不执行 prune；只有下一次真实投影与相同 model/tools/tail directives 下确实变小，才能报告 `compacted`。
 
 ## 六、主/子代理 scope
 
@@ -151,13 +165,13 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队；R3/R4 通过 store
 2. logical compaction 从 snapshot 到 terminal 持有 scope lease；`prepareTurn()` 内部直接执行 compaction core，不重复进入 lane，因此不会嵌套死锁。
 3. candidate await 后把选中 Part 的原快照交给 `commitCompaction()`；store 在任何写入前原子深比较当前值。被选中 Part 已修改、删除或 compacted 时以 `CompressionResult { status: "skipped", reason: "stale" }` 结束并重读最新 view；安全追加到尾部的消息不误伤旧 prefix summary。
 4. failpoint 已证明旧的 summary/mark 多步写存在部分终态窗口；当前由窄的 `commitCompaction()` 端口修复，SQLite 使用 `BEGIN IMMEDIATE`，in-memory 在写前完整校验，不做 catch-only rollback。子进程在首个 part update 后被 `SIGKILL` 的 reopen 测试确认 SQLite 会回滚整个未提交事务。
-5. summary request 自身 overflow 直接失败，不缩小摘要输入后重试。成功退场范围必须等于实际发送的历史范围；前置 prune 仍是独立旧路径，后续批次再删除。abort signal 贯通主/子代理共用 Lifecycle 与 summary client。
+5. summary request 自身 overflow 直接失败，不缩小摘要输入后重试。摘要看到完整 prepared 模型历史；原文替代范围仍由旧尾段算法决定，不等于本批发送的全量历史。独立 prune 及其消费者已移除。abort signal 贯通主/子代理共用 Lifecycle 与 summary client。
 
 ## 八、事件与 UI projection
 
 - 所有 Context event 具有 session/scope identity；primary wire payload 可省略 scope，但消费者归一为 primary。
 - compaction progress/terminal event 具有 `attemptId`，每个 accepted attempt 只有一个 terminal outcome。
-- summary 每次 Provider attempt 只观测 `attempt/estimatedHistoryTokens`；token 值来自正式 history 投影的 heuristic，不含固定请求开销，不记录 message 正文或额外通用状态。
+- summary progress 每次 Provider attempt 继续观测 `attempt/estimatedHistoryTokens`；token 值来自正式 history 投影的 heuristic，不含固定请求开销，不记录 message 正文或额外通用状态。
 - durable commit 先于 success event；subscriber 错误不得回滚已提交状态。
 - primary UI 只消费 `UiContextWindowUsage` tracker；child scope 不显示 session-only 聚合的伪精确窗口。
 - `ContextUsage` 继续只承载窗口控制总量；七类 `ContextOccupancyComposition` 是最终 `PreparedTurn` 的 optional 解释字段，不参与 compaction 决策。
@@ -178,16 +192,22 @@ R2 已完成同一 `ContextManager` 内的 per-scope 排队；R3/R4 通过 store
 
 这些决策优先正确性、可靠性和隔离性；复杂度必须由可复现失败证据挣得。
 
-## 迁移 improve-6 的计量与摘要边界
+## 迁移 improve-6 的计量与摘要边界（历史记录）
 
 Context 直接选择 `ModelMessage`／扁平工具定义作为计量材料，不再转换为内部旧 Chat 形状。原生状态中的可读推理仍按文本估算，含不透明推理数据时才额外加一次既有 token 代理值；密文和签名不按字符计数；分类来源核对包含完整原生状态。七类分桶是未校准的解释值。
 
 摘要客户端等待流耗尽并要求正常 `stop` 与非空文本。摘要专用序列化补足工具名称、输入、状态与结果；普通历史评分不变。overflow progress 的 `estimatedHistoryTokens` 仍是可读历史评分，不代表完整摘要请求。
 
-## improve-7：失败历史的请求、摘要与计量
+## improve-7：失败历史的请求、摘要与计量（历史记录）
 
 `failed-history.ts` 是纯选择函数，不写持久化、不新增历史系统。普通请求和实际摘要（`includeToolContext: true`）共用它：可靠截断、过滤、已知断流可用 active 可见正文加说明；取消只有持久化事实；未知失败为空。所有失败协议消息的 native、推理和未完成工具均不回放。
 
 合成中断事实由 Lifecycle 在原 assistant 上保存。已接受工具步骤的事实单独置于调用/结果之后，不混入 native 正文。退休以现有 Part compacted 标记为准，不能每次从错误枚举重新产生没有载体的事实。
 
 计量使用同一请求投影；失败回复的派生说明与正文整体计入 conversation 一次。scoped assemble 仍负责主/子隔离。默认 readable scoring、选段、prune、低收益锁和 95% 触发策略保持不变。
+
+## Compact 议题 improve-3：重试与 records 所有权
+
+`ContextManager` 是摘要重试的唯一 owner，至多两次实际 Provider 请求；summary client 关闭流层重试，OpenAI Chat、Responses 与 Anthropic SDK 均设置 `maxRetries: 0`。只对 transient transport／可重试 HTTP 错误使用同一 prepared 输入重试；overflow、abort、空白、length、工具调用、协议不完整直接结束。
+
+summary client 返回 `SummaryRequestResult { text, summaryMessageId, requests }`；`SummaryRequestRecord` 属于 compaction／预分配摘要消息，不伪造 runId/step。成功结果返回 records，未应用记录作日志观测，本批不持久化摘要 records 或新增统计消费者。既有 summary + marks 原子提交保持；第 4 批再处理 records 的持久化归属、尾段和终止策略。mask 的普通／摘要一致投影本批保留，第 5 批再清理。

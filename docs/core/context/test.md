@@ -1,11 +1,13 @@
 # Context 模块：测试策略
 
+当前契约已同步 [Compact 议题第 3 批](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-3/02-optimization-plan-and-change-scope.md)（2026-10-13）。文末先前批次章节保留为历史记录；与当前正文冲突时，以当前正文及第 3 批说明为准。第 4 批尾段／终止策略和第 5 批 mask 清理尚未实施。
+
 本文定义 Context 的长期测试职责。improve-4～5 联合回归的完整 ID、故障矩阵和发布门见 [04-test-and-acceptance.md](./improve-4-to-5-regression/04-test-and-acceptance.md)。
 
 ## 一、测试回答什么
 
 1. 测量和 Provider 是否消费同一 `PreparedModelRequest`？
-2. mask/prune/summary/retry/restart 后模型可见 history 是否唯一、tool pairing 是否合法？
+2. mask/summary/retry/restart 后模型可见 history 是否唯一、tool pairing 是否合法？
 3. primary、child/sibling scope 是否隔离？
 4. 部分写、并发、abort 和 hard crash 后 durable truth 是否可恢复？
 5. 同 run/epoch 的 system、runtime、tools 前缀是否稳定？
@@ -28,7 +30,7 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
 - measured `{ messages, tools }` 与 adapter 实际输入深等价。
 - `PreparedModelRequest` 创建后不可被 MCP load、permission change、retry 或调用方 mutation 改写。
-- `ContextUsage.usageRatio` 使用完整输出预留后的 input budget；mask/thrash 局部使用原半窗压力比以保持时序；summary 独立使用 `currentTokens / contextLimit >= 0.95`，与 UI 完整窗口占用一致，输入预算不足不提前摘要。
+- `ContextUsage.usageRatio` 使用完整输出预留后的 input budget；mask/thrash 局部使用原半窗压力比以保持时序；summary 使用 `currentTokens / contextLimit >= 0.90`，并验证 `ordinaryInput >= ordinaryInputBudget || summaryInput + ordinaryMaxTokens >= summaryInputBudget`；容量压力与占用率共同走 summary，仍受旧次数／thrash guard。
 - cache read/write/uncached 是 inclusive input breakdown，不改变窗口占用总量。
 - summary 与被替代原文不同时 active；失败不声称成功。
 - 同 initiating message 的 runtime part 基数不超过 1，包括并发/多 manager/restart。
@@ -50,18 +52,21 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
 | 输入 | 预期 |
 |---|---|
-| 完整窗口占用 `0.94999` | 不进入 summary |
-| 完整窗口占用 `0.95` | `prune-summary` |
-| 完整窗口占用 `<0.95`、remaining `4096` | 不进入 summary |
-| 完整窗口占用 `<0.95`、remaining `0` | 不进入 summary |
+| 完整窗口占用 `0.89999` 且普通输入、摘要输入加普通 maxTokens 均未到边界 | 不进入 summary |
+| 完整窗口占用 `0.90` | `summary`（仍受旧次数／thrash 规则） |
+| 占用 `<0.90`、普通输入到自身预算或摘要输入加普通 maxTokens 到摘要预算 | `summary`，仍受旧次数／thrash guard |
+| 上述容量压力 + thrash locked | `none` |
+| 上述容量压力 + per-turn cap 已到 | `mask`，不调用摘要 Provider |
+| ordinaryMaxTokens 小于 summaryMaxTokens，当前输入均放得下但摘要输入加普通 maxTokens 到界 | 在发送普通请求前触发 summary |
+| 摘要完整输入已超过自身可用容量 | Provider 零调用，原历史不变 |
 | ratio `>=0.50` 且未进 summary | `mask` |
-| `force=true` | `force`，不受 thrash lock 拦截 |
+| 显式 `force=true` | `force`，绕过旧 thrash lock／per-turn cap |
 
 ### 4.3 Compaction/failure
 
 - summary 非 overflow 失败、inflated、stream abort；
-- summary request context overflow 首次失败即停止，预设第二次成功也不能调用；隔离 prune 后，SQLite 重开原 parts 完全不变；
-- create summary、append part、第 N 个 compacted update、prune 第 N 个 update、commit 后 event 前故障；
+- summary request context overflow 首次失败即停止，预设第二次成功也不能调用；SQLite 重开原 parts 完全不变；
+- create summary、append part、第 N 个 compacted update、commit 后 event 前故障；
 - hard SIGKILL 等待 marker 精确内容，不只等待文件存在；
 - auto+auto、manual+auto、manual+manual、manual+prompt；
 - primary 与 child 同时 compact；
@@ -79,7 +84,7 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 
 - global/project `OHBABY.md` 路径边界、失败降级、run 内稳定；
 - subagent 不加载 Memory；
-- runtime metadata 不进入 UI/summary/title/export；
+- runtime metadata 不进入 UI/title/export；摘要请求继承普通 prepared 中模型可见的 runtime context，不额外复制或重建；
 - 同 tool epoch wire order 稳定，有意 epoch 变化只失效一次后重新稳定；
 - cache key 基于 session + scope，tool epoch 不写入 key；
 - Provider usage 的 observed zero 与 unavailable 区分。
@@ -149,13 +154,24 @@ test:context:eval
 
 本文件描述长期模块规则；联合回归的可执行 ID 与最终门以 `improve-4-to-5-regression/04-test-and-acceptance.md` 为准。实施完成后实际证据、偏差和剩余风险写入同目录的 `05-implementation-acceptance.md`，不得回写本文件伪造测试进度。
 
-## improve-1 新增回归（2026-10-13）
+## improve-1 新增回归（2026-10-13）（历史记录）
 
 - 尾段计数严格对照正式请求投影，覆盖工具 metadata、活动 reasoning、展示副本和原生 opaque 状态；逐消息切点也接受同一 Map。
 - 输出超过半窗与输入预算为零时，完整预留不缩小，mask/thrash 仍按旧阈值触发和解锁。
 - 正常摘要成功后的精确退场 part IDs 等于发送历史；超窗失败没有缩水请求或摘要提交。
 - usage reasoning 保持可选、缺失不填零、总量不重复相加；本批真实三协议服务结果见[验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-1/05-implementation-acceptance.md)。
 
-## Compact 议题 improve-2 回归
+## Compact 议题 improve-2 回归（历史记录）
 
 `serializer.integration.test.ts` 用真实 MCP adapter、scheduler、lifecycle 和 SQLite 验证 error metadata 接回、错误与结构化内容不重复、两个大结果完整、预算变化下的稳定性、普通／摘要工具投影及计数在重开后相同；另验 aborted 部分输出与错误各一次。adapter 单测覆盖媒体文本表达和 resource URI，scheduler 单测覆盖非法 metadata 及注册来源。Read 多字节分页与子代理文件引用／Read 授权沿用既有回归。真实独立服务的分页、工具错误、子代理与重启结果见 [本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-2/05-implementation-acceptance.md)。
+
+## Compact 议题 improve-3 回归职责
+
+- 验证摘要派生自普通 prepared：system、tools、model、reasoning、tail directives、native state 和同一 mask 投影保持，只有追加 user 指令、输出预算与 purpose 为允许差异；不使用 transcript 重建。
+- 容量测试同时覆盖等于边界、比边界少 1、普通输出小于摘要输出，以及 thrash/cap 不被容量压力绕过；摘要实际发送只按独立 summaryInputBudget 校验，单次巨型输入跨窗时零 Provider 调用。提前预留仅使用已申请普通 maxTokens，不引入预测增长或新 ratio。
+- 三协议最终 wire 断言 cache key／标记及 thinking 字段稳定；正文 16,384 与数字 B／effort 预留分别验证，budget 大于半窗也不得静默缩小。
+- Context transient 首次失败可再试一次，总实际 HTTP 请求最多两次；第三次预设成功不能调用。overflow、abort、空白、length、工具调用、协议缺终态不重试；三个 SDK `maxRetries: 0`。
+- 逐次 requests records 保留 usage、attempt 和 compaction／summary identity；成功仅随结果返回，SQLite 不新增摘要 assistant.modelRequests。失败、无收益和 stale 不提交摘要，不把日志观测当作持久化。
+- prune 返回值、事件、bridge、UI／SDK 消费链均不再存在；已有 compacted marks 仍正常读取。mask 本批保留并验证普通／摘要一致性；旧尾段算法与次数规则不按第 4 批目标冒写为已完成。
+
+本节列出本批测试职责，不代表实网验收已通过。实际执行与三协议证据由 Compact 议题第 3 批验收文档记录。
