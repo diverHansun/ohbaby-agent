@@ -1481,7 +1481,7 @@ export function createContextManager(
       reasoning: input.reasoning,
       assembled,
       contextScopeId: input.contextScopeId,
-      force: true,
+      force: input.force ?? true,
       isSubagent,
       modelId: input.modelId,
       sessionId,

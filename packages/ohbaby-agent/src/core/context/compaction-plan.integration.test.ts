@@ -169,6 +169,50 @@ async function invokeCompaction(
 }
 
 describe("compaction candidate plan", () => {
+  it("leaves low-pressure history unchanged when manual force is explicitly false", async () => {
+    const f = await fixture();
+    const before = await f.history();
+    const result = await f.manager.compact("s", { ...f.input, force: false });
+
+    expect(result.status).toBe("not-needed");
+    expect(result.compression).toBeUndefined();
+    expect(await f.history()).toEqual(before);
+    expect(f.generate).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, true] as const)(
+    "allows manual compaction below automatic pressure [force=%s]",
+    async (force) => {
+      const f = await fixture();
+      const result = await f.manager.compact("s", { ...f.input, force });
+
+      expect(result.status).toBe("compacted");
+      expect(result.usageAfter.currentTokens).toBeLessThan(
+        result.usageBefore.currentTokens,
+      );
+      expect(
+        (await f.history())
+          .flatMap((message) => message.parts)
+          .filter(isContextSummaryPart),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("still compacts under capacity pressure when manual force is false", async () => {
+    const f = await fixture(64000);
+    const result = await f.manager.compact("s", { ...f.input, force: false });
+
+    expect(result.status).toBe("compacted");
+    expect(result.usageAfter.currentTokens).toBeLessThan(
+      result.usageBefore.currentTokens,
+    );
+    expect(
+      (await f.history())
+        .flatMap((message) => message.parts)
+        .filter(isContextSummaryPart),
+    ).toHaveLength(1);
+  });
+
   it("keeps a sub-20K history unchanged without asking for a summary", async () => {
     const f = await fixture(64000, [1000, 1000, 1000, 1000]);
     const before = await f.messages.listBySession("s");
@@ -756,36 +800,46 @@ describe("compaction candidate plan", () => {
     expect(f.generate).toHaveBeenCalledTimes(2);
   });
 
-  it("bypasses the same child scope floor through the shared manual entry without growth", async () => {
-    const f = await fixture(
-      64000,
-      Array<number>(8).fill(6000),
-      0,
-      "child_scope",
-    );
-    expect(
-      (await f.manager.prepareTurn({ ...f.input, force: false })).compaction
-        ?.status,
-    ).toBe("compacted");
-    const before = await f.history();
-    const skipped: string[] = [];
-    f.bus.subscribe(ContextEvent.CompactSkipped, (event) => {
-      skipped.push(event.reason);
-    });
-    expect(
-      (await f.manager.prepareTurn({ ...f.input, force: false })).compaction,
-    ).toBeUndefined();
-    expect(skipped).toEqual(["not-needed"]);
-    const manual = await f.manager.compact("s", f.input);
-    // The unchanged successful tail has no older group to summarize. The manual
-    // entry still evaluates it instead of returning at the automatic floor.
-    expect(manual).toMatchObject({
-      status: "not-needed",
-      compression: { status: "skipped", reason: "too-short" },
-    });
-    expect(skipped).toEqual(["not-needed", "too-short"]);
-    expect(await f.history()).toEqual(before);
-  });
+  it.each([undefined, true] as const)(
+    "bypasses the same child scope floor only for forced manual compaction [force=%s]",
+    async (force) => {
+      const f = await fixture(
+        64000,
+        Array<number>(8).fill(6000),
+        0,
+        "child_scope",
+      );
+      expect(
+        (await f.manager.prepareTurn({ ...f.input, force: false })).compaction
+          ?.status,
+      ).toBe("compacted");
+      const before = await f.history();
+      const skipped: string[] = [];
+      f.bus.subscribe(ContextEvent.CompactSkipped, (event) => {
+        skipped.push(event.reason);
+      });
+      expect(
+        (await f.manager.prepareTurn({ ...f.input, force: false })).compaction,
+      ).toBeUndefined();
+      expect(skipped).toEqual(["not-needed"]);
+      const unforced = await f.manager.compact("s", {
+        ...f.input,
+        force: false,
+      });
+      expect(unforced.status).toBe("not-needed");
+      expect(unforced.compression).toBeUndefined();
+      expect(skipped).toEqual(["not-needed", "not-needed"]);
+      const manual = await f.manager.compact("s", { ...f.input, force });
+      // The unchanged successful tail has no older group to summarize. The manual
+      // entry still evaluates it instead of returning at the automatic floor.
+      expect(manual).toMatchObject({
+        status: "not-needed",
+        compression: { status: "skipped", reason: "too-short" },
+      });
+      expect(skipped).toEqual(["not-needed", "not-needed", "too-short"]);
+      expect(await f.history()).toEqual(before);
+    },
+  );
 
   it.each([
     {
