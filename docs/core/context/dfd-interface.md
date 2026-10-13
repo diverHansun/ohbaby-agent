@@ -245,3 +245,7 @@ selectFailedHistoryText / selectActiveInterruptionText
 ```
 
 失败原始协议状态不下发；可投影文本不会被另存为“成功 assistant”。固定说明和可见性定义由 `message/interruption.ts` 提供。工具阶段取消保留调用/结果，说明跟在结果之后。SQLite 重开沿用同一读取规则。
+
+## Compact 议题 improve-2：工具错误 metadata
+
+MCP adapter 抛出的工具执行错误携带原有 metadata，scheduler 通过对象形状守卫接入 `ToolCallResult.metadata`，再由既有 lifecycle 保存到 `ToolPart.state.metadata`。普通请求与摘要继续使用同一工具投影；错误状态和正文保留。新增错误字段不可枚举，避免通过 `error.details` 再写入一份正文；核心不导入 MCP 错误类。见 [本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-2/05-implementation-acceptance.md)。

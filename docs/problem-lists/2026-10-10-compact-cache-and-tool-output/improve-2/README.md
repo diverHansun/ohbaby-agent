@@ -1,6 +1,6 @@
 # Compact 缓存与工具输出优化 · improve-2（工具结果稳定回放）
 
-> 第 2 批规划稿，**尚未实施**。规划日期 2026-10-12，代码基线 `c5cfda26`（当前 HEAD）。
+> 第 2 批已实施并完成测试，待用户审查。实施日期 2026-10-13，实际基线为 improve-1 的 `c8be589d`；原规划日期 2026-10-12、调查基线 `c5cfda26`。
 > 整体规则以 [plan/02](../plan/02-optimization-plan-and-change-scope.md) 为准，本批只收敛工具结果的存储与投影。
 
 ## 本批交付
@@ -17,7 +17,7 @@
 | improve-4 滚动摘要与切换 | 依赖本批的保留段与投影一致 |
 | improve-5 入口贯通与清扫 | 承接本批，删除 mask 与残留压力改写 |
 
-plan 已确认：prune 的移除归第 3 批，mask 的整体清理归第 5 批。本批只保证常规投影不改写已发送结果，不提前删这两条路径。本批实施完成后，由验收模式另写 `05-implementation-acceptance.md`，规划期不预建。
+plan 已确认：prune 的移除归第 3 批，mask 的整体清理归第 5 批。本批只保证常规投影不改写已发送结果，不提前删这两条路径。实际变更与验证结果见 [05 实施验收](./05-implementation-acceptance.md)。
 
 ## 文档地图
 
@@ -28,5 +28,6 @@ plan 已确认：prune 的移除归第 3 批，mask 的整体清理归第 5 批�
 | [02-optimization-plan-and-change-scope](./02-optimization-plan-and-change-scope.md) | 改动面、开发顺序、数据流、兼容回退 |
 | [03-reference-projects](./03-reference-projects.md) | 参考项目借鉴与不照搬 |
 | [04-test-and-acceptance](./04-test-and-acceptance.md) | 风险测试、测试 ID 映射、实网收尾 |
+| [05-implementation-acceptance](./05-implementation-acceptance.md) | 实际实施、单元／集成／真实服务验收、审查与剩余边界 |
 
 [返回议题入口](../README.md) · [整体规划](../plan/README.md)

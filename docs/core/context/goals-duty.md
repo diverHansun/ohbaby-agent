@@ -157,3 +157,7 @@ calibration factor、mask cutoff、thrash lock 与 per-turn compaction count 按
 ## improve-1 计量与退场修复（2026-10-13）
 
 尾段与完整请求复用正式模型消息投影及 TokenCounter，包含工具 metadata、活动兼容 reasoning 和实际回传的原生状态；展示 reasoning 不重复计数。摘要超窗直接失败，不能缩小输入后仍按原集合退场。前置 prune 与无收益 aggressive 重试保持现状，后续批次再替换。详见[本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-1/05-implementation-acceptance.md)。
+
+## Compact 议题 improve-2：稳定工具结果
+
+MCP 工具错误的结构化 metadata 已接入既有持久化与白名单投影，error 状态不变。同一记录在常规请求、摘要工具投影与数据库重开后保持一致；默认 mask 关闭时，预算变化不二次裁短正文。Read 分页与子代理回传沿用原有机制，不新增配额或预览状态。完整压力路径的 prune／mask 清理分别留在第 3、5 批，见 [本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-2/05-implementation-acceptance.md)。

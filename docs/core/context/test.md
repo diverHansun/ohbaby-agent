@@ -155,3 +155,7 @@ test:context:eval
 - 输出超过半窗与输入预算为零时，完整预留不缩小，mask/thrash 仍按旧阈值触发和解锁。
 - 正常摘要成功后的精确退场 part IDs 等于发送历史；超窗失败没有缩水请求或摘要提交。
 - usage reasoning 保持可选、缺失不填零、总量不重复相加；本批真实三协议服务结果见[验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-1/05-implementation-acceptance.md)。
+
+## Compact 议题 improve-2 回归
+
+`serializer.integration.test.ts` 用真实 MCP adapter、scheduler、lifecycle 和 SQLite 验证 error metadata 接回、错误与结构化内容不重复、两个大结果完整、预算变化下的稳定性、普通／摘要工具投影及计数在重开后相同；另验 aborted 部分输出与错误各一次。adapter 单测覆盖媒体文本表达和 resource URI，scheduler 单测覆盖非法 metadata 及注册来源。Read 多字节分页与子代理文件引用／Read 授权沿用既有回归。真实独立服务的分页、工具错误、子代理与重启结果见 [本批验收](../../problem-lists/2026-10-10-compact-cache-and-tool-output/improve-2/05-implementation-acceptance.md)。

@@ -1,6 +1,6 @@
 # Compact 缓存与工具输出优化
 
-> 状态：improve-1 已实施并完成测试，待用户审查；improve-2～5 待实施。整体方案保留在 plan。
+> 状态：improve-1、improve-2 已实施并完成测试，待用户审查；improve-3～5 待实施。整体方案保留在 plan。
 > 开发文档建立日期：2026-10-12。代码调查基线：`c5cfda26`；实施各批前需核对前批实际改动。
 
 本议题改进摘要请求的缓存、计数与输出预算、工具结果稳定回放，以及手动／自动压缩。设计重点是复用已有请求、持久化和调度路径，减少压缩前后对历史的反复改写。
@@ -15,7 +15,7 @@
 | 计划批次 | 主要交付 | 当前状态 |
 | --- | --- | --- |
 | [improve-1](./improve-1/README.md) | 计数、实际输出预算、用量记录基础与危险退场分支修复 | 已实施，见 [验收](./improve-1/05-implementation-acceptance.md)，待用户审查 |
-| [improve-2](./improve-2/README.md) | 复用已有工具结果，保证模型投影和引用稳定 | 开发规划，待实施 |
+| [improve-2](./improve-2/README.md) | 复用已有工具结果，保证模型投影和引用稳定 | 已实施，见 [验收](./improve-2/05-implementation-acceptance.md)，待用户审查 |
 | [improve-3](./improve-3/README.md) | 正常请求分叉、缓存、统一重试、触发容量保护与 prune 清理 | 开发规划，待实施 |
 | [improve-4](./improve-4/README.md) | 滚动摘要、容量兜底、原子切换、失败终止与占用刷新 | 开发规划，待实施 |
 | [improve-5](./improve-5/README.md) | 入口贯通、旧机制退出、代码清扫与完整验收 | 开发规划，待实施 |
