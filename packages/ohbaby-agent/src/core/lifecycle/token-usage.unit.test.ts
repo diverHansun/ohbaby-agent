@@ -117,3 +117,41 @@ describe("aggregateTokenUsage", () => {
     });
   });
 });
+
+describe("aggregate reasoning usage", () => {
+  const known = {
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+    reasoningTokens: 3,
+  };
+  it("sums fully reported reasoning without adding it to output or total", () => {
+    expect(
+      aggregateTokenUsage(aggregateTokenUsage(undefined, known), {
+        ...known,
+        reasoningTokens: 0,
+      }),
+    ).toEqual({
+      inputTokens: 20,
+      outputTokens: 10,
+      totalTokens: 30,
+      reasoningTokens: 3,
+      usageComplete: true,
+    });
+  });
+  it.each([
+    undefined,
+    { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+  ])(
+    "keeps partial reasoning unknown regardless of request order %#",
+    (unknown) => {
+      expect(
+        aggregateTokenUsage(aggregateTokenUsage(undefined, known), unknown),
+      ).not.toHaveProperty("reasoningTokens");
+      expect(
+        aggregateTokenUsage(aggregateTokenUsage(undefined, unknown), known),
+      ).not.toHaveProperty("reasoningTokens");
+    },
+  );
+});

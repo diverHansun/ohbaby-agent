@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createAnthropicUsageAccumulator,
   normalizeOpenAICompatibleUsage,
+  normalizeOpenAIResponsesUsage,
 } from "./token-usage.js";
 import type { TokenUsageNormalizationDiagnostic } from "./token-usage.js";
 import type { InterfaceProviderTokenUsage } from "./types.js";
@@ -565,5 +566,100 @@ describe("createAnthropicUsageAccumulator", () => {
         totalTokens: 28,
       },
     );
+  });
+});
+
+describe("optional reasoning usage", () => {
+  const normalizers = [
+    {
+      name: "Chat",
+      normalize: (
+        reasoning: unknown,
+      ): InterfaceProviderTokenUsage | undefined =>
+        normalizeOpenAICompatibleUsage({
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          completion_tokens_details: { reasoning_tokens: reasoning },
+        }),
+    },
+    {
+      name: "Responses",
+      normalize: (
+        reasoning: unknown,
+      ): InterfaceProviderTokenUsage | undefined =>
+        normalizeOpenAIResponsesUsage({
+          input_tokens: 10,
+          output_tokens: 5,
+          output_tokens_details: { reasoning_tokens: reasoning },
+        }),
+    },
+    {
+      name: "Anthropic",
+      normalize: (
+        reasoning: unknown,
+      ): InterfaceProviderTokenUsage | undefined =>
+        createAnthropicUsageAccumulator().update({
+          input_tokens: 10,
+          output_tokens: 5,
+          output_tokens_details: { thinking_tokens: reasoning },
+        }),
+    },
+  ];
+  describe.each(normalizers)("$name", ({ normalize }) => {
+    it.each([0, 4, 5])(
+      "preserves reported reasoning %s as an output subset",
+      (reasoningTokens) => {
+        expect(normalize(reasoningTokens)).toEqual({
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+          reasoningTokens,
+        });
+      },
+    );
+    it.each([
+      undefined,
+      null,
+      -1,
+      1.5,
+      6,
+      "4",
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ])(
+      "omits unavailable or invalid reasoning %# while retaining totals",
+      (reasoning) => {
+        expect(normalize(reasoning)).toEqual({
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        });
+      },
+    );
+  });
+  it("retains Anthropic reasoning on input updates but drops stale or conflicting detail", () => {
+    const usage = createAnthropicUsageAccumulator();
+    usage.update({
+      input_tokens: 10,
+      output_tokens: 5,
+      output_tokens_details: { thinking_tokens: 4 },
+    });
+    expect(usage.update({ input_tokens: 12 })).toEqual({
+      inputTokens: 12,
+      outputTokens: 5,
+      totalTokens: 17,
+      reasoningTokens: 4,
+    });
+    expect(usage.update({ output_tokens: 7 })).toEqual({
+      inputTokens: 12,
+      outputTokens: 7,
+      totalTokens: 19,
+    });
+    expect(
+      usage.update({
+        output_tokens: 8,
+        output_tokens_details: { thinking_tokens: 9 },
+      }),
+    ).toEqual({ inputTokens: 12, outputTokens: 8, totalTokens: 20 });
   });
 });

@@ -40,3 +40,9 @@ Lifecycle 等生成器耗尽之后再发布一次 `llm:complete`。length/filter
 SDK 默认额外 2 次与项目默认额外 5 次重试保留。双方都允许的无输出失败，在一个不含 overflow 恢复的步骤通道最多 18 次 HTTP；这不是 Run 总预算。正文、推理或工具片段出现后项目层不重发，不新增自动续写。
 
 模型窗口、缓存用量、reasoning/native 状态沿用前序合同；此处不定义新的计量或缓存控制算法。
+
+## 可选用量明细（2026-10-13，compact improve-1）
+
+`TokenUsage`／`StreamingTokenUsage` 增加可选 `reasoningTokens`，是 `outputTokens` 子项，不重复计入 `totalTokens = inputTokens + outputTokens`。缺失、非法或大于 output 的明细保持未知，明确的 0 保留；任一请求明细缺失时，Run 聚合明细也未知。cache breakdown 仍属于 inclusive input。
+
+`ModelRequestRecord.usage?: TokenUsage` 是现有记录的可选字段，旧记录可读且不补零；普通请求所有权不变。本批仅建立结构，摘要请求的记录填充与成功摘要同事务提交由后续批次接入。

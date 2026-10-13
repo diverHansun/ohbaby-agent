@@ -706,7 +706,6 @@ export function createAnthropicProvider(
         > {
           const usage = createAnthropicUsageAccumulator(reportTokenUsage);
           const native = new AnthropicNativeAccumulator();
-          let reasoningTokens: number | undefined;
           for await (const rawEvent of stream) {
             const initial = native.update(rawEvent);
             if (initial) yield initial;
@@ -717,15 +716,7 @@ export function createAnthropicProvider(
                   ? rawEvent.usage
                   : undefined;
             const tokenUsage = rawUsage ? usage.update(rawUsage) : undefined;
-            const thinkingTokens =
-              rawUsage?.output_tokens_details?.thinking_tokens;
-            if (
-              thinkingTokens !== undefined &&
-              Number.isInteger(thinkingTokens) &&
-              thinkingTokens >= 0
-            ) {
-              reasoningTokens = thinkingTokens;
-            }
+            const reasoningTokens = tokenUsage?.reasoningTokens;
             if (rawEvent.type === "message_start") {
               // message_start usage initializes attempt-local accounting. It
               // is deliberately not exposed as a half-complete provider frame;

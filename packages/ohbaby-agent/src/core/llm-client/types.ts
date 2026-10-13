@@ -255,6 +255,8 @@ export interface StreamingResponse {
 
 /** One observable adapter invocation; provider-internal retries are not counted. */
 export interface ModelRequestRecord {
+  /** Provider-reported usage; absence means unknown, not zero. */
+  readonly usage?: TokenUsage;
   readonly endTimeSource?: "recovery";
   /** Immutable current-run input membership of this exact prepared request. */
   readonly inputIds?: readonly string[];

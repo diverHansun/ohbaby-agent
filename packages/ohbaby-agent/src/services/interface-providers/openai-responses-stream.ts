@@ -92,20 +92,6 @@ function isReasoningPart(value: unknown): boolean {
     (value as Record<string, unknown>).type === "reasoning_text"
   );
 }
-function reasoningTokenCount(value: unknown): number | undefined {
-  if (!isObject(value)) return undefined;
-  const usage = value as Record<string, unknown>;
-  if (!isObject(usage.output_tokens_details)) return undefined;
-  const count = (usage.output_tokens_details as Record<string, unknown>)
-    .reasoning_tokens;
-  return typeof count === "number" &&
-    Number.isInteger(count) &&
-    count >= 0 &&
-    typeof usage.output_tokens === "number" &&
-    count <= usage.output_tokens
-    ? count
-    : undefined;
-}
 
 function isAssistant(role: unknown): boolean {
   return role === "assistant";
@@ -836,9 +822,9 @@ class ResponsesStreamState {
             },
           }
         : {}),
-      ...(reasoningTokenCount(event.response.usage) === undefined
+      ...(tokenUsage?.reasoningTokens === undefined
         ? {}
-        : { reasoningTokens: reasoningTokenCount(event.response.usage) }),
+        : { reasoningTokens: tokenUsage.reasoningTokens }),
     };
   }
 }

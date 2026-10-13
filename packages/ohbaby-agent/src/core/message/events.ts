@@ -80,6 +80,25 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
           endedAt: z.number().optional(),
           endTimeSource: z.literal("recovery").optional(),
           outcome: z.enum(["running", "success", "error", "aborted"]),
+          usage: z
+            .object({
+              inputTokens: z.number().int().nonnegative(),
+              outputTokens: z.number().int().nonnegative(),
+              totalTokens: z.number().int().nonnegative(),
+              reasoningTokens: z.number().int().nonnegative().optional(),
+              inputBreakdown: z
+                .object({
+                  uncached: z.number().int().nonnegative(),
+                  cacheRead: z.number().int().nonnegative(),
+                  cacheWrite: z.number().int().nonnegative(),
+                  observed: z.object({
+                    cacheRead: z.boolean(),
+                    cacheWrite: z.boolean(),
+                  }),
+                })
+                .optional(),
+            })
+            .optional(),
         }),
       )
       .optional(),

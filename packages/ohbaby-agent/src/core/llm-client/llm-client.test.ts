@@ -311,6 +311,7 @@ describe("LLM Client Integration Tests", () => {
             inputTokens: 10,
             outputTokens: 5,
             totalTokens: 15,
+            reasoningTokens: 2,
           },
         },
       ];
@@ -335,7 +336,12 @@ describe("LLM Client Integration Tests", () => {
       expect(responses[2].isComplete).toBe(true);
       expect(responses[2].finishReason).toBe("stop");
       expect(responses[2].rawFinishReason).toBeUndefined();
-      expect(responses[2].tokenUsage?.totalTokens).toBe(15);
+      expect(responses[2].tokenUsage).toEqual({
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        reasoningTokens: 2,
+      });
     });
 
     it("should accumulate and parse tool calls", async () => {

@@ -100,9 +100,14 @@ function breakdown(input: {
 function tokenUsage(input: {
   readonly inputTokens: number;
   readonly outputTokens: number;
+  readonly reasoningTokens?: number;
   readonly inputBreakdown?: InputTokenBreakdown;
 }): InterfaceProviderTokenUsage {
+  const reasoningTokens = nonNegativeInteger(input.reasoningTokens);
   return {
+    ...(reasoningTokens !== undefined && reasoningTokens <= input.outputTokens
+      ? { reasoningTokens }
+      : {}),
     ...(input.inputBreakdown === undefined
       ? {}
       : { inputBreakdown: input.inputBreakdown }),
@@ -116,6 +121,7 @@ function openAICompatibleTokenUsage(
   input: {
     readonly inputTokens: number;
     readonly outputTokens: number;
+    readonly reasoningTokens?: number;
     readonly inputBreakdown?: InputTokenBreakdown;
   },
   rawTotal: number | undefined,
@@ -152,6 +158,10 @@ export function normalizeOpenAICompatibleUsage(
   }
 
   const outputTokens = field(usage, "completion_tokens");
+  const reasoningTokens = field(
+    record(usage.completion_tokens_details),
+    "reasoning_tokens",
+  );
   const promptTokens = field(usage, "prompt_tokens");
   const cacheHit = field(usage, "prompt_cache_hit_tokens");
   const cacheMiss = field(usage, "prompt_cache_miss_tokens");
@@ -186,6 +196,7 @@ export function normalizeOpenAICompatibleUsage(
         ...(inputBreakdown === undefined ? {} : { inputBreakdown }),
         inputTokens,
         outputTokens,
+        reasoningTokens,
       },
       rawTotal,
       report,
@@ -215,6 +226,7 @@ export function normalizeOpenAICompatibleUsage(
         ...(inputBreakdown === undefined ? {} : { inputBreakdown }),
         inputTokens: promptTokens,
         outputTokens,
+        reasoningTokens,
       },
       rawTotal,
       report,
@@ -238,6 +250,7 @@ export function normalizeOpenAICompatibleUsage(
         ...(inputBreakdown === undefined ? {} : { inputBreakdown }),
         inputTokens: promptTokens,
         outputTokens,
+        reasoningTokens,
       },
       rawTotal,
       report,
@@ -245,7 +258,7 @@ export function normalizeOpenAICompatibleUsage(
   }
 
   return openAICompatibleTokenUsage(
-    { inputTokens: promptTokens, outputTokens },
+    { inputTokens: promptTokens, outputTokens, reasoningTokens },
     rawTotal,
     report,
   );
@@ -288,6 +301,10 @@ export function normalizeOpenAIResponsesUsage(
   const normalized = tokenUsage({
     inputTokens,
     outputTokens,
+    reasoningTokens: field(
+      record(usage?.output_tokens_details),
+      "reasoning_tokens",
+    ),
     ...(inputBreakdown === undefined ? {} : { inputBreakdown }),
   });
   const rawTotal = field(usage, "total_tokens");
@@ -313,6 +330,7 @@ export function createAnthropicUsageAccumulator(
   let cacheRead: number | undefined;
   let cacheWrite: number | undefined;
   let outputTokens: number | undefined;
+  let reasoningTokens: number | undefined;
   let cacheReadObserved = false;
   let cacheWriteObserved = false;
 
@@ -371,7 +389,19 @@ export function createAnthropicUsageAccumulator(
         if (!inputPlaceholder) cacheWrite = nextCacheWrite;
       }
       if (nextOutput !== undefined) {
+        // A larger cumulative output makes earlier reasoning detail incomplete.
+        if (nextOutput > (outputTokens ?? 0)) reasoningTokens = undefined;
         outputTokens = monotonic(outputTokens, nextOutput);
+      }
+      const outputDetails = record(usage.output_tokens_details);
+      if (outputDetails && Object.hasOwn(outputDetails, "thinking_tokens")) {
+        const thinkingTokens = field(outputDetails, "thinking_tokens");
+        reasoningTokens =
+          thinkingTokens !== undefined &&
+          outputTokens !== undefined &&
+          thinkingTokens <= outputTokens
+            ? thinkingTokens
+            : undefined;
       }
 
       if (
@@ -403,6 +433,7 @@ export function createAnthropicUsageAccumulator(
         ...(inputBreakdown === undefined ? {} : { inputBreakdown }),
         inputTokens,
         outputTokens,
+        reasoningTokens,
       });
     },
   };

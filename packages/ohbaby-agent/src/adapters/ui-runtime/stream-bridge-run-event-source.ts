@@ -76,6 +76,10 @@ function tokenUsageData(value: unknown): LlmCompleteEvent["tokenUsage"] {
     typeof observed.cacheWrite === "boolean";
 
   return {
+    ...(nonNegativeInteger(data.reasoningTokens) &&
+    data.reasoningTokens <= outputTokens
+      ? { reasoningTokens: data.reasoningTokens }
+      : {}),
     ...(hasValidBreakdown
       ? {
           inputBreakdown: {

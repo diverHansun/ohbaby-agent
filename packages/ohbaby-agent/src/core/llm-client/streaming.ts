@@ -67,6 +67,9 @@ interface AccumulatedToolCall {
 
 function toStreamingTokenUsage(usage: TokenUsage): StreamingTokenUsage {
   return {
+    ...(usage.reasoningTokens === undefined
+      ? {}
+      : { reasoningTokens: usage.reasoningTokens }),
     ...(usage.inputBreakdown === undefined
       ? {}
       : { inputBreakdown: usage.inputBreakdown }),
@@ -459,8 +462,12 @@ export async function* streamResponse(
           nativeOutput = NativeOutputSchema.parse(event.nativeOutput);
           validatingProtocol = false;
         }
-        if (event.reasoningTokens !== undefined)
-          reasoningTokens = event.reasoningTokens;
+        if (
+          event.tokenUsage !== undefined ||
+          event.reasoningTokens !== undefined
+        )
+          reasoningTokens =
+            event.tokenUsage?.reasoningTokens ?? event.reasoningTokens;
 
         // Update finish reason when stream ends
         if (finish) {

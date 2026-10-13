@@ -34,9 +34,15 @@ function canonicalTokenUsage(value: unknown): TokenUsage | undefined {
   if (!Number.isSafeInteger(totalTokens)) {
     return undefined;
   }
+  const reasoning =
+    nonNegativeInteger(candidate.reasoningTokens) &&
+    candidate.reasoningTokens <= outputTokens
+      ? { reasoningTokens: candidate.reasoningTokens }
+      : {};
   const breakdown = record(candidate.inputBreakdown);
   if (!breakdown) {
     return {
+      ...reasoning,
       inputTokens,
       outputTokens,
       totalTokens,
@@ -53,6 +59,7 @@ function canonicalTokenUsage(value: unknown): TokenUsage | undefined {
     !observed
   ) {
     return {
+      ...reasoning,
       inputTokens,
       outputTokens,
       totalTokens,
@@ -63,6 +70,7 @@ function canonicalTokenUsage(value: unknown): TokenUsage | undefined {
     typeof observed.cacheWrite !== "boolean"
   ) {
     return {
+      ...reasoning,
       inputTokens,
       outputTokens,
       totalTokens,
@@ -70,6 +78,7 @@ function canonicalTokenUsage(value: unknown): TokenUsage | undefined {
   }
 
   return {
+    ...reasoning,
     inputBreakdown: {
       cacheRead: breakdown.cacheRead,
       cacheWrite: breakdown.cacheWrite,
@@ -94,6 +103,9 @@ export function createTokenUsageMetadata(
 
   return {
     tokenUsage: {
+      ...(tokenUsage.reasoningTokens === undefined
+        ? {}
+        : { reasoningTokens: tokenUsage.reasoningTokens }),
       ...(tokenUsage.inputBreakdown === undefined
         ? {}
         : {

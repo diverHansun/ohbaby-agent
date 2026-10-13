@@ -318,6 +318,8 @@ export interface LifecycleResult {
 
 /** Aggregate usage for one Lifecycle.run, not an individual provider call or session. */
 export interface LifecycleTokenUsage {
+  /** Present only when every aggregated request reports reasoning usage. */
+  readonly reasoningTokens?: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;

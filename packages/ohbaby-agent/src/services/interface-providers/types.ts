@@ -54,6 +54,8 @@ export interface InterfaceProviderTokenUsage {
   /** All input tokens, inclusive of cache usage even without optional details. */
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /** Reported subset of outputTokens; absent when unavailable or invalid. */
+  readonly reasoningTokens?: number;
   /** Always inputTokens + outputTokens. */
   readonly totalTokens: number;
   /** Optional because providers do not always expose cache source fields. */
