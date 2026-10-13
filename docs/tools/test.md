@@ -172,7 +172,9 @@
 - 正文展示只留下完整路径行；模型投影保留 count/truncated/scanComplete/displayLimited/stopReason，list 语义不变。
 - 超过旧 10,000 个已访问文件仍可找出稀疏后续结果；已安装产物脱离系统 PATH 使用 bundled rg。
 
-对应就近测试为 `tools/glob.unit.test.ts`、`tools/utils/ripgrep-files.unit.test.ts`；跨模块与真实文件树在 `tests/integration/shell-tools/`，安装产物沿现有 packaging smoke。
+Windows 的代理键只保留一种大小写；真实换行文件名场景限 POSIX，N/N+1 配额和含换行 NUL 帧解析仍覆盖全部平台。Windows Glob 清理契约覆盖 kill 返回 true / false 均等待 close、错误且未 close 保持 unconfirmed，以及原协议错误保留。
+
+对应就近测试为 `tools/glob.unit.test.ts`、`tools/utils/ripgrep-files.unit.test.ts`、`tools/glob-cleanup.contract.test.ts`；跨模块与真实文件树在 `tests/integration/shell-tools/`，安装产物沿现有 packaging smoke。
 
 ### 2.5 grep 工具
 

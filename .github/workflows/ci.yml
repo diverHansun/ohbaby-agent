@@ -45,6 +45,9 @@ jobs:
       - name: Unit tests
         run: pnpm test:unit
 
+      - name: Glob process cleanup contracts
+        run: pnpm exec vitest run packages/ohbaby-agent/src/tools/glob-cleanup.contract.test.ts
+
       - name: Permission runtime integration
         run: pnpm exec vitest run packages/ohbaby-agent/src/permission/permission.unit.test.ts packages/ohbaby-agent/src/permission/permission-lifecycle.unit.test.ts packages/ohbaby-agent/src/host/core-api-permission.integration.test.ts tests/integration/core/tool-scheduler-permission.integration.test.ts tests/integration/agents/permission-run-lifecycle.integration.test.ts tests/integration/agents/inprocess-child-permission.integration.test.ts
 

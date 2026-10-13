@@ -45,16 +45,22 @@ describe("child proxy environment", () => {
     expect(env.HTTP_PROXY).toBe("http://override:3/");
     expect(env).not.toHaveProperty("HTTPS_PROXY");
   });
-  it("blank overrides restore inheritance and leave ordinary empty strings intact", () => {
-    const env = mergeChildProxyEnvironment(
-      { http_proxy: "http://stale:1", EMPTY: "x" },
-      { HTTP_PROXY: "  ", EMPTY: "" },
-      snapshot({ HTTP_PROXY: "http://base:2" }),
-    );
-    expect(env.http_proxy).toBe("http://base:2/");
-    expect(env.HTTP_PROXY).toBe("http://base:2/");
-    expect(env.EMPTY).toBe("");
-  });
+  it.each(["darwin", "linux", "win32"] as const)(
+    "%s: blank overrides restore inheritance and leave ordinary empty strings intact",
+    (platform) => {
+      const env = mergeChildProxyEnvironment(
+        { http_proxy: "http://stale:1", EMPTY: "x" },
+        { HTTP_PROXY: "  ", EMPTY: "" },
+        snapshot({ HTTP_PROXY: "http://base:2" }),
+        platform,
+      );
+      expect(env.http_proxy).toBe(
+        platform === "win32" ? undefined : "http://base:2/",
+      );
+      expect(env.HTTP_PROXY).toBe("http://base:2/");
+      expect(env.EMPTY).toBe("");
+    },
+  );
   it("follows the system when only NO_PROXY is set and adds its native rule", () => {
     expect(
       buildChildProxyEnvironment(snapshot({ NO_PROXY: "custom.test" }))
@@ -65,14 +71,22 @@ describe("child proxy environment", () => {
         .HTTPS_PROXY,
     ).toBe("http://system:8081/");
   });
-  it("all bypass ignores failed discovery and removes every old proxy alias", () => {
-    const env = mergeChildProxyEnvironment(
-      { HTTP_PROXY: "http://stale:1", https_proxy: "http://stale:2" },
-      { NO_PROXY: "*" },
-      { env: {}, error: "System PAC proxy is not supported" },
-    );
-    expect(env).toEqual({ NO_PROXY: "*", no_proxy: "*" });
-  });
+  it.each(["darwin", "linux", "win32"] as const)(
+    "%s: all bypass ignores failed discovery and removes every old proxy alias",
+    (platform) => {
+      const env = mergeChildProxyEnvironment(
+        { HTTP_PROXY: "http://stale:1", https_proxy: "http://stale:2" },
+        { NO_PROXY: "*" },
+        { env: {}, error: "System PAC proxy is not supported" },
+        platform,
+      );
+      expect(env).toEqual(
+        platform === "win32"
+          ? { NO_PROXY: "*" }
+          : { NO_PROXY: "*", no_proxy: "*" },
+      );
+    },
+  );
   it("allows complete explicit proxy overrides despite a failed system read", () => {
     expect(
       buildChildProxyEnvironment(

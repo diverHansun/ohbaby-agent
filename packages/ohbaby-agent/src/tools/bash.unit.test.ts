@@ -812,10 +812,11 @@ describe("Bash proxy startup", () => {
         ),
       );
       expect(result.metadata?.status).toBe("running");
-      expect(spawn.mock.calls[0]?.[2].env).toMatchObject({
-        HTTP_PROXY: "http://override:2/",
-        http_proxy: "http://override:2/",
-      });
+      const childEnv = spawn.mock.calls[0]?.[2].env;
+      expect(childEnv?.HTTP_PROXY).toBe("http://override:2/");
+      expect(childEnv?.http_proxy).toBe(
+        process.platform === "win32" ? undefined : "http://override:2/",
+      );
       child.emitExit(0, null);
     } finally {
       await installation.dispose();

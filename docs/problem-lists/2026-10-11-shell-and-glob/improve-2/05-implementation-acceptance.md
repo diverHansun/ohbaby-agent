@@ -24,7 +24,7 @@
 
 Opus 5.5 的认证检查通过，但实际调用返回 `model_not_supported`，没有取得审查意见。经用户明确选择，另启动两个 `deepseek/deepseek-flash`、xhigh 实例分别审查 Shell 与 Glob。其意见按实证筛选：普通 `bash a.sh` 的下载执行拒绝原本有效；真实换行文件名能够被含换行的模式匹配，因此没有采纳禁止全部控制字符的建议。实际发现的 metadata 衔接与执行入口问题纳入回归。
 
-Glob 没有新增通用进程或资源隔离框架。普通取消 / 限额停止等待进程 close 与清理结果；无法确认清理且仍未 close 时，标记已有资源 lease 为 unconfirmed，让后续冲突请求明确失败。close 后最终探测仍 unknown 时报告清理失败，沿用现有操作结束后释放资源的契约，不声称提供持久进程组隔离。
+Glob 没有新增通用进程或资源隔离框架。初版普通取消 / 限额停止等待进程 close 与进程树清理结果；Windows 的后续修正见下节。无法确认清理且仍未 close 时，标记已有资源 lease 为 unconfirmed，让后续冲突请求明确失败。close 后最终探测仍 unknown 时报告清理失败，沿用现有操作结束后释放资源的契约，不声称提供持久进程组隔离。
 
 ## 验证记录
 
@@ -49,3 +49,16 @@ OHBABY_RUN_REAL_PROCESS_TOOLS=1 OHBABY_REAL_PROCESS_BATCH=shell-glob pnpm exec v
 实际主机为 macOS。Windows / Linux 平台选择有模拟契约测试，但没有这两个系统的真机执行证据；PowerShell grammar 在本机可验证加载，不等于 Windows PowerShell 5.1 的输出编码已验收。后续平台检查继续依据 [04](04-test-and-acceptance.md)。
 
 AST 分析、审批和进程内目录锁不构成操作系统沙箱。用户授权整条命令执行后，未知脚本的实际副作用仍属于原有执行边界。
+
+
+## 2026-10-13 Windows CI 修正
+
+[CI run 38256158721 / Windows job](https://github.com/diverHansun/ohbaby-agent/actions/runs/38256158721/job/114834664353) 的代码为 `206b011d`。完整日志共有 6 项失败（4 个文件）；Linux、macOS 和最低 Node 网络任务通过。这些失败来自本议题新增代码或测试，不能用此前 macOS 端到端成功替代 Windows 验收。
+
+- 三项代理测试把 POSIX 的大小写双键输出当成全平台契约。Windows 实现本来只输出大写单键，避免环境变量的大小写冲突。修正空覆盖继承、全绕过为 darwin / linux / win32 三平台表格用例，Bash 启动测试按实际平台校验；不改变生产代理行为。
+- 一项 Glob 测试在 Windows 创建含换行的文件名而失败。将真实换行文件名测试限定 POSIX，N 与 N+1 的截断判断拆成普通文件名的全平台测试。NUL 协议接收器仍在所有平台验证帧内换行。
+- 两项 Glob 接收器测试揭示实际退出竞态：短命 rg 已经自然退出时，Windows `taskkill /t` 返回失败，覆盖原 UTF-8 错误或限额结果。只为固定 bundled rg 的 Windows 路径使用拥有的 `ChildProcess.kill()` 句柄，并等 `close` 后确认清理。固定 `--no-config --files` 参数不启动 shell、不使用 `--pre`、不加载用户配置，因此适用叶进程边界；不推广到通用 Shell。1 秒内仍未 close 会报告 unconfirmed 并保留现有资源限制，不能因 kill 返回 true 或 false 就提前确认。POSIX 进程组探测与共享 Shell 清理规则不变。
+
+新 Windows 模拟契约覆盖 kill 成功但未 close、kill 返回 false 后自然 close、停止错误且暂未 close，以及协议错误不被停止错误覆盖。三个用例在修复前失败，修复后通过。旧 POSIX 不确定进程树契约保留；CI 三平台矩阵新增执行该契约文件。
+
+定向验证：5 个文件、71 项通过；全仓测试为 526 个文件、5798 项通过，另 6 个文件、17 项按配置跳过。独立子代理复核未发现阻断问题。完整 `pnpm preflight` 返回 0，格式、lint（0 errors / 109 项既有 warnings）、typecheck、测试、安装包检查与最终构建均通过。本机仍为 macOS，此次本地模拟不能宣称新的 Windows runner 已通过；提交后的真实 Windows CI 需重新运行。

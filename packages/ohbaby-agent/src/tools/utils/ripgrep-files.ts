@@ -62,6 +62,7 @@ export async function listFilesWithRipgrep(
   options: GlobProcessOptions,
 ): Promise<GlobProcessCompletion> {
   if (options.signal.aborted) throw abortError(options.signal);
+  const windows = process.platform === "win32";
   const args = [
     "--no-config",
     "--files",
@@ -89,7 +90,7 @@ export async function listFilesWithRipgrep(
     const child = spawn(options.executablePath, args, {
       cwd: options.cwd,
       stdio: ["ignore", "pipe", "pipe"],
-      detached: process.platform !== "win32",
+      detached: !windows,
       windowsHide: true,
     });
     const frame = Buffer.allocUnsafe(RIPGREP_RECORD_BYTES);
@@ -103,7 +104,26 @@ export async function listFilesWithRipgrep(
     function terminate(): void {
       if (cleanup) return;
       options.reportCleanup?.("in-progress");
-      cleanup = killTree(child, { exited: () => closed });
+      if (windows) {
+        // Fixed bundled rg --no-config --files cannot spawn children. Use its
+        // owned handle: taskkill by PID races with this short-lived leaf's exit.
+        cleanup = new Promise((complete) => {
+          const timer = setTimeout(() => {
+            complete({ status: "unconfirmed", reason: "observation-expired" });
+          }, 1000);
+          child.once("close", () => {
+            clearTimeout(timer);
+            complete({ status: "confirmed" });
+          });
+        });
+        try {
+          child.kill();
+        } catch (error) {
+          options.reportCleanupError?.(error);
+        }
+      } else {
+        cleanup = killTree(child, { exited: () => closed });
+      }
       void cleanup.then((result) => {
         options.reportCleanup?.(
           result.status === "confirmed" ? "confirmed" : "unconfirmed",
@@ -187,8 +207,10 @@ export async function listFilesWithRipgrep(
         );
     });
     child.on("error", (error) => {
-      failure = new Error(
-        `Glob unavailable: bundled ripgrep could not start: ${error.message}`,
+      failure ??= new Error(
+        cleanup
+          ? `Glob failed: bundled ripgrep could not stop: ${error.message}`
+          : `Glob unavailable: bundled ripgrep could not start: ${error.message}`,
         { cause: error },
       );
     });
@@ -204,9 +226,10 @@ export async function listFilesWithRipgrep(
       void (async (): Promise<void> => {
         const cleaned = await cleanup;
         if (cleaned && cleaned.status !== "confirmed") {
-          // A short-lived rg can exit between the initial cleanup probe and close.
-          // Recheck the original group once; close alone never proves tree cleanup.
+          // Windows owns a known leaf; close proves its cleanup. POSIX still
+          // needs the original process group probe, not just its leader's exit.
           if (
+            windows ||
             probeProcessTree(child, {
               exited: () => closed,
               terminationSucceeded: cleaned.terminationSucceeded,

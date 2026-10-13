@@ -180,17 +180,23 @@ describe("glob file tool", () => {
         createGlobTool().execute({ pattern }, createTestContext(tempRoot)),
       ).rejects.toThrow();
   });
-  it("keeps newline filenames as one escaped result and distinguishes N from N+1", async () => {
-    await writeFile(tempRoot, "line\nbreak.ts", "");
-    const exactPattern = await createGlobTool().execute(
-      { pattern: "line\nbreak.ts" },
-      createTestContext(tempRoot),
-    );
-    expect(exactPattern.output).toBe('"line\\nbreak.ts"');
-    expect(exactPattern.metadata).toMatchObject({
-      count: 1,
-      scanComplete: true,
-    });
+  it.skipIf(process.platform === "win32")(
+    "keeps newline filenames as one escaped result",
+    async () => {
+      await writeFile(tempRoot, "line\nbreak.ts", "");
+      const exactPattern = await createGlobTool().execute(
+        { pattern: "line\nbreak.ts" },
+        createTestContext(tempRoot),
+      );
+      expect(exactPattern.output).toBe('"line\\nbreak.ts"');
+      expect(exactPattern.metadata).toMatchObject({
+        count: 1,
+        scanComplete: true,
+      });
+    },
+  );
+  it("distinguishes N from N+1 on every platform", async () => {
+    await writeFile(tempRoot, "first.ts", "");
     const exact = await createGlobTool().execute(
       { pattern: "*.ts", limit: 1 },
       createTestContext(tempRoot),
@@ -200,7 +206,7 @@ describe("glob file tool", () => {
       scanComplete: true,
       truncated: false,
     });
-    expect(exact.output).toBe('"line\\nbreak.ts"');
+    expect(exact.output).toBe("first.ts");
     await writeFile(tempRoot, "other.ts", "");
     const limited = await createGlobTool().execute(
       { pattern: "*.ts", limit: 1 },

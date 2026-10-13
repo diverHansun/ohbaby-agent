@@ -251,7 +251,7 @@ rg 包含隐藏普通文件，不读 ignore/config，始终排除 `.git / dist /
 
 只在看到第 limit+1 个匹配后数量截断。正常空结果才写 `No files matched.`；提前停止写明不完整及缩小范围。metadata 为 count、truncated、scanComplete、displayLimited、stopReason，模型投影保留全部字段。count 是采集的返回路径数量，displayLimited 表示正文展示少于这些结果；展示 clipping 与扫描完成性分开。
 
-目录读锁在 rg close 与必要进程树清理之后才释放。取消保留既有取消状态；超限有 stopReason；清理不确定使用既有 cleanup 事实，不能假装完成。close 尚未到达且清理无法确认时，已有资源 lease 标记 unconfirmed，冲突写入会明确报资源不可用。close 后最后的进程组探测仍无法确认时返回清理错误；沿用既有操作结算释放行为，本批不增加持久进程组隔离或新资源平台。单帧 4 MiB、stdout 16 MiB、stderr 64 KiB，展示采用现有 8,000 token 近似预算；不再使用已访问 10,000 文件上限或伪造 visitedFileCount。
+目录读锁在 rg close 与必要清理之后才释放。Windows 的固定 bundled rg（`--no-config --files`、不启动子进程）按叶进程处理：使用拥有的 ChildProcess 句柄停止，等待 close 确认；kill 的返回值不代表清理完成，1 秒未 close 报 unconfirmed。POSIX 继续清理并探测进程组。取消保留既有取消状态；超限有 stopReason；清理不确定使用既有 cleanup 事实，不能假装完成。close 尚未到达且清理无法确认时，已有资源 lease 标记 unconfirmed，冲突写入会明确报资源不可用。POSIX close 后最后的进程组探测仍无法确认时返回清理错误；沿用既有操作结算释放行为，本批不增加持久进程组隔离或新资源平台。单帧 4 MiB、stdout 16 MiB、stderr 64 KiB，展示采用现有 8,000 token 近似预算；不再使用已访问 10,000 文件上限或伪造 visitedFileCount。
 
 ### 4.5 grep 工具
 

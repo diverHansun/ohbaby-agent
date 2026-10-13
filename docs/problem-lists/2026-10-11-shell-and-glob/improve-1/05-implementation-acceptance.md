@@ -51,3 +51,7 @@ OHBABY_RUN_REAL_PROCESS_TOOLS=1 OHBABY_REAL_PROCESS_BATCH=network pnpm exec vite
 ## 平台边界
 
 本轮可实际运行的主机为 macOS。Windows/Linux 的平台分支可做契约测试，但没有实际主机运行证据，不能据此宣称三个平台都已验收。后续平台验收继续依据 [04](04-test-and-acceptance.md)。
+
+## 2026-10-13 Windows 测试修正
+
+Windows CI 揭示两项 child environment 测试和一项 Bash 启动测试错误地要求大小写双键。生产实现的 Windows 单键契约保留；测试已补齐三平台覆盖。完整原因、Glob 同期修正与验证结果见 [improve-2 后续验收](../improve-2/05-implementation-acceptance.md#2026-10-13-windows-ci-修正)。
