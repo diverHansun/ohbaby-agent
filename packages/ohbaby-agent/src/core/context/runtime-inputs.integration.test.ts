@@ -83,7 +83,6 @@ async function setup(
         });
       },
     },
-    maskEnabled: false,
   });
   return { context, messages, protectedInput, collected, counter };
 }

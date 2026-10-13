@@ -18,7 +18,6 @@ import { COMPRESSION_PROMPT } from "./compression-prompt.js";
 import { ContextEvent } from "./events.js";
 import { appendFileOpsSummary, extractFileOps } from "./file-ops.js";
 import { isActivePart } from "./filters.js";
-import { createMaskConfig, reduceForModel } from "./projection.js";
 import { serializeForLlm, serializeHistoryMessages } from "./serializer.js";
 import { createScopedExclusiveLane } from "./scoped-exclusive-lane.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
@@ -142,7 +141,6 @@ interface CompactionRequest {
   readonly contextScopeId?: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly isSubagent: boolean;
-  readonly projectForUsage?: (context: AssembledContext) => AssembledContext;
 }
 
 type AcceptedCompactionRequest = CompactionRequest & {
@@ -276,19 +274,10 @@ export function createContextManager(
     ...(options.compressionThreshold === undefined
       ? {}
       : { summary: options.compressionThreshold }),
-    ...(options.maskConfig?.minUsageRatio === undefined
-      ? {}
-      : { mask: options.maskConfig.minUsageRatio }),
   };
   const summaryAgentName = options.summaryAgentName ?? SUMMARY_AGENT_NAME;
   const calibrationFactors = new Map<string, number>();
-  const maskCutoffs = new Map<string, number>();
   const compactionFloors = new Map<string, CompactionFloor>();
-  const maskConfig = createMaskConfig({
-    ...options.maskConfig,
-    enabled: options.maskEnabled ?? false,
-    minUsageRatio: compactionThresholds.mask,
-  });
   const mutationLane = createScopedExclusiveLane();
 
   function getCalibrationFactor(
@@ -328,7 +317,7 @@ export function createContextManager(
   }
 
   function disposeSession(sessionId: string): void {
-    for (const map of [calibrationFactors, maskCutoffs, compactionFloors]) {
+    for (const map of [calibrationFactors, compactionFloors]) {
       for (const key of map.keys()) {
         if (isScopedSessionKeyForSession(key, sessionId)) map.delete(key);
       }
@@ -338,7 +327,6 @@ export function createContextManager(
   function disposeScope(sessionId: string, contextScopeId: string): void {
     const key = scopedSessionKey({ sessionId, contextScopeId });
     calibrationFactors.delete(key);
-    maskCutoffs.delete(key);
     compactionFloors.delete(key);
   }
 
@@ -464,75 +452,6 @@ export function createContextManager(
       contextScopeId: input.contextScopeId,
       sessionId: input.sessionId,
     };
-  }
-
-  function withHistory(
-    context: AssembledContext,
-    history: readonly MessageWithParts[],
-  ): AssembledContext {
-    return { ...context, history };
-  }
-
-  function reduceContextForModel(input: {
-    readonly context: AssembledContext;
-    readonly usage: ContextUsage;
-    readonly allowCutoffAdvance: boolean;
-    readonly publishEvent: boolean;
-  }): AssembledContext {
-    const result = reduceForModel({
-      allowCutoffAdvance: input.allowCutoffAdvance,
-      config: maskConfig,
-      cutoff:
-        maskCutoffs.get(
-          scopedSessionKey({
-            contextScopeId: input.context.contextScopeId,
-            sessionId: input.context.sessionId,
-          }),
-        ) ?? 0,
-      history: input.context.history,
-      sessionId: input.context.sessionId,
-      tokenCounter: options.tokenCounter,
-      usage: input.usage,
-    });
-    if (input.allowCutoffAdvance) {
-      maskCutoffs.set(
-        scopedSessionKey({
-          contextScopeId: input.context.contextScopeId,
-          sessionId: input.context.sessionId,
-        }),
-        result.cutoff,
-      );
-    }
-    if (input.publishEvent) {
-      options.bus.publish(ContextEvent.Masked, {
-        ...result.event,
-        ...(input.context.contextScopeId === undefined
-          ? {}
-          : { contextScopeId: input.context.contextScopeId }),
-        maskedPartIds: [...result.event.maskedPartIds],
-      });
-    }
-    return withHistory(input.context, result.history);
-  }
-
-  function projectContextForUsage(
-    context: AssembledContext,
-    modelId: string,
-    tools: PrepareTurnInput["tools"],
-    tailDirectives?: readonly ModelMessage[],
-  ): AssembledContext {
-    return reduceContextForModel({
-      allowCutoffAdvance: false,
-      context,
-      publishEvent: false,
-      usage: measureContext({
-        tailDirectives,
-        context,
-        isSubagent: context.isSubagent,
-        modelId,
-        tools,
-      }).usage,
-    });
   }
 
   async function assemble(
@@ -772,12 +691,7 @@ export function createContextManager(
     history: readonly MessageWithParts[],
     bodyTokens: number,
   ): PreparedModelRequest {
-    const context = projectContextForUsage(
-      withHistory(req.assembled, history),
-      req.modelId,
-      req.tools,
-      req.tailDirectives,
-    );
+    const context = { ...req.assembled, history };
     return summaryRequest(
       assembleModelRequest({
         requestSettings: req.request.settings,
@@ -1260,7 +1174,7 @@ export function createContextManager(
         inputIds: req.request.inputIds,
         tailDirectives: req.tailDirectives,
         activeReasoningByMessageId: req.activeReasoningByMessageId,
-        context: req.projectForUsage?.(context) ?? context,
+        context,
         isSubagent: req.isSubagent,
         modelId: req.modelId,
         tools: req.tools,
@@ -1304,7 +1218,7 @@ export function createContextManager(
           thresholds: compactionThresholds,
           usage: req.usageBefore,
         });
-    if (rung === "none" || rung === "mask") {
+    if (rung === "none") {
       options.bus.publish(ContextEvent.CompactSkipped, {
         ...scopedEventIdentity(req.sessionId, req.contextScopeId),
         attemptId: req.attemptId,
@@ -1497,7 +1411,6 @@ export function createContextManager(
       tokens: projectedUsage.currentTokens,
       capacity,
     });
-    maskCutoffs.set(key, 0);
     const current = await reloadCompactionState(req);
     return {
       status: "compacted",
@@ -1555,29 +1468,13 @@ export function createContextManager(
       isSubagent,
       toolNames: input.toolNames,
     });
-    const unreducedMeasurement = measureContext({
+    const preparedBefore = measureContext({
       requestSettings: input.requestSettings,
       context: assembled,
       isSubagent,
       modelId: input.modelId,
       tools: input.tools,
     });
-    const reducedBeforeCompaction = reduceContextForModel({
-      allowCutoffAdvance: true,
-      context: assembled,
-      publishEvent: true,
-      usage: unreducedMeasurement.usage,
-    });
-    const preparedBefore =
-      reducedBeforeCompaction.history === assembled.history
-        ? unreducedMeasurement
-        : measureContext({
-            requestSettings: input.requestSettings,
-            context: reducedBeforeCompaction,
-            isSubagent,
-            modelId: input.modelId,
-            tools: input.tools,
-          });
     const usageBefore = preparedBefore.usage;
     const outcome = await runCompaction({
       request: preparedBefore.request,
@@ -1588,6 +1485,7 @@ export function createContextManager(
       isSubagent,
       modelId: input.modelId,
       sessionId,
+      signal: input.signal,
       tools: input.tools,
       usageBefore,
     });
@@ -1608,7 +1506,7 @@ export function createContextManager(
       promptSnapshot: input.promptSnapshot,
       toolNames: input.toolNames,
     });
-    const unreducedMeasurement = measureContext({
+    const preparedBefore = measureContext({
       requestSettings: input.requestSettings,
       inputIds: input.inputIds,
       tailDirectives: input.tailDirectives,
@@ -1618,26 +1516,6 @@ export function createContextManager(
       modelId: input.modelId,
       tools: input.tools,
     });
-    const unreducedUsage = unreducedMeasurement.usage;
-    const reducedBeforeCompaction = reduceContextForModel({
-      allowCutoffAdvance: true,
-      context: assembled,
-      publishEvent: true,
-      usage: unreducedUsage,
-    });
-    const preparedBefore =
-      reducedBeforeCompaction.history === assembled.history
-        ? unreducedMeasurement
-        : measureContext({
-            requestSettings: input.requestSettings,
-            inputIds: input.inputIds,
-            tailDirectives: input.tailDirectives,
-            activeReasoningByMessageId: input.activeReasoningByMessageId,
-            context: reducedBeforeCompaction,
-            isSubagent,
-            modelId: input.modelId,
-            tools: input.tools,
-          });
     const usageBefore = preparedBefore.usage;
     const outcome = await runCompaction({
       request: preparedBefore.request,
@@ -1650,13 +1528,6 @@ export function createContextManager(
       isSubagent,
       modelId: input.modelId,
       onCompactionStarted: input.onCompactionStarted,
-      projectForUsage: (context) =>
-        projectContextForUsage(
-          context,
-          input.modelId,
-          input.tools,
-          input.tailDirectives,
-        ),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       sessionId: input.sessionId,
       tools: input.tools,
@@ -1667,7 +1538,7 @@ export function createContextManager(
       outcome.status === "not-needed"
         ? undefined
         : mapOutcomeToCompactResult(outcome);
-    const rawFinalMeasurement = measureContext({
+    const finalMeasurement = measureContext({
       requestSettings: input.requestSettings,
       inputIds: input.inputIds,
       tailDirectives: input.tailDirectives,
@@ -1677,32 +1548,12 @@ export function createContextManager(
       modelId: input.modelId,
       tools: input.tools,
     });
-    const rawFinalUsage = rawFinalMeasurement.usage;
-    const reducedFinalContext = reduceContextForModel({
-      allowCutoffAdvance: false,
-      context: finalContext,
-      publishEvent: true,
-      usage: rawFinalUsage,
-    });
-    const finalMeasurement =
-      reducedFinalContext.history === finalContext.history
-        ? rawFinalMeasurement
-        : measureContext({
-            requestSettings: input.requestSettings,
-            inputIds: input.inputIds,
-            tailDirectives: input.tailDirectives,
-            activeReasoningByMessageId: input.activeReasoningByMessageId,
-            context: reducedFinalContext,
-            isSubagent,
-            modelId: input.modelId,
-            tools: input.tools,
-          });
     const usage = finalMeasurement.usage;
     const request = finalMeasurement.request;
     const composition = estimateContextOccupancyComposition(
       {
         activeReasoningByMessageId: input.activeReasoningByMessageId,
-        context: reducedFinalContext,
+        context: finalContext,
         request,
         tailDirectives: input.tailDirectives,
         toolDefinitions: input.toolDefinitions,
@@ -1749,7 +1600,10 @@ export function createContextManager(
         contextScopeId: input.contextScopeId,
         sessionId,
       }),
-      () => compactUnlocked(sessionId, snapshot),
+      () => {
+        snapshot.signal?.throwIfAborted();
+        return compactUnlocked(sessionId, snapshot);
+      },
     );
   }
 

@@ -10,7 +10,12 @@ import {
 } from "../message/index.js";
 import { createContextManager } from "./context-manager.js";
 import { ContextEvent } from "./events.js";
-import type { ContextLLMClient, PreparedModelRequest } from "./types.js";
+import type {
+  CompactResult,
+  ContextLLMClient,
+  PreparedModelRequest,
+  PrepareTurnInput,
+} from "./types.js";
 
 const input = {
   sessionId: "s",
@@ -112,6 +117,25 @@ async function fixture(
   };
 }
 
+const entries = ["manual", "automatic", "force"] as const;
+
+async function invokeCompaction(
+  f: Awaited<ReturnType<typeof fixture>>,
+  entry: (typeof entries)[number],
+  options: Partial<PrepareTurnInput> = {},
+): Promise<CompactResult> {
+  if (entry === "manual")
+    return f.manager.compact("s", { ...input, ...options });
+  const result = await f.manager.prepareTurn({
+    ...input,
+    ...options,
+    force: entry === "force",
+  });
+  if (!result.compaction)
+    throw new Error(`${entry} did not attempt compaction`);
+  return result.compaction;
+}
+
 describe("compaction candidate plan", () => {
   it("keeps a sub-20K history unchanged without asking for a summary", async () => {
     const f = await fixture(64000, [1000, 1000, 1000, 1000]);
@@ -137,22 +161,25 @@ describe("compaction candidate plan", () => {
     expect(await f.messages.listBySession("s")).toEqual(before);
   });
 
-  it("does not commit when Stop arrives while the message mutation is queued", async () => {
-    const f = await fixture();
-    const controller = new AbortController();
-    const before = await f.messages.listBySession("s");
-    const originalCommit = f.messages.commitCompaction.bind(f.messages);
-    f.messages.commitCompaction = (
-      value,
-    ): ReturnType<MessageManager["commitCompaction"]> => {
-      controller.abort();
-      return originalCommit(value);
-    };
-    await expect(
-      f.manager.prepareTurn({ ...input, signal: controller.signal }),
-    ).rejects.toMatchObject({ name: "AbortError" });
-    expect(await f.messages.listBySession("s")).toEqual(before);
-  });
+  it.each(entries)(
+    "does not commit when Stop arrives while the message mutation is queued [%s]",
+    async (entry) => {
+      const f = await fixture(128000, Array<number>(8).fill(6000), 0);
+      const controller = new AbortController();
+      const before = await f.messages.listBySession("s");
+      const originalCommit = f.messages.commitCompaction.bind(f.messages);
+      f.messages.commitCompaction = (
+        value,
+      ): ReturnType<MessageManager["commitCompaction"]> => {
+        controller.abort();
+        return originalCommit(value);
+      };
+      await expect(
+        invokeCompaction(f, entry, { signal: controller.signal }),
+      ).rejects.toMatchObject({ name: "AbortError" });
+      expect(await f.messages.listBySession("s")).toEqual(before);
+    },
+  );
 
   it("counts protected input once while shrinking a calibrated post-summary request", async () => {
     const f = await fixture();
@@ -202,98 +229,113 @@ describe("compaction candidate plan", () => {
     ).toEqual(protectedInput.parts);
   });
 
-  it("replaces every active old summary and stores the successful request on the new summary", async () => {
-    const f = await fixture();
-    await f.append("old constraint A", true);
-    await f.append("old constraint B", true);
-    const result = await f.manager.compact("s", input);
-    expect(result.status).toBe("compacted");
-    expect(JSON.stringify(f.requests[0])).toContain("old constraint A");
-    expect(JSON.stringify(f.requests[0])).toContain("old constraint B");
-    const history = await f.messages.listBySession("s");
-    const active = history
-      .flatMap((message) => message.parts)
-      .filter((part) => part.time?.compacted === undefined);
-    expect(active.filter(isContextSummaryPart)).toHaveLength(1);
-    const summaryId =
-      result.compression?.status === "compressed"
-        ? result.compression.summaryMessageId
-        : undefined;
-    const summary = history.find((message) => message.info.id === summaryId);
-    expect(summary?.info).toMatchObject({
-      modelRequests: [{ purpose: "context-summary", outcome: "success" }],
-    });
-    expect(active.filter((part) => !isContextSummaryPart(part))).toHaveLength(
-      3,
-    );
-  });
-
-  it("trims only older groups for summary capacity and persists exact omitted part IDs", async () => {
-    const f = await fixture(40000);
-    await f.append("inherited constraint", true);
-    const before = await f.messages.listBySession("s");
-    const result = await f.manager.compact("s", input);
-    expect(result.status).toBe("compacted");
-    expect(f.requests).toHaveLength(1);
-    const sent = JSON.stringify(f.requests[0]);
-    expect(sent).toContain("inherited constraint");
-    const omitted = before
-      .flatMap((message) => message.parts)
-      .filter((part) => part.type === "text" && !sent.includes(part.text))
-      .map((part) => part.id);
-    expect(omitted.length).toBeGreaterThan(0);
-    const history = await f.messages.listBySession("s");
-    const summary = history
-      .flatMap((message) => message.parts)
-      .find(
-        (part) =>
-          isContextSummaryPart(part) && part.time?.compacted === undefined,
-      );
-    expect(summary).toMatchObject({
-      metadata: { omittedPartIds: omitted, omissionReason: "summary-capacity" },
-    });
-    expect(result).toMatchObject({ omittedParts: omitted.length });
-    expect(summary?.type === "text" ? summary.text : "").toContain("omitted");
-    expect(
-      history
+  it.each(entries)(
+    "replaces every active old summary and stores the successful request on the new summary [%s]",
+    async (entry) => {
+      const f = await fixture(128000, Array<number>(8).fill(6000), 0);
+      await f.append("old constraint A", true);
+      await f.append("old constraint B", true);
+      const result = await invokeCompaction(f, entry);
+      expect(result.status).toBe("compacted");
+      expect(JSON.stringify(f.requests[0])).toContain("old constraint A");
+      expect(JSON.stringify(f.requests[0])).toContain("old constraint B");
+      const history = await f.messages.listBySession("s");
+      const active = history
         .flatMap((message) => message.parts)
-        .filter((part) => omitted.includes(part.id))
-        .every((part) => part.time?.compacted !== undefined),
-    ).toBe(true);
-  });
-
-  it("uses the full ordinary output reservation to shrink the tail once without another summary request", async () => {
-    const f = await fixture();
-    const result = await f.manager.compact("s", {
-      ...input,
-      requestSettings: { model: "m", maxTokens: 114000 },
-    });
-    expect(result.status).toBe("compacted");
-    expect(f.requests).toHaveLength(1);
-    expect(result.usageAfter.currentTokens + 114000 + 1024).toBeLessThanOrEqual(
-      128000,
-    );
-    const active = (await f.messages.listBySession("s"))
-      .flatMap((message) => message.parts)
-      .filter(
-        (part) =>
-          part.time?.compacted === undefined && !isContextSummaryPart(part),
+        .filter((part) => part.time?.compacted === undefined);
+      expect(active.filter(isContextSummaryPart)).toHaveLength(1);
+      const summaryId =
+        result.compression?.status === "compressed"
+          ? result.compression.summaryMessageId
+          : undefined;
+      const summary = history.find((message) => message.info.id === summaryId);
+      expect(summary?.info).toMatchObject({
+        modelRequests: [{ purpose: "context-summary", outcome: "success" }],
+      });
+      expect(active.filter((part) => !isContextSummaryPart(part))).toHaveLength(
+        3,
       );
-    expect(active).toHaveLength(2);
-    expect(result.omittedParts ?? 0).toBe(0);
-  });
+    },
+  );
 
-  it("fails locally with the original history intact when the most recent group cannot fit", async () => {
-    const f = await fixture(128000, [10000, 10000, 10000, 25000]);
-    const before = await f.messages.listBySession("s");
-    const result = await f.manager.compact("s", {
-      ...input,
-      requestSettings: { model: "m", maxTokens: 110000 },
-    });
-    expect(result.status).toBe("failed");
-    expect(f.generate).toHaveBeenCalledOnce();
-    expect(await f.messages.listBySession("s")).toEqual(before);
-  });
+  it.each(entries)(
+    "trims only older groups for summary capacity and persists exact omitted part IDs [%s]",
+    async (entry) => {
+      const f = await fixture(40000, Array<number>(8).fill(6000), 0);
+      await f.append("inherited constraint", true);
+      const before = await f.messages.listBySession("s");
+      const result = await invokeCompaction(f, entry);
+      expect(result.status).toBe("compacted");
+      expect(f.requests).toHaveLength(1);
+      const sent = JSON.stringify(f.requests[0]);
+      expect(sent).toContain("inherited constraint");
+      const omitted = before
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "text" && !sent.includes(part.text))
+        .map((part) => part.id);
+      expect(omitted.length).toBeGreaterThan(0);
+      const history = await f.messages.listBySession("s");
+      const summary = history
+        .flatMap((message) => message.parts)
+        .find(
+          (part) =>
+            isContextSummaryPart(part) && part.time?.compacted === undefined,
+        );
+      expect(summary).toMatchObject({
+        metadata: {
+          omittedPartIds: omitted,
+          omissionReason: "summary-capacity",
+        },
+      });
+      expect(result).toMatchObject({ omittedParts: omitted.length });
+      expect(summary?.type === "text" ? summary.text : "").toContain("omitted");
+      expect(
+        history
+          .flatMap((message) => message.parts)
+          .filter((part) => omitted.includes(part.id))
+          .every((part) => part.time?.compacted !== undefined),
+      ).toBe(true);
+    },
+  );
+
+  it.each(entries)(
+    "uses the full ordinary output reservation to shrink the tail once without another summary request [%s]",
+    async (entry) => {
+      const f = await fixture(128000, Array<number>(8).fill(6000), 0);
+      const result = await invokeCompaction(f, entry, {
+        ...input,
+        requestSettings: { model: "m", maxTokens: 114000 },
+      });
+      expect(result.status).toBe("compacted");
+      expect(f.requests).toHaveLength(1);
+      expect(
+        result.usageAfter.currentTokens + 114000 + 1024,
+      ).toBeLessThanOrEqual(128000);
+      const active = (await f.messages.listBySession("s"))
+        .flatMap((message) => message.parts)
+        .filter(
+          (part) =>
+            part.time?.compacted === undefined && !isContextSummaryPart(part),
+        );
+      expect(active).toHaveLength(2);
+      expect(result.omittedParts ?? 0).toBe(0);
+    },
+  );
+
+  it.each(entries)(
+    "fails locally with the original history intact when the most recent group cannot fit [%s]",
+    async (entry) => {
+      const f = await fixture(128000, [10000, 10000, 10000, 25000], 0);
+      const before = await f.messages.listBySession("s");
+      const result = await invokeCompaction(f, entry, {
+        ...input,
+        requestSettings: { model: "m", maxTokens: 110000 },
+      });
+      expect(result.status).toBe("failed");
+      expect(f.generate).toHaveBeenCalledOnce();
+      expect(await f.messages.listBySession("s")).toEqual(before);
+    },
+  );
 
   it("keeps a committed success with protected input when new input and Stop arrive after the transaction", async () => {
     const f = await fixture();
@@ -367,10 +409,14 @@ describe("compaction candidate plan", () => {
     expect(sent).toContain("3:" + "x".repeat(6000));
   });
 
-  it.each(["network-first", "overflow-first"])(
-    "shares two actual attempts for %s mixed failures",
-    async (order) => {
-      const f = await fixture();
+  it.each(
+    entries.flatMap((entry) =>
+      ["network-first", "overflow-first"].map((order) => ({ entry, order })),
+    ),
+  )(
+    "shares two actual attempts for $order mixed failures [$entry]",
+    async ({ entry, order }) => {
+      const f = await fixture(128000, Array<number>(8).fill(6000), 0);
       const before = await f.messages.listBySession("s");
       const network = Object.assign(new Error("disconnected"), {
         code: "ECONNRESET",
@@ -381,7 +427,7 @@ describe("compaction candidate plan", () => {
       f.generate
         .mockRejectedValueOnce(order === "network-first" ? network : overflow)
         .mockRejectedValueOnce(order === "network-first" ? overflow : network);
-      expect((await f.manager.compact("s", input)).status).toBe("failed");
+      expect((await invokeCompaction(f, entry)).status).toBe("failed");
       expect(f.generate).toHaveBeenCalledTimes(2);
       expect(await f.messages.listBySession("s")).toEqual(before);
     },
@@ -457,29 +503,32 @@ describe("compaction candidate plan", () => {
     ).toBeLessThanOrEqual(16384);
   });
 
-  it("rejects additions to an existing related group while allowing independent new messages", async () => {
-    const f = await fixture();
-    const old = (await f.messages.listBySession("s"))[0];
-    f.generate.mockImplementationOnce(async (request) => {
-      await f.messages.appendPart(old.info.id, {
-        type: "text",
-        text: "new member of existing group",
+  it.each(entries)(
+    "rejects additions to an existing related group while allowing independent new messages [%s]",
+    async (entry) => {
+      const f = await fixture(128000, Array<number>(8).fill(6000), 0);
+      const old = (await f.messages.listBySession("s"))[0];
+      f.generate.mockImplementationOnce(async (request) => {
+        await f.messages.appendPart(old.info.id, {
+          type: "text",
+          text: "new member of existing group",
+        });
+        return {
+          text: "checkpoint",
+          summaryMessageId: request.summaryMessageId,
+          requests: [],
+        };
       });
-      return {
-        text: "checkpoint",
-        summaryMessageId: request.summaryMessageId,
-        requests: [],
-      };
-    });
-    expect((await f.manager.compact("s", input)).status).toBe("failed");
-    const parts = (await f.messages.listBySession("s")).flatMap(
-      (message) => message.parts,
-    );
-    expect(parts.some(isContextSummaryPart)).toBe(false);
-    expect(parts.every((part) => part.time?.compacted === undefined)).toBe(
-      true,
-    );
-  });
+      expect((await invokeCompaction(f, entry)).status).toBe("failed");
+      const parts = (await f.messages.listBySession("s")).flatMap(
+        (message) => message.parts,
+      );
+      expect(parts.some(isContextSummaryPart)).toBe(false);
+      expect(parts.every((part) => part.time?.compacted === undefined)).toBe(
+        true,
+      );
+    },
+  );
 
   it("protects unfinished non-native tools before newer messages", async () => {
     const f = await fixture(128000, [30000, 500, 30000]);

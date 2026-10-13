@@ -488,7 +488,6 @@ describe("AgentInstance long task integration", () => {
     const baseContextManager = createContextManager({
       bus,
       compactionThresholds: {
-        mask: 0.9,
         summary: 0.45,
       },
       llmClient: {

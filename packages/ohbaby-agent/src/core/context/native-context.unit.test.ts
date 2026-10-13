@@ -10,7 +10,6 @@ import {
   estimatePreparedRequestHeuristic,
   estimateContextOccupancyComposition,
 } from "./token-estimation.js";
-import { createMaskConfig, reduceForModel } from "./projection.js";
 import {
   estimateHistoryForCompaction,
   findCutPoint,
@@ -234,31 +233,6 @@ describe("native source and compaction boundaries", () => {
         model: "other",
       }),
     ).toThrow(/unfinished|pending|source/u);
-  });
-  it("protects completed native tools from context masking", () => {
-    const message = nativeMessage();
-    const reduced = reduceForModel({
-      sessionId: "s",
-      history: [message, textMessage("user", "user")],
-      usage: {
-        currentTokens: 900,
-        contextLimit: 1000,
-        remainingTokens: 100,
-        usageRatio: 0.9,
-        modelId: "fixture",
-      },
-      cutoff: 0,
-      config: createMaskConfig({
-        enabled: true,
-        minPartTokens: 1,
-        minPrunableTokens: 1,
-        minUsageRatio: 0,
-        protectionTokens: 0,
-      }),
-      tokenCounter: counter,
-    });
-    expect(reduced.event.maskedPartIds).toEqual([]);
-    expect(reduced.history[0]?.parts).toEqual(message.parts);
   });
   it("never summarizes an unfinished native roundtrip even before later visible messages", () => {
     const history = [

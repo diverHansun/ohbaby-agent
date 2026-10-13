@@ -64,25 +64,7 @@ export function getContextUsage(
   };
 }
 
-export type CompactionRung = "none" | "mask" | "summary" | "force";
-
-// Retain the legacy mask formula; capacity checks use the full reservation.
-const LEGACY_OUTPUT_RESERVATION_RATIO = 0.5;
-
-export function getCompactionPressureRatio(usage: ContextUsage): number {
-  if (
-    usage.reservedOutputTokens === undefined ||
-    usage.safetyMarginTokens === undefined
-  )
-    return usage.usageRatio;
-  const available = Math.max(0, usage.contextLimit - usage.safetyMarginTokens);
-  const reserved = Math.min(
-    usage.reservedOutputTokens,
-    Math.floor(available * LEGACY_OUTPUT_RESERVATION_RATIO),
-  );
-  const inputBudget = available - reserved;
-  return inputBudget === 0 ? 1 : usage.currentTokens / inputBudget;
-}
+export type CompactionRung = "none" | "summary" | "force";
 
 export function decideCompactionRung(input: {
   readonly usage: ContextUsage;
@@ -100,9 +82,6 @@ export function decideCompactionRung(input: {
   ) {
     return "summary";
   }
-  if (getCompactionPressureRatio(input.usage) >= thresholds.mask) {
-    return "mask";
-  }
   return "none";
 }
 
@@ -111,7 +90,6 @@ export function needsSummaryCompaction(
   thresholds: CompactionThresholds,
 ): boolean {
   // Auto summary follows the same full-window occupancy shown in the UI.
-  // Input-budget pressure still drives masking; upstream overflow uses force.
   const occupancy =
     usage.contextLimit <= 0 ? 1 : usage.currentTokens / usage.contextLimit;
   return occupancy >= thresholds.summary;

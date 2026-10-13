@@ -165,6 +165,7 @@ export type CompressionResult =
 export type CompactStatus = "not-needed" | "compacted" | "failed" | "inflated";
 
 export interface CompactOptions {
+  readonly signal?: AbortSignal;
   readonly requestSettings?: PreparedRequestSettings;
   readonly reasoning?: ReasoningIntent;
   readonly modelOrigin?: ModelOrigin;
@@ -269,15 +270,6 @@ export interface ContextManagerOptions {
   readonly compactionThresholds?: Partial<CompactionThresholds>;
   readonly compressionThreshold?: number;
   readonly summaryAgentName?: string;
-  readonly maskEnabled?: boolean;
-  readonly maskConfig?: {
-    readonly exemptToolPrefixes?: readonly string[];
-    readonly minPartTokens?: number;
-    readonly minPrunableTokens?: number;
-    readonly minUsageRatio?: number;
-    readonly placeholderPrefix?: string;
-    readonly protectionTokens?: number;
-  };
   /** Receives a detached copy of each occupancy payload for diagnostics and tests. */
   readonly onRequestMeasured?: (request: PreparedModelRequest) => void;
   readonly onWarning?: (message: string, error?: unknown) => void;

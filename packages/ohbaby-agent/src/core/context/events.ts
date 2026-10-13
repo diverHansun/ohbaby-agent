@@ -35,12 +35,6 @@ const ContextUsageSchema = z.object({
   modelId: z.string(),
 });
 
-const MaskSkippedReasonSchema = z.union([
-  z.literal("below-threshold"),
-  z.literal("below-batch"),
-  z.literal("all-exempt"),
-]);
-
 const ScopedContextIdentitySchema = z.object({
   contextScopeId: z.string().optional(),
   sessionId: z.string(),
@@ -115,17 +109,6 @@ export const ContextEvent = {
         z.literal("stale"),
       ]),
       usage: ContextUsageSchema,
-    }),
-  ),
-  Masked: BusEvent.define(
-    "context.masked",
-    ScopedContextIdentitySchema.extend({
-      enabled: z.boolean(),
-      maskedPartIds: z.array(z.string()),
-      maskedTokens: z.number(),
-      cutoff: z.number(),
-      usageRatio: z.number(),
-      skippedReason: MaskSkippedReasonSchema.optional(),
     }),
   ),
 } as const;

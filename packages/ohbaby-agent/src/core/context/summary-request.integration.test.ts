@@ -72,7 +72,6 @@ async function fixture(
     systemPromptProvider: { build: () => Promise.resolve("NORMAL SYSTEM") },
     tokenCounter: createHeuristicTokenCounter({ defaultLimit: 128000 }),
     llmClient: { generateSummary },
-    maskEnabled: false,
     ...overrides,
   });
   return { manager, messages, input: fixtureInput };
@@ -274,88 +273,86 @@ it.each(["protocol", "eof", "provider_abort"] as const)(
   },
 );
 
-it("cancels during network retry delay and keeps completed tool output active", async () => {
-  const controller = new AbortController();
-  const diagnosticRecords: Readonly<Record<string, unknown>>[] = [];
-  const logger: Logger = {
-    emit(definition, input) {
-      diagnosticRecords.push(
-        encodeDiagnosticEvent(
-          definition,
-          input,
-          { roots: {} },
-          "2026-10-13T00:00:00Z",
-        ).record,
-      );
-    },
-  };
-  const generateSummary = vi.fn(
-    async (input: Parameters<ContextLLMClient["generateSummary"]>[0]) => {
-      await Promise.resolve();
-      input.onRequestRecord?.({
-        requestId: "failed",
-        messageId: input.summaryMessageId,
-        compactionId: input.compactionId,
-        purpose: "context-summary",
-        attempt: 1,
-        startedAt: 1,
-        endedAt: 2,
-        outcome: "error",
-      });
-      setTimeout(() => {
-        controller.abort();
-      }, 5);
-      throw Object.assign(new Error("disconnected"), { code: "ECONNRESET" });
-    },
-  );
-  const { manager, messages, input } = await fixture(generateSummary, {
-    logger,
-  });
-  for (let i = 0; i < 3; i++) {
-    const old = await messages.createMessage({
-      sessionId: "s",
-      role: "assistant",
-      agent: "primary",
-    });
-    await messages.appendPart(old.id, {
-      type: "tool",
-      tool: "read",
-      callId: `old-${String(i)}`,
-      state: {
-        status: "completed",
-        input: { path: "file" },
-        output: "ORIGINAL".repeat(12500),
+it.each(["force", "manual"] as const)(
+  "%s cancels during network retry delay and keeps completed tool output active",
+  async (entry) => {
+    const controller = new AbortController();
+    const diagnosticRecords: Readonly<Record<string, unknown>>[] = [];
+    const logger: Logger = {
+      emit(definition, input) {
+        diagnosticRecords.push(
+          encodeDiagnosticEvent(
+            definition,
+            input,
+            { roots: {} },
+            "2026-10-13T00:00:00Z",
+          ).record,
+        );
       },
+    };
+    const generateSummary = vi.fn(
+      async (input: Parameters<ContextLLMClient["generateSummary"]>[0]) => {
+        await Promise.resolve();
+        input.onRequestRecord?.({
+          requestId: "failed",
+          messageId: input.summaryMessageId,
+          compactionId: input.compactionId,
+          purpose: "context-summary",
+          attempt: 1,
+          startedAt: 1,
+          endedAt: 2,
+          outcome: "error",
+        });
+        setTimeout(() => {
+          controller.abort();
+        }, 5);
+        throw Object.assign(new Error("disconnected"), { code: "ECONNRESET" });
+      },
+    );
+    const { manager, messages, input } = await fixture(generateSummary, {
+      logger,
     });
-  }
-  const before = await messages.listBySession("s");
-  await expect(
-    manager.prepareTurn({ ...input, signal: controller.signal }),
-  ).rejects.toMatchObject({ name: "AbortError" });
-  expect(generateSummary).toHaveBeenCalledOnce();
-  expect(diagnosticRecords).toHaveLength(1);
-  expect(diagnosticRecords[0]).toMatchObject({
-    event: "llm.context_summary.unused",
-    reason: "aborted",
-    attempt: 1,
-  });
-  expect(diagnosticRecords[0]).not.toHaveProperty("inputTokens");
-  expect(await messages.listBySession("s")).toEqual(before);
-});
+    for (let i = 0; i < 3; i++) {
+      const old = await messages.createMessage({
+        sessionId: "s",
+        role: "assistant",
+        agent: "primary",
+      });
+      await messages.appendPart(old.id, {
+        type: "tool",
+        tool: "read",
+        callId: `old-${String(i)}`,
+        state: {
+          status: "completed",
+          input: { path: "file" },
+          output: "ORIGINAL".repeat(12500),
+        },
+      });
+    }
+    const before = await messages.listBySession("s");
+    const options = { ...input, signal: controller.signal };
+    await expect(
+      entry === "manual"
+        ? manager.compact(input.sessionId, options)
+        : manager.prepareTurn(options),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(generateSummary).toHaveBeenCalledOnce();
+    expect(diagnosticRecords).toHaveLength(1);
+    expect(diagnosticRecords[0]).toMatchObject({
+      event: "llm.context_summary.unused",
+      reason: "aborted",
+      attempt: 1,
+    });
+    expect(diagnosticRecords[0]).not.toHaveProperty("inputTokens");
+    expect(await messages.listBySession("s")).toEqual(before);
+  },
+);
 
-it.each(["automatic", "manual"] as const)(
-  "uses the ordinary masked projection for %s summary requests",
+it.each(["force", "manual"] as const)(
+  "preserves full tool results and ordinary request prefix for %s summaries",
   async (entry) => {
     const generateSummary = vi.fn(successfulSummary);
-    const { manager, messages, input } = await fixture(generateSummary, {
-      maskEnabled: true,
-      maskConfig: {
-        minPartTokens: 1,
-        minPrunableTokens: 1,
-        minUsageRatio: 0,
-        protectionTokens: 1,
-      },
-    });
+    const { manager, messages, input } = await fixture(generateSummary);
     for (let i = 0; i < 3; i++) {
       const old = await messages.createMessage({
         sessionId: "s",
@@ -380,10 +377,10 @@ it.each(["automatic", "manual"] as const)(
     });
     await messages.appendPart(latest.id, { type: "text", text: "continue" });
     const normal = await manager.prepareTurn({ ...input, force: false });
-    expect(JSON.stringify(normal.request.messages)).not.toContain(
+    expect(JSON.stringify(normal.request.messages)).toContain(
       "TOOL-0:" + "ORIGINAL".repeat(3000),
     );
-    if (entry === "automatic") await manager.prepareTurn(input);
+    if (entry === "force") await manager.prepareTurn(input);
     else await manager.compact(input.sessionId, input);
     expect(generateSummary).toHaveBeenCalledOnce();
     expect(

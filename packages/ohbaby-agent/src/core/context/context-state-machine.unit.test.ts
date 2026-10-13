@@ -139,7 +139,6 @@ function createHarness(isSubagent: boolean): ReferenceHarness {
             requests: [],
           }),
       },
-      maskEnabled: false,
       memory: {
         load: () =>
           Promise.resolve({

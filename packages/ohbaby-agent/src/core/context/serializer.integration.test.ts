@@ -304,8 +304,7 @@ describe("serializeForLlm database metadata projection", () => {
       expectedCount,
     );
 
-    // Cross the old mask pressure line without reaching summary pressure; default
-    // mask is off, so changed budgets must not redistribute or trim old results.
+    // Changed budgets below summary pressure must not redistribute or trim old results.
     limit = 200_000;
     const prepared = await contextManager.prepareTurn({
       sessionId: "session_1",

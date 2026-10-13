@@ -422,6 +422,12 @@ describe("atomic context compaction", () => {
     expect(JSON.stringify(serializeForLlm(assembled))).toContain(
       "committed-summary",
     );
+    const visiblePartIds = assembled.history.flatMap((message) =>
+      message.parts.map((part) => part.id),
+    );
+    for (const partId of retiredPartIds) {
+      expect(visiblePartIds).not.toContain(partId);
+    }
     expect(resumeSummary).not.toHaveBeenCalled();
     expect(replayEvents).toEqual([]);
     expect(generateSummary).toHaveBeenCalledOnce();
