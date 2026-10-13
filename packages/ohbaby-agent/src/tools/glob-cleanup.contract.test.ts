@@ -32,6 +32,15 @@ vi.mock("node:child_process", async (importOriginal) => {
     },
   };
 });
+vi.mock("./utils/ripgrep-search.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./utils/ripgrep-search.js")>();
+  return {
+    ...actual,
+    // The process is fake; platform simulation must not load another OS's rg.
+    resolveBundledRipgrepPath: (): string => "fixture-rg",
+  };
+});
 vi.mock("../shell/process.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../shell/process.js")>();
   return {
@@ -46,7 +55,7 @@ describe("Glob uncertain cleanup through existing resource ownership", () => {
   beforeEach(async () => {
     Object.defineProperty(process, "platform", {
       ...platformDescriptor,
-      value: "darwin",
+      value: "linux",
     });
     root = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-glob-uncertain-"));
     boundary.child = Object.assign(new EventEmitter(), {

@@ -62,3 +62,5 @@ AST 分析、审批和进程内目录锁不构成操作系统沙箱。用户授�
 新 Windows 模拟契约覆盖 kill 成功但未 close、kill 返回 false 后自然 close、停止错误且暂未 close，以及协议错误不被停止错误覆盖。三个用例在修复前失败，修复后通过。旧 POSIX 不确定进程树契约保留；CI 三平台矩阵新增执行该契约文件。
 
 定向验证：5 个文件、71 项通过；全仓测试为 526 个文件、5798 项通过，另 6 个文件、17 项按配置跳过。独立子代理复核未发现阻断问题。完整 `pnpm preflight` 返回 0，格式、lint（0 errors / 109 项既有 warnings）、typecheck、测试、安装包检查与最终构建均通过。本机仍为 macOS，此次本地模拟不能宣称新的 Windows runner 已通过；提交后的真实 Windows CI 需重新运行。
+
+首次推送修复后的 [CI 38327642502](https://github.com/diverHansun/ohbaby-agent/actions/runs/38327642502) 中，Windows 与 Linux 单元测试均通过，原六个失败已消除；新加的清理契约步骤却暴露测试隔离缺口：模拟 POSIX 平台时，未隔离 bundled rg 路径解析，导致 Windows/Linux 试图加载 macOS 可选依赖。此契约本来使用虚拟进程，现同时模拟可执行文件定位；真实 rg 加载继续由 Glob 单元及安装包测试验证。本机将模拟平台改为 Linux 后复现 2 项失败，补齐隔离后相关 3 文件、19 项通过。
