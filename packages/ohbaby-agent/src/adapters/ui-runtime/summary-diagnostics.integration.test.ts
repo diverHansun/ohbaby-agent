@@ -46,7 +46,7 @@ it.each([
       });
       await messageManager.appendPart(message.id, {
         type: "text",
-        text: "Old history ".repeat(100),
+        text: "Old history ".repeat(1000),
       });
     }
     let calls = 0;

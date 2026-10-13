@@ -83,7 +83,7 @@ async function setup() {
       requestId,
       messageId: requestId,
       runId: "root",
-      purpose: "agent-step",
+      purpose: "agent-step" as const,
       step: requestNumber,
       attempt: 1,
       startedAt: Date.now(),

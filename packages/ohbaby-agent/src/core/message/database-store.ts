@@ -527,11 +527,40 @@ export function createDatabaseMessageStore(
       input: StoreCompactionInput,
     ): Promise<CommitCompactionResult | undefined> {
       return withImmediateTransaction(() => {
+        input.signal?.throwIfAborted();
         const expectedPartIds = new Set(
           input.expectedParts.map((part) => part.id),
         );
         if (expectedPartIds.size !== input.expectedParts.length) {
           throw new Error("Compaction expected parts contain duplicate ids");
+        }
+        for (const expected of input.expectedMessages ?? []) {
+          if (
+            expected.info.sessionId !== input.sessionId ||
+            expected.info.contextScopeId !== input.contextScopeId
+          ) {
+            throw new Error(
+              `Compaction message belongs to another scope: ${expected.info.id}`,
+            );
+          }
+          const row = getMessageRow(expected.info.id);
+          if (row?.data !== messageToRowData(expected.info)) {
+            return undefined;
+          }
+          const currentParts = db
+            .prepare<PartRow>(
+              `SELECT * FROM ${schema.part.tableName} WHERE message_id = ? ORDER BY order_index`,
+            )
+            .all(expected.info.id);
+          if (
+            currentParts.length !== expected.parts.length ||
+            currentParts.some(
+              (part, index) =>
+                part.data !== partToRowData(expected.parts[index]),
+            )
+          ) {
+            return undefined;
+          }
         }
         const targets: Part[] = [];
         for (const expectedPart of input.expectedParts) {

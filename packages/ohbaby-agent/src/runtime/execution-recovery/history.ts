@@ -25,6 +25,7 @@ export async function repairInterruptedRunHistory(
       if (message.info.role === "assistant") {
         const unfinished = (message.info.modelRequests ?? []).filter(
           (request) =>
+            request.purpose === "agent-step" &&
             request.runId === input.runId &&
             request.endedAt === undefined &&
             request.outcome === "running",

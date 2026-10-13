@@ -175,7 +175,7 @@ describe("goals x compact (integration)", () => {
         await addTextMessage(messageManager, {
           role: "assistant",
           sessionId,
-          text: `turn ${String(turn)} work log: ${"x".repeat(600)}`,
+          text: `turn ${String(turn)} work log: ${"x".repeat(24_000)}`,
         });
         await input.onTurn?.(turn);
         return { status: "succeeded", tokensUsed: 50 };

@@ -14,7 +14,7 @@ import type {
   RuntimeInputOrigin,
 } from "../../core/message/types.js";
 import { applyMessagePatch } from "../../core/message/message-patch.js";
-import type { ModelRequestRecord } from "../../core/llm-client/types.js";
+import type { AgentStepRequestRecord } from "../../core/llm-client/types.js";
 import type { RunLedger, RunLedgerRecord } from "../run-ledger/types.js";
 import type { PromptSubmissionRecord } from "./types.js";
 import { InMemoryPromptSubmissionStore } from "./in-memory-store.js";
@@ -90,7 +90,7 @@ export interface CurrentRunInputStore {
     messages: readonly MessageWithParts[],
   ): Promise<readonly MessageWithParts[]>;
   admitRequestAttempt(
-    request: ModelRequestRecord,
+    request: AgentStepRequestRecord,
     signal?: AbortSignal,
   ): Promise<void>;
   confirmRequestSuccess(requestId: string): Promise<readonly string[]>;
@@ -449,7 +449,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
     });
   }
   async admitRequestAttempt(
-    request: ModelRequestRecord,
+    request: AgentStepRequestRecord,
     signal?: AbortSignal,
   ): Promise<void> {
     await this.transaction(() => {
@@ -519,7 +519,8 @@ abstract class CurrentInputs implements CurrentRunInputStore {
       const request = owner.info.modelRequests?.find(
         (r) => r.requestId === requestId,
       );
-      if (!request) conflict("Request attempt not found");
+      if (request?.purpose !== "agent-step")
+        conflict("Request attempt not found");
       if (request.outcome !== "success")
         conflict("Only a persisted successful request can confirm processing");
       const records = (request.inputIds ?? []).map((id) => {

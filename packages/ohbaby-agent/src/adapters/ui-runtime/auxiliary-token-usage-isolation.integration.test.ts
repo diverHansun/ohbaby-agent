@@ -180,7 +180,6 @@ describe("auxiliary token usage isolation", () => {
           usageRatio: 42 / 128_000,
         },
       }),
-      resetTurnCompactionCount: vi.fn(),
       updateCalibrationFactor,
     } as unknown as ContextManager;
     const messageManager = createMessageManager({

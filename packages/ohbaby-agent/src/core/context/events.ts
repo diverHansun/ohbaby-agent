@@ -2,6 +2,7 @@ import { z } from "zod";
 import { BusEvent } from "../../bus/index.js";
 
 const CompressionMetricsSchema = z.object({
+  omittedParts: z.number().int().nonnegative().optional(),
   originalTokens: z.number(),
   newTokens: z.number(),
   savedTokens: z.number(),
@@ -74,6 +75,9 @@ export const ContextEvent = {
       outcome: CompactionAttemptOutcomeSchema,
       rung: z.literal("summary").optional(),
       status: CompactStatusSchema,
+      usageBefore: ContextUsageSchema.optional(),
+      usageAfter: ContextUsageSchema.optional(),
+      omittedParts: z.number().int().nonnegative().optional(),
     }),
   ),
   CompactionProgress: BusEvent.define(
@@ -108,8 +112,6 @@ export const ContextEvent = {
         z.literal("not-needed"),
         z.literal("too-short"),
         z.literal("inflated"),
-        z.literal("thrash-locked"),
-        z.literal("per-turn-cap"),
         z.literal("stale"),
       ]),
       usage: ContextUsageSchema,

@@ -3831,7 +3831,6 @@ describe("OhbabyWebApp slash command interactions", () => {
     await clickButton(app.container, "Compact session");
 
     expect(fake.compactSession).toHaveBeenCalledWith({
-      force: true,
       sessionId: "session_1",
     });
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
@@ -5653,7 +5652,7 @@ it("hides model waiting permanently after first text and resets for the next att
     messageId: "m",
     step: 1,
     attempt: 1,
-    purpose: "agent-step",
+    purpose: "agent-step" as const,
     startedAt: 1000,
     outcome: "running" as const,
   };

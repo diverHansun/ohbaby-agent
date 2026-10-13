@@ -153,7 +153,6 @@ function createHarness(isSubagent: boolean): ReferenceHarness {
       systemPromptProvider: {
         build: () => Promise.resolve(SYSTEM_PROMPT),
       },
-      thrashWindow: 2,
       tokenCounter: {
         estimateTokens: (content) => content.length,
         getLimit: () => 420,

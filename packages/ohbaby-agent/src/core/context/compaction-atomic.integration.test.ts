@@ -83,7 +83,7 @@ function createManager(
     },
     tokenCounter: {
       estimateTokens: (content) => content.length,
-      getLimit: () => 20_000,
+      getLimit: () => 128_000,
     },
   });
 }
@@ -104,7 +104,7 @@ async function appendTextHistory(
       sessionId,
     });
     await messageManager.appendPart(message.id, {
-      text: `${String(index)} ${"durable history ".repeat(30)}`,
+      text: `${String(index)} ${"durable history ".repeat(500)}`,
       type: "text",
     });
   }
@@ -124,7 +124,7 @@ async function appendToolHistory(
       callId: `call-${String(index)}`,
       state: {
         input: { index },
-        output: `tool-${String(index)} ${"large output ".repeat(30)}`,
+        output: `tool-${String(index)} ${"large output ".repeat(500)}`,
         status: "completed",
       },
       tool: "read",
@@ -427,7 +427,7 @@ describe("atomic context compaction", () => {
     expect(generateSummary).toHaveBeenCalledOnce();
   });
 
-  it("leaves every original part active after summary overflow without a shrunken retry", async () => {
+  it("leaves every original part active after both summary overflow attempts fail", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-context-overflow-"));
     cleanupPaths.push(directory);
     const dbPath = join(directory, "agent.db");
@@ -448,18 +448,18 @@ describe("atomic context compaction", () => {
           code: "context_length_exceeded",
         }),
       )
-      .mockResolvedValueOnce({
-        text: "overflow-recovered-summary",
-        summaryMessageId: "summary",
-        requests: [],
-      });
+      .mockRejectedValueOnce(
+        Object.assign(new Error("context length exceeded"), {
+          code: "context_length_exceeded",
+        }),
+      );
     const contextManager = createManager(messageManager, { generateSummary });
 
     await expect(compact(contextManager, "session_1")).resolves.toMatchObject({
       status: "failed",
       compression: { status: "failed", error: "context length exceeded" },
     });
-    expect(generateSummary).toHaveBeenCalledOnce();
+    expect(generateSummary).toHaveBeenCalledTimes(2);
 
     const recovered = await reopenHistory(dbPath, "session_1");
     expect(

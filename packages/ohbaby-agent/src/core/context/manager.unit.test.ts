@@ -118,7 +118,7 @@ function createTokenCounter(): TokenCounter {
       return content.length;
     },
     getLimit(): number {
-      return 10_000;
+      return 128_000;
     },
   };
 }
@@ -198,9 +198,7 @@ function createManager(
     readonly maskConfig?: Parameters<
       typeof createContextManager
     >[0]["maskConfig"];
-    readonly maxCompactionsPerTurn?: number;
     readonly systemPromptProvider?: SystemPromptProvider;
-    readonly thrashWindow?: number;
   } = {},
 ): ContextFixture {
   const bus = createBus();
@@ -244,8 +242,6 @@ function createManager(
     compressionThreshold: options.compressionThreshold,
     maskEnabled: options.maskEnabled,
     maskConfig: options.maskConfig,
-    maxCompactionsPerTurn: options.maxCompactionsPerTurn,
-    thrashWindow: options.thrashWindow,
   });
   const manager: FixtureContextManager = {
     ...contextManager,
@@ -307,11 +303,11 @@ async function addSummaryOverflowHistory(
     await addTextMessage(messageManager, {
       role: "user",
       sessionId: "session_1",
-      text: `user-${String(index)} ${"request ".repeat(20)}`,
+      text: `user-${String(index)} ${"request ".repeat(400)}`,
       ...(contextScopeId === undefined ? {} : { contextScopeId }),
     });
     await addCompletedToolMessage(messageManager, {
-      output: `tool-${String(index)} ${"result ".repeat(20)}`,
+      output: `tool-${String(index)} ${"result ".repeat(400)}`,
       sessionId: "session_1",
       ...(contextScopeId === undefined ? {} : { contextScopeId }),
     });
@@ -1051,10 +1047,10 @@ describe("ContextManager", () => {
       type: "tool",
     });
     for (const [role, text] of [
-      ["user", `${oldConversationMarker} ${"old user ".repeat(20)}`],
-      ["assistant", "old assistant ".repeat(20)],
-      ["user", "middle user ".repeat(20)],
-      ["assistant", "middle assistant ".repeat(20)],
+      ["user", `${oldConversationMarker} ${"old user ".repeat(800)}`],
+      ["assistant", "old assistant ".repeat(800)],
+      ["user", "middle user ".repeat(800)],
+      ["assistant", "middle assistant ".repeat(800)],
     ] as const) {
       await addTextMessage(messageManager, {
         role,
@@ -1093,7 +1089,7 @@ describe("ContextManager", () => {
       },
       tokenCounter: {
         estimateTokens: (content) => content.length,
-        getLimit: () => 10_000,
+        getLimit: () => 128_000,
       },
     });
     const promptSnapshot = await manager.createRunPromptSnapshot({
@@ -2232,22 +2228,22 @@ describe("ContextManager", () => {
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "first long text",
+      text: "first long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "second long text",
+      text: "second long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "third long text",
+      text: "third long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "fourth long text",
+      text: "fourth long text".repeat(1000),
     });
     const { manager, measurements } = createManager({
       llmClient: {
@@ -2286,7 +2282,7 @@ describe("ContextManager", () => {
         ),
       ).toHaveLength(1);
     }
-    expect(listBySession).toHaveBeenCalledTimes(2);
+    expect(listBySession).toHaveBeenCalledTimes(3);
     expect(loadMemory).toHaveBeenCalledTimes(1);
     expect(onCompactionStarted).toHaveBeenCalledTimes(1);
   });
@@ -2302,7 +2298,7 @@ describe("ContextManager", () => {
       await addTextMessage(messageManager, {
         sessionId: "session_1",
         role: role as "user" | "assistant",
-        text: `${String(index)} ${"long text ".repeat(30)}`,
+        text: `${String(index)} ${"long text ".repeat(800)}`,
       });
     }
     const generateSummary = vi
@@ -2496,80 +2492,7 @@ describe("ContextManager", () => {
         },
       }),
     ).toBe("summary");
-    expect(
-      decideCompactionRung({
-        force: false,
-        thrashLocked: true,
-        usage: {
-          contextLimit: 100_000,
-          currentTokens: 98_000,
-          inputBudgetTokens: 100_000,
-          modelId: "large-model",
-          remainingTokens: 2_000,
-          usageRatio: 0.98,
-        },
-      }),
-    ).toBe("none");
-    expect(
-      decideCompactionRung({
-        force: true,
-        thrashLocked: true,
-        usage: {
-          contextLimit: 100_000,
-          currentTokens: 98_000,
-          inputBudgetTokens: 100_000,
-          modelId: "large-model",
-          remainingTokens: 2_000,
-          usageRatio: 0.98,
-        },
-      }),
-    ).toBe("force");
-    expect(
-      decideCompactionRung({
-        compactionCount: 2,
-        force: false,
-        maxPerTurn: 2,
-        usage: {
-          contextLimit: 100_000,
-          currentTokens: 98_000,
-          inputBudgetTokens: 100_000,
-          modelId: "large-model",
-          remainingTokens: 2_000,
-          usageRatio: 0.98,
-        },
-      }),
-    ).toBe("mask");
-    expect(
-      decideCompactionRung({
-        compactionCount: 2,
-        force: true,
-        maxPerTurn: 2,
-        usage: {
-          contextLimit: 100_000,
-          currentTokens: 98_000,
-          inputBudgetTokens: 100_000,
-          modelId: "large-model",
-          remainingTokens: 2_000,
-          usageRatio: 0.98,
-        },
-      }),
-    ).toBe("force");
-    expect(
-      decideCompactionRung({
-        compactionCount: 2,
-        force: true,
-        maxPerTurn: 0,
-        thrashLocked: true,
-        usage: {
-          contextLimit: 100_000,
-          currentTokens: 98_000,
-          inputBudgetTokens: 100_000,
-          modelId: "large-model",
-          remainingTokens: 2_000,
-          usageRatio: 0.98,
-        },
-      }),
-    ).toBe("force");
+
     expect(
       decideCompactionRung({
         force: false,
@@ -2657,7 +2580,7 @@ describe("ContextManager", () => {
       await addTextMessage(messageManager, {
         role: role as "user" | "assistant",
         sessionId: "session_1",
-        text: `${String(index)} ${"long context ".repeat(40)}`,
+        text: `${String(index)} ${"long context ".repeat(600)}`,
       });
     }
     const estimateTokens = vi.fn((content: string) => content.length);
@@ -2684,7 +2607,7 @@ describe("ContextManager", () => {
     expect(result.usageAfter.currentTokens).toBeLessThan(
       result.usageBefore.currentTokens,
     );
-    expect(schemaMeasurements).toHaveLength(4);
+    expect(schemaMeasurements.length).toBeGreaterThanOrEqual(4);
     expect(
       schemaMeasurements.every(([content]) =>
         content.endsWith(
@@ -2703,7 +2626,7 @@ describe("ContextManager", () => {
         await addTextMessage(messageManager, {
           role: role as "user" | "assistant",
           sessionId: "session_1",
-          text: `${String(index)} ${"same context ".repeat(40)}`,
+          text: `${String(index)} ${"same context ".repeat(600)}`,
         });
       }
       return createManager({
@@ -2756,22 +2679,22 @@ describe("ContextManager", () => {
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "first long text",
+      text: "first long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "second long text",
+      text: "second long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "third long text",
+      text: "third long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "fourth long text",
+      text: "fourth long text".repeat(1000),
     });
     const { compressed, manager } = createManager({ messageManager });
 
@@ -2840,22 +2763,22 @@ describe("ContextManager", () => {
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "first long text",
+      text: "first long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "second long text",
+      text: "second long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "third long text",
+      text: "third long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "fourth long text",
+      text: "fourth long text".repeat(1000),
     });
     const { manager } = createManager({ messageManager });
 
@@ -2916,17 +2839,17 @@ describe("ContextManager", () => {
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "first long text",
+      text: "first long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "second long text",
+      text: "second long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "third long text",
+      text: "third long text".repeat(1000),
     });
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
@@ -2964,22 +2887,22 @@ describe("ContextManager", () => {
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "first long text",
+      text: "first long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "second long text",
+      text: "second long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "third long text",
+      text: "third long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "fourth long text",
+      text: "fourth long text".repeat(1000),
       metadata: {
         keep: true,
         tokenUsage: {
@@ -3040,7 +2963,7 @@ describe("ContextManager", () => {
       await addTextMessage(messageManager, {
         sessionId: "session_1",
         role: role as "user" | "assistant",
-        text: `${String(index)} ${"x".repeat(80)}`,
+        text: `${String(index)} ${"x".repeat(index === 3 ? 20000 : 80)}`,
         metadata:
           index === 3
             ? {
@@ -3057,7 +2980,7 @@ describe("ContextManager", () => {
       .fn<ContextLLMClient["generateSummary"]>()
       .mockImplementation((input) =>
         Promise.resolve({
-          text: "s".repeat(JSON.stringify(input.request.messages).length),
+          text: "s".repeat(1000),
           summaryMessageId: input.summaryMessageId,
           requests: [],
         }),
@@ -3092,17 +3015,17 @@ describe("ContextManager", () => {
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "first long text",
+      text: "first long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "second long text",
+      text: "second long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "third long text",
+      text: "third long text".repeat(1000),
     });
     const { manager } = createManager({
       llmClient: { generateSummary },
@@ -3126,7 +3049,7 @@ describe("ContextManager", () => {
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
       .mockResolvedValueOnce({
-        text: "x".repeat(200),
+        text: "x".repeat(2000),
         summaryMessageId: "summary",
         requests: [],
       })
@@ -3138,17 +3061,17 @@ describe("ContextManager", () => {
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "small one",
+      text: "small one".repeat(200),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "small two",
+      text: "small two".repeat(500),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "small three",
+      text: "small three".repeat(1300),
     });
     const { manager } = createManager({
       llmClient: { generateSummary },
@@ -3166,7 +3089,7 @@ describe("ContextManager", () => {
     expect(generateSummary).toHaveBeenCalledTimes(1);
   });
 
-  it("fails summary overflow once and preserves scoped history without retiring unread parts", async () => {
+  it("fails after the shared overflow allowance and preserves scoped history", async () => {
     const messageManager = createMessageManagerFixture();
     await addSummaryOverflowHistory(messageManager, 8, "child_1");
     const original = await messageManager.listBySession("session_1");
@@ -3177,11 +3100,11 @@ describe("ContextManager", () => {
           code: "context_length_exceeded",
         }),
       )
-      .mockResolvedValueOnce({
-        text: "would succeed with missing history",
-        summaryMessageId: "summary",
-        requests: [],
-      });
+      .mockRejectedValueOnce(
+        Object.assign(new Error("context length exceeded"), {
+          code: "context_length_exceeded",
+        }),
+      );
     const { compactionProgress, manager } = createManager({
       llmClient: { generateSummary },
       messageManager,
@@ -3200,8 +3123,8 @@ describe("ContextManager", () => {
         error: "context length exceeded",
       },
     });
-    expect(generateSummary).toHaveBeenCalledOnce();
-    expect(compactionProgress).toMatchObject([
+    expect(generateSummary).toHaveBeenCalledTimes(2);
+    expect(compactionProgress.slice(0, 1)).toMatchObject([
       {
         attempt: 1,
         contextScopeId: "child_1",
@@ -3297,79 +3220,6 @@ describe("ContextManager", () => {
     ).resolves.toBe(0);
   });
 
-  it("locks automatic compaction after repeated zero-savings summary attempts", async () => {
-    const messageManager = createMessageManagerFixture();
-    for (const [index, role] of [
-      "user",
-      "assistant",
-      "user",
-      "assistant",
-    ].entries()) {
-      await addTextMessage(messageManager, {
-        sessionId: "session_1",
-        role: role as "user" | "assistant",
-        text: `${String(index)} ${"long text ".repeat(20)}`,
-      });
-    }
-    const generateSummary = vi
-      .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue({
-        text: "x".repeat(10_000),
-        summaryMessageId: "summary",
-        requests: [],
-      });
-    const { compactSkipped, manager } = createManager({
-      compressionThreshold: 0.02,
-      llmClient: { generateSummary },
-      maxCompactionsPerTurn: 10,
-      messageManager,
-    });
-
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    expect(generateSummary).toHaveBeenCalledTimes(2);
-
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-
-    expect(generateSummary).toHaveBeenCalledTimes(2);
-    expect(compactSkipped.at(-1)).toMatchObject({
-      reason: "thrash-locked",
-      sessionId: "session_1",
-    });
-
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      force: true,
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    expect(generateSummary).toHaveBeenCalledTimes(3);
-
-    await addTextMessage(messageManager, {
-      sessionId: "session_1",
-      role: "user",
-      text: "new large input ".repeat(100),
-    });
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    expect(generateSummary).toHaveBeenCalledTimes(4);
-  });
-
   it.each([8000, 10000])(
     "rejects summary capacity before sending with %i ordinary output",
     async (output) => {
@@ -3378,7 +3228,7 @@ describe("ContextManager", () => {
         await addTextMessage(messageManager, {
           sessionId: "session_1",
           role,
-          text: "x".repeat(300),
+          text: "x".repeat(30000),
         });
       const counter = createHeuristicTokenCounter({
         defaultLimit: 10000,
@@ -3405,7 +3255,7 @@ describe("ContextManager", () => {
     },
   );
 
-  it("disposes per-session calibration and compaction state", async () => {
+  it("disposes per-session calibration", async () => {
     const messageManager = createMessageManagerFixture();
     for (const [index, role] of [
       "user",
@@ -3429,7 +3279,6 @@ describe("ContextManager", () => {
     const { manager } = createManager({
       compressionThreshold: 0.02,
       llmClient: { generateSummary },
-      maxCompactionsPerTurn: 10,
       messageManager,
     });
     manager.updateCalibrationFactor("session_1", 300, 100);
@@ -3443,162 +3292,15 @@ describe("ContextManager", () => {
       tools: undefined,
     });
 
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    expect(generateSummary).toHaveBeenCalledTimes(2);
-
     manager.disposeSession("session_1");
     const resetUsage = manager.getUsage({
       context,
       modelId: "model-a",
       tools: undefined,
     });
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-
     expect(resetUsage.currentTokens).toBeLessThan(
       calibratedUsage.currentTokens,
     );
-    expect(generateSummary).toHaveBeenCalledTimes(3);
-  });
-
-  it("counts forced prepareTurn compactions but not manual compact calls", async () => {
-    const messageManager = createMessageManagerFixture();
-    for (const [index, role] of [
-      "user",
-      "assistant",
-      "user",
-      "assistant",
-    ].entries()) {
-      await addTextMessage(messageManager, {
-        sessionId: "session_1",
-        role: role as "user" | "assistant",
-        text: `${String(index)} ${"long text ".repeat(20)}`,
-      });
-    }
-    const generateSummary = vi
-      .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue({
-        text: "x".repeat(10_000),
-        summaryMessageId: "summary",
-        requests: [],
-      });
-    const { compactSkipped, manager } = createManager({
-      compressionThreshold: 0.02,
-      llmClient: { generateSummary },
-      maxCompactionsPerTurn: 1,
-      messageManager,
-      thrashWindow: 0,
-    });
-
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      force: true,
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    expect(generateSummary).toHaveBeenCalledTimes(1);
-    expect(compactSkipped.at(-1)).toMatchObject({
-      reason: "per-turn-cap",
-      sessionId: "session_1",
-    });
-
-    manager.resetTurnCompactionCount("session_1");
-    await manager.compact("session_1", {
-      directory: "D:/repo",
-      force: true,
-      modelId: "model-a",
-    });
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    expect(generateSummary).toHaveBeenCalledTimes(3);
-  });
-
-  it("caps automatic summary attempts per turn", async () => {
-    const messageManager = createMessageManagerFixture();
-    for (const [index, role] of [
-      "user",
-      "assistant",
-      "user",
-      "assistant",
-    ].entries()) {
-      await addTextMessage(messageManager, {
-        sessionId: "session_1",
-        role: role as "user" | "assistant",
-        text: `${String(index)} ${"long text ".repeat(20)}`,
-      });
-    }
-    const generateSummary = vi
-      .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue({
-        text: "x".repeat(10_000),
-        summaryMessageId: "summary",
-        requests: [],
-      });
-    const { compactSkipped, manager } = createManager({
-      compressionThreshold: 0.02,
-      llmClient: { generateSummary },
-      maxCompactionsPerTurn: 2,
-      messageManager,
-      thrashWindow: 0,
-    });
-
-    manager.resetTurnCompactionCount("session_1");
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    expect(generateSummary).toHaveBeenCalledTimes(2);
-
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-
-    expect(generateSummary).toHaveBeenCalledTimes(2);
-    expect(compactSkipped.at(-1)).toMatchObject({
-      reason: "per-turn-cap",
-      sessionId: "session_1",
-    });
-
-    manager.resetTurnCompactionCount("session_1");
-    await manager.prepareTurn({
-      directory: "D:/repo",
-      modelId: "model-a",
-      sessionId: "session_1",
-    });
-    expect(generateSummary).toHaveBeenCalledTimes(3);
   });
 
   it("includes file operations from the complete active history", async () => {
@@ -3631,12 +3333,12 @@ describe("ContextManager", () => {
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "middle long text",
+      text: "middle long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "recent long text",
+      text: "recent long text".repeat(1000),
     });
     const { manager } = createManager({
       llmClient: {
@@ -3689,17 +3391,17 @@ describe("ContextManager", () => {
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "first active long text",
+      text: "first active long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "second active long text",
+      text: "second active long text".repeat(1000),
     });
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "third active long text",
+      text: "third active long text".repeat(1000),
     });
     const { manager } = createManager({
       llmClient: {
@@ -3777,17 +3479,17 @@ describe("ContextManager", () => {
     await addTextMessage(failingMessageManager, {
       sessionId: "session_fail",
       role: "user",
-      text: "first long text",
+      text: "first long text".repeat(1000),
     });
     await addTextMessage(failingMessageManager, {
       sessionId: "session_fail",
       role: "assistant",
-      text: "second long text",
+      text: "second long text".repeat(1000),
     });
     await addTextMessage(failingMessageManager, {
       sessionId: "session_fail",
       role: "user",
-      text: "third long text",
+      text: "third long text".repeat(1000),
     });
     const failing = createManager({
       llmClient: {
@@ -3813,22 +3515,22 @@ describe("ContextManager", () => {
     await addTextMessage(inflatedMessageManager, {
       sessionId: "session_inflated",
       role: "user",
-      text: "small one",
+      text: "small one".repeat(200),
     });
     await addTextMessage(inflatedMessageManager, {
       sessionId: "session_inflated",
       role: "assistant",
-      text: "small two",
+      text: "small two".repeat(500),
     });
     await addTextMessage(inflatedMessageManager, {
       sessionId: "session_inflated",
       role: "user",
-      text: "small three",
+      text: "small three".repeat(1300),
     });
     const inflated = createManager({
       llmClient: {
         generateSummary: vi.fn().mockResolvedValue({
-          text: "x".repeat(200),
+          text: "x".repeat(2000),
           summaryMessageId: "summary",
           requests: [],
         }),

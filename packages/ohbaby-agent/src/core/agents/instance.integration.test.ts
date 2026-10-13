@@ -150,7 +150,7 @@ function createSmallBudgetTokenCounter(): TokenCounter {
     },
     getBudget(modelId, options): TokenBudget {
       const usedInputTokens = options?.usedInputTokens ?? 0;
-      const contextWindowTokens = 32000;
+      const contextWindowTokens = 64000;
       const reservedOutputTokens = options?.requestedOutputTokens ?? 32;
       const safetyMarginTokens = options?.safetyMarginTokens ?? 16;
       const inputBudgetTokens =
@@ -169,7 +169,7 @@ function createSmallBudgetTokenCounter(): TokenCounter {
       };
     },
     getLimit(): number {
-      return 32000;
+      return 64000;
     },
   };
 }
@@ -265,7 +265,7 @@ function createToolSchedulerFixture(): ToolSchedulerFixture {
               : "unknown";
           return {
             callId: call.callId,
-            output: "tool output ".repeat(12) + `step=${String(index)}`,
+            output: "tool output ".repeat(100) + `step=${String(index)}`,
             status: "success" as const,
           };
         }),
@@ -488,8 +488,8 @@ describe("AgentInstance long task integration", () => {
     const baseContextManager = createContextManager({
       bus,
       compactionThresholds: {
-        mask: 0.45,
-        summary: 0.15,
+        mask: 0.9,
+        summary: 0.45,
       },
       llmClient: {
         generateSummary: (input) =>

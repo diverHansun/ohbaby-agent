@@ -182,7 +182,7 @@ it("closes unfinished request attempts without replacing completed requests or n
     messageId: message.id,
     step: 1,
     attempt: 1,
-    purpose: "main",
+    purpose: "agent-step" as const,
     startedAt: 1,
     outcome: "running" as const,
   };

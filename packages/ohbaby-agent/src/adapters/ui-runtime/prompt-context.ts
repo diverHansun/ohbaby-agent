@@ -61,15 +61,14 @@ export function noticeFromCompactResult(
       level: "warning",
       message: `Context compact failed: ${
         result.error ?? "summary generation failed"
-      }. Continuing with the available context.`,
+      }.`,
       title: "Context compact warning",
     };
   }
   return {
     key: `context:compact:${sessionId}`,
     level: "warning",
-    message:
-      "Context compact skipped because the summary was not smaller. Continuing with the available context.",
+    message: "Context compact failed because the summary was not smaller.",
     title: "Context compact warning",
   };
 }

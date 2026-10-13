@@ -39,6 +39,47 @@ const RuntimeInputSchema = z.object({
   targetRunId: z.string(),
   sourceId: z.string(),
 });
+const RequestRecordSchema = z.object({
+  requestId: z.string(),
+  inputIds: z.array(z.string()).readonly().optional(),
+  messageId: z.string(),
+  attempt: z.number(),
+  startedAt: z.number(),
+  firstTextAt: z.number().optional(),
+  endedAt: z.number().optional(),
+  endTimeSource: z.literal("recovery").optional(),
+  outcome: z.enum(["running", "success", "error", "aborted"]),
+  usage: z
+    .object({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      totalTokens: z.number().int().nonnegative(),
+      reasoningTokens: z.number().int().nonnegative().optional(),
+      inputBreakdown: z
+        .object({
+          uncached: z.number().int().nonnegative(),
+          cacheRead: z.number().int().nonnegative(),
+          cacheWrite: z.number().int().nonnegative(),
+          observed: z.object({
+            cacheRead: z.boolean(),
+            cacheWrite: z.boolean(),
+          }),
+        })
+        .optional(),
+    })
+    .optional(),
+});
+const ModelRequestRecordSchema = z.discriminatedUnion("purpose", [
+  RequestRecordSchema.extend({
+    purpose: z.literal("agent-step"),
+    runId: z.string(),
+    step: z.number(),
+  }),
+  RequestRecordSchema.extend({
+    purpose: z.literal("context-summary"),
+    compactionId: z.string(),
+  }),
+]);
 const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
   z.object({
     id: z.string(),
@@ -65,43 +106,7 @@ const MessageSchema: z.ZodType<Message> = z.discriminatedUnion("role", [
     runId: z.string().optional(),
     role: z.literal("assistant"),
     runtimeInput: RuntimeInputSchema.optional(),
-    modelRequests: z
-      .array(
-        z.object({
-          requestId: z.string(),
-          inputIds: z.array(z.string()).readonly().optional(),
-          runId: z.string(),
-          messageId: z.string(),
-          step: z.number(),
-          attempt: z.number(),
-          purpose: z.string(),
-          startedAt: z.number(),
-          firstTextAt: z.number().optional(),
-          endedAt: z.number().optional(),
-          endTimeSource: z.literal("recovery").optional(),
-          outcome: z.enum(["running", "success", "error", "aborted"]),
-          usage: z
-            .object({
-              inputTokens: z.number().int().nonnegative(),
-              outputTokens: z.number().int().nonnegative(),
-              totalTokens: z.number().int().nonnegative(),
-              reasoningTokens: z.number().int().nonnegative().optional(),
-              inputBreakdown: z
-                .object({
-                  uncached: z.number().int().nonnegative(),
-                  cacheRead: z.number().int().nonnegative(),
-                  cacheWrite: z.number().int().nonnegative(),
-                  observed: z.object({
-                    cacheRead: z.boolean(),
-                    cacheWrite: z.boolean(),
-                  }),
-                })
-                .optional(),
-            })
-            .optional(),
-        }),
-      )
-      .optional(),
+    modelRequests: z.array(ModelRequestRecordSchema).optional(),
     time: MessageTimeSchema,
     agent: z.string(),
     parentId: z.string().optional(),

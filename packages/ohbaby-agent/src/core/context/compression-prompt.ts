@@ -28,6 +28,7 @@ Use this exact format:
 - [known risks, failing tests, uncertainties, or "(none)"]
 
 Rules:
+- Merge all previous checkpoints into this checkpoint, preserving still-relevant constraints, decisions, unfinished work, and risks.
 - Preserve exact file paths, function names, command names, errors, model names, and numbers.
 - Preserve all user intent, but summarize long pasted logs or code instead of copying them wholesale.
 - Keep bullets terse and factual.

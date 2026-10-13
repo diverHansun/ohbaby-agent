@@ -21,7 +21,6 @@ export function CompactOverlayBody(props: {
   readonly sessionId: string | undefined;
 }): ReactElement {
   const { sessionId } = props;
-  const [force, setForce] = useState(true);
   const [usage, setUsage] = useState<UiContextWindowUsage | null>(null);
   const [result, setResult] = useState<UiCompactSessionResult | null>(null);
   const [status, setStatus] = useState<OverlayStatus>({
@@ -63,10 +62,14 @@ export function CompactOverlayBody(props: {
       setStatus,
       async () => {
         const nextResult = await props.client.compactSession({
-          force,
           sessionId,
         });
         setResult(nextResult);
+        setUsage(
+          await props.client
+            .getContextWindowUsage({ sessionId })
+            .catch(() => usageFromCompactResult(nextResult)),
+        );
         const failureMessage = compactFailureMessage(nextResult);
         if (failureMessage) {
           throw new Error(failureMessage);
@@ -75,7 +78,7 @@ export function CompactOverlayBody(props: {
       },
       "Compacting session",
     );
-  }, [force, props.client, sessionId]);
+  }, [props.client, sessionId]);
 
   return (
     <div className="ohb-structured-body">
@@ -94,16 +97,6 @@ export function CompactOverlayBody(props: {
           ]}
         />
       ) : null}
-      <label className="ohb-structured-check">
-        <input
-          checked={force}
-          onChange={(event) => {
-            setForce(event.target.checked);
-          }}
-          type="checkbox"
-        />
-        force compaction
-      </label>
       <OverlayStatusLine status={status} />
       {result ? (
         <OverlayResult
@@ -123,7 +116,7 @@ export function CompactOverlayBody(props: {
       <div className="ohb-structured-actions">
         <button
           className="ohb-button-primary"
-          disabled={!sessionId}
+          disabled={!sessionId || status.kind === "busy"}
           onClick={compactSession}
           title="Compact session"
           type="button"
@@ -133,6 +126,22 @@ export function CompactOverlayBody(props: {
       </div>
     </div>
   );
+}
+
+// The compact result is authoritative; a failed refresh falls back to its estimate.
+function usageFromCompactResult(
+  result: UiCompactSessionResult,
+): UiContextWindowUsage | null {
+  const { contextLimit, currentTokens, modelId } = result.usageAfter;
+  if (!Number.isFinite(contextLimit) || contextLimit <= 0) return null;
+  return {
+    contextWindowRatio: currentTokens / contextLimit,
+    contextWindowTokens: contextLimit,
+    currentTokens,
+    estimatedAt: new Date().toISOString(),
+    modelId,
+    sessionId: result.sessionId,
+  };
 }
 
 function compactFailureMessage(result: UiCompactSessionResult): string | null {

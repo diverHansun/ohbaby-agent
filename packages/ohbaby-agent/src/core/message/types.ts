@@ -231,13 +231,17 @@ export interface MessageScopeFilter {
 
 export interface CommitCompactionInput {
   readonly compactedAt: number;
+  readonly signal?: AbortSignal;
   readonly expectedParts: readonly Part[];
+  readonly expectedMessages?: readonly MessageWithParts[];
   readonly contextScopeId?: string;
   readonly sessionId: string;
   readonly summary?: {
     readonly messageId?: string;
     readonly agent: string;
     readonly text: string;
+    readonly modelRequests?: readonly ModelRequestRecord[];
+    readonly metadata?: Record<string, unknown>;
   };
 }
 
@@ -251,7 +255,9 @@ export interface CommitCompactionResult {
 
 export interface StoreCompactionInput {
   readonly compactedAt: number;
+  readonly signal?: AbortSignal;
   readonly expectedParts: readonly Part[];
+  readonly expectedMessages?: readonly MessageWithParts[];
   readonly contextScopeId?: string;
   readonly sessionId: string;
   readonly summary?: {

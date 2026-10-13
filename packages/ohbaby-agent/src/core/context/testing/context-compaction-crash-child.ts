@@ -108,7 +108,7 @@ async function main(): Promise<void> {
       sessionId: "session_1",
     });
     await seed.appendPart(message.id, {
-      text: `${String(index)} ${"durable history ".repeat(30)}`,
+      text: `${String(index)} ${"durable history ".repeat(500)}`,
       type: "text",
     });
   }
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     },
     tokenCounter: {
       estimateTokens: (content) => content.length,
-      getLimit: () => 20_000,
+      getLimit: () => 128_000,
     },
   });
   await context.compact("session_1", {

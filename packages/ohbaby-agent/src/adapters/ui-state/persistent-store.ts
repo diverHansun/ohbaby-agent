@@ -197,15 +197,34 @@ export function messageToUiMessage(
         Number(left.metadata?.sourceOrder ?? left.orderIndex) -
         Number(right.metadata?.sourceOrder ?? right.orderIndex),
     );
-  if (
-    message.info.agent === SUMMARY_AGENT_NAME &&
-    activeParts.some(isContextSummaryPart)
-  ) {
+  // Retired summaries remain durable compaction boundaries; never project their body.
+  const summaryPart = message.parts.find(isContextSummaryPart);
+  if (message.info.agent === SUMMARY_AGENT_NAME && summaryPart !== undefined) {
+    const metadata = summaryPart.metadata;
+    const before = metadata?.usageBeforeTokens;
+    const after = metadata?.usageAfterTokens;
+    const omitted = Array.isArray(metadata?.omittedPartIds)
+      ? metadata.omittedPartIds.length
+      : 0;
+    const estimate =
+      typeof before === "number" && typeof after === "number"
+        ? `Compacted (estimated): ${Math.round(before).toLocaleString("en-US")} -> ${Math.round(after).toLocaleString("en-US")} tokens`
+        : CONTEXT_COMPACTED_TEXT;
+    const omission =
+      omitted > 0
+        ? `; ${String(omitted)} ${omitted === 1 ? "part" : "parts"} omitted`
+        : "";
     return {
       createdAt: toIsoString(message.info.time.created),
       id: message.info.id,
-      parts: [{ text: CONTEXT_COMPACTED_TEXT, type: "text" }],
-      role: "assistant",
+      parts: [
+        {
+          text: `${estimate}${omission}`,
+          type: "text",
+          metadata: { kind: "context-compaction" },
+        },
+      ],
+      role: "system",
     };
   }
 

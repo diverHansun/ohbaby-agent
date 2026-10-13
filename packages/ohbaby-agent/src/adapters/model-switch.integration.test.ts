@@ -339,7 +339,9 @@ describe("shared model configuration admission", () => {
       expect(
         (
           await client.submitPromptAndWait(
-            "Start a background shell and preserve the blue lantern fact.",
+            "Start a background shell and preserve the blue lantern fact. ".repeat(
+              2000,
+            ),
             { sessionId: "session" },
           )
         ).prompt.status,

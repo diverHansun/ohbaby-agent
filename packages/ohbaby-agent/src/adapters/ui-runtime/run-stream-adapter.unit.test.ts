@@ -659,7 +659,7 @@ describe("startRunStreamProjection", () => {
     ).toEqual(["session_parent", "session_child"]);
   });
 
-  it("does not emit persistent notices for successful context compaction", async () => {
+  it("leaves successful compaction messages to the durable summary projection", async () => {
     const streamBridge = createInMemoryStreamBridge({ heartbeatIntervalMs: 0 });
     const stateStore = createInMemoryUiStateStore({
       activeSessionId: "session_1",
@@ -692,6 +692,7 @@ describe("startRunStreamProjection", () => {
 
     const compaction = {
       status: "compacted",
+      omittedParts: 2,
       usageAfter: {
         contextLimit: 100_000,
         currentTokens: 10_000,
@@ -729,6 +730,8 @@ describe("startRunStreamProjection", () => {
     await projection.done;
 
     expect(onNotice).not.toHaveBeenCalled();
+    const session = await stateStore.getSession("session_1");
+    expect(session?.messages).toHaveLength(0);
   });
 
   it("can subscribe before a fast run ends and pump the buffered events later", async () => {

@@ -529,8 +529,6 @@ describe("createUiRuntimeComposition skill tools", () => {
       disposeSession,
       getUsage: vi.fn<ContextManager["getUsage"]>(),
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
-      resetTurnCompactionCount:
-        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
       updateCalibrationFactor:
         vi.fn<ContextManager["updateCalibrationFactor"]>(),
     } satisfies ContextManager;
@@ -618,8 +616,6 @@ describe("createUiRuntimeComposition skill tools", () => {
       disposeSession: vi.fn<ContextManager["disposeSession"]>(),
       getUsage,
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
-      resetTurnCompactionCount:
-        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
       updateCalibrationFactor:
         vi.fn<ContextManager["updateCalibrationFactor"]>(),
     } satisfies ContextManager;
@@ -678,6 +674,7 @@ describe("createUiRuntimeComposition skill tools", () => {
       context: assembledContext,
       modelId: "fake-model",
       tools,
+      toolDefinitions: definitions,
     });
     expect(compact).toHaveBeenCalledWith("session_1", {
       requestSettings: {
@@ -720,8 +717,6 @@ describe("createUiRuntimeComposition skill tools", () => {
       disposeSession: vi.fn<ContextManager["disposeSession"]>(),
       getUsage: vi.fn<ContextManager["getUsage"]>(),
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
-      resetTurnCompactionCount:
-        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
       updateCalibrationFactor:
         vi.fn<ContextManager["updateCalibrationFactor"]>(),
     } satisfies ContextManager;
@@ -848,8 +843,6 @@ describe("createUiRuntimeComposition skill tools", () => {
       disposeSession: vi.fn<ContextManager["disposeSession"]>(),
       getUsage: vi.fn<ContextManager["getUsage"]>(),
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
-      resetTurnCompactionCount:
-        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
       updateCalibrationFactor:
         vi.fn<ContextManager["updateCalibrationFactor"]>(),
     } satisfies ContextManager;

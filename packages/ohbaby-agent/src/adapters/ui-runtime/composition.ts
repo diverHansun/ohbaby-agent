@@ -35,6 +35,7 @@ import {
   type CompactResult,
   type ContextManager,
   type ContextUsage,
+  type ContextOccupancyComposition,
 } from "../../core/context/index.js";
 import {
   Lifecycle,
@@ -544,6 +545,7 @@ export async function createUiRuntimeComposition(
     readonly agentName: string;
     readonly toolNames: readonly string[];
     readonly tools: ReturnType<typeof toModelTools>;
+    readonly toolDefinitions: readonly ToolDefinition[];
   }> {
     const session = await sessionManager.get(input.sessionId);
     if (session?.isSubagent === true) {
@@ -561,6 +563,7 @@ export async function createUiRuntimeComposition(
       agentName,
       toolNames: definitions.map((tool) => tool.name),
       tools: toModelTools(definitions),
+      toolDefinitions: definitions,
     };
   }
 
@@ -1252,7 +1255,11 @@ export async function createUiRuntimeComposition(
       return result;
     },
 
-    async getContextUsage(input): Promise<ContextUsage> {
+    async getContextUsage(
+      input,
+    ): Promise<
+      ContextUsage & { readonly composition?: ContextOccupancyComposition }
+    > {
       const resolved = await resolvePrimaryContextTools({
         operation: "inspect context usage",
         sessionId: input.sessionId,
@@ -1276,6 +1283,7 @@ export async function createUiRuntimeComposition(
         context: assembled,
         modelId: options.llmClient.config.model,
         tools: resolved.tools,
+        toolDefinitions: resolved.toolDefinitions,
       });
     },
 

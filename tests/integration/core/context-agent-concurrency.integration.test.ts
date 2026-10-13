@@ -61,7 +61,7 @@ function createManager(
     },
     tokenCounter: {
       estimateTokens: (content) => content.length,
-      getLimit: () => options.contextLimit ?? 20_000,
+      getLimit: () => options.contextLimit ?? 1_000_000,
     },
   });
 }
@@ -89,7 +89,7 @@ async function appendHistory(
       sessionId: input.sessionId,
     });
     await messageManager.appendPart(message.id, {
-      text: `${input.sentinel}-${String(index)} ${"history ".repeat(80)}`,
+      text: `${input.sentinel}-${String(index)} ${"history ".repeat(5_000)}`,
       type: "text",
     });
   }
@@ -183,7 +183,7 @@ describe("context scoped mutation coordination", () => {
     ).resolves.toBe(1);
   });
 
-  it("treats a cross-manager compaction conflict as stale", async () => {
+  it("fails a cross-manager compaction conflict without applying the stale candidate", async () => {
     const baseMessageManager = createMessageManager({
       bus: createBus(),
       idGenerator: createIds(),
@@ -231,13 +231,14 @@ describe("context scoped mutation coordination", () => {
     const results = await Promise.all([first, second]);
     expect(results.map((result) => result.status).sort()).toEqual([
       "compacted",
-      "not-needed",
+      "failed",
     ]);
     expect(
       results.some(
         (result) =>
-          result.compression?.status === "skipped" &&
-          result.compression.reason === "stale",
+          result.compression?.status === "failed" &&
+          result.compression.error ===
+            "Context changed before the compaction transaction committed",
       ),
     ).toBe(true);
     await expect(
@@ -286,8 +287,11 @@ describe("context scoped mutation coordination", () => {
 
     const result = await resultPromise;
     expect(result).toMatchObject({
-      compression: { reason: "stale", status: "skipped" },
-      status: "not-needed",
+      compression: {
+        error: "Context changed before the compaction transaction committed",
+        status: "failed",
+      },
+      status: "failed",
     });
     await expect(
       summaryCount(baseMessageManager, "shared_1", "scope_a"),
@@ -327,7 +331,7 @@ describe("context scoped mutation coordination", () => {
         };
       });
     const manager = createManager(messageManager, generateSummary, {
-      contextLimit: 20_000,
+      contextLimit: 1_000_000,
     });
 
     const first = prepare(manager, "shared_1", "scope_a");
@@ -373,7 +377,7 @@ describe("context scoped mutation coordination", () => {
         };
       });
     const manager = createManager(messageManager, generateSummary, {
-      contextLimit: 20_000,
+      contextLimit: 1_000_000,
     });
 
     const manual = compact(manager, "shared_1", "scope_a");

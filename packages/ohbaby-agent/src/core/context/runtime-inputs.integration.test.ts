@@ -12,7 +12,7 @@ import { createContextManager } from "./context-manager.js";
 import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 
 async function setup(
-  limit = 10000,
+  limit = 128000,
   kind: "user-steer" | "subagent-status" | "subagent-result" = "user-steer",
 ): Promise<{
   context: ReturnType<typeof createContextManager>;
@@ -34,7 +34,9 @@ async function setup(
     });
     await messages.appendPart(message.id, {
       type: "text",
-      text: `Old context ${String(index)} ` + "x".repeat(300),
+      text:
+        `Old context ${String(index)} ` +
+        "x".repeat(limit <= 10000 ? 300 : 6000),
     });
   }
   const input = await messages.createMessage({
@@ -82,7 +84,6 @@ async function setup(
       },
     },
     maskEnabled: false,
-    compressionPreserveRatio: 0.1,
   });
   return { context, messages, protectedInput, collected, counter };
 }
@@ -99,7 +100,7 @@ describe("durable inputs in prepared context", () => {
     "preserves %s input through compaction and measures exactly what it sends",
     async (kind) => {
       const { context, protectedInput, collected, counter } = await setup(
-        10000,
+        128000,
         kind,
       );
       const prepared = await context.prepareTurn({

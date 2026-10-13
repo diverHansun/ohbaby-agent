@@ -17,8 +17,8 @@ export function ModelWaiting({
   if (
     !request ||
     run.status.kind !== "running" ||
-    request.runId !== run.id ||
     request.purpose !== "agent-step" ||
+    request.runId !== run.id ||
     request.outcome !== "running" ||
     request.firstTextAt !== undefined ||
     request.endedAt !== undefined

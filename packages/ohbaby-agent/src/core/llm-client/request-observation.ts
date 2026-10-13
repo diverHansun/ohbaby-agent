@@ -2,7 +2,7 @@ import type { InterfaceProviderStreamEvent } from "../../services/interface-prov
 import type {
   ModelRequestObservation,
   ModelRequestRecord,
-  SummaryRequestRecord,
+  AgentStepRequestRecord,
 } from "./types.js";
 
 export class ModelObservationError extends Error {
@@ -16,7 +16,7 @@ export class ModelObservationError extends Error {
 }
 /** Capture facts at receipt; serialize only the three durable transitions. */
 export class RequestAttemptObserver<
-  T extends ModelRequestRecord | SummaryRequestRecord = ModelRequestRecord,
+  T extends ModelRequestRecord = AgentStepRequestRecord,
 > {
   private tail: Promise<void> = Promise.resolve();
   private facts: ModelRequestObservation<T>[] = [];

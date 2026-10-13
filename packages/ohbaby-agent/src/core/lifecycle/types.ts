@@ -1,4 +1,4 @@
-import type { ModelRequestRecord } from "../llm-client/types.js";
+import type { AgentStepRequestRecord } from "../llm-client/types.js";
 import type { ToolExecutionObservation } from "../tool-scheduler/types.js";
 import type {
   DisplayReasoningOwner,
@@ -89,7 +89,7 @@ export interface LifecycleRunInputPort {
   ): Promise<readonly MessageWithParts[]>;
   beforeFinish(signal?: AbortSignal): Promise<"continue" | "finish">;
   admitRequestAttempt(
-    request: ModelRequestRecord,
+    request: AgentStepRequestRecord,
     signal?: AbortSignal,
   ): Promise<void>;
   confirmRequestSuccess(requestId: string): Promise<void>;
@@ -141,6 +141,7 @@ export type AgentTerminalReason =
   | "provider_stream_interrupted"
   | "tool_parse_failure"
   | "context_overflow"
+  | "context_compaction_failed"
   | "output_length"
   | "content_filter"
   | "model_state_persistence_failure"
@@ -202,7 +203,7 @@ export type LifecycleEvent = LifecycleSourceIdentity &
         readonly contextScopeId?: string;
         readonly step: number;
         readonly timestamp: number;
-        readonly request: ModelRequestRecord;
+        readonly request: AgentStepRequestRecord;
       })
     | {
         readonly type: "llm:start";

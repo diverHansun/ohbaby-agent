@@ -1,7 +1,6 @@
 import { ContextEvent } from "./events.js";
 
 export {
-  COMPRESSION_PRESERVE_RATIO,
   COMPRESSION_THRESHOLD,
   KEEP_RECENT_TOKENS,
   MASK_EXEMPT_TOOL_PREFIXES,

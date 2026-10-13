@@ -7,7 +7,7 @@ const request = {
   messageId: "m",
   step: 1,
   attempt: 1,
-  purpose: "agent-step",
+  purpose: "agent-step" as const,
   startedAt: 100,
   outcome: "running" as const,
 };

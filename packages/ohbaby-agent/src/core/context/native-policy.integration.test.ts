@@ -146,7 +146,7 @@ function history(): MessageWithParts[] {
   ];
 }
 async function harness(
-  preserveRatio: number,
+  keepAll: number,
   summaryText = "Retain the history constraint and lookup result.",
 ): Promise<{
   manager: ContextManager;
@@ -156,7 +156,15 @@ async function harness(
 }> {
   const bus = createBus();
   const store = createInMemoryMessageStore();
-  for (const message of history()) {
+  for (const original of history()) {
+    const message = {
+      ...original,
+      parts: original.parts.map((part) =>
+        keepAll !== 1 && part.type === "text" && part.id === "new-text"
+          ? { ...part, text: "new question".repeat(1700) }
+          : part,
+      ),
+    };
     await store.insertMessage(message.info);
     for (const part of message.parts) {
       const data =
@@ -204,7 +212,6 @@ async function harness(
         });
       },
     },
-    compressionPreserveRatio: preserveRatio,
   });
   return { manager, store, summaryInputs, summaryReasoning };
 }

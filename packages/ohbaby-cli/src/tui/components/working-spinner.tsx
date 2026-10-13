@@ -25,8 +25,8 @@ export function WorkingSpinner({
 
   if (
     runtime.kind !== "running" ||
-    modelActivity?.runId !== runtime.runId ||
-    modelActivity.purpose !== "agent-step" ||
+    modelActivity?.purpose !== "agent-step" ||
+    modelActivity.runId !== runtime.runId ||
     modelActivity.outcome !== "running" ||
     modelActivity.endedAt !== undefined ||
     modelActivity.firstTextAt !== undefined

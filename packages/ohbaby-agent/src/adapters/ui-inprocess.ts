@@ -2825,9 +2825,17 @@ export function createInProcessUiBackendClient(
         projectRoot: target.projectRoot,
         sessionId: target.sessionId,
       });
+      // Compaction has already finished; a failed refresh only degrades this estimate.
+      const measured = await runtime
+        .getContextUsage({
+          projectRoot: target.projectRoot,
+          sessionId: target.sessionId,
+        })
+        .catch(() => undefined);
       const usage = contextWindowUsage.updateFromContextUsage(
         target.sessionId,
-        result.usageAfter,
+        measured ?? result.usageAfter,
+        measured?.composition,
       );
       if (usage) {
         const event: UiEvent = { type: "context.window.updated", usage };
@@ -2886,6 +2894,7 @@ export function createInProcessUiBackendClient(
     const result = contextWindowUsage.updateFromContextUsage(
       input.sessionId,
       usage,
+      usage.composition,
     );
     if (result) {
       const event: UiEvent = { type: "context.window.updated", usage: result };

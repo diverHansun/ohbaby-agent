@@ -1,18 +1,26 @@
 import type { UiMessage, UiRun, UiToolCall } from "./snapshot.js";
 
-export interface UiModelRequest {
+export interface UiAgentStepRequest {
   readonly endTimeSource?: "recovery";
   readonly requestId: string;
   readonly runId: string;
   readonly messageId: string;
   readonly step: number;
   readonly attempt: number;
-  readonly purpose: string;
+  readonly purpose: "agent-step";
   readonly startedAt: number;
   readonly firstTextAt?: number;
   readonly endedAt?: number;
   readonly outcome: "running" | "success" | "error" | "aborted";
 }
+export type UiSummaryRequest = Omit<
+  UiAgentStepRequest,
+  "runId" | "step" | "purpose"
+> & {
+  readonly purpose: "context-summary";
+  readonly compactionId: string;
+};
+export type UiModelRequest = UiAgentStepRequest | UiSummaryRequest;
 export interface UiToolExecution {
   readonly runId?: string;
   readonly phase:
@@ -52,9 +60,9 @@ export function projectModelActivity(
     .flatMap((message) =>
       (message.modelRequests ?? []).filter(
         (request) =>
+          request.purpose === "agent-step" &&
           request.runId === run.id &&
           request.messageId === message.id &&
-          request.purpose === "agent-step" &&
           request.endedAt === undefined &&
           request.outcome === "running",
       ),

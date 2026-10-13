@@ -30,6 +30,7 @@ export interface UiCompactSessionCompressionResult {
 }
 
 export interface UiCompactSessionResult {
+  readonly omittedParts?: number;
   readonly sessionId: string;
   readonly status: UiCompactSessionStatus;
   readonly usageBefore: UiCompactSessionUsage;

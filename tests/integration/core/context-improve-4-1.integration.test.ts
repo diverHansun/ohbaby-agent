@@ -441,7 +441,7 @@ describe("context improve-4.1 integration", () => {
         sessionId: "session_1",
       });
       await messageManager.appendPart(message.id, {
-        text: `${String(index)} ${"long context ".repeat(40)}`,
+        text: `${String(index)} ${"long context ".repeat(4000)}`,
         type: "text",
       });
     }
@@ -496,7 +496,7 @@ describe("context improve-4.1 integration", () => {
       sessionId: "session_static",
     });
     expect(staticOnlyUsage?.currentTokens).toBeGreaterThan(0);
-    expect(staticOnlyUsage).not.toHaveProperty("composition");
+    expect(staticOnlyUsage?.composition).toBeDefined();
     expect(requests).toHaveLength(0);
     await client.submitPromptAndWait("seed a measured request", {
       sessionId: "session_1",
@@ -553,7 +553,7 @@ describe("context improve-4.1 integration", () => {
     expect(windowEvent?.usage.currentTokens).toBe(
       compact.usageAfter.currentTokens,
     );
-    expect(windowEvent?.usage).not.toHaveProperty("composition");
+    expect(windowEvent?.usage.composition).toBeDefined();
     expect(statusEvent?.output).toMatchObject({
       data: { contextWindow: windowEvent?.usage },
       kind: "data",

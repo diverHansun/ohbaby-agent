@@ -168,6 +168,9 @@ describe("noticeFromCompactResult", () => {
     expect(
       noticeFromCompactResult("session_1", compactResult("compacted")),
     ).toBeUndefined();
+    expect(
+      noticeFromCompactResult("session_1", compactResult("not-needed")),
+    ).toBeUndefined();
   });
 
   it("emits compact warnings without token deltas for failed and inflated results", () => {
@@ -194,5 +197,7 @@ describe("noticeFromCompactResult", () => {
     expect(inflatedNotice?.message).not.toContain("->");
     expect(failedNotice?.message).not.toMatch(/\d[\d,]*\s*tokens/u);
     expect(inflatedNotice?.message).not.toMatch(/\d[\d,]*\s*tokens/u);
+    expect(failedNotice?.message).not.toMatch(/continuing/i);
+    expect(inflatedNotice?.message).not.toMatch(/continuing/i);
   });
 });

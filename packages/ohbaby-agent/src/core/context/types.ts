@@ -140,6 +140,7 @@ export type CompressionStatus =
 export type CompressionSkipReason = "stale" | "too-short";
 
 interface CompressionMetrics {
+  readonly omittedParts?: number;
   readonly requests?: readonly SummaryRequestRecord[];
   readonly originalTokens: number;
   readonly newTokens: number;
@@ -178,6 +179,7 @@ export interface CompactOptions {
 }
 
 export interface CompactResult {
+  readonly omittedParts?: number;
   readonly status: CompactStatus;
   readonly usageBefore: ContextUsage;
   readonly usageAfter: ContextUsage;
@@ -234,7 +236,8 @@ export interface ContextManager {
     readonly context: AssembledContext;
     readonly modelId: string;
     readonly tools: readonly ModelToolDefinition[] | undefined;
-  }): ContextUsage;
+    readonly toolDefinitions?: readonly ToolDefinition[];
+  }): ContextUsage & { readonly composition?: ContextOccupancyComposition };
   createRunPromptSnapshot(
     input: CreateRunPromptSnapshotInput,
   ): Promise<AgentRunPromptSnapshot>;
@@ -246,7 +249,6 @@ export interface ContextManager {
   ): void;
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
-  resetTurnCompactionCount(sessionId: string, contextScopeId?: string): void;
   disposeScope(sessionId: string, contextScopeId: string): void;
   disposeSession(sessionId: string): void;
 }
@@ -266,12 +268,7 @@ export interface ContextManagerOptions {
   readonly now?: () => number;
   readonly compactionThresholds?: Partial<CompactionThresholds>;
   readonly compressionThreshold?: number;
-  readonly compressionPreserveRatio?: number;
   readonly summaryAgentName?: string;
-  readonly maxCompactionsPerTurn?: number;
-  readonly thrashWindow?: number;
-  readonly thrashMinSavingsRatio?: number;
-  readonly thrashUnlockDelta?: number;
   readonly maskEnabled?: boolean;
   readonly maskConfig?: {
     readonly exemptToolPrefixes?: readonly string[];

@@ -357,10 +357,10 @@ it.each([
     });
     try {
       await session.submit(
-        "Remember Cedar release 17 and owner Lin." + createCompactionNotes(30),
+        "Remember Cedar release 17 and owner Lin." + createCompactionNotes(300),
       );
       await session.submit(
-        "Confirm Cedar release 17 and owner Lin." + createCompactionNotes(60),
+        "Confirm Cedar release 17 and owner Lin." + createCompactionNotes(600),
       );
       await session.submit(
         "Restate Cedar release 17 and owner Lin. Do not use tools.",

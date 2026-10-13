@@ -349,11 +349,31 @@ export function createInMemoryMessageStore(): MessageStore {
     commitCompaction(
       input: StoreCompactionInput,
     ): Promise<CommitCompactionResult | undefined> {
+      input.signal?.throwIfAborted();
       const expectedPartIds = new Set(
         input.expectedParts.map((part) => part.id),
       );
       if (expectedPartIds.size !== input.expectedParts.length) {
         throw new Error("Compaction expected parts contain duplicate ids");
+      }
+      for (const expected of input.expectedMessages ?? []) {
+        if (
+          expected.info.sessionId !== input.sessionId ||
+          expected.info.contextScopeId !== input.contextScopeId
+        ) {
+          throw new Error(
+            `Compaction message belongs to another scope: ${expected.info.id}`,
+          );
+        }
+        const message = messages.get(expected.info.id);
+        if (
+          !message ||
+          JSON.stringify(message) !== JSON.stringify(expected.info) ||
+          JSON.stringify(listPartsForMessage(expected.info.id)) !==
+            JSON.stringify(expected.parts)
+        ) {
+          return Promise.resolve(undefined);
+        }
       }
       const targets: Part[] = [];
       for (const expectedPart of input.expectedParts) {

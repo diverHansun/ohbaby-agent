@@ -6,6 +6,7 @@ import {
 import type {
   ModelRequestObservation,
   ModelRequestRecord,
+  AgentStepRequestRecord,
   SummaryRequestRecord,
   PreparedRequestSettings,
 } from "./types.js";
@@ -92,7 +93,7 @@ class RetrySleepAbortedError extends Error {
 }
 
 function isRunRequestObservation(
-  fact: ModelRequestObservation<ModelRequestRecord | SummaryRequestRecord>,
+  fact: ModelRequestObservation<ModelRequestRecord>,
 ): fact is ModelRequestObservation {
   return "runId" in fact.request;
 }
@@ -309,9 +310,9 @@ export async function* streamResponse(
       "compactionId" | "messageId" | "attempt" | "inputIds"
     >;
     onSummaryRequestRecord?: (record: SummaryRequestRecord) => void;
-    requestOwner?: Pick<ModelRequestRecord, "runId" | "messageId" | "step">;
+    requestOwner?: Pick<AgentStepRequestRecord, "runId" | "messageId" | "step">;
     /** Persist input membership and recheck run eligibility before each attempt. */
-    beforeRequestAttempt?: (request: ModelRequestRecord) => Promise<void>;
+    beforeRequestAttempt?: (request: AgentStepRequestRecord) => Promise<void>;
     onRequestObservation?: (
       observation: ModelRequestObservation,
     ) => Promise<void>;
@@ -394,29 +395,28 @@ export async function* streamResponse(
     let reasoningTokens: number | undefined;
     let validatingProtocol = false;
 
-    const requestRecord: ModelRequestRecord | SummaryRequestRecord | undefined =
-      options?.summaryOwner
+    const requestRecord: ModelRequestRecord | undefined = options?.summaryOwner
+      ? {
+          ...options.summaryOwner,
+          requestId: randomUUID(),
+          purpose: "context-summary",
+          startedAt: 0,
+          outcome: "running",
+        }
+      : options?.requestOwner
         ? {
-            ...options.summaryOwner,
+            ...options.requestOwner,
             requestId: randomUUID(),
-            purpose: "context-summary",
+            attempt: failedAttempts + 1,
+            purpose: "agent-step",
             startedAt: 0,
             outcome: "running",
           }
-        : options?.requestOwner
-          ? {
-              ...options.requestOwner,
-              requestId: randomUUID(),
-              attempt: failedAttempts + 1,
-              purpose: purpose ?? "agent-step",
-              startedAt: 0,
-              outcome: "running",
-            }
-          : undefined;
+        : undefined;
     const observer = new RequestAttemptObserver(
       requestRecord,
       async (fact) => {
-        if ("compactionId" in fact.request) {
+        if (fact.request.purpose === "context-summary") {
           if (fact.type === "request-ended")
             options?.onSummaryRequestRecord?.(fact.request);
         } else {
