@@ -1,6 +1,6 @@
 # Context improve-7 · 压缩与工具输出变更记录入口
 
-> 状态：议题 improve-1～5 已实施并记录验收，等待用户审查；improve-6 已实施并完成自动与实网验收，独立审查完成，待用户审查；improve-1～6 集中验收尚待后续进行。全量与实网结果以各批验收记录为准，不由本入口推定通过。更新：2026-10-13。
+> 状态：议题 improve-1～6 已完成整体验收并合入本地 `codex/context-optimization`，六个阶段分支已删除；main 未合入、未 push，等待用户审查。测试与实网边界见 [整体验收](../../../problem-lists/2026-10-10-compact-cache-and-tool-output/06-overall-acceptance.md)。更新：2026-10-13。
 
 - [整体规划](../../../problem-lists/2026-10-10-compact-cache-and-tool-output/plan/README.md)
 - [Context 模块设计](../../../problem-lists/2026-10-10-compact-cache-and-tool-output/plan/context-design/README.md)
