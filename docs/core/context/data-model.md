@@ -292,4 +292,4 @@ capacityPressure = ordinaryInput >= ordinaryInputBudget
 
 `summaryInput` 包含普通 prepared 的同一 mask 投影、system/tools、完整历史和追加摘要指令。加上 `ordinaryMaxTokens` 是在发送普通请求前为其已申请的最大输出预留空间，不是预测实际未来增长，也不另加比例。普通与摘要实际发送仍各用自身独立预算；摘要发送前只检查 `summaryInput > summaryInputBudget`，不再扣一次普通输出。单次巨型输入仍可能直接跨过摘要容量并失败。
 
-容量压力与完整窗口 0.90 阈值共同进入 summary，均受旧次数／thrash guard；只有显式 force 绕过。旧 preserve ratio、尾段切分和次数状态保留到第 4 批；mask 状态保留到第 5 批。
+第 3 批完成时，容量压力与完整窗口 0.90 阈值共同进入 summary，仍受旧次数／thrash guard 约束，只有显式 force 绕过。第 4 批已移除次数帽、thrash lock 和 preserve ratio，改用固定 20K 完整组尾段与成功占用地板；只有 mask 状态仍保留到第 5 批。此段记录阶段演进，不表示旧保护当前仍存在。

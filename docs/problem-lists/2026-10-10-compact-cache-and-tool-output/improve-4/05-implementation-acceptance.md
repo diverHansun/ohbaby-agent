@@ -125,3 +125,20 @@ Pi 最终只读复核自行重跑 5 文件、202 项测试，全部通过，确�
 | 本文所在文档提交 | 同步 Context 当前契约、议题入口和本批实施验收记录 |
 
 前两批提交钩子的 lint、typecheck 均通过；完整工作树的测试证据见第 3 节。凭据扫描未发现真实 key 进入变更或新增交付文件，临时实网 runner、报告和截图不纳入提交。未 merge、未 push，等待用户审查。improve-5 仍需清理 mask 并执行完整入口贯通，不将本批阶段结果当成整个议题结束。
+
+## 8. 审查后收尾（2026-10-13）
+
+用户提供四批审查截图后，基于 `a6610611` 核查四个非阻塞尾项。本次只收尾，不开始 improve-5。
+
+| 尾项 | 处理 |
+| --- | --- |
+| streaming 摘要传输中断分支缺少直接测试 | 在 `llm-client.test.ts` 增加 6 个调用真实 `streamResponse` 的用例：OpenAI/Anthropic SDK 连接错误和 socket reset，各覆盖无输出与已有部分正文。断言 transport 分类、原错误 cause、只调用一次 provider、没有重试或成功帧 |
+| `ContextCutPoint` 死字段 | 删除 `messagesToSummarize`、`turnPrefixMessages` 及无人消费的分片计算；保留生产调用使用的 `firstKeptIndex` 和 `keptMessages`。原测试改为验证完整尾组、未闭合原生依赖保护和原生占用切点，不改变实际选择规则 |
+| 数据模型历史段容易误读 | 明确第 3 批当时的 guard 与第 4 批已删除次数帽、thrash、preserve ratio 的时间关系；仅 mask 仍留到第 5 批 |
+| serializer 集成测试导入 MCP | 保留。该用例验证真实 adapter 的错误 metadata、大结果投影及重启回放；改成手写夹具会失去这条跨模块合同证据。未在生产 core 中引入 MCP 依赖 |
+
+新增测试先在现有实现上通过；随后临时移除摘要 transport 分类分支，3 个无输出用例如期失败，分别暴露 SDK 错误未包装和 socket reset 被误归为 retry exhausted。恢复后 `streaming.ts` 无最终 diff。已有部分正文的 3 个用例同时约束部分输出不能被宣告成功，也不能触发 streaming 自行重试。
+
+本次验证：改动前 4 文件、137 项基线通过；改动后 `pnpm exec vitest run packages/ohbaby-agent/src/core/context packages/ohbaby-agent/src/core/llm-client --reporter=dot` 为 30 文件通过、1 文件跳过，403 项通过、2 项实网测试跳过。`pnpm run typecheck` 与四个变更 TS 文件的 ESLint 均通过。没有重跑全仓或真实 LLM 请求，不将第 3、4 节的前次结果冒充本次验证。日志保存在 `/tmp/ohbaby-improve4-tail-*.log`。
+
+子代理只读复核上述 diff，未发现需要修改的问题，确认切点行为未变、测试直接覆盖分类分支、MCP 集成测试保留合理且未越界到 improve-5；子代理没有重复运行测试。Prettier 与 `git diff --check` 也通过。收尾作为本节所在提交追加到 improve-4 本地分支，不 merge、不 push。

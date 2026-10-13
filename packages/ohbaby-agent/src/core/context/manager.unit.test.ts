@@ -1155,7 +1155,7 @@ describe("ContextManager", () => {
     expect(cut.firstKeptIndex).toBe(2);
   });
 
-  it("returns a turn prefix when the cut keeps an assistant suffix", () => {
+  it("keeps a complete assistant group without pulling in the preceding user", () => {
     const currentUser = messageWithText("user", "current question");
     const currentAssistant = messageWithText("assistant", "current answer");
     const cut = findCutPoint({
@@ -1172,9 +1172,7 @@ describe("ContextManager", () => {
     });
 
     expect(cut.firstKeptIndex).toBe(3);
-    expect(cut.turnPrefixMessages.map((message) => message.info.id)).toEqual([
-      currentUser.info.id,
-    ]);
+    expect(cut.keptMessages).toEqual([currentAssistant]);
   });
 
   it("identifies active parts and partitions context summaries", async () => {

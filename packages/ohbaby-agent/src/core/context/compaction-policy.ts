@@ -119,9 +119,7 @@ export function needsSummaryCompaction(
 
 export interface ContextCutPoint {
   readonly firstKeptIndex: number;
-  readonly messagesToSummarize: readonly MessageWithParts[];
   readonly keptMessages: readonly MessageWithParts[];
-  readonly turnPrefixMessages: readonly MessageWithParts[];
 }
 
 /** A persisted assistant owns its calls and results; synthetic inputs join their preceding group. */
@@ -164,8 +162,6 @@ export function findCutPoint(input: {
     return {
       firstKeptIndex: 0,
       keptMessages: [],
-      messagesToSummarize: [],
-      turnPrefixMessages: [],
     };
   }
 
@@ -179,8 +175,6 @@ export function findCutPoint(input: {
     return {
       firstKeptIndex: 0,
       keptMessages: history,
-      messagesToSummarize: [],
-      turnPrefixMessages: [],
     };
   }
 
@@ -210,18 +204,8 @@ export function findCutPoint(input: {
     groupStart += group.length;
   }
 
-  const turnPrefixMessages =
-    firstKeptIndex > 0 &&
-    history[firstKeptIndex]?.info.role === "assistant" &&
-    getMessageOrigin(history[firstKeptIndex - 1]) === "user"
-      ? [history[firstKeptIndex - 1]]
-      : [];
-  const messagesToSummarizeEnd = firstKeptIndex - turnPrefixMessages.length;
-
   return {
     firstKeptIndex,
     keptMessages: history.slice(firstKeptIndex),
-    messagesToSummarize: history.slice(0, messagesToSummarizeEnd),
-    turnPrefixMessages,
   };
 }

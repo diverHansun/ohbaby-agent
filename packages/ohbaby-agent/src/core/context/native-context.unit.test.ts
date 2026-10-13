@@ -271,9 +271,7 @@ describe("native source and compaction boundaries", () => {
       keepRecentTokens: 1,
       tokenCounter: counter,
     });
-    expect(
-      cut.messagesToSummarize.some((message) => message.info.id === "m1"),
-    ).toBe(false);
+    expect(cut.firstKeptIndex).toBe(1);
     expect(cut.keptMessages.some((message) => message.info.id === "m1")).toBe(
       true,
     );
@@ -293,9 +291,7 @@ it("uses native occupancy when choosing a summary boundary", () => {
     tokenCounter: counter,
   });
   // Public text is under 900 characters, but the actual native request adds the opaque allowance.
-  expect(
-    cut.messagesToSummarize.length + cut.turnPrefixMessages.length,
-  ).toBeGreaterThan(0);
+  expect(cut.firstKeptIndex).toBeGreaterThan(0);
 });
 
 it("counts distinct Chat reasoning text and summary without double-counting mirrored text details", () => {
