@@ -183,12 +183,12 @@ return mergeConfigs(globalConfig, projectConfig)
 
 ```typescript
 // 采用方案：完全替换
-global: { build: { maxSteps: 50, temperature: 0.7 } }
+global: { build: { maxSteps: 50, timeout: 30000 } }
 project: { build: { maxSteps: 30 } }
-result: { build: { maxSteps: 30 } }  // 完全替换，temperature 丢失
+result: { build: { maxSteps: 30 } }  // 完全替换，timeout 丢失
 
 // 未采用方案：深度合并
-result: { build: { maxSteps: 30, temperature: 0.7 } }  // 保留未覆盖字段
+result: { build: { maxSteps: 30, timeout: 30000 } }  // 保留未覆盖字段
 ```
 
 **理由**：

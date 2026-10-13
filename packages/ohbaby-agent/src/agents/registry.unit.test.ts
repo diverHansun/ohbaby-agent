@@ -3,6 +3,38 @@ import { AgentRegistry } from "./registry.js";
 import type { AgentsConfig } from "./types.js";
 
 describe("AgentRegistry", () => {
+  it.each([
+    ["model", "provider/legacy"],
+    ["maxTokens", 100],
+    ["temperature", 0.5],
+    ["topP", 0.9],
+    ["model", undefined],
+    ["maxTokens", undefined],
+    ["temperature", undefined],
+    ["topP", undefined],
+  ] as const)(
+    "rejects removed %s in both programmatic sources (value %s)",
+    async (field, value) => {
+      const agent = {
+        name: "custom",
+        mode: "primary" as const,
+        [field]: value,
+      };
+      for (const source of ["builtinAgents", "configLoader"] as const) {
+        const registry = new AgentRegistry({
+          builtinAgents: source === "builtinAgents" ? [agent] : [],
+          configLoader: (): AgentsConfig => ({
+            agents: source === "configLoader" ? { custom: agent } : {},
+          }),
+        });
+        await expect(registry.initialize()).rejects.toThrow(
+          new RegExp(`custom.*${field}`),
+        );
+        expect(registry.isInitialized()).toBe(false);
+      }
+    },
+  );
+
   it("loads enabled builtin agents by default", async () => {
     const registry = new AgentRegistry({
       configLoader: (): AgentsConfig => ({ agents: {} }),

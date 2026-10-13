@@ -2,7 +2,12 @@ import { SUBAGENT_DISABLED_TOOLS } from "../core/tool-scheduler/index.js";
 import { loadAgentConfig } from "../config/agents/index.js";
 import { BUILTIN_AGENTS } from "./builtin/index.js";
 import { SUBAGENT_ROLES } from "./roles.js";
-import type { AgentConfig, AgentMode, AgentsConfig } from "./types.js";
+import {
+  assertNoStaticModelConfig,
+  type AgentConfig,
+  type AgentMode,
+  type AgentsConfig,
+} from "./types.js";
 
 const AGENT_NAME_REGEX = /^[a-z0-9-]+$/;
 const MAX_AGENT_NAME_LENGTH = 50;
@@ -49,7 +54,8 @@ function assertMode(mode: unknown): asserts mode is AgentMode {
   }
 }
 
-function validateAgent(agent: AgentConfig): void {
+function validateAgent(agent: AgentConfig, source: string): void {
+  assertNoStaticModelConfig(agent, source);
   assertAgentName(agent.name);
   assertMode(agent.mode);
   if (agent.mode === "subagent" && !agent.description?.trim()) {
@@ -86,14 +92,14 @@ export class AgentRegistry {
   async initialize(): Promise<void> {
     const merged = new Map<string, AgentConfig>();
     for (const agent of this.options.builtinAgents ?? BUILTIN_AGENTS) {
-      validateAgent(agent);
+      validateAgent(agent, "builtinAgents");
       merged.set(agent.name, cloneAgent(agent));
     }
 
     const configLoader = this.options.configLoader ?? loadDefaultAgentConfig;
     const userConfig = await configLoader();
     for (const agent of Object.values(userConfig.agents)) {
-      validateAgent(agent);
+      validateAgent(agent, "configLoader");
       assertUserAgentCanOverride(agent.name);
       merged.set(agent.name, cloneAgent(agent));
     }

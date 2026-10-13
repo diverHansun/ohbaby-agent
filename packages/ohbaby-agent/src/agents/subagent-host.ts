@@ -20,6 +20,7 @@ import {
   type ExecutionBudgetSnapshot,
 } from "./subagents/execution-budget.js";
 import type { AgentManager } from "./manager.js";
+import { assertNoStaticModelConfig } from "./types.js";
 import type { SubagentRole } from "./roles.js";
 import type {
   QueuedSubagentInput,
@@ -848,9 +849,13 @@ export class SessionSubagentHost {
     if (!input.role) {
       throw new Error("role is required when creating a subagent");
     }
-    await this.options.agentManager.getRuntimeAgent(input.role, {
-      isSubagent: true,
-    });
+    const runtimeAgent = await this.options.agentManager.getRuntimeAgent(
+      input.role,
+      {
+        isSubagent: true,
+      },
+    );
+    assertNoStaticModelConfig(runtimeAgent.config, "SessionSubagentHost");
     const parent = await this.options.sessionManager.get(input.parentSessionId);
     if (!parent) {
       throw new Error(`Parent session not found: ${input.parentSessionId}`);
@@ -1541,6 +1546,7 @@ export class SessionSubagentHost {
         record.role,
         { isSubagent: true },
       );
+      assertNoStaticModelConfig(runtimeAgent.config, "SessionSubagentHost");
       if (this.isActiveClosed(active) || this.isActiveStopping(active)) {
         return await this.mustGet(record.parentSessionId, record.subagentId);
       }
@@ -1553,7 +1559,7 @@ export class SessionSubagentHost {
         contextScopeId: record.contextScopeId,
         instanceId: record.subagentId,
         maxSteps: runtimeAgent.config.maxSteps,
-        modelId: runtimeAgent.config.model ?? this.options.modelId,
+        modelId: this.options.modelId,
         parentSessionId: record.parentSessionId,
         projectRoot: session.projectRoot,
         sessionId: record.sessionId,
