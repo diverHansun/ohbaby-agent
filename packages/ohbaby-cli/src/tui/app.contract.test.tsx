@@ -5961,11 +5961,9 @@ async function submitConnectField(
 ): Promise<void> {
   app.stdin.write("\r");
   await settleConnectInput();
-  for (const char of value) {
-    app.stdin.write(char);
-    await flush();
-  }
-  await settleConnectInput();
+  // Paste fixture values together to avoid a render/timer cycle per character
+  // on slow CI runners. Per-keystroke masking has its own contract test.
+  app.stdin.write(value);
   await waitForFrame(
     app,
     (nextFrame) => connectInputEchoed(nextFrame, value),
