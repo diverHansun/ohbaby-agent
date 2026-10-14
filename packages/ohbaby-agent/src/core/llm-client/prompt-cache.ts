@@ -200,8 +200,8 @@ export function createScopedPromptCacheKey(input: {
 }
 
 /**
- * Resolve request policy once before the provider retry loop. Auxiliary and
- * legacy calls remain observable but cannot accidentally share a cache key.
+ * Resolve request policy once before the provider retry loop. Summaries reuse
+ * their normal request's cache identity, stopping before the appended instruction.
  */
 export function resolvePromptCacheRequest(
   input: PromptCacheRequestInput,
@@ -212,7 +212,7 @@ export function resolvePromptCacheRequest(
       reason: "legacy caller omitted request purpose",
     };
   }
-  if (input.purpose !== "agent-step") {
+  if (input.purpose !== "agent-step" && input.purpose !== "context-summary") {
     return {
       strategy: "observe-only",
       reason: `${input.purpose} is an auxiliary request`,
@@ -221,14 +221,26 @@ export function resolvePromptCacheRequest(
   if (input.sessionId === undefined || input.sessionId === "") {
     return {
       strategy: "observe-only",
-      reason: "agent-step caller omitted its session identity",
+      reason: `${input.purpose} caller omitted its session identity`,
     };
   }
 
   const capability = resolvePromptCacheStrategy(input);
+  const messages = input.messages ?? [];
+  const messageBoundary =
+    input.purpose === "context-summary" &&
+    (capability.strategy === "anthropic-explicit-last-block" ||
+      capability.strategy === "anthropic-top-level-auto")
+      ? messages.length - 2
+      : undefined;
   if (
-    capability.strategy === "anthropic-explicit-last-block" &&
-    !hasAnthropicExplicitCacheTarget(input.messages ?? [])
+    (capability.strategy === "anthropic-explicit-last-block" ||
+      messageBoundary !== undefined) &&
+    !hasAnthropicExplicitCacheTarget(
+      messageBoundary === undefined
+        ? messages
+        : messages.slice(0, messageBoundary + 1),
+    )
   ) {
     return {
       strategy: "observe-only",
@@ -251,6 +263,7 @@ export function resolvePromptCacheRequest(
   return {
     strategy: capability.strategy,
     reason: capability.reason,
+    ...(messageBoundary === undefined ? {} : { messageBoundary }),
   };
 }
 

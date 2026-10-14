@@ -43,7 +43,7 @@ const request = {
   requestId: "req",
   runId: "run_1",
   messageId: "m",
-  purpose: "agent-step",
+  purpose: "agent-step" as const,
   step: 0,
   attempt: 0,
   startedAt: 1000,
@@ -56,14 +56,22 @@ function frameOf(runtime: TuiRuntimeStatus): string {
     app = render(
       <WorkingSpinner
         runtime={runtime}
-        modelActivity={{
-          ...request,
-          purpose:
-            runtime.kind === "running" && runtime.title
-              ? "compaction"
-              : "agent-step",
-          runId: runtime.kind === "running" ? runtime.runId : "run_1",
-        }}
+        modelActivity={
+          runtime.kind === "running" && runtime.title
+            ? {
+                requestId: "summary-request",
+                messageId: "summary-message",
+                compactionId: "compaction",
+                purpose: "context-summary",
+                attempt: 1,
+                startedAt: 1000,
+                outcome: "running",
+              }
+            : {
+                ...request,
+                runId: runtime.kind === "running" ? runtime.runId : "run_1",
+              }
+        }
       />,
     );
   });

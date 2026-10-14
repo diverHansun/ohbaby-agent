@@ -29,10 +29,6 @@ export interface AgentConfig {
   readonly maxSteps?: number;
   readonly timeout?: number;
   readonly allowDoomLoop?: boolean;
-  readonly model?: string;
-  readonly temperature?: number;
-  readonly topP?: number;
-  readonly maxTokens?: number;
   readonly tools?: ToolsConfig;
   readonly permission?: PermissionConfig;
   /**
@@ -41,6 +37,20 @@ export interface AgentConfig {
    * task contract.
    */
   readonly prompt?: string;
+}
+
+/** Reject removed static LLM settings, including explicitly undefined properties. */
+export function assertNoStaticModelConfig(
+  config: AgentConfig,
+  source: string,
+): void {
+  for (const field of ["model", "maxTokens", "temperature", "topP"] as const) {
+    if (Object.hasOwn(config, field)) {
+      throw new Error(
+        `Agent ${config.name} configuration from ${source} contains removed field ${field}; configure models in the LLM layer`,
+      );
+    }
+  }
 }
 
 export interface AgentsConfig {

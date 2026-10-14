@@ -1,3 +1,4 @@
+import { resolvePreparedRequestSettings } from "../llm-client/streaming.js";
 import { createContextSummaryClient } from "../../adapters/ui-runtime/prompt-context.js";
 import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
 import type { LLMClientInstance } from "../llm-client/types.js";
@@ -69,10 +70,6 @@ function createManager(
   messageManager: MessageManager,
   llmClient: ContextLLMClient,
   bus = createBus(),
-  compaction: {
-    readonly pruneMinimumTokens?: number;
-    readonly pruneProtectTokens?: number;
-  } = {},
 ): ContextManager {
   return createContextManager({
     bus,
@@ -81,15 +78,12 @@ function createManager(
       load: () => Promise.resolve({ global: "", merged: "", project: "" }),
     },
     messageManager,
-    pruneMinimumTokens:
-      compaction.pruneMinimumTokens ?? Number.MAX_SAFE_INTEGER,
-    pruneProtectTokens: compaction.pruneProtectTokens,
     systemPromptProvider: {
       build: () => Promise.resolve("stable"),
     },
     tokenCounter: {
       estimateTokens: (content) => content.length,
-      getLimit: () => 20_000,
+      getLimit: () => 128_000,
     },
   });
 }
@@ -110,7 +104,7 @@ async function appendTextHistory(
       sessionId,
     });
     await messageManager.appendPart(message.id, {
-      text: `${String(index)} ${"durable history ".repeat(30)}`,
+      text: `${String(index)} ${"durable history ".repeat(500)}`,
       type: "text",
     });
   }
@@ -130,7 +124,7 @@ async function appendToolHistory(
       callId: `call-${String(index)}`,
       state: {
         input: { index },
-        output: `tool-${String(index)} ${"large output ".repeat(30)}`,
+        output: `tool-${String(index)} ${"large output ".repeat(500)}`,
         status: "completed",
       },
       tool: "read",
@@ -218,7 +212,7 @@ afterEach(async () => {
 
 describe("atomic context compaction", () => {
   it.each(["length", "content_filter"] as const)(
-    "keeps prune but never retires summary history after provider %s",
+    "never retires tool or text history after provider %s",
     async (finishReason) => {
       const directory = await mkdtemp(join(tmpdir(), "ohbaby-summary-finish-"));
       cleanupPaths.push(directory);
@@ -260,12 +254,12 @@ describe("atomic context compaction", () => {
         messages,
         createContextSummaryClient(client),
         createBus(),
-        { pruneMinimumTokens: 1, pruneProtectTokens: 0 },
       );
       const result = await manager.compact("session_1", {
         directory: "/repo",
         force: true,
         modelId: "gpt-5.2",
+        requestSettings: resolvePreparedRequestSettings(client),
         toolNames: [],
         tools: undefined,
       });
@@ -278,7 +272,7 @@ describe("atomic context compaction", () => {
         parts.some(
           (part) => part.type === "tool" && part.time?.compacted !== undefined,
         ),
-      ).toBe(true);
+      ).toBe(false);
       expect(
         parts
           .filter((part) => part.type === "text")
@@ -320,7 +314,11 @@ describe("atomic context compaction", () => {
       }),
     });
     const contextManager = createManager(faultManager, {
-      generateSummary: vi.fn().mockResolvedValue("atomic-summary"),
+      generateSummary: vi.fn().mockResolvedValue({
+        text: "atomic-summary",
+        summaryMessageId: "summary",
+        requests: [],
+      }),
     });
 
     await expect(compact(contextManager, "session_1")).rejects.toThrow(
@@ -365,7 +363,11 @@ describe("atomic context compaction", () => {
     await appendTextHistory(messageManager, "session_1");
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("committed-summary");
+      .mockResolvedValue({
+        text: "committed-summary",
+        summaryMessageId: "summary",
+        requests: [],
+      });
     const contextManager = createManager(
       messageManager,
       { generateSummary },
@@ -382,6 +384,18 @@ describe("atomic context compaction", () => {
     expect(
       recovered.filter((message) => message.parts.some(isContextSummaryPart)),
     ).toHaveLength(1);
+    const sentRequest = JSON.stringify(
+      generateSummary.mock.calls[0][0].request.messages,
+    );
+    const retiredPartIds = recovered
+      .flatMap((message) => message.parts)
+      .filter((part) => part.time?.compacted !== undefined)
+      .map((part) => part.id);
+    expect(retiredPartIds.length).toBeGreaterThan(0);
+    for (const message of recovered)
+      for (const part of message.parts)
+        if (retiredPartIds.includes(part.id) && part.type === "text")
+          expect(sentRequest).toContain(part.text);
     const replayBus = createBus();
     const replayEvents: unknown[] = [];
     replayBus.subscribe(ContextEvent.CompactionStarted, (event) => {
@@ -408,12 +422,18 @@ describe("atomic context compaction", () => {
     expect(JSON.stringify(serializeForLlm(assembled))).toContain(
       "committed-summary",
     );
+    const visiblePartIds = assembled.history.flatMap((message) =>
+      message.parts.map((part) => part.id),
+    );
+    for (const partId of retiredPartIds) {
+      expect(visiblePartIds).not.toContain(partId);
+    }
     expect(resumeSummary).not.toHaveBeenCalled();
     expect(replayEvents).toEqual([]);
     expect(generateSummary).toHaveBeenCalledOnce();
   });
 
-  it("persists one legal view after summary overflow shrinks and retries", async () => {
+  it("leaves every original part active after both summary overflow attempts fail", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-context-overflow-"));
     cleanupPaths.push(directory);
     const dbPath = join(directory, "agent.db");
@@ -426,6 +446,7 @@ describe("atomic context compaction", () => {
     });
     await appendTextHistory(messageManager, "session_1");
     await appendTextHistory(messageManager, "session_1");
+    const original = await messageManager.listBySession("session_1");
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
       .mockRejectedValueOnce(
@@ -433,31 +454,24 @@ describe("atomic context compaction", () => {
           code: "context_length_exceeded",
         }),
       )
-      .mockResolvedValueOnce("overflow-recovered-summary");
+      .mockRejectedValueOnce(
+        Object.assign(new Error("context length exceeded"), {
+          code: "context_length_exceeded",
+        }),
+      );
     const contextManager = createManager(messageManager, { generateSummary });
 
     await expect(compact(contextManager, "session_1")).resolves.toMatchObject({
-      status: "compacted",
+      status: "failed",
+      compression: { status: "failed", error: "context length exceeded" },
     });
     expect(generateSummary).toHaveBeenCalledTimes(2);
-    expect(generateSummary.mock.calls[1]?.[0].history.length).toBeLessThan(
-      generateSummary.mock.calls[0]?.[0].history.length ?? 0,
-    );
 
     const recovered = await reopenHistory(dbPath, "session_1");
     expect(
       recovered.filter((message) => message.parts.some(isContextSummaryPart)),
-    ).toHaveLength(1);
-    expect(
-      recovered
-        .filter((message) => message.parts.some(isContextSummaryPart))
-        .flatMap((message) => message.parts)
-        .some(
-          (part) =>
-            part.type === "text" &&
-            part.text.includes("overflow-recovered-summary"),
-        ),
-    ).toBe(true);
+    ).toHaveLength(0);
+    expect(recovered).toEqual(original);
   });
 
   it("rolls back every prune mark when a later mark fails", async () => {
@@ -485,9 +499,14 @@ describe("atomic context compaction", () => {
     });
     const contextManager = createManager(
       faultManager,
-      { generateSummary: vi.fn().mockResolvedValue("unused") },
+      {
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "unused",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
+      },
       createBus(),
-      { pruneMinimumTokens: 1, pruneProtectTokens: 0 },
     );
 
     await expect(compact(contextManager, "session_1")).rejects.toThrow(

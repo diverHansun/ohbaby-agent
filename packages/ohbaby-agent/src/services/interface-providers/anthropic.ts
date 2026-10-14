@@ -374,14 +374,28 @@ function buildRequestParams(
   request: InterfaceProviderRequest,
   options: CreateInterfaceProviderOptions,
 ): MessageCreateParams {
-  const convertedMessages = convertMessages(request.messages, {
+  const origin: ModelOrigin = {
     provider: options.id,
     model: request.model,
     protocol: "anthropic",
     endpoint: options.baseUrl,
-  });
+  };
+  const messageBoundary =
+    request.promptCache.strategy === "anthropic-explicit-last-block" ||
+    request.promptCache.strategy === "anthropic-top-level-auto"
+      ? request.promptCache.messageBoundary
+      : undefined;
+  // Convert history independently: tool-result grouping changes wire indices.
+  // The appended summary instruction must never become the cache breakpoint.
+  const convertedMessages = convertMessages(
+    messageBoundary === undefined
+      ? request.messages
+      : request.messages.slice(0, messageBoundary + 1),
+    origin,
+  );
   if (
-    request.promptCache.strategy === "anthropic-explicit-last-block" &&
+    (request.promptCache.strategy === "anthropic-explicit-last-block" ||
+      messageBoundary !== undefined) &&
     !applyLastBlockCacheControl(convertedMessages)
   ) {
     throw new Error(
@@ -390,6 +404,12 @@ function buildRequestParams(
   }
   if (request.promptCache.strategy === "anthropic-top-level-auto") {
     applyStableSystemCacheControl(convertedMessages);
+  }
+  if (messageBoundary !== undefined) {
+    convertedMessages.messages.push(
+      ...convertMessages(request.messages.slice(messageBoundary + 1), origin)
+        .messages,
+    );
   }
   const params: MessageCreateParams = {
     model: request.model,
@@ -420,7 +440,10 @@ function buildRequestParams(
     params.system = convertedMessages.system;
   }
 
-  if (request.promptCache.strategy === "anthropic-top-level-auto") {
+  if (
+    request.promptCache.strategy === "anthropic-top-level-auto" &&
+    messageBoundary === undefined
+  ) {
     params.cache_control = { type: "ephemeral" };
   }
 
@@ -682,6 +705,7 @@ export function createAnthropicProvider(
   const client = new Anthropic({
     apiKey: options.apiKey,
     baseURL: options.baseUrl,
+    maxRetries: 0,
   });
 
   return {
@@ -706,7 +730,6 @@ export function createAnthropicProvider(
         > {
           const usage = createAnthropicUsageAccumulator(reportTokenUsage);
           const native = new AnthropicNativeAccumulator();
-          let reasoningTokens: number | undefined;
           for await (const rawEvent of stream) {
             const initial = native.update(rawEvent);
             if (initial) yield initial;
@@ -717,15 +740,7 @@ export function createAnthropicProvider(
                   ? rawEvent.usage
                   : undefined;
             const tokenUsage = rawUsage ? usage.update(rawUsage) : undefined;
-            const thinkingTokens =
-              rawUsage?.output_tokens_details?.thinking_tokens;
-            if (
-              thinkingTokens !== undefined &&
-              Number.isInteger(thinkingTokens) &&
-              thinkingTokens >= 0
-            ) {
-              reasoningTokens = thinkingTokens;
-            }
+            const reasoningTokens = tokenUsage?.reasoningTokens;
             if (rawEvent.type === "message_start") {
               // message_start usage initializes attempt-local accounting. It
               // is deliberately not exposed as a half-complete provider frame;

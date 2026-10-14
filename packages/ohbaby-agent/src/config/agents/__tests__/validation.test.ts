@@ -8,10 +8,6 @@ const VALID_PRIMARY_AGENT = {
   color: "#00A67E",
   maxSteps: 50,
   timeout: 300_000,
-  model: "anthropic/claude-sonnet-4.5",
-  temperature: 0.7,
-  topP: 0.9,
-  maxTokens: 4096,
   tools: {
     include: ["read", "bash"],
     exclude: ["subagent_run"],
@@ -42,7 +38,6 @@ describe("AgentConfigSchema", () => {
       default: false,
       disabled: false,
       allowDoomLoop: false,
-      model: "anthropic/claude-sonnet-4.5",
     });
   });
 
@@ -96,8 +91,6 @@ describe("AgentConfigSchema", () => {
       ...VALID_PRIMARY_AGENT,
       mode: "invalid",
       color: "green",
-      temperature: 3,
-      topP: 2,
       maxSteps: 0,
     });
 
@@ -105,32 +98,19 @@ describe("AgentConfigSchema", () => {
     if (!result.success) {
       const paths = result.error.issues.map((issue) => issue.path.join("."));
       expect(paths).toEqual(
-        expect.arrayContaining([
-          "mode",
-          "color",
-          "temperature",
-          "topP",
-          "maxSteps",
-        ]),
+        expect.arrayContaining(["mode", "color", "maxSteps"]),
       );
     }
   });
 
-  it("rejects model ids without a provider/model separator but allows dotted model names", () => {
-    expect(() =>
-      AgentConfigSchema.parse({
-        ...VALID_PRIMARY_AGENT,
-        model: "anthropic/claude-sonnet-4.5",
-      }),
-    ).not.toThrow();
-
-    expect(() =>
-      AgentConfigSchema.parse({
-        ...VALID_PRIMARY_AGENT,
-        model: "claude-sonnet-4.5",
-      }),
-    ).toThrow(/model/i);
-  });
+  it.each(["model", "maxTokens", "temperature", "topP"] as const)(
+    "rejects an explicitly undefined removed %s field",
+    (field) => {
+      expect(() =>
+        AgentConfigSchema.parse({ ...VALID_PRIMARY_AGENT, [field]: undefined }),
+      ).toThrow(field);
+    },
+  );
 });
 
 describe("AgentsConfigSchema", () => {

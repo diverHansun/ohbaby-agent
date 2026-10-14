@@ -147,6 +147,7 @@ export function adaptMcpTool(
           client.name,
           mcpTool.name,
           new Error(output.output ?? "MCP tool execution failed"),
+          output.metadata,
         );
       }
       return output;

@@ -53,9 +53,49 @@ export function compareSubagentMessages(
       execution.childRunId ? [[execution.childRunId, execution] as const] : [],
     ),
   );
+  const startedExecutions = executions
+    .filter(
+      (
+        execution,
+      ): execution is UiSubagentExecution & { readonly startedAt: number } =>
+        Boolean(execution.childRunId) &&
+        execution.startedAt !== undefined &&
+        Number.isFinite(execution.startedAt),
+    )
+    .sort(
+      (left, right) =>
+        (left.delegationSequence ?? 0) - (right.delegationSequence ?? 0) ||
+        left.createdAt - right.createdAt ||
+        left.executionId.localeCompare(right.executionId),
+    );
+  const byCompaction = new Map<string, UiSubagentExecution>();
+  for (const message of messages) {
+    if (
+      message.runId !== undefined ||
+      !message.parts.some(
+        (part) =>
+          part.type === "text" && part.metadata?.kind === "context-compaction",
+      )
+    )
+      continue;
+    const request = message.modelRequests?.find(
+      (record) => record.purpose === "context-summary",
+    );
+    const at = request?.startedAt ?? Date.parse(message.createdAt);
+    const execution = startedExecutions.find((candidate, index) => {
+      const nextStartedAt = startedExecutions.at(index + 1)?.startedAt;
+      return (
+        at >= candidate.startedAt &&
+        (candidate.completedAt === undefined || at <= candidate.completedAt) &&
+        (nextStartedAt === undefined || at < nextStartedAt)
+      );
+    });
+    if (execution) byCompaction.set(message.id, execution);
+  }
   const owner = (message: UiMessage): UiSubagentExecution | undefined =>
     byParent.get(message.id) ??
-    (message.runId ? byRun.get(message.runId) : undefined);
+    (message.runId ? byRun.get(message.runId) : undefined) ??
+    byCompaction.get(message.id);
   return [...messages].sort((left, right) => {
     const leftOwner = owner(left);
     const rightOwner = owner(right);

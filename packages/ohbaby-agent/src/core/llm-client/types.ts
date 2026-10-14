@@ -254,7 +254,9 @@ export interface StreamingResponse {
 }
 
 /** One observable adapter invocation; provider-internal retries are not counted. */
-export interface ModelRequestRecord {
+export interface AgentStepRequestRecord {
+  /** Provider-reported usage; absence means unknown, not zero. */
+  readonly usage?: TokenUsage;
   readonly endTimeSource?: "recovery";
   /** Immutable current-run input membership of this exact prepared request. */
   readonly inputIds?: readonly string[];
@@ -263,13 +265,32 @@ export interface ModelRequestRecord {
   readonly messageId: string;
   readonly step: number;
   readonly attempt: number;
-  readonly purpose: string;
+  readonly purpose: "agent-step";
   readonly startedAt: number;
   readonly firstTextAt?: number;
   readonly endedAt?: number;
   readonly outcome: "running" | "success" | "error" | "aborted";
 }
-export interface ModelRequestObservation {
+export interface ModelRequestObservation<T = AgentStepRequestRecord> {
   readonly type: "request-started" | "first-text" | "request-ended";
-  readonly request: ModelRequestRecord;
+  readonly request: T;
 }
+
+/** Resolved ordinary-request settings, snapshotted before context maintenance. */
+export type PreparedRequestSettings = Readonly<
+  Pick<
+    import("../../services/interface-providers/types.js").InterfaceProviderRequest,
+    "model" | "temperature" | "reasoning" | "maxTokens"
+  >
+>;
+
+/** A compact attempt owns a future summary, without inventing an ordinary run. */
+export type SummaryRequestRecord = Omit<
+  AgentStepRequestRecord,
+  "runId" | "step" | "purpose"
+> & {
+  readonly compactionId: string;
+  readonly purpose: "context-summary";
+};
+
+export type ModelRequestRecord = AgentStepRequestRecord | SummaryRequestRecord;

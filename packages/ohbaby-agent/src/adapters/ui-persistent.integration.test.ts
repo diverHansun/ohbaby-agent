@@ -2922,3 +2922,60 @@ it("refreshes a seeded SQLite view only after actual orphan repair and leaves re
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+it.each(["compact", "prompt"] as const)(
+  "rejects cross-workspace %s admission when persistent backends share a database",
+  async (operation) => {
+    const directory = await tempDir("ohbaby-manual-owner-scope-");
+    const clients: PersistentUiBackendClient[] = [];
+    try {
+      const dbPath = join(directory, "agent.db");
+      const projectA = join(directory, "project-a");
+      const projectB = join(directory, "project-b");
+      await mkdir(projectA, { recursive: true });
+      await mkdir(projectB, { recursive: true });
+      const owner = createPersistentUiBackendClient({
+        dbPath,
+        workdir: projectA,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Owner response", finishReason: "stop" },
+        ]),
+      });
+      const other = createPersistentUiBackendClient({
+        dbPath,
+        workdir: projectB,
+        llmClient: createFakeLLMClient([
+          { textDelta: "Other response", finishReason: "stop" },
+        ]),
+      });
+      clients.push(owner, other);
+      await owner.submitPromptAndWait("Owned by workspace A");
+      const sessionId = (await owner.getSnapshot()).activeSessionId;
+      if (!sessionId) throw new Error("Expected owner session");
+      if (!owner.getSessionView)
+        throw new Error("Expected session view support");
+      const before = (await owner.getSessionView({ sessionId })).session
+        .messages;
+      const action =
+        operation === "compact"
+          ? other.compactSession({ sessionId })
+          : other.submitPromptAccepted("Must not enter another workspace", {
+              sessionId,
+            });
+      await expect(action).rejects.toThrow(/another workspace/);
+      expect(
+        (await owner.getSessionView({ sessionId })).session.messages,
+      ).toEqual(before);
+      await expect(owner.compactSession({ sessionId })).resolves.toMatchObject({
+        sessionId,
+      });
+      await expect(
+        other.submitPromptAndWait("Work in B"),
+      ).resolves.toMatchObject({ prompt: { status: "succeeded" } });
+    } finally {
+      await Promise.all(clients.map((client) => client.dispose()));
+      closeDatabase();
+      await rm(directory, { force: true, recursive: true });
+    }
+  },
+);

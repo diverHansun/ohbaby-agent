@@ -679,6 +679,7 @@ export function startRunStreamProjection(
     if (!isRecord(data.request)) return;
     const request = data.request as unknown as UiModelRequest;
     if (
+      request.purpose !== "agent-step" ||
       request.runId !== options.runId ||
       request.messageId !== data.messageId ||
       terminalRunStarted

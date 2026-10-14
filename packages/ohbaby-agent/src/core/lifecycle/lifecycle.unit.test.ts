@@ -2,7 +2,7 @@ import { RuntimeInputSnapshotChangedError } from "./runtime-input-error.js";
 import { createPromptCacheUsageTracker } from "../../adapters/ui-inprocess/prompt-cache-usage.js";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import * as llmStreaming from "../llm-client/index.js";
-import type { ModelRequestRecord } from "../llm-client/types.js";
+import type { AgentStepRequestRecord } from "../llm-client/types.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -310,7 +310,6 @@ function createContextManagerMock(
   prepareTurn: ContextManager["prepareTurn"],
   options: {
     readonly assembleRequestFromInput?: boolean;
-    readonly resetTurnCompactionCount?: ContextManager["resetTurnCompactionCount"];
   } = {},
 ): ContextManager {
   return {
@@ -339,8 +338,21 @@ function createContextManagerMock(
         },
       };
     },
-    resetTurnCompactionCount: options.resetTurnCompactionCount ?? vi.fn(),
     updateCalibrationFactor: vi.fn(),
+  };
+}
+
+function compactedTurn(prepared: PreparedTurn): PreparedTurn {
+  return {
+    ...prepared,
+    compaction: {
+      status: "compacted",
+      usageBefore: {
+        ...prepared.usage,
+        currentTokens: prepared.usage.currentTokens + 1_000,
+      },
+      usageAfter: prepared.usage,
+    },
   };
 }
 
@@ -530,8 +542,6 @@ describe("Lifecycle.run", () => {
           ]),
         ),
     } as unknown as ToolSchedulerInstance;
-    const resetTurnCompactionCount =
-      vi.fn<ContextManager["resetTurnCompactionCount"]>();
     const updateCalibrationFactor =
       vi.fn<ContextManager["updateCalibrationFactor"]>();
     const createRunPromptSnapshot = vi
@@ -541,9 +551,7 @@ describe("Lifecycle.run", () => {
         systemPrompt: "stable snapshot",
       });
     const contextManager = {
-      ...createContextManagerMock(prepareTurn, {
-        resetTurnCompactionCount,
-      }),
+      ...createContextManagerMock(prepareTurn),
       createRunPromptSnapshot,
       updateCalibrationFactor,
     };
@@ -649,8 +657,6 @@ describe("Lifecycle.run", () => {
     expect(prepareTurn.mock.calls[0]?.[0].promptSnapshot).toBe(
       prepareTurn.mock.calls[1]?.[0].promptSnapshot,
     );
-    expect(resetTurnCompactionCount).toHaveBeenCalledTimes(1);
-    expect(resetTurnCompactionCount).toHaveBeenCalledWith("session_test");
     expect(resolveTools).toHaveBeenNthCalledWith(1, {
       agentName: undefined,
       contextScopeId: undefined,
@@ -1741,14 +1747,10 @@ describe("Lifecycle.run", () => {
           42,
         ),
       );
-    const resetTurnCompactionCount =
-      vi.fn<ContextManager["resetTurnCompactionCount"]>();
     const updateCalibrationFactor =
       vi.fn<ContextManager["updateCalibrationFactor"]>();
     const contextManager = {
-      ...createContextManagerMock(prepareTurn, {
-        resetTurnCompactionCount,
-      }),
+      ...createContextManagerMock(prepareTurn),
       updateCalibrationFactor,
     };
     const lifecycle = new Lifecycle({
@@ -1785,10 +1787,6 @@ describe("Lifecycle.run", () => {
       }),
     );
 
-    expect(resetTurnCompactionCount).toHaveBeenCalledWith(
-      "child_1",
-      "subagent_1",
-    );
     expect(prepareTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         contextScopeId: "subagent_1",
@@ -2541,7 +2539,7 @@ describe("Lifecycle.run", () => {
       abortController.signal.reason,
     );
     expect(requests).toHaveLength(0);
-    expect(events).toEqual([]);
+    expect(events).toEqual(["turn:start", "context:prepared", "turn:end"]);
     expect(result).toMatchObject({
       finishReason: "error",
       success: false,
@@ -2652,7 +2650,14 @@ describe("Lifecycle.run", () => {
       .mockImplementationOnce((input) => {
         input.onCompactionStarted?.();
         return Promise.resolve(
-          preparedTurn(forcedMessages, SESSION_USAGE, 222, forcedSnapshotTools),
+          compactedTurn(
+            preparedTurn(
+              forcedMessages,
+              SESSION_USAGE,
+              222,
+              forcedSnapshotTools,
+            ),
+          ),
         );
       });
     const overflowError = Object.assign(
@@ -2805,7 +2810,7 @@ describe("Lifecycle.run", () => {
       .mockResolvedValueOnce(preparedTurn(stepOneMessages))
       .mockResolvedValueOnce(preparedTurn(stepTwoMessages))
       .mockResolvedValueOnce(preparedTurn(stepThreeMessages))
-      .mockResolvedValueOnce(preparedTurn(forcedMessages));
+      .mockResolvedValueOnce(compactedTurn(preparedTurn(forcedMessages)));
     const lifecycle = new Lifecycle({
       contextManager: createContextManagerMock(prepareTurn),
       llmClient: createScriptedFakeLLMClient(
@@ -2998,7 +3003,9 @@ describe("Lifecycle.run", () => {
         preparedTurn([{ role: "user", content: "Huge input" }]),
       )
       .mockResolvedValueOnce(
-        preparedTurn([{ role: "user", content: "Compacted huge input" }]),
+        compactedTurn(
+          preparedTurn([{ role: "user", content: "Compacted huge input" }]),
+        ),
       );
     const lifecycle = new Lifecycle({
       contextManager: createContextManagerMock(prepareTurn),
@@ -3136,15 +3143,14 @@ describe("Lifecycle final step usage observer", () => {
     lifecycle: Lifecycle;
     updateCalibrationFactor: Mock<ContextManager["updateCalibrationFactor"]>;
   } {
-    const contextManager = createContextManagerMock(() =>
-      Promise.resolve(
-        preparedTurn(
-          [{ role: "user", content: "Observe usage" }],
-          SESSION_USAGE,
-          50,
-        ),
-      ),
-    );
+    const contextManager = createContextManagerMock((input) => {
+      const prepared = preparedTurn(
+        [{ role: "user", content: "Observe usage" }],
+        SESSION_USAGE,
+        50,
+      );
+      return Promise.resolve(input.force ? compactedTurn(prepared) : prepared);
+    });
     const updateCalibrationFactor =
       vi.fn<ContextManager["updateCalibrationFactor"]>();
     const lifecycle = new Lifecycle({
@@ -3672,7 +3678,13 @@ it("discards native state and usage from an overflowing attempt before accepting
     idGenerator: createDeterministicIds(),
   });
   const observed = vi.fn();
-  const prepare = vi.fn().mockResolvedValue(preparedTurn([]));
+  const prepare = vi
+    .fn<ContextManager["prepareTurn"]>()
+    .mockImplementation((input) =>
+      Promise.resolve(
+        input.force ? compactedTurn(preparedTurn([])) : preparedTurn([]),
+      ),
+    );
   const lifecycle = new Lifecycle({
     llmClient: llm,
     messageManager: manager,
@@ -3708,7 +3720,11 @@ it("discards native state and usage from an overflowing attempt before accepting
         ? [...(message.info.modelRequests ?? [])]
         : [],
   );
-  expect(attempts.map((request) => request.step)).toEqual([1, 1]);
+  expect(
+    attempts
+      .filter((request) => request.purpose === "agent-step")
+      .map((request) => request.step),
+  ).toEqual([1, 1]);
   expect(new Set(attempts.map((request) => request.requestId)).size).toBe(2);
   expect(attempts.map((request) => request.outcome)).toEqual([
     "error",
@@ -4444,6 +4460,555 @@ it("preserves the complete protocol reasoning after the real 256-segment display
   }
 });
 
+describe("compaction failure boundaries", () => {
+  it("keeps a twice-overflowing child isolated while its parent and sibling continue in the same runtime", async () => {
+    const sessionId = "shared-session";
+    const requests: InterfaceProviderRequest[] = [];
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+      idGenerator: createDeterministicIds(),
+    });
+    for (const [contextScopeId, text] of [
+      [undefined, "Parent task"],
+      ["failed-child", "Failing child task"],
+      ["sibling", "Sibling task"],
+    ] as const) {
+      const message = await messageManager.createMessage({
+        sessionId,
+        contextScopeId,
+        agent: "build",
+        role: "user",
+      });
+      await messageManager.appendPart(message.id, { type: "text", text });
+    }
+    const primaryBefore = await messageManager.listBySession(sessionId, {
+      contextScopeId: undefined,
+    });
+    const siblingBefore = await messageManager.listBySession(sessionId, {
+      contextScopeId: "sibling",
+    });
+    const prepareTurn = vi.fn<ContextManager["prepareTurn"]>(async (input) => {
+      const messages = await messageManager.toModelMessages(input.sessionId, {
+        contextScopeId: input.contextScopeId,
+      });
+      const prepared = preparedTurn(messages);
+      return input.force
+        ? compactedTurn(
+            preparedTurn([
+              { role: "user", content: "Recovered failing child task" },
+            ]),
+          )
+        : prepared;
+    });
+    const overflow = Object.assign(new Error("context length exceeded"), {
+      code: "context_length_exceeded",
+    });
+    let childResult: LifecycleResult | undefined;
+    let siblingResult: LifecycleResult | undefined;
+    const childEvents: LifecycleEvent[] = [];
+    const executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>(
+      async (batch) => {
+        const parentBeforeChild = await messageManager.listBySession(
+          sessionId,
+          { contextScopeId: undefined },
+        );
+        const childLoop = lifecycle.run({
+          sessionId,
+          runId: "child-run",
+          contextScopeId: "failed-child",
+          isSubagent: true,
+          agent: "build",
+          directory: "/repo",
+          modelId: "fake-model",
+        });
+        let next = await childLoop.next();
+        while (!next.done) {
+          childEvents.push(next.value);
+          next = await childLoop.next();
+        }
+        childResult = next.value;
+        expect(
+          await messageManager.listBySession(sessionId, {
+            contextScopeId: undefined,
+          }),
+        ).toEqual(parentBeforeChild);
+        expect(
+          await messageManager.listBySession(sessionId, {
+            contextScopeId: "sibling",
+          }),
+        ).toEqual(siblingBefore);
+        siblingResult = (
+          await consumeLifecycleEvents(
+            lifecycle.run({
+              sessionId,
+              runId: "sibling-run",
+              contextScopeId: "sibling",
+              isSubagent: true,
+              directory: "/repo",
+              modelId: "fake-model",
+            }),
+          )
+        ).result;
+        return deliverFixtureResults(
+          batch,
+          batch.calls.map((call) => ({
+            callId: call.callId,
+            status: "success" as const,
+            output: "Child failed; sibling completed",
+          })),
+        );
+      },
+    );
+    const lifecycle = new Lifecycle({
+      messageManager,
+      contextManager: createContextManagerMock(prepareTurn),
+      llmClient: createScriptedFakeLLMClient(
+        [
+          {
+            events: [
+              {
+                toolCallDeltas: [
+                  {
+                    index: 0,
+                    id: "launch-children",
+                    name: "subagent_run",
+                    argumentsDelta: "{}",
+                  },
+                ],
+                finishReason: "tool_calls",
+              },
+            ],
+          },
+          { error: overflow },
+          { error: overflow },
+          {
+            events: [{ textDelta: "Sibling completed", finishReason: "stop" }],
+          },
+          { events: [{ textDelta: "Parent continued", finishReason: "stop" }] },
+        ],
+        requests,
+      ),
+      toolScheduler: { executeBatch } as unknown as ToolSchedulerInstance,
+    });
+    const parentResult = (
+      await consumeLifecycleEvents(
+        lifecycle.run({
+          sessionId,
+          runId: "parent-run",
+          directory: "/repo",
+          modelId: "fake-model",
+        }),
+      )
+    ).result;
+    expect(childResult).toMatchObject({
+      success: false,
+      terminalReason: "context_overflow",
+      finishReason: "error",
+    });
+    expect(childEvents.at(-1)).toMatchObject({
+      type: "turn:end",
+      contextScopeId: "failed-child",
+      finishReason: "error",
+    });
+    expect(
+      childEvents.every((event) => event.contextScopeId === "failed-child"),
+    ).toBe(true);
+    expect(prepareTurn.mock.calls.filter(([input]) => input.force)).toEqual([
+      [
+        expect.objectContaining({
+          sessionId,
+          contextScopeId: "failed-child",
+          isSubagent: true,
+          agentName: "build",
+          modelId: "fake-model",
+        }),
+      ],
+    ]);
+    expect(siblingResult).toMatchObject({
+      success: true,
+      finalResponse: "Sibling completed",
+    });
+    expect(parentResult).toMatchObject({
+      success: true,
+      finalResponse: "Parent continued",
+    });
+    expect(requests).toHaveLength(5);
+    expect(requests[1].messages).toContainEqual({
+      role: "user",
+      content: "Failing child task",
+    });
+    expect(requests[2].messages).toContainEqual({
+      role: "user",
+      content: "Recovered failing child task",
+    });
+    expect(requests[3].messages).toContainEqual({
+      role: "user",
+      content: "Sibling task",
+    });
+    expect(JSON.stringify(requests[4].messages)).not.toContain(
+      "Failing child task",
+    );
+    const parentHistory = await messageManager.listBySession(sessionId, {
+      contextScopeId: undefined,
+    });
+    const siblingHistory = await messageManager.listBySession(sessionId, {
+      contextScopeId: "sibling",
+    });
+    expect(parentHistory[0]).toEqual(primaryBefore[0]);
+    expect(siblingHistory[0]).toEqual(siblingBefore[0]);
+    expect(
+      parentHistory
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "text")
+        .map((part) => part.text),
+    ).toContain("Parent continued");
+    expect(
+      siblingHistory
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "text")
+        .map((part) => part.text),
+    ).toContain("Sibling completed");
+    const childHistory = await messageManager.listBySession(sessionId, {
+      contextScopeId: "failed-child",
+    });
+    expect(
+      childHistory.filter((message) => message.info.role === "assistant"),
+    ).toHaveLength(2);
+    expect(
+      childHistory
+        .filter((message) => message.info.role === "assistant")
+        .every(
+          (message) =>
+            message.info.role === "assistant" &&
+            message.info.finish === "error",
+        ),
+    ).toBe(true);
+  });
+
+  it.each([false, true])(
+    "permits a fresh force recovery after a completed tool step (child=%s)",
+    async (isSubagent) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const overflow = Object.assign(new Error("context length exceeded"), {
+        code: "context_length_exceeded",
+      });
+      const prepareTurn = vi.fn<ContextManager["prepareTurn"]>((input) =>
+        Promise.resolve(
+          input.force ? compactedTurn(preparedTurn([])) : preparedTurn([]),
+        ),
+      );
+      const executeBatch = vi.fn<ToolSchedulerInstance["executeBatch"]>(
+        ({ calls }) =>
+          Promise.resolve(
+            calls.map((call) => ({
+              callId: call.callId,
+              output: "ok",
+              status: "success" as const,
+            })),
+          ),
+      );
+      const lifecycle = new Lifecycle({
+        contextManager: createContextManagerMock(prepareTurn),
+        llmClient: createScriptedFakeLLMClient(
+          [
+            { error: overflow },
+            {
+              events: [
+                {
+                  toolCallDeltas: [
+                    {
+                      index: 0,
+                      id: "recovered-tool",
+                      name: "read",
+                      argumentsDelta: "{}",
+                    },
+                  ],
+                  finishReason: "tool_calls",
+                },
+              ],
+            },
+            { error: overflow },
+            {
+              events: [
+                { textDelta: "Both steps recovered", finishReason: "stop" },
+              ],
+            },
+          ],
+          requests,
+        ),
+        messageManager: createMessageManager({
+          bus: createBus(),
+          store: createInMemoryMessageStore(),
+        }),
+        toolScheduler: { executeBatch } as unknown as ToolSchedulerInstance,
+      });
+      const { result } = await consumeLifecycleEvents(
+        lifecycle.run({
+          runId: "run",
+          sessionId: "session",
+          directory: "/repo",
+          modelId: "fake-model",
+          ...(isSubagent ? { contextScopeId: "child-scope", isSubagent } : {}),
+        }),
+      );
+      expect(result).toMatchObject({
+        success: true,
+        finalResponse: "Both steps recovered",
+      });
+      expect(
+        prepareTurn.mock.calls.filter(([input]) => input.force),
+      ).toHaveLength(2);
+      if (isSubagent) {
+        expect(prepareTurn.mock.calls.filter(([input]) => input.force)).toEqual(
+          [
+            [
+              expect.objectContaining({
+                contextScopeId: "child-scope",
+                isSubagent: true,
+                sessionId: "session",
+                modelId: "fake-model",
+              }),
+            ],
+            [
+              expect.objectContaining({
+                contextScopeId: "child-scope",
+                isSubagent: true,
+                sessionId: "session",
+                modelId: "fake-model",
+              }),
+            ],
+          ],
+        );
+      }
+      expect(requests).toHaveLength(4);
+      expect(executeBatch).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["failed", "inflated"] as const)(
+    "ends the run on %s automatic compaction before ordinary provider admission",
+    async (status) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const prepareTurn = vi
+        .fn<ContextManager["prepareTurn"]>()
+        .mockResolvedValue({
+          ...preparedTurn([{ role: "user", content: "Continue" }]),
+          compaction: {
+            status,
+            usageBefore: SESSION_USAGE,
+            usageAfter: SESSION_USAGE,
+          },
+        });
+      const lifecycle = new Lifecycle({
+        contextManager: createContextManagerMock(prepareTurn),
+        llmClient: createSequentialFakeLLMClient(
+          [[{ textDelta: "Must not send", finishReason: "stop" }]],
+          requests,
+        ),
+        messageManager: createMessageManager({
+          bus: createBus(),
+          store: createInMemoryMessageStore(),
+        }),
+        toolScheduler: {
+          executeBatch: vi.fn(),
+        } as unknown as ToolSchedulerInstance,
+      });
+      const { result, events } = await consumeLifecycleEvents(
+        lifecycle.run({
+          sessionId: "session",
+          directory: "/repo",
+          modelId: "fake-model",
+        }),
+      );
+      expect(result).toMatchObject({
+        success: false,
+        terminalReason: "context_compaction_failed",
+      });
+      expect(requests).toHaveLength(0);
+      expect(prepareTurn).toHaveBeenCalledTimes(1);
+      expect(events).toContain("context:prepared");
+      expect(events.at(-1)).toBe("turn:end");
+    },
+  );
+
+  it.each([
+    ["failed", false],
+    ["inflated", false],
+    ["not-needed", false],
+    ["failed", true],
+    ["inflated", true],
+    ["not-needed", true],
+  ] as const)(
+    "does not resend an overflowed request when force returns %s (child=%s)",
+    async (status, isSubagent) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const prepareTurn = vi
+        .fn<ContextManager["prepareTurn"]>()
+        .mockResolvedValueOnce(
+          preparedTurn([{ role: "user", content: "Continue" }]),
+        )
+        .mockResolvedValueOnce({
+          ...preparedTurn([{ role: "user", content: "Unchanged" }]),
+          compaction: {
+            status,
+            usageBefore: SESSION_USAGE,
+            usageAfter: SESSION_USAGE,
+          },
+        });
+      const lifecycle = new Lifecycle({
+        contextManager: createContextManagerMock(prepareTurn),
+        llmClient: createScriptedFakeLLMClient(
+          [
+            {
+              error: Object.assign(new Error("context length exceeded"), {
+                code: "context_length_exceeded",
+              }),
+            },
+            {
+              events: [{ textDelta: "Must not resend", finishReason: "stop" }],
+            },
+          ],
+          requests,
+        ),
+        messageManager: createMessageManager({
+          bus: createBus(),
+          store: createInMemoryMessageStore(),
+        }),
+        toolScheduler: {
+          executeBatch: vi.fn(),
+        } as unknown as ToolSchedulerInstance,
+      });
+      const { result } = await consumeLifecycleEvents(
+        lifecycle.run({
+          sessionId: "session",
+          directory: "/repo",
+          modelId: "fake-model",
+          ...(isSubagent ? { contextScopeId: "child-scope", isSubagent } : {}),
+        }),
+      );
+      expect(result.success).toBe(false);
+      expect(requests).toHaveLength(1);
+      expect(prepareTurn).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("rejects a locally oversized ordinary request even when no old history can be compacted", async () => {
+    const requests: InterfaceProviderRequest[] = [];
+    const lifecycle = new Lifecycle({
+      contextManager: createContextManagerMock(() =>
+        Promise.resolve(
+          preparedTurn(
+            [{ role: "user", content: "Oversized protected input" }],
+            {
+              ...SESSION_USAGE,
+              currentTokens: 120,
+              inputBudgetTokens: 119,
+            },
+          ),
+        ),
+      ),
+      llmClient: createSequentialFakeLLMClient(
+        [[{ textDelta: "Must not send", finishReason: "stop" }]],
+        requests,
+      ),
+      messageManager: createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+      }),
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        sessionId: "session",
+        directory: "/repo",
+        modelId: "fake-model",
+      }),
+    );
+    expect(result).toMatchObject({
+      success: false,
+      terminalReason: "context_overflow",
+    });
+    expect(requests).toHaveLength(0);
+  });
+
+  it.each([false, true])(
+    "does not award another force recovery after the same step's input snapshot changes (child=%s)",
+    async (isSubagent) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const initial = preparedTurn([{ role: "user", content: "Continue" }]);
+      const recovered: PreparedTurn = {
+        ...initial,
+        compaction: {
+          status: "compacted",
+          usageBefore: { ...SESSION_USAGE, currentTokens: 500 },
+          usageAfter: SESSION_USAGE,
+        },
+      };
+      const prepareTurn = vi
+        .fn<ContextManager["prepareTurn"]>()
+        .mockResolvedValueOnce(initial)
+        .mockResolvedValueOnce(recovered)
+        .mockResolvedValue(initial);
+      const overflow = Object.assign(new Error("context length exceeded"), {
+        code: "context_length_exceeded",
+      });
+      let admissions = 0;
+      const lifecycle = new Lifecycle({
+        contextManager: createContextManagerMock(prepareTurn),
+        llmClient: createScriptedFakeLLMClient(
+          [
+            { error: overflow },
+            { error: overflow },
+            {
+              events: [
+                { textDelta: "Must not recover twice", finishReason: "stop" },
+              ],
+            },
+          ],
+          requests,
+        ),
+        messageManager: createMessageManager({
+          bus: createBus(),
+          store: createInMemoryMessageStore(),
+        }),
+        toolScheduler: {
+          executeBatch: vi.fn(),
+        } as unknown as ToolSchedulerInstance,
+      });
+      const { result } = await consumeLifecycleEvents(
+        lifecycle.run({
+          runId: "run",
+          sessionId: "session",
+          directory: "/repo",
+          modelId: "fake-model",
+          ...(isSubagent ? { contextScopeId: "child-scope", isSubagent } : {}),
+          currentRunInputs: {
+            beforeStep: () => Promise.resolve([]),
+            beforeFinish: () => Promise.resolve("finish"),
+            admitRequestAttempt: () => {
+              if (++admissions === 2)
+                return Promise.reject(new RuntimeInputSnapshotChangedError());
+              return Promise.resolve();
+            },
+            confirmRequestSuccess: () => Promise.resolve(),
+          },
+        }),
+      );
+      expect(result).toMatchObject({
+        success: false,
+        terminalReason: "context_overflow",
+      });
+      expect(
+        prepareTurn.mock.calls.filter(([input]) => input.force),
+      ).toHaveLength(1);
+      expect(requests).toHaveLength(2);
+    },
+  );
+});
+
 describe("same-run durable input continuation", () => {
   it("continues in one lifecycle and confirms only the frozen provider attempt membership", async () => {
     const requests: InterfaceProviderRequest[] = [];
@@ -4452,7 +5017,7 @@ describe("same-run durable input continuation", () => {
       store: createInMemoryMessageStore(),
     });
     let finishes = 0;
-    const admitted: ModelRequestRecord[] = [];
+    const admitted: AgentStepRequestRecord[] = [];
     const confirmed: string[] = [];
     const beforeStep = vi.fn().mockResolvedValue([]);
     const lifecycle = new Lifecycle({

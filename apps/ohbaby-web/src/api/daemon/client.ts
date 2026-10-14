@@ -954,9 +954,13 @@ export class BrowserDaemonClient implements UiBackendClient {
     if (!sessionId) {
       throw new Error("No session is selected");
     }
-    const response = await this.http.compactSession(sessionId, {
-      ...(options.force === undefined ? {} : { force: options.force }),
-    });
+    const response = await this.http.compactSession(
+      sessionId,
+      {
+        ...(options.force === undefined ? {} : { force: options.force }),
+      },
+      { signal: options.signal },
+    );
     return response.compact;
   }
 
@@ -990,6 +994,7 @@ export class BrowserDaemonClient implements UiBackendClient {
 
   async executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
+    options?: Parameters<UiBackendClient["executeCommand"]>[1],
   ): ReturnType<UiBackendClient["executeCommand"]> {
     // Retain this invocation's feedback through the bounded store timeout;
     // removing its presentation/correlation must not erase an observed failure.
@@ -1039,6 +1044,7 @@ export class BrowserDaemonClient implements UiBackendClient {
         AbortSignal.any([
           this.lifecycleController.signal,
           AbortSignal.timeout(60_000),
+          ...(options?.signal ? [options.signal] : []),
         ]),
       );
       if (
@@ -1081,6 +1087,16 @@ export class BrowserDaemonClient implements UiBackendClient {
       }
       return completion;
     } catch (error) {
+      if (
+        options?.signal?.aborted &&
+        (error instanceof Error || error instanceof DOMException) &&
+        error.name === "AbortError"
+      ) {
+        // The HTTP response can be lost after commit; keep authoritative events.
+        if (!this.closed && scopeTicket === this.scopeTicket)
+          this.store.stopCommandWait(invocation.clientInvocationId);
+        throw error;
+      }
       const message = error instanceof Error ? error.message : String(error);
       const unconfirmed = `Command result is unconfirmed: ${message}`;
       const detail = feedback?.error

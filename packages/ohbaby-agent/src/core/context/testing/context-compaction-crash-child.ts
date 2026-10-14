@@ -108,7 +108,7 @@ async function main(): Promise<void> {
       sessionId: "session_1",
     });
     await seed.appendPart(message.id, {
-      text: `${String(index)} ${"durable history ".repeat(30)}`,
+      text: `${String(index)} ${"durable history ".repeat(500)}`,
       type: "text",
     });
   }
@@ -122,19 +122,23 @@ async function main(): Promise<void> {
   const context = createContextManager({
     bus: createBus(),
     llmClient: {
-      generateSummary: () => Promise.resolve("crash-summary"),
+      generateSummary: (input) =>
+        Promise.resolve({
+          text: "crash-summary",
+          summaryMessageId: input.summaryMessageId,
+          requests: [],
+        }),
     },
     memory: {
       load: () => Promise.resolve({ global: "", merged: "", project: "" }),
     },
     messageManager,
-    pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
     systemPromptProvider: {
       build: () => Promise.resolve("stable"),
     },
     tokenCounter: {
       estimateTokens: (content) => content.length,
-      getLimit: () => 20_000,
+      getLimit: () => 128_000,
     },
   });
   await context.compact("session_1", {

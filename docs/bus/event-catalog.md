@@ -21,12 +21,10 @@ Bus is the internal domain event bus. This catalog records scope, required conte
 | message.part-removed | Message | session | domain, tests | low | sessionId, messageId, partId | complete | no | Internal domain event only. |
 | context.compaction.started | Context | session | domain, tests | low | sessionId, attemptId | complete | no | Starts one scoped compaction attempt; contextScopeId is omitted only for primary. |
 | context.compaction.finished | Context | session | domain, tests | low | sessionId, attemptId, outcome, status | complete | no | Terminates one scoped compaction attempt exactly once; contextScopeId is omitted only for primary. |
-| context.compaction.progress | Context | session | domain, tests | low | sessionId, attemptId, attempt, estimatedHistoryTokens, droppedRounds | complete | no | Records bounded history estimates; contextScopeId is omitted only for primary. |
+| context.compaction.progress | Context | session | domain, tests | low | sessionId, attemptId, attempt, estimatedHistoryTokens | complete | no | Records bounded history estimates; contextScopeId is omitted only for primary. |
 | context.compressed | Context | session | domain, tests | low | sessionId, attemptId, result | complete | no | Internal domain event; contextScopeId is omitted only for primary. |
-| context.pruned | Context | session | domain, tests | low | sessionId, attemptId, result | complete | no | Internal domain event; contextScopeId is omitted only for primary. |
 | context.turn-prepared | Context | session | domain, tests | medium | sessionId, usage, tookMs | complete | no | Run stream owns user-visible context events; contextScopeId is omitted only for primary. |
 | context.compact-skipped | Context | session | domain, tests | low | sessionId, attemptId, reason, usage | complete | no | Internal domain event; contextScopeId is omitted only for primary. |
-| context.masked | Context | session | domain, tests | medium | sessionId, enabled, maskedPartIds, maskedTokens, cutoff, usageRatio | complete | no | Internal projection telemetry; contextScopeId is omitted only for primary. |
 | tool-scheduler.delivery-failed | ToolScheduler | run | domain, tests | low | sessionId, messageId, callId, timestamp | complete | no | Routes durable delivery failures to the owning lifecycle run. |
 | tool-scheduler.status-changed | ToolScheduler | run | domain, tests | high | callId, toolName, timestamp | known-gap | no | Missing runId/sessionId/messageId; run stream owns visible tool events. |
 | tool-scheduler.execution-started | ToolScheduler | run | domain, tests | high | callId, toolName, timestamp | known-gap | no | Missing runId/sessionId/messageId; run stream owns visible tool events. |

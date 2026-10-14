@@ -93,13 +93,13 @@ describe("config/agents loaders", () => {
   it("loads only project config when global config is missing", async () => {
     await writeJson(projectPath, {
       agents: {
-        review: agent("review", { temperature: 0.3 }),
+        review: agent("review", { maxSteps: 30 }),
       },
     });
 
     const config = await loadAgentConfig({ globalPath, projectPath });
 
-    expect(config.agents.review.temperature).toBe(0.3);
+    expect(config.agents.review.maxSteps).toBe(30);
   });
 
   it("merges different names and fully replaces same-name project agents", async () => {
@@ -109,7 +109,7 @@ describe("config/agents loaders", () => {
           mode: "subagent",
           description: "Global explorer",
           maxSteps: 15,
-          temperature: 0.5,
+          timeout: 30_000,
         }),
         security: agent("security", { maxSteps: 20 }),
       },
@@ -131,7 +131,7 @@ describe("config/agents loaders", () => {
       description: "Project explorer",
       maxSteps: 25,
     });
-    expect(config.agents.explore.temperature).toBeUndefined();
+    expect(config.agents.explore.timeout).toBeUndefined();
   });
 
   it("exposes full replacement merge as a pure helper", () => {
@@ -184,6 +184,26 @@ describe("config/agents loaders", () => {
       path: projectPath,
     });
   });
+
+  it.each([
+    ["model", "provider/legacy"],
+    ["maxTokens", 100],
+    ["temperature", 0.5],
+    ["topP", 0.9],
+  ] as const)(
+    "rejects removed %s with source and agent location",
+    async (field, value) => {
+      await writeJson(projectPath, {
+        agents: { build: agent("build", { [field]: value }) },
+      });
+      await expect(
+        loadAgentConfig({ globalPath, projectPath }),
+      ).rejects.toMatchObject({ path: projectPath });
+      await expect(
+        loadAgentConfig({ globalPath, projectPath }),
+      ).rejects.toThrow(new RegExp(`agents.build.*${field}`));
+    },
+  );
 
   it("throws AgentConfigAccessError for unreadable settings paths", async () => {
     await fs.mkdir(globalPath, { recursive: true });

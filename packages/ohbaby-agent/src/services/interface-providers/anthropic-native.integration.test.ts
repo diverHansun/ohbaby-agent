@@ -107,7 +107,7 @@ afterEach(() => {
 });
 
 describe("Anthropic native continuation through SDK SSE", () => {
-  it.each([0, 4])(
+  it.each([0, 4, 6])(
     "retains thinking token subset %s without adding it to billed output",
     async (thinking_tokens) => {
       const ending = terminal("end_turn");
@@ -128,11 +128,12 @@ describe("Anthropic native continuation through SDK SSE", () => {
       expect(
         frames.find((frame) => frame.reasoningTokens !== undefined)
           ?.reasoningTokens,
-      ).toBe(thinking_tokens);
+      ).toBe(thinking_tokens <= 5 ? thinking_tokens : undefined);
       expect(frames.find((frame) => frame.finishReason)?.tokenUsage).toEqual({
         inputTokens: 12,
         outputTokens: 5,
         totalTokens: 17,
+        ...(thinking_tokens <= 5 ? { reasoningTokens: thinking_tokens } : {}),
       });
     },
   );

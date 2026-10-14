@@ -67,7 +67,14 @@ async function runThroughTransport(
   const contextManager = createContextManager({
     bus,
     messageManager,
-    llmClient: { generateSummary: () => Promise.resolve("unused") },
+    llmClient: {
+      generateSummary: (input) =>
+        Promise.resolve({
+          text: "unused",
+          summaryMessageId: input.summaryMessageId,
+          requests: [],
+        }),
+    },
     memory: {
       load: () => Promise.resolve({ global: "", project: "", merged: "" }),
     },

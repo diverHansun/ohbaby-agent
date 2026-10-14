@@ -12,7 +12,6 @@ import {
 } from "../message/index.js";
 import type { ContextManager } from "./types.js";
 import { createContextManager } from "./context-manager.js";
-import { serializeHistory } from "./serialization.js";
 
 const origin: ModelOrigin = {
   provider: "openai",
@@ -147,7 +146,7 @@ function history(): MessageWithParts[] {
   ];
 }
 async function harness(
-  preserveRatio: number,
+  keepAll: number,
   summaryText = "Retain the history constraint and lookup result.",
 ): Promise<{
   manager: ContextManager;
@@ -157,7 +156,15 @@ async function harness(
 }> {
   const bus = createBus();
   const store = createInMemoryMessageStore();
-  for (const message of history()) {
+  for (const original of history()) {
+    const message = {
+      ...original,
+      parts: original.parts.map((part) =>
+        keepAll !== 1 && part.type === "text" && part.id === "new-text"
+          ? { ...part, text: "new question".repeat(1700) }
+          : part,
+      ),
+    };
     await store.insertMessage(message.info);
     for (const part of message.parts) {
       const data =
@@ -196,20 +203,21 @@ async function harness(
     },
     llmClient: {
       generateSummary: (input) => {
-        summaryInputs.push(serializeHistory(input.history));
-        summaryReasoning.push(input.reasoning);
-        return Promise.resolve(summaryText);
+        summaryInputs.push(JSON.stringify(input.request.messages));
+        summaryReasoning.push(input.request.settings?.reasoning?.intent);
+        return Promise.resolve({
+          text: summaryText,
+          summaryMessageId: input.summaryMessageId,
+          requests: [],
+        });
       },
     },
-    pruneProtectTokens: 0,
-    pruneMinimumTokens: 1,
-    compressionPreserveRatio: preserveRatio,
   });
   return { manager, store, summaryInputs, summaryReasoning };
 }
 
 describe("native context policy with production manager and store", () => {
-  it("prunes ordinary old tools while keeping every native dependency active", async () => {
+  it("does not retire ordinary or native parts when there is no compressible prefix", async () => {
     const { manager, store } = await harness(1);
     const result = await manager.compact("s", {
       directory: "/fixture",
@@ -219,13 +227,13 @@ describe("native context policy with production manager and store", () => {
       toolNames: [],
       force: true,
     });
-    expect(result.prune?.prunedCount).toBe(1);
+    expect(result.status).toBe("not-needed");
     const parts = (await store.listBySession("s")).flatMap(
       (message) => message.parts,
     );
     expect(
       parts.find((part) => part.id === "ordinary-tool")?.time?.compacted,
-    ).toBeDefined();
+    ).toBeUndefined();
     expect(
       parts.find((part) => part.id === "native-tool")?.time?.compacted,
     ).toBeUndefined();
@@ -245,7 +253,7 @@ describe("native context policy with production manager and store", () => {
     });
     expect(result.compression?.status).toBe("compressed");
     expect(summaryInputs.length).toBeGreaterThan(0);
-    expect(summaryInputs.join("")).not.toContain("opaque-must-not-leak");
+    expect(summaryInputs.join("")).toContain("opaque-must-not-leak");
     const parts = (await store.listBySession("s")).flatMap(
       (message) => message.parts,
     );
@@ -315,6 +323,17 @@ it("passes the owning reasoning snapshot to context summary without changing its
     toolNames: [],
     force: true,
     reasoning,
+    requestSettings: {
+      model: origin.model,
+      maxTokens: 32768,
+      reasoning: {
+        intent: reasoning,
+        mode: "effort",
+        wire: "anthropic-budget",
+        budgetTokens: 4096,
+        capabilitySource: "test",
+      },
+    },
   });
   reasoning.effort = "low";
   await pending;

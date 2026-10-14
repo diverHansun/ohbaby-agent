@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 import { createContextSummaryClient } from "./prompt-context.js";
-import { streamResponse } from "../../core/llm-client/streaming.js";
+import {
+  streamResponse,
+  resolvePreparedRequestSettings,
+} from "../../core/llm-client/streaming.js";
 import type { LLMClientInstance } from "../../core/llm-client/types.js";
 import type {
   InterfaceProviderRequest,
@@ -38,21 +41,41 @@ it("concurrent agent summaries send their own reasoning snapshot while the share
   const first = summaries.generateSummary({
     sessionId: "parent",
     contextScopeId: "child-high",
-    prompt: "summarize",
-    history: [],
-    reasoning: mergeReasoningIntent({ effort: "high" }),
+    request: {
+      messages: [{ role: "user", content: "summarize" }],
+      tools: undefined,
+      settings: {
+        ...resolvePreparedRequestSettings(client, {
+          reasoning: mergeReasoningIntent({ effort: "high" }),
+        }),
+        maxTokens: 32768,
+      },
+    },
+    summaryMessageId: "s1",
+    compactionId: "c1",
+    attempt: 1,
   });
   const second = summaries.generateSummary({
     sessionId: "parent",
     contextScopeId: "child-off",
-    prompt: "summarize",
-    history: [],
-    reasoning: mergeReasoningIntent({ enabled: false, effort: "high" }),
+    request: {
+      messages: [{ role: "user", content: "summarize" }],
+      tools: undefined,
+      settings: {
+        ...resolvePreparedRequestSettings(client, {
+          reasoning: mergeReasoningIntent({ enabled: false, effort: "high" }),
+        }),
+        maxTokens: 16384,
+      },
+    },
+    summaryMessageId: "s2",
+    compactionId: "c2",
+    attempt: 1,
   });
   client.config.reasoning = { effort: "medium" };
-  await expect(Promise.all([first, second])).resolves.toEqual([
-    "Summary",
-    "Summary",
+  await expect(Promise.all([first, second])).resolves.toMatchObject([
+    { text: "Summary" },
+    { text: "Summary" },
   ]);
   expect(
     requests.map((request) => [
@@ -105,24 +128,30 @@ it("summarizes with the child model and validates inherited intent against that 
     summaries.generateSummary({
       sessionId: "children",
       contextScopeId: "child",
-      modelId: "gpt-4o",
-      prompt: "summarize",
-      history: [],
-      reasoning: mergeReasoningIntent(),
+      request: {
+        messages: [{ role: "user", content: "summarize" }],
+        tools: undefined,
+        settings: {
+          ...resolvePreparedRequestSettings(client, {
+            modelId: "gpt-4o",
+            reasoning: mergeReasoningIntent(),
+          }),
+          maxTokens: 16384,
+        },
+      },
+      summaryMessageId: "s",
+      compactionId: "c",
+      attempt: 1,
     }),
-  ).resolves.toBe("Child summary");
+  ).resolves.toMatchObject({ text: "Child summary" });
   expect(requests[0].model).toBe("gpt-4o");
   expect(requests[0].reasoning?.mode).toBe("none");
-  await expect(
-    summaries.generateSummary({
-      sessionId: "children",
-      contextScopeId: "child",
+  expect(() =>
+    resolvePreparedRequestSettings(client, {
       modelId: "gpt-4o",
-      prompt: "summarize",
-      history: [],
       reasoning: mergeReasoningIntent({ effort: "high" }),
     }),
-  ).rejects.toThrow(/does not support reasoning/);
+  ).toThrow(/does not support reasoning/);
   expect(requests).toHaveLength(1);
   expect(client.config.model).toBe("gpt-5.2");
 });

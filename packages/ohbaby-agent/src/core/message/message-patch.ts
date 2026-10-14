@@ -11,7 +11,12 @@ export function applyMessagePatch(
     message.modelRequests?.map((request) => [request.requestId, request]),
   );
   for (const request of patch.modelRequests) {
-    if (request.runId !== message.runId || request.messageId !== message.id)
+    if (
+      request.messageId !== message.id ||
+      (request.purpose === "agent-step"
+        ? request.runId !== message.runId
+        : message.runId !== undefined)
+    )
       throw new Error("Model request owner does not match assistant message");
     const previous = records.get(request.requestId);
     if (

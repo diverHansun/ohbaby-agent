@@ -637,7 +637,19 @@ async function realPermissionValidationFixture(
         id: "fake",
         kind: "openai-compatible",
         isAbortError: () => false,
-        streamResponse() {
+        streamResponse(request) {
+          if (request.purpose === "context-summary") {
+            const event = {
+              finishReason: "stop" as const,
+              textDelta:
+                "Continue the remaining permission validation requests.",
+            };
+            return Promise.resolve(
+              (async function* (): AsyncGenerator<typeof event, void, unknown> {
+                yield await Promise.resolve(event);
+              })(),
+            );
+          }
           // Cache eviction spans runs/steps. Bound each real model reply so
           // the 1026-approval test measures that contract, not quadratic full-
           // message projection of one artificial 1026-tool reply.
@@ -877,7 +889,14 @@ it("rejects evicted real terminal IDs through REST/RPC without reviving or leaki
         });
     });
     const receipt = await fixture.start();
-    const pending = await lastPending;
+    const pending = await Promise.race([
+      lastPending,
+      fixture.backend.waitForPrompt(receipt.promptId).then((result) => {
+        throw new Error(
+          `Approval run ended after ${String(seen)} requests before the last pending approval: ${JSON.stringify(result)}`,
+        );
+      }),
+    ]);
     stop();
     expect(errors).toEqual([]);
     expect(seen).toBe(1026); // All 17 model tool steps reached real approval.

@@ -22,6 +22,23 @@ export function decodeMessagePage(
   runId?: string,
 ): { limit: number; cursor?: Cursor; direction: "before" | "after" } {
   const limit = options.limit ?? 50;
+  const window = options.includeRunSummaries;
+  if (
+    window !== undefined &&
+    (runId === undefined ||
+      options.scope === undefined ||
+      !Number.isFinite(window.startedAt) ||
+      (window.completedAt !== undefined &&
+        !Number.isFinite(window.completedAt)) ||
+      (window.nextStartedAt !== undefined &&
+        !Number.isFinite(window.nextStartedAt)))
+  )
+    throw Object.assign(
+      new Error(
+        "Summary pages require a run, scope and finite execution bounds",
+      ),
+      { code: "INVALID_SESSION_QUERY" },
+    );
   if (!Number.isInteger(limit) || limit < 1 || limit > 200)
     throw Object.assign(
       new Error("Message page limit must be between 1 and 200"),

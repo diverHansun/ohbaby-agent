@@ -171,3 +171,35 @@ describe("readTokenUsageMetadata", () => {
     ).toEqual({ inputTokens: 10, outputTokens: 3, totalTokens: 13 });
   });
 });
+
+describe("reasoning usage metadata", () => {
+  it.each([undefined, 0, 2])(
+    "round-trips optional reasoning %s without changing totals",
+    (reasoningTokens) => {
+      const usage = {
+        inputTokens: 10,
+        outputTokens: 3,
+        totalTokens: 13,
+        ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+      };
+      expect(readTokenUsageMetadata(createTokenUsageMetadata(usage))).toEqual(
+        usage,
+      );
+      expect(
+        readTokenUsageMetadata({
+          tokenUsage: { ...usage, inputBreakdown: { uncached: -1 } },
+        }),
+      ).toEqual(usage);
+    },
+  );
+  it.each([-1, 4, 1.5, Number.NaN])(
+    "discards invalid reasoning %s and preserves totals",
+    (reasoningTokens) => {
+      expect(
+        readTokenUsageMetadata({
+          tokenUsage: { inputTokens: 10, outputTokens: 3, reasoningTokens },
+        }),
+      ).toEqual({ inputTokens: 10, outputTokens: 3, totalTokens: 13 });
+    },
+  );
+});

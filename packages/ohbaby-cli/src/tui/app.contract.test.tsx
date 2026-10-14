@@ -2003,6 +2003,74 @@ describe("OhbabyTerminalApp", () => {
     expect(client.abortRun).toHaveBeenCalledWith("run_1");
   });
 
+  it.each(["Escape", "Ctrl+C"])(
+    "cancels a manual compact command with %s without targeting a run",
+    async (key) => {
+      const client = createFakeClient(snapshot(), {
+        ...catalog,
+        commands: [
+          ...catalog.commands,
+          command({
+            id: "compact",
+            path: ["compact"],
+            description: "Compact context",
+          }),
+        ],
+      });
+      let signal: AbortSignal | undefined;
+      let rejectRequest!: (reason: unknown) => void;
+      client.executeCommand.mockImplementation(
+        (_invocation: unknown, options?: { signal?: AbortSignal }) => {
+          signal = options?.signal;
+          return new Promise<void>((_resolve, reject) => {
+            rejectRequest = reject;
+          });
+        },
+      );
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await flush();
+      app.stdin.write("/compact");
+      await flush();
+      app.stdin.write("\r");
+      await waitForCommandCount(client, 1);
+      expect(signal).toBeDefined();
+      app.stdin.write(key === "Escape" ? "\u001B" : "\u0003");
+      await flushEscapeInput();
+      expect(signal?.aborted).toBe(true);
+      expect(client.abortRun).not.toHaveBeenCalled();
+      rejectRequest(
+        new DOMException("request aborted after commit", "AbortError"),
+      );
+      await flush();
+      client.emit({
+        type: "message.updated",
+        sessionId: "session_1",
+        message: {
+          id: "summary",
+          role: "system",
+          createdAt: "2026-10-13T00:00:00Z",
+          parts: [
+            {
+              type: "text",
+              text: "Compacted (estimated): 92 -> 24 tokens",
+              metadata: { kind: "context-compaction" },
+            },
+          ],
+        },
+      });
+      const frame = await waitForFrame(app, (next) =>
+        next.includes("Compacted (estimated)"),
+      );
+      expect(frame).not.toContain("request aborted after commit");
+      app.unmount();
+    },
+  );
+
   it("aborts the active run on double Esc when no dialog is open", async () => {
     const client = createFakeClient({
       ...snapshot(),

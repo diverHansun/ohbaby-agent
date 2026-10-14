@@ -1841,7 +1841,7 @@ describe("TUI store event reducer", () => {
     expect(state.commandNotices).toHaveLength(0);
   });
 
-  it("formats compact command notices for humans without token deltas", () => {
+  it("does not duplicate compact success and treats failed business results as errors", () => {
     let state = createStateFromSnapshot(snapshot());
 
     state = applyCommandOutput(
@@ -1864,7 +1864,7 @@ describe("TUI store event reducer", () => {
       "compact",
     );
 
-    expect(latestCommandNoticeText(state)).toBe("Compacted");
+    expect(state.commandNotices).toHaveLength(0);
 
     state = applyCommandOutput(
       state,
@@ -1879,7 +1879,10 @@ describe("TUI store event reducer", () => {
       },
       "compact",
     );
-    expect(latestCommandNoticeText(state)).toBe("Compact skipped");
+    expect(latestCommandNoticeText(state)).toBe(
+      "Compact failed: summary was not smaller",
+    );
+    expect(state.commandNotices.at(-1)?.kind).toBe("error");
 
     state = applyCommandOutput(
       state,
@@ -1895,6 +1898,7 @@ describe("TUI store event reducer", () => {
       "compact",
     );
     expect(latestCommandNoticeText(state)).toBe("Compact failed");
+    expect(state.commandNotices.at(-1)?.kind).toBe("error");
   });
 
   it("formats status command notices with optional backend summaries", () => {

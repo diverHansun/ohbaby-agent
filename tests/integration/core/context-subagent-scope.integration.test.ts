@@ -185,16 +185,21 @@ describe("subagent scoped context integration", () => {
     } satisfies MemoryReader;
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
-      .mockResolvedValue("<state_snapshot>scope a short</state_snapshot>");
+      .mockImplementation(async (input) => ({
+        text: "<state_snapshot>scope a short</state_snapshot>",
+        summaryMessageId: input.summaryMessageId,
+        requests: [],
+      }));
     const systemPromptProvider = {
       build: vi.fn<SystemPromptProvider["build"]>().mockResolvedValue("child"),
     } satisfies SystemPromptProvider;
     const tokenCounter = {
       estimateTokens: (content: string): number => content.length,
-      getLimit: (): number => 20_000,
+      getLimit: (): number => 64_000,
     } satisfies TokenCounter;
     const manager = createContextManager({
       bus,
+      compressionThreshold: 0.3,
       llmClient: { generateSummary },
       memory,
       messageManager,
@@ -301,16 +306,19 @@ describe("subagent scoped context integration", () => {
     const generateSummary = vi
       .fn<ContextLLMClient["generateSummary"]>()
       .mockImplementation((input) =>
-        Promise.resolve(
-          `<state_snapshot>${input.contextScopeId ?? "primary"} short</state_snapshot>`,
-        ),
+        Promise.resolve({
+          text: `<state_snapshot>${input.contextScopeId ?? "primary"} short</state_snapshot>`,
+          summaryMessageId: input.summaryMessageId,
+          requests: [],
+        }),
       );
     const tokenCounter = {
       estimateTokens: (content: string): number => content.length,
-      getLimit: (): number => 20_000,
+      getLimit: (): number => 64_000,
     } satisfies TokenCounter;
     const manager = createContextManager({
       bus,
+      compressionThreshold: 0.3,
       llmClient: { generateSummary },
       memory: {
         load: vi.fn().mockResolvedValue({

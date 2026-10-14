@@ -574,6 +574,7 @@ export function createInProcessUiBackendClient(
   const promptQueueOwnerClientId =
     options.promptQueueOwnerClientId ?? `inprocess_${randomUUID()}`;
   const activePromptsBySession = new Map<string, ActivePromptState>();
+  const compactingSessions = new Set<string>();
   const pendingRuntimePromptsBySession = new Map<string, number>();
   const acceptedNewSessionIds = new Set<string>();
   // Multiple submits may admit together, while New takes a short exclusive
@@ -954,6 +955,7 @@ export function createInProcessUiBackendClient(
         (usesPersistentStateStore() ? undefined : (): string => runIds.next());
 
       const runtime = await createUiRuntimeComposition({
+        logger: options.logger,
         agentManager: options.agentManager,
         bus,
         ...(options.createSubagentId
@@ -2562,6 +2564,12 @@ export function createInProcessUiBackendClient(
       return;
     }
     const session = await options.sessionManager.get(sessionId);
+    if (
+      session &&
+      !sameSessionProjectRoot(session.projectRoot, await resolveProjectRoot())
+    ) {
+      throw new Error("Session belongs to another workspace");
+    }
     if (session?.isSubagent === true || session?.parentId !== undefined) {
       const action =
         operation === "compact"
@@ -2799,34 +2807,47 @@ export function createInProcessUiBackendClient(
     compactOptions: UiCompactSessionOptions = {},
   ): Promise<UiCompactSessionResult> {
     const target = await resolveCompactTarget(compactOptions);
+    compactOptions.signal?.throwIfAborted();
+    const hasPendingPrompt = await promptScheduler.hasPendingSession(
+      target.sessionId,
+    );
+    if (
+      hasPendingPrompt ||
+      compactingSessions.has(target.sessionId) ||
+      activePromptsBySession.has(target.sessionId) ||
+      pendingRuntimePromptsBySession.has(target.sessionId)
+    ) {
+      throw new SessionRunBusyError(target.sessionId, []);
+    }
+    // Reserve before runtime acquisition. Prompt preparation also checks this
+    // reservation, closing the async gap before RunManager claims its scope.
+    compactingSessions.add(target.sessionId);
     let admission:
       | Awaited<ReturnType<typeof runtimeController.acquireRuntime>>
       | undefined;
-    {
-      for (;;) {
-        try {
-          admission = await runtimeController.acquireRuntime(
-            Boolean(runtimeController.getActiveRunId(target.sessionId)),
-          );
-          break;
-        } catch (error) {
-          if (!(error instanceof RuntimeSwitchPendingError)) throw error;
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-      }
-    }
-    const runtime = admission.runtime;
     try {
+      admission = await runtimeController.acquireRuntime();
+      const runtime = admission.runtime;
+      compactOptions.signal?.throwIfAborted();
       await runtime.setSessionWorkdir(target.sessionId, target.projectRoot);
       const result = await runtime.compactSession({
+        signal: compactOptions.signal,
         force: compactOptions.force ?? true,
         reasoning: await sessionReasoningPreference(target.sessionId),
         projectRoot: target.projectRoot,
         sessionId: target.sessionId,
       });
+      // Compaction has already finished; a failed refresh only degrades this estimate.
+      const measured = await runtime
+        .getContextUsage({
+          projectRoot: target.projectRoot,
+          sessionId: target.sessionId,
+        })
+        .catch(() => undefined);
       const usage = contextWindowUsage.updateFromContextUsage(
         target.sessionId,
-        result.usageAfter,
+        measured ?? result.usageAfter,
+        measured?.composition,
       );
       if (usage) {
         const event: UiEvent = { type: "context.window.updated", usage };
@@ -2841,7 +2862,8 @@ export function createInProcessUiBackendClient(
         sessionId: target.sessionId,
       };
     } finally {
-      admission.release();
+      compactingSessions.delete(target.sessionId);
+      admission?.release();
     }
   }
 
@@ -2885,6 +2907,7 @@ export function createInProcessUiBackendClient(
     const result = contextWindowUsage.updateFromContextUsage(
       input.sessionId,
       usage,
+      usage.composition,
     );
     if (result) {
       const event: UiEvent = { type: "context.window.updated", usage: result };
@@ -2917,6 +2940,9 @@ export function createInProcessUiBackendClient(
     submitOptions?: InternalSubmitPromptOptions,
   ): Promise<RunCompletion | undefined> {
     const sessionId = submitOptions?.sessionId;
+    if (sessionId && compactingSessions.has(sessionId)) {
+      return Promise.reject(new SessionRunBusyError(sessionId, []));
+    }
     if (sessionId) {
       pendingRuntimePromptsBySession.set(
         sessionId,
@@ -4153,8 +4179,9 @@ export function createInProcessUiBackendClient(
 
     executeCommand(
       invocation: UiCommandInvocation,
+      execution?: { readonly signal?: AbortSignal },
     ): ReturnType<UiBackendClient["executeCommand"]> {
-      return commandService.executeCommand(invocation);
+      return commandService.executeCommand(invocation, execution);
     },
 
     respondPermission(

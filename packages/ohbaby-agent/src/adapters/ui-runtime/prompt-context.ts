@@ -1,14 +1,14 @@
-import { mergeReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type { UiNotice } from "ohbaby-sdk";
 import type {
   CompactResult,
   ContextLLMClient,
+  SummaryRequestResult,
 } from "../../core/context/index.js";
 import {
   appendMemoryToSystemPrompt,
   loadMemoryForPrompt,
 } from "../../core/context/index.js";
-import { serializeHistory } from "../../core/context/serialization.js";
+import type { SummaryRequestRecord } from "../../core/llm-client/types.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import { streamResponse } from "../../core/llm-client/index.js";
 import type { PromptSecurityFinding } from "../../core/system-prompt/security/index.js";
@@ -51,11 +51,7 @@ export function noticeFromCompactResult(
   sessionId: string,
   result: CompactResult,
 ): Omit<UiNotice, "id" | "createdAt"> | undefined {
-  if (
-    result.status === "not-needed" ||
-    result.status === "compacted" ||
-    result.status === "pruned"
-  ) {
+  if (result.status === "not-needed" || result.status === "compacted") {
     return undefined;
   }
 
@@ -65,15 +61,14 @@ export function noticeFromCompactResult(
       level: "warning",
       message: `Context compact failed: ${
         result.error ?? "summary generation failed"
-      }. Continuing with the available context.`,
+      }.`,
       title: "Context compact warning",
     };
   }
   return {
     key: `context:compact:${sessionId}`,
     level: "warning",
-    message:
-      "Context compact skipped because the summary was not smaller. Continuing with the available context.",
+    message: "Context compact failed because the summary was not smaller.",
     title: "Context compact warning",
   };
 }
@@ -82,66 +77,73 @@ export function createContextSummaryClient(
   llmClient: LLMClientInstance,
 ): ContextLLMClient {
   return {
-    async generateSummary(input): Promise<string> {
-      const requestClient =
-        input.modelId === undefined
-          ? llmClient
-          : {
-              ...llmClient,
-              config: { ...llmClient.config, model: input.modelId },
-            };
-      const reasoning =
-        input.reasoning === undefined
-          ? undefined
-          : mergeReasoningIntent(input.reasoning);
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        throwIfSummaryAborted(input.signal);
-        let summary = "";
-        let completedNormally = false;
+    async generateSummary(input): Promise<SummaryRequestResult> {
+      throwIfSummaryAborted(input.signal);
+      const settings = input.request.settings;
+      if (!settings)
+        throw new Error("Summary request is missing resolved settings");
+      let summary = "";
+      let completedNormally = false;
+      const requests: SummaryRequestRecord[] = [];
+      let summaryFailure: string | undefined;
+      try {
         for await (const response of streamResponse(
-          requestClient,
-          [
-            { role: "system", content: input.systemPrompt ?? input.prompt },
-            {
-              role: "user",
-              content: redactPromptSecrets(
-                serializeHistory(input.history, {
-                  includeModelContext: false,
-                  includeToolContext: true,
-                }),
-              ),
-            },
-            { role: "user", content: input.prompt },
-          ],
+          llmClient,
+          input.request.messages,
           {
+            preparedSettings: settings,
+            tools: input.request.tools,
             purpose: "context-summary",
-            ...(reasoning === undefined ? {} : { reasoning }),
+            maxTokens: settings.maxTokens,
+            retry: { maxRetriesPerStep: 0 },
             sessionId: input.sessionId,
-            ...(input.contextScopeId === undefined
-              ? {}
-              : { contextScopeId: input.contextScopeId }),
-            ...(input.signal === undefined ? {} : { signal: input.signal }),
+            contextScopeId: input.contextScopeId,
+            signal: input.signal,
+            summaryOwner: {
+              compactionId: input.compactionId,
+              messageId: input.summaryMessageId,
+              attempt: input.attempt,
+              inputIds: input.request.inputIds,
+            },
+            onSummaryRequestRecord(record) {
+              requests.push(record);
+              input.onRequestRecord?.(record);
+            },
           },
         )) {
-          if (response.streamStopReason === "user_aborted") {
+          if (response.streamStopReason === "user_aborted")
             throw summaryAbortError();
+          if (
+            (response.parsedToolCalls?.length ?? 0) > 0 ||
+            response.finishReason === "tool_calls"
+          ) {
+            summaryFailure = "Context compact summary attempted a tool call";
+          } else if (
+            response.finishReason !== undefined &&
+            response.finishReason !== "stop"
+          ) {
+            summaryFailure ??=
+              "Context compact summary did not finish normally";
           }
           if (response.isComplete) {
             completedNormally = response.finishReason === "stop";
             summary = messageContentToText(response.messageSnapshot.content);
           }
         }
-
-        throwIfSummaryAborted(input.signal);
-        if (!completedNormally) {
-          throw new Error("Context compact summary did not finish normally");
-        }
-        const trimmed = redactPromptSecrets(summary).trim();
-        if (trimmed !== "") {
-          return trimmed;
-        }
+      } catch (error) {
+        if (summaryFailure && !input.signal?.aborted)
+          throw new Error(summaryFailure, {
+            cause: error,
+          });
+        throw error;
       }
-      throw new Error("Context compact summary was empty after retries");
+      throwIfSummaryAborted(input.signal);
+      if (summaryFailure) throw new Error(summaryFailure);
+      if (!completedNormally)
+        throw new Error("Context compact summary did not finish normally");
+      const text = redactPromptSecrets(summary).trim();
+      if (!text) throw new Error("Context compact summary was empty");
+      return { text, summaryMessageId: input.summaryMessageId, requests };
     },
   };
 }

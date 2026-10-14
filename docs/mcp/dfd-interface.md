@@ -212,7 +212,7 @@ Both tools use `source: "mcp"` and `requireExplicitApproval: true`, so the gener
 - Individual server connection failures are isolated and reflected in status.
 - Individual resource/prompt discovery failures are isolated per server and reported through status/onError.
 - Unsupported resource/prompt direct reads throw clear capability errors.
-- Tool execution results with `isError` become `McpToolExecutionError`.
+- Tool execution results with `isError` become `McpToolExecutionError`. Its optional, non-enumerable `metadata` carries the existing MCP fields through the generic scheduler error path into `ToolPart.state.metadata`; the result stays an error. Metadata is projected by the existing tool whitelist instead of being duplicated inside serialized error details.
 - Runtime composition reports MCP refresh failures through `onNotice` and does not block startup.
 
 ## stdio 启动环境与失败边界

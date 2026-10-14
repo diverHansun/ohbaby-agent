@@ -1,11 +1,11 @@
 export type UiCompactSessionStatus =
   | "not-needed"
-  | "pruned"
   | "compacted"
   | "failed"
   | "inflated";
 
 export interface UiCompactSessionOptions {
+  readonly signal?: AbortSignal;
   readonly sessionId?: string;
   readonly force?: boolean;
 }
@@ -21,13 +21,6 @@ export interface UiCompactSessionUsage {
   readonly usageRatio: number;
 }
 
-export interface UiCompactSessionPruneResult {
-  readonly prunedCount: number;
-  readonly freedTokens: number;
-  readonly protectedCount: number;
-  readonly totalScanned: number;
-}
-
 export interface UiCompactSessionCompressionResult {
   readonly status: "compressed" | "skipped" | "failed" | "inflated";
   readonly originalTokens: number;
@@ -38,11 +31,11 @@ export interface UiCompactSessionCompressionResult {
 }
 
 export interface UiCompactSessionResult {
+  readonly omittedParts?: number;
   readonly sessionId: string;
   readonly status: UiCompactSessionStatus;
   readonly usageBefore: UiCompactSessionUsage;
   readonly usageAfter: UiCompactSessionUsage;
-  readonly prune?: UiCompactSessionPruneResult;
   readonly compression?: UiCompactSessionCompressionResult;
   readonly error?: string;
 }

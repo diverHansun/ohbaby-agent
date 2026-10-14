@@ -1,5 +1,9 @@
 import type { InterfaceProviderStreamEvent } from "../../services/interface-providers/types.js";
-import type { ModelRequestObservation, ModelRequestRecord } from "./types.js";
+import type {
+  ModelRequestObservation,
+  ModelRequestRecord,
+  AgentStepRequestRecord,
+} from "./types.js";
 
 export class ModelObservationError extends Error {
   constructor(cause: unknown) {
@@ -11,9 +15,11 @@ export class ModelObservationError extends Error {
   }
 }
 /** Capture facts at receipt; serialize only the three durable transitions. */
-export class RequestAttemptObserver {
+export class RequestAttemptObserver<
+  T extends ModelRequestRecord = AgentStepRequestRecord,
+> {
   private tail: Promise<void> = Promise.resolve();
-  private facts: ModelRequestObservation[] = [];
+  private facts: ModelRequestObservation<T>[] = [];
   private started = false;
   private failure?: ModelObservationError;
   private resolveStart!: () => void;
@@ -22,8 +28,8 @@ export class RequestAttemptObserver {
   });
   private finishedAt?: number;
   constructor(
-    private record: ModelRequestRecord | undefined,
-    private readonly save?: (fact: ModelRequestObservation) => Promise<void>,
+    private record: T | undefined,
+    private readonly save?: (fact: ModelRequestObservation<T>) => Promise<void>,
     private readonly signal?: AbortSignal,
   ) {
     signal?.addEventListener("abort", this.onAbort, { once: true });
@@ -93,6 +99,10 @@ export class RequestAttemptObserver {
       ),
     );
   }
+  setUsage(usage: ModelRequestRecord["usage"]): void {
+    if (this.record && usage !== undefined)
+      this.record = { ...this.record, usage };
+  }
   end(outcome: "success" | "error" | "aborted"): void {
     if (!this.started || !this.record || this.record.endedAt !== undefined)
       return;
@@ -123,7 +133,7 @@ export class RequestAttemptObserver {
     await this.tail;
     if (this.failure) throw this.failure;
   }
-  drain(): ModelRequestObservation[] {
+  drain(): ModelRequestObservation<T>[] {
     const result = this.facts;
     this.facts = [];
     return result;

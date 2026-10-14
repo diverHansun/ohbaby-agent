@@ -1,32 +1,25 @@
-import { hasNativeDependencies } from "./native-context.js";
+import { setTimeout as sleep } from "node:timers/promises";
+import { emitDiagnostic, NOOP_LOGGER } from "../../observability/logger.js";
+import {
+  contextSummaryUnused,
+  type UnusedSummaryReason,
+} from "../../observability/events.js";
 import { estimateHistoryForCompaction } from "./compaction-policy.js";
 import { randomUUID } from "node:crypto";
 import {
-  COMPRESSION_PRESERVE_RATIO,
   DEFAULT_COMPACTION_THRESHOLDS,
-  MAX_COMPACTION_PER_TURN,
+  KEEP_RECENT_TOKENS,
+  SUMMARY_BODY_TOKENS,
   MAX_SUMMARY_PROVIDER_ATTEMPTS,
-  PRUNE_MINIMUM_TOKENS,
-  PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
-  THRASH_MIN_SAVINGS_RATIO,
-  THRASH_UNLOCK_DELTA,
-  THRASH_WINDOW,
 } from "./constants.js";
 import type { CompactionThresholds } from "./constants.js";
-import {
-  AGGRESSIVE_COMPRESSION_PROMPT,
-  COMPRESSION_PROMPT,
-  SUMMARIZATION_SYSTEM_PROMPT,
-} from "./compression-prompt.js";
+import { COMPRESSION_PROMPT } from "./compression-prompt.js";
 import { ContextEvent } from "./events.js";
 import { appendFileOpsSummary, extractFileOps } from "./file-ops.js";
 import { isActivePart } from "./filters.js";
-import { getCompletedToolOutput, serializeHistory } from "./serialization.js";
-import { createMaskConfig, reduceForModel } from "./projection.js";
 import { serializeForLlm, serializeHistoryMessages } from "./serializer.js";
 import { createScopedExclusiveLane } from "./scoped-exclusive-lane.js";
-import { shrinkSummaryHistory } from "./summary-overflow.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
 import {
   estimateContextOccupancyComposition,
@@ -34,9 +27,9 @@ import {
 } from "./token-estimation.js";
 import {
   decideCompactionRung,
+  findCutPoint,
+  historyGroups,
   getContextUsage,
-  getHistoryToCompress,
-  needsSummaryCompaction,
 } from "./compaction-policy.js";
 import {
   isScopedSessionKeyForSession,
@@ -57,13 +50,21 @@ import type {
   PreparedModelRequest,
   PreparedTurn,
   PrepareTurnInput,
-  PruneResult,
   TokenCounter,
 } from "./types.js";
+import type {
+  PreparedRequestSettings,
+  SummaryRequestRecord,
+} from "../llm-client/types.js";
+import { isContextOverflowError } from "../llm-client/index.js";
 import {
-  isContextOverflowError,
-  type ModelMessage,
-} from "../llm-client/index.js";
+  isRetryableProviderError,
+  ProviderRetryExhaustedError,
+  ProviderStreamInterruptedError,
+  nextRetryDelayMs,
+  DEFAULT_PROVIDER_RETRY_POLICY,
+} from "../llm-client/retry.js";
+import type { ModelMessage } from "../llm-client/index.js";
 import {
   isModelContextPart,
   type MessageWithParts,
@@ -99,11 +100,25 @@ type SummaryCandidate =
   | CompressionResult
   | {
       readonly status: "candidate";
+      readonly compactionId: string;
+      readonly modelOrigin?: AssembledContext["modelOrigin"];
+      readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
+      readonly preparedRequest: PreparedModelRequest;
+      readonly sourceHistory: readonly MessageWithParts[];
+      readonly expectedMessages: readonly MessageWithParts[];
       readonly historyToCompress: readonly MessageWithParts[];
+      readonly compactedPartSnapshot: readonly Part[];
+      readonly keptIds: readonly string[];
+      readonly protectedInputIds: readonly string[];
+      readonly readIds: readonly string[];
+      readonly omittedPartIds: readonly string[];
+      readonly summaryBody: string;
       readonly newTokens: number;
       readonly originalTokens: number;
       readonly savedTokens: number;
       readonly snapshot: string;
+      readonly summaryMessageId: string;
+      readonly requests: readonly SummaryRequestRecord[];
     };
 
 type CommittableSummaryCandidate = Extract<
@@ -112,11 +127,10 @@ type CommittableSummaryCandidate = Extract<
 >;
 
 interface CompactionRequest {
+  readonly request: PreparedModelRequest;
   readonly reasoning?: PrepareTurnInput["reasoning"];
   readonly tailDirectives?: readonly ModelMessage[];
   readonly assembled: AssembledContext;
-  readonly bypassThrashLock: boolean;
-  readonly countTurnCompaction: boolean;
   readonly usageBefore: ContextUsage;
   readonly modelId: string;
   readonly onCompactionStarted?: () => void;
@@ -127,24 +141,21 @@ interface CompactionRequest {
   readonly contextScopeId?: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly isSubagent: boolean;
-  readonly projectForUsage?: (context: AssembledContext) => AssembledContext;
 }
 
 type AcceptedCompactionRequest = CompactionRequest & {
   readonly attemptId: string;
 };
 
-interface ThrashLockEntry {
-  readonly recentSavingsRatios: readonly number[];
-  readonly lockedAtUsageRatio?: number;
+interface CompactionFloor {
+  readonly tokens: number;
+  readonly capacity: string;
 }
 
 interface CompactionOutcome {
   readonly status: CompactStatus;
-  readonly prune?: PruneResult;
   readonly compression?: CompressionResult;
   readonly usageBefore: ContextUsage;
-  readonly usageAfterPrune: ContextUsage;
   readonly usageAfter: ContextUsage;
   readonly projectedContext: AssembledContext;
   readonly error?: string;
@@ -180,7 +191,7 @@ function terminalOutcomeForCompaction(
   if (outcome.status === "inflated") {
     return "inflated";
   }
-  if (outcome.status === "compacted" || outcome.status === "pruned") {
+  if (outcome.status === "compacted") {
     return "success";
   }
   return "skipped";
@@ -263,30 +274,10 @@ export function createContextManager(
     ...(options.compressionThreshold === undefined
       ? {}
       : { summary: options.compressionThreshold }),
-    ...(options.maskConfig?.minUsageRatio === undefined
-      ? {}
-      : { mask: options.maskConfig.minUsageRatio }),
   };
-  const compressionPreserveRatio =
-    options.compressionPreserveRatio ?? COMPRESSION_PRESERVE_RATIO;
-  const pruneProtectTokens = options.pruneProtectTokens ?? PRUNE_PROTECT_TOKENS;
-  const pruneMinimumTokens = options.pruneMinimumTokens ?? PRUNE_MINIMUM_TOKENS;
   const summaryAgentName = options.summaryAgentName ?? SUMMARY_AGENT_NAME;
-  const maxCompactionsPerTurn =
-    options.maxCompactionsPerTurn ?? MAX_COMPACTION_PER_TURN;
-  const thrashWindow = options.thrashWindow ?? THRASH_WINDOW;
-  const thrashMinSavingsRatio =
-    options.thrashMinSavingsRatio ?? THRASH_MIN_SAVINGS_RATIO;
-  const thrashUnlockDelta = options.thrashUnlockDelta ?? THRASH_UNLOCK_DELTA;
   const calibrationFactors = new Map<string, number>();
-  const maskCutoffs = new Map<string, number>();
-  const thrashLocks = new Map<string, ThrashLockEntry>();
-  const turnCompactionCounts = new Map<string, number>();
-  const maskConfig = createMaskConfig({
-    ...options.maskConfig,
-    enabled: options.maskEnabled ?? false,
-    minUsageRatio: compactionThresholds.mask,
-  });
+  const compactionFloors = new Map<string, CompactionFloor>();
   const mutationLane = createScopedExclusiveLane();
 
   function getCalibrationFactor(
@@ -325,31 +316,10 @@ export function createContextManager(
     );
   }
 
-  function resetThrashLock(sessionId: string, contextScopeId?: string): void {
-    thrashLocks.delete(scopedSessionKey({ sessionId, contextScopeId }));
-  }
-
-  function resetTurnCompactionCount(
-    sessionId: string,
-    contextScopeId?: string,
-  ): void {
-    turnCompactionCounts.set(
-      scopedSessionKey({ sessionId, contextScopeId }),
-      0,
-    );
-  }
-
   function disposeSession(sessionId: string): void {
-    for (const map of [calibrationFactors, maskCutoffs, turnCompactionCounts]) {
+    for (const map of [calibrationFactors, compactionFloors]) {
       for (const key of map.keys()) {
-        if (isScopedSessionKeyForSession(key, sessionId)) {
-          map.delete(key);
-        }
-      }
-    }
-    for (const key of thrashLocks.keys()) {
-      if (isScopedSessionKeyForSession(key, sessionId)) {
-        thrashLocks.delete(key);
+        if (isScopedSessionKeyForSession(key, sessionId)) map.delete(key);
       }
     }
   }
@@ -357,82 +327,12 @@ export function createContextManager(
   function disposeScope(sessionId: string, contextScopeId: string): void {
     const key = scopedSessionKey({ sessionId, contextScopeId });
     calibrationFactors.delete(key);
-    maskCutoffs.delete(key);
-    turnCompactionCounts.delete(key);
-    thrashLocks.delete(key);
-  }
-
-  function getTurnCompactionCount(
-    sessionId: string,
-    contextScopeId?: string,
-  ): number {
-    return (
-      turnCompactionCounts.get(
-        scopedSessionKey({ sessionId, contextScopeId }),
-      ) ?? 0
-    );
-  }
-
-  function incrementTurnCompactionCount(
-    sessionId: string,
-    contextScopeId?: string,
-  ): void {
-    turnCompactionCounts.set(
-      scopedSessionKey({ sessionId, contextScopeId }),
-      getTurnCompactionCount(sessionId, contextScopeId) + 1,
-    );
-  }
-
-  function isThrashLocked(
-    sessionId: string,
-    usage: ContextUsage,
-    contextScopeId?: string,
-  ): boolean {
-    const key = scopedSessionKey({ sessionId, contextScopeId });
-    const state = thrashLocks.get(key);
-    if (state?.lockedAtUsageRatio === undefined) {
-      return false;
-    }
-    if (usage.usageRatio >= state.lockedAtUsageRatio + thrashUnlockDelta) {
-      thrashLocks.delete(key);
-      return false;
-    }
-    return true;
-  }
-
-  function recordThrashSavings(input: {
-    readonly compression: CompressionResult;
-    readonly sessionId: string;
-    readonly contextScopeId?: string;
-    readonly usageBefore: ContextUsage;
-  }): void {
-    if (thrashWindow <= 0) {
-      return;
-    }
-    const ratio =
-      input.compression.originalTokens <= 0
-        ? 0
-        : input.compression.savedTokens / input.compression.originalTokens;
-    const key = scopedSessionKey(input);
-    const previous = thrashLocks.get(key);
-    const recentSavingsRatios = [
-      ...(previous?.recentSavingsRatios ?? []),
-      ratio,
-    ].slice(-thrashWindow);
-    const shouldLock =
-      recentSavingsRatios.length >= thrashWindow &&
-      recentSavingsRatios.every(
-        (recentRatio) => recentRatio < thrashMinSavingsRatio,
-      );
-    thrashLocks.set(key, {
-      recentSavingsRatios,
-      ...(shouldLock
-        ? { lockedAtUsageRatio: input.usageBefore.usageRatio }
-        : {}),
-    });
+    compactionFloors.delete(key);
   }
 
   function assembleModelRequest(input: {
+    readonly requestSettings?: PreparedRequestSettings;
+    readonly inputIds?: readonly string[];
     readonly tailDirectives?: readonly ModelMessage[];
     readonly context: AssembledContext;
     readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
@@ -448,6 +348,10 @@ export function createContextManager(
       systemPrompt: input.context.systemPrompt,
     });
     const request: PreparedModelRequest = structuredClone({
+      ...(input.requestSettings === undefined
+        ? {}
+        : { settings: input.requestSettings }),
+      ...(input.inputIds === undefined ? {} : { inputIds: input.inputIds }),
       messages:
         input.tailDirectives === undefined
           ? messages
@@ -479,11 +383,14 @@ export function createContextManager(
         currentTokens,
         input.modelId,
         options.tokenCounter,
+        request.settings?.maxTokens,
       ),
     };
   }
 
   function measureContext(input: {
+    readonly requestSettings?: PreparedRequestSettings;
+    readonly inputIds?: readonly string[];
     readonly tailDirectives?: readonly ModelMessage[];
     readonly context: AssembledContext;
     readonly modelId: string;
@@ -496,6 +403,8 @@ export function createContextManager(
     readonly usage: ContextUsage;
   } {
     const request = assembleModelRequest({
+      requestSettings: input.requestSettings,
+      inputIds: input.inputIds,
       tailDirectives: input.tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: input.context,
@@ -537,81 +446,12 @@ export function createContextManager(
       modelOrigin: input.modelOrigin,
       memory: input.memory,
       history,
-      hasSummary: input.rawHistory.some(isSummaryMessage),
+      hasSummary: history.some(isSummaryMessage),
       isSubagent: input.isSubagent,
       assembledAt: input.assembledAt,
       contextScopeId: input.contextScopeId,
       sessionId: input.sessionId,
     };
-  }
-
-  function withHistory(
-    context: AssembledContext,
-    history: readonly MessageWithParts[],
-  ): AssembledContext {
-    return { ...context, history };
-  }
-
-  function reduceContextForModel(input: {
-    readonly context: AssembledContext;
-    readonly usage: ContextUsage;
-    readonly allowCutoffAdvance: boolean;
-    readonly publishEvent: boolean;
-  }): AssembledContext {
-    const result = reduceForModel({
-      allowCutoffAdvance: input.allowCutoffAdvance,
-      config: maskConfig,
-      cutoff:
-        maskCutoffs.get(
-          scopedSessionKey({
-            contextScopeId: input.context.contextScopeId,
-            sessionId: input.context.sessionId,
-          }),
-        ) ?? 0,
-      history: input.context.history,
-      sessionId: input.context.sessionId,
-      tokenCounter: options.tokenCounter,
-      usage: input.usage,
-    });
-    if (input.allowCutoffAdvance) {
-      maskCutoffs.set(
-        scopedSessionKey({
-          contextScopeId: input.context.contextScopeId,
-          sessionId: input.context.sessionId,
-        }),
-        result.cutoff,
-      );
-    }
-    if (input.publishEvent) {
-      options.bus.publish(ContextEvent.Masked, {
-        ...result.event,
-        ...(input.context.contextScopeId === undefined
-          ? {}
-          : { contextScopeId: input.context.contextScopeId }),
-        maskedPartIds: [...result.event.maskedPartIds],
-      });
-    }
-    return withHistory(input.context, result.history);
-  }
-
-  function projectContextForUsage(
-    context: AssembledContext,
-    modelId: string,
-    tools: PrepareTurnInput["tools"],
-    tailDirectives?: readonly ModelMessage[],
-  ): AssembledContext {
-    return reduceContextForModel({
-      allowCutoffAdvance: false,
-      context,
-      publishEvent: false,
-      usage: measureContext({
-        tailDirectives,
-        context,
-        isSubagent: context.isSubagent,
-        modelId,
-        tools,
-      }).usage,
-    });
   }
 
   async function assemble(
@@ -723,255 +563,422 @@ export function createContextManager(
     });
   }
 
-  async function pruneHistory(
-    identity: {
-      readonly attemptId: string;
-      readonly contextScopeId?: string;
-      readonly sessionId: string;
-    },
-    history: readonly MessageWithParts[],
-  ): Promise<
-    | {
-        readonly compactedAt?: number;
-        readonly compactedPartIds: ReadonlySet<string>;
-        readonly result: PruneResult;
-      }
-    | undefined
-  > {
-    const candidates: { readonly part: Part; readonly tokens: number }[] = [];
-
-    for (const message of history) {
-      if (hasNativeDependencies(message)) continue;
-      for (const part of message.parts) {
-        const output = getCompletedToolOutput(part);
-        if (output !== undefined) {
-          candidates.push({
-            part,
-            tokens: tokenCount(options.tokenCounter, output),
-          });
-        }
-      }
-    }
-
-    let protectedTokens = 0;
-    let protectedCount = 0;
-    const prunable: { readonly part: Part; readonly tokens: number }[] = [];
-
-    for (let index = candidates.length - 1; index >= 0; index -= 1) {
-      const candidate = candidates[index];
-      if (protectedTokens < pruneProtectTokens) {
-        protectedTokens += candidate.tokens;
-        protectedCount += 1;
-      } else {
-        prunable.push(candidate);
-      }
-    }
-
-    const freedTokens = prunable.reduce(
-      (sum, candidate) => sum + candidate.tokens,
-      0,
-    );
-    if (freedTokens < pruneMinimumTokens) {
-      const result = {
-        prunedCount: 0,
-        freedTokens: 0,
-        protectedCount,
-        totalScanned: candidates.length,
-      };
-      options.bus.publish(ContextEvent.Pruned, { ...identity, result });
-      return { compactedPartIds: new Set(), result };
-    }
-
-    const compactedAt = now();
-    const commit = await options.messageManager.commitCompaction({
-      compactedAt,
-      expectedParts: prunable.map((candidate) => candidate.part),
-      ...(identity.contextScopeId === undefined
+  function summaryRequest(
+    request: PreparedModelRequest,
+    bodyTokens = SUMMARY_BODY_TOKENS,
+  ): PreparedModelRequest {
+    const reasoning = request.settings?.reasoning;
+    const maxTokens =
+      reasoning?.budgetTokens !== undefined
+        ? bodyTokens + reasoning.budgetTokens
+        : reasoning === undefined ||
+            reasoning.mode === "none" ||
+            reasoning.mode === "disabled"
+          ? bodyTokens
+          : bodyTokens + SUMMARY_BODY_TOKENS;
+    return deepFreeze({
+      ...request,
+      ...(request.settings === undefined
         ? {}
-        : { contextScopeId: identity.contextScopeId }),
-      sessionId: identity.sessionId,
+        : { settings: { ...request.settings, maxTokens } }),
+      messages: [
+        ...request.messages,
+        { role: "user" as const, content: COMPRESSION_PROMPT },
+      ],
     });
-    if (commit === undefined) {
-      return undefined;
-    }
-    const compactedPartIds = new Set(
-      commit.updatedParts.map((part) => part.id),
-    );
-
-    const result = {
-      prunedCount: prunable.length,
-      freedTokens,
-      protectedCount,
-      totalScanned: candidates.length,
-    };
-    options.bus.publish(ContextEvent.Pruned, { ...identity, result });
-    return { compactedAt, compactedPartIds, result };
   }
 
-  async function generateSummaryCandidate(
+  function summaryUsage(
+    request: PreparedModelRequest,
     identity: {
-      readonly attemptId: string;
-      readonly contextScopeId?: string;
+      readonly modelId: string;
       readonly sessionId: string;
+      readonly contextScopeId?: string;
     },
-    rawHistory: readonly MessageWithParts[],
-    signal?: AbortSignal,
-    modelOrigin?: AssembledContext["modelOrigin"],
-    reasoning?: PrepareTurnInput["reasoning"],
-    modelId?: string,
-  ): Promise<SummaryCandidate> {
-    const activeHistory = getActiveHistory(rawHistory).filter(
-      (message) => !isSummaryMessage(message),
+  ): ContextUsage {
+    const currentTokens = Math.round(
+      estimatePreparedRequestHeuristic(request, options.tokenCounter) *
+        getCalibrationFactor(identity.sessionId, identity.contextScopeId),
     );
-    const activeTokens = estimateHistoryForCompaction(
-      activeHistory,
+    return getContextUsage(
+      currentTokens,
+      identity.modelId,
       options.tokenCounter,
-      modelOrigin,
+      request.settings?.maxTokens ?? SUMMARY_BODY_TOKENS,
     );
-    if (activeHistory.length <= 2) {
-      return {
-        status: "skipped",
-        reason: "too-short",
-        originalTokens: activeTokens,
-        newTokens: activeTokens,
-        savedTokens: 0,
-      };
-    }
+  }
 
-    const historyToCompress = getHistoryToCompress({
-      history: activeHistory,
-      preserveRatio: compressionPreserveRatio,
-      modelOrigin,
-      tokenCounter: options.tokenCounter,
-    });
+  function isRetryableSummaryError(error: unknown): boolean {
+    if (isAbortError(error) || isContextOverflowError(error)) return false;
+    if (error instanceof ProviderRetryExhaustedError)
+      return isRetryableSummaryError(error.cause);
+    if (error instanceof ProviderStreamInterruptedError)
+      return error.source === "transport";
+    return isRetryableProviderError(error);
+  }
+
+  function fitsRequest(
+    usage: ContextUsage,
+    requestedOutputTokens?: number,
+  ): boolean {
+    return (
+      usage.currentTokens +
+        (requestedOutputTokens ?? usage.reservedOutputTokens ?? 0) +
+        (usage.safetyMarginTokens ?? 0) <=
+      usage.contextLimit
+    );
+  }
+
+  function candidateText(
+    body: string,
+    historyToCompress: readonly MessageWithParts[],
+    omittedPartIds: readonly string[],
+  ): string {
+    const text = appendFileOpsSummary(body, extractFileOps(historyToCompress));
+    return omittedPartIds.length === 0
+      ? text
+      : `${text}\n\n[Capacity limit: ${String(omittedPartIds.length)} earlier parts were omitted without being summarized.]`;
+  }
+
+  function reviseCandidate(
+    candidate: CommittableSummaryCandidate,
+    keptIds: readonly string[],
+    readIds = candidate.readIds,
+    summaryBody = candidate.summaryBody,
+  ): CommittableSummaryCandidate {
+    const kept = new Set(keptIds);
+    const read = new Set(readIds);
+    const historyToCompress = candidate.sourceHistory.filter(
+      (message) => isSummaryMessage(message) || !kept.has(message.info.id),
+    );
+    const compactedPartSnapshot = historyToCompress.flatMap(
+      (message) => message.parts,
+    );
+    const omittedPartIds = historyToCompress
+      .filter(
+        (message) => !isSummaryMessage(message) && !read.has(message.info.id),
+      )
+      .flatMap((message) => message.parts.map((part) => part.id));
+    const snapshot = candidateText(
+      summaryBody,
+      historyToCompress,
+      omittedPartIds,
+    );
     const originalTokens = estimateHistoryForCompaction(
       historyToCompress,
       options.tokenCounter,
-      modelOrigin,
+      candidate.modelOrigin,
+      candidate.activeReasoningByMessageId,
     );
-    if (historyToCompress.length === 0 || originalTokens === 0) {
-      return {
-        status: "skipped",
-        reason: "too-short",
-        originalTokens,
-        newTokens: originalTokens,
-        savedTokens: 0,
-      };
-    }
-
-    let summaryHistory = historyToCompress;
-    let snapshot = "";
-    let newTokens = originalTokens;
-    let providerAttempts = 0;
-    let droppedRounds = 0;
-    const prompts = [COMPRESSION_PROMPT, AGGRESSIVE_COMPRESSION_PROMPT];
-    for (const prompt of prompts) {
-      let generatedForPrompt = false;
-      while (providerAttempts < MAX_SUMMARY_PROVIDER_ATTEMPTS) {
-        providerAttempts += 1;
-        options.bus.publish(ContextEvent.CompactionProgress, {
-          ...identity,
-          attempt: providerAttempts,
-          droppedRounds,
-          estimatedHistoryTokens: tokenCount(
-            options.tokenCounter,
-            serializeHistory(summaryHistory, { includeModelContext: false }),
-          ),
-        });
-        try {
-          snapshot = await options.llmClient.generateSummary({
-            modelId,
-            ...scopedEventIdentity(identity.sessionId, identity.contextScopeId),
-            prompt,
-            systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
-            history: summaryHistory,
-            ...(reasoning === undefined ? {} : { reasoning }),
-            ...(signal === undefined ? {} : { signal }),
-          });
-          if (snapshot.trim() === "")
-            return {
-              status: "failed",
-              originalTokens,
-              newTokens: originalTokens,
-              savedTokens: 0,
-              error:
-                "Summary response was empty; original history remains active",
-            };
-          generatedForPrompt = true;
-          break;
-        } catch (error) {
-          if (isAbortError(error)) {
-            throw error;
-          }
-          if (!isContextOverflowError(error)) {
-            return {
-              status: "failed",
-              originalTokens,
-              newTokens: originalTokens,
-              savedTokens: 0,
-              error: errorToMessage(error),
-            };
-          }
-          if (providerAttempts >= MAX_SUMMARY_PROVIDER_ATTEMPTS) {
-            return {
-              status: "failed",
-              originalTokens,
-              newTokens: originalTokens,
-              savedTokens: 0,
-              error: `Summary context overflow recovery exhausted after ${String(providerAttempts)} attempts`,
-              reason: "summary-overflow-exhausted",
-            };
-          }
-          const shrink = shrinkSummaryHistory({
-            history: summaryHistory,
-            tokenCounter: options.tokenCounter,
-          });
-          if (shrink === undefined) {
-            return {
-              status: "failed",
-              originalTokens,
-              newTokens: originalTokens,
-              savedTokens: 0,
-              error:
-                "Summary context overflow recovery stopped to preserve the most recent user round",
-              reason: "summary-overflow-minimum",
-            };
-          }
-          summaryHistory = shrink.history;
-          droppedRounds += shrink.droppedRounds;
-        }
-      }
-      if (!generatedForPrompt) {
-        break;
-      }
-      snapshot = appendFileOpsSummary(
-        snapshot,
-        extractFileOps(historyToCompress),
-      );
-
-      newTokens = tokenCount(options.tokenCounter, snapshot);
-      if (newTokens < originalTokens) {
-        break;
-      }
-    }
-
-    if (newTokens >= originalTokens) {
-      return {
-        status: "inflated",
-        originalTokens,
-        newTokens,
-        savedTokens: 0,
-      };
-    }
-
+    const newTokens = tokenCount(options.tokenCounter, snapshot);
     return {
-      status: "candidate",
+      ...candidate,
       historyToCompress,
+      compactedPartSnapshot,
+      keptIds,
+      readIds,
+      omittedPartIds,
+      summaryBody,
+      snapshot,
       originalTokens,
       newTokens,
       savedTokens: originalTokens - newTokens,
-      snapshot,
     };
+  }
+
+  function requestForSummaryHistory(
+    req: AcceptedCompactionRequest,
+    history: readonly MessageWithParts[],
+    bodyTokens: number,
+  ): PreparedModelRequest {
+    const context = { ...req.assembled, history };
+    return summaryRequest(
+      assembleModelRequest({
+        requestSettings: req.request.settings,
+        inputIds: req.request.inputIds,
+        tailDirectives: req.tailDirectives,
+        activeReasoningByMessageId: req.activeReasoningByMessageId,
+        context,
+        isSubagent: req.isSubagent,
+        tools: req.tools,
+      }),
+      bodyTokens,
+    );
+  }
+
+  async function generateSummaryCandidate(
+    req: AcceptedCompactionRequest,
+  ): Promise<SummaryCandidate> {
+    const sourceHistory = structuredClone(req.assembled.history);
+    const { summaries, nonSummary } = partitionSummary(sourceHistory);
+    const cut = findCutPoint({
+      history: nonSummary,
+      keepRecentTokens: KEEP_RECENT_TOKENS,
+      modelOrigin: req.assembled.modelOrigin,
+      activeReasoningByMessageId: req.activeReasoningByMessageId,
+      tokenCounter: options.tokenCounter,
+    });
+    if (cut.firstKeptIndex === 0 && summaries.length < 2)
+      return {
+        status: "skipped",
+        reason: "too-short",
+        originalTokens: 0,
+        newTokens: 0,
+        savedTokens: 0,
+      };
+    const sourceIds = new Set(sourceHistory.map((message) => message.info.id));
+    const expectedMessages = (
+      await loadModelHistory(req.sessionId, {
+        contextScopeId: req.contextScopeId,
+      })
+    ).filter((message) => sourceIds.has(message.info.id));
+    if (
+      JSON.stringify(getActiveHistory(expectedMessages)) !==
+      JSON.stringify(sourceHistory)
+    )
+      return {
+        status: "failed",
+        error: "Context changed before summary preparation",
+        originalTokens: 0,
+        newTokens: 0,
+        savedTokens: 0,
+      };
+    const requests: SummaryRequestRecord[] = [];
+    let candidate: CommittableSummaryCandidate = {
+      status: "candidate",
+      compactionId: req.attemptId,
+      preparedRequest: req.request,
+      modelOrigin: req.assembled.modelOrigin,
+      activeReasoningByMessageId: req.activeReasoningByMessageId,
+      sourceHistory,
+      expectedMessages: structuredClone(expectedMessages),
+      historyToCompress: [],
+      compactedPartSnapshot: [],
+      keptIds: cut.keptMessages.map((message) => message.info.id),
+      protectedInputIds: req.request.inputIds ?? [],
+      readIds: sourceHistory.map((message) => message.info.id),
+      omittedPartIds: [],
+      summaryBody: "",
+      snapshot: "",
+      summaryMessageId: randomUUID(),
+      originalTokens: 0,
+      newTokens: 0,
+      savedTokens: 0,
+      requests,
+    };
+    candidate = reviseCandidate(candidate, candidate.keptIds);
+    const minimumKeptIds = findCutPoint({
+      history: cut.keptMessages,
+      keepRecentTokens: 0,
+      modelOrigin: req.assembled.modelOrigin,
+      activeReasoningByMessageId: req.activeReasoningByMessageId,
+      tokenCounter: options.tokenCounter,
+    }).keptMessages.map((message) => message.info.id);
+    const fail = (error: string): CompressionResult => {
+      logUnusedSummaryRequests(requests, "failed");
+      return {
+        status: "failed",
+        originalTokens: candidate.originalTokens,
+        newTokens: candidate.originalTokens,
+        savedTokens: 0,
+        error,
+      };
+    };
+    let readHistory = sourceHistory;
+    const prepare = (): boolean => {
+      candidate = reviseCandidate(
+        candidate,
+        candidate.keptIds,
+        readHistory.map((message) => message.info.id),
+      );
+      // Mode B can retire more of the tail, so reserve its possible file-operation suffix now.
+      const hostText = reviseCandidate(candidate, minimumKeptIds).snapshot;
+      const bodyTokens =
+        SUMMARY_BODY_TOKENS - tokenCount(options.tokenCounter, hostText);
+      if (bodyTokens <= 0) return false;
+      // Preserve the ordinary prepared bytes when no history was removed.
+      const preparedRequest =
+        readHistory.length === sourceHistory.length
+          ? summaryRequest(req.request, bodyTokens)
+          : requestForSummaryHistory(req, readHistory, bodyTokens);
+      candidate = { ...candidate, preparedRequest };
+      return true;
+    };
+    const trimForCapacity = (providerOverflow?: unknown): boolean => {
+      const usage = summaryUsage(candidate.preparedRequest, req);
+      let gap =
+        usage.currentTokens +
+        (candidate.preparedRequest.settings?.maxTokens ?? SUMMARY_BODY_TOKENS) +
+        (usage.safetyMarginTokens ?? 0) -
+        usage.contextLimit;
+      if (gap <= 0 && providerOverflow === undefined) return true;
+      const message = errorToMessage(providerOverflow);
+      const openaiGap =
+        /maximum context length is (\d+) tokens[\s\S]*?(?:requested|resulted in) (\d+) tokens/iu.exec(
+          message,
+        );
+      const anthropicGap =
+        /prompt is too long:\s*(\d+) tokens\s*>\s*(\d+)/iu.exec(message);
+      const reportedGap = openaiGap
+        ? Number(openaiGap[2]) - Number(openaiGap[1])
+        : anthropicGap
+          ? Number(anthropicGap[1]) - Number(anthropicGap[2])
+          : 0;
+      // Without a reported gap, only the next complete older group is known to be removable.
+      gap = Math.max(1, gap, reportedGap);
+      const kept = new Set(candidate.keptIds);
+      const removable = historyGroups(nonSummary).filter((group) =>
+        group.every(
+          (message) =>
+            !kept.has(message.info.id) &&
+            candidate.readIds.includes(message.info.id),
+        ),
+      );
+      const removed = new Set<string>();
+      let removedTokens = 0;
+      for (const group of removable) {
+        for (const message of group) removed.add(message.info.id);
+        removedTokens +=
+          estimateHistoryForCompaction(
+            group,
+            options.tokenCounter,
+            req.assembled.modelOrigin,
+            req.activeReasoningByMessageId,
+          ) * getCalibrationFactor(req.sessionId, req.contextScopeId);
+        if (removedTokens >= gap) break;
+      }
+      if (removed.size === 0) return false;
+      readHistory = readHistory.filter(
+        (message) => !removed.has(message.info.id),
+      );
+      return (
+        prepare() &&
+        fitsRequest(
+          summaryUsage(candidate.preparedRequest, req),
+          candidate.preparedRequest.settings?.maxTokens ?? SUMMARY_BODY_TOKENS,
+        )
+      );
+    };
+    if (!prepare() || !trimForCapacity())
+      return fail(
+        "Summary request exceeds the model input budget; protected history remains active",
+      );
+
+    const observe = (record: SummaryRequestRecord): void => {
+      const index = requests.findIndex(
+        (existing) => existing.requestId === record.requestId,
+      );
+      if (index < 0) requests.push(record);
+      else requests[index] = record;
+    };
+    for (let attempt = 1; attempt <= MAX_SUMMARY_PROVIDER_ATTEMPTS; attempt++) {
+      if (req.signal?.aborted) {
+        logUnusedSummaryRequests(requests, "aborted");
+        req.signal.throwIfAborted();
+      }
+      options.bus.publish(ContextEvent.CompactionProgress, {
+        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+        attemptId: req.attemptId,
+        attempt,
+        estimatedHistoryTokens: estimateHistoryForCompaction(
+          readHistory,
+          options.tokenCounter,
+          req.assembled.modelOrigin,
+          req.activeReasoningByMessageId,
+        ),
+      });
+      try {
+        const result = await options.llmClient.generateSummary({
+          ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+          request: candidate.preparedRequest,
+          summaryMessageId: candidate.summaryMessageId,
+          compactionId: req.attemptId,
+          attempt,
+          onRequestRecord: observe,
+          ...(req.signal === undefined ? {} : { signal: req.signal }),
+        });
+        result.requests.forEach(observe);
+        const body = result.text.trim();
+        if (body === "")
+          throw new Error(
+            "Summary response was empty; original history remains active",
+          );
+        candidate = reviseCandidate(
+          candidate,
+          candidate.keptIds,
+          candidate.readIds,
+          body,
+        );
+        if (candidate.newTokens > SUMMARY_BODY_TOKENS) {
+          logUnusedSummaryRequests(requests, "summary-body-limit");
+          return {
+            status: "failed",
+            originalTokens: candidate.originalTokens,
+            newTokens: candidate.newTokens,
+            savedTokens: 0,
+            error: "Summary body exceeds 16384 tokens",
+          };
+        }
+        return candidate;
+      } catch (error) {
+        if (isAbortError(error) || req.signal?.aborted) {
+          logUnusedSummaryRequests(requests, "aborted");
+          throw error;
+        }
+        if (attempt < MAX_SUMMARY_PROVIDER_ATTEMPTS) {
+          if (isContextOverflowError(error) && trimForCapacity(error)) continue;
+          if (isRetryableSummaryError(error)) {
+            const cause =
+              error instanceof ProviderRetryExhaustedError ||
+              error instanceof ProviderStreamInterruptedError
+                ? error.cause
+                : error;
+            try {
+              await sleep(
+                nextRetryDelayMs({
+                  attempt,
+                  error: cause,
+                  policy: DEFAULT_PROVIDER_RETRY_POLICY,
+                }),
+                undefined,
+                { signal: req.signal },
+              );
+            } catch (aborted) {
+              logUnusedSummaryRequests(requests, "aborted");
+              throw aborted;
+            }
+            continue;
+          }
+        }
+        return fail(errorToMessage(error));
+      }
+    }
+    return fail("Summary provider attempts exhausted");
+  }
+
+  function logUnusedSummaryRequests(
+    requests: readonly SummaryRequestRecord[],
+    reason: UnusedSummaryReason,
+  ): void {
+    for (const request of requests) {
+      const usage = request.usage;
+      emitDiagnostic(options.logger ?? NOOP_LOGGER, contextSummaryUnused, {
+        operationId: request.requestId,
+        compactionId: request.compactionId,
+        attempt: request.attempt,
+        reason,
+        inputTokens: usage?.inputTokens,
+        outputTokens: usage?.outputTokens,
+        totalTokens: usage?.totalTokens,
+        reasoningTokens: usage?.reasoningTokens,
+        cacheReadTokens: usage?.inputBreakdown?.observed.cacheRead
+          ? usage.inputBreakdown.cacheRead
+          : undefined,
+        cacheWriteTokens: usage?.inputBreakdown?.observed.cacheWrite
+          ? usage.inputBreakdown.cacheWrite
+          : undefined,
+      });
+    }
   }
 
   async function commitSummaryCandidate(
@@ -981,22 +988,39 @@ export function createContextManager(
       readonly sessionId: string;
     },
     candidate: CommittableSummaryCandidate,
+    usageBefore: ContextUsage,
+    usageAfter: ContextUsage,
+    signal?: AbortSignal,
   ): Promise<CompressionResult | undefined> {
     const compactedAt = now();
     const commit = await options.messageManager.commitCompaction({
       compactedAt,
-      expectedParts: candidate.historyToCompress.flatMap((message) =>
-        message.parts
-          .filter((part) => part.time?.compacted === undefined)
-          .map((part) => part),
-      ),
+      expectedParts: candidate.compactedPartSnapshot,
+      expectedMessages: candidate.expectedMessages,
+      ...(signal === undefined ? {} : { signal }),
       ...(identity.contextScopeId === undefined
         ? {}
         : { contextScopeId: identity.contextScopeId }),
       sessionId: identity.sessionId,
       summary: {
+        messageId: candidate.summaryMessageId,
         agent: summaryAgentName,
         text: candidate.snapshot,
+        modelRequests: candidate.requests.filter(
+          (record) => record.outcome === "success",
+        ),
+        metadata: {
+          compactionId: candidate.compactionId,
+          readIds: candidate.readIds,
+          keptIds: candidate.keptIds,
+          protectedInputIds: candidate.protectedInputIds,
+          omittedPartIds: candidate.omittedPartIds,
+          usageBeforeTokens: usageBefore.currentTokens,
+          usageAfterTokens: usageAfter.currentTokens,
+          ...(candidate.omittedPartIds.length === 0
+            ? {}
+            : { omissionReason: "summary-capacity" }),
+        },
       },
     });
     if (commit === undefined) {
@@ -1012,6 +1036,8 @@ export function createContextManager(
       newTokens: candidate.newTokens,
       savedTokens: candidate.savedTokens,
       summaryMessageId: commit.summary.message.id,
+      requests: candidate.requests,
+      omittedParts: candidate.omittedPartIds.length,
     } satisfies CompressionResult;
     options.bus.publish(ContextEvent.Compressed, { ...identity, result });
     return result;
@@ -1079,38 +1105,11 @@ export function createContextManager(
     };
   }
 
-  function pruneReducedContext(input: {
-    readonly pruneResult: PruneResult;
-    readonly usageBefore: ContextUsage;
-    readonly usageAfterPrune: ContextUsage;
-  }): boolean {
-    return (
-      input.pruneResult.prunedCount > 0 &&
-      input.usageAfterPrune.currentTokens < input.usageBefore.currentTokens
-    );
-  }
-
-  function statusForUncommittedCompression(input: {
-    readonly compression: CompressionResult;
-    readonly pruneResult: PruneResult;
-    readonly usageBefore: ContextUsage;
-    readonly usageAfterPrune: ContextUsage;
-  }): CompactStatus {
-    if (input.compression.status === "failed") {
-      return "failed";
-    }
-    if (
-      pruneReducedContext({
-        pruneResult: input.pruneResult,
-        usageBefore: input.usageBefore,
-        usageAfterPrune: input.usageAfterPrune,
-      })
-    ) {
-      return "pruned";
-    }
-    if (input.compression.status === "inflated") {
-      return "inflated";
-    }
+  function statusForUncommittedCompression(
+    compression: CompressionResult,
+  ): CompactStatus {
+    if (compression.status === "failed") return "failed";
+    if (compression.status === "inflated") return "inflated";
     return "not-needed";
   }
 
@@ -1139,11 +1138,13 @@ export function createContextManager(
       status: outcome.status,
       usageBefore: outcome.usageBefore,
       usageAfter: outcome.usageAfter,
-      ...(outcome.prune === undefined ? {} : { prune: outcome.prune }),
       ...(outcome.compression === undefined
         ? {}
         : { compression: outcome.compression }),
       ...(outcome.error === undefined ? {} : { error: outcome.error }),
+      ...(outcome.compression?.omittedParts === undefined
+        ? {}
+        : { omittedParts: outcome.compression.omittedParts }),
     };
   }
 
@@ -1169,9 +1170,11 @@ export function createContextManager(
     return {
       context,
       usage: measureContext({
+        requestSettings: req.request.settings,
+        inputIds: req.request.inputIds,
         tailDirectives: req.tailDirectives,
         activeReasoningByMessageId: req.activeReasoningByMessageId,
-        context: req.projectForUsage?.(context) ?? context,
+        context,
         isSubagent: req.isSubagent,
         modelId: req.modelId,
         tools: req.tools,
@@ -1182,301 +1185,239 @@ export function createContextManager(
   async function runCompactionCore(
     req: AcceptedCompactionRequest,
   ): Promise<CompactionOutcome> {
-    const thrashLocked =
-      !req.bypassThrashLock &&
-      isThrashLocked(req.sessionId, req.usageBefore, req.contextScopeId);
-    const compactionCount = getTurnCompactionCount(
-      req.sessionId,
-      req.contextScopeId,
-    );
-    const perTurnCapped =
+    const preparedSummary = summaryRequest(req.request);
+    const summaryCapacity = summaryUsage(preparedSummary, req);
+    const ordinaryOutput =
+      req.request.settings?.maxTokens ??
+      req.usageBefore.reservedOutputTokens ??
+      0;
+    // Before the ordinary step, leave room for its maximum output and a later summary request.
+    const capacityPressure =
+      !fitsRequest(req.usageBefore, ordinaryOutput) ||
+      summaryCapacity.currentTokens + ordinaryOutput >=
+        (summaryCapacity.inputBudgetTokens ?? summaryCapacity.contextLimit);
+    const key = scopedSessionKey(req);
+    const capacity = JSON.stringify([
+      req.modelId,
+      req.assembled.modelOrigin,
+      req.usageBefore.contextLimit,
+      ordinaryOutput,
+      req.usageBefore.safetyMarginTokens ?? 0,
+      preparedSummary.settings?.maxTokens,
+    ]);
+    const floor = compactionFloors.get(key);
+    const floorApplies =
       !req.force &&
-      !thrashLocked &&
-      needsSummaryCompaction(req.usageBefore, compactionThresholds) &&
-      compactionCount >= maxCompactionsPerTurn;
-    const rung = decideCompactionRung({
-      compactionCount,
-      force: req.force,
-      maxPerTurn: maxCompactionsPerTurn,
-      thresholds: compactionThresholds,
-      thrashLocked,
-      usage: req.usageBefore,
-    });
-
-    if (rung === "none" || rung === "mask") {
+      floor?.capacity === capacity &&
+      req.usageBefore.currentTokens <= floor.tokens;
+    const rung = floorApplies
+      ? "none"
+      : decideCompactionRung({
+          force: req.force,
+          capacityPressure,
+          thresholds: compactionThresholds,
+          usage: req.usageBefore,
+        });
+    if (rung === "none") {
       options.bus.publish(ContextEvent.CompactSkipped, {
         ...scopedEventIdentity(req.sessionId, req.contextScopeId),
         attemptId: req.attemptId,
-        reason: thrashLocked
-          ? "thrash-locked"
-          : perTurnCapped
-            ? "per-turn-cap"
-            : "not-needed",
+        reason: "not-needed",
         usage: req.usageBefore,
       });
       return {
         status: "not-needed",
         usageBefore: req.usageBefore,
-        usageAfterPrune: req.usageBefore,
         usageAfter: req.usageBefore,
         projectedContext: req.assembled,
       };
     }
-
     req.onCompactionStarted?.();
-
-    if (req.countTurnCompaction) {
-      incrementTurnCompactionCount(req.sessionId, req.contextScopeId);
+    let candidate = await generateSummaryCandidate(req);
+    if (req.signal?.aborted) {
+      if (candidate.status === "candidate")
+        logUnusedSummaryRequests(candidate.requests, "aborted");
+      req.signal.throwIfAborted();
     }
-
-    const pruneOutcome = await pruneHistory(
-      {
-        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
-        attemptId: req.attemptId,
-      },
-      req.assembled.history,
-    );
-    if (pruneOutcome === undefined) {
-      const current = await reloadCompactionState(req);
-      options.bus.publish(ContextEvent.CompactSkipped, {
-        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
-        attemptId: req.attemptId,
-        reason: "stale",
-        usage: current.usage,
-      });
-      return {
-        status: "not-needed",
-        usageBefore: req.usageBefore,
-        usageAfterPrune: current.usage,
-        usageAfter: current.usage,
-        projectedContext: current.context,
-      };
-    }
-    const historyAfterPrune = markCompactedParts(
-      req.assembled.history,
-      pruneOutcome.compactedPartIds,
-      pruneOutcome.compactedAt,
-    );
-    const afterPrune = assembleFromRawHistory({
-      modelOrigin: req.assembled.modelOrigin,
-      assembledAt: now(),
-      isSubagent: req.isSubagent,
-      memory: req.assembled.memory,
-      rawHistory: historyAfterPrune,
-      contextScopeId: req.contextScopeId,
-      sessionId: req.sessionId,
-      systemPrompt: req.assembled.systemPrompt,
-    });
-    const usageAfterPrune = measureContext({
-      tailDirectives: req.tailDirectives,
-      activeReasoningByMessageId: req.activeReasoningByMessageId,
-      context: req.projectForUsage?.(afterPrune) ?? afterPrune,
-      isSubagent: req.isSubagent,
-      modelId: req.modelId,
-      tools: req.tools,
-    }).usage;
-
-    const afterPruneRung = decideCompactionRung({
-      force: false,
-      thresholds: compactionThresholds,
-      usage: usageAfterPrune,
-    });
-    if (rung !== "force" && afterPruneRung !== "prune-summary") {
-      return {
-        status: pruneOutcome.result.prunedCount > 0 ? "pruned" : "not-needed",
-        prune: pruneOutcome.result,
-        usageBefore: req.usageBefore,
-        usageAfterPrune,
-        usageAfter: usageAfterPrune,
-        projectedContext: afterPrune,
-      };
-    }
-
-    const candidate = await generateSummaryCandidate(
-      {
-        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
-        attemptId: req.attemptId,
-      },
-      afterPrune.history,
-      req.signal,
-      afterPrune.modelOrigin,
-      req.reasoning,
-      req.modelId,
-    );
-    req.signal?.throwIfAborted();
     if (candidate.status !== "candidate") {
-      if (candidate.status === "inflated") {
-        recordThrashSavings({
+      if (
+        candidate.status === "skipped" &&
+        !fitsRequest(req.usageBefore, ordinaryOutput)
+      ) {
+        return {
+          status: "failed",
           compression: candidate,
-          contextScopeId: req.contextScopeId,
-          sessionId: req.sessionId,
+          error:
+            "Ordinary request exceeds the model input budget and there is no older group to compact",
           usageBefore: req.usageBefore,
-        });
+          usageAfter: req.usageBefore,
+          projectedContext: req.assembled,
+        };
       }
       publishCompactSkippedForCompression({
         attemptId: req.attemptId,
         compression: candidate,
         contextScopeId: req.contextScopeId,
         sessionId: req.sessionId,
-        usage: usageAfterPrune,
+        usage: req.usageBefore,
       });
       return {
-        status: statusForUncommittedCompression({
-          compression: candidate,
-          pruneResult: pruneOutcome.result,
-          usageBefore: req.usageBefore,
-          usageAfterPrune,
-        }),
-        prune: pruneOutcome.result,
+        status: statusForUncommittedCompression(candidate),
         compression: candidate,
         usageBefore: req.usageBefore,
-        usageAfterPrune,
-        usageAfter: usageAfterPrune,
-        projectedContext: afterPrune,
+        usageAfter: req.usageBefore,
+        projectedContext: req.assembled,
         ...(candidate.status === "failed" ? { error: candidate.error } : {}),
       };
     }
-
-    const projectedContext = projectSummaryCandidate({
-      assembled: afterPrune,
-      candidate,
-      compactedAt: afterPrune.assembledAt,
-    });
-    const projectedUsage = measureContext({
-      tailDirectives: req.tailDirectives,
-      activeReasoningByMessageId: req.activeReasoningByMessageId,
-      context: req.projectForUsage?.(projectedContext) ?? projectedContext,
-      isSubagent: req.isSubagent,
-      modelId: req.modelId,
-      tools: req.tools,
-    }).usage;
-    if (projectedUsage.currentTokens >= usageAfterPrune.currentTokens) {
+    const measureCandidate = (
+      value: CommittableSummaryCandidate,
+    ): ContextUsage => {
+      const context = projectSummaryCandidate({
+        assembled: req.assembled,
+        candidate: value,
+        compactedAt: req.assembled.assembledAt,
+      });
+      return measureContext({
+        requestSettings: req.request.settings,
+        inputIds: req.request.inputIds,
+        tailDirectives: req.tailDirectives,
+        activeReasoningByMessageId: req.activeReasoningByMessageId,
+        context,
+        isSubagent: req.isSubagent,
+        modelId: req.modelId,
+        tools: req.tools,
+      }).usage;
+    };
+    let projectedUsage = measureCandidate(candidate);
+    if (!fitsRequest(projectedUsage, ordinaryOutput)) {
+      const keptIds = new Set(candidate.keptIds);
+      const keptHistory = candidate.sourceHistory.filter((message) =>
+        keptIds.has(message.info.id),
+      );
+      // Measure fixed material through the same request builder, including protected input and protocol overhead.
+      const fixedUsage = measureCandidate(reviseCandidate(candidate, []));
+      const available = Math.max(
+        0,
+        projectedUsage.contextLimit -
+          ordinaryOutput -
+          (projectedUsage.safetyMarginTokens ?? 0) -
+          fixedUsage.currentTokens,
+      );
+      const cut = findCutPoint({
+        history: keptHistory,
+        keepRecentTokens: Math.min(
+          KEEP_RECENT_TOKENS,
+          available / getCalibrationFactor(req.sessionId, req.contextScopeId),
+        ),
+        modelOrigin: req.assembled.modelOrigin,
+        activeReasoningByMessageId: req.activeReasoningByMessageId,
+        tokenCounter: options.tokenCounter,
+      });
+      candidate = reviseCandidate(
+        candidate,
+        cut.keptMessages.map((message) => message.info.id),
+      );
+      projectedUsage = measureCandidate(candidate);
+    }
+    if (
+      candidate.newTokens > SUMMARY_BODY_TOKENS ||
+      !fitsRequest(projectedUsage, ordinaryOutput)
+    ) {
+      logUnusedSummaryRequests(candidate.requests, "failed");
+      const error =
+        candidate.newTokens > SUMMARY_BODY_TOKENS
+          ? "Summary body exceeds 16384 tokens"
+          : "Compacted request exceeds the model input budget with the latest complete group preserved";
+      return {
+        status: "failed",
+        error,
+        usageBefore: req.usageBefore,
+        usageAfter: req.usageBefore,
+        projectedContext: req.assembled,
+        compression: {
+          status: "failed",
+          error,
+          originalTokens: candidate.originalTokens,
+          newTokens: candidate.newTokens,
+          savedTokens: 0,
+        },
+      };
+    }
+    if (projectedUsage.currentTokens >= req.usageBefore.currentTokens) {
+      logUnusedSummaryRequests(candidate.requests, "inflated");
       const compression = compressionFromRejectedCandidate(candidate);
-      recordThrashSavings({
+      publishCompactSkippedForCompression({
+        attemptId: req.attemptId,
         compression,
         contextScopeId: req.contextScopeId,
         sessionId: req.sessionId,
-        usageBefore: req.usageBefore,
-      });
-      options.bus.publish(ContextEvent.CompactSkipped, {
-        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
-        attemptId: req.attemptId,
-        reason: "inflated",
-        usage: usageAfterPrune,
+        usage: req.usageBefore,
       });
       return {
-        status: statusForUncommittedCompression({
-          compression,
-          pruneResult: pruneOutcome.result,
-          usageBefore: req.usageBefore,
-          usageAfterPrune,
-        }),
-        prune: pruneOutcome.result,
+        status: "inflated",
         compression,
         usageBefore: req.usageBefore,
-        usageAfterPrune,
-        usageAfter: usageAfterPrune,
-        projectedContext: afterPrune,
+        usageAfter: req.usageBefore,
+        projectedContext: req.assembled,
       };
     }
-
-    req.signal?.throwIfAborted();
-    const compression = await commitSummaryCandidate(
-      {
-        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
-        attemptId: req.attemptId,
-      },
-      candidate,
-    );
+    let compression: CompressionResult | undefined;
+    try {
+      req.signal?.throwIfAborted();
+      compression = await commitSummaryCandidate(
+        {
+          ...scopedEventIdentity(req.sessionId, req.contextScopeId),
+          attemptId: req.attemptId,
+        },
+        candidate,
+        req.usageBefore,
+        projectedUsage,
+        req.signal,
+      );
+    } catch (error) {
+      logUnusedSummaryRequests(
+        candidate.requests,
+        isAbortError(error) ? "aborted" : "failed",
+      );
+      throw error;
+    }
     if (compression === undefined) {
-      const staleCompression = {
-        newTokens: candidate.newTokens,
-        originalTokens: candidate.originalTokens,
-        reason: "stale",
-        savedTokens: 0,
-        status: "skipped",
-      } satisfies CompressionResult;
+      logUnusedSummaryRequests(candidate.requests, "stale");
       const current = await reloadCompactionState(req);
-      options.bus.publish(ContextEvent.CompactSkipped, {
-        ...scopedEventIdentity(req.sessionId, req.contextScopeId),
-        attemptId: req.attemptId,
-        reason: "stale",
-        usage: current.usage,
-      });
+      const error =
+        "Context changed before the compaction transaction committed";
       return {
-        compression: staleCompression,
-        prune: pruneOutcome.result,
+        status: "failed",
+        error,
+        compression: {
+          status: "failed",
+          error,
+          newTokens: candidate.newTokens,
+          originalTokens: candidate.originalTokens,
+          savedTokens: 0,
+        },
         projectedContext: current.context,
-        status: pruneReducedContext({
-          pruneResult: pruneOutcome.result,
-          usageAfterPrune,
-          usageBefore: req.usageBefore,
-        })
-          ? "pruned"
-          : "not-needed",
         usageAfter: current.usage,
-        usageAfterPrune,
         usageBefore: req.usageBefore,
       };
     }
-    recordThrashSavings({
-      compression,
-      contextScopeId: req.contextScopeId,
-      sessionId: req.sessionId,
-      usageBefore: req.usageBefore,
+    // The transaction is the success boundary. Later input or Stop cannot undo this fact.
+    logUnusedSummaryRequests(
+      candidate.requests.filter((record) => record.outcome !== "success"),
+      "failed",
+    );
+    compactionFloors.set(key, {
+      tokens: projectedUsage.currentTokens,
+      capacity,
     });
-    const committedRawHistory = await loadModelHistory(req.sessionId, {
-      contextScopeId: req.contextScopeId,
-    });
-    const committedContext = assembleFromRawHistory({
-      modelOrigin: req.assembled.modelOrigin,
-      assembledAt: now(),
-      isSubagent: req.isSubagent,
-      memory: req.assembled.memory,
-      rawHistory: committedRawHistory,
-      contextScopeId: req.contextScopeId,
-      sessionId: req.sessionId,
-      systemPrompt: req.assembled.systemPrompt,
-    });
-    const usageAfter = measureContext({
-      tailDirectives: req.tailDirectives,
-      activeReasoningByMessageId: req.activeReasoningByMessageId,
-      context: req.projectForUsage?.(committedContext) ?? committedContext,
-      isSubagent: req.isSubagent,
-      modelId: req.modelId,
-      tools: req.tools,
-    }).usage;
-    if (compression.status === "compressed") {
-      maskCutoffs.set(
-        scopedSessionKey({
-          contextScopeId: req.contextScopeId,
-          sessionId: req.sessionId,
-        }),
-        0,
-      );
-    }
-
+    const current = await reloadCompactionState(req);
     return {
-      status:
-        compression.status === "compressed" &&
-        usageAfter.currentTokens < req.usageBefore.currentTokens
-          ? "compacted"
-          : statusForUncommittedCompression({
-              compression:
-                compression.status === "compressed"
-                  ? compressionFromRejectedCandidate(candidate)
-                  : compression,
-              pruneResult: pruneOutcome.result,
-              usageBefore: req.usageBefore,
-              usageAfterPrune,
-            }),
-      prune: pruneOutcome.result,
+      status: "compacted",
       compression,
       usageBefore: req.usageBefore,
-      usageAfterPrune,
-      usageAfter,
-      projectedContext: committedContext,
-      ...(compression.status === "failed" ? { error: compression.error } : {}),
+      usageAfter: current.usage,
+      projectedContext: current.context,
     };
   }
 
@@ -1495,20 +1436,21 @@ export function createContextManager(
         ...identity,
         attemptId,
         outcome: terminalOutcomeForCompaction(outcome),
-        ...(outcome.status === "compacted"
-          ? { rung: "summary" as const }
-          : outcome.status === "pruned"
-            ? { rung: "prune" as const }
-            : {}),
+        ...(outcome.status === "compacted" ? { rung: "summary" as const } : {}),
         status: outcome.status,
+        usageBefore: outcome.usageBefore,
+        usageAfter: outcome.usageAfter,
+        omittedParts: outcome.compression?.omittedParts,
       });
       return outcome;
     } catch (error) {
       options.bus.publish(ContextEvent.CompactionFinished, {
         ...identity,
         attemptId,
-        outcome: isAbortError(error) ? "aborted" : "failed",
+        outcome:
+          isAbortError(error) || req.signal?.aborted ? "aborted" : "failed",
         status: "failed",
+        usageBefore: req.usageBefore,
       });
       throw error;
     }
@@ -1518,7 +1460,6 @@ export function createContextManager(
     sessionId: string,
     input: CompactOptions,
   ): Promise<CompactResult> {
-    resetThrashLock(sessionId, input.contextScopeId);
     const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(sessionId, input.directory, {
       agentName: input.agentName,
@@ -1527,22 +1468,24 @@ export function createContextManager(
       isSubagent,
       toolNames: input.toolNames,
     });
-    const usageBefore = measureContext({
+    const preparedBefore = measureContext({
+      requestSettings: input.requestSettings,
       context: assembled,
       isSubagent,
       modelId: input.modelId,
       tools: input.tools,
-    }).usage;
+    });
+    const usageBefore = preparedBefore.usage;
     const outcome = await runCompaction({
+      request: preparedBefore.request,
       reasoning: input.reasoning,
       assembled,
-      bypassThrashLock: true,
-      countTurnCompaction: false,
       contextScopeId: input.contextScopeId,
-      force: input.force === true,
+      force: input.force ?? true,
       isSubagent,
       modelId: input.modelId,
       sessionId,
+      signal: input.signal,
       tools: input.tools,
       usageBefore,
     });
@@ -1551,7 +1494,7 @@ export function createContextManager(
   }
 
   async function prepareTurnUnlocked(
-    input: PrepareTurnInput,
+    input: PrepareTurnInput & { readonly inputIds?: readonly string[] },
   ): Promise<PreparedTurn> {
     const startedAt = now();
     const isSubagent = input.isSubagent ?? false;
@@ -1563,7 +1506,9 @@ export function createContextManager(
       promptSnapshot: input.promptSnapshot,
       toolNames: input.toolNames,
     });
-    const unreducedMeasurement = measureContext({
+    const preparedBefore = measureContext({
+      requestSettings: input.requestSettings,
+      inputIds: input.inputIds,
       tailDirectives: input.tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: assembled,
@@ -1571,43 +1516,18 @@ export function createContextManager(
       modelId: input.modelId,
       tools: input.tools,
     });
-    const unreducedUsage = unreducedMeasurement.usage;
-    const reducedBeforeCompaction = reduceContextForModel({
-      allowCutoffAdvance: true,
-      context: assembled,
-      publishEvent: true,
-      usage: unreducedUsage,
-    });
-    const usageBefore =
-      reducedBeforeCompaction.history === assembled.history
-        ? unreducedUsage
-        : measureContext({
-            tailDirectives: input.tailDirectives,
-            activeReasoningByMessageId: input.activeReasoningByMessageId,
-            context: reducedBeforeCompaction,
-            isSubagent,
-            modelId: input.modelId,
-            tools: input.tools,
-          }).usage;
+    const usageBefore = preparedBefore.usage;
     const outcome = await runCompaction({
+      request: preparedBefore.request,
       reasoning: input.reasoning,
       tailDirectives: input.tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       assembled,
-      bypassThrashLock: input.force === true,
-      countTurnCompaction: true,
       contextScopeId: input.contextScopeId,
       force: input.force === true,
       isSubagent,
       modelId: input.modelId,
       onCompactionStarted: input.onCompactionStarted,
-      projectForUsage: (context) =>
-        projectContextForUsage(
-          context,
-          input.modelId,
-          input.tools,
-          input.tailDirectives,
-        ),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       sessionId: input.sessionId,
       tools: input.tools,
@@ -1615,10 +1535,12 @@ export function createContextManager(
     });
     const finalContext = outcome.projectedContext;
     const compaction =
-      outcome.status === "not-needed" && outcome.prune === undefined
+      outcome.status === "not-needed"
         ? undefined
         : mapOutcomeToCompactResult(outcome);
-    const rawFinalMeasurement = measureContext({
+    const finalMeasurement = measureContext({
+      requestSettings: input.requestSettings,
+      inputIds: input.inputIds,
       tailDirectives: input.tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: finalContext,
@@ -1626,30 +1548,12 @@ export function createContextManager(
       modelId: input.modelId,
       tools: input.tools,
     });
-    const rawFinalUsage = rawFinalMeasurement.usage;
-    const reducedFinalContext = reduceContextForModel({
-      allowCutoffAdvance: false,
-      context: finalContext,
-      publishEvent: true,
-      usage: rawFinalUsage,
-    });
-    const finalMeasurement =
-      reducedFinalContext.history === finalContext.history
-        ? rawFinalMeasurement
-        : measureContext({
-            tailDirectives: input.tailDirectives,
-            activeReasoningByMessageId: input.activeReasoningByMessageId,
-            context: reducedFinalContext,
-            isSubagent,
-            modelId: input.modelId,
-            tools: input.tools,
-          });
     const usage = finalMeasurement.usage;
     const request = finalMeasurement.request;
     const composition = estimateContextOccupancyComposition(
       {
         activeReasoningByMessageId: input.activeReasoningByMessageId,
-        context: reducedFinalContext,
+        context: finalContext,
         request,
         tailDirectives: input.tailDirectives,
         toolDefinitions: input.toolDefinitions,
@@ -1682,6 +1586,10 @@ export function createContextManager(
   ): Promise<CompactResult> {
     const snapshot = {
       ...input,
+      requestSettings:
+        input.requestSettings === undefined
+          ? undefined
+          : deepFreeze(structuredClone(input.requestSettings)),
       reasoning:
         input.reasoning === undefined
           ? undefined
@@ -1692,7 +1600,10 @@ export function createContextManager(
         contextScopeId: input.contextScopeId,
         sessionId,
       }),
-      () => compactUnlocked(sessionId, snapshot),
+      () => {
+        snapshot.signal?.throwIfAborted();
+        return compactUnlocked(sessionId, snapshot);
+      },
     );
   }
 
@@ -1725,6 +1636,11 @@ export function createContextManager(
     }
     const snapshot = {
       ...input,
+      requestSettings:
+        input.requestSettings === undefined
+          ? undefined
+          : deepFreeze(structuredClone(input.requestSettings)),
+      inputIds,
       // Reuse the measured request-tail pipeline, without making durable inputs
       // part of compressible history or replacing their message/ledger identity.
       tailDirectives: protectedProjection.length
@@ -1745,6 +1661,7 @@ export function createContextManager(
     if (input.protectedInputs === undefined) return prepared;
     if (
       inputIds.length &&
+      prepared.compaction?.status !== "compacted" &&
       prepared.usage.currentTokens >
         (prepared.usage.inputBudgetTokens ?? prepared.usage.contextLimit)
     )
@@ -1760,18 +1677,29 @@ export function createContextManager(
   return {
     assemble,
     createRunPromptSnapshot,
-    getUsage(input): ContextUsage {
-      return measureContext({
+    getUsage(input): ReturnType<ContextManager["getUsage"]> {
+      const measurement = measureContext({
         context: input.context,
         isSubagent: input.context.isSubagent,
         modelId: input.modelId,
         tools: input.tools,
-      }).usage;
+      });
+      const composition = estimateContextOccupancyComposition(
+        {
+          context: input.context,
+          request: measurement.request,
+          toolDefinitions: input.toolDefinitions,
+        },
+        options.tokenCounter,
+      );
+      return {
+        ...measurement.usage,
+        ...(composition === undefined ? {} : { composition }),
+      };
     },
     updateCalibrationFactor,
     compact,
     prepareTurn,
-    resetTurnCompactionCount,
     disposeScope,
     disposeSession,
   };

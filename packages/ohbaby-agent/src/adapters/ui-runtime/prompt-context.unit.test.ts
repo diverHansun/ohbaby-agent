@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CompactResult, ContextUsage } from "../../core/context/index.js";
-import type { MessageWithParts } from "../../core/message/types.js";
+import type {
+  CompactResult,
+  ContextLLMClient,
+  ContextUsage,
+} from "../../core/context/index.js";
 import type {
   LLMClientInstance,
   StreamingResponse,
@@ -77,349 +80,86 @@ function compactResult(
   };
 }
 
+function summaryInput(
+  signal?: AbortSignal,
+): Parameters<ContextLLMClient["generateSummary"]>[0] {
+  return {
+    request: {
+      messages: [
+        { role: "system" as const, content: "original system" },
+        { role: "user" as const, content: "history" },
+        { role: "user" as const, content: "summarize" },
+      ],
+      tools: [{ name: "read", inputSchema: {} }],
+      settings: { model: "test-model", maxTokens: 16384 },
+    },
+    sessionId: "s",
+    summaryMessageId: "summary",
+    compactionId: "compact",
+    attempt: 1,
+    signal,
+  };
+}
+
 describe("createContextSummaryClient", () => {
-  beforeEach(() => {
-    streamResponseMock.mockReset();
-  });
-
-  it("retries once when summary generation returns empty content", async () => {
-    streamResponseMock
-      .mockReturnValueOnce(streamWithContent("  "))
-      .mockReturnValueOnce(streamWithContent("valid summary"));
-    const client = createContextSummaryClient({} as LLMClientInstance);
-
+  beforeEach(() => streamResponseMock.mockReset());
+  it("rejects empty content without spending another request", async () => {
+    streamResponseMock.mockReturnValueOnce(streamWithContent("  "));
     await expect(
-      client.generateSummary({
-        history: [],
-        prompt: "summarize",
-        sessionId: "session_1",
-        systemPrompt: "system",
-      }),
-    ).resolves.toBe("valid summary");
-    expect(streamResponseMock).toHaveBeenCalledTimes(2);
+      createContextSummaryClient({} as LLMClientInstance).generateSummary(
+        summaryInput(),
+      ),
+    ).rejects.toThrow("empty");
+    expect(streamResponseMock).toHaveBeenCalledTimes(1);
   });
-
-  it("sends permitted failure facts to the actual summary request without cancelled or unknown text", async () => {
+  it("sends prepared messages unchanged and disables lower-layer retries", async () => {
     streamResponseMock.mockReturnValueOnce(streamWithContent("summary"));
-    const client = createContextSummaryClient({} as LLMClientInstance);
-    const history: MessageWithParts[] = [
-      {
-        info: {
-          id: "limited",
-          sessionId: "session_1",
-          agent: "test",
-          role: "assistant",
-          time: { created: 1, completed: 2 },
-          finish: "error",
-          error: { name: "MessageOutputLengthError" },
-        },
-        parts: [
-          {
-            id: "body",
-            messageId: "limited",
-            sessionId: "session_1",
-            orderIndex: 0,
-            type: "text",
-            text: "saved limited answer",
-          },
-        ],
-      },
-      {
-        info: {
-          id: "cancelled",
-          sessionId: "session_1",
-          agent: "test",
-          role: "assistant",
-          time: { created: 3, completed: 4 },
-          finish: "error",
-          error: { name: "MessageAbortedError", message: "cancelled" },
-        },
-        parts: [
-          {
-            id: "cancelled_body",
-            messageId: "cancelled",
-            sessionId: "session_1",
-            orderIndex: 0,
-            type: "text",
-            text: "must not enter summary",
-          },
-          {
-            id: "fact",
-            messageId: "cancelled",
-            sessionId: "session_1",
-            orderIndex: 1,
-            type: "text",
-            text: "[Response cancelled by the user.]",
-            synthetic: true,
-            metadata: { kind: "lifecycle-interruption" },
-          },
-        ],
-      },
-      {
-        info: {
-          id: "unknown",
-          sessionId: "session_1",
-          agent: "test",
-          role: "assistant",
-          time: { created: 5, completed: 6 },
-          finish: "error",
-          error: { name: "Unknown", message: "transport interrupted" },
-        },
-        parts: [
-          {
-            id: "unknown_body",
-            messageId: "unknown",
-            sessionId: "session_1",
-            orderIndex: 0,
-            type: "text",
-            text: "unknown failure body",
-          },
-        ],
-      },
-    ];
-
+    const input = summaryInput();
     await expect(
-      client.generateSummary({
-        history,
-        prompt: "summarize",
-        sessionId: "session_1",
-      }),
-    ).resolves.toBe("summary");
-    expect(streamResponseMock.mock.calls[0]?.[1][1]).toEqual({
-      role: "user",
-      content:
-        "assistant: [Response incomplete: output limit reached.]\nsaved limited answer\n\nassistant: [Response cancelled by the user.]",
+      createContextSummaryClient({} as LLMClientInstance).generateSummary(
+        input,
+      ),
+    ).resolves.toMatchObject({ text: "summary", summaryMessageId: "summary" });
+    expect(streamResponseMock.mock.calls[0][1]).toBe(input.request.messages);
+    expect(streamResponseMock.mock.calls[0][2]).toMatchObject({
+      purpose: "context-summary",
+      tools: input.request.tools,
+      maxTokens: 16384,
+      retry: { maxRetriesPerStep: 0 },
     });
   });
-
-  it("accepts canonical auxiliary usage without coupling it to context accounting", async () => {
-    streamResponseMock.mockReturnValueOnce(
-      streamWithContent("summary", {
-        inputBreakdown: {
-          cacheRead: 80,
-          cacheWrite: 0,
-          observed: { cacheRead: true, cacheWrite: false },
-          uncached: 20,
-        },
-        inputTokens: 100,
-        outputTokens: 10,
-        totalTokens: 110,
-      }),
-    );
-    const client = createContextSummaryClient({} as LLMClientInstance);
-
-    await expect(
-      client.generateSummary({
-        history: [],
-        prompt: "summarize",
-        sessionId: "child_session",
-        systemPrompt: "system",
-      }),
-    ).resolves.toBe("summary");
-  });
-
-  it("throws a clear error after repeated empty summaries", async () => {
-    streamResponseMock
-      .mockReturnValueOnce(streamWithContent(""))
-      .mockReturnValueOnce(streamWithContent("  "));
-    const client = createContextSummaryClient({} as LLMClientInstance);
-
-    await expect(
-      client.generateSummary({
-        history: [],
-        prompt: "summarize",
-        sessionId: "session_1",
-        systemPrompt: "system",
-      }),
-    ).rejects.toThrow("empty after retries");
-    expect(streamResponseMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("forwards cancellation and does not retry an aborted summary stream", async () => {
+  it("forwards cancellation without retry", async () => {
     streamResponseMock.mockReturnValueOnce(abortedStream());
-    const client = createContextSummaryClient({} as LLMClientInstance);
     const controller = new AbortController();
-
     await expect(
-      client.generateSummary({
-        history: [],
-        prompt: "summarize",
-        sessionId: "session_1",
-        signal: controller.signal,
-      }),
+      createContextSummaryClient({} as LLMClientInstance).generateSummary(
+        summaryInput(controller.signal),
+      ),
     ).rejects.toMatchObject({ name: "AbortError" });
     expect(streamResponseMock).toHaveBeenCalledTimes(1);
-    expect(streamResponseMock.mock.calls[0]?.[2]).toMatchObject({
+    expect(streamResponseMock.mock.calls[0][2]).toMatchObject({
       signal: controller.signal,
     });
   });
-
-  it("does not start summary generation for an already aborted signal", async () => {
-    const client = createContextSummaryClient({} as LLMClientInstance);
+  it("does not start an already aborted summary", async () => {
     const controller = new AbortController();
     controller.abort();
-
     await expect(
-      client.generateSummary({
-        history: [],
-        prompt: "summarize",
-        sessionId: "session_1",
-        signal: controller.signal,
-      }),
+      createContextSummaryClient({} as LLMClientInstance).generateSummary(
+        summaryInput(controller.signal),
+      ),
     ).rejects.toMatchObject({ name: "AbortError" });
     expect(streamResponseMock).not.toHaveBeenCalled();
   });
-
-  it("sends both serialized history and the compression prompt to the model", async () => {
-    streamResponseMock.mockReturnValueOnce(streamWithContent("summary"));
-    const client = createContextSummaryClient({} as LLMClientInstance);
-
-    await client.generateSummary({
-      contextScopeId: "subagent_1",
-      history: [
-        {
-          info: {
-            agent: "test",
-            id: "message_1",
-            role: "user",
-            sessionId: "session_1",
-            time: { created: 1 },
-          },
-          parts: [
-            {
-              id: "part_1",
-              messageId: "message_1",
-              orderIndex: 0,
-              sessionId: "session_1",
-              text: "hello",
-              type: "text",
-            },
-            {
-              id: "part_runtime",
-              messageId: "message_1",
-              metadata: { kind: "model-context:runtime:v1" },
-              orderIndex: 1,
-              sessionId: "session_1",
-              synthetic: true,
-              text: "<environment_context>private cwd</environment_context>",
-              type: "text",
-            },
-          ],
-        },
-      ],
-      prompt: "Use this exact format",
-      sessionId: "session_1",
-      systemPrompt: "system",
-    });
-
-    const messages = streamResponseMock.mock.calls[0][1] as {
-      readonly content: string;
-      readonly role: string;
-    }[];
-    expect(messages).toEqual([
-      { role: "system", content: "system" },
-      {
-        role: "user",
-        content: expect.stringContaining("user: hello") as string,
-      },
-      {
-        role: "user",
-        content: expect.stringContaining("Use this exact format") as string,
-      },
-    ]);
-    expect(JSON.stringify(messages)).not.toContain("private cwd");
-    expect(streamResponseMock.mock.calls[0][2]).toEqual({
-      contextScopeId: "subagent_1",
-      purpose: "context-summary",
-      sessionId: "session_1",
-    });
-  });
-
-  it("sends summary-only tool facts through the production summary request", async () => {
-    streamResponseMock.mockReturnValueOnce(streamWithContent("summary"));
-    const client = createContextSummaryClient({} as LLMClientInstance);
-    await client.generateSummary({
-      sessionId: "s",
-      prompt: "summarize",
-      history: [
-        {
-          info: {
-            id: "m",
-            role: "assistant",
-            agent: "test",
-            sessionId: "s",
-            time: { created: 1 },
-          },
-          parts: [
-            {
-              id: "p",
-              messageId: "m",
-              sessionId: "s",
-              orderIndex: 0,
-              type: "tool",
-              tool: "bash",
-              callId: "c",
-              state: {
-                status: "completed",
-                input: { command: "pwd", apiKey: "summary-input-canary" },
-                output: "",
-                metadata: { exitCode: 0, internalSecret: "private-metadata" },
-              },
-            },
-          ],
-        },
-      ],
-    });
-    const sent = streamResponseMock.mock.calls[0][1][1].content;
-    expect(sent).toContain('"tool":"bash"');
-    expect(sent).toContain('"command":"pwd"');
-    expect(sent).toContain('"status":"completed"');
-    expect(sent).toContain('"exitCode":0');
-    expect(sent).not.toContain("summary-input-canary");
-    expect(sent).not.toContain("private-metadata");
-  });
-
-  it("redacts credential canaries before and after summary generation", async () => {
-    const canary = "json-summary-secret-canary";
+  it("redacts credentials from generated summary text", async () => {
     streamResponseMock.mockReturnValueOnce(
-      streamWithContent(
-        `## Goal\n- keep ${JSON.stringify({ password: canary })}`,
-      ),
+      streamWithContent('summary {"password":"summary-secret-canary"}'),
     );
-    const client = createContextSummaryClient({} as LLMClientInstance);
-
-    const summary = await client.generateSummary({
-      history: [
-        {
-          info: {
-            agent: "test",
-            id: "message_1",
-            role: "user",
-            sessionId: "session_1",
-            time: { created: 1 },
-          },
-          parts: [
-            {
-              id: "part_1",
-              messageId: "message_1",
-              orderIndex: 0,
-              sessionId: "session_1",
-              text: `Do not expose ${JSON.stringify({ apiKey: canary })}`,
-              type: "text",
-            },
-          ],
-        },
-      ],
-      prompt: "Use this exact format",
-      sessionId: "session_1",
-      systemPrompt: "system",
-    });
-
-    expect(JSON.stringify(streamResponseMock.mock.calls[0]?.[1])).not.toContain(
-      canary,
-    );
-    expect(summary).not.toContain(canary);
-    expect(summary).toContain("[redacted]");
+    const result = await createContextSummaryClient(
+      {} as LLMClientInstance,
+    ).generateSummary(summaryInput());
+    expect(result.text).not.toContain("summary-secret-canary");
+    expect(result.text).toContain("[redacted]");
   });
 });
 
@@ -429,7 +169,7 @@ describe("noticeFromCompactResult", () => {
       noticeFromCompactResult("session_1", compactResult("compacted")),
     ).toBeUndefined();
     expect(
-      noticeFromCompactResult("session_1", compactResult("pruned")),
+      noticeFromCompactResult("session_1", compactResult("not-needed")),
     ).toBeUndefined();
   });
 
@@ -457,5 +197,7 @@ describe("noticeFromCompactResult", () => {
     expect(inflatedNotice?.message).not.toContain("->");
     expect(failedNotice?.message).not.toMatch(/\d[\d,]*\s*tokens/u);
     expect(inflatedNotice?.message).not.toMatch(/\d[\d,]*\s*tokens/u);
+    expect(failedNotice?.message).not.toMatch(/continuing/i);
+    expect(inflatedNotice?.message).not.toMatch(/continuing/i);
   });
 });

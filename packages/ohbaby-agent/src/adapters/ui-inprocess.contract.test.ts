@@ -1850,7 +1850,7 @@ async function createBlockedAutoCompactionContext(): Promise<{
     await addCoreTextMessage(messageManager, {
       role: role as "assistant" | "user",
       sessionId: "session_1",
-      text: `${String(index)} ${"large context ".repeat(100)}`,
+      text: `${String(index)} ${"large context ".repeat(2000)}`,
     });
   }
 
@@ -2526,7 +2526,21 @@ describe("createInProcessUiBackendClient", () => {
         ) as { defaultModel: string };
         return saved.defaultModel === "new-model" ? newClient : oldClient;
       });
+      const bus = createBus();
+      const messageManager = createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      });
+      for (const role of ["user", "assistant"] as const) {
+        await addCoreTextMessage(messageManager, {
+          sessionId: "session_1",
+          role,
+          text: `${role} history `.repeat(5000),
+        });
+      }
       client = createInProcessUiBackendClient({
+        bus,
+        messageManager,
         createLLMClient: createClient,
         initialSnapshot: {
           activeSessionId: "session_1",
@@ -2878,7 +2892,7 @@ describe("createInProcessUiBackendClient", () => {
       id: "session_child",
       isSubagent: false,
       projectId: "project_1",
-      projectRoot: "D:/repo",
+      projectRoot: process.cwd(),
       stats: { messageCount: 1 },
       status: "active",
       title: "Primary before role change",
@@ -2892,7 +2906,7 @@ describe("createInProcessUiBackendClient", () => {
       isSubagent: true,
       parentId: "session_parent",
       projectId: "project_1",
-      projectRoot: "D:/repo",
+      projectRoot: process.cwd(),
       stats: { messageCount: 1 },
       status: "active",
       title: "Child",
@@ -2911,7 +2925,7 @@ describe("createInProcessUiBackendClient", () => {
             createdAt: "2026-08-22T00:00:00.000Z",
             id: "session_child",
             messages: [],
-            projectRoot: "D:/repo",
+            projectRoot: process.cwd(),
             title: "Child",
             updatedAt: "2026-08-22T00:00:00.000Z",
           },
@@ -3250,8 +3264,8 @@ describe("createInProcessUiBackendClient", () => {
       bus,
       store: createInMemoryMessageStore(),
     });
-    const oldUserText = `old-user-${"u".repeat(12_000)}`;
-    const oldAssistantText = `old-assistant-${"a".repeat(12_000)}`;
+    const oldUserText = `old-user-${"u".repeat(60_000)}`;
+    const oldAssistantText = `old-assistant-${"a".repeat(60_000)}`;
     await addCoreTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
@@ -3295,7 +3309,7 @@ describe("createInProcessUiBackendClient", () => {
           [{ textDelta: "Fresh answer", finishReason: "stop" }],
         ],
         requests,
-        { contextWindowTokens: 4_096 },
+        { contextWindowTokens: 65_536, maxTokens: 30_000 },
       ),
       messageManager,
     });
@@ -3315,7 +3329,7 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(mainRequestText).toContain("fresh prompt");
     expect(mainRequestText).not.toContain(oldUserText);
-    expect(mainRequestText).not.toContain(oldAssistantText);
+    expect(mainRequestText).toContain(oldAssistantText);
     expect(
       events.some(
         (event) =>
@@ -3335,17 +3349,17 @@ describe("createInProcessUiBackendClient", () => {
     await addCoreTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "first long message ".repeat(20),
+      text: "first long message ".repeat(4000),
     });
     await addCoreTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "second long message ".repeat(20),
+      text: "second long message ".repeat(4000),
     });
     await addCoreTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "third long message",
+      text: "third long message ".repeat(5000),
     });
     const client = createInProcessUiBackendClient({
       bus,
@@ -3405,6 +3419,17 @@ describe("createInProcessUiBackendClient", () => {
     expect(manualWindowEvents).toHaveLength(1);
     expect(manualWindowEvents[0]?.usage).toMatchObject(expectedWindowUsage);
     expect(
+      manualWindowEvents[0]?.usage.composition?.["summarized-conversation"],
+    ).toBeGreaterThan(0);
+    const compactMessages = (
+      await client.getSessionView({ sessionId: "session_1" })
+    ).session.messages.filter((message) =>
+      message.parts.some(
+        (part) => part.metadata?.kind === "context-compaction",
+      ),
+    );
+    expect(compactMessages).toHaveLength(1);
+    expect(
       events.some(
         (event) =>
           event.type === "session.changed" && event.context?.status === "ready",
@@ -3417,18 +3442,99 @@ describe("createInProcessUiBackendClient", () => {
       (await client.getSessionView({ sessionId: "session_1" })).context,
     ).toMatchObject({ status: "ready", value: expectedWindowUsage });
 
-    await expect(messageManager.listBySession("session_1")).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          parts: [
-            expect.objectContaining({
-              metadata: { kind: "context-summary" },
-              text: "<state_snapshot>manual summary</state_snapshot>",
-            }),
+    const savedSummary = (await messageManager.listBySession("session_1"))
+      .flatMap((message) => message.parts)
+      .find((part) => part.metadata?.kind === "context-summary");
+    expect(savedSummary).toMatchObject({
+      metadata: { kind: "context-summary" },
+      text: "<state_snapshot>manual summary</state_snapshot>",
+    });
+  });
+
+  it("keeps a committed manual compact successful when the usage refresh fails", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createInMemoryMessageStore(),
+    });
+    for (const [role, text] of [
+      ["user", "first long message ".repeat(4000)],
+      ["assistant", "second long message ".repeat(4000)],
+      ["user", "third long message ".repeat(5000)],
+    ] as const) {
+      await addCoreTextMessage(messageManager, {
+        sessionId: "session_1",
+        role,
+        text,
+      });
+    }
+    let failNextRefresh = false;
+    bus.subscribe(contextModule.ContextEvent.CompactionFinished, (event) => {
+      // The next history read after a committed compaction is the UI usage refresh.
+      if (event.status === "compacted") failNextRefresh = true;
+    });
+    const client = createInProcessUiBackendClient({
+      bus,
+      initialSnapshot: {
+        activeSessionId: "session_1",
+        permissions: [],
+        runs: [],
+        sessions: [
+          {
+            createdAt: "2026-05-20T00:00:00.000Z",
+            id: "session_1",
+            messages: [],
+            title: "Existing",
+            updatedAt: "2026-05-20T00:00:00.000Z",
+          },
+        ],
+        status: { kind: "idle" },
+      },
+      llmClient: createSequentialFakeLLMClient(
+        [
+          [
+            {
+              textDelta: "<state_snapshot>manual summary</state_snapshot>",
+              finishReason: "stop",
+            },
           ],
-        }),
-      ]),
+        ],
+        [],
+      ),
+      messageManager: {
+        ...messageManager,
+        listBySession(...args) {
+          if (failNextRefresh) {
+            failNextRefresh = false;
+            return Promise.reject(new Error("usage refresh unavailable"));
+          }
+          return messageManager.listBySession(...args);
+        },
+      },
+    });
+    const events: UiEvent[] = [];
+    client.subscribeEvents((event) => {
+      events.push(event);
+    });
+
+    const result = await client.compactSession({ sessionId: "session_1" });
+
+    expect(result.status).toBe("compacted");
+    const windowEvents = events.filter(
+      (event): event is Extract<UiEvent, { type: "context.window.updated" }> =>
+        event.type === "context.window.updated",
     );
+    expect(windowEvents).toHaveLength(1);
+    expect(windowEvents[0]?.usage).toMatchObject({
+      currentTokens: result.usageAfter.currentTokens,
+      contextWindowTokens: result.usageAfter.contextLimit,
+    });
+    expect(windowEvents[0]?.usage.composition).toBeUndefined();
+    expect(
+      (await messageManager.listBySession("session_1")).some((message) =>
+        message.parts.some((part) => part.metadata?.kind === "context-summary"),
+      ),
+    ).toBe(true);
   });
 
   it("runs manual compact from the /compact slash command", async () => {
@@ -3441,17 +3547,17 @@ describe("createInProcessUiBackendClient", () => {
     await addCoreTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "first command message ".repeat(20),
+      text: "first command message ".repeat(4000),
     });
     await addCoreTextMessage(messageManager, {
       sessionId: "session_1",
       role: "assistant",
-      text: "second command message ".repeat(20),
+      text: "second command message ".repeat(4000),
     });
     await addCoreTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
-      text: "third command message",
+      text: "third command message ".repeat(5000),
     });
     const client = createInProcessUiBackendClient({
       bus,
@@ -3574,12 +3680,12 @@ describe("createInProcessUiBackendClient", () => {
     await addCoreTextMessage(messageManager, {
       role: "user",
       sessionId: "session_1",
-      text: "first message ".repeat(20),
+      text: "first message ".repeat(4000),
     });
     await addCoreTextMessage(messageManager, {
       role: "assistant",
       sessionId: "session_1",
-      text: "second message ".repeat(20),
+      text: "second message ".repeat(4000),
     });
     await addCoreTextMessage(messageManager, {
       role: "user",
@@ -5453,7 +5559,7 @@ describe("createInProcessUiBackendClient", () => {
       await addCoreTextMessage(messageManager, {
         role: role as "assistant" | "user",
         sessionId: "session_1",
-        text: `${String(index)} ${"large context ".repeat(100)}`,
+        text: `${String(index)} ${"large context ".repeat(2000)}`,
       });
     }
     const commitCoreCompaction =
@@ -5471,7 +5577,7 @@ describe("createInProcessUiBackendClient", () => {
       initialSnapshot: createInitialSnapshotWithTwoSessions(),
       llmClient: createFakeLLMClient(
         [{ textDelta: "## Goal\nshort", finishReason: "stop" }],
-        { contextWindowTokens: 1_000 },
+        { contextWindowTokens: 65_536, maxTokens: 30_000 },
       ),
       messageManager,
     });
@@ -5508,7 +5614,7 @@ describe("createInProcessUiBackendClient", () => {
       initialSnapshot: createInitialSnapshotWithTwoSessions(),
       llmClient: createFakeLLMClient(
         [{ textDelta: "## Goal\nshort", finishReason: "stop" }],
-        { contextWindowTokens: 1_000 },
+        { contextWindowTokens: 65_536, maxTokens: 30_000 },
       ),
       messageManager,
     });
@@ -5601,10 +5707,11 @@ describe("createInProcessUiBackendClient", () => {
       ...baseClient,
       config: {
         ...baseClient.config,
-        contextWindowTokens: 1_000,
+        contextWindowTokens: 65_536,
+        maxTokens: 30_000,
         modelProfiles: baseClient.config.modelProfiles?.map((profile) => ({
           ...profile,
-          contextWindowTokens: 1000,
+          contextWindowTokens: 65_536,
         })),
       },
     };
@@ -11848,4 +11955,228 @@ it("coalesces cold entry while first view and control reads wait outside the own
     unsubscribe();
     await client.dispose();
   }
+});
+
+async function createManualAdmissionFixture(input: {
+  readonly beforePromptSubmit?: () => Promise<void>;
+  readonly stream: (
+    request: InterfaceProviderRequest,
+  ) => Promise<AsyncIterable<InterfaceProviderStreamEvent>>;
+}): Promise<{
+  readonly bus: BusInstance;
+  readonly client: ReturnType<typeof createInProcessUiBackendClient>;
+  readonly messageManager: MessageManager;
+}> {
+  const bus = createBus();
+  const messageManager = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+  });
+  for (const sessionId of ["manual_one", "manual_two"]) {
+    for (const role of ["user", "assistant", "user"] as const) {
+      await addCoreTextMessage(messageManager, {
+        sessionId,
+        role,
+        text: "old context ".repeat(5000),
+      });
+    }
+  }
+  const fake = createFakeLLMClient([]);
+  const client = createInProcessUiBackendClient({
+    bus,
+    messageManager,
+    beforePromptSubmit: input.beforePromptSubmit,
+    initialSnapshot: {
+      activeSessionId: "manual_one",
+      permissions: [],
+      runs: [],
+      status: { kind: "idle" },
+      sessions: ["manual_one", "manual_two"].map((id) => ({
+        id,
+        title: "Existing",
+        messages: [],
+        createdAt: "2026-05-20T00:00:00.000Z",
+        updatedAt: "2026-05-20T00:00:00.000Z",
+      })),
+    },
+    llmClient: {
+      ...fake,
+      provider: { ...fake.provider, streamResponse: input.stream },
+    },
+  });
+  return { bus, client, messageManager };
+}
+
+function manualSummaryStream(): AsyncIterable<InterfaceProviderStreamEvent> {
+  return createProviderStream([
+    {
+      textDelta: "<state_snapshot>summary</state_snapshot>",
+      finishReason: "stop",
+    },
+  ]);
+}
+
+describe("manual compact admission", () => {
+  it("rejects a preparing prompt immediately before any run exists", async () => {
+    const preparing = createDeferred<undefined>();
+    const release = createDeferred<undefined>();
+    const requests: InterfaceProviderRequest[] = [];
+    const { client } = await createManualAdmissionFixture({
+      beforePromptSubmit: async () => {
+        preparing.resolve(undefined);
+        await release.promise;
+      },
+      stream: (request) => {
+        requests.push(request);
+        return Promise.resolve(manualSummaryStream());
+      },
+    });
+    const prompt = client.submitPromptAndWait("continue", {
+      sessionId: "manual_one",
+    });
+    await preparing.promise;
+    try {
+      await expect(
+        withTimeout(
+          client.compactSession({ sessionId: "manual_one" }),
+          250,
+          "compact waited for prompt",
+        ),
+      ).rejects.toThrow(/busy|active run/i);
+      expect(requests).toHaveLength(0);
+    } finally {
+      release.resolve(undefined);
+      await prompt;
+      await client.dispose();
+    }
+  });
+
+  it("rejects duplicate compact without blocking other sessions and admits a prompt after compact settles", async () => {
+    const started = createDeferred<undefined>();
+    const release = createDeferred<undefined>();
+    let calls = 0;
+    const { client } = await createManualAdmissionFixture({
+      stream: async () => {
+        calls += 1;
+        if (calls === 1) {
+          started.resolve(undefined);
+          await release.promise;
+        }
+        return manualSummaryStream();
+      },
+    });
+    const first = client.compactSession({ sessionId: "manual_one" });
+    await started.promise;
+    const duplicate = client.compactSession({ sessionId: "manual_one" });
+    try {
+      await expect(
+        withTimeout(duplicate, 250, "duplicate compact queued"),
+      ).rejects.toThrow(/busy|active run/i);
+      await expect(
+        client.compactSession({ sessionId: "manual_two" }),
+      ).resolves.toMatchObject({ status: "compacted" });
+      expect(calls).toBe(2);
+      const queued = await client.submitPromptAccepted("continue", {
+        sessionId: "manual_one",
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(calls).toBe(2);
+      release.resolve(undefined);
+      await first;
+      await client.waitForPrompt(queued.promptId);
+    } finally {
+      release.resolve(undefined);
+      await first;
+      await duplicate.catch(() => undefined);
+    }
+    expect(calls).toBe(3);
+    await client.dispose();
+  });
+
+  it("rejects compact during a live run without aborting its provider", async () => {
+    const started = createDeferred<AbortSignal | undefined>();
+    let calls = 0;
+    const { client } = await createManualAdmissionFixture({
+      stream: (request) => {
+        calls += 1;
+        started.resolve(request.signal);
+        return Promise.resolve(createAbortableProviderStream(request.signal));
+      },
+    });
+    const prompt = client.submitPromptAndWait("keep working", {
+      sessionId: "manual_one",
+    });
+    const signal = await started.promise;
+    const control = await client.getSessionControl({ sessionId: "manual_one" });
+    if (!control.runId) throw new Error("Expected an active prompt run");
+    try {
+      await expect(
+        withTimeout(
+          client.compactSession({ sessionId: "manual_one" }),
+          250,
+          "compact waited for run",
+        ),
+      ).rejects.toThrow(/busy|active run/i);
+      expect(signal?.aborted).toBe(false);
+      expect(calls).toBe(1);
+    } finally {
+      await client.abortRun(control.runId);
+      await prompt;
+      await client.dispose();
+    }
+  });
+
+  it("keeps a committed success when Stop arrives before the manual result refresh", async () => {
+    const controller = new AbortController();
+    const { bus, client } = await createManualAdmissionFixture({
+      stream: () => Promise.resolve(manualSummaryStream()),
+    });
+    bus.subscribe(contextModule.ContextEvent.CompactionFinished, (event) => {
+      if (event.status === "compacted") controller.abort();
+    });
+    try {
+      await expect(
+        client.compactSession({
+          sessionId: "manual_one",
+          signal: controller.signal,
+        }),
+      ).resolves.toMatchObject({ status: "compacted" });
+      expect(controller.signal.aborted).toBe(true);
+      expect((await client.getSnapshot()).runs).toEqual([]);
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it("passes manual cancellation to the summary provider and leaves history unchanged", async () => {
+    const started = createDeferred<AbortSignal | undefined>();
+    let calls = 0;
+    const { client, messageManager } = await createManualAdmissionFixture({
+      stream: (request) => {
+        calls += 1;
+        if (calls > 1) return Promise.resolve(manualSummaryStream());
+        started.resolve(request.signal);
+        return Promise.resolve(createAbortableProviderStream(request.signal));
+      },
+    });
+    const before = await messageManager.listBySession("manual_one");
+    const controller = new AbortController();
+    const compact = client.compactSession({
+      sessionId: "manual_one",
+      signal: controller.signal,
+    });
+    const failure = expect(
+      withTimeout(compact, 500, "manual Stop did not reach summary"),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    const signal = await started.promise;
+    controller.abort();
+    await failure;
+    expect(signal?.aborted).toBe(true);
+    expect(await messageManager.listBySession("manual_one")).toEqual(before);
+    await expect(
+      client.compactSession({ sessionId: "manual_one" }),
+    ).resolves.toMatchObject({ status: "compacted" });
+    expect((await client.getSnapshot()).runs).toEqual([]);
+    await client.dispose();
+  });
 });

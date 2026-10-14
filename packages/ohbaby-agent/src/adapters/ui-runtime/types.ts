@@ -8,7 +8,11 @@ import type {
   CommandMcpServerSummary,
   CommandToolSummary,
 } from "../../commands/index.js";
-import type { CompactResult, ContextUsage } from "../../core/context/index.js";
+import type {
+  CompactResult,
+  ContextUsage,
+  ContextOccupancyComposition,
+} from "../../core/context/index.js";
 import type { ToolSchedulerInstance } from "../../core/tool-scheduler/index.js";
 import type {
   AgentManager,
@@ -51,6 +55,7 @@ export interface UiRuntimeComposition {
     readonly title: string;
   }): Promise<void>;
   compactSession(input: {
+    readonly signal?: AbortSignal;
     readonly reasoning?: ReasoningConfig;
     readonly force?: boolean;
     readonly projectRoot: string;
@@ -59,7 +64,9 @@ export interface UiRuntimeComposition {
   getContextUsage(input: {
     readonly projectRoot: string;
     readonly sessionId: string;
-  }): Promise<ContextUsage>;
+  }): Promise<
+    ContextUsage & { readonly composition?: ContextOccupancyComposition }
+  >;
   listMcpServerSummaries(): Promise<readonly CommandMcpServerSummary[]>;
   listToolSummaries(input?: {
     readonly agentName?: string;

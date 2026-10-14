@@ -205,6 +205,7 @@ export interface UiCommandClient
   setPermission(input: UiPermissionUpdate): Promise<UiPermissionState>;
   executeCommand(
     invocation: UiSlashCommandInvocation,
+    options?: { readonly signal?: AbortSignal },
   ): Promise<UiCommandCompletion>;
   respondPermission(
     requestId: string,

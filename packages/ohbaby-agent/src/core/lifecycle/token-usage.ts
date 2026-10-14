@@ -58,8 +58,16 @@ export function aggregateTokenUsage(
   const nextInputTokens = inputTokens + next.inputTokens;
   const nextOutputTokens = outputTokens + next.outputTokens;
   const inputBreakdown = combineBreakdown(current, next, usageComplete);
+  // A missing detail in any request makes the aggregate detail unknown.
+  const reasoningTokens =
+    usageComplete &&
+    next.reasoningTokens !== undefined &&
+    (current === undefined || current.reasoningTokens !== undefined)
+      ? (current?.reasoningTokens ?? 0) + next.reasoningTokens
+      : undefined;
   return {
     ...(inputBreakdown === undefined ? {} : { inputBreakdown }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
     inputTokens: nextInputTokens,
     outputTokens: nextOutputTokens,
     totalTokens: nextInputTokens + nextOutputTokens,

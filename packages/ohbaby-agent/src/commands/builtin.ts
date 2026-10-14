@@ -544,6 +544,7 @@ async function handleSessionCompact(
   const result = await options.compact.compactSession({
     force: parseForceArg(invocation.argv, true),
     sessionId: parseSessionIdArg(invocation.argv) ?? invocation.sessionId,
+    ...(context.signal === undefined ? {} : { signal: context.signal }),
   });
   context.emitOutput(dataOutput("session.compact", { result }));
   context.emitAction(

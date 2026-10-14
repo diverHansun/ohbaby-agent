@@ -381,7 +381,7 @@ describe("Chat native reasoning through SDK SSE", () => {
     await expect(collect(provider)).rejects.toThrow();
   });
 
-  it.each([0, 4])(
+  it.each([0, 4, 6])(
     "retains reasoning token subset %s without changing total output",
     async (reasoning_tokens) => {
       const final = chunk({ content: "done" }, "stop");
@@ -396,11 +396,12 @@ describe("Chat native reasoning through SDK SSE", () => {
       expect(
         frames.find((frame) => frame.reasoningTokens !== undefined)
           ?.reasoningTokens,
-      ).toBe(reasoning_tokens);
+      ).toBe(reasoning_tokens <= 5 ? reasoning_tokens : undefined);
       expect(frames.find((frame) => frame.finishReason)?.tokenUsage).toEqual({
         inputTokens: 12,
         outputTokens: 5,
         totalTokens: 17,
+        ...(reasoning_tokens <= 5 ? { reasoningTokens: reasoning_tokens } : {}),
       });
     },
   );
@@ -510,3 +511,33 @@ it("rejects a late id that aliases another indexed reasoning detail", async () =
   ]);
   await expect(collect(provider)).rejects.toThrow(/identity/);
 });
+
+it.each([undefined, 6])(
+  "clears earlier reasoning when final usage detail is missing or invalid (%s)",
+  async (reasoning_tokens) => {
+    const final = chunk({ content: "done" }, "stop");
+    final.usage = {
+      prompt_tokens: 12,
+      completion_tokens: 5,
+      completion_tokens_details: { reasoning_tokens: 4 },
+    };
+    const trailing = {
+      ...chunk({}),
+      choices: [],
+      usage: {
+        prompt_tokens: 12,
+        completion_tokens: 5,
+        completion_tokens_details: { reasoning_tokens },
+      },
+    };
+    const { provider } = fixture([final, trailing]);
+    const frames = await collect(provider);
+    const terminal = frames.find((frame) => frame.finishReason);
+    expect(terminal?.reasoningTokens).toBeUndefined();
+    expect(terminal?.tokenUsage).toEqual({
+      inputTokens: 12,
+      outputTokens: 5,
+      totalTokens: 17,
+    });
+  },
+);

@@ -126,14 +126,26 @@ const FORBIDDEN_CONTENT_FIELD_NAMES = new Set([
 const BEARER_MARKER_PATTERN = /\bbearer\s+/iu;
 const MAX_SAFE_STRING_BYTES = 512;
 const EXTERNAL_ID_KINDS = new Set(["operation", "provider", "session"]);
-const SAFE_NUMERIC_CONTENT_FIELD_NAMES = new Set(["textLength", "tokenCount"]);
+const SAFE_NUMERIC_CONTENT_FIELD_NAMES = new Set([
+  "textLength",
+  "tokenCount",
+  "inputTokens",
+  "outputTokens",
+  "totalTokens",
+  "reasoningTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+]);
 const DIAGNOSTIC_ENUM_VALUES = new Set([
+  "aborted",
   "anthropic",
   "cache_creation_input_tokens",
   "cache_read_input_tokens",
   "cli",
   "disconnect",
+  "failed",
   "idle",
+  "inflated",
   "input-breakdown-conflict",
   "input_tokens",
   "non-monotonic-cumulative-field",
@@ -147,6 +159,8 @@ const DIAGNOSTIC_ENUM_VALUES = new Set([
   "shutdown",
   "signal",
   "startup-failed",
+  "stale",
+  "summary-body-limit",
   "tui",
 ] as const);
 type DiagnosticEnumValue =

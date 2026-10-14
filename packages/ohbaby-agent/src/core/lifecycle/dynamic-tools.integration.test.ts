@@ -47,7 +47,14 @@ it("measures and sends each changed toolset with ordered mixed tool results and 
   const contextManager = createContextManager({
     bus,
     messageManager,
-    llmClient: { generateSummary: () => Promise.resolve("unused") },
+    llmClient: {
+      generateSummary: (input) =>
+        Promise.resolve({
+          text: "unused",
+          summaryMessageId: input.summaryMessageId,
+          requests: [],
+        }),
+    },
     memory: {
       load: () => Promise.resolve({ global: "", project: "", merged: "" }),
     },
@@ -205,9 +212,10 @@ it("measures and sends each changed toolset with ordered mixed tool results and 
   ).toEqual([["lookup"], ["summarize"]]);
   for (const [index, request] of requests.entries()) {
     const { turn, payloads } = prepared[index];
-    expect({ messages: request.messages, tools: request.tools }).toEqual(
-      turn.request,
-    );
+    expect({ messages: request.messages, tools: request.tools }).toEqual({
+      messages: turn.request.messages,
+      tools: turn.request.tools,
+    });
     expect(request.tools).toBe(turn.request.tools);
     expect(Object.isFrozen(turn.request)).toBe(true);
     expect(Object.isFrozen(turn.request.messages)).toBe(true);

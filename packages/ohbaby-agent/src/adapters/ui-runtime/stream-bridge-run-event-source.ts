@@ -1,4 +1,4 @@
-import type { ModelRequestRecord } from "../../core/llm-client/types.js";
+import type { AgentStepRequestRecord } from "../../core/llm-client/types.js";
 import type { ToolExecutionObservation } from "../../core/tool-scheduler/types.js";
 import type { AgentRunEventSource } from "../../core/agents/index.js";
 import type { LifecycleEvent } from "../../core/lifecycle/index.js";
@@ -76,6 +76,10 @@ function tokenUsageData(value: unknown): LlmCompleteEvent["tokenUsage"] {
     typeof observed.cacheWrite === "boolean";
 
   return {
+    ...(nonNegativeInteger(data.reasoningTokens) &&
+    data.reasoningTokens <= outputTokens
+      ? { reasoningTokens: data.reasoningTokens }
+      : {}),
     ...(hasValidBreakdown
       ? {
           inputBreakdown: {
@@ -178,7 +182,7 @@ function lifecycleEventFromStream(
           : item.event === "run.llm.first-text"
             ? "llm:first-text"
             : "llm:request-ended",
-      request: request as unknown as ModelRequestRecord,
+      request: request as unknown as AgentStepRequestRecord,
     };
   }
   if (item.event === "run.tool.state") {

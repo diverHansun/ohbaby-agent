@@ -13,6 +13,7 @@ import type {
   MessageWithParts,
 } from "../../core/message/types.js";
 import { messageCursor } from "../../core/message/pagination.js";
+import { subagentSummaryWindow } from "./subagent-summary-window.js";
 
 interface HistoryCursor {
   readonly version: 1;
@@ -369,11 +370,16 @@ export function createSubagentConversationHistory(options: {
           record.childRunId !== undefined &&
           !(position?.kind === "parent" && !forward)
         ) {
+          const includeRunSummaries = await subagentSummaryWindow(
+            record,
+            options.executions,
+          );
           let more = false;
           let rowsScanned = 0;
           for (;;) {
             if (items.length > limit) break;
             const pageOptions = {
+              includeRunSummaries,
               scope: { contextScopeId: record.childScopeId },
               limit: pageLimit,
               ...(forward ? { after: pageCursor } : { before: pageCursor }),

@@ -391,7 +391,7 @@ agents 模块
 ```json
 {
   "agents": {
-    "explore": { "maxSteps": 15, "temperature": 0.5 },
+    "explore": { "maxSteps": 15, "timeout": 30000 },
     "security-scanner": { "maxSteps": 20 }
   }
 }
@@ -416,7 +416,7 @@ agents 模块
 }
 ```
 
-注意：`explore` 的 `temperature` 字段被丢弃，因为项目配置完全替换全局配置。
+注意：`explore` 的 `timeout` 字段被丢弃，因为项目配置完全替换全局配置。
 
 ---
 

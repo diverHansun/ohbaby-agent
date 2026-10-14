@@ -1,3 +1,5 @@
+import { isContextOverflowError } from "./errors.js";
+
 export interface ProviderRetryPolicy {
   readonly maxRetriesPerStep: number;
   readonly initialDelayMs: number;
@@ -101,6 +103,9 @@ export function retryReason(error: unknown): string {
 }
 
 export function isRetryableProviderError(error: unknown): boolean {
+  // Context recovery belongs to the forced-compaction path, never backoff.
+  if (isContextOverflowError(error)) return false;
+
   const status = providerErrorStatus(error);
   if (
     status === 408 ||

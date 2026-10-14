@@ -3,7 +3,13 @@ import {
   ModelObservationError,
   RequestAttemptObserver,
 } from "./request-observation.js";
-import type { ModelRequestObservation, ModelRequestRecord } from "./types.js";
+import type {
+  ModelRequestObservation,
+  ModelRequestRecord,
+  AgentStepRequestRecord,
+  SummaryRequestRecord,
+  PreparedRequestSettings,
+} from "./types.js";
 import { APIConnectionError as OpenAIConnectionError } from "openai";
 import { APIConnectionError as AnthropicConnectionError } from "@anthropic-ai/sdk/error";
 /**
@@ -67,6 +73,9 @@ interface AccumulatedToolCall {
 
 function toStreamingTokenUsage(usage: TokenUsage): StreamingTokenUsage {
   return {
+    ...(usage.reasoningTokens === undefined
+      ? {}
+      : { reasoningTokens: usage.reasoningTokens }),
     ...(usage.inputBreakdown === undefined
       ? {}
       : { inputBreakdown: usage.inputBreakdown }),
@@ -81,6 +90,12 @@ class RetrySleepAbortedError extends Error {
     super("Retry sleep aborted");
     this.name = "RetrySleepAbortedError";
   }
+}
+
+function isRunRequestObservation(
+  fact: ModelRequestObservation<ModelRequestRecord>,
+): fact is ModelRequestObservation {
+  return "runId" in fact.request;
 }
 
 function sortedToolCalls(
@@ -195,6 +210,33 @@ function validateRequestMaxTokens(
   return value;
 }
 
+export function resolvePreparedRequestSettings(
+  client: LLMClientInstance,
+  input: {
+    modelId?: string;
+    reasoning?: ReasoningConfig | ReasoningIntent;
+  } = {},
+): PreparedRequestSettings {
+  const config = client.config;
+  const snapshot = input.reasoning;
+  const model = input.modelId ?? config.model;
+  return Object.freeze({
+    model,
+    maxTokens: config.maxTokens,
+    ...(config.temperature === undefined
+      ? {}
+      : { temperature: config.temperature }),
+    reasoning: resolveRequestReasoning({
+      ...config,
+      model,
+      ...(snapshot && "explicit" in snapshot
+        ? { reasoning: snapshot }
+        : { override: snapshot }),
+      purpose: "agent-step",
+    }),
+  });
+}
+
 /**
  * Stream chat completion and accumulate complete messages in real-time.
  *
@@ -257,13 +299,20 @@ function validateRequestMaxTokens(
  * }
  * ```
  */
+
 export async function* streamResponse(
   llmClient: LLMClientInstance,
   messages: readonly ModelMessage[],
   options?: {
-    requestOwner?: Pick<ModelRequestRecord, "runId" | "messageId" | "step">;
+    preparedSettings?: PreparedRequestSettings;
+    summaryOwner?: Pick<
+      SummaryRequestRecord,
+      "compactionId" | "messageId" | "attempt" | "inputIds"
+    >;
+    onSummaryRequestRecord?: (record: SummaryRequestRecord) => void;
+    requestOwner?: Pick<AgentStepRequestRecord, "runId" | "messageId" | "step">;
     /** Persist input membership and recheck run eligibility before each attempt. */
-    beforeRequestAttempt?: (request: ModelRequestRecord) => Promise<void>;
+    beforeRequestAttempt?: (request: AgentStepRequestRecord) => Promise<void>;
     onRequestObservation?: (
       observation: ModelRequestObservation,
     ) => Promise<void>;
@@ -289,16 +338,20 @@ export async function* streamResponse(
   } = options ?? {};
   const retryPolicy = resolveProviderRetryPolicy(retry);
   const requestMaxTokens =
-    validateRequestMaxTokens(maxTokens) ?? config.maxTokens;
+    validateRequestMaxTokens(maxTokens) ??
+    options?.preparedSettings?.maxTokens ??
+    config.maxTokens;
   const snapshot = options?.reasoning;
-  const reasoning = resolveRequestReasoning({
-    ...config,
-    maxTokens: requestMaxTokens,
-    ...(snapshot && "explicit" in snapshot
-      ? { reasoning: snapshot }
-      : { override: snapshot }),
-    purpose,
-  });
+  const reasoning =
+    options?.preparedSettings?.reasoning ??
+    resolveRequestReasoning({
+      ...config,
+      maxTokens: requestMaxTokens,
+      ...(snapshot && "explicit" in snapshot
+        ? { reasoning: snapshot }
+        : { override: snapshot }),
+      purpose,
+    });
   const promptCache = resolvePromptCacheRequest({
     baseUrl: config.baseUrl,
     interfaceProvider: config.interfaceProvider,
@@ -342,19 +395,37 @@ export async function* streamResponse(
     let reasoningTokens: number | undefined;
     let validatingProtocol = false;
 
-    const requestRecord: ModelRequestRecord | undefined = options?.requestOwner
+    const requestRecord: ModelRequestRecord | undefined = options?.summaryOwner
       ? {
-          ...options.requestOwner,
+          ...options.summaryOwner,
           requestId: randomUUID(),
-          attempt: failedAttempts + 1,
-          purpose: purpose ?? "agent-step",
+          purpose: "context-summary",
           startedAt: 0,
           outcome: "running",
         }
-      : undefined;
+      : options?.requestOwner
+        ? {
+            ...options.requestOwner,
+            requestId: randomUUID(),
+            attempt: failedAttempts + 1,
+            purpose: "agent-step",
+            startedAt: 0,
+            outcome: "running",
+          }
+        : undefined;
     const observer = new RequestAttemptObserver(
       requestRecord,
-      options?.onRequestObservation,
+      async (fact) => {
+        if (fact.request.purpose === "context-summary") {
+          if (fact.type === "request-ended")
+            options?.onSummaryRequestRecord?.(fact.request);
+        } else {
+          await options?.onRequestObservation?.({
+            ...fact,
+            request: fact.request,
+          });
+        }
+      },
       signal,
     );
     let iterator:
@@ -379,7 +450,7 @@ export async function* streamResponse(
     try {
       const beforeRequestAttempt = options?.beforeRequestAttempt;
       if (beforeRequestAttempt) {
-        if (!requestRecord) {
+        if (!requestRecord || !("runId" in requestRecord)) {
           throw new ModelObservationError(
             new Error("Attempt admission requires a request owner"),
           );
@@ -397,11 +468,11 @@ export async function* streamResponse(
       }
       if (provider.streamStart !== "iterator") observer.start();
       const opening = provider.streamResponse({
-        model: config.model,
+        model: options?.preparedSettings?.model ?? config.model,
         messages,
-        ...(config.temperature === undefined
+        ...((options?.preparedSettings ?? config).temperature === undefined
           ? {}
-          : { temperature: config.temperature }),
+          : { temperature: (options?.preparedSettings ?? config).temperature }),
         reasoning,
         maxTokens: requestMaxTokens,
         tools,
@@ -432,7 +503,7 @@ export async function* streamResponse(
       if (provider.streamStart === "iterator")
         await observer.waitStarted(first);
       await observer.flush();
-      for (const fact of observer.drain())
+      for (const fact of observer.drain().filter(isRunRequestObservation))
         yield {
           messageSnapshot: { content: null },
           isComplete: false,
@@ -441,7 +512,7 @@ export async function* streamResponse(
       let next = await first;
       for (;;) {
         await observer.flush();
-        for (const fact of observer.drain())
+        for (const fact of observer.drain().filter(isRunRequestObservation))
           yield {
             messageSnapshot: { content: null },
             isComplete: false,
@@ -459,8 +530,12 @@ export async function* streamResponse(
           nativeOutput = NativeOutputSchema.parse(event.nativeOutput);
           validatingProtocol = false;
         }
-        if (event.reasoningTokens !== undefined)
-          reasoningTokens = event.reasoningTokens;
+        if (
+          event.tokenUsage !== undefined ||
+          event.reasoningTokens !== undefined
+        )
+          reasoningTokens =
+            event.tokenUsage?.reasoningTokens ?? event.reasoningTokens;
 
         // Update finish reason when stream ends
         if (finish) {
@@ -473,6 +548,7 @@ export async function* streamResponse(
         // Capture token usage (typically only in last chunk)
         if (event.tokenUsage) {
           tokenUsage = event.tokenUsage;
+          observer.setUsage(tokenUsage);
         }
 
         // Anthropic reports cache accounting in message_start. Retain it for
@@ -547,7 +623,7 @@ export async function* streamResponse(
       if (signal.aborted) {
         observer.end("aborted");
         await observer.flush();
-        for (const fact of observer.drain())
+        for (const fact of observer.drain().filter(isRunRequestObservation))
           yield {
             messageSnapshot: { content: null },
             isComplete: false,
@@ -587,7 +663,7 @@ export async function* streamResponse(
               version: 1,
               origin: {
                 provider: config.provider,
-                model: config.model,
+                model: options?.preparedSettings?.model ?? config.model,
                 protocol: config.interfaceProvider,
                 endpoint: config.baseUrl,
               },
@@ -617,7 +693,7 @@ export async function* streamResponse(
       validatingProtocol = false;
       observer.end("success");
       await observer.flush();
-      for (const fact of observer.drain())
+      for (const fact of observer.drain().filter(isRunRequestObservation))
         yield {
           messageSnapshot: { content: null },
           isComplete: false,
@@ -639,7 +715,7 @@ export async function* streamResponse(
     } catch (error) {
       observer.end(signal.aborted ? "aborted" : "error");
       await observer.flush();
-      for (const fact of observer.drain())
+      for (const fact of observer.drain().filter(isRunRequestObservation))
         yield {
           messageSnapshot: { content: null },
           isComplete: false,
@@ -681,6 +757,14 @@ export async function* streamResponse(
       // overflowing attempt that emitted a provisional completion already.
       // Do not turn that explicit provider error into a transport failure.
       if (isContextOverflowError(error)) throw error;
+      // Summaries have not executed tools or committed their partial output.
+      // Preserve SDK transport identity for Context's single remaining retry.
+      if (
+        purpose === "context-summary" &&
+        streamFailureSource(error) === "transport"
+      ) {
+        throw new ProviderStreamInterruptedError(error, "transport");
+      }
 
       if (
         accumulatedContent !== "" ||

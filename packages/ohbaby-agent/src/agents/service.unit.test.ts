@@ -229,6 +229,45 @@ function createToolScheduler(): Pick<
 }
 
 describe("AgentService", () => {
+  it.each([
+    ["model", "provider/legacy"],
+    ["maxTokens", 100],
+    ["temperature", 0.5],
+    ["topP", 0.9],
+    ["model", undefined],
+    ["maxTokens", undefined],
+    ["temperature", undefined],
+    ["topP", undefined],
+  ] as const)(
+    "rejects custom primary runtime config %s before a model run (value %s)",
+    async (field, value) => {
+      const agentManager = await createAgentManager();
+      vi.spyOn(agentManager, "getRuntimeAgent").mockResolvedValue({
+        config: { name: "build", mode: "primary", [field]: value },
+        isSubagent: false,
+        tools: {},
+      });
+      const create = vi.fn(() => {
+        throw new Error("Model run must not start");
+      });
+      const service = new AgentService({
+        agentManager,
+        instanceFactory: { create },
+        modelId: "fake-model",
+        sessionManager: createSessionManager(),
+      });
+      await expect(
+        service.startSession({
+          agentName: "build",
+          prompt: "hello",
+          projectRoot: "/repo",
+          sessionId: "primary_1",
+        }),
+      ).rejects.toThrow(new RegExp(`build.*${field}`));
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
   it("freezes field-wise backend overrides before startup awaits and reads fresh defaults next run", async () => {
     const runs = createRunCoordinator();
     const modelReasoning = { enabled: false, effort: "high" };

@@ -325,7 +325,7 @@ export function applyTuiEvent(
       return appendCommandNotice(next, {
         clientInvocationId: event.clientInvocationId,
         commandId: event.commandRunId,
-        kind: "result",
+        kind: compactOutputFailed(event.output) ? "error" : "result",
         sessionId: commandSessionId(next, event.commandRunId) ?? undefined,
         text: formatCommandOutput(event.output),
       });
@@ -1078,6 +1078,12 @@ function shouldDisplayCommandOutput(output: UiCommandOutput): boolean {
   if (output.kind !== "data") {
     return true;
   }
+  if (
+    output.subject === "session.compact" &&
+    getRecord(output.data, "result")?.status === "compacted"
+  ) {
+    return false;
+  }
 
   return ![
     "permission.level",
@@ -1085,6 +1091,13 @@ function shouldDisplayCommandOutput(output: UiCommandOutput): boolean {
     "session.created",
     "session.current",
   ].includes(output.subject);
+}
+
+function compactOutputFailed(output: UiCommandOutput): boolean {
+  if (output.kind !== "data" || output.subject !== "session.compact")
+    return false;
+  const status = getRecord(output.data, "result")?.status;
+  return status === "failed" || status === "inflated";
 }
 
 function formatPermissionOutput(
@@ -1159,11 +1172,13 @@ function formatDataCommandOutput(
       const status = result ? getString(result, "status") : undefined;
       switch (status) {
         case "compacted":
-        case "pruned":
           return "Compacted";
-        case "failed":
-          return "Compact failed";
+        case "failed": {
+          const error = result ? getString(result, "error") : undefined;
+          return error ? `Compact failed: ${error}` : "Compact failed";
+        }
         case "inflated":
+          return "Compact failed: summary was not smaller";
         case "not-needed":
           return "Compact skipped";
         default:

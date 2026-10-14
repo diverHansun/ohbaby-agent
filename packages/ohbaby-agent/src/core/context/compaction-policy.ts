@@ -2,37 +2,26 @@ import { getMessageOrigin } from "../message/origin.js";
 import type { ModelOrigin } from "../../services/interface-providers/native-state.js";
 import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 import { serializeHistoryMessages } from "./serializer.js";
-import {
-  hasNativeDependencies,
-  hasUnfinishedNativeDependencies,
-} from "./native-context.js";
-import {
-  DEFAULT_COMPACTION_THRESHOLDS,
-  KEEP_RECENT_TOKENS,
-} from "./constants.js";
+import { hasUnfinishedNativeDependencies } from "./native-context.js";
+import { DEFAULT_COMPACTION_THRESHOLDS } from "./constants.js";
 import type { CompactionThresholds } from "./constants.js";
-import { serializeHistory, serializeMessage } from "./serialization.js";
 import type { MessageWithParts } from "../message/index.js";
 import type { ContextUsage, TokenCounter } from "./types.js";
 
-function tokenCount(
-  tokenCounter: Pick<TokenCounter, "estimateTokens">,
-  content: string,
-): number {
-  return Math.max(0, tokenCounter.estimateTokens(content));
-}
-
-/** Preserve readable-history scoring; native units use the model request estimator. */
+/** Count only the history projection that a normal model request would replay. */
 export function estimateHistoryForCompaction(
   history: readonly MessageWithParts[],
   tokenCounter: Pick<TokenCounter, "estimateTokens">,
   modelOrigin?: ModelOrigin,
+  activeReasoningByMessageId?: ReadonlyMap<string, string>,
 ): number {
-  if (!history.some(hasNativeDependencies))
-    return tokenCount(tokenCounter, serializeHistory(history));
   return estimatePreparedRequestHeuristic(
     {
-      messages: serializeHistoryMessages(history, undefined, modelOrigin),
+      messages: serializeHistoryMessages(
+        history,
+        activeReasoningByMessageId,
+        modelOrigin,
+      ),
       tools: undefined,
     },
     tokenCounter,
@@ -43,9 +32,11 @@ export function getContextUsage(
   currentTokens: number,
   modelId: string,
   tokenCounter: Pick<TokenCounter, "getLimit" | "getBudget">,
+  requestedOutputTokens?: number,
 ): ContextUsage {
   const budget = tokenCounter.getBudget?.(modelId, {
     usedInputTokens: currentTokens,
+    ...(requestedOutputTokens === undefined ? {} : { requestedOutputTokens }),
   });
 
   if (budget) {
@@ -73,34 +64,23 @@ export function getContextUsage(
   };
 }
 
-export type CompactionRung = "none" | "mask" | "prune-summary" | "force";
+export type CompactionRung = "none" | "summary" | "force";
 
 export function decideCompactionRung(input: {
   readonly usage: ContextUsage;
-  readonly compactionCount?: number;
+  readonly capacityPressure?: boolean;
   readonly force: boolean;
-  readonly maxPerTurn?: number;
   readonly thresholds?: CompactionThresholds;
-  readonly thrashLocked?: boolean;
 }): CompactionRung {
   if (input.force) {
     return "force";
   }
-  if (input.thrashLocked === true) {
-    return "none";
-  }
   const thresholds = input.thresholds ?? DEFAULT_COMPACTION_THRESHOLDS;
-  if (needsSummaryCompaction(input.usage, thresholds)) {
-    if (
-      (input.compactionCount ?? 0) >=
-      (input.maxPerTurn ?? Number.POSITIVE_INFINITY)
-    ) {
-      return "mask";
-    }
-    return "prune-summary";
-  }
-  if (input.usage.usageRatio >= thresholds.mask) {
-    return "mask";
+  if (
+    input.capacityPressure === true ||
+    needsSummaryCompaction(input.usage, thresholds)
+  ) {
+    return "summary";
   }
   return "none";
 }
@@ -110,7 +90,6 @@ export function needsSummaryCompaction(
   thresholds: CompactionThresholds,
 ): boolean {
   // Auto summary follows the same full-window occupancy shown in the UI.
-  // Input-budget pressure still drives masking; upstream overflow uses force.
   const occupancy =
     usage.contextLimit <= 0 ? 1 : usage.currentTokens / usage.contextLimit;
   return occupancy >= thresholds.summary;
@@ -118,15 +97,42 @@ export function needsSummaryCompaction(
 
 export interface ContextCutPoint {
   readonly firstKeptIndex: number;
-  readonly messagesToSummarize: readonly MessageWithParts[];
   readonly keptMessages: readonly MessageWithParts[];
-  readonly turnPrefixMessages: readonly MessageWithParts[];
+}
+
+/** A persisted assistant owns its calls and results; synthetic inputs join their preceding group. */
+export function historyGroups(
+  history: readonly MessageWithParts[],
+): readonly (readonly MessageWithParts[])[] {
+  const groups: MessageWithParts[][] = [];
+  for (const message of history) {
+    if (
+      groups.length === 0 ||
+      message.info.role === "assistant" ||
+      (message.info.role === "user" && getMessageOrigin(message) === "user")
+    )
+      groups.push([]);
+    groups[groups.length - 1].push(message);
+  }
+  return groups;
+}
+
+export function hasUnfinishedDependencies(message: MessageWithParts): boolean {
+  return (
+    hasUnfinishedNativeDependencies(message) ||
+    message.parts.some(
+      (part) =>
+        part.type === "tool" &&
+        (part.state.status === "pending" || part.state.status === "running"),
+    )
+  );
 }
 
 export function findCutPoint(input: {
   readonly history: readonly MessageWithParts[];
   readonly keepRecentTokens: number;
   readonly modelOrigin?: ModelOrigin;
+  readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly tokenCounter: Pick<TokenCounter, "estimateTokens">;
 }): ContextCutPoint {
   const { history } = input;
@@ -134,8 +140,6 @@ export function findCutPoint(input: {
     return {
       firstKeptIndex: 0,
       keptMessages: [],
-      messagesToSummarize: [],
-      turnPrefixMessages: [],
     };
   }
 
@@ -143,26 +147,25 @@ export function findCutPoint(input: {
     history,
     input.tokenCounter,
     input.modelOrigin,
+    input.activeReasoningByMessageId,
   );
   if (fullTokens <= input.keepRecentTokens) {
     return {
       firstKeptIndex: 0,
       keptMessages: history,
-      messagesToSummarize: [],
-      turnPrefixMessages: [],
     };
   }
 
   let firstKeptIndex = history.length;
   let keptTokens = 0;
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const messageTokens = hasNativeDependencies(history[index])
-      ? estimateHistoryForCompaction(
-          [history[index]],
-          input.tokenCounter,
-          input.modelOrigin,
-        )
-      : tokenCount(input.tokenCounter, serializeMessage(history[index]));
+  const groups = historyGroups(history);
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    const messageTokens = estimateHistoryForCompaction(
+      groups[index],
+      input.tokenCounter,
+      input.modelOrigin,
+      input.activeReasoningByMessageId,
+    );
     if (
       firstKeptIndex !== history.length &&
       keptTokens + messageTokens > input.keepRecentTokens
@@ -170,69 +173,17 @@ export function findCutPoint(input: {
       break;
     }
     keptTokens += messageTokens;
-    firstKeptIndex = index;
+    firstKeptIndex -= groups[index].length;
   }
-
-  const legalCutPoints = new Set<number>([0, history.length]);
-  for (let index = 0; index < history.length; index += 1) {
-    const role = history[index]?.info.role;
-    if (
-      (role === "user" && getMessageOrigin(history[index]) === "user") ||
-      role === "assistant"
-    ) {
-      legalCutPoints.add(index);
-    }
+  let groupStart = 0;
+  for (const group of groups) {
+    if (group.some(hasUnfinishedDependencies))
+      firstKeptIndex = Math.min(firstKeptIndex, groupStart);
+    groupStart += group.length;
   }
-
-  while (
-    firstKeptIndex < history.length &&
-    !legalCutPoints.has(firstKeptIndex)
-  ) {
-    firstKeptIndex += 1;
-  }
-
-  const unfinishedIndex = history.findIndex(hasUnfinishedNativeDependencies);
-  if (unfinishedIndex >= 0)
-    firstKeptIndex = Math.min(firstKeptIndex, unfinishedIndex);
-
-  const turnPrefixMessages =
-    firstKeptIndex > 0 &&
-    history[firstKeptIndex]?.info.role === "assistant" &&
-    getMessageOrigin(history[firstKeptIndex - 1]) === "user"
-      ? [history[firstKeptIndex - 1]]
-      : [];
-  const messagesToSummarizeEnd = firstKeptIndex - turnPrefixMessages.length;
 
   return {
     firstKeptIndex,
     keptMessages: history.slice(firstKeptIndex),
-    messagesToSummarize: history.slice(0, messagesToSummarizeEnd),
-    turnPrefixMessages,
   };
-}
-
-export function getHistoryToCompress(input: {
-  readonly history: readonly MessageWithParts[];
-  readonly preserveRatio: number;
-  readonly modelOrigin?: ModelOrigin;
-  readonly tokenCounter: TokenCounter;
-}): readonly MessageWithParts[] {
-  const fullTokens = estimateHistoryForCompaction(
-    input.history,
-    input.tokenCounter,
-    input.modelOrigin,
-  );
-  const preserveTarget = Math.max(
-    1,
-    Math.floor(fullTokens * input.preserveRatio),
-  );
-  const cut = findCutPoint({
-    history: input.history,
-    modelOrigin: input.modelOrigin,
-    keepRecentTokens:
-      fullTokens <= KEEP_RECENT_TOKENS ? preserveTarget : KEEP_RECENT_TOKENS,
-    tokenCounter: input.tokenCounter,
-  });
-
-  return [...cut.messagesToSummarize, ...cut.turnPrefixMessages];
 }

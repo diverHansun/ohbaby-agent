@@ -203,8 +203,33 @@ export function createDatabaseMessageStore(
         }
       }
       if (runId !== undefined) {
-        clauses.push("json_extract(data, '$.runId') = ?");
         params.push(runId);
+        const window = options.includeRunSummaries;
+        if (window === undefined) {
+          clauses.push("json_extract(data, '$.runId') = ?");
+        } else {
+          // Request start belongs to the execution even when the summary commit
+          // and the following execution start share a millisecond.
+          const at = `COALESCE((SELECT json_extract(request.value, '$.startedAt')
+            FROM json_each(${schema.message.tableName}.data, '$.modelRequests') AS request
+            WHERE json_extract(request.value, '$.purpose') = 'context-summary' LIMIT 1), created_at)`;
+          const bounds = [`${at} >= ?`];
+          params.push(window.startedAt);
+          if (window.completedAt !== undefined) {
+            bounds.push(`${at} <= ?`);
+            params.push(window.completedAt);
+          }
+          if (window.nextStartedAt !== undefined) {
+            bounds.push(`${at} < ?`);
+            params.push(window.nextStartedAt);
+          }
+          clauses.push(`(json_extract(data, '$.runId') = ? OR
+            (json_extract(data, '$.runId') IS NULL AND ${bounds.join(" AND ")}
+             AND EXISTS (SELECT 1 FROM ${schema.part.tableName} AS summary
+               WHERE summary.message_id = ${schema.message.tableName}.id
+               AND summary.type = 'text'
+               AND json_extract(summary.data, '$.metadata.kind') = 'context-summary')))`);
+        }
       }
       if (cursor !== undefined) {
         clauses.push(
@@ -527,11 +552,40 @@ export function createDatabaseMessageStore(
       input: StoreCompactionInput,
     ): Promise<CommitCompactionResult | undefined> {
       return withImmediateTransaction(() => {
+        input.signal?.throwIfAborted();
         const expectedPartIds = new Set(
           input.expectedParts.map((part) => part.id),
         );
         if (expectedPartIds.size !== input.expectedParts.length) {
           throw new Error("Compaction expected parts contain duplicate ids");
+        }
+        for (const expected of input.expectedMessages ?? []) {
+          if (
+            expected.info.sessionId !== input.sessionId ||
+            expected.info.contextScopeId !== input.contextScopeId
+          ) {
+            throw new Error(
+              `Compaction message belongs to another scope: ${expected.info.id}`,
+            );
+          }
+          const row = getMessageRow(expected.info.id);
+          if (row?.data !== messageToRowData(expected.info)) {
+            return undefined;
+          }
+          const currentParts = db
+            .prepare<PartRow>(
+              `SELECT * FROM ${schema.part.tableName} WHERE message_id = ? ORDER BY order_index`,
+            )
+            .all(expected.info.id);
+          if (
+            currentParts.length !== expected.parts.length ||
+            currentParts.some(
+              (part, index) =>
+                part.data !== partToRowData(expected.parts[index]),
+            )
+          ) {
+            return undefined;
+          }
         }
         const targets: Part[] = [];
         for (const expectedPart of input.expectedParts) {

@@ -26,6 +26,8 @@ import {
   createTokenUsageMetadata,
   readTokenUsageMetadata,
 } from "./token-usage-metadata.js";
+import { MessageEvent } from "./events.js";
+import type { ModelRequestRecord } from "../llm-client/types.js";
 import type { Message, MessageStore } from "./types.js";
 
 const cleanupPaths: string[] = [];
@@ -418,7 +420,7 @@ describe("createDatabaseMessageStore", () => {
       messageId: "assistant",
       step: 1,
       attempt: 1,
-      purpose: "agent-step",
+      purpose: "agent-step" as const,
       startedAt: 100,
       outcome: "running" as const,
     };
@@ -899,6 +901,7 @@ describe("createDatabaseMessageStore", () => {
           },
           inputTokens: 120,
           outputTokens: 7,
+          reasoningTokens: 3,
           totalTokens: 127,
         }),
       },
@@ -923,6 +926,7 @@ describe("createDatabaseMessageStore", () => {
       },
       inputTokens: 120,
       outputTokens: 7,
+      reasoningTokens: 3,
       totalTokens: 127,
     });
   });
@@ -1222,3 +1226,50 @@ function createFailingMessageTouchConnection(): DatabaseConnection {
     },
   };
 }
+
+it("persists optional request usage and reads old request records without inventing usage", async () => {
+  const store = createDatabaseMessageStore();
+  const oldRequest: ModelRequestRecord = {
+    requestId: "old",
+    runId: "run",
+    messageId: "assistant-usage",
+    step: 1,
+    attempt: 1,
+    purpose: "agent-step",
+    startedAt: 1,
+    endedAt: 2,
+    outcome: "success",
+  };
+  const usage = {
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+    reasoningTokens: 3,
+  };
+  const newRequest: ModelRequestRecord = {
+    ...oldRequest,
+    requestId: "new",
+    step: 2,
+    usage,
+  };
+  await store.insertMessage({
+    id: "assistant-usage",
+    sessionId: "session_1",
+    role: "assistant",
+    agent: "default",
+    runId: "run",
+    time: { created: 1 },
+    modelRequests: [oldRequest, newRequest],
+  });
+  closeDatabase();
+  initDatabase({ dbPath: databasePath });
+  const message =
+    await createDatabaseMessageStore().getMessage("assistant-usage");
+  if (message?.role !== "assistant")
+    throw new Error("Missing assistant message");
+  expect(message.modelRequests?.[0]).not.toHaveProperty("usage");
+  expect(message.modelRequests?.[1]?.usage).toEqual(usage);
+  expect(MessageEvent.Updated.schema.parse({ info: message })).toEqual({
+    info: message,
+  });
+});

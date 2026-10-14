@@ -23,11 +23,19 @@ export function modelProfileRouteKey(
   ]);
 }
 
-/** Select before the legacy model registry folds model identifiers and drops routes. */
-export function activeModelProfiles(
+/**
+ * Select the active route before the legacy registry folds identifiers and drops routes.
+ * For budgeting, maxOutputTokens is the ordinary request preference.
+ */
+export function activeModelBudgetProfiles(
   config: Pick<
     import("./types.js").LLMConfig,
-    "provider" | "model" | "baseUrl" | "interfaceProvider" | "modelProfiles"
+    | "provider"
+    | "model"
+    | "baseUrl"
+    | "interfaceProvider"
+    | "modelProfiles"
+    | "maxTokens"
   >,
 ): readonly import("./types.js").ModelJsonModelProfile[] {
   const matching =
@@ -43,7 +51,10 @@ export function activeModelProfiles(
     ) ?? [];
   matching.sort((a, b) => profileSpecificity(a) - profileSpecificity(b));
   const profile = matching.at(-1);
-  return profile === undefined ? [] : [profile];
+  // Profile routing selects window/capability metadata; output is the ordinary request preference.
+  return profile === undefined
+    ? []
+    : [{ ...profile, maxOutputTokens: config.maxTokens }];
 }
 
 export function profileSpecificity(profile: {

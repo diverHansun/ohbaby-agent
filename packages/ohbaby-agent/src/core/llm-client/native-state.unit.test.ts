@@ -133,3 +133,41 @@ it.each([
     expect(frames.at(-1)?.tokenUsage?.outputTokens).toBe(outputTokens);
   },
 );
+
+it("uses final output as the opaque estimate when later usage no longer reports reasoning", async () => {
+  const c = client();
+  c.provider.streamResponse = (): Promise<
+    AsyncIterable<InterfaceProviderStreamEvent>
+  > =>
+    Promise.resolve(
+      (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+        await Promise.resolve();
+        yield {
+          reasoningTokens: 4,
+          tokenUsage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15,
+            reasoningTokens: 4,
+          },
+        };
+        yield {
+          textDelta: "done",
+          finishReason: "stop",
+          tokenUsage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
+        };
+        yield { nativeOutput: output };
+      })(),
+    );
+  const frames: StreamingResponse[] = [];
+  for await (const frame of streamResponse(c, [])) frames.push(frame);
+  expect(frames.at(-1)?.modelState?.estimate).toEqual({
+    tokens: 8,
+    source: "output",
+  });
+  expect(frames.at(-1)?.tokenUsage).toEqual({
+    inputTokens: 10,
+    outputTokens: 8,
+    totalTokens: 18,
+  });
+});

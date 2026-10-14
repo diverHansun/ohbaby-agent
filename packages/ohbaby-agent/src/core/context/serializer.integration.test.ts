@@ -20,6 +20,18 @@ import { createFallbackSessionTitleFromMessages } from "../../services/session/t
 import { createContextManager } from "./context-manager.js";
 import { serializeHistory } from "./serialization.js";
 import { serializeForLlm, serializeHistoryMessages } from "./serializer.js";
+import { Lifecycle } from "../lifecycle/lifecycle.js";
+import { createToolScheduler } from "../tool-scheduler/index.js";
+import { createPermissionState } from "../../permission/index.js";
+import { adaptMcpTool } from "../../mcp/integration/tool-adapter.js";
+import { admitMcpTool } from "../../mcp/integration/dynamic-tool-menu.js";
+import type { McpClientLike } from "../../mcp/types.js";
+import type { LLMClientInstance } from "../llm-client/index.js";
+import type {
+  InterfaceProviderRequest,
+  InterfaceProviderStreamEvent,
+} from "../../services/interface-providers/types.js";
+import { estimateHistoryForCompaction } from "./compaction-policy.js";
 
 const cleanupPaths: string[] = [];
 let databasePath = "";
@@ -91,6 +103,240 @@ afterEach(async () => {
 });
 
 describe("serializeForLlm database metadata projection", () => {
+  it("replays real MCP error and large successful results through lifecycle, restart and budget changes", async () => {
+    const bus = createBus();
+    const messageManager = createMessageManager({
+      bus,
+      store: createDatabaseMessageStore(),
+      idGenerator: createMessageIds(),
+      now: createClock(),
+    });
+    const user = await messageManager.createMessage({
+      sessionId: "session_1",
+      role: "user",
+      agent: "default",
+    });
+    await messageManager.appendPart(user.id, {
+      type: "text",
+      text: "Look up all three records",
+    });
+    const largeOutput = "stable-large-result-".repeat(3000);
+    const structuredContent = {
+      reason: "missing-record",
+      suggestion: "correct the record id",
+    };
+    const mcp: McpClientLike = {
+      name: "records",
+      config: {
+        type: "stdio",
+        command: "fixture",
+        args: [],
+        enabled: true,
+        trust: true,
+        timeout: 5000,
+      },
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      listTools: () => Promise.resolve([]),
+      getStatus: () => ({ status: "connected", toolCount: 1 }),
+      callTool: ({ arguments: params }) =>
+        Promise.resolve(
+          params?.key === "missing"
+            ? {
+                isError: true,
+                content: [{ type: "text", text: "Record not found" }],
+                structuredContent,
+              }
+            : { content: [{ type: "text", text: largeOutput }] },
+        ),
+    };
+    const tool = adaptMcpTool(
+      {
+        name: "lookup",
+        inputSchema: {
+          type: "object",
+          properties: { key: { type: "string" } },
+        },
+        annotations: { readOnlyHint: true },
+      },
+      mcp,
+    );
+    const scheduler = createToolScheduler({
+      bus,
+      permissionState: createPermissionState({
+        bus,
+        initialLevel: "full-access",
+      }),
+    });
+    scheduler.register(admitMcpTool(tool).accepted[0]);
+    let limit = 1_000_000;
+    const tokenCounter = {
+      estimateTokens: (text: string): number => text.length,
+      getLimit: (): number => limit,
+    };
+    const contextManager = createContextManager({
+      bus,
+      messageManager,
+      tokenCounter,
+      llmClient: {
+        generateSummary: () =>
+          Promise.reject(new Error("Unexpected compaction")),
+      },
+      memory: {
+        load: () => Promise.resolve({ global: "", project: "", merged: "" }),
+      },
+      systemPromptProvider: { build: () => Promise.resolve("system") },
+    });
+    const requests: InterfaceProviderRequest[] = [];
+    const llmClient: LLMClientInstance = {
+      config: {
+        provider: "fixture",
+        model: "fixture",
+        interfaceProvider: "openai-compatible",
+        baseUrl: "https://fixture.invalid",
+        maxTokens: 128,
+        modelProfiles: [
+          {
+            model: "fixture",
+            contextWindowTokens: limit,
+            reasoningCapabilities: {
+              mode: "none",
+              wire: "none",
+              supportsDisabled: true,
+            },
+          },
+        ],
+      },
+      provider: {
+        id: "fixture",
+        kind: "openai-compatible",
+        client: {},
+        isAbortError: () => false,
+        streamResponse(
+          request,
+        ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> {
+          requests.push(request);
+          const first = requests.length === 1;
+          return Promise.resolve(
+            (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              yield await Promise.resolve(
+                first
+                  ? {
+                      toolCallDeltas: ["missing", "one", "two"].map(
+                        (key, index) => ({
+                          index,
+                          id: `call_${key}`,
+                          name: tool.name,
+                          argumentsDelta: JSON.stringify({ key }),
+                        }),
+                      ),
+                      finishReason: "tool_calls",
+                    }
+                  : { textDelta: "Done", finishReason: "stop" },
+              );
+            })(),
+          );
+        },
+      },
+    };
+    const lifecycle = new Lifecycle({
+      llmClient,
+      messageManager,
+      contextManager,
+      toolScheduler: scheduler,
+    });
+    const run = lifecycle.run({
+      sessionId: "session_1",
+      modelId: "fixture",
+      directory: process.cwd(),
+    });
+    let next = await run.next();
+    while (!next.done) next = await run.next();
+    expect(next.value.success).toBe(true);
+    expect(requests).toHaveLength(2);
+    const sentResults = requests[1].messages.filter(
+      (message) => message.role === "tool",
+    );
+    expect(sentResults.map((message) => message.callId)).toEqual([
+      "call_missing",
+      "call_one",
+      "call_two",
+    ]);
+    const errorContent = sentResults[0].content;
+    if (typeof errorContent !== "string") throw new Error("Expected tool text");
+    expect(errorContent.match(/Record not found/g)).toHaveLength(1);
+    expect(errorContent.match(/missing-record/g)).toHaveLength(1);
+    expect(errorContent).toContain('"isError":true');
+    expect(errorContent).not.toContain('"source"');
+    expect(errorContent).not.toContain("uiToolSource");
+    expect(errorContent).not.toContain('"metadata":');
+    for (const result of sentResults.slice(1))
+      expect(result.content).toContain(largeOutput);
+
+    const history = await messageManager.listBySession("session_1");
+    const parts = history
+      .flatMap((message) => message.parts)
+      .filter((part) => part.type === "tool");
+    expect(parts.map((part) => part.state.status)).toEqual([
+      "error",
+      "completed",
+      "completed",
+    ]);
+    expect(parts[0].state).toMatchObject({
+      metadata: {
+        isError: true,
+        source: "mcp",
+        contentTypes: ["text"],
+        structuredContent,
+      },
+    });
+    const before = serializeHistoryMessages(history);
+    const summary = serializeHistory(history, { includeToolContext: true });
+    for (const result of sentResults) {
+      if (typeof result.content !== "string")
+        throw new Error("Expected tool text");
+      expect(summary).toContain(result.content);
+    }
+    const expectedCount = before
+      .map((message) => JSON.stringify(message))
+      .join("\n").length;
+    expect(estimateHistoryForCompaction(history, tokenCounter)).toBe(
+      expectedCount,
+    );
+
+    // Changed budgets below summary pressure must not redistribute or trim old results.
+    limit = 200_000;
+    const prepared = await contextManager.prepareTurn({
+      sessionId: "session_1",
+      directory: process.cwd(),
+      modelId: "fixture",
+      toolNames: [],
+      tools: undefined,
+    });
+    expect(prepared.usage.usageRatio).toBeGreaterThan(0.5);
+    expect(prepared.compaction).toBeUndefined();
+    expect(
+      prepared.request.messages.filter((message) => message.role === "tool"),
+    ).toEqual(sentResults);
+    expect(await messageManager.listBySession("session_1")).toEqual(history);
+
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const reopened = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+    });
+    const restored = await reopened.listBySession("session_1");
+    expect(restored).toEqual(history);
+    expect(serializeHistoryMessages(restored)).toEqual(before);
+    expect(serializeHistory(restored, { includeToolContext: true })).toBe(
+      summary,
+    );
+    expect(estimateHistoryForCompaction(restored, tokenCounter)).toBe(
+      expectedCount,
+    );
+  });
+
   it.each([
     {
       name: "MessageContentFilterError",
@@ -364,7 +610,11 @@ describe("serializeForLlm database metadata projection", () => {
       createContextManager({
         bus: createBus(),
         llmClient: {
-          generateSummary: vi.fn().mockResolvedValue("summary"),
+          generateSummary: vi.fn().mockResolvedValue({
+            text: "summary",
+            summaryMessageId: "summary",
+            requests: [],
+          }),
         },
         memory: {
           load: vi
@@ -411,11 +661,19 @@ describe("serializeForLlm database metadata projection", () => {
       idGenerator: createMessageIds("reopened_"),
       now: createClock(),
     });
-    const rebuildRuntimeContext = vi.fn().mockResolvedValue("replacement");
+    const rebuildRuntimeContext = vi.fn().mockResolvedValue({
+      text: "replacement",
+      summaryMessageId: "summary",
+      requests: [],
+    });
     const reopenedContextManager = createContextManager({
       bus: createBus(),
       llmClient: {
-        generateSummary: vi.fn().mockResolvedValue("summary"),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "summary",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       },
       memory: {
         load: vi
@@ -505,11 +763,19 @@ describe("serializeForLlm database metadata projection", () => {
       "inspect caching",
     );
 
-    const buildRuntimeContext = vi.fn().mockResolvedValue("new runtime");
+    const buildRuntimeContext = vi.fn().mockResolvedValue({
+      text: "new runtime",
+      summaryMessageId: "summary",
+      requests: [],
+    });
     const contextManager = createContextManager({
       bus: createBus(),
       llmClient: {
-        generateSummary: vi.fn().mockResolvedValue("summary"),
+        generateSummary: vi.fn().mockResolvedValue({
+          text: "summary",
+          summaryMessageId: "summary",
+          requests: [],
+        }),
       },
       memory: {
         load: vi
@@ -637,6 +903,71 @@ describe("serializeForLlm database metadata projection", () => {
           'structured result\n\n<tool_metadata>\n{"server":"server","tool":"search","contentTypes":["text"],"structuredContent":{"count":1}}\n</tool_metadata>',
       },
     ]);
+  });
+
+  it("keeps aborted output, error and call pairing exactly once after restart", async () => {
+    const manager = createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+      idGenerator: createMessageIds(),
+    });
+    const assistant = await manager.createMessage({
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "default",
+    });
+    await manager.appendPart(assistant.id, {
+      type: "tool",
+      callId: "call_aborted",
+      tool: "bash",
+      state: {
+        status: "aborted",
+        input: { command: "long-job" },
+        output: "partial stdout",
+        error: "Tool execution aborted by user",
+        metadata: {
+          exitCode: 130,
+          signal: "SIGINT",
+          internalPath: "private-path",
+        },
+      },
+    });
+    const history = await manager.listBySession("session_1");
+    const before = serializeHistoryMessages(history);
+    const summaryBefore = serializeHistory(history, {
+      includeToolContext: true,
+    });
+    const result = before.find((message) => message.role === "tool");
+    expect(before[0]).toMatchObject({
+      role: "assistant",
+      toolCalls: [
+        {
+          callId: "call_aborted",
+          name: "bash",
+          argumentsJson: '{"command":"long-job"}',
+        },
+      ],
+    });
+    expect(result).toMatchObject({ role: "tool", callId: "call_aborted" });
+    if (typeof result?.content !== "string")
+      throw new Error("Expected aborted tool text");
+    for (const text of [result.content, summaryBefore]) {
+      expect(text.match(/partial stdout/g)).toHaveLength(1);
+      expect(text.match(/Tool execution aborted by user/g)).toHaveLength(1);
+      expect(text).toContain('"exitCode":130');
+      expect(text).not.toContain("private-path");
+    }
+    closeDatabase();
+    initDatabase({ dbPath: databasePath });
+    const restored = await createMessageManager({
+      bus: createBus(),
+      store: createDatabaseMessageStore(),
+    }).listBySession("session_1");
+    expect(restored).toEqual(history);
+    expect(serializeHistoryMessages(restored)).toEqual(before);
+    expect(serializeHistory(restored, { includeToolContext: true })).toBe(
+      summaryBefore,
+    );
   });
 
   it("projects deterministic unknown results for in-flight tools after restart", async () => {

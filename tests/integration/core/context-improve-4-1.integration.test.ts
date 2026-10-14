@@ -132,7 +132,11 @@ describe("context improve-4.1 integration", () => {
       llmClient: {
         generateSummary: vi
           .fn<ContextLLMClient["generateSummary"]>()
-          .mockResolvedValue("summary"),
+          .mockImplementation(async (input) => ({
+            text: "summary",
+            summaryMessageId: input.summaryMessageId,
+            requests: [],
+          })),
       },
       memory: {
         load: vi
@@ -291,7 +295,11 @@ describe("context improve-4.1 integration", () => {
       llmClient: {
         generateSummary: vi
           .fn<ContextLLMClient["generateSummary"]>()
-          .mockResolvedValue("summary"),
+          .mockImplementation(async (input) => ({
+            text: "summary",
+            summaryMessageId: input.summaryMessageId,
+            requests: [],
+          })),
       },
       memory: {
         load: vi
@@ -378,7 +386,10 @@ describe("context improve-4.1 integration", () => {
     expect({
       messages: requests[0]?.messages,
       tools: requests[0]?.tools,
-    }).toEqual(regularMeasurement);
+    }).toEqual({
+      messages: regularMeasurement?.messages,
+      tools: regularMeasurement?.tools,
+    });
     expect(JSON.stringify(requests[0]?.messages)).toContain(
       "Available tools: read_file",
     );
@@ -393,7 +404,10 @@ describe("context improve-4.1 integration", () => {
     expect({
       messages: requests[1]?.messages,
       tools: requests[1]?.tools,
-    }).toEqual(finalMeasurement);
+    }).toEqual({
+      messages: finalMeasurement?.messages,
+      tools: finalMeasurement?.tools,
+    });
     expect(JSON.stringify(requests[1]?.messages)).toContain(
       "Available tools: read_file",
     );
@@ -427,7 +441,7 @@ describe("context improve-4.1 integration", () => {
         sessionId: "session_1",
       });
       await messageManager.appendPart(message.id, {
-        text: `${String(index)} ${"long context ".repeat(40)}`,
+        text: `${String(index)} ${"long context ".repeat(4000)}`,
         type: "text",
       });
     }
@@ -482,7 +496,7 @@ describe("context improve-4.1 integration", () => {
       sessionId: "session_static",
     });
     expect(staticOnlyUsage?.currentTokens).toBeGreaterThan(0);
-    expect(staticOnlyUsage).not.toHaveProperty("composition");
+    expect(staticOnlyUsage?.composition).toBeDefined();
     expect(requests).toHaveLength(0);
     await client.submitPromptAndWait("seed a measured request", {
       sessionId: "session_1",
@@ -539,7 +553,7 @@ describe("context improve-4.1 integration", () => {
     expect(windowEvent?.usage.currentTokens).toBe(
       compact.usageAfter.currentTokens,
     );
-    expect(windowEvent?.usage).not.toHaveProperty("composition");
+    expect(windowEvent?.usage.composition).toBeDefined();
     expect(statusEvent?.output).toMatchObject({
       data: { contextWindow: windowEvent?.usage },
       kind: "data",

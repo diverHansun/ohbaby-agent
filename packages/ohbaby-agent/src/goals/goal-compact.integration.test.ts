@@ -138,7 +138,12 @@ describe("goals x compact (integration)", () => {
     contextManager = createContextManager({
       bus: createBus(),
       llmClient: {
-        generateSummary: () => Promise.resolve(DISTORTED_SUMMARY),
+        generateSummary: (input) =>
+          Promise.resolve({
+            text: DISTORTED_SUMMARY,
+            summaryMessageId: input.summaryMessageId,
+            requests: [],
+          }),
       },
       memory,
       messageManager,
@@ -170,7 +175,7 @@ describe("goals x compact (integration)", () => {
         await addTextMessage(messageManager, {
           role: "assistant",
           sessionId,
-          text: `turn ${String(turn)} work log: ${"x".repeat(600)}`,
+          text: `turn ${String(turn)} work log: ${"x".repeat(24_000)}`,
         });
         await input.onTurn?.(turn);
         return { status: "succeeded", tokensUsed: 50 };

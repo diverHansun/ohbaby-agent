@@ -491,7 +491,8 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
   compactSession(
     options?: Parameters<UiBackendClient["compactSession"]>[0],
   ): ReturnType<UiBackendClient["compactSession"]> {
-    return this.rpc("compactSession", [options]);
+    const { signal, ...compactOptions } = options ?? {};
+    return this.rpc("compactSession", [compactOptions], { signal });
   }
 
   updateSessionReasoning(
@@ -536,8 +537,11 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
 
   async executeCommand(
     invocation: Parameters<UiBackendClient["executeCommand"]>[0],
+    options?: Parameters<UiBackendClient["executeCommand"]>[1],
   ): ReturnType<UiBackendClient["executeCommand"]> {
-    const completion = await this.rpc("executeCommand", [invocation]);
+    const completion = await this.rpc("executeCommand", [invocation], {
+      signal: options?.signal,
+    });
     if (
       !isUiCommandCompletion(completion) ||
       completion.clientInvocationId !== invocation.clientInvocationId ||
@@ -631,12 +635,24 @@ class RemoteDaemonClient implements RemoteUiBackendClient {
         signal: options.signal,
       });
     } catch (error) {
+      if (
+        (method === "executeCommand" || method === "compactSession") &&
+        options.signal?.aborted &&
+        isAbortError(error)
+      )
+        throw error;
       throw daemonConnectionError(method, error);
     }
     let responseJson: unknown;
     try {
       responseJson = await response.json();
     } catch (error) {
+      if (
+        (method === "executeCommand" || method === "compactSession") &&
+        options.signal?.aborted &&
+        isAbortError(error)
+      )
+        throw error;
       if (!response.ok) {
         throw new Error(
           `Daemon request ${method} failed with HTTP ${String(response.status)}`,

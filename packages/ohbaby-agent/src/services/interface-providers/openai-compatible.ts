@@ -75,7 +75,9 @@ function buildRequestParams(
     ...(request.temperature !== undefined
       ? { temperature: request.temperature }
       : {}),
-    max_tokens: request.maxTokens,
+    ...(options.id === "openai"
+      ? { max_completion_tokens: request.maxTokens }
+      : { max_tokens: request.maxTokens }),
     stream: true,
     stream_options: { include_usage: true },
   };
@@ -179,16 +181,9 @@ function buildStreamEvent(
   chunk: ChatCompletionChunk,
   report: NonNullable<CreateInterfaceProviderOptions["tokenUsageReporter"]>,
 ): InterfaceProviderStreamEvent | null {
-  const rawReasoningTokens =
-    chunk.usage?.completion_tokens_details?.reasoning_tokens;
-  const reasoningTokens =
-    rawReasoningTokens !== undefined &&
-    Number.isInteger(rawReasoningTokens) &&
-    rawReasoningTokens >= 0
-      ? rawReasoningTokens
-      : undefined;
+  const tokenUsage = normalizeOpenAICompatibleUsage(chunk.usage, report);
+  const reasoningTokens = tokenUsage?.reasoningTokens;
   if (chunk.choices.length === 0) {
-    const tokenUsage = normalizeOpenAICompatibleUsage(chunk.usage, report);
     return tokenUsage || reasoningTokens !== undefined
       ? {
           ...(tokenUsage ? { tokenUsage } : {}),
@@ -211,7 +206,6 @@ function buildStreamEvent(
   const textDelta = nonEmptyString(choice.delta.content);
   const reasoningTextDelta = reasoningTextDeltaFromChoiceDelta(choice.delta);
   const finishReason = mapFinishReason(choice.finish_reason);
-  const tokenUsage = normalizeOpenAICompatibleUsage(chunk.usage, report);
   const event: InterfaceProviderStreamEvent = {
     ...(textDelta === undefined ? {} : { textDelta }),
     ...(reasoningTextDelta === undefined ? {} : { reasoningTextDelta }),
@@ -443,6 +437,7 @@ export function createOpenAICompatibleProvider(
   const client = new OpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseUrl,
+    maxRetries: 0,
   });
 
   return {
@@ -479,10 +474,10 @@ export function createOpenAICompatibleProvider(
                   ...terminalEvent,
                   ...(event.tokenUsage === undefined
                     ? {}
-                    : { tokenUsage: event.tokenUsage }),
-                  ...(event.reasoningTokens === undefined
-                    ? {}
-                    : { reasoningTokens: event.reasoningTokens }),
+                    : {
+                        tokenUsage: event.tokenUsage,
+                        reasoningTokens: event.tokenUsage.reasoningTokens,
+                      }),
                 };
                 continue;
               }

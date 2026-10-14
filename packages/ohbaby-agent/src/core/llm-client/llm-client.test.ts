@@ -6,6 +6,8 @@
  */
 
 import * as path from "node:path";
+import { APIConnectionError as OpenAIConnectionError } from "openai";
+import { APIConnectionError as AnthropicConnectionError } from "@anthropic-ai/sdk/error";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type {
   InterfaceProviderRequest,
@@ -311,6 +313,7 @@ describe("LLM Client Integration Tests", () => {
             inputTokens: 10,
             outputTokens: 5,
             totalTokens: 15,
+            reasoningTokens: 2,
           },
         },
       ];
@@ -335,7 +338,12 @@ describe("LLM Client Integration Tests", () => {
       expect(responses[2].isComplete).toBe(true);
       expect(responses[2].finishReason).toBe("stop");
       expect(responses[2].rawFinishReason).toBeUndefined();
-      expect(responses[2].tokenUsage?.totalTokens).toBe(15);
+      expect(responses[2].tokenUsage).toEqual({
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        reasoningTokens: 2,
+      });
     });
 
     it("should accumulate and parse tool calls", async () => {
@@ -857,6 +865,64 @@ describe("LLM Client Integration Tests", () => {
         "outputTokens",
         "totalTokens",
       ]);
+    });
+
+    describe.each([
+      {
+        label: "OpenAI SDK",
+        error: new OpenAIConnectionError({}),
+      },
+      {
+        label: "Anthropic SDK",
+        error: new AnthropicConnectionError({}),
+      },
+      {
+        label: "socket reset",
+        error: Object.assign(new Error("socket closed"), {
+          code: "ECONNRESET",
+        }),
+      },
+    ])("summary transport interruption: $label", ({ error }) => {
+      it.each([false, true])(
+        "preserves the transport cause for Context without retrying (partial output: %s)",
+        async (partialOutput) => {
+          streamResponseMock.mockResolvedValueOnce(
+            createAbortingProviderStream(
+              partialOutput ? [{ textDelta: "Partial summary" }] : [],
+              error,
+            ),
+          );
+          const responses: StreamingResponse[] = [];
+          const consume = async (): Promise<void> => {
+            for await (const response of streamResponse(
+              mockClient,
+              [{ role: "user", content: "Summarize the conversation" }],
+              {
+                purpose: "context-summary",
+                retry: { maxRetriesPerStep: 0 },
+              },
+            )) {
+              responses.push(response);
+            }
+          };
+
+          await expect(consume()).rejects.toMatchObject({
+            name: "ProviderStreamInterruptedError",
+            source: "transport",
+            cause: error,
+          });
+          expect(streamResponseMock).toHaveBeenCalledTimes(1);
+          expect(responses).toHaveLength(partialOutput ? 1 : 0);
+          expect(responses.every((response) => !response.isComplete)).toBe(
+            true,
+          );
+          expect(responses.some((response) => response.retry)).toBe(false);
+          if (partialOutput)
+            expect(responses[0].messageSnapshot.content).toBe(
+              "Partial summary",
+            );
+        },
+      );
     });
 
     it("does not retry after a reasoning delta has been emitted", async () => {

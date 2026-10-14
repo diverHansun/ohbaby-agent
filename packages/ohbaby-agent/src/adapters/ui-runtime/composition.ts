@@ -1,3 +1,4 @@
+import type { Logger } from "../../observability/logger.js";
 import {
   collectCleanup,
   createShutdownOptions,
@@ -14,7 +15,7 @@ import { collectExecutionFacts } from "../../agents/subagents/execution-facts.js
 import { createStorage } from "../../services/storage/index.js";
 import { PermissionEvent } from "../../permission/events.js";
 import { randomUUID } from "node:crypto";
-import { activeModelProfiles } from "../../config/llm/model-profile.js";
+import { activeModelBudgetProfiles } from "../../config/llm/model-profile.js";
 import {
   mergeReasoningIntent,
   type ReasoningIntent,
@@ -34,13 +35,17 @@ import {
   type CompactResult,
   type ContextManager,
   type ContextUsage,
+  type ContextOccupancyComposition,
 } from "../../core/context/index.js";
 import {
   Lifecycle,
   type DisplayReasoningOwner,
 } from "../../core/lifecycle/index.js";
 import type { ResolvedStepTools } from "../../core/lifecycle/index.js";
-import type { LLMClientInstance } from "../../core/llm-client/index.js";
+import {
+  resolvePreparedRequestSettings,
+  type LLMClientInstance,
+} from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
 import { createMemoryLoader } from "../../core/memory/index.js";
 import {
@@ -160,6 +165,7 @@ const DEFAULT_RUN_POLICY: RunDefaultsPolicy = {
 };
 
 export interface UiRuntimeCompositionOptions {
+  readonly logger?: Logger;
   readonly agentManager?: AgentManager;
   readonly createSubagentId?: () => string;
   readonly bus: BusInstance;
@@ -539,6 +545,7 @@ export async function createUiRuntimeComposition(
     readonly agentName: string;
     readonly toolNames: readonly string[];
     readonly tools: ReturnType<typeof toModelTools>;
+    readonly toolDefinitions: readonly ToolDefinition[];
   }> {
     const session = await sessionManager.get(input.sessionId);
     if (session?.isSubagent === true) {
@@ -556,6 +563,7 @@ export async function createUiRuntimeComposition(
       agentName,
       toolNames: definitions.map((tool) => tool.name),
       tools: toModelTools(definitions),
+      toolDefinitions: definitions,
     };
   }
 
@@ -632,6 +640,7 @@ export async function createUiRuntimeComposition(
       ),
       bus: options.bus,
       llmClient: createContextSummaryClient(options.llmClient),
+      logger: options.logger,
       memory: createMemoryLoader(),
       messageManager: options.messageManager,
       now: options.now,
@@ -648,7 +657,8 @@ export async function createUiRuntimeComposition(
       systemPromptProvider,
       tokenCounter: createHeuristicTokenCounter({
         defaultLimit: options.llmClient.config.contextWindowTokens,
-        profiles: activeModelProfiles(options.llmClient.config),
+        defaultMaxOutputTokens: options.llmClient.config.maxTokens,
+        profiles: activeModelBudgetProfiles(options.llmClient.config),
         provider: options.llmClient.config.provider,
       }),
     });
@@ -1209,40 +1219,51 @@ export async function createUiRuntimeComposition(
     },
 
     async compactSession(input): Promise<CompactResult> {
-      const reasoning =
-        runManager.getActiveReasoning(input.sessionId) ??
-        mergeReasoningIntent(
-          options.llmClient.config.reasoning,
-          input.reasoning,
-        );
-      const resolved = await resolvePrimaryContextTools({
-        operation: "manually compact context",
-        sessionId: input.sessionId,
+      return runManager.withIdleSession(input, async () => {
+        input.signal?.throwIfAborted();
+        const reasoning =
+          runManager.getActiveReasoning(input.sessionId) ??
+          mergeReasoningIntent(
+            options.llmClient.config.reasoning,
+            input.reasoning,
+          );
+        const resolved = await resolvePrimaryContextTools({
+          operation: "manually compact context",
+          sessionId: input.sessionId,
+        });
+        const result = await contextManager.compact(input.sessionId, {
+          signal: input.signal,
+          requestSettings: resolvePreparedRequestSettings(options.llmClient, {
+            reasoning,
+          }),
+          modelOrigin: {
+            provider: options.llmClient.config.provider,
+            model: options.llmClient.config.model,
+            protocol: options.llmClient.config.interfaceProvider,
+            endpoint: options.llmClient.config.baseUrl,
+          },
+          reasoning,
+          agentName: resolved.agentName,
+          directory: input.projectRoot,
+          force: input.force ?? true,
+          isSubagent: false,
+          modelId: options.llmClient.config.model,
+          toolNames: resolved.toolNames,
+          tools: resolved.tools,
+        });
+        const notice = noticeFromCompactResult(input.sessionId, result);
+        if (notice) {
+          options.onNotice?.(notice);
+        }
+        return result;
       });
-      const result = await contextManager.compact(input.sessionId, {
-        modelOrigin: {
-          provider: options.llmClient.config.provider,
-          model: options.llmClient.config.model,
-          protocol: options.llmClient.config.interfaceProvider,
-          endpoint: options.llmClient.config.baseUrl,
-        },
-        reasoning,
-        agentName: resolved.agentName,
-        directory: input.projectRoot,
-        force: input.force ?? true,
-        isSubagent: false,
-        modelId: options.llmClient.config.model,
-        toolNames: resolved.toolNames,
-        tools: resolved.tools,
-      });
-      const notice = noticeFromCompactResult(input.sessionId, result);
-      if (notice) {
-        options.onNotice?.(notice);
-      }
-      return result;
     },
 
-    async getContextUsage(input): Promise<ContextUsage> {
+    async getContextUsage(
+      input,
+    ): Promise<
+      ContextUsage & { readonly composition?: ContextOccupancyComposition }
+    > {
       const resolved = await resolvePrimaryContextTools({
         operation: "inspect context usage",
         sessionId: input.sessionId,
@@ -1266,6 +1287,7 @@ export async function createUiRuntimeComposition(
         context: assembled,
         modelId: options.llmClient.config.model,
         tools: resolved.tools,
+        toolDefinitions: resolved.toolDefinitions,
       });
     },
 

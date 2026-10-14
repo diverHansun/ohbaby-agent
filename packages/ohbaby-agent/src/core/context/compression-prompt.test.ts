@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  COMPRESSION_PROMPT,
-  SUMMARIZATION_SYSTEM_PROMPT,
-} from "./compression-prompt.js";
+import { COMPRESSION_PROMPT } from "./compression-prompt.js";
 
 describe("compression prompts", () => {
   it("uses structured continuation sections with explicit compression pressure", () => {
@@ -18,19 +15,17 @@ describe("compression prompts", () => {
       expect(COMPRESSION_PROMPT).toContain(section);
     }
 
-    expect(COMPRESSION_PROMPT).toMatch(/15-30%|one third/i);
+    expect(COMPRESSION_PROMPT).toMatch(/16384/);
     expect(COMPRESSION_PROMPT).toMatch(/Do not mention.*summar/i);
   });
 
-  it("declares summary-only behavior and exposes an aggressive retry prompt", async () => {
+  it("declares summary-only behavior without a second prompt", async () => {
     const promptModule = (await import("./compression-prompt.js")) as {
       readonly AGGRESSIVE_COMPRESSION_PROMPT?: string;
     };
 
-    expect(SUMMARIZATION_SYSTEM_PROMPT).toMatch(/do not.*tool/i);
-    expect(SUMMARIZATION_SYSTEM_PROMPT).toMatch(/same language/i);
-    expect(promptModule.AGGRESSIVE_COMPRESSION_PROMPT).toEqual(
-      expect.stringMatching(/CRITICAL|too long|compress aggressively/i),
-    );
+    expect(COMPRESSION_PROMPT).toMatch(/without tools/i);
+    expect(COMPRESSION_PROMPT).toMatch(/language/i);
+    expect(promptModule.AGGRESSIVE_COMPRESSION_PROMPT).toBeUndefined();
   });
 });

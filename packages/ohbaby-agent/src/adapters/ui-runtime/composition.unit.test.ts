@@ -529,8 +529,6 @@ describe("createUiRuntimeComposition skill tools", () => {
       disposeSession,
       getUsage: vi.fn<ContextManager["getUsage"]>(),
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
-      resetTurnCompactionCount:
-        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
       updateCalibrationFactor:
         vi.fn<ContextManager["updateCalibrationFactor"]>(),
     } satisfies ContextManager;
@@ -618,8 +616,6 @@ describe("createUiRuntimeComposition skill tools", () => {
       disposeSession: vi.fn<ContextManager["disposeSession"]>(),
       getUsage,
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
-      resetTurnCompactionCount:
-        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
       updateCalibrationFactor:
         vi.fn<ContextManager["updateCalibrationFactor"]>(),
     } satisfies ContextManager;
@@ -678,8 +674,17 @@ describe("createUiRuntimeComposition skill tools", () => {
       context: assembledContext,
       modelId: "fake-model",
       tools,
+      toolDefinitions: definitions,
     });
     expect(compact).toHaveBeenCalledWith("session_1", {
+      requestSettings: {
+        model: "fake-model",
+        maxTokens: 128,
+        temperature: 0,
+        reasoning: expect.objectContaining({ mode: "none" }) as {
+          mode: "none";
+        },
+      },
       modelOrigin: {
         provider: "fake",
         model: "fake-model",
@@ -712,8 +717,6 @@ describe("createUiRuntimeComposition skill tools", () => {
       disposeSession: vi.fn<ContextManager["disposeSession"]>(),
       getUsage: vi.fn<ContextManager["getUsage"]>(),
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
-      resetTurnCompactionCount:
-        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
       updateCalibrationFactor:
         vi.fn<ContextManager["updateCalibrationFactor"]>(),
     } satisfies ContextManager;
@@ -840,8 +843,6 @@ describe("createUiRuntimeComposition skill tools", () => {
       disposeSession: vi.fn<ContextManager["disposeSession"]>(),
       getUsage: vi.fn<ContextManager["getUsage"]>(),
       prepareTurn: vi.fn<ContextManager["prepareTurn"]>(),
-      resetTurnCompactionCount:
-        vi.fn<ContextManager["resetTurnCompactionCount"]>(),
       updateCalibrationFactor:
         vi.fn<ContextManager["updateCalibrationFactor"]>(),
     } satisfies ContextManager;
@@ -1088,7 +1089,52 @@ describe("createUiRuntimeComposition skill tools", () => {
     );
   });
 
-  it("does not reserve an oversized fallback output budget for unknown models", async () => {
+  it.each([false, true])(
+    "reserves the configured ordinary output with a user profile present=%s",
+    async (withProfile) => {
+      const bus = createBus();
+      const workdir = await tempWorkdir();
+      const messageManager = createMessageManager({
+        bus,
+        store: createInMemoryMessageStore(),
+      });
+      const composition = await createUiRuntimeComposition({
+        agentManager: new AgentManager(),
+        bus,
+        messageManager,
+        llmClient: fakeLlmClient({
+          model: "gpt-5",
+          maxTokens: 16_000,
+          contextWindowTokens: 96_000,
+          modelProfiles: withProfile
+            ? [
+                {
+                  model: "gpt-5",
+                  contextWindowTokens: 80_000,
+                  maxOutputTokens: 32_000,
+                },
+              ]
+            : [],
+        }),
+        mcpManager: { getAllTools: () => Promise.resolve([]) },
+        permissionState: createPermissionState({
+          bus,
+          initialLevel: "full-access",
+        }),
+        skillRegistry: createMutableSkillRegistry([]),
+        workdir,
+      });
+      const usage = await composition.getContextUsage({
+        sessionId: "session_budget",
+        projectRoot: workdir,
+      });
+      expect(usage.reservedOutputTokens).toBe(16_000);
+      expect(usage.contextLimit).toBe(withProfile ? 80_000 : 96_000);
+      expect(usage.inputBudgetTokens).toBe(withProfile ? 62_976 : 78_976);
+    },
+  );
+
+  it("does not announce compaction without eligible older history for an oversized output preference", async () => {
     const bus = createBus();
     const workdir = await tempWorkdir();
     const messageManager = createMessageManager({

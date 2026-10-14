@@ -132,42 +132,6 @@ interface AgentConfig {
    */
   allowDoomLoop?: boolean
 
-  // ==================== 模型参数（可选覆盖全局配置） ====================
-
-  /**
-   * 指定使用的模型
-   *
-   * 格式：providerID/modelID（如 "anthropic/claude-sonnet-4.5"）
-   *
-   * 未设置时，使用 config/llm 的全局模型
-   * 用户通过 /model 切换时，不会影响指定了 model 的 agent
-   */
-  model?: string
-
-  /**
-   * 温度参数（覆盖全局配置）
-   * 范围：0.0 - 2.0
-   *
-   * 未设置时，继承 model.json 中的 temperature
-   */
-  temperature?: number
-
-  /**
-   * Top-P 参数（覆盖全局配置）
-   * 范围：0.0 - 1.0
-   *
-   * 未设置时，继承 model.json 中的 topP
-   */
-  topP?: number
-
-  /**
-   * Max tokens（覆盖全局配置）
-   * 单次响应的最大 token 数
-   *
-   * 未设置时，继承 model.json 中的 maxTokens
-   */
-  maxTokens?: number
-
   // ==================== 工具配置 ====================
 
   /**
@@ -329,12 +293,6 @@ export const HexColorSchema = z.string().regex(
   /^#[0-9a-fA-F]{6}$/,
   'Invalid hex color format (expected #RRGGBB)'
 )
-
-// 模型标识 Schema
-export const ModelIdSchema = z.string().regex(
-  /^[a-z0-9-]+\/[a-z0-9-]+$/i,
-  'Invalid model ID format (expected providerID/modelID)'
-)
 ```
 
 ### 3.2 工具配置 Schema
@@ -393,12 +351,6 @@ export const AgentConfigSchema = z.object({
   timeout: z.number().int().positive().optional(),
   allowDoomLoop: z.boolean().optional().default(false),
 
-  // 模型参数
-  model: ModelIdSchema.optional(),
-  temperature: z.number().min(0).max(2).optional(),
-  topP: z.number().min(0).max(1).optional(),
-  maxTokens: z.number().int().positive().optional(),
-
   // 工具配置
   tools: ToolsConfigSchema.optional(),
 
@@ -454,14 +406,11 @@ export type AgentsConfig = z.infer<typeof AgentsConfigSchema>
 | timeout | number | 否 | 无 runtime 默认值 | 旧配置字段；当前 subagent deadline 由 `subagent_run.timeout_ms`/host 管理 |
 | allowDoomLoop | boolean | 否 | false | 是否允许循环检测 |
 
-### 4.4 模型参数字段
+### 4.4 已删除的模型字段
 
-| 字段 | 类型 | 必需 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| model | string | 否 | 继承全局 | 指定模型（providerID/modelID） |
-| temperature | number | 否 | 继承全局 | 温度参数（0.0-2.0） |
-| topP | number | 否 | 继承全局 | Top-P 参数（0.0-1.0） |
-| maxTokens | number | 否 | 继承全局 | 最大响应 token 数 |
+`model`、`maxTokens`、`temperature`、`topP` 已退出静态 agent 配置。包含任一字段的旧文件通过严格 schema 校验时报错，错误包含文件路径、agent 路径与字段。程序化 Registry 输入及自定义 RuntimeAgent 消费入口也会拒绝这些字段，不能依赖 TypeScript 类型或静默忽略。
+
+迁移时删除这些字段，将模型设置放到 `config/llm`。运行时 `modelId` 和 reasoning 保留，子代理继承 host 的运行时模型身份。
 
 ### 4.5 工具配置字段
 
@@ -496,9 +445,7 @@ export type AgentsConfig = z.infer<typeof AgentsConfigSchema>
       "name": "explore",
       "mode": "subagent",
       "description": "Enhanced codebase exploration with web search",
-      "model": "anthropic/claude-haiku-4",
       "maxSteps": 15,
-      "temperature": 0.5,
       "tools": {
         "include": ["read", "grep", "glob", "web-search"]
       },
@@ -523,7 +470,6 @@ export type AgentsConfig = z.infer<typeof AgentsConfigSchema>
       "description": "Specialized code review agent",
       "color": "#FF5733",
       "maxSteps": 30,
-      "temperature": 0.3,
       "tools": {
         "include": ["read", "grep", "glob", "web-search"],
         "exclude": ["write", "edit", "bash"]
@@ -549,7 +495,6 @@ export type AgentsConfig = z.infer<typeof AgentsConfigSchema>
       "description": "Scans code for security vulnerabilities (OWASP Top 10)",
       "color": "#DC3545",
       "maxSteps": 20,
-      "temperature": 0.3,
       "tools": {
         "include": ["read", "grep", "glob"]
       },

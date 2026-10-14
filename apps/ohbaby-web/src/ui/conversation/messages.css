@@ -34,6 +34,15 @@
   align-items: flex-end;
 }
 
+.ohb-message-compaction .ohb-message-body {
+  color: #727782;
+  font-size: 13px;
+}
+
+.ohb-message-compaction .ohb-markdown p {
+  margin: 0;
+}
+
 .ohb-message-body {
   color: #2b2d33;
   font-size: 15px;

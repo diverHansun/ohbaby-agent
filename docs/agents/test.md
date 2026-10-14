@@ -1,5 +1,8 @@
 # agent 模块 test.md
 
+> 2026-10-13 X1 配置收尾：`AgentConfig.model`／`maxTokens`／`temperature`／`topP` 已删除。现有配置测试参数化验证文件、Registry 的两个程序化来源，以及 AgentService／SessionSubagentHost 对自定义 RuntimeAgent 的拒绝，且发生在模型请求前。移除字段后沿用运行时 `modelId` 与 reasoning；子代理继承 host 模型。历史运行接口示例保留用于理解原测试设计，当前契约以源码和 improve-6 D1 为准。
+
+
 本文档定义 `agent` 模块的测试策略与测试用例。
 
 ---

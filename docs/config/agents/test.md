@@ -67,9 +67,8 @@
 | name 缺失 | `{ mode: "primary" }` | 抛出 ConfigValidationError |
 | mode 无效值 | `{ name: "x", mode: "invalid" }` | 抛出 ConfigValidationError |
 | subagent 缺少 description | `{ name: "x", mode: "subagent" }` | 抛出 ConfigValidationError |
-| temperature 超范围 | `{ ..., temperature: 3.0 }` | 抛出 ConfigValidationError |
+| 已删除的模型字段 | 分别传入 `model`、`maxTokens`、`temperature`、`topP` | 抛出 ConfigValidationError，定位来源、agent 和字段 |
 | 颜色格式错误 | `{ ..., color: "red" }` | 抛出 ConfigValidationError |
-| model ID 格式错误 | `{ ..., model: "invalid" }` | 抛出 ConfigValidationError |
 
 ### 2.4 错误处理场景
 
@@ -102,11 +101,9 @@
 
 config/agents 模块不直接依赖 config/llm 模块。
 
-模型参数（temperature、topP 等）在 agent 配置中是可选的：
-- 设置时：覆盖 config/llm 的全局配置
-- 未设置时：由 agents 模块从 config/llm 获取默认值
+静态 agent 配置不接受 `model`、`maxTokens`、`temperature`、`topP`。文件加载测试参数化覆盖四个字段及来源路径；Registry 测试覆盖 `configLoader` 和 `builtinAgents`，运行入口测试覆盖自定义 AgentManager 的主、子代理返回值，并验证错误发生在模型请求前。显式值为 `undefined` 的旧属性也要拒绝。
 
-此逻辑由 agents 模块负责，不在 config/agents 测试范围内。
+LLM 层设置、运行时 `modelId` 和 reasoning 保留；相关运行测试继续验证子代理继承 host 的模型和父代理的 reasoning。
 
 ---
 

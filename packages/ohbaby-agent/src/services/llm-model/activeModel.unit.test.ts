@@ -40,7 +40,21 @@ describe("active model projection", () => {
       interfaceProvider: "openai-compatible",
     });
     expect(summary.profile?.contextWindowTokens).toBe(128_000);
+    expect(summary.profile?.maxOutputTokens).toBe(4096);
     expect(JSON.stringify(summary)).not.toContain("sk-secret");
+  });
+
+  it("summarizes detected limits and ordinary output preference without a model profile", () => {
+    const summary = summarizeActiveModel({
+      ...activeConfig,
+      modelProfiles: [],
+      contextWindowTokens: 96_000,
+    });
+    expect(summary.profile).toMatchObject({
+      contextWindowTokens: 96_000,
+      maxOutputTokens: 4096,
+      source: "fallback",
+    });
   });
 
   it("should list only the configured single active model for now", () => {

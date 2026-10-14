@@ -87,7 +87,8 @@ Agent 的系统提示词由 system-prompt 模块管理，本模块不处理任�
 以下验证由 agents 模块负责，不在本模块范围内：
 - 工具名称是否存在（tools.include/exclude 中的工具名）
 - 权限配置是否与 Policy 模块兼容
-- model 字段指定的模型是否存在
+
+文件中出现已删除的静态 `model`／`maxTokens`／`temperature`／`topP` 字段，由本模块的严格 schema 拒绝。绕过文件加载的程序化配置，由 agents 模块在消费入口补充检查。模型设置归 LLM 层管理。
 
 ### N4: 不负责配置缓存
 

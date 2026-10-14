@@ -28,7 +28,9 @@ export class SessionRunBusyError extends Error {
     readonly activeRunIds: readonly string[],
   ) {
     super(
-      `Session ${sessionId} already has active run(s): ${activeRunIds.join(", ")}`,
+      activeRunIds.length > 0
+        ? `Session ${sessionId} already has active run(s): ${activeRunIds.join(", ")}`
+        : `Session ${sessionId} is busy; try again when the current operation finishes`,
     );
     this.name = "SessionRunBusyError";
   }

@@ -10,8 +10,10 @@ import {
   estimatePreparedRequestHeuristic,
   estimateContextOccupancyComposition,
 } from "./token-estimation.js";
-import { createMaskConfig, reduceForModel } from "./projection.js";
-import { findCutPoint } from "./compaction-policy.js";
+import {
+  estimateHistoryForCompaction,
+  findCutPoint,
+} from "./compaction-policy.js";
 
 const origin: ModelOrigin = {
   provider: "openai",
@@ -105,6 +107,44 @@ function textMessage(
 const counter = { estimateTokens: (text: string): number => text.length };
 
 describe("native request occupancy", () => {
+  it("uses the same native replay estimate for history and request, ignoring display copies and ciphertext length", () => {
+    const history = [nativeMessage()];
+    const estimate = (): number =>
+      estimateHistoryForCompaction(history, counter, origin);
+    const expected = estimatePreparedRequestHeuristic(
+      {
+        messages: serializeHistoryMessages(history, undefined, origin),
+        tools: undefined,
+      },
+      counter,
+    );
+    expect(estimate()).toBe(expected);
+    history[0] = {
+      ...history[0],
+      parts: [
+        ...history[0].parts,
+        {
+          type: "reasoning",
+          text: "display-only ".repeat(1000),
+          id: "display",
+          messageId: "m1",
+          sessionId: "s",
+          orderIndex: 2,
+        },
+      ],
+    };
+    const native = history[0].parts[0];
+    if (
+      native.type !== "model-state" ||
+      native.modelState.output.protocol !== "openai-responses"
+    )
+      throw new Error("fixture");
+    for (const item of native.modelState.output.items) {
+      if (item.type === "reasoning")
+        item.encrypted_content = "cipher".repeat(10_000);
+    }
+    expect(estimate()).toBe(expected);
+  });
   it.each([0, 80])(
     "counts one opaque response proxy of %i plus readable reasoning once",
     (tokens) => {
@@ -194,31 +234,6 @@ describe("native source and compaction boundaries", () => {
       }),
     ).toThrow(/unfinished|pending|source/u);
   });
-  it("protects completed native tools from context masking", () => {
-    const message = nativeMessage();
-    const reduced = reduceForModel({
-      sessionId: "s",
-      history: [message, textMessage("user", "user")],
-      usage: {
-        currentTokens: 900,
-        contextLimit: 1000,
-        remainingTokens: 100,
-        usageRatio: 0.9,
-        modelId: "fixture",
-      },
-      cutoff: 0,
-      config: createMaskConfig({
-        enabled: true,
-        minPartTokens: 1,
-        minPrunableTokens: 1,
-        minUsageRatio: 0,
-        protectionTokens: 0,
-      }),
-      tokenCounter: counter,
-    });
-    expect(reduced.event.maskedPartIds).toEqual([]);
-    expect(reduced.history[0]?.parts).toEqual(message.parts);
-  });
   it("never summarizes an unfinished native roundtrip even before later visible messages", () => {
     const history = [
       textMessage("u0", "user", "old".repeat(100)),
@@ -230,9 +245,7 @@ describe("native source and compaction boundaries", () => {
       keepRecentTokens: 1,
       tokenCounter: counter,
     });
-    expect(
-      cut.messagesToSummarize.some((message) => message.info.id === "m1"),
-    ).toBe(false);
+    expect(cut.firstKeptIndex).toBe(1);
     expect(cut.keptMessages.some((message) => message.info.id === "m1")).toBe(
       true,
     );
@@ -252,9 +265,7 @@ it("uses native occupancy when choosing a summary boundary", () => {
     tokenCounter: counter,
   });
   // Public text is under 900 characters, but the actual native request adds the opaque allowance.
-  expect(
-    cut.messagesToSummarize.length + cut.turnPrefixMessages.length,
-  ).toBeGreaterThan(0);
+  expect(cut.firstKeptIndex).toBeGreaterThan(0);
 });
 
 it("counts distinct Chat reasoning text and summary without double-counting mirrored text details", () => {

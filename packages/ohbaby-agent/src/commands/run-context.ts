@@ -15,6 +15,7 @@ export function createCommandRunContext(input: {
   readonly clientInvocationId: string;
   readonly sessionId?: string;
   readonly surface: UiCommandSurface;
+  readonly signal?: AbortSignal;
   readonly options: CommandServiceOptions;
 }): CommandRunContext & {
   completion(promptReceipt?: UiPromptReceipt): UiCommandCompletion;
@@ -44,6 +45,7 @@ export function createCommandRunContext(input: {
     clientInvocationId: input.clientInvocationId,
     sessionId: input.sessionId,
     surface: input.surface,
+    signal: input.signal,
 
     emitOutput(output: UiCommandOutput): void {
       outputCount += 1;

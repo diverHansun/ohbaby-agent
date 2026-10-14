@@ -55,13 +55,13 @@ function createManager(
       load: () => Promise.resolve({ global: "", merged: "", project: "" }),
     },
     messageManager,
-    pruneMinimumTokens: Number.MAX_SAFE_INTEGER,
+    compressionThreshold: 0.1,
     systemPromptProvider: {
       build: () => Promise.resolve("stable"),
     },
     tokenCounter: {
       estimateTokens: (content) => content.length,
-      getLimit: () => options.contextLimit ?? 20_000,
+      getLimit: () => options.contextLimit ?? 1_000_000,
     },
   });
 }
@@ -89,7 +89,7 @@ async function appendHistory(
       sessionId: input.sessionId,
     });
     await messageManager.appendPart(message.id, {
-      text: `${input.sentinel}-${String(index)} ${"history ".repeat(80)}`,
+      text: `${input.sentinel}-${String(index)} ${"history ".repeat(5_000)}`,
       type: "text",
     });
   }
@@ -158,7 +158,11 @@ describe("context scoped mutation coordination", () => {
       .mockImplementation(async () => {
         firstStarted.resolve();
         await releaseFirst.promise;
-        return "scope-a-summary";
+        return {
+          text: "scope-a-summary",
+          summaryMessageId: "mock-summary",
+          requests: [],
+        };
       });
     const manager = createManager(messageManager, generateSummary);
 
@@ -179,7 +183,7 @@ describe("context scoped mutation coordination", () => {
     ).resolves.toBe(1);
   });
 
-  it("treats a cross-manager compaction conflict as stale", async () => {
+  it("fails a cross-manager compaction conflict without applying the stale candidate", async () => {
     const baseMessageManager = createMessageManager({
       bus: createBus(),
       idGenerator: createIds(),
@@ -204,13 +208,19 @@ describe("context scoped mutation coordination", () => {
         return baseMessageManager.commitCompaction(input);
       },
     });
-    const firstManager = createManager(
-      withCommitBarrier(),
-      async () => "first-summary",
+    const firstManager = createManager(withCommitBarrier(), () =>
+      Promise.resolve({
+        text: "first-summary",
+        summaryMessageId: "mock-summary",
+        requests: [],
+      }),
     );
-    const secondManager = createManager(
-      withCommitBarrier(),
-      async () => "second-summary",
+    const secondManager = createManager(withCommitBarrier(), () =>
+      Promise.resolve({
+        text: "second-summary",
+        summaryMessageId: "mock-summary",
+        requests: [],
+      }),
     );
 
     const first = compact(firstManager, "shared_1", "scope_a");
@@ -221,13 +231,14 @@ describe("context scoped mutation coordination", () => {
     const results = await Promise.all([first, second]);
     expect(results.map((result) => result.status).sort()).toEqual([
       "compacted",
-      "not-needed",
+      "failed",
     ]);
     expect(
       results.some(
         (result) =>
-          result.compression?.status === "skipped" &&
-          result.compression.reason === "stale",
+          result.compression?.status === "failed" &&
+          result.compression.error ===
+            "Context changed before the compaction transaction committed",
       ),
     ).toBe(true);
     await expect(
@@ -258,9 +269,12 @@ describe("context scoped mutation coordination", () => {
         return baseMessageManager.commitCompaction(input);
       },
     };
-    const manager = createManager(
-      barrierMessageManager,
-      async () => "candidate-summary",
+    const manager = createManager(barrierMessageManager, () =>
+      Promise.resolve({
+        text: "candidate-summary",
+        summaryMessageId: "mock-summary",
+        requests: [],
+      }),
     );
 
     const resultPromise = compact(manager, "shared_1", "scope_a");
@@ -273,8 +287,11 @@ describe("context scoped mutation coordination", () => {
 
     const result = await resultPromise;
     expect(result).toMatchObject({
-      compression: { reason: "stale", status: "skipped" },
-      status: "not-needed",
+      compression: {
+        error: "Context changed before the compaction transaction committed",
+        status: "failed",
+      },
+      status: "failed",
     });
     await expect(
       summaryCount(baseMessageManager, "shared_1", "scope_a"),
@@ -307,10 +324,14 @@ describe("context scoped mutation coordination", () => {
       .mockImplementation(async () => {
         firstStarted.resolve();
         await releaseFirst.promise;
-        return "scope-a-summary";
+        return {
+          text: "scope-a-summary",
+          summaryMessageId: "mock-summary",
+          requests: [],
+        };
       });
     const manager = createManager(messageManager, generateSummary, {
-      contextLimit: 2_000,
+      contextLimit: 1_000_000,
     });
 
     const first = prepare(manager, "shared_1", "scope_a");
@@ -322,11 +343,11 @@ describe("context scoped mutation coordination", () => {
 
     const [firstResult, secondResult] = await Promise.all([first, second]);
     expect(firstResult.compaction?.status).toBe("compacted");
-    // Once the first summary lowers occupancy below 95%, no second attempt starts.
+    // Once the first summary lowers occupancy below the fixture threshold, no second attempt starts.
     expect(secondResult.compaction).toBeUndefined();
     expect(
       secondResult.usage.currentTokens / secondResult.usage.contextLimit,
-    ).toBeLessThan(0.95);
+    ).toBeLessThan(0.1);
     expect(secondResult.request.messages).toEqual(firstResult.request.messages);
     expect(generateSummary).toHaveBeenCalledOnce();
   });
@@ -349,10 +370,14 @@ describe("context scoped mutation coordination", () => {
       .mockImplementation(async () => {
         compactStarted.resolve();
         await releaseCompact.promise;
-        return "scope-a-summary";
+        return {
+          text: "scope-a-summary",
+          summaryMessageId: "mock-summary",
+          requests: [],
+        };
       });
     const manager = createManager(messageManager, generateSummary, {
-      contextLimit: 2_000,
+      contextLimit: 1_000_000,
     });
 
     const manual = compact(manager, "shared_1", "scope_a");
@@ -367,7 +392,7 @@ describe("context scoped mutation coordination", () => {
     expect(prepared.compaction).toBeUndefined();
     expect(
       prepared.usage.currentTokens / prepared.usage.contextLimit,
-    ).toBeLessThan(0.95);
+    ).toBeLessThan(0.1);
     expect(JSON.stringify(prepared.request.messages)).toContain(
       "scope-a-summary",
     );
@@ -403,7 +428,11 @@ describe("context scoped mutation coordination", () => {
           bothStarted.resolve();
         }
         await releaseBoth.promise;
-        return `${input.contextScopeId ?? "primary"}-summary`;
+        return {
+          text: `${input.contextScopeId ?? "primary"}-summary`,
+          summaryMessageId: "mock-summary",
+          requests: [],
+        };
       });
     const manager = createManager(messageManager, generateSummary);
 
@@ -435,7 +464,11 @@ describe("context scoped mutation coordination", () => {
     const manager = createManager(messageManager, async () => {
       candidateStarted.resolve();
       await releaseCandidate.promise;
-      return "prefix-summary";
+      return {
+        text: "prefix-summary",
+        summaryMessageId: "mock-summary",
+        requests: [],
+      };
     });
 
     const resultPromise = compact(manager, "shared_1", "scope_a");
@@ -515,7 +548,11 @@ describe("context scoped mutation coordination", () => {
     const manager = createManager(
       messageManager,
       (input) =>
-        Promise.resolve(`${input.contextScopeId ?? "primary"}-summary`),
+        Promise.resolve({
+          text: `${input.contextScopeId ?? "primary"}-summary`,
+          summaryMessageId: input.summaryMessageId,
+          requests: [],
+        }),
       { bus },
     );
 

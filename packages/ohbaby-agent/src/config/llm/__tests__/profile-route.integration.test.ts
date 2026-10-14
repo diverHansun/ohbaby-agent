@@ -151,13 +151,13 @@ it("loads exact active route windows for summary and token budgets", async () =>
     expect(summarizeActiveModel(config).profile?.contextWindowTokens).toBe(
       200000,
     );
-    const { activeModelProfiles } = await import("../model-profile.js");
+    const { activeModelBudgetProfiles } = await import("../model-profile.js");
     const { createHeuristicTokenCounter } =
       await import("../../../services/llm-model/tokenCounting.js");
     expect(
       createHeuristicTokenCounter({
         provider: config.provider,
-        profiles: activeModelProfiles(config),
+        profiles: activeModelBudgetProfiles(config),
       }).getBudget(config.model).contextWindowTokens,
     ).toBe(200000);
   } finally {

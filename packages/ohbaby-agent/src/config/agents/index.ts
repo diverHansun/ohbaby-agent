@@ -17,7 +17,6 @@ export {
   AgentsConfigSchema,
   CriticalOperationsConfigSchema,
   HexColorSchema,
-  ModelIdSchema,
   PermissionConfigSchema,
   PermissionValueSchema,
   ToolsConfigSchema,

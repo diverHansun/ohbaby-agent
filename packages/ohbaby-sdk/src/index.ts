@@ -55,7 +55,6 @@ export type {
 export type {
   UiCompactSessionCompressionResult,
   UiCompactSessionOptions,
-  UiCompactSessionPruneResult,
   UiCompactSessionResult,
   UiCompactSessionStatus,
   UiCompactSessionUsage,

@@ -223,10 +223,13 @@ export async function executeCommandForClient(input: {
   readonly createSessionId: () => string;
   readonly permissionRouter: PermissionRouter;
   readonly invocation: Parameters<UiBackendClient["executeCommand"]>[0];
+  readonly signal?: AbortSignal;
 }): ReturnType<UiBackendClient["executeCommand"]> {
   const { invocation } = input;
   if (!invocation.commandId.startsWith("skill."))
-    return input.backend.executeCommand(invocation);
+    return input.signal === undefined
+      ? input.backend.executeCommand(invocation)
+      : input.backend.executeCommand(invocation, { signal: input.signal });
   const target =
     invocation.sessionId ??
     input.clientViews.binding(input.clientId, "prompt").rootSessionId ??

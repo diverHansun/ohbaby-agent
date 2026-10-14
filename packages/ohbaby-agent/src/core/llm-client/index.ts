@@ -25,7 +25,7 @@ export {
   retryReason,
 } from "./retry.js";
 export type { CreateLLMClientOptions } from "./client.js";
-export { streamResponse } from "./streaming.js";
+export { streamResponse, resolvePreparedRequestSettings } from "./streaming.js";
 
 // Export type definitions for consumers
 export type {

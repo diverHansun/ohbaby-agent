@@ -79,13 +79,6 @@ export const HexColorSchema = z
   .string()
   .regex(/^#[0-9a-fA-F]{6}$/u, "Invalid hex color format (expected #RRGGBB)");
 
-export const ModelIdSchema = z
-  .string()
-  .regex(
-    /^[^\s/]+\/[^\s/]+$/u,
-    "Invalid model ID format (expected providerID/modelID)",
-  );
-
 export const ToolsConfigSchema = z
   .object({
     include: z.array(z.string().min(1)).optional(),
@@ -128,10 +121,6 @@ export const AgentConfigSchema = z
     maxSteps: z.number().int().positive().optional(),
     timeout: z.number().int().positive().optional(),
     allowDoomLoop: z.boolean().optional().default(false),
-    model: ModelIdSchema.optional(),
-    temperature: z.number().min(0).max(2).optional(),
-    topP: z.number().min(0).max(1).optional(),
-    maxTokens: z.number().int().positive().optional(),
     tools: ToolsConfigSchema.optional(),
     permission: PermissionConfigSchema.optional(),
     prompt: z.string().trim().min(1).optional(),

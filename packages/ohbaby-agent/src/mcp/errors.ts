@@ -37,6 +37,7 @@ export class McpToolExecutionError extends Error {
     readonly serverName: string,
     readonly toolName: string,
     readonly originalError: unknown,
+    readonly metadata?: Record<string, unknown>,
   ) {
     super(
       `MCP tool "${serverName}.${toolName}" execution failed: ${errorMessage(
@@ -45,5 +46,8 @@ export class McpToolExecutionError extends Error {
       { cause: originalError },
     );
     this.name = "McpToolExecutionError";
+    // The scheduler also retains this error as details. Metadata travels through
+    // ToolCallResult so it must not bypass model projection via error JSON.
+    Object.defineProperty(this, "metadata", { enumerable: false });
   }
 }

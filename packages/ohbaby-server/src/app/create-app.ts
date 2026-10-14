@@ -1710,6 +1710,7 @@ class DaemonServerAppRuntime {
             clientId,
             invocation,
           ),
+          signal: context.req.raw.signal,
         });
         return context.json({
           ok: true,
@@ -2064,6 +2065,7 @@ class DaemonServerAppRuntime {
           clientId,
         }).compactSession({
           ...(force === undefined ? {} : { force }),
+          signal: context.req.raw.signal,
           sessionId: context.req.param("id"),
         });
         return context.json({ compact, ok: true });

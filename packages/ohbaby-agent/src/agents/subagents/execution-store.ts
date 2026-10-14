@@ -53,6 +53,8 @@ export type ExecutionHistory = (
   readonly beforeSequence?: number;
   /** Legacy rows without a sequence, ordered by the original acceptance key. */
   readonly legacyOnly?: boolean;
+  /** Exclude executions without both a start time and child run before pagination. */
+  readonly startedOnly?: boolean;
   readonly ascending?: boolean;
   readonly limit?: number;
   readonly before?: {
@@ -666,6 +668,8 @@ export class InMemorySubagentExecutionStore extends ExecutionStore {
           (input.subagentId === undefined ||
             r.subagentId === input.subagentId) &&
           (input.rootRunId === undefined || r.rootRunId === input.rootRunId) &&
+          (!input.startedOnly ||
+            (r.startedAt !== undefined && r.childRunId !== undefined)) &&
           (!input.legacyOnly || r.delegationSequence === undefined) &&
           (input.afterSequence === undefined ||
             (r.delegationSequence !== undefined &&
@@ -886,6 +890,8 @@ export class DatabaseSubagentExecutionStore extends ExecutionStore {
       );
     }
     if (input.legacyOnly) where.push("delegation_sequence IS NULL");
+    if (input.startedOnly)
+      where.push("started_at IS NOT NULL AND child_run_id IS NOT NULL");
     if (input.afterSequence !== undefined) {
       where.push("delegation_sequence > ?");
       values.push(input.afterSequence);

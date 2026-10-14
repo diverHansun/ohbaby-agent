@@ -74,6 +74,32 @@ describe("pairToolCallResult", () => {
 });
 
 describe("MessageRow", () => {
+  it("renders a compaction boundary as one muted line", () => {
+    const parts = renderMessageParts(
+      {
+        id: "compact",
+        createdAt: "2026-10-13T00:00:00Z",
+        role: "system",
+        parts: [
+          {
+            type: "text",
+            text: "Compacted (estimated): 92,000 -> 12,000 tokens",
+            metadata: { kind: "context-compaction" },
+          },
+        ],
+      },
+      100,
+      createTheme("dark", 3),
+    );
+    expect(parts).toMatchObject([
+      {
+        kind: "text",
+        dimColor: true,
+        text: "Compacted (estimated): 92,000 -> 12,000 tokens",
+      },
+    ]);
+    expect(parts).toHaveLength(1);
+  });
   it("keeps historical user message text readable while muting only the gutter", () => {
     const theme = createTheme("dark", 3);
     const message = userMessage([

@@ -40,7 +40,7 @@ it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
         },
       ],
     });
-    for (const currentTokens of [189_999, 190_000, 190_001]) {
+    for (const currentTokens of [179_999, 180_000, 180_001]) {
       const usage = getContextUsage(currentTokens, "gpt-4o", counter);
       const displayed = contextUsageToContextWindowUsage({
         sessionId: "s",
@@ -52,7 +52,7 @@ it.each(["openai-compatible", "openai-responses", "anthropic"] as const)(
       );
       expect(usage.remainingTokens).toBe(0);
       expect(decideCompactionRung({ force: false, usage })).toBe(
-        currentTokens < 190_000 ? "mask" : "prune-summary",
+        currentTokens < 180_000 ? "none" : "summary",
       );
     }
     expect(metadata).toHaveBeenCalledTimes(1);

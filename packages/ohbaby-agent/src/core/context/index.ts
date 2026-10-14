@@ -1,23 +1,11 @@
 import { ContextEvent } from "./events.js";
 
 export {
-  COMPRESSION_PRESERVE_RATIO,
   COMPRESSION_THRESHOLD,
   KEEP_RECENT_TOKENS,
-  MASK_EXEMPT_TOOL_PREFIXES,
-  MASK_MIN_PART_TOKENS,
-  MASK_MIN_PRUNABLE_TOKENS,
-  MASK_MIN_USAGE_RATIO,
-  MASK_PLACEHOLDER_PREFIX,
-  MASK_PROTECTION_TOKENS,
-  PRUNE_MINIMUM_TOKENS,
-  PRUNE_PROTECT_TOKENS,
   SUMMARY_AGENT_NAME,
 } from "./constants.js";
-export {
-  COMPRESSION_PROMPT,
-  SUMMARIZATION_SYSTEM_PROMPT,
-} from "./compression-prompt.js";
+export { COMPRESSION_PROMPT } from "./compression-prompt.js";
 export { ContextEvent } from "./events.js";
 export {
   contextUsageToContextWindowUsage,
@@ -45,13 +33,6 @@ export {
   formatToolResultContentForModel,
   projectToolMetadataForModel,
 } from "./tool-metadata-projection.js";
-export { createMaskConfig, reduceForModel } from "./projection.js";
-export type {
-  ContextMaskedEventPayload,
-  MaskConfig,
-  MaskSkippedReason,
-  ModelReductionResult,
-} from "./projection.js";
 export type {
   AssembledContext,
   AgentRunPromptSnapshot,
@@ -59,11 +40,11 @@ export type {
   CompactResult,
   CompactStatus,
   CompressionResult,
-  CompressionFailureReason,
   CompressionSkipReason,
   CompressionStatus,
   ContextAssemblyOptions,
   ContextLLMClient,
+  SummaryRequestResult,
   ContextManager,
   ContextManagerOptions,
   ContextOccupancyComposition,
@@ -73,7 +54,6 @@ export type {
   MemoryReader,
   PreparedTurn,
   PrepareTurnInput,
-  PruneResult,
   SystemPromptProvider,
   SystemPromptProviderInput,
   TokenCounter,

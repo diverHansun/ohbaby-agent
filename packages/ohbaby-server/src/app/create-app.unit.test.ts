@@ -3164,7 +3164,11 @@ describe("createDaemonServerApp", () => {
         ok: true,
       });
       expect(backend.compactOptions).toEqual([
-        { force: true, sessionId: "session_1" },
+        {
+          force: true,
+          sessionId: "session_1",
+          signal: expect.any(AbortSignal) as AbortSignal,
+        },
       ]);
     } finally {
       await handle.dispose();

@@ -1,9 +1,8 @@
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
-const DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
 const DEFAULT_SAFETY_MARGIN_TOKENS = 1_024;
-const MAX_OUTPUT_RESERVATION_RATIO = 0.5;
 
-export type ModelProfileSource = "builtin" | "user" | "fallback";
+export type ModelProfileSource = "user" | "fallback";
 
 export interface ModelProfile {
   readonly id: string;
@@ -44,7 +43,6 @@ export interface TokenBudget {
 
 export interface ModelProfileRegistry {
   resolve(modelId: string, provider?: string): ModelProfile;
-  list(): readonly ModelProfile[];
   calculateBudget(
     modelId: string,
     options?: TokenBudgetOptions & { readonly provider?: string },
@@ -57,89 +55,6 @@ export interface ModelProfileRegistryOptions {
   readonly fallbackMaxOutputTokens?: number;
   readonly userProfiles?: readonly ModelProfileRegistration[];
 }
-
-interface BuiltinProfileRule {
-  readonly provider: string;
-  readonly modelPrefix: string;
-  readonly contextWindowTokens: number;
-  readonly maxOutputTokens: number;
-  readonly label?: string;
-}
-
-const BUILTIN_PROFILE_RULES: readonly BuiltinProfileRule[] = [
-  {
-    contextWindowTokens: 1_000_000,
-    maxOutputTokens: 32_768,
-    modelPrefix: "gpt-4.1",
-    provider: "openai",
-  },
-  {
-    contextWindowTokens: 400_000,
-    maxOutputTokens: 128_000,
-    modelPrefix: "gpt-5",
-    provider: "openai",
-  },
-  {
-    contextWindowTokens: 200_000,
-    maxOutputTokens: 100_000,
-    modelPrefix: "o3",
-    provider: "openai",
-  },
-  {
-    contextWindowTokens: 200_000,
-    maxOutputTokens: 100_000,
-    modelPrefix: "o4-mini",
-    provider: "openai",
-  },
-  {
-    contextWindowTokens: 128_000,
-    maxOutputTokens: 16_384,
-    modelPrefix: "gpt-4-turbo",
-    provider: "openai",
-  },
-  {
-    contextWindowTokens: 128_000,
-    maxOutputTokens: 16_384,
-    modelPrefix: "gpt-4o-mini",
-    provider: "openai",
-  },
-  {
-    contextWindowTokens: 128_000,
-    maxOutputTokens: 16_384,
-    modelPrefix: "gpt-4o",
-    provider: "openai",
-  },
-  {
-    contextWindowTokens: 4_096,
-    maxOutputTokens: 2_048,
-    modelPrefix: "gpt-3.5-turbo",
-    provider: "openai",
-  },
-  {
-    contextWindowTokens: 8_192,
-    maxOutputTokens: 4_096,
-    modelPrefix: "gpt-4",
-    provider: "openai",
-  },
-  {
-    contextWindowTokens: 200_000,
-    maxOutputTokens: 8_192,
-    modelPrefix: "claude-",
-    provider: "anthropic",
-  },
-  {
-    contextWindowTokens: 64_000,
-    maxOutputTokens: 8_192,
-    modelPrefix: "deepseek-",
-    provider: "deepseek",
-  },
-  {
-    contextWindowTokens: 128_000,
-    maxOutputTokens: 8_192,
-    modelPrefix: "glm-4",
-    provider: "zhipu",
-  },
-];
 
 export function createModelProfileRegistry(
   options: ModelProfileRegistryOptions = {},
@@ -178,8 +93,7 @@ export function createModelProfileRegistry(
       });
     }
 
-    const resolvedProvider =
-      normalizeProvider(provider) ?? defaultProvider ?? inferProvider(modelId);
+    const resolvedProvider = normalizeProvider(provider) ?? defaultProvider;
     const userProfile = findUserProfile(
       userProfiles,
       bareUserProfiles,
@@ -188,11 +102,6 @@ export function createModelProfileRegistry(
     );
     if (userProfile) {
       return userProfile;
-    }
-
-    const builtin = findBuiltinProfile(normalizedModel, resolvedProvider);
-    if (builtin) {
-      return builtin;
     }
 
     return fallbackProfile({
@@ -209,10 +118,6 @@ export function createModelProfileRegistry(
         resolve(modelId, budgetOptions.provider),
         budgetOptions,
       );
-    },
-    list(): readonly ModelProfile[] {
-      const builtins = BUILTIN_PROFILE_RULES.map(ruleToProfile);
-      return dedupeProfiles([...userProfiles.values(), ...builtins]);
     },
     resolve,
   };
@@ -233,11 +138,7 @@ export function calculateTokenBudget(
     ),
     profile.contextWindowTokens,
   );
-  const reservedOutputTokens = Math.min(
-    requestedOutputTokens,
-    profile.maxOutputTokens,
-    maxOutputReservation(profile.contextWindowTokens, safetyMarginTokens),
-  );
+  const reservedOutputTokens = requestedOutputTokens;
   const inputBudgetTokens = Math.max(
     0,
     profile.contextWindowTokens - reservedOutputTokens - safetyMarginTokens,
@@ -283,64 +184,6 @@ function findUserProfile(
     return bareMatch;
   }
   return undefined;
-}
-
-function findBuiltinProfile(
-  modelId: string,
-  provider: string | undefined,
-): ModelProfile | undefined {
-  const normalizedModelCandidates = modelKeyCandidates(modelId);
-  const normalizedProvider = normalizeProvider(provider);
-  const matchingRules = BUILTIN_PROFILE_RULES.filter((rule) => {
-    const providerMatches =
-      normalizedProvider === undefined ||
-      normalizedProvider === rule.provider ||
-      normalizedProvider === "custom" ||
-      !isKnownBuiltinProvider(normalizedProvider);
-    const normalizedPrefix = normalizeKey(rule.modelPrefix);
-    return (
-      providerMatches &&
-      normalizedModelCandidates.some((candidate) =>
-        candidate.startsWith(normalizedPrefix),
-      )
-    );
-  }).sort((left, right) => right.modelPrefix.length - left.modelPrefix.length);
-
-  if (matchingRules.length === 0) {
-    return undefined;
-  }
-
-  const rule = matchingRules[0];
-  return {
-    ...ruleToProfile(rule),
-    model: modelId.trim(),
-  };
-}
-
-function isKnownBuiltinProvider(provider: string): boolean {
-  return BUILTIN_PROFILE_RULES.some((rule) => rule.provider === provider);
-}
-
-function modelKeyCandidates(modelId: string): readonly string[] {
-  const normalized = normalizeKey(modelId);
-  const candidates = [normalized];
-  const slashIndex = normalized.indexOf("/");
-  if (slashIndex >= 0 && slashIndex < normalized.length - 1) {
-    candidates.push(normalized.slice(slashIndex + 1));
-  }
-  return [...new Set(candidates)];
-}
-
-function ruleToProfile(rule: BuiltinProfileRule): ModelProfile {
-  return {
-    contextWindowTokens: rule.contextWindowTokens,
-    id: `${rule.provider}:${rule.modelPrefix}`,
-    maxOutputTokens: rule.maxOutputTokens,
-    model: rule.modelPrefix,
-    provider: rule.provider,
-    ...(rule.label ? { label: rule.label } : {}),
-    source: "builtin",
-  };
 }
 
 function normalizeUserProfile(
@@ -418,43 +261,6 @@ function profileProviderModelKey(provider: string, model: string): string {
 
 function profileBareModelKey(model: string): string {
   return `model:${normalizeKey(model)}`;
-}
-
-function maxOutputReservation(
-  contextWindowTokens: number,
-  safetyMarginTokens: number,
-): number {
-  const availableTokens = Math.max(0, contextWindowTokens - safetyMarginTokens);
-  return Math.floor(availableTokens * MAX_OUTPUT_RESERVATION_RATIO);
-}
-
-function dedupeProfiles(profiles: readonly ModelProfile[]): ModelProfile[] {
-  const byId = new Map<string, ModelProfile>();
-  for (const profile of profiles) {
-    byId.set(profile.id, profile);
-  }
-  return Array.from(byId.values());
-}
-
-function inferProvider(modelId: string): string | undefined {
-  const normalized = normalizeKey(modelId);
-  if (
-    normalized.startsWith("gpt-") ||
-    normalized.startsWith("o3") ||
-    normalized.startsWith("o4-mini")
-  ) {
-    return "openai";
-  }
-  if (normalized.startsWith("claude-")) {
-    return "anthropic";
-  }
-  if (normalized.startsWith("deepseek-")) {
-    return "deepseek";
-  }
-  if (normalized.startsWith("glm-4")) {
-    return "zhipu";
-  }
-  return undefined;
 }
 
 function normalizeProvider(provider: string | undefined): string | undefined {

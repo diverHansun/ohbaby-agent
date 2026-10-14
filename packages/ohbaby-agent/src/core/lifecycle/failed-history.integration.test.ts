@@ -69,7 +69,6 @@ function fixture(
     disposeScope: vi.fn(),
     disposeSession: vi.fn(),
     getUsage: vi.fn(),
-    resetTurnCompactionCount: vi.fn(),
     updateCalibrationFactor: vi.fn(),
     createRunPromptSnapshot: vi.fn().mockResolvedValue({
       memory: { global: "", project: "", merged: "" },

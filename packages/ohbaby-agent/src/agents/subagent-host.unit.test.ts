@@ -244,6 +244,53 @@ async function runAndObserve(
 }
 
 describe("SessionSubagentHost", () => {
+  it.each([
+    ["model", "provider/legacy"],
+    ["maxTokens", 100],
+    ["temperature", 0.5],
+    ["topP", 0.9],
+    ["model", undefined],
+    ["maxTokens", undefined],
+    ["temperature", undefined],
+    ["topP", undefined],
+  ] as const)(
+    "rejects custom child runtime config %s before a model run (value %s)",
+    async (field, value) => {
+      for (const lookup of ["admission", "turn"] as const) {
+        const { host, getRuntimeAgent, turn } = createHostFixture();
+        if (lookup === "turn")
+          getRuntimeAgent.mockResolvedValueOnce({
+            config: { name: "explore", mode: "subagent" },
+            isSubagent: true,
+            tools: {},
+          });
+        getRuntimeAgent.mockResolvedValue({
+          config: { name: "explore", mode: "subagent", [field]: value },
+          isSubagent: true,
+          tools: {},
+        });
+        const run = runAndObserve(host, {
+          mode: "foreground",
+          parentSessionId: "parent_1",
+          role: "explore",
+          prompt: "inspect",
+        });
+        if (lookup === "admission") {
+          await expect(run).rejects.toThrow(new RegExp(`explore.*${field}`));
+        } else {
+          const result = await run;
+          expect(result.success).toBe(false);
+          expect(result.execution.status).toBe("failed");
+          expect(result.execution.error).toMatch(
+            new RegExp(`explore.*${field}`),
+          );
+        }
+        expect(turn).not.toHaveBeenCalled();
+        await host.dispose();
+      }
+    },
+  );
+
   it.each(["accept", "bindChild", "start"] as const)(
     "seals and reports fatal %s persistence failures",
     async (method) => {
@@ -810,12 +857,12 @@ describe("SessionSubagentHost", () => {
     await host.dispose();
   });
 
-  it("uses the configured child model while retaining the parent reasoning intent", async () => {
+  it("inherits the runtime model while retaining the parent reasoning intent", async () => {
     const { host, turn, createInstance, getRuntimeAgent } = createHostFixture({
       getParentReasoning: () => mergeReasoningIntent({ effort: "high" }),
     });
     getRuntimeAgent.mockResolvedValue({
-      config: { name: "explore", mode: "subagent", model: "child-model" },
+      config: { name: "explore", mode: "subagent" },
       isSubagent: true,
       tools: {},
     });
@@ -825,7 +872,7 @@ describe("SessionSubagentHost", () => {
       role: "explore",
       prompt: "inspect",
     });
-    expect(createInstance.mock.calls[0][0].modelId).toBe("child-model");
+    expect(createInstance.mock.calls[0][0].modelId).toBe("fake-model");
     expect(turn.mock.calls[0][0].reasoning?.effort).toBe("high");
     await host.dispose();
   });

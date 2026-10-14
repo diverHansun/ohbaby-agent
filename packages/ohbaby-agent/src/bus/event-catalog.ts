@@ -257,7 +257,6 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
       "attemptId",
       "attempt",
       "estimatedHistoryTokens",
-      "droppedRounds",
     ],
     contextStatus: "complete",
     uiVisible: "no",
@@ -266,18 +265,6 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
   },
   {
     event: ContextEvent.Compressed,
-    owner: "Context",
-    scope: "session",
-    audience: ["domain", "tests"],
-    frequency: "low",
-    requiredContext: ["sessionId", "attemptId", "result"],
-    contextStatus: "complete",
-    uiVisible: "no",
-    decision:
-      "Internal domain event; contextScopeId is omitted only for primary.",
-  },
-  {
-    event: ContextEvent.Pruned,
     owner: "Context",
     scope: "session",
     audience: ["domain", "tests"],
@@ -311,25 +298,6 @@ export const busEventCatalog: readonly BusEventCatalogEntry[] = [
     uiVisible: "no",
     decision:
       "Internal domain event; contextScopeId is omitted only for primary.",
-  },
-  {
-    event: ContextEvent.Masked,
-    owner: "Context",
-    scope: "session",
-    audience: ["domain", "tests"],
-    frequency: "medium",
-    requiredContext: [
-      "sessionId",
-      "enabled",
-      "maskedPartIds",
-      "maskedTokens",
-      "cutoff",
-      "usageRatio",
-    ],
-    contextStatus: "complete",
-    uiVisible: "no",
-    decision:
-      "Internal projection telemetry; contextScopeId is omitted only for primary.",
   },
   {
     event: ToolSchedulerEvent.DeliveryFailed,

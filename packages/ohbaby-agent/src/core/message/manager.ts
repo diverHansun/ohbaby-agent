@@ -265,7 +265,9 @@ export function createMessageManager(
         input.summary === undefined
           ? undefined
           : allocateMessageRecord({
+              id: input.summary.messageId,
               agent: input.summary.agent,
+              modelRequests: input.summary.modelRequests,
               ...(input.contextScopeId === undefined
                 ? {}
                 : { contextScopeId: input.contextScopeId }),
@@ -277,7 +279,9 @@ export function createMessageManager(
       }
       const result = await options.store.commitCompaction({
         compactedAt: input.compactedAt,
+        signal: input.signal,
         expectedParts: input.expectedParts,
+        expectedMessages: input.expectedMessages,
         ...(input.contextScopeId === undefined
           ? {}
           : { contextScopeId: input.contextScopeId }),
@@ -287,7 +291,10 @@ export function createMessageManager(
           : {
               summary: {
                 data: {
-                  metadata: { kind: "context-summary" },
+                  metadata: {
+                    ...input.summary.metadata,
+                    kind: "context-summary",
+                  },
                   synthetic: true,
                   text: input.summary.text,
                   type: "text",

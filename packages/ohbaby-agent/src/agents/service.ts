@@ -6,7 +6,11 @@ import type { ReasoningConfig } from "../config/llm/types.js";
 import type { AgentInstanceFactory } from "../core/agents/index.js";
 import type { Session, SessionManager } from "../services/session/index.js";
 import { AgentManager } from "./manager.js";
-import type { AgentSessionStartResult, StartSessionParams } from "./types.js";
+import {
+  assertNoStaticModelConfig,
+  type AgentSessionStartResult,
+  type StartSessionParams,
+} from "./types.js";
 
 export interface AgentServiceOptions {
   readonly getReasoning?: () => ReasoningConfig | ReasoningIntent | undefined;
@@ -30,6 +34,7 @@ export class AgentService {
       params.agentName,
       { isSubagent: false },
     );
+    assertNoStaticModelConfig(runtimeAgent.config, "AgentService");
     if (runtimeAgent.config.mode === "subagent") {
       throw new Error(
         `Agent ${params.agentName} cannot be used as a primary agent`,

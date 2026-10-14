@@ -1,3 +1,7 @@
+import type {
+  PreparedRequestSettings,
+  SummaryRequestRecord,
+} from "../llm-client/types.js";
 import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type { ModelOrigin } from "../../services/interface-providers/native-state.js";
 import type { BusInstance } from "../../bus/index.js";
@@ -6,6 +10,7 @@ import type { MergedMemory } from "../memory/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
 import type { CompactionThresholds } from "./constants.js";
+import type { Logger } from "../../observability/logger.js";
 
 export interface MemoryReader {
   load(directory: string): Promise<MergedMemory>;
@@ -48,17 +53,23 @@ export interface TokenCounter {
   getLimit(modelId: string): number;
 }
 
+export interface SummaryRequestResult {
+  readonly text: string;
+  readonly summaryMessageId: string;
+  readonly requests: readonly SummaryRequestRecord[];
+}
+
 export interface ContextLLMClient {
   generateSummary(input: {
-    readonly modelId?: string;
-    readonly reasoning?: ReasoningIntent;
+    readonly request: PreparedModelRequest;
     readonly sessionId: string;
     readonly contextScopeId?: string;
-    readonly prompt: string;
-    readonly systemPrompt?: string;
-    readonly history: readonly MessageWithParts[];
+    readonly summaryMessageId: string;
+    readonly compactionId: string;
+    readonly attempt: number;
+    readonly onRequestRecord?: (record: SummaryRequestRecord) => void;
     readonly signal?: AbortSignal;
-  }): Promise<string>;
+  }): Promise<SummaryRequestResult>;
 }
 
 export interface AssembledContext {
@@ -93,6 +104,7 @@ export interface CreateRunPromptSnapshotInput extends SystemPromptProviderInput 
 }
 
 export interface PreparedModelRequest {
+  readonly settings?: PreparedRequestSettings;
   readonly inputIds?: readonly string[];
   readonly messages: readonly ModelMessage[];
   readonly tools: readonly ModelToolDefinition[] | undefined;
@@ -126,11 +138,10 @@ export type CompressionStatus =
   | "inflated";
 
 export type CompressionSkipReason = "stale" | "too-short";
-export type CompressionFailureReason =
-  | "summary-overflow-exhausted"
-  | "summary-overflow-minimum";
 
 interface CompressionMetrics {
+  readonly omittedParts?: number;
+  readonly requests?: readonly SummaryRequestRecord[];
   readonly originalTokens: number;
   readonly newTokens: number;
   readonly savedTokens: number;
@@ -148,25 +159,14 @@ export type CompressionResult =
   | (CompressionMetrics & {
       readonly status: "failed";
       readonly error: string;
-      readonly reason?: CompressionFailureReason;
     })
   | (CompressionMetrics & { readonly status: "inflated" });
 
-export interface PruneResult {
-  readonly prunedCount: number;
-  readonly freedTokens: number;
-  readonly protectedCount: number;
-  readonly totalScanned: number;
-}
-
-export type CompactStatus =
-  | "not-needed"
-  | "pruned"
-  | "compacted"
-  | "failed"
-  | "inflated";
+export type CompactStatus = "not-needed" | "compacted" | "failed" | "inflated";
 
 export interface CompactOptions {
+  readonly signal?: AbortSignal;
+  readonly requestSettings?: PreparedRequestSettings;
   readonly reasoning?: ReasoningIntent;
   readonly modelOrigin?: ModelOrigin;
   readonly agentName?: string;
@@ -180,15 +180,16 @@ export interface CompactOptions {
 }
 
 export interface CompactResult {
+  readonly omittedParts?: number;
   readonly status: CompactStatus;
   readonly usageBefore: ContextUsage;
   readonly usageAfter: ContextUsage;
-  readonly prune?: PruneResult;
   readonly compression?: CompressionResult;
   readonly error?: string;
 }
 
 export interface PrepareTurnInput {
+  readonly requestSettings?: PreparedRequestSettings;
   readonly runId?: string;
   /** Durable first-delivery inputs, excluded from compressible history. */
   readonly protectedInputs?: readonly MessageWithParts[];
@@ -236,7 +237,8 @@ export interface ContextManager {
     readonly context: AssembledContext;
     readonly modelId: string;
     readonly tools: readonly ModelToolDefinition[] | undefined;
-  }): ContextUsage;
+    readonly toolDefinitions?: readonly ToolDefinition[];
+  }): ContextUsage & { readonly composition?: ContextOccupancyComposition };
   createRunPromptSnapshot(
     input: CreateRunPromptSnapshotInput,
   ): Promise<AgentRunPromptSnapshot>;
@@ -248,12 +250,12 @@ export interface ContextManager {
   ): void;
   compact(sessionId: string, options: CompactOptions): Promise<CompactResult>;
   prepareTurn(input: PrepareTurnInput): Promise<PreparedTurn>;
-  resetTurnCompactionCount(sessionId: string, contextScopeId?: string): void;
   disposeScope(sessionId: string, contextScopeId: string): void;
   disposeSession(sessionId: string): void;
 }
 
 export interface ContextManagerOptions {
+  readonly logger?: Logger;
   /** Ledger-backed projection: pending/unsent runtime inputs cannot enter summaries. */
   readonly filterModelHistory?: (
     messages: readonly MessageWithParts[],
@@ -267,23 +269,7 @@ export interface ContextManagerOptions {
   readonly now?: () => number;
   readonly compactionThresholds?: Partial<CompactionThresholds>;
   readonly compressionThreshold?: number;
-  readonly compressionPreserveRatio?: number;
-  readonly pruneProtectTokens?: number;
-  readonly pruneMinimumTokens?: number;
   readonly summaryAgentName?: string;
-  readonly maxCompactionsPerTurn?: number;
-  readonly thrashWindow?: number;
-  readonly thrashMinSavingsRatio?: number;
-  readonly thrashUnlockDelta?: number;
-  readonly maskEnabled?: boolean;
-  readonly maskConfig?: {
-    readonly exemptToolPrefixes?: readonly string[];
-    readonly minPartTokens?: number;
-    readonly minPrunableTokens?: number;
-    readonly minUsageRatio?: number;
-    readonly placeholderPrefix?: string;
-    readonly protectionTokens?: number;
-  };
   /** Receives a detached copy of each occupancy payload for diagnostics and tests. */
   readonly onRequestMeasured?: (request: PreparedModelRequest) => void;
   readonly onWarning?: (message: string, error?: unknown) => void;

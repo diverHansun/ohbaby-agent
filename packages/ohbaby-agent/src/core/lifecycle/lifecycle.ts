@@ -1,5 +1,5 @@
 import { isRuntimeInputSnapshotChanged } from "./runtime-input-error.js";
-import type { ModelRequestRecord } from "../llm-client/types.js";
+import type { AgentStepRequestRecord } from "../llm-client/types.js";
 import { ModelObservationError } from "../llm-client/request-observation.js";
 import { ToolBatchEventQueue } from "./tool-event-queue.js";
 import { ToolDeliveryError } from "../tool-scheduler/index.js";
@@ -15,6 +15,7 @@ import {
   ToolCallParseError,
   isRetryableProviderError,
   streamResponse,
+  resolvePreparedRequestSettings,
   providerErrorStatus,
 } from "../llm-client/index.js";
 import type {
@@ -137,6 +138,47 @@ function providerFailure(error: unknown):
     return {
       finalResponse: error.message,
       terminalReason: "tool_parse_failure",
+    };
+  }
+  return undefined;
+}
+
+function contextPreparationFailure(
+  prepared: PreparedTurn,
+  forced = false,
+):
+  | {
+      readonly message: string;
+      readonly terminalReason: LifecycleResult["terminalReason"];
+    }
+  | undefined {
+  const compaction = prepared.compaction;
+  if (compaction?.status === "failed" || compaction?.status === "inflated") {
+    return {
+      message:
+        compaction.error ??
+        "Context compaction failed to free space. Retry or continue in a new run.",
+      terminalReason: "context_compaction_failed",
+    };
+  }
+  if (
+    forced &&
+    (compaction?.status !== "compacted" ||
+      compaction.usageAfter.currentTokens >=
+        compaction.usageBefore.currentTokens)
+  ) {
+    return {
+      message: "Context overflow could not be recovered by compaction",
+      terminalReason: "context_overflow",
+    };
+  }
+  if (
+    prepared.usage.currentTokens >
+    (prepared.usage.inputBudgetTokens ?? prepared.usage.contextLimit)
+  ) {
+    return {
+      message: "The prepared request exceeds the model input budget",
+      terminalReason: "context_overflow",
     };
   }
   return undefined;
@@ -342,7 +384,10 @@ export class Lifecycle {
   private sourceOrder = 0;
   private readonly activeModelRequests = new Map<
     string,
-    { readonly request: ModelRequestRecord; readonly saved: Promise<unknown> }
+    {
+      readonly request: AgentStepRequestRecord;
+      readonly saved: Promise<unknown>;
+    }
   >();
 
   private async closeModelRequests(
@@ -479,14 +524,6 @@ export class Lifecycle {
             ),
     };
     const contextManager = this.deps.contextManager;
-    if (params.contextScopeId === undefined) {
-      contextManager.resetTurnCompactionCount(params.sessionId);
-    } else {
-      contextManager.resetTurnCompactionCount(
-        params.sessionId,
-        params.contextScopeId,
-      );
-    }
 
     // Clamp so the loop always runs at least one step and `step === maxSteps`
     // is reachable for non-integer overrides; otherwise the loop could exit
@@ -503,6 +540,7 @@ export class Lifecycle {
     const allToolCalls: ParsedToolCall[] = [];
     let turnStarted = false;
     let staleInputRetries = 0;
+    let forceRecoveryStep: number | undefined;
     let promptSnapshot: AgentRunPromptSnapshot | undefined;
     const activeReasoningByMessageId = new Map<string, string>();
 
@@ -577,16 +615,6 @@ export class Lifecycle {
         toolNames,
         tools,
       });
-      if (params.signal?.aborted) {
-        return {
-          success: false,
-          finishReason: "error",
-          finalResponse,
-          terminalReason: "cancelled",
-          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-          usage,
-        };
-      }
       if (!turnStarted) {
         turnStarted = true;
         yield {
@@ -606,6 +634,29 @@ export class Lifecycle {
         sessionId: params.sessionId,
         step,
       });
+
+      const preparationFailure = params.signal?.aborted
+        ? { message: finalResponse, terminalReason: "cancelled" as const }
+        : contextPreparationFailure(prepared);
+      if (preparationFailure) {
+        finalResponse = preparationFailure.message;
+        yield this.createTurnEndEvent({
+          contextScopeId: params.contextScopeId,
+          finalResponse,
+          finishReason: "error",
+          prepared,
+          sessionId: params.sessionId,
+          step,
+        });
+        return {
+          success: false,
+          finishReason: "error",
+          finalResponse,
+          terminalReason: preparationFailure.terminalReason,
+          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+          usage,
+        };
+      }
 
       const runParams: ModelStepParams = {
         currentRunInputs: params.currentRunInputs,
@@ -659,6 +710,29 @@ export class Lifecycle {
           throw error;
         }
 
+        if (forceRecoveryStep === step) {
+          const overflowMessage =
+            "Context overflow after forced compaction retry";
+          yield this.createTurnEndEvent({
+            contextScopeId: params.contextScopeId,
+            finalResponse: overflowMessage,
+            finishReason: "error",
+            prepared,
+            sessionId: params.sessionId,
+            step,
+          });
+          return {
+            success: false,
+            finishReason: "error",
+            finalResponse: overflowMessage,
+            terminalReason: "context_overflow",
+            toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+            usage,
+          };
+        }
+        // Input admission may restart this step; it must not renew recovery.
+        forceRecoveryStep = step;
+
         prepared = yield* this.prepareTurnWithProgress({
           runId: params.runId,
           protectedInputs,
@@ -683,22 +757,34 @@ export class Lifecycle {
           toolNames,
           tools,
         });
-        if (params.signal?.aborted) {
-          return {
-            success: false,
-            finishReason: "error",
-            finalResponse,
-            terminalReason: "cancelled",
-            toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-            usage,
-          };
-        }
         yield this.createContextPreparedEvent({
           contextScopeId: params.contextScopeId,
           prepared,
           sessionId: params.sessionId,
           step,
         });
+        const recoveryFailure = params.signal?.aborted
+          ? { message: finalResponse, terminalReason: "cancelled" as const }
+          : contextPreparationFailure(prepared, true);
+        if (recoveryFailure) {
+          finalResponse = recoveryFailure.message;
+          yield this.createTurnEndEvent({
+            contextScopeId: params.contextScopeId,
+            finalResponse,
+            finishReason: "error",
+            prepared,
+            sessionId: params.sessionId,
+            step,
+          });
+          return {
+            success: false,
+            finishReason: "error",
+            finalResponse,
+            terminalReason: recoveryFailure.terminalReason,
+            toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+            usage,
+          };
+        }
         try {
           stepResult = yield* this.runModelStep({
             request: prepared.request,
@@ -1365,10 +1451,11 @@ export class Lifecycle {
         requestClient,
         [...input.request.messages],
         {
+          preparedSettings: input.request.settings,
           purpose: "agent-step",
           ...(currentRunInputs
             ? {
-                beforeRequestAttempt: (request: ModelRequestRecord) =>
+                beforeRequestAttempt: (request: AgentStepRequestRecord) =>
                   currentRunInputs.admitRequestAttempt(
                     { ...request, inputIds: input.request.inputIds ?? [] },
                     params.signal,
@@ -1695,6 +1782,10 @@ export class Lifecycle {
     });
     const prepared = this.deps.contextManager.prepareTurn({
       ...prepareInput,
+      requestSettings: resolvePreparedRequestSettings(this.deps.llmClient, {
+        modelId: input.modelId,
+        reasoning: input.reasoning,
+      }),
       modelOrigin: {
         provider: this.deps.llmClient.config.provider,
         model: input.modelId,

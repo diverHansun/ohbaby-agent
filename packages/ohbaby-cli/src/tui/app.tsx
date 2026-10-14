@@ -110,6 +110,7 @@ export function OhbabyTerminalApp({
 }: TerminalUiOptions): ReactElement {
   const storeRef = useRef<TuiStore>(createTuiStore(createEmptySnapshot()));
   const keyboardCommandSequenceRef = useRef(0);
+  const compactCommandRef = useRef<AbortController | null>(null);
   const [queueInputMode, setQueueInputMode] = useState(false);
   const [toolView, setToolView] = useState<{
     sessionId: string | null;
@@ -156,6 +157,32 @@ export function OhbabyTerminalApp({
     (state) => state.activeSessionId,
   );
   activeSessionIdRef.current = activeSessionId;
+  useEffect(
+    () => (): void => {
+      compactCommandRef.current?.abort();
+      compactCommandRef.current = null;
+    },
+    [activeSessionId],
+  );
+  const executePromptCommand = useCallback<CoreAPI["executeCommand"]>(
+    async (invocation) => {
+      if (invocation.commandId !== "compact")
+        return client.executeCommand(invocation);
+      if (compactCommandRef.current)
+        throw new Error("Context compaction is already running");
+      const controller = new AbortController();
+      compactCommandRef.current = controller;
+      try {
+        return await client.executeCommand(invocation, {
+          signal: controller.signal,
+        });
+      } finally {
+        if (compactCommandRef.current === controller)
+          compactCommandRef.current = null;
+      }
+    },
+    [client],
+  );
   const footerModel = useFooterModel(client, activeSessionId, subscribeEvents);
   const activeSession = useTuiStoreSelector(store, (state) =>
     state.sessions.find((session) => session.id === state.activeSessionId),
@@ -625,6 +652,13 @@ export function OhbabyTerminalApp({
 
   useInput(
     (value, key) => {
+      if (
+        compactCommandRef.current &&
+        (key.escape || value === "\u0003" || (key.ctrl && value === "c"))
+      ) {
+        compactCommandRef.current.abort();
+        return;
+      }
       if (
         (!hasDialog || subagentBrowserOpen) &&
         key.ctrl &&
@@ -1111,6 +1145,7 @@ export function OhbabyTerminalApp({
             catalog={catalog}
             client={client}
             disabled={hasDialog || subagentBrowserOpen}
+            executeCommand={executePromptCommand}
             canSubmit={
               executionRecovery?.status !== "recovering" &&
               recoveryState.initialized &&

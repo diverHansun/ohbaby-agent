@@ -211,6 +211,29 @@
   overflow-wrap: anywhere;
 }
 
+/* Compact overlay: one context row with a hairline meter on its bottom edge. */
+.ohb-structured-result > .ohb-compact-usage {
+  position: relative;
+}
+
+.ohb-compact-usage em {
+  color: #8a8d94;
+  font-style: normal;
+  margin-left: 10px;
+}
+
+.ohb-compact-usage i {
+  background: #5f86c4;
+  bottom: 0;
+  height: 2px;
+  left: 0;
+  position: absolute;
+}
+
+.ohb-compact-usage i.is-high {
+  background: #c4756b;
+}
+
 .ohb-structured-actions {
   display: flex;
   flex: none;

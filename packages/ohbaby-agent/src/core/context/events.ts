@@ -2,6 +2,7 @@ import { z } from "zod";
 import { BusEvent } from "../../bus/index.js";
 
 const CompressionMetricsSchema = z.object({
+  omittedParts: z.number().int().nonnegative().optional(),
   originalTokens: z.number(),
   newTokens: z.number(),
   savedTokens: z.number(),
@@ -19,22 +20,9 @@ const CompressionResultSchema = z.discriminatedUnion("status", [
   CompressionMetricsSchema.extend({
     status: z.literal("failed"),
     error: z.string(),
-    reason: z
-      .union([
-        z.literal("summary-overflow-exhausted"),
-        z.literal("summary-overflow-minimum"),
-      ])
-      .optional(),
   }),
   CompressionMetricsSchema.extend({ status: z.literal("inflated") }),
 ]);
-
-const PruneResultSchema = z.object({
-  prunedCount: z.number(),
-  freedTokens: z.number(),
-  protectedCount: z.number(),
-  totalScanned: z.number(),
-});
 
 const ContextUsageSchema = z.object({
   currentTokens: z.number(),
@@ -46,12 +34,6 @@ const ContextUsageSchema = z.object({
   remainingTokens: z.number(),
   modelId: z.string(),
 });
-
-const MaskSkippedReasonSchema = z.union([
-  z.literal("below-threshold"),
-  z.literal("below-batch"),
-  z.literal("all-exempt"),
-]);
 
 const ScopedContextIdentitySchema = z.object({
   contextScopeId: z.string().optional(),
@@ -68,7 +50,6 @@ const CompactionAttemptOutcomeSchema = z.union([
 
 const CompactStatusSchema = z.union([
   z.literal("not-needed"),
-  z.literal("pruned"),
   z.literal("compacted"),
   z.literal("failed"),
   z.literal("inflated"),
@@ -86,8 +67,11 @@ export const ContextEvent = {
     ScopedContextIdentitySchema.extend({
       attemptId: z.string(),
       outcome: CompactionAttemptOutcomeSchema,
-      rung: z.union([z.literal("prune"), z.literal("summary")]).optional(),
+      rung: z.literal("summary").optional(),
       status: CompactStatusSchema,
+      usageBefore: ContextUsageSchema.optional(),
+      usageAfter: ContextUsageSchema.optional(),
+      omittedParts: z.number().int().nonnegative().optional(),
     }),
   ),
   CompactionProgress: BusEvent.define(
@@ -95,8 +79,7 @@ export const ContextEvent = {
     ScopedContextIdentitySchema.extend({
       attemptId: z.string(),
       attempt: z.number().int().positive(),
-      droppedRounds: z.number().int().nonnegative(),
-      // Readable-history retry score, not the complete summary request token estimate.
+      // Model history projection estimate; excludes system/tools request overhead.
       estimatedHistoryTokens: z.number().nonnegative(),
     }),
   ),
@@ -105,13 +88,6 @@ export const ContextEvent = {
     ScopedContextIdentitySchema.extend({
       attemptId: z.string(),
       result: CompressionResultSchema,
-    }),
-  ),
-  Pruned: BusEvent.define(
-    "context.pruned",
-    ScopedContextIdentitySchema.extend({
-      attemptId: z.string(),
-      result: PruneResultSchema,
     }),
   ),
   TurnPrepared: BusEvent.define(
@@ -130,22 +106,9 @@ export const ContextEvent = {
         z.literal("not-needed"),
         z.literal("too-short"),
         z.literal("inflated"),
-        z.literal("thrash-locked"),
-        z.literal("per-turn-cap"),
         z.literal("stale"),
       ]),
       usage: ContextUsageSchema,
-    }),
-  ),
-  Masked: BusEvent.define(
-    "context.masked",
-    ScopedContextIdentitySchema.extend({
-      enabled: z.boolean(),
-      maskedPartIds: z.array(z.string()),
-      maskedTokens: z.number(),
-      cutoff: z.number(),
-      usageRatio: z.number(),
-      skippedReason: MaskSkippedReasonSchema.optional(),
     }),
   ),
 } as const;

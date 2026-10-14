@@ -111,32 +111,6 @@ interface AgentConfig {
   /** 是否允许 doom loop */
   allowDoomLoop?: boolean
 
-  // ==================== 模型参数（可选覆盖） ====================
-
-  /**
-   * 指定使用的模型
-   * 格式：providerID/modelID（如 "anthropic/claude-sonnet-4.5"）
-   * 未设置时：使用 config/llm 的全局配置
-   */
-  model?: string
-
-  /**
-   * 温度参数（覆盖 config/llm 配置）
-   * 范围：0.0 - 2.0
-   */
-  temperature?: number
-
-  /**
-   * Top-P 参数（覆盖 config/llm 配置）
-   * 范围：0.0 - 1.0
-   */
-  topP?: number
-
-  /**
-   * 最大响应 token 数（覆盖 config/llm 配置）
-   */
-  maxTokens?: number
-
   // ==================== 工具配置 ====================
 
   /**
@@ -211,17 +185,6 @@ interface RuntimeAgent {
    * 根据 tools 配置计算得出
    */
   availableTools: string[]
-
-  /**
-   * 有效的 LLM 参数
-   * 合并 agent 配置和 config/llm 全局配置
-   */
-  llmParams: {
-    model: string
-    temperature: number
-    topP: number
-    maxTokens: number
-  }
 }
 ```
 
@@ -359,20 +322,11 @@ class AgentRegistry {
 }
 ```
 
-### 3.3 LLM 参数合并
+### 3.3 运行时模型身份
 
-```typescript
-function resolveLlmParams(agentConfig: AgentConfig): LlmParams {
-  const globalConfig = getLlmConfig()  // from config/llm
+模型设置归 `config/llm` 管理。主代理与子代理的 instance 都使用调用方提供的运行时 `modelId`；reasoning 仍通过运行参数传递。`AgentConfig` 不再声明 `model`、`maxTokens`、`temperature`、`topP`，也不合并这些设置。
 
-  return {
-    model: agentConfig.model ?? globalConfig.model,
-    temperature: agentConfig.temperature ?? globalConfig.temperature,
-    topP: agentConfig.topP ?? globalConfig.topP,
-    maxTokens: agentConfig.maxTokens ?? globalConfig.maxTokens
-  }
-}
-```
+文件配置沿用严格 schema 校验。Registry 的 `configLoader`／`builtinAgents`、AgentService 和 SessionSubagentHost 消费自定义 RuntimeAgent 时，均在模型请求前拒绝四个旧字段；错误指出配置来源或 agent 名称及字段。即使值为 `undefined`，显式保留这些属性也会被拒绝。迁移时需要删除旧字段，并将模型设置放到 LLM 层。
 
 ---
 
@@ -536,9 +490,7 @@ const SUBAGENT_DISABLED_TOOLS = ['task', 'agent_open', 'agent_eval', 'agent_stat
 | `mode` | 枚举：'primary' / 'subagent' / 'all' |
 | `description` | subagent 模式必填 |
 | `color` | 十六进制格式（#RRGGBB） |
-| `model` | 格式：providerID/modelID |
-| `temperature` | 范围：0.0 - 2.0 |
-| `topP` | 范围：0.0 - 1.0 |
+| `model`／`maxTokens`／`temperature`／`topP` | 已删除；出现即报错 |
 | `maxSteps` | 正整数 |
 | `timeout` | 正整数 |
 
@@ -549,7 +501,6 @@ agents 模块在配置加载后执行业务验证：
 | 验证项 | 说明 |
 |--------|------|
 | 工具存在性 | tools.include/exclude 中的工具名必须存在 |
-| 模型可用性 | model 指定的模型必须是可用的 |
 | 权限合法性 | bash 通配符格式正确 |
 | 子代理工具限制 | 子代理自动禁用 task/agent_* 递归控制工具；todo 按配置启用 |
 

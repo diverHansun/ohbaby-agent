@@ -1865,6 +1865,40 @@ describe("CommandService", () => {
     );
   });
 
+  it("cancels a compact command through its request signal", async () => {
+    let summarySignal: AbortSignal | undefined;
+    let rejectSummary!: (error: Error) => void;
+    const { events, service } = createServiceHarness({
+      compact: {
+        compactSession(input) {
+          summarySignal = (input as { signal?: AbortSignal }).signal;
+          return new Promise((_, reject) => {
+            rejectSummary = reject;
+          });
+        },
+      },
+    });
+    const controller = new AbortController();
+    const work = service.executeCommand(
+      makeInvocation("compact", ["compact"], []),
+      { signal: controller.signal },
+    );
+    await Promise.resolve();
+    controller.abort();
+    expect(summarySignal?.aborted).toBe(true);
+    rejectSummary(new DOMException("Compaction stopped", "AbortError"));
+    const completion = await work;
+    expect(completion.status).toBe("failed");
+    expect(events.some((event) => event.type === "failed")).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          isRecord(event.action) &&
+          event.action.kind === "session.compact.completed",
+      ),
+    ).toBe(false);
+  });
+
   it("resumes a session from the top-level /resume command", async () => {
     const selectSession = vi.fn<() => Promise<void>>().mockResolvedValue();
     const { events, service } = createServiceHarness({

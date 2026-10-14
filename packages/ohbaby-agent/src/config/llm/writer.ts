@@ -1,3 +1,4 @@
+import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../services/llm-model/modelProfiles.js";
 import {
   capabilitiesFor,
   compatibleReasoningPreference,
@@ -27,7 +28,6 @@ import { defaultApiKeyEnvForProvider, nonEmptyApiKey } from "./api-key.js";
 
 import { modelProfileRouteKey } from "./model-profile.js";
 
-const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_INTERFACE_PROVIDER: InterfaceProviderKind = "openai-compatible";
 
 export interface SetActiveLLMConfigInput {
@@ -128,7 +128,7 @@ function buildLLMParams(
     ...(temperature === undefined ? {} : { temperature }),
     ...(reasoning === undefined ? {} : { reasoning }),
     maxTokens:
-      input.maxTokens ?? existingParams?.maxTokens ?? DEFAULT_MAX_TOKENS,
+      input.maxTokens ?? existingParams?.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
     ...(contextWindowTokens === undefined
       ? {}
       : {

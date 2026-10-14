@@ -1056,9 +1056,13 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       expect(backend.searchInputs).toEqual([
         { apiKeyEnv: "TAVILY_API_KEY", provider: "tavily" },
       ]);
-      expect(backend.compactInputs).toEqual([
-        { force: true, sessionId: "session_1" },
+      expect(backend.compactInputs).toMatchObject([
+        {
+          force: true,
+          sessionId: "session_1",
+        },
       ]);
+      expect(backend.compactInputs[0]?.signal).toBeInstanceOf(AbortSignal);
       expect(backend.executedCommands).toHaveLength(1);
       expect(
         backend.executedCommands.some(
@@ -1219,4 +1223,70 @@ describe("ohbaby-web with ohbaby-server /v1", () => {
       await server.dispose();
     }
   });
+});
+
+it("cancels a manual summary through the browser REST request without creating a run", async () => {
+  const backend = new FakeBackend();
+  let started!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let summarySignal: AbortSignal | undefined;
+  backend.compactSession = async (options): Promise<UiCompactSessionResult> => {
+    summarySignal = options?.signal;
+    started();
+    await gate;
+    summarySignal?.throwIfAborted();
+    return compactResult();
+  };
+  const server = createDaemonServerApp({
+    authToken,
+    backend,
+    packageVersion: "test",
+  });
+  await server.start();
+  const runtime = createOhbabyWebRuntime(
+    {
+      baseUrl: "http://127.0.0.1:4096",
+      clientId: "compact_stop",
+      directory: "/repo",
+      token: authToken,
+    },
+    {
+      fetch: (input, init = {}) => {
+        const url = new URL(urlFromRequestInput(input));
+        return Promise.resolve(
+          server.app.request(`${url.pathname}${url.search}`, init),
+        );
+      },
+    },
+  );
+  try {
+    await runtime.ready;
+    const controller = new AbortController();
+    const client = runtime.client;
+    if (!client) throw new Error("Expected an active browser client");
+    const compact = client.compactSession({
+      sessionId: "session_1",
+      signal: controller.signal,
+    });
+    const settled = compact.catch((error: unknown) => error);
+    await entered;
+    controller.abort();
+    try {
+      expect(summarySignal?.aborted).toBe(true);
+    } finally {
+      release();
+      await settled;
+    }
+    expect(backend.executedCommands).toEqual([]);
+  } finally {
+    release();
+    await runtime.dispose();
+    await server.dispose();
+  }
 });

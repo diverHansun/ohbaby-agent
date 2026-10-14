@@ -24,6 +24,7 @@ describe("token usage event transport", () => {
       },
       inputTokens: 100,
       outputTokens: 25,
+      reasoningTokens: 10,
       totalTokens: 125,
     } as const;
     const lifecycle: RunLifecycle = {
