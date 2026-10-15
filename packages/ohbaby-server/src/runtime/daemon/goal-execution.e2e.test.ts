@@ -7,18 +7,24 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { UiEvent } from "ohbaby-sdk";
+import type { UiEvent, UiMessage } from "ohbaby-sdk";
 import {
   createPersistentUiBackendClient,
   closePersistentUiBackendDatabase,
 } from "../../../../ohbaby-agent/src/adapters/ui-persistent.js";
 import { loadEnvFile } from "../../../../ohbaby-agent/src/config/llm/loaders.js";
+import { createDatabaseMessageStore } from "../../../../ohbaby-agent/src/core/message/database-store.js";
+import {
+  getMessageOrigin,
+  isModelContextPart,
+} from "../../../../ohbaby-agent/src/core/message/origin.js";
 import type { LLMClientInstance } from "../../../../ohbaby-agent/src/core/llm-client/types.js";
 import { createSqliteGoalPersistence } from "../../../../ohbaby-agent/src/goals/persistence.js";
 import type { GoalPersistencePort } from "../../../../ohbaby-agent/src/goals/types.js";
 import { getDatabase } from "../../../../ohbaby-agent/src/services/database/index.js";
 import { createInterfaceProvider } from "../../../../ohbaby-agent/src/services/interface-providers/index.js";
 import type {
+  InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
   InterfaceProviderTokenUsage,
 } from "../../../../ohbaby-agent/src/services/interface-providers/types.js";
@@ -41,6 +47,7 @@ async function withDaemon(
     client: RemoteClient;
     events: UiEvent[];
     persistence: GoalPersistencePort;
+    reconnect: () => RemoteClient;
   }) => Promise<void>,
 ): Promise<void> {
   const root = await mkdtemp(join(os.tmpdir(), "ohbaby-goal-e2e-"));
@@ -68,6 +75,7 @@ async function withDaemon(
     onClientConnected: connected.resolve,
   });
   let client: RemoteClient | undefined;
+  const reconnectedClients: RemoteClient[] = [];
   try {
     await server.start();
     client = createRemoteUiBackendClient({
@@ -82,8 +90,18 @@ async function withDaemon(
       client,
       events,
       persistence: createSqliteGoalPersistence(getDatabase()),
+      reconnect: () => {
+        const reconnected = createRemoteUiBackendClient({
+          authToken,
+          host: "127.0.0.1",
+          port: server.port,
+        });
+        reconnectedClients.push(reconnected);
+        return reconnected;
+      },
     });
   } finally {
+    await Promise.all(reconnectedClients.map((item) => item.dispose()));
     await client?.dispose();
     await server.stop();
     await backend.dispose();
@@ -138,7 +156,286 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function uiMessageText(message: UiMessage): string {
+  return message.parts
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("\n");
+}
+
+function lastUserText(request: InterfaceProviderRequest): string {
+  const message = request.messages
+    .filter((item) => item.role === "user")
+    .at(-1);
+  if (!message) throw new Error("Expected user input in the model request");
+  return typeof message.content === "string"
+    ? message.content
+    : message.content
+        .map((part) => ("text" in part ? part.text : ""))
+        .join("\n");
+}
+
 describe("goal execution through the HTTP daemon", () => {
+  it("separates two goal turns from their live and replay display while preserving runtime context, title and silent counters", async () => {
+    const firstRequest = deferred();
+    const releaseFirst = deferred();
+    const objective =
+      "Verify the cobalt telescope handoff within exactly 2 turns";
+    const requests: InterfaceProviderRequest[] = [];
+    const titles: InterfaceProviderRequest[] = [];
+    const llmClient: LLMClientInstance = {
+      config: {
+        provider: "fixture",
+        model: "fixture",
+        interfaceProvider: "openai-compatible",
+        baseUrl: "https://fixture.invalid",
+        maxTokens: 128,
+        contextWindowTokens: 128000,
+      },
+      provider: {
+        id: "fixture",
+        kind: "openai-compatible",
+        client: {},
+        isAbortError: () => false,
+        streamResponse(request) {
+          return Promise.resolve(
+            (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              if (request.purpose === "session-title") {
+                titles.push(request);
+                yield {
+                  textDelta: "Verify cobalt telescope handoff",
+                  finishReason: "stop",
+                };
+                return;
+              }
+              const index = requests.push(request) - 1;
+              if (index === 0) {
+                firstRequest.resolve();
+                await releaseFirst.promise;
+                yield {
+                  toolCallDeltas: [
+                    {
+                      index: 0,
+                      id: "set_two_turn_limit",
+                      name: "SetGoalBudget",
+                      argumentsDelta: '{"value":2,"unit":"turns"}',
+                    },
+                  ],
+                  finishReason: "tool_calls",
+                  tokenUsage: usage(100, 20),
+                };
+              } else if (index <= 2) {
+                yield {
+                  textDelta: `GOAL_TURN_${String(index)}_OK`,
+                  finishReason: "stop",
+                  tokenUsage: usage(100, 20),
+                };
+              } else if (index === 3) {
+                yield {
+                  toolCallDeltas: [
+                    {
+                      index: 0,
+                      id: "read_blocked_goal",
+                      name: "GetGoal",
+                      argumentsDelta: "{}",
+                    },
+                  ],
+                  finishReason: "tool_calls",
+                  tokenUsage: usage(100, 20),
+                };
+              } else {
+                yield {
+                  textDelta: "ORDINARY_INPUT_OK",
+                  finishReason: "stop",
+                  tokenUsage: usage(100, 20),
+                };
+              }
+            })(),
+          );
+        },
+      },
+    };
+    await withDaemon(
+      llmClient,
+      async ({ client, events, persistence, reconnect }) => {
+        try {
+          const session = await client.createSession();
+          await createGoal(client, session.id, objective);
+          await firstRequest.promise;
+          const initial = (await client.getSnapshot()).goals?.find(
+            (item) => item.sessionId === session.id,
+          )?.goal;
+          expect(initial).toMatchObject({
+            status: "active",
+            turnsUsed: 1,
+          });
+          expect(typeof initial?.wallClockMs).toBe("number");
+          expect(initial).not.toHaveProperty("turnBudget");
+          releaseFirst.resolve();
+          await vi.waitFor(async () => {
+            expect(
+              (await persistence.list(session.id)).filter(
+                (record) => record.tokensUsed !== undefined,
+              ),
+            ).toHaveLength(2);
+            expect(
+              (await client.getSessionView({ sessionId: session.id })).goal,
+            ).toMatchObject({
+              status: "ready",
+              value: { status: "blocked", turnsUsed: 2, turnBudget: 2 },
+            });
+          });
+          const view = await client.getSessionView({ sessionId: session.id });
+          const replayUserMessages = view.session.messages.filter(
+            (message) => message.role === "user",
+          );
+          expect(replayUserMessages.map(uiMessageText)).toEqual([
+            "Goal started",
+            "Goal auto-continue (turn 2)",
+          ]);
+          await vi.waitFor(() => {
+            const liveUserMessages = events.flatMap((event) =>
+              event.type === "message.appended" &&
+              event.sessionId === session.id &&
+              event.message.role === "user"
+                ? [event.message]
+                : [],
+            );
+            expect(liveUserMessages.map(uiMessageText)).toEqual(
+              replayUserMessages.map(uiMessageText),
+            );
+          });
+          expect(requests).toHaveLength(3);
+          const turnPrompts = [
+            lastUserText(requests[0]),
+            lastUserText(requests[2]),
+          ];
+          turnPrompts.forEach((text, index) => {
+            expect(text).toContain(
+              `<untrusted_objective>\n${objective}\n</untrusted_objective>`,
+            );
+            expect(text).toContain(
+              `Progress: ${String(index + 1)} continuation turns`,
+            );
+            expect(text).toContain("<environment_context>");
+            expect(text).not.toContain("Goal started");
+            expect(text).not.toContain("Goal auto-continue");
+            expect(text.match(/<untrusted_objective>/gu)).toHaveLength(1);
+          });
+          expect(
+            requests[0].messages.filter((message) => message.role === "system"),
+          ).toEqual(
+            requests[2].messages.filter((message) => message.role === "system"),
+          );
+          await vi.waitFor(() => {
+            expect(titles).toHaveLength(1);
+          });
+          expect(lastUserText(titles[0])).toContain(objective);
+          expect(lastUserText(titles[0])).not.toMatch(
+            /Goal started|Goal auto-continue/u,
+          );
+          expect(view.session.title).toBe("Verify cobalt telescope handoff");
+          const stored = (
+            await createDatabaseMessageStore().listBySession(session.id)
+          ).filter((message) => message.info.role === "user");
+          expect(stored).toHaveLength(2);
+          stored.forEach((message, index) => {
+            expect(getMessageOrigin(message)).toBe("user");
+            const body = message.parts.find(
+              (part) => part.type === "text" && !isModelContextPart(part),
+            );
+            if (body?.type !== "text")
+              throw new Error("Expected persisted goal body");
+            expect(body.text).toContain(objective);
+            expect(body.metadata?.displayText).toBe(
+              uiMessageText(replayUserMessages[index]),
+            );
+            expect(body.metadata).not.toHaveProperty("kind");
+            const runtime = message.parts.filter(isModelContextPart);
+            expect(runtime).toHaveLength(1);
+            if (runtime[0]?.type !== "text")
+              throw new Error("Expected runtime context part");
+            expect(runtime[0].text).toContain("<environment_context>");
+          });
+          if (view.goal.status !== "ready" || !view.goal.value)
+            throw new Error("Expected blocked goal projection");
+          const stoppedGoal = view.goal.value;
+          expect(stoppedGoal.wallClockMs).toBeGreaterThan(0);
+          expect(
+            Object.keys(stoppedGoal).some((key) => /token/iu.test(key)),
+          ).toBe(false);
+          const freshClient = reconnect();
+          await freshClient.selectSession(session.id);
+          const snapshot = await freshClient.getSnapshot();
+          expect(
+            snapshot.goals?.find((item) => item.sessionId === session.id)?.goal,
+          ).toEqual(stoppedGoal);
+          expect(
+            (await freshClient.getSessionView({ sessionId: session.id })).goal,
+          ).toEqual(view.goal);
+          expect(
+            snapshot.sessions
+              .find((item) => item.id === session.id)
+              ?.messages.filter((message) => message.role === "user")
+              .map(uiMessageText),
+          ).toEqual(replayUserMessages.map(uiMessageText));
+          await vi.waitFor(() => {
+            const updates = events.filter(
+              (event): event is Extract<UiEvent, { type: "goal.updated" }> =>
+                event.type === "goal.updated" && event.sessionId === session.id,
+            );
+            expect(updates.at(-1)).toMatchObject({ goal: stoppedGoal });
+            expect(updates.some((event) => event.goal?.turnsUsed === 1)).toBe(
+              true,
+            );
+            expect(updates.some((event) => event.goal?.turnsUsed === 2)).toBe(
+              true,
+            );
+          });
+          const goalNotices = events.filter(
+            (event) =>
+              event.type === "notice.emitted" &&
+              event.notice.source === "goals",
+          );
+          expect(goalNotices).toHaveLength(3); // creation, explicit budget, budget exhaustion only
+          const ordinary =
+            "Read the current goal explicitly; do not resume it.";
+          const accepted = await client.submitPromptAccepted(ordinary, {
+            sessionId: session.id,
+          });
+          expect(
+            (
+              await client.waitForPrompt(accepted.promptId, {
+                signal: AbortSignal.timeout(10_000),
+              })
+            ).prompt.status,
+          ).toBe("succeeded");
+          expect(lastUserText(requests[3]).startsWith(ordinary)).toBe(true);
+          expect(lastUserText(requests[3])).not.toContain(objective);
+          expect(lastUserText(requests[3])).not.toMatch(
+            /currently paused|<untrusted_objective>|\/goal resume/u,
+          );
+          expect(lastUserText(requests[3])).toContain("<environment_context>");
+          expect(JSON.stringify(requests[4].messages)).toContain(
+            `Goal: ${objective}`,
+          );
+          expect(JSON.stringify(requests[4].messages)).toContain("Tokens:");
+          expect(
+            (await client.getSessionView({ sessionId: session.id })).goal,
+          ).toEqual(view.goal);
+          expect(
+            events.filter(
+              (event) =>
+                event.type === "notice.emitted" &&
+                event.notice.source === "goals",
+            ),
+          ).toHaveLength(goalNotices.length);
+        } finally {
+          releaseFirst.resolve();
+        }
+      },
+    );
+  }, 20_000);
+
   it("keeps oversized protected input recoverable when context preparation rejects it before the next request", async () => {
     const started = deferred();
     const nextStep = deferred();
@@ -486,6 +783,7 @@ describe("goal execution through the HTTP daemon", () => {
         value: {
           status: "blocked",
           pauseReason: "Need the user's database choice",
+          turnsUsed: 3,
         },
       });
       expect(
@@ -521,6 +819,15 @@ describe("goal execution through the HTTP daemon", () => {
           .map((row) => row.turnsUsed),
       ).toEqual([1, 2, 3, 4, 5]);
       expect(completionNotices(events)).toHaveLength(1);
+      expect(
+        events.some(
+          (event) =>
+            event.type === "goal.updated" &&
+            event.goal?.status === "active" &&
+            event.goal.turnBudget === 5 &&
+            event.goal.turnsUsed >= 3,
+        ),
+      ).toBe(true);
       expect((await client.getSnapshot()).goals ?? []).toEqual([]);
     });
   }, 20_000);
@@ -575,6 +882,7 @@ describe("goal execution through the HTTP daemon", () => {
                 expect(JSON.stringify(request.messages)).toContain(
                   "steered user instruction",
                 );
+                expect(lastUserText(request)).toBe("steered user instruction");
                 tailStarted.resolve();
                 await finishTail.promise;
                 yield {
@@ -586,6 +894,12 @@ describe("goal execution through the HTTP daemon", () => {
                 expect(index).toBe(2);
                 expect(JSON.stringify(request.messages)).toContain(
                   "queued user",
+                );
+                expect(lastUserText(request).startsWith("queued user")).toBe(
+                  true,
+                );
+                expect(lastUserText(request)).not.toMatch(
+                  /currently paused|<untrusted_objective>|\/goal resume/u,
                 );
                 yield {
                   textDelta: "QUEUED_USER_OK",
@@ -739,7 +1053,7 @@ describe("goal execution through the HTTP daemon", () => {
 const live = process.env.OHBABY_RUN_GOAL_REAL_E2E === "1" ? it : it.skip;
 describe("live goal execution through the HTTP daemon", () => {
   live(
-    "uses real DeepSeek to consume an automatic steer in the same goal run and complete it",
+    "uses real DeepSeek across two displayed goal turns with automatic steer, full context and completion",
     async () => {
       const env = await loadEnvFile(join(process.cwd(), ".env"));
       const apiKey = process.env.DEEPSEEK_API_KEY ?? env.DEEPSEEK_API_KEY;
@@ -757,10 +1071,14 @@ describe("live goal execution through the HTTP daemon", () => {
       const allowFirstRequest = deferred();
       let calls = 0;
       let goalCalls = 0;
+      const modelRequests: InterfaceProviderRequest[] = [];
+      const titleRequests: InterfaceProviderRequest[] = [];
       provider.streamResponse = async (request): ReturnType<typeof open> => {
         if (calls >= 8) throw new Error("Real goal E2E request cap reached");
         calls++;
-        if (request.purpose !== "session-title") {
+        if (request.purpose === "session-title") titleRequests.push(request);
+        else {
+          modelRequests.push(request);
           goalCalls++;
           if (goalCalls === 1) {
             firstGoalRequest.resolve();
@@ -800,26 +1118,23 @@ describe("live goal execution through the HTTP daemon", () => {
             ],
           },
         },
-        async ({ client, events, persistence }) => {
+        async ({ client, events, persistence, reconnect }) => {
           const session = await client.createSession();
-          await createGoal(
-            client,
-            session.id,
-            [
-              "Verify this goal lifecycle handshake. No file, shell, network, or subagent work is required.",
-              "First call GetGoal once to read the current goal state. An additional user instruction will arrive during this first request.",
-              "After GetGoal returns, read that additional user instruction. It contains the success marker and final answer instructions.",
-              "The goal is complete when you can return that exact marker. Then call UpdateGoal with status complete and give the requested answer.",
-              "Do not invent a budget or create another goal.",
-            ].join(" "),
-          );
+          const objective = [
+            "Verify the cobalt telescope two-turn lifecycle handshake. No file, shell, network, or subagent work is required.",
+            "The success condition requires observing a SECOND admitted goal turn (Progress: 2 continuation turns).",
+            "On the FIRST admitted turn, call GetGoal once, read the additional user instruction, then end your response with FIRST_TURN_READY while keeping the goal active so the runtime can admit the second turn.",
+            "On the SECOND admitted turn, the condition is satisfied: call UpdateGoal with status complete, then return the exact success marker supplied by the additional user instruction.",
+            "Do not invent a budget or create another goal.",
+          ].join(" ");
+          await createGoal(client, session.id, objective);
           await firstGoalRequest.promise;
           let steered: Awaited<
             ReturnType<RemoteClient["submitPromptAccepted"]>
           >;
           try {
             steered = await client.submitPromptAccepted(
-              `Additional user instruction: the success marker is ${marker}. After GetGoal, call UpdateGoal with status complete, then return only ${marker}. Do not do any other work.`,
+              `Additional user instruction: the success marker is ${marker}. In turn 1, after GetGoal, return only FIRST_TURN_READY and keep the goal active. In turn 2, call UpdateGoal with status complete, then return only ${marker}. Do not do any other work.`,
               {
                 sessionId: session.id,
                 clientRequestId: `live-steer-${marker}`,
@@ -855,14 +1170,94 @@ describe("live goal execution through the HTTP daemon", () => {
           await vi.waitFor(() => {
             expect(completionNotices(events)).toHaveLength(1);
           });
+          // Emit bounded observations before assertions so a test-oracle failure
+          // still leaves useful request/accounting evidence without request data.
+          // eslint-disable-next-line no-console
+          console.info(
+            "GOAL_REAL_E2E_OBSERVED",
+            JSON.stringify({
+              calls,
+              goalCalls,
+              turns: records.filter((row) => row.turnsUsed !== undefined).at(-1)
+                ?.turnsUsed,
+              tokens: settled?.tokensUsed,
+              cachedTokens: settled?.cachedTokensUsed,
+              usageIncomplete: settled?.usageIncomplete,
+            }),
+          );
           const view = await client.getSessionView({ sessionId: session.id });
           expect(view.session.unconsumedSteers ?? []).toEqual([]);
-          expect(view.runs).toHaveLength(1);
+          expect(view.runs).toHaveLength(2);
           expect(
             records
               .filter((row) => row.turnsUsed !== undefined)
               .map((row) => row.turnsUsed),
-          ).toEqual([1]);
+          ).toEqual([1, 2]);
+          const goalMessages = view.session.messages.filter(
+            (message) =>
+              message.role === "user" && message.id !== steered.userMessageId,
+          );
+          expect(goalMessages.map(uiMessageText)).toEqual([
+            "Goal started",
+            "Goal auto-continue (turn 2)",
+          ]);
+          const liveGoalMessages = events.flatMap((event) =>
+            event.type === "message.appended" &&
+            event.message.role === "user" &&
+            event.message.id !== steered.userMessageId
+              ? [event.message]
+              : [],
+          );
+          expect(liveGoalMessages.map(uiMessageText)).toEqual(
+            goalMessages.map(uiMessageText),
+          );
+          for (const turn of [1, 2]) {
+            const progressLine = new RegExp(
+              `^Progress: ${String(turn)} continuation turns,`,
+              "m",
+            );
+            const request = modelRequests.find((item) =>
+              progressLine.test(lastUserText(item)),
+            );
+            if (!request)
+              throw new Error(`Missing real goal turn ${String(turn)} request`);
+            const body = lastUserText(request);
+            expect(body).toContain(objective);
+            expect(body).toContain("<environment_context>");
+            expect(body).not.toMatch(/Goal started|Goal auto-continue/u);
+          }
+          const steerRequest = modelRequests.find((request) =>
+            lastUserText(request).startsWith("Additional user instruction:"),
+          );
+          if (!steerRequest)
+            throw new Error("Expected real protected user input request");
+          expect(lastUserText(steerRequest)).not.toMatch(
+            /currently paused|<untrusted_objective>|\/goal resume/u,
+          );
+          expect(titleRequests).toHaveLength(1);
+          expect(lastUserText(titleRequests[0])).toContain("cobalt telescope");
+          expect(lastUserText(titleRequests[0])).not.toMatch(
+            /Goal started|Goal auto-continue/u,
+          );
+          expect(view.session.title).not.toMatch(
+            /Goal started|Goal auto-continue/u,
+          );
+          expect(view.session.title.trim().length).toBeGreaterThan(0);
+          const freshClient = reconnect();
+          await freshClient.selectSession(session.id);
+          const reloaded = await freshClient.getSessionView({
+            sessionId: session.id,
+          });
+          expect(
+            reloaded.session.messages
+              .filter(
+                (message) =>
+                  message.role === "user" &&
+                  message.id !== steered.userMessageId,
+              )
+              .map(uiMessageText),
+          ).toEqual(goalMessages.map(uiMessageText));
+          expect(reloaded.goal).toEqual({ status: "ready", value: null });
           expect(
             view.session.messages.filter(
               (message) => message.id === steered.userMessageId,
@@ -910,6 +1305,10 @@ describe("live goal execution through the HTTP daemon", () => {
               completionNotices: completionNotices(events).length,
               markerReturned: true,
               automaticSteer: true,
+              firstAndContinuationDisplay: true,
+              fullModelBodyAndRuntimeContext: true,
+              titleFromObjective: true,
+              reconnectedReplay: true,
               recoveryEntries: view.session.unconsumedSteers?.length ?? 0,
             }),
           );

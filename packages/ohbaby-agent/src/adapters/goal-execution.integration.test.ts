@@ -1061,9 +1061,10 @@ it.each(["continue", "pause"] as const)(
           (record) => record.turnsUsed !== undefined,
         ),
       ).toEqual([]);
-      expect((await client.getSnapshot()).goals?.[0]?.goal.status).toBe(
-        "active",
-      );
+      expect((await client.getSnapshot()).goals?.[0]?.goal).toMatchObject({
+        status: "active",
+        turnsUsed: 0,
+      });
       if (action === "pause") await command(client, ["pause"]);
       finishSummary.resolve();
       await expect(compact).resolves.toMatchObject({ status: "compacted" });
@@ -1244,9 +1245,12 @@ it.each([
       releaseOldSettlement.resolve();
       await pause;
       await newStarted.promise;
-      expect((await client.getSnapshot()).goals?.[0]?.goal.status).toBe(
-        "active",
-      );
+      expect((await client.getSnapshot()).goals?.[0]?.goal).toMatchObject({
+        status: "active",
+        turnsUsed: action === "resume" ? 2 : 1,
+        objective:
+          action === "resume" ? "resume identity goal" : "new identity goal",
+      });
       expect(
         (await persistence.list("one")).filter(
           (record) => record.status === "paused",
