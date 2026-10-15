@@ -2,6 +2,7 @@ export type GoalErrorCode =
   | "no_goal"
   | "goal_exists"
   | "invalid_objective"
+  | "invalid_criterion"
   | "invalid_transition"
   | "invalid_budget"
   | "budget_reached"

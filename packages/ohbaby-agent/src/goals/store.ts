@@ -130,6 +130,18 @@ export class GoalStore {
         `Goal objective cannot exceed ${String(MAX_GOAL_OBJECTIVE_LENGTH)} characters.`,
       );
     }
+    const trimmedCriterion = input.completionCriterion?.trim();
+    const completionCriterion =
+      trimmedCriterion === "" ? undefined : trimmedCriterion;
+    if (
+      completionCriterion !== undefined &&
+      completionCriterion.length > MAX_GOAL_OBJECTIVE_LENGTH
+    ) {
+      throw new GoalError(
+        "invalid_criterion",
+        `Goal completion criterion cannot exceed ${String(MAX_GOAL_OBJECTIVE_LENGTH)} UTF-16 code units (received ${String(completionCriterion.length)}).`,
+      );
+    }
     if (
       this.state !== undefined &&
       this.state.status !== "complete" &&
@@ -149,9 +161,7 @@ export class GoalStore {
       cachedTokensUsed: 0,
       usageIncomplete: false,
       type: "create",
-      ...(input.completionCriterion !== undefined
-        ? { completionCriterion: input.completionCriterion }
-        : {}),
+      ...(completionCriterion !== undefined ? { completionCriterion } : {}),
       ...(input.budgetLimits !== undefined ? { budgetLimits } : {}),
     };
     await this.appendRecord(record);
@@ -166,9 +176,7 @@ export class GoalStore {
       turnsUsed: 0,
       wallClockMs: 0,
       wallClockResumedAt: this.now(),
-      ...(input.completionCriterion !== undefined
-        ? { completionCriterion: input.completionCriterion }
-        : {}),
+      ...(completionCriterion !== undefined ? { completionCriterion } : {}),
     };
     const snapshot = this.toSnapshot(this.state);
     this.onChange?.(snapshot, { actor: input.actor, kind: "created" });

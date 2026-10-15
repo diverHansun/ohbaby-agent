@@ -29,6 +29,70 @@ describe("goal persistence", () => {
 
   const suite = (name: string, make: () => GoalPersistencePort): void => {
     describe(name, () => {
+      it.each([false, true])(
+        "U11 validates criterion before replacing or rejecting an existing goal (replace=%s)",
+        async (replace) => {
+          const persistence = make();
+          const store = await GoalStore.rebuild({
+            persistence,
+            sessionId: "s1",
+            now: () => 1000,
+          });
+          const original = await store.create({
+            actor: "user",
+            objective: "original",
+            completionCriterion: "keep this",
+          });
+          await store.incrementTurn();
+          await store.recordUsage(original.goalId, {
+            totalTokens: 42,
+            cachedInputTokens: 12,
+            usageComplete: true,
+          });
+          await store.pause("waiting", "user");
+          const before = store.getSnapshot();
+          const records = await persistence.list("s1");
+          await expect(
+            store.create({
+              actor: "user",
+              objective: "replacement",
+              completionCriterion: "x".repeat(6001),
+              replace,
+            }),
+          ).rejects.toMatchObject({ code: "invalid_criterion" });
+          expect(store.getSnapshot()).toEqual(before);
+          expect(await persistence.list("s1")).toEqual(records);
+          const rebuilt = await GoalStore.rebuild({
+            persistence,
+            sessionId: "s1",
+            now: () => 1000,
+          });
+          expect(rebuilt.getSnapshot()).toEqual(before);
+        },
+      );
+
+      it("U10 reads legacy criterion verbatim without applying new-write limits", async () => {
+        const persistence = make();
+        const completionCriterion = ` ${"x".repeat(6001)} `;
+        await persistence.append("s1", {
+          type: "create",
+          goalId: "legacy",
+          objective: "legacy",
+          completionCriterion,
+        });
+        await persistence.append("s1", {
+          type: "update",
+          goalId: "legacy",
+          status: "paused",
+        });
+        const records = await persistence.list("s1");
+        const store = await GoalStore.rebuild({ persistence, sessionId: "s1" });
+        expect(store.getSnapshot()?.completionCriterion).toBe(
+          completionCriterion,
+        );
+        expect(await persistence.list("s1")).toEqual(records);
+      });
+
       it("appends records with increasing seq and lists them in order", async () => {
         const persistence = make();
         await persistence.append("s1", {

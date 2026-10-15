@@ -60,6 +60,56 @@ describe("GoalStore state machine", () => {
     expect(replaced.objective).toBe("b");
   });
 
+  it.each(["x".repeat(5999), "x".repeat(6000), "😀".repeat(3000)])(
+    "U10 trims and preserves an allowed criterion (%#)",
+    async (criterion) => {
+      const { store, persistence } = await makeStore();
+      const snapshot = await store.create({
+        actor: ACTOR,
+        objective: "verify",
+        completionCriterion: ` \n${criterion}\t `,
+      });
+      expect(snapshot.completionCriterion).toBe(criterion);
+      expect((await persistence.list("s1"))[0]?.completionCriterion).toBe(
+        criterion,
+      );
+    },
+  );
+
+  it.each([undefined, "", " \n\t "])(
+    "U10 omits an absent or blank criterion (%#)",
+    async (completionCriterion) => {
+      const { store, persistence } = await makeStore();
+      const snapshot = await store.create({
+        actor: ACTOR,
+        objective: "verify",
+        completionCriterion,
+      });
+      expect(snapshot).not.toHaveProperty("completionCriterion");
+      expect((await persistence.list("s1"))[0]).not.toHaveProperty(
+        "completionCriterion",
+      );
+    },
+  );
+
+  it.each(["x".repeat(6001), `${"😀".repeat(3000)}x`])(
+    "U10 rejects overlong criteria by UTF-16 length without writing (%#)",
+    async (completionCriterion) => {
+      const { store, persistence } = await makeStore();
+      const creation = store.create({
+        actor: ACTOR,
+        objective: "verify",
+        completionCriterion: ` ${completionCriterion} `,
+      });
+      await expect(creation).rejects.toMatchObject({
+        code: "invalid_criterion",
+      });
+      await expect(creation).rejects.toThrow(/6000.*6001/);
+      expect(store.getSnapshot()).toBeNull();
+      expect(await persistence.list("s1")).toEqual([]);
+    },
+  );
+
   it("pause/resume round-trip clears pause reason", async () => {
     const { store } = await makeStore();
     await store.create({ actor: ACTOR, objective: "a" });

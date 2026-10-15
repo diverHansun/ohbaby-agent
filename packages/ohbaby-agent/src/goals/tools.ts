@@ -73,7 +73,10 @@ function createCreateGoalTool(backend: GoalToolBackend): Tool {
       additionalProperties: false,
       properties: {
         completionCriterion: {
-          description: "Checkable success condition, if the user provided one.",
+          description:
+            "Checkable success condition, if the user provided one. Trimmed before storage; " +
+            "blank means omitted. Maximum 6000 UTF-16 code units, like the objective; " +
+            "longer values are rejected, never truncated.",
           type: "string",
         },
         objective: {
