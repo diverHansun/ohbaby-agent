@@ -1,5 +1,7 @@
 # 04 测试与验收：第 2 批（执行准入与统计基础）
 
+> 实际交付与验证见 [05 实施验收](./05-implementation-acceptance.md)。实施后模块文档（仅第 2 批）：[架构](../../../goals/improve-2/architecture.md) · [数据模型](../../../goals/improve-2/data-model.md) · [接口与时序](../../../goals/improve-2/dfd-interface.md) · [测试说明](../../../goals/improve-2/test.md)。按 2026-10-15 的补充约定，上级 `docs/goals/` 原文保留不改；本文下方原始规划中的文档同步落点改用该子目录。
+
 > 总体验收基线见 [../plan/04-test-and-acceptance.md](../plan/04-test-and-acceptance.md)，本文只覆盖本批场景，并标明哪些场景留给第 3/4/5 批。默认在仓库根执行；测试分类遵循 `docs-test/classification.md`。
 
 ## 4.1 命令

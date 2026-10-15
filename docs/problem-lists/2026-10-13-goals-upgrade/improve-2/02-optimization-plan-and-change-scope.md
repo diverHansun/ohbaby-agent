@@ -1,5 +1,7 @@
 # 02 优化方案与改动面：第 2 批（执行准入与统计基础）
 
+> 实际交付与验证见 [05 实施验收](./05-implementation-acceptance.md)。实施后模块文档（仅第 2 批）：[架构](../../../goals/improve-2/architecture.md) · [数据模型](../../../goals/improve-2/data-model.md) · [接口与时序](../../../goals/improve-2/dfd-interface.md) · [测试说明](../../../goals/improve-2/test.md)。按 2026-10-15 的补充约定，上级 `docs/goals/` 原文保留不改；本文下方原始规划中的文档同步落点改用该子目录。
+
 > 本文是给后续实施会话的执行契约。行为来源见 [00](./00-discussion.md)，现状依据见 [01](./01-problem-analysis-and-current-state.md)，验收见 [04](./04-test-and-acceptance.md)，参考对照见 [03](./03-reference-projects.md)。总体约束见 [../plan/02](../plan/02-optimization-plan-and-change-scope.md)。
 > 文中接口与字段是**预期实现**（定行为、定所有权、定顺序），实施时可调命名，但要满足同一契约。第 3、4 批复用同一串行边界，见 §2.10 的挂点。
 
