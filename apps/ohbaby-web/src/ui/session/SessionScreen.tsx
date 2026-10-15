@@ -495,7 +495,7 @@ export function SessionScreen({
   );
 
   const openOverlayForSlashText = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string): Promise<boolean | "goal-resume-with-arguments"> => {
       const generation = commandScopeGeneration.current;
       let catalog: UiWebCommandCatalog;
       try {
@@ -522,6 +522,9 @@ export function SessionScreen({
       if (!kind) {
         return false;
       }
+      if (kind === "goal" && /^resume\s+\S/u.test(resolved.rawArgs.trim())) {
+        return "goal-resume-with-arguments";
+      }
       setStructuredOverlay({
         commandLabel: slashCommandLabel(command),
         ...(kind === "goal"
@@ -543,25 +546,39 @@ export function SessionScreen({
         const generation = commandScopeGeneration.current;
         const opened = await openOverlayForSlashText(text);
         if (generation !== commandScopeGeneration.current) return false;
-        if (opened) return true;
+        if (opened === true) return true;
+        const resumeWithArguments = opened === "goal-resume-with-arguments";
         clearActionError();
         try {
           const completion = await runtime.executeSlashCommand({
+            ...(resumeWithArguments ? { allowOverlay: true } : {}),
             ...(view.composer.activeSessionId === undefined
               ? {}
               : { sessionId: view.composer.activeSessionId }),
             text,
             clientRequestId,
           });
+          if (
+            resumeWithArguments &&
+            completion.status === "failed" &&
+            generation === commandScopeGeneration.current
+          ) {
+            setCommandInputError({
+              scopeKey: draftScopeKey,
+              clientRequestId,
+              message: completion.error.message,
+            });
+          }
           return completion.status === "completed";
         } catch (error) {
           if (
             generation === commandScopeGeneration.current &&
-            !(
-              typeof error === "object" &&
-              error !== null &&
-              "commandFeedback" in error
-            )
+            (resumeWithArguments ||
+              !(
+                typeof error === "object" &&
+                error !== null &&
+                "commandFeedback" in error
+              ))
           )
             setCommandInputError({
               scopeKey: draftScopeKey,

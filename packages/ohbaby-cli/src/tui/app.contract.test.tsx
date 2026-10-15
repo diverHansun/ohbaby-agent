@@ -1,3 +1,8 @@
+// eslint-disable-next-line no-restricted-imports -- Test resolves Ink's Chalk instance to verify actual ANSI color output.
+import { createRequire } from "node:module";
+import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
+import chalk from "chalk";
 import { applyTuiEvent, createStateFromSnapshot } from "./store/events.js";
 // eslint-disable-next-line no-restricted-imports -- This contract fixture uses the real durable-operation behavior; production TUI only calls the SDK.
 import { InMemoryPromptSubmissionStore } from "../../../ohbaby-agent/src/runtime/prompt-scheduler/in-memory-store.js";
@@ -27,6 +32,7 @@ import {
 } from "./app.js";
 import { OhbabyTerminalApp } from "./index.js";
 import { renderOhbabyLogo } from "./render/logo.js";
+import { createTheme } from "./theme/index.js";
 import type {
   TerminalClient,
   TuiCommandCatalog,
@@ -806,6 +812,58 @@ describe("OhbabyTerminalApp", () => {
 
     expect(app.lastFrame()).toContain("goal paused");
     expect(app.lastFrame()).not.toContain("interrupted");
+  });
+
+  it("renders blocked goal status using the existing warning color", async () => {
+    // Ink and the CLI may use different Chalk versions. Enable the renderer's
+    // instance too, so the contract checks the actual terminal escape codes.
+    const require = createRequire(import.meta.url);
+    const inkChalkPath = require.resolve("chalk", {
+      paths: [dirname(require.resolve("ink"))],
+    });
+    // eslint-disable-next-line no-restricted-syntax -- Test imports only Ink's Chalk renderer dependency to verify ANSI output.
+    const inkChalkModule = (await import(
+      pathToFileURL(inkChalkPath).href
+    )) as typeof import("chalk");
+    const inkChalk = inkChalkModule.default;
+    const previousLevel = chalk.level;
+    const previousInkLevel = inkChalk.level;
+    chalk.level = 3;
+    inkChalk.level = 3;
+    vi.stubEnv("FORCE_COLOR", "3");
+    vi.stubEnv("OHBABY_TUI_THEME", "dark");
+    vi.stubEnv("NO_COLOR", undefined);
+    const client = createFakeClient({
+      ...snapshot(),
+      goals: [
+        {
+          sessionId: "session_1",
+          goal: {
+            objective: "finish goal UI",
+            status: "blocked",
+            pauseReason: "budget reached",
+          },
+        },
+      ],
+    });
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    try {
+      await flush();
+      expect(app.lastFrame()).toContain(
+        chalk.hex(createTheme("dark", 3).status.warning)("goal blocked"),
+      );
+      expect(app.lastFrame()).not.toContain("budget reached");
+    } finally {
+      app.unmount();
+      chalk.level = previousLevel;
+      inkChalk.level = previousInkLevel;
+      vi.unstubAllEnvs();
+    }
   });
 
   it("does not render goal status without a goal for the active session", async () => {

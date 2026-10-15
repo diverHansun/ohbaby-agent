@@ -241,18 +241,164 @@
   justify-content: flex-end;
 }
 
+/* Goal panel: flat sections separated by hairlines; no nested cards. */
+.ohb-goal-panel {
+  gap: 0;
+  padding-top: 18px;
+}
+
+.ohb-goal-panel > * + * {
+  border-top: 1px solid #f1f1f1;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.ohb-goal-panel > .ohb-goal-feedback,
+.ohb-goal-panel > .ohb-goal-actions {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.ohb-goal-panel > .ohb-goal-actions {
+  margin-top: 20px;
+}
+
+.ohb-goal-panel > .ohb-goal-feedback:empty {
+  display: none;
+}
+
+.ohb-goal-state p {
+  margin: 0;
+}
+
+.ohb-goal-status {
+  align-items: center;
+  color: #26282d;
+  display: flex;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 9px;
+}
+
+.ohb-goal-status > span {
+  display: block;
+  flex: none;
+  height: 7px;
+  width: 7px;
+}
+
+.ohb-goal-reason {
+  color: #6b6d73;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ohb-goal-status.ohb-goal-active > span,
+.ohb-goal-status.ohb-goal-paused > span {
+  border-radius: 50%;
+}
+
+.ohb-goal-status + .ohb-goal-reason {
+  margin-top: 4px;
+  padding-left: 16px;
+}
+
+.ohb-goal-objective-field textarea {
+  min-height: 76px;
+}
+
+.ohb-goal-save-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.ohb-goal-save-row small {
+  color: #6b6d73;
+  font-size: 12px;
+}
+
+.ohb-goal-optional-limits summary {
+  color: #6b6d73;
+  cursor: pointer;
+  font-size: 12.5px;
+  width: fit-content;
+}
+
+.ohb-goal-optional-limits summary:focus-visible,
+.ohb-goal-delete:focus-visible {
+  border-radius: 4px;
+  box-shadow: 0 0 0 3px rgba(95, 134, 196, 0.18);
+  outline: none;
+}
+
+.ohb-goal-optional-limits > p {
+  color: #6b6d73;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 8px 0 12px;
+}
+
+.ohb-goal-limit-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ohb-goal-panel .ohb-structured-status {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  padding: 0;
+}
+
+.ohb-goal-panel .ohb-structured-error {
+  border-left: 2px solid #c4756b;
+  padding-left: 10px;
+}
+
 .ohb-goal-actions {
+  align-items: center;
   flex-wrap: wrap;
 }
 
-.ohb-goal-actions [data-goal-action="delete"] {
-  color: #c4756b;
+.ohb-goal-delete {
+  background: none;
+  border: 0;
+  color: #a8554c;
+  font-size: 13px;
   margin-right: auto;
+  padding: 6px 0;
 }
 
-.ohb-goal-action-highlight {
-  border-color: #cdd7e8;
-  box-shadow: 0 0 0 3px rgba(95, 134, 196, 0.09);
+.ohb-goal-delete:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ohb-goal-panel button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ohb-goal-action-highlight:not(.ohb-goal-delete) {
+  box-shadow: 0 0 0 3px rgba(95, 134, 196, 0.12);
+}
+
+@media (max-width: 520px) {
+  .ohb-goal-limit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ohb-goal-save-row {
+    align-items: flex-end;
+    flex-direction: column;
+  }
 }
 
 .ohb-status-result {

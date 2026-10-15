@@ -3889,6 +3889,63 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.textContent).not.toContain("finish goal UI");
   });
 
+  it.each(["paused", "blocked"] as const)(
+    "offers optional resume limits for a %s goal and keeps backend errors visible",
+    async (goalStatus) => {
+      const fake = createFakeRuntime({
+        snapshot: {
+          ...snapshotWithStatus({ kind: "idle" }),
+          goals: [
+            {
+              sessionId: "session_1",
+              goal: {
+                objective: "finish goal UI",
+                status: goalStatus,
+                pauseReason: "budget reached",
+              },
+            },
+          ],
+        },
+      });
+      fake.executeSlashCommand.mockResolvedValue({
+        status: "failed",
+        commandRunId: "resume_failed",
+        clientInvocationId: "resume",
+        outputCount: 0,
+        eventCount: 1,
+        error: {
+          code: "budget_reached",
+          message: "Cannot resume: turns used 20/20.",
+        },
+      });
+      const app = mountApp(fake.runtime);
+      await clickButton(app.container, `goal ${goalStatus}`);
+      const resume = app.container.querySelector<HTMLButtonElement>(
+        '[data-goal-action="resume"]',
+      );
+      expect(resume?.disabled).toBe(false);
+      expect(app.container.querySelector("summary")?.textContent).toContain(
+        "Optional limits",
+      );
+      expect(
+        app.container.querySelector('input[aria-label="Turn limit"]'),
+      ).not.toBeNull();
+      expect(
+        app.container.querySelector(
+          'input[aria-label="Active duration limit"]',
+        ),
+      ).not.toBeNull();
+      await clickButton(app.container, "Resume goal");
+      await waitFor(() =>
+        Boolean(app.container.querySelector(".ohb-structured-error")),
+      );
+      expect(
+        app.container.querySelector(".ohb-structured-dialog")?.textContent,
+      ).toContain("Cannot resume: turns used 20/20.");
+      expect(app.container.querySelector(".ohb-structured-success")).toBeNull();
+    },
+  );
+
   it("opens goal commands as an overlay instead of direct execution", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -3903,10 +3960,83 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
 
     expect(
-      app.container.querySelector('button[data-goal-action="pause"]')
-        ?.className,
-    ).toContain("ohb-goal-action-highlight");
+      app.container.querySelector('button[data-goal-action="pause"]'),
+    ).toBeNull();
+    expect(
+      app.container.querySelector(".ohb-structured-dialog")?.textContent,
+    ).toContain("No goal to pause.");
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it("makes resume primary for a blocked goal, saves objective separately and locks actions while busy", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        goals: [
+          {
+            sessionId: "session_1",
+            goal: {
+              objective: "finish goal UI",
+              status: "blocked",
+              pauseReason: "same blocker three times",
+            },
+          },
+        ],
+      },
+    });
+    const pending = deferred<import("ohbaby-sdk").UiCommandCompletion>();
+    fake.executeSlashCommand.mockReturnValue(pending.promise);
+    const app = mountApp(fake.runtime);
+    await clickButton(app.container, "goal blocked");
+    const dialog = app.container.querySelector(".ohb-structured-dialog");
+    const button = (action: string): HTMLButtonElement | null | undefined =>
+      dialog?.querySelector<HTMLButtonElement>(
+        `[data-goal-action="${action}"]`,
+      );
+    expect(dialog?.querySelector(".ohb-structured-result")).toBeNull();
+    expect(dialog?.textContent).toContain("same blocker three times");
+    expect(button("pause")).toBeNull();
+    expect(button("resume")?.className).toContain("ohb-button-primary");
+    expect(button("save")?.textContent).toBe("Save objective");
+    expect(button("save")?.disabled).toBe(true);
+
+    const objective = dialog?.querySelector("textarea");
+    if (!objective) throw new Error("objective field not found");
+    await act(async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      );
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- React controlled inputs need the native textarea setter in jsdom tests.
+      const setValue = descriptor?.set;
+      if (setValue)
+        Reflect.apply(setValue, objective, ["finish goal UI polish"]);
+      objective.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(button("save")?.disabled).toBe(false);
+    await clickButton(app.container, "Save objective");
+    expect(fake.executeSlashCommand).toHaveBeenCalledWith({
+      allowOverlay: true,
+      sessionId: "session_1",
+      text: "/goal replace finish goal UI polish",
+    });
+    expect(button("resume")?.disabled).toBe(true);
+    expect(button("delete")?.disabled).toBe(true);
+    await act(async () => {
+      pending.resolve({
+        status: "completed",
+        commandRunId: "r",
+        clientInvocationId: "i",
+        outputCount: 0,
+        eventCount: 1,
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-success")),
+    );
+    expect(button("resume")?.disabled).toBe(false);
   });
 
   it.each(["completed failure", "lost response"])(
@@ -3939,7 +4069,7 @@ describe("OhbabyWebApp slash command interactions", () => {
       await waitFor(() =>
         Boolean(app.container.querySelector(".ohb-structured-overlay")),
       );
-      await clickButton(app.container, "Save goal");
+      await clickButton(app.container, "Create goal");
       await waitFor(() =>
         Boolean(app.container.querySelector(".ohb-structured-error")),
       );

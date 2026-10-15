@@ -110,6 +110,11 @@
   box-shadow: inset 0 0 0 1.5px #5f86c4;
 }
 
+.ohb-goal-blocked span {
+  background: #6b6d73;
+  border-radius: 1px;
+}
+
 .ohb-divider {
   background: #e6e6e6;
   height: 16px;

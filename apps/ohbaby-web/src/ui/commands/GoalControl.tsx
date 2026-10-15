@@ -2,7 +2,6 @@ import type { UiCommandCompletion, UiGoal } from "ohbaby-sdk";
 import type { ChangeEvent, ReactElement } from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
-  OverlayResult,
   type OverlayStatus,
   OverlayStatusLine,
   runOverlayAction,
@@ -55,9 +54,13 @@ export function GoalOverlayBody(props: {
   const [objective, setObjective] = useState(
     props.intent.objectiveDraft ?? activeGoal?.objective ?? "",
   );
+  const [turnLimit, setTurnLimit] = useState("");
+  const [durationLimit, setDurationLimit] = useState("");
   const [status, setStatus] = useState<OverlayStatus>({
     kind: "idle",
-    message: sessionId ? "" : "No active session for goal commands.",
+    message: sessionId
+      ? unavailableIntentMessage(props.intent.action, activeGoal)
+      : "No active session for goal commands.",
   });
 
   useEffect(() => {
@@ -99,8 +102,8 @@ export function GoalOverlayBody(props: {
     }
     runGoalCommand(
       activeGoal ? `/goal replace ${trimmed}` : `/goal ${trimmed}`,
-      activeGoal ? "Saving goal" : "Creating goal",
-      activeGoal ? "goal updated" : "goal created",
+      activeGoal ? "Saving objective" : "Creating goal",
+      activeGoal ? "objective saved" : "goal created",
     );
   }, [activeGoal, objective, runGoalCommand]);
 
@@ -109,101 +112,206 @@ export function GoalOverlayBody(props: {
   }, [runGoalCommand]);
 
   const resumeGoal = useCallback(() => {
-    runGoalCommand("/goal resume", "Resuming goal", "goal resumed");
-  }, [runGoalCommand]);
+    const limits = [
+      ...(turnLimit.trim() ? [`${turnLimit.trim()} turns`] : []),
+      ...(durationLimit.trim() ? [durationLimit.trim()] : []),
+    ];
+    runGoalCommand(
+      ["/goal resume", ...limits].join(" "),
+      "Resuming goal",
+      "goal resumed",
+    );
+  }, [durationLimit, runGoalCommand, turnLimit]);
 
   const deleteGoal = useCallback(() => {
     runGoalCommand("/goal cancel", "Deleting goal", "goal deleted");
   }, [runGoalCommand]);
-  const canSaveGoal = Boolean(sessionId) && objective.trim().length > 0;
+
+  const busy = status.kind === "busy";
+  const ready = Boolean(sessionId) && !busy;
+  const trimmedObjective = objective.trim();
+  const objectiveChanged = activeGoal
+    ? trimmedObjective !== activeGoal.objective.trim()
+    : true;
+  const canSaveGoal = ready && trimmedObjective.length > 0 && objectiveChanged;
+  const resumable =
+    activeGoal?.status === "paused" || activeGoal?.status === "blocked";
 
   return (
-    <div className="ohb-structured-body">
-      {activeGoal ? (
-        <OverlayResult
-          rows={[
-            ["status", activeGoal.status],
-            ["objective", activeGoal.objective],
-            ...(activeGoal.pauseReason
-              ? [["reason", activeGoal.pauseReason] as const]
-              : []),
-          ]}
-        />
-      ) : (
-        <p>No current goal for this session.</p>
-      )}
-      <label className="ohb-structured-field ohb-goal-objective-field">
-        <span>Objective</span>
-        <textarea
-          autoFocus={props.intent.action === "save"}
-          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-            setObjective(event.target.value);
-          }}
-          placeholder="Describe the goal"
-          rows={4}
-          value={objective}
-        />
-      </label>
-      <OverlayStatusLine status={status} />
+    <div className="ohb-structured-body ohb-goal-panel" aria-busy={busy}>
+      <div className="ohb-goal-state">
+        {activeGoal ? (
+          <>
+            <p className={`ohb-goal-status ohb-goal-${activeGoal.status}`}>
+              <span aria-hidden="true" />
+              {GOAL_STATUS_LABEL[activeGoal.status]}
+            </p>
+            {activeGoal.pauseReason ? (
+              <p className="ohb-goal-reason">{activeGoal.pauseReason}</p>
+            ) : null}
+          </>
+        ) : (
+          <p className="ohb-goal-reason">No goal in this session.</p>
+        )}
+      </div>
+      <div className="ohb-goal-section">
+        <label className="ohb-structured-field ohb-goal-objective-field">
+          <span>Objective</span>
+          <textarea
+            autoFocus={props.intent.action === "save"}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+              setObjective(event.target.value);
+            }}
+            placeholder="Describe the goal"
+            rows={3}
+            value={objective}
+          />
+        </label>
+        {activeGoal ? (
+          <div className="ohb-goal-save-row">
+            <small>Replaces the objective; status is unchanged.</small>
+            <button
+              className={goalActionButtonClass(
+                props.intent,
+                "save",
+                "ohb-button",
+              )}
+              data-goal-action="save"
+              disabled={!canSaveGoal}
+              onClick={saveGoal}
+              title="Save objective"
+              type="button"
+            >
+              Save objective
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {resumable ? (
+        <details className="ohb-goal-section ohb-goal-optional-limits">
+          <summary>Optional limits</summary>
+          <p>Totals for this goal. Leave blank to keep the current limit.</p>
+          <div className="ohb-goal-limit-grid">
+            <label className="ohb-structured-field">
+              <span>Turn limit</span>
+              <input
+                aria-label="Turn limit"
+                inputMode="numeric"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  setTurnLimit(event.target.value);
+                }}
+                placeholder="e.g. 100"
+                type="text"
+                value={turnLimit}
+              />
+            </label>
+            <label className="ohb-structured-field">
+              <span>Active duration limit</span>
+              <input
+                aria-label="Active duration limit"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  setDurationLimit(event.target.value);
+                }}
+                placeholder="e.g. 3h"
+                type="text"
+                value={durationLimit}
+              />
+            </label>
+          </div>
+        </details>
+      ) : null}
+      <div aria-live="polite" className="ohb-goal-feedback">
+        <OverlayStatusLine status={status} />
+      </div>
       <div className="ohb-structured-actions ohb-goal-actions">
-        <button
-          autoFocus={props.intent.action === "delete"}
-          className={goalActionButtonClass(
-            props.intent,
-            "delete",
-            "ohb-button",
-          )}
-          data-goal-action="delete"
-          disabled={!sessionId || !activeGoal}
-          onClick={deleteGoal}
-          title="Delete goal"
-          type="button"
-        >
-          Delete goal
-        </button>
-        <button
-          autoFocus={props.intent.action === "pause"}
-          className={goalActionButtonClass(props.intent, "pause", "ohb-button")}
-          data-goal-action="pause"
-          disabled={!sessionId || activeGoal?.status !== "active"}
-          onClick={pauseGoal}
-          title="Pause goal"
-          type="button"
-        >
-          Pause
-        </button>
-        <button
-          autoFocus={props.intent.action === "resume"}
-          className={goalActionButtonClass(
-            props.intent,
-            "resume",
-            "ohb-button",
-          )}
-          data-goal-action="resume"
-          disabled={!sessionId || activeGoal?.status !== "paused"}
-          onClick={resumeGoal}
-          title="Resume goal"
-          type="button"
-        >
-          Resume
-        </button>
-        <button
-          className={goalActionButtonClass(
-            props.intent,
-            "save",
-            "ohb-button-primary",
-          )}
-          data-goal-action="save"
-          disabled={!canSaveGoal}
-          onClick={saveGoal}
-          title="Save goal"
-          type="button"
-        >
-          Save
-        </button>
+        {activeGoal ? (
+          <button
+            autoFocus={props.intent.action === "delete"}
+            className={goalActionButtonClass(
+              props.intent,
+              "delete",
+              "ohb-goal-delete",
+            )}
+            data-goal-action="delete"
+            disabled={!ready}
+            onClick={deleteGoal}
+            title="Delete goal"
+            type="button"
+          >
+            Delete goal
+          </button>
+        ) : null}
+        {activeGoal?.status === "active" ? (
+          <button
+            autoFocus={props.intent.action === "pause"}
+            className={goalActionButtonClass(
+              props.intent,
+              "pause",
+              "ohb-button",
+            )}
+            data-goal-action="pause"
+            disabled={!ready}
+            onClick={pauseGoal}
+            title="Pause goal"
+            type="button"
+          >
+            Pause
+          </button>
+        ) : null}
+        {resumable ? (
+          <button
+            autoFocus={props.intent.action === "resume"}
+            className={goalActionButtonClass(
+              props.intent,
+              "resume",
+              "ohb-button-primary",
+            )}
+            data-goal-action="resume"
+            disabled={!ready}
+            onClick={resumeGoal}
+            title="Resume goal"
+            type="button"
+          >
+            Resume
+          </button>
+        ) : null}
+        {activeGoal ? null : (
+          <button
+            className="ohb-button-primary"
+            data-goal-action="save"
+            disabled={!canSaveGoal}
+            onClick={saveGoal}
+            title="Create goal"
+            type="button"
+          >
+            Create goal
+          </button>
+        )}
       </div>
     </div>
   );
+}
+
+const GOAL_STATUS_LABEL: Record<UiGoal["status"], string> = {
+  active: "Active",
+  blocked: "Blocked",
+  paused: "Paused",
+};
+
+function unavailableIntentMessage(
+  action: GoalPanelAction,
+  goal: UiGoal | null,
+): string {
+  if (action === "pause" && goal?.status !== "active")
+    return goal ? `Only an active goal can be paused.` : "No goal to pause.";
+  if (
+    action === "resume" &&
+    goal?.status !== "paused" &&
+    goal?.status !== "blocked"
+  )
+    return goal ? "Goal is already active." : "No goal to resume.";
+  if (action === "delete" && !goal) return "No goal to delete.";
+  return "";
 }
 
 export function goalPanelIntentFromArgs(rawArgs: string): GoalPanelIntent {
