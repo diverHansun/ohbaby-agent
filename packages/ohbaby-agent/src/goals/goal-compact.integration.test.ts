@@ -295,10 +295,10 @@ describe("goals x compact (integration)", () => {
     });
     await service.whenIdle(sessionId);
 
-    // turn 预算到顶 → driver 自动 pause。
+    // turn 预算到顶 → driver 自动 block。
     expect(prompts).toHaveLength(2);
     const paused = await service.getSnapshot(sessionId);
-    expect(paused?.status).toBe("paused");
+    expect(paused?.status).toBe("blocked");
 
     const compactResult = await contextManager.compact(sessionId, {
       directory: dir,
@@ -319,7 +319,7 @@ describe("goals x compact (integration)", () => {
     const snapshot = await rebuilt.getSnapshot(sessionId);
     expect(snapshot).toMatchObject({
       objective: OBJECTIVE,
-      status: "paused",
+      status: "blocked",
       tokensUsed: 100,
       turnsUsed: 2,
     });

@@ -139,6 +139,131 @@ afterEach(() => {
 });
 
 describe("goal execution through the HTTP daemon", () => {
+  it("counts blocked reports by admitted run, preserves the final reply, and atomically resumes with fresh audit", async () => {
+    let requests = 0;
+    const signals: AbortSignal[] = [];
+    const llmClient: LLMClientInstance = {
+      config: {
+        provider: "fixture",
+        model: "fixture",
+        interfaceProvider: "openai-compatible",
+        baseUrl: "https://fixture.invalid",
+        maxTokens: 128,
+        contextWindowTokens: 128000,
+      },
+      provider: {
+        id: "fixture",
+        kind: "openai-compatible",
+        client: {},
+        isAbortError: () => false,
+        streamResponse(request) {
+          return Promise.resolve(
+            (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              await Promise.resolve();
+              if (request.purpose === "session-title") {
+                yield { textDelta: "Blocked fixture", finishReason: "stop" };
+                return;
+              }
+              const step = requests++;
+              if (request.signal) signals.push(request.signal);
+              if (step % 2 === 0) {
+                // Three reports in one admitted run must still count as only 1/3.
+                yield {
+                  toolCallDeltas: Array.from(
+                    { length: step === 0 ? 3 : 1 },
+                    (_, index) => ({
+                      index,
+                      id: `blocked_${String(step)}_${String(index)}`,
+                      name: "UpdateGoal",
+                      argumentsDelta: JSON.stringify(
+                        step >= 8
+                          ? { status: "complete" }
+                          : {
+                              status: "blocked",
+                              reason: "Need the user's database choice",
+                            },
+                      ),
+                    }),
+                  ),
+                  finishReason: "tool_calls",
+                  tokenUsage: usage(100, 80),
+                };
+              } else
+                yield {
+                  textDelta: `TAIL_${String(step)}`,
+                  finishReason: "stop",
+                  tokenUsage: usage(50, 20),
+                };
+            })(),
+          );
+        },
+      },
+    };
+    await withDaemon(llmClient, async ({ client, events, persistence }) => {
+      const session = await client.createSession();
+      await createGoal(client, session.id, "Resolve the database choice");
+      await vi.waitFor(async () => {
+        expect(
+          (await persistence.list(session.id)).filter(
+            (row) => row.tokensUsed !== undefined,
+          ),
+        ).toHaveLength(3);
+      });
+      const stopped = await persistence.list(session.id);
+      expect(
+        stopped
+          .filter((row) => row.turnsUsed !== undefined)
+          .map((row) => row.turnsUsed),
+      ).toEqual([1, 2, 3]);
+      expect(stopped.filter((row) => row.status === "blocked")).toHaveLength(1);
+      expect(requests).toBe(6);
+      expect(signals.every((signal) => !signal.aborted)).toBe(true);
+      expect(
+        (await client.getSessionView({ sessionId: session.id })).goal,
+      ).toMatchObject({
+        status: "ready",
+        value: {
+          status: "blocked",
+          pauseReason: "Need the user's database choice",
+        },
+      });
+      expect(
+        JSON.stringify(
+          (await client.getSessionView({ sessionId: session.id })).session
+            .messages,
+        ),
+      ).toContain("TAIL_5");
+      const resume = await client.executeCommand({
+        commandId: "goal",
+        path: ["goal"],
+        clientInvocationId: randomUUID(),
+        raw: "/goal resume 5 turns 1h",
+        rawArgs: "resume 5 turns 1h",
+        argv: ["resume", "5", "turns", "1h"],
+        sessionId: session.id,
+        surface: "web",
+      });
+      expect(resume.status).toBe("completed");
+      await vi.waitFor(async () => {
+        expect((await persistence.list(session.id)).at(-1)?.type).toBe("clear");
+      });
+      const records = await persistence.list(session.id);
+      expect(records.filter((row) => row.status === "blocked")).toHaveLength(1);
+      expect(records.filter((row) => row.status === "active")).toContainEqual(
+        expect.objectContaining({
+          budgetLimits: { turnBudget: 5, wallClockBudgetMs: 3_600_000 },
+        }),
+      );
+      expect(
+        records
+          .filter((row) => row.turnsUsed !== undefined)
+          .map((row) => row.turnsUsed),
+      ).toEqual([1, 2, 3, 4, 5]);
+      expect(completionNotices(events)).toHaveLength(1);
+      expect((await client.getSnapshot()).goals ?? []).toEqual([]);
+    });
+  }, 20_000);
+
   it("queues the user without interruption, hides complete once, settles tail usage in SQLite, then runs the user", async () => {
     const started = deferred();
     const complete = deferred();

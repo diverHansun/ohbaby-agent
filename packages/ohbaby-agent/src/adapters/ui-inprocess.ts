@@ -1549,7 +1549,7 @@ export function createInProcessUiBackendClient(
   }
 
   function goalSnapshotToUiGoal(snapshot: GoalSnapshot): UiGoal | null {
-    if (snapshot.status !== "active" && snapshot.status !== "paused") {
+    if (snapshot.status === "complete") {
       return null;
     }
     return {
@@ -3748,8 +3748,8 @@ export function createInProcessUiBackendClient(
       return (await goalService()).replaceGoal(sessionId, objective);
     },
     resolveSessionId: resolveGoalSessionId,
-    async resume(sessionId) {
-      return (await goalService()).resumeGoal(sessionId);
+    async resume(sessionId, limits) {
+      return (await goalService()).resumeGoal(sessionId, limits);
     },
     status(sessionId): Promise<GoalSnapshot | null> {
       const snapshot = sharedGoalService.peekSnapshot(sessionId) ?? null;
@@ -3893,6 +3893,7 @@ export function createInProcessUiBackendClient(
   function closeAdmission(): void {
     if (disposed) return;
     disposed = true;
+    sharedGoalService.dispose();
     acceptsPromptCacheUsage = false;
     closingRuntime = runtimeController.getRuntimeIfStarted();
     runtimeController.close();

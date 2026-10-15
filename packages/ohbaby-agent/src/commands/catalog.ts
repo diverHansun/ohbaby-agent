@@ -76,7 +76,7 @@ const BUILTIN_COMMANDS: readonly UiCommandSpec[] = [
     aliases: [],
     acceptsArguments: true,
     argsHint:
-      "[<objective> | status | pause | resume | cancel | replace <objective>]",
+      "[<objective> | status | pause | resume [<turns> turns] [<time>h] | cancel | replace <objective>]",
     argumentMode: "argv",
     category: "session",
     description: "Create and control a long-running goal",

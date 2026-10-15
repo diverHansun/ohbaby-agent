@@ -8031,7 +8031,7 @@ describe("createInProcessUiBackendClient", () => {
       storedStatus: "blocked" as const,
     },
   ])(
-    "injects a paused goal light note for $label records without resuming the goal",
+    "preserves $label records without resuming the goal (only paused keeps its pre-improve-5 light note)",
     async ({ label, reason, storedStatus }) => {
       const requests: InterfaceProviderRequest[] = [];
       const goalPersistence = new InMemoryGoalPersistence(() => 1);
@@ -8072,9 +8072,13 @@ describe("createInProcessUiBackendClient", () => {
 
       expect(requests).toHaveLength(1);
       const promptText = lastRequestMessageText(requests[0]);
-      expect(promptText).toContain("currently paused");
-      expect(promptText).toContain(`${label} goal objective`);
-      expect(promptText).toContain("/goal resume");
+      if (storedStatus === "paused") {
+        expect(promptText).toContain("currently paused");
+        expect(promptText).toContain(`${label} goal objective`);
+        expect(promptText).toContain("/goal resume");
+      } else {
+        expect(promptText).not.toContain(`${label} goal objective`);
+      }
       expect(promptText).toContain(`Discuss the ${label} goal`);
 
       const snapshot = await client.getSnapshot();
@@ -8096,7 +8100,7 @@ describe("createInProcessUiBackendClient", () => {
           goal: {
             objective: `${label} goal objective`,
             pauseReason: reason,
-            status: "paused",
+            status: storedStatus,
           },
           sessionId: "session_1",
         },

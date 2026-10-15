@@ -310,7 +310,7 @@ describe("goal and subagent lifecycle integration", () => {
     }
   });
 
-  it("interrupts background work when the runtime safety cap pauses the goal", async () => {
+  it("blocks at the safety cap without sweeping unrelated work when no goal run was admitted", async () => {
     const { goalService, host, store, turn } = createFixture({
       safetyCapTurns: 0,
     });
@@ -341,16 +341,16 @@ describe("goal and subagent lifecycle integration", () => {
       goalService.ensureDriving(parent.id);
       await goalService.whenIdle(parent.id);
 
-      expect((await goalService.getSnapshot(parent.id))?.status).toBe("paused");
+      expect((await goalService.getSnapshot(parent.id))?.status).toBe(
+        "blocked",
+      );
       expect(turn).toHaveBeenCalledTimes(1);
       const record = await store.get({
         parentSessionId: parent.id,
         subagentId: started.execution.subagentId,
       });
-      expect(record).toMatchObject({
-        pendingQueue: [],
-        status: "interrupted",
-      });
+      expect(record?.status).toBe("running");
+      expect(record?.pendingQueue).toHaveLength(1);
       expect(record?.closedAt).toBeUndefined();
     } finally {
       await host.dispose();

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { UiCommandInvocation, UiCommandOutput } from "ohbaby-sdk";
-import { computeBudgetReport } from "../goals/index.js";
+import { computeBudgetReport, planResume } from "../goals/budget.js";
 import type { GoalSnapshot } from "../goals/index.js";
 import { createGoalCommandHandler } from "./goal.js";
 import type { CommandGoalBackend, CommandRunContext } from "./types.js";
@@ -159,5 +159,100 @@ describe("/goal command handler", () => {
     const { context, failures } = makeContext();
     await handler.execute(invoke([]), context);
     expect(failures).toHaveLength(1);
+  });
+});
+
+describe("/goal resume limits", () => {
+  it.each([
+    [[], {}],
+    [["100", "turns"], { turnBudget: 100 }],
+    [["3h"], { wallClockBudgetMs: 10_800_000 }],
+    [
+      ["100", "turns", "3h"],
+      { turnBudget: 100, wallClockBudgetMs: 10_800_000 },
+    ],
+    [
+      ["3h", "100", "turns"],
+      { turnBudget: 100, wallClockBudgetMs: 10_800_000 },
+    ],
+  ])(
+    "applies %j as total limits and emits the resulting status",
+    async (args, expected) => {
+      let state = snapshot({ status: "paused", turnsUsed: 2 });
+      const backend = makeBackend({
+        resume: (_sessionId, limits) => {
+          const merged = planResume(state, limits);
+          state = {
+            ...state,
+            budgetLimits: merged,
+            status: "active",
+            budget: computeBudgetReport(state, merged),
+          };
+          return Promise.resolve(state);
+        },
+      });
+      const { context, outputs, failures } = makeContext();
+      await createGoalCommandHandler({ goals: backend }).execute(
+        invoke(["resume", ...(args as string[])]),
+        context,
+      );
+      expect(failures).toEqual([]);
+      expect(state.status).toBe("active");
+      expect(state.turnsUsed).toBe(2);
+      expect(state.budgetLimits).toEqual(expected);
+      expect(JSON.stringify(outputs)).toContain("active");
+    },
+  );
+
+  it.each([
+    "100 turns extra",
+    "20 turns 30 turns",
+    "3h 4h",
+    "tokens",
+    "1.5 turns",
+    "25h",
+  ])("rejects %j before changing the goal", async (args) => {
+    let state = snapshot({ status: "paused" });
+    const backend = makeBackend({
+      resume: () => {
+        state = { ...state, status: "active" };
+        return Promise.resolve(state);
+      },
+    });
+    const { context, outputs, failures } = makeContext();
+    await createGoalCommandHandler({ goals: backend }).execute(
+      invoke(["resume", ...args.split(" ")]),
+      context,
+    );
+    expect(state.status).toBe("paused");
+    expect(outputs).toEqual([]);
+    expect(failures).toEqual([
+      expect.objectContaining({ code: "invalid_budget" }),
+    ]);
+  });
+
+  it("preserves actionable budget errors from the backend", async () => {
+    const state = snapshot({
+      status: "paused",
+      turnsUsed: 20,
+      wallClockMs: 3_600_000,
+      budgetLimits: { turnBudget: 20, wallClockBudgetMs: 3_600_000 },
+    });
+    const backend = makeBackend({
+      resume: (_id, limits) => {
+        planResume(state, limits);
+        return Promise.resolve(state);
+      },
+    });
+    const { context, failures } = makeContext();
+    await createGoalCommandHandler({ goals: backend }).execute(
+      invoke(["resume", "40", "turns"]),
+      context,
+    );
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ code: "budget_reached" });
+    expect(JSON.stringify(failures[0])).toContain(
+      "active time used 3600000/3600000",
+    );
   });
 });

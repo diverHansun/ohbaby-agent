@@ -164,7 +164,7 @@ describe("GoalService", () => {
     await service.whenIdle("s1");
   });
 
-  it("resumeGoal after automatic pause restarts driving", async () => {
+  it("resumeGoal rejects an exhausted safety cap", async () => {
     const outcomes: string[] = [];
     const service = new GoalService({
       executionControl: noOpExecutionControl,
@@ -188,13 +188,13 @@ describe("GoalService", () => {
     });
     await service.createGoal("s1", { actor: "user", objective: "a" });
     await service.whenIdle("s1");
-    expect((await service.getSnapshot("s1"))?.status).toBe("paused");
-    await service.resumeGoal("s1");
+    expect((await service.getSnapshot("s1"))?.status).toBe("blocked");
+    await expect(service.resumeGoal("s1")).rejects.toThrow("Safety cap");
     await service.whenIdle("s1");
     expect(outcomes.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("routes safety-cap pause through execution control", async () => {
+  it("blocks at safety cap without a session-wide interrupt after the goal turn settled", async () => {
     const interruptions: GoalExecutionInterruptInput[] = [];
     const service = new GoalService({
       executionControl: {
@@ -224,9 +224,8 @@ describe("GoalService", () => {
     await service.createGoal("s1", { actor: "user", objective: "a" });
     await service.whenIdle("s1");
 
-    expect(interruptions).toEqual([
-      expect.objectContaining({ includePrimary: true, sessionId: "s1" }),
-    ]);
+    expect(interruptions).toEqual([]);
+    expect(service.peekSnapshot("s1")?.status).toBe("blocked");
   });
 
   it("updateGoalFromModel: active-on-paused does NOT resume (single resume path)", async () => {
@@ -242,9 +241,10 @@ describe("GoalService", () => {
     await service.createGoal("s1", { actor: "user", objective: "a" });
     await service.whenIdle("s1");
     expect((await service.getSnapshot("s1"))?.status).toBe("paused");
-    const result = await service.updateGoalFromModel("s1", "active");
-    expect(result.snapshot?.status).toBe("paused");
-    expect(result.note).toContain("/goal resume");
+    await expect(service.updateGoalFromModel("s1", "active")).rejects.toThrow(
+      "complete or blocked",
+    );
+    expect(service.peekSnapshot("s1")?.status).toBe("paused");
   });
 
   it("updateGoalFromModel complete clears the goal", async () => {
@@ -317,4 +317,23 @@ describe("GoalService", () => {
     });
     expect(snapshot.status).toBe("active");
   });
+});
+
+it("rejects attempts to clear an active time budget through undefined", async () => {
+  const persistence = new InMemoryGoalPersistence();
+  const service = new GoalService({
+    persistence,
+    executionControl: noOpExecutionControl,
+  });
+  await service.createGoal("s", {
+    actor: "user",
+    objective: "work",
+    budgetLimits: { wallClockBudgetMs: 10000 },
+  });
+  const before = await persistence.list("s");
+  await expect(
+    service.setBudget("s", { wallClockBudgetMs: undefined }),
+  ).rejects.toThrow();
+  expect(await persistence.list("s")).toEqual(before);
+  service.dispose();
 });

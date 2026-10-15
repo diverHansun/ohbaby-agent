@@ -83,6 +83,7 @@ describe("driveGoal", () => {
     }, store);
     await driveGoal({
       pause: (reason, actor) => store.pause(reason, actor),
+      block: (reason, actor) => store.block(reason, actor),
       runner,
       safetyCapTurns: 200,
       sessionId: "s1",
@@ -101,6 +102,7 @@ describe("driveGoal", () => {
     const { runner } = scriptedRunner(() => ({ status: "cancelled" }), store);
     await driveGoal({
       pause: (reason, actor) => store.pause(reason, actor),
+      block: (reason, actor) => store.block(reason, actor),
       runner,
       safetyCapTurns: 200,
       sessionId: "s1",
@@ -118,6 +120,7 @@ describe("driveGoal", () => {
     );
     await driveGoal({
       pause: (reason, actor) => store.pause(reason, actor),
+      block: (reason, actor) => store.block(reason, actor),
       runner,
       safetyCapTurns: 200,
       sessionId: "s1",
@@ -138,6 +141,7 @@ describe("driveGoal", () => {
 
     await driveGoal({
       pause: (reason, actor) => store.pause(reason, actor),
+      block: (reason, actor) => store.block(reason, actor),
       runner,
       safetyCapTurns: 200,
       sessionId: "s1",
@@ -148,7 +152,7 @@ describe("driveGoal", () => {
     expect(store.getSnapshot()?.pauseReason).toBe("needs review");
   });
 
-  it("pauses when a set turn budget is exhausted", async () => {
+  it("blocks when a set turn budget is exhausted", async () => {
     const store = await makeActiveStore();
     await store.setBudgetLimits({ turnBudget: 2 }, "user");
     const { prompts, runner } = scriptedRunner(
@@ -157,17 +161,18 @@ describe("driveGoal", () => {
     );
     await driveGoal({
       pause: (reason, actor) => store.pause(reason, actor),
+      block: (reason, actor) => store.block(reason, actor),
       runner,
       safetyCapTurns: 200,
       sessionId: "s1",
       store,
     });
     expect(prompts).toHaveLength(2);
-    expect(store.getSnapshot()?.status).toBe("paused");
+    expect(store.getSnapshot()?.status).toBe("blocked");
     expect(store.getSnapshot()?.pauseReason).toContain("budget");
   });
 
-  it("pauses at safety cap when no turn budget set", async () => {
+  it("blocks at safety cap when no turn budget set", async () => {
     const store = await makeActiveStore();
     const { prompts, runner } = scriptedRunner(
       () => ({ status: "succeeded" }),
@@ -175,17 +180,18 @@ describe("driveGoal", () => {
     );
     await driveGoal({
       pause: (reason, actor) => store.pause(reason, actor),
+      block: (reason, actor) => store.block(reason, actor),
       runner,
       safetyCapTurns: 3,
       sessionId: "s1",
       store,
     });
     expect(prompts).toHaveLength(3);
-    expect(store.getSnapshot()?.status).toBe("paused");
+    expect(store.getSnapshot()?.status).toBe("blocked");
     expect(store.getSnapshot()?.pauseReason).toContain("Safety cap");
   });
 
-  it("pauses at the system safety cap even when a larger turn budget is set", async () => {
+  it("blocks at the system safety cap even when a larger turn budget is set", async () => {
     const store = await makeActiveStore();
     await store.setBudgetLimits({ turnBudget: 1000 }, "user");
     const { prompts, runner } = scriptedRunner(
@@ -194,6 +200,7 @@ describe("driveGoal", () => {
     );
     await driveGoal({
       pause: (reason, actor) => store.pause(reason, actor),
+      block: (reason, actor) => store.block(reason, actor),
       runner,
       safetyCapTurns: 3,
       sessionId: "s1",
@@ -214,6 +221,7 @@ describe("driveGoal", () => {
 
     await driveGoal({
       pause: (reason, actor) => store.pause(reason, actor),
+      block: (reason, actor) => store.block(reason, actor),
       runner,
       safetyCapTurns: 1000,
       sessionId: "s1",
@@ -223,7 +231,7 @@ describe("driveGoal", () => {
     expect(prompts).toHaveLength(1);
     expect(store.getSnapshot()).toMatchObject({
       pauseReason: "A configured budget was reached",
-      status: "paused",
+      status: "blocked",
       wallClockMs: 1_000,
     });
   });
@@ -240,12 +248,13 @@ describe("driveGoal", () => {
     );
     await driveGoal({
       pause: (reason, actor) => store.pause(reason, actor),
+      block: (reason, actor) => store.block(reason, actor),
       runner,
       safetyCapTurns: 200,
       sessionId: "s1",
       store,
     });
-    expect(store.getSnapshot()?.status).toBe("paused");
+    expect(store.getSnapshot()?.status).toBe("blocked");
     expect(store.getSnapshot()?.tokensUsed).toBeGreaterThanOrEqual(1000);
   });
 });
@@ -259,6 +268,7 @@ it("exits a still-current lifecycle when adapter admission closes", async () => 
     safetyCapTurns: 1000,
     isCurrent: () => store.getSnapshot()?.status === "active",
     pause: (reason, actor) => store.pause(reason, actor),
+    block: (reason, actor) => store.block(reason, actor),
     runner: {
       runTurn: () =>
         Promise.resolve({

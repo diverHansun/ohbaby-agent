@@ -238,7 +238,7 @@ describe("GoalStore rebuild + normalizeAfterReplay", () => {
     expect(snapshot?.pauseReason).toBe("Paused after agent resume");
   });
 
-  it("normalizes legacy blocked records to paused with pauseReason", async () => {
+  it("preserves legacy blocked records with pauseReason", async () => {
     const persistence = new InMemoryGoalPersistence();
     await persistence.append("s1", {
       goalId: "g1",
@@ -256,7 +256,7 @@ describe("GoalStore rebuild + normalizeAfterReplay", () => {
 
     expect(rebuilt.getSnapshot()).toMatchObject({
       pauseReason: "legacy block",
-      status: "paused",
+      status: "blocked",
     });
   });
 

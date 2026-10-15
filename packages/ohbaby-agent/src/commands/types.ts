@@ -19,7 +19,7 @@ import type {
   UiSnapshot,
 } from "ohbaby-sdk";
 import type { BusInstance } from "../bus/index.js";
-import type { GoalSnapshot } from "../goals/index.js";
+import type { GoalBudgetLimits, GoalSnapshot } from "../goals/index.js";
 import type {
   InteractionBroker,
   InteractionRequestContext,
@@ -174,7 +174,10 @@ export interface CommandGoalBackend {
   ) => Promise<GoalSnapshot>;
   readonly status: (sessionId: string) => Promise<GoalSnapshot | null>;
   readonly pause: (sessionId: string) => Promise<GoalSnapshot>;
-  readonly resume: (sessionId: string) => Promise<GoalSnapshot>;
+  readonly resume: (
+    sessionId: string,
+    limits?: GoalBudgetLimits,
+  ) => Promise<GoalSnapshot>;
   readonly cancel: (sessionId: string) => Promise<void>;
   readonly replace: (
     sessionId: string,

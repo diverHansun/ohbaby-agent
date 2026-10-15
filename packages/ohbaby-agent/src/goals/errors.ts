@@ -2,7 +2,10 @@ export type GoalErrorCode =
   | "no_goal"
   | "goal_exists"
   | "invalid_objective"
-  | "invalid_transition";
+  | "invalid_transition"
+  | "invalid_budget"
+  | "budget_reached"
+  | "safety_cap_reached";
 
 export class GoalError extends Error {
   constructor(

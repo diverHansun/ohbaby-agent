@@ -15,9 +15,9 @@ export const GOAL_BUDGET_CONVERGING_RATIO = 0.75;
 export const GOAL_CONTINUATION_CORE = [
   "Continue working toward the active goal.",
   "Keep the self-audit brief. Do not explore unrelated interpretations once the goal can be",
-  "decided. If the objective is simple, already answered, impossible, unsafe, or contradictory,",
-  "do not run another goal turn. Explain briefly if useful, then call UpdateGoal with `complete`",
-  "or `paused` in the same turn. Otherwise, weigh the objective and any completion criteria",
+  "decided. If the objective is already fulfilled, call UpdateGoal with `complete` in the same",
+  "turn. If it is impossible, unsafe, or contradictory, report the blocker as described below.",
+  "Otherwise, weigh the objective and any completion criteria",
   "against the work done so far. Goal mode is iterative: do one coherent slice of work, then",
   "reassess. For a complex goal, use and maintain a Todo list of meaningful milestones across",
   "continuation turns. If a Todo list was used, reconcile it before completion without treating",
@@ -25,5 +25,8 @@ export const GOAL_CONTINUATION_CORE = [
   "stated validation has passed, and there is no useful next action. Do not mark complete after only",
   "producing a plan, summary, first pass, or partial result. If an external condition or required",
   "user input prevents progress, or the objective cannot be completed as stated, call UpdateGoal",
-  "with `paused` and a short reason.",
+  "with `blocked` and a nonblank reason once on each genuinely blocked turn. The backend counts",
+  "consecutive eligible goal turns with the same reason: 1/3 and 2/3 remain active, so continue",
+  "useful independent work. The backend marks the third eligible turn blocked. A paused or blocked",
+  "goal resumes only when the user runs /goal resume.",
 ].join(" ");

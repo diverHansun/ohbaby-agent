@@ -10,6 +10,7 @@ export interface DriveGoalDeps {
   readonly goalId?: string;
   readonly executionEpoch?: number;
   readonly isCurrent?: () => boolean;
+  readonly block: (reason: string, actor: GoalActor) => Promise<unknown>;
   readonly pause: (reason: string, actor: GoalActor) => Promise<unknown>;
 }
 
@@ -30,7 +31,7 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
       snapshot.budget.overBudget ||
       isSafetyCapReached(snapshot, safetyCapTurns)
     ) {
-      await pause(
+      await deps.block(
         snapshot.budget.overBudget
           ? "A configured budget was reached"
           : "Safety cap reached: too many continuation turns without completion",
@@ -58,7 +59,11 @@ export async function driveGoal(deps: DriveGoalDeps): Promise<void> {
       )
         return;
       if (outcome.status === "cancelled") {
-        await pause("interrupted", "user");
+        const stopReason = ticket?.stopIntent?.reason;
+        await pause(
+          stopReason ?? "interrupted",
+          stopReason === undefined ? "user" : "runtime",
+        );
         return;
       }
       if (outcome.status === "failed") {

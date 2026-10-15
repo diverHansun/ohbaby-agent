@@ -11,9 +11,8 @@ import type {
   CreateGoalInput,
   GoalBudgetLimits,
   GoalSnapshot,
-  GoalStatus,
 } from "./types.js";
-import { GOAL_SAFETY_CAP_TURNS } from "./constants.js";
+import { budgetLimitsFromInput, GOAL_BUDGET_UNITS } from "./budget-input.js";
 
 /** goal 工具的后端子集；GoalService 天然满足。 */
 export interface GoalToolBackend {
@@ -24,7 +23,7 @@ export interface GoalToolBackend {
   ): Promise<GoalSnapshot>;
   updateGoalFromModel(
     sessionId: string,
-    status: GoalStatus,
+    status: "complete" | "blocked",
     reason?: string,
     runId?: string,
   ): Promise<{ readonly snapshot: GoalSnapshot | null; readonly note: string }>;
@@ -35,8 +34,6 @@ export interface GoalToolBackend {
     runId?: string,
   ): Promise<GoalSnapshot>;
 }
-
-const GOAL_STATUSES = new Set<GoalStatus>(["active", "complete", "paused"]);
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -51,71 +48,6 @@ function optionalString(value: unknown, field: string): string | undefined {
     throw new Error(`Invalid ${field}: expected a string.`);
   }
   return value;
-}
-
-function requirePositiveNumber(value: unknown, field: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new Error(`Invalid ${field}: expected a positive number.`);
-  }
-  return value;
-}
-
-const MIN_TIME_BUDGET_MS = 1_000;
-const MAX_TIME_BUDGET_MS = 24 * 60 * 60 * 1_000;
-const GOAL_BUDGET_UNITS = [
-  "turns",
-  "milliseconds",
-  "seconds",
-  "minutes",
-  "hours",
-] as const;
-type GoalBudgetUnit = (typeof GOAL_BUDGET_UNITS)[number];
-
-function isGoalBudgetUnit(value: unknown): value is GoalBudgetUnit {
-  return (
-    typeof value === "string" &&
-    GOAL_BUDGET_UNITS.includes(value as GoalBudgetUnit)
-  );
-}
-
-function timeBudgetMs(value: number, unit: GoalBudgetUnit): number | undefined {
-  const factor =
-    unit === "milliseconds"
-      ? 1
-      : unit === "seconds"
-        ? 1_000
-        : unit === "minutes"
-          ? 60_000
-          : unit === "hours"
-            ? 3_600_000
-            : undefined;
-  return factor === undefined ? undefined : Math.round(value * factor);
-}
-
-function budgetLimitsFromInput(
-  value: number,
-  unit: GoalBudgetUnit,
-): GoalBudgetLimits {
-  if (unit === "turns") {
-    const turnBudget = Math.max(1, Math.round(value));
-    if (turnBudget > GOAL_SAFETY_CAP_TURNS) {
-      throw new Error(
-        `Invalid turn budget: system safety cap is ${String(GOAL_SAFETY_CAP_TURNS)} turns.`,
-      );
-    }
-    return { turnBudget };
-  }
-  const wallClockBudgetMs = timeBudgetMs(value, unit);
-  if (
-    wallClockBudgetMs === undefined ||
-    wallClockBudgetMs < MIN_TIME_BUDGET_MS ||
-    wallClockBudgetMs > MAX_TIME_BUDGET_MS
-  ) {
-    throw new Error(
-      "Invalid time budget: expected a duration from 1 second to 24 hours.",
-    );
-  }
-  return { wallClockBudgetMs };
 }
 
 function truncate(text: string, max = 120): string {
@@ -192,19 +124,23 @@ function createUpdateGoalTool(backend: GoalToolBackend): Tool {
     description:
       "Update the current goal's lifecycle status after your self-audit. Call with `complete` " +
       "only when all required work is done and validated — never after just a plan or partial " +
-      "result. Call with `paused` when the objective cannot proceed (external condition, " +
-      "required user input, or an impossible objective). Resuming a paused goal is user-only " +
-      "via /goal resume. If you used Todo for this Goal, reconcile it before completion, but do " +
+      "result. On each genuinely blocked turn, call once with `blocked` and a nonblank reason " +
+      "when an external condition, required user input, or an impossible objective prevents progress. " +
+      "The backend counts consecutive goal turns with the same reason: 1/3 and 2/3 remain active, " +
+      "so continue useful independent work; the third eligible turn becomes blocked. " +
+      "Resuming a paused or blocked goal is user-only via /goal resume. " +
+      "If you used Todo for this Goal, reconcile it before completion, but do " +
       "not treat Todo state as a runtime completion gate.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
         reason: {
-          description: "Short human-readable reason (for paused).",
+          description:
+            "Required nonblank human-readable reason for blocked; ignored for complete.",
           type: "string",
         },
         status: {
-          enum: ["active", "paused", "complete"],
+          enum: ["complete", "blocked"],
           type: "string",
         },
       },
@@ -215,16 +151,16 @@ function createUpdateGoalTool(backend: GoalToolBackend): Tool {
     category: "memory",
     async execute(params, context): Promise<ToolExecutionResult> {
       const status = params.status;
-      if (
-        typeof status !== "string" ||
-        !GOAL_STATUSES.has(status as GoalStatus)
-      ) {
+      if (status !== "complete" && status !== "blocked") {
         throw new Error(`Invalid status: ${String(status)}`);
       }
-      const reason = optionalString(params.reason, "reason");
+      const reason =
+        status === "blocked"
+          ? requireString(params.reason, "reason").trim()
+          : undefined;
       const result = await backend.updateGoalFromModel(
         context.sessionId,
-        status as GoalStatus,
+        status,
         reason,
         context.runId,
       );
@@ -269,8 +205,9 @@ function createSetGoalBudgetTool(backend: GoalToolBackend): Tool {
       "Translate one explicit hard limit from the user, system, or developer into a structured " +
       "budget for the current goal. Never estimate, infer, recommend, or invent a budget. Set " +
       "one dimension per call; call again only when another dimension was explicitly stated. " +
-      "Time measures active goal pursuit, excludes paused time, and is enforced at continuation " +
-      "boundaries rather than as an exact deadline. When reached, the goal pauses and remains resumable.",
+      "Time measures all active goal time, including waiting, and excludes paused or blocked time. " +
+      "A time limit is enforced during the current turn; reaching either limit blocks the goal. " +
+      "Setting a budget does not resume a paused or blocked goal; only the user can resume it.",
     parametersJsonSchema: {
       additionalProperties: false,
       properties: {
@@ -288,13 +225,10 @@ function createSetGoalBudgetTool(backend: GoalToolBackend): Tool {
     source: "builtin",
     category: "memory",
     async execute(params, context): Promise<ToolExecutionResult> {
-      const value = requirePositiveNumber(params.value, "value");
-      if (!isGoalBudgetUnit(params.unit)) {
-        throw new Error("Invalid unit for SetGoalBudget.");
-      }
+      const limits = budgetLimitsFromInput(params.value, params.unit);
       const snapshot = await backend.setBudget(
         context.sessionId,
-        budgetLimitsFromInput(value, params.unit),
+        limits,
         context.runId,
       );
       return {

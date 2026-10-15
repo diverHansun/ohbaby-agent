@@ -1,4 +1,13 @@
-export { computeBudgetReport, isSafetyCapReached } from "./budget.js";
+export {
+  budgetLimitsFromInput,
+  parseGoalResumeBudget,
+  validateGoalBudgetLimits,
+} from "./budget-input.js";
+export {
+  computeBudgetReport,
+  isSafetyCapReached,
+  planResume,
+} from "./budget.js";
 export {
   GOAL_SAFETY_CAP_TURNS,
   MAX_GOAL_OBJECTIVE_LENGTH,

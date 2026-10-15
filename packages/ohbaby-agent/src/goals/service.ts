@@ -1,3 +1,6 @@
+import { validateGoalBudgetLimits } from "./budget-input.js";
+import { BlockedAudit } from "./blocked-audit.js";
+import { planResume } from "./budget.js";
 import { renderGoalTurnPrompt } from "./injection.js";
 import { GoalError } from "./errors.js";
 import { GOAL_SAFETY_CAP_TURNS } from "./constants.js";
@@ -56,6 +59,12 @@ export class GoalService {
   private readonly epochs = new Map<string, number>();
   private readonly tickets = new Map<string, Set<GoalTurnTicket>>();
   private readonly requested = new Set<string>();
+  private readonly audits = new Map<string, BlockedAudit>();
+  private readonly deadlines = new Map<
+    string,
+    { token: symbol; timer: ReturnType<typeof setTimeout> }
+  >();
+  private disposed = false;
   private runner: GoalTurnRunner | undefined;
   private readonly safetyCapTurns: number;
 
@@ -148,7 +157,7 @@ export class GoalService {
     if (store === undefined || before === undefined || before === null)
       return null;
     if (before.budget.overBudget || before.turnsUsed >= this.safetyCapTurns) {
-      await store.pause(
+      await store.block(
         before.budget.overBudget
           ? "A configured budget was reached"
           : "Safety cap reached: too many continuation turns without completion",
@@ -214,7 +223,7 @@ export class GoalService {
   }
 
   ensureDriving(sessionId: string): void {
-    if (this.runner === undefined) return;
+    if (this.disposed || this.runner === undefined) return;
     if (this.driving.has(sessionId)) return;
     const runner = this.runner;
     const epoch = this.currentExecutionEpoch(sessionId);
@@ -224,6 +233,8 @@ export class GoalService {
     const loop = (async (): Promise<void> => {
       const store = await this.storeFor(sessionId);
       await driveGoal({
+        block: (reason, actor) =>
+          this.blockExecution(sessionId, goalId, epoch, reason, actor),
         pause: (reason, actor) =>
           this.pauseExecution(sessionId, goalId, epoch, reason, actor),
         runner,
@@ -285,20 +296,32 @@ export class GoalService {
         this.requireMutation(sessionId, runId, observedGoalId);
       const result = await store.create(input);
       this.invalidate(sessionId);
+      this.audits.delete(sessionId);
       return result;
     });
+    this.armDeadline(sessionId);
     this.ensureDriving(sessionId);
     return snapshot;
   }
 
-  async resumeGoal(sessionId: string): Promise<GoalSnapshot> {
+  async resumeGoal(
+    sessionId: string,
+    limits: GoalBudgetLimits = {},
+  ): Promise<GoalSnapshot> {
     const store = await this.storeFor(sessionId);
     const snapshot = await this.mutate(sessionId, async () => {
-      const wasActive = store.getSnapshot()?.status === "active";
-      const result = await store.resume("user");
-      if (!wasActive) this.invalidate(sessionId);
+      const current = store.getSnapshot();
+      if (current === null)
+        throw new GoalError("no_goal", "No goal is currently set.");
+      const merged = planResume(current, limits, this.safetyCapTurns);
+      const result = await store.resumeWithBudget(merged, "user");
+      if (current.status !== "active") {
+        this.invalidate(sessionId);
+        this.audits.delete(sessionId);
+      }
       return result;
     });
+    this.armDeadline(sessionId);
     if (this.driving.has(sessionId)) this.requested.add(sessionId);
     this.ensureDriving(sessionId);
     return snapshot;
@@ -338,10 +361,16 @@ export class GoalService {
       const before = store.getSnapshot();
       const snapshot = await store.replaceObjective(objective, "user");
       const changed = before?.objective !== snapshot.objective;
-      if (changed) this.invalidate(sessionId);
+      if (changed) {
+        this.invalidate(sessionId);
+        this.audits.delete(sessionId);
+      }
       return { snapshot, changed };
     });
-    if (changed) this.ensureDriving(sessionId);
+    if (changed) {
+      this.armDeadline(sessionId);
+      this.ensureDriving(sessionId);
+    }
     return snapshot;
   }
 
@@ -355,10 +384,12 @@ export class GoalService {
     const observedGoalId = (
       observed === undefined ? store.getSnapshot() : observed
     )?.goalId;
-    return this.mutate(sessionId, async () => {
+    const snapshot = await this.mutate(sessionId, async () => {
       this.requireMutation(sessionId, runId, observedGoalId);
-      return store.setBudgetLimits(limits, "model");
+      return store.setBudgetLimits(validateGoalBudgetLimits(limits), "model");
     });
+    this.armDeadline(sessionId);
+    return snapshot;
   }
 
   async getSnapshot(sessionId: string): Promise<GoalSnapshot | null> {
@@ -375,6 +406,16 @@ export class GoalService {
     readonly snapshot: GoalSnapshot | null;
     readonly note: string;
   }> {
+    if (status !== "complete" && status !== "blocked")
+      throw new GoalError(
+        "invalid_transition",
+        "Models may only report complete or blocked.",
+      );
+    if (status === "blocked" && !reason?.trim())
+      throw new GoalError(
+        "invalid_transition",
+        "A blocked report requires a non-empty reason.",
+      );
     const observed = this.peekSnapshot(sessionId);
     const store = await this.storeFor(sessionId);
     const observedGoalId = (
@@ -386,8 +427,6 @@ export class GoalService {
       const current = store.getSnapshot();
       if (current?.status !== "active")
         return { note: inactiveGoalNote(current), snapshot: current };
-      if (status === "active")
-        return { note: "Goal is already active.", snapshot: current };
       const ticket = this.currentTicket(sessionId, current.goalId);
       if (status === "complete") {
         await store.markComplete("model");
@@ -401,15 +440,48 @@ export class GoalService {
         );
         return { note: "Goal completed.", snapshot: null };
       }
-      const snapshot = await store.pause(reason ?? "Paused by model", "model");
-      this.invalidate(sessionId);
-      interrupt = this.interruptInput(
-        sessionId,
-        reason ?? "Paused by model",
-        true,
-        ticket,
+      const reportingTicket =
+        runId === undefined
+          ? undefined
+          : this.getTicketForRun(sessionId, runId);
+      if (
+        runId === undefined ||
+        reportingTicket === undefined ||
+        !this.isExecutionCurrent(
+          sessionId,
+          reportingTicket.goalId,
+          reportingTicket.executionEpoch,
+        )
+      )
+        return {
+          note: "Blocker not counted: only an admitted current goal run can report a blocker.",
+          snapshot: current,
+        };
+      const audit = this.audits.get(sessionId) ?? new BlockedAudit();
+      this.audits.set(sessionId, audit);
+      const blocker = (reason ?? "").trim();
+      const count = await audit.report(
+        runId,
+        reportingTicket.turnNumber,
+        blocker,
+        async () => {
+          await store.block(blocker, "model");
+          this.invalidate(sessionId);
+          interrupt = this.interruptInput(
+            sessionId,
+            blocker,
+            false,
+            reportingTicket,
+          );
+        },
       );
-      return { note: `Goal paused: ${snapshot.pauseReason ?? ""}`, snapshot };
+      return {
+        note:
+          count >= 3
+            ? `Goal blocked: ${blocker}. Use /goal resume to continue.`
+            : `Blocker recorded (${String(count)}/3 consecutive goal turns). The goal is still active.`,
+        snapshot: store.getSnapshot(),
+      };
     });
     if (interrupt !== undefined)
       await this.deps.executionControl.interruptGoalExecution(interrupt);
@@ -454,11 +526,123 @@ export class GoalService {
     return snapshot;
   }
 
+  private async blockExecution(
+    sessionId: string,
+    goalId: string,
+    epoch: number,
+    reason: string,
+    actor: GoalActor = "runtime",
+  ): Promise<void> {
+    const store = await this.storeFor(sessionId);
+    await this.mutate(sessionId, async () => {
+      if (!this.isExecutionCurrent(sessionId, goalId, epoch)) return;
+      await store.block(reason, actor);
+      this.invalidate(sessionId);
+    });
+  }
+
+  /** Stop local timers before the adapter releases sessions or closes admission. */
+  dispose(): void {
+    this.disposed = true;
+    for (const sessionId of this.deadlines.keys())
+      this.clearDeadline(sessionId);
+    this.audits.clear();
+    this.requested.clear();
+  }
+
+  private clearDeadline(sessionId: string): void {
+    const entry = this.deadlines.get(sessionId);
+    if (entry !== undefined) clearTimeout(entry.timer);
+    this.deadlines.delete(sessionId);
+  }
+
+  private armDeadline(sessionId: string): void {
+    this.clearDeadline(sessionId);
+    const snapshot = this.peekSnapshot(sessionId);
+    const remaining = snapshot?.budget.remainingWallClockMs;
+    if (
+      this.disposed ||
+      snapshot?.status !== "active" ||
+      remaining === undefined ||
+      remaining === null
+    )
+      return;
+    const token = Symbol("goal-deadline");
+    const timer = setTimeout(
+      () => {
+        void this.onDeadline(sessionId, snapshot.goalId, token).catch(
+          (error: unknown) => this.deps.onError?.({ sessionId, error }),
+        );
+      },
+      Math.max(0, remaining),
+    );
+    timer.unref();
+    this.deadlines.set(sessionId, { token, timer });
+  }
+
+  private async onDeadline(
+    sessionId: string,
+    goalId: string,
+    token: symbol,
+  ): Promise<void> {
+    const action = await this.mutate(sessionId, async () => {
+      if (this.disposed || this.deadlines.get(sessionId)?.token !== token)
+        return;
+      this.clearDeadline(sessionId);
+      const store = this.initializedStores.get(sessionId);
+      const snapshot = store?.getSnapshot();
+      if (
+        store === undefined ||
+        snapshot?.goalId !== goalId ||
+        snapshot.status !== "active"
+      )
+        return;
+      if (!snapshot.budget.wallClockBudgetReached) {
+        return "rearm" as const;
+      }
+      // Cancellation follows the actual admitted root, even if objective edits made its tools stale.
+      const ticket = this.currentTicket(sessionId, goalId);
+      const reason = "Active time budget reached";
+      try {
+        await store.block(reason, "runtime");
+      } catch (error) {
+        // Failed persistence must not let the captured execution run past its limit.
+        // Keep the epoch unchanged: the existing cancelled outcome owns pausing,
+        // and a changed epoch here could restart an active driver after failure.
+        const interrupt =
+          ticket === undefined
+            ? undefined
+            : this.interruptInput(sessionId, reason, true, ticket);
+        ticket?.controller.abort();
+        return { error, interrupt };
+      }
+      this.invalidate(sessionId);
+      return ticket === undefined
+        ? undefined
+        : this.interruptInput(sessionId, reason, true, ticket);
+    });
+    if (action === "rearm") this.armDeadline(sessionId);
+    else if (action !== undefined && "error" in action) {
+      if (action.interrupt !== undefined) {
+        try {
+          await this.deps.executionControl.interruptGoalExecution(
+            action.interrupt,
+          );
+        } catch (error) {
+          this.deps.onError?.({ sessionId, error });
+        }
+      }
+      throw action.error;
+    } else if (action !== undefined)
+      await this.deps.executionControl.interruptGoalExecution(action);
+  }
+
   private mutate<T>(sessionId: string, op: () => Promise<T>): Promise<T> {
     return this.deps.withSessionMutation?.(sessionId, op) ?? op();
   }
 
   private invalidate(sessionId: string): void {
+    this.clearDeadline(sessionId);
     this.epochs.set(sessionId, this.currentExecutionEpoch(sessionId) + 1);
     for (const ticket of this.tickets.get(sessionId) ?? [])
       ticket.controller.abort();

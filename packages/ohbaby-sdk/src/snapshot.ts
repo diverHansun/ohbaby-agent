@@ -72,7 +72,7 @@ export interface UiSessionTodoList {
   readonly visible: boolean;
 }
 
-export type UiGoalStatus = "active" | "paused";
+export type UiGoalStatus = "active" | "paused" | "blocked";
 
 export interface UiGoal {
   readonly status: UiGoalStatus;

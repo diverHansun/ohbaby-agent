@@ -98,7 +98,7 @@ export class GoalStore {
         state.budgetLimits = normalizeBudgetLimits(record.budgetLimits);
       }
       if (record.status !== undefined) {
-        const status = normalizeStoredStatus(record.status);
+        const status = record.status;
         state.status = status;
         state.pauseReason =
           status === "active"
@@ -185,6 +185,35 @@ export class GoalStore {
     });
   }
 
+  async resumeWithBudget(
+    limits: GoalBudgetLimits,
+    actor: GoalActor,
+  ): Promise<GoalSnapshot> {
+    const state = this.requireEditableState();
+    if (
+      state.status === "active" &&
+      state.budgetLimits.turnBudget === limits.turnBudget &&
+      state.budgetLimits.wallClockBudgetMs === limits.wallClockBudgetMs
+    )
+      return this.toSnapshot(state);
+    return this.applyUpdate({ status: "active", budgetLimits: limits }, actor, {
+      actor,
+      kind: "lifecycle",
+      status: "active",
+    });
+  }
+
+  async block(pauseReason: string, actor: GoalActor): Promise<GoalSnapshot> {
+    const state = this.requireState();
+    if (state.status !== "active") return this.toSnapshot(state);
+    return this.applyUpdate({ pauseReason, status: "blocked" }, actor, {
+      actor,
+      kind: "lifecycle",
+      pauseReason,
+      status: "blocked",
+    });
+  }
+
   async pause(pauseReason: string, actor: GoalActor): Promise<GoalSnapshot> {
     const state = this.requireState();
     if (state.status !== "active") return this.toSnapshot(state);
@@ -196,7 +225,7 @@ export class GoalStore {
     });
   }
 
-  /** 宣告成功后立即清除记录——complete 从不作为驻留状态落盘。 */
+  /** Persist completion before the admitted turn settles and clears its tail. */
   async markComplete(actor: GoalActor): Promise<GoalSnapshot> {
     const state = this.requireState();
     if (state.status !== "active") return this.toSnapshot(state);
@@ -365,11 +394,16 @@ export class GoalStore {
 
   /** 状态迁移的统一落点：折算 wall-clock → append → 改内存 → 通知。 */
   private async applyUpdate(
-    update: { readonly status: GoalStatus; readonly pauseReason?: string },
+    update: {
+      readonly status: GoalStatus;
+      readonly pauseReason?: string;
+      readonly budgetLimits?: GoalBudgetLimits;
+    },
     actor: GoalActor,
     change: GoalChange,
   ): Promise<GoalSnapshot> {
     const state = this.requireState();
+    const activeUpdateAt = state.status === "active" ? this.now() : undefined;
     const wallClockMs = this.liveWallClockMs(state);
     await this.appendRecord({
       actor,
@@ -380,14 +414,19 @@ export class GoalStore {
         ? { pauseReason: update.pauseReason }
         : {}),
       status: update.status,
+      ...(update.budgetLimits === undefined
+        ? {}
+        : { budgetLimits: update.budgetLimits }),
     });
+    if (update.budgetLimits !== undefined)
+      state.budgetLimits = { ...update.budgetLimits };
     state.wallClockMs = wallClockMs;
     state.wallClockResumedAt = undefined;
     state.status = update.status;
     state.pauseReason =
       update.status === "active" ? undefined : update.pauseReason;
     if (update.status === "active") {
-      state.wallClockResumedAt = this.now();
+      state.wallClockResumedAt = activeUpdateAt ?? this.now();
     }
     const snapshot = this.toSnapshot(state);
     this.onChange?.(snapshot, change);
@@ -460,8 +499,4 @@ function normalizeBudgetLimits(
       ? {}
       : { wallClockBudgetMs: limits.wallClockBudgetMs }),
   };
-}
-
-function normalizeStoredStatus(status: GoalStatus | "blocked"): GoalStatus {
-  return status === "blocked" ? "paused" : status;
 }

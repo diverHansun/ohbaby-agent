@@ -1,5 +1,15 @@
-import { GOAL_BUDGET_CONVERGING_RATIO } from "./constants.js";
-import type { GoalBudgetLimits, GoalBudgetReport, GoalUsage } from "./types.js";
+import {
+  GOAL_BUDGET_CONVERGING_RATIO,
+  GOAL_SAFETY_CAP_TURNS,
+} from "./constants.js";
+import type {
+  GoalBudgetLimits,
+  GoalBudgetReport,
+  GoalSnapshot,
+  GoalUsage,
+} from "./types.js";
+import { validateGoalBudgetLimits } from "./budget-input.js";
+import { GoalError } from "./errors.js";
 
 interface DimensionReport {
   readonly limit: number | null;
@@ -53,4 +63,45 @@ export function isSafetyCapReached(
   safetyCapTurns: number,
 ): boolean {
   return usage.turnsUsed >= safetyCapTurns;
+}
+
+export function planResume(
+  snapshot: GoalSnapshot,
+  overrides: GoalBudgetLimits = {},
+  safetyCapTurns = GOAL_SAFETY_CAP_TURNS,
+): GoalBudgetLimits {
+  const limits = validateGoalBudgetLimits({
+    ...snapshot.budgetLimits,
+    ...validateGoalBudgetLimits(overrides),
+  });
+  if (isSafetyCapReached(snapshot, safetyCapTurns)) {
+    throw new GoalError(
+      "safety_cap_reached",
+      `Safety cap reached: ${String(snapshot.turnsUsed)}/${String(safetyCapTurns)} continuation turns. Run /goal cancel, then create a new goal.`,
+    );
+  }
+  const reached: string[] = [];
+  if (
+    limits.turnBudget !== undefined &&
+    snapshot.turnsUsed >= limits.turnBudget
+  ) {
+    reached.push(
+      `turns used ${String(snapshot.turnsUsed)}/${String(limits.turnBudget)}`,
+    );
+  }
+  if (
+    limits.wallClockBudgetMs !== undefined &&
+    snapshot.wallClockMs >= limits.wallClockBudgetMs
+  ) {
+    reached.push(
+      `active time used ${String(snapshot.wallClockMs)}/${String(limits.wallClockBudgetMs)} ms`,
+    );
+  }
+  if (reached.length > 0) {
+    throw new GoalError(
+      "budget_reached",
+      `Cannot resume: ${reached.join("; ")}. Provide total limits greater than usage for all reached dimensions; provide both dimensions together when needed, for example /goal resume 100 turns 3h. Usage is not reset. If a maximum total is exhausted, run /goal cancel, then create a new goal.`,
+    );
+  }
+  return limits;
 }

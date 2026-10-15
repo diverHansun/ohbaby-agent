@@ -1,5 +1,9 @@
 import type { UiCommandInvocation } from "ohbaby-sdk";
-import { formatGoalStatusLines, GoalError } from "../goals/index.js";
+import {
+  formatGoalStatusLines,
+  GoalError,
+  parseGoalResumeBudget,
+} from "../goals/index.js";
 import type { GoalSnapshot } from "../goals/index.js";
 import type {
   CommandGoalBackend,
@@ -48,7 +52,8 @@ async function runGoalCommand(
     return;
   }
   if (head === "resume") {
-    emitText(statusText(await goals.resume(sessionId)));
+    const limits = parseGoalResumeBudget(argv.slice(1).join(" "));
+    emitText(statusText(await goals.resume(sessionId, limits)));
     return;
   }
   if (head === "cancel") {
