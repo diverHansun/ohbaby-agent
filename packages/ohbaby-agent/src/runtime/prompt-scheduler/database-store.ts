@@ -36,6 +36,7 @@ import type {
 } from "./types.js";
 
 export interface PromptSubmissionRow {
+  readonly resend_of_prompt_id: string | null;
   readonly steer_receipt: string | null;
   readonly prompt_id: string;
   readonly client_request_id: string;
@@ -117,6 +118,7 @@ export function promptSubmissionRowToRecord(
 ): PromptSubmissionRecord {
   return {
     promptId: row.prompt_id,
+    resendOfPromptId: row.resend_of_prompt_id ?? undefined,
     steerReceipt: row.steer_receipt
       ? (JSON.parse(
           row.steer_receipt,
@@ -204,6 +206,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         if (
           existing.sessionId !== input.sessionId ||
           existing.text !== input.text ||
+          existing.resendOfPromptId !== input.resendOfPromptId ||
           !sameReasoning(existing.reasoning, input.reasoning)
         ) {
           throw new PromptIdempotencyConflictError(input.clientRequestId);
@@ -241,9 +244,9 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
       db.prepare(
         `INSERT INTO ${this.tableName}
           (prompt_id, client_request_id, scope_key, session_id,
-           user_message_id, text, reasoning_data, naming_source, title_expected, status,
+           user_message_id, text, reasoning_data, naming_source, title_expected, resend_of_prompt_id, status,
            created_at, updated_at, owner_id, owner_pid, accepted_at, admission_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
       ).run(
         input.promptId,
         input.clientRequestId,
@@ -254,6 +257,7 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         input.reasoning ? JSON.stringify(input.reasoning) : null,
         input.namingSource ? JSON.stringify(input.namingSource) : null,
         input.titleExpected ?? null,
+        input.resendOfPromptId ?? null,
         at,
         at,
         this.ownerId,
@@ -654,6 +658,18 @@ export class DatabasePromptSubmissionStore implements PromptSubmissionStore {
         )
         .get(scopeKey, sessionId) !== undefined
     );
+  }
+
+  async listResendChildren(
+    scopeKey: string,
+    parentPromptId: string,
+  ): Promise<readonly PromptSubmissionRecord[]> {
+    return this.db
+      .prepare<PromptSubmissionRow>(
+        `SELECT * FROM ${this.tableName} WHERE scope_key = ? AND resend_of_prompt_id = ? ORDER BY created_at, prompt_id`,
+      )
+      .all(scopeKey, parentPromptId)
+      .map(promptSubmissionRowToRecord);
   }
 
   async listForSession(

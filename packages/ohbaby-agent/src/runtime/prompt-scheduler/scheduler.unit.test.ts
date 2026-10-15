@@ -83,9 +83,15 @@ describe("WorkspacePromptScheduler", () => {
       },
     });
     try {
-      const first = await scheduler.accept({ sessionId: "s", text: "first" });
+      const { record: first } = await scheduler.accept({
+        sessionId: "s",
+        text: "first",
+      });
       now = 20;
-      const queued = await scheduler.accept({ sessionId: "s", text: "second" });
+      const { record: queued } = await scheduler.accept({
+        sessionId: "s",
+        text: "second",
+      });
       now = 100;
       firstGate.resolve();
       await scheduler.waitForCompletion(first.promptId);
@@ -127,11 +133,13 @@ describe("WorkspacePromptScheduler", () => {
     });
     try {
       await expect(
-        scheduler.accept({
-          sessionId: "s",
-          text: "hello",
-          clientRequestId: "known-rejected",
-        }),
+        scheduler
+          .accept({
+            sessionId: "s",
+            text: "hello",
+            clientRequestId: "known-rejected",
+          })
+          .then(({ record }) => record),
       ).rejects.toMatchObject({
         code: "PROMPT_SUBMISSION_REJECTED",
         message: "seed failed",
@@ -182,11 +190,17 @@ describe("WorkspacePromptScheduler", () => {
     });
     try {
       await expect(
-        scheduler.accept({ sessionId: "s", text: "first" }),
+        scheduler
+          .accept({ sessionId: "s", text: "first" })
+          .then(({ record }) => record),
       ).rejects.toThrow("transient seed");
       healthy = true;
-      const a = scheduler.accept({ sessionId: "s", text: "second" });
-      const b = scheduler.accept({ sessionId: "s", text: "third" });
+      const a = scheduler
+        .accept({ sessionId: "s", text: "second" })
+        .then(({ record }) => record);
+      const b = scheduler
+        .accept({ sessionId: "s", text: "third" })
+        .then(({ record }) => record);
       void a.catch(() => undefined);
       void b.catch(() => undefined);
       await vi.waitFor(() => {
@@ -287,7 +301,7 @@ describe("WorkspacePromptScheduler", () => {
         return { status: "succeeded" };
       },
     });
-    const prompt = await scheduler.accept({
+    const { record: prompt } = await scheduler.accept({
       clientRequestId: "cancel-starting",
       sessionId: "session",
       text: "hello",
@@ -321,13 +335,15 @@ describe("WorkspacePromptScheduler", () => {
       sessionId: "session_1",
       text: "hello",
     } as const;
-    const first = await scheduler.accept(input);
-    const duplicate = await scheduler.accept(input);
+    const { record: first } = await scheduler.accept(input);
+    const { record: duplicate } = await scheduler.accept(input);
 
     expect(duplicate.promptId).toBe(first.promptId);
     expect(onSubmitted).toHaveBeenCalledTimes(1);
     await expect(
-      scheduler.accept({ ...input, text: "different" }),
+      scheduler
+        .accept({ ...input, text: "different" })
+        .then(({ record }) => record),
     ).rejects.toBeInstanceOf(PromptIdempotencyConflictError);
     gate.resolve();
     await scheduler.waitForCompletion(first.promptId);
@@ -342,11 +358,13 @@ describe("WorkspacePromptScheduler", () => {
     });
 
     await expect(
-      scheduler.accept({
-        clientRequestId: "legacy:prompt_old",
-        sessionId: "session_1",
-        text: "legacy collision",
-      }),
+      scheduler
+        .accept({
+          clientRequestId: "legacy:prompt_old",
+          sessionId: "session_1",
+          text: "legacy collision",
+        })
+        .then(({ record }) => record),
     ).rejects.toBeInstanceOf(InvalidPromptClientRequestIdError);
     await scheduler.accept({
       clientRequestId: "request_explicit",
@@ -355,12 +373,14 @@ describe("WorkspacePromptScheduler", () => {
       text: "same text",
     });
     await expect(
-      scheduler.accept({
-        clientRequestId: "request_explicit",
-        expectedSessionId: "session_2",
-        sessionId: () => Promise.resolve("session_2"),
-        text: "same text",
-      }),
+      scheduler
+        .accept({
+          clientRequestId: "request_explicit",
+          expectedSessionId: "session_2",
+          sessionId: () => Promise.resolve("session_2"),
+          text: "same text",
+        })
+        .then(({ record }) => record),
     ).rejects.toBeInstanceOf(PromptIdempotencyConflictError);
   });
 
@@ -377,7 +397,7 @@ describe("WorkspacePromptScheduler", () => {
         return { status: "succeeded" };
       },
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "race",
     });
@@ -423,7 +443,7 @@ describe("WorkspacePromptScheduler", () => {
         return { status: "succeeded" };
       },
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "close while waiting",
     });
@@ -464,11 +484,13 @@ describe("WorkspacePromptScheduler", () => {
       store,
     });
 
-    const accepting = scheduler.accept({
-      clientRequestId: "request_close_lookup",
-      sessionId: "session_1",
-      text: "close during lookup",
-    });
+    const accepting = scheduler
+      .accept({
+        clientRequestId: "request_close_lookup",
+        sessionId: "session_1",
+        text: "close during lookup",
+      })
+      .then(({ record }) => record);
     await lookupStarted.promise;
     scheduler.close();
     releaseLookup.resolve();
@@ -500,10 +522,12 @@ describe("WorkspacePromptScheduler", () => {
       store,
     });
 
-    const accepting = scheduler.accept({
-      sessionId: "session_1",
-      text: "durably accepted before close",
-    });
+    const accepting = scheduler
+      .accept({
+        sessionId: "session_1",
+        text: "durably accepted before close",
+      })
+      .then(({ record }) => record);
     await acceptCommitted.promise;
     scheduler.close();
     releaseAccept.resolve();
@@ -542,16 +566,18 @@ describe("WorkspacePromptScheduler", () => {
       scopeKey: "/workspace",
       store,
     });
-    const first = await scheduler.accept({
+    const { record: first } = await scheduler.accept({
       sessionId: "session_1",
       text: "trigger scheduler fault",
     });
     await firstStarted.promise;
 
-    const accepting = scheduler.accept({
-      sessionId: "session_2",
-      text: "accepted before fault",
-    });
+    const accepting = scheduler
+      .accept({
+        sessionId: "session_2",
+        text: "accepted before fault",
+      })
+      .then(({ record }) => record);
     await secondCommitted.promise;
     const firstCompletion = scheduler.waitForCompletion(first.promptId);
     finishFirst.resolve();
@@ -584,7 +610,7 @@ describe("WorkspacePromptScheduler", () => {
       scopeKey: "/workspace",
       store,
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "stay queued after close",
     });
@@ -620,7 +646,7 @@ describe("WorkspacePromptScheduler", () => {
       scopeKey: "/workspace",
       store,
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "requeue claimed work",
     });
@@ -649,7 +675,7 @@ describe("WorkspacePromptScheduler", () => {
         return { status: "succeeded" };
       },
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "abort one wait",
     });
@@ -683,7 +709,7 @@ describe("WorkspacePromptScheduler", () => {
         return { status: "succeeded" };
       },
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "three-way waiter race",
     });
@@ -716,7 +742,7 @@ describe("WorkspacePromptScheduler", () => {
         return { status: "succeeded" };
       },
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "wait abort wins",
     });
@@ -748,7 +774,7 @@ describe("WorkspacePromptScheduler", () => {
         return { status: "succeeded" };
       },
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "scheduler close wins",
     });
@@ -783,7 +809,7 @@ describe("WorkspacePromptScheduler", () => {
       execute: (): Promise<{ status: "succeeded" }> =>
         Promise.resolve({ status: "succeeded" }),
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "persist terminal",
     });
@@ -794,7 +820,7 @@ describe("WorkspacePromptScheduler", () => {
 
     expect(outcome).toEqual({ error: storageError, kind: "rejected" });
     expect(finish).toHaveBeenCalledOnce();
-    const healthy = await scheduler.accept({
+    const { record: healthy } = await scheduler.accept({
       sessionId: "session_2",
       text: "after fault",
     });
@@ -818,7 +844,7 @@ describe("WorkspacePromptScheduler", () => {
       execute: (): Promise<never> =>
         Promise.reject(new Error("provider failed")),
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "persist failed terminal",
     });
@@ -829,7 +855,7 @@ describe("WorkspacePromptScheduler", () => {
 
     expect(outcome).toEqual({ error: storageError, kind: "rejected" });
     expect(finish).toHaveBeenCalledOnce();
-    const healthy = await scheduler.accept({
+    const { record: healthy } = await scheduler.accept({
       sessionId: "session_2",
       text: "after fault",
     });
@@ -864,7 +890,7 @@ describe("WorkspacePromptScheduler", () => {
           status: "interrupted" as const,
         }),
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "interrupt me",
     });
@@ -896,7 +922,7 @@ describe("WorkspacePromptScheduler", () => {
         return Promise.resolve({ status: "succeeded" });
       },
     });
-    const accepted = await scheduler.accept({
+    const { record: accepted } = await scheduler.accept({
       sessionId: "session_1",
       text: "retry",
     });
@@ -941,10 +967,12 @@ describe("WorkspacePromptScheduler", () => {
     const accepted = [];
     for (let index = 1; index <= 11; index += 1) {
       accepted.push(
-        await scheduler.accept({
-          sessionId: `session_${String(index)}`,
-          text: `prompt ${String(index)}`,
-        }),
+        (
+          await scheduler.accept({
+            sessionId: `session_${String(index)}`,
+            text: `prompt ${String(index)}`,
+          })
+        ).record,
       );
     }
 
@@ -991,12 +1019,18 @@ describe("WorkspacePromptScheduler", () => {
       },
     });
 
-    const first = await scheduler.accept({ sessionId: "session_1", text: "A" });
-    const second = await scheduler.accept({
+    const { record: first } = await scheduler.accept({
+      sessionId: "session_1",
+      text: "A",
+    });
+    const { record: second } = await scheduler.accept({
       sessionId: "session_1",
       text: "B",
     });
-    const third = await scheduler.accept({ sessionId: "session_1", text: "C" });
+    const { record: third } = await scheduler.accept({
+      sessionId: "session_1",
+      text: "C",
+    });
 
     await vi.waitFor(() => {
       expect(executed).toEqual(["A"]);
@@ -1032,11 +1066,23 @@ describe("WorkspacePromptScheduler", () => {
         return { status: "succeeded" };
       },
     });
-    const a = await scheduler.accept({ sessionId: "session_1", text: "A" });
-    const b = await scheduler.accept({ sessionId: "session_1", text: "B" });
-    const c = await scheduler.accept({ sessionId: "session_1", text: "C" });
+    const { record: a } = await scheduler.accept({
+      sessionId: "session_1",
+      text: "A",
+    });
+    const { record: b } = await scheduler.accept({
+      sessionId: "session_1",
+      text: "B",
+    });
+    const { record: c } = await scheduler.accept({
+      sessionId: "session_1",
+      text: "C",
+    });
     const lease = await scheduler.acquireEditLease(b.promptId, "client_1");
-    const d = await scheduler.accept({ sessionId: "session_2", text: "D" });
+    const { record: d } = await scheduler.accept({
+      sessionId: "session_2",
+      text: "D",
+    });
 
     await vi.waitFor(() => {
       expect(executed).toEqual(["A", "D"]);
@@ -1064,8 +1110,14 @@ describe("WorkspacePromptScheduler", () => {
         return { status: "succeeded" };
       },
     });
-    const a = await scheduler.accept({ sessionId: "session_1", text: "A" });
-    const b = await scheduler.accept({ sessionId: "session_1", text: "B" });
+    const { record: a } = await scheduler.accept({
+      sessionId: "session_1",
+      text: "A",
+    });
+    const { record: b } = await scheduler.accept({
+      sessionId: "session_1",
+      text: "B",
+    });
     await scheduler.acquireEditLease(b.promptId, "client_1", 30);
 
     firstGate.resolve();
@@ -1085,14 +1137,14 @@ it("captures a lazy session preference once and rejects explicit conflicting rep
       Promise.resolve({ status: "succeeded" }),
   });
   let effort = "medium";
-  const first = await scheduler.accept({
+  const { record: first } = await scheduler.accept({
     clientRequestId: "reasoning-req",
     sessionId: "s",
     text: "hi",
     reasoning: () => Promise.resolve({ effort }),
   });
   effort = "high";
-  const replay = await scheduler.accept({
+  const { record: replay } = await scheduler.accept({
     clientRequestId: "reasoning-req",
     sessionId: "s",
     text: "hi",
@@ -1101,12 +1153,14 @@ it("captures a lazy session preference once and rejects explicit conflicting rep
   expect(replay.promptId).toBe(first.promptId);
   expect(replay.reasoning).toEqual({ effort: "medium" });
   await expect(
-    scheduler.accept({
-      clientRequestId: "reasoning-req",
-      sessionId: "s",
-      text: "hi",
-      reasoning: { effort: "high" },
-    }),
+    scheduler
+      .accept({
+        clientRequestId: "reasoning-req",
+        sessionId: "s",
+        text: "hi",
+        reasoning: { effort: "high" },
+      })
+      .then(({ record }) => record),
   ).rejects.toThrow(/conflict|different/i);
   scheduler.close();
 });
@@ -1140,7 +1194,10 @@ describe("stopped prompt durability and recovery", () => {
       },
     });
     try {
-      const prompt = await scheduler.accept({ sessionId: "s", text: "A" });
+      const { record: prompt } = await scheduler.accept({
+        sessionId: "s",
+        text: "A",
+      });
       await scheduler.waitForCompletion(prompt.promptId);
       expect(observed).toEqual([runBudget]);
     } finally {
@@ -1201,7 +1258,10 @@ describe("stopped prompt durability and recovery", () => {
       },
     });
     try {
-      const prompt = await scheduler.accept({ sessionId: "s", text: "A" });
+      const { record: prompt } = await scheduler.accept({
+        sessionId: "s",
+        text: "A",
+      });
       await expect(
         scheduler.waitForCompletion(prompt.promptId),
       ).rejects.toThrow(originalFailure);
@@ -1268,10 +1328,19 @@ describe("stopped prompt durability and recovery", () => {
       },
     });
     try {
-      const a = await scheduler.accept({ sessionId: "s", text: "A" });
+      const { record: a } = await scheduler.accept({
+        sessionId: "s",
+        text: "A",
+      });
       await running.promise;
-      const b = await scheduler.accept({ sessionId: "s", text: "B" });
-      const c = await scheduler.accept({ sessionId: "s", text: "C" });
+      const { record: b } = await scheduler.accept({
+        sessionId: "s",
+        text: "B",
+      });
+      const { record: c } = await scheduler.accept({
+        sessionId: "s",
+        text: "C",
+      });
       const done = scheduler.waitForCompletion(a.promptId);
       mainExited.resolve();
       await expect(done).rejects.toThrow("stop terminal unavailable");
@@ -1280,11 +1349,13 @@ describe("stopped prompt durability and recovery", () => {
       await scheduler.listForSession("s");
       expect(finish).toHaveBeenCalledTimes(1);
       await expect(
-        scheduler.accept({
-          sessionId: "s",
-          text: "D",
-          clientRequestId: "not-accepted",
-        }),
+        scheduler
+          .accept({
+            sessionId: "s",
+            text: "D",
+            clientRequestId: "not-accepted",
+          })
+          .then(({ record }) => record),
       ).rejects.toThrow("stop terminal unavailable");
       expect(
         await store.getByClientRequestId("recovery", "not-accepted"),
@@ -1388,7 +1459,10 @@ describe("recovery review regressions", () => {
       },
     });
     try {
-      const prompt = await scheduler.accept({ sessionId: "s", text: "A" });
+      const { record: prompt } = await scheduler.accept({
+        sessionId: "s",
+        text: "A",
+      });
       await expect(
         scheduler.waitForCompletion(prompt.promptId),
       ).rejects.toThrow("terminal write failed");
@@ -1426,18 +1500,20 @@ it("rejects an admission still preparing when the preceding prompt becomes block
     },
   });
   try {
-    const a = await scheduler.accept({ sessionId: "s", text: "A" });
+    const { record: a } = await scheduler.accept({ sessionId: "s", text: "A" });
     await running.promise;
-    const admission = scheduler.accept({
-      sessionId: "s",
-      text: "D",
-      clientRequestId: "never-accepted",
-      reasoning: async () => {
-        preparing.resolve();
-        await reasoning.promise;
-        return undefined;
-      },
-    });
+    const admission = scheduler
+      .accept({
+        sessionId: "s",
+        text: "D",
+        clientRequestId: "never-accepted",
+        reasoning: async () => {
+          preparing.resolve();
+          await reasoning.promise;
+          return undefined;
+        },
+      })
+      .then(({ record }) => record);
     await preparing.promise;
     const completion = scheduler.waitForCompletion(a.promptId);
     main.resolve();
@@ -1482,7 +1558,7 @@ it("keeps a retained prompt unchanged when finalization fails during its entry c
     },
   });
   try {
-    const a = await scheduler.accept({ sessionId: "s", text: "A" });
+    const { record: a } = await scheduler.accept({ sessionId: "s", text: "A" });
     await running.promise;
     const retained = (
       await store.accept({
@@ -1544,7 +1620,7 @@ it("returns a committed resubmission receipt even when finalization later blocks
     },
   });
   try {
-    const a = await scheduler.accept({ sessionId: "s", text: "A" });
+    const { record: a } = await scheduler.accept({ sessionId: "s", text: "A" });
     await running.promise;
     const retained = (
       await store.accept({
@@ -1609,7 +1685,7 @@ it("preserves a claimed B when its waiting goal owner fails, without adopting A'
     },
   });
   try {
-    const b = await scheduler.accept({ sessionId: "s", text: "B" });
+    const { record: b } = await scheduler.accept({ sessionId: "s", text: "B" });
     await waiting.promise;
     scheduler.blockExecutionFinalization("s", failure, repairGoal);
     release.resolve();

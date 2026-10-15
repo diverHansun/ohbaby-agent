@@ -33,6 +33,10 @@ export type {
 } from "./command-record.js";
 export { isUiPromptNamingSource } from "./prompt.js";
 export type {
+  UiAcceptedSteerOutcome,
+  UiSteerSkipReason,
+  UiResendSteerInput,
+  UiSteerQueuedPromptResult,
   UiSteerQueuedPromptInput,
   UiSteerQueuedPromptReceipt,
   UiCancelQueuedPromptInput,
@@ -171,6 +175,7 @@ export type {
   UiRun,
   UiRunStatus,
   UiSession,
+  UiUnconsumedSteer,
   UiSessionPermissionRules,
   UiSnapshot,
   UiToolCall,
@@ -266,7 +271,7 @@ export {
 } from "./subagent-conversation-reader.js";
 export type { UiSubagentConversationReaderState } from "./subagent-conversation-reader.js";
 
-export { hasUnsentSteerAfterLatestStop } from "./run-inputs.js";
+export { getUnconsumedSteers } from "./run-inputs.js";
 export { compareUiPromptQueueOrder } from "./prompt-queue-order.js";
 
 export { isUiCommandCompletion } from "./slash-command/types.js";

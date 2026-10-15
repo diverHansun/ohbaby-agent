@@ -1,5 +1,10 @@
 import { Box, useStdout } from "ink";
-import type { UiModelRequest, UiMessage, UiNotice } from "ohbaby-sdk";
+import type {
+  UiModelRequest,
+  UiMessage,
+  UiNotice,
+  UiUnconsumedSteer,
+} from "ohbaby-sdk";
 import { useContext, type ReactElement } from "react";
 import { TranscriptDocumentContext } from "../../layout/context.js";
 import type {
@@ -20,6 +25,7 @@ import { LiveTail } from "./live-tail.js";
 import { NoticeLane } from "./notice-lane.js";
 
 export interface TranscriptViewportProps {
+  readonly unconsumedSteers?: readonly UiUnconsumedSteer[];
   readonly toolsExpanded?: boolean;
   readonly commandNotices: readonly TuiCommandNotice[];
   readonly committedItems: readonly TranscriptItem[];
@@ -31,6 +37,7 @@ export interface TranscriptViewportProps {
 }
 
 export function TranscriptViewport({
+  unconsumedSteers,
   toolsExpanded = false,
   commandNotices,
   committedItems,
@@ -51,6 +58,7 @@ export function TranscriptViewport({
     <Box flexDirection="column">
       {useStatic ? (
         <ReplayableTranscript
+          unconsumedSteers={unconsumedSteers}
           items={committedItems}
           liveMessage={liveMessage}
           toolsExpanded={toolsExpanded}
@@ -60,6 +68,7 @@ export function TranscriptViewport({
       ) : (
         <>
           <CommittedTranscript
+            unconsumedSteers={unconsumedSteers}
             items={committedItems}
             toolsExpanded={toolsExpanded}
           />

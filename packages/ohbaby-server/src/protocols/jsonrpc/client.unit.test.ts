@@ -288,6 +288,10 @@ describe("createRemoteUiBackendClient", () => {
       text: "send retained",
       operationId: "resubmit_1",
     });
+    await client.resendSteerInput({
+      inputId: "steer-input",
+      operationId: "resend_1",
+    });
     await client.cancelQueuedPrompt({
       promptId: receipt.promptId,
     });
@@ -313,6 +317,7 @@ describe("createRemoteUiBackendClient", () => {
       "acquirePromptEditLease",
       "editQueuedPrompt",
       "resubmitRetainedPrompt",
+      "resendSteerInput",
       "cancelQueuedPrompt",
       "waitForPrompt",
       "submitPromptAccepted",

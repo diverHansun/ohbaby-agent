@@ -122,6 +122,52 @@ describe("services/database", () => {
     }
   });
 
+  it("adds nullable non-unique resend parents without rewriting old prompt identity or content", async () => {
+    const dbPath = await tempDbPath();
+    initDatabase({
+      dbPath,
+      migrations: INITIAL_MIGRATIONS.filter(
+        (migration) => migration.version < "024",
+      ),
+    });
+    getDatabase()
+      .prepare(
+        "INSERT INTO session(id,project_id,project_root,title,status,created_at,updated_at,data) VALUES('s','p','/w','Existing','active',1,1,'{}')",
+      )
+      .run();
+    getDatabase()
+      .prepare(
+        "INSERT INTO prompt_submission(prompt_id,client_request_id,scope_key,session_id,user_message_id,text,status,created_at,updated_at,accepted_at,admission_order) VALUES('old','old','/w','s','old-message','Original','queued',1,1,1,1)",
+      )
+      .run();
+    closeDatabase();
+    initDatabase({ dbPath });
+    expect(
+      getDatabase()
+        .prepare(
+          "SELECT prompt_id,user_message_id,text,resend_of_prompt_id FROM prompt_submission WHERE prompt_id='old'",
+        )
+        .get(),
+    ).toEqual({
+      prompt_id: "old",
+      user_message_id: "old-message",
+      text: "Original",
+      resend_of_prompt_id: null,
+    });
+    const insert = getDatabase().prepare(
+      "INSERT INTO prompt_submission(prompt_id,client_request_id,scope_key,session_id,user_message_id,text,status,created_at,updated_at,accepted_at,admission_order,resend_of_prompt_id) VALUES(?,?,'/w','s',?,'Original','queued',2,2,2,?,'old')",
+    );
+    insert.run("first", "resend:first", "first-message", 2);
+    insert.run("second", "resend:second", "second-message", 3);
+    expect(
+      getDatabase()
+        .prepare(
+          "SELECT prompt_id FROM prompt_submission WHERE resend_of_prompt_id='old' ORDER BY admission_order",
+        )
+        .all(),
+    ).toEqual([{ prompt_id: "first" }, { prompt_id: "second" }]);
+  });
+
   it("records migrations only once across repeated initialization", async () => {
     const dbPath = await tempDbPath();
 
@@ -157,6 +203,7 @@ describe("services/database", () => {
       { version: "021_subagent_delegation_identity" },
       { version: "022_retained_prompt_admission" },
       { version: "023_prompt_naming_source" },
+      { version: "024_prompt_resend_parent" },
     ]);
   });
 

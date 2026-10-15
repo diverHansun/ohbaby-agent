@@ -452,6 +452,19 @@ class FakeBackend implements UiBackendClient {
     return this.resubmitRetainedPrompt(input);
   }
 
+  resendSteerInput(
+    _input: Parameters<UiBackendClient["resendSteerInput"]>[0],
+  ): ReturnType<UiBackendClient["resendSteerInput"]> {
+    return Promise.reject(new Error("unused"));
+  }
+  resendSteerInputForOwner(
+    input: Parameters<UiBackendClient["resendSteerInput"]>[0],
+    _owner: string,
+    _sessionId?: string,
+  ): ReturnType<UiBackendClient["resendSteerInput"]> {
+    return this.resendSteerInput(input);
+  }
+
   steerQueuedPrompt(
     _input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
@@ -3529,12 +3542,15 @@ describe("createDaemonServerApp", () => {
     const steer = vi
       .spyOn(backend, "steerQueuedPromptForOwner")
       .mockResolvedValue({
-        promptId: "prompt_1",
-        userMessageId: "message_1",
-        inputId: "steer:prompt_1",
-        acceptedTargetRunId: "run-a",
-        acceptedAt: 1,
-        clientRequestId: "steer-1",
+        status: "steered",
+        receipt: {
+          promptId: "prompt_1",
+          userMessageId: "message_1",
+          inputId: "steer:prompt_1",
+          acceptedTargetRunId: "run-a",
+          acceptedAt: 1,
+          clientRequestId: "steer-1",
+        },
       });
     const handle = createApp(backend, {
       createSessionId: () => "session_generated",
@@ -3575,7 +3591,10 @@ describe("createDaemonServerApp", () => {
         "client_web",
       );
       expect(await response.json()).toMatchObject({
-        receipt: { acceptedTargetRunId: "run-a", userMessageId: "message_1" },
+        result: {
+          status: "steered",
+          receipt: { acceptedTargetRunId: "run-a", userMessageId: "message_1" },
+        },
       });
       const rpcSteer = await handle.app.request("/api/rpc", {
         body: JSON.stringify({
@@ -3595,7 +3614,10 @@ describe("createDaemonServerApp", () => {
       });
       expect(await rpcSteer.json()).toMatchObject({
         ok: true,
-        result: { acceptedTargetRunId: "run-a" },
+        result: {
+          status: "steered",
+          receipt: { acceptedTargetRunId: "run-a" },
+        },
       });
       expect(steer).toHaveBeenLastCalledWith(
         {
@@ -3624,6 +3646,93 @@ describe("createDaemonServerApp", () => {
         headers,
         method: "POST",
       });
+      expect(invalid.status).toBe(400);
+    } finally {
+      await handle.dispose();
+    }
+  });
+
+  it("binds resend ownership to the selected session even after the recovery item is hidden", async () => {
+    const backend = new DurablePromptFakeBackend();
+    const resend = vi
+      .spyOn(backend, "resendSteerInputForOwner")
+      .mockResolvedValue({
+        promptId: "resend-new",
+        userMessageId: "new-message",
+        clientRequestId: "resend:operation-1",
+        sessionId: "session_generated",
+        status: "queued",
+        createdAt: "2026-01-01T00:00:00Z",
+      });
+    const handle = createApp(backend, {
+      createSessionId: () => "session_generated",
+    });
+    await handle.start();
+    const headers = {
+      ...authHeaders(),
+      "content-type": "application/json",
+      "x-ohbaby-client-id": "client_web",
+    };
+    try {
+      await handle.app.request("/v1/clients", {
+        body: JSON.stringify({ clientId: "client_web" }),
+        headers,
+        method: "POST",
+      });
+      await handle.app.request("/v1/prompts", {
+        body: JSON.stringify({ clientRequestId: "request_1", text: "queued" }),
+        headers,
+        method: "POST",
+      });
+      const response = await handle.app.request(
+        "/v1/steer-inputs/old-input/resend",
+        {
+          body: JSON.stringify({
+            operationId: "operation-1",
+            sessionId: "spoofed",
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        receipt: { promptId: "resend-new" },
+      });
+      expect(resend).toHaveBeenLastCalledWith(
+        { inputId: "old-input", operationId: "operation-1" },
+        "client_web",
+        "session_generated",
+      );
+      const rpc = await handle.app.request("/api/rpc", {
+        body: JSON.stringify({
+          id: "resend-rpc",
+          clientId: "client_web",
+          method: "resendSteerInput",
+          params: [
+            {
+              inputId: "old-input",
+              operationId: "operation-1",
+              sessionId: "spoofed",
+            },
+          ],
+        }),
+        headers,
+        method: "POST",
+      });
+      expect(await rpc.json()).toMatchObject({
+        ok: true,
+        result: { promptId: "resend-new" },
+      });
+      expect(resend).toHaveBeenLastCalledWith(
+        { inputId: "old-input", operationId: "operation-1" },
+        "client_web",
+        "session_generated",
+      );
+      const invalid = await handle.app.request(
+        "/v1/steer-inputs/old-input/resend",
+        { body: "{}", headers, method: "POST" },
+      );
       expect(invalid.status).toBe(400);
     } finally {
       await handle.dispose();

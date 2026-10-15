@@ -35,6 +35,7 @@ export function promptRecordToUi(
 ): UiPromptSubmission {
   return {
     promptId: record.promptId,
+    resendOfPromptId: record.resendOfPromptId,
     steerReceipt: record.steerReceipt,
     clientRequestId: record.clientRequestId,
     scopeKey: record.scopeKey,

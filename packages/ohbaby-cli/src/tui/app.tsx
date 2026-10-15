@@ -1,7 +1,4 @@
-import {
-  compareUiPromptQueueOrder,
-  hasUnsentSteerAfterLatestStop,
-} from "ohbaby-sdk";
+import { compareUiPromptQueueOrder, getUnconsumedSteers } from "ohbaby-sdk";
 import { createSubagentReader } from "ohbaby-sdk";
 import {
   SubagentBrowser,
@@ -1175,7 +1172,7 @@ export function OhbabyTerminalApp({
             model={footerModel}
             reasoning={activeSession?.reasoning}
             queuedPrompts={queuedPrompts}
-            unsentSteer={hasUnsentSteerAfterLatestStop(runs, activeSessionId)}
+            unconsumedSteers={getUnconsumedSteers(activeSession)}
             contextWindowUsage={contextWindowUsageLabel}
             runtimeStatusLabel={
               escInterruptArmedRunId !== null
@@ -1239,6 +1236,9 @@ function TranscriptViewportContainer({
     store,
     (state) => state.commandNotices,
   );
+  const activeSession = useTuiStoreSelector(store, (state) =>
+    state.sessions.find((session) => session.id === state.activeSessionId),
+  );
   const committedItems = useTuiStoreSelector(store, selectCommittedItems);
   const liveMessage = useTuiStoreSelector(store, selectLiveMessage);
   const liveReasoning = useTuiStoreSelector(store, selectLiveReasoning);
@@ -1261,6 +1261,7 @@ function TranscriptViewportContainer({
       <TranscriptViewport
         key={activeSessionId ?? "none"}
         commandNotices={commandNotices}
+        unconsumedSteers={getUnconsumedSteers(activeSession)}
         committedItems={committedItems}
         toolsExpanded={toolsExpanded}
         liveMessage={liveMessage}

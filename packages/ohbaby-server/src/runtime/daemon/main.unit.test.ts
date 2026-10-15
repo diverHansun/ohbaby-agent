@@ -170,6 +170,7 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
       Promise.reject(new Error("No queued prompt in fake backend")),
     ),
     steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
+    resendSteerInput: vi.fn(() => Promise.reject(new Error("unused"))),
     cancelQueuedPrompt: vi.fn(() =>
       Promise.reject(new Error("No queued prompt in fake backend")),
     ),

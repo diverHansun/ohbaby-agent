@@ -132,3 +132,29 @@ function message(
     role,
   };
 }
+
+it("marks recovery by message identity without rewriting transcript text", () => {
+  const original = message("old-steer", "Original requirement");
+  const app = render(
+    <TranscriptViewport
+      commandNotices={[]}
+      committedItems={[item(original)]}
+      liveMessage={null}
+      notices={[]}
+      runtime={{ kind: "idle" }}
+      unconsumedSteers={[
+        {
+          inputId: "input",
+          promptId: "prompt",
+          messageId: "old-steer",
+          text: "Original requirement",
+          state: "unconfirmed",
+        },
+      ]}
+    />,
+  );
+  expect(app.lastFrame()).toContain("Processing unconfirmed");
+  expect(original.parts).toEqual([
+    { type: "text", text: "Original requirement" },
+  ]);
+});

@@ -2,7 +2,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 32px 0 144px;
+  padding: 32px 0 calc(144px + var(--steer-recovery-space, 0px));
 }
 
 .ohb-stream::-webkit-scrollbar {

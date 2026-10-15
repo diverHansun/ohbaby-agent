@@ -59,7 +59,7 @@
   }
 
   .ohb-stream {
-    padding-bottom: 176px;
+    padding-bottom: calc(176px + var(--steer-recovery-space, 0px));
   }
 
   .ohb-message-user-bubble {
@@ -67,7 +67,7 @@
   }
 
   .ohb-app-content-has-todos .ohb-stream {
-    padding-bottom: 370px;
+    padding-bottom: calc(370px + var(--steer-recovery-space, 0px));
   }
 
   .ohb-composer {

@@ -204,5 +204,5 @@
 }
 
 .ohb-app-content-has-todos .ohb-stream {
-  padding-bottom: 350px;
+  padding-bottom: calc(350px + var(--steer-recovery-space, 0px));
 }

@@ -172,6 +172,7 @@ describe("daemon protocol", () => {
       "resubmitRetainedPrompt",
       "cancelQueuedPrompt",
       "steerQueuedPrompt",
+      "resendSteerInput",
       "acquirePromptEditLease",
       "renewPromptEditLease",
       "releasePromptEditLease",

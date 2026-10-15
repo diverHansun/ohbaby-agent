@@ -362,6 +362,24 @@ function withStartupRecovery(
       await ready();
       return client.submitPromptAndWait(text, submitOptions);
     },
+    async resendSteerInput(
+      input,
+    ): ReturnType<UiBackendClient["resendSteerInput"]> {
+      await ready();
+      return client.resendSteerInput(input);
+    },
+    async resendSteerInputForOwner(
+      input,
+      trustedOwnerClientId,
+      expectedSessionId,
+    ): ReturnType<UiPromptQueueExecutionPort["resendSteerInputForOwner"]> {
+      await ready();
+      return client.resendSteerInputForOwner(
+        input,
+        trustedOwnerClientId,
+        expectedSessionId,
+      );
+    },
     async resubmitRetainedPrompt(input) {
       await ready();
       return client.resubmitRetainedPrompt(input);
@@ -679,7 +697,7 @@ export function createPersistentUiBackendClient(
     ownerId: backendOwnerId,
     ownerPid: process.pid,
   });
-  const recoverExecutionSession = createSessionExecutionRecovery({
+  const recoverSessionExecution = createSessionExecutionRecovery({
     runs: runLedger,
     prompts: promptSubmissionStore,
     inputs: currentRunInputStore,
@@ -690,6 +708,18 @@ export function createPersistentUiBackendClient(
     ownerId: backendOwnerId,
     now,
   });
+  // These are startup/retry outcomes, not input-delivery state. Reads never retry recovery.
+  const recoveryFailures = new Map<string, unknown>();
+  async function recoverExecutionSession(sessionId: string): Promise<boolean> {
+    try {
+      const changed = await recoverSessionExecution(sessionId);
+      recoveryFailures.delete(sessionId);
+      return changed;
+    } catch (error) {
+      recoveryFailures.set(sessionId, error);
+      throw error;
+    }
+  }
   const startupReady = Promise.resolve().then(async () => {
     const sessions = await sessionManager.listByProjectRoot(await projectRoot, {
       status: "active",
@@ -730,6 +760,10 @@ export function createPersistentUiBackendClient(
       projectDirectory: options.projectDirectory,
       promptScopeKey,
       recoverExecutionSession,
+      assertExecutionRecoveryReady(sessionId): void {
+        if (recoveryFailures.has(sessionId))
+          throw recoveryFailures.get(sessionId);
+      },
       promptQueueOwnerClientId: backendOwnerId,
       currentRunInputStore,
       promptSubmissionStore,

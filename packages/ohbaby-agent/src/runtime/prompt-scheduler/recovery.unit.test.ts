@@ -97,17 +97,19 @@ describe("prompt recovery boundaries", () => {
       execute: (): Promise<PromptExecutionResult> =>
         Promise.resolve({ status: "succeeded" }),
     });
-    const first = scheduler.accept({
-      sessionId: "a",
-      text: "first",
-      clientRequestId: "first",
-    });
+    const first = scheduler
+      .accept({
+        sessionId: "a",
+        text: "first",
+        clientRequestId: "first",
+      })
+      .then(({ record }) => record);
     try {
       await entered.promise;
       expect(
         await store.getByClientRequestId("workspace", "first"),
       ).toBeUndefined();
-      const second = await scheduler.accept({
+      const { record: second } = await scheduler.accept({
         sessionId: "b",
         text: "second",
         clientRequestId: "second",
@@ -171,19 +173,21 @@ describe("prompt recovery boundaries", () => {
       execute: (): Promise<PromptExecutionResult> =>
         Promise.resolve({ status: "succeeded" }),
     });
-    const first = scheduler.accept({
-      expectedSessionId: "a",
-      clientRequestId: "a",
-      text: "a",
-      async sessionId(): Promise<string> {
-        entered.resolve();
-        await blocked.promise;
-        return "a";
-      },
-    });
+    const first = scheduler
+      .accept({
+        expectedSessionId: "a",
+        clientRequestId: "a",
+        text: "a",
+        async sessionId(): Promise<string> {
+          entered.resolve();
+          await blocked.promise;
+          return "a";
+        },
+      })
+      .then(({ record }) => record);
     try {
       await entered.promise;
-      const second = await scheduler.accept({
+      const { record: second } = await scheduler.accept({
         expectedSessionId: "b",
         sessionId: "b",
         clientRequestId: "b",
@@ -244,7 +248,7 @@ describe("prompt recovery boundaries", () => {
       },
     });
     try {
-      const accepted = await scheduler.accept({
+      const { record: accepted } = await scheduler.accept({
         sessionId: "a",
         text: "hello",
         clientRequestId: "request",
@@ -296,11 +300,13 @@ describe("prompt recovery boundaries", () => {
       );
       expect((await store.get("broken"))?.status).toBe("queued");
       await expect(
-        scheduler.accept({
-          sessionId: "a",
-          text: "another",
-          clientRequestId: "another",
-        }),
+        scheduler
+          .accept({
+            sessionId: "a",
+            text: "another",
+            clientRequestId: "another",
+          })
+          .then(({ record }) => record),
       ).rejects.toThrow("seed unavailable");
       expect(
         await store.getByClientRequestId("workspace", "another"),

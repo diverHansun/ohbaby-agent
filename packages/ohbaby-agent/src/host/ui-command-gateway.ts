@@ -32,6 +32,7 @@ const RECORDED_METHODS = new Set<UiCommandMethod>([
   "resubmitRetainedPrompt",
   "cancelQueuedPrompt",
   "steerQueuedPrompt",
+  "resendSteerInput",
   "acquirePromptEditLease",
   "renewPromptEditLease",
   "releasePromptEditLease",
@@ -52,6 +53,7 @@ const TRUSTED_QUEUE_METHODS = new Map<PropertyKey, UiCommandMethod>([
   ["resubmitRetainedPromptForOwner", "resubmitRetainedPrompt"],
   ["cancelQueuedPromptForOwner", "cancelQueuedPrompt"],
   ["steerQueuedPromptForOwner", "steerQueuedPrompt"],
+  ["resendSteerInputForOwner", "resendSteerInput"],
   ["acquirePromptEditLeaseForOwner", "acquirePromptEditLease"],
   ["renewPromptEditLeaseForOwner", "renewPromptEditLease"],
   ["releasePromptEditLeaseForOwner", "releasePromptEditLease"],
@@ -94,6 +96,7 @@ function inputCorrelation(
           : { sessionId: stringField(options, "sessionId") }),
       };
     }
+    case "resendSteerInput":
     case "resubmitRetainedPrompt":
     case "editQueuedPrompt":
     case "cancelQueuedPrompt":

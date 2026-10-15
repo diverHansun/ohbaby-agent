@@ -45,7 +45,8 @@ import type {
 } from "./snapshot.js";
 import type {
   UiSteerQueuedPromptInput,
-  UiSteerQueuedPromptReceipt,
+  UiSteerQueuedPromptResult,
+  UiResendSteerInput,
   UiCancelQueuedPromptInput,
   UiAcquirePromptEditLeaseInput,
   UiEditQueuedPromptInput,
@@ -159,7 +160,8 @@ export interface UiPromptQueueCommandClient {
   ): Promise<UiPromptResubmissionReceipt>;
   steerQueuedPrompt(
     input: UiSteerQueuedPromptInput,
-  ): Promise<UiSteerQueuedPromptReceipt>;
+  ): Promise<UiSteerQueuedPromptResult>;
+  resendSteerInput(input: UiResendSteerInput): Promise<UiPromptReceipt>;
   editQueuedPrompt(input: UiEditQueuedPromptInput): Promise<UiPromptSubmission>;
   cancelQueuedPrompt(
     input: UiCancelQueuedPromptInput,

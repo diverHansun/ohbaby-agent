@@ -5,6 +5,7 @@ import {
   type CleanupResult,
 } from "../runtime/shutdown.js";
 import { SessionExecutionGate } from "./session-execution.js";
+import { projectUnconsumedSteers } from "./ui-inprocess/steer-recovery.js";
 import { RunFinalizationError } from "../runtime/run-manager/errors.js";
 import { SubagentConversationProjection } from "./ui-inprocess/subagent-conversation.js";
 import { InMemorySubagentExecutionStore } from "../agents/subagents/execution-store.js";
@@ -49,7 +50,8 @@ import type {
   UiBackendClient,
   UiAcquirePromptEditLeaseInput,
   UiSteerQueuedPromptInput,
-  UiSteerQueuedPromptReceipt,
+  UiSteerQueuedPromptResult,
+  UiResendSteerInput,
   UiCancelQueuedPromptInput,
   UiEditQueuedPromptInput,
   UiResubmitRetainedPromptInput,
@@ -301,6 +303,8 @@ export interface InProcessUiBackendOptions {
   readonly promptScopeKey?: string;
   readonly promptSubmissionStore?: PromptSubmissionStore;
   readonly currentRunInputStore?: CurrentRunInputStore;
+  /** Startup recovery failures stay visible until explicit session entry succeeds. */
+  readonly assertExecutionRecoveryReady?: (sessionId: string) => void;
   readonly promptQueueOwnerClientId?: string;
   readonly now?: () => Date;
   readonly runLedger?: RunLedger;
@@ -321,7 +325,12 @@ export interface UiPromptQueueExecutionPort {
   steerQueuedPromptForOwner(
     input: UiSteerQueuedPromptInput,
     trustedOwnerClientId: string,
-  ): Promise<UiSteerQueuedPromptReceipt>;
+  ): Promise<UiSteerQueuedPromptResult>;
+  resendSteerInputForOwner(
+    input: UiResendSteerInput,
+    trustedOwnerClientId: string,
+    expectedSessionId?: string,
+  ): Promise<UiPromptReceipt>;
   editQueuedPromptForOwner(
     input: UiEditQueuedPromptInput,
     trustedOwnerClientId: string,
@@ -656,7 +665,7 @@ export function createInProcessUiBackendClient(
   );
   const sessionSubviewFailures = new Map<
     string,
-    { goal?: string; todo?: string }
+    { goal?: string; todo?: string; steerRecovery?: string }
   >();
   const subagentInstanceStore =
     options.subagentInstanceStore ?? new InMemorySubagentInstanceStore();
@@ -664,19 +673,47 @@ export function createInProcessUiBackendClient(
     options.subagentExecutionStore ?? new InMemorySubagentExecutionStore();
   const sourceLedger =
     options.runLedger ?? stateStore.runLedger ?? createInMemoryRunLedger();
-  async function projectRunRecord(
+  function projectRunRecord(
     record: import("../runtime/run-ledger/index.js").RunLedgerRecord,
   ): Promise<UiRun> {
-    return {
-      ...runToUiRun(record),
-      ...(record.inputsCloseReason === "user-stop"
-        ? {
-            unsentSteer:
-              (await currentRunInputStore?.hasUnsentSteer(record.runId)) ??
-              false,
-          }
-        : {}),
-    };
+    return Promise.resolve(runToUiRun(record));
+  }
+  async function unconsumedSteers(
+    sessionId: string,
+  ): Promise<readonly import("ohbaby-sdk").UiUnconsumedSteer[] | undefined> {
+    try {
+      const inputs = currentRunInputStore
+        ? await projectUnconsumedSteers({
+            sessionId,
+            scopeKey: promptScopeKey,
+            inputs: currentRunInputStore,
+            prompts: promptSubmissionStore,
+            runs: sourceLedger,
+            messages: messageManager,
+            assertRecoveryReady: () =>
+              options.assertExecutionRecoveryReady?.(sessionId),
+          })
+        : [];
+      const failures = sessionSubviewFailures.get(sessionId);
+      if (failures) delete failures.steerRecovery;
+      return inputs;
+    } catch (error) {
+      // A failed recovery field must not hide readable history or other sessions.
+      sessionSubviewFailures.set(sessionId, {
+        ...sessionSubviewFailures.get(sessionId),
+        steerRecovery: getErrorMessage(error),
+      });
+      return undefined;
+    }
+  }
+  function executionRecoveryFor(
+    sessionId: string,
+    state = promptScheduler.getRecoveryState(sessionId),
+  ): NonNullable<UiSessionView["executionRecovery"]> {
+    const failure = sessionSubviewFailures.get(sessionId)?.steerRecovery;
+    return state.status === "ready" && failure !== undefined
+      ? { status: "blocked", message: failure }
+      : state;
   }
   const sourceProjection: SourceSessionProjection = new SourceSessionProjection(
     {
@@ -692,7 +729,10 @@ export function createInProcessUiBackendClient(
             ));
         if (!session)
           throw new Error(`Session metadata unavailable: ${sessionId}`);
-        return session;
+        return {
+          ...session,
+          unconsumedSteers: await unconsumedSteers(sessionId),
+        };
       },
       runs: async (sessionId): Promise<readonly UiRun[]> => {
         const stored = await Promise.all(
@@ -735,7 +775,7 @@ export function createInProcessUiBackendClient(
         const context = contextWindowUsage.get(sessionId);
         const failures = sessionSubviewFailures.get(sessionId);
         return {
-          executionRecovery: promptScheduler.getRecoveryState(sessionId),
+          executionRecovery: executionRecoveryFor(sessionId),
           ...(goal === undefined
             ? {}
             : {
@@ -793,9 +833,10 @@ export function createInProcessUiBackendClient(
       onCommitted: (record) => {
         if (record.contextScopeId === undefined)
           void projectRunRecord(record)
-            .then((run) =>
-              sourceProjection.commitEvent({ type: "run.updated", run }),
-            )
+            .then(async (run) => {
+              await sourceProjection.commitEvent({ type: "run.updated", run });
+              refreshSteerRecovery(record.sessionId);
+            })
             .catch((error: unknown) => {
               sourceProjection.owner.markUnavailable(record.sessionId, error);
             });
@@ -911,6 +952,8 @@ export function createInProcessUiBackendClient(
         throw goalFailure instanceof Error
           ? goalFailure
           : new Error(getErrorMessage(goalFailure));
+      const steerFailure = sessionSubviewFailures.get(sessionId)?.steerRecovery;
+      if (steerFailure !== undefined) throw new Error(steerFailure);
     })().catch((error: unknown) => {
       sessionInitializationById.delete(sessionId);
       throw error;
@@ -1059,15 +1102,74 @@ export function createInProcessUiBackendClient(
         sourceProjection.owner.markUnavailable(message.info.sessionId, error);
       });
   });
+  // Refresh after the committing owner entry; rebuild itself joins that queue.
+  const steerRecoveryRefreshes = new Map<string, Promise<void>>();
+  function refreshSteerRecovery(sessionId: string): void {
+    if (disposed || !sourceProjection.owner.hasViewOrPendingSeed(sessionId))
+      return;
+    const previous = steerRecoveryRefreshes.get(sessionId) ?? Promise.resolve();
+    const refresh = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const changed = await sourceProjection.owner.runControl(
+          sessionId,
+          async () => {
+            const next = await unconsumedSteers(sessionId);
+            const current = sourceProjection.owner.read(sessionId);
+            return (
+              JSON.stringify(current.session.unconsumedSteers) !==
+                JSON.stringify(next) ||
+              JSON.stringify(current.executionRecovery) !==
+                JSON.stringify(executionRecoveryFor(sessionId))
+            );
+          },
+        );
+        if (!changed || disposed) return;
+        await sourceProjection.owner.rebuild(sessionId);
+        publish({
+          type: "session.updated",
+          session: cloneSession(sourceProjection.owner.read(sessionId).session),
+        });
+      })
+      .catch((error: unknown) => {
+        if (!disposed) sourceProjection.owner.markUnavailable(sessionId, error);
+      })
+      .finally(() => {
+        if (steerRecoveryRefreshes.get(sessionId) === refresh)
+          steerRecoveryRefreshes.delete(sessionId);
+      });
+    steerRecoveryRefreshes.set(sessionId, refresh);
+  }
+  currentRunInputStore?.setStateChangeObserver(refreshSteerRecovery);
   const promptScopeKey =
     options.promptScopeKey ??
     options.workdir ??
     options.projectDirectory ??
     process.cwd();
+  function getActiveGoalRunForSteer(
+    sessionId: string,
+  ): { runId: string; goalId: string } | undefined {
+    const active = activePromptsBySession.get(sessionId);
+    if (disposed || active?.owner !== "goal" || active.runId === undefined)
+      return undefined;
+    const ticket = sharedGoalService.getTicketForRun(sessionId, active.runId);
+    if (
+      !ticket ||
+      !sharedGoalService.isExecutionCurrent(
+        sessionId,
+        ticket.goalId,
+        ticket.executionEpoch,
+      ) ||
+      !currentRunInputStore?.isAcceptingSteer(active.runId)
+    )
+      return undefined;
+    return { runId: active.runId, goalId: ticket.goalId };
+  }
   const promptScheduler: WorkspacePromptScheduler =
     new WorkspacePromptScheduler({
       executionGate: sessionExecution,
       currentRunInputs: currentRunInputStore,
+      resolveSteerTarget: getActiveGoalRunForSteer,
       now: () => now().getTime(),
       isExecutionPersistenceError: (error) =>
         error instanceof RunFinalizationError,
@@ -1094,6 +1196,7 @@ export function createInProcessUiBackendClient(
         };
       },
       onRecoveryChanged(sessionId, state): void {
+        const recovery = executionRecoveryFor(sessionId, state);
         sessionExecution.notify(sessionId);
         if (sourceProjection.owner.hasViewOrPendingSeed(sessionId))
           void sourceProjection.owner
@@ -1101,9 +1204,9 @@ export function createInProcessUiBackendClient(
               await sourceProjection.owner.ready(sessionId);
               const previous =
                 sourceProjection.owner.read(sessionId).executionRecovery;
-              if (JSON.stringify(previous) !== JSON.stringify(state))
+              if (JSON.stringify(previous) !== JSON.stringify(recovery))
                 sourceProjection.owner.commit(sessionId, {
-                  executionRecovery: state,
+                  executionRecovery: recovery,
                 });
             })
             .catch(() => undefined);
@@ -1119,7 +1222,9 @@ export function createInProcessUiBackendClient(
         const changed = await options.recoverExecutionSession?.(sessionId);
         if (sourceProjection.owner.hasViewOrPendingSeed(sessionId)) {
           await sourceProjection.owner.ready(sessionId).catch(() => undefined);
-          let rebuild = changed === true;
+          let rebuild =
+            changed === true ||
+            sessionSubviewFailures.get(sessionId)?.steerRecovery !== undefined;
           try {
             sourceProjection.owner.read(sessionId);
           } catch {
@@ -1127,6 +1232,9 @@ export function createInProcessUiBackendClient(
           }
           if (rebuild) await sourceProjection.owner.rebuild(sessionId);
         }
+        const steerFailure =
+          sessionSubviewFailures.get(sessionId)?.steerRecovery;
+        if (steerFailure !== undefined) throw new Error(steerFailure);
       },
       beforeSessionWrite: initializeSessionView,
       commitCoordinator: {
@@ -1145,6 +1253,7 @@ export function createInProcessUiBackendClient(
         error instanceof RuntimeSwitchPendingError,
       onSubmitted(prompt): void {
         sessionExecution.notify(prompt.sessionId);
+        if (prompt.resendOfPromptId) refreshSteerRecovery(prompt.sessionId);
         publish({
           type: "prompt.submitted",
           prompt: promptRecordToUi(prompt),
@@ -1153,6 +1262,7 @@ export function createInProcessUiBackendClient(
       },
       onUpdated(prompt): void {
         sessionExecution.notify(prompt.sessionId);
+        if (prompt.resendOfPromptId) refreshSteerRecovery(prompt.sessionId);
         publish({
           type: "prompt.updated",
           prompt: promptRecordToUi(prompt),
@@ -1445,6 +1555,7 @@ export function createInProcessUiBackendClient(
   async function submitPromptAcceptedWork(
     text: string,
     submitOptions?: SubmitPromptOptions,
+    resendOfPromptId?: string,
   ): Promise<UiPromptReceipt> {
     await ready;
     if (
@@ -1459,7 +1570,8 @@ export function createInProcessUiBackendClient(
     } catch (error) {
       throw new PromptSubmissionRejectedError(error);
     }
-    const accepted = await promptScheduler.accept({
+    const { record: accepted, steer } = await promptScheduler.accept({
+      resendOfPromptId,
       reasoning: submitOptions?.reasoning ?? sessionReasoningPreference,
       namingSource: submitOptions?.namingSource,
       titleExpected: (sessionId) =>
@@ -1494,6 +1606,10 @@ export function createInProcessUiBackendClient(
       sessionId: accepted.sessionId,
       status: accepted.status,
       createdAt: new Date(accepted.createdAt).toISOString(),
+      steer:
+        steer.status === "error"
+          ? { ...steer, error: { ...steer.error, source: "scheduler" } }
+          : steer,
     };
   }
 
@@ -1523,8 +1639,24 @@ export function createInProcessUiBackendClient(
   }
 
   function publish(event: UiEvent): void {
-    if (event.type === "session.updated")
+    if (event.type === "session.updated") {
+      // Metadata-only producers preserve the durable recovery projection.
+      if (event.session.unconsumedSteers === undefined) {
+        try {
+          event = {
+            ...event,
+            session: {
+              ...event.session,
+              unconsumedSteers: sourceProjection.owner.read(event.session.id)
+                .session.unconsumedSteers,
+            },
+          };
+        } catch {
+          /* An unseeded session has no recovery projection yet. */
+        }
+      }
       sessionMetadataById.set(event.session.id, event.session);
+    }
     try {
       if (event.type !== "run.updated")
         void sourceProjection.commitEvent(event);
@@ -2008,8 +2140,15 @@ export function createInProcessUiBackendClient(
         } catch {
           /* Legacy reads do not initialize or rebuild. */
         }
+        const recovery = await unconsumedSteers(session.id);
+        if (recovery === undefined) {
+          // Keep an already-open view honest without running execution recovery.
+          refreshSteerRecovery(session.id);
+          await steerRecoveryRefreshes.get(session.id);
+        }
         return {
           ...session,
+          unconsumedSteers: recovery,
           messages: [...messages.values()].sort((a, b) =>
             a.createdAt < b.createdAt
               ? -1
@@ -3978,9 +4117,7 @@ export function createInProcessUiBackendClient(
     async getSessionControl(input): Promise<UiSessionControl> {
       await validateSessionRead(input);
       await sessionEntries.get(input.sessionId)?.catch(() => undefined);
-      const executionRecovery = promptScheduler.getRecoveryState(
-        input.sessionId,
-      );
+      const executionRecovery = executionRecoveryFor(input.sessionId);
       if (
         sharedGoalService.peekSnapshot(input.sessionId) === undefined &&
         executionRecovery.status !== "blocked"
@@ -4043,29 +4180,15 @@ export function createInProcessUiBackendClient(
               sessionId: prompt.sessionId,
               status: prompt.status,
               createdAt: new Date(prompt.createdAt).toISOString(),
+              steer:
+                prompt.status === "steered" && prompt.steerReceipt
+                  ? { status: "steered", receipt: prompt.steerReceipt }
+                  : { status: "existing", promptId: prompt.promptId },
             }
           : null,
       };
     },
-    getActiveGoalRunForSteer(
-      sessionId,
-    ): { runId: string; goalId: string } | undefined {
-      const active = activePromptsBySession.get(sessionId);
-      if (disposed || active?.owner !== "goal" || active.runId === undefined)
-        return undefined;
-      const ticket = sharedGoalService.getTicketForRun(sessionId, active.runId);
-      if (
-        !ticket ||
-        !sharedGoalService.isExecutionCurrent(
-          sessionId,
-          ticket.goalId,
-          ticket.executionEpoch,
-        ) ||
-        !currentRunInputStore?.isAcceptingSteer(active.runId)
-      )
-        return undefined;
-      return { runId: active.runId, goalId: ticket.goalId };
-    },
+    getActiveGoalRunForSteer,
     closeAdmission,
     dispose(
       shutdown: ShutdownOptions = createShutdownOptions(),
@@ -4150,13 +4273,13 @@ export function createInProcessUiBackendClient(
 
     async steerQueuedPrompt(
       input: UiSteerQueuedPromptInput,
-    ): Promise<UiSteerQueuedPromptReceipt> {
+    ): Promise<UiSteerQueuedPromptResult> {
       return this.steerQueuedPromptForOwner(input, promptQueueOwnerClientId);
     },
     async steerQueuedPromptForOwner(
       input: UiSteerQueuedPromptInput,
       _trustedOwnerClientId: string,
-    ): Promise<UiSteerQueuedPromptReceipt> {
+    ): Promise<UiSteerQueuedPromptResult> {
       await ready;
       const prompt = await promptScheduler.get(input.promptId);
       if (!prompt)
@@ -4169,7 +4292,91 @@ export function createInProcessUiBackendClient(
         sessionId: prompt.sessionId,
         scopeKey: promptScopeKey,
       });
-      return result.receipt;
+      return result.status === "steered"
+        ? { status: "steered", receipt: result.receipt }
+        : { status: "not-steered", reason: result.reason };
+    },
+
+    resendSteerInput(input): Promise<UiPromptReceipt> {
+      return this.resendSteerInputForOwner(input, promptQueueOwnerClientId);
+    },
+    resendSteerInputForOwner(
+      input,
+      _trustedOwnerClientId,
+      expectedSessionId,
+    ): Promise<UiPromptReceipt> {
+      return withSessionAdmission("read", async () => {
+        await ready;
+        if (!input.operationId.trim())
+          throw permissionError(
+            "INVALID_OPERATION_ID",
+            "Resend operationId must not be empty",
+          );
+        const source = await currentRunInputStore?.getInput(input.inputId);
+        if (
+          source?.source !== "user-steer" ||
+          source.contextScopeId !== undefined
+        )
+          throw permissionError(
+            "STEER_INPUT_NOT_FOUND",
+            "Steered input not found",
+          );
+        await validatePermissionRoot(source.sessionId);
+        if (
+          expectedSessionId !== undefined &&
+          source.sessionId !== expectedSessionId
+        )
+          throw permissionError(
+            "SESSION_SCOPE_CHANGED",
+            "Steered input belongs to another session",
+          );
+        await enterSession(source.sessionId);
+        const original = await promptScheduler.get(source.sourceId);
+        if (
+          original?.scopeKey !== promptScopeKey ||
+          original.sessionId !== source.sessionId
+        )
+          throw permissionError(
+            "STEER_INPUT_NOT_FOUND",
+            "Original prompt not found",
+          );
+        const clientRequestId = `resend:${input.operationId}`;
+        const existing =
+          await promptScheduler.getByClientRequestId(clientRequestId);
+        const current = await currentRunInputStore?.getInput(input.inputId);
+        const run = await sourceLedger.get(source.runId);
+        if (
+          !existing &&
+          (!current ||
+            current.processedRequestId !== undefined ||
+            (current.closedAt === undefined &&
+              (!run || run.status === "pending" || run.status === "running")))
+        )
+          throw permissionError(
+            "STEER_INPUT_NOT_RECOVERABLE",
+            "Input has not closed or already has a successful processing record",
+          );
+        const message = (
+          await messageManager.listByIds(source.sessionId, [source.messageId])
+        ).at(0);
+        if (
+          message?.info.role !== "user" ||
+          message.info.contextScopeId !== undefined
+        )
+          throw permissionError(
+            "STEER_INPUT_NOT_FOUND",
+            "Original input message unavailable",
+          );
+        const text = message.parts
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("");
+        return submitPromptAcceptedWork(
+          text,
+          { sessionId: source.sessionId, clientRequestId },
+          source.sourceId,
+        );
+      });
     },
 
     resubmitRetainedPrompt(input): Promise<UiPromptResubmissionReceipt> {

@@ -139,6 +139,267 @@ afterEach(() => {
 });
 
 describe("goal execution through the HTTP daemon", () => {
+  it("keeps oversized protected input recoverable when context preparation rejects it before the next request", async () => {
+    const started = deferred();
+    const nextStep = deferred();
+    const text = Array.from(
+      { length: 25_000 },
+      (_, index) => `UNIQUE_INPUT_${String(index)}`,
+    ).join(" ");
+    let ordinaryRequests = 0;
+    const llmClient: LLMClientInstance = {
+      config: {
+        provider: "fixture",
+        model: "fixture",
+        interfaceProvider: "openai-compatible",
+        baseUrl: "https://fixture.invalid",
+        maxTokens: 128,
+        contextWindowTokens: 32000,
+      },
+      provider: {
+        id: "fixture",
+        kind: "openai-compatible",
+        client: {},
+        isAbortError: () => false,
+        streamResponse(request) {
+          return Promise.resolve(
+            (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              if (request.purpose === "session-title") {
+                yield {
+                  textDelta: "Oversized input fixture",
+                  finishReason: "stop",
+                };
+                return;
+              }
+              if (request.purpose === "context-summary") {
+                yield {
+                  textDelta:
+                    "The goal is testing oversized protected input recovery.",
+                  finishReason: "stop",
+                  tokenUsage: usage(100, 0),
+                };
+                return;
+              }
+              ordinaryRequests++;
+              expect(ordinaryRequests).toBe(1);
+              started.resolve();
+              await nextStep.promise;
+              yield {
+                toolCallDeltas: [
+                  {
+                    index: 0,
+                    id: "read_goal_before_overflow",
+                    name: "GetGoal",
+                    argumentsDelta: "{}",
+                  },
+                ],
+                finishReason: "tool_calls",
+                tokenUsage: usage(100, 0),
+              };
+            })(),
+          );
+        },
+      },
+    };
+    await withDaemon(llmClient, async ({ client }) => {
+      try {
+        const session = await client.createSession();
+        await createGoal(
+          client,
+          session.id,
+          "Exercise oversized protected input",
+        );
+        await started.promise;
+        const original = await client.submitPromptAccepted(text, {
+          sessionId: session.id,
+        });
+        expect(original.status).toBe("steered");
+        nextStep.resolve();
+        await vi.waitFor(
+          async () => {
+            const view = await client.getSessionView({ sessionId: session.id });
+            expect(
+              view.runs.some(
+                (run) =>
+                  run.status.kind === "error" &&
+                  /context|input.*budget|compact/i.test(run.status.message),
+              ),
+            ).toBe(true);
+            expect(view.session.unconsumedSteers).toEqual([
+              expect.objectContaining({
+                promptId: original.promptId,
+                text,
+                state: "unconsumed",
+              }),
+            ]);
+          },
+          { timeout: 10_000 },
+        );
+        expect(ordinaryRequests).toBe(1);
+        const view = await client.getSessionView({ sessionId: session.id });
+        const recovery = view.session.unconsumedSteers?.[0];
+        if (!recovery) throw new Error("Expected oversized input recovery");
+        const resent = await client.resendSteerInput({
+          inputId: recovery.inputId,
+          operationId: "oversized-explicit-resend",
+        });
+        expect(resent.promptId).not.toBe(original.promptId);
+        expect(resent.userMessageId).not.toBe(original.userMessageId);
+        const completion = await client.waitForPrompt(resent.promptId, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        expect(completion.prompt.status).toBe("failed");
+        await vi.waitFor(async () => {
+          expect(
+            (
+              await client.getSessionView({ sessionId: session.id })
+            ).session.unconsumedSteers?.some(
+              (input) =>
+                input.promptId === original.promptId && input.text === text,
+            ),
+          ).toBe(true);
+        });
+        expect(ordinaryRequests).toBe(1);
+      } finally {
+        nextStep.resolve();
+      }
+    });
+  }, 25_000);
+
+  it("publishes failed-run input recovery over SSE and resends through a fresh idempotent HTTP prompt", async () => {
+    const started = deferred();
+    const failGoal = deferred();
+    const resendStarted = deferred();
+    const finishResend = deferred();
+    let requests = 0;
+    const text = "RECOVER_THIS_STEER";
+    const llmClient: LLMClientInstance = {
+      config: {
+        provider: "fixture",
+        model: "fixture",
+        interfaceProvider: "openai-compatible",
+        baseUrl: "https://fixture.invalid",
+        maxTokens: 128,
+        contextWindowTokens: 128000,
+      },
+      provider: {
+        id: "fixture",
+        kind: "openai-compatible",
+        client: {},
+        isAbortError: () => false,
+        streamResponse(request) {
+          return Promise.resolve(
+            (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+              if (request.purpose === "session-title") {
+                yield { textDelta: "Recovery fixture", finishReason: "stop" };
+                return;
+              }
+              const index = requests++;
+              if (index === 0) {
+                started.resolve();
+                yield { textDelta: "Partial output before a provider failure" };
+                await failGoal.promise;
+                throw new Error("Controlled provider failure after output");
+              }
+              expect(index).toBe(1);
+              expect(JSON.stringify(request.messages)).toContain(text);
+              resendStarted.resolve();
+              await finishResend.promise;
+              yield {
+                textDelta: "RESEND_OK",
+                finishReason: "stop",
+                tokenUsage: usage(100, 0),
+              };
+            })(),
+          );
+        },
+      },
+    };
+    await withDaemon(llmClient, async ({ client, events }) => {
+      try {
+        const session = await client.createSession();
+        await createGoal(
+          client,
+          session.id,
+          "Exercise failed-run input recovery",
+        );
+        await started.promise;
+        const original = await client.submitPromptAccepted(text, {
+          sessionId: session.id,
+        });
+        expect(original.status).toBe("steered");
+        failGoal.resolve();
+        await vi.waitFor(async () => {
+          const view = await client.getSessionView({ sessionId: session.id });
+          expect(view.session.unconsumedSteers).toEqual([
+            expect.objectContaining({
+              promptId: original.promptId,
+              messageId: original.userMessageId,
+              text,
+              state: "unconsumed",
+            }),
+          ]);
+          expect(view.runs.some((run) => run.status.kind === "error")).toBe(
+            true,
+          );
+        });
+        const view = await client.getSessionView({ sessionId: session.id });
+        const recovery = view.session.unconsumedSteers?.[0];
+        if (!recovery) throw new Error("Expected failed-run input recovery");
+        const inputId = recovery.inputId;
+        await vi.waitFor(() => {
+          expect(
+            events.some(
+              (event) =>
+                event.type === "session.updated" &&
+                event.session.unconsumedSteers?.some(
+                  (input) => input.inputId === inputId,
+                ),
+            ),
+          ).toBe(true);
+        });
+        const command = { inputId, operationId: "resend-http-recovery" };
+        const resend = await client.resendSteerInput(command);
+        expect(resend.promptId).not.toBe(original.promptId);
+        expect(resend.userMessageId).not.toBe(original.userMessageId);
+        await resendStarted.promise;
+        const retry = await client.resendSteerInput(command);
+        expect(retry.promptId).toBe(resend.promptId);
+        expect(retry.userMessageId).toBe(resend.userMessageId);
+        await vi.waitFor(async () => {
+          expect(
+            (await client.getSessionView({ sessionId: session.id })).session
+              .unconsumedSteers ?? [],
+          ).toEqual([]);
+        });
+        finishResend.resolve();
+        expect(
+          (
+            await client.waitForPrompt(resend.promptId, {
+              signal: AbortSignal.timeout(5_000),
+            })
+          ).prompt.status,
+        ).toBe("succeeded");
+        const final = await client.getSessionView({ sessionId: session.id });
+        expect(final.session.unconsumedSteers ?? []).toEqual([]);
+        expect(
+          final.session.messages.some(
+            (message) => message.id === original.userMessageId,
+          ),
+        ).toBe(true);
+        expect(
+          final.session.messages.some(
+            (message) => message.id === resend.userMessageId,
+          ),
+        ).toBe(true);
+        expect(requests).toBe(2);
+      } finally {
+        failGoal.resolve();
+        finishResend.resolve();
+      }
+    });
+  }, 20_000);
+
   it("counts blocked reports by admitted run, preserves the final reply, and atomically resumes with fresh audit", async () => {
     let requests = 0;
     const signals: AbortSignal[] = [];
@@ -264,7 +525,7 @@ describe("goal execution through the HTTP daemon", () => {
     });
   }, 20_000);
 
-  it("queues the user without interruption, hides complete once, settles tail usage in SQLite, then runs the user", async () => {
+  it("steers into the active goal over HTTP, then queues after completion without losing tail settlement", async () => {
     const started = deferred();
     const complete = deferred();
     const tailStarted = deferred();
@@ -311,6 +572,9 @@ describe("goal execution through the HTTP daemon", () => {
                   tokenUsage: usage(100, 80),
                 };
               } else if (index === 1) {
+                expect(JSON.stringify(request.messages)).toContain(
+                  "steered user instruction",
+                );
                 tailStarted.resolve();
                 await finishTail.promise;
                 yield {
@@ -344,14 +608,47 @@ describe("goal execution through the HTTP daemon", () => {
           "Finish the deterministic goal fixture",
         );
         await started.promise;
-        const queued = await client.submitPromptAccepted("queued user", {
-          sessionId: session.id,
-        });
+        const steered = await client.submitPromptAccepted(
+          "steered user instruction",
+          {
+            sessionId: session.id,
+            clientRequestId: "auto-steer-http",
+          },
+        );
+        expect(steered.status).toBe("steered");
+        expect(steered.steer?.status).toBe("steered");
+        const retry = await client.submitPromptAccepted(
+          "steered user instruction",
+          {
+            sessionId: session.id,
+            clientRequestId: "auto-steer-http",
+          },
+        );
+        expect(retry).toEqual(steered);
+        expect(
+          (
+            await client.waitForPrompt(steered.promptId, {
+              signal: AbortSignal.timeout(5_000),
+            })
+          ).prompt.status,
+        ).toBe("steered");
         const pending = await client.getSessionView({ sessionId: session.id });
         expect(
-          pending.prompts.find((row) => row.promptId === queued.promptId)
-            ?.status,
-        ).toBe("queued");
+          pending.prompts.some(
+            (row) =>
+              row.promptId === steered.promptId && row.status === "queued",
+          ),
+        ).toBe(false);
+        await vi.waitFor(() => {
+          expect(
+            events.some(
+              (event) =>
+                event.type === "prompt.updated" &&
+                event.prompt.promptId === steered.promptId &&
+                event.prompt.status === "steered",
+            ),
+          ).toBe(true);
+        });
         expect(goalSignal?.aborted).toBe(false);
         expect(order).toEqual(["goal"]);
         expect(
@@ -362,6 +659,14 @@ describe("goal execution through the HTTP daemon", () => {
 
         complete.resolve();
         await tailStarted.promise;
+        const queued = await client.submitPromptAccepted("queued user", {
+          sessionId: session.id,
+        });
+        expect(queued.status).toBe("queued");
+        expect(queued.steer).toEqual({
+          status: "not-steered",
+          reason: "no-goal-run",
+        });
         expect((await client.getSnapshot()).goals ?? []).toEqual([]);
         expect(
           (await client.getSessionView({ sessionId: session.id })).goal,
@@ -413,6 +718,12 @@ describe("goal execution through the HTTP daemon", () => {
           ),
         ).toHaveLength(2);
         const view = await client.getSessionView({ sessionId: session.id });
+        expect(view.session.unconsumedSteers ?? []).toEqual([]);
+        expect(
+          view.session.messages.filter(
+            (message) => message.id === steered.userMessageId,
+          ),
+        ).toHaveLength(1);
         expect(JSON.stringify(view.session.messages)).toContain("GOAL_TAIL_OK");
         expect(JSON.stringify(view.session.messages)).toContain(
           "QUEUED_USER_OK",
@@ -428,7 +739,7 @@ describe("goal execution through the HTTP daemon", () => {
 const live = process.env.OHBABY_RUN_GOAL_REAL_E2E === "1" ? it : it.skip;
 describe("live goal execution through the HTTP daemon", () => {
   live(
-    "uses real DeepSeek and production UpdateGoal, persists usage, and returns the final marker",
+    "uses real DeepSeek to consume an automatic steer in the same goal run and complete it",
     async () => {
       const env = await loadEnvFile(join(process.cwd(), ".env"));
       const apiKey = process.env.DEEPSEEK_API_KEY ?? env.DEEPSEEK_API_KEY;
@@ -442,12 +753,20 @@ describe("live goal execution through the HTTP daemon", () => {
         baseUrl: "https://api.deepseek.com",
       });
       const open = provider.streamResponse.bind(provider);
+      const firstGoalRequest = deferred();
+      const allowFirstRequest = deferred();
       let calls = 0;
       let goalCalls = 0;
-      provider.streamResponse = (request): ReturnType<typeof open> => {
+      provider.streamResponse = async (request): ReturnType<typeof open> => {
         if (calls >= 8) throw new Error("Real goal E2E request cap reached");
         calls++;
-        if (request.purpose !== "session-title") goalCalls++;
+        if (request.purpose !== "session-title") {
+          goalCalls++;
+          if (goalCalls === 1) {
+            firstGoalRequest.resolve();
+            await allowFirstRequest.promise;
+          }
+        }
         return open({
           ...request,
           signal: AbortSignal.any([
@@ -488,13 +807,29 @@ describe("live goal execution through the HTTP daemon", () => {
             session.id,
             [
               "Verify this goal lifecycle handshake. No file, shell, network, or subagent work is required.",
-              "The checkable success condition is that you have read this instruction and can return the exact marker below.",
-              "That verification is already complete by reading it. Call the available UpdateGoal tool with status complete now.",
-              "After the tool succeeds, give your final answer consisting only of this marker:",
-              marker,
+              "First call GetGoal once to read the current goal state. An additional user instruction will arrive during this first request.",
+              "After GetGoal returns, read that additional user instruction. It contains the success marker and final answer instructions.",
+              "The goal is complete when you can return that exact marker. Then call UpdateGoal with status complete and give the requested answer.",
               "Do not invent a budget or create another goal.",
             ].join(" "),
           );
+          await firstGoalRequest.promise;
+          let steered: Awaited<
+            ReturnType<RemoteClient["submitPromptAccepted"]>
+          >;
+          try {
+            steered = await client.submitPromptAccepted(
+              `Additional user instruction: the success marker is ${marker}. After GetGoal, call UpdateGoal with status complete, then return only ${marker}. Do not do any other work.`,
+              {
+                sessionId: session.id,
+                clientRequestId: `live-steer-${marker}`,
+              },
+            );
+            expect(steered.status).toBe("steered");
+            expect(steered.steer?.status).toBe("steered");
+          } finally {
+            allowFirstRequest.resolve();
+          }
           await vi.waitFor(
             async () => {
               const records = await persistence.list(session.id);
@@ -521,6 +856,18 @@ describe("live goal execution through the HTTP daemon", () => {
             expect(completionNotices(events)).toHaveLength(1);
           });
           const view = await client.getSessionView({ sessionId: session.id });
+          expect(view.session.unconsumedSteers ?? []).toEqual([]);
+          expect(view.runs).toHaveLength(1);
+          expect(
+            records
+              .filter((row) => row.turnsUsed !== undefined)
+              .map((row) => row.turnsUsed),
+          ).toEqual([1]);
+          expect(
+            view.session.messages.filter(
+              (message) => message.id === steered.userMessageId,
+            ),
+          ).toHaveLength(1);
           const assistantMessages = view.session.messages.filter(
             (message) => message.role === "assistant",
           );
@@ -562,6 +909,8 @@ describe("live goal execution through the HTTP daemon", () => {
               usageIncomplete: settled?.usageIncomplete,
               completionNotices: completionNotices(events).length,
               markerReturned: true,
+              automaticSteer: true,
+              recoveryEntries: view.session.unconsumedSteers?.length ?? 0,
             }),
           );
         },

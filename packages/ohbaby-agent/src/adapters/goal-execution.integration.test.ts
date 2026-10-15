@@ -4,6 +4,13 @@ import {
   createInProcessUiBackendClient,
   type InProcessUiBackendOptions,
 } from "./ui-inprocess.js";
+import { createBus } from "../bus/index.js";
+import {
+  createMessageManager,
+  createInMemoryMessageStore,
+} from "../core/message/index.js";
+import { createInMemoryRunLedger } from "../runtime/run-ledger/index.js";
+import { InMemoryCurrentRunInputStore } from "../runtime/prompt-scheduler/current-run-inputs.js";
 import { InMemoryGoalPersistence } from "../goals/index.js";
 import { InMemoryPromptSubmissionStore } from "../runtime/prompt-scheduler/index.js";
 import type {
@@ -124,11 +131,140 @@ async function command(
 }
 
 describe("goal execution admission and settlement", () => {
+  it("S4-01/02 automatically steers accepted input into the current goal turn", async () => {
+    const started = deferred();
+    const finish = deferred();
+    const { client, prompts, persistence, requests } = fixture(
+      async function* (_request, index) {
+        if (index === 0) {
+          started.resolve();
+          await finish.promise;
+          yield { textDelta: "Goal step done.", finishReason: "stop" };
+        } else if (index === 1) {
+          yield tool("UpdateGoal", { status: "complete" });
+        } else yield { textDelta: "Done.", finishReason: "stop" };
+      },
+    );
+    try {
+      await command(client, ["finish the steer fixture"]);
+      await started.promise;
+      const goalRun = client.getActiveGoalRunForSteer("one");
+      const receipt = await client.submitPromptAccepted(
+        "include the new detail",
+        {
+          sessionId: "one",
+          clientRequestId: "automatic-steer",
+        },
+      );
+      expect(receipt).toMatchObject({
+        status: "steered",
+        steer: {
+          status: "steered",
+          receipt: { acceptedTargetRunId: goalRun?.runId },
+        },
+      });
+      expect((await client.waitForPrompt(receipt.promptId)).prompt.status).toBe(
+        "steered",
+      );
+      expect((await prompts.get(receipt.promptId))?.runId).toBeUndefined();
+      expect(requests[0]?.signal?.aborted).toBe(false);
+      finish.resolve();
+      await vi.waitFor(async () => {
+        expect((await persistence.list("one")).at(-1)?.type).toBe("clear");
+      });
+      expect(JSON.stringify(requests[1])).toContain("include the new detail");
+      expect(
+        (await persistence.list("one"))
+          .filter((record) => record.turnsUsed !== undefined)
+          .every((record) => record.turnsUsed === 1),
+      ).toBe(true);
+    } finally {
+      finish.resolve();
+    }
+  });
+
+  it.each(["blocked", "complete"] as const)(
+    "S4-17 queues input after model %s commits while the old goal run is finishing",
+    async (status) => {
+      const tailStarted = deferred();
+      const finishTail = deferred();
+      const tailIndex = status === "blocked" ? 5 : 1;
+      const { client, persistence, prompts, requests } = fixture(
+        async function* (_request, index) {
+          if (index <= tailIndex && index % 2 === 0) {
+            yield tool("UpdateGoal", {
+              status,
+              ...(status === "blocked"
+                ? { reason: "Need database choice" }
+                : {}),
+            });
+            return;
+          }
+          if (index === tailIndex) {
+            tailStarted.resolve();
+            await finishTail.promise;
+          }
+          yield { textDelta: "Finished.", finishReason: "stop" };
+        },
+      );
+      try {
+        await command(client, ["finish the model lifecycle fixture"]);
+        await tailStarted.promise;
+        expect((await persistence.list("one")).at(-1)?.status).toBe(status);
+        expect(client.getActiveGoalRunForSteer("one")).toBeUndefined();
+        const queued = await client.submitPromptAccepted("successor user", {
+          sessionId: "one",
+          clientRequestId: `after-model-${status}`,
+        });
+        expect(queued).toMatchObject({
+          status: "queued",
+          steer: { status: "not-steered", reason: "no-goal-run" },
+        });
+        expect(
+          (await prompts.get(queued.promptId))?.steerReceipt,
+        ).toBeUndefined();
+        expect(requests).toHaveLength(tailIndex + 1);
+        expect(requests[tailIndex]?.signal?.aborted).toBe(false);
+        finishTail.resolve();
+        expect(
+          (await client.waitForPrompt(queued.promptId)).prompt.status,
+        ).toBe("succeeded");
+        expect(requests).toHaveLength(tailIndex + 2);
+        expect(JSON.stringify(requests.at(-1))).toContain("successor user");
+        const records = await persistence.list("one");
+        expect(
+          records
+            .filter((record) => record.turnsUsed !== undefined)
+            .map((record) => record.turnsUsed),
+        ).toEqual(status === "blocked" ? [1, 2, 3] : [1]);
+        if (status === "blocked")
+          expect(
+            records.filter((record) => record.status !== undefined).at(-1)
+              ?.status,
+          ).toBe("blocked");
+        else expect(records.at(-1)?.type).toBe("clear");
+      } finally {
+        finishTail.resolve();
+      }
+    },
+  );
+
   it("G1/G3 queues user work without interrupting the goal, then runs users before another goal turn", async () => {
     const started = deferred();
     const finish = deferred();
     const order: string[] = [];
     let signal: AbortSignal | undefined;
+    const runLedger = createInMemoryRunLedger();
+    const promptSubmissionStore = new InMemoryPromptSubmissionStore();
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const currentRunInputStore = new InMemoryCurrentRunInputStore({
+      runLedger,
+      promptStore: promptSubmissionStore,
+      messageManager,
+    });
     const { client, prompts, persistence } = fixture(
       async function* (request, index) {
         order.push(request.sessionId ?? "unknown");
@@ -141,10 +277,19 @@ describe("goal execution admission and settlement", () => {
           yield tool("UpdateGoal", { status: "complete" });
         else yield { textDelta: "Done.", finishReason: "stop" };
       },
+      {
+        runLedger,
+        promptSubmissionStore,
+        messageManager,
+        currentRunInputStore,
+      },
     );
     try {
       await command(client, ["finish the admission fixture"]);
       await started.promise;
+      const target = client.getActiveGoalRunForSteer("one");
+      if (!target) throw new Error("Goal run missing");
+      await currentRunInputStore.sealSteer(target.runId);
       const user = await client.submitPromptAccepted("queued user", {
         sessionId: "one",
       });

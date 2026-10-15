@@ -50,6 +50,7 @@ import {
   executeCommandForClient,
   cancelQueuedPromptForClient,
   steerQueuedPromptForClient,
+  resendSteerInputForClient,
   editQueuedPromptForClient,
   resubmitRetainedPromptForClient,
   releasePromptEditLeaseForClient,
@@ -404,6 +405,26 @@ export async function callDaemonBackend(input: {
           operationId: input.operationId,
           text: input.text,
         },
+        request.clientId,
+        clientViews,
+      );
+    }
+    case "resendSteerInput": {
+      const input = request.params[0];
+      if (
+        !isRecord(input) ||
+        typeof input.inputId !== "string" ||
+        !input.inputId.trim() ||
+        typeof input.operationId !== "string" ||
+        !input.operationId.trim()
+      ) {
+        throw Object.assign(new Error("inputId and operationId are required"), {
+          code: "INVALID_ARGUMENT",
+        });
+      }
+      return resendSteerInputForClient(
+        backend,
+        { inputId: input.inputId, operationId: input.operationId },
         request.clientId,
         clientViews,
       );

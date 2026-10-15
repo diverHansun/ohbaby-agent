@@ -1,3 +1,4 @@
+import type { UiUnconsumedSteer } from "ohbaby-sdk";
 import { Box, useStdout } from "ink";
 import { memo, useContext, type ReactElement } from "react";
 import {
@@ -10,6 +11,7 @@ import { PromptCompletion } from "./prompt-completion.js";
 import { MessageRow } from "../message/message-row.js";
 
 export interface CommittedTranscriptProps {
+  readonly unconsumedSteers?: readonly UiUnconsumedSteer[];
   readonly toolsExpanded?: boolean;
   readonly items: readonly TranscriptItem[];
 }
@@ -21,6 +23,7 @@ interface StaticTranscriptDecisionInput {
 }
 
 export const CommittedTranscript = memo(function CommittedTranscript({
+  unconsumedSteers,
   items,
   toolsExpanded = false,
 }: CommittedTranscriptProps): ReactElement {
@@ -34,7 +37,13 @@ export const CommittedTranscript = memo(function CommittedTranscript({
     });
 
   if (useStatic) {
-    return <ReplayableTranscript items={items} toolsExpanded={toolsExpanded} />;
+    return (
+      <ReplayableTranscript
+        unconsumedSteers={unconsumedSteers}
+        items={items}
+        toolsExpanded={toolsExpanded}
+      />
+    );
   }
 
   const partStarts = new Map<string, number>();
@@ -57,6 +66,11 @@ export const CommittedTranscript = memo(function CommittedTranscript({
             key={item.id}
             toolsExpanded={toolsExpanded}
             message={item.message}
+            steerState={
+              unconsumedSteers?.find(
+                (input) => input.messageId === item.messageId,
+              )?.state
+            }
           />
         ),
       )}

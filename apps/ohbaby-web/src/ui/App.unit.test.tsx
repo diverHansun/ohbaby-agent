@@ -2015,6 +2015,40 @@ describe("OhbabyWebApp slash command interactions", () => {
     );
   });
 
+  it("shows automatic steer failure while preserving accepted prompt admission", async () => {
+    const fake = createFakeRuntime({
+      snapshot: snapshotWithStatus({ kind: "idle" }),
+    });
+    fake.submitPromptAccepted.mockImplementation((_text, options) =>
+      Promise.resolve({
+        clientRequestId: options?.clientRequestId ?? "",
+        promptId: "accepted-prompt",
+        userMessageId: "accepted-message",
+        sessionId: "session_1",
+        status: "queued",
+        createdAt: timestamp,
+        steer: {
+          status: "error",
+          error: {
+            code: "STEER_FAILED",
+            source: "scheduler",
+            message: "Input store unavailable",
+            retryable: true,
+          },
+        },
+      }),
+    );
+    const app = mountApp(fake.runtime);
+    await setTextareaValue(app.container, "accepted requirement");
+    await pressTextareaKey(app.container, "Enter");
+    await waitFor(() =>
+      app.container.textContent.includes("Accepted in queue"),
+    );
+    expect(app.container.textContent).toContain("Input store unavailable");
+    expect(textareaValue(app.container)).toBe("");
+    expect(fake.submitPromptAccepted).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves the draft when the receipt request id does not match", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
@@ -4390,6 +4424,7 @@ function createFakeRuntime(input: {
     archiveSession: vi.fn(() => Promise.resolve()),
     compactSession,
     steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
+    resendSteerInput: vi.fn(() => Promise.reject(new Error("unused"))),
     cancelQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     connectModel,
     executeCommand: vi.fn(() =>

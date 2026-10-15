@@ -414,13 +414,22 @@ export class DaemonHttpClient {
     );
   }
 
+  resendSteerInput(
+    input: import("ohbaby-sdk").UiResendSteerInput,
+  ): Promise<{ ok: true; receipt: import("ohbaby-sdk").UiPromptReceipt }> {
+    return this.request(
+      `/v1/steer-inputs/${encodeURIComponent(input.inputId)}/resend`,
+      { body: { operationId: input.operationId }, method: "POST" },
+    );
+  }
+
   steerQueuedPrompt(
     promptId: string,
     expectedRunId: string,
     clientRequestId: string,
   ): Promise<{
     ok: true;
-    receipt: import("ohbaby-sdk").UiSteerQueuedPromptReceipt;
+    result: import("ohbaby-sdk").UiSteerQueuedPromptResult;
   }> {
     return this.request(`/v1/prompts/${encodeURIComponent(promptId)}/steer`, {
       body: { expectedRunId, clientRequestId },

@@ -1303,6 +1303,7 @@ function createCore(): {
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
   readonly steerQueuedPrompt: ReturnType<typeof vi.fn>;
+  readonly resendSteerInput: ReturnType<typeof vi.fn>;
   readonly cancelQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly resubmitRetainedPrompt: ReturnType<typeof vi.fn>;
   readonly editQueuedPrompt: ReturnType<typeof vi.fn>;
@@ -1344,6 +1345,7 @@ function createCore(): {
     ),
     archiveSession: vi.fn(() => Promise.resolve()),
     steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
+    resendSteerInput: vi.fn(() => Promise.reject(new Error("unused"))),
     cancelQueuedPrompt: vi.fn(() => Promise.resolve(prompt)),
     compactSession: vi.fn(() => Promise.resolve()),
     connectModel: vi.fn(() =>

@@ -72,6 +72,7 @@ import {
   executeCommandForClient,
   cancelQueuedPromptForClient,
   steerQueuedPromptForClient,
+  resendSteerInputForClient,
   editQueuedPromptForClient,
   resubmitRetainedPromptForClient,
   releasePromptEditLeaseForClient,
@@ -233,17 +234,20 @@ function promptErrorBody(error: unknown): unknown {
   };
 }
 
-function promptMutationStatus(error: unknown): 400 | 404 | 409 | 429 {
+function promptMutationStatus(error: unknown): 400 | 403 | 404 | 409 | 429 {
+  if (isDaemonForbiddenError(error)) return 403;
   const code =
     isRecord(error) && typeof error.code === "string" ? error.code : undefined;
   if (code === "QUEUE_FULL") {
     return 429;
   }
-  if (code === "PROMPT_NOT_FOUND") {
+  if (code === "PROMPT_NOT_FOUND" || code === "STEER_INPUT_NOT_FOUND") {
     return 404;
   }
   if (
     code === "CURRENT_RUN_INPUT_CONFLICT" ||
+    code === "STEER_INPUT_NOT_RECOVERABLE" ||
+    code === "SESSION_SCOPE_CHANGED" ||
     code === "PROMPT_NOT_QUEUED" ||
     code === "PROMPT_VERSION_CONFLICT" ||
     code === "IDEMPOTENCY_CONFLICT" ||
@@ -2312,6 +2316,38 @@ class DaemonServerAppRuntime {
       }
     });
 
+    this.app.post("/v1/steer-inputs/:id/resend", async (context) => {
+      const authorization = this.authorizePromptMutation(context);
+      if ("response" in authorization) return authorization.response;
+      const parsed = await readJsonWithLimit(context.req.raw);
+      if (!parsed.ok)
+        return context.json(
+          webErrorBody(parsed.message),
+          parsed.status as 400 | 413,
+        );
+      const operationId = isRecord(parsed.value)
+        ? asNonEmptyString(parsed.value.operationId)
+        : undefined;
+      if (!operationId)
+        return context.json(webErrorBody("operationId is required"), 400);
+      try {
+        const receipt = await resendSteerInputForClient(
+          this.commandBackend("server-rest", {
+            clientId: authorization.clientId,
+          }),
+          { inputId: context.req.param("id"), operationId },
+          authorization.clientId,
+          this.clientViews,
+        );
+        return context.json({ ok: true, receipt });
+      } catch (error) {
+        return context.json(
+          promptErrorBody(error),
+          promptMutationStatus(error),
+        );
+      }
+    });
+
     this.app.post("/v1/prompts/:id/steer", async (context) => {
       const authorization = this.authorizePromptMutation(context);
       if ("response" in authorization) {
@@ -2345,7 +2381,7 @@ class DaemonServerAppRuntime {
             403,
           );
         }
-        const receipt = await steerQueuedPromptForClient(
+        const result = await steerQueuedPromptForClient(
           this.commandBackend("server-rest", {
             clientId: authorization.clientId,
           }),
@@ -2356,7 +2392,7 @@ class DaemonServerAppRuntime {
           },
           authorization.clientId,
         );
-        return context.json({ ok: true, receipt });
+        return context.json({ ok: true, result });
       } catch (error) {
         return context.json(
           promptErrorBody(error),

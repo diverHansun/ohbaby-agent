@@ -73,18 +73,32 @@ export interface AcceptRuntimeInput {
   readonly observation?: CurrentRunInputRecord["observation"];
 }
 export interface SteerQueuedPromptResult {
+  readonly status: "steered";
   readonly receipt: SteerQueuedPromptReceipt;
   readonly prompt: PromptSubmissionRecord;
   readonly message: MessageWithParts;
 }
+export type SteerQueuedPromptOutcome =
+  | SteerQueuedPromptResult
+  | {
+      readonly status: "not-steered";
+      readonly reason:
+        | "target-unavailable"
+        | "target-sealed"
+        | "prompt-not-queued";
+      readonly prompt: PromptSubmissionRecord;
+    };
 export interface CurrentRunInputStore {
   /** Synchronous fact query for admission within the session owner boundary. */
   isAcceptingSteer(runId: string): boolean;
-  /** Pure fact query. The caller selects the latest user-stopped root run. */
-  hasUnsentSteer(runId: string): Promise<boolean>;
+  /** Durable session candidates, including pending inputs; callers project closure. */
+  listUnconsumedSteers(
+    sessionId: string,
+  ): Promise<readonly CurrentRunInputRecord[]>;
+  setStateChangeObserver(observer: (sessionId: string) => void): void;
   sealSteer(runId: string): Promise<void>;
   acceptRuntimeInput(input: AcceptRuntimeInput): Promise<CurrentRunInputRecord>;
-  steerQueued(input: SteerQueuedPromptInput): Promise<SteerQueuedPromptResult>;
+  steerQueued(input: SteerQueuedPromptInput): Promise<SteerQueuedPromptOutcome>;
   getInput(inputId: string): Promise<CurrentRunInputRecord | undefined>;
   listPending(runId: string): Promise<readonly CurrentRunInputRecord[]>;
   getMessages(runId: string): Promise<readonly MessageWithParts[]>;
@@ -122,6 +136,26 @@ function pending(record: CurrentRunInputRecord): boolean {
 }
 abstract class CurrentInputs implements CurrentRunInputStore {
   protected readonly locallyClosed = new Set<string>();
+  private stateChangeObserver: ((sessionId: string) => void) | undefined;
+  setStateChangeObserver(observer: (sessionId: string) => void): void {
+    this.stateChangeObserver = observer;
+  }
+  private notifyStateChanged(runId: string): void {
+    const sessionId = this.run(runId)?.sessionId;
+    if (sessionId === undefined) return;
+    try {
+      this.stateChangeObserver?.(sessionId);
+    } catch {
+      /* Durable input facts cannot be rolled back by a projection observer. */
+    }
+  }
+  private notifyMessage(message: MessageWithParts): void {
+    try {
+      this.messageObserver?.(message);
+    } catch {
+      /* Durable acceptance remains successful even when the view cannot update. */
+    }
+  }
   private messageObserver: ((message: MessageWithParts) => void) | undefined;
   setMessageCommitObserver(
     observer: (message: MessageWithParts) => void,
@@ -136,6 +170,9 @@ abstract class CurrentInputs implements CurrentRunInputStore {
   protected abstract sealSteerRun(runId: string, at: number): void;
   protected abstract readInput(id: string): CurrentRunInputRecord | undefined;
   protected abstract inputs(runId: string): readonly CurrentRunInputRecord[];
+  protected abstract sessionInputs(
+    sessionId: string,
+  ): readonly CurrentRunInputRecord[];
   protected abstract saveInput(record: CurrentRunInputRecord): void;
   protected abstract readMessage(id: string): MessageWithParts | undefined;
   protected abstract putMessage(message: MessageWithParts): void;
@@ -231,9 +268,17 @@ abstract class CurrentInputs implements CurrentRunInputStore {
       info: { ...message.info, runId: input.runId, runtimeInput: expected },
     };
   }
+  private nextAcceptedAt(runId: string): number {
+    // All input sources share one durable run order, even within a millisecond.
+    // A queued prompt's earlier admission time cannot order a later manual steer.
+    return this.inputs(runId).reduce(
+      (at, input) => Math.max(at, input.acceptedAt + 1),
+      this.now(),
+    );
+  }
   private acceptSync(
     input: AcceptRuntimeInput,
-    acceptedAt = this.now(),
+    acceptedAt = this.nextAcceptedAt(input.runId),
   ): CurrentRunInputRecord {
     for (const id of [
       input.inputId,
@@ -312,15 +357,15 @@ abstract class CurrentInputs implements CurrentRunInputStore {
       const created = !this.readInput(input.inputId);
       return { result: this.acceptSync(input), created };
     });
-    this.messageObserver?.(this.readMessage(result.messageId) ?? input.message);
+    this.notifyMessage(this.readMessage(result.messageId) ?? input.message);
     if (created) this.wake(input.runId);
     return result;
   }
   async steerQueued(
     input: SteerQueuedPromptInput,
-  ): Promise<SteerQueuedPromptResult> {
+  ): Promise<SteerQueuedPromptOutcome> {
     required(input.clientRequestId);
-    const result = await this.transaction(() => {
+    const result = await this.transaction<SteerQueuedPromptOutcome>(() => {
       const previous = this.promptBySteerRequest(
         input.scopeKey,
         input.clientRequestId,
@@ -337,26 +382,35 @@ abstract class CurrentInputs implements CurrentRunInputStore {
         const message = this.readMessage(previous.userMessageId);
         if (!message || message.info.contextScopeId !== input.contextScopeId)
           conflict("Steer message conflict");
-        return { receipt, prompt: previous, message };
+        return { status: "steered", receipt, prompt: previous, message };
       }
       const prompt = this.prompt(input.promptId);
       if (
         prompt?.scopeKey !== input.scopeKey ||
-        prompt.sessionId !== input.sessionId ||
-        prompt.status !== "queued"
+        prompt.sessionId !== input.sessionId
       )
         conflict("Queued prompt scope or status conflict");
+      if (prompt.status !== "queued")
+        return { status: "not-steered", reason: "prompt-not-queued", prompt };
       if ((prompt.editLeaseExpiresAt ?? 0) > this.now())
         conflict("Queued prompt edit lease is active");
-      const target = this.active(
-        input.expectedRunId,
-        input.sessionId,
-        input.contextScopeId,
-      );
+      const target = this.run(input.expectedRunId);
+      if (
+        target &&
+        (target.sessionId !== input.sessionId ||
+          target.contextScopeId !== input.contextScopeId)
+      )
+        conflict("Target run scope conflict");
+      if (
+        target?.status !== "running" ||
+        target.inputsClosedAt !== undefined ||
+        this.locallyClosed.has(input.expectedRunId)
+      )
+        return { status: "not-steered", reason: "target-unavailable", prompt };
       if (target.steerClosedAt !== undefined)
-        conflict("Target run is already on its final step");
+        return { status: "not-steered", reason: "target-sealed", prompt };
       const inputId = `steer:${prompt.promptId}`;
-      const acceptedAt = this.now();
+      const acceptedAt = this.nextAcceptedAt(input.expectedRunId);
       const message: MessageWithParts = {
         info: {
           id: prompt.userMessageId,
@@ -410,25 +464,27 @@ abstract class CurrentInputs implements CurrentRunInputStore {
       };
       this.putPrompt(converted);
       return {
+        status: "steered",
         receipt,
         prompt: converted,
         message: this.readMessage(prompt.userMessageId) ?? message,
       };
     });
-    this.messageObserver?.(result.message);
-    this.wake(input.expectedRunId);
+    if (result.status === "steered") {
+      this.notifyMessage(result.message);
+      this.wake(input.expectedRunId);
+    }
     return result;
   }
   async getInput(inputId: string): Promise<CurrentRunInputRecord | undefined> {
     return this.readInput(inputId);
   }
-  async hasUnsentSteer(runId: string): Promise<boolean> {
-    return this.inputs(runId).some(
+  async listUnconsumedSteers(
+    sessionId: string,
+  ): Promise<readonly CurrentRunInputRecord[]> {
+    return this.sessionInputs(sessionId).filter(
       (record) =>
         record.source === "user-steer" &&
-        record.closedAt !== undefined &&
-        record.firstAttemptRequestId === undefined &&
-        record.firstAttemptAt === undefined &&
         record.processedRequestId === undefined,
     );
   }
@@ -555,6 +611,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
       return { runId: request.runId, processed };
     });
     this.wake(result.runId);
+    this.notifyStateChanged(result.runId);
     return result.processed;
   }
   close(runId: string, reason: string): Promise<void> {
@@ -567,6 +624,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
           this.saveInput({ ...r, closedAt: at, closeReason: reason });
     }).then(() => {
       this.wake(runId);
+      this.notifyStateChanged(runId);
     });
   }
   async sealSteer(runId: string): Promise<void> {
@@ -668,6 +726,16 @@ export class InMemoryCurrentRunInputStore extends CurrentInputs {
           a.acceptedAt - b.acceptedAt || a.inputId.localeCompare(b.inputId),
       )
       .map((r) => this.effectiveInput(structuredClone(r)));
+  }
+  protected sessionInputs(sessionId: string): readonly CurrentRunInputRecord[] {
+    return [...this.records.values()]
+      .filter((record) => record.sessionId === sessionId)
+      .sort(
+        (left, right) =>
+          left.acceptedAt - right.acceptedAt ||
+          left.inputId.localeCompare(right.inputId),
+      )
+      .map((record) => this.effectiveInput(structuredClone(record)));
   }
   protected saveInput(r: CurrentRunInputRecord): void {
     this.records.set(r.inputId, structuredClone(r));
@@ -774,6 +842,16 @@ export class DatabaseCurrentRunInputStore extends CurrentInputs {
       .all(run)
       .map((r) =>
         this.effectiveInput(JSON.parse(r.data) as CurrentRunInputRecord),
+      );
+  }
+  protected sessionInputs(sessionId: string): readonly CurrentRunInputRecord[] {
+    return this.db
+      .prepare<{ data: string }>(
+        "SELECT data FROM current_run_input WHERE session_id=? ORDER BY accepted_at,input_id",
+      )
+      .all(sessionId)
+      .map((row) =>
+        this.effectiveInput(JSON.parse(row.data) as CurrentRunInputRecord),
       );
   }
   protected saveInput(r: CurrentRunInputRecord): void {

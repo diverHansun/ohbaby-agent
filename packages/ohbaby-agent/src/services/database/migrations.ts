@@ -626,4 +626,8 @@ export const INITIAL_MIGRATIONS: readonly MigrationDefinition[] = [
     sql: `ALTER TABLE prompt_submission ADD COLUMN naming_source TEXT;
           ALTER TABLE prompt_submission ADD COLUMN title_expected TEXT;`,
   },
+  {
+    version: "024_prompt_resend_parent",
+    sql: `ALTER TABLE prompt_submission ADD COLUMN resend_of_prompt_id TEXT;`,
+  },
 ];

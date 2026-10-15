@@ -156,6 +156,11 @@ describe("context window UI contract", () => {
       archiveSession(): ReturnType<CoreAPI["archiveSession"]> {
         return Promise.resolve();
       },
+      resendSteerInput(
+        _input: Parameters<CoreAPI["resendSteerInput"]>[0],
+      ): ReturnType<CoreAPI["resendSteerInput"]> {
+        return Promise.reject(new Error("unused"));
+      },
       steerQueuedPrompt(): ReturnType<CoreAPI["steerQueuedPrompt"]> {
         return Promise.reject(new Error("unused"));
       },

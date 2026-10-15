@@ -8,7 +8,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import type { UiMessage } from "ohbaby-sdk";
+import type { UiMessage, UiUnconsumedSteer } from "ohbaby-sdk";
 import type { TranscriptItem } from "../../store/transcript.js";
 import { LiveTailRefContext, useTuiLayout } from "../../layout/context.js";
 import { useTheme } from "../../theme/index.js";
@@ -32,6 +32,7 @@ interface CachedRow {
 }
 
 interface ProjectedRow {
+  readonly steerState?: "unconsumed" | "unconfirmed";
   readonly id: string;
   readonly message: UiMessage;
   readonly part?: RenderedPart;
@@ -41,6 +42,7 @@ interface ProjectedRow {
 
 /** Append stable output; replace it only when its visible prefix changes. */
 export function ReplayableTranscript({
+  unconsumedSteers,
   items,
   identity,
   toolsExpanded = false,
@@ -48,6 +50,7 @@ export function ReplayableTranscript({
   children,
 }: {
   readonly children?: ReactNode;
+  readonly unconsumedSteers?: readonly UiUnconsumedSteer[];
   readonly items: readonly TranscriptItem[];
   readonly identity?: string;
   readonly toolsExpanded?: boolean;
@@ -99,6 +102,7 @@ export function ReplayableTranscript({
     messageId: string,
     cached?: CachedRow,
     promptCompletion?: TranscriptItem["promptCompletion"],
+    steerState?: "unconsumed" | "unconfirmed",
   ): void => {
     const index = lineCounts.get(messageId) ?? 0;
     lineCounts.set(messageId, index + 1);
@@ -108,13 +112,25 @@ export function ReplayableTranscript({
       message,
       part: cached?.part,
       promptCompletion,
-      fingerprint: `${id}:${cached?.fingerprint ?? (promptCompletion ? JSON.stringify(promptCompletion) : "blank")}`,
+      steerState,
+      fingerprint: `${id}:${cached?.fingerprint ?? steerState ?? (promptCompletion ? JSON.stringify(promptCompletion) : "blank")}`,
     });
   };
   for (const item of items) {
     if (item.promptCompletion) {
       append(item.message, item.messageId, undefined, item.promptCompletion);
     } else {
+      const recovery = unconsumedSteers?.find(
+        (input) => input.messageId === item.messageId,
+      );
+      if (recovery)
+        append(
+          item.message,
+          item.messageId,
+          undefined,
+          undefined,
+          recovery.state,
+        );
       for (const part of project(item.message))
         append(item.message, item.messageId, part);
       if (item.spacing) append(item.message, item.messageId);
@@ -201,7 +217,13 @@ export function ReplayableTranscript({
     <>
       <Static key={generation} items={staticRows}>
         {(row): ReactElement =>
-          row.promptCompletion ? (
+          row.steerState ? (
+            <Text key={row.id} dimColor>
+              {row.steerState === "unconfirmed"
+                ? "Processing unconfirmed"
+                : "Not processed"}
+            </Text>
+          ) : row.promptCompletion ? (
             <PromptCompletion key={row.id} prompt={row.promptCompletion} />
           ) : row.part ? (
             <Box key={row.id}>

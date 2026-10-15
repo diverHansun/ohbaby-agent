@@ -6,6 +6,7 @@ import type {
   UiPromptCompletion,
 } from "ohbaby-sdk";
 import { createUiCommandGateway } from "./ui-command-gateway.js";
+import type { UiPromptQueueExecutionPort } from "../adapters/ui-inprocess.js";
 
 const completion: UiPromptCompletion = {
   prompt: {
@@ -158,5 +159,53 @@ describe("createUiCommandGateway", () => {
 
     await expect(gateway.abortRun("run_1")).resolves.toBeUndefined();
     expect(raw.abortRun).toHaveBeenCalledWith("run_1");
+  });
+});
+
+it("records an explicit resend once with the new prompt receipt and trusted owner", async () => {
+  const records: UiCommandRecord[] = [];
+  const receipt = {
+    clientRequestId: "resend:one",
+    createdAt: "2026-10-15T00:00:00.000Z",
+    promptId: "new-prompt",
+    sessionId: "session",
+    status: "queued" as const,
+    userMessageId: "new-message",
+  };
+  const raw = {
+    resendSteerInputForOwner: vi.fn<
+      UiPromptQueueExecutionPort["resendSteerInputForOwner"]
+    >(() => Promise.resolve(receipt)),
+  };
+  const gateway = createUiCommandGateway(
+    raw as unknown as UiBackendClient & typeof raw,
+    {
+      entryPoint: "server-rpc",
+      recorder: { record: (record) => records.push(record) },
+    },
+  );
+  const input = { inputId: "steer:old", operationId: "one" };
+  expect(
+    await gateway.resendSteerInputForOwner(input, "trusted-owner", "session"),
+  ).toEqual(receipt);
+  expect(raw.resendSteerInputForOwner).toHaveBeenCalledWith(
+    input,
+    "trusted-owner",
+    "session",
+  );
+  expect(records).toHaveLength(2);
+  expect(records[0]).toMatchObject({
+    method: "resendSteerInput",
+    phase: "started",
+    correlation: { clientId: "trusted-owner" },
+  });
+  expect(records[1]).toMatchObject({
+    method: "resendSteerInput",
+    phase: "completed",
+    correlation: {
+      promptId: "new-prompt",
+      clientRequestId: "resend:one",
+      sessionId: "session",
+    },
   });
 });

@@ -511,6 +511,18 @@ class FakeBackend implements UiBackendClient {
     return Promise.reject(new Error("No queued prompt in fake backend"));
   }
 
+  resendSteerInput(
+    _input: Parameters<UiBackendClient["resendSteerInput"]>[0],
+  ): ReturnType<UiBackendClient["resendSteerInput"]> {
+    return Promise.reject(new Error("unused"));
+  }
+  resendSteerInputForOwner(
+    input: Parameters<UiBackendClient["resendSteerInput"]>[0],
+    _owner: string,
+    _sessionId?: string,
+  ): ReturnType<UiBackendClient["resendSteerInput"]> {
+    return this.resendSteerInput(input);
+  }
   steerQueuedPrompt(
     _input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {

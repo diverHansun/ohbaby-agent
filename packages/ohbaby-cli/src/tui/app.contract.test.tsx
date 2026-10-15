@@ -5472,6 +5472,9 @@ function createFakeClient(
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly steerQueuedPrompt: ReturnType<typeof vi.fn>;
+  readonly resendSteerInput: ReturnType<
+    typeof vi.fn<TerminalClient["resendSteerInput"]>
+  >;
   readonly cancelQueuedPrompt: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
   readonly executeCommand: ReturnType<typeof vi.fn>;
@@ -5681,6 +5684,9 @@ function createFakeClient(
       }),
     ),
     steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
+    resendSteerInput: vi.fn<TerminalClient["resendSteerInput"]>(() =>
+      Promise.reject(new Error("unused")),
+    ),
     cancelQueuedPrompt: vi.fn((input: { readonly promptId: string }) => {
       const prompt = initialSnapshot.prompts?.find(
         (candidate) => candidate.promptId === input.promptId,
@@ -5798,6 +5804,7 @@ function createFakeClient(
             handler({
               type: "session.changed",
               version: next.version,
+              session: next.session,
               messages: next.session.messages,
               runs: next.runs,
               prompts: next.prompts,
@@ -6193,7 +6200,10 @@ it("Steers a selected queued row with a stable request after an uncertain respon
     Promise.reject(new Error("No selection"));
   client.steerQueuedPrompt
     .mockRejectedValueOnce(new Error("response lost"))
-    .mockResolvedValueOnce({ acceptedTargetRunId: "run_1" });
+    .mockResolvedValueOnce({
+      status: "steered",
+      receipt: { acceptedTargetRunId: "run_1" },
+    });
   const app = render(
     <OhbabyTerminalApp
       client={client}
@@ -6264,7 +6274,10 @@ it.each(["before", "after"])(
     client.getSubagentExecutionView = (): Promise<
       import("ohbaby-sdk").UiSubagentExecutionView
     > => Promise.reject(new Error("No selection"));
-    let accept!: (receipt: { acceptedTargetRunId: string }) => void;
+    let accept!: (result: {
+      status: "steered";
+      receipt: { acceptedTargetRunId: string };
+    }) => void;
     client.steerQueuedPrompt.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -6282,7 +6295,7 @@ it.each(["before", "after"])(
     app.stdin.write("\u0013");
     await flush();
     if (timing === "after") {
-      accept({ acceptedTargetRunId: "run_1" });
+      accept({ status: "steered", receipt: { acceptedTargetRunId: "run_1" } });
       await waitForFrame(app, (frame) => frame.includes("Steer accepted"));
     }
     client.emit({
@@ -6296,13 +6309,26 @@ it.each(["before", "after"])(
         status: { kind: "idle" },
         terminalReason: "user-stop",
         inputsCloseReason: "user-stop",
-        unsentSteer: true,
       },
     });
-    await waitForFrame(app, (frame) =>
-      frame.includes("Task stopped before your steer message was sent."),
-    );
-    if (timing === "before") accept({ acceptedTargetRunId: "run_1" });
+    client.emit({
+      type: "session.updated",
+      session: {
+        ...snapshot().sessions[0],
+        unconsumedSteers: [
+          {
+            inputId: "input",
+            promptId: "queued-steer",
+            messageId: "queued-message",
+            text: "steer this row",
+            state: "unconsumed",
+          },
+        ],
+      },
+    });
+    await waitForFrame(app, (frame) => frame.includes("Not processed"));
+    if (timing === "before")
+      accept({ status: "steered", receipt: { acceptedTargetRunId: "run_1" } });
     await flush();
     expect(app.lastFrame()).not.toContain("Steer accepted");
     client.emit({
@@ -7223,3 +7249,208 @@ it("Ctrl+O before any session keeps the mode when the first session binds automa
   expect(app.lastFrame()).not.toContain("AUTOMATIC-BIND-BODY");
   app.unmount();
 });
+
+it("recovers an older steer from the session list with stable retry and a fresh explicit resend", async () => {
+  const initial = snapshot();
+  const client = createFakeClient({
+    ...initial,
+    sessions: initial.sessions.map((session) => ({
+      ...session,
+      unconsumedSteers: [
+        {
+          inputId: "input-old",
+          promptId: "prompt-old",
+          messageId: "outside-page",
+          text: "Original recovery requirement",
+          state: "unconfirmed" as const,
+        },
+      ],
+    })),
+  });
+  client.resendSteerInput
+    .mockRejectedValueOnce(new Error("response lost"))
+    .mockResolvedValue(promptReceipt("resent"));
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await waitForFrame(app, (frame) =>
+    frame.includes("Original recovery requirement"),
+  );
+  expect(app.lastFrame()).toContain("Processing unconfirmed");
+  await flush();
+  app.stdin.write("\u0012");
+  await waitForFrame(app, (frame) => frame.includes("response lost"));
+  app.stdin.write("\u0012");
+  await waitForFrame(app, (frame) => frame.includes("Resend accepted"));
+  expect(client.resendSteerInput.mock.calls[1]?.[0]).toEqual(
+    client.resendSteerInput.mock.calls[0]?.[0],
+  );
+  app.stdin.write("\u0012");
+  await flush();
+  expect(client.resendSteerInput.mock.calls[2]?.[0].operationId).not.toBe(
+    client.resendSteerInput.mock.calls[0]?.[0].operationId,
+  );
+  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+});
+
+it.each(["before", "after"])(
+  "keeps a resend admission error visible when recovery clears %s the receipt",
+  async (timing) => {
+    const initial = snapshot();
+    const client = createFakeClient({
+      ...initial,
+      sessions: initial.sessions.map((session) => ({
+        ...session,
+        unconsumedSteers: [
+          {
+            inputId: "input-old",
+            promptId: "prompt-old",
+            messageId: "outside-page",
+            text: "Original recovery requirement",
+            state: "unconfirmed" as const,
+          },
+        ],
+      })),
+    });
+    const acknowledgement = createDeferred<UiPromptReceipt>();
+    client.resendSteerInput.mockReturnValue(acknowledgement.promise);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) =>
+      frame.includes("Original recovery requirement"),
+    );
+    await flush();
+    app.stdin.write("Unrelated draft");
+    app.stdin.write("\u0012");
+    await flush();
+    const clearRecovery = (): void => {
+      client.emit({
+        type: "session.updated",
+        session: { ...initial.sessions[0], unconsumedSteers: [] },
+      });
+    };
+    if (timing === "before") {
+      clearRecovery();
+      await flush();
+    }
+    acknowledgement.resolve({
+      ...promptReceipt("resent"),
+      steer: {
+        status: "error",
+        error: {
+          code: "STEER_FAILED",
+          source: "scheduler",
+          message: "Input store unavailable",
+          retryable: true,
+        },
+      },
+    });
+    await waitForFrame(app, (frame) =>
+      frame.includes("Input store unavailable"),
+    );
+    if (timing === "after") {
+      clearRecovery();
+      await flush();
+    }
+    expect(app.lastFrame()).toContain("Accepted in queue");
+    expect(app.lastFrame()).toContain("Input store unavailable");
+    expect(app.lastFrame()).not.toContain("Original recovery requirement");
+    expect(app.lastFrame()).toContain("Unrelated draft");
+    expect(client.resendSteerInput).toHaveBeenCalledTimes(1);
+    expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+  },
+);
+
+it("shows an automatic steer failure after durable admission without restoring the submitted draft", async () => {
+  const client = createFakeClient(snapshot());
+  client.submitPromptAccepted.mockResolvedValue({
+    ...promptReceipt(),
+    steer: {
+      status: "error",
+      error: {
+        code: "STEER_FAILED",
+        source: "scheduler",
+        message: "Input store unavailable",
+        retryable: true,
+      },
+    },
+  });
+  const app = render(
+    <OhbabyTerminalApp
+      client={client}
+      subscribeEvents={client.subscribeEvents}
+    />,
+  );
+  await flush();
+  app.stdin.write("accepted requirement");
+  app.stdin.write("\r");
+  await waitForFrame(app, (frame) => frame.includes("Input store unavailable"));
+  expect(app.lastFrame()).toContain("Accepted in queue");
+  expect(app.lastFrame()).not.toContain("> accepted requirement");
+  expect(client.submitPromptAccepted).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  ["Ctrl+arrows", "\u001b[1;5C", "\u001b[1;5D"],
+  ["Ctrl+N/P", "\u000e", "\u0010"],
+])(
+  "keeps long recovery inputs navigable with %s without changing the draft",
+  async (_label, next, previous) => {
+    const initial = snapshot();
+    const client = createFakeClient({
+      ...initial,
+      sessions: initial.sessions.map((session) => ({
+        ...session,
+        unconsumedSteers: [
+          {
+            inputId: "long",
+            promptId: "long-prompt",
+            messageId: "long-message",
+            text: "Large original\n".repeat(1000),
+            state: "unconsumed" as const,
+          },
+          {
+            inputId: "second",
+            promptId: "second-prompt",
+            messageId: "second-message",
+            text: "Second recovery item",
+            state: "unconfirmed" as const,
+          },
+        ],
+      })),
+    });
+    client.resendSteerInput.mockResolvedValue(promptReceipt("resent"));
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Steer recovery"));
+    expect((app.lastFrame() ?? "").split("\n").length).toBeLessThan(30);
+    expect(app.lastFrame()).toContain("1 / 2");
+    await flush();
+    app.stdin.write("Unrelated draft");
+    app.stdin.write(next);
+    await waitForFrame(app, (frame) => frame.includes("Second recovery item"));
+    expect(app.lastFrame()).toContain("2 / 2");
+    expect(app.lastFrame()).toContain("Unrelated draft");
+    app.stdin.write(previous);
+    await waitForFrame(app, (frame) => frame.includes("1 / 2"));
+    app.stdin.write(next);
+    await waitForFrame(app, (frame) => frame.includes("2 / 2"));
+    app.stdin.write("\u0012");
+    await waitForFrame(app, (frame) => frame.includes("Resend accepted"));
+    expect(app.lastFrame()).toContain("Unrelated draft");
+    expect(client.resendSteerInput).toHaveBeenCalledWith(
+      expect.objectContaining({ inputId: "second" }),
+    );
+  },
+);

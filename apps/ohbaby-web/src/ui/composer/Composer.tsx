@@ -1,3 +1,4 @@
+import { UnconsumedSteers } from "./UnconsumedSteers.js";
 import { SteerButton } from "./SteerButton.js";
 import { LoaderCircle, Pencil, Send, Square, Trash2 } from "lucide-react";
 import type {
@@ -7,6 +8,7 @@ import type {
   UiPromptSubmission,
   UiReasoningConfig,
   UiSession,
+  UiUnconsumedSteer,
   UiWebCommandCatalog,
 } from "ohbaby-sdk";
 import type {
@@ -79,12 +81,13 @@ export function Composer(props: {
     | "resubmitRetainedPrompt"
     | "cancelQueuedPrompt"
     | "steerQueuedPrompt"
+    | "resendSteerInput"
     | "getCurrentModel"
     | "subscribeEvents"
     | "updateSessionReasoning"
   >;
   readonly compact?: boolean;
-  readonly unsentSteer?: boolean;
+  readonly unconsumedSteers?: readonly UiUnconsumedSteer[];
   readonly readOnly?: boolean;
   readonly draftScopeKey: string;
   readonly isPromptAdmitting: boolean;
@@ -133,6 +136,7 @@ export function Composer(props: {
   const [queueExpanded, setQueueExpanded] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [resendError, setResendError] = useState<string | null>(null);
   const [slashCatalog, setSlashCatalog] = useState<UiWebCommandCatalog | null>(
     null,
   );
@@ -234,6 +238,7 @@ export function Composer(props: {
     queueAcquirePendingRef.current = false;
     setQueueAcquirePending(false);
     setQueueError(null);
+    setResendError(null);
     setLeaseActivityVersion(0);
 
     const storedLease = readSessionValue(
@@ -983,9 +988,27 @@ export function Composer(props: {
         }}
       >
         {props.topContent}
-        {props.unsentSteer ? (
-          <p className="ohb-unsent-steer" role="status">
-            Task stopped before your steer message was sent.
+        <UnconsumedSteers
+          inputs={props.unconsumedSteers ?? []}
+          disabled={props.model.disabled || props.readOnly === true}
+          resend={async (input) => {
+            const generation = draftScopeGeneration.current;
+            setResendError(null);
+            const receipt = await props.client.resendSteerInput(input);
+            if (
+              generation === draftScopeGeneration.current &&
+              receipt.steer?.status === "error"
+            ) {
+              setResendError(
+                `Accepted in queue · ${receipt.steer.error.message}`,
+              );
+            }
+            return receipt;
+          }}
+        />
+        {resendError ? (
+          <p className="ohb-unsent-steer ohb-slash-error" role="alert">
+            {resendError}
           </p>
         ) : null}
         {steerNoticeRunId && steerNoticeRunId === props.model.activeRunId ? (
@@ -1044,6 +1067,7 @@ export function Composer(props: {
                         const receipt =
                           await props.client.steerQueuedPrompt(input);
                         if (
+                          receipt.status === "steered" &&
                           generation === draftScopeGeneration.current &&
                           revision === editRevision.current &&
                           currentSteerTarget.current.activeRunId ===

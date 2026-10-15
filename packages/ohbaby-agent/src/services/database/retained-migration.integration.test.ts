@@ -9,6 +9,7 @@ import type { InterfaceProviderStreamEvent } from "../interface-providers/types.
 import { closeDatabase, getDatabase, initDatabase } from "./index.js";
 import { NodeSqliteConnection } from "./connection.js";
 import { INITIAL_MIGRATIONS } from "./migrations.js";
+import { DatabasePromptSubmissionStore } from "../../runtime/prompt-scheduler/database-store.js";
 
 const legacy = INITIAL_MIGRATIONS.filter((m) => m.version < "022");
 const upgrade = INITIAL_MIGRATIONS.find(
@@ -91,6 +92,49 @@ describe("offline retained queue migration", () => {
       VALUES('done-instance','s','finished-child','s','generic','finished prompt','completed','[ ]',NULL,'finished-run','original complete output',1,4,4)`,
     ).run();
   }
+
+  it("S4-15 adds nullable resend ancestry without backfilling legacy prompts or limiting explicit children", async () => {
+    initDatabase({ dbPath, migrationBackupPath: backupPath });
+    const prompts = new DatabasePromptSubmissionStore({ db: getDatabase() });
+    const original = await prompts.get("q");
+    expect(original).toMatchObject({
+      promptId: "q",
+      text: "keep",
+      userMessageId: "m",
+    });
+    expect(original?.resendOfPromptId).toBeUndefined();
+    expect(
+      getDatabase()
+        .prepare(
+          "SELECT resend_of_prompt_id FROM prompt_submission WHERE prompt_id='q'",
+        )
+        .get(),
+    ).toEqual({ resend_of_prompt_id: null });
+    for (const id of ["one", "two"])
+      await prompts.accept({
+        promptId: id,
+        userMessageId: `message-${id}`,
+        clientRequestId: `resend:${id}`,
+        sessionId: "s",
+        scopeKey: "/w",
+        text: "keep",
+        resendOfPromptId: "q",
+        maxQueuedPrompts: 100,
+      });
+    expect(
+      (await prompts.listResendChildren("/w", "q")).map(
+        (prompt) => prompt.promptId,
+      ),
+    ).toEqual(["one", "two"]);
+    expect(await prompts.get("q")).toEqual(original);
+    const column = getDatabase()
+      .prepare<{ name: string; notnull: number }>(
+        "PRAGMA table_info(prompt_submission)",
+      )
+      .all()
+      .find((entry) => entry.name === "resend_of_prompt_id");
+    expect(column?.notnull).toBe(0);
+  });
 
   it("retires offline ownerless child current and pending eligibility without changing terminal audit records", () => {
     seedLegacyChild();

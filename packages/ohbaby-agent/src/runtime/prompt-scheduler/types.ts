@@ -13,6 +13,7 @@ export type PromptSubmissionStatus =
   | "interrupted";
 
 export interface PromptSubmissionRecord {
+  readonly resendOfPromptId?: string;
   readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
   /** Admission-created temporary title; preserved when the queued text changes. */
   readonly titleExpected?: string;
@@ -42,6 +43,7 @@ export interface PromptSubmissionRecord {
 }
 
 export interface AcceptPromptSubmissionInput {
+  readonly resendOfPromptId?: string;
   readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
   /** Admission-created temporary title; preserved when the queued text changes. */
   readonly titleExpected?: string;
@@ -194,6 +196,11 @@ export interface PromptSubmissionStore {
     scopeKey: string,
     sessionId: string,
   ): Promise<string | undefined>;
+  /** All resend children, including terminal and steered history outside the loaded page. */
+  listResendChildren(
+    scopeKey: string,
+    parentPromptId: string,
+  ): Promise<readonly PromptSubmissionRecord[]>;
   listForSession(
     scopeKey: string,
     sessionId: string,

@@ -33,6 +33,7 @@ import { renderToolDisplay } from "./parts/tool-display.js";
 const OUTPUT_TRUNCATED_LABEL = "output truncated";
 
 export interface MessageRowProps {
+  readonly steerState?: "unconsumed" | "unconfirmed";
   readonly anchorId?: string;
   /** Bottom margin rows; 0 for transcript fragments that continue below. */
   readonly bottomMargin?: number;
@@ -56,6 +57,7 @@ export type PairedMessagePart =
     };
 
 export const MessageRow = memo(function MessageRow({
+  steerState,
   anchorId,
   bottomMargin = 1,
   contentWidth,
@@ -72,13 +74,15 @@ export const MessageRow = memo(function MessageRow({
     width: number;
     theme: Theme;
     expanded: boolean;
+    steerState?: "unconsumed" | "unconfirmed";
     height: number;
   }>();
   const valid =
     measured?.message === message &&
     measured.width === contentWidth &&
     measured.theme === theme &&
-    measured.expanded === toolsExpanded;
+    measured.expanded === toolsExpanded &&
+    measured.steerState === steerState;
   const geometry = element.current
     ? measureElement(element.current)
     : undefined;
@@ -100,6 +104,7 @@ export const MessageRow = memo(function MessageRow({
       width: contentWidth,
       theme,
       expanded: toolsExpanded,
+      steerState,
       height: measureElement(element.current).height,
     });
   });
@@ -145,6 +150,13 @@ export const MessageRow = memo(function MessageRow({
 
   return (
     <Box ref={register} flexDirection="column" marginBottom={bottomMargin}>
+      {steerState ? (
+        <Text dimColor>
+          {steerState === "unconfirmed"
+            ? "Processing unconfirmed"
+            : "Not processed"}
+        </Text>
+      ) : null}
       {content}
     </Box>
   );

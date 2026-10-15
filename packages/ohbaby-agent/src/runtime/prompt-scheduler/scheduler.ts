@@ -6,6 +6,8 @@ import type {
   CurrentRunInputStore,
   SteerQueuedPromptInput,
   SteerQueuedPromptResult,
+  SteerQueuedPromptOutcome,
+  SteerQueuedPromptReceipt,
 } from "./current-run-inputs.js";
 import type { ReasoningConfig } from "../../config/llm/types.js";
 import { sameReasoning } from "./types.js";
@@ -38,6 +40,10 @@ export interface WorkspacePromptSchedulerOptions {
     subscribe(sessionId: string, wake: () => void): () => void;
   };
   readonly currentRunInputs?: CurrentRunInputStore;
+  /** Synchronous goal qualification inside the existing session owner boundary. */
+  readonly resolveSteerTarget?: (
+    sessionId: string,
+  ) => { runId: string } | undefined;
   readonly onSteered?: (result: SteerQueuedPromptResult) => void;
   readonly scopeKey: string;
   readonly store: PromptSubmissionStore;
@@ -82,7 +88,28 @@ export interface WorkspacePromptSchedulerOptions {
   readonly onUpdated?: (prompt: PromptSubmissionRecord) => void;
 }
 
+export interface AcceptedSteerError {
+  readonly code: string;
+  readonly message: string;
+  readonly retryable: boolean;
+}
+export type SteerSkipReason =
+  | "no-goal-run"
+  | "earlier-queued"
+  | "target-unavailable"
+  | "target-sealed";
+export type AcceptedSteerOutcome =
+  | { readonly status: "steered"; readonly receipt: SteerQueuedPromptReceipt }
+  | { readonly status: "not-steered"; readonly reason: SteerSkipReason }
+  | { readonly status: "existing"; readonly promptId: string }
+  | { readonly status: "error"; readonly error: AcceptedSteerError };
+export interface AcceptedWorkspacePrompt {
+  readonly record: PromptSubmissionRecord;
+  readonly steer: AcceptedSteerOutcome;
+}
+
 export interface AcceptWorkspacePromptInput {
+  readonly resendOfPromptId?: string;
   readonly titleExpected?: (sessionId: string) => string | undefined;
   readonly namingSource?: import("ohbaby-sdk").UiPromptNamingSource;
   readonly reasoning?:
@@ -193,7 +220,7 @@ export class WorkspacePromptScheduler {
 
   async accept(
     input: AcceptWorkspacePromptInput,
-  ): Promise<PromptSubmissionRecord> {
+  ): Promise<AcceptedWorkspacePrompt> {
     this.assertOpen();
     await this.init();
     const explicitSessionId =
@@ -237,6 +264,7 @@ export class WorkspacePromptScheduler {
           (typeof input.sessionId === "string" ? input.sessionId : undefined);
         if (
           existing.text !== input.text ||
+          existing.resendOfPromptId !== input.resendOfPromptId ||
           (typeof input.reasoning !== "function" &&
             input.reasoning !== undefined &&
             !sameReasoning(existing.reasoning, input.reasoning)) ||
@@ -245,7 +273,7 @@ export class WorkspacePromptScheduler {
         ) {
           throw new PromptIdempotencyConflictError(clientRequestId);
         }
-        return existing;
+        return this.existingAcceptance(existing);
       }
       knownUnaccepted = true;
       await this.options.store.assertCapacity(
@@ -281,6 +309,7 @@ export class WorkspacePromptScheduler {
           scopeKey: this.options.scopeKey,
           sessionId,
           text: input.text,
+          resendOfPromptId: input.resendOfPromptId,
           namingSource: input.namingSource,
           titleExpected: input.titleExpected?.(sessionId),
           reasoning,
@@ -290,9 +319,9 @@ export class WorkspacePromptScheduler {
             `message_${randomUUID()}`,
         });
         // The durable receipt survives projection failures and shutdown races.
-        if (accepted.inserted)
-          this.notify(accepted.record, this.options.onSubmitted);
-        return accepted.record;
+        if (!accepted.inserted) return this.existingAcceptance(accepted.record);
+        this.notify(accepted.record, this.options.onSubmitted);
+        return this.steerAccepted(accepted.record);
       });
       this.requestDrain();
       return prompt;
@@ -303,6 +332,115 @@ export class WorkspacePromptScheduler {
     } finally {
       release();
     }
+  }
+
+  private existingAcceptance(
+    record: PromptSubmissionRecord,
+  ): AcceptedWorkspacePrompt {
+    return {
+      record,
+      steer:
+        record.status === "steered" && record.steerReceipt
+          ? { status: "steered", receipt: record.steerReceipt }
+          : { status: "existing", promptId: record.promptId },
+    };
+  }
+
+  /** Already inside commit(sessionId): only invoke store methods, never public steerQueued. */
+  private async steerAccepted(
+    record: PromptSubmissionRecord,
+  ): Promise<AcceptedWorkspacePrompt> {
+    if (!this.options.resolveSteerTarget)
+      return {
+        record,
+        steer: { status: "not-steered", reason: "no-goal-run" },
+      };
+    try {
+      const queued = await this.options.store.listQueued(record.scopeKey);
+      const acceptedAt = record.acceptedAt ?? record.createdAt;
+      const earlier = queued.some((candidate) => {
+        const candidateAt = candidate.acceptedAt ?? candidate.createdAt;
+        return (
+          candidate.sessionId === record.sessionId &&
+          candidate.promptId !== record.promptId &&
+          (candidateAt < acceptedAt ||
+            (candidateAt === acceptedAt &&
+              (candidate.admissionOrder ?? 0) < (record.admissionOrder ?? 0)))
+        );
+      });
+      if (earlier)
+        return {
+          record,
+          steer: { status: "not-steered", reason: "earlier-queued" },
+        };
+      const target = this.options.resolveSteerTarget(record.sessionId);
+      if (!target)
+        return {
+          record,
+          steer: { status: "not-steered", reason: "no-goal-run" },
+        };
+      const inputs = this.options.currentRunInputs;
+      if (!inputs) throw new Error("Current-run inputs are unavailable");
+      const result = await inputs.steerQueued({
+        promptId: record.promptId,
+        expectedRunId: target.runId,
+        // Acceptance and its one automatic routing decision deliberately share identity.
+        clientRequestId: record.clientRequestId,
+        scopeKey: record.scopeKey,
+        sessionId: record.sessionId,
+        // Ordinary queued prompts belong to the root scope, as does automatic claim.
+      });
+      if (result.status === "steered") {
+        this.completeSteer(result);
+        return {
+          record: result.prompt,
+          steer: { status: "steered", receipt: result.receipt },
+        };
+      }
+      // A foreign conversion can only reuse its actual durable state, never claim a new decision.
+      if (result.reason === "prompt-not-queued")
+        return this.existingAcceptance(result.prompt);
+      return {
+        record: result.prompt,
+        steer: { status: "not-steered", reason: result.reason },
+      };
+    } catch (error) {
+      return {
+        record,
+        steer: {
+          status: "error",
+          error: {
+            code:
+              typeof error === "object" &&
+              error !== null &&
+              "code" in error &&
+              typeof error.code === "string"
+                ? error.code
+                : "STEER_ERROR",
+            message: error instanceof Error ? error.message : String(error),
+            retryable:
+              typeof error === "object" &&
+              error !== null &&
+              "retryable" in error &&
+              error.retryable === true,
+          },
+        },
+      };
+    }
+  }
+
+  private completeSteer(result: SteerQueuedPromptResult): void {
+    this.notify(result.prompt, this.options.onUpdated);
+    try {
+      this.options.onSteered?.(result);
+    } catch (error) {
+      try {
+        this.options.onProjectionError?.(error, result.prompt);
+      } catch {
+        /* The receipt is already durable; projection errors cannot block waiters. */
+      }
+    }
+    this.resolveCompletion(result.prompt);
   }
 
   async resubmitRetained(
@@ -347,7 +485,7 @@ export class WorkspacePromptScheduler {
 
   async steerQueued(
     input: SteerQueuedPromptInput,
-  ): Promise<SteerQueuedPromptResult> {
+  ): Promise<SteerQueuedPromptOutcome> {
     this.assertOpen();
     if (!this.options.currentRunInputs)
       throw new Error("Current-run inputs are unavailable");
@@ -361,15 +499,9 @@ export class WorkspacePromptScheduler {
         ...input,
         scopeKey: this.options.scopeKey,
       });
-      this.notify(result.prompt, this.options.onUpdated);
-      try {
-        this.options.onSteered?.(result);
-      } catch (error) {
-        this.options.onProjectionError?.(error, result.prompt);
-      }
+      if (result.status === "steered") this.completeSteer(result);
       return result;
     });
-    this.resolveCompletion(result.prompt);
     this.requestDrain();
     return result;
   }

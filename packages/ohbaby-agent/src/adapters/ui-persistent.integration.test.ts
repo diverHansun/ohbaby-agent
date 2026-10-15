@@ -2979,3 +2979,157 @@ it.each(["compact", "prompt"] as const)(
     }
   },
 );
+
+it("S4-10 isolates failed recovery from healthy sessions and readable history until explicit retry", async () => {
+  const directory = await tempDir("ohbaby-steer-startup-recovery-");
+  const release = createDeferred<undefined>();
+  const started = createDeferred<undefined>();
+  let client: PersistentUiBackendClient | undefined;
+  try {
+    const workdir = join(directory, "workspace");
+    const dbPath = join(directory, "agent.db");
+    client = createPersistentUiBackendClient({
+      dbPath,
+      workdir,
+      llmClient: createFakeLLMClient([
+        { textDelta: "seed", finishReason: "stop" },
+      ]),
+    });
+    const first = await client.submitPromptAccepted("seed recovery session");
+    await client.waitForPrompt(first.promptId);
+    const other = await client.createSession();
+    await client.submitPromptAndWait("healthy session", {
+      sessionId: other.id,
+    });
+    await client.dispose();
+    client = undefined;
+    const ledger = createDatabaseRunLedger({
+      ownerId: "old-owner",
+      ownerPid: 2147483647,
+    });
+    await ledger.createPending({
+      runId: "stale-steer-run",
+      sessionId: first.sessionId,
+      triggerSource: "user",
+    });
+    await ledger.markRunning("stale-steer-run");
+    const { DatabasePromptSubmissionStore } =
+      await import("../runtime/prompt-scheduler/database-store.js");
+    const { DatabaseCurrentRunInputStore } =
+      await import("../runtime/prompt-scheduler/current-run-inputs.js");
+    const prompts = new DatabasePromptSubmissionStore({
+      ownerId: "old-owner",
+      ownerPid: 2147483647,
+    });
+    await prompts.accept({
+      promptId: "stale-steer-prompt",
+      userMessageId: "stale-steer-message",
+      clientRequestId: "stale-accept",
+      sessionId: first.sessionId,
+      scopeKey: workdir,
+      text: "recover my original guidance",
+      maxQueuedPrompts: 100,
+    });
+    const inputs = new DatabaseCurrentRunInputStore();
+    await inputs.steerQueued({
+      promptId: "stale-steer-prompt",
+      expectedRunId: "stale-steer-run",
+      clientRequestId: "stale-steer",
+      sessionId: first.sessionId,
+      scopeKey: workdir,
+    });
+    getDatabase()
+      .prepare(
+        "UPDATE run_ledger SET owner_id=NULL, owner_pid=NULL WHERE run_id='stale-steer-run'",
+      )
+      .run();
+    client = createPersistentUiBackendClient({
+      dbPath,
+      workdir,
+      resumeSessionId: other.id,
+      llmClient: createConcurrentBlockingLLMClient({
+        onStarted: () => {
+          started.resolve(undefined);
+        },
+        release: release.promise,
+      }),
+    });
+    if (!client.getSessionView || !client.getSessionHistory)
+      throw new Error("Session recovery API unavailable");
+    const snapshot = await client.getSnapshot();
+    expect(
+      snapshot.sessions.find((session) => session.id === first.sessionId)
+        ?.unconsumedSteers,
+    ).toBeUndefined();
+    await client.initializeSession(other.id);
+    expect(
+      (await client.getSessionView({ sessionId: other.id })).session
+        .unconsumedSteers,
+    ).toEqual([]);
+    await expect(client.initializeSession(first.sessionId)).rejects.toThrow(
+      /unknown owner/i,
+    );
+    const blocked = await client.getSessionView({ sessionId: first.sessionId });
+    expect(blocked.session.unconsumedSteers).toBeUndefined();
+    expect(blocked.executionRecovery?.status).toBe("blocked");
+    expect(blocked.executionRecovery).toHaveProperty(
+      "message",
+      expect.stringMatching(/unknown owner/i),
+    );
+    expect(JSON.stringify(blocked.session.messages)).toContain(
+      "seed recovery session",
+    );
+    expect(
+      JSON.stringify(
+        (await client.getSessionHistory({ sessionId: first.sessionId }))
+          .messages,
+      ),
+    ).toContain("seed recovery session");
+    const healthy = await client.submitPromptAccepted("still healthy", {
+      sessionId: other.id,
+    });
+    await started.promise;
+    const queued = await client.submitPromptAccepted("cancel healthy queue", {
+      sessionId: other.id,
+    });
+    expect(queued.status).toBe("queued");
+    expect(
+      (await client.cancelQueuedPrompt({ promptId: queued.promptId })).status,
+    ).toBe("cancelled");
+    release.resolve(undefined);
+    expect((await client.waitForPrompt(healthy.promptId)).prompt.status).toBe(
+      "succeeded",
+    );
+    // Reading again must retain unknown recovery, without retrying execution repair.
+    expect(
+      (await client.getSnapshot()).sessions.find(
+        (session) => session.id === first.sessionId,
+      )?.unconsumedSteers,
+    ).toBeUndefined();
+    getDatabase()
+      .prepare(
+        "UPDATE run_ledger SET owner_id='old-owner', owner_pid=2147483647 WHERE run_id='stale-steer-run'",
+      )
+      .run();
+    await client.initializeSession(first.sessionId);
+    const view = await client.getSessionView({ sessionId: first.sessionId });
+    expect(view.executionRecovery).toEqual({ status: "ready" });
+    expect(view.session.unconsumedSteers).toMatchObject([
+      {
+        promptId: "stale-steer-prompt",
+        text: "recover my original guidance",
+        state: "unconsumed",
+      },
+    ]);
+    expect(
+      (await client.getSnapshot()).sessions.find(
+        (session) => session.id === first.sessionId,
+      )?.unconsumedSteers,
+    ).toEqual(view.session.unconsumedSteers);
+  } finally {
+    release.resolve(undefined);
+    await client?.dispose();
+    closeDatabase();
+    await rm(directory, { force: true, recursive: true });
+  }
+});

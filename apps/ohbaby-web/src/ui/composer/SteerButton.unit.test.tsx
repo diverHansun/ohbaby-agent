@@ -26,7 +26,17 @@ describe("Steer button", () => {
     const steer = vi
       .fn()
       .mockRejectedValueOnce(new Error("response lost"))
-      .mockResolvedValue({});
+      .mockResolvedValue({
+        status: "steered",
+        receipt: {
+          promptId: "p",
+          userMessageId: "m",
+          inputId: "input",
+          acceptedTargetRunId: "r",
+          acceptedAt: 1,
+          clientRequestId: "steer",
+        },
+      });
     const render = (runId = "run", lease = false): void => {
       act(() => {
         root.render(

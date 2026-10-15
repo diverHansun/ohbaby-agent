@@ -1,4 +1,4 @@
-import { hasUnsentSteerAfterLatestStop } from "ohbaby-sdk";
+import { getUnconsumedSteers } from "ohbaby-sdk";
 import {
   createSubagentReader,
   createSubagentConversationReader,
@@ -622,6 +622,9 @@ export function SessionScreen({
             ? {}
             : { sessionId: submittedSessionId }),
         });
+        if (receipt.steer?.status === "error") {
+          setActionError(`Accepted in queue · ${receipt.steer.error.message}`);
+        }
         if (receipt.clientRequestId !== requestId) {
           throw new Error("Prompt receipt did not match this submission");
         }
@@ -1034,6 +1037,7 @@ export function SessionScreen({
                 }}
               >
                 <ConversationStream
+                  unconsumedSteers={getUnconsumedSteers(view.activeSession)}
                   historyState={storeSnapshot.historyState}
                   historyHasMore={storeSnapshot.historyHasMore}
                   historyStale={storeSnapshot.historyStale}
@@ -1149,10 +1153,7 @@ export function SessionScreen({
             }}
             activeSession={view.activeSession}
             queuedPrompts={view.queuedPrompts}
-            unsentSteer={hasUnsentSteerAfterLatestStop(
-              view.snapshot?.runs ?? [],
-              view.composer.activeSessionId,
-            )}
+            unconsumedSteers={getUnconsumedSteers(view.activeSession)}
             commandCatalogVersion={view.commandCatalogVersion}
             connectionKind={view.header.connectionKind}
             topContent={

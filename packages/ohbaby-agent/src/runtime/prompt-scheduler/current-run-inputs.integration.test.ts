@@ -24,7 +24,16 @@ import { InMemoryPromptSubmissionStore } from "./in-memory-store.js";
 import {
   DatabaseCurrentRunInputStore,
   InMemoryCurrentRunInputStore,
+  type SteerQueuedPromptOutcome,
+  type SteerQueuedPromptResult,
 } from "./current-run-inputs.js";
+function requireSteered(
+  result: SteerQueuedPromptOutcome,
+): SteerQueuedPromptResult {
+  if (result.status !== "steered")
+    throw new Error(`Unexpected steer result: ${result.reason}`);
+  return result;
+}
 const dirs: string[] = [];
 afterEach(async () => {
   closeDatabase();
@@ -95,10 +104,12 @@ for (const backend of ["memory", "sqlite"] as const)
       };
       return { ledger, queue, messages, messageStore, inputs, steer };
     }
-    it("reads closed never-attempted Steer facts without mutating records or waking execution", async () => {
+    it("reads pending and closed Steer candidates without mutating records or waking execution", async () => {
       const f = await fixture();
-      const { receipt } = await f.inputs.steerQueued(f.steer);
-      expect(await f.inputs.hasUnsentSteer("run-a")).toBe(false);
+      const { receipt } = requireSteered(await f.inputs.steerQueued(f.steer));
+      expect(await f.inputs.listUnconsumedSteers("session")).toMatchObject([
+        { inputId: receipt.inputId },
+      ]);
       const wake = vi.fn();
       const unsubscribe = f.inputs.subscribe("run-a", wake);
       await f.inputs.close("run-a", "user-stop");
@@ -108,18 +119,22 @@ for (const backend of ["memory", "sqlite"] as const)
         backend === "sqlite"
           ? new DatabaseCurrentRunInputStore({ db: getDatabase() })
           : f.inputs;
-      expect(await reader.hasUnsentSteer("run-a")).toBe(true);
-      expect(await reader.hasUnsentSteer("run-b")).toBe(false);
-      expect(await reader.hasUnsentSteer("run-a")).toBe(true);
+      expect(await reader.listUnconsumedSteers("session")).toMatchObject([
+        { inputId: receipt.inputId },
+      ]);
+      expect(await reader.listUnconsumedSteers("other")).toEqual([]);
+      expect(await reader.listUnconsumedSteers("session")).toMatchObject([
+        { inputId: receipt.inputId },
+      ]);
       expect(await reader.getInput(receipt.inputId)).toEqual(before);
       expect(wake).not.toHaveBeenCalled();
       unsubscribe();
     });
     it.each(["error", "aborted"] as const)(
-      "does not call attempted Steer unsent after a request ended with %s",
+      "retains attempted unconfirmed Steer after a request ended with %s",
       async (outcome) => {
         const f = await fixture();
-        const { receipt } = await f.inputs.steerQueued(f.steer);
+        const { receipt } = requireSteered(await f.inputs.steerQueued(f.steer));
         await f.messages.createMessage({
           id: "assistant-unsent",
           role: "assistant",
@@ -149,13 +164,15 @@ for (const backend of ["memory", "sqlite"] as const)
         expect(
           (await f.inputs.getInput(receipt.inputId))?.firstAttemptRequestId,
         ).toBe(request.requestId);
-        expect(await f.inputs.hasUnsentSteer("run-a")).toBe(false);
+        expect(await f.inputs.listUnconsumedSteers("session")).toMatchObject([
+          { inputId: receipt.inputId },
+        ]);
       },
     );
 
     it("atomically converts the queued receipt with original message identity and idempotent receipt", async () => {
       const f = await fixture();
-      const first = await f.inputs.steerQueued(f.steer);
+      const first = requireSteered(await f.inputs.steerQueued(f.steer));
       expect(first.receipt).toMatchObject({
         acceptedTargetRunId: "run-a",
         userMessageId: "reserved-message",
@@ -196,7 +213,7 @@ for (const backend of ["memory", "sqlite"] as const)
           agent: "default",
         });
         clock.mockReturnValue(createdAt + 200);
-        const accepted = await f.inputs.steerQueued(f.steer);
+        const accepted = requireSteered(await f.inputs.steerQueued(f.steer));
         const history = await f.messages.listBySession("session");
         expect(history.map((message) => message.info.id).at(-1)).toBe(
           "reserved-message",
@@ -214,16 +231,20 @@ for (const backend of ["memory", "sqlite"] as const)
     });
     it("makes normal finish and acceptance mutually exclusive and rejects active leases", async () => {
       const f = await fixture();
-      await f.queue.acquireEditLease("queued", "editor", 60000);
+      const lease = await f.queue.acquireEditLease("queued", "editor", 60000);
       await expect(f.inputs.steerQueued(f.steer)).rejects.toThrow(/lease/i);
+      await f.queue.releaseEditLease("queued", lease.editLeaseId, "editor");
       expect(await f.inputs.tryCloseForCompletion("run-a")).toBe(true);
-      await expect(f.inputs.steerQueued(f.steer)).rejects.toThrow();
+      await expect(f.inputs.steerQueued(f.steer)).resolves.toMatchObject({
+        status: "not-steered",
+        reason: "target-unavailable",
+      });
       expect((await f.queue.get("queued"))?.status).toBe("queued");
       expect(await f.messages.listBySession("session")).toHaveLength(0);
     });
     it("seals final-step Steer admission without closing already accepted inputs or request delivery", async () => {
       const f = await fixture();
-      const first = await f.inputs.steerQueued(f.steer);
+      const first = requireSteered(await f.inputs.steerQueued(f.steer));
       await f.queue.accept({
         promptId: "late",
         clientRequestId: "late-submit",
@@ -244,7 +265,10 @@ for (const backend of ["memory", "sqlite"] as const)
           promptId: "late",
           clientRequestId: "late-steer",
         }),
-      ).rejects.toThrow(/final step/i);
+      ).resolves.toMatchObject({
+        status: "not-steered",
+        reason: "target-sealed",
+      });
       expect((await f.queue.get("late"))?.status).toBe("queued");
       expect(await reader.listPending("run-a")).toMatchObject([
         { inputId: first.receipt.inputId },
@@ -255,7 +279,7 @@ for (const backend of ["memory", "sqlite"] as const)
     });
     it("freezes attempt membership, excludes late input, preserves unsent input after stop and filters it from later history", async () => {
       const f = await fixture();
-      const { receipt } = await f.inputs.steerQueued(f.steer);
+      const { receipt } = requireSteered(await f.inputs.steerQueued(f.steer));
       await f.messages.createMessage({
         id: "assistant",
         role: "assistant",
@@ -284,11 +308,13 @@ for (const backend of ["memory", "sqlite"] as const)
         text: "Later instruction",
         maxQueuedPrompts: 10,
       });
-      const later = await f.inputs.steerQueued({
-        ...f.steer,
-        promptId: "later",
-        clientRequestId: "steer-later",
-      });
+      const later = requireSteered(
+        await f.inputs.steerQueued({
+          ...f.steer,
+          promptId: "later",
+          clientRequestId: "steer-later",
+        }),
+      );
       expect(
         await f.inputs.filterModelHistory(
           await f.messages.listBySession("session"),
@@ -340,7 +366,10 @@ for (const backend of ["memory", "sqlite"] as const)
         expect(results[1]).toMatchObject({ status: "fulfilled", value: null });
         expect(await f.messages.listBySession("session")).toHaveLength(1);
       } else {
-        expect(results[0].status).toBe("rejected");
+        expect(results[0]).toMatchObject({
+          status: "fulfilled",
+          value: { status: "not-steered", reason: "prompt-not-queued" },
+        });
         expect(await f.messages.listBySession("session")).toHaveLength(0);
       }
     });
@@ -553,7 +582,7 @@ for (const backend of ["memory", "sqlite"] as const)
       await expect(f.inputs.admitRequestAttempt(request)).rejects.toMatchObject(
         { name: "RuntimeInputSnapshotChangedError" },
       );
-      const accepted = await acceptance;
+      const accepted = requireSteered(await acceptance);
       expect(
         (await f.inputs.getInput("observation"))?.firstAttemptRequestId,
       ).toBeUndefined();
@@ -588,7 +617,7 @@ for (const backend of ["memory", "sqlite"] as const)
     if (backend === "sqlite")
       it("reopens immutable input membership and receipts after database restart", async () => {
         const f = await fixture();
-        const accepted = await f.inputs.steerQueued(f.steer);
+        const accepted = requireSteered(await f.inputs.steerQueued(f.steer));
         await f.messages.createMessage({
           id: "assistant",
           role: "assistant",
@@ -613,9 +642,9 @@ for (const backend of ["memory", "sqlite"] as const)
         const reopened = new DatabaseCurrentRunInputStore({
           db: getDatabase(),
         });
-        expect((await reopened.steerQueued(f.steer)).receipt).toEqual(
-          accepted.receipt,
-        );
+        expect(
+          requireSteered(await reopened.steerQueued(f.steer)).receipt,
+        ).toEqual(accepted.receipt);
         expect(await reopened.getInput(accepted.receipt.inputId)).toMatchObject(
           { firstAttemptRequestId: "persisted" },
         );

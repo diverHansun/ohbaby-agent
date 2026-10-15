@@ -862,6 +862,12 @@ export class BrowserDaemonClient implements UiBackendClient {
     return (await this.http.resubmitRetainedPrompt(input)).receipt;
   }
 
+  async resendSteerInput(
+    input: Parameters<UiBackendClient["resendSteerInput"]>[0],
+  ): ReturnType<UiBackendClient["resendSteerInput"]> {
+    return (await this.http.resendSteerInput(input)).receipt;
+  }
+
   async steerQueuedPrompt(
     input: Parameters<UiBackendClient["steerQueuedPrompt"]>[0],
   ): ReturnType<UiBackendClient["steerQueuedPrompt"]> {
@@ -871,7 +877,7 @@ export class BrowserDaemonClient implements UiBackendClient {
         input.expectedRunId,
         input.clientRequestId,
       )
-    ).receipt;
+    ).result;
   }
 
   async cancelQueuedPrompt(

@@ -1,56 +1,43 @@
 import { expect, it } from "vitest";
-import type { UiRun } from "./snapshot.js";
-import { hasUnsentSteerAfterLatestStop } from "./run-inputs.js";
-const run = (id: string, patch: Partial<UiRun> = {}): UiRun => ({
-  id,
-  sessionId: "a",
-  startedAt: "2026-01-01T00:00:00Z",
-  status: { kind: "idle" },
-  updatedAt: "2026-01-01T00:00:00Z",
-  inputsCloseReason: "user-stop",
-  unsentSteer: true,
-  ...patch,
+import type { UiSession } from "./snapshot.js";
+import { getUnconsumedSteers } from "./run-inputs.js";
+
+const session: UiSession = {
+  id: "session",
+  title: "Recovery",
+  messages: [],
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-02T00:00:00Z",
+  unconsumedSteers: [
+    {
+      inputId: "input-1",
+      promptId: "prompt-1",
+      messageId: "old-message",
+      text: "Keep the original requirement",
+      state: "unconsumed",
+    },
+    {
+      inputId: "input-2",
+      promptId: "prompt-2",
+      messageId: "attempted-message",
+      text: "Check the result",
+      state: "unconfirmed",
+    },
+  ],
+};
+
+it("keeps recovery entries even when their messages are outside the loaded page", () => {
+  expect(getUnconsumedSteers(session).map((entry) => entry.inputId)).toEqual([
+    "input-1",
+    "input-2",
+  ]);
+  expect(getUnconsumedSteers(session)[1]?.state).toBe("unconfirmed");
 });
-it("uses only the latest user Stop of the current root session, with stable ties", () => {
+
+it("handles sessions without recovery entries", () => {
+  expect(getUnconsumedSteers(undefined)).toEqual([]);
   expect(
-    hasUnsentSteerAfterLatestStop(
-      [run("old"), run("other", { sessionId: "b" })],
-      "a",
-    ),
-  ).toBe(true);
-  expect(
-    hasUnsentSteerAfterLatestStop(
-      [
-        run("old"),
-        run("new", { endedAt: "2026-01-02T00:00:00Z", unsentSteer: false }),
-      ],
-      "a",
-    ),
-  ).toBe(false);
-  expect(
-    hasUnsentSteerAfterLatestStop(
-      [
-        run("old"),
-        run("finished", {
-          inputsCloseReason: "completed",
-          endedAt: "2026-01-02T00:00:00Z",
-          unsentSteer: false,
-        }),
-      ],
-      "a",
-    ),
-  ).toBe(true);
-  expect(
-    hasUnsentSteerAfterLatestStop(
-      [run("z", { unsentSteer: false }), run("a")],
-      "a",
-    ),
-  ).toBe(false);
-  expect(
-    hasUnsentSteerAfterLatestStop(
-      [run("a"), run("z", { unsentSteer: false })],
-      "a",
-    ),
-  ).toBe(false);
-  expect(hasUnsentSteerAfterLatestStop([run("a")], "b")).toBe(false);
+    getUnconsumedSteers({ ...session, unconsumedSteers: undefined }),
+  ).toEqual([]);
+  expect(getUnconsumedSteers(null)).toEqual([]);
 });

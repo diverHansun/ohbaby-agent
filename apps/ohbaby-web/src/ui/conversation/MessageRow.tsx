@@ -7,6 +7,7 @@ import { MarkdownBlock } from "../shared/MarkdownBlock.js";
 import { OrphanToolResultCard, pairToolParts, ToolCard } from "./tool-card.js";
 
 export function MessageRow(props: {
+  readonly steerState?: "unconsumed" | "unconfirmed";
   readonly message: UiMessage;
   readonly reasoning?: ReasoningViewState;
   readonly beforeText?: ReactNode;
@@ -43,6 +44,13 @@ export function MessageRow(props: {
           isUser ? "ohb-message-user-bubble" : "ohb-message-assistant-bare"
         }`}
       >
+        {props.steerState ? (
+          <small role="status">
+            {props.steerState === "unconfirmed"
+              ? "Processing unconfirmed"
+              : "Not processed"}
+          </small>
+        ) : null}
         {isUser && presentation.fromParent ? (
           <div className="ohb-parent-source">
             From parent

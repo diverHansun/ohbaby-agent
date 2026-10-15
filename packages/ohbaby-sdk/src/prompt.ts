@@ -43,6 +43,7 @@ export interface UiPromptError {
 }
 
 export interface UiPromptSubmission {
+  readonly resendOfPromptId?: string;
   readonly steerReceipt?: UiSteerQueuedPromptReceipt;
   readonly reasoning?: UiReasoningConfig;
   readonly promptId: string;
@@ -100,6 +101,7 @@ export type UiCompletedPromptSubmission =
     });
 
 export interface UiPromptReceipt {
+  readonly steer?: UiAcceptedSteerOutcome;
   readonly promptId: string;
   readonly clientRequestId: string;
   readonly userMessageId: string;
@@ -169,4 +171,31 @@ export interface UiSteerQueuedPromptReceipt {
   readonly acceptedTargetRunId: string;
   readonly acceptedAt: number;
   readonly clientRequestId: string;
+}
+
+export type UiSteerSkipReason =
+  | "no-goal-run"
+  | "earlier-queued"
+  | "target-unavailable"
+  | "target-sealed";
+
+export type UiAcceptedSteerOutcome =
+  | { readonly status: "steered"; readonly receipt: UiSteerQueuedPromptReceipt }
+  | { readonly status: "not-steered"; readonly reason: UiSteerSkipReason }
+  | { readonly status: "existing"; readonly promptId: string }
+  | { readonly status: "error"; readonly error: UiPromptError };
+
+export type UiSteerQueuedPromptResult =
+  | { readonly status: "steered"; readonly receipt: UiSteerQueuedPromptReceipt }
+  | {
+      readonly status: "not-steered";
+      readonly reason:
+        | "target-unavailable"
+        | "target-sealed"
+        | "prompt-not-queued";
+    };
+
+export interface UiResendSteerInput {
+  readonly inputId: string;
+  readonly operationId: string;
 }

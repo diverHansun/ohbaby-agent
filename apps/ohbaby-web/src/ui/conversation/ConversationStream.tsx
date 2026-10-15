@@ -9,7 +9,12 @@ import {
   useState,
 } from "react";
 
-import type { UiMessage, UiPromptSubmission, UiRun } from "ohbaby-sdk";
+import type {
+  UiMessage,
+  UiPromptSubmission,
+  UiRun,
+  UiUnconsumedSteer,
+} from "ohbaby-sdk";
 import type { ReactNode } from "react";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
 import { ModelWaiting, PromptDuration } from "./ExecutionProgress.js";
@@ -34,6 +39,7 @@ export interface ConversationReadingPosition {
 }
 
 export function ConversationStream(props: {
+  readonly unconsumedSteers?: readonly UiUnconsumedSteer[];
   readonly preserveMessageOrder?: boolean;
   readonly readingPosition?: ConversationReadingPosition;
   readonly anchorMessageId?: string;
@@ -513,6 +519,11 @@ export function ConversationStream(props: {
               >
                 <MessageRow
                   message={item.message}
+                  steerState={
+                    props.unconsumedSteers?.find(
+                      (input) => input.messageId === item.message.id,
+                    )?.state
+                  }
                   reasoning={props.reasoningByMessageId[item.message.id]}
                   reasoningIdPrefix={`${messageDomId(item.message.id)}-reasoning`}
                   reasoningHidden={(

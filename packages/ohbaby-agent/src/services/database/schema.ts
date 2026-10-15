@@ -154,6 +154,7 @@ export const schema = {
     lastOpenedAt: "last_opened_at",
   }),
   promptSubmission: table("prompt_submission", {
+    resendOfPromptId: "resend_of_prompt_id",
     acceptedAt: "accepted_at",
     admissionOrder: "admission_order",
     endTimeSource: "end_time_source",

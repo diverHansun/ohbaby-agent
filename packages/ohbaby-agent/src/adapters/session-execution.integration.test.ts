@@ -56,12 +56,12 @@ describe("session execution admission", () => {
         text: "other session",
       });
       await otherStarted.promise;
-      expect((await store.get(waiting.promptId))?.status).toBe("queued");
+      expect((await store.get(waiting.record.promptId))?.status).toBe("queued");
       expect(started).toEqual(["other"]);
       otherFinish.resolve();
-      await scheduler.waitForCompletion(other.promptId);
+      await scheduler.waitForCompletion(other.record.promptId);
       gate.release(token);
-      await scheduler.waitForCompletion(waiting.promptId);
+      await scheduler.waitForCompletion(waiting.record.promptId);
       expect(started).toEqual(["other", "goal"]);
     } finally {
       otherFinish.resolve();
@@ -108,9 +108,9 @@ it("G23 rechecks ownership inside the shared commit queue after a stale empty pr
   try {
     const queued = await scheduler.accept({ sessionId: "one", text: "user" });
     await checked.promise;
-    expect((await store.get(queued.promptId))?.status).toBe("queued");
+    expect((await store.get(queued.record.promptId))?.status).toBe("queued");
     gate.release(token);
-    await scheduler.waitForCompletion(queued.promptId);
+    await scheduler.waitForCompletion(queued.record.promptId);
     expect(gate.isHeld("one")).toBe(false);
   } finally {
     scheduler.close();
@@ -151,7 +151,7 @@ it("G4 releases the claim lease if shutdown wins before executor handoff", async
   await vi.waitFor(() => {
     expect(gate.isHeld("one")).toBe(false);
   });
-  expect((await store.get(queued.promptId))?.status).toBe("queued");
+  expect((await store.get(queued.record.promptId))?.status).toBe("queued");
   const next = Symbol("next");
   expect(gate.reserve("one", next)).toBe(true);
   gate.release(Symbol("stale"));
@@ -202,7 +202,7 @@ it("G4 can reclaim queued work after the former scheduler closes", async () => {
   });
   try {
     await next.init();
-    await next.waitForCompletion(queued.promptId);
+    await next.waitForCompletion(queued.record.promptId);
     await vi.waitFor(() => {
       expect(release).toHaveBeenCalledTimes(2);
     });

@@ -14,7 +14,10 @@ import type {
   UiPromptSubmission,
 } from "ohbaby-sdk";
 import type { UiPromptQueueExecutionPort } from "ohbaby-agent";
-import type { DaemonClientViewCoordinator } from "./client-view.js";
+import {
+  DaemonForbiddenError,
+  type DaemonClientViewCoordinator,
+} from "./client-view.js";
 import type { PermissionRouter } from "./permission-router.js";
 
 export interface DaemonPromptItem {
@@ -202,6 +205,51 @@ export async function acceptDaemonPrompt(input: {
       started.release();
       throw error;
     }
+  } finally {
+    finishOperation();
+  }
+}
+
+export async function resendSteerInputForClient(
+  backend: UiBackendClient & UiPromptQueueExecutionPort,
+  input: Parameters<UiBackendClient["resendSteerInput"]>[0],
+  trustedClientId: string,
+  clientViews: DaemonClientViewCoordinator,
+): ReturnType<UiBackendClient["resendSteerInput"]> {
+  const sessionId = clientViews.binding(
+    trustedClientId,
+    "prompt",
+  ).rootSessionId;
+  if (!sessionId)
+    throw new DaemonForbiddenError("Resend requires a selected session");
+  const finishOperation = clientViews.beginSessionOperation(
+    trustedClientId,
+    sessionId,
+  );
+  const item: DaemonPromptItem = {
+    clientId: trustedClientId,
+    sessionId,
+    text: "",
+  };
+  clientViews.promptStarted(item);
+  try {
+    // Durable input identity is checked by the adapter, including idempotent retries
+    // whose original input is no longer present in the recovery projection.
+    const receipt = await backend.resendSteerInputForOwner(
+      input,
+      trustedClientId,
+      sessionId,
+    );
+    void backend
+      .waitForPrompt(receipt.promptId)
+      .finally(() => {
+        clientViews.promptSettled(item);
+      })
+      .catch(() => undefined);
+    return receipt;
+  } catch (error) {
+    clientViews.promptSettled(item);
+    throw error;
   } finally {
     finishOperation();
   }

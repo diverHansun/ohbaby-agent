@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
-import { hasUnsentSteerAfterLatestStop } from "ohbaby-sdk";
 import type {
   UiBackendClient,
   UiCommandRecord,
@@ -65,6 +64,7 @@ import {
   DatabasePromptSubmissionStore,
 } from "../runtime/prompt-scheduler/index.js";
 import { createInProcessUiBackendClient } from "./ui-inprocess.js";
+import { InMemoryCurrentRunInputStore } from "../runtime/prompt-scheduler/current-run-inputs.js";
 import { createHostLocalSandboxManager } from "./ui-runtime/host-local-environment.js";
 import { reloadLLMConfig } from "../config/index.js";
 import * as contextModule from "../core/context/index.js";
@@ -74,6 +74,31 @@ import {
   createPersistentUiStateStore,
   type UiStateStore,
 } from "./ui-state/index.js";
+
+function createSteerStores(): {
+  runLedger: RunLedger;
+  promptSubmissionStore: InMemoryPromptSubmissionStore;
+  messageManager: MessageManager;
+  currentRunInputStore: InMemoryCurrentRunInputStore;
+} {
+  const runLedger = createInMemoryRunLedger();
+  const promptSubmissionStore = new InMemoryPromptSubmissionStore();
+  const messageManager = createMessageManager({
+    bus: createBus(),
+    store: createInMemoryMessageStore(),
+  });
+  const currentRunInputStore = new InMemoryCurrentRunInputStore({
+    runLedger,
+    promptStore: promptSubmissionStore,
+    messageManager,
+  });
+  return {
+    runLedger,
+    promptSubmissionStore,
+    messageManager,
+    currentRunInputStore,
+  };
+}
 
 interface FakeSdkClient {
   readonly kind: "fake";
@@ -4695,7 +4720,10 @@ describe("createInProcessUiBackendClient", () => {
       expectedRunId: "run_1",
       clientRequestId: "steer-close-background",
     });
-    expect(receipt.acceptedTargetRunId).toBe("run_1");
+    expect(receipt.status).toBe("steered");
+    if (receipt.status !== "steered")
+      throw new Error("Expected successful steer");
+    expect(receipt.receipt.acceptedTargetRunId).toBe("run_1");
     await running;
 
     expect(childSignal?.aborted).toBe(true);
@@ -7571,7 +7599,9 @@ describe("createInProcessUiBackendClient", () => {
   it("queues a user prompt until explicit pause and then injects a paused light note", async () => {
     const goalStarted = createDeferred<undefined>();
     const requests: InterfaceProviderRequest[] = [];
+    const steerStores = createSteerStores();
     const client = createInProcessUiBackendClient({
+      ...steerStores,
       llmClient: createInterruptibleGoalLLMClient(requests, goalStarted),
     });
     const events: UiEvent[] = [];
@@ -7601,6 +7631,9 @@ describe("createInProcessUiBackendClient", () => {
     expect(goalSessionId).not.toBeNull();
     await goalStarted.promise;
 
+    const target = client.getActiveGoalRunForSteer(goalSessionId ?? "");
+    if (!target) throw new Error("Goal run missing");
+    await steerStores.currentRunInputStore.sealSteer(target.runId);
     const queued = await client.submitPromptAccepted(
       "What is the current progress?",
       { sessionId: goalSessionId ?? undefined },
@@ -7832,7 +7865,9 @@ describe("createInProcessUiBackendClient", () => {
     const childStarted = createDeferred<AbortSignal | undefined>();
     const parentContinued = createDeferred<AbortSignal | undefined>();
     const subagentStore = new InMemorySubagentInstanceStore();
+    const steerStores = createSteerStores();
     const client = createInProcessUiBackendClient({
+      ...steerStores,
       createSubagentId: () => "subagent_1",
       llmClient: createAbortableBackgroundRunTreeLLMClient(
         requests,
@@ -7874,6 +7909,9 @@ describe("createInProcessUiBackendClient", () => {
         "goal parent did not continue after spawning background work",
       );
 
+      const target = client.getActiveGoalRunForSteer(sessionId ?? "");
+      if (!target) throw new Error("Goal run missing");
+      await steerStores.currentRunInputStore.sealSteer(target.runId);
       const queued = await client.submitPromptAccepted(
         "Handle this user interruption",
         { sessionId: sessionId ?? undefined },
@@ -11011,7 +11049,10 @@ it("steers an accepted queued message into its active run and releases its waite
       expectedRunId: approval.request.runId,
       clientRequestId: "steer-once",
     });
-    expect(receipt.userMessageId).toBe(queued.userMessageId);
+    expect(receipt.status).toBe("steered");
+    if (receipt.status !== "steered")
+      throw new Error("Expected successful steer");
+    expect(receipt.receipt.userMessageId).toBe(queued.userMessageId);
     expect(await waiting).toMatchObject({
       prompt: { status: "steered", userMessageId: queued.userMessageId },
     });
@@ -11190,7 +11231,10 @@ it.each([false, true])(
           expectedRunId: first.request.runId,
           clientRequestId: "wave-steer",
         });
-        expect(receipt.userMessageId).toBe(queued.userMessageId);
+        expect(receipt.status).toBe("steered");
+        if (receipt.status !== "steered")
+          throw new Error("Expected successful steer");
+        expect(receipt.receipt.userMessageId).toBe(queued.userMessageId);
       }
       expect(parentRequests).toHaveLength(1);
       await client.respondPermission(first.request.id, {
@@ -11455,7 +11499,7 @@ it("rejects a late Steer while the actual final provider step is in flight and k
         expectedRunId: run.runId,
         clientRequestId: "late-final-steer",
       }),
-    ).rejects.toThrow(/final step/i);
+    ).resolves.toEqual({ status: "not-steered", reason: "target-sealed" });
     expect(requests).toHaveLength(1);
     release.resolve(undefined);
     await first;
@@ -11689,7 +11733,133 @@ describe("improve-4 measured handoff", () => {
   );
 });
 
-it("keeps user Stop idle and scopes the unsent Steer notice to the latest stopped run", async () => {
+it.each(["read failure", "missing message"] as const)(
+  "isolates steer recovery %s as blocked while preserving history and healthy sessions",
+  async (failure) => {
+    const stores = createSteerStores();
+    await stores.runLedger.createPending({
+      runId: "broken-run",
+      sessionId: "broken",
+      triggerSource: "user",
+    });
+    await stores.runLedger.markRunning("broken-run");
+    await stores.promptSubmissionStore.accept({
+      promptId: "broken-prompt",
+      userMessageId: "broken-message",
+      clientRequestId: "broken-accept",
+      sessionId: "broken",
+      scopeKey: "recovery-scope",
+      text: "Readable original guidance",
+      maxQueuedPrompts: 100,
+    });
+    await stores.currentRunInputStore.steerQueued({
+      promptId: "broken-prompt",
+      expectedRunId: "broken-run",
+      clientRequestId: "broken-steer",
+      sessionId: "broken",
+      scopeKey: "recovery-scope",
+    });
+    await stores.currentRunInputStore.close("broken-run", "failed");
+    const list = vi.spyOn(stores.messageManager, "listByIds");
+    if (failure === "read failure")
+      list.mockRejectedValue(new Error("Recovery query unavailable"));
+    else list.mockResolvedValue([]);
+    const client = createInProcessUiBackendClient({
+      ...stores,
+      promptScopeKey: "recovery-scope",
+      initialSnapshot: {
+        activeSessionId: "healthy",
+        permissions: [],
+        runs: [],
+        status: { kind: "idle" },
+        sessions: ["broken", "healthy"].map((id) => ({
+          id,
+          title: id,
+          messages: [],
+          createdAt: "2026-10-15T00:00:00.000Z",
+          updatedAt: "2026-10-15T00:00:00.000Z",
+        })),
+      },
+      llmClient: createFakeLLMClient([
+        { textDelta: "Healthy response", finishReason: "stop" },
+      ]),
+    });
+    try {
+      expect(
+        (await client.getSnapshot()).sessions.find(
+          (session) => session.id === "broken",
+        )?.unconsumedSteers,
+      ).toBeUndefined();
+      await expect(client.initializeSession("broken")).rejects.toThrow(
+        failure === "read failure"
+          ? "Recovery query unavailable"
+          : "Steered input original message missing",
+      );
+      const blocked = await client.getSessionView({ sessionId: "broken" });
+      expect(blocked.executionRecovery?.status).toBe("blocked");
+      expect(blocked.session.unconsumedSteers).toBeUndefined();
+      expect(JSON.stringify(blocked.session.messages)).toContain(
+        "Readable original guidance",
+      );
+      expect(
+        JSON.stringify(
+          (await client.getSessionHistory({ sessionId: "broken" })).messages,
+        ),
+      ).toContain("Readable original guidance");
+      expect(
+        (
+          await client.submitPromptAndWait("healthy request", {
+            sessionId: "healthy",
+          })
+        ).prompt.status,
+      ).toBe("succeeded");
+      expect(
+        (await client.getSessionView({ sessionId: "healthy" }))
+          .executionRecovery,
+      ).toEqual({ status: "ready" });
+      list.mockRestore();
+      await client.initializeSession("broken");
+      const recovered = await client.getSessionView({ sessionId: "broken" });
+      expect(recovered.executionRecovery).toEqual({ status: "ready" });
+      expect(recovered.session.unconsumedSteers).toMatchObject([
+        { promptId: "broken-prompt", text: "Readable original guidance" },
+      ]);
+      const liveList = vi
+        .spyOn(stores.messageManager, "listByIds")
+        .mockRejectedValue(new Error("Live recovery query unavailable"));
+      try {
+        if (failure === "read failure") await client.getSnapshot();
+        else await stores.currentRunInputStore.close("broken-run", "failed");
+        await vi.waitFor(async () => {
+          const live = await client.getSessionView({ sessionId: "broken" });
+          expect(live.session.unconsumedSteers).toBeUndefined();
+          expect(live.executionRecovery).toMatchObject({
+            status: "blocked",
+            message: "Live recovery query unavailable",
+          });
+          expect(JSON.stringify(live.session.messages)).toContain(
+            "Readable original guidance",
+          );
+        });
+        await expect(client.initializeSession("broken")).rejects.toThrow(
+          "Live recovery query unavailable",
+        );
+      } finally {
+        liveList.mockRestore();
+      }
+      await client.initializeSession("broken");
+      expect(
+        (await client.getSessionView({ sessionId: "broken" }))
+          .executionRecovery,
+      ).toEqual({ status: "ready" });
+    } finally {
+      list.mockRestore();
+      await client.dispose();
+    }
+  },
+);
+
+it("S4-10/12 keeps recovery across runs and resends with a new idempotent prompt", async () => {
   const llm = createFakeLLMClient([]);
   const titleResponse = llm.provider.streamResponse.bind(llm.provider);
   const starts: string[] = [];
@@ -11724,15 +11894,22 @@ it("keeps user Stop idle and scopes the unsent Steer notice to the latest stoppe
     expect(snapshot.runs.find((item) => item.id === run)?.status).toEqual({
       kind: "idle",
     });
-    expect(hasUnsentSteerAfterLatestStop(snapshot.runs, a.sessionId)).toBe(
-      true,
-    );
+    const recovery = snapshot.sessions.find(
+      (session) => session.id === a.sessionId,
+    )?.unconsumedSteers;
+    expect(recovery).toEqual([
+      {
+        inputId: `steer:${steer.promptId}`,
+        promptId: steer.promptId,
+        messageId: steer.userMessageId,
+        text: "unsent guidance",
+        state: "unconsumed",
+      },
+    ]);
     expect(
-      hasUnsentSteerAfterLatestStop(
-        (await client.getSessionView({ sessionId: a.sessionId })).runs,
-        a.sessionId,
-      ),
-    ).toBe(true);
+      (await client.getSessionView({ sessionId: a.sessionId })).session
+        .unconsumedSteers,
+    ).toEqual(recovery);
     expect(starts).toHaveLength(1);
     const b = await client.submitPromptAccepted("B", {
       sessionId: a.sessionId,
@@ -11744,14 +11921,48 @@ it("keeps user Stop idle and scopes the unsent Steer notice to the latest stoppe
       (prompt) => prompt.promptId === b.promptId,
     )?.runId;
     if (!bRun) throw new Error("Missing B");
+    const resendInput = {
+      inputId: `steer:${steer.promptId}`,
+      operationId: "first-resend",
+    };
+    const resent = await client.resendSteerInput(resendInput);
+    expect(resent.promptId).not.toBe(steer.promptId);
+    expect(resent.userMessageId).not.toBe(steer.userMessageId);
+    expect(
+      (await client.getSessionView({ sessionId: a.sessionId })).prompts.find(
+        (prompt) => prompt.promptId === resent.promptId,
+      )?.resendOfPromptId,
+    ).toBe(steer.promptId);
+    expect(await client.resendSteerInput(resendInput)).toMatchObject({
+      promptId: resent.promptId,
+      userMessageId: resent.userMessageId,
+    });
+    await vi.waitFor(async () => {
+      expect(
+        (await client.getSessionView({ sessionId: a.sessionId })).session
+          .unconsumedSteers,
+      ).toEqual([]);
+    });
+    await client.cancelQueuedPrompt({ promptId: resent.promptId });
+    await vi.waitFor(async () => {
+      expect(
+        (await client.getSessionView({ sessionId: a.sessionId })).session
+          .unconsumedSteers,
+      ).toEqual(recovery);
+    });
+    const again = await client.resendSteerInput({
+      ...resendInput,
+      operationId: "second-resend",
+    });
+    expect(again.promptId).not.toBe(resent.promptId);
+    await client.cancelQueuedPrompt({ promptId: again.promptId });
     await client.abortRun(bRun);
     await client.waitForPrompt(b.promptId);
     expect(
-      hasUnsentSteerAfterLatestStop(
-        (await client.getSnapshot()).runs,
-        a.sessionId,
-      ),
-    ).toBe(false);
+      (await client.getSnapshot()).sessions.find(
+        (session) => session.id === a.sessionId,
+      )?.unconsumedSteers,
+    ).toEqual(recovery);
     expect(starts).toHaveLength(2);
   } finally {
     await client.dispose();

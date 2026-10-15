@@ -3,7 +3,7 @@ import type { ReactElement } from "react";
 import type {
   UiPromptSubmission,
   UiSteerQueuedPromptInput,
-  UiSteerQueuedPromptReceipt,
+  UiSteerQueuedPromptResult,
 } from "ohbaby-sdk";
 export function SteerButton(props: {
   readonly prompt: UiPromptSubmission;
@@ -11,12 +11,13 @@ export function SteerButton(props: {
   readonly disabled: boolean;
   readonly steer: (
     input: UiSteerQueuedPromptInput,
-  ) => Promise<UiSteerQueuedPromptReceipt>;
+  ) => Promise<UiSteerQueuedPromptResult>;
   readonly onAccepted?: () => void;
 }): ReactElement {
   const attempt = useRef<UiSteerQueuedPromptInput | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
   const disabled =
     props.disabled ||
@@ -47,9 +48,17 @@ export function SteerButton(props: {
           void props
             .steer(input)
             .then(
-              () => {
-                setAccepted(true);
-                props.onAccepted?.();
+              (result) => {
+                if (result.status === "steered") {
+                  setAccepted(true);
+                  props.onAccepted?.();
+                } else {
+                  setNotice(
+                    result.reason === "prompt-not-queued"
+                      ? "Prompt is no longer queued"
+                      : `Kept in queue · ${result.reason}`,
+                  );
+                }
               },
               (caught: unknown) => {
                 setError(
@@ -64,6 +73,7 @@ export function SteerButton(props: {
       >
         {pending ? "Steering…" : accepted ? "Accepted" : "Steer"}
       </button>
+      {notice ? <small role="status">{notice}</small> : null}
       {error ? (
         <small role="alert">{error} · Retry uses the original target</small>
       ) : null}

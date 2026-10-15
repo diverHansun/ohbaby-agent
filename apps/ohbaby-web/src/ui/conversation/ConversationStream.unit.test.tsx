@@ -432,3 +432,30 @@ describe("completed run disclosure", () => {
     }
   });
 });
+
+it("derives recovery markers from matching message IDs and clears them with the session projection", () => {
+  const h = conversationHarness();
+  try {
+    h.render({
+      unconsumedSteers: [
+        {
+          inputId: "input",
+          promptId: "prompt",
+          messageId: "user",
+          text: "user",
+          state: "unconfirmed",
+        },
+      ],
+    });
+    expect(
+      h.container.querySelector('[data-message-id="user"]')?.textContent,
+    ).toContain("Processing unconfirmed");
+    expect(
+      h.container.querySelector('[data-message-id="answer"]')?.textContent,
+    ).not.toContain("Processing unconfirmed");
+    h.render({ unconsumedSteers: [] });
+    expect(h.container.textContent).not.toContain("Processing unconfirmed");
+  } finally {
+    h.close();
+  }
+});

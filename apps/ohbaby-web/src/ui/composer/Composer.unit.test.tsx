@@ -1,5 +1,9 @@
 // @vitest-environment jsdom
-import type { UiBackendClient, UiPromptSubmission } from "ohbaby-sdk";
+import type {
+  UiBackendClient,
+  UiPromptReceipt,
+  UiPromptSubmission,
+} from "ohbaby-sdk";
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -30,6 +34,7 @@ function fixture(overrides: Partial<ComponentProps<typeof Composer>> = {}): {
   const props: ComponentProps<typeof Composer> = {
     client: {
       steerQueuedPrompt: vi.fn<UiBackendClient["steerQueuedPrompt"]>(),
+      resendSteerInput: vi.fn<UiBackendClient["resendSteerInput"]>(),
       getCurrentModel: () => Promise.resolve(null),
       subscribeEvents: (): (() => void) => (): void => undefined,
       updateSessionReasoning:
@@ -277,6 +282,7 @@ it.each(["queued", "retained"] as const)(
         resubmitRetainedPrompt: send,
         cancelQueuedPrompt: vi.fn(),
         steerQueuedPrompt: vi.fn(),
+        resendSteerInput: vi.fn(),
       },
     });
     f.type("original draft");
@@ -412,6 +418,7 @@ it.each([
       editQueuedPrompt: vi.fn(),
       cancelQueuedPrompt: vi.fn(),
       steerQueuedPrompt: vi.fn(),
+      resendSteerInput: vi.fn(),
     };
     f = fixture({ queuedPrompts: [prompt], onSubmit, client });
     const clickSend = async (label: string): Promise<void> => {
@@ -509,6 +516,7 @@ it("keeps expired edit text associated with its prompt and prevents sending as a
       resubmitRetainedPrompt: send,
       cancelQueuedPrompt: vi.fn(),
       steerQueuedPrompt: vi.fn(),
+      resendSteerInput: vi.fn(),
     },
   });
   await act(async () => {
@@ -530,15 +538,126 @@ it("keeps expired edit text associated with its prompt and prevents sending as a
   expect(f.input().value).toBe("original draft");
 });
 
-it("shows the stopped Steer notice above an empty queue without adding a prompt", () => {
-  const f = fixture({ unsentSteer: true });
-  expect(document.body.textContent).toContain(
-    "Task stopped before your steer message was sent.",
-  );
+const unconsumedSteers = [
+  {
+    inputId: "input-old",
+    promptId: "prompt-old",
+    messageId: "message-old",
+    text: "Keep my requirement",
+    state: "unconfirmed" as const,
+  },
+];
+
+it("shows durable recovery text outside the chat page and resends with an idempotent retry", async () => {
+  const resend = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Network lost"))
+    .mockResolvedValue({ promptId: "new-prompt", status: "queued" });
+  const f = fixture({
+    unconsumedSteers,
+    client: {
+      resendSteerInput: resend,
+      getCurrentModel: () => Promise.resolve(null),
+      subscribeEvents: (): (() => void) => (): void => undefined,
+    } as unknown as UiBackendClient,
+  });
+  expect(document.body.textContent).toContain("Processing unconfirmed");
+  expect(document.body.textContent).toContain("Keep my requirement");
   expect(document.querySelector(".ohb-prompt-queue")).toBeNull();
-  f.update({ unsentSteer: false });
-  expect(document.body.textContent).not.toContain("Task stopped before");
+  await flushAction(() => {
+    clickLabel("Resend steer 1: Keep my requirement");
+  });
+  expect(document.body.textContent).toContain("Network lost");
+  await flushAction(() => {
+    clickLabel("Resend steer 1: Keep my requirement");
+  });
+  expect(resend.mock.calls[1]?.[0]).toEqual(resend.mock.calls[0]?.[0]);
+  expect(resend.mock.calls[0]?.[0]).toMatchObject({ inputId: "input-old" });
+  f.update({ unconsumedSteers: [] });
+  expect(document.body.textContent).not.toContain("Keep my requirement");
 });
+
+it("keeps a refused manual steer visibly queued without announcing acceptance", async () => {
+  fixture({
+    model: {
+      canSend: true,
+      canStop: true,
+      disabled: false,
+      isRunning: true,
+      mode: "auto",
+      permissionLevel: "default",
+      activeRunId: "run-1",
+      activeSessionId: "session",
+    },
+    queuedPrompts: [queuedPrompt("queued")],
+    client: {
+      steerQueuedPrompt: () =>
+        Promise.resolve({ status: "not-steered", reason: "target-sealed" }),
+      getCurrentModel: () => Promise.resolve(null),
+      subscribeEvents: (): (() => void) => (): void => undefined,
+    } as unknown as UiBackendClient,
+  });
+  await flushAction(() => {
+    clickLabel("Steer queued prompt: body p");
+  });
+  expect(document.body.textContent).toContain("Kept in queue");
+  expect(document.body.textContent).not.toContain("Steer accepted");
+});
+
+it.each(["before", "after"])(
+  "keeps a resend admission error visible when recovery clears %s the receipt",
+  async (timing) => {
+    let accept!: (receipt: UiPromptReceipt) => void;
+    const acknowledgement = new Promise<UiPromptReceipt>((resolve) => {
+      accept = resolve;
+    });
+    const resend = vi.fn<UiBackendClient["resendSteerInput"]>(
+      () => acknowledgement,
+    );
+    const f = fixture({
+      unconsumedSteers,
+      client: {
+        resendSteerInput: resend,
+        getCurrentModel: () => Promise.resolve(null),
+        subscribeEvents: (): (() => void) => (): void => undefined,
+      } as unknown as UiBackendClient,
+    });
+    f.type("Unrelated draft");
+    await flushAction(() => {
+      clickLabel("Resend steer 1: Keep my requirement");
+    });
+    if (timing === "before") f.update({ unconsumedSteers: [] });
+    await flushAction(() => {
+      accept({
+        promptId: "resent",
+        sessionId: "session",
+        clientRequestId: "resend-operation",
+        status: "queued",
+        userMessageId: "resent-message",
+        createdAt: "2026-10-15T00:00:00Z",
+        steer: {
+          status: "error",
+          error: {
+            code: "STEER_FAILED",
+            message: "Input store unavailable",
+            source: "scheduler",
+            retryable: true,
+          },
+        },
+      });
+    });
+    expect(document.body.textContent).toContain(
+      "Accepted in queue · Input store unavailable",
+    );
+    if (timing === "after") f.update({ unconsumedSteers: [] });
+    expect(document.body.textContent).toContain(
+      "Accepted in queue · Input store unavailable",
+    );
+    expect(document.body.textContent).not.toContain("Keep my requirement");
+    expect(f.input().value).toBe("Unrelated draft");
+    expect(resend).toHaveBeenCalledTimes(1);
+  },
+);
 
 it("does not revive an item deleted while its edit lease response was in flight", async () => {
   const prompt = queuedPrompt("retained");
@@ -567,6 +686,7 @@ it("does not revive an item deleted while its edit lease response was in flight"
       resubmitRetainedPrompt: vi.fn(),
       cancelQueuedPrompt: vi.fn(),
       steerQueuedPrompt: vi.fn(),
+      resendSteerInput: vi.fn(),
     },
   });
   f.type("draft preserved");
@@ -590,12 +710,16 @@ it("does not revive an item deleted while its edit lease response was in flight"
 it.each(["before", "after"])(
   "expires Steer acceptance when its target ends %s acknowledgement",
   async (timing) => {
-    let accept!: (receipt: { acceptedTargetRunId: string }) => void;
-    const acknowledgement = new Promise<{ acceptedTargetRunId: string }>(
-      (resolve) => {
-        accept = resolve;
-      },
-    );
+    let accept!: (result: {
+      status: "steered";
+      receipt: { acceptedTargetRunId: string };
+    }) => void;
+    const acknowledgement = new Promise<{
+      status: "steered";
+      receipt: { acceptedTargetRunId: string };
+    }>((resolve) => {
+      accept = resolve;
+    });
     const model = {
       canSend: true,
       canStop: true,
@@ -624,7 +748,10 @@ it.each(["before", "after"])(
     );
     if (timing === "after") {
       await flushAction(() => {
-        accept({ acceptedTargetRunId: "run-1" });
+        accept({
+          status: "steered",
+          receipt: { acceptedTargetRunId: "run-1" },
+        });
       });
       expect(document.body.textContent).toContain("Steer accepted");
     }
@@ -635,17 +762,21 @@ it.each(["before", "after"])(
         isRunning: false,
         canStop: false,
       },
-      unsentSteer: true,
+      unconsumedSteers,
     });
     if (timing === "before")
       await flushAction(() => {
-        accept({ acceptedTargetRunId: "run-1" });
+        accept({
+          status: "steered",
+          receipt: { acceptedTargetRunId: "run-1" },
+        });
       });
-    expect(document.body.textContent).toContain(
-      "Task stopped before your steer message was sent.",
-    );
+    expect(document.body.textContent).toContain("Processing unconfirmed");
     expect(document.body.textContent).not.toContain("Steer accepted");
-    f.update({ model: { ...model, activeRunId: "run-2" }, unsentSteer: false });
+    f.update({
+      model: { ...model, activeRunId: "run-2" },
+      unconsumedSteers: [],
+    });
     f.type("next prompt");
     expect(document.body.textContent).not.toContain("Steer accepted");
   },
@@ -654,12 +785,16 @@ it.each(["before", "after"])(
 it.each(["draft edit", "session round trip"])(
   "does not revive Steer acceptance after a pending request crosses %s",
   async (change) => {
-    let accept!: (receipt: { acceptedTargetRunId: string }) => void;
-    const acknowledgement = new Promise<{ acceptedTargetRunId: string }>(
-      (resolve) => {
-        accept = resolve;
-      },
-    );
+    let accept!: (result: {
+      status: "steered";
+      receipt: { acceptedTargetRunId: string };
+    }) => void;
+    const acknowledgement = new Promise<{
+      status: "steered";
+      receipt: { acceptedTargetRunId: string };
+    }>((resolve) => {
+      accept = resolve;
+    });
     const model = {
       canSend: true,
       canStop: true,
@@ -696,7 +831,7 @@ it.each(["draft edit", "session round trip"])(
       f.update({ draftScopeKey: "workspace:session", model });
     }
     await flushAction(() => {
-      accept({ acceptedTargetRunId: "run-1" });
+      accept({ status: "steered", receipt: { acceptedTargetRunId: "run-1" } });
     });
     expect(document.body.textContent).not.toContain("Steer accepted");
     if (change === "draft edit")

@@ -9,6 +9,7 @@ import type {
   UiPermissionState,
   UiPromptSubmission,
   UiReasoningConfig,
+  UiUnconsumedSteer,
 } from "ohbaby-sdk";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
@@ -54,7 +55,7 @@ export interface PromptProps {
   readonly canSubmit?: boolean;
   readonly footerOnly?: boolean;
   readonly submissionContextGeneration?: number;
-  readonly unsentSteer?: boolean;
+  readonly unconsumedSteers?: readonly UiUnconsumedSteer[];
   readonly onQueueModeChange?: (active: boolean) => void;
   readonly submitPrompt?: SubmitPrompt;
   readonly onLoadHistory?: () => void;
@@ -92,7 +93,7 @@ export function Prompt({
   footerOnly = false,
   submissionContextGeneration,
   canSubmit = true,
-  unsentSteer = false,
+  unconsumedSteers = [],
   onQueueModeChange,
   submitPrompt,
   onLoadHistory,
@@ -113,6 +114,16 @@ export function Prompt({
   runtimeStatusLabel,
 }: PromptProps): ReactElement {
   const [steerSelection, setSteerSelection] = useState(0);
+  const [recoverySelection, setRecoverySelection] = useState(0);
+  const [recoveryNotice, setRecoveryNotice] = useState<string>();
+  const resendAttempts = useRef(
+    new Map<string, import("ohbaby-sdk").UiResendSteerInput>(),
+  );
+  useEffect(() => {
+    resendAttempts.current.clear();
+    setRecoverySelection(0);
+    setRecoveryNotice(undefined);
+  }, [activeSessionId]);
   const [queueSelectionId, setQueueSelectionId] = useState<string | null>(null);
   const queueSelectionRef = useRef<string | null>(null);
   const selectQueue = (id: string | null): void => {
@@ -437,6 +448,60 @@ export function Prompt({
         return;
       }
       const generation = draftGeneration.current;
+      const nextRecovery = key.rightArrow || value === "n" || value === "\x0e";
+      const previousRecovery =
+        key.leftArrow || value === "p" || value === "\x10";
+      if (
+        unconsumedSteers.length > 0 &&
+        key.ctrl &&
+        (nextRecovery || previousRecovery)
+      ) {
+        setRecoverySelection((current) =>
+          Math.max(
+            0,
+            Math.min(
+              unconsumedSteers.length - 1,
+              current + (nextRecovery ? 1 : -1),
+            ),
+          ),
+        );
+        return;
+      }
+      if (key.ctrl && (value === "r" || value === "\x12")) {
+        const entry = unconsumedSteers.at(
+          Math.min(recoverySelection, unconsumedSteers.length - 1),
+        );
+        if (!entry || !canSubmit) return;
+        const input = resendAttempts.current.get(entry.inputId) ?? {
+          inputId: entry.inputId,
+          operationId: randomUUID(),
+        };
+        resendAttempts.current.set(entry.inputId, input);
+        replaceQueuedMutationPending(true);
+        setError(null);
+        void client
+          .resendSteerInput(input)
+          .then(
+            (receipt) => {
+              if (generation !== draftGeneration.current) return;
+              resendAttempts.current.delete(entry.inputId);
+              setRecoveryNotice("Resend accepted");
+              if (receipt.steer?.status === "error")
+                setError(`Accepted in queue · ${receipt.steer.error.message}`);
+            },
+            (caught: unknown) => {
+              if (generation === draftGeneration.current)
+                setError(
+                  `${formatError(caught)} · Ctrl+R retries the same resend`,
+                );
+            },
+          )
+          .finally(() => {
+            if (generation === draftGeneration.current)
+              replaceQueuedMutationPending(false);
+          });
+        return;
+      }
       if (key.ctrl && (key.upArrow || key.downArrow)) {
         setSteerSelection((current) =>
           Math.max(
@@ -484,14 +549,21 @@ export function Prompt({
         void client
           .steerQueuedPrompt(input)
           .then(
-            () => {
+            (result) => {
               if (
                 generation !== draftGeneration.current ||
                 currentSteerTarget.current !== input.expectedRunId ||
                 noticeRevision !== steerNoticeRevision.current
               )
                 return;
-              setSteerNoticeRunId(input.expectedRunId);
+              if (result.status === "steered")
+                setSteerNoticeRunId(input.expectedRunId);
+              else
+                setRecoveryNotice(
+                  result.reason === "prompt-not-queued"
+                    ? "Prompt is no longer queued"
+                    : `Kept in queue · ${result.reason}`,
+                );
             },
             (caught: unknown) => {
               if (generation !== draftGeneration.current) return;
@@ -905,6 +977,11 @@ export function Prompt({
     permission,
     usage: contextWindowUsage,
   });
+  const recoveryIndex = Math.min(
+    recoverySelection,
+    unconsumedSteers.length - 1,
+  );
+  const recoveryInput = unconsumedSteers.at(recoveryIndex);
   const goalStatusColor =
     goalStatus === "active" ? theme.status.accent : theme.status.warning;
 
@@ -919,11 +996,23 @@ export function Prompt({
               {unsent.at(-1)}
             </Text>
           ) : null}
-          {unsentSteer ? (
-            <Text dimColor>
-              Task stopped before your steer message was sent.
-            </Text>
+          {recoveryInput ? (
+            <Box flexDirection="column">
+              <Text dimColor>
+                Steer recovery {recoveryIndex + 1} / {unconsumedSteers.length} ·
+                Ctrl+N/P select · Ctrl+R Resend
+              </Text>
+              <Text>
+                {recoveryInput.state === "unconfirmed"
+                  ? "Processing unconfirmed"
+                  : "Not processed"}
+              </Text>
+              <Text wrap="truncate-end">
+                Preview · {recoveryInput.text.replace(/\s+/g, " ")}
+              </Text>
+            </Box>
           ) : null}
+          {recoveryNotice ? <Text dimColor>{recoveryNotice}</Text> : null}
           {steerNoticeRunId && steerNoticeRunId === activeRunId ? (
             <Text>
               Steer accepted · waiting for the active run’s next safe boundary
@@ -1174,6 +1263,8 @@ async function submitInput(
             sessionId: activeSessionId ?? undefined,
           }));
       onAccepted?.(receipt.sessionId);
+      if (receipt.steer?.status === "error")
+        setError(`Accepted in queue · ${receipt.steer.error.message}`);
     } catch (caught) {
       const message = formatError(caught);
       if (!message.startsWith("Submission outcome unknown"))

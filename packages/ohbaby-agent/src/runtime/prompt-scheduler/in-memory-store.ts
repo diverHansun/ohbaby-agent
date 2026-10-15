@@ -124,6 +124,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       if (
         existing.sessionId !== input.sessionId ||
         existing.text !== input.text ||
+        existing.resendOfPromptId !== input.resendOfPromptId ||
         !sameReasoning(existing.reasoning, input.reasoning)
       ) {
         throw new PromptIdempotencyConflictError(input.clientRequestId);
@@ -159,6 +160,7 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
       sessionId: input.sessionId,
       userMessageId: input.userMessageId,
       text: input.text,
+      resendOfPromptId: input.resendOfPromptId,
       titleExpected: input.titleExpected,
       namingSource: input.namingSource ? { ...input.namingSource } : undefined,
       reasoning: input.reasoning ? { ...input.reasoning } : undefined,
@@ -462,6 +464,20 @@ export class InMemoryPromptSubmissionStore implements PromptSubmissionStore {
         return true;
     }
     return false;
+  }
+
+  async listResendChildren(
+    scopeKey: string,
+    parentPromptId: string,
+  ): Promise<readonly PromptSubmissionRecord[]> {
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          record.scopeKey === scopeKey &&
+          record.resendOfPromptId === parentPromptId,
+      )
+      .sort(compareOrder)
+      .map(clone);
   }
 
   async listForSession(

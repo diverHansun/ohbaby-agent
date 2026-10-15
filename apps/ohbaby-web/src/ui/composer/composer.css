@@ -439,9 +439,36 @@
 }
 
 .ohb-unsent-steer {
+  background: #fafafa;
+  border: 1px solid #e2e2e2;
+  border-radius: 10px;
+  box-sizing: border-box;
+  max-height: min(30vh, 260px);
+  overflow-y: auto;
   color: #8a8d94;
   font-size: 12px;
   margin: 0 auto 8px;
   max-width: 770px;
+  padding: 10px 12px;
   width: calc(100% - 30px);
+}
+
+/* The composer overlays the stream; reserve the recovery card's bounded height. */
+.ohb-app-content:has(> .ohb-root-composer .ohb-unsent-steer)
+  > .ohb-root-conversation
+  > .ohb-stream {
+  --steer-recovery-space: calc(min(30vh, 260px) + 8px);
+}
+
+.ohb-steer-recovery-text {
+  margin: 4px 0;
+  max-height: 8em;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font: inherit;
+}
+
+.ohb-unsent-steer > div + div {
+  margin-top: 8px;
 }

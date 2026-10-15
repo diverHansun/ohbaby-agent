@@ -85,7 +85,16 @@ export interface UiSessionGoal {
   readonly goal: UiGoal;
 }
 
+export interface UiUnconsumedSteer {
+  readonly inputId: string;
+  readonly promptId: string;
+  readonly messageId: string;
+  readonly text: string;
+  readonly state: "unconsumed" | "unconfirmed";
+}
+
 export interface UiSession {
+  readonly unconsumedSteers?: readonly UiUnconsumedSteer[];
   readonly reasoning?: UiReasoningConfig;
   readonly id: string;
   readonly title: string;
@@ -99,7 +108,6 @@ export interface UiRun {
   readonly inputsCloseReason?: string;
   readonly endedAt?: string;
   readonly endTimeSource?: "recovery";
-  readonly unsentSteer?: boolean;
   readonly modelActivity?: UiModelRequest;
   readonly id: string;
   readonly sessionId: string;
