@@ -1,5 +1,7 @@
 # goals 模块 data-model.md
 
+> 最新字段和写入约束见 [improve-5](./improve-5/architecture.md)：criterion trim 后最多 6000 UTF-16 code units，超限拒绝；UiGoal 投影轮次与活跃时长。下文保留历史概念描述，其中 token 预算及非活跃注入已被升级取代。
+
 本文档是 `goals` 模块的**概念词典**：统一讨论、接口与实现使用的领域语言。它不冻结实现，不列完整类型。所有概念服务于 [goals-duty.md](./goals-duty.md) 与 [architecture.md](./architecture.md)。
 
 ---

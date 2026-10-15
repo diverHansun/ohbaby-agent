@@ -1,5 +1,7 @@
 # goals 模块 test.md
 
+> 本页保留原始测试规划。升级后的发布门与实测记录见 [improve-5 验收](../problem-lists/2026-10-13-goals-upgrade/improve-5/05-implementation-acceptance.md)。确定性测试仍不访问付费模型；用户授权的真实 API E2E 使用独立 opt-in 开关与临时数据目录，不属于默认单元/集成测试。
+
 本文档说明如何验证 `goals` 模块在协作环境中的正确性。遵循项目级测试规范（[docs-test/classification.md](../../docs-test/classification.md)：`unit` / `contract` / `integration` / `smoke`，就近命名），只补 goals 特有场景。测试围绕**职责与交互边界**，不围绕代码结构。
 
 > 模块原型：**服务编排模块** → 主 `unit`、次 `integration`；对外接口/事件用 `contract` 固定。**禁止调用真实 LLM API**，续跑循环一律用 fake provider。

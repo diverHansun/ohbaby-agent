@@ -1,5 +1,7 @@
 # Goal UI Design
 
+> 本页保留原始 UI 设计。2026-10-15 的 [improve-5](../improve-5/architecture.md) 已替代“不暴露 turn usage”的旧限制：CLI 显示轮次/活跃时长，Web 面板显示两行统计，chip 保持简短；token 明细仍只在主动查询中显示。恢复与 Optional limits 沿用 improve-3/4。
+
 本文档描述 `goals` 模块在 CLI TUI 与 Web UI 中的呈现和操作方式。它只覆盖前端适配层，不改变后端状态机、GoalService、GoalDriver 或持久化语义。
 
 ## 1. Design Goals

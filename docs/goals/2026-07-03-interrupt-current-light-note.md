@@ -1,5 +1,7 @@
 # goals interrupt-current 与 light-note 设计补丁
 
+> Superseded（2026-10-15）：普通输入处理已由 improve-2 的排队、improve-4 的自动 steer 取代；improve-5 删除 paused light note 及专用开关。最新行为见 [improve-5](./improve-5/architecture.md)。本文原始内容保留用于追溯。
+
 日期：2026-07-03
 状态：Accepted
 

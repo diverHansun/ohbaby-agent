@@ -1,5 +1,7 @@
 # goals 模块 dfd-interface.md
 
+> 流 D 的最新路径见 [improve-5](./improve-5/architecture.md)：同次准入生成正文与 displayText；普通输入不再注入 light note。下文保留原始接口设计。
+
 > 本文保留原始接口设计。升级后的执行身份与生命周期见 [improve-2](./improve-2/dfd-interface.md)、[improve-3](./improve-3/dfd-interface.md)；自动 steer 分型、会话恢复列表与显式重发接口见 [improve-4](./improve-4/architecture.md)。
 
 本文档以**数据流优先、接口从属**的视角，说明 `goals` 模块的数据从哪来、经过什么、流向哪，以及承载这些流动的接口。概念沿用 [data-model.md](./data-model.md)，结构沿用 [architecture.md](./architecture.md)，不引入新职责。

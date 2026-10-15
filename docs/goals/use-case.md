@@ -1,5 +1,7 @@
 # goals 模块 use-case.md
 
+> 最新交互见 [improve-5](./improve-5/architecture.md)：非活跃目标不自动注入普通输入；续跑气泡显示短提示，模型正文与主动查询保留。下文是历史用例，执行准入、blocked 和恢复以 improve-2–4 为准。
+
 本文档说明 goals 模块围绕职责完成的关键业务动作——"职责如何被执行"，不是实现。概念沿用 [data-model.md](./data-model.md)，数据流沿用 [dfd-interface.md](./dfd-interface.md)，职责追溯 [goals-duty.md](./goals-duty.md)。
 
 ---
