@@ -1,5 +1,7 @@
 # goals 模块 architecture.md
 
+> 本文保留原始设计。2026-10-15 分批升级后的实际架构见 [improve-2](./improve-2/architecture.md)、[improve-3](./improve-3/architecture.md)、[improve-4](./improve-4/architecture.md)；最新自动插话、输入恢复与验收见 [第 4 批实施记录](../problem-lists/2026-10-13-goals-upgrade/improve-4/05-implementation-acceptance.md)。
+
 本文档描述 `goals` 模块（`packages/ohbaby-agent/src/goals`）的内部结构与设计取舍。所有结构均服务于 [goals-duty.md](./goals-duty.md) 中已确认的目标与职责，不引入新职责。
 
 ---
