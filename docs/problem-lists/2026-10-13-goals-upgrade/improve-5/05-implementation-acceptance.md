@@ -93,5 +93,6 @@ watchdog 的 improve-5 回看已完成：生产 createIdleWatchdog 仍只有 llm
 | `1adbe248` | criterion 写入校验与原子替换保护 |
 | `b15c1610` | 正文/短显示接线、inactive 注入删除、SDK/CLI/Web 数字与回放 |
 | `99c9258d` | 自动/手动压缩组合回归、daemon 与真实 API E2E |
+| `9cecaed6` | 阶段架构、逐项验收证据和历史文档指引 |
 
-本验收记录与阶段架构另行作为文档提交。所有发布门已通过；按用户要求，接下来将五批统一 fast-forward 合入 `codex/goals-upgrade` 与 `main`，合并完成后补记实际结果。未请求远端推送。
+2026-10-15，发布门通过后，`codex/goals-upgrade` 与 `main` 均从 `62d99d14` fast-forward 到 `9cecaed6`，统一包含 improve-1 至 improve-5。核对三个分支指向同一提交，无冲突、无丢弃修改。本段是合并后的文档补记，随后同步到三个分支；没有远端推送。保留本批开发分支以便追溯。
