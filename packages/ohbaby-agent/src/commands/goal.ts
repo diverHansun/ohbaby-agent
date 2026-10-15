@@ -62,7 +62,9 @@ async function runGoalCommand(
     return;
   }
   if (head === "replace") {
-    const objective = argv.slice(1).join(" ").trim();
+    const objective = [argv.slice(1).join(" ").trim(), invocation.body ?? ""]
+      .join("\n")
+      .trim();
     emitText(statusText(await goals.replace(sessionId, objective)));
     return;
   }
@@ -73,7 +75,9 @@ async function runGoalCommand(
     );
   }
   // 首 token 非保留子命令 → 整段视为 objective 创建 goal
-  const objective = argv.join(" ").trim();
+  const objective = [argv.join(" ").trim(), invocation.body ?? ""]
+    .join("\n")
+    .trim();
   const snapshot = await goals.create(sessionId, { objective });
   emitText(
     `Goal started (${snapshot.status}). Use /goal status to inspect, /goal pause|cancel to control.\n${statusText(snapshot)}`,

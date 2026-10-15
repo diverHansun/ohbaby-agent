@@ -8,6 +8,8 @@ import os from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UiEvent, UiMessage } from "ohbaby-sdk";
+import { parseSlashCommandInput, resolveSlashCommand } from "ohbaby-sdk";
+import { buildCommandCatalog } from "../../../../ohbaby-agent/src/commands/catalog.js";
 import {
   createPersistentUiBackendClient,
   closePersistentUiBackendDatabase,
@@ -115,15 +117,22 @@ async function createGoal(
   sessionId: string,
   objective: string,
 ): Promise<void> {
+  const resolved = resolveSlashCommand(
+    buildCommandCatalog(),
+    parseSlashCommandInput(`/goal ${objective}`),
+    { surface: "tui" },
+  );
+  if (!resolved.ok) throw new Error(resolved.error.message);
   const result = await client.executeCommand({
-    commandId: "goal",
-    path: ["goal"],
+    commandId: resolved.command.id,
+    path: resolved.path,
     clientInvocationId: randomUUID(),
-    raw: `/goal ${objective}`,
-    rawArgs: objective,
-    argv: [objective],
+    raw: resolved.raw,
+    rawArgs: resolved.rawArgs,
+    argv: resolved.argv,
+    body: resolved.body,
     sessionId,
-    surface: "web",
+    surface: "tui",
   });
   expect(result.status).toBe("completed");
 }
@@ -179,7 +188,7 @@ describe("goal execution through the HTTP daemon", () => {
     const firstRequest = deferred();
     const releaseFirst = deferred();
     const objective =
-      "Verify the cobalt telescope handoff within exactly 2 turns";
+      "Verify the cobalt telescope handoff within exactly 2 turns\n\n  汇总每轮结果，并注明来源";
     const requests: InterfaceProviderRequest[] = [];
     const titles: InterfaceProviderRequest[] = [];
     const llmClient: LLMClientInstance = {
@@ -289,7 +298,7 @@ describe("goal execution through the HTTP daemon", () => {
             (message) => message.role === "user",
           );
           expect(replayUserMessages.map(uiMessageText)).toEqual([
-            "Goal started",
+            objective,
             "Goal auto-continue (turn 2)",
           ]);
           await vi.waitFor(() => {
@@ -329,7 +338,10 @@ describe("goal execution through the HTTP daemon", () => {
           await vi.waitFor(() => {
             expect(titles).toHaveLength(1);
           });
-          expect(lastUserText(titles[0])).toContain(objective);
+          // Title input normalizes whitespace, while chat/model history keeps it.
+          expect(lastUserText(titles[0])).toContain(
+            "Verify the cobalt telescope handoff within exactly 2 turns 汇总每轮结果，并注明来源",
+          );
           expect(lastUserText(titles[0])).not.toMatch(
             /Goal started|Goal auto-continue/u,
           );
@@ -415,10 +427,12 @@ describe("goal execution through the HTTP daemon", () => {
             /currently paused|<untrusted_objective>|\/goal resume/u,
           );
           expect(lastUserText(requests[3])).toContain("<environment_context>");
-          expect(JSON.stringify(requests[4].messages)).toContain(
-            `Goal: ${objective}`,
-          );
-          expect(JSON.stringify(requests[4].messages)).toContain("Tokens:");
+          const explicitGoal = requests[4].messages.find(
+            (message) =>
+              message.role === "tool" && message.callId === "read_blocked_goal",
+          )?.content;
+          expect(explicitGoal).toContain(`Goal: ${objective}`);
+          expect(explicitGoal).toContain("Tokens:");
           expect(
             (await client.getSessionView({ sessionId: session.id })).goal,
           ).toEqual(view.goal);
@@ -1198,7 +1212,7 @@ describe("live goal execution through the HTTP daemon", () => {
               message.role === "user" && message.id !== steered.userMessageId,
           );
           expect(goalMessages.map(uiMessageText)).toEqual([
-            "Goal started",
+            objective,
             "Goal auto-continue (turn 2)",
           ]);
           const liveGoalMessages = events.flatMap((event) =>

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { UiCommandInvocation, UiCommandOutput } from "ohbaby-sdk";
+import { parseSlashCommandInput, resolveSlashCommand } from "ohbaby-sdk";
 import { computeBudgetReport, planResume } from "../goals/budget.js";
 import type { GoalSnapshot } from "../goals/index.js";
+import { InMemoryGoalPersistence } from "../goals/persistence.js";
+import { GoalService } from "../goals/service.js";
+import { buildCommandCatalog } from "./catalog.js";
 import { createGoalCommandHandler } from "./goal.js";
 import type { CommandGoalBackend, CommandRunContext } from "./types.js";
 
@@ -43,6 +47,25 @@ function invoke(argv: readonly string[]): UiCommandInvocation {
     path: ["goal"],
     raw: `/goal ${argv.join(" ")}`,
     rawArgs: argv.join(" "),
+    surface: "tui",
+  };
+}
+
+function parsedInvocation(raw: string): UiCommandInvocation {
+  const resolved = resolveSlashCommand(
+    buildCommandCatalog(),
+    parseSlashCommandInput(raw),
+    { surface: "tui" },
+  );
+  if (!resolved.ok) throw new Error(resolved.error.message);
+  return {
+    argv: resolved.argv,
+    body: resolved.body,
+    clientInvocationId: "i1",
+    commandId: resolved.command.id,
+    path: resolved.path,
+    raw: resolved.raw,
+    rawArgs: resolved.rawArgs,
     surface: "tui",
   };
 }
@@ -93,6 +116,65 @@ describe("/goal command handler", () => {
     expect(backend.create).toHaveBeenCalledWith("s1", {
       objective: "fix all tests",
     });
+  });
+
+  it.each([
+    {
+      action: "create",
+      raw: '/goal "检查  台北" 天气\n\n  汇总 <>& 并注明来源\n结束  ',
+      objective: "检查  台北 天气\n\n  汇总 <>& 并注明来源\n结束",
+    },
+    {
+      action: "replace",
+      raw: '/goal replace "检查  東京" 天气\r\n\r\n  汇总 <>& 并注明来源\r\n结束  ',
+      objective: "检查  東京 天气\n\n  汇总 <>& 并注明来源\n结束",
+    },
+  ])(
+    "preserves the parsed multiline objective on $action",
+    async ({ action, raw, objective }) => {
+      const service = new GoalService({
+        persistence: new InMemoryGoalPersistence(),
+        executionControl: {
+          interruptGoalExecution: (): Promise<void> => Promise.resolve(),
+        },
+      });
+      if (action === "replace") {
+        await service.createGoal("s1", {
+          objective: "old goal",
+          actor: "user",
+        });
+      }
+      const backend = makeBackend({
+        create: (sessionId, input) =>
+          service.createGoal(sessionId, { ...input, actor: "user" }),
+        replace: (sessionId, nextObjective) =>
+          service.replaceGoal(sessionId, nextObjective),
+      });
+      const { context, failures } = makeContext();
+
+      await createGoalCommandHandler({ goals: backend }).execute(
+        parsedInvocation(raw),
+        context,
+      );
+
+      expect(failures).toEqual([]);
+      expect(service.peekSnapshot("s1")?.objective).toBe(objective);
+      service.dispose();
+    },
+  );
+
+  it("keeps a body-only /goal request as a status command", async () => {
+    const backend = makeBackend();
+    const { context, outputs, failures } = makeContext();
+
+    await createGoalCommandHandler({ goals: backend }).execute(
+      parsedInvocation("/goal\nbody without a first-line objective"),
+      context,
+    );
+
+    expect(failures).toEqual([]);
+    expect(JSON.stringify(outputs)).toContain("fix tests");
+    expect(backend.create).not.toHaveBeenCalled();
   });
 
   it("pause / resume / cancel / replace route to backend", async () => {

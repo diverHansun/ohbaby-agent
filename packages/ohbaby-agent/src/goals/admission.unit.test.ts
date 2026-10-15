@@ -10,14 +10,18 @@ describe("goal admission identity", () => {
         interruptGoalExecution: (): Promise<void> => Promise.resolve(),
       },
     });
+    const objective = "检查城市天气 <台北> & 東京\n汇总结果并注明来源";
     const goal = await service.createGoal("s", {
-      objective: "work",
+      objective,
       actor: "user",
     });
     const epoch = service.currentExecutionEpoch("s");
     const ticket = await service.admitTurnInBoundary("s", goal.goalId, epoch);
     expect(ticket?.turnNumber).toBe(1);
-    expect(ticket?.displayText).toBe("Goal started");
+    expect(ticket?.displayText).toBe(objective);
+    expect(ticket?.modelText).toContain(
+      "<untrusted_objective>\n检查城市天气 &lt;台北&gt; &amp; 東京\n汇总结果并注明来源\n</untrusted_objective>",
+    );
     expect(ticket?.modelText).toContain("Progress: 1 continuation turns");
     await service.pauseGoal("s");
     expect(ticket?.controller.signal.aborted).toBe(true);

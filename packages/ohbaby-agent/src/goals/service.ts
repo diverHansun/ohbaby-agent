@@ -180,7 +180,7 @@ export class GoalService {
       }),
       displayText:
         snapshot.turnsUsed === 1
-          ? "Goal started"
+          ? snapshot.objective
           : `Goal auto-continue (turn ${String(snapshot.turnsUsed)})`,
       token: Symbol("goal-turn"),
       controller: new AbortController(),

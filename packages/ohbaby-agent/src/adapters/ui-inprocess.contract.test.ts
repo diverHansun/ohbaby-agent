@@ -7170,7 +7170,7 @@ describe("createInProcessUiBackendClient", () => {
     );
     expect(userMessages).toHaveLength(1);
     expect(userMessages[0]?.parts).toEqual([
-      { type: "text", text: "Goal started" },
+      { type: "text", text: "fix all goal tests" },
     ]);
     expect(goalEvents.some((event) => event.goal?.turnsUsed === 1)).toBe(true);
     expect(goalEvents[0]?.goal).toMatchObject({
@@ -7551,7 +7551,8 @@ describe("createInProcessUiBackendClient", () => {
         (message) =>
           message.role === "user" &&
           message.parts.some(
-            (part) => part.type === "text" && part.text === "Goal started",
+            (part) =>
+              part.type === "text" && part.text === "finish model-created goal",
           ),
       ),
     ).toBe(true);

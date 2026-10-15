@@ -1575,7 +1575,7 @@ describe("createPersistentUiBackendClient", () => {
         beforeRestart.session.messages
           .filter((message) => message.role === "user")
           .flatMap((message) => message.parts),
-      ).toMatchObject([{ type: "text", text: "Goal started" }]);
+      ).toMatchObject([{ type: "text", text: "persist this goal" }]);
       expect(beforeRestart.goal).toMatchObject({
         status: "ready",
         value: { status: "paused", turnsUsed: 1 },
@@ -1623,7 +1623,7 @@ describe("createPersistentUiBackendClient", () => {
         afterRestart.session.messages
           .filter((message) => message.role === "user")
           .flatMap((message) => message.parts),
-      ).toMatchObject([{ type: "text", text: "Goal started" }]);
+      ).toMatchObject([{ type: "text", text: "persist this goal" }]);
       await restored.dispose();
     } finally {
       closeDatabase();

@@ -272,7 +272,7 @@ it("U2/U13 preserves goal text, display and runtime context across automatic and
       );
       const display =
         index === 0
-          ? "Goal started"
+          ? objective
           : `Goal auto-continue (turn ${String(index + 1)})`;
       expect(body).toMatchObject({ metadata: { displayText: display } });
       expect(body?.metadata?.kind).toBeUndefined();
