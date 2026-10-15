@@ -1568,6 +1568,18 @@ describe("createPersistentUiBackendClient", () => {
         surface: "tui",
       });
       await paused;
+      if (!sessionId) throw new Error("Goal session was not created");
+      const beforeRestart = await client.getSessionView?.({ sessionId });
+      if (!beforeRestart) throw new Error("Goal session view is unavailable");
+      expect(
+        beforeRestart.session.messages
+          .filter((message) => message.role === "user")
+          .flatMap((message) => message.parts),
+      ).toMatchObject([{ type: "text", text: "Goal started" }]);
+      expect(beforeRestart.goal).toMatchObject({
+        status: "ready",
+        value: { status: "paused", turnsUsed: 1 },
+      });
       await client.dispose();
       closeDatabase();
 
@@ -1587,7 +1599,7 @@ describe("createPersistentUiBackendClient", () => {
         path: ["goal"],
         raw: "/goal status",
         rawArgs: "status",
-        sessionId: sessionId ?? undefined,
+        sessionId,
         surface: "tui",
       });
 
@@ -1603,6 +1615,15 @@ describe("createPersistentUiBackendClient", () => {
       const text = output?.kind === "text" ? output.text : "";
       expect(text).toContain("persist this goal");
       expect(text).toContain("paused");
+      const afterRestart = await restored.getSessionView?.({ sessionId });
+      if (!afterRestart)
+        throw new Error("Restored goal session view is unavailable");
+      expect(afterRestart.goal).toEqual(beforeRestart.goal);
+      expect(
+        afterRestart.session.messages
+          .filter((message) => message.role === "user")
+          .flatMap((message) => message.parts),
+      ).toMatchObject([{ type: "text", text: "Goal started" }]);
       await restored.dispose();
     } finally {
       closeDatabase();

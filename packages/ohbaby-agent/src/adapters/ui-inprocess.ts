@@ -103,11 +103,7 @@ import type {
   CommandModelSummary,
   CommandSessionSummary,
 } from "../commands/index.js";
-import {
-  GoalService,
-  InMemoryGoalPersistence,
-  renderGoalContextNote,
-} from "../goals/index.js";
+import { GoalService, InMemoryGoalPersistence } from "../goals/index.js";
 import { executeGoalExecutionInterrupt } from "./goal-execution-control.js";
 import type {
   GoalPersistencePort,
@@ -259,9 +255,8 @@ type InternalSubmitPromptOptions = SubmitPromptOptions & {
   readonly owner?: PromptOwner;
   readonly goalId?: string;
   readonly goalTicket?: GoalTurnTicket;
-  /** Carried from admission; live/replay display wiring belongs to improve-5. */
+  /** Display value from the same admission snapshot as goalTicket. */
   readonly displayText?: string;
-  readonly suppressGoalContextNote?: boolean;
   readonly reservedUserMessageId?: string;
   readonly onRunStarted?: (runId: string) => Promise<void>;
 };
@@ -1361,7 +1356,6 @@ export function createInProcessUiBackendClient(
         signal: admitted.controller.signal,
         owner: "goal",
         sessionId,
-        suppressGoalContextNote: true,
       });
       return {
         ...goalOutcomeFromRunCompletion(completion),
@@ -1690,6 +1684,11 @@ export function createInProcessUiBackendClient(
         ? {}
         : { pauseReason: snapshot.pauseReason }),
       status: snapshot.status,
+      turnsUsed: snapshot.turnsUsed,
+      wallClockMs: snapshot.wallClockMs,
+      ...(snapshot.budget.turnBudget === null
+        ? {}
+        : { turnBudget: snapshot.budget.turnBudget }),
     };
   }
 
@@ -3378,22 +3377,13 @@ export function createInProcessUiBackendClient(
         activePromptsBySession.set(promptSessionId, activePrompt);
       }
 
-      const modelPromptText = await promptTextForModel({
-        owner,
-        runtime,
-        sessionId: session.id,
-        suppressGoalContextNote:
-          submitOptions?.suppressGoalContextNote === true,
-        text,
-      });
-
       if (submitOptions?.reservedUserMessageId) {
         messageIds.reserve(submitOptions.reservedUserMessageId);
       }
       const userMessage = createTextMessage({
         id: submitOptions?.reservedUserMessageId ?? messageIds.next(),
         role: "user",
-        text,
+        text: submitOptions?.displayText ?? text,
         createdAt,
       });
       const runId = await nextRunId();
@@ -3436,8 +3426,10 @@ export function createInProcessUiBackendClient(
           agentName,
           reasoning: submitOptions?.reasoning,
           initialUserMessageId: userMessage.id,
-          ...(modelPromptText === text ? {} : { displayUserText: text }),
-          prompt: modelPromptText,
+          ...(submitOptions?.displayText === undefined
+            ? {}
+            : { displayUserText: submitOptions.displayText }),
+          prompt: text,
           projectRoot: resolvedProjectRoot,
           runId,
           sessionId: session.id,
@@ -3684,28 +3676,6 @@ export function createInProcessUiBackendClient(
       idleWaiters.add(resolveOnce);
       promptIdleWaiters.set(sessionId, idleWaiters);
     });
-  }
-
-  async function promptTextForModel(input: {
-    readonly owner: PromptOwner;
-    readonly runtime: UiRuntimeComposition;
-    readonly sessionId: string;
-    readonly suppressGoalContextNote: boolean;
-    readonly text: string;
-  }): Promise<string> {
-    if (input.owner !== "user" || input.suppressGoalContextNote) {
-      return input.text;
-    }
-    const snapshot = await input.runtime.goals.getSnapshot(input.sessionId);
-    if (snapshot === null) {
-      return input.text;
-    }
-    publishGoalUpdated(input.sessionId, snapshot);
-    const note = renderGoalContextNote(snapshot);
-    if (note === undefined) {
-      return input.text;
-    }
-    return `${note}\n\nCurrent user request:\n${input.text}`;
   }
 
   const pendingModelSaves = new Map<string, Promise<UiConnectModelResult>>();

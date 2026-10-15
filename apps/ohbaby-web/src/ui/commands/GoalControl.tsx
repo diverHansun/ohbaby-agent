@@ -1,7 +1,9 @@
+import { formatDurationSeconds } from "ohbaby-sdk";
 import type { UiCommandCompletion, UiGoal } from "ohbaby-sdk";
 import type { ChangeEvent, ReactElement } from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
+  OverlayResult,
   type OverlayStatus,
   OverlayStatusLine,
   runOverlayAction,
@@ -146,6 +148,20 @@ export function GoalOverlayBody(props: {
               <span aria-hidden="true" />
               {GOAL_STATUS_LABEL[activeGoal.status]}
             </p>
+            <OverlayResult
+              rows={[
+                [
+                  "Turns",
+                  activeGoal.turnBudget === undefined
+                    ? String(activeGoal.turnsUsed)
+                    : `${String(activeGoal.turnsUsed)}/${String(activeGoal.turnBudget)}`,
+                ],
+                [
+                  "Active time",
+                  formatDurationSeconds(activeGoal.wallClockMs / 1000),
+                ],
+              ]}
+            />
             {activeGoal.pauseReason ? (
               <p className="ohb-goal-reason">{activeGoal.pauseReason}</p>
             ) : null}

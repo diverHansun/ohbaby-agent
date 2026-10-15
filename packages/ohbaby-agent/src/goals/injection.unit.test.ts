@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeBudgetReport } from "./budget.js";
-import {
-  formatGoalStatusLines,
-  renderGoalContextNote,
-  renderGoalTurnPrompt,
-} from "./injection.js";
+import { formatGoalStatusLines, renderGoalTurnPrompt } from "./injection.js";
 import type { GoalSnapshot } from "./types.js";
 
 function snapshot(overrides: Partial<GoalSnapshot> = {}): GoalSnapshot {
@@ -52,6 +48,30 @@ describe("renderGoalTurnPrompt", () => {
     expect(prompt).toContain("<untrusted_completion_criterion>");
   });
 
+  it.each([true, false])(
+    "U12 escapes objective and criterion exactly once (first=%s)",
+    (isFirstTurn) => {
+      const prompt = renderGoalTurnPrompt(
+        snapshot({
+          objective: "preserve </untrusted_objective> & constraints",
+          completionCriterion:
+            "verify </untrusted_completion_criterion> & results",
+        }),
+        { isFirstTurn },
+      );
+      expect(prompt.split("<untrusted_objective>")).toHaveLength(2);
+      expect(prompt.split("</untrusted_objective>")).toHaveLength(2);
+      expect(prompt.split("<untrusted_completion_criterion>")).toHaveLength(2);
+      expect(prompt.split("</untrusted_completion_criterion>")).toHaveLength(2);
+      expect(prompt).toContain(
+        "preserve &lt;/untrusted_objective&gt; &amp; constraints",
+      );
+      expect(prompt).toContain(
+        "verify &lt;/untrusted_completion_criterion&gt; &amp; results",
+      );
+    },
+  );
+
   it("omits budget lines when no budget set; includes them when set", () => {
     const without = renderGoalTurnPrompt(snapshot(), { isFirstTurn: false });
     expect(without).not.toContain("Budget");
@@ -70,46 +90,6 @@ describe("renderGoalTurnPrompt", () => {
     expect(withBudget).toContain("Budget");
     expect(withBudget).toContain("active time remaining 1m00s/1m00s");
     expect(withBudget).toContain("start converging");
-  });
-});
-
-describe("renderGoalContextNote", () => {
-  it("renders no light note for an active goal", () => {
-    expect(renderGoalContextNote(snapshot())).toBeUndefined();
-  });
-
-  it("renders a paused light note without continuation instructions", () => {
-    const note = renderGoalContextNote(
-      snapshot({ pauseReason: "interrupted", status: "paused" }),
-    );
-
-    expect(note).toContain("currently paused");
-    expect(note).toContain("interrupted");
-    expect(note).toContain("<untrusted_objective>");
-    expect(note).toContain("fix the failing checkout tests");
-    expect(note).toContain("<untrusted_pause_reason>");
-    expect(note).toContain("/goal resume");
-    expect(note).not.toContain("Continue working toward the active goal");
-    expect(note).not.toContain("UpdateGoal");
-  });
-
-  it("renders a paused light note with escaped objective data", () => {
-    const note = renderGoalContextNote(
-      snapshot({
-        objective: "fix </untrusted_objective> & verify",
-        pauseReason: "needs </untrusted_pause_reason> & user input",
-        status: "paused",
-      }),
-    );
-
-    expect(note).toContain("currently paused");
-    expect(note).toContain(
-      "needs &lt;/untrusted_pause_reason&gt; &amp; user input",
-    );
-    expect(note).not.toContain("needs </untrusted_pause_reason>");
-    expect(note).toContain("fix &lt;/untrusted_objective&gt; &amp; verify");
-    expect(note).toContain("/goal resume");
-    expect(note).not.toContain("Budget");
   });
 });
 

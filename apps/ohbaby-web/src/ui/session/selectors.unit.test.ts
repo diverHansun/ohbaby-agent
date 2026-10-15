@@ -393,6 +393,8 @@ describe("ohbaby-web ui selectors", () => {
           {
             goal: {
               objective: "finish goal UI",
+              turnsUsed: 7,
+              wallClockMs: 192000,
               status: "paused",
             },
             sessionId: "session_1",
@@ -400,6 +402,8 @@ describe("ohbaby-web ui selectors", () => {
           {
             goal: {
               objective: "other session goal",
+              turnsUsed: 7,
+              wallClockMs: 192000,
               status: "active",
             },
             sessionId: "session_2",
@@ -410,6 +414,8 @@ describe("ohbaby-web ui selectors", () => {
 
     expect(view.activeGoal).toEqual({
       objective: "finish goal UI",
+      turnsUsed: 7,
+      wallClockMs: 192000,
       status: "paused",
     });
   });
@@ -424,6 +430,8 @@ describe("ohbaby-web ui selectors", () => {
           {
             goal: {
               objective: "other session goal",
+              turnsUsed: 7,
+              wallClockMs: 192000,
               status: "active",
             },
             sessionId: "session_2",

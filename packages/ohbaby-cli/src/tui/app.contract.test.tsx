@@ -768,7 +768,10 @@ describe("OhbabyTerminalApp", () => {
         {
           goal: {
             objective: "finish goal UI",
+            turnsUsed: 7,
+            wallClockMs: 192000,
             status: "active",
+            turnBudget: 20,
           },
           sessionId: "session_1",
         },
@@ -783,7 +786,12 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("goal active");
+    expect(app.lastFrame()).toContain("goal active · 3m 12s · 7/20 turns");
+    Object.defineProperty(app.stdout, "columns", { get: () => 40 });
+    app.stdout.emit("resize");
+    await flush();
+    expect(app.lastFrame()).toContain("goal active · 3m 12s · 7/20 turns");
+
     expect(app.lastFrame()).not.toContain("finish goal UI");
   });
 
@@ -794,6 +802,8 @@ describe("OhbabyTerminalApp", () => {
         {
           goal: {
             objective: "finish goal UI",
+            turnsUsed: 7,
+            wallClockMs: 192000,
             pauseReason: "interrupted",
             status: "paused",
           },
@@ -810,7 +820,7 @@ describe("OhbabyTerminalApp", () => {
 
     await flush();
 
-    expect(app.lastFrame()).toContain("goal paused");
+    expect(app.lastFrame()).toContain("goal paused · 3m 12s · 7 turns");
     expect(app.lastFrame()).not.toContain("interrupted");
   });
 
@@ -840,6 +850,8 @@ describe("OhbabyTerminalApp", () => {
           sessionId: "session_1",
           goal: {
             objective: "finish goal UI",
+            turnsUsed: 7,
+            wallClockMs: 192000,
             status: "blocked",
             pauseReason: "budget reached",
           },
@@ -855,7 +867,9 @@ describe("OhbabyTerminalApp", () => {
     try {
       await flush();
       expect(app.lastFrame()).toContain(
-        chalk.hex(createTheme("dark", 3).status.warning)("goal blocked"),
+        chalk.hex(createTheme("dark", 3).status.warning)(
+          "goal blocked · 3m 12s · 7 turns",
+        ),
       );
       expect(app.lastFrame()).not.toContain("budget reached");
     } finally {

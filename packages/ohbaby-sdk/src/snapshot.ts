@@ -75,6 +75,9 @@ export interface UiSessionTodoList {
 export type UiGoalStatus = "active" | "paused" | "blocked";
 
 export interface UiGoal {
+  readonly turnsUsed: number;
+  readonly wallClockMs: number;
+  readonly turnBudget?: number;
   readonly status: UiGoalStatus;
   readonly objective: string;
   readonly pauseReason?: string;

@@ -7163,6 +7163,20 @@ describe("createInProcessUiBackendClient", () => {
       status: "active",
     });
     expect(goalEvents.at(-1)?.goal).toBeNull();
+    const userMessages = events.flatMap((event) =>
+      event.type === "message.appended" && event.message.role === "user"
+        ? [event.message]
+        : [],
+    );
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]?.parts).toEqual([
+      { type: "text", text: "Goal started" },
+    ]);
+    expect(goalEvents.some((event) => event.goal?.turnsUsed === 1)).toBe(true);
+    expect(goalEvents[0]?.goal).toMatchObject({
+      turnsUsed: 0,
+    });
+    expect(typeof goalEvents[0]?.goal?.wallClockMs).toBe("number");
   });
 
   it("keeps a goal Todo projection visible across continuation turns", async () => {
@@ -7537,9 +7551,7 @@ describe("createInProcessUiBackendClient", () => {
         (message) =>
           message.role === "user" &&
           message.parts.some(
-            (part) =>
-              part.type === "text" &&
-              part.text.includes("finish model-created goal"),
+            (part) => part.type === "text" && part.text === "Goal started",
           ),
       ),
     ).toBe(true);
@@ -7583,6 +7595,8 @@ describe("createInProcessUiBackendClient", () => {
             goal: {
               objective: "stale goal",
               status: "paused",
+              turnsUsed: 0,
+              wallClockMs: 0,
             },
             sessionId: "session_1",
           },
@@ -7596,7 +7610,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(snapshot.goals).toEqual([]);
   });
 
-  it("queues a user prompt until explicit pause and then injects a paused light note", async () => {
+  it("U3 queues a user prompt until explicit pause and submits its original text", async () => {
     const goalStarted = createDeferred<undefined>();
     const requests: InterfaceProviderRequest[] = [];
     const steerStores = createSteerStores();
@@ -7684,8 +7698,10 @@ describe("createInProcessUiBackendClient", () => {
 
     expect(requests).toHaveLength(2);
     expect(lastRequestMessageText(requests[0])).toContain("goal mode");
-    expect(lastRequestMessageText(requests[1])).toContain("currently paused");
-    expect(lastRequestMessageText(requests[1])).toContain("/goal resume");
+    expect(lastRequestMessageText(requests[1])).not.toContain(
+      "currently paused",
+    );
+    expect(lastRequestMessageText(requests[1])).not.toContain("/goal resume");
     expect(lastRequestMessageText(requests[1])).toContain(
       "What is the current progress?",
     );
@@ -7956,7 +7972,9 @@ describe("createInProcessUiBackendClient", () => {
       expect(lastRequestMessageText(userRequest)).toContain(
         "Handle this user interruption",
       );
-      expect(lastRequestMessageText(userRequest)).toContain("currently paused");
+      expect(lastRequestMessageText(userRequest)).not.toContain(
+        "currently paused",
+      );
     } finally {
       await client.dispose();
     }
@@ -8053,8 +8071,10 @@ describe("createInProcessUiBackendClient", () => {
     if (userRequest === undefined) {
       throw new Error("expected a user request to be captured");
     }
-    expect(lastRequestMessageText(userRequest)).toContain("currently paused");
-    expect(lastRequestMessageText(userRequest)).toContain("/goal resume");
+    expect(lastRequestMessageText(userRequest)).not.toContain(
+      "currently paused",
+    );
+    expect(lastRequestMessageText(userRequest)).not.toContain("/goal resume");
   });
 
   it.each([
@@ -8069,7 +8089,7 @@ describe("createInProcessUiBackendClient", () => {
       storedStatus: "blocked" as const,
     },
   ])(
-    "preserves $label records without resuming the goal (only paused keeps its pre-improve-5 light note)",
+    "U3 preserves $label records without injecting or resuming the goal",
     async ({ label, reason, storedStatus }) => {
       const requests: InterfaceProviderRequest[] = [];
       const goalPersistence = new InMemoryGoalPersistence(() => 1);
@@ -8110,14 +8130,10 @@ describe("createInProcessUiBackendClient", () => {
 
       expect(requests).toHaveLength(1);
       const promptText = lastRequestMessageText(requests[0]);
-      if (storedStatus === "paused") {
-        expect(promptText).toContain("currently paused");
-        expect(promptText).toContain(`${label} goal objective`);
-        expect(promptText).toContain("/goal resume");
-      } else {
-        expect(promptText).not.toContain(`${label} goal objective`);
-      }
-      expect(promptText).toContain(`Discuss the ${label} goal`);
+      expect(promptText.startsWith(`Discuss the ${label} goal`)).toBe(true);
+      expect(promptText).not.toContain(`${label} goal objective`);
+      expect(promptText).not.toContain("/goal resume");
+      expect(promptText).toContain("<environment_context>");
 
       const snapshot = await client.getSnapshot();
       const userTexts = snapshot.sessions.flatMap((session) =>

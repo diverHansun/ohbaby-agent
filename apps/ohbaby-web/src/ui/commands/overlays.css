@@ -271,6 +271,10 @@
   margin: 0;
 }
 
+.ohb-goal-state .ohb-structured-result span {
+  width: 92px;
+}
+
 .ohb-goal-status {
   align-items: center;
   color: #26282d;

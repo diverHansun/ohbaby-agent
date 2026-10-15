@@ -3879,7 +3879,10 @@ describe("OhbabyWebApp slash command interactions", () => {
           {
             goal: {
               objective: "finish goal UI",
+              turnsUsed: 7,
+              wallClockMs: 192000,
               status: "active",
+              turnBudget: 20,
             },
             sessionId: "session_1",
           },
@@ -3899,6 +3902,12 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(
       app.container.querySelector(".ohb-structured-dialog")?.textContent,
     ).toContain("finish goal UI");
+    expect(
+      app.container.querySelector(".ohb-goal-state")?.textContent,
+    ).toContain("Turns7/20");
+    expect(
+      app.container.querySelector(".ohb-goal-state")?.textContent,
+    ).toContain("Active time3m 12s");
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
@@ -3910,6 +3919,8 @@ describe("OhbabyWebApp slash command interactions", () => {
           {
             goal: {
               objective: "finish goal UI",
+              turnsUsed: 7,
+              wallClockMs: 192000,
               status: "paused",
             },
             sessionId: "session_1",
@@ -3934,6 +3945,8 @@ describe("OhbabyWebApp slash command interactions", () => {
               sessionId: "session_1",
               goal: {
                 objective: "finish goal UI",
+                turnsUsed: 7,
+                wallClockMs: 192000,
                 status: goalStatus,
                 pauseReason: "budget reached",
               },
@@ -3954,6 +3967,12 @@ describe("OhbabyWebApp slash command interactions", () => {
       });
       const app = mountApp(fake.runtime);
       await clickButton(app.container, `goal ${goalStatus}`);
+      expect(
+        app.container.querySelector(".ohb-goal-state")?.textContent,
+      ).toContain("Turns7");
+      expect(
+        app.container.querySelector(".ohb-goal-state")?.textContent,
+      ).toContain("Active time3m 12s");
       const resume = app.container.querySelector<HTMLButtonElement>(
         '[data-goal-action="resume"]',
       );
@@ -4011,6 +4030,8 @@ describe("OhbabyWebApp slash command interactions", () => {
             sessionId: "session_1",
             goal: {
               objective: "finish goal UI",
+              turnsUsed: 7,
+              wallClockMs: 192000,
               status: "blocked",
               pauseReason: "same blocker three times",
             },
@@ -4027,7 +4048,9 @@ describe("OhbabyWebApp slash command interactions", () => {
       dialog?.querySelector<HTMLButtonElement>(
         `[data-goal-action="${action}"]`,
       );
-    expect(dialog?.querySelector(".ohb-structured-result")).toBeNull();
+    expect(dialog?.querySelector(".ohb-structured-result")?.textContent).toBe(
+      "Turns7Active time3m 12s",
+    );
     expect(dialog?.textContent).toContain("same blocker three times");
     expect(button("pause")).toBeNull();
     expect(button("resume")?.className).toContain("ohb-button-primary");
@@ -4127,6 +4150,8 @@ describe("OhbabyWebApp slash command interactions", () => {
           {
             goal: {
               objective: "finish goal UI",
+              turnsUsed: 7,
+              wallClockMs: 192000,
               status: "active",
             },
             sessionId: "session_1",
@@ -4160,6 +4185,8 @@ describe("OhbabyWebApp slash command interactions", () => {
           {
             goal: {
               objective: "finish goal UI",
+              turnsUsed: 7,
+              wallClockMs: 192000,
               status: "active",
             },
             sessionId: "session_1",

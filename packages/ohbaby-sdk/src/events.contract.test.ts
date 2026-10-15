@@ -86,6 +86,8 @@ describe("UiEvent protocol", () => {
     const event: UiEvent = {
       goal: {
         objective: "finish the migration",
+        turnsUsed: 7,
+        wallClockMs: 192000,
         pauseReason: "interrupted",
         status: "paused",
       },
@@ -103,6 +105,8 @@ describe("UiEvent protocol", () => {
 
     expect(event).toMatchObject({
       goal: {
+        turnsUsed: 7,
+        wallClockMs: 192000,
         pauseReason: "interrupted",
         status: "paused",
       },

@@ -1163,7 +1163,7 @@ export function OhbabyTerminalApp({
             }}
             submitPrompt={submitPrompt}
             submissionContextGeneration={submissionContextGeneration}
-            goalStatus={activeGoal?.status}
+            goal={activeGoal ?? undefined}
             isRuntimeRunning={runtime.kind === "running"}
             loadCatalog={loadCatalog}
             onCommandPanelOpen={openCommandPanel}

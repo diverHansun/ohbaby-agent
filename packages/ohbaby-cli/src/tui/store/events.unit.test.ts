@@ -861,6 +861,8 @@ describe("TUI store event reducer", () => {
     state = applyTuiEvent(state, {
       goal: {
         objective: "finish sdk contract",
+        turnsUsed: 7,
+        wallClockMs: 192000,
         status: "active",
       },
       sessionId: "session_1",
@@ -871,6 +873,8 @@ describe("TUI store event reducer", () => {
       {
         goal: {
           objective: "finish sdk contract",
+          turnsUsed: 7,
+          wallClockMs: 192000,
           status: "active",
         },
         sessionId: "session_1",

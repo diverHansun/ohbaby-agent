@@ -34,6 +34,33 @@ const view: UiSessionView = {
   context: { status: "ready", value: null },
 };
 describe("session cut reconciliation", () => {
+  it("preserves blocked goal metrics across a session change", () => {
+    const goal = {
+      status: "ready" as const,
+      value: {
+        status: "blocked" as const,
+        objective: "finish migration",
+        pauseReason: "budget reached",
+        turnsUsed: 7,
+        wallClockMs: 192000,
+        turnBudget: 20,
+      },
+    };
+    const next = applySessionChange(view, {
+      type: "session.changed",
+      version: { ...view.version, sessionRevision: 3 },
+      goal,
+    });
+    if (!next) throw new Error("Change was not accepted");
+    expect(next.goal).toEqual(goal);
+    expect(
+      applySessionChange(next, {
+        type: "session.changed",
+        version: { ...view.version, sessionRevision: 4 },
+      })?.goal,
+    ).toEqual(goal);
+  });
+
   it("replaces a real message once, ignores duplicates, and refuses gaps", () => {
     const event = {
       type: "session.changed" as const,

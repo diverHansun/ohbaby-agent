@@ -102,6 +102,8 @@ describe("ohbaby-web eventReducer", () => {
       {
         goal: {
           objective: "finish backend contract",
+          turnsUsed: 7,
+          wallClockMs: 192000,
           pauseReason: "interrupted",
           status: "paused",
         },
@@ -115,6 +117,8 @@ describe("ohbaby-web eventReducer", () => {
       {
         goal: {
           objective: "finish backend contract",
+          turnsUsed: 7,
+          wallClockMs: 192000,
           status: "paused",
         },
         sessionId: "session_1",

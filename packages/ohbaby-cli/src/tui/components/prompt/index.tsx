@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Box, Text, useInput, usePaste } from "ink";
+import { formatDurationSeconds } from "ohbaby-sdk";
 import { formatError } from "../../format-error.js";
 import type {
   CoreAPI,
@@ -70,7 +71,7 @@ export interface PromptProps {
   readonly model?: UiCurrentModelConfig | null;
   readonly reasoning?: UiReasoningConfig | null;
   readonly disabled: boolean;
-  readonly goalStatus?: UiGoal["status"];
+  readonly goal?: UiGoal;
   readonly isRuntimeRunning?: boolean;
   readonly loadCatalog?: () => Promise<TuiCommandCatalog>;
   readonly onCommandPanelOpen?: (input: {
@@ -106,7 +107,7 @@ export function Prompt({
   model,
   reasoning,
   disabled,
-  goalStatus,
+  goal,
   loadCatalog,
   onCommandPanelOpen,
   permission,
@@ -973,7 +974,7 @@ export function Prompt({
   );
   const recoveryInput = unconsumedSteers.at(recoveryIndex);
   const goalStatusColor =
-    goalStatus === "active" ? theme.status.accent : theme.status.warning;
+    goal?.status === "active" ? theme.status.accent : theme.status.warning;
 
   return (
     <Box flexDirection="column" width={layout.contentWidth}>
@@ -1042,8 +1043,16 @@ export function Prompt({
               </Text>
             </Box>
           )}
-          {goalStatus === undefined ? null : (
-            <Text color={goalStatusColor}>goal {goalStatus}</Text>
+          {goal === undefined ? null : (
+            <Text color={goalStatusColor}>
+              goal {goal.status} ·{" "}
+              {formatDurationSeconds(goal.wallClockMs / 1000)} ·{" "}
+              {goal.turnsUsed}
+              {goal.turnBudget === undefined
+                ? ""
+                : `/${String(goal.turnBudget)}`}{" "}
+              turns
+            </Text>
           )}
           {runtimeStatusLabel ? (
             <Text dimColor>{runtimeStatusLabel}</Text>
