@@ -282,7 +282,9 @@ function ReasoningDetails(props: {
           aria-hidden="true"
         />
       </summary>
-      <pre>{props.text}</pre>
+      <pre tabIndex={0} aria-label="Reasoning content">
+        {props.text}
+      </pre>
     </details>
   );
 }

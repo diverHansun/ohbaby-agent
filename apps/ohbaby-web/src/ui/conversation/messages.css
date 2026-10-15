@@ -106,12 +106,24 @@
   font-size: 13px;
   line-height: 1.65;
   margin: 0;
+}
+
+.ohb-streaming-text,
+.ohb-tool-panel pre {
   overflow-x: auto;
   white-space: pre-wrap;
 }
 
 .ohb-reasoning {
   color: #6b6d73;
+}
+
+.ohb-reasoning > pre {
+  font: inherit;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: none;
+  white-space: pre-wrap;
 }
 
 .ohb-tool-panel {
@@ -312,6 +324,7 @@
 }
 
 .ohb-reasoning > summary:focus-visible,
+.ohb-reasoning > pre:focus-visible,
 .ohb-run-disclosure:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 3px;
