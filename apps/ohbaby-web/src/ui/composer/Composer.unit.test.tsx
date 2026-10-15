@@ -565,6 +565,15 @@ it("keeps recovery collapsed by default and preserves an idempotent retry across
     "details.ohb-unsent-steer",
   );
   expect(recovery?.open).toBe(false);
+  expect(recovery?.querySelector("summary")?.textContent).toContain(
+    "1 input to review",
+  );
+  expect(recovery?.querySelector("summary")?.textContent).toContain(
+    "Processing unconfirmed",
+  );
+  expect(document.querySelectorAll(".ohb-steer-recovery-state")).toHaveLength(
+    0,
+  );
   await flushAction(() => recovery?.querySelector("summary")?.click());
   expect(recovery?.open).toBe(true);
   expect(document.body.textContent).toContain("Processing unconfirmed");
@@ -584,8 +593,42 @@ it("keeps recovery collapsed by default and preserves an idempotent retry across
   });
   expect(resend.mock.calls[1]?.[0]).toEqual(resend.mock.calls[0]?.[0]);
   expect(resend.mock.calls[0]?.[0]).toMatchObject({ inputId: "input-old" });
+  expect(recovery?.querySelector("button")?.textContent).toBe("Resend again");
   f.update({ unconsumedSteers: [] });
   expect(document.body.textContent).not.toContain("Keep my requirement");
+});
+
+it("shows per-item recovery state only when unconsumed and unconfirmed inputs are mixed", async () => {
+  fixture({
+    unconsumedSteers: [
+      {
+        inputId: "input-unconsumed",
+        promptId: "prompt-1",
+        messageId: "message-1",
+        text: "恢复提醒：请在最终结果中注明每个城市的来源和时间。",
+        state: "unconsumed",
+      },
+      {
+        inputId: "input-unconfirmed",
+        promptId: "prompt-2",
+        messageId: "message-2",
+        text: "补充：对比昨天与今天的气温变化。",
+        state: "unconfirmed",
+      },
+    ],
+  });
+  const recovery = document.querySelector<HTMLDetailsElement>(
+    "details.ohb-unsent-steer",
+  );
+  expect(recovery?.querySelector("summary")?.textContent).toBe(
+    "2 inputs to review",
+  );
+  await flushAction(() => recovery?.querySelector("summary")?.click());
+  expect(
+    [...document.querySelectorAll(".ohb-steer-recovery-state")].map(
+      (node) => node.textContent,
+    ),
+  ).toEqual(["Not processed", "Processing unconfirmed"]);
 });
 
 it("keeps every recovery item reachable without expanding long text by default", async () => {

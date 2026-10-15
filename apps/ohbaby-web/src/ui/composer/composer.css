@@ -544,64 +544,166 @@
 }
 
 .ohb-steer-recovery {
+  background: #fafafa;
   display: flow-root;
 }
 
 .ohb-unsent-steer {
-  background: #fafafa;
-  border: 1px solid #e2e2e2;
-  border-radius: 10px;
   box-sizing: border-box;
   color: #6b6d73;
   font-size: 12px;
-  margin: 0 auto 8px;
-  max-width: 770px;
-  padding: 6px 12px;
-  width: calc(100% - 30px);
-}
-
-details.ohb-unsent-steer:not([open]) {
-  background: transparent;
-  border-color: transparent;
-}
-
-details.ohb-unsent-steer[open] {
-  max-height: min(30vh, 260px);
-  overflow-y: auto;
+  margin: 0 auto 6px;
+  max-width: 784px;
+  padding: 2px 4px;
+  width: calc(100% - 16px);
 }
 
 .ohb-unsent-steer > summary {
+  align-items: center;
+  border-radius: 5px;
+  color: #6b6d73;
   cursor: pointer;
-  line-height: 20px;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  line-height: 18px;
+  list-style: none;
+  max-width: 100%;
+  padding: 2px 6px;
+  user-select: none;
+}
+
+.ohb-unsent-steer > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ohb-unsent-steer > summary:hover {
+  background: rgba(38, 40, 45, 0.04);
+  color: #26282d;
 }
 
 .ohb-unsent-steer > summary:focus-visible {
+  border-radius: 5px;
   outline: 2px solid #8a8d94;
-  outline-offset: 2px;
-  border-radius: 4px;
+  outline-offset: 1px;
 }
 
-.ohb-resend-error {
-  max-height: min(20vh, 120px);
+.ohb-unsent-steer-chevron {
+  color: #8a8d94;
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+details.ohb-unsent-steer[open] > summary .ohb-unsent-steer-chevron {
+  transform: rotate(90deg);
+}
+
+.ohb-unsent-steer-count {
+  color: #54565c;
+  font-weight: 500;
+}
+
+.ohb-unsent-steer-state,
+.ohb-steer-recovery-state {
+  color: #8a8d94;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.ohb-steer-recovery-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  max-height: min(26vh, 200px);
   overflow-y: auto;
-  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
 }
 
 .ohb-steer-recovery-item {
-  border-top: 1px solid #ececec;
-  margin-top: 6px;
-  padding-top: 6px;
+  align-items: flex-start;
+  border-radius: 6px;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 3px 6px 3px 18px;
 }
 
-.ohb-steer-recovery-item > p {
-  margin: 0;
+.ohb-steer-recovery-item:hover {
+  background: rgba(38, 40, 45, 0.035);
+}
+
+.ohb-steer-recovery-body {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 
 .ohb-steer-recovery-text {
-  margin: 4px 0;
-  max-height: 8em;
-  overflow: auto;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  color: #3a3d45;
   font: inherit;
+  font-size: 12.5px;
+  line-height: 19px;
+  margin: 0;
+  max-height: 5.7em;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+}
+
+.ohb-steer-recovery-text:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid #8a8d94;
+  outline-offset: 1px;
+}
+
+.ohb-steer-recovery-resend {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: #6b6d73;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  gap: 4px;
+  height: 24px;
+  justify-content: center;
+  line-height: 1;
+  margin-top: -1px;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+
+.ohb-steer-recovery-resend:not(:disabled):hover {
+  background: #eceef2;
+  color: #26282d;
+}
+
+.ohb-steer-recovery-resend:focus-visible {
+  outline: 2px solid #8a8d94;
+  outline-offset: 1px;
+}
+
+.ohb-steer-recovery-resend:disabled {
+  color: #aeb2ba;
+  cursor: default;
+}
+
+.ohb-steer-recovery-resend-icon {
+  flex: 0 0 auto;
+}
+
+.ohb-resend-error {
+  line-height: 17px;
+  max-height: min(20vh, 120px);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 2px 10px;
 }

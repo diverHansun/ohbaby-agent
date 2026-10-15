@@ -89,6 +89,11 @@
     width: calc(100% - 8px);
   }
 
+  .ohb-unsent-steer {
+    max-width: none;
+    width: calc(100% - 8px);
+  }
+
   .ohb-goal-strip {
     max-width: none;
     padding: 5px 7px 11px 10px;
