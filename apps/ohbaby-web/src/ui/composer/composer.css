@@ -438,26 +438,58 @@
   font-size: 11px;
 }
 
+.ohb-steer-recovery {
+  display: flow-root;
+}
+
 .ohb-unsent-steer {
   background: #fafafa;
   border: 1px solid #e2e2e2;
   border-radius: 10px;
   box-sizing: border-box;
-  max-height: min(30vh, 260px);
-  overflow-y: auto;
-  color: #8a8d94;
+  color: #6b6d73;
   font-size: 12px;
   margin: 0 auto 8px;
   max-width: 770px;
-  padding: 10px 12px;
+  padding: 6px 12px;
   width: calc(100% - 30px);
 }
 
-/* The composer overlays the stream; reserve the recovery card's bounded height. */
-.ohb-app-content:has(> .ohb-root-composer .ohb-unsent-steer)
-  > .ohb-root-conversation
-  > .ohb-stream {
-  --steer-recovery-space: calc(min(30vh, 260px) + 8px);
+details.ohb-unsent-steer:not([open]) {
+  background: transparent;
+  border-color: transparent;
+}
+
+details.ohb-unsent-steer[open] {
+  max-height: min(30vh, 260px);
+  overflow-y: auto;
+}
+
+.ohb-unsent-steer > summary {
+  cursor: pointer;
+  line-height: 20px;
+}
+
+.ohb-unsent-steer > summary:focus-visible {
+  outline: 2px solid #8a8d94;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.ohb-resend-error {
+  max-height: min(20vh, 120px);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.ohb-steer-recovery-item {
+  border-top: 1px solid #ececec;
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.ohb-steer-recovery-item > p {
+  margin: 0;
 }
 
 .ohb-steer-recovery-text {
@@ -467,8 +499,4 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   font: inherit;
-}
-
-.ohb-unsent-steer > div + div {
-  margin-top: 8px;
 }

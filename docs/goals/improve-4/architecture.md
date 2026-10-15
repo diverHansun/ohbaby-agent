@@ -16,6 +16,8 @@ prompt 顺序使用既有 `accepted_at`、`admission_order`。进入当前 run �
 
 `UiSession.unconsumedSteers` 是客户端唯一恢复列表，条目包含 inputId、promptId、messageId、原文与 `unconsumed | unconfirmed`。`ui-inprocess/steer-recovery.ts` 查询所有未成功处理的 root user-steer 输入、run 关闭事实、原消息与重发子项，不读取聊天 viewport 来判断是否遗失。
 
+Web 默认只显示单行数量入口，展开后查看完整原文和逐项重发；CLI 保留紧凑状态与单行预览。折叠不丢失待定操作及重试身份，换会话重置展开状态。真正的重发错误独立于折叠列表显示；恢复区域按实际高度给聊天流留白。成功插话不另加常驻提示。
+
 所有关闭原因均可产生恢复项。已有本地 attempt、没有本地成功落盘标记时显示“处理未确认”；这不是 provider 收到或模型理解的证明。原消息经过分页、隐藏或 compact 后，仍可按 ID 取得持久原文。旧 run 已终态但缺输入关闭字段时可作为读取依据，不改写旧输入。
 
 close、确认和重发子项状态变化安排区外 rebuild；只有列表实变才发布既有 session 事件，避免 owner 重入。读取失败只使该 session 的列表为 undefined，并并入既有 executionRecovery blocked；不会中断历史或全局 snapshot。persistent adapter 等待既有启动 execution recovery，失败按 session 保留，健康 root 可继续读写，成功显式恢复清除错误。只读 snapshot 不发起隐式恢复重试。

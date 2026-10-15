@@ -9,13 +9,20 @@ export function UnconsumedSteers(props: {
   readonly inputs: readonly UiUnconsumedSteer[];
   readonly disabled: boolean;
   readonly resend: UiBackendClient["resendSteerInput"];
+  /** Session scope: remounts only on session change, so pending retry ids survive collapse. */
+  readonly scopeKey: string;
 }): ReactElement | null {
-  if (props.inputs.length === 0) return null;
+  const count = props.inputs.length;
+  if (count === 0) return null;
   return (
-    <section
+    <details
+      key={props.scopeKey}
       className="ohb-unsent-steer"
       aria-label="Steer inputs needing recovery"
     >
+      <summary>
+        {String(count)} input{count === 1 ? "" : "s"} to review
+      </summary>
       {props.inputs.map((input, index) => (
         <RecoveryInput
           key={input.inputId}
@@ -25,7 +32,7 @@ export function UnconsumedSteers(props: {
           resend={props.resend}
         />
       ))}
-    </section>
+    </details>
   );
 }
 
@@ -37,10 +44,9 @@ function RecoveryInput(props: {
 }): ReactElement {
   const attempt = useRef<UiResendSteerInput | undefined>(undefined);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string>();
   const [resent, setResent] = useState(false);
   return (
-    <div>
+    <div className="ohb-steer-recovery-item">
       <p role="status">
         {props.input.state === "unconfirmed"
           ? "Processing unconfirmed"
@@ -65,7 +71,6 @@ function RecoveryInput(props: {
           };
           attempt.current = input;
           setPending(true);
-          setError(undefined);
           void props
             .resend(input)
             .then(
@@ -73,10 +78,8 @@ function RecoveryInput(props: {
                 attempt.current = undefined;
                 setResent(true);
               },
-              (caught: unknown) => {
-                setError(
-                  caught instanceof Error ? caught.message : String(caught),
-                );
+              () => {
+                // Keep the operationId for an idempotent retry; the composer shows the error.
               },
             )
             .finally(() => {
@@ -86,7 +89,6 @@ function RecoveryInput(props: {
       >
         {pending ? "Resending…" : resent ? "Resend again" : "Resend"}
       </button>
-      {error ? <small role="alert">{error}</small> : null}
     </div>
   );
 }

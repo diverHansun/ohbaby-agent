@@ -118,14 +118,6 @@ export function Composer(props: {
   useEffect(() => {
     selectedReasoning.current = undefined;
   }, [props.activeSession?.id, props.client]);
-  const [steerNoticeRunId, setSteerNoticeRunId] = useState<string>();
-  const currentSteerTarget = useRef(props.model);
-  useLayoutEffect(() => {
-    currentSteerTarget.current = props.model;
-  }, [props.model]);
-  useEffect(() => {
-    setSteerNoticeRunId(undefined);
-  }, [props.model.activeSessionId, props.model.activeRunId]);
   const [draft, setDraft] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
@@ -146,6 +138,7 @@ export function Composer(props: {
   const [slashError, setSlashError] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const recoveryRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLDivElement | null>(null);
   const draftRef = useRef("");
   const queuedEditRef = useRef(queuedEdit);
@@ -164,7 +157,6 @@ export function Composer(props: {
   }, [props.onEditRevision]);
   const advanceEditRevision = useCallback((): void => {
     editRevision.current += 1;
-    setSteerNoticeRunId(undefined);
     onEditRevisionRef.current(editRevision.current);
   }, []);
   useLayoutEffect(
@@ -308,6 +300,28 @@ export function Composer(props: {
     }
     fitComposerTextarea(textarea, { lineHeight: 22, maxLines: 7 });
   }, [draft, props.model.disabled, slashOpen]);
+
+  useLayoutEffect(() => {
+    const recovery = recoveryRef.current;
+    const content = recovery?.closest(".ohb-root-composer")?.parentElement;
+    if (!recovery || !content) return;
+    const measure = (): void => {
+      content.style.setProperty(
+        "--steer-recovery-space",
+        `${String(recovery.getBoundingClientRect().height)}px`,
+      );
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(measure);
+    observer?.observe(recovery);
+    return (): void => {
+      observer?.disconnect();
+      content.style.removeProperty("--steer-recovery-space");
+    };
+  }, []);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -988,34 +1002,48 @@ export function Composer(props: {
         }}
       >
         {props.topContent}
-        <UnconsumedSteers
-          inputs={props.unconsumedSteers ?? []}
-          disabled={props.model.disabled || props.readOnly === true}
-          resend={async (input) => {
-            const generation = draftScopeGeneration.current;
-            setResendError(null);
-            const receipt = await props.client.resendSteerInput(input);
-            if (
-              generation === draftScopeGeneration.current &&
-              receipt.steer?.status === "error"
-            ) {
-              setResendError(
-                `Accepted in queue · ${receipt.steer.error.message}`,
-              );
-            }
-            return receipt;
-          }}
-        />
-        {resendError ? (
-          <p className="ohb-unsent-steer ohb-slash-error" role="alert">
-            {resendError}
-          </p>
-        ) : null}
-        {steerNoticeRunId && steerNoticeRunId === props.model.activeRunId ? (
-          <p role="status">
-            Steer accepted · waiting for the active run’s next safe boundary
-          </p>
-        ) : null}
+        <div className="ohb-steer-recovery" ref={recoveryRef}>
+          <UnconsumedSteers
+            inputs={props.unconsumedSteers ?? []}
+            disabled={props.model.disabled || props.readOnly === true}
+            scopeKey={props.draftScopeKey}
+            resend={async (input) => {
+              const generation = draftScopeGeneration.current;
+              setResendError(null);
+              let receipt: Awaited<
+                ReturnType<typeof props.client.resendSteerInput>
+              >;
+              try {
+                receipt = await props.client.resendSteerInput(input);
+              } catch (caught: unknown) {
+                // Kept here, not on the row: SSE may remove the row first.
+                if (generation === draftScopeGeneration.current)
+                  setResendError(
+                    caught instanceof Error ? caught.message : String(caught),
+                  );
+                throw caught;
+              }
+              if (
+                generation === draftScopeGeneration.current &&
+                receipt.steer?.status === "error"
+              ) {
+                setResendError(
+                  `Accepted in queue · ${receipt.steer.error.message}`,
+                );
+              }
+              return receipt;
+            }}
+          />
+          {resendError ? (
+            <p
+              className="ohb-unsent-steer ohb-resend-error ohb-slash-error"
+              role="alert"
+              tabIndex={0}
+            >
+              {resendError}
+            </p>
+          ) : null}
+        </div>
         {props.queuedPrompts.length > 0 ? (
           <section className="ohb-prompt-queue" aria-label="Queued prompts">
             <div className="ohb-prompt-queue-header">
@@ -1061,23 +1089,7 @@ export function Composer(props: {
                         editing ||
                         props.model.disabled
                       }
-                      steer={async (input) => {
-                        const generation = draftScopeGeneration.current;
-                        const revision = editRevision.current;
-                        const receipt =
-                          await props.client.steerQueuedPrompt(input);
-                        if (
-                          receipt.status === "steered" &&
-                          generation === draftScopeGeneration.current &&
-                          revision === editRevision.current &&
-                          currentSteerTarget.current.activeRunId ===
-                            input.expectedRunId &&
-                          currentSteerTarget.current.activeSessionId ===
-                            props.model.activeSessionId
-                        )
-                          setSteerNoticeRunId(input.expectedRunId);
-                        return receipt;
-                      }}
+                      steer={(input) => props.client.steerQueuedPrompt(input)}
                     />
                     <button
                       aria-label={`Edit prompt: ${prompt.text}`}

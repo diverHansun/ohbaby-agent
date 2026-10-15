@@ -6161,79 +6161,111 @@ async function waitForFrame(
   throw new Error(`Timed out waiting for frame. Last frame:\n${frame}`);
 }
 
-it("Steers a selected queued row with a stable request after an uncertain response", async () => {
-  const prompt = {
-    clientRequestId: "queued-request",
-    createdAt: "2026-05-14T00:00:04Z",
-    promptId: "queued-steer",
-    scopeKey: "/repo",
-    sessionId: "session_1",
-    status: "queued" as const,
-    text: "steer this row",
-    updatedAt: "2026-05-14T00:00:04Z",
-    userMessageId: "queued-message",
-  };
-  const client = createFakeClient({
-    ...snapshot(),
-    prompts: [prompt],
-    runs: [
-      {
-        id: "run_1",
-        sessionId: "session_1",
-        startedAt: "2026-05-14T00:00:03Z",
-        status: { kind: "running", runId: "run_1" },
-        updatedAt: "2026-05-14T00:00:03Z",
-      },
-    ],
-    status: { kind: "running", runId: "run_1" },
-  });
-  client.listSubagentExecutions = () =>
-    Promise.resolve({
-      executions: [],
-      hasMore: false,
-      waiting: false,
-      approvalBlocked: false,
-      activeCount: 0,
-      completedCount: 0,
+it.each(["steered", "not-steered"])(
+  "retries a selected queued row with a stable request after an uncertain response (%s)",
+  async (outcome) => {
+    const prompt = {
+      clientRequestId: "queued-request",
+      createdAt: "2026-05-14T00:00:04Z",
+      promptId: "queued-steer",
+      scopeKey: "/repo",
+      sessionId: "session_1",
+      status: "queued" as const,
+      text: "steer this row",
+      updatedAt: "2026-05-14T00:00:04Z",
+      userMessageId: "queued-message",
+    };
+    const client = createFakeClient({
+      ...snapshot(),
+      prompts: [prompt],
+      runs: [
+        {
+          id: "run_1",
+          sessionId: "session_1",
+          startedAt: "2026-05-14T00:00:03Z",
+          status: { kind: "running", runId: "run_1" },
+          updatedAt: "2026-05-14T00:00:03Z",
+        },
+      ],
+      status: { kind: "running", runId: "run_1" },
     });
-  client.getSubagentExecutionView = () =>
-    Promise.reject(new Error("No selection"));
-  client.steerQueuedPrompt
-    .mockRejectedValueOnce(new Error("response lost"))
-    .mockResolvedValueOnce({
-      status: "steered",
-      receipt: { acceptedTargetRunId: "run_1" },
+    client.listSubagentExecutions = () =>
+      Promise.resolve({
+        executions: [],
+        hasMore: false,
+        waiting: false,
+        approvalBlocked: false,
+        activeCount: 0,
+        completedCount: 0,
+      });
+    client.getSubagentExecutionView = () =>
+      Promise.reject(new Error("No selection"));
+    client.steerQueuedPrompt
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce(
+        outcome === "steered"
+          ? {
+              status: "steered",
+              receipt: { acceptedTargetRunId: "run_1" },
+            }
+          : { status: "not-steered", reason: "target-sealed" },
+      );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await waitForFrame(app, (frame) => frame.includes("Steer"));
+    await flush();
+    app.stdin.write("\u0013");
+    await waitForFrame(app, (frame) => frame.includes("response lost"));
+    app.stdin.write("\u0007");
+    await waitForFrame(app, (frame) => frame.includes("Read only"));
+    await flush();
+    app.stdin.write("\u001b");
+    await waitForFrame(app, (frame) => frame.includes("Ctrl+G subagents"));
+    app.stdin.write("\u0013");
+    await vi.waitFor(() => {
+      expect(client.steerQueuedPrompt).toHaveBeenCalledTimes(2);
     });
-  const app = render(
-    <OhbabyTerminalApp
-      client={client}
-      subscribeEvents={client.subscribeEvents}
-    />,
-  );
-  await waitForFrame(app, (frame) => frame.includes("Steer"));
-  await flush();
-  app.stdin.write("\u0013");
-  await waitForFrame(app, (frame) => frame.includes("response lost"));
-  app.stdin.write("\u0007");
-  await waitForFrame(app, (frame) => frame.includes("Read only"));
-  await flush();
-  app.stdin.write("\u001b");
-  await waitForFrame(app, (frame) => frame.includes("Ctrl+G subagents"));
-  app.stdin.write("\u0013");
-  await waitForFrame(app, (frame) => frame.includes("Steer accepted"));
-  expect(client.steerQueuedPrompt.mock.calls[0][0]).toMatchObject({
-    promptId: "queued-steer",
-    expectedRunId: "run_1",
-  });
-  expect(client.steerQueuedPrompt.mock.calls[1][0]).toEqual(
-    client.steerQueuedPrompt.mock.calls[0][0],
-  );
-  expect(client.submitPromptAccepted).not.toHaveBeenCalled();
-  expect(client.abortRun).not.toHaveBeenCalled();
-});
+    await waitForFrame(app, (frame) => !frame.includes("response lost"));
+    expect(app.lastFrame()).not.toContain("Steer accepted");
+    if (outcome === "not-steered") {
+      await waitForFrame(app, (frame) => frame.includes("Kept in queue"));
+      expect(app.lastFrame()).toContain("Queued 1");
+      expect(app.lastFrame()).toContain("steer this row");
+      const nextAttempt = createDeferred<{
+        status: "not-steered";
+        reason: "target-sealed";
+      }>();
+      client.steerQueuedPrompt.mockReturnValueOnce(nextAttempt.promise);
+      app.stdin.write("\u0013");
+      await vi.waitFor(() => {
+        expect(client.steerQueuedPrompt).toHaveBeenCalledTimes(3);
+      });
+      await waitForFrame(app, (frame) => !frame.includes("Kept in queue"));
+      expect(app.lastFrame()).toContain("Queued 1");
+      nextAttempt.resolve({ status: "not-steered", reason: "target-sealed" });
+      await waitForFrame(app, (frame) => frame.includes("Kept in queue"));
+      expect(client.steerQueuedPrompt.mock.calls[2][0]).toEqual(
+        client.steerQueuedPrompt.mock.calls[0][0],
+      );
+    }
+    expect(client.steerQueuedPrompt.mock.calls[0][0]).toMatchObject({
+      promptId: "queued-steer",
+      expectedRunId: "run_1",
+    });
+    expect(client.steerQueuedPrompt.mock.calls[1][0]).toEqual(
+      client.steerQueuedPrompt.mock.calls[0][0],
+    );
+    expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+    expect(client.abortRun).not.toHaveBeenCalled();
+  },
+);
 
 it.each(["before", "after"])(
-  "expires TUI Steer notice when target ends %s acknowledgement",
+  "preserves recovery when the Steer target ends %s acknowledgement",
   async (timing) => {
     const prompt = {
       clientRequestId: "queued-request",
@@ -6284,6 +6316,7 @@ it.each(["before", "after"])(
           accept = resolve;
         }),
     );
+    client.resendSteerInput.mockResolvedValue(promptReceipt("resent"));
     const app = render(
       <OhbabyTerminalApp
         client={client}
@@ -6293,10 +6326,12 @@ it.each(["before", "after"])(
     await waitForFrame(app, (frame) => frame.includes("Steer"));
     await flush();
     app.stdin.write("\u0013");
-    await flush();
+    await vi.waitFor(() => {
+      expect(client.steerQueuedPrompt).toHaveBeenCalledTimes(1);
+    });
     if (timing === "after") {
       accept({ status: "steered", receipt: { acceptedTargetRunId: "run_1" } });
-      await waitForFrame(app, (frame) => frame.includes("Steer accepted"));
+      await flush();
     }
     client.emit({
       type: "run.updated",
@@ -6326,11 +6361,18 @@ it.each(["before", "after"])(
         ],
       },
     });
-    await waitForFrame(app, (frame) => frame.includes("Not processed"));
+    await waitForFrame(app, (frame) => frame.includes("Ctrl+R Resend"));
     if (timing === "before")
       accept({ status: "steered", receipt: { acceptedTargetRunId: "run_1" } });
     await flush();
     expect(app.lastFrame()).not.toContain("Steer accepted");
+    expect(app.lastFrame()).toContain("steer this row");
+    expect(client.steerQueuedPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptId: "queued-steer",
+        expectedRunId: "run_1",
+      }),
+    );
     client.emit({
       type: "run.updated",
       run: {
@@ -6345,6 +6387,15 @@ it.each(["before", "after"])(
     app.stdin.write("next prompt");
     await flush();
     expect(app.lastFrame()).not.toContain("Steer accepted");
+    expect(app.lastFrame()).toContain("next prompt");
+    app.stdin.write("\u0012");
+    await vi.waitFor(() => {
+      expect(client.resendSteerInput).toHaveBeenCalledWith(
+        expect.objectContaining({ inputId: "input" }),
+      );
+    });
+    expect(app.lastFrame()).toContain("next prompt");
+    expect(client.submitPromptAccepted).not.toHaveBeenCalled();
   },
 );
 
@@ -7279,17 +7330,25 @@ it("recovers an older steer from the session list with stable retry and a fresh 
   await waitForFrame(app, (frame) =>
     frame.includes("Original recovery requirement"),
   );
-  expect(app.lastFrame()).toContain("Processing unconfirmed");
+  expect(app.lastFrame()).toMatch(/unconfirmed/i);
+  expect(app.lastFrame()).toContain("Ctrl+R Resend");
+  expect(app.lastFrame()).not.toContain("Ctrl+N/P");
   await flush();
   app.stdin.write("\u0012");
   await waitForFrame(app, (frame) => frame.includes("response lost"));
   app.stdin.write("\u0012");
-  await waitForFrame(app, (frame) => frame.includes("Resend accepted"));
+  await vi.waitFor(() => {
+    expect(client.resendSteerInput).toHaveBeenCalledTimes(2);
+  });
+  await waitForFrame(app, (frame) => !frame.includes("response lost"));
+  expect(app.lastFrame()).not.toContain("Resend accepted");
   expect(client.resendSteerInput.mock.calls[1]?.[0]).toEqual(
     client.resendSteerInput.mock.calls[0]?.[0],
   );
   app.stdin.write("\u0012");
-  await flush();
+  await vi.waitFor(() => {
+    expect(client.resendSteerInput).toHaveBeenCalledTimes(3);
+  });
   expect(client.resendSteerInput.mock.calls[2]?.[0].operationId).not.toBe(
     client.resendSteerInput.mock.calls[0]?.[0].operationId,
   );
@@ -7433,21 +7492,25 @@ it.each([
         subscribeEvents={client.subscribeEvents}
       />,
     );
-    await waitForFrame(app, (frame) => frame.includes("Steer recovery"));
+    await waitForFrame(app, (frame) => frame.includes("Large original"));
     expect((app.lastFrame() ?? "").split("\n").length).toBeLessThan(30);
-    expect(app.lastFrame()).toContain("1 / 2");
+    expect(app.lastFrame()).toContain("1/2");
     await flush();
     app.stdin.write("Unrelated draft");
     app.stdin.write(next);
     await waitForFrame(app, (frame) => frame.includes("Second recovery item"));
-    expect(app.lastFrame()).toContain("2 / 2");
+    expect(app.lastFrame()).toContain("2/2");
     expect(app.lastFrame()).toContain("Unrelated draft");
     app.stdin.write(previous);
-    await waitForFrame(app, (frame) => frame.includes("1 / 2"));
+    await waitForFrame(app, (frame) => frame.includes("1/2"));
     app.stdin.write(next);
-    await waitForFrame(app, (frame) => frame.includes("2 / 2"));
+    await waitForFrame(app, (frame) => frame.includes("2/2"));
     app.stdin.write("\u0012");
-    await waitForFrame(app, (frame) => frame.includes("Resend accepted"));
+    await vi.waitFor(() => {
+      expect(client.resendSteerInput).toHaveBeenCalledTimes(1);
+    });
+    await flush();
+    expect(app.lastFrame()).not.toContain("Resend accepted");
     expect(app.lastFrame()).toContain("Unrelated draft");
     expect(client.resendSteerInput).toHaveBeenCalledWith(
       expect.objectContaining({ inputId: "second" }),

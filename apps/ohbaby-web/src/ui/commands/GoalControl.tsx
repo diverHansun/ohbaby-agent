@@ -169,7 +169,6 @@ export function GoalOverlayBody(props: {
         </label>
         {activeGoal ? (
           <div className="ohb-goal-save-row">
-            <small>Replaces the objective; status is unchanged.</small>
             <button
               className={goalActionButtonClass(
                 props.intent,

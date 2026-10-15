@@ -312,13 +312,8 @@
   align-items: center;
   display: flex;
   gap: 12px;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-top: 10px;
-}
-
-.ohb-goal-save-row small {
-  color: #6b6d73;
-  font-size: 12px;
 }
 
 .ohb-goal-optional-limits summary {

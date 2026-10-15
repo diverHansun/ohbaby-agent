@@ -110,3 +110,29 @@ SWE 边界：复用既有 owner、事务、prompt/input/message/run 事实；局
 | `a4c86772` | 独立的 scheduler 竞态与恢复祖链集成回归，覆盖内存和 SQLite |
 
 阶段架构、验收矩阵与本记录另作第三批文档提交。所有提交运行仓库原有 lint/typecheck 钩子；本批未推送、未合并，improve-5 完成后再集中检查和合并。
+
+## 2026-10-15 UI 精简补充
+
+用户指出恢复卡片默认展开、提示过多。本节记录 `4c520771` 之后的展示层调整，不改变前述持久恢复与重发契约。
+
+- 截图中的整块恢复卡由 `42439586` 引入；其中 “Please verify the mobile layout…” 是隔离验收时的用户输入原文，不是产品指引。成功 steer 后的 safe-boundary 提示则来自更早的 `a75d96f6`。
+- Web 默认仅显示无边框的单行 “N inputs to review”，实测高度 34px；点击后才显示状态、完整原文和逐项重发。没有恢复项时不显示入口，也不留额外空白。原消息上的简短状态保持不变。
+- 删除 Web/CLI 的成功 steer 长提示、CLI 的 “Resend accepted” 与不可用操作标签，以及 Goal 面板重复解释替换目标的文字。Goal 状态入口、暂停原因、操作按钮、折叠的 Optional limits 保留。
+- CLI 恢复区从三行缩为状态/快捷键与单行预览，多条才显示选择快捷键。新操作开始清除旧拒绝反馈，真实的新拒绝与错误仍显示。
+- 折叠不卸载恢复项，保留 pending 与幂等 operationId；切换会话重置展开状态。重发错误由 Composer 保存，即使 SSE 先移除恢复项或用户收起列表也能看到，旧会话的迟到错误不污染新会话。
+
+参考的是实际挂载的源码：DSH `GoalBar.tsx` 的 36px 单行状态与 `QueueDock.tsx` 的折叠队列；Kimi TUI `footer.ts` 的摘要与 `/goal` 主动查询详情；ZCode `ConversationStatusPanel.tsx` 的紧凑/展开结构及避免重复 composer 计数的做法。没有把 ZCode 未挂载的旧 banner 或 Kimi 仓库外的 Web 实现当作证据，也没有借呈现精简删除 ohbaby 自己的持久恢复能力。
+
+Pi 使用用户指定的 `opencode/claude-opus-5-5`、medium 完成关键源码调整。首次调用因上游 thinking 签名绑定错误中断，保留已落盘修改；同模型重新建立会话后完成收尾（会话 `46cc7cdc-7077-4cde-ae83-044acb9fcf86`）。主代理负责测试、启动服务、浏览器验收与后续修正；Pi 原文已完整展示在聊天中，未写入仓库。
+
+独立复审发现恢复列表与错误同时出现时，固定底部留白漏算错误高度。浏览器在 390px 宽度复现：长错误高 364px，正文尾部进入 composer 覆盖区。修复复用既有 CSS 留白变量，以局部 ResizeObserver 测量恢复区域的实际高度；错误限高但保留全文滚动和键盘聚焦。复测折叠/展开与长错误并存时，正文尾部均在 composer 上方，独立复审无遗留 P1/P2。
+
+| 补充验证 | 结果 |
+| --- | --- |
+| Web 全部测试 | 42 文件、565 项通过，包含默认折叠、长原文、多项操作、会话隔离、折叠幂等重试及迟到错误 |
+| CLI contract 与 transcript | 2 文件、158 项通过，包含稳定请求身份、拒绝仍排队、草稿保留与新操作清除旧反馈 |
+| 静态与构建 | typecheck、修改文件 lint/Prettier、diff check、完整 pnpm build 通过；保留既有 Web 大 chunk 构建提示 |
+| 浏览器 | 本地真实 daemon + SQLite + 确定性 provider，1280×800 与 390×844；展开、键盘选中第二项、失败后折叠再重试、同 operationId、SSE 仅移除对应项、刷新、换会话、最后一项处理后留白归零均通过；原草稿保留 |
+| 视觉与控制台 | 已实际查看桌面、窄屏和错误状态截图，无横向溢出或尾部遮挡；正常流程无 console error/warning，故障注入的预期 503 单独核对 |
+
+本次没有后端改动，也未重复调用付费模型 API；浏览器测试使用隔离临时工作区，验收后停止服务。继续保留 improve-4 分支，不推送、不合并，不提前实施 improve-5。

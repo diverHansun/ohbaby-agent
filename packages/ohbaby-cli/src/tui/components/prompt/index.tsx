@@ -130,19 +130,15 @@ export function Prompt({
     queueSelectionRef.current = id;
     setQueueSelectionId(id);
   };
-  const [steerNoticeRunId, setSteerNoticeRunId] = useState<string>();
   const currentSteerTarget = useRef(activeRunId);
-  const steerNoticeRevision = useRef(0);
   useLayoutEffect(() => {
     currentSteerTarget.current = activeRunId;
-    setSteerNoticeRunId(undefined);
   }, [activeSessionId, activeRunId]);
   const steerAttempts = useRef(
     new Map<string, import("ohbaby-sdk").UiSteerQueuedPromptInput>(),
   );
   useEffect(() => {
     steerAttempts.current.clear();
-    setSteerNoticeRunId(undefined);
     setSteerSelection(0);
   }, [activeSessionId]);
   const theme = useTheme();
@@ -209,10 +205,6 @@ export function Prompt({
   }, [activeSessionId]);
 
   const replaceEditor = (nextEditor: EditorState): void => {
-    if (editorText(editorRef.current) !== editorText(nextEditor)) {
-      steerNoticeRevision.current += 1;
-      setSteerNoticeRunId(undefined);
-    }
     editorRef.current = nextEditor;
     setEditor(nextEditor);
   };
@@ -478,6 +470,7 @@ export function Prompt({
         };
         resendAttempts.current.set(entry.inputId, input);
         replaceQueuedMutationPending(true);
+        setRecoveryNotice(undefined);
         setError(null);
         void client
           .resendSteerInput(input)
@@ -485,7 +478,6 @@ export function Prompt({
             (receipt) => {
               if (generation !== draftGeneration.current) return;
               resendAttempts.current.delete(entry.inputId);
-              setRecoveryNotice("Resend accepted");
               if (receipt.steer?.status === "error")
                 setError(`Accepted in queue · ${receipt.steer.error.message}`);
             },
@@ -544,21 +536,19 @@ export function Prompt({
         };
         steerAttempts.current.set(prompt.promptId, input);
         replaceQueuedMutationPending(true);
+        setRecoveryNotice(undefined);
         setError(null);
-        const noticeRevision = steerNoticeRevision.current;
         void client
           .steerQueuedPrompt(input)
           .then(
             (result) => {
               if (
                 generation !== draftGeneration.current ||
-                currentSteerTarget.current !== input.expectedRunId ||
-                noticeRevision !== steerNoticeRevision.current
+                currentSteerTarget.current !== input.expectedRunId
               )
                 return;
-              if (result.status === "steered")
-                setSteerNoticeRunId(input.expectedRunId);
-              else
+              // Success needs no notice: the prompt leaves the queue.
+              if (result.status !== "steered")
                 setRecoveryNotice(
                   result.reason === "prompt-not-queued"
                     ? "Prompt is no longer queued"
@@ -998,26 +988,21 @@ export function Prompt({
           ) : null}
           {recoveryInput ? (
             <Box flexDirection="column">
-              <Text dimColor>
-                Steer recovery {recoveryIndex + 1} / {unconsumedSteers.length} ·
-                Ctrl+N/P select · Ctrl+R Resend
-              </Text>
-              <Text>
+              <Text dimColor wrap="truncate-end">
                 {recoveryInput.state === "unconfirmed"
                   ? "Processing unconfirmed"
                   : "Not processed"}
+                {unconsumedSteers.length > 1
+                  ? ` ${String(recoveryIndex + 1)}/${String(unconsumedSteers.length)} · Ctrl+N/P`
+                  : ""}
+                {" · Ctrl+R Resend"}
               </Text>
               <Text wrap="truncate-end">
-                Preview · {recoveryInput.text.replace(/\s+/g, " ")}
+                ↳ {recoveryInput.text.replace(/\s+/g, " ")}
               </Text>
             </Box>
           ) : null}
           {recoveryNotice ? <Text dimColor>{recoveryNotice}</Text> : null}
-          {steerNoticeRunId && steerNoticeRunId === activeRunId ? (
-            <Text>
-              Steer accepted · waiting for the active run’s next safe boundary
-            </Text>
-          ) : null}
           {queuedPrompts.length === 0 ? null : (
             <Box
               flexDirection="column"
@@ -1047,7 +1032,7 @@ export function Prompt({
                   !prompt.editLeaseOwnerId &&
                   !queuedEdit
                     ? " · Steer"
-                    : " · Steer unavailable"}
+                    : ""}
                 </Text>
               ))}
               <Text dimColor>

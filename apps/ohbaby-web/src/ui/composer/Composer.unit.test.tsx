@@ -548,7 +548,7 @@ const unconsumedSteers = [
   },
 ];
 
-it("shows durable recovery text outside the chat page and resends with an idempotent retry", async () => {
+it("keeps recovery collapsed by default and preserves an idempotent retry across toggles", async () => {
   const resend = vi
     .fn()
     .mockRejectedValueOnce(new Error("Network lost"))
@@ -561,12 +561,23 @@ it("shows durable recovery text outside the chat page and resends with an idempo
       subscribeEvents: (): (() => void) => (): void => undefined,
     } as unknown as UiBackendClient,
   });
+  const recovery = document.querySelector<HTMLDetailsElement>(
+    "details.ohb-unsent-steer",
+  );
+  expect(recovery?.open).toBe(false);
+  await flushAction(() => recovery?.querySelector("summary")?.click());
+  expect(recovery?.open).toBe(true);
   expect(document.body.textContent).toContain("Processing unconfirmed");
   expect(document.body.textContent).toContain("Keep my requirement");
   expect(document.querySelector(".ohb-prompt-queue")).toBeNull();
   await flushAction(() => {
     clickLabel("Resend steer 1: Keep my requirement");
   });
+  expect(document.body.textContent).toContain("Network lost");
+  await flushAction(() => recovery?.querySelector("summary")?.click());
+  expect(recovery?.open).toBe(false);
+  await flushAction(() => recovery?.querySelector("summary")?.click());
+  expect(recovery?.open).toBe(true);
   expect(document.body.textContent).toContain("Network lost");
   await flushAction(() => {
     clickLabel("Resend steer 1: Keep my requirement");
@@ -575,6 +586,115 @@ it("shows durable recovery text outside the chat page and resends with an idempo
   expect(resend.mock.calls[0]?.[0]).toMatchObject({ inputId: "input-old" });
   f.update({ unconsumedSteers: [] });
   expect(document.body.textContent).not.toContain("Keep my requirement");
+});
+
+it("keeps every recovery item reachable without expanding long text by default", async () => {
+  const original = "A long requirement. ".repeat(200);
+  const resend = vi
+    .fn<UiBackendClient["resendSteerInput"]>()
+    .mockResolvedValue({
+      promptId: "new",
+      sessionId: "session",
+      clientRequestId: "resend-operation",
+      userMessageId: "new-message",
+      status: "queued",
+      createdAt: "2026-10-15T00:00:00Z",
+    });
+  const f = fixture({
+    unconsumedSteers: unconsumedSteers
+      .map((input) => ({ ...input, text: original }))
+      .concat([
+        {
+          ...unconsumedSteers[0],
+          inputId: "second",
+          promptId: "second-prompt",
+          messageId: "second-message",
+          text: original,
+        },
+      ]),
+    client: {
+      resendSteerInput: resend,
+      getCurrentModel: () => Promise.resolve(null),
+      subscribeEvents: (): (() => void) => (): void => undefined,
+    } as unknown as UiBackendClient,
+  });
+  f.type("Unrelated draft");
+  const recovery = document.querySelector<HTMLDetailsElement>(
+    "details.ohb-unsent-steer",
+  );
+  expect(recovery?.open).toBe(false);
+  expect(recovery?.querySelector("summary")?.textContent).toContain("2 inputs");
+  await flushAction(() => recovery?.querySelector("summary")?.click());
+  expect(recovery?.open).toBe(true);
+  expect(
+    [...document.querySelectorAll(".ohb-steer-recovery-text")].map(
+      (node) => node.textContent,
+    ),
+  ).toEqual([original, original]);
+  if (!recovery) throw new Error("Recovery entry missing");
+  const buttons = [...recovery.querySelectorAll<HTMLButtonElement>("button")];
+  await flushAction(() => {
+    buttons[1]?.click();
+  });
+  expect(resend.mock.calls[0]?.[0]).toMatchObject({ inputId: "second" });
+  await flushAction(() => {
+    buttons[0]?.click();
+  });
+  expect(resend.mock.calls[1]?.[0]).toMatchObject({ inputId: "input-old" });
+  expect(resend.mock.calls[1]?.[0].operationId).not.toBe(
+    resend.mock.calls[0]?.[0].operationId,
+  );
+  expect(f.input().value).toBe("Unrelated draft");
+  f.render(null, true);
+  expect(
+    [...recovery.querySelectorAll<HTMLButtonElement>("button")].every(
+      (button) => button.disabled,
+    ),
+  ).toBe(true);
+  f.update({ unconsumedSteers: [] });
+  expect(document.querySelector("details.ohb-unsent-steer")).toBeNull();
+});
+
+it("resets expansion and failed recovery state when the session changes", async () => {
+  const resend = vi
+    .fn<UiBackendClient["resendSteerInput"]>()
+    .mockRejectedValue(new Error("Network lost"));
+  const f = fixture({
+    unconsumedSteers,
+    client: {
+      resendSteerInput: resend,
+      getCurrentModel: () => Promise.resolve(null),
+      subscribeEvents: (): (() => void) => (): void => undefined,
+    } as unknown as UiBackendClient,
+  });
+  await flushAction(() =>
+    document
+      .querySelector("details.ohb-unsent-steer summary")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true })),
+  );
+  await flushAction(() => {
+    clickLabel("Resend steer 1: Keep my requirement");
+  });
+  expect(document.body.textContent).toContain("Network lost");
+  f.update({
+    draftScopeKey: "workspace:other",
+    unconsumedSteers: [
+      { ...unconsumedSteers[0], text: "Other session requirement" },
+    ],
+  });
+  const recovery = document.querySelector<HTMLDetailsElement>(
+    "details.ohb-unsent-steer",
+  );
+  expect(recovery?.open).toBe(false);
+  expect(document.body.textContent).not.toContain("Network lost");
+  expect(document.body.textContent).not.toContain("Keep my requirement");
+  await flushAction(() => recovery?.querySelector("summary")?.click());
+  await flushAction(() => {
+    clickLabel("Resend steer 1: Other session requirement");
+  });
+  expect(resend.mock.calls[1]?.[0].operationId).not.toBe(
+    resend.mock.calls[0]?.[0].operationId,
+  );
 });
 
 it("keeps a refused manual steer visibly queued without announcing acceptance", async () => {
@@ -623,6 +743,12 @@ it.each(["before", "after"])(
       } as unknown as UiBackendClient,
     });
     f.type("Unrelated draft");
+    await flushAction(() =>
+      document
+        .querySelector<HTMLDetailsElement>("details.ohb-unsent-steer")
+        ?.querySelector("summary")
+        ?.click(),
+    );
     await flushAction(() => {
       clickLabel("Resend steer 1: Keep my requirement");
     });
@@ -655,6 +781,51 @@ it.each(["before", "after"])(
     );
     expect(document.body.textContent).not.toContain("Keep my requirement");
     expect(f.input().value).toBe("Unrelated draft");
+    expect(resend).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(["recovery removed", "recovery collapsed", "session changed"])(
+  "keeps a late resend failure in its owning session after %s",
+  async (change) => {
+    let reject!: (error: Error) => void;
+    const pending = new Promise<UiPromptReceipt>((_, fail) => {
+      reject = fail;
+    });
+    const resend = vi.fn(() => pending);
+    const f = fixture({
+      unconsumedSteers,
+      client: {
+        resendSteerInput: resend,
+        getCurrentModel: () => Promise.resolve(null),
+        subscribeEvents: (): (() => void) => (): void => undefined,
+      } as unknown as UiBackendClient,
+    });
+    const recovery = document.querySelector<HTMLDetailsElement>(
+      "details.ohb-unsent-steer",
+    );
+    await flushAction(() => recovery?.querySelector("summary")?.click());
+    await flushAction(() => {
+      clickLabel("Resend steer 1: Keep my requirement");
+    });
+    expect(recovery?.querySelector("button")?.disabled).toBe(true);
+    if (change === "recovery removed") f.update({ unconsumedSteers: [] });
+    if (change === "recovery collapsed") {
+      await flushAction(() => recovery?.querySelector("summary")?.click());
+      expect(recovery?.open).toBe(false);
+    }
+    if (change === "session changed")
+      f.update({ draftScopeKey: "workspace:other", unconsumedSteers: [] });
+    await flushAction(() => {
+      reject(new Error("Resend connection lost"));
+    });
+    const alert = document.querySelector('[role="alert"]');
+    if (change === "session changed") {
+      expect(alert).toBeNull();
+    } else {
+      expect(alert?.textContent).toBe("Resend connection lost");
+      expect(alert?.closest("details")).toBeNull();
+    }
     expect(resend).toHaveBeenCalledTimes(1);
   },
 );
@@ -708,7 +879,7 @@ it("does not revive an item deleted while its edit lease response was in flight"
 });
 
 it.each(["before", "after"])(
-  "expires Steer acceptance when its target ends %s acknowledgement",
+  "keeps successful steer quiet when its target ends %s acknowledgement",
   async (timing) => {
     let accept!: (result: {
       status: "steered";
@@ -753,7 +924,7 @@ it.each(["before", "after"])(
           receipt: { acceptedTargetRunId: "run-1" },
         });
       });
-      expect(document.body.textContent).toContain("Steer accepted");
+      expect(document.body.textContent).not.toContain("Steer accepted");
     }
     f.update({
       model: {
