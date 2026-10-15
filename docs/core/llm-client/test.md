@@ -124,3 +124,13 @@
 ## 后续重构提示
 
 当前 provider 单测已独立维护在 `docs/services/providers/test.md` 对应的源码测试文件中。llm-client 测试只关注消息累积、完成态构造和中断处理，不重复验证 provider 的协议转换细节。
+
+## 请求空闲保护测试（2026-10-15）
+
+- `idle-watchdog.unit.test.ts`：默认/覆盖阈值、pulse、消费者空档、取消、dispose、迟到异常与输入校验。
+- `stream-idle.integration.test.ts`：四个等待点、partial 不重放、取消竞争、opening 在退避期间及 finally 后迟到、next 迟到、慢持久化不污染 first-text/endedAt、建流与首事件分别计时。
+- `sdk-retry.integration.test.ts`：安装的三种真实 SDK 配合本地 fetch stub；无归一化输出的原始事件持续续时；挂住的 HTTP body 只按应用层预算重试，无 SDK 隐藏重试。
+- `core/lifecycle/failed-history.integration.test.ts`：partial idle 以 APIError 落库，正文保留但不进入后续模型历史或摘要。
+- `packages/ohbaby-server/src/runtime/daemon/model-idle.e2e.test.ts`：真实 HTTP daemon、SQLite 和 goal driver 的故障链路；付费三协议请求需显式设置 `OHBABY_RUN_IDLE_REAL_E2E=1`，使用 DeepSeek 官方 `deepseek-flash`，凭据 `DEEPSEEK_API_KEY` 只从环境或根 `.env` 读取。三种请求都显式关闭 thinking。使用现有 `vitest.e2e.config.ts` 运行；不依赖浏览器。
+
+本批范围与实际验收结果分别见 [04](../../problem-lists/2026-10-13-goals-upgrade/improve-1/04-test-and-acceptance.md) 和 [05](../../problem-lists/2026-10-13-goals-upgrade/improve-1/05-implementation-acceptance.md)。

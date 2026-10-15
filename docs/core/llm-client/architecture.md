@@ -83,3 +83,19 @@ llm-client 不知道 provider 内部如何调用 SDK，只消费归一化事件�
 2. provider 创建只绑定连接级配置，model/temperature/maxTokens 在请求时传入。
 3. tool call 参数只在完成态解析，避免流式片段中间态误解析。
 4. abort 判断委托给 provider，partial response 构造保留在 llm-client。
+
+## 请求空闲看门狗（2026-10-15）
+
+`streamResponse` 的每次 attempt 拥有一个 `idle-watchdog.ts` 实例。它分别守卫建流、首个 next、usage-only 后 next 和主循环 next；只计算未完成的 provider 等待，不计本地 flush 或消费者 yield 时间。默认 600,000 ms；请求级 `idleTimeoutMs` 可覆盖，必须为正有限数且不超过 2,147,483,647。没有环境变量、model.json 或 UI 配置入口。
+
+provider 接收融合的 `providerSignal` 和可选 `onActivity`。三种协议在 SDK 原始事件到达时调用活动回调；没有产出归一化事件的 role/空 delta/状态事件也可续时。SDK 未暴露的心跳不在保证内。
+
+超时只 abort 专属子 controller，并由 race 主动结束等待；不修改 caller signal。用户取消优先；无 partial 时走既有有界 retry，原因是 `stream_idle_timeout`，耗尽后抛 `ProviderRetryExhaustedError`；已有正文、reasoning、工具片段或 finish 时抛 `ProviderStreamInterruptedError`，不重放，也不把超时伪装成摘要可恢复的 transport 错误。
+
+这个分类有一个上层后果：partial idle 在 lifecycle 中记录为 `APIError`，已输出正文仍保存在消息记录和 UI 中，但没有 interruption fact，也不会进入后续请求或摘要的失败历史投影。它与 ECONNRESET 的保留策略不同，属于本批按既有分类落地的边界。
+
+安装的 OpenAI、Anthropic SDK 另有默认 600,000 ms 的建流 timeout，收到 HTTP 响应后清除；因此建流阶段存在同阈值竞争，错误可能先由 SDK 或看门狗报告。流读取仍由本模块守卫。未来上调 idle 常量时，需同时复查 SDK 的建流 timeout，不能将常量误当成唯一请求时限。
+
+observer 观察受守卫的原始读取，迟到 chunk 不触发 first-text 记录。原始 opening 的回调保留局部 iterator 清理，先检查 aborted/finalized/expired 再绑定 attempt，覆盖退避期间 finally 尚未执行的窗口。return 继续 detach；不等待不合作 provider 的清理。
+
+看门狗保护普通请求与 goal 请求，不判断任务进展；目录位置取舍及用户要求回看的事项见 [位置记录](../../problem-lists/2026-10-13-goals-upgrade/improve-1/06-request-idle-placement-review.md)。
