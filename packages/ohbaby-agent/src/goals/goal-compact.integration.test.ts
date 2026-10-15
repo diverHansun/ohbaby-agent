@@ -160,11 +160,22 @@ describe("goals x compact (integration)", () => {
   });
 
   function createRunner(input: {
+    readonly service: GoalService;
     readonly prompts: string[];
     readonly onTurn?: (turn: number) => Promise<void>;
   }): GoalTurnRunner {
     return {
-      async runTurn(sessionId, promptText): Promise<GoalTurnOutcome> {
+      async finishTurn(sessionId, ticket, outcome): Promise<void> {
+        await input.service.settleTurn(sessionId, ticket, outcome);
+      },
+      async runTurn(sessionId, goalId, epoch): Promise<GoalTurnOutcome> {
+        const ticket = await input.service.admitTurnInBoundary(
+          sessionId,
+          goalId,
+          epoch,
+        );
+        if (ticket === null) return { status: "not_admitted" };
+        const promptText = ticket.modelText;
         input.prompts.push(promptText);
         const turn = input.prompts.length;
         await addTextMessage(messageManager, {
@@ -178,7 +189,11 @@ describe("goals x compact (integration)", () => {
           text: `turn ${String(turn)} work log: ${"x".repeat(24_000)}`,
         });
         await input.onTurn?.(turn);
-        return { status: "succeeded", tokensUsed: 50 };
+        return {
+          status: "succeeded",
+          ticket,
+          usage: { totalTokens: 50, usageComplete: true },
+        };
       },
     };
   }
@@ -195,6 +210,7 @@ describe("goals x compact (integration)", () => {
     });
     service.attachTurnRunner(
       createRunner({
+        service,
         prompts,
         onTurn: async (turn) => {
           if (turn === 2) {
@@ -270,7 +286,7 @@ describe("goals x compact (integration)", () => {
       },
       persistence,
     });
-    service.attachTurnRunner(createRunner({ prompts }));
+    service.attachTurnRunner(createRunner({ service, prompts }));
 
     await service.createGoal(sessionId, {
       actor: "user",

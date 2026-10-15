@@ -978,6 +978,7 @@ export async function createUiRuntimeComposition(
       executionControl: options.goalExecutionControl,
       onChange: (event): void => {
         options.onGoalChange?.(event);
+        if (event.change.kind === "progress") return;
         const status = event.snapshot?.status;
         options.onNotice?.({
           level: "info",
@@ -1318,13 +1319,8 @@ export async function createUiRuntimeComposition(
 
     interruptRunTree,
 
-    async interruptSubagentsByParent(parentSessionId, reason): Promise<void> {
-      const roots = await runLedger.getActiveRuns(parentSessionId);
-      await Promise.all(
-        roots
-          .filter((run) => run.contextScopeId === undefined)
-          .map((run) => subagentHost.interruptByRootRun(run.runId, reason)),
-      );
+    async interruptSubagentsByRootRun(rootRunId, reason): Promise<void> {
+      await subagentHost.interruptByRootRun(rootRunId, reason);
     },
 
     getActivityReasons(): readonly string[] {

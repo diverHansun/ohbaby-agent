@@ -52,14 +52,7 @@ const tools: ModelToolDefinition[] = [
       additionalProperties: false,
       properties: {
         unit: {
-          enum: [
-            "turns",
-            "tokens",
-            "milliseconds",
-            "seconds",
-            "minutes",
-            "hours",
-          ],
+          enum: ["turns", "milliseconds", "seconds", "minutes", "hours"],
           type: "string",
         },
         value: { exclusiveMinimum: 0, type: "number" },

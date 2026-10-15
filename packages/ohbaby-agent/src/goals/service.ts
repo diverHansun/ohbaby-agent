@@ -1,3 +1,5 @@
+import { renderGoalTurnPrompt } from "./injection.js";
+import { GoalError } from "./errors.js";
 import { GOAL_SAFETY_CAP_TURNS } from "./constants.js";
 import { driveGoal } from "./driver.js";
 import { GoalStore } from "./store.js";
@@ -7,14 +9,26 @@ import type {
   GoalBudgetLimits,
   GoalChange,
   GoalExecutionControlPort,
+  GoalExecutionInterruptInput,
   GoalPersistencePort,
   GoalSnapshot,
   GoalStatus,
   GoalTurnRunner,
+  GoalTurnTicket,
+  GoalTurnOutcome,
+  GoalMutationContext,
 } from "./types.js";
 
 export interface GoalServiceDeps {
   readonly persistence: GoalPersistencePort;
+  readonly withSessionMutation?: <T>(
+    sessionId: string,
+    op: () => Promise<T>,
+  ) => Promise<T>;
+  readonly resolveMutationContext?: (
+    sessionId: string,
+    runId: string,
+  ) => GoalMutationContext;
   readonly now?: () => number;
   readonly createGoalId?: () => string;
   /** 默认 GOAL_SAFETY_CAP_TURNS；仅测试可注入低值，不对用户暴露。 */
@@ -39,6 +53,9 @@ export class GoalService {
   private readonly stores = new Map<string, Promise<GoalStore>>();
   private readonly initializedStores = new Map<string, GoalStore>();
   private readonly driving = new Map<string, Promise<void>>();
+  private readonly epochs = new Map<string, number>();
+  private readonly tickets = new Map<string, Set<GoalTurnTicket>>();
+  private readonly requested = new Set<string>();
   private runner: GoalTurnRunner | undefined;
   private readonly safetyCapTurns: number;
 
@@ -88,57 +105,201 @@ export class GoalService {
     return created;
   }
 
-  /** 确保 active goal 恰有一个 driver 循环在跑（fire-and-forget、幂等）。 */
+  currentExecutionEpoch(sessionId: string): number {
+    return this.epochs.get(sessionId) ?? 0;
+  }
+
+  isExecutionCurrent(
+    sessionId: string,
+    goalId: string,
+    epoch: number,
+  ): boolean {
+    const snapshot = this.peekSnapshot(sessionId);
+    return (
+      snapshot?.goalId === goalId &&
+      snapshot.status === "active" &&
+      this.currentExecutionEpoch(sessionId) === epoch
+    );
+  }
+
+  getTicketForRun(
+    sessionId: string,
+    runId: string,
+  ): GoalTurnTicket | undefined {
+    return [...(this.tickets.get(sessionId) ?? [])].find(
+      (ticket) => ticket.runId === runId,
+    );
+  }
+
+  bindTicketRun(ticket: GoalTurnTicket, runId: string): void {
+    ticket.runId = runId;
+  }
+
+  /** Caller already owns the session mutation boundary; never enters it again. */
+  async admitTurnInBoundary(
+    sessionId: string,
+    goalId: string,
+    epoch: number,
+    available = true,
+  ): Promise<GoalTurnTicket | null> {
+    if (!this.isExecutionCurrent(sessionId, goalId, epoch)) return null;
+    const store = this.initializedStores.get(sessionId);
+    const before = store?.getSnapshot();
+    if (store === undefined || before === undefined || before === null)
+      return null;
+    if (before.budget.overBudget || before.turnsUsed >= this.safetyCapTurns) {
+      await store.pause(
+        before.budget.overBudget
+          ? "A configured budget was reached"
+          : "Safety cap reached: too many continuation turns without completion",
+        "runtime",
+      );
+      this.invalidate(sessionId);
+      return null;
+    }
+    if (!available) return null;
+    await store.incrementTurn();
+    const snapshot = store.getSnapshot();
+    if (snapshot === null)
+      throw new Error("Admitted goal disappeared inside its session boundary.");
+    const ticket: GoalTurnTicket = {
+      goalId,
+      executionEpoch: epoch,
+      turnNumber: snapshot.turnsUsed,
+      modelText: renderGoalTurnPrompt(snapshot, {
+        isFirstTurn: snapshot.turnsUsed === 1,
+      }),
+      displayText:
+        snapshot.turnsUsed === 1
+          ? "Goal started"
+          : `Goal auto-continue (turn ${String(snapshot.turnsUsed)})`,
+      token: Symbol("goal-turn"),
+      controller: new AbortController(),
+      settled: false,
+    };
+    const tickets = this.tickets.get(sessionId) ?? new Set<GoalTurnTicket>();
+    tickets.add(ticket);
+    this.tickets.set(sessionId, tickets);
+    return ticket;
+  }
+
+  async settleTurn(
+    sessionId: string,
+    ticket: GoalTurnTicket,
+    outcome: GoalTurnOutcome,
+  ): Promise<void> {
+    const store = await this.storeFor(sessionId);
+    await this.mutate(sessionId, async () => {
+      if (!ticket.settled) {
+        await store.recordUsage(
+          ticket.goalId,
+          outcome.usage ?? { usageComplete: false },
+        );
+        ticket.settled = true;
+      }
+      const current = store.getSnapshot();
+      if (
+        current?.goalId === ticket.goalId &&
+        current.status === "complete" &&
+        ![...(this.tickets.get(sessionId) ?? [])].some(
+          (other) =>
+            other !== ticket &&
+            other.goalId === ticket.goalId &&
+            !other.settled,
+        )
+      )
+        await store.clearCompleted(ticket.goalId);
+      this.tickets.get(sessionId)?.delete(ticket);
+    });
+  }
+
   ensureDriving(sessionId: string): void {
     if (this.runner === undefined) return;
     if (this.driving.has(sessionId)) return;
     const runner = this.runner;
+    const epoch = this.currentExecutionEpoch(sessionId);
+    const goalId = this.peekSnapshot(sessionId)?.goalId;
+    if (goalId === undefined) return;
+    this.requested.delete(sessionId);
     const loop = (async (): Promise<void> => {
       const store = await this.storeFor(sessionId);
       await driveGoal({
         pause: (reason, actor) =>
-          this.pauseActiveGoal(sessionId, reason, actor),
+          this.pauseExecution(sessionId, goalId, epoch, reason, actor),
         runner,
         safetyCapTurns: this.safetyCapTurns,
         sessionId,
         store,
+        goalId,
+        executionEpoch: epoch,
+        isCurrent: () => this.isExecutionCurrent(sessionId, goalId, epoch),
       });
     })()
       .catch(async (error: unknown) => {
         this.deps.onError?.({ error, sessionId });
-        const store = await this.storeFor(sessionId).catch(() => undefined);
-        if (store?.getSnapshot()?.status === "active") {
-          await this.pauseActiveGoal(
-            sessionId,
-            `runtime error: ${errorMessage(error)}`,
-            "runtime",
-          ).catch(() => undefined);
-        }
+        await this.pauseExecution(
+          sessionId,
+          goalId,
+          epoch,
+          `runtime error: ${errorMessage(error)}`,
+          "runtime",
+        ).catch(() => undefined);
       })
       .finally(() => {
+        if (this.driving.get(sessionId) !== loop) return;
         this.driving.delete(sessionId);
+        const changed =
+          this.currentExecutionEpoch(sessionId) !== epoch ||
+          this.peekSnapshot(sessionId)?.goalId !== goalId;
+        const requested = this.requested.delete(sessionId);
+        if (
+          (changed || requested) &&
+          this.peekSnapshot(sessionId)?.status === "active"
+        )
+          this.ensureDriving(sessionId);
       });
     this.driving.set(sessionId, loop);
   }
 
-  /** 测试与收尾用：等待当前 driver 循环退出（无循环则立即返回）。 */
-  async whenIdle(sessionId: string): Promise<void> {
-    await (this.driving.get(sessionId) ?? Promise.resolve());
+  /** Shutdown calls without a session after closing admission; join successor generations too. */
+  async whenIdle(sessionId?: string): Promise<void> {
+    if (sessionId !== undefined) {
+      await this.driving.get(sessionId);
+      return;
+    }
+    while (this.driving.size > 0) await Promise.all([...this.driving.values()]);
   }
 
   async createGoal(
     sessionId: string,
     input: CreateGoalInput,
+    runId?: string,
   ): Promise<GoalSnapshot> {
+    const observed = this.peekSnapshot(sessionId);
     const store = await this.storeFor(sessionId);
-    const snapshot = await store.create(input);
+    const observedGoalId = (
+      observed === undefined ? store.getSnapshot() : observed
+    )?.goalId;
+    const snapshot = await this.mutate(sessionId, async () => {
+      if (input.actor === "model" || runId !== undefined)
+        this.requireMutation(sessionId, runId, observedGoalId);
+      const result = await store.create(input);
+      this.invalidate(sessionId);
+      return result;
+    });
     this.ensureDriving(sessionId);
     return snapshot;
   }
 
   async resumeGoal(sessionId: string): Promise<GoalSnapshot> {
     const store = await this.storeFor(sessionId);
-    const snapshot = await store.resume("user");
+    const snapshot = await this.mutate(sessionId, async () => {
+      const wasActive = store.getSnapshot()?.status === "active";
+      const result = await store.resume("user");
+      if (!wasActive) this.invalidate(sessionId);
+      return result;
+    });
+    if (this.driving.has(sessionId)) this.requested.add(sessionId);
     this.ensureDriving(sessionId);
     return snapshot;
   }
@@ -147,16 +308,25 @@ export class GoalService {
     sessionId: string,
     reason = "Paused by user",
   ): Promise<GoalSnapshot> {
-    return this.pauseActiveGoal(sessionId, reason, "user");
+    const snapshot = await this.pauseActiveGoal(sessionId, reason, "user");
+    if (snapshot === null)
+      throw new GoalError("no_goal", "No goal is currently set.");
+    return snapshot;
   }
 
   async cancelGoal(sessionId: string): Promise<void> {
     const store = await this.storeFor(sessionId);
-    const wasActive = store.getSnapshot()?.status === "active";
-    await store.cancel("user");
-    if (wasActive) {
-      await this.interruptGoalExecution(sessionId, "goal cancelled", true);
-    }
+    const interrupt = await this.mutate(sessionId, async () => {
+      const current = store.getSnapshot();
+      const ticket = this.currentTicket(sessionId, current?.goalId);
+      await store.cancel("user");
+      if (current !== null) this.invalidate(sessionId);
+      return current?.status === "active"
+        ? this.interruptInput(sessionId, "goal cancelled", true, ticket)
+        : undefined;
+    });
+    if (interrupt !== undefined)
+      await this.deps.executionControl.interruptGoalExecution(interrupt);
   }
 
   async replaceGoal(
@@ -164,15 +334,31 @@ export class GoalService {
     objective: string,
   ): Promise<GoalSnapshot> {
     const store = await this.storeFor(sessionId);
-    return store.replaceObjective(objective, "user");
+    const { snapshot, changed } = await this.mutate(sessionId, async () => {
+      const before = store.getSnapshot();
+      const snapshot = await store.replaceObjective(objective, "user");
+      const changed = before?.objective !== snapshot.objective;
+      if (changed) this.invalidate(sessionId);
+      return { snapshot, changed };
+    });
+    if (changed) this.ensureDriving(sessionId);
+    return snapshot;
   }
 
   async setBudget(
     sessionId: string,
     limits: GoalBudgetLimits,
+    runId?: string,
   ): Promise<GoalSnapshot> {
+    const observed = this.peekSnapshot(sessionId);
     const store = await this.storeFor(sessionId);
-    return store.setBudgetLimits(limits, "model");
+    const observedGoalId = (
+      observed === undefined ? store.getSnapshot() : observed
+    )?.goalId;
+    return this.mutate(sessionId, async () => {
+      this.requireMutation(sessionId, runId, observedGoalId);
+      return store.setBudgetLimits(limits, "model");
+    });
   }
 
   async getSnapshot(sessionId: string): Promise<GoalSnapshot | null> {
@@ -180,88 +366,173 @@ export class GoalService {
     return store.getSnapshot();
   }
 
-  /**
-   * 模型经 UpdateGoal 的唯一杠杆。恢复只有 `/goal resume` 一条路：
-   * 对 paused 的 goal 传 "active" 不迁移、不起 driver，只返回引导语。
-   */
   async updateGoalFromModel(
     sessionId: string,
     status: GoalStatus,
     reason?: string,
+    runId?: string,
   ): Promise<{
     readonly snapshot: GoalSnapshot | null;
     readonly note: string;
   }> {
+    const observed = this.peekSnapshot(sessionId);
     const store = await this.storeFor(sessionId);
-    const current = store.getSnapshot();
-    if (status !== "active" && current?.status !== "active") {
-      return {
-        note: inactiveGoalNote(current),
-        snapshot: current,
-      };
-    }
-    if (status === "complete") {
-      await store.markComplete("model");
-      await this.interruptGoalExecution(sessionId, "goal completed", false);
-      return { note: "Goal completed and cleared.", snapshot: null };
-    }
-    if (status === "paused") {
-      const snapshot = await this.pauseActiveGoal(
+    const observedGoalId = (
+      observed === undefined ? store.getSnapshot() : observed
+    )?.goalId;
+    let interrupt: ReturnType<GoalService["interruptInput"]> | undefined;
+    const result = await this.mutate(sessionId, async () => {
+      this.requireMutation(sessionId, runId, observedGoalId);
+      const current = store.getSnapshot();
+      if (current?.status !== "active")
+        return { note: inactiveGoalNote(current), snapshot: current };
+      if (status === "active")
+        return { note: "Goal is already active.", snapshot: current };
+      const ticket = this.currentTicket(sessionId, current.goalId);
+      if (status === "complete") {
+        await store.markComplete("model");
+        this.invalidate(sessionId);
+        if (ticket === undefined) await store.clearCompleted(current.goalId);
+        interrupt = this.interruptInput(
+          sessionId,
+          "goal completed",
+          false,
+          ticket,
+        );
+        return { note: "Goal completed.", snapshot: null };
+      }
+      const snapshot = await store.pause(reason ?? "Paused by model", "model");
+      this.invalidate(sessionId);
+      interrupt = this.interruptInput(
         sessionId,
         reason ?? "Paused by model",
-        "model",
+        true,
+        ticket,
       );
-      return {
-        note: `Goal paused: ${snapshot.pauseReason ?? ""}`,
-        snapshot,
-      };
-    }
-    if (current === null) {
-      return { note: "No goal is currently set.", snapshot: null };
-    }
-    if (current.status === "active") {
-      return { note: "Goal is already active.", snapshot: current };
-    }
-    return {
-      note: inactiveGoalNote(current),
-      snapshot: current,
-    };
+      return { note: `Goal paused: ${snapshot.pauseReason ?? ""}`, snapshot };
+    });
+    if (interrupt !== undefined)
+      await this.deps.executionControl.interruptGoalExecution(interrupt);
+    return result;
+  }
+
+  async pauseExecution(
+    sessionId: string,
+    goalId: string,
+    epoch: number,
+    reason: string,
+    actor: GoalActor = "runtime",
+  ): Promise<GoalSnapshot | null> {
+    return this.pauseActiveGoal(sessionId, reason, actor, { goalId, epoch });
   }
 
   private async pauseActiveGoal(
     sessionId: string,
     reason: string,
     actor: GoalActor,
-  ): Promise<GoalSnapshot> {
+    expected?: { goalId: string; epoch: number },
+  ): Promise<GoalSnapshot | null> {
     const store = await this.storeFor(sessionId);
-    const wasActive = store.getSnapshot()?.status === "active";
-    const snapshot = await store.pause(reason, actor);
-    if (wasActive) {
-      await this.interruptGoalExecution(sessionId, reason, true);
-    }
+    let interrupt: ReturnType<GoalService["interruptInput"]> | undefined;
+    const snapshot = await this.mutate(sessionId, async () => {
+      if (
+        expected !== undefined &&
+        !this.isExecutionCurrent(sessionId, expected.goalId, expected.epoch)
+      )
+        return store.getSnapshot();
+      const current = store.getSnapshot();
+      const ticket = this.currentTicket(sessionId, current?.goalId);
+      const result = await store.pause(reason, actor);
+      if (current?.status === "active") {
+        this.invalidate(sessionId);
+        interrupt = this.interruptInput(sessionId, reason, true, ticket);
+      }
+      return result;
+    });
+    if (interrupt !== undefined)
+      await this.deps.executionControl.interruptGoalExecution(interrupt);
     return snapshot;
   }
 
-  private async interruptGoalExecution(
+  private mutate<T>(sessionId: string, op: () => Promise<T>): Promise<T> {
+    return this.deps.withSessionMutation?.(sessionId, op) ?? op();
+  }
+
+  private invalidate(sessionId: string): void {
+    this.epochs.set(sessionId, this.currentExecutionEpoch(sessionId) + 1);
+    for (const ticket of this.tickets.get(sessionId) ?? [])
+      ticket.controller.abort();
+  }
+
+  private currentTicket(
+    sessionId: string,
+    goalId: string | undefined,
+  ): GoalTurnTicket | undefined {
+    return [...(this.tickets.get(sessionId) ?? [])].find(
+      (ticket) => ticket.goalId === goalId,
+    );
+  }
+
+  private interruptInput(
     sessionId: string,
     reason: string,
     includePrimary: boolean,
-  ): Promise<void> {
-    await this.deps.executionControl.interruptGoalExecution({
-      includePrimary,
-      reason,
+    ticket?: GoalTurnTicket,
+  ): GoalExecutionInterruptInput {
+    if (ticket !== undefined) ticket.stopIntent = { reason, includePrimary };
+    return {
       sessionId,
-    });
+      reason,
+      includePrimary,
+      ...(ticket === undefined ? {} : { ticket }),
+      ...(ticket?.runId === undefined ? {} : { expectedRunId: ticket.runId }),
+    };
+  }
+
+  private requireMutation(
+    sessionId: string,
+    runId?: string,
+    observedGoalId?: string,
+  ): void {
+    if (runId === undefined) {
+      if (this.deps.resolveMutationContext !== undefined)
+        throw new GoalError(
+          "invalid_transition",
+          "Model goal changes require a trusted run identity.",
+        );
+      return;
+    }
+    const context = this.deps.resolveMutationContext?.(sessionId, runId) ?? {
+      kind: "invalid",
+    };
+    if (
+      context.kind === "user" &&
+      this.peekSnapshot(sessionId)?.goalId === observedGoalId
+    )
+      return;
+    if (
+      context.kind === "goal" &&
+      this.isExecutionCurrent(
+        sessionId,
+        context.ticket.goalId,
+        context.ticket.executionEpoch,
+      )
+    )
+      return;
+    throw new GoalError(
+      "invalid_transition",
+      "This run no longer has permission to modify the current goal.",
+    );
   }
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
 function inactiveGoalNote(snapshot: GoalSnapshot | null): string {
-  if (snapshot === null) {
-    return "No goal is currently set.";
-  }
-  return `Goal is ${snapshot.status}. Ask the user to run /goal resume to continue it.`;
+  return snapshot === null
+    ? "No goal is currently set."
+    : snapshot.status === "complete"
+      ? "Goal is complete."
+      : `Goal is ${snapshot.status}. Ask the user to run /goal resume to continue it.`;
 }

@@ -7239,21 +7239,38 @@ describe("createInProcessUiBackendClient", () => {
 
   it("freezes the Todo lease to the old Goal when CreateGoal replaces it mid-run", async () => {
     const requests: InterfaceProviderRequest[] = [];
+    const persistence = new InMemoryGoalPersistence();
+    const oldTailStarted = createDeferred<undefined>();
+    const releaseOldTail = createDeferred<undefined>();
     const replacementTurnStarted = createDeferred<undefined>();
     const releaseReplacementTurn = createDeferred<undefined>();
     const oldGoalTodos = [
       { content: "Settle old goal run", status: "completed" as const },
     ];
     const client = createInProcessUiBackendClient({
+      goalPersistence: persistence,
       llmClient: createControlledSequentialFakeLLMClient(
         [
           {
             events: [
-              goalCreateToolCallEvent({
-                callId: "call_replace_goal_mid_run",
-                objective: "replacement goal",
-                replace: true,
-              }),
+              {
+                ...goalCreateToolCallEvent({
+                  callId: "call_replace_goal_mid_run",
+                  objective: "replacement goal",
+                  replace: true,
+                }),
+                tokenUsage: {
+                  inputTokens: 90,
+                  outputTokens: 10,
+                  totalTokens: 100,
+                  inputBreakdown: {
+                    cacheRead: 80,
+                    cacheWrite: 0,
+                    uncached: 10,
+                    observed: { cacheRead: true, cacheWrite: true },
+                  },
+                },
+              },
             ],
           },
           {
@@ -7264,7 +7281,11 @@ describe("createInProcessUiBackendClient", () => {
               }),
             ],
           },
-          { events: [{ textDelta: "Old run settled.", finishReason: "stop" }] },
+          {
+            events: [{ textDelta: "Old run settled.", finishReason: "stop" }],
+            started: oldTailStarted,
+            release: releaseOldTail.promise,
+          },
           {
             events: [
               goalUpdateToolCallEvent({
@@ -7313,6 +7334,9 @@ describe("createInProcessUiBackendClient", () => {
       rawArgs: "original goal",
       surface: "tui",
     });
+    await oldTailStarted.promise;
+    expect(client.getActiveGoalRunForSteer("session_1")).toBeUndefined();
+    releaseOldTail.resolve(undefined);
     await withTimeout(
       replacementTurnStarted.promise,
       1_000,
@@ -7323,6 +7347,15 @@ describe("createInProcessUiBackendClient", () => {
       goals: [{ goal: { objective: "replacement goal", status: "active" } }],
       todos: [{ todos: [], visible: false }],
     });
+    const creates = (await persistence.list("session_1")).filter(
+      (record) => record.type === "create",
+    );
+    expect(creates).toHaveLength(2);
+    expect(
+      (await persistence.list("session_1"))
+        .filter((record) => record.goalId === creates[1]?.goalId)
+        .every((record) => !record.tokensUsed),
+    ).toBe(true);
     expect(
       events.some(
         (event) =>
@@ -7387,6 +7420,16 @@ describe("createInProcessUiBackendClient", () => {
     const sessionId = (await client.getSnapshot()).activeSessionId;
     expect(sessionId).not.toBeNull();
 
+    await client.executeCommand({
+      argv: ["pause"],
+      clientInvocationId: "explicit-todo-pause",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal pause",
+      rawArgs: "pause",
+      sessionId: sessionId ?? undefined,
+      surface: "tui",
+    });
     await client.submitPromptAndWait("Handle an ordinary interruption", {
       sessionId: sessionId ?? undefined,
     });
@@ -7525,7 +7568,7 @@ describe("createInProcessUiBackendClient", () => {
     expect(snapshot.goals).toEqual([]);
   });
 
-  it("lets a user prompt interrupt an active goal run and injects a paused light note", async () => {
+  it("queues a user prompt until explicit pause and then injects a paused light note", async () => {
     const goalStarted = createDeferred<undefined>();
     const requests: InterfaceProviderRequest[] = [];
     const client = createInProcessUiBackendClient({
@@ -7558,11 +7601,24 @@ describe("createInProcessUiBackendClient", () => {
     expect(goalSessionId).not.toBeNull();
     await goalStarted.promise;
 
+    const queued = await client.submitPromptAccepted(
+      "What is the current progress?",
+      { sessionId: goalSessionId ?? undefined },
+    );
+    expect(requests).toHaveLength(1);
+    await client.executeCommand({
+      argv: ["pause"],
+      clientInvocationId: "explicit-pause",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal pause",
+      rawArgs: "pause",
+      sessionId: goalSessionId ?? undefined,
+      surface: "tui",
+    });
     try {
       await withTimeout(
-        client.submitPromptAndWait("What is the current progress?", {
-          sessionId: goalSessionId ?? undefined,
-        }),
+        client.waitForPrompt(queued.promptId),
         2_000,
         "user prompt did not run after interrupting the goal",
       );
@@ -7590,7 +7646,7 @@ describe("createInProcessUiBackendClient", () => {
     )?.output;
     expect(statusOutput?.kind).toBe("text");
     expect(statusOutput?.kind === "text" ? statusOutput.text : "").toContain(
-      "Status: paused (interrupted)",
+      "Status: paused (Paused by user)",
     );
 
     expect(requests).toHaveLength(2);
@@ -7606,7 +7662,7 @@ describe("createInProcessUiBackendClient", () => {
       {
         goal: {
           objective: "finish the interruptible goal",
-          pauseReason: "interrupted",
+          pauseReason: "Paused by user",
           status: "paused",
         },
         sessionId: goalSessionId,
@@ -7818,12 +7874,26 @@ describe("createInProcessUiBackendClient", () => {
         "goal parent did not continue after spawning background work",
       );
 
+      const queued = await client.submitPromptAccepted(
+        "Handle this user interruption",
+        { sessionId: sessionId ?? undefined },
+      );
+      expect(parentSignal?.aborted).toBe(false);
+      expect(childSignal?.aborted).toBe(false);
+      await client.executeCommand({
+        argv: ["pause"],
+        clientInvocationId: "explicit-background-pause",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal pause",
+        rawArgs: "pause",
+        sessionId: sessionId ?? undefined,
+        surface: "tui",
+      });
       await withTimeout(
-        client.submitPromptAndWait("Handle this user interruption", {
-          sessionId: sessionId ?? undefined,
-        }),
+        client.waitForPrompt(queued.promptId),
         2_000,
-        "user prompt did not run after preempting goal execution",
+        "queued user did not run after explicit pause",
       );
 
       expect(parentSignal?.aborted).toBe(true);
@@ -7840,7 +7910,7 @@ describe("createInProcessUiBackendClient", () => {
         (await client.getSnapshot()).goals?.find(
           (entry) => entry.sessionId === sessionId,
         )?.goal,
-      ).toMatchObject({ pauseReason: "interrupted", status: "paused" });
+      ).toMatchObject({ pauseReason: "Paused by user", status: "paused" });
       const userRequest = requests.at(-1);
       if (userRequest === undefined) {
         throw new Error("user prompt request was not captured");
@@ -7898,9 +7968,19 @@ describe("createInProcessUiBackendClient", () => {
     );
     await Promise.resolve();
     expect(requests).toHaveLength(0);
+    const pause = client.executeCommand({
+      argv: ["pause"],
+      clientInvocationId: "explicit-starting-pause",
+      commandId: "goal",
+      path: ["goal"],
+      raw: "/goal pause",
+      rawArgs: "pause",
+      sessionId: goalSessionId ?? undefined,
+      surface: "tui",
+    });
     agentManager.release.resolve(undefined);
     try {
-      await userPrompt;
+      await Promise.all([pause, userPrompt]);
     } finally {
       await abortActiveRun(client).catch(() => undefined);
     }
@@ -7924,7 +8004,7 @@ describe("createInProcessUiBackendClient", () => {
     )?.output;
     expect(statusOutput?.kind).toBe("text");
     expect(statusOutput?.kind === "text" ? statusOutput.text : "").toContain(
-      "Status: paused (interrupted)",
+      "Status: paused (Paused by user)",
     );
 
     const userRequest = requests.find((request) =>
@@ -12180,3 +12260,269 @@ describe("manual compact admission", () => {
     await client.dispose();
   });
 });
+
+// Hold the adapter handshake after the real runtime has started its worker.
+it.each(["complete", "replace", "pause", "cancel"] as const)(
+  "G24 preserves captured stop intent when %s commits after worker start but before UI runReady",
+  async (action) => {
+    const compositionModule = await import("./ui-runtime/composition.js");
+    const createComposition = compositionModule.createUiRuntimeComposition;
+    const handshake = createDeferred<undefined>();
+    const releaseHandshake = createDeferred<undefined>();
+    const providerStarted = createDeferred<undefined>();
+    const releaseTool = createDeferred<undefined>();
+    const releaseOutput = createDeferred<undefined>();
+    const tailStarted = createDeferred<undefined>();
+    let firstStart = true;
+    const compositionSpy = vi
+      .spyOn(compositionModule, "createUiRuntimeComposition")
+      .mockImplementation(
+        async (
+          options,
+        ): Promise<Awaited<ReturnType<typeof createComposition>>> => {
+          const runtime = await createComposition(options);
+          return {
+            ...runtime,
+            async startSession(input): ReturnType<typeof runtime.startSession> {
+              const result = await runtime.startSession(input);
+              if (firstStart) {
+                firstStart = false;
+                handshake.resolve(undefined);
+                await releaseHandshake.promise;
+              }
+              return result;
+            },
+          };
+        },
+      );
+    const persistence = new InMemoryGoalPersistence();
+    const requests: InterfaceProviderRequest[] = [];
+    let goalSignal: AbortSignal | undefined;
+    const llm = createFakeLLMClient([]);
+    const originalStream = llm.provider.streamResponse.bind(llm.provider);
+    llm.provider.streamResponse = (
+      request,
+    ): Promise<AsyncIterable<InterfaceProviderStreamEvent>> => {
+      if (isTitleGenerationRequest(request)) return originalStream(request);
+      const index = requests.push(request) - 1;
+      return Promise.resolve(
+        (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
+          if (index === 0) {
+            goalSignal = request.signal;
+            providerStarted.resolve(undefined);
+            if (action === "complete") {
+              await releaseTool.promise;
+              yield goalUpdateToolCallEvent({
+                callId: "handoff-complete",
+                status: "complete",
+              });
+              return;
+            }
+            await Promise.race([
+              releaseOutput.promise,
+              new Promise<void>((resolve) => {
+                if (request.signal?.aborted) resolve();
+                else
+                  request.signal?.addEventListener(
+                    "abort",
+                    () => {
+                      resolve();
+                    },
+                    { once: true },
+                  );
+              }),
+            ]);
+          } else if (action === "complete" && index === 1) {
+            tailStarted.resolve(undefined);
+            await releaseOutput.promise;
+          } else if (action === "replace" && index === 2) {
+            yield goalUpdateToolCallEvent({
+              callId: "handoff-new-complete",
+              status: "complete",
+            });
+            return;
+          }
+          yield { textDelta: "Finished.", finishReason: "stop" };
+        })(),
+      );
+    };
+    const client = createInProcessUiBackendClient({
+      llmClient: llm,
+      goalPersistence: persistence,
+    });
+    async function goalCommand(args: string[]): Promise<unknown> {
+      return client.executeCommand({
+        argv: args,
+        clientInvocationId: `handoff-${args.join("-")}`,
+        commandId: "goal",
+        path: ["goal"],
+        raw: `/goal ${args.join(" ")}`,
+        rawArgs: args.join(" "),
+        sessionId: "session_1",
+        surface: "tui",
+      });
+    }
+    try {
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "handoff-new",
+        commandId: "new",
+        path: ["new"],
+        raw: "/new",
+        rawArgs: "",
+        surface: "tui",
+      });
+      await goalCommand(["original handoff objective"]);
+      await Promise.all([handshake.promise, providerStarted.promise]);
+      expect(client.getActiveGoalRunForSteer("session_1")).toBeDefined();
+      let stopping: Promise<unknown> | undefined;
+      if (action === "complete") {
+        releaseTool.resolve(undefined);
+        await tailStarted.promise;
+      } else {
+        stopping = goalCommand(
+          action === "replace"
+            ? ["replace", "edited handoff objective"]
+            : [action],
+        );
+        await vi.waitFor(async () => {
+          const records = await persistence.list("session_1");
+          if (action === "replace")
+            expect(records.at(-1)?.objective).toBe("edited handoff objective");
+          else if (action === "pause")
+            expect(records.at(-1)?.status).toBe("paused");
+          else expect(records.at(-1)?.type).toBe("clear");
+        });
+      }
+      expect(client.getActiveGoalRunForSteer("session_1")).toBeUndefined();
+      const queued = await client.submitPromptAccepted("successor user", {
+        sessionId: "session_1",
+      });
+      expect(requests).toHaveLength(action === "complete" ? 2 : 1);
+      expect(goalSignal?.aborted).toBe(false);
+      releaseHandshake.resolve(undefined);
+      if (action === "pause" || action === "cancel") {
+        await stopping;
+        expect(goalSignal?.aborted).toBe(true);
+      } else {
+        await stopping;
+        expect(goalSignal?.aborted).toBe(false);
+        releaseOutput.resolve(undefined);
+      }
+      await client.waitForPrompt(queued.promptId);
+      expect(
+        requests.find((request) =>
+          lastRequestMessageText(request).includes("successor user"),
+        )?.signal?.aborted,
+      ).toBe(false);
+      if (action === "replace" || action === "complete")
+        await vi.waitFor(async () => {
+          expect((await persistence.list("session_1")).at(-1)?.type).toBe(
+            "clear",
+          );
+        });
+      expect(
+        (await persistence.list("session_1"))
+          .filter((record) => record.turnsUsed !== undefined)
+          .map((record) => record.turnsUsed),
+      ).toEqual(action === "replace" ? [1, 2] : [1]);
+    } finally {
+      releaseTool.resolve(undefined);
+      releaseHandshake.resolve(undefined);
+      releaseOutput.resolve(undefined);
+      await client.dispose();
+      compositionSpy.mockRestore();
+    }
+  },
+);
+
+it.each([false, true])(
+  "waits for goal tail settlement and late recovery before confirming shutdown (retry=%s)",
+  async (retry) => {
+    const persistence = new InMemoryGoalPersistence();
+    const append = persistence.append.bind(persistence);
+    const saving = createDeferred<undefined>();
+    const release = createDeferred<undefined>();
+    let attempts = 0;
+    persistence.append = async (sessionId, record): Promise<void> => {
+      if (record.tokensUsed === 10) {
+        attempts++;
+        if (attempts === 1) {
+          saving.resolve(undefined);
+          await release.promise;
+          if (retry) throw new Error("late goal usage failure");
+        }
+      }
+      await append(sessionId, record);
+    };
+    const client = createInProcessUiBackendClient({
+      goalPersistence: persistence,
+      llmClient: createControlledSequentialFakeLLMClient(
+        [
+          {
+            events: [
+              goalUpdateToolCallEvent({
+                callId: "shutdown-complete",
+                status: "complete",
+              }),
+            ],
+          },
+          {
+            events: [
+              {
+                textDelta: "Finished",
+                finishReason: "stop",
+                tokenUsage: {
+                  inputTokens: 8,
+                  outputTokens: 2,
+                  totalTokens: 10,
+                },
+              },
+            ],
+          },
+        ],
+        [],
+      ),
+    });
+    try {
+      await client.executeCommand({
+        argv: [],
+        clientInvocationId: "shutdown-new",
+        commandId: "new",
+        path: ["new"],
+        raw: "/new",
+        rawArgs: "",
+        surface: "tui",
+      });
+      await client.executeCommand({
+        argv: ["finish"],
+        clientInvocationId: "shutdown-goal",
+        commandId: "goal",
+        path: ["goal"],
+        raw: "/goal finish",
+        rawArgs: "finish",
+        surface: "tui",
+      });
+      await saving.promise;
+      let confirmed = false;
+      const closing = client.dispose().then((result) => {
+        confirmed = true;
+        return result;
+      });
+      // Flush ready shutdown continuations while the durable append remains held.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(confirmed).toBe(false);
+      release.resolve(undefined);
+      expect(await closing).toEqual({ status: "confirmed", errors: [] });
+      const records = await persistence.list("session_1");
+      expect(records.at(-1)?.type).toBe("clear");
+      expect(records.filter((record) => record.tokensUsed === 10)).toHaveLength(
+        1,
+      );
+      expect(attempts).toBe(retry ? 2 : 1);
+    } finally {
+      release.resolve(undefined);
+      await client.dispose();
+    }
+  },
+);

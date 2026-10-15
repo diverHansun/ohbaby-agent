@@ -17,14 +17,23 @@ import { GOAL_SAFETY_CAP_TURNS } from "./constants.js";
 
 /** goal 工具的后端子集；GoalService 天然满足。 */
 export interface GoalToolBackend {
-  createGoal(sessionId: string, input: CreateGoalInput): Promise<GoalSnapshot>;
+  createGoal(
+    sessionId: string,
+    input: CreateGoalInput,
+    runId?: string,
+  ): Promise<GoalSnapshot>;
   updateGoalFromModel(
     sessionId: string,
     status: GoalStatus,
     reason?: string,
+    runId?: string,
   ): Promise<{ readonly snapshot: GoalSnapshot | null; readonly note: string }>;
   getSnapshot(sessionId: string): Promise<GoalSnapshot | null>;
-  setBudget(sessionId: string, limits: GoalBudgetLimits): Promise<GoalSnapshot>;
+  setBudget(
+    sessionId: string,
+    limits: GoalBudgetLimits,
+    runId?: string,
+  ): Promise<GoalSnapshot>;
 }
 
 const GOAL_STATUSES = new Set<GoalStatus>(["active", "complete", "paused"]);
@@ -55,7 +64,6 @@ const MIN_TIME_BUDGET_MS = 1_000;
 const MAX_TIME_BUDGET_MS = 24 * 60 * 60 * 1_000;
 const GOAL_BUDGET_UNITS = [
   "turns",
-  "tokens",
   "milliseconds",
   "seconds",
   "minutes",
@@ -96,9 +104,6 @@ function budgetLimitsFromInput(
       );
     }
     return { turnBudget };
-  }
-  if (unit === "tokens") {
-    return { tokenBudget: Math.max(1, Math.round(value)) };
   }
   const wallClockBudgetMs = timeBudgetMs(value, unit);
   if (
@@ -163,12 +168,16 @@ function createCreateGoalTool(backend: GoalToolBackend): Tool {
         "completionCriterion",
       );
       const replace = params.replace === true;
-      const snapshot = await backend.createGoal(context.sessionId, {
-        actor: "model",
-        objective,
-        replace,
-        ...(completionCriterion !== undefined ? { completionCriterion } : {}),
-      });
+      const snapshot = await backend.createGoal(
+        context.sessionId,
+        {
+          actor: "model",
+          objective,
+          replace,
+          ...(completionCriterion !== undefined ? { completionCriterion } : {}),
+        },
+        context.runId,
+      );
       return {
         metadata: { goalId: snapshot.goalId, status: snapshot.status },
         output: `Goal created (${snapshot.status}): ${truncate(snapshot.objective)}`,
@@ -217,6 +226,7 @@ function createUpdateGoalTool(backend: GoalToolBackend): Tool {
         context.sessionId,
         status as GoalStatus,
         reason,
+        context.runId,
       );
       return {
         metadata: { status: result.snapshot?.status ?? "cleared" },
@@ -285,6 +295,7 @@ function createSetGoalBudgetTool(backend: GoalToolBackend): Tool {
       const snapshot = await backend.setBudget(
         context.sessionId,
         budgetLimitsFromInput(value, params.unit),
+        context.runId,
       );
       return {
         metadata: { budgetLimits: { ...snapshot.budgetLimits } },

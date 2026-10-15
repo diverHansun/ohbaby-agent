@@ -34,5 +34,7 @@ export type {
   GoalStatus,
   GoalTurnOutcome,
   GoalTurnRunner,
+  GoalTurnTicket,
+  GoalMutationContext,
   GoalUsage,
 } from "./types.js";

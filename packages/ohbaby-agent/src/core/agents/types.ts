@@ -43,6 +43,8 @@ export interface AgentRunInput {
   readonly initialUserPrompt?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
+  /** Cancellation applies only until the worker accepts execution. */
+  readonly preparationSignal?: AbortSignal;
   readonly environment?: ToolExecutionEnvironment;
   readonly workdir?: string;
   readonly maxSteps?: number;
@@ -81,6 +83,7 @@ export interface AgentRunEventSource {
 }
 
 export interface AgentRunCreateOptions {
+  readonly preparationSignal?: AbortSignal;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly runId?: string;
   readonly sessionId: string;
@@ -175,6 +178,8 @@ export interface AgentTurnInput {
   readonly prompt: string;
   readonly waitMode: AgentWaitMode;
   readonly signal?: AbortSignal;
+  /** Cancellation applies only until the worker accepts execution. */
+  readonly preparationSignal?: AbortSignal;
   readonly environment?: ToolExecutionEnvironment;
   readonly runId?: string;
   readonly workdir?: string;

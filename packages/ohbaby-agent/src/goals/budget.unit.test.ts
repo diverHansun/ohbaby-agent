@@ -13,7 +13,6 @@ describe("computeBudgetReport", () => {
   it("no limits set: all null, not overBudget, not converging", () => {
     const report = computeBudgetReport(usage(10, 5000, 60000), {});
     expect(report.turnBudget).toBeNull();
-    expect(report.tokenBudget).toBeNull();
     expect(report.wallClockBudgetMs).toBeNull();
     expect(report.overBudget).toBe(false);
     expect(report.converging).toBe(false);
@@ -26,14 +25,12 @@ describe("computeBudgetReport", () => {
     expect(report.overBudget).toBe(true);
   });
 
-  it("dimensions are independent: token over, turn under", () => {
+  it("token usage is statistical and never trips a budget", () => {
     const report = computeBudgetReport(usage(1, 1000), {
       turnBudget: 50,
-      tokenBudget: 800,
     });
-    expect(report.tokenBudgetReached).toBe(true);
     expect(report.turnBudgetReached).toBe(false);
-    expect(report.overBudget).toBe(true);
+    expect(report.overBudget).toBe(false);
   });
 
   it("active-time budget participates in reached and remaining math", () => {

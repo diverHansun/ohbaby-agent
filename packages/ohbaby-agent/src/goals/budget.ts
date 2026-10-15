@@ -28,22 +28,18 @@ export function computeBudgetReport(
   limits: GoalBudgetLimits,
 ): GoalBudgetReport {
   const turns = reportDimension(usage.turnsUsed, limits.turnBudget);
-  const tokens = reportDimension(usage.tokensUsed, limits.tokenBudget);
   const wallClock = reportDimension(
     usage.wallClockMs,
     limits.wallClockBudgetMs,
   );
-  const ratios = [turns.ratio, tokens.ratio, wallClock.ratio].filter(
+  const ratios = [turns.ratio, wallClock.ratio].filter(
     (ratio): ratio is number => ratio !== null,
   );
   return {
     converging: ratios.some((ratio) => ratio >= GOAL_BUDGET_CONVERGING_RATIO),
-    overBudget: turns.reached || tokens.reached || wallClock.reached,
-    remainingTokens: tokens.remaining,
+    overBudget: turns.reached || wallClock.reached,
     remainingTurns: turns.remaining,
     remainingWallClockMs: wallClock.remaining,
-    tokenBudget: tokens.limit,
-    tokenBudgetReached: tokens.reached,
     turnBudget: turns.limit,
     turnBudgetReached: turns.reached,
     wallClockBudgetMs: wallClock.limit,

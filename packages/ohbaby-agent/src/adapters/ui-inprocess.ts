@@ -4,6 +4,7 @@ import {
   type ShutdownOptions,
   type CleanupResult,
 } from "../runtime/shutdown.js";
+import { SessionExecutionGate } from "./session-execution.js";
 import { RunFinalizationError } from "../runtime/run-manager/errors.js";
 import { SubagentConversationProjection } from "./ui-inprocess/subagent-conversation.js";
 import { InMemorySubagentExecutionStore } from "../agents/subagents/execution-store.js";
@@ -111,6 +112,7 @@ import type {
   GoalExecutionInterruptInput,
   GoalSnapshot,
   GoalTurnOutcome,
+  GoalTurnTicket,
 } from "../goals/index.js";
 import { createCommandService } from "../commands/index.js";
 import { createInteractionBroker } from "../runtime/interaction-broker/index.js";
@@ -254,6 +256,9 @@ type InternalSubmitPromptOptions = SubmitPromptOptions & {
   readonly signal?: AbortSignal;
   readonly owner?: PromptOwner;
   readonly goalId?: string;
+  readonly goalTicket?: GoalTurnTicket;
+  /** Carried from admission; live/replay display wiring belongs to improve-5. */
+  readonly displayText?: string;
   readonly suppressGoalContextNote?: boolean;
   readonly reservedUserMessageId?: string;
   readonly onRunStarted?: (runId: string) => Promise<void>;
@@ -361,6 +366,10 @@ export interface InProcessUiBackendClient
   >;
   initialize(): Promise<void>;
   initializeSession(sessionId: string): Promise<void>;
+  /** Read inside the session owner boundary; does not steer or reserve execution. */
+  getActiveGoalRunForSteer(
+    sessionId: string,
+  ): { runId: string; goalId: string } | undefined;
   closeAdmission(): void;
   dispose(options?: ShutdownOptions): Promise<CleanupResult>;
 }
@@ -573,6 +582,7 @@ export function createInProcessUiBackendClient(
   });
   const promptQueueOwnerClientId =
     options.promptQueueOwnerClientId ?? `inprocess_${randomUUID()}`;
+  const sessionExecution = new SessionExecutionGate();
   const activePromptsBySession = new Map<string, ActivePromptState>();
   const compactingSessions = new Set<string>();
   const pendingRuntimePromptsBySession = new Map<string, number>();
@@ -798,12 +808,26 @@ export function createInProcessUiBackendClient(
   });
   const sessionInitializationById = new Map<string, Promise<void>>();
   const sessionEntries = new Map<string, Promise<void>>();
-  const sharedGoalService = new GoalService({
+  const sharedGoalService: GoalService = new GoalService({
     persistence: goalPersistence,
     now: (): number => now().getTime(),
     executionControl: { interruptGoalExecution },
+    withSessionMutation: (sessionId, operation) =>
+      sourceProjection.owner.runControl(sessionId, operation),
+    resolveMutationContext(
+      sessionId,
+      runId,
+    ): import("../goals/types.js").GoalMutationContext {
+      const active = activePromptsBySession.get(sessionId);
+      if (active?.runId !== runId) return { kind: "invalid" };
+      if (active.owner === "user") return { kind: "user" };
+      const ticket = sharedGoalService.getTicketForRun(sessionId, runId);
+      return ticket ? { kind: "goal", ticket } : { kind: "invalid" };
+    },
     onChange(event): void {
       publishGoalUpdated(event.sessionId, event.snapshot);
+      sessionExecution.notify(event.sessionId);
+      if (event.change.kind === "progress") return;
       const status = event.snapshot?.status;
       publishNotice({
         level: "info",
@@ -1002,20 +1026,8 @@ export function createInProcessUiBackendClient(
         workdir: baseProjectRoot,
       });
       runtime.goals.attachTurnRunner({
-        async runTurn(sessionId, promptText, goalId) {
-          try {
-            await waitForPromptIdle(sessionId);
-            const completion = await submitPromptInternal(promptText, {
-              goalId,
-              owner: "goal",
-              sessionId,
-              suppressGoalContextNote: true,
-            });
-            return goalOutcomeFromRunCompletion(completion);
-          } catch (error) {
-            return { error: getErrorMessage(error), status: "failed" };
-          }
-        },
+        runTurn: runGoalTurn,
+        finishTurn: finishGoalTurn,
       });
       return runtime;
     },
@@ -1054,6 +1066,7 @@ export function createInProcessUiBackendClient(
     process.cwd();
   const promptScheduler: WorkspacePromptScheduler =
     new WorkspacePromptScheduler({
+      executionGate: sessionExecution,
       currentRunInputs: currentRunInputStore,
       now: () => now().getTime(),
       isExecutionPersistenceError: (error) =>
@@ -1080,7 +1093,8 @@ export function createInProcessUiBackendClient(
           endedAt: runtime.runManager.get(targetRunId)?.endedAt,
         };
       },
-      onRecoveryChanged(sessionId, state) {
+      onRecoveryChanged(sessionId, state): void {
+        sessionExecution.notify(sessionId);
         if (sourceProjection.owner.hasViewOrPendingSeed(sessionId))
           void sourceProjection.owner
             .runControl(sessionId, async () => {
@@ -1130,6 +1144,7 @@ export function createInProcessUiBackendClient(
         error instanceof SessionRunBusyError ||
         error instanceof RuntimeSwitchPendingError,
       onSubmitted(prompt): void {
+        sessionExecution.notify(prompt.sessionId);
         publish({
           type: "prompt.submitted",
           prompt: promptRecordToUi(prompt),
@@ -1137,6 +1152,7 @@ export function createInProcessUiBackendClient(
         });
       },
       onUpdated(prompt): void {
+        sessionExecution.notify(prompt.sessionId);
         publish({
           type: "prompt.updated",
           prompt: promptRecordToUi(prompt),
@@ -1167,6 +1183,133 @@ export function createInProcessUiBackendClient(
         };
       },
     });
+
+  async function runGoalTurn(
+    sessionId: string,
+    goalId: string,
+    epoch: number,
+  ): Promise<GoalTurnOutcome> {
+    await sharedGoalService.initSession(sessionId);
+    let ticket: GoalTurnTicket | null = null;
+    for (;;) {
+      let wake!: () => void;
+      const changed = new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+      const unsubscribe = sessionExecution.subscribe(sessionId, wake);
+      try {
+        ticket = await sourceProjection.owner.runControl(
+          sessionId,
+          async () => {
+            if (
+              disposed ||
+              !sharedGoalService.isExecutionCurrent(sessionId, goalId, epoch)
+            )
+              return null;
+            const queued =
+              await promptSubmissionStore.listQueued(promptScopeKey);
+            const available =
+              !sessionExecution.isHeld(sessionId) &&
+              promptScheduler.getRecoveryState(sessionId).status === "ready" &&
+              !queued.some((prompt) => prompt.sessionId === sessionId);
+            const admitted = await sharedGoalService.admitTurnInBoundary(
+              sessionId,
+              goalId,
+              epoch,
+              available,
+            );
+            if (
+              admitted &&
+              !sessionExecution.reserve(sessionId, admitted.token)
+            )
+              throw new Error(
+                "Goal execution reservation changed inside admission",
+              );
+            return admitted;
+          },
+        );
+        if (ticket) break;
+        if (
+          disposed ||
+          !sharedGoalService.isExecutionCurrent(sessionId, goalId, epoch)
+        )
+          return { status: "not_admitted" };
+        await changed;
+      } finally {
+        unsubscribe();
+      }
+    }
+    const admitted = ticket;
+    const release = (): void => {
+      sessionExecution.release(admitted.token);
+    };
+    try {
+      const completion = await submitPromptInternal(admitted.modelText, {
+        goalId,
+        goalTicket: admitted,
+        displayText: admitted.displayText,
+        signal: admitted.controller.signal,
+        owner: "goal",
+        sessionId,
+        suppressGoalContextNote: true,
+      });
+      return {
+        ...goalOutcomeFromRunCompletion(completion),
+        ticket: admitted,
+        release,
+      };
+    } catch (error) {
+      if (error instanceof RunFinalizationError) {
+        // One recovery slot owns runtime finalization, usage and complete clear.
+        // Keep the final completion after the first stage succeeds.
+        let recovered: GoalTurnOutcome | undefined;
+        admitted.recoveryPending = true;
+        promptScheduler.blockExecutionFinalization(
+          sessionId,
+          error,
+          async () => {
+            if (!recovered) {
+              const runtime = await (runtimeController.getRuntimeIfStarted() ??
+                closingRuntime);
+              if (!runtime) throw error;
+              recovered = goalOutcomeFromRunCompletion(
+                await runtime.runManager.retryFinalization(error.runId),
+              );
+              await reconcileRuntimeStatus();
+            }
+            await sharedGoalService.settleTurn(sessionId, admitted, recovered);
+          },
+        );
+        release();
+        throw error;
+      }
+      return {
+        status: admitted.controller.signal.aborted ? "cancelled" : "failed",
+        error: getErrorMessage(error),
+        ticket: admitted,
+        release,
+      };
+    }
+  }
+
+  async function finishGoalTurn(
+    sessionId: string,
+    ticket: GoalTurnTicket,
+    outcome: GoalTurnOutcome,
+  ): Promise<void> {
+    if (ticket.recoveryPending) return;
+    try {
+      await sharedGoalService.settleTurn(sessionId, ticket, outcome);
+    } catch (error) {
+      ticket.recoveryPending = true;
+      promptScheduler.blockExecutionFinalization(
+        sessionId,
+        error instanceof Error ? error : new Error(String(error)),
+        () => sharedGoalService.settleTurn(sessionId, ticket, outcome),
+      );
+      throw error;
+    }
+  }
 
   function usesPersistentStateStore(): boolean {
     return stateStore.requiresServiceManagersForWrites === true;
@@ -2808,20 +2951,21 @@ export function createInProcessUiBackendClient(
   ): Promise<UiCompactSessionResult> {
     const target = await resolveCompactTarget(compactOptions);
     compactOptions.signal?.throwIfAborted();
-    const hasPendingPrompt = await promptScheduler.hasPendingSession(
-      target.sessionId,
-    );
-    if (
-      hasPendingPrompt ||
-      compactingSessions.has(target.sessionId) ||
-      activePromptsBySession.has(target.sessionId) ||
-      pendingRuntimePromptsBySession.has(target.sessionId)
-    ) {
-      throw new SessionRunBusyError(target.sessionId, []);
-    }
-    // Reserve before runtime acquisition. Prompt preparation also checks this
-    // reservation, closing the async gap before RunManager claims its scope.
-    compactingSessions.add(target.sessionId);
+    const token = Symbol("manual compact");
+    await sourceProjection.owner.runControl(target.sessionId, async () => {
+      const queued = await promptSubmissionStore.listQueued(promptScopeKey);
+      if (
+        sessionExecution.isHeld(target.sessionId) ||
+        promptScheduler.getRecoveryState(target.sessionId).status !== "ready" ||
+        queued.some((prompt) => prompt.sessionId === target.sessionId) ||
+        activePromptsBySession.has(target.sessionId) ||
+        pendingRuntimePromptsBySession.has(target.sessionId)
+      ) {
+        throw new SessionRunBusyError(target.sessionId, []);
+      }
+      compactingSessions.add(target.sessionId);
+      sessionExecution.reserve(target.sessionId, token);
+    });
     let admission:
       | Awaited<ReturnType<typeof runtimeController.acquireRuntime>>
       | undefined;
@@ -2863,6 +3007,7 @@ export function createInProcessUiBackendClient(
       };
     } finally {
       compactingSessions.delete(target.sessionId);
+      sessionExecution.release(token);
       admission?.release();
     }
   }
@@ -2991,6 +3136,7 @@ export function createInProcessUiBackendClient(
         throw new Error(recovery.message);
       await enterSession(submitOptions.sessionId);
     }
+    submitOptions?.signal?.throwIfAborted();
     await options.beforePromptSubmit?.();
     let activePrompt: ActivePromptState = {
       owner,
@@ -3003,6 +3149,10 @@ export function createInProcessUiBackendClient(
     };
     submitOptions?.signal?.throwIfAborted();
     const admission = await runtimeController.acquireRuntime();
+    if (submitOptions?.signal?.aborted) {
+      admission.release();
+      submitOptions.signal.throwIfAborted();
+    }
     activePromptsBySession.set(promptSessionId, activePrompt);
     const createdAt = timestamp();
     let projection: RunStreamProjection | undefined;
@@ -3109,6 +3259,9 @@ export function createInProcessUiBackendClient(
       });
       const runId = await nextRunId();
       submittedRunId = runId;
+      submitOptions?.signal?.throwIfAborted();
+      if (submitOptions?.goalTicket)
+        sharedGoalService.bindTicketRun(submitOptions.goalTicket, runId);
 
       runtimeController.setActiveRunId(runId, session.id);
       todoWorkScopeLease = runtime.todoWorkScopes.acquire(
@@ -3140,6 +3293,7 @@ export function createInProcessUiBackendClient(
       try {
         submitOptions?.signal?.throwIfAborted();
         const result = await runtime.startSession({
+          preparationSignal: submitOptions?.goalTicket?.controller.signal,
           agentName,
           reasoning: submitOptions?.reasoning,
           initialUserMessageId: userMessage.id,
@@ -3151,6 +3305,16 @@ export function createInProcessUiBackendClient(
           title: session.title,
         });
         startedRuntimeRunId = result.runId;
+        if (submitOptions?.goalTicket) {
+          const stop = submitOptions.goalTicket.stopIntent;
+          if (stop?.includePrimary)
+            await runtime.interruptRunTree(result.runId, stop.reason);
+          else if (stop)
+            await runtime.interruptSubagentsByRootRun(
+              result.runId,
+              stop.reason,
+            );
+        }
         if (result.runId !== runId) {
           throw new Error(
             `Agent service created unexpected run id: ${result.runId}`,
@@ -3222,16 +3386,6 @@ export function createInProcessUiBackendClient(
         }
         return completion;
       } catch (error) {
-        if (owner === "goal" && error instanceof RunFinalizationError) {
-          promptScheduler.blockExecutionFinalization(
-            session.id,
-            error,
-            async () => {
-              await runtime.runManager.retryFinalization(error.runId);
-              await reconcileRuntimeStatus();
-            },
-          );
-        }
         if (error instanceof RunFinalizationError) await projection.stop();
         else await projection.done.catch(() => undefined);
         const errorStatus = {
@@ -3333,33 +3487,11 @@ export function createInProcessUiBackendClient(
       if (!active) {
         return;
       }
-      if (owner === "user" && active.owner === "goal") {
-        await interruptGoalPromptInFlight(sessionId);
-        continue;
-      }
-      if (owner === "goal" && active.owner === "user") {
+      if (owner !== active.owner) {
         await waitForPromptIdle(sessionId);
         continue;
       }
       throw new Error(`A prompt is already running for session ${sessionId}`);
-    }
-  }
-
-  async function interruptGoalPromptInFlight(sessionId: string): Promise<void> {
-    try {
-      const runtime = await runtimeController.getRuntimeForPrompt();
-      const snapshot = await runtime.goals.getSnapshot(sessionId);
-      if (snapshot?.status === "active") {
-        await runtime.goals.pauseGoal(sessionId, "interrupted");
-      } else {
-        await interruptGoalExecution({
-          includePrimary: true,
-          reason: "interrupted",
-          sessionId,
-        });
-      }
-    } finally {
-      await waitForPromptIdle(sessionId);
     }
   }
 
@@ -3371,8 +3503,8 @@ export function createInProcessUiBackendClient(
     await executeGoalExecutionInterrupt(input, {
       abortPromptRun: (runId) => runtimeController.abortPromptRun(runId),
       activeRunId: () => runtimeController.getActiveRunId(sessionId),
-      interruptSubagentsByParent: (sessionId, reason) =>
-        runtime.interruptSubagentsByParent(sessionId, reason),
+      interruptSubagentsByRootRun: (runId, reason) =>
+        runtime.interruptSubagentsByRootRun(runId, reason),
       promptOwner: () => activePromptsBySession.get(sessionId)?.owner,
       promptSessionId: () => activePromptsBySession.get(sessionId)?.sessionId,
       waitForPromptRunReadyOrIdle: () => waitForPromptRunReadyOrIdle(sessionId),
@@ -3545,20 +3677,32 @@ export function createInProcessUiBackendClient(
   function goalOutcomeFromRunCompletion(
     completion: RunCompletion | undefined,
   ): GoalTurnOutcome {
-    if (completion?.status === "cancelled") {
-      return { status: "cancelled" };
-    }
-    if (completion?.status === "succeeded") {
-      return {
-        status: "succeeded",
-        ...(completion.usage?.usageComplete !== true
-          ? {}
-          : { tokensUsed: completion.usage.totalTokens }),
-      };
-    }
+    const usage = completion?.usage;
+    const cachedInputTokens = usage?.inputBreakdown?.observed.cacheRead
+      ? usage.inputBreakdown.cacheRead
+      : usage?.cachedInputTokens;
     return {
-      error: completion?.error ?? `Run ${completion?.status ?? "failed"}`,
-      status: "failed",
+      status:
+        completion?.status === "succeeded" || completion?.status === "cancelled"
+          ? completion.status
+          : "failed",
+      ...(completion?.status === "succeeded" ||
+      completion?.status === "cancelled"
+        ? {}
+        : {
+            error: completion?.error ?? `Run ${completion?.status ?? "failed"}`,
+          }),
+      usage: {
+        // An incomplete zero aggregate has no observed subtotal; do not turn
+        // missing provider usage into a persisted zero.
+        ...(usage && (usage.usageComplete || usage.totalTokens > 0)
+          ? { totalTokens: usage.totalTokens }
+          : {}),
+        ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
+        usageComplete:
+          usage?.usageComplete === true &&
+          usage.inputBreakdown?.observed.cacheRead === true,
+      },
     };
   }
 
@@ -3569,7 +3713,7 @@ export function createInProcessUiBackendClient(
     if (explicitSessionId) {
       await ready;
       await assertCanUseAsPrimarySession(explicitSessionId);
-      await enterSession(explicitSessionId);
+      await initializeSessionView(explicitSessionId);
       return explicitSessionId;
     }
     const snapshot = await stateStore.readSnapshot();
@@ -3577,7 +3721,8 @@ export function createInProcessUiBackendClient(
       return undefined;
     }
     await assertCanUseAsPrimarySession(snapshot.activeSessionId);
-    await enterSession(snapshot.activeSessionId);
+    // Goal state controls remain available while execution finalization is blocked.
+    await initializeSessionView(snapshot.activeSessionId);
     return snapshot.activeSessionId;
   }
 
@@ -3752,6 +3897,7 @@ export function createInProcessUiBackendClient(
     closingRuntime = runtimeController.getRuntimeIfStarted();
     runtimeController.close();
     promptScheduler.close();
+    sessionExecution.close();
     interactionBroker.abortAll("service-shutdown");
   }
   const ready = Promise.resolve(options.startupReady).then(async () => {
@@ -3900,6 +4046,25 @@ export function createInProcessUiBackendClient(
           : null,
       };
     },
+    getActiveGoalRunForSteer(
+      sessionId,
+    ): { runId: string; goalId: string } | undefined {
+      const active = activePromptsBySession.get(sessionId);
+      if (disposed || active?.owner !== "goal" || active.runId === undefined)
+        return undefined;
+      const ticket = sharedGoalService.getTicketForRun(sessionId, active.runId);
+      if (
+        !ticket ||
+        !sharedGoalService.isExecutionCurrent(
+          sessionId,
+          ticket.goalId,
+          ticket.executionEpoch,
+        ) ||
+        !currentRunInputStore?.isAcceptingSteer(active.runId)
+      )
+        return undefined;
+      return { runId: active.runId, goalId: ticket.goalId };
+    },
     closeAdmission,
     dispose(
       shutdown: ShutdownOptions = createShutdownOptions(),
@@ -3909,7 +4074,11 @@ export function createInProcessUiBackendClient(
       permission.dispose();
       disposal = collectCleanup(shutdown, {
         runtime: () => runtimeController.resetRuntime(shutdown),
-        prompts: () => promptScheduler.settleShutdown(),
+        prompts: async () => {
+          // Goal settlement can register recovery after the runtime has finished.
+          await sharedGoalService.whenIdle();
+          await promptScheduler.settleShutdown();
+        },
       }).then((result) => {
         eventRouter.dispose();
         unsubscribePromptCacheUsageSessionRemoved();

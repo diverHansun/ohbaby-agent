@@ -165,6 +165,7 @@ export async function runAgent(
   deps: AgentRunDeps,
   input: AgentRunInput,
 ): Promise<AgentRunResult> {
+  input.preparationSignal?.throwIfAborted();
   const reasoning =
     input.reasoning === undefined
       ? undefined
@@ -180,6 +181,7 @@ export async function runAgent(
     isSubagent: scope.isSubagent,
   });
 
+  input.preparationSignal?.throwIfAborted();
   const userMessageId = await writeInitialUserMessage(deps, {
     agentName: input.agentName,
     contextScopeId: scope.contextScopeId,
@@ -194,7 +196,9 @@ export async function runAgent(
       : undefined;
   let record: Awaited<ReturnType<AgentRunDeps["runCoordinator"]["create"]>>;
   try {
+    input.preparationSignal?.throwIfAborted();
     record = await deps.runCoordinator.create({
+      preparationSignal: input.preparationSignal,
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(scope.agentInstanceId === undefined
         ? {}

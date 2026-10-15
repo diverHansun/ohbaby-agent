@@ -27,6 +27,8 @@ interface GoalState {
   status: GoalStatus;
   turnsUsed: number;
   tokensUsed: number;
+  cachedTokensUsed?: number;
+  usageIncomplete?: boolean;
   /** 已折算的 active 区间累计时长；不含当前 active 区间的实时部分。 */
   wallClockMs: number;
   /** 当前 active 区间的起点（非 active 时为 undefined）。 */
@@ -60,7 +62,11 @@ export class GoalStore {
           goalId: record.goalId,
           objective: record.objective ?? "",
           status: "active",
-          tokensUsed: 0,
+          tokensUsed: record.tokensUsed ?? 0,
+          ...(record.cachedTokensUsed === undefined
+            ? {}
+            : { cachedTokensUsed: record.cachedTokensUsed }),
+          usageIncomplete: record.usageIncomplete ?? true,
           turnsUsed: 0,
           wallClockMs: 0,
           ...(record.completionCriterion !== undefined
@@ -70,17 +76,21 @@ export class GoalStore {
         continue;
       }
       if (record.type === "clear") {
-        store.state = undefined;
+        if (record.goalId === store.state?.goalId) store.state = undefined;
         continue;
       }
       const state = store.state;
-      if (state === undefined) continue;
+      if (record.goalId !== state?.goalId) continue;
       if (record.objective !== undefined) state.objective = record.objective;
       if (record.completionCriterion !== undefined) {
         state.completionCriterion = record.completionCriterion;
       }
       if (record.turnsUsed !== undefined) state.turnsUsed = record.turnsUsed;
       if (record.tokensUsed !== undefined) state.tokensUsed = record.tokensUsed;
+      if (record.cachedTokensUsed !== undefined)
+        state.cachedTokensUsed = record.cachedTokensUsed;
+      state.usageIncomplete =
+        record.usageIncomplete ?? state.usageIncomplete ?? true;
       if (record.wallClockMs !== undefined) {
         state.wallClockMs = record.wallClockMs;
       }
@@ -120,7 +130,11 @@ export class GoalStore {
         `Goal objective cannot exceed ${String(MAX_GOAL_OBJECTIVE_LENGTH)} characters.`,
       );
     }
-    if (this.state !== undefined && input.replace !== true) {
+    if (
+      this.state !== undefined &&
+      this.state.status !== "complete" &&
+      input.replace !== true
+    ) {
       throw new GoalError(
         "goal_exists",
         "A goal already exists for this session. Use replace to start a new one.",
@@ -132,6 +146,8 @@ export class GoalStore {
       actor: input.actor,
       goalId,
       objective,
+      cachedTokensUsed: 0,
+      usageIncomplete: false,
       type: "create",
       ...(input.completionCriterion !== undefined
         ? { completionCriterion: input.completionCriterion }
@@ -145,6 +161,8 @@ export class GoalStore {
       objective,
       status: "active",
       tokensUsed: 0,
+      cachedTokensUsed: 0,
+      usageIncomplete: false,
       turnsUsed: 0,
       wallClockMs: 0,
       wallClockResumedAt: this.now(),
@@ -158,7 +176,7 @@ export class GoalStore {
   }
 
   async resume(actor: GoalActor): Promise<GoalSnapshot> {
-    const state = this.requireState();
+    const state = this.requireEditableState();
     if (state.status === "active") return this.toSnapshot(state);
     return this.applyUpdate({ status: "active" }, actor, {
       actor,
@@ -182,19 +200,12 @@ export class GoalStore {
   async markComplete(actor: GoalActor): Promise<GoalSnapshot> {
     const state = this.requireState();
     if (state.status !== "active") return this.toSnapshot(state);
-    this.foldWallClock(state);
-    const finalSnapshot: GoalSnapshot = {
-      ...this.toSnapshot(state),
-      status: "complete",
-    };
-    await this.appendRecord({ goalId: state.goalId, type: "clear" });
-    this.state = undefined;
-    this.onChange?.(finalSnapshot, {
+    const snapshot = await this.applyUpdate({ status: "complete" }, actor, {
       actor,
       kind: "completion",
       status: "complete",
     });
-    return finalSnapshot;
+    return snapshot;
   }
 
   async cancel(actor: GoalActor): Promise<void> {
@@ -209,7 +220,7 @@ export class GoalStore {
     objective: string,
     actor: GoalActor,
   ): Promise<GoalSnapshot> {
-    const state = this.requireState();
+    const state = this.requireEditableState();
     const trimmed = objective.trim();
     if (trimmed.length === 0 || trimmed.length > MAX_GOAL_OBJECTIVE_LENGTH) {
       throw new GoalError(
@@ -217,6 +228,7 @@ export class GoalStore {
         "Invalid replacement objective.",
       );
     }
+    if (trimmed === state.objective) return this.toSnapshot(state);
     await this.appendRecord({
       actor,
       goalId: state.goalId,
@@ -239,24 +251,57 @@ export class GoalStore {
       type: "update",
     });
     state.turnsUsed += 1;
+    this.onChange?.(this.toSnapshot(state), { kind: "progress" });
   }
 
-  async recordTokenUsage(tokens: number): Promise<void> {
+  async recordUsage(
+    goalId: string,
+    usage: {
+      readonly totalTokens?: number;
+      readonly cachedInputTokens?: number;
+      readonly usageComplete: boolean;
+    },
+  ): Promise<void> {
     const state = this.state;
-    if (state?.status !== "active" || tokens <= 0) return;
+    if (state?.goalId !== goalId) return;
+    const tokensUsed =
+      usage.totalTokens === undefined
+        ? undefined
+        : state.tokensUsed + usage.totalTokens;
+    const cachedTokensUsed =
+      usage.cachedInputTokens === undefined
+        ? undefined
+        : (state.cachedTokensUsed ?? 0) + usage.cachedInputTokens;
+    const usageIncomplete =
+      state.usageIncomplete === true || !usage.usageComplete;
     await this.appendRecord({
-      goalId: state.goalId,
-      tokensUsed: state.tokensUsed + tokens,
+      goalId,
       type: "update",
+      usageIncomplete,
+      ...(tokensUsed === undefined ? {} : { tokensUsed }),
+      ...(cachedTokensUsed === undefined ? {} : { cachedTokensUsed }),
     });
-    state.tokensUsed += tokens;
+    if (tokensUsed !== undefined) state.tokensUsed = tokensUsed;
+    if (cachedTokensUsed !== undefined)
+      state.cachedTokensUsed = cachedTokensUsed;
+    state.usageIncomplete = usageIncomplete;
+    this.onChange?.(this.toSnapshot(state), { kind: "progress" });
+  }
+
+  /** Clear is a data refresh, not a second completion event. */
+  async clearCompleted(goalId: string): Promise<void> {
+    if (this.state?.goalId !== goalId || this.state.status !== "complete")
+      return;
+    await this.appendRecord({ goalId, type: "clear" });
+    this.state = undefined;
+    this.onChange?.(null, { kind: "progress" });
   }
 
   async setBudgetLimits(
     limits: GoalBudgetLimits,
     actor: GoalActor,
   ): Promise<GoalSnapshot> {
-    const state = this.requireState();
+    const state = this.requireEditableState();
     const mergedLimits = normalizeBudgetLimits({
       ...state.budgetLimits,
       ...limits,
@@ -297,6 +342,16 @@ export class GoalStore {
     }
   }
 
+  private requireEditableState(): GoalState {
+    const state = this.requireState();
+    if (state.status === "complete")
+      throw new GoalError(
+        "invalid_transition",
+        "This goal is complete and can no longer be edited.",
+      );
+    return state;
+  }
+
   private requireState(): GoalState {
     const state = this.state;
     if (state === undefined) {
@@ -315,19 +370,19 @@ export class GoalStore {
     change: GoalChange,
   ): Promise<GoalSnapshot> {
     const state = this.requireState();
-    if (state.status === "active" && update.status !== "active") {
-      this.foldWallClock(state);
-    }
+    const wallClockMs = this.liveWallClockMs(state);
     await this.appendRecord({
       actor,
       goalId: state.goalId,
       type: "update",
-      wallClockMs: state.wallClockMs,
+      wallClockMs,
       ...(update.pauseReason !== undefined
         ? { pauseReason: update.pauseReason }
         : {}),
       status: update.status,
     });
+    state.wallClockMs = wallClockMs;
+    state.wallClockResumedAt = undefined;
     state.status = update.status;
     state.pauseReason =
       update.status === "active" ? undefined : update.pauseReason;
@@ -343,13 +398,6 @@ export class GoalStore {
     return this.deps.persistence.append(this.deps.sessionId, data);
   }
 
-  private foldWallClock(state: GoalState): void {
-    if (state.wallClockResumedAt !== undefined) {
-      state.wallClockMs += Math.max(0, this.now() - state.wallClockResumedAt);
-      state.wallClockResumedAt = undefined;
-    }
-  }
-
   private liveWallClockMs(state: GoalState): number {
     if (state.status === "active" && state.wallClockResumedAt !== undefined) {
       return (
@@ -363,6 +411,12 @@ export class GoalStore {
     const wallClockMs = this.liveWallClockMs(state);
     const usage = {
       tokensUsed: state.tokensUsed,
+      ...(state.cachedTokensUsed === undefined
+        ? {}
+        : { cachedTokensUsed: state.cachedTokensUsed }),
+      ...(state.usageIncomplete === undefined
+        ? {}
+        : { usageIncomplete: state.usageIncomplete }),
       turnsUsed: state.turnsUsed,
       wallClockMs,
     };
@@ -373,6 +427,12 @@ export class GoalStore {
       objective: state.objective,
       status: state.status,
       tokensUsed: state.tokensUsed,
+      ...(state.cachedTokensUsed === undefined
+        ? {}
+        : { cachedTokensUsed: state.cachedTokensUsed }),
+      ...(state.usageIncomplete === undefined
+        ? {}
+        : { usageIncomplete: state.usageIncomplete }),
       turnsUsed: state.turnsUsed,
       wallClockMs,
       ...(state.completionCriterion !== undefined
@@ -393,9 +453,6 @@ function normalizeBudgetLimits(
   limits: GoalBudgetLimits | undefined,
 ): GoalBudgetLimits {
   return {
-    ...(limits?.tokenBudget === undefined
-      ? {}
-      : { tokenBudget: limits.tokenBudget }),
     ...(limits?.turnBudget === undefined
       ? {}
       : { turnBudget: limits.turnBudget }),

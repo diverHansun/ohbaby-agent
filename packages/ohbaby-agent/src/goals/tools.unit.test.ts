@@ -48,6 +48,10 @@ describe("goal tools", () => {
     ]);
     for (const tool of byName.values()) {
       expect(tool.parametersJsonSchema).toBeTypeOf("object");
+      expect(tool.parametersJsonSchema).toMatchObject({
+        additionalProperties: false,
+      });
+      expect(tool.parametersJsonSchema.properties).not.toHaveProperty("runId");
       expect(tool.source).toBe("builtin");
     }
   });
@@ -91,37 +95,31 @@ describe("goal tools", () => {
     ).rejects.toThrow();
   });
 
-  it("SetGoalBudget sets one explicit turn, token, or active-time dimension per call", async () => {
+  it("SetGoalBudget sets one explicit turn or active-time dimension per call", async () => {
     const { byName, service } = makeTools();
     await getTool(byName, "CreateGoal").execute({ objective: "a" }, ctx());
     await getTool(byName, "SetGoalBudget").execute(
       { unit: "turns", value: 10 },
       ctx(),
     );
-    await getTool(byName, "SetGoalBudget").execute(
-      { unit: "tokens", value: 1000 },
-      ctx(),
-    );
+    await expect(
+      getTool(byName, "SetGoalBudget").execute(
+        { unit: "tokens", value: 1000 },
+        ctx(),
+      ),
+    ).rejects.toThrow("Invalid unit");
     await getTool(byName, "SetGoalBudget").execute(
       { unit: "minutes", value: 5 },
       ctx(),
     );
     const snapshot = await service.getSnapshot("s1");
     expect(snapshot?.budget.turnBudget).toBe(10);
-    expect(snapshot?.budget.tokenBudget).toBe(1000);
     expect(snapshot?.budget.wallClockBudgetMs).toBe(300_000);
     expect(getTool(byName, "SetGoalBudget").parametersJsonSchema).toMatchObject(
       {
         properties: {
           unit: {
-            enum: [
-              "turns",
-              "tokens",
-              "milliseconds",
-              "seconds",
-              "minutes",
-              "hours",
-            ],
+            enum: ["turns", "milliseconds", "seconds", "minutes", "hours"],
           },
           value: { type: "number" },
         },

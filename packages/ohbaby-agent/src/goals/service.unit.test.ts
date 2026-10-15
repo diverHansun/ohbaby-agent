@@ -172,10 +172,19 @@ describe("GoalService", () => {
       safetyCapTurns: 1,
     });
     service.attachTurnRunner({
-      runTurn() {
+      async runTurn(sessionId, goalId, epoch) {
         outcomes.push("turn");
-        return Promise.resolve({ status: "succeeded" as const });
+        const ticket = await service.admitTurnInBoundary(
+          sessionId,
+          goalId,
+          epoch,
+        );
+        return ticket === null
+          ? { status: "not_admitted" as const }
+          : { status: "succeeded" as const, ticket };
       },
+      finishTurn: (sessionId, ticket, outcome) =>
+        service.settleTurn(sessionId, ticket, outcome),
     });
     await service.createGoal("s1", { actor: "user", objective: "a" });
     await service.whenIdle("s1");
@@ -198,9 +207,18 @@ describe("GoalService", () => {
       safetyCapTurns: 1,
     });
     service.attachTurnRunner({
-      runTurn() {
-        return Promise.resolve({ status: "succeeded" as const });
+      async runTurn(sessionId, goalId, epoch) {
+        const ticket = await service.admitTurnInBoundary(
+          sessionId,
+          goalId,
+          epoch,
+        );
+        return ticket === null
+          ? { status: "not_admitted" as const }
+          : { status: "succeeded" as const, ticket };
       },
+      finishTurn: (sessionId, ticket, outcome) =>
+        service.settleTurn(sessionId, ticket, outcome),
     });
 
     await service.createGoal("s1", { actor: "user", objective: "a" });
@@ -283,7 +301,7 @@ describe("GoalService", () => {
     });
     await service.createGoal("s1", { actor: "user", objective: "a" });
 
-    await service.setBudget("s1", { tokenBudget: 1_000 });
+    await service.setBudget("s1", { wallClockBudgetMs: 1_000 });
 
     expect(actors.at(-1)).toBe("model");
   });

@@ -31,6 +31,12 @@ import type {
 } from "./types.js";
 
 export interface WorkspacePromptSchedulerOptions {
+  readonly executionGate?: {
+    isHeld(sessionId: string): boolean;
+    reserve(sessionId: string, token: symbol): boolean;
+    release(token: symbol): void;
+    subscribe(sessionId: string, wake: () => void): () => void;
+  };
   readonly currentRunInputs?: CurrentRunInputStore;
   readonly onSteered?: (result: SteerQueuedPromptResult) => void;
   readonly scopeKey: string;
@@ -139,6 +145,7 @@ function runtimeError(error: unknown): UiPromptError {
 }
 
 export class WorkspacePromptScheduler {
+  private readonly executionSubscriptions = new Map<string, () => void>();
   private readonly sessionSeeds = new Map<string, Promise<void>>();
   private readonly readySessions = new Set<string>();
   private readonly pendingFinalizations = new Map<
@@ -750,6 +757,9 @@ export class WorkspacePromptScheduler {
   }
 
   close(): void {
+    for (const unsubscribe of this.executionSubscriptions.values())
+      unsubscribe();
+    this.executionSubscriptions.clear();
     for (const controller of this.startingControllers.values())
       controller.abort("Scheduler closed");
     if (this.closed) {
@@ -901,12 +911,24 @@ export class WorkspacePromptScheduler {
         }
         const laneHeads = new Map<string, PromptSubmissionRecord>();
         for (const prompt of queued) {
+          if (
+            this.options.executionGate &&
+            !this.executionSubscriptions.has(prompt.sessionId)
+          ) {
+            this.executionSubscriptions.set(
+              prompt.sessionId,
+              this.options.executionGate.subscribe(prompt.sessionId, () => {
+                this.requestDrain();
+              }),
+            );
+          }
           if (!laneHeads.has(prompt.sessionId)) {
             laneHeads.set(prompt.sessionId, prompt);
           }
         }
         const candidate = [...laneHeads.values()].find(
           (prompt) =>
+            !this.options.executionGate?.isHeld(prompt.sessionId) &&
             !this.activeBySession.has(prompt.sessionId) &&
             !this.pendingFinalizations.has(prompt.sessionId) &&
             !this.entryFailures.has(prompt.sessionId) &&
@@ -950,36 +972,58 @@ export class WorkspacePromptScheduler {
           );
           continue;
         }
-        const claimed = await this.commit(candidate.sessionId, async () => {
-          const result = await this.options.store.claim(candidate.promptId);
-          if (result) this.notify(result, this.options.onUpdated);
-          return result;
-        });
-        if (!claimed) {
-          continue;
-        }
-        if (this.isClosed()) {
-          try {
-            await this.commit(claimed.sessionId, async () => {
-              const queued = await this.options.store.requeueBusy(
-                claimed.promptId,
+        const token = Symbol("user execution");
+        let handedOff = false;
+        try {
+          const claimed = await this.commit(candidate.sessionId, async () => {
+            if (this.options.executionGate?.isHeld(candidate.sessionId))
+              return null;
+            const result = await this.options.store.claim(candidate.promptId);
+            if (result) this.notify(result, this.options.onUpdated);
+            if (result && this.options.executionGate) {
+              const reserved = this.options.executionGate.reserve(
+                candidate.sessionId,
+                token,
               );
-              this.notify(queued, this.options.onUpdated);
-            });
-          } catch {
-            // Startup recovery will reconcile a claim that cannot be requeued
-            // after the scheduler has already entered its terminal state.
-          }
-          break;
-        }
-        this.activeBySession.set(claimed.sessionId, claimed.promptId);
-        const execution = this.executeClaimed(claimed);
-        this.executions.add(execution);
-        void execution
-          .finally(() => this.executions.delete(execution))
-          .catch((error: unknown) => {
-            this.fault(error);
+              if (!reserved)
+                throw new Error(
+                  "Session execution reservation changed inside claim",
+                );
+            }
+            return result;
           });
+          if (!claimed) {
+            continue;
+          }
+          if (this.isClosed()) {
+            try {
+              await this.commit(claimed.sessionId, async () => {
+                const queued = await this.options.store.requeueBusy(
+                  claimed.promptId,
+                );
+                this.notify(queued, this.options.onUpdated);
+              });
+            } catch {
+              // Startup recovery will reconcile a claim that cannot be requeued
+              // after the scheduler has already entered its terminal state.
+            }
+            break;
+          }
+          this.activeBySession.set(claimed.sessionId, claimed.promptId);
+          const execution = this.executeClaimed(
+            claimed,
+            this.options.executionGate ? token : undefined,
+          );
+          handedOff = true;
+          this.executions.add(execution);
+          void execution
+            .finally(() => this.executions.delete(execution))
+            .catch((error: unknown) => {
+              this.fault(error);
+            });
+        } finally {
+          if (!handedOff) this.options.executionGate?.release(token);
+        }
       }
     } finally {
       this.draining = false;
@@ -993,7 +1037,10 @@ export class WorkspacePromptScheduler {
     return this.closed;
   }
 
-  private async executeClaimed(prompt: PromptSubmissionRecord): Promise<void> {
+  private async executeClaimed(
+    prompt: PromptSubmissionRecord,
+    token?: symbol,
+  ): Promise<void> {
     const starting = new AbortController();
     const isStartingCancelled = (): boolean => starting.signal.aborted;
     this.startingControllers.set(prompt.promptId, starting);
@@ -1130,6 +1177,7 @@ export class WorkspacePromptScheduler {
       if (this.activeBySession.get(prompt.sessionId) === prompt.promptId) {
         this.activeBySession.delete(prompt.sessionId);
       }
+      if (token) this.options.executionGate?.release(token);
       this.requestDrain();
     }
   }
@@ -1203,6 +1251,9 @@ export class WorkspacePromptScheduler {
       error instanceof Error ? error : new Error(String(error));
     this.closed = true;
     this.terminalError = normalized;
+    for (const unsubscribe of this.executionSubscriptions.values())
+      unsubscribe();
+    this.executionSubscriptions.clear();
     this.rejectAllCompletionWaiters(normalized);
   }
 }

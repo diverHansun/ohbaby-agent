@@ -30,6 +30,7 @@ export interface RunDefaultsPolicy {
 }
 
 export interface CreateRunOptions {
+  readonly preparationSignal?: AbortSignal;
   readonly reasoning?: ReasoningConfig | ReasoningIntent;
   readonly runId?: string;
   readonly sessionId: string;

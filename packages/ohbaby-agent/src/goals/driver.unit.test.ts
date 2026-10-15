@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GOAL_SAFETY_CAP_TURNS } from "./constants.js";
+import { renderGoalTurnPrompt } from "./injection.js";
 import { driveGoal } from "./driver.js";
 import { InMemoryGoalPersistence } from "./persistence.js";
 import { GoalStore } from "./store.js";
@@ -29,11 +30,41 @@ function scriptedRunner(
     prompts,
     goalIds,
     runner: {
-      async runTurn(_sessionId, promptText, goalId): Promise<GoalTurnOutcome> {
-        prompts.push(promptText);
+      async runTurn(
+        _sessionId,
+        goalId,
+        executionEpoch,
+      ): Promise<GoalTurnOutcome> {
+        await store.incrementTurn();
+        const snapshot = store.getSnapshot();
+        if (snapshot === null) throw new Error("missing goal");
+        const modelText = renderGoalTurnPrompt(snapshot, {
+          isFirstTurn: snapshot.turnsUsed === 1,
+        });
+        prompts.push(modelText);
         goalIds.push(goalId);
         turn += 1;
-        return script(turn, store);
+        return {
+          ...(await script(turn, store)),
+          ticket: {
+            goalId,
+            executionEpoch,
+            turnNumber: snapshot.turnsUsed,
+            modelText,
+            displayText: "",
+            token: Symbol(),
+            controller: new AbortController(),
+            settled: false,
+          },
+        };
+      },
+      async finishTurn(_sessionId, ticket, outcome): Promise<void> {
+        await store.recordUsage(
+          ticket.goalId,
+          outcome.usage ?? { usageComplete: false },
+        );
+        if (store.getSnapshot()?.status === "complete")
+          await store.cancel("runtime");
       },
     },
   };
@@ -197,11 +228,14 @@ describe("driveGoal", () => {
     });
   });
 
-  it("records token usage from outcome toward token budget", async () => {
+  it("records token usage as statistics independently of budget", async () => {
     const store = await makeActiveStore();
-    await store.setBudgetLimits({ tokenBudget: 1000 }, "user");
+    await store.setBudgetLimits({ turnBudget: 2 }, "user");
     const { runner } = scriptedRunner(
-      () => ({ status: "succeeded", tokensUsed: 600 }),
+      () => ({
+        status: "succeeded",
+        usage: { totalTokens: 600, usageComplete: true },
+      }),
       store,
     );
     await driveGoal({
@@ -214,4 +248,24 @@ describe("driveGoal", () => {
     expect(store.getSnapshot()?.status).toBe("paused");
     expect(store.getSnapshot()?.tokensUsed).toBeGreaterThanOrEqual(1000);
   });
+});
+
+it("exits a still-current lifecycle when adapter admission closes", async () => {
+  const store = await makeActiveStore();
+  let calls = 0;
+  await driveGoal({
+    store,
+    sessionId: "s1",
+    safetyCapTurns: 1000,
+    isCurrent: () => store.getSnapshot()?.status === "active",
+    pause: (reason, actor) => store.pause(reason, actor),
+    runner: {
+      runTurn: () =>
+        Promise.resolve({
+          status: ++calls === 1 ? "not_admitted" : "cancelled",
+        }),
+    },
+  });
+  expect(calls).toBe(1);
+  expect(store.getSnapshot()?.status).toBe("active");
 });

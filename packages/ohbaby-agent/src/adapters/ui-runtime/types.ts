@@ -72,8 +72,8 @@ export interface UiRuntimeComposition {
     readonly agentName?: string;
   }): Promise<readonly CommandToolSummary[]>;
   interruptRunTree(runId: string, reason?: string): Promise<void>;
-  interruptSubagentsByParent(
-    parentSessionId: string,
+  interruptSubagentsByRootRun(
+    rootRunId: string,
     reason?: string,
   ): Promise<void>;
   getActivityReasons(): readonly string[];

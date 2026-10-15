@@ -78,7 +78,7 @@ describe("GoalStore state machine", () => {
     });
   });
 
-  it("markComplete announces then clears; complete never rests on disk", async () => {
+  it("markComplete persists completion before explicit settlement clear", async () => {
     const { persistence, store } = await makeStore();
     await store.create({ actor: ACTOR, objective: "a" });
     const changes: string[] = [];
@@ -87,6 +87,8 @@ describe("GoalStore state machine", () => {
     };
     const final = await store.markComplete("model");
     expect(final.status).toBe("complete");
+    expect(store.getSnapshot()?.status).toBe("complete");
+    await store.cancel("runtime");
     expect(store.getSnapshot()).toBeNull();
     expect(changes).toContain("completion");
     const rebuilt = await GoalStore.rebuild({ persistence, sessionId: "s1" });
@@ -122,17 +124,23 @@ describe("GoalStore state machine", () => {
     });
   });
 
-  it("incrementTurn and recordTokenUsage only advance while active", async () => {
+  it("incrementTurn requires active but late token usage also settles paused goals", async () => {
     const { store } = await makeStore();
     await store.create({ actor: ACTOR, objective: "a" });
     await store.incrementTurn();
-    await store.recordTokenUsage(500);
+    await store.recordUsage(store.getSnapshot()?.goalId ?? "missing", {
+      totalTokens: 500,
+      usageComplete: true,
+    });
     await store.pause("stop", "user");
     await store.incrementTurn();
-    await store.recordTokenUsage(500);
+    await store.recordUsage(store.getSnapshot()?.goalId ?? "missing", {
+      totalTokens: 500,
+      usageComplete: true,
+    });
     const snapshot = store.getSnapshot();
     expect(snapshot?.turnsUsed).toBe(1);
-    expect(snapshot?.tokensUsed).toBe(500);
+    expect(snapshot?.tokensUsed).toBe(1000);
   });
 
   it("setBudgetLimits reflects in snapshot budget report", async () => {
@@ -146,11 +154,11 @@ describe("GoalStore state machine", () => {
   it("setBudgetLimits merges partial updates", async () => {
     const { store } = await makeStore();
     await store.create({ actor: ACTOR, objective: "a" });
-    await store.setBudgetLimits({ tokenBudget: 1000 }, "user");
+    await store.setBudgetLimits({ wallClockBudgetMs: 1000 }, "user");
     await store.setBudgetLimits({ turnBudget: 10 }, "user");
 
     expect(store.getSnapshot()?.budgetLimits).toEqual({
-      tokenBudget: 1000,
+      wallClockBudgetMs: 1000,
       turnBudget: 10,
     });
   });

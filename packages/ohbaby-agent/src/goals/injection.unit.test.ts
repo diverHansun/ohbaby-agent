@@ -124,3 +124,21 @@ describe("formatGoalStatusLines", () => {
     expect(text).toContain("fix the failing checkout tests");
   });
 });
+
+it("G20 reserves token statistics for queries and keeps continuation counters concise", () => {
+  const state = snapshot({
+    turnsUsed: 3,
+    tokensUsed: 1234,
+    cachedTokensUsed: 1000,
+    usageIncomplete: true,
+    wallClockMs: 60000,
+  });
+  expect(formatGoalStatusLines(state).join("\n")).toContain(
+    "Tokens: 1,234 total (cache read 1,000); usage incomplete.",
+  );
+  for (const isFirstTurn of [true, false]) {
+    const prompt = renderGoalTurnPrompt(state, { isFirstTurn });
+    expect(prompt).toContain("3 continuation turns, 1m00s elapsed");
+    expect(prompt).not.toMatch(/tokens|cache read|1,234|1,000/i);
+  }
+});

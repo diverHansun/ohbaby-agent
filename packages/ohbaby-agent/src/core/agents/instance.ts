@@ -39,6 +39,7 @@ class DefaultAgentInstance implements AgentInstance {
       projectRoot: this.identity.projectRoot,
       runId: input.runId,
       signal: input.signal,
+      preparationSignal: input.preparationSignal,
       sessionId: this.contextScope.sessionId,
       waitMode: input.waitMode,
       workdir: input.workdir,

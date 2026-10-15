@@ -26,6 +26,7 @@ export class AgentService {
   async startSession(
     params: StartSessionParams,
   ): Promise<AgentSessionStartResult> {
+    params.preparationSignal?.throwIfAborted();
     const reasoning = mergeReasoningIntent(
       this.options.getReasoning?.(),
       params.reasoning,
@@ -34,6 +35,7 @@ export class AgentService {
       params.agentName,
       { isSubagent: false },
     );
+    params.preparationSignal?.throwIfAborted();
     assertNoStaticModelConfig(runtimeAgent.config, "AgentService");
     if (runtimeAgent.config.mode === "subagent") {
       throw new Error(
@@ -41,6 +43,7 @@ export class AgentService {
       );
     }
     const session = await this.resolvePrimarySession(params);
+    params.preparationSignal?.throwIfAborted();
     const instance = this.options.instanceFactory.create({
       agentName: params.agentName,
       instanceId: session.id,
@@ -58,6 +61,7 @@ export class AgentService {
       prompt: params.prompt,
       runId: params.runId,
       signal: params.signal,
+      preparationSignal: params.preparationSignal,
       waitMode: "stream",
     });
     if (result.mode !== "stream") {

@@ -75,6 +75,8 @@ export interface StartSessionParams {
   readonly runId?: string;
   readonly title?: string;
   readonly signal?: AbortSignal;
+  /** Cancellation applies only until the worker accepts execution. */
+  readonly preparationSignal?: AbortSignal;
   readonly environment?: ToolExecutionEnvironment;
   readonly maxSteps?: number;
 }

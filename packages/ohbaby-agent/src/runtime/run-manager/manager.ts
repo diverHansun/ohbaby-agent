@@ -131,6 +131,7 @@ export class RunManager {
       sessionId: options.sessionId,
     });
     return this.withSessionLock(lockKey, async () => {
+      options.preparationSignal?.throwIfAborted();
       const resolved = mergeRunDefaults(
         this.deps.policy,
         options.triggerSource,
@@ -147,6 +148,7 @@ export class RunManager {
         await this.interruptActiveRuns(activeRunIds);
       }
 
+      options.preparationSignal?.throwIfAborted();
       const runId = options.runId ?? this.createRunId();
       const ledgerRecord = await this.deps.runLedger.claimPendingRun({
         contextScopeId: options.contextScopeId,
@@ -369,14 +371,31 @@ export class RunManager {
   private async startRun(record: ManagedRunRecord): Promise<RunCompletion> {
     const sandboxManager = this.deps.sandboxManager;
     let outcome: RunWorkerResult;
-
+    const preparationSignal = record.options.preparationSignal;
+    const cancelPreparation = (): void => {
+      try {
+        this.cancel(record.runId, "run preparation cancelled");
+      } catch {
+        // cancel delivers the abort in finally; finalization retries revocation.
+        // An AbortSignal listener must not throw outside the managed run.
+      }
+    };
+    const releasePreparation = (): void => {
+      preparationSignal?.removeEventListener("abort", cancelPreparation);
+    };
+    preparationSignal?.addEventListener("abort", cancelPreparation, {
+      once: true,
+    });
     try {
+      if (preparationSignal?.aborted) cancelPreparation();
+      record.abortController.signal.throwIfAborted();
       const sandboxLease = await sandboxManager.acquire({
         contextScopeId: record.options.contextScopeId,
         sessionId: record.sessionId,
         workdir: record.options.directory,
       });
       record.sandboxLease = sandboxLease;
+      record.abortController.signal.throwIfAborted();
       const context: RunContext = {
         agentInstanceId: record.options.agentInstanceId,
         runId: record.runId,
@@ -415,6 +434,10 @@ export class RunManager {
           );
           this.applyLedgerProjection(record, ledgerRecord);
           this.publishRunUpdated(record);
+          record.abortController.signal.throwIfAborted();
+          // Handoff is synchronous after the final preparation await. Later
+          // preparation cancellation must not stop an already started worker.
+          releasePreparation();
         },
       });
       if (record.abortController.signal.aborted) {
@@ -439,6 +462,7 @@ export class RunManager {
       };
     }
 
+    releasePreparation();
     if (record.fatalError) {
       outcome = {
         ...outcome,

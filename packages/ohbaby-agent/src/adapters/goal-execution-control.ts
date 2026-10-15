@@ -5,7 +5,7 @@ export interface GoalExecutionInterruptDeps {
   readonly promptOwner: () => "goal" | "user" | undefined;
   readonly promptSessionId: () => string | undefined;
   abortPromptRun(runId: string): Promise<boolean>;
-  interruptSubagentsByParent(sessionId: string, reason: string): Promise<void>;
+  interruptSubagentsByRootRun(runId: string, reason: string): Promise<void>;
   waitForPromptRunReadyOrIdle(): Promise<void>;
 }
 
@@ -22,11 +22,18 @@ export async function executeGoalExecutionInterrupt(
   ) {
     await deps.waitForPromptRunReadyOrIdle();
     const runId = deps.activeRunId();
-    if (runId !== undefined) {
+    const expectedRunId = input.expectedRunId ?? input.ticket?.runId;
+    if (
+      runId !== undefined &&
+      runId === expectedRunId &&
+      deps.promptOwner() === "goal" &&
+      deps.promptSessionId() === input.sessionId
+    ) {
       interruptedWithPrimary = await deps.abortPromptRun(runId);
     }
   }
-  if (!interruptedWithPrimary) {
-    await deps.interruptSubagentsByParent(input.sessionId, input.reason);
+  const rootRunId = input.expectedRunId ?? input.ticket?.runId;
+  if (!interruptedWithPrimary && rootRunId !== undefined) {
+    await deps.interruptSubagentsByRootRun(rootRunId, input.reason);
   }
 }

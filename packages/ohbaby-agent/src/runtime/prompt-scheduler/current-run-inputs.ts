@@ -78,6 +78,8 @@ export interface SteerQueuedPromptResult {
   readonly message: MessageWithParts;
 }
 export interface CurrentRunInputStore {
+  /** Synchronous fact query for admission within the session owner boundary. */
+  isAcceptingSteer(runId: string): boolean;
   /** Pure fact query. The caller selects the latest user-stopped root run. */
   hasUnsentSteer(runId: string): Promise<boolean>;
   sealSteer(runId: string): Promise<void>;
@@ -159,6 +161,16 @@ abstract class CurrentInputs implements CurrentRunInputStore {
         }
       : record;
   }
+  isAcceptingSteer(runId: string): boolean {
+    const run = this.run(runId);
+    return (
+      run?.status === "running" &&
+      run.inputsClosedAt === undefined &&
+      run.steerClosedAt === undefined &&
+      !this.locallyClosed.has(runId)
+    );
+  }
+
   private active(
     runId: string,
     sessionId?: string,

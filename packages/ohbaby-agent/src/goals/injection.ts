@@ -22,11 +22,6 @@ function budgetLines(report: GoalBudgetReport): string[] {
       `turns remaining ${String(report.remainingTurns ?? 0)}/${String(report.turnBudget)}`,
     );
   }
-  if (report.tokenBudget !== null) {
-    parts.push(
-      `tokens remaining ${String(report.remainingTokens ?? 0)}/${String(report.tokenBudget)}`,
-    );
-  }
   if (report.wallClockBudgetMs !== null) {
     parts.push(
       `active time remaining ${formatElapsed(report.remainingWallClockMs ?? 0)}/${formatElapsed(report.wallClockBudgetMs)}`,
@@ -70,7 +65,7 @@ export function renderGoalTurnPrompt(
   }
   lines.push("", ...untrustedBlock(snapshot), "");
   lines.push(
-    `Progress: ${String(snapshot.turnsUsed)} continuation turns, ${String(snapshot.tokensUsed)} tokens, ${formatElapsed(snapshot.wallClockMs)} elapsed.`,
+    `Progress: ${String(snapshot.turnsUsed)} continuation turns, ${formatElapsed(snapshot.wallClockMs)} elapsed.`,
   );
   lines.push(...budgetLines(snapshot.budget));
   if (options.isFirstTurn) {
@@ -111,7 +106,8 @@ export function formatGoalStatusLines(
   const lines = [
     `Goal: ${snapshot.objective}`,
     `Status: ${snapshot.status}${snapshot.pauseReason ? ` (${snapshot.pauseReason})` : ""}`,
-    `Progress: ${String(snapshot.turnsUsed)} turns, ${String(snapshot.tokensUsed)} tokens, ${formatElapsed(snapshot.wallClockMs)} elapsed.`,
+    `Progress: ${String(snapshot.turnsUsed)} turns, ${formatElapsed(snapshot.wallClockMs)} elapsed.`,
+    `Tokens: ${snapshot.tokensUsed.toLocaleString("en-US")} total${snapshot.cachedTokensUsed === undefined ? "" : ` (cache read ${snapshot.cachedTokensUsed.toLocaleString("en-US")})`}${snapshot.usageIncomplete !== false ? "; usage incomplete" : ""}.`,
   ];
   lines.push(...budgetLines(snapshot.budget));
   if (snapshot.completionCriterion !== undefined) {

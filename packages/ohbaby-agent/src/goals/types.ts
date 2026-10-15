@@ -4,25 +4,23 @@ export type GoalActor = "user" | "model" | "runtime" | "system";
 
 export interface GoalBudgetLimits {
   readonly turnBudget?: number;
-  readonly tokenBudget?: number;
   readonly wallClockBudgetMs?: number;
 }
 
 export interface GoalUsage {
   readonly turnsUsed: number;
   readonly tokensUsed: number;
+  readonly cachedTokensUsed?: number;
+  readonly usageIncomplete?: boolean;
   readonly wallClockMs: number;
 }
 
 export interface GoalBudgetReport {
   readonly turnBudget: number | null;
-  readonly tokenBudget: number | null;
   readonly wallClockBudgetMs: number | null;
   readonly remainingTurns: number | null;
-  readonly remainingTokens: number | null;
   readonly remainingWallClockMs: number | null;
   readonly turnBudgetReached: boolean;
-  readonly tokenBudgetReached: boolean;
   readonly wallClockBudgetReached: boolean;
   readonly overBudget: boolean;
   /** 任一已设维度用量占比 >= GOAL_BUDGET_CONVERGING_RATIO */
@@ -36,13 +34,19 @@ export interface GoalSnapshot {
   readonly status: GoalStatus;
   readonly turnsUsed: number;
   readonly tokensUsed: number;
+  readonly cachedTokensUsed?: number;
+  readonly usageIncomplete?: boolean;
   readonly wallClockMs: number;
   readonly budgetLimits: GoalBudgetLimits;
   readonly budget: GoalBudgetReport;
   readonly pauseReason?: string;
 }
 
-export type GoalChangeKind = "created" | "lifecycle" | "completion";
+export type GoalChangeKind =
+  | "created"
+  | "lifecycle"
+  | "completion"
+  | "progress";
 
 export interface GoalChange {
   readonly kind: GoalChangeKind;
@@ -62,6 +66,8 @@ export interface GoalRecordData {
   readonly status?: GoalStoredStatus;
   readonly turnsUsed?: number;
   readonly tokensUsed?: number;
+  readonly cachedTokensUsed?: number;
+  readonly usageIncomplete?: boolean;
   readonly wallClockMs?: number;
   readonly budgetLimits?: GoalBudgetLimits;
   readonly pauseReason?: string;
@@ -84,18 +90,28 @@ export interface GoalPersistencePort {
 
 /** 一轮续跑 Run 的结果（driver 唯一消费的执行层信号）。 */
 export interface GoalTurnOutcome {
-  readonly status: "succeeded" | "failed" | "cancelled";
+  readonly status: "succeeded" | "failed" | "cancelled" | "not_admitted";
+  readonly ticket?: GoalTurnTicket;
+  readonly release?: () => void;
   readonly error?: string;
-  /** 本轮消耗 token（best-effort；不可得时省略，token 预算即不推进）。 */
-  readonly tokensUsed?: number;
+  readonly usage?: {
+    readonly totalTokens?: number;
+    readonly cachedInputTokens?: number;
+    readonly usageComplete: boolean;
+  };
 }
 
 /** 适配层实现：把提醒文本作为 user 消息起一轮 Run 并等待完成。 */
 export interface GoalTurnRunner {
+  finishTurn?(
+    sessionId: string,
+    ticket: GoalTurnTicket,
+    outcome: GoalTurnOutcome,
+  ): Promise<void>;
   runTurn(
     sessionId: string,
-    promptText: string,
     goalId: string,
+    executionEpoch: number,
   ): Promise<GoalTurnOutcome>;
 }
 
@@ -104,6 +120,8 @@ export interface GoalExecutionInterruptInput {
   readonly reason: string;
   /** Complete lets the current main run finish its final response. */
   readonly includePrimary: boolean;
+  readonly ticket?: GoalTurnTicket;
+  readonly expectedRunId?: string;
 }
 
 export interface GoalExecutionControlPort {
@@ -117,3 +135,23 @@ export interface CreateGoalInput {
   readonly replace?: boolean;
   readonly actor: GoalActor;
 }
+
+/** In-memory admission identity; never serialized into a model tool schema. */
+export interface GoalTurnTicket {
+  readonly goalId: string;
+  readonly executionEpoch: number;
+  readonly turnNumber: number;
+  readonly modelText: string;
+  readonly displayText: string;
+  readonly token: symbol;
+  readonly controller: AbortController;
+  recoveryPending?: boolean;
+  stopIntent?: { readonly reason: string; readonly includePrimary: boolean };
+  runId?: string;
+  settled: boolean;
+}
+
+export type GoalMutationContext =
+  | { readonly kind: "user" }
+  | { readonly kind: "goal"; readonly ticket: GoalTurnTicket }
+  | { readonly kind: "invalid" };

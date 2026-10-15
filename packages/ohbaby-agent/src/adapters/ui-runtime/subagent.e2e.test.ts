@@ -711,8 +711,8 @@ describe("subagent runtime e2e", () => {
           );
           gate.release.resolve(undefined);
         } else if (terminalStatus === "interrupted") {
-          await composition.interruptSubagentsByParent(
-            "session_parent",
+          await composition.interruptSubagentsByRootRun(
+            run.runId,
             "test child interruption",
           );
           gate.release.resolve(undefined);
