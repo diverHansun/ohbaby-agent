@@ -1,14 +1,16 @@
 # Goals improve-5：正文、展示与写入边界
 
-2026-10-15。基于 improve-4 `17fdae14`，本批收尾方案见 [实施范围](../../problem-lists/2026-10-13-goals-upgrade/improve-5/02-optimization-plan-and-change-scope.md)。原始模块文档保留历史内容；本页描述本批实际改变的接口与行为，前序生命周期与输入恢复仍见 [improve-3](../improve-3/architecture.md)、[improve-4](../improve-4/architecture.md)。
+2026-10-16 更新（含 [截图反馈收尾](../../problem-lists/2026-10-13-goals-upgrade/improve-5/06-prompt-and-composer-followup.md)）。基于 improve-4 `17fdae14`，本批收尾方案见 [实施范围](../../problem-lists/2026-10-13-goals-upgrade/improve-5/02-optimization-plan-and-change-scope.md)。原始模块文档保留历史内容；本页描述本批实际改变的接口与行为，前序生命周期与输入恢复仍见 [improve-3](../improve-3/architecture.md)、[improve-4](../improve-4/architecture.md)。
 
 ## 正文和展示共用同一次准入
 
-`GoalService.admitTurnInBoundary` 已生成 `GoalTurnTicket.modelText`、`displayText` 和 `turnNumber`。首轮展示 `Goal started`，后续展示 `Goal auto-continue (turn N)`；adapter 不重新计算文案或轮号。
+`GoalService.admitTurnInBoundary` 已生成 `GoalTurnTicket.modelText`、`displayText` 和 `turnNumber`。首轮展示该快照的完整 objective，后续展示 `Goal auto-continue (turn N)`；adapter 不重新计算文案或轮号。
 
-`submitPromptInternal` 将正文作为 `runtime.startSession.prompt`，把独立展示值交给 `displayUserText`，实时 `message.appended` 使用同一展示值。runner 仍将正文写入普通 user text part，附加既有 `metadata.displayText`；SQLite 回放复用 persistent-store 的既有展示投影。实时与重连因此显示同一短提示，模型与压缩仍读取完整正文。自动会话标题的 `firstUserMessage` 保持正文。
+`submitPromptInternal` 将正文作为 `runtime.startSession.prompt`，把独立展示值交给 `displayUserText`，实时 `message.appended` 使用同一展示值。runner 仍将正文写入普通 user text part，附加既有 `metadata.displayText`；SQLite 回放复用 persistent-store 的既有展示投影。实时与重连因此显示相同的目标原文或续轮短提示，模型与压缩仍读取完整正文。自动会话标题的 `firstUserMessage` 保持正文。
 
 没有新增消息 kind、system role、origin 或缓存身份。环境信息与 MCP 菜单继续由 runtime model-context part 承担；目标提醒仍按普通 user history 分组，可被通用压缩处理，下一轮目标从 store 重建。
+
+`/goal` 创建与 `/goal replace` 将 argv 首行与 SDK invocation.body 合并，保留多行目标；不改变全局 slash parser 或引号参数语义。命令执行成功提示仍可写 `Goal started (...)`，它不是聊天 prompt。旧消息的 displayText 不迁移。
 
 ## 普通输入直接透传
 
@@ -27,7 +29,8 @@
 `UiGoal` 在既有 status/objective/pauseReason 之外增加必填 `turnsUsed`、`wallClockMs`，以及可选 `turnBudget`。`goalSnapshotToUiGoal` 是统一生成点，服务初始快照、session view 与增量事件；无轮次上限时省略字段，complete 仍为 null。
 
 - CLI 常驻行显示 `goal active · 3m 12s · 7/20 turns`；无上限为 `7 turns`。
-- Web chip 仍只显示状态；面板在现有状态区增加 Turns 与 Active time 两行，保留 objective 编辑、恢复按钮与折叠的 Optional limits。
+- Web header 移除 goal chip。Composer 依次显示 steer recovery、queued prompts、goal 窄条、输入框；goal 始终紧贴输入框上沿。状态条包含单色靶心、状态、单行省略的 objective、轮次上限进度与活跃时长、同槽位暂停/恢复及编辑图标；480px 以下收起附加数字，保留摘要和操作空间。
+- active 直接暂停；paused 直接恢复，失败时打开 Resume 面板显示后端错误；blocked 打开 Resume 面板。编辑复用现有面板，保留 Turns、Active time、Optional limits；不会重置累计或新建目标。目标清空、正文更换或切换会话会使旧操作回调失效；仅统计更新不取消当前操作。
 - 两端复用 SDK `formatDurationSeconds`；显示后端最近一次快照，不在前端启动计时器。paused/blocked 显示停止值，恢复不清零。
 - 数字更新复用 progress 静默刷新，不追加生命周期 notice。常驻 UI 和自动提醒不显示 tokens，主动查询仍保留 total/cached 和统计不完整标识。
 

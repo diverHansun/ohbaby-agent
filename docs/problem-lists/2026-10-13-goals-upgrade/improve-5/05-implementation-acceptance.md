@@ -1,5 +1,7 @@
 # improve-5 实施与最终组合验收
 
+> 后续用户截图反馈调整了首轮显示与 Web goal 入口；收尾需求、修复和补充验收见 [06](./06-prompt-and-composer-followup.md)。本页保留首次交付时的事实记录。
+
 日期：2026-10-15。开发分支 `codex/goals-upgrade-improve-5`，基于 improve-4 最后提交 `17fdae14`。本记录对应 [04 验收契约](./04-test-and-acceptance.md)；原始方案和历史模块文档保留，不把当时的预期交付改写成当时已经实现。
 
 ## 交付与实施前核对
