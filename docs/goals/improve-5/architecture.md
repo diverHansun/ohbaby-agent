@@ -30,6 +30,7 @@
 
 - CLI 常驻行显示 `goal active · 3m 12s · 7/20 turns`；无上限为 `7 turns`。
 - Web header 移除 goal chip。Composer 依次显示 steer recovery、queued prompts、goal 窄条、输入框；goal 始终紧贴输入框上沿。状态条包含单色靶心、状态、单行省略的 objective、轮次上限进度与活跃时长、同槽位暂停/恢复及编辑图标；480px 以下收起附加数字，保留摘要和操作空间。
+- steer recovery 是用户的手动恢复入口，默认折叠为无卡片外框的摘要。同状态只标注一次，混合状态逐项区分；展开后原文与重发并排，保留全文滚动、失败重试幂等和独立错误展示。整层使用页面同色背景，避免聊天历史透字；后端投影和重发契约不变。详见 [收尾验收](../../problem-lists/2026-10-13-goals-upgrade/improve-5/07-steer-recovery-polish.md)。
 - active 直接暂停；paused 直接恢复，失败时打开 Resume 面板显示后端错误；blocked 打开 Resume 面板。编辑复用现有面板，保留 Turns、Active time、Optional limits；不会重置累计或新建目标。目标清空、正文更换或切换会话会使旧操作回调失效；仅统计更新不取消当前操作。
 - 两端复用 SDK `formatDurationSeconds`；显示后端最近一次快照，不在前端启动计时器。paused/blocked 显示停止值，恢复不清零。
 - 数字更新复用 progress 静默刷新，不追加生命周期 notice。常驻 UI 和自动提醒不显示 tokens，主动查询仍保留 total/cached 和统计不完整标识。

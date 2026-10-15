@@ -57,3 +57,5 @@ Web 的旧入口位于 `SessionStatus` 的 header 与 empty state，调用 `Goal
 - 本收尾文档同步当前模块行为，随后将 improve-5 分支本地 fast-forward 合并至 `codex/goals-upgrade` 与 `main`；不 push。
 
 两次代码提交均通过仓库 pre-commit 的全仓 lint 与 typecheck。临时测试服务已停止、隔离数据目录已清理，内置浏览器 viewport 已恢复；已有 `.playwright-mcp/` 未纳入提交。
+
+用户随后要求精简 steer 输入恢复区，后续实现及独立验收见 [07-steer-recovery-polish](./07-steer-recovery-polish.md)。
