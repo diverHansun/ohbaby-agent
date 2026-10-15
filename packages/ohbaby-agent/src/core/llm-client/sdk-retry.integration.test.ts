@@ -542,3 +542,128 @@ describe.each(protocols)("%s Context summary HTTP budget", (protocol) => {
     },
   );
 });
+
+describe.each(protocols)("%s SDK idle watchdog", (protocol) => {
+  it("counts raw activity even when the adapter emits no normalized event", async () => {
+    const bytes = new TextEncoder();
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    const f = fixture(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller): void {
+              body = controller;
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      protocol,
+    );
+    const source = await success(protocol).text();
+    const frames = source.split("\n\n").filter(Boolean);
+    const output: StreamingResponse[] = [];
+    const caller = new AbortController();
+    const done = (async (): Promise<unknown> => {
+      try {
+        for await (const frame of streamResponse(
+          f.client,
+          [{ role: "user", content: "test" }],
+          {
+            idleTimeoutMs: 100,
+            signal: caller.signal,
+            retry: { maxRetriesPerStep: 0 },
+          },
+        ))
+          output.push(frame);
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(0);
+    // Two real SDK events, 80 ms apart, neither authorizes any output.
+    const silent =
+      protocol === "openai-compatible"
+        ? [1, 2].map(
+            () => `data: ${JSON.stringify(chunk({ role: "assistant" }))}`,
+          )
+        : protocol === "openai-responses"
+          ? ["response.created", "response.in_progress"].map(
+              (type) =>
+                `data: ${JSON.stringify({
+                  type,
+                  response: {
+                    id: "resp_fixture",
+                    status: "in_progress",
+                    output: [],
+                    previous_response_id: null,
+                    store: false,
+                  },
+                })}`,
+            )
+          : frames.splice(0, 2); // message_start and empty text block start
+    try {
+      for (const event of silent) {
+        await vi.advanceTimersByTimeAsync(80);
+        body.enqueue(bytes.encode(`${event}\n\n`));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(output).toEqual([]);
+      }
+      await vi.advanceTimersByTimeAsync(80);
+      body.enqueue(bytes.encode(frames.join("\n\n") + "\n\n"));
+      body.close();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await done).toBeUndefined();
+      expect(output.at(-1)?.messageSnapshot.content).toBe("done");
+      expect(f.attempts).toHaveLength(1);
+    } finally {
+      caller.abort();
+      await done;
+    }
+  });
+
+  it("uses only application retries for stalled HTTP bodies", async () => {
+    const bodies: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const f = fixture(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller): void {
+              bodies.push(controller);
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+      protocol,
+    );
+    const done = (async (): Promise<unknown> => {
+      try {
+        for await (const _ of streamResponse(
+          f.client,
+          [{ role: "user", content: "test" }],
+          {
+            idleTimeoutMs: 100,
+            retry: { maxRetriesPerStep: 2, initialDelayMs: 0 },
+          },
+        )) {
+          /* drain retry notifications */
+        }
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(await done).toBeInstanceOf(ProviderRetryExhaustedError);
+    expect(f.attempts.map((a) => a.providerCall)).toEqual([1, 2, 3]);
+    // Settle detached SDK reads without adding a second cleanup wait to production.
+    for (const body of bodies) {
+      try {
+        body.close();
+      } catch {
+        /* abort may already cancel the body */
+      }
+    }
+    await vi.advanceTimersByTimeAsync(0);
+  });
+});

@@ -15,6 +15,7 @@ import type { InterfaceProviderStreamEvent } from "../../services/interface-prov
 import { serializeHistoryMessages } from "../context/serializer.js";
 import { serializeHistory } from "../context/serialization.js";
 import { ensureInterruptionFact } from "../message/interruption.js";
+import { ProviderStreamIdleTimeoutError } from "../llm-client/idle-watchdog.js";
 
 function fixture(
   events: InterfaceProviderStreamEvent[],
@@ -194,6 +195,26 @@ describe("failed model history persistence", () => {
           "[Response interrupted: the saved text below may be incomplete.]\nsaved fragment",
       },
     ]);
+  });
+  it("stores partial idle output but excludes it from subsequent model history", async () => {
+    const f = fixture([{ textDelta: "idle fragment" }], () => {
+      throw new ProviderStreamIdleTimeoutError(100, 100);
+    });
+    const { result } = await f.run();
+    expect(result.success).toBe(false);
+    const history = await f.manager.listBySession("session");
+    expect(history[0].info).toMatchObject({
+      finish: "error",
+      error: { name: "APIError" },
+    });
+    expect(history[0].parts).toEqual([
+      expect.objectContaining({ type: "text", text: "idle fragment" }),
+    ]);
+    expect(serializeHistoryMessages(history)).toEqual([]);
+    expect(
+      serializeHistory(history, { includeToolContext: true }),
+    ).not.toContain("idle fragment");
+    expect(f.execute).not.toHaveBeenCalled();
   });
   it("persists one retireable fact for EOF without visible text", async () => {
     const f = fixture([]);
