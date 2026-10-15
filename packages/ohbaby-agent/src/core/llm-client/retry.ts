@@ -1,4 +1,5 @@
 import { isContextOverflowError } from "./errors.js";
+import { ProviderStreamIdleTimeoutError } from "./idle-watchdog.js";
 
 export interface ProviderRetryPolicy {
   readonly maxRetriesPerStep: number;
@@ -82,6 +83,8 @@ export function providerErrorStatus(error: unknown): number | undefined {
 }
 
 export function retryReason(error: unknown): string {
+  if (error instanceof ProviderStreamIdleTimeoutError)
+    return "stream_idle_timeout";
   const status = providerErrorStatus(error);
   if (status !== undefined) {
     if (status === 429) {
@@ -103,6 +106,7 @@ export function retryReason(error: unknown): string {
 }
 
 export function isRetryableProviderError(error: unknown): boolean {
+  if (error instanceof ProviderStreamIdleTimeoutError) return true;
   // Context recovery belongs to the forced-compaction path, never backoff.
   if (isContextOverflowError(error)) return false;
 

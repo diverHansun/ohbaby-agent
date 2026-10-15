@@ -463,6 +463,7 @@ export function createOpenAICompatibleProvider(
         const native = new ChatNativeAccumulator();
 
         for await (const chunk of stream) {
+          request.onActivity?.();
           native.update(chunk);
           const event = buildStreamEvent(chunk, reportTokenUsage);
           if (event) {

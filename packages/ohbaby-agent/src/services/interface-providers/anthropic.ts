@@ -731,6 +731,7 @@ export function createAnthropicProvider(
           const usage = createAnthropicUsageAccumulator(reportTokenUsage);
           const native = new AnthropicNativeAccumulator();
           for await (const rawEvent of stream) {
+            request.onActivity?.();
             const initial = native.update(rawEvent);
             if (initial) yield initial;
             const rawUsage =

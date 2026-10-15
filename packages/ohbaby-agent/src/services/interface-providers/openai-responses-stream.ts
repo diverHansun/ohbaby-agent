@@ -833,11 +833,13 @@ export async function* mapResponsesStream(
   stream: AsyncIterable<ResponseStreamEvent>,
   report?: TokenUsageDiagnosticReporter,
   signal?: AbortSignal,
+  onActivity?: () => void,
 ): AsyncGenerator<InterfaceProviderStreamEvent> {
   const state = new ResponsesStreamState();
   // Releasing the terminal only at EOF prevents a later event from authorizing tools.
   let terminal: InterfaceProviderStreamEvent | undefined;
   for await (const event of stream) {
+    onActivity?.();
     if (signal?.aborted) throw new APIUserAbortError();
     check(isObject(event), "stream", "event must be an object");
     const eventType = event.type;

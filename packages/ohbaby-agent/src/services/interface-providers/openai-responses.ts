@@ -191,6 +191,7 @@ export function createOpenAIResponsesProvider(
         stream,
         options.tokenUsageReporter,
         request.signal,
+        request.onActivity,
       );
     },
     isAbortError(error): boolean {

@@ -97,7 +97,8 @@ it("replays a successful direct tool roundtrip with the original argument text a
       isAbortError: () => false,
       async streamResponse(request) {
         await Promise.resolve();
-        requests.push(structuredClone(request));
+        // Activity is a runtime callback, not part of the replay payload.
+        requests.push(structuredClone({ ...request, onActivity: undefined }));
         return (async function* (): AsyncGenerator<InterfaceProviderStreamEvent> {
           await Promise.resolve();
           if (requests.length === 1)

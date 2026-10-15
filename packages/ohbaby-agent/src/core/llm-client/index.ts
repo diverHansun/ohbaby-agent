@@ -11,6 +11,11 @@
  * 3. Error Classes: APIUserAbortError (for convenience)
  */
 
+export {
+  DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+  ProviderStreamIdleTimeoutError,
+} from "./idle-watchdog.js";
+
 // Export core functions
 export { createLLMClient } from "./client.js";
 export { isContextOverflowError, ToolCallParseError } from "./errors.js";

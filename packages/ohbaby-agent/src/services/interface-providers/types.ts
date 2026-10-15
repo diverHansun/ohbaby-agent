@@ -179,6 +179,8 @@ export interface InterfaceProviderRequest {
   maxTokens: number;
   tools?: readonly ModelToolDefinition[];
   signal?: AbortSignal;
+  /** Observed raw stream activity; synchronous, cheap, and must not throw. */
+  onActivity?: () => void;
   purpose?: LLMRequestPurpose;
   sessionId?: string;
   contextScopeId?: string;

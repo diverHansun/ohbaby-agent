@@ -716,7 +716,11 @@ describe("LLM Client Integration Tests", () => {
 
       const callArgs = getInterfaceProviderRequest();
 
-      expect(callArgs.signal).toBe(controller.signal);
+      expect(callArgs.signal?.aborted).toBe(false);
+      controller.abort();
+      expect(callArgs.signal?.aborted).toBe(true);
+      expect(callArgs.signal?.reason).toBe(controller.signal.reason);
+      await iterator.return();
     });
 
     it("should return partial content when local cancellation aborts the provider", async () => {

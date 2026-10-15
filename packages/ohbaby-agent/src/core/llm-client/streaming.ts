@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
+  createIdleWatchdog,
+  DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+  validateStreamIdleTimeoutMs,
+} from "./idle-watchdog.js";
+import {
   ModelObservationError,
   RequestAttemptObserver,
 } from "./request-observation.js";
@@ -317,6 +322,7 @@ export async function* streamResponse(
       observation: ModelRequestObservation,
     ) => Promise<void>;
     retry?: Partial<ProviderRetryPolicy>;
+    idleTimeoutMs?: number;
     signal?: AbortSignal;
     tools?: readonly ModelToolDefinition[];
     maxTokens?: number;
@@ -337,6 +343,9 @@ export async function* streamResponse(
     contextScopeId,
   } = options ?? {};
   const retryPolicy = resolveProviderRetryPolicy(retry);
+  const idleTimeoutMs = validateStreamIdleTimeoutMs(
+    options?.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+  );
   const requestMaxTokens =
     validateRequestMaxTokens(maxTokens) ??
     options?.preparedSettings?.maxTokens ??
@@ -382,6 +391,7 @@ export async function* streamResponse(
         ? AbortSignal.any([callerSignal, controller.signal])
         : callerSignal
       : controller.signal;
+    const watchdog = createIdleWatchdog({ signal, timeoutMs: idleTimeoutMs });
     // Every provider retry is a new attempt. Keeping this state inside the
     // loop prevents usage, reasoning, finish state, and partial tool calls
     // from a failed attempt leaking into the replacement stream.
@@ -436,16 +446,29 @@ export async function* streamResponse(
     let exhausted = false;
     let finalized = false;
     let iteratorClosed = false;
-    const closeIterator = (): void => {
-      const target = iterator;
-      if (iteratorClosed || !target?.return) return;
-      const close = target.return.bind(target);
-      iteratorClosed = true;
-      // Resource cleanup must not hold cancellation hostage. Observe both a
-      // synchronous throw and a rejected close from an uncooperative adapter.
+    const closeDetached = (target: typeof iterator): void => {
+      if (!target?.return) return;
+      // Neither a synchronous throw nor an uncooperative return may hold up exit.
       void Promise.resolve()
-        .then(close)
+        .then(() => target.return?.())
         .catch(() => undefined);
+    };
+    const closeIterator = (): void => {
+      if (iteratorClosed) return;
+      iteratorClosed = true;
+      closeDetached(iterator);
+    };
+    const retired = (): boolean =>
+      signal.aborted || finalized || watchdog.expired();
+    const nextEvent = (): ReturnType<typeof observer.next> => {
+      const target = iterator;
+      return observer.next(
+        target && {
+          // Guard raw reads before observer side effects: late chunks cannot
+          // change first-text timing or enqueue durable observations.
+          next: () => watchdog.next(target),
+        },
+      );
     };
     try {
       const beforeRequestAttempt = options?.beforeRequestAttempt;
@@ -476,24 +499,42 @@ export async function* streamResponse(
         reasoning,
         maxTokens: requestMaxTokens,
         tools,
-        signal,
+        signal: watchdog.providerSignal,
+        onActivity: () => {
+          watchdog.pulse();
+        },
         ...(purpose === undefined ? {} : { purpose }),
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(contextScopeId === undefined ? {} : { contextScopeId }),
         promptCache,
       });
-      // Attach the receiver immediately, including eager opening failures. For a
-      // lazy adapter the first next starts before any observation save is awaited.
+      // Keep late cleanup attached to the raw opening, even after its guarded
+      // wait expires. In particular, retry backoff runs BEFORE finally.
+      const openedIterator = opening.then((stream) => {
+        const target = stream[Symbol.asyncIterator]();
+        if (retired()) {
+          closeDetached(target);
+          throw (
+            watchdog.providerSignal.reason ?? new Error("Request finalized")
+          );
+        }
+        return target;
+      });
+      // Opening and first read are separate waits. Attach the receiver before
+      // awaiting persistence so eager errors cannot become unhandled rejections.
       const first = observer.receive(
-        opening
-          .then((stream) => {
-            iterator = stream[Symbol.asyncIterator]();
-            if (signal.aborted || finalized) {
-              closeIterator();
-              return { error: signal.reason ?? new Error("Request finalized") };
+        watchdog
+          .wait(openedIterator)
+          .then((target) => {
+            if (retired()) {
+              closeDetached(target);
+              throw (
+                watchdog.providerSignal.reason ?? new Error("Request finalized")
+              );
             }
+            iterator = target;
             if (provider.streamStart === "iterator") observer.start();
-            return observer.next(iterator);
+            return nextEvent();
           })
           .catch((error: unknown) => {
             observer.receivedError();
@@ -555,7 +596,7 @@ export async function* streamResponse(
         // the eventual terminal response, but do not expose an attempt-local
         // usage-only frame that may later be discarded by a safe retry.
         if (isUsageOnlyEvent(event)) {
-          next = await observer.next(iterator);
+          next = await nextEvent();
           continue;
         }
 
@@ -618,7 +659,7 @@ export async function* streamResponse(
           tokenUsage:
             tokenUsage === null ? undefined : toStreamingTokenUsage(tokenUsage),
         };
-        next = await observer.next(iterator);
+        next = await nextEvent();
       }
       if (signal.aborted) {
         observer.end("aborted");
@@ -712,7 +753,7 @@ export async function* streamResponse(
           tokenUsage === null ? undefined : toStreamingTokenUsage(tokenUsage),
       };
       return;
-    } catch (error) {
+    } catch (caughtError) {
       observer.end(signal.aborted ? "aborted" : "error");
       await observer.flush();
       for (const fact of observer.drain().filter(isRunRequestObservation))
@@ -721,11 +762,11 @@ export async function* streamResponse(
           isComplete: false,
           requestObservation: fact,
         };
-      if (error instanceof ModelObservationError) throw error;
+      if (caughtError instanceof ModelObservationError) throw caughtError;
       // Malformed tool arguments are a model output defect; surface them
       // as-is so consumers do not mistake them for a transport interruption.
-      if (error instanceof ToolCallParseError) {
-        throw error;
+      if (caughtError instanceof ToolCallParseError) {
+        throw caughtError;
       }
       // Handle user-initiated interruption
       if (signal.aborted) {
@@ -742,6 +783,11 @@ export async function* streamResponse(
         return;
       }
 
+      // SDKs may translate our timeout abort into their own AbortError. Preserve
+      // the watchdog cause without turning caller cancellation into a retry.
+      const error: unknown = watchdog.expired()
+        ? watchdog.providerSignal.reason
+        : caughtError;
       if (provider.isAbortError(error)) {
         throw annotatePromptCacheError(
           new ProviderStreamInterruptedError(error, "provider_abort"),
@@ -829,6 +875,7 @@ export async function* streamResponse(
         throw sleepError;
       }
     } finally {
+      watchdog.dispose();
       finalized = true;
       observer.end(signal.aborted ? "aborted" : "error");
       observer.close();
