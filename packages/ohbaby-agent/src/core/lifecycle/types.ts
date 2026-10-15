@@ -325,6 +325,8 @@ export interface LifecycleTokenUsage {
   readonly outputTokens: number;
   readonly totalTokens: number;
   readonly inputBreakdown?: TokenUsage["inputBreakdown"];
+  /** Known cache reads when the full aggregate breakdown is unavailable or partial. */
+  readonly cachedInputTokens?: number;
   /**
    * True when every aggregated result included usage; excludes unaggregated HTTP attempts.
    * Independent of lifecycle completion and cache-field observation.

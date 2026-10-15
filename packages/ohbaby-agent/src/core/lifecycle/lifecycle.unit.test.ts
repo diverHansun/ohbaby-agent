@@ -1241,7 +1241,7 @@ describe("Lifecycle.run", () => {
         inputTokens: 40,
         outputTokens: 4,
         totalTokens: 44,
-        usageComplete: true,
+        usageComplete: false,
       },
     });
     expect(updateCalibrationFactor.mock.calls).toEqual([
@@ -1334,77 +1334,100 @@ describe("Lifecycle.run", () => {
         inputTokens: 40,
         outputTokens: 4,
         totalTokens: 44,
-        usageComplete: true,
+        usageComplete: false,
       },
     });
     expect(updateCalibrationFactor).toHaveBeenCalledTimes(1);
   });
 
-  it("still rejects an unclassified error after retaining earlier usage", async () => {
-    const messageManager = createMessageManager({
-      bus: createBus(),
-      store: createInMemoryMessageStore(),
-      idGenerator: createDeterministicIds(),
-      now: () => 1_700_000_000_000,
-    });
-    const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(
-        vi
-          .fn()
-          .mockResolvedValue(
-            preparedTurn(
+  it.each([false, true])(
+    "retains known usage on an unclassified failure (after overflow=%s)",
+    async (afterOverflow) => {
+      const messageManager = createMessageManager({
+        bus: createBus(),
+        store: createInMemoryMessageStore(),
+        idGenerator: createDeterministicIds(),
+        now: () => 1_700_000_000_000,
+      });
+      const lifecycle = new Lifecycle({
+        contextManager: createContextManagerMock(
+          vi.fn().mockImplementation((input: { force?: boolean }) => {
+            const prepared = preparedTurn(
               [{ role: "user", content: "Continue" }],
               SESSION_USAGE,
               30,
-            ),
-          ),
-      ),
-      llmClient: createScriptedFakeLLMClient(
-        [
-          {
-            events: [
-              {
-                finishReason: "tool_calls",
-                tokenUsage: {
-                  inputTokens: 40,
-                  outputTokens: 4,
-                  totalTokens: 44,
-                },
-                toolCallDeltas: [
-                  {
-                    argumentsDelta: "{}",
-                    id: "call_1",
-                    index: 0,
-                    name: "continue",
+            );
+            return Promise.resolve(
+              input.force ? compactedTurn(prepared) : prepared,
+            );
+          }),
+        ),
+        llmClient: createScriptedFakeLLMClient(
+          [
+            {
+              events: [
+                {
+                  finishReason: "tool_calls",
+                  tokenUsage: {
+                    inputTokens: 40,
+                    outputTokens: 4,
+                    totalTokens: 44,
                   },
-                ],
-              },
-            ],
-          },
-          { error: new Error("unclassified failure") },
-        ],
-        [],
-      ),
-      messageManager,
-      toolScheduler: {
-        executeBatch: vi
-          .fn()
-          .mockResolvedValue([
-            { callId: "call_1", output: "ok", status: "success" },
-          ]),
-      } as unknown as ToolSchedulerInstance,
-    });
+                  toolCallDeltas: [
+                    {
+                      argumentsDelta: "{}",
+                      id: "call_1",
+                      index: 0,
+                      name: "continue",
+                    },
+                  ],
+                },
+              ],
+            },
+            ...(afterOverflow
+              ? [
+                  {
+                    error: Object.assign(
+                      new Error("maximum context length exceeded"),
+                      { code: "context_length_exceeded" },
+                    ),
+                  },
+                ]
+              : []),
+            { error: new Error("unclassified failure") },
+          ],
+          [],
+        ),
+        messageManager,
+        toolScheduler: {
+          executeBatch: vi
+            .fn()
+            .mockResolvedValue([
+              { callId: "call_1", output: "ok", status: "success" },
+            ]),
+        } as unknown as ToolSchedulerInstance,
+      });
 
-    await expect(
-      consumeLifecycle(
+      const { result } = await consumeLifecycleEvents(
         lifecycle.run({
           directory: "D:/repo",
           modelId: "fake-model",
           sessionId: "session_throw",
         }),
-      ),
-    ).rejects.toThrow("unclassified failure");
-  });
+      );
+      expect(result).toMatchObject({
+        success: false,
+        finalResponse: "unclassified failure",
+        failureCause: new Error("unclassified failure"),
+        usage: {
+          inputTokens: 40,
+          outputTokens: 4,
+          totalTokens: 44,
+          usageComplete: false,
+        },
+      });
+    },
+  );
 
   it.each([false, true])(
     "persists tool-only and hybrid usage once per step (child=%s)",
@@ -2914,15 +2937,19 @@ describe("Lifecycle.run", () => {
       } as unknown as ToolSchedulerInstance,
     });
 
-    await expect(
-      consumeLifecycle(
-        lifecycle.run({
-          directory: "D:/repo",
-          modelId: "fake-model",
-          sessionId: "session_test",
-        }),
-      ),
-    ).rejects.toThrow("network down");
+    const { result } = await consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "D:/repo",
+        modelId: "fake-model",
+        sessionId: "session_test",
+      }),
+    );
+    expect(result).toMatchObject({
+      success: false,
+      finalResponse: "network down",
+      failureCause: new Error("network down"),
+      usage: { usageComplete: false },
+    });
 
     expect(prepareTurn).toHaveBeenCalledTimes(1);
     expect(requests).toHaveLength(1);
@@ -3058,16 +3085,6 @@ describe("Lifecycle.run", () => {
     });
   });
 });
-
-async function consumeLifecycle(
-  loop: AsyncGenerator<unknown, unknown, void>,
-): Promise<unknown> {
-  let next = await loop.next();
-  while (!next.done) {
-    next = await loop.next();
-  }
-  return next.value;
-}
 
 async function consumeLifecycleEvents(
   loop: AsyncGenerator<LifecycleEvent, LifecycleResult, void>,

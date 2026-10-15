@@ -46,8 +46,22 @@ export function aggregateTokenUsage(
   const outputTokens = current?.outputTokens ?? 0;
   const usageComplete = (current?.usageComplete ?? true) && next !== undefined;
 
+  const currentCache =
+    current?.cachedInputTokens ??
+    (current?.inputBreakdown?.observed.cacheRead
+      ? current.inputBreakdown.cacheRead
+      : undefined);
+  const nextCache = next?.inputBreakdown?.observed.cacheRead
+    ? next.inputBreakdown.cacheRead
+    : undefined;
+  const knownCache =
+    currentCache === undefined && nextCache === undefined
+      ? undefined
+      : (currentCache ?? 0) + (nextCache ?? 0);
+
   if (next === undefined) {
     return {
+      ...(knownCache === undefined ? {} : { cachedInputTokens: knownCache }),
       inputTokens,
       outputTokens,
       totalTokens: inputTokens + outputTokens,
@@ -67,6 +81,9 @@ export function aggregateTokenUsage(
       : undefined;
   return {
     ...(inputBreakdown === undefined ? {} : { inputBreakdown }),
+    ...(inputBreakdown?.observed.cacheRead || knownCache === undefined
+      ? {}
+      : { cachedInputTokens: knownCache }),
     ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
     inputTokens: nextInputTokens,
     outputTokens: nextOutputTokens,

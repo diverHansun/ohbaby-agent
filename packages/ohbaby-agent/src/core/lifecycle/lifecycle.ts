@@ -686,8 +686,9 @@ export class Lifecycle {
           continue;
         }
         const failure = providerFailure(error);
-        if (failure) {
-          finalResponse = failure.finalResponse;
+        if (failure || !isContextOverflowError(error)) {
+          usage = aggregateTokenUsage(usage, undefined);
+          finalResponse = failure?.finalResponse ?? getErrorMessage(error);
           yield this.createTurnEndEvent({
             contextScopeId: params.contextScopeId,
             finalResponse,
@@ -701,13 +702,10 @@ export class Lifecycle {
             failureCause: error,
             finishReason: "error",
             finalResponse,
-            terminalReason: failure.terminalReason,
+            terminalReason: failure?.terminalReason,
             toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
             usage,
           };
-        }
-        if (!isContextOverflowError(error)) {
-          throw error;
         }
 
         if (forceRecoveryStep === step) {
@@ -801,8 +799,10 @@ export class Lifecycle {
             continue;
           }
           const failure = providerFailure(retryError);
-          if (failure) {
-            finalResponse = failure.finalResponse;
+          if (failure || !isContextOverflowError(retryError)) {
+            usage = aggregateTokenUsage(usage, undefined);
+            finalResponse =
+              failure?.finalResponse ?? getErrorMessage(retryError);
             yield this.createTurnEndEvent({
               contextScopeId: params.contextScopeId,
               finalResponse,
@@ -816,13 +816,10 @@ export class Lifecycle {
               failureCause: retryError,
               finishReason: "error",
               finalResponse,
-              terminalReason: failure.terminalReason,
+              terminalReason: failure?.terminalReason,
               toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
               usage,
             };
-          }
-          if (!isContextOverflowError(retryError)) {
-            throw retryError;
           }
 
           const overflowMessage =

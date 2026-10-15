@@ -354,6 +354,7 @@ describe("model result transport", () => {
         result.observations.filter((event) => event.type === "llm:complete"),
       ).toEqual([]);
       expect(result.result.result?.usage).toEqual({
+        cachedInputTokens: 70,
         inputTokens: 100,
         outputTokens: 25,
         totalTokens: 125,

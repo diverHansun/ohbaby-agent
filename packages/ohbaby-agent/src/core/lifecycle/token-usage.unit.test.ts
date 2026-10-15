@@ -2,6 +2,35 @@ import { describe, expect, it } from "vitest";
 import { aggregateTokenUsage } from "./token-usage.js";
 
 describe("aggregateTokenUsage", () => {
+  it("retains known cache reads across missing usage without claiming a complete breakdown", () => {
+    const known = {
+      inputTokens: 10,
+      outputTokens: 2,
+      totalTokens: 12,
+      inputBreakdown: {
+        cacheRead: 6,
+        cacheWrite: 0,
+        uncached: 4,
+        observed: { cacheRead: true, cacheWrite: true },
+      },
+    };
+    for (const missing of [
+      undefined,
+      { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
+    ]) {
+      for (const pair of [
+        [known, missing],
+        [missing, known],
+      ]) {
+        const result = aggregateTokenUsage(
+          aggregateTokenUsage(undefined, pair[0]),
+          pair[1],
+        );
+        expect(result.cachedInputTokens).toBe(6);
+        expect(result.inputBreakdown).toBeUndefined();
+      }
+    }
+  });
   it("sums disjoint input buckets and ANDs observed flags", () => {
     const first = aggregateTokenUsage(undefined, {
       inputBreakdown: {
@@ -61,6 +90,7 @@ describe("aggregateTokenUsage", () => {
         totalTokens: 6,
       }),
     ).toEqual({
+      cachedInputTokens: 6,
       inputTokens: 15,
       outputTokens: 3,
       totalTokens: 18,
@@ -82,6 +112,7 @@ describe("aggregateTokenUsage", () => {
     });
 
     expect(aggregateTokenUsage(first, undefined)).toEqual({
+      cachedInputTokens: 6,
       inputTokens: 10,
       outputTokens: 2,
       totalTokens: 12,

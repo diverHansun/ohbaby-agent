@@ -453,6 +453,7 @@ describe("Responses adapter through llm-client and Lifecycle", () => {
     ]);
     const result = await harness.run();
     expect(result.usage).toEqual({
+      cachedInputTokens: 40,
       inputTokens: 200,
       outputTokens: 40,
       totalTokens: 240,
