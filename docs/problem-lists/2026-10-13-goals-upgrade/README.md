@@ -3,7 +3,7 @@
 > 建立日期：2026-10-13。规划复查基线：main / `018a5c96`。
 > 规划状态：2026-10-15 已依据代码审查修订总体 plan 与五批 00–04，并完成三个子代理的复核；复核新增的 deadline 重排、Web 执行入口、结算交接与恢复槽竞争已修正并通过定点复核。规划阶段 Pi（github-copilot/claude-opus-5.5，medium）审查已执行；此前受阻的一次尝试不是本次审查结果。文档作为按 1 → 2 → 3 → 4 → 5 推进实施的基线。
 >
-> 实施状态：improve-1 已在 `codex/goals-upgrade-improve-1` 实现，验收与独立审查结果见 [05](./improve-1/05-implementation-acceptance.md)；看门狗位置疑问、五个参考项目对照及 improve-5 回看条件见 [06](./improve-1/06-request-idle-placement-review.md)。improve-2 已在基于 improve-1 的 `codex/goals-upgrade-improve-2` 实现，交付与验证见 [05](./improve-2/05-implementation-acceptance.md)，阶段模块文档见 [docs/goals/improve-2](../../goals/improve-2/architecture.md)。原始 goals 文档保留；improve-3–5 尚未实施，本批尚未合并。
+> 实施状态：improve-1 已在 `codex/goals-upgrade-improve-1` 实现，验收与独立审查结果见 [05](./improve-1/05-implementation-acceptance.md)；看门狗位置疑问、五个参考项目对照及 improve-5 回看条件见 [06](./improve-1/06-request-idle-placement-review.md)。improve-2 已在基于 improve-1 的 `codex/goals-upgrade-improve-2` 实现，交付与验证见 [05](./improve-2/05-implementation-acceptance.md)，阶段模块文档见 [docs/goals/improve-2](../../goals/improve-2/architecture.md)。improve-3 已在基于 improve-2 收尾提交 `fed91056` 的 `codex/goals-upgrade-improve-3` 实现，交付与验证见 [05](./improve-3/05-implementation-acceptance.md)，阶段文档见 [docs/goals/improve-3](../../goals/improve-3/architecture.md)。原始 goals 文档保留；improve-4–5 尚未实施，各批尚未合并，等待 improve-5 总体验收。
 
 本议题改进 goals 长任务的执行准入、预算与恢复、请求空闲超时、用户插话及 CLI/Web 展示。保留现有 store/service/runner/scheduler，补齐执行与消息边界。
 
@@ -31,7 +31,7 @@ plan 于 2026-10-13 开启，2026-10-15 统一修订。用户随后明确要求�
 
 ## 五批实施地图
 
-五批均于 2026-10-15 开启规划，第 1、2 批的实际交付分别见各批 05。按 **1 → 2 → 3 → 4 → 5** 推进。第 1 批相对独立；第 2 批提供后续执行基础，第 3 批补齐停止和恢复契约，第 4 批接自动插话，第 5 批完成展示与组合回归。
+五批均于 2026-10-15 开启规划，第 1–3 批的实际交付分别见各批 05。按 **1 → 2 → 3 → 4 → 5** 推进。第 1 批相对独立；第 2 批提供后续执行基础，第 3 批补齐停止和恢复契约，第 4 批接自动插话，第 5 批完成展示与组合回归。
 
 | 批次 | 交付重点 | 前置依赖 | 为何放在一起 |
 | --- | --- | --- | --- |
