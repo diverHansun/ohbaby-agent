@@ -1011,3 +1011,32 @@ it.each(["draft edit", "session round trip"])(
       );
   },
 );
+
+it("keeps the goal directly against the input below queued prompts and steer recovery", () => {
+  const f = fixture({
+    activeGoal: {
+      objective: "Finish the goal after queued guidance",
+      status: "paused",
+      turnsUsed: 1,
+      wallClockMs: 24000,
+    },
+    queuedPrompts: [queuedPrompt("queued")],
+    unconsumedSteers,
+  });
+  const strip = document.querySelector('[aria-label="Session goal"]');
+  const queue = document.querySelector('[aria-label="Queued prompts"]');
+  const recovery = document.querySelector(".ohb-steer-recovery");
+  if (!strip) throw new Error("Goal strip missing");
+  expect(queue?.nextElementSibling).toBe(strip);
+  expect(strip.nextElementSibling).toBe(
+    f.input().closest(".ohb-composer-input"),
+  );
+  expect(recovery?.compareDocumentPosition(strip)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+  f.update({ queuedPrompts: [] });
+  expect(recovery?.nextElementSibling).toBe(strip);
+  expect(strip.nextElementSibling).toBe(
+    f.input().closest(".ohb-composer-input"),
+  );
+});

@@ -3911,7 +3911,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
-  it("renders compact goal status without objective copy", () => {
+  it("renders the goal strip above the composer input instead of the header chip", () => {
     const fake = createFakeRuntime({
       snapshot: {
         ...snapshotWithStatus({ kind: "idle" }),
@@ -3922,6 +3922,7 @@ describe("OhbabyWebApp slash command interactions", () => {
               turnsUsed: 7,
               wallClockMs: 192000,
               status: "paused",
+              turnBudget: 20,
             },
             sessionId: "session_1",
           },
@@ -3930,8 +3931,53 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
-    expect(app.container.textContent).toContain("goal paused");
-    expect(app.container.textContent).not.toContain("finish goal UI");
+    expect(
+      app.container.querySelector(".ohb-empty-status .ohb-goal-chip"),
+    ).toBeNull();
+    const strip = app.container.querySelector(".ohb-composer .ohb-goal-strip");
+    expect(strip).not.toBeNull();
+    expect(
+      strip?.nextElementSibling?.classList.contains("ohb-composer-input"),
+    ).toBe(true);
+    expect(strip?.querySelector("svg.ohb-goal-strip-icon")).not.toBeNull();
+    expect(strip?.textContent).toContain("Paused goal");
+    expect(strip?.textContent).toContain("finish goal UI");
+    expect(strip?.textContent).toContain("7/20");
+    expect(strip?.textContent).toContain("3m 12s");
+    expect(
+      strip?.querySelector(".ohb-goal-strip-summary")?.getAttribute("title"),
+    ).toContain("finish goal UI");
+    expect(strip?.querySelectorAll("button button")).toHaveLength(0);
+
+    act(() => {
+      fake.runtime.store.replaceSnapshot(
+        {
+          ...snapshotWithStatus({ kind: "running", runId: "run_1" }),
+          goals: [
+            {
+              goal: {
+                objective: "finish goal UI",
+                turnsUsed: 7,
+                wallClockMs: 192000,
+                status: "active",
+                turnBudget: 20,
+              },
+              sessionId: "session_1",
+            },
+          ],
+        },
+        2,
+      );
+    });
+    expect(
+      app.container.querySelector(".ohb-statusbar .ohb-goal-chip"),
+    ).toBeNull();
+    expect(
+      app.container.querySelector(".ohb-statusbar .ohb-context-usage-control"),
+    ).not.toBeNull();
+    expect(
+      app.container.querySelector(".ohb-composer .ohb-goal-strip")?.textContent,
+    ).toContain("Active goal");
   });
 
   it.each(["paused", "blocked"] as const)(
@@ -3966,7 +4012,7 @@ describe("OhbabyWebApp slash command interactions", () => {
         },
       });
       const app = mountApp(fake.runtime);
-      await clickButton(app.container, `goal ${goalStatus}`);
+      await clickButton(app.container, "Edit goal");
       expect(
         app.container.querySelector(".ohb-goal-state")?.textContent,
       ).toContain("Turns7");
@@ -3988,7 +4034,9 @@ describe("OhbabyWebApp slash command interactions", () => {
           'input[aria-label="Active duration limit"]',
         ),
       ).not.toBeNull();
-      await clickButton(app.container, "Resume goal");
+      const dialog = app.container.querySelector(".ohb-structured-dialog");
+      if (!dialog) throw new Error("Goal dialog missing");
+      await clickButton(dialog, "Resume goal");
       await waitFor(() =>
         Boolean(app.container.querySelector(".ohb-structured-error")),
       );
@@ -4042,7 +4090,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     const pending = deferred<import("ohbaby-sdk").UiCommandCompletion>();
     fake.executeSlashCommand.mockReturnValue(pending.promise);
     const app = mountApp(fake.runtime);
-    await clickButton(app.container, "goal blocked");
+    await clickButton(app.container, "Resume goal");
     const dialog = app.container.querySelector(".ohb-structured-dialog");
     const button = (action: string): HTMLButtonElement | null | undefined =>
       dialog?.querySelector<HTMLButtonElement>(
@@ -4168,7 +4216,9 @@ describe("OhbabyWebApp slash command interactions", () => {
     await waitFor(() =>
       Boolean(app.container.querySelector(".ohb-structured-overlay")),
     );
-    await clickButton(app.container, "Pause goal");
+    const dialog = app.container.querySelector(".ohb-structured-dialog");
+    if (!dialog) throw new Error("Goal dialog missing");
+    await clickButton(dialog, "Pause goal");
 
     expect(fake.executeSlashCommand).toHaveBeenCalledWith({
       allowOverlay: true,
@@ -4177,7 +4227,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
   });
 
-  it("opens the goal panel when the status chip is clicked", async () => {
+  it("opens the goal panel when the edit icon in the goal strip is clicked without submitting", async () => {
     const fake = createFakeRuntime({
       snapshot: {
         ...snapshotWithStatus({ kind: "idle" }),
@@ -4196,12 +4246,14 @@ describe("OhbabyWebApp slash command interactions", () => {
     });
     const app = mountApp(fake.runtime);
 
-    const chip = app.container.querySelector(".ohb-goal-chip");
-    if (!(chip instanceof HTMLButtonElement)) {
-      throw new Error("goal chip not found");
+    const editButton = app.container.querySelector(
+      '[data-goal-strip-action="edit"]',
+    );
+    if (!(editButton instanceof HTMLButtonElement)) {
+      throw new Error("goal edit button not found");
     }
     await act(async () => {
-      chip.click();
+      editButton.click();
       await Promise.resolve();
     });
 
@@ -4211,12 +4263,222 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
   });
 
-  it("does not render the goal chip without a goal for the active session", () => {
+  it("pauses an active goal directly from the goal strip, resumes a paused goal directly, and falls back to the resume panel with visible error when direct resume fails", async () => {
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        goals: [
+          {
+            goal: {
+              objective: "ship goal strip",
+              turnsUsed: 4,
+              wallClockMs: 45_000,
+              status: "active",
+            },
+            sessionId: "session_1",
+          },
+        ],
+      },
+    });
+    fake.executeSlashCommand.mockResolvedValueOnce({
+      status: "completed",
+      commandRunId: "pause_1",
+      clientInvocationId: "inv_pause",
+      outputCount: 0,
+      eventCount: 1,
+    });
+    const app = mountApp(fake.runtime);
+
+    await clickButton(app.container, "Pause goal");
+    expect(fake.executeSlashCommand).toHaveBeenCalledWith({
+      allowOverlay: true,
+      sessionId: "session_1",
+      text: "/goal pause",
+    });
+    expect(app.container.querySelector(".ohb-structured-overlay")).toBeNull();
+
+    act(() => {
+      fake.runtime.store.replaceSnapshot(
+        {
+          ...snapshotWithStatus({ kind: "idle" }),
+          goals: [
+            {
+              goal: {
+                objective: "ship goal strip",
+                turnsUsed: 20,
+                wallClockMs: 45_000,
+                status: "paused",
+                turnBudget: 20,
+              },
+              sessionId: "session_1",
+            },
+          ],
+        },
+        2,
+      );
+    });
+
+    fake.executeSlashCommand.mockResolvedValueOnce({
+      status: "failed",
+      commandRunId: "resume_1",
+      clientInvocationId: "inv_resume",
+      outputCount: 0,
+      eventCount: 1,
+      error: {
+        code: "budget_reached",
+        message: "Cannot resume: turns used 20/20.",
+      },
+    });
+
+    await clickButton(app.container, "Resume goal");
+    expect(fake.executeSlashCommand).toHaveBeenLastCalledWith({
+      allowOverlay: true,
+      sessionId: "session_1",
+      text: "/goal resume",
+    });
+    await waitFor(() =>
+      Boolean(app.container.querySelector(".ohb-structured-overlay")),
+    );
+    expect(
+      app.container.querySelector(".ohb-structured-error")?.textContent,
+    ).toContain("Cannot resume: turns used 20/20.");
+    expect(
+      app.container.querySelector('[data-goal-action="resume"]'),
+    ).not.toBeNull();
+  });
+
+  it("disables goal strip actions while disconnected or submitting and ignores stale async completions after switching sessions", async () => {
+    const pendingPause = deferred<import("ohbaby-sdk").UiCommandCompletion>();
+    const fake = createFakeRuntime({
+      snapshot: {
+        ...snapshotWithStatus({ kind: "idle" }),
+        sessions: [
+          {
+            id: "session_1",
+            title: "Session 1",
+            projectRoot: "/repo",
+            messages: [],
+            createdAt: "2026-03-20T00:00:00.000Z",
+            updatedAt: "2026-03-20T00:00:00.000Z",
+          },
+          {
+            id: "session_2",
+            title: "Session 2",
+            projectRoot: "/repo",
+            messages: [],
+            createdAt: "2026-03-20T00:01:00.000Z",
+            updatedAt: "2026-03-20T00:01:00.000Z",
+          },
+        ],
+        goals: [
+          {
+            goal: {
+              objective: "session 1 goal",
+              turnsUsed: 2,
+              wallClockMs: 12_000,
+              status: "paused",
+            },
+            sessionId: "session_1",
+          },
+          {
+            goal: {
+              objective: "session 2 goal",
+              turnsUsed: 1,
+              wallClockMs: 5_000,
+              status: "active",
+            },
+            sessionId: "session_2",
+          },
+        ],
+      },
+    });
+    fake.executeSlashCommand.mockReturnValueOnce(pendingPause.promise);
+    const app = mountApp(fake.runtime);
+
+    const resumeBtn = app.container.querySelector<HTMLButtonElement>(
+      '[data-goal-strip-action="resume"]',
+    );
+    const editBtn = app.container.querySelector<HTMLButtonElement>(
+      '[data-goal-strip-action="edit"]',
+    );
+    expect(resumeBtn?.disabled).toBe(false);
+    expect(editBtn?.disabled).toBe(false);
+
+    await clickButton(app.container, "Resume goal");
+    expect(
+      app.container.querySelector<HTMLButtonElement>(
+        '[data-goal-strip-action="resume"]',
+      )?.disabled,
+    ).toBe(true);
+    expect(
+      app.container.querySelector<HTMLButtonElement>(
+        '[data-goal-strip-action="edit"]',
+      )?.disabled,
+    ).toBe(true);
+
+    const currentSnapshot = fake.runtime.store.getSnapshot().view.snapshot;
+    if (!currentSnapshot) {
+      throw new Error("missing snapshot");
+    }
+    act(() => {
+      fake.runtime.store.replaceSnapshot(
+        {
+          ...currentSnapshot,
+          activeSessionId: "session_2",
+        },
+        2,
+      );
+    });
+    expect(
+      app.container.querySelector(".ohb-goal-strip")?.textContent,
+    ).toContain("session 2 goal");
+    expect(
+      app.container.querySelector<HTMLButtonElement>(
+        '[data-goal-strip-action="pause"]',
+      )?.disabled,
+    ).toBe(false);
+
+    await act(async () => {
+      pendingPause.resolve({
+        status: "failed",
+        commandRunId: "stale_resume",
+        clientInvocationId: "inv_stale",
+        outputCount: 0,
+        eventCount: 1,
+        error: {
+          code: "budget_reached",
+          message: "Stale session error should not appear",
+        },
+      });
+      await Promise.resolve();
+    });
+    expect(app.container.querySelector(".ohb-structured-overlay")).toBeNull();
+    expect(app.container.textContent).not.toContain(
+      "Stale session error should not appear",
+    );
+
+    act(() => {
+      fake.runtime.store.setConnectionState("reconnecting");
+    });
+    expect(
+      app.container.querySelector<HTMLButtonElement>(
+        '[data-goal-strip-action="pause"]',
+      )?.disabled,
+    ).toBe(true);
+    expect(
+      app.container.querySelector<HTMLButtonElement>(
+        '[data-goal-strip-action="edit"]',
+      )?.disabled,
+    ).toBe(true);
+  });
+
+  it("does not render the goal strip without a goal for the active session", () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
     const app = mountApp(fake.runtime);
 
+    expect(app.container.querySelector(".ohb-goal-strip")).toBeNull();
     expect(app.container.querySelector(".ohb-goal-chip")).toBeNull();
   });
 

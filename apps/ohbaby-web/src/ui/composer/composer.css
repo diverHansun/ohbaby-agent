@@ -92,6 +92,111 @@
   color: #a8554c;
 }
 
+.ohb-goal-strip {
+  align-items: center;
+  background: #f8f9fb;
+  border: 1px solid #e2e5ec;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  color: #767b84;
+  display: flex;
+  font-size: 12.5px;
+  gap: 8px;
+  justify-content: space-between;
+  line-height: 18px;
+  margin: 0 auto -6px;
+  max-width: 784px;
+  min-height: 32px;
+  min-width: 0;
+  padding: 5px 9px 11px 13px;
+  position: relative;
+  width: calc(100% - 16px);
+  z-index: 1;
+}
+
+.ohb-prompt-queue:has(+ .ohb-goal-strip) {
+  max-width: 784px;
+  width: calc(100% - 16px);
+}
+
+.ohb-prompt-queue + .ohb-goal-strip {
+  border-radius: 0;
+}
+
+.ohb-goal-strip-summary {
+  align-items: center;
+  display: flex;
+  flex: 1 1 0;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ohb-goal-strip-icon {
+  color: #7c8089;
+  flex: 0 0 auto;
+}
+
+.ohb-goal-strip-status {
+  color: #26282d;
+  flex: 0 0 auto;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ohb-goal-strip-objective {
+  color: #767b84;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ohb-goal-strip-meta {
+  color: #8a8d94;
+  flex: 0 0 auto;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.ohb-goal-strip-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.ohb-goal-strip-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: #767b84;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.ohb-goal-strip-button:not(:disabled):hover {
+  background: #eceef2;
+  color: #26282d;
+}
+
+.ohb-goal-strip-button:focus-visible {
+  outline: 2px solid #8a8d94;
+  outline-offset: 1px;
+}
+
+.ohb-goal-strip-button:disabled {
+  color: #b4b8c0;
+  cursor: default;
+}
+
 .ohb-composer-input {
   align-items: stretch;
   background: #ffffff;
@@ -108,7 +213,7 @@
   padding: 12px 11px 9px 16px;
   position: relative;
   width: 100%;
-  z-index: auto;
+  z-index: 2;
 }
 
 .ohb-composer-input.is-plan {

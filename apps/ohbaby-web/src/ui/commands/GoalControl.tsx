@@ -1,7 +1,14 @@
+import { Pencil } from "lucide-react";
 import { formatDurationSeconds } from "ohbaby-sdk";
 import type { UiCommandCompletion, UiGoal } from "ohbaby-sdk";
 import type { ChangeEvent, ReactElement } from "react";
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   OverlayResult,
   type OverlayStatus,
@@ -19,30 +26,210 @@ type GoalPanelAction = "delete" | "pause" | "resume" | "save" | "view";
 
 export interface GoalPanelIntent {
   readonly action: GoalPanelAction;
+  readonly errorMessage?: string;
   readonly objectiveDraft?: string;
 }
 
 export const DEFAULT_GOAL_PANEL_INTENT: GoalPanelIntent = { action: "view" };
 
-export function GoalStatusChip(props: {
+const GOAL_STRIP_STATUS_LABEL: Record<UiGoal["status"], string> = {
+  active: "Active goal",
+  blocked: "Blocked goal",
+  paused: "Paused goal",
+};
+
+export function GoalComposerStrip(props: {
+  readonly disabled?: boolean;
   readonly goal: UiGoal | null;
-  readonly onOpen: (intent?: GoalPanelIntent) => void;
+  readonly onExecuteSlashCommand?: ExecuteGoalCommand;
+  readonly onOpenGoalPanel?: (intent?: GoalPanelIntent) => void;
+  readonly scopeKey: string;
+  readonly sessionId: string | undefined;
 }): ReactElement | null {
-  if (!props.goal) {
+  const { goal, onExecuteSlashCommand, onOpenGoalPanel, scopeKey, sessionId } =
+    props;
+  const [busy, setBusy] = useState(false);
+  const scopeGeneration = useRef(0);
+
+  useLayoutEffect(() => {
+    // A cleared or edited goal must not inherit the previous action's result.
+    scopeGeneration.current += 1;
+    setBusy(false);
+    return (): void => {
+      scopeGeneration.current += 1;
+    };
+  }, [scopeKey, sessionId, goal?.objective]);
+
+  const runDirectAction = useCallback(
+    (commandText: string, fallbackAction: "pause" | "resume") => {
+      if (!sessionId || !onExecuteSlashCommand) {
+        onOpenGoalPanel?.({ action: fallbackAction });
+        return;
+      }
+      const generation = scopeGeneration.current;
+      const targetSessionId = sessionId;
+      setBusy(true);
+      void onExecuteSlashCommand({
+        allowOverlay: true,
+        sessionId: targetSessionId,
+        text: commandText,
+      })
+        .then((completion) => {
+          if (generation !== scopeGeneration.current) return;
+          if (completion.status === "failed") {
+            onOpenGoalPanel?.({
+              action: fallbackAction,
+              errorMessage: completion.error.message,
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          if (generation !== scopeGeneration.current) return;
+          onOpenGoalPanel?.({
+            action: fallbackAction,
+            errorMessage:
+              error instanceof Error ? error.message : String(error),
+          });
+        })
+        .finally(() => {
+          if (generation === scopeGeneration.current) {
+            setBusy(false);
+          }
+        });
+    },
+    [onExecuteSlashCommand, onOpenGoalPanel, sessionId],
+  );
+
+  if (!goal) {
     return null;
   }
+
+  const actionDisabled = Boolean(props.disabled) || !sessionId || busy;
+  const durationLabel = formatDurationSeconds(goal.wallClockMs / 1000);
+  const turnsProgress =
+    goal.turnBudget === undefined
+      ? null
+      : `${String(goal.turnsUsed)}/${String(goal.turnBudget)}`;
+  const metaParts = [turnsProgress, durationLabel].filter(
+    (part): part is string => part !== null,
+  );
+  const fullSummaryTitle = [
+    `${GOAL_STRIP_STATUS_LABEL[goal.status]}: ${goal.objective}`,
+    `Turns ${turnsProgress ?? String(goal.turnsUsed)} · Active time ${durationLabel}`,
+    ...(goal.pauseReason ? [goal.pauseReason] : []),
+  ].join(" — ");
+
+  const isActive = goal.status === "active";
+  const toggleLabel = isActive ? "Pause goal" : "Resume goal";
+  const toggleAction = isActive ? "pause" : "resume";
+
   return (
-    <button
-      className={`ohb-goal-chip ohb-goal-${props.goal.status}`}
-      onClick={() => {
-        props.onOpen(DEFAULT_GOAL_PANEL_INTENT);
-      }}
-      title={props.goal.objective}
-      type="button"
+    <div
+      aria-busy={busy || undefined}
+      aria-label="Session goal"
+      className={`ohb-goal-strip ohb-goal-strip-${goal.status}`}
+      data-goal-status={goal.status}
+      role="region"
     >
-      <span />
-      goal {props.goal.status}
-    </button>
+      <div className="ohb-goal-strip-summary" title={fullSummaryTitle}>
+        <GoalTargetIcon />
+        <span className="ohb-goal-strip-status">
+          {GOAL_STRIP_STATUS_LABEL[goal.status]}
+        </span>
+        <span className="ohb-goal-strip-objective">{goal.objective}</span>
+        <span aria-hidden="true" className="ohb-goal-strip-meta">
+          · {metaParts.join(" · ")}
+        </span>
+      </div>
+      <div className="ohb-goal-strip-actions">
+        <button
+          aria-label={toggleLabel}
+          className="ohb-goal-strip-button"
+          data-goal-strip-action={toggleAction}
+          disabled={actionDisabled}
+          onClick={() => {
+            if (isActive) {
+              runDirectAction("/goal pause", "pause");
+              return;
+            }
+            if (goal.status === "blocked") {
+              onOpenGoalPanel?.({ action: "resume" });
+              return;
+            }
+            runDirectAction("/goal resume", "resume");
+          }}
+          title={toggleLabel}
+          type="button"
+        >
+          {isActive ? <GoalPauseIcon /> : <GoalResumeIcon />}
+        </button>
+        <button
+          aria-label="Edit goal"
+          className="ohb-goal-strip-button"
+          data-goal-strip-action="edit"
+          disabled={actionDisabled}
+          onClick={() => {
+            onOpenGoalPanel?.({ action: "save" });
+          }}
+          title="Edit goal"
+          type="button"
+        >
+          <Pencil aria-hidden="true" size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GoalTargetIcon(): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      className="ohb-goal-strip-icon"
+      fill="none"
+      height="14"
+      viewBox="0 0 16 16"
+      width="14"
+    >
+      <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="8" cy="8" r="3.25" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="8" cy="8" fill="currentColor" r="1.15" />
+    </svg>
+  );
+}
+
+function GoalPauseIcon(): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="14"
+      viewBox="0 0 16 16"
+      width="14"
+    >
+      <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M6.6 5.6v4.8M9.4 5.6v4.8"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.35"
+      />
+    </svg>
+  );
+}
+
+function GoalResumeIcon(): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="14"
+      viewBox="0 0 16 16"
+      width="14"
+    >
+      <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M6.8 5.55 10.6 8l-3.8 2.45V5.55Z" fill="currentColor" />
+    </svg>
   );
 }
 
@@ -58,16 +245,26 @@ export function GoalOverlayBody(props: {
   );
   const [turnLimit, setTurnLimit] = useState("");
   const [durationLimit, setDurationLimit] = useState("");
-  const [status, setStatus] = useState<OverlayStatus>({
-    kind: "idle",
-    message: sessionId
-      ? unavailableIntentMessage(props.intent.action, activeGoal)
-      : "No active session for goal commands.",
-  });
+  const [status, setStatus] = useState<OverlayStatus>(() =>
+    props.intent.errorMessage
+      ? { kind: "error", message: props.intent.errorMessage }
+      : {
+          kind: "idle",
+          message: sessionId
+            ? unavailableIntentMessage(props.intent.action, activeGoal)
+            : "No active session for goal commands.",
+        },
+  );
 
   useEffect(() => {
     setObjective(props.intent.objectiveDraft ?? activeGoal?.objective ?? "");
   }, [activeGoal?.objective, props.intent.objectiveDraft]);
+
+  useEffect(() => {
+    if (props.intent.errorMessage) {
+      setStatus({ kind: "error", message: props.intent.errorMessage });
+    }
+  }, [props.intent.errorMessage]);
 
   const runGoalCommand = useCallback(
     (text: string, busyMessage: string, successMessage: string) => {

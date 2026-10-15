@@ -67,40 +67,6 @@
   min-width: 0;
 }
 
-.ohb-goal-chip {
-  align-items: center;
-  background: #ffffff;
-  border: 1px solid #e4e4e4;
-  border-radius: 999px;
-  color: #6b6d73;
-  display: inline-flex;
-  flex: none;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 12px;
-  font-weight: 500;
-  gap: 7px;
-  padding: 6px 12px 6px 10px;
-  white-space: nowrap;
-}
-
-.ohb-goal-chip:hover {
-  background: #f6f7f9;
-  border-color: #d6dae1;
-}
-
-.ohb-goal-chip:focus-visible {
-  border-color: #cdd7e8;
-  box-shadow: 0 0 0 3px rgba(95, 134, 196, 0.09);
-  outline: none;
-}
-
-.ohb-goal-chip span {
-  border-radius: 50%;
-  display: block;
-  height: 7px;
-  width: 7px;
-}
-
 .ohb-goal-active span {
   background: #5f86c4;
 }

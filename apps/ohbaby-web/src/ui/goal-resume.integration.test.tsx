@@ -278,9 +278,10 @@ describe("goal resume through the rendered app, real Web runtime and command bac
         await submit(f.container, text);
         await waitFor(() => {
           expect(
-            f.container.querySelector(".ohb-goal-chip")?.textContent,
-          ).toContain("goal active");
+            f.container.querySelector(".ohb-goal-strip")?.textContent,
+          ).toContain("Active goal");
         });
+        expect(f.container.querySelector(".ohb-goal-chip")).toBeNull();
         expect(f.commands).toHaveLength(1);
         expect(f.container.querySelector(".ohb-structured-overlay")).toBeNull();
         const records = await f.persistence.list("session_1");
@@ -418,6 +419,48 @@ describe("goal resume through the rendered app, real Web runtime and command bac
       expect(await f.persistence.list("session_1")).toEqual(before);
     } finally {
       await f.dispose();
+    }
+  });
+
+  it("resumes a paused goal directly from the composer strip and falls back to the resume panel when budget is exhausted", async () => {
+    const paused = await fixture({ status: "paused", reached: false });
+    try {
+      await click(paused.container, '[data-goal-strip-action="resume"]');
+      await waitFor(() => {
+        expect(
+          paused.container.querySelector(".ohb-goal-strip")?.textContent,
+        ).toContain("Active goal");
+      });
+      expect(
+        paused.container.querySelector(".ohb-structured-overlay"),
+      ).toBeNull();
+      await click(paused.container, '[data-goal-strip-action="pause"]');
+      await waitFor(() => {
+        expect(
+          paused.container.querySelector(".ohb-goal-strip")?.textContent,
+        ).toContain("Paused goal");
+      });
+    } finally {
+      await paused.dispose();
+    }
+
+    const exhaustedPaused = await fixture({ status: "paused", reached: true });
+    try {
+      await click(
+        exhaustedPaused.container,
+        '[data-goal-strip-action="resume"]',
+      );
+      await waitFor(() => {
+        expect(
+          exhaustedPaused.container.querySelector(".ohb-structured-overlay"),
+        ).not.toBeNull();
+      });
+      expect(
+        exhaustedPaused.container.querySelector(".ohb-structured-error")
+          ?.textContent,
+      ).toMatch(/budget|turn|duration|time/iu);
+    } finally {
+      await exhaustedPaused.dispose();
     }
   });
 });

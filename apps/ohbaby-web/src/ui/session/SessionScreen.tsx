@@ -1002,9 +1002,7 @@ export function SessionScreen({
                   ? `Waiting for subagents  ${String(subagentState.list.completedCount)} done  ${String(subagentState.list.activeCount)} open`
                   : undefined
               }
-              activeGoal={view.activeGoal}
               header={view.header}
-              onOpenGoalPanel={openGoalPanel}
               sessionId={view.activeSession?.id ?? null}
             />
             <ErrorBanner
@@ -1109,7 +1107,6 @@ export function SessionScreen({
               onDismiss={clearActionError}
             />
             <EmptyState
-              onOpenGoalPanel={openGoalPanel}
               status={view.header}
               view={view}
               workspaceDirectory={workspace.selectedDirectory}
@@ -1151,6 +1148,9 @@ export function SessionScreen({
                 viewingSubagent ||
                 approvalDialogVisible,
             }}
+            activeGoal={view.activeGoal}
+            onExecuteGoalCommand={(input) => runtime.executeSlashCommand(input)}
+            onOpenGoalPanel={openGoalPanel}
             activeSession={view.activeSession}
             queuedPrompts={view.queuedPrompts}
             unconsumedSteers={getUnconsumedSteers(view.activeSession)}

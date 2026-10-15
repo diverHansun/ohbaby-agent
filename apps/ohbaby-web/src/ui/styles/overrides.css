@@ -84,6 +84,17 @@
     max-width: none;
   }
 
+  .ohb-prompt-queue:has(+ .ohb-goal-strip) {
+    max-width: none;
+    width: calc(100% - 8px);
+  }
+
+  .ohb-goal-strip {
+    max-width: none;
+    padding: 5px 7px 11px 10px;
+    width: calc(100% - 8px);
+  }
+
   .ohb-slash-completion {
     display: none;
   }
@@ -251,5 +262,11 @@
   }
   .ohb-stop-pending {
     animation: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .ohb-goal-strip-meta {
+    display: none;
   }
 }

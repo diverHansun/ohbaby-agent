@@ -41,3 +41,43 @@ it("uses the existing status slot for a short Waiting label and keeps counts in 
     container.remove();
   }
 });
+
+it("keeps the context usage ring in the header while omitting any goal chip from header and empty state", () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    act(() => {
+      root.render(
+        <StatusBar
+          activeGoal={{
+            objective: "Ship minimal goal strip",
+            status: "active",
+            turnsUsed: 3,
+            wallClockMs: 24_000,
+          }}
+          onOpenGoalPanel={() => undefined}
+          sessionId="session_1"
+          header={{
+            connectionKind: "idle",
+            statusLabel: "idle",
+            modelLabel: "gpt-5",
+            contextLabel: "12k / 128k",
+            contextRatio: 0.1,
+            contextWindowUsage: null,
+          }}
+        />,
+      );
+    });
+    expect(
+      container.querySelector(".ohb-context-usage-control"),
+    ).not.toBeNull();
+    expect(container.querySelector(".ohb-goal-chip")).toBeNull();
+    expect(container.textContent).not.toContain("goal active");
+  } finally {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  }
+});

@@ -3,6 +3,7 @@ import { SteerButton } from "./SteerButton.js";
 import { LoaderCircle, Pencil, Send, Square, Trash2 } from "lucide-react";
 import type {
   UiBackendClient,
+  UiGoal,
   UiPermissionLevel,
   UiPermissionMode,
   UiPromptSubmission,
@@ -25,6 +26,11 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  type ExecuteGoalCommand,
+  GoalComposerStrip,
+  type GoalPanelIntent,
+} from "../commands/GoalControl.js";
 import {
   createSlashPaletteItems,
   selectedSlashItem,
@@ -107,6 +113,9 @@ export function Composer(props: {
   readonly prefill?: ComposerPrefill | null;
   readonly onEditRevision: (revision: number) => void;
   readonly model: ComposerModel;
+  readonly activeGoal?: UiGoal | null;
+  readonly onExecuteGoalCommand?: ExecuteGoalCommand;
+  readonly onOpenGoalPanel?: (intent?: GoalPanelIntent) => void;
   readonly activeSession: UiSession | null;
   readonly queuedPrompts: readonly UiPromptSubmission[];
   readonly commandCatalogVersion: string | null;
@@ -1121,6 +1130,20 @@ export function Composer(props: {
             </div>
           </section>
         ) : null}
+        <GoalComposerStrip
+          disabled={
+            Boolean(props.readOnly) ||
+            props.model.disabled ||
+            !props.model.canSend ||
+            props.isPromptAdmitting ||
+            isSubmitting
+          }
+          goal={props.activeGoal ?? null}
+          onExecuteSlashCommand={props.onExecuteGoalCommand}
+          onOpenGoalPanel={props.onOpenGoalPanel}
+          scopeKey={props.draftScopeKey}
+          sessionId={props.model.activeSessionId ?? props.activeSession?.id}
+        />
         <div
           className={`ohb-composer-input${props.model.mode === "plan" ? " is-plan" : ""}`}
           ref={composerInputRef}

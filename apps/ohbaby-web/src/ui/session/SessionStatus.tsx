@@ -1,14 +1,11 @@
 import type { ReactElement } from "react";
-import {
-  type GoalPanelIntent,
-  GoalStatusChip,
-} from "../commands/GoalControl.js";
+import { type GoalPanelIntent } from "../commands/GoalControl.js";
 import { ContextUsageControl } from "../shared/ContextUsage.js";
 import { compactHomePath, workspaceLabel } from "../workspace/ProjectRail.js";
 import { type HeaderModel, type ViewModel } from "./selectors.js";
 
 export function EmptyState(props: {
-  readonly onOpenGoalPanel: (intent?: GoalPanelIntent) => void;
+  readonly onOpenGoalPanel?: (intent?: GoalPanelIntent) => void;
   readonly status: HeaderModel;
   readonly view: ViewModel;
   readonly workspaceDirectory: string | null;
@@ -32,10 +29,6 @@ export function EmptyState(props: {
           kind={props.status.connectionKind}
           label={props.status.statusLabel}
         />
-        <GoalStatusChip
-          goal={props.view.activeGoal}
-          onOpen={props.onOpenGoalPanel}
-        />
       </div>
       <section className="ohb-empty-hero">
         <div className="ohb-wordmark" aria-label="ohbaby">
@@ -56,9 +49,9 @@ export function EmptyState(props: {
 export function StatusBar(props: {
   readonly onOpenContextUsage?: () => void;
   readonly waitingSummary?: string;
-  readonly activeGoal: ViewModel["activeGoal"];
+  readonly activeGoal?: ViewModel["activeGoal"];
   readonly header: HeaderModel;
-  readonly onOpenGoalPanel: (intent?: GoalPanelIntent) => void;
+  readonly onOpenGoalPanel?: (intent?: GoalPanelIntent) => void;
   readonly sessionId: string | null;
 }): ReactElement {
   return (
@@ -87,10 +80,6 @@ export function StatusBar(props: {
           onOpen={props.onOpenContextUsage}
           sessionId={props.sessionId}
           usage={props.header.contextWindowUsage}
-        />
-        <GoalStatusChip
-          goal={props.activeGoal}
-          onOpen={props.onOpenGoalPanel}
         />
       </div>
     </header>

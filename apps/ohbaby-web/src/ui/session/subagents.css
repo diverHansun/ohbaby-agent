@@ -216,6 +216,7 @@
 }
 .ohb-composer-readonly-label {
   position: absolute;
+  z-index: 3;
   inset: 16px 24px 11px;
   display: flex;
   align-items: center;
