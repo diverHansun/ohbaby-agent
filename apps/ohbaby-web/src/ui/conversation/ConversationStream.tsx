@@ -17,7 +17,11 @@ import type {
 } from "ohbaby-sdk";
 import type { ReactNode } from "react";
 import type { ReasoningViewState } from "../../api/daemon/wire.js";
-import { ModelWaiting, PromptDuration } from "./ExecutionProgress.js";
+import {
+  Compacting,
+  ModelWaiting,
+  PromptDuration,
+} from "./ExecutionProgress.js";
 import { filterTodoToolMessages, MessageRow } from "./MessageRow.js";
 import { projectRunProcesses, type RunProcess } from "./run-process.js";
 import { isNearBottom, scrollToBottom } from "./streamScroll.js";
@@ -61,6 +65,8 @@ export function ConversationStream(props: {
     Partial<Record<string, ReasoningViewState>>
   >;
   readonly commandNotices: ReactNode;
+  readonly compacting?: boolean;
+  readonly compactNotice?: string;
 }): ReactElement {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const streamInnerRef = useRef<HTMLDivElement | null>(null);
@@ -369,6 +375,8 @@ export function ConversationStream(props: {
     props.promptRows.map((row) => `${row.id}:${row.label ?? ""}`).join(","),
     props.startupThinkingAt,
     props.isRunning,
+    props.compacting,
+    props.compactNotice,
     scheduleStickScroll,
   ]);
 
@@ -545,6 +553,12 @@ export function ConversationStream(props: {
           .map(renderDuration)}
         {props.commandNotices}
         {props.isRunning ? <ModelWaiting run={props.activeRun} /> : null}
+        {props.compacting ? <Compacting /> : null}
+        {props.compactNotice ? (
+          <div className="ohb-compact-notice" role="status">
+            {props.compactNotice}
+          </div>
+        ) : null}
       </div>
     </section>
   );

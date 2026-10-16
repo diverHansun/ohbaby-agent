@@ -37,6 +37,24 @@ export function ModelWaiting({
   );
 }
 
+/** Same three dots as Thinking, squeezed together vertically while history compacts. */
+export function Compacting(): ReactElement {
+  return (
+    <div
+      className="ohb-thinking ohb-compacting"
+      role="status"
+      aria-label="Compacting"
+    >
+      <span aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+      <span>Compacting</span>
+    </div>
+  );
+}
+
 export function PromptDuration({
   prompt,
   disclosure,

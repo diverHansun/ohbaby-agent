@@ -28,6 +28,36 @@
   animation-delay: 0.3s;
 }
 
+/* Compacting stacks the dots in a column and presses them toward the middle one. */
+.ohb-compacting > span:first-child {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ohb-compacting > span:first-child span {
+  animation: ohb-squeeze-middle 1.4s ease-in-out infinite;
+  height: 5px;
+  width: 10px;
+}
+
+.ohb-compacting > span:first-child span:nth-child(1) {
+  animation-name: ohb-squeeze-top;
+}
+
+.ohb-compacting > span:first-child span:nth-child(2) {
+  animation-delay: 0s;
+}
+
+.ohb-compacting > span:first-child span:nth-child(3) {
+  animation-delay: 0s;
+  animation-name: ohb-squeeze-bottom;
+}
+
+.ohb-compact-notice {
+  color: #727782;
+  font-size: 13px;
+}
+
 .ohb-thinking > span:nth-child(3),
 .ohb-thinking > span:nth-child(4) {
   color: #aeb2ba;

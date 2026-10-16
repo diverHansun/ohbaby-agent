@@ -3862,6 +3862,20 @@ describe("OhbabyWebApp slash command interactions", () => {
     await waitFor(() =>
       Boolean(app.container.querySelector(".ohb-structured-overlay")),
     );
+    let complete!: () => void;
+    fake.compactSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = (): void => {
+            resolve({
+              sessionId: "session_1",
+              status: "compacted",
+              usageAfter: compactUsage(8_000),
+              usageBefore: compactUsage(16_000),
+            });
+          };
+        }),
+    );
     await clickButton(app.container, "Compact session");
 
     expect(fake.compactSession).toHaveBeenCalledWith({
@@ -3869,6 +3883,15 @@ describe("OhbabyWebApp slash command interactions", () => {
       signal: expect.any(AbortSignal) as AbortSignal,
     });
     expect(fake.executeSlashCommand).not.toHaveBeenCalled();
+    // The overlay steps aside; progress lives in the conversation.
+    expect(app.container.querySelector(".ohb-structured-overlay")).toBeNull();
+    expect(
+      app.container.querySelector('[aria-label="Compacting"]'),
+    ).not.toBeNull();
+    complete();
+    await waitFor(
+      () => !app.container.querySelector('[aria-label="Compacting"]'),
+    );
   });
 
   it("opens the structured goal overlay from the slash palette", async () => {
@@ -4482,7 +4505,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(app.container.querySelector(".ohb-goal-chip")).toBeNull();
   });
 
-  it("shows compact failures as overlay errors", async () => {
+  it("shows compact failures in the error banner", async () => {
     const fake = createFakeRuntime({
       snapshot: snapshotWithStatus({ kind: "idle" }),
     });
@@ -4505,12 +4528,11 @@ describe("OhbabyWebApp slash command interactions", () => {
     await clickButton(app.container, "Compact session");
 
     await waitFor(() =>
-      Boolean(app.container.querySelector(".ohb-structured-error")),
+      Boolean(app.container.querySelector(".ohb-error-banner")),
     );
     expect(
-      app.container.querySelector(".ohb-structured-error")?.textContent,
-    ).toContain("summary failed");
-    expect(app.container.querySelector(".ohb-structured-success")).toBeNull();
+      app.container.querySelector(".ohb-error-banner")?.textContent,
+    ).toContain("Compaction failed: summary failed");
   });
 });
 
