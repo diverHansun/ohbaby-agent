@@ -52,7 +52,9 @@ async function runGoalCommand(
     return;
   }
   if (head === "resume") {
-    const limits = parseGoalResumeBudget(argv.slice(1).join(" "));
+    const limits = parseGoalResumeBudget(
+      [argv.slice(1).join(" "), invocation.body ?? ""].join("\n"),
+    );
     emitText(statusText(await goals.resume(sessionId, limits)));
     return;
   }

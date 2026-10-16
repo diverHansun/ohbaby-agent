@@ -270,6 +270,8 @@ describe("goal resume through the rendered app, real Web runtime and command bac
     ["/goal resume 3h 100 turns", 100, 10800000],
     ["/goal resume 100 turns", 100, 7200000],
     ["/goal resume 3h", 30, 10800000],
+    ["/goal resume 100 turns\n3h", 100, 10800000],
+    ["/goal resume\n3h 100 turns", 100, 10800000],
   ] as const)(
     "submits %s intact and preserves unspecified budgets and usage",
     async (text, turnBudget, wallClockBudgetMs) => {
@@ -307,29 +309,36 @@ describe("goal resume through the rendered app, real Web runtime and command bac
     },
   );
 
-  it("passes invalid trailing arguments to the backend without changing any goal record", async () => {
-    const f = await fixture();
-    try {
-      const before = await f.persistence.list("session_1");
-      await submit(f.container, "/goal resume 100 turns extra");
-      await waitFor(() => {
-        expect(f.commands).toHaveLength(1);
-      });
-      await waitFor(() => {
-        expect(
-          f.container.querySelector(".ohb-error-banner[role=alert]")
-            ?.textContent,
-        ).toContain("Invalid resume budget");
-      });
-      expect(await f.persistence.list("session_1")).toEqual(before);
-      expect(f.container.querySelector(".ohb-structured-overlay")).toBeNull();
-      expect(f.commands[0]).toMatchObject({
-        raw: "/goal resume 100 turns extra",
-      });
-    } finally {
-      await f.dispose();
-    }
-  });
+  it.each([
+    "/goal resume 100 turns extra",
+    "/goal resume 100 turns\nextra",
+    "/goal resume\n100 turns extra",
+  ])(
+    "rejects the complete invalid command without changing any goal record: %j",
+    async (text) => {
+      const f = await fixture();
+      try {
+        const before = await f.persistence.list("session_1");
+        await submit(f.container, text);
+        await waitFor(() => {
+          expect(f.commands).toHaveLength(1);
+        });
+        await waitFor(() => {
+          expect(
+            f.container.querySelector(".ohb-error-banner[role=alert]")
+              ?.textContent,
+          ).toContain("Invalid resume budget");
+        });
+        expect(await f.persistence.list("session_1")).toEqual(before);
+        expect(f.container.querySelector(".ohb-structured-overlay")).toBeNull();
+        expect(f.commands[0]).toMatchObject({
+          raw: text,
+        });
+      } finally {
+        await f.dispose();
+      }
+    },
+  );
 
   it.each(["paused", "blocked"] as const)(
     "opens no-argument resume for %s and resumes with blank optional fields",

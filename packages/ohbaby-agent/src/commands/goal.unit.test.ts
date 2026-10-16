@@ -246,6 +246,83 @@ describe("/goal command handler", () => {
 
 describe("/goal resume limits", () => {
   it.each([
+    "/goal resume 100 turns\n3h",
+    "/goal resume\n3h 100 turns",
+    "/goal resume 3h\r\n100 turns",
+  ])("applies both limits from the complete parsed command %j", async (raw) => {
+    const persistence = new InMemoryGoalPersistence();
+    const service = new GoalService({
+      persistence,
+      executionControl: {
+        interruptGoalExecution: (): Promise<void> => Promise.resolve(),
+      },
+    });
+    try {
+      await service.createGoal("s1", {
+        actor: "user",
+        objective: "Finish acceptance",
+      });
+      await service.pauseGoal("s1");
+      const backend = makeBackend({
+        resume: (sessionId, limits) => service.resumeGoal(sessionId, limits),
+      });
+      const { context, failures } = makeContext();
+      await createGoalCommandHandler({ goals: backend }).execute(
+        parsedInvocation(raw),
+        context,
+      );
+      expect(failures).toEqual([]);
+      expect(await service.getSnapshot("s1")).toMatchObject({
+        status: "active",
+        budgetLimits: { turnBudget: 100, wallClockBudgetMs: 10_800_000 },
+      });
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it.each([
+    "/goal resume 100 turns\nextra",
+    "/goal resume 100 turns\n25h",
+    "/goal resume 100 turns\n30 turns",
+    "/goal resume\n3h extra",
+  ])(
+    "rejects invalid multiline limits without persistence changes: %j",
+    async (raw) => {
+      const persistence = new InMemoryGoalPersistence();
+      const service = new GoalService({
+        persistence,
+        executionControl: {
+          interruptGoalExecution: (): Promise<void> => Promise.resolve(),
+        },
+      });
+      try {
+        await service.createGoal("s1", {
+          actor: "user",
+          objective: "Finish acceptance",
+        });
+        await service.pauseGoal("s1");
+        const before = await persistence.list("s1");
+        const backend = makeBackend({
+          resume: (sessionId, limits) => service.resumeGoal(sessionId, limits),
+        });
+        const { context, failures, outputs } = makeContext();
+        await createGoalCommandHandler({ goals: backend }).execute(
+          parsedInvocation(raw),
+          context,
+        );
+        expect(failures).toEqual([
+          expect.objectContaining({ code: "invalid_budget" }),
+        ]);
+        expect(outputs).toEqual([]);
+        expect(await persistence.list("s1")).toEqual(before);
+      } finally {
+        service.dispose();
+      }
+    },
+  );
+
+  it.each([
     [[], {}],
     [["100", "turns"], { turnBudget: 100 }],
     [["3h"], { wallClockBudgetMs: 10_800_000 }],

@@ -522,7 +522,11 @@ export function SessionScreen({
       if (!kind) {
         return false;
       }
-      if (kind === "goal" && /^resume\s+\S/u.test(resolved.rawArgs.trim())) {
+      if (
+        kind === "goal" &&
+        resolved.argv[0] === "resume" &&
+        (resolved.argv.length > 1 || resolved.body.trim().length > 0)
+      ) {
         return "goal-resume-with-arguments";
       }
       setStructuredOverlay({
