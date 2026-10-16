@@ -40,6 +40,60 @@ function stream(frames: unknown[]): { wire: string; response: Response } {
 }
 
 describe("formal backend passive cache observer", () => {
+  it("observes an explicitly selected endpoint without changing the request or retaining its contents", async () => {
+    const endpoint = "https://api.deepseek.com/responses";
+    const response = stream([
+      { type: "response.completed", response: { usage: { input_tokens: 42 } } },
+    ]).response;
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(response);
+    globalThis.fetch = transport;
+    const onRequest = vi.fn();
+    const observer = installFormalCacheObserver({
+      generationEndpoint: { url: endpoint, protocol: "openai-responses" },
+      onRequest,
+    });
+    const body = { input: [{ role: "user", content: "private fixture" }] };
+    const init = {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { Authorization: "private credential" },
+    };
+    expect(await fetch(endpoint, init)).toBe(response);
+    await observer.drain();
+    expect(transport).toHaveBeenCalledWith(endpoint, init);
+    expect(onRequest).toHaveBeenCalledWith(body, generations(observer)[0]);
+    expect(generations(observer)[0]).toMatchObject({
+      protocol: "openai-responses",
+      finalUsage: { input_tokens: 42 },
+    });
+    expect(JSON.stringify(observer.records)).not.toContain("private");
+    observer.restore();
+  });
+
+  it("limits custom observation to the exact HTTPS POST endpoint", async () => {
+    const endpoint = "https://api.deepseek.com/responses";
+    const transport = vi.fn<typeof fetch>();
+    globalThis.fetch = transport;
+    const observer = installFormalCacheObserver({
+      generationEndpoint: { url: endpoint, protocol: "openai-responses" },
+    });
+    for (const candidate of [
+      endpoint + "?other=1",
+      endpoint + "/other",
+      "http://api.deepseek.com/responses",
+      "https://api.deepseek.com:8443/responses",
+      "https://user@api.deepseek.com/responses",
+      url,
+    ]) {
+      await expect(fetch(candidate, { method: "POST" })).rejects.toThrow(
+        "NETWORK_DENIED",
+      );
+    }
+    await expect(fetch(endpoint)).rejects.toThrow("NETWORK_DENIED");
+    expect(transport).not.toHaveBeenCalled();
+    observer.restore();
+  });
+
   it("native replay requires actual expected hashes and distinguishes an unexercised branch", () => {
     expect(auditFormalNativeReplay(["one"], [])).toMatchObject({
       exercised: true,

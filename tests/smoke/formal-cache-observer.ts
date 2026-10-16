@@ -340,6 +340,16 @@ export function installFormalCacheObserver(
   options: {
     maxRequests?: number;
     context?: () => { purpose?: string; id?: number } | undefined;
+    /** An exact opt-in endpoint for non-ZenMux protocol acceptance tests. */
+    generationEndpoint?: {
+      url: string;
+      protocol: FormalCacheGenerationEvidence["protocol"];
+    };
+    /** Inspect synthetic fixture markers in memory; do not persist request bodies. */
+    onRequest?: (
+      body: JsonRecord,
+      evidence: FormalCacheGenerationEvidence,
+    ) => void;
   } = {},
 ): {
   records: FormalCacheRequestEvidence[];
@@ -361,8 +371,14 @@ export function installFormalCacheObserver(
     const metadata =
       method === "GET" &&
       ["/api/v1/models", "/api/anthropic/v1/models"].includes(url.pathname);
-    const protocol =
-      url.pathname === "/api/v1/chat/completions"
+    const selectedEndpoint = options.generationEndpoint;
+    const selectedMatch =
+      selectedEndpoint?.url === url.href && method === "POST";
+    const protocol = selectedEndpoint
+      ? selectedMatch
+        ? selectedEndpoint.protocol
+        : undefined
+      : url.pathname === "/api/v1/chat/completions"
         ? "openai-compatible"
         : url.pathname === "/api/v1/responses"
           ? "openai-responses"
@@ -371,7 +387,7 @@ export function installFormalCacheObserver(
             : undefined;
     if (
       url.protocol !== "https:" ||
-      url.hostname !== "zenmux.ai" ||
+      (selectedEndpoint ? !selectedMatch : url.hostname !== "zenmux.ai") ||
       url.port ||
       url.username ||
       url.password ||
@@ -426,8 +442,10 @@ export function installFormalCacheObserver(
               ? await input.clone().text()
               : undefined;
         const body = raw === undefined ? undefined : record(JSON.parse(raw));
-        if (body) Object.assign(evidence, requestEvidence(body));
-        else evidence.captureError = "request_body";
+        if (body) {
+          Object.assign(evidence, requestEvidence(body));
+          options.onRequest?.(body, evidence);
+        } else evidence.captureError = "request_body";
       } catch {
         evidence.captureError = "request_body";
       }
