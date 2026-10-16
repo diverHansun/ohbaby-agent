@@ -1,0 +1,3095 @@
+{
+  "fixture": "900 synthetic repetitive observations; retain AMBER-731; identical question before/after/reopen",
+  "entry": "createPersistentUiBackendClient.submitPromptAndWait",
+  "contextWindowTokens": 128000,
+  "contextWindowSource": "test configuration (not model limit verification)",
+  "maxOutputTokens": 4096,
+  "rows": [
+    {
+      "profile": "aliyun-qwen-anthropic",
+      "model": "qwen3.8-flash",
+      "protocol": "anthropic",
+      "recordedAt": "2026-10-16T03:47:31.348Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 142415,
+          "providerInputTokens": 43756
+        },
+        "after": {
+          "wireInputBytes": 2303,
+          "providerInputTokens": 9841
+        },
+        "reopened": {
+          "wireInputBytes": 2768,
+          "providerInputTokens": 10012
+        },
+        "estimatedBefore": 44187,
+        "estimatedAfter": 10060
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1277,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 0
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "f4c1c82002c81b0373b09e64bcf8ad161d99483e822718af0c555fa910a9d06f",
+            "bytes": 142415
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 42951,
+              "output_tokens": 0
+            },
+            {
+              "input_tokens": 748,
+              "output_tokens": 6,
+              "cache_read_input_tokens": 43008,
+              "cache_creation_input_tokens": 0,
+              "prompt_tokens_details": {
+                "cached_tokens": 43008
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 748,
+            "output_tokens": 6,
+            "cache_read_input_tokens": 43008,
+            "cache_creation_input_tokens": 0,
+            "prompt_tokens_details": {
+              "cached_tokens": 43008
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 43008,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 748
+            },
+            "inputTokens": 43756,
+            "outputTokens": 6,
+            "totalTokens": 43762
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "ea8e87b44d97484eae44d40098bf879799c819c81156b10000365a1e5885cd40",
+            "bytes": 2303
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 9023,
+              "output_tokens": 0
+            },
+            {
+              "input_tokens": 1649,
+              "output_tokens": 6,
+              "cache_read_input_tokens": 8192,
+              "cache_creation_input_tokens": 0,
+              "prompt_tokens_details": {
+                "cached_tokens": 8192
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 1649,
+            "output_tokens": 6,
+            "cache_read_input_tokens": 8192,
+            "cache_creation_input_tokens": 0,
+            "prompt_tokens_details": {
+              "cached_tokens": 8192
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 8192,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 1649
+            },
+            "inputTokens": 9841,
+            "outputTokens": 6,
+            "totalTokens": 9847
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "53dc18224ce04a52b88e88dcf12de7feaa5ae9f010074add5ad84a29c79a07f9",
+            "bytes": 2768
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 9180,
+              "output_tokens": 0
+            },
+            {
+              "input_tokens": 796,
+              "output_tokens": 6,
+              "cache_read_input_tokens": 9216,
+              "cache_creation_input_tokens": 0,
+              "prompt_tokens_details": {
+                "cached_tokens": 9216
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 796,
+            "output_tokens": 6,
+            "cache_read_input_tokens": 9216,
+            "cache_creation_input_tokens": 0,
+            "prompt_tokens_details": {
+              "cached_tokens": 9216
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 9216,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 796
+            },
+            "inputTokens": 10012,
+            "outputTokens": 6,
+            "totalTokens": 10018
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "aliyun-qwen-openai-compatible",
+      "model": "qwen3.8-flash",
+      "protocol": "openai-compatible",
+      "recordedAt": "2026-10-16T03:47:13.623Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 160313,
+          "providerInputTokens": 43762
+        },
+        "after": {
+          "wireInputBytes": 21478,
+          "providerInputTokens": 10121
+        },
+        "reopened": {
+          "wireInputBytes": 21943,
+          "providerInputTokens": 10292
+        },
+        "estimatedBefore": 44192,
+        "estimatedAfter": 10374
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 2533,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 0
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "5e32d4f1c4ee4a94d38cc1a431acc36bdf7d95ee43038794d889d686e7d7f7d7",
+            "bytes": 160313
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 43768,
+              "prompt_tokens": 43762,
+              "completion_tokens": 6,
+              "prompt_tokens_details": {
+                "cached_tokens": 43008
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 43768,
+            "prompt_tokens": 43762,
+            "completion_tokens": 6,
+            "prompt_tokens_details": {
+              "cached_tokens": 43008
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 43008,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 754
+            },
+            "inputTokens": 43762,
+            "outputTokens": 6,
+            "totalTokens": 43768
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "d5f25bb2c301e94e72d876859d9d2b2c51214a45c5dd5b4eb8c9cbc7cbb6b415",
+            "bytes": 21478
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 10127,
+              "prompt_tokens": 10121,
+              "completion_tokens": 6,
+              "prompt_tokens_details": {
+                "cached_tokens": 8192
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 10127,
+            "prompt_tokens": 10121,
+            "completion_tokens": 6,
+            "prompt_tokens_details": {
+              "cached_tokens": 8192
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 8192,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 1929
+            },
+            "inputTokens": 10121,
+            "outputTokens": 6,
+            "totalTokens": 10127
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "e6e365f26a63fd2a606e97f6e1d20be0a124b2bffa30a250511cdbd5519e13ec",
+            "bytes": 21943
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 10298,
+              "prompt_tokens": 10292,
+              "completion_tokens": 6,
+              "prompt_tokens_details": {
+                "cached_tokens": 9216
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 10298,
+            "prompt_tokens": 10292,
+            "completion_tokens": 6,
+            "prompt_tokens_details": {
+              "cached_tokens": 9216
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 9216,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 1076
+            },
+            "inputTokens": 10292,
+            "outputTokens": 6,
+            "totalTokens": 10298
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "deepseek-flash-anthropic",
+      "model": "deepseek-flash",
+      "protocol": "anthropic",
+      "recordedAt": "2026-10-16T03:48:04.283Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 142415,
+          "providerInputTokens": 41661
+        },
+        "after": {
+          "wireInputBytes": 2625,
+          "providerInputTokens": 9574
+        },
+        "reopened": {
+          "wireInputBytes": 3090,
+          "providerInputTokens": 9717
+        },
+        "estimatedBefore": 42620,
+        "estimatedAfter": 9778
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1598,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 0
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "3b4b0a9fd63604426da01b0dd136200177e8d56744628f1a18a2b9d1bbc21535",
+            "bytes": 142415
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 189,
+              "output_tokens": 0,
+              "cache_read_input_tokens": 41472,
+              "cache_creation_input_tokens": 0
+            },
+            {
+              "input_tokens": 189,
+              "output_tokens": 4,
+              "cache_read_input_tokens": 41472,
+              "cache_creation_input_tokens": 0
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 189,
+            "output_tokens": 4,
+            "cache_read_input_tokens": 41472,
+            "cache_creation_input_tokens": 0
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 41472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 189
+            },
+            "inputTokens": 41661,
+            "outputTokens": 4,
+            "totalTokens": 41665
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "e270cff22054e60de9cd251d8eeb703d406e4aa2a6ff74b5f623b3daf573ae7b",
+            "bytes": 2625
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 870,
+              "output_tokens": 0,
+              "cache_read_input_tokens": 8704,
+              "cache_creation_input_tokens": 0
+            },
+            {
+              "input_tokens": 870,
+              "output_tokens": 4,
+              "cache_read_input_tokens": 8704,
+              "cache_creation_input_tokens": 0
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 870,
+            "output_tokens": 4,
+            "cache_read_input_tokens": 8704,
+            "cache_creation_input_tokens": 0
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 8704,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 870
+            },
+            "inputTokens": 9574,
+            "outputTokens": 4,
+            "totalTokens": 9578
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "adb97c3dcbe01ec5f6bd892b58f1b33d2cb885aafbf6ca964e6bee0f62682f81",
+            "bytes": 3090
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 245,
+              "output_tokens": 0,
+              "cache_read_input_tokens": 9472,
+              "cache_creation_input_tokens": 0
+            },
+            {
+              "input_tokens": 245,
+              "output_tokens": 4,
+              "cache_read_input_tokens": 9472,
+              "cache_creation_input_tokens": 0
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 245,
+            "output_tokens": 4,
+            "cache_read_input_tokens": 9472,
+            "cache_creation_input_tokens": 0
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 9472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 245
+            },
+            "inputTokens": 9717,
+            "outputTokens": 4,
+            "totalTokens": 9721
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "deepseek-flash-openai-compatible",
+      "model": "deepseek-flash",
+      "protocol": "openai-compatible",
+      "recordedAt": "2026-10-16T03:47:52.164Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 160313,
+          "providerInputTokens": 41663
+        },
+        "after": {
+          "wireInputBytes": 20565,
+          "providerInputTokens": 9619
+        },
+        "reopened": {
+          "wireInputBytes": 21030,
+          "providerInputTokens": 9763
+        },
+        "estimatedBefore": 42622,
+        "estimatedAfter": 9789
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1638,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 0
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "3f102a16744bd170acb5a89ce6e3476f896fbfa99f64ae05698544e92f7f46f6",
+            "bytes": 160313
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 41667,
+              "prompt_tokens": 41663,
+              "completion_tokens": 4,
+              "prompt_cache_hit_tokens": 41472,
+              "prompt_cache_miss_tokens": 191,
+              "prompt_tokens_details": {
+                "cached_tokens": 41472
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 41667,
+            "prompt_tokens": 41663,
+            "completion_tokens": 4,
+            "prompt_cache_hit_tokens": 41472,
+            "prompt_cache_miss_tokens": 191,
+            "prompt_tokens_details": {
+              "cached_tokens": 41472
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 41472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 191
+            },
+            "inputTokens": 41663,
+            "outputTokens": 4,
+            "totalTokens": 41667
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "c7bdde4e67f3b164fd8512d3935dfa19985bd93bf7c9326647b7a655b7f3d23a",
+            "bytes": 20565
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 9623,
+              "prompt_tokens": 9619,
+              "completion_tokens": 4,
+              "prompt_cache_hit_tokens": 8704,
+              "prompt_cache_miss_tokens": 915,
+              "prompt_tokens_details": {
+                "cached_tokens": 8704
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 9623,
+            "prompt_tokens": 9619,
+            "completion_tokens": 4,
+            "prompt_cache_hit_tokens": 8704,
+            "prompt_cache_miss_tokens": 915,
+            "prompt_tokens_details": {
+              "cached_tokens": 8704
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 8704,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 915
+            },
+            "inputTokens": 9619,
+            "outputTokens": 4,
+            "totalTokens": 9623
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "a51bd2202c22e26f630fab33570af00cbab0cfe2850dbd5e51bdb1de78bc675e",
+            "bytes": 21030
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 9767,
+              "prompt_tokens": 9763,
+              "completion_tokens": 4,
+              "prompt_cache_hit_tokens": 9600,
+              "prompt_cache_miss_tokens": 163,
+              "prompt_tokens_details": {
+                "cached_tokens": 9600
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 9767,
+            "prompt_tokens": 9763,
+            "completion_tokens": 4,
+            "prompt_cache_hit_tokens": 9600,
+            "prompt_cache_miss_tokens": 163,
+            "prompt_tokens_details": {
+              "cached_tokens": 9600
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 9600,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 163
+            },
+            "inputTokens": 9763,
+            "outputTokens": 4,
+            "totalTokens": 9767
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "deepseek-flash-openai-responses",
+      "model": "deepseek-flash",
+      "protocol": "openai-responses",
+      "recordedAt": "2026-10-16T03:48:02.318Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 142583,
+          "providerInputTokens": 41661
+        },
+        "after": {
+          "wireInputBytes": 2595,
+          "providerInputTokens": 9508
+        },
+        "reopened": {
+          "wireInputBytes": 3228,
+          "providerInputTokens": 9651
+        },
+        "estimatedBefore": 42620,
+        "estimatedAfter": 9693
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1230,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 2
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "eac95a38de3fcb4527fc92ef25cb2c425cfe91d8d6ce07531d3889f130ae8bb4",
+            "bytes": 142583
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 41661,
+              "output_tokens": 4,
+              "total_tokens": 41665,
+              "input_tokens_details": {
+                "cached_tokens": 41472
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 41661,
+            "output_tokens": 4,
+            "total_tokens": 41665,
+            "input_tokens_details": {
+              "cached_tokens": 41472
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 41472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 189
+            },
+            "inputTokens": 41661,
+            "outputTokens": 4,
+            "totalTokens": 41665
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "4fc17654b0cad1ee6bb96e875076b0af0d55a3d04fc210efc780c73110e0b09c",
+            "bytes": 2595
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 9508,
+              "output_tokens": 4,
+              "total_tokens": 9512,
+              "input_tokens_details": {
+                "cached_tokens": 8704
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 9508,
+            "output_tokens": 4,
+            "total_tokens": 9512,
+            "input_tokens_details": {
+              "cached_tokens": 8704
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 8704,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 804
+            },
+            "inputTokens": 9508,
+            "outputTokens": 4,
+            "totalTokens": 9512
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "2cdb4221acd742419cc32ba58f9d314f4ce3fc18b60c1dc3ac6700ec264c7d44",
+            "bytes": 3228
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 9651,
+              "output_tokens": 4,
+              "total_tokens": 9655,
+              "input_tokens_details": {
+                "cached_tokens": 9472
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 9651,
+            "output_tokens": 4,
+            "total_tokens": 9655,
+            "input_tokens_details": {
+              "cached_tokens": 9472
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 9472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 179
+            },
+            "inputTokens": 9651,
+            "outputTokens": 4,
+            "totalTokens": 9655
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "deepseek-pro-anthropic",
+      "model": "deepseek-v4-pro",
+      "protocol": "anthropic",
+      "recordedAt": "2026-10-16T03:48:30.431Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 142415,
+          "providerInputTokens": 41672
+        },
+        "after": {
+          "wireInputBytes": 2203,
+          "providerInputTokens": 9485
+        },
+        "reopened": {
+          "wireInputBytes": 2668,
+          "providerInputTokens": 9629
+        },
+        "estimatedBefore": 42628,
+        "estimatedAfter": 9681
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1184,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 0
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "66efbe3a3e6dd0471dfbb3a650d765d54d05259137210bd16dec9d8357be71b7",
+            "bytes": 142415
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 200,
+              "output_tokens": 0,
+              "cache_read_input_tokens": 41472,
+              "cache_creation_input_tokens": 0
+            },
+            {
+              "input_tokens": 200,
+              "output_tokens": 4,
+              "cache_read_input_tokens": 41472,
+              "cache_creation_input_tokens": 0
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 200,
+            "output_tokens": 4,
+            "cache_read_input_tokens": 41472,
+            "cache_creation_input_tokens": 0
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 41472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 200
+            },
+            "inputTokens": 41672,
+            "outputTokens": 4,
+            "totalTokens": 41676
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "c479fb94183237ace2bedc71e0fe8d514253006a98690ccd8d5c009e53be5536",
+            "bytes": 2203
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 653,
+              "output_tokens": 0,
+              "cache_read_input_tokens": 8832,
+              "cache_creation_input_tokens": 0
+            },
+            {
+              "input_tokens": 653,
+              "output_tokens": 4,
+              "cache_read_input_tokens": 8832,
+              "cache_creation_input_tokens": 0
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 653,
+            "output_tokens": 4,
+            "cache_read_input_tokens": 8832,
+            "cache_creation_input_tokens": 0
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 8832,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 653
+            },
+            "inputTokens": 9485,
+            "outputTokens": 4,
+            "totalTokens": 9489
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "238818006bb3347da0e3c41097737bd6692e0598e08408db1a3a0a3f40d56c5b",
+            "bytes": 2668
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 157,
+              "output_tokens": 0,
+              "cache_read_input_tokens": 9472,
+              "cache_creation_input_tokens": 0
+            },
+            {
+              "input_tokens": 157,
+              "output_tokens": 4,
+              "cache_read_input_tokens": 9472,
+              "cache_creation_input_tokens": 0
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 157,
+            "output_tokens": 4,
+            "cache_read_input_tokens": 9472,
+            "cache_creation_input_tokens": 0
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 9472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 157
+            },
+            "inputTokens": 9629,
+            "outputTokens": 4,
+            "totalTokens": 9633
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "deepseek-pro-openai-compatible",
+      "model": "deepseek-v4-pro",
+      "protocol": "openai-compatible",
+      "recordedAt": "2026-10-16T03:48:13.824Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 160313,
+          "providerInputTokens": 41672
+        },
+        "after": {
+          "wireInputBytes": 19830,
+          "providerInputTokens": 9450
+        },
+        "reopened": {
+          "wireInputBytes": 20295,
+          "providerInputTokens": 9594
+        },
+        "estimatedBefore": 42628,
+        "estimatedAfter": 9618
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 903,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 0
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "2af59dcb66df60cee4187d51a5a1dadaf0a0d00fa7e296e5d14d4c4dc05e4271",
+            "bytes": 160313
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 41676,
+              "prompt_tokens": 41672,
+              "completion_tokens": 4,
+              "prompt_cache_hit_tokens": 41472,
+              "prompt_cache_miss_tokens": 200,
+              "prompt_tokens_details": {
+                "cached_tokens": 41472
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 41676,
+            "prompt_tokens": 41672,
+            "completion_tokens": 4,
+            "prompt_cache_hit_tokens": 41472,
+            "prompt_cache_miss_tokens": 200,
+            "prompt_tokens_details": {
+              "cached_tokens": 41472
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 41472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 200
+            },
+            "inputTokens": 41672,
+            "outputTokens": 4,
+            "totalTokens": 41676
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "ec0a81e2b374d8d84ff4d4572882340e1fc9eedbd297f1e498b6cdb7b296cd9d",
+            "bytes": 19830
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 9454,
+              "prompt_tokens": 9450,
+              "completion_tokens": 4,
+              "prompt_cache_hit_tokens": 768,
+              "prompt_cache_miss_tokens": 8682,
+              "prompt_tokens_details": {
+                "cached_tokens": 768
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 9454,
+            "prompt_tokens": 9450,
+            "completion_tokens": 4,
+            "prompt_cache_hit_tokens": 768,
+            "prompt_cache_miss_tokens": 8682,
+            "prompt_tokens_details": {
+              "cached_tokens": 768
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 768,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 8682
+            },
+            "inputTokens": 9450,
+            "outputTokens": 4,
+            "totalTokens": 9454
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "e46a81f3c1da4b6896260ce25a7c7c22ccb2407bdf5536f1d57aa7d1bd0b1da5",
+            "bytes": 20295
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 9598,
+              "prompt_tokens": 9594,
+              "completion_tokens": 4,
+              "prompt_cache_hit_tokens": 9344,
+              "prompt_cache_miss_tokens": 250,
+              "prompt_tokens_details": {
+                "cached_tokens": 9344
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 9598,
+            "prompt_tokens": 9594,
+            "completion_tokens": 4,
+            "prompt_cache_hit_tokens": 9344,
+            "prompt_cache_miss_tokens": 250,
+            "prompt_tokens_details": {
+              "cached_tokens": 9344
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 9344,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 250
+            },
+            "inputTokens": 9594,
+            "outputTokens": 4,
+            "totalTokens": 9598
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "deepseek-pro-openai-responses",
+      "model": "deepseek-v4-pro",
+      "protocol": "openai-responses",
+      "recordedAt": "2026-10-16T03:48:15.651Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 142583,
+          "providerInputTokens": 41674
+        },
+        "after": {
+          "wireInputBytes": 2285,
+          "providerInputTokens": 9481
+        },
+        "reopened": {
+          "wireInputBytes": 2918,
+          "providerInputTokens": 9626
+        },
+        "estimatedBefore": 42630,
+        "estimatedAfter": 9720
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 554,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 2
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "8134374a51b042e851e4c4f78ca93b4b61db019d9bdd29cabab858b4206e39fa",
+            "bytes": 142583
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 41674,
+              "output_tokens": 4,
+              "total_tokens": 41678,
+              "input_tokens_details": {
+                "cached_tokens": 41472
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 41674,
+            "output_tokens": 4,
+            "total_tokens": 41678,
+            "input_tokens_details": {
+              "cached_tokens": 41472
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 41472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 202
+            },
+            "inputTokens": 41674,
+            "outputTokens": 4,
+            "totalTokens": 41678
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "8b3b48022e83ff475a20b707035d76dab44889a9a55214465019323f6b2ade43",
+            "bytes": 2285
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 9481,
+              "output_tokens": 4,
+              "total_tokens": 9485,
+              "input_tokens_details": {
+                "cached_tokens": 768
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 9481,
+            "output_tokens": 4,
+            "total_tokens": 9485,
+            "input_tokens_details": {
+              "cached_tokens": 768
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 768,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 8713
+            },
+            "inputTokens": 9481,
+            "outputTokens": 4,
+            "totalTokens": 9485
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "cbe38376f2f16005f2fe6f2ebb6b9cbdb1cc88c72f31cee9b2708dbc91b4283b",
+            "bytes": 2918
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 9626,
+              "output_tokens": 4,
+              "total_tokens": 9630,
+              "input_tokens_details": {
+                "cached_tokens": 9472
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 9626,
+            "output_tokens": 4,
+            "total_tokens": 9630,
+            "input_tokens_details": {
+              "cached_tokens": 9472
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 9472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 154
+            },
+            "inputTokens": 9626,
+            "outputTokens": 4,
+            "totalTokens": 9630
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "zenmux-deepseek-anthropic",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "protocol": "anthropic",
+      "recordedAt": "2026-10-16T03:46:44.688Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 142477,
+          "providerInputTokens": 41661
+        },
+        "after": {
+          "wireInputBytes": 2938,
+          "providerInputTokens": 9637
+        },
+        "reopened": {
+          "wireInputBytes": 3403,
+          "providerInputTokens": 9780
+        },
+        "estimatedBefore": 42620,
+        "estimatedAfter": 9837
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1844,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 0
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "ca7a3ba2dd35fcccc2f500599b3635b2b614037cc16ffeee17a382e3f22bc154",
+            "bytes": 142477
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 189,
+              "output_tokens": 0,
+              "cache_read_input_tokens": 41472,
+              "cache_creation_input_tokens": 0
+            },
+            {
+              "input_tokens": 189,
+              "output_tokens": 4,
+              "cache_read_input_tokens": 41472,
+              "cache_creation_input_tokens": 0
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 189,
+            "output_tokens": 4,
+            "cache_read_input_tokens": 41472,
+            "cache_creation_input_tokens": 0
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 41472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 189
+            },
+            "inputTokens": 41661,
+            "outputTokens": 4,
+            "totalTokens": 41665
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "2c954edab5483685f41a5071435665fe59e7e039dd0a47c2e29777c14b70ce3f",
+            "bytes": 2938
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 933,
+              "output_tokens": 0,
+              "cache_read_input_tokens": 8704,
+              "cache_creation_input_tokens": 0
+            },
+            {
+              "input_tokens": 933,
+              "output_tokens": 4,
+              "cache_read_input_tokens": 8704,
+              "cache_creation_input_tokens": 0
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 933,
+            "output_tokens": 4,
+            "cache_read_input_tokens": 8704,
+            "cache_creation_input_tokens": 0
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 8704,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 933
+            },
+            "inputTokens": 9637,
+            "outputTokens": 4,
+            "totalTokens": 9641
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "f573430f623dda796ff84222f8ab0e2044d58bcd7235ca7a7d93d1a2e5167f2c",
+            "bytes": 3403
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 180,
+              "output_tokens": 0,
+              "cache_read_input_tokens": 9600,
+              "cache_creation_input_tokens": 0
+            },
+            {
+              "input_tokens": 180,
+              "output_tokens": 4,
+              "cache_read_input_tokens": 9600,
+              "cache_creation_input_tokens": 0
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 180,
+            "output_tokens": 4,
+            "cache_read_input_tokens": 9600,
+            "cache_creation_input_tokens": 0
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 9600,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 180
+            },
+            "inputTokens": 9780,
+            "outputTokens": 4,
+            "totalTokens": 9784
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "zenmux-deepseek-openai-compatible",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "protocol": "openai-compatible",
+      "recordedAt": "2026-10-16T03:44:37.886Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 160313,
+          "providerInputTokens": 41665
+        },
+        "after": {
+          "wireInputBytes": 20553,
+          "providerInputTokens": 9595
+        },
+        "reopened": {
+          "wireInputBytes": 21018,
+          "providerInputTokens": 9740
+        },
+        "estimatedBefore": 42623,
+        "estimatedAfter": 9786
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1622,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 0
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "ba0c09ee6654d399c1678abbb63a30957f2382337c1496db5e00663bd23fefbe",
+            "bytes": 160313
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 41669,
+              "prompt_tokens": 41665,
+              "completion_tokens": 4,
+              "prompt_cache_hit_tokens": 41472,
+              "prompt_cache_miss_tokens": 193,
+              "prompt_tokens_details": {
+                "cached_tokens": 41472
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 41669,
+            "prompt_tokens": 41665,
+            "completion_tokens": 4,
+            "prompt_cache_hit_tokens": 41472,
+            "prompt_cache_miss_tokens": 193,
+            "prompt_tokens_details": {
+              "cached_tokens": 41472
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 41472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 193
+            },
+            "inputTokens": 41665,
+            "outputTokens": 4,
+            "totalTokens": 41669
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "673332e28e550fc988c938f7ff9fd48453bf07c80503c79749ea290c5d2f000f",
+            "bytes": 20553
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 9599,
+              "prompt_tokens": 9595,
+              "completion_tokens": 4,
+              "prompt_cache_hit_tokens": 8704,
+              "prompt_cache_miss_tokens": 891,
+              "prompt_tokens_details": {
+                "cached_tokens": 8704
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 9599,
+            "prompt_tokens": 9595,
+            "completion_tokens": 4,
+            "prompt_cache_hit_tokens": 8704,
+            "prompt_cache_miss_tokens": 891,
+            "prompt_tokens_details": {
+              "cached_tokens": 8704
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 8704,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 891
+            },
+            "inputTokens": 9595,
+            "outputTokens": 4,
+            "totalTokens": 9599
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "c01599aea9bc5f536d574f50862edfbdfb40b2255717a7b8d1c7d554c9053fd6",
+            "bytes": 21018
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 9744,
+              "prompt_tokens": 9740,
+              "completion_tokens": 4,
+              "prompt_cache_hit_tokens": 9472,
+              "prompt_cache_miss_tokens": 268,
+              "prompt_tokens_details": {
+                "cached_tokens": 9472
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 9744,
+            "prompt_tokens": 9740,
+            "completion_tokens": 4,
+            "prompt_cache_hit_tokens": 9472,
+            "prompt_cache_miss_tokens": 268,
+            "prompt_tokens_details": {
+              "cached_tokens": 9472
+            }
+          },
+          "normalizedUsage": {
+            "inputBreakdown": {
+              "cacheRead": 9472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 268
+            },
+            "inputTokens": 9740,
+            "outputTokens": 4,
+            "totalTokens": 9744
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "zenmux-deepseek-openai-responses",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "protocol": "openai-responses",
+      "recordedAt": "2026-10-16T03:50:31.402Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 142583,
+          "providerInputTokens": 41689
+        },
+        "after": {
+          "wireInputBytes": 2952,
+          "providerInputTokens": 9607
+        },
+        "reopened": {
+          "wireInputBytes": 3585,
+          "providerInputTokens": 9752
+        },
+        "estimatedBefore": 42641,
+        "estimatedAfter": 9782
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1590,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 2
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "78b43ba7d98d75092f29c33bf43a050360039cc35c15ca22d44db1aedaf1e0b9",
+            "bytes": 142583
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 41689,
+              "output_tokens": 5,
+              "total_tokens": 41694,
+              "input_tokens_details": {
+                "cached_tokens": 41472
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 41689,
+            "output_tokens": 5,
+            "total_tokens": 41694,
+            "input_tokens_details": {
+              "cached_tokens": 41472
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 41472,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 217
+            },
+            "inputTokens": 41689,
+            "outputTokens": 5,
+            "totalTokens": 41694
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "d37acf93000cf2e8780c95ab32cb550626421ebef773925f29e98940c4e4ae92",
+            "bytes": 2952
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 9607,
+              "output_tokens": 5,
+              "total_tokens": 9612,
+              "input_tokens_details": {
+                "cached_tokens": 8832
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 9607,
+            "output_tokens": 5,
+            "total_tokens": 9612,
+            "input_tokens_details": {
+              "cached_tokens": 8832
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 8832,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 775
+            },
+            "inputTokens": 9607,
+            "outputTokens": 5,
+            "totalTokens": 9612
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "df478e12b9fe28ecfccf855a8a39bffce51b9f5d4d369436160372cc8e18a314",
+            "bytes": 3585
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 9752,
+              "output_tokens": 5,
+              "total_tokens": 9757,
+              "input_tokens_details": {
+                "cached_tokens": 9600
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 9752,
+            "output_tokens": 5,
+            "total_tokens": 9757,
+            "input_tokens_details": {
+              "cached_tokens": 9600
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 9600,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 152
+            },
+            "inputTokens": 9752,
+            "outputTokens": 5,
+            "totalTokens": 9757
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "zenmux-luna-openai-compatible",
+      "model": "openai/gpt-5.6-luna",
+      "protocol": "openai-compatible",
+      "recordedAt": "2026-10-16T03:46:51.922Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 160313,
+          "providerInputTokens": 38296
+        },
+        "after": {
+          "wireInputBytes": 20215,
+          "providerInputTokens": 7940
+        },
+        "reopened": {
+          "wireInputBytes": 20680,
+          "providerInputTokens": 8085
+        },
+        "estimatedBefore": 40094,
+        "estimatedAfter": 9132
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1295,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 0
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "87f4117c821bb50181d09ac4a9c17f6fc38fe1c0266cd332c53f5c331ea15b72",
+            "bytes": 160313
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 38304,
+              "prompt_tokens": 38296,
+              "completion_tokens": 8,
+              "prompt_tokens_details": {
+                "cached_tokens": 38151
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 38304,
+            "prompt_tokens": 38296,
+            "completion_tokens": 8,
+            "prompt_tokens_details": {
+              "cached_tokens": 38151
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 38151,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 145
+            },
+            "inputTokens": 38296,
+            "outputTokens": 8,
+            "totalTokens": 38304
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "0b20b89ac81c9a78f474822c27ac07dd2d894e417461ac27f0e831d8364ac3e3",
+            "bytes": 20215
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 7948,
+              "prompt_tokens": 7940,
+              "completion_tokens": 8,
+              "prompt_tokens_details": {
+                "cached_tokens": 7370
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 7948,
+            "prompt_tokens": 7940,
+            "completion_tokens": 8,
+            "prompt_tokens_details": {
+              "cached_tokens": 7370
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 7370,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 570
+            },
+            "inputTokens": 7940,
+            "outputTokens": 8,
+            "totalTokens": 7948
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "880d96f182dd452e17b9b8790a68022200db98076e2527cf2c144fa461c08ab2",
+            "bytes": 20680
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 8093,
+              "prompt_tokens": 8085,
+              "completion_tokens": 8,
+              "prompt_tokens_details": {
+                "cached_tokens": 7937
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 8093,
+            "prompt_tokens": 8085,
+            "completion_tokens": 8,
+            "prompt_tokens_details": {
+              "cached_tokens": 7937
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 7937,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 148
+            },
+            "inputTokens": 8085,
+            "outputTokens": 8,
+            "totalTokens": 8093
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "zenmux-luna-openai-responses",
+      "model": "openai/gpt-5.6-luna",
+      "protocol": "openai-responses",
+      "recordedAt": "2026-10-16T03:47:04.203Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 142601,
+          "providerInputTokens": 38300
+        },
+        "after": {
+          "wireInputBytes": 2608,
+          "providerInputTokens": 7925
+        },
+        "reopened": {
+          "wireInputBytes": 3259,
+          "providerInputTokens": 8072
+        },
+        "estimatedBefore": 40096,
+        "estimatedAfter": 9115
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1212,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 2
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "8162baacc4ab3281b6e995c9a60c95dc5bcbc1199e4a91ed3aadf5f0a88852e4",
+            "bytes": 142601
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 38300,
+              "output_tokens": 8,
+              "total_tokens": 38308,
+              "input_tokens_details": {
+                "cached_tokens": 38153,
+                "cache_write_tokens": 144
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 38300,
+            "output_tokens": 8,
+            "total_tokens": 38308,
+            "input_tokens_details": {
+              "cached_tokens": 38153,
+              "cache_write_tokens": 144
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 38153,
+              "cacheWrite": 144,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 38300,
+            "outputTokens": 8,
+            "totalTokens": 38308
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "c6a8f61cd3116621a888901008b47ae4ae5a71c1b9e3cf4d556f8e1197b62b62",
+            "bytes": 2608
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 7925,
+              "output_tokens": 8,
+              "total_tokens": 7933,
+              "input_tokens_details": {
+                "cached_tokens": 7370,
+                "cache_write_tokens": 552
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 7925,
+            "output_tokens": 8,
+            "total_tokens": 7933,
+            "input_tokens_details": {
+              "cached_tokens": 7370,
+              "cache_write_tokens": 552
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 7370,
+              "cacheWrite": 552,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 7925,
+            "outputTokens": 8,
+            "totalTokens": 7933
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "9cc68f74a7004eebde2d083bb73dc410ce170779e3cc2744c3d55bf68ef0849c",
+            "bytes": 3259
+          },
+          "system": {
+            "sha256": "edffe8a1f89f6cc98dc2046cb3ba4605fbc944420092ea77896dac372811dd8e",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "44552c4959ef1a31284c1ecba9b908c109c4801b53a9a99e672de4eaab352bfe",
+            "bytes": 21918
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 8072,
+              "output_tokens": 8,
+              "total_tokens": 8080,
+              "input_tokens_details": {
+                "cached_tokens": 7922,
+                "cache_write_tokens": 147
+              }
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 8072,
+            "output_tokens": 8,
+            "total_tokens": 8080,
+            "input_tokens_details": {
+              "cached_tokens": 7922,
+              "cache_write_tokens": 147
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 7922,
+              "cacheWrite": 147,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 8072,
+            "outputTokens": 8,
+            "totalTokens": 8080
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": [
+        {
+          "purpose": "session-title",
+          "httpStatus": 200,
+          "captureError": "response_stream"
+        }
+      ]
+    },
+    {
+      "profile": "zenmux-sonnet-anthropic",
+      "model": "anthropic/claude-sonnet-5",
+      "protocol": "anthropic",
+      "recordedAt": "2026-10-16T03:46:44.690Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 142477,
+          "providerInputTokens": 62869
+        },
+        "after": {
+          "wireInputBytes": 2793,
+          "providerInputTokens": 14790
+        },
+        "reopened": {
+          "wireInputBytes": 3258,
+          "providerInputTokens": 14995
+        },
+        "estimatedBefore": 58529,
+        "estimatedAfter": 13463
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1695,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 0
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "ed75596dc0caec147fba287d9b05157ae8d52b9a226e95294df6db52bdd88062",
+            "bytes": 142477
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 6,
+              "cache_read_input_tokens": 62666,
+              "cache_creation_input_tokens": 201
+            },
+            {
+              "input_tokens": 2,
+              "output_tokens": 8,
+              "cache_read_input_tokens": 62666,
+              "cache_creation_input_tokens": 201
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 2,
+            "output_tokens": 8,
+            "cache_read_input_tokens": 62666,
+            "cache_creation_input_tokens": 201
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 62666,
+              "cacheWrite": 201,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 62869,
+            "outputTokens": 8,
+            "totalTokens": 62877
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "5edfdc7fef1282b4ccacc4d8986995a309ec89167baef27b07cc5cf102ed234f",
+            "bytes": 2793
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 8,
+              "cache_read_input_tokens": 0,
+              "cache_creation_input_tokens": 14788
+            },
+            {
+              "input_tokens": 2,
+              "output_tokens": 8,
+              "cache_read_input_tokens": 0,
+              "cache_creation_input_tokens": 14788
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 2,
+            "output_tokens": 8,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 14788
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 14788,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 14790,
+            "outputTokens": 8,
+            "totalTokens": 14798
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "0425681d4644fb963f39d88ae40fe4318fc0924a66fa544764231e658dc049c3",
+            "bytes": 3258
+          },
+          "system": {
+            "sha256": "e9ff42bf23f20d9c7d31cc1ac5b6e61a22cb7699b62efddbe7400ebb94e12a22",
+            "bytes": 17914
+          },
+          "tools": {
+            "sha256": "5a134021ffc0a93181171d29ebaf4a652b9930157ef0fa9853655637a8649eee",
+            "bytes": 21143
+          },
+          "rawUsage": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 8,
+              "cache_read_input_tokens": 14788,
+              "cache_creation_input_tokens": 205
+            },
+            {
+              "input_tokens": 2,
+              "output_tokens": 8,
+              "cache_read_input_tokens": 14788,
+              "cache_creation_input_tokens": 205
+            }
+          ],
+          "finalUsage": {
+            "input_tokens": 2,
+            "output_tokens": 8,
+            "cache_read_input_tokens": 14788,
+            "cache_creation_input_tokens": 205
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 14788,
+              "cacheWrite": 205,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 14995,
+            "outputTokens": 8,
+            "totalTokens": 15003
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": []
+    },
+    {
+      "profile": "zhipu-glm-openai-compatible",
+      "model": "glm-5.3-flash",
+      "protocol": "openai-compatible",
+      "recordedAt": "2026-10-16T03:47:08.645Z",
+      "status": "passed",
+      "comparison": {
+        "before": {
+          "wireInputBytes": 161029,
+          "providerInputTokens": 40571
+        },
+        "after": {
+          "wireInputBytes": 21463,
+          "providerInputTokens": 9525
+        },
+        "reopened": {
+          "wireInputBytes": 21928,
+          "providerInputTokens": 9666
+        },
+        "estimatedBefore": 41867,
+        "estimatedAfter": 9771
+      },
+      "persistedAfterCompaction": {
+        "summaryParts": 1,
+        "summaryCharacters": 1714,
+        "retiredParts": 2,
+        "retiredNativeParts": 0,
+        "activeNativeParts": 2
+      },
+      "stages": {
+        "before": {
+          "sequence": 3,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "c6767cc2b325d67b51cce0c174f21a97a721fce5c273d2767de3e90a8f54e0f4",
+            "bytes": 161029
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 40598,
+              "prompt_tokens": 40571,
+              "completion_tokens": 27,
+              "prompt_tokens_details": {
+                "cached_tokens": 40256
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 40598,
+            "prompt_tokens": 40571,
+            "completion_tokens": 27,
+            "prompt_tokens_details": {
+              "cached_tokens": 40256
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 20,
+            "inputBreakdown": {
+              "cacheRead": 40256,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 315
+            },
+            "inputTokens": 40571,
+            "outputTokens": 27,
+            "totalTokens": 40598
+          },
+          "markers": {
+            "sequence": 3,
+            "purpose": "agent-step",
+            "rawLines": 900,
+            "summary": false,
+            "code": true
+          }
+        },
+        "after": {
+          "sequence": 5,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "6a5c81b467943f70f467b23b67f5b6dff4c1561ecda659611c7aa88b421e53b2",
+            "bytes": 21463
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 9532,
+              "prompt_tokens": 9525,
+              "completion_tokens": 7,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 9532,
+            "prompt_tokens": 9525,
+            "completion_tokens": 7,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 9525
+            },
+            "inputTokens": 9525,
+            "outputTokens": 7,
+            "totalTokens": 9532
+          },
+          "markers": {
+            "sequence": 5,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        },
+        "reopened": {
+          "sequence": 6,
+          "httpStatus": 200,
+          "input": {
+            "sha256": "58e2b3a9539ad464f5e30d5171935c2a19a04bfd316aeafac743e109d2577f4c",
+            "bytes": 21928
+          },
+          "system": {
+            "sha256": "2e9634ff7f4b658195f36f0788c73ca636264b5033a53fe69ec8918c7f8b7b1a",
+            "bytes": 17946
+          },
+          "tools": {
+            "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+            "bytes": 21868
+          },
+          "rawUsage": [
+            {
+              "total_tokens": 9673,
+              "prompt_tokens": 9666,
+              "completion_tokens": 7,
+              "prompt_tokens_details": {
+                "cached_tokens": 8640
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 9673,
+            "prompt_tokens": 9666,
+            "completion_tokens": 7,
+            "prompt_tokens_details": {
+              "cached_tokens": 8640
+            }
+          },
+          "normalizedUsage": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 8640,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 1026
+            },
+            "inputTokens": 9666,
+            "outputTokens": 7,
+            "totalTokens": 9673
+          },
+          "markers": {
+            "sequence": 6,
+            "purpose": "agent-step",
+            "rawLines": 0,
+            "summary": true,
+            "code": true
+          }
+        }
+      },
+      "backgroundIssues": [
+        {
+          "purpose": "session-title",
+          "httpStatus": 400
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "sessionId": "session_1792121415181_mu77wu1",
+  "summary": {
+    "characters": 1073,
+    "estimatedBefore": 42257,
+    "estimatedAfter": 9960
+  },
+  "retiredParts": 24,
+  "measuredInputBefore": 42270,
+  "measuredInputAfter": 9772,
+  "latestUsage": {
+    "reasoningTokens": 0,
+    "inputBreakdown": {
+      "cacheRead": 8832,
+      "cacheWrite": 0,
+      "observed": {
+        "cacheRead": true,
+        "cacheWrite": false
+      },
+      "uncached": 940
+    },
+    "inputTokens": 9772,
+    "outputTokens": 5,
+    "totalTokens": 9777
+  }
+}
