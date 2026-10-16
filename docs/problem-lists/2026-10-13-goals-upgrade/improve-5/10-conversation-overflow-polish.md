@@ -31,3 +31,22 @@
 先调用用户指定的 `opencode/gemini-4-argon-contributor`，返回模型不可用。用户同意改为 `opencode-go/gemini-4-argon-contributor` 后，medium 调用仍失败：`Provider opencode-go has no API implementation for "google-generative-ai"`。
 
 Pi 没有产出审查或修改。本次代码分析、修复和浏览器验收由主代理完成；不将失败调用计为独立审查通过。
+
+## Google Argon 复审与焦点修复
+
+同日用户授权改用 `google/gemini-4-argon`，medium，复用本任务 Pi 会话。此次调用成功。Pi 认可共享样式的改动，发现并修复了子代理对话框的焦点循环问题：折叠 Thought 中带 `tabIndex=0` 的 pre 被误计入焦点列表，导致末端 Tab 或首端 Shift+Tab 无法正确循环。
+
+- `SubagentView.tsx` 排除折叠 details 的正文控件，保留 summary；展开后正文恢复可聚焦。
+- `SubagentView.unit.test.tsx` 扩充折叠/展开时的正反向焦点循环回归断言。
+- 主代理独立复核：新断言在原实现上失败（7 项中 1 项失败）；恢复修复后，相关 5 个文件共 42 项通过，生产构建通过。
+- 原生浏览器 E2E：子代理浮层中，折叠 Thought 按 Tab 回到 Expand，Expand 按 Shift+Tab 回到 Thought；展开 Thought 后，Shift+Tab 能到达 Reasoning content，正文 Tab 回到 Expand。展开整个子会话后，折叠 Thought 与首个面包屑按钮间的正反向循环同样正常。
+- 本轮使用独立本地 HTTP/SQLite fixture；没有真实模型请求。视觉检查未见布局变化，控制台无 warning / error；测试服务与临时工作区已清理。
+
+## 2026-10-17 最终焦点复核
+
+浏览器实际操作发现第二个边界情况：展开子会话后，将焦点移至主会话面包屑按钮并按 Escape。收起时该按钮被移除，焦点落到页面根部，第二次 Escape 不再到达子会话的键盘处理器。
+
+- 在已有 Escape 回归测试中聚焦真实面包屑，收起后检查焦点仍在子会话内，并从实际聚焦元素发送第二次 Escape；修复前断言失败。
+- `SubagentView` 的标题聚焦 effect 加入 `expanded` 依赖，展开/收起时保持焦点在子会话。没有增加全局键盘监听或更改主会话焦点恢复逻辑。
+- 修复后全量 Web 44 个测试文件、591 项通过，生产构建通过。
+- 在最新生产构建的 390px 浏览器中复验：第一次 Escape 后焦点为子会话 H2；第二次 Escape 后子会话关闭，焦点回到主会话委派按钮。桌面/窄屏链接与边界验收记录见 `11-link-color-polish.md`。

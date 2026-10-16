@@ -92,12 +92,37 @@
   margin: -10px 24px 0;
 }
 
+.ohb-markdown a,
+.ohb-markdown a:visited {
+  color: #53677d;
+  text-decoration-color: rgba(83, 103, 125, 0.45);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.ohb-markdown a:hover,
+.ohb-markdown a:focus-visible {
+  color: #3b4d61;
+  text-decoration-color: currentColor;
+}
+
+.ohb-markdown a:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 .ohb-markdown code {
   background: #f1f1f2;
   border-radius: 4px;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 13px;
   padding: 1px 5px;
+}
+
+.ohb-markdown a code {
+  color: inherit;
 }
 
 /* Shared by root messages and the child transcript, including parent prompts. */

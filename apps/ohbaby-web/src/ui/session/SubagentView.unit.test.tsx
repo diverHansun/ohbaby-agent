@@ -199,6 +199,7 @@ it("handles Escape by collapsing first and closing a sheet, while ignoring IME c
     });
   };
   render(true);
+  element.querySelector<HTMLButtonElement>("nav button")?.focus();
   void act(() =>
     element.querySelector('[role="dialog"]')?.dispatchEvent(
       new KeyboardEvent("keydown", {
@@ -219,12 +220,11 @@ it("handles Escape by collapsing first and closing a sheet, while ignoring IME c
   expect(onExpandedChange).toHaveBeenCalledWith(false);
   expect(onClose).not.toHaveBeenCalled();
   render(false);
+  expect(element.contains(document.activeElement)).toBe(true);
   void act(() =>
-    element
-      .querySelector('[role="dialog"]')
-      ?.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-      ),
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    ),
   );
   expect(onClose).toHaveBeenCalledOnce();
 });
@@ -380,6 +380,83 @@ it("keeps keyboard focus inside the child and only loads later history after use
     stream?.dispatchEvent(new Event("scroll"));
   });
   expect(loadLater).toHaveBeenCalledOnce();
+
+  const foldedReasoning = {
+    ...data,
+    conversation: data.conversation
+      ? {
+          ...data.conversation,
+          messages: [
+            data.conversation.messages[0],
+            {
+              id: "m",
+              role: "assistant" as const,
+              createdAt: "2026-01-01",
+              parts: [
+                {
+                  type: "reasoning" as const,
+                  text: "folded thought",
+                  endReason: "normal" as const,
+                },
+                { type: "text" as const, text: "done" },
+              ],
+            },
+          ],
+        }
+      : undefined,
+  };
+  act(() => {
+    root.render(
+      <SubagentView
+        reader={reader}
+        readingCache={readingCache}
+        state={foldedReasoning}
+        rootTitle="Main"
+        title="Worker"
+        expanded={false}
+        onExpandedChange={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+  });
+  const summary = element.querySelector<HTMLElement>(
+    ".ohb-reasoning > summary",
+  );
+  const reasoningPre = element.querySelector<HTMLElement>(
+    ".ohb-reasoning > pre",
+  );
+  const expandButton = element.querySelector<HTMLButtonElement>(
+    'button[aria-label="Expand"]',
+  );
+  summary?.focus();
+  act(() => {
+    summary?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+    );
+  });
+  expect(document.activeElement).toBe(expandButton);
+  act(() => {
+    expandButton?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Tab",
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+  });
+  expect(document.activeElement).toBe(summary);
+  element.querySelector("details")?.setAttribute("open", "");
+  act(() => {
+    expandButton?.focus();
+    expandButton?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Tab",
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+  });
+  expect(document.activeElement).toBe(reasoningPre);
 });
 
 it("keeps an explicit parent anchor even when it is within the auto-follow threshold", () => {

@@ -53,8 +53,9 @@ export function SubagentView({
   }
   const heading = useRef<HTMLHeadingElement>(null);
   useLayoutEffect(() => {
+    // Collapsing removes the breadcrumb; keep keyboard navigation in the child.
     heading.current?.focus({ preventScroll: true });
-  }, [identity, anchorToken]);
+  }, [identity, anchorToken, expanded]);
   const execution =
     conversation?.executions.find(
       (item) => item.executionId === selected?.executionId,
@@ -77,7 +78,12 @@ export function SubagentView({
             ...event.currentTarget.querySelectorAll<HTMLElement>(
               'button:not(:disabled),a[href],summary,[tabindex="0"]',
             ),
-          ].filter((node) => !node.closest("[hidden]"));
+          ].filter(
+            (node) =>
+              !node.closest("[hidden]") &&
+              (node.tagName === "SUMMARY" ||
+                !node.closest("details:not([open])")),
+          );
           const first = controls[0],
             last = controls.at(-1);
           if (
