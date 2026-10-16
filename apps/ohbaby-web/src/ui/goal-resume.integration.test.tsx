@@ -324,6 +324,76 @@ describe("goal resume through the rendered app, real Web runtime and command bac
     },
   );
 
+  it.each(["create", "replace"] as const)(
+    "keeps the saved %s objective after editing a slash-command draft",
+    async (action) => {
+      const f = await fixture();
+      try {
+        if (action === "create") {
+          await act(async () => {
+            await f.runtime.executeSlashCommand({
+              allowOverlay: true,
+              sessionId: "session_1",
+              text: "/goal cancel",
+            });
+          });
+        }
+        await submit(
+          f.container,
+          action === "create"
+            ? "/goal Initial draft"
+            : "/goal replace Initial draft",
+        );
+        const selector = ".ohb-goal-objective-field textarea";
+        await waitFor(() => {
+          expect(
+            f.container.querySelector<HTMLTextAreaElement>(selector)?.value,
+          ).toBe("Initial draft");
+        });
+        const objective = "Final objective\n  Keep the edited body";
+        await setField(f.container, selector, objective);
+        await click(f.container, '[data-goal-action="save"]');
+        await waitFor(() => {
+          expect(
+            f.container.querySelector(".ohb-structured-success")?.textContent,
+          ).toContain(action === "create" ? "goal created" : "objective saved");
+        });
+        expect(
+          (await f.persistence.list("session_1"))
+            .filter((record) => record.objective !== undefined)
+            .at(-1),
+        ).toMatchObject({ objective });
+        expect(
+          f.container.querySelector<HTMLTextAreaElement>(selector)?.value,
+        ).toBe(objective);
+        expect(
+          f.container.querySelector<HTMLButtonElement>(
+            '[data-goal-action="save"]',
+          )?.disabled,
+        ).toBe(true);
+      } finally {
+        await f.dispose();
+      }
+    },
+  );
+
+  it("prefills the current objective when replace opens without a draft", async () => {
+    const f = await fixture();
+    try {
+      await submit(f.container, "/goal replace");
+      await waitFor(() => {
+        expect(
+          f.container.querySelector<HTMLTextAreaElement>(
+            ".ohb-goal-objective-field textarea",
+          )?.value,
+        ).toBe("Finish the goal flow");
+      });
+      expect(f.commands).toHaveLength(0);
+    } finally {
+      await f.dispose();
+    }
+  });
+
   it.each([
     ["/goal resume 100 turns 3h", 100, 10800000],
     ["/goal resume 3h 100 turns", 100, 10800000],

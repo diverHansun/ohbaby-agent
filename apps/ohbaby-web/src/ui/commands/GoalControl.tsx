@@ -243,6 +243,10 @@ export function GoalOverlayBody(props: {
   const [objective, setObjective] = useState(
     props.intent.objectiveDraft ?? activeGoal?.objective ?? "",
   );
+  const objectiveSource = useRef({
+    intent: props.intent,
+    objective: activeGoal?.objective,
+  });
   const [turnLimit, setTurnLimit] = useState("");
   const [durationLimit, setDurationLimit] = useState("");
   const [status, setStatus] = useState<OverlayStatus>(() =>
@@ -257,8 +261,17 @@ export function GoalOverlayBody(props: {
   );
 
   useEffect(() => {
-    setObjective(props.intent.objectiveDraft ?? activeGoal?.objective ?? "");
-  }, [activeGoal?.objective, props.intent.objectiveDraft]);
+    const previous = objectiveSource.current;
+    if (previous.intent !== props.intent) {
+      setObjective(props.intent.objectiveDraft ?? activeGoal?.objective ?? "");
+    } else if (previous.objective !== activeGoal?.objective) {
+      setObjective(activeGoal?.objective ?? "");
+    }
+    objectiveSource.current = {
+      intent: props.intent,
+      objective: activeGoal?.objective,
+    };
+  }, [activeGoal?.objective, props.intent]);
 
   useEffect(() => {
     if (props.intent.errorMessage) {
@@ -547,13 +560,12 @@ export function goalPanelIntentFromArgs(rawArgs: string): GoalPanelIntent {
       return { action: "resume" };
     case "cancel":
       return { action: "delete" };
-    case "replace":
-      return {
-        action: "save",
-        objectiveDraft: [trimmed.slice(command.length).trimStart(), body]
-          .join("\n")
-          .trim(),
-      };
+    case "replace": {
+      const objectiveDraft = [trimmed.slice(command.length).trimStart(), body]
+        .join("\n")
+        .trim();
+      return { action: "save", ...(objectiveDraft ? { objectiveDraft } : {}) };
+    }
     default:
       return {
         action: "save",
