@@ -47,6 +47,7 @@
   color: #2b2d33;
   font-size: 15px;
   line-height: 1.62;
+  min-width: 0;
 }
 
 .ohb-message-user-bubble {
@@ -97,6 +98,35 @@
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 13px;
   padding: 1px 5px;
+}
+
+/* Shared by root messages and the child transcript, including parent prompts. */
+.ohb-markdown,
+.ohb-streaming-text {
+  overflow-wrap: anywhere;
+}
+
+/* Preserve formatted content without letting it widen the message or stream. */
+.ohb-markdown pre,
+.ohb-markdown table {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: none;
+}
+
+.ohb-markdown pre {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.ohb-markdown table {
+  display: block;
+  overflow-wrap: normal;
+}
+
+.ohb-markdown img {
+  max-width: 100%;
+  height: auto;
 }
 
 .ohb-streaming-text,
