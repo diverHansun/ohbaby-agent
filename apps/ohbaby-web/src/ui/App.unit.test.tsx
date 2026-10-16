@@ -4124,7 +4124,7 @@ describe("OhbabyWebApp slash command interactions", () => {
     expect(fake.executeSlashCommand).toHaveBeenCalledWith({
       allowOverlay: true,
       sessionId: "session_1",
-      text: "/goal replace finish goal UI polish",
+      text: "/goal replace\nfinish goal UI polish",
     });
     expect(button("resume")?.disabled).toBe(true);
     expect(button("delete")?.disabled).toBe(true);

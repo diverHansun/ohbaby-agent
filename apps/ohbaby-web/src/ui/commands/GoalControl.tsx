@@ -300,7 +300,7 @@ export function GoalOverlayBody(props: {
       return;
     }
     runGoalCommand(
-      activeGoal ? `/goal replace ${trimmed}` : `/goal ${trimmed}`,
+      activeGoal ? `/goal replace\n${trimmed}` : `/goal\n${trimmed}`,
       activeGoal ? "Saving objective" : "Creating goal",
       activeGoal ? "objective saved" : "goal created",
     );
@@ -527,11 +527,17 @@ function unavailableIntentMessage(
 }
 
 export function goalPanelIntentFromArgs(rawArgs: string): GoalPanelIntent {
-  const trimmed = rawArgs.trim();
+  const [firstLine = "", ...bodyLines] = rawArgs
+    .replace(/\r\n/gu, "\n")
+    .split("\n");
+  const trimmed = firstLine.trim();
+  const body = bodyLines.join("\n");
   if (!trimmed) {
-    return DEFAULT_GOAL_PANEL_INTENT;
+    return body.trim()
+      ? { action: "save", objectiveDraft: body.trim() }
+      : DEFAULT_GOAL_PANEL_INTENT;
   }
-  const [command = "", ...rest] = trimmed.split(/\s+/u);
+  const [command = ""] = trimmed.split(/\s+/u);
   switch (command) {
     case "status":
       return DEFAULT_GOAL_PANEL_INTENT;
@@ -544,10 +550,15 @@ export function goalPanelIntentFromArgs(rawArgs: string): GoalPanelIntent {
     case "replace":
       return {
         action: "save",
-        objectiveDraft: rest.join(" "),
+        objectiveDraft: [trimmed.slice(command.length).trimStart(), body]
+          .join("\n")
+          .trim(),
       };
     default:
-      return { action: "save", objectiveDraft: trimmed };
+      return {
+        action: "save",
+        objectiveDraft: [trimmed, body].join("\n").trim(),
+      };
   }
 }
 

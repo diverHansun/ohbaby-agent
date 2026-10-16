@@ -532,7 +532,11 @@ export function SessionScreen({
       setStructuredOverlay({
         commandLabel: slashCommandLabel(command),
         ...(kind === "goal"
-          ? { goalIntent: goalPanelIntentFromArgs(resolved.rawArgs) }
+          ? {
+              goalIntent: goalPanelIntentFromArgs(
+                [resolved.rawArgs, resolved.body].join("\n"),
+              ),
+            }
           : {}),
         kind,
       });

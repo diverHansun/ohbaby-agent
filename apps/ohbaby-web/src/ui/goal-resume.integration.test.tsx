@@ -266,6 +266,65 @@ async function click(container: ParentNode, selector: string): Promise<void> {
 
 describe("goal resume through the rendered app, real Web runtime and command backend", () => {
   it.each([
+    {
+      action: "create",
+      prefix: "/goal ",
+      objective: "检查 <台北> & 東京\n\n  保留第二行\n完成后汇报",
+    },
+    {
+      action: "replace",
+      prefix: "/goal replace ",
+      objective: "检查 <台北> & 東京\n\n  保留第二行\n完成后汇报",
+    },
+    {
+      action: "create",
+      prefix: "/goal\n",
+      objective: 'status report for "台北"\n  Keep the full objective',
+    },
+    {
+      action: "replace",
+      prefix: "/goal replace\n",
+      objective: 'resume "quoted" work\n  Keep indentation',
+    },
+  ] as const)(
+    "preserves the complete objective through the composer and $action panel: $prefix",
+    async ({ action, prefix, objective }) => {
+      const f = await fixture();
+      try {
+        if (action === "create") {
+          await act(async () => {
+            await f.runtime.executeSlashCommand({
+              allowOverlay: true,
+              sessionId: "session_1",
+              text: "/goal cancel",
+            });
+          });
+        }
+        await submit(f.container, `${prefix}${objective}`);
+        await waitFor(() => {
+          expect(
+            f.container.querySelector<HTMLTextAreaElement>(
+              ".ohb-goal-objective-field textarea",
+            )?.value,
+          ).toBe(objective);
+        });
+        await click(f.container, '[data-goal-action="save"]');
+        await waitFor(() => {
+          expect(
+            f.container.querySelector(".ohb-structured-success")?.textContent,
+          ).toContain(action === "create" ? "goal created" : "objective saved");
+        });
+        const records = await f.persistence.list("session_1");
+        expect(
+          records.filter((record) => record.objective !== undefined).at(-1),
+        ).toMatchObject({ objective });
+      } finally {
+        await f.dispose();
+      }
+    },
+  );
+
+  it.each([
     ["/goal resume 100 turns 3h", 100, 10800000],
     ["/goal resume 3h 100 turns", 100, 10800000],
     ["/goal resume 100 turns", 100, 7200000],

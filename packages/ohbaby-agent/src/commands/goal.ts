@@ -24,6 +24,8 @@ async function runGoalCommand(
 ): Promise<void> {
   const argv = invocation.argv;
   const head = argv.at(0);
+  const isStatusRequest =
+    (head === undefined && !invocation.body?.trim()) || head === "status";
   const emitText = (text: string): void => {
     context.emitOutput({ kind: "text", text });
   };
@@ -31,7 +33,7 @@ async function runGoalCommand(
     invocation.sessionId ?? context.sessionId,
   );
   if (sessionId === undefined) {
-    if (head === undefined || head === "status") {
+    if (isStatusRequest) {
       emitText(statusText(null));
       return;
     }
@@ -43,7 +45,7 @@ async function runGoalCommand(
     return;
   }
 
-  if (head === undefined || head === "status") {
+  if (isStatusRequest) {
     emitText(statusText(await goals.status(sessionId)));
     return;
   }

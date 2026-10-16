@@ -121,6 +121,16 @@ describe("/goal command handler", () => {
   it.each([
     {
       action: "create",
+      raw: '/goal\nstatus report for "台北"\n\n  Preserve the full objective',
+      objective: 'status report for "台北"\n\n  Preserve the full objective',
+    },
+    {
+      action: "replace",
+      raw: '/goal replace\nresume "quoted" work\n  Keep indentation',
+      objective: 'resume "quoted" work\n  Keep indentation',
+    },
+    {
+      action: "create",
       raw: '/goal "检查  台北" 天气\n\n  汇总 <>& 并注明来源\n结束  ',
       objective: "检查  台北 天气\n\n  汇总 <>& 并注明来源\n结束",
     },
@@ -163,12 +173,12 @@ describe("/goal command handler", () => {
     },
   );
 
-  it("keeps a body-only /goal request as a status command", async () => {
+  it("keeps /goal with a whitespace-only body as a status command", async () => {
     const backend = makeBackend();
     const { context, outputs, failures } = makeContext();
 
     await createGoalCommandHandler({ goals: backend }).execute(
-      parsedInvocation("/goal\nbody without a first-line objective"),
+      parsedInvocation("/goal\n  \n  "),
       context,
     );
 
@@ -234,6 +244,19 @@ describe("/goal command handler", () => {
     await handler.execute(invoke(["pause"]), context);
     expect(failures).toHaveLength(1);
     expect(backend.pause).not.toHaveBeenCalled();
+  });
+
+  it("rejects body-only goal creation without a session", async () => {
+    const backend = makeBackend({
+      resolveSessionId: (): Promise<undefined> => Promise.resolve(undefined),
+    });
+    const { context, failures, outputs } = makeContext();
+    await createGoalCommandHandler({ goals: backend }).execute(
+      parsedInvocation("/goal\nstatus report for acceptance"),
+      context,
+    );
+    expect(failures).toEqual([expect.objectContaining({ code: "no_session" })]);
+    expect(outputs).toEqual([]);
   });
 
   it("fails cleanly when backend missing", async () => {
