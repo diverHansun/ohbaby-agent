@@ -61,7 +61,8 @@ function createCreateGoalTool(backend: GoalToolBackend): Tool {
       "Create a durable goal the runtime will pursue autonomously across multiple turns. " +
       "Call this only when the user explicitly asks you to work autonomously toward an outcome " +
       "with a checkable end state. Do NOT create goals for greetings, ordinary questions, or " +
-      "vague requests — ask the user for the missing completion criterion first. " +
+      "vague requests. Ask for clarification only if the intended outcome cannot be determined; " +
+      "a separate completion criterion is optional when the objective itself is checkable. " +
       "The objective must be self-contained: later turns may only see a compressed summary of " +
       "this conversation, so fold into the objective every constraint, decision, and rejected " +
       "direction already agreed here that would change how the work is done. Never reference " +
@@ -126,11 +127,18 @@ function createUpdateGoalTool(backend: GoalToolBackend): Tool {
     name: "UpdateGoal",
     description:
       "Update the current goal's lifecycle status after your self-audit. Call with `complete` " +
-      "only when all required work is done and validated — never after just a plan or partial " +
-      "result. On each genuinely blocked turn, call once with `blocked` and a nonblank reason " +
-      "when an external condition, required user input, or an impossible objective prevents progress. " +
+      "only when delegated work has settled, current evidence covers every requirement and any " +
+      "completion criterion, and validation covering your claim has passed. A partial result is " +
+      "insufficient, and a plan alone is insufficient unless the requested deliverable is a plan. " +
+      "If work remains and progress is possible, leave the goal active without calling this tool; " +
+      "the runtime will continue after a normal turn end. Do not infer a blocker from size, " +
+      "difficulty, slow progress, pending validation, or a single failed attempt. " +
+      "Resolve questions answerable from the workspace yourself. On each genuinely blocked turn, call once " +
+      "with `blocked` and a nonblank reason when an external condition, required user input, or an " +
+      "impossible, unsafe, or contradictory objective prevents progress. Reuse the same concise " +
+      "reason verbatim (without turn or attempt counts) while the blocking condition is unchanged. " +
       "The backend counts consecutive goal turns with the same reason: 1/3 and 2/3 remain active, " +
-      "so continue useful independent work; the third eligible turn becomes blocked. " +
+      "so continue any useful independent work or end the turn cleanly; the third eligible turn becomes blocked. " +
       "Resuming a paused or blocked goal is user-only via /goal resume. " +
       "If you used Todo for this Goal, reconcile it before completion, but do " +
       "not treat Todo state as a runtime completion gate.",
@@ -139,7 +147,8 @@ function createUpdateGoalTool(backend: GoalToolBackend): Tool {
       properties: {
         reason: {
           description:
-            "Required nonblank human-readable reason for blocked; ignored for complete.",
+            "Required nonblank human-readable reason for blocked; ignored for complete. " +
+            "Keep the wording identical while the blocking condition is unchanged; omit attempt counts.",
           type: "string",
         },
         status: {

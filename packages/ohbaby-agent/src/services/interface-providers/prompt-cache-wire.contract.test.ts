@@ -6,6 +6,11 @@ import type { ChatCompletionChunk } from "openai/resources/chat/completions/comp
 import { describe, expect, it, vi } from "vitest";
 import { resolvePromptCacheRequest } from "../../core/llm-client/prompt-cache.js";
 import type { PromptCachePolicy } from "../../config/index.js";
+import { PRIMARY_BASE_PROMPT } from "../../core/system-prompt/prompts/primary/base.js";
+import { computeBudgetReport } from "../../goals/budget.js";
+import { renderGoalTurnPrompt } from "../../goals/injection.js";
+import { createGoalTools } from "../../goals/tools.js";
+import type { GoalSnapshot } from "../../goals/types.js";
 import { createAnthropicProvider } from "./anthropic.js";
 import { createOpenAICompatibleProvider } from "./openai-compatible.js";
 import { createOpenAIResponsesProvider } from "./openai-responses.js";
@@ -65,6 +70,166 @@ function customToolNames(tools: MessageCreateParams["tools"]): string[] {
 }
 
 describe("prompt-cache wire contract", () => {
+  it("appends changing goal reminders without rewriting any provider's cached prefix", async () => {
+    const chat = createOpenAICompatibleProvider({
+      id: "openai",
+      apiKey: "test-key",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    const chatCreate = vi
+      .spyOn(chat.client.chat.completions, "create")
+      .mockResolvedValue(
+        emptyStream<ChatCompletionChunk>() as unknown as Awaited<
+          ReturnType<typeof chat.client.chat.completions.create>
+        >,
+      );
+    const responses = createOpenAIResponsesProvider({
+      id: "openai",
+      apiKey: "test-key",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    const responsesCreate = vi
+      .spyOn(responses.client.responses, "create")
+      .mockResolvedValue(
+        emptyStream() as unknown as Awaited<
+          ReturnType<typeof responses.client.responses.create>
+        >,
+      );
+    const anthropic = createAnthropicProvider({
+      id: "anthropic",
+      apiKey: "test-key",
+      baseUrl: "https://api.anthropic.com",
+    });
+    const anthropicStream = vi
+      .spyOn(anthropic.client.messages, "stream")
+      .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+    const firstGoal: GoalSnapshot = {
+      goalId: "cache-goal",
+      objective: "Fix checkout validation without changing the payment API.",
+      completionCriterion: "Checkout integration tests pass.",
+      status: "active",
+      turnsUsed: 1,
+      tokensUsed: 0,
+      wallClockMs: 0,
+      budgetLimits: {},
+      budget: computeBudgetReport(
+        { turnsUsed: 1, tokensUsed: 0, wallClockMs: 0 },
+        {},
+      ),
+    };
+    const nextUsage = { turnsUsed: 2, tokensUsed: 1200, wallClockMs: 45_000 };
+    const budgetLimits = { turnBudget: 4, wallClockBudgetMs: 60_000 };
+    const nextGoal: GoalSnapshot = {
+      ...firstGoal,
+      ...nextUsage,
+      budgetLimits,
+      budget: computeBudgetReport(nextUsage, budgetLimits),
+    };
+    const firstReminder = renderGoalTurnPrompt(firstGoal, {
+      isFirstTurn: true,
+    });
+    const nextReminder = renderGoalTurnPrompt(nextGoal, { isFirstTurn: false });
+    expect(nextReminder).not.toBe(firstReminder);
+    const firstMessages: ModelMessage[] = [
+      { role: "system", content: PRIMARY_BASE_PROMPT },
+      { role: "user", content: firstReminder },
+    ];
+    const nextMessages: ModelMessage[] = [
+      ...firstMessages,
+      {
+        role: "assistant",
+        content: "Validation fixed; integration tests remain.",
+      },
+      { role: "user", content: nextReminder },
+    ];
+    const tools = createGoalTools({
+      createGoal: vi.fn(),
+      updateGoalFromModel: vi.fn(),
+      getSnapshot: vi.fn(),
+      setBudget: vi.fn(),
+    }).map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.parametersJsonSchema,
+    }));
+    const before = structuredClone({ firstMessages, nextMessages, tools });
+
+    for (const messages of [firstMessages, nextMessages]) {
+      for (const [kind, provider] of [
+        ["openai-compatible", chat],
+        ["openai-responses", responses],
+        ["anthropic", anthropic],
+      ] as const) {
+        const promptCache = wirePromptCache({
+          baseUrl:
+            kind === "anthropic"
+              ? "https://api.anthropic.com"
+              : "https://api.openai.com/v1",
+          interfaceProvider: kind,
+          messages,
+          provider: provider.id,
+        });
+        if (kind === "openai-responses")
+          expect(promptCache.strategy).toBe("observe-only");
+        await provider.streamResponse({
+          purpose: "agent-step",
+          maxTokens: 128,
+          model: kind === "anthropic" ? "claude-fixture" : "gpt-fixture",
+          messages,
+          tools,
+          promptCache,
+        });
+      }
+    }
+
+    const firstChat = chatCreate.mock.calls[0][0];
+    const nextChat = chatCreate.mock.calls[1][0];
+    expect(nextChat.messages).toEqual([
+      ...firstChat.messages,
+      ...nextMessages.slice(firstMessages.length),
+    ]);
+    expect(firstChat.messages).toEqual(firstMessages);
+    expect(nextChat.tools).toEqual(firstChat.tools);
+    const chatKey = (firstChat as unknown as Record<string, unknown>)
+      .prompt_cache_key;
+    expect(chatKey).toEqual(expect.any(String));
+    expect(nextChat).toHaveProperty("prompt_cache_key", chatKey);
+    for (const request of [firstChat, nextChat])
+      expect(cacheExtensionKeys(request)).toEqual(["prompt_cache_key"]);
+
+    const firstResponses = responsesCreate.mock.calls[0][0];
+    const nextResponses = responsesCreate.mock.calls[1][0];
+    expect(firstResponses.instructions).toBe(PRIMARY_BASE_PROMPT);
+    expect(nextResponses.instructions).toBe(firstResponses.instructions);
+    expect(firstResponses.input).toEqual(firstMessages.slice(1));
+    expect(nextResponses.input).toEqual(nextMessages.slice(1));
+    expect(nextResponses.tools).toEqual(firstResponses.tools);
+    for (const request of [firstResponses, nextResponses]) {
+      expect(cacheExtensionKeys(request)).toEqual([]);
+      expect(request).not.toHaveProperty("previous_response_id");
+      expect(request.store).toBe(false);
+    }
+
+    const firstAnthropic = anthropicStream.mock.calls[0][0];
+    const nextAnthropic = anthropicStream.mock.calls[1][0];
+    expect(firstAnthropic.system).toEqual([
+      {
+        type: "text",
+        text: PRIMARY_BASE_PROMPT,
+        cache_control: { type: "ephemeral" },
+      },
+    ]);
+    expect(nextAnthropic.system).toEqual(firstAnthropic.system);
+    expect(firstAnthropic.messages).toEqual(firstMessages.slice(1));
+    expect(nextAnthropic.messages).toEqual(nextMessages.slice(1));
+    expect(nextAnthropic.tools).toEqual(firstAnthropic.tools);
+    for (const request of [firstAnthropic, nextAnthropic]) {
+      expect(request.cache_control).toEqual({ type: "ephemeral" });
+      expect(JSON.stringify(request.messages)).not.toContain("cache_control");
+    }
+    expect({ firstMessages, nextMessages, tools }).toEqual(before);
+  });
+
   it("shares the scoped Chat key and unchanged history/tools with a summary", async () => {
     const baseUrl = "https://api.openai.com/v1";
     const provider = createOpenAICompatibleProvider({

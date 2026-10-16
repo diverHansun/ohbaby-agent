@@ -226,6 +226,31 @@ describe("goal model instructions", () => {
       expect(instruction).toContain("1/3");
       expect(instruction).toContain("2/3");
       expect(instruction).toContain("independent work");
+      expect(instruction).toContain("or end the turn cleanly");
+      expect(instruction).toContain("Reuse the same concise reason verbatim");
+      expect(instruction).toContain("without turn or attempt counts");
+      expect(instruction).toContain("Do not infer a blocker from");
+      expect(instruction).toContain(
+        "Resolve questions answerable from the workspace yourself",
+      );
+    }
+  });
+
+  it("requires evidence for the full goal while allowing a requested plan as the deliverable", () => {
+    const { byName } = makeTools();
+    for (const instruction of [
+      GOAL_CONTINUATION_CORE,
+      PRIMARY_BASE_PROMPT_TEMPLATE,
+      getTool(byName, "UpdateGoal").description,
+    ]) {
+      expect(instruction).toContain("current evidence");
+      expect(instruction).toContain("A partial result is insufficient");
+      expect(instruction).toContain(
+        "unless the requested deliverable is a plan",
+      );
+      expect(instruction).toContain("leave the goal active");
+      expect(instruction).toContain("If work remains and progress is possible");
+      expect(instruction).not.toContain("there is no useful next action");
     }
   });
 });
