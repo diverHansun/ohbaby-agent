@@ -29,6 +29,7 @@ export function SubagentBrowser({
   const executions = state.list?.executions ?? [];
   const view = state.view;
   const width = Math.max(1, layout.contentWidth);
+  const plainLines = (text: string): string[] => wrapAnsi(text, width);
   const title = "Subagents · Read only · Esc back · Ctrl+G root · R retry";
   const explanation =
     "Prompts, approvals and stop controls remain in the root conversation.";
@@ -39,10 +40,12 @@ export function SubagentBrowser({
   const lines = view
     ? [
         ...(view.execution.processedRequestId
-          ? [`Processed request: ${view.execution.processedRequestId}`]
+          ? plainLines(
+              `Processed request: ${view.execution.processedRequestId}`,
+            )
           : []),
         ...(view.execution.artifactPath
-          ? [`Full result artifact: ${view.execution.artifactPath}`]
+          ? plainLines(`Full result artifact: ${view.execution.artifactPath}`)
           : []),
         ...view.messages
           .filter(isVisibleTranscriptMessage)
@@ -54,27 +57,35 @@ export function SubagentBrowser({
                   { ...message, parts: [part], finishReason: undefined },
                   width,
                   theme,
-                ).map((rendered) => {
+                ).flatMap((rendered) => {
                   const text =
                     rendered.kind === "text" ? rendered.text : rendered.label;
-                  return part.type === "tool-call"
-                    ? `${text} (${part.call.status})`
-                    : text;
+                  // Shared message rendering has already sanitized raw input.
+                  // Preserve its web links across the browser's final reflow.
+                  return wrapAnsi(
+                    part.type === "tool-call"
+                      ? `${text} (${part.call.status})`
+                      : text,
+                    width,
+                    { hyperlinks: true },
+                  );
                 });
               }
               return [
                 `Tool result ${part.result.callId}`,
                 part.result.output,
                 part.result.error ?? "",
-              ];
+              ].flatMap(plainLines);
             });
             return parts.some((part) => part.trim() !== "")
-              ? [`${message.role} · ${message.id}`, ...parts, ""]
+              ? [...plainLines(`${message.role} · ${message.id}`), ...parts, ""]
               : [];
           }),
-        ...(view.output === undefined ? [] : ["Stored result", view.output]),
-        ...(view.error ? [view.error] : []),
-      ].flatMap((line) => wrapAnsi(line, width))
+        ...(view.output === undefined
+          ? []
+          : ["Stored result", view.output].flatMap(plainLines)),
+        ...(view.error ? plainLines(view.error) : []),
+      ]
     : [];
   const help = state.selectedId
     ? `↑/↓ scroll · PgUp/PgDn page · ${String(lines.length)}/${String(lines.length)} lines${view?.history.hasMore ? " · PgUp at top loads earlier" : ""}`

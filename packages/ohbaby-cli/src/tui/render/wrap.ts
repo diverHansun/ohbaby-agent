@@ -7,16 +7,45 @@ import {
 import { stripVTControlCharacters } from "node:util";
 
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-// Preserve SGR styles only. Output must never move the cursor, set a title,
-// change the clipboard, or invoke a terminal protocol on behalf of a tool.
+// Raw input keeps SGR styles only. Rendered Markdown can additionally opt in
+// to validated web links; cursor, title and clipboard controls remain forbidden.
 const SGR = /(\u001b\[[0-9;:]*m)/gu;
+const DISPLAY_CODES = /(\u001b\[[0-9;:]*m|\u001b\]8;;[^\u0007\u001b]*\u0007)/gu;
+// Ink's fallback reflow recognizes BEL-terminated OSC 8 when closing and
+// reopening links. Normalize Pi's ST terminators before reaching that layer.
+const HYPERLINK_CLOSE = "\u001b]8;;\u0007";
 
-export function sanitizeTerminalText(input: string): string {
+function safeHyperlink(sequence: string): string {
+  const match =
+    /^\u001b\]8;;([^\u0000-\u0020\u007f-\u009f]*)(?:\u0007|\u001b\\)$/u.exec(
+      sequence,
+    );
+  if (!match) return "";
+  const url = match[1];
+  if (url === "") return HYPERLINK_CLOSE;
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+      parsed.hostname
+      ? `\u001b]8;;${url}\u0007`
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+export function sanitizeTerminalText(
+  input: string,
+  hyperlinks = false,
+): string {
   return input
     .replace(/\r\n/gu, "\n")
-    .replace(/(?:\u001b\]|\u009d)[\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/gu, "")
+    .replace(
+      /(?:\u001b\]|\u009d)[\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/gu,
+      (sequence) => (hyperlinks ? safeHyperlink(sequence) : ""),
+    )
     .replace(/\u001b[P_X^][\s\S]*?(?:\u001b\\|\u009c|$)/gu, "")
-    .split(SGR)
+    .split(hyperlinks ? DISPLAY_CODES : SGR)
     .map((part, index) =>
       index % 2 === 1
         ? part
@@ -33,10 +62,10 @@ export function visibleWidth(input: string): number {
 }
 
 /** Display-only normalization; original input and tool facts remain untouched. */
-function displayText(input: string, width: number): string {
+function displayText(input: string, width: number, hyperlinks = false): string {
   let column = 0;
-  return sanitizeTerminalText(input)
-    .split(SGR)
+  return sanitizeTerminalText(input, hyperlinks)
+    .split(hyperlinks ? DISPLAY_CODES : SGR)
     .map((part, index) => {
       if (index % 2 === 1) return part;
       let output = "";
@@ -61,10 +90,21 @@ function displayText(input: string, width: number): string {
     .join("");
 }
 
-export function wrapAnsi(input: string, width: number): string[] {
+export function wrapAnsi(
+  input: string,
+  width: number,
+  { hyperlinks = false }: { readonly hyperlinks?: boolean } = {},
+): string[] {
   const columns = Math.max(1, Math.floor(width));
-  return wrapTextWithAnsi(displayText(input, columns), columns).map((line) =>
-    line.includes("\u001b[") ? `${line}\u001b[0m` : line,
+  return wrapTextWithAnsi(displayText(input, columns, hyperlinks), columns).map(
+    (line) => {
+      const styled = line.includes("\u001b[") ? `${line}\u001b[0m` : line;
+      // Explicit newlines in Markdown labels can leave an open link on a row
+      // that needs no further wrapping. Close it before viewport slicing or Ink.
+      return line.lastIndexOf("\u001b]8;;") > line.lastIndexOf(HYPERLINK_CLOSE)
+        ? `${styled}${HYPERLINK_CLOSE}`
+        : styled;
+    },
   );
 }
 

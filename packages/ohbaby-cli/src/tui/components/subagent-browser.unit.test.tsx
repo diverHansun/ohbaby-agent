@@ -1,4 +1,9 @@
 import { render } from "ink-testing-library";
+import {
+  getOsc8LinkAtColumn,
+  setCapabilityOverrides,
+} from "@earendil-works/pi-tui";
+import { stripVTControlCharacters } from "node:util";
 import type { ReactElement } from "react";
 import { expect, it, vi } from "vitest";
 import { SubagentBrowser, SubagentWait } from "./subagent-browser.js";
@@ -7,6 +12,81 @@ import { LayoutProvider } from "../layout/context.js";
 import { computeLayoutMetrics } from "../layout/metrics.js";
 import { AppShell } from "../layout/app-shell.js";
 import { createSubagentReader, type UiSubagentReaderState } from "ohbaby-sdk";
+
+it.each([40, 80])(
+  "preserves child link ranges at %i columns without promoting raw output",
+  (columns) => {
+    setCapabilityOverrides({ hyperlinks: true });
+    const reader = createSubagentReader({}, "root");
+    const url = `https://example.com/${"long-path/".repeat(20)}`;
+    const raw =
+      "\u001b]8;;https://injected.example\u001b\\RAW\u001b]8;;\u001b\\";
+    const state: UiSubagentReaderState = {
+      loading: false,
+      selectedId: "execution",
+      view: {
+        execution: {
+          executionId: "execution",
+          subagentId: "agent",
+          rootSessionId: "root",
+          rootRunId: "run",
+          status: "completed",
+          createdAt: 1,
+          updatedAt: 2,
+          resultStored: true,
+          delivery: "processed",
+        },
+        readOnly: true,
+        reasoningMissing: false,
+        history: { hasMore: false },
+        messages: [
+          {
+            id: "answer",
+            role: "assistant",
+            createdAt: "2026-01-01",
+            parts: [
+              {
+                type: "text",
+                text: `BEFORE [${"X".repeat(73)}](${url}) AFTER`,
+              },
+              { type: "tool-result", result: { callId: "tool", output: raw } },
+            ],
+          },
+        ],
+        output: raw,
+      },
+    };
+    const app = render(
+      <LayoutProvider value={computeLayoutMetrics({ columns, rows: 50 })}>
+        <SubagentBrowser
+          reader={reader}
+          state={state}
+          onClose={() => undefined}
+        />
+      </LayoutProvider>,
+    );
+    try {
+      const frame = app.lastFrame() ?? "";
+      expect(frame).not.toContain("injected.example");
+      expect(frame).toContain("RAW");
+      let linkedCells = 0;
+      for (const line of frame.split("\n")) {
+        const visible = stripVTControlCharacters(line);
+        for (let column = 0; column <= visible.length; column++) {
+          const expected = visible[column] === "X" ? url : undefined;
+          expect(getOsc8LinkAtColumn(line, column)).toBe(expected);
+          if (expected) linkedCells++;
+        }
+      }
+      expect(linkedCells).toBe(73);
+    } finally {
+      app.unmount();
+      reader.dispose();
+      setCapabilityOverrides({});
+    }
+  },
+);
+
 it("renders read-only child text and complete tool bodies without internal inputs or reasoning and returns with Escape", async () => {
   const reader = createSubagentReader({}, "root");
   const close = vi.fn();

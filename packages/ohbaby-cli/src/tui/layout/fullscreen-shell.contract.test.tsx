@@ -1,7 +1,12 @@
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { Terminal } from "@xterm/headless";
-import { Markdown } from "@earendil-works/pi-tui";
+import {
+  getOsc8LinkAtColumn,
+  Markdown,
+  setCapabilityOverrides,
+} from "@earendil-works/pi-tui";
+import { stripVTControlCharacters } from "node:util";
 import { Box, render, Text } from "ink";
 import type {
   CoreAPI,
@@ -649,7 +654,44 @@ describe("fullscreen review probes", () => {
     }
   });
 
-  it("keeps Ctrl+B/F out of the draft and leaves a real prompt usable beside narrow tasks", async () => {
+  it("preserves table hyperlinks through fullscreen Ink rendering and resize", async () => {
+    setCapabilityOverrides({ hyperlinks: true });
+    const url = `https://example.com/${"long-path/".repeat(20)}`;
+    const text = `| Name | Website |\n| --- | --- |\n| Example | [${"X".repeat(137)}](${url}) |\n\n> [YYYY\n> YYYY](${url}) normal\n\nAFTER-LINK`;
+    const h = await harness({ text, complete: true });
+    const links: string[] = [];
+    const listener = h.term.parser.registerOscHandler(8, (data) => {
+      links.push(data);
+      return false;
+    });
+    try {
+      await write(h.term, h.output.chunks.join(""));
+      expect(links).toContain(`;${url}`);
+      expect(links.at(-1)).toBe(";");
+      expect(screen(h.term).join("\n")).toContain("XXX");
+      await h.resize(40, 20);
+      expect(screen(h.term).join("\n")).toContain("XXX");
+      expect(screen(h.term).join("\n")).toContain("AFTER-LINK");
+      expect(links.at(-1)).toBe(";");
+      for (const line of h.output.chunks.join("").split("\n")) {
+        const visible = stripVTControlCharacters(line);
+        for (let column = 0; column <= visible.length; column++) {
+          expect(getOsc8LinkAtColumn(line, column)).toBe(
+            visible[column] === "X" || visible[column] === "Y"
+              ? url
+              : undefined,
+          );
+        }
+      }
+    } finally {
+      listener.dispose();
+      await h.close();
+      h.term.dispose();
+      setCapabilityOverrides({});
+    }
+  });
+
+  it("scrolls and returns to latest with Ctrl+B/F/Y without changing the draft", async () => {
     const submit = vi.fn().mockResolvedValue({ sessionId: "root" });
     // SAFETY: only prompt submission is exercised by this dock fixture.
     const client = { submitPromptAccepted: submit } as unknown as CoreAPI;
@@ -685,7 +727,13 @@ describe("fullscreen review probes", () => {
       await h.press("abc");
       await h.press("\u0002");
       expect(screen(h.term).join("\n")).toContain("History");
+      expect(screen(h.term).join("\n")).toContain("Ctrl+Y latest");
+      await h.press("\u0002");
       await h.press("\u0006");
+      expect(screen(h.term).join("\n")).toContain("History");
+      await h.press("\u0019");
+      expect(screen(h.term).join("\n")).toContain("LATEST");
+      expect(screen(h.term).join("\n")).not.toContain("History");
       await h.press("d");
       await h.press("\r");
       expect(submit).toHaveBeenCalledWith("abcd", expect.anything());

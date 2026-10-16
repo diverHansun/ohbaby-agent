@@ -103,6 +103,11 @@ export function FullscreenShell({
   });
   useInput(
     (value, key) => {
+      if (key.ctrl && value === "y") {
+        anchor.current = null;
+        setPosition(null);
+        return;
+      }
       if (key.ctrl && (value === "b" || value === "f")) {
         scroll((value === "f" ? 1 : -1) * Math.max(1, viewport.height - 1));
         return;
@@ -183,7 +188,11 @@ export function FullscreenShell({
                 <Text dimColor wrap="truncate-end">
                   {position === null
                     ? "─".repeat(layout.contentWidth)
-                    : "History · Ctrl+B/F scroll · Shift+End latest"}
+                    : layout.contentWidth >= 49
+                      ? "History · Ctrl+B up · Ctrl+F down · Ctrl+Y latest"
+                      : layout.contentWidth >= 35
+                        ? "History  Ctrl+B/F ↑↓  Ctrl+Y latest"
+                        : "History · Ctrl+Y latest"}
                 </Text>
               ) : null}
               <TodoPanelRefContext.Provider value={todoRef}>

@@ -1,15 +1,7 @@
-import {
-  Markdown,
-  setCapabilityOverrides,
-  type MarkdownTheme,
-} from "@earendil-works/pi-tui";
+import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import chalk, { type ForegroundColorName } from "chalk";
 import type { Theme } from "../theme/tokens.js";
 import { sanitizeTerminalText, wrapAnsi } from "./wrap.js";
-
-// This app consumes Pi only as a text renderer. Keep URLs visible for native
-// terminal copying instead of emitting terminal-dependent OSC link controls.
-setCapabilityOverrides({ hyperlinks: false });
 
 export interface MarkdownRenderOptions {
   readonly width: number;
@@ -28,7 +20,7 @@ function markdownTheme(theme?: Theme): MarkdownTheme {
   return {
     heading: (text) => chalk.bold(color(theme?.text.heading)(text)),
     link: color(theme?.text.link),
-    linkUrl: color(theme?.text.muted),
+    linkUrl: color(theme?.text.dim),
     code: (text) => color(theme?.text.strong)(`\`${text}\``),
     codeBlock: (text) => text,
     codeBlockBorder: color(theme?.text.muted),
@@ -60,9 +52,12 @@ export function mdToAnsi(
       undefined,
       { preserveOrderedListMarkers: true, renderLatex: false },
     ).render(width);
-    // Pi may emit terminal-dependent OSC links and pads its component lines.
-    // Keep only safe styles at our display boundary and enforce narrow widths.
-    return rendered.flatMap((line) => wrapAnsi(line.trimEnd(), width));
+    // Pi detects terminal hyperlink support and retains visible URLs otherwise.
+    // Only generated web links survive the display boundary; raw input above
+    // cannot inject OSC controls. Wrapping closes links on each physical row.
+    return rendered.flatMap((line) =>
+      wrapAnsi(line.trimEnd(), width, { hyperlinks: true }),
+    );
   } catch {
     return wrapAnsi(source, width);
   }

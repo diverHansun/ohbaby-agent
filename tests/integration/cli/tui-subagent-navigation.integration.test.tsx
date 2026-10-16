@@ -10,6 +10,7 @@ import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
 import type { DOMElement } from "ink";
 import type { CoreAPI, UiSubagentExecution } from "ohbaby-sdk";
 import { stripVTControlCharacters } from "node:util";
+import { createRequire } from "node:module";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -19,6 +20,14 @@ import {
   SESSION_VIEW_CLEAR_SEQUENCE,
 } from "../../../packages/ohbaby-cli/src/tui/app.js";
 import { createTuiReviewBackend } from "./fixtures/tui-improve1-backend.js";
+
+const cliRequire = createRequire(
+  new URL("../../../packages/ohbaby-cli/package.json", import.meta.url),
+);
+// SAFETY: resolve the same public Pi dependency used by the CLI renderer.
+const { getOsc8LinkAtColumn, setCapabilityOverrides } = (await import(
+  cliRequire.resolve("@earendil-works/pi-tui")
+)) as typeof import("../../../packages/ohbaby-cli/node_modules/@earendil-works/pi-tui/dist/index.js");
 
 describe("TUI subagent browser navigation", () => {
   it("replays one current history on return, retains draft, and settles to zero polling output", async () => {
@@ -74,6 +83,8 @@ describe("TUI subagent browser navigation", () => {
 });
 
 it("keeps actual App execution detail pages and status reachable at 60x20", async () => {
+  setCapabilityOverrides({ hyperlinks: true });
+  const linkUrl = `https://example.com/${"long-path/".repeat(20)}`;
   const workspace = await mkdtemp(
     path.join(os.tmpdir(), "tui-browser-window-"),
   );
@@ -116,7 +127,8 @@ it("keeps actual App execution detail pages and status reachable at 60x20", asyn
               type: "text",
               text: Array.from(
                 { length: 35 },
-                (_, index) => `detail-${String(index).padStart(2, "0")}`,
+                (_, index) =>
+                  `detail-${String(index).padStart(2, "0")}${index === 10 ? ` [${"X".repeat(137)}](${linkUrl}) AFTER` : ""}`,
               ).join("\n"),
             },
           ],
@@ -150,12 +162,11 @@ it("keeps actual App execution detail pages and status reachable at 60x20", asyn
       incrementalRendering: false,
     },
   );
-  const frame = (): string =>
-    stripVTControlCharacters(
-      stdout.chunks.findLast((chunk) =>
-        chunk.includes("Subagents · Read only"),
-      ) ?? "",
-    );
+  const rawFrame = (): string =>
+    stdout.chunks.findLast((chunk) =>
+      chunk.includes("Subagents · Read only"),
+    ) ?? "";
+  const frame = (): string => stripVTControlCharacters(rawFrame());
   try {
     await tick();
     await tick();
@@ -163,16 +174,30 @@ it("keeps actual App execution detail pages and status reachable at 60x20", asyn
     await tick();
     stdin.send("\r");
     await tick();
+    const beforeLatestKey = frame();
+    stdin.send("\u0019");
+    await tick();
+    expect(frame()).toBe(beforeLatestKey);
     const seen = new Set<string>();
+    let linkedCells = 0;
     for (let page = 0; page < 10; page++) {
       expect(height).toBeLessThan(20);
       expect(frame()).toContain("Subagents · Read only");
       expect(frame()).toContain("audit-agent · completed");
+      for (const line of rawFrame().split("\n")) {
+        const visible = stripVTControlCharacters(line);
+        for (let column = 0; column <= visible.length; column++) {
+          const expected = visible[column] === "X" ? linkUrl : undefined;
+          expect(getOsc8LinkAtColumn(line, column)).toBe(expected);
+          if (expected) linkedCells++;
+        }
+      }
       for (const match of frame().matchAll(/detail-\d+/gu)) seen.add(match[0]);
       stdin.send("\u001b[6~");
       await tick();
     }
     expect(seen.size).toBe(35);
+    expect(linkedCells).toBeGreaterThanOrEqual(137);
     for (let page = 0; page < 10; page++) {
       stdin.send("\u001b[5~");
       await tick();
@@ -182,6 +207,7 @@ it("keeps actual App execution detail pages and status reachable at 60x20", asyn
     expect(height).toBeLessThan(20);
   } finally {
     app.unmount();
+    setCapabilityOverrides({});
     await rm(workspace, { recursive: true, force: true });
   }
 });

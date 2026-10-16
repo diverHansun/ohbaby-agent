@@ -142,10 +142,10 @@ export function createTheme(
       dim: color("textDim", "gray"),
       heading: color("gold", "yellow"),
       headingAccent: color("skyBlue", "cyan"),
-      link: color("skyBlue", "cyan"),
+      link: color("link", mode === "dark" ? "white" : "black"),
       muted: color("textMuted", "gray"),
       normal: color("text", "white"),
-      strong: color("textStrong", "white"),
+      strong: color("textStrong", mode === "dark" ? "white" : "black"),
     },
     tool: {
       arg: color("text", mode === "dark" ? "white" : "black"),

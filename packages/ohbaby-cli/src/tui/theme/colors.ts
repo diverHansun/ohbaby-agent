@@ -4,6 +4,7 @@ export interface RawPalette {
   readonly gold: string;
   readonly goldBright: string;
   readonly green: string;
+  readonly link: string;
   readonly purple: string;
   readonly purpleBright: string;
   readonly purpleShimmer: string;
@@ -24,6 +25,7 @@ export const darkPalette = {
   gold: "#D4A24F",
   goldBright: "#E0B463",
   green: "#8FCB9B",
+  link: "#9AAFC1",
   purple: "#B9A3E3",
   purpleBright: "#C9B8EC",
   purpleShimmer: "#F3ECFF",
@@ -44,6 +46,7 @@ export const lightPalette = {
   gold: "#B5832A",
   goldBright: "#C79535",
   green: "#3D9A57",
+  link: "#53677D",
   purple: "#7C5BC4",
   purpleBright: "#8E6ED4",
   purpleShimmer: "#C9B2F5",
