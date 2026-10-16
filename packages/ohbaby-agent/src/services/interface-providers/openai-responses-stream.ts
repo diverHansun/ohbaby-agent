@@ -31,6 +31,8 @@ interface TextState {
   text: string;
   textDone: boolean;
   done: boolean;
+  /** Some providers wrap reasoning_text in content_part added/done events. */
+  requiresPartDone?: boolean;
 }
 interface MessageState extends BaseState {
   type: "message";
@@ -432,6 +434,29 @@ class ResponsesStreamState {
     >,
   ): void {
     const item = this.activeItem(event);
+    if (item.type === "reasoning") {
+      check(
+        Number.isInteger(event.content_index) &&
+          event.content_index === item.content.size &&
+          !item.content.has(event.content_index),
+        event.type,
+        "duplicate or unordered reasoning content part",
+      );
+      check(
+        isReasoningPart(event.part) &&
+          "text" in event.part &&
+          event.part.text === "",
+        event.type,
+        "added reasoning content must be empty reasoning_text",
+      );
+      item.content.set(event.content_index, {
+        text: "",
+        textDone: false,
+        done: false,
+        requiresPartDone: true,
+      });
+      return;
+    }
     check(
       item.type === "message",
       event.type,
@@ -478,6 +503,22 @@ class ResponsesStreamState {
   partDone(
     event: Extract<ResponseStreamEvent, { type: "response.content_part.done" }>,
   ): void {
+    const item = this.activeItem(event);
+    if (item.type === "reasoning") {
+      const part = item.content.get(event.content_index);
+      check(
+        part?.requiresPartDone &&
+          !part.done &&
+          part.textDone &&
+          isReasoningPart(event.part) &&
+          "text" in event.part &&
+          event.part.text === part.text,
+        event.type,
+        "reasoning content part done does not match accumulated text",
+      );
+      part.done = true;
+      return;
+    }
     const part = this.activePart(event);
     const incoming = outputText(event.part, event.type);
     check(
@@ -601,7 +642,7 @@ class ResponsesStreamState {
         "reasoning text done conflicts with accumulated text",
       );
       part.textDone = true;
-      if (!summary) part.done = true;
+      if (!summary && !part.requiresPartDone) part.done = true;
     }
   }
 

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "incremental": false,
+    "rootDir": "../.."
+  },
+  "include": [
+    "compact-token-flow.real.e2e.test.ts",
+    "compact-token-flow.vitest.config.ts",
+    "compact-token-profiles.unit.test.ts",
+    "formal-cache-observer.unit.test.ts"
+  ]
+}

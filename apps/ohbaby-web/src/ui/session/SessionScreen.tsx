@@ -57,6 +57,7 @@ import { DirectoryPickerDialog } from "../workspace/directory-picker/DirectoryPi
 import { ProjectRail } from "../workspace/ProjectRail.js";
 import { selectViewModel, type ViewModel } from "./selectors.js";
 import { SessionSidebar } from "./SessionSidebar.js";
+import { useCompactRequest } from "./use-compact-request.js";
 import {
   EmptyState,
   ErrorBanner,
@@ -357,6 +358,11 @@ export function SessionScreen({
     view.composer.activeRunId,
     setActionError,
   );
+  const compactRequest = useCompactRequest(
+    client,
+    view.composer.activeSessionId ?? view.activeSession?.id,
+    setActionError,
+  );
   const [dismissedPromptErrorId, setDismissedPromptErrorId] = useState<
     string | null
   >(null);
@@ -406,7 +412,9 @@ export function SessionScreen({
     !view.isEmpty ||
     view.commandNotices.length > 0 ||
     promptProjection.rows.length > 0 ||
-    promptProjection.startupThinkingAt !== undefined;
+    promptProjection.startupThinkingAt !== undefined ||
+    compactRequest.isCompacting(view.activeSession?.id) ||
+    compactRequest.notice?.sessionId === view.activeSession?.id;
 
   useEffect(() => {
     const keepAttempt = (attempt: LocalPromptAttempt): boolean => {
@@ -1065,6 +1073,15 @@ export function SessionScreen({
                     view.composer.isRunning && !subagentState.list?.waiting
                   }
                   reasoningByMessageId={view.reasoningByMessageId}
+                  compacting={compactRequest.isCompacting(
+                    view.activeSession?.id,
+                  )}
+                  compactNotice={
+                    compactRequest.notice &&
+                    compactRequest.notice.sessionId === view.activeSession?.id
+                      ? compactRequest.notice.text
+                      : undefined
+                  }
                   commandNotices={
                     <CommandNoticeList
                       notices={view.commandNotices.filter(
@@ -1221,6 +1238,10 @@ export function SessionScreen({
           <StructuredCommandOverlay
             key={draftScopeKey}
             client={client}
+            compacting={compactRequest.isCompacting(
+              view.composer.activeSessionId ?? view.activeSession?.id,
+            )}
+            onCompact={compactRequest.start}
             onExecuteSlashCommand={(input) =>
               runtime.executeSlashCommand(input)
             }

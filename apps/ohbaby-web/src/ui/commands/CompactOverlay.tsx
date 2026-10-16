@@ -1,10 +1,6 @@
-import type {
-  UiBackendClient,
-  UiCompactSessionResult,
-  UiContextWindowUsage,
-} from "ohbaby-sdk";
+import type { UiBackendClient, UiContextWindowUsage } from "ohbaby-sdk";
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   formatTokenCount,
   type OverlayStatus,
@@ -12,15 +8,12 @@ import {
 } from "./overlay-controls.js";
 
 export function CompactOverlayBody(props: {
-  readonly client: Pick<
-    UiBackendClient,
-    "getContextWindowUsage" | "compactSession"
-  >;
-  readonly onBusyChange?: (busy: boolean) => void;
+  readonly client: Pick<UiBackendClient, "getContextWindowUsage">;
+  readonly compacting: boolean;
+  readonly onCompact: (sessionId: string) => void;
   readonly sessionId: string | undefined;
 }): ReactElement {
-  const { onBusyChange, sessionId } = props;
-  const pending = useRef<AbortController | null>(null);
+  const { sessionId } = props;
   const [usage, setUsage] = useState<UiContextWindowUsage | null>(null);
   const [status, setStatus] = useState<OverlayStatus>({
     kind: "idle",
@@ -54,80 +47,7 @@ export function CompactOverlayBody(props: {
       });
     return (): void => {
       cancelled = true;
-      const controller = pending.current;
-      pending.current = null;
-      controller?.abort();
     };
-  }, [props.client, sessionId]);
-
-  const busy = status.kind === "busy";
-  useEffect(() => {
-    if (!busy) return;
-    onBusyChange?.(true);
-    return (): void => onBusyChange?.(false);
-  }, [busy, onBusyChange]);
-
-  const compactSession = useCallback(() => {
-    if (pending.current) return;
-    if (!sessionId) {
-      setStatus({ kind: "error", message: "No active session to compact." });
-      return;
-    }
-    const controller = new AbortController();
-    pending.current = controller;
-    setStatus({ kind: "busy", message: "Compacting session…" });
-    void (async (): Promise<void> => {
-      try {
-        const nextResult = await props.client.compactSession({
-          sessionId,
-          signal: controller.signal,
-        });
-        if (pending.current !== controller) return;
-        const nextUsage = await props.client
-          .getContextWindowUsage({ sessionId })
-          .catch(() => usageFromCompactResult(nextResult));
-        if (pending.current !== controller) return;
-        setUsage(nextUsage);
-        const failureMessage = compactFailureMessage(nextResult);
-        if (failureMessage) {
-          throw new Error(failureMessage);
-        }
-        // A returned result is authoritative even when Stop raced its commit.
-        setStatus({
-          kind: "success",
-          message:
-            nextResult.status === "not-needed"
-              ? "Nothing to compact"
-              : // Same full-window estimate as the durable conversation notice.
-                `Compacted · ${formatTokenCount(nextResult.usageBefore.currentTokens)} → ${formatTokenCount(nextResult.usageAfter.currentTokens)} tokens`,
-        });
-      } catch (error) {
-        if (pending.current !== controller) return;
-        if (
-          (error instanceof Error || error instanceof DOMException) &&
-          error.name === "AbortError"
-        ) {
-          // Aborting transport cannot undo a commit whose response is still in flight.
-          const latest = await props.client
-            .getContextWindowUsage({ sessionId })
-            .catch(() => null);
-          if (pending.current !== controller) return;
-          setUsage(latest);
-          // An AbortError alone cannot tell whether the server committed first.
-          setStatus({
-            kind: "idle",
-            message:
-              "Stopped waiting. If compaction had already finished, its result stays in the conversation.",
-          });
-        } else
-          setStatus({
-            kind: "error",
-            message: error instanceof Error ? error.message : String(error),
-          });
-      } finally {
-        if (pending.current === controller) pending.current = null;
-      }
-    })();
   }, [props.client, sessionId]);
 
   return (
@@ -142,27 +62,16 @@ export function CompactOverlayBody(props: {
       <div className="ohb-structured-actions">
         <button
           className="ohb-button-primary"
-          disabled={!sessionId || status.kind === "busy"}
-          onClick={compactSession}
+          disabled={!sessionId || props.compacting}
+          onClick={() => {
+            // Progress and the result belong to the conversation, not this overlay.
+            if (sessionId) props.onCompact(sessionId);
+          }}
           title="Compact session"
           type="button"
         >
-          {status.kind === "busy" ? "Compacting…" : "Compact session"}
+          {props.compacting ? "Compacting…" : "Compact session"}
         </button>
-        {status.kind === "busy" ? (
-          <button
-            className="ohb-button"
-            disabled={pending.current?.signal.aborted === true}
-            onClick={() => {
-              pending.current?.abort();
-              setStatus({ kind: "busy", message: "Stopping compaction…" });
-            }}
-            title="Stop compaction"
-            type="button"
-          >
-            Stop
-          </button>
-        ) : null}
       </div>
     </div>
   );
@@ -194,32 +103,4 @@ function ContextUsageCard(props: {
       </div>
     </div>
   );
-}
-
-// The compact result is authoritative; a failed refresh falls back to its estimate.
-function usageFromCompactResult(
-  result: UiCompactSessionResult,
-): UiContextWindowUsage | null {
-  const { contextLimit, currentTokens, modelId } = result.usageAfter;
-  if (!Number.isFinite(contextLimit) || contextLimit <= 0) return null;
-  return {
-    contextWindowRatio: currentTokens / contextLimit,
-    contextWindowTokens: contextLimit,
-    currentTokens,
-    estimatedAt: new Date().toISOString(),
-    modelId,
-    sessionId: result.sessionId,
-  };
-}
-
-function compactFailureMessage(result: UiCompactSessionResult): string | null {
-  if (result.status !== "failed" && result.status !== "inflated") {
-    return null;
-  }
-  const error = result.error ?? result.compression?.error;
-  const label =
-    result.status === "failed"
-      ? "Compaction failed"
-      : "Compaction did not reduce context";
-  return error ? `${label}: ${error}` : label;
 }

@@ -59,6 +59,40 @@ textarea:disabled {
   }
 }
 
+/* Outer dots close the 2px gaps and all three flatten, then spring back. */
+@keyframes ohb-squeeze-top {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+  45%,
+  60% {
+    transform: translateY(3px) scaleY(0.4);
+  }
+}
+
+@keyframes ohb-squeeze-middle {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  45%,
+  60% {
+    transform: scaleY(0.4);
+  }
+}
+
+@keyframes ohb-squeeze-bottom {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+  45%,
+  60% {
+    transform: translateY(-3px) scaleY(0.4);
+  }
+}
+
 @keyframes ohb-fade {
   from {
     opacity: 0;

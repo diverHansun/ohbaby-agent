@@ -10,10 +10,13 @@ describe("compression prompts", () => {
       "## User Intent & Feedback",
       "## Relevant Files",
       "## Next Steps",
-      "## Risks",
     ]) {
       expect(COMPRESSION_PROMPT).toContain(section);
     }
+    // Risks fold into Blocked; a separate section only repeated it.
+    expect(COMPRESSION_PROMPT).not.toContain("## Risks");
+    expect(COMPRESSION_PROMPT).toMatch(/stand on its own/);
+    expect(COMPRESSION_PROMPT).toMatch(/unanswered, quote it verbatim/);
 
     expect(COMPRESSION_PROMPT).toMatch(/16384/);
     expect(COMPRESSION_PROMPT).toMatch(/Do not mention.*summar/i);

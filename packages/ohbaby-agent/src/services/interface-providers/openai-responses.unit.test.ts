@@ -1584,6 +1584,83 @@ describe("Responses native continuation guards through SDK SSE", () => {
 });
 
 describe("Responses streamed reasoning parts", () => {
+  it.each([
+    "valid",
+    "missing-done",
+    "mismatched-text",
+    "duplicate-added",
+    "duplicate-done",
+    "wrong-index",
+    "wrong-part-type",
+  ] as const)(
+    "validates reasoning content part envelopes: %s",
+    async (variant) => {
+      const ref = { item_id: "rs-wrapped", output_index: 0, content_index: 0 };
+      const reasoning = {
+        id: "rs-wrapped",
+        type: "reasoning",
+        status: "completed",
+        summary: [],
+        content: [{ type: "reasoning_text", text: "private" }],
+      };
+      const added = {
+        type: "response.content_part.added",
+        ...ref,
+        part: { type: "reasoning_text", text: "" },
+      };
+      const done = {
+        type: "response.content_part.done",
+        ...ref,
+        part: { type: "reasoning_text", text: "private" },
+      };
+      const events = [
+        {
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { ...reasoning, status: "in_progress", content: [] },
+        },
+        added,
+        ...(variant === "duplicate-added" ? [added] : []),
+        { type: "response.reasoning_text.delta", ...ref, delta: "private" },
+        { type: "response.reasoning_text.done", ...ref, text: "private" },
+        ...(variant === "missing-done"
+          ? []
+          : [
+              {
+                ...done,
+                content_index: variant === "wrong-index" ? 1 : 0,
+                part: {
+                  type:
+                    variant === "wrong-part-type"
+                      ? "output_text"
+                      : "reasoning_text",
+                  text: variant === "mismatched-text" ? "different" : "private",
+                },
+              },
+            ]),
+        ...(variant === "duplicate-done" ? [done] : []),
+        { type: "response.output_item.done", output_index: 0, item: reasoning },
+        ...textEvents("READY", "completed", 1),
+        terminal([reasoning, message("READY")]),
+      ];
+      await sdkFixture([events], async (provider) => {
+        if (variant !== "valid") {
+          await expect(sdkCollect(provider)).rejects.toThrow(/Responses/);
+          return;
+        }
+        const output = await sdkCollect(provider);
+        expect(output.map((event) => event.textDelta ?? "").join("")).toBe(
+          "READY",
+        );
+        expect(output.at(-1)).toMatchObject({
+          nativeOutput: {
+            protocol: "openai-responses",
+            items: [reasoning, message("READY")],
+          },
+        });
+      });
+    },
+  );
   it("validates and retains summary and private text parts before terminal completion", async () => {
     const ref = { item_id: "rs-1", output_index: 0 };
     const reasoning = {

@@ -27,7 +27,10 @@ import { probeActiveModelContextWindow } from "../../packages/ohbaby-agent/src/c
 import { getDatabase } from "../../packages/ohbaby-agent/src/services/database/index.js";
 import { readTokenUsageMetadata } from "../../packages/ohbaby-agent/src/core/message/index.js";
 import type { RunStatus } from "../../packages/ohbaby-agent/src/runtime/run-ledger/types.js";
-import { NATIVE_REAL_PROFILES } from "./reasoning-native-harness.js";
+import {
+  NATIVE_REAL_PROFILES,
+  type NativeRealProfile,
+} from "./reasoning-native-harness.js";
 import { LIVE_CONTEXT_PROFILES } from "./formal-cache-live-context.js";
 import {
   classifyControlledRead,
@@ -193,6 +196,9 @@ async function drainWithDeadline(
 export async function createFormalCacheSession(
   profileId: string,
   options: {
+    profile?: NativeRealProfile & { provider: string; apiKeyEnv: string };
+    reasoningEnabled?: boolean;
+    observeWireRequest?: Parameters<typeof installFormalCacheObserver>[0];
     /** In-memory inspection at the real provider boundary; never persisted by this harness. */
     onProviderRequest?: (
       request: InterfaceProviderRequest,
@@ -206,18 +212,22 @@ export async function createFormalCacheSession(
     emptyConfig?: boolean;
   } = {},
 ): Promise<FormalCacheSession> {
-  const profile = [...NATIVE_REAL_PROFILES, ...LIVE_CONTEXT_PROFILES].find(
-    (item) => item.id === profileId,
-  );
+  const profile =
+    options.profile ??
+    [...NATIVE_REAL_PROFILES, ...LIVE_CONTEXT_PROFILES].find(
+      (item) => item.id === profileId,
+    );
   if (!profile) throw new Error("Unknown verified profile");
   const originalHome = process.env.OHBABY_HOME;
   const originalHomedir = os.homedir;
-  const originalKey = process.env.ZENMUX_API_KEY;
+  const apiKeyEnv = options.profile?.apiKeyEnv ?? "ZENMUX_API_KEY";
+  const provider = options.profile?.provider ?? "zenmux";
+  const originalKey = process.env[apiKeyEnv];
   const environment: Partial<Record<string, string>> = await loadEnvFile(
     join(process.cwd(), ".env"),
   );
-  const key = originalKey ?? environment.ZENMUX_API_KEY;
-  if (!key) throw new Error("Missing ZenMux credential");
+  const key = originalKey ?? environment[apiKeyEnv];
+  if (!key) throw new Error(`Missing ${apiKeyEnv} credential`);
   let setupRoot: string | undefined;
   let setupObserver: ReturnType<typeof installFormalCacheObserver> | undefined;
   let setupBackend:
@@ -228,11 +238,12 @@ export async function createFormalCacheSession(
     os.homedir = originalHomedir;
     if (originalHome === undefined) delete process.env.OHBABY_HOME;
     else process.env.OHBABY_HOME = originalHome;
-    if (originalKey === undefined) delete process.env.ZENMUX_API_KEY;
-    else process.env.ZENMUX_API_KEY = originalKey;
+    if (originalKey === undefined)
+      Reflect.deleteProperty(process.env, apiKeyEnv);
+    else process.env[apiKeyEnv] = originalKey;
   };
   try {
-    process.env.ZENMUX_API_KEY = key;
+    process.env[apiKeyEnv] = key;
     const root = await mkdtemp(join(tmpdir(), "ohbaby-formal-cache-"));
     setupRoot = root;
     if (options.emptyConfig) os.homedir = () => root;
@@ -249,6 +260,7 @@ export async function createFormalCacheSession(
     process.env.OHBABY_HOME = home;
     const context = new AsyncLocalStorage<{ id: number; purpose?: string }>();
     const observer = installFormalCacheObserver({
+      ...options.observeWireRequest,
       maxRequests: options.maxRequests ?? 25,
       context: () => context.getStore(),
     });
@@ -271,17 +283,20 @@ export async function createFormalCacheSession(
       contextWindow = { tokens: probe.contextWindowTokens, source: "detected" };
     }
     const config = {
-      provider: "zenmux",
+      provider,
       defaultModel: profile.model,
       apiConfig: {
         baseUrl: profile.baseUrl,
-        apiKeyEnv: "ZENMUX_API_KEY",
+        apiKeyEnv,
         interfaceProvider: profile.protocol,
       },
       llmParams: {
         maxTokens: 4096,
         contextWindowTokens: contextWindow.tokens,
-        reasoning: { enabled: true, effort: profile.enabledEffort },
+        reasoning: {
+          enabled: options.reasoningEnabled ?? true,
+          effort: profile.enabledEffort,
+        },
       },
       models: [
         {
@@ -687,11 +702,11 @@ export async function createFormalCacheSession(
           projectDirectory: workdir,
         });
         await backend.connectModel({
-          provider: "zenmux",
+          provider,
           model: profile.model,
           interfaceProvider: profile.protocol,
           baseUrl: profile.baseUrl,
-          apiKeyEnv: "ZENMUX_API_KEY",
+          apiKeyEnv,
           contextWindowTokens: contextWindow.tokens,
           maxOutputTokens: 4096,
         });
