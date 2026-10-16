@@ -5,6 +5,8 @@
 >
 > 实施状态：improve-1 已在 `codex/goals-upgrade-improve-1` 实现，验收与独立审查结果见 [05](./improve-1/05-implementation-acceptance.md)；看门狗位置疑问、五个参考项目对照及 improve-5 回看条件见 [06](./improve-1/06-request-idle-placement-review.md)。improve-2 已在基于 improve-1 的 `codex/goals-upgrade-improve-2` 实现，交付与验证见 [05](./improve-2/05-implementation-acceptance.md)，阶段模块文档见 [docs/goals/improve-2](../../goals/improve-2/architecture.md)。improve-3 已在基于 improve-2 收尾提交 `fed91056` 的 `codex/goals-upgrade-improve-3` 实现，交付与验证见 [05](./improve-3/05-implementation-acceptance.md)，阶段文档见 [docs/goals/improve-3](../../goals/improve-3/architecture.md)。improve-4 已在基于 improve-3 收尾提交 `a97e07ce` 的 `codex/goals-upgrade-improve-4` 实现并完成本批验收；实际测试映射与审查见 [05](./improve-4/05-implementation-acceptance.md)，阶段架构见 [docs/goals/improve-4](../../goals/improve-4/architecture.md)。improve-5 已在基于 improve-4 收尾提交 `17fdae14` 的 `codex/goals-upgrade-improve-5` 实现并完成总体验收，实际测试与审查见 [05](./improve-5/05-implementation-acceptance.md)，阶段架构见 [docs/goals/improve-5](../../goals/improve-5/architecture.md)。原始 goals 文档保留；五批已统一 fast-forward 合入 `codex/goals-upgrade` 与 `main`，未推送远端，提交与集成记录见 improve-5/05。
 
+2026-10-16 独立总体验收见 [06-overall-acceptance](./06-overall-acceptance.md)：完成方案对照、子代理审查、全量单元/契约/集成测试、真实 API 与桌面/窄屏浏览器检查；新增两批命令入口修复，并根据 Argon 终审补修面板草稿同步。此前的本地合并记录保留为历史，本轮新增提交按 `codex/goals-upgrade` → `main` 汇总，只推送 `main`，清理 improve-1 至 improve-5 临时分支。
+
 本议题改进 goals 长任务的执行准入、预算与恢复、请求空闲超时、用户插话及 CLI/Web 展示。保留现有 store/service/runner/scheduler，补齐执行与消息边界。
 
 ## 范围与阅读方式
