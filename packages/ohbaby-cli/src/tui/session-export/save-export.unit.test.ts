@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { saveExportFile } from "./save-export.js";
 
@@ -32,7 +33,7 @@ describe("saveExportFile", () => {
         },
         fs,
       ),
-    ).resolves.toBe(`${directory}/ohbaby-20261017-080000-first.html`);
+    ).resolves.toBe(path.join(directory, "ohbaby-20261017-080000-first.html"));
     await expect(
       saveExportFile(
         {
@@ -42,7 +43,9 @@ describe("saveExportFile", () => {
         },
         fs,
       ),
-    ).resolves.toBe(`${directory}/ohbaby-20261017-080000-first-1.html`);
+    ).resolves.toBe(
+      path.join(directory, "ohbaby-20261017-080000-first-1.html"),
+    );
     await expect(
       saveExportFile(
         {
@@ -52,10 +55,10 @@ describe("saveExportFile", () => {
         },
         fs,
       ),
-    ).resolves.toBe(`${directory}/ohbaby-20261017-080000-other.html`);
-    expect(files.get(`${directory}/ohbaby-20261017-080000-first.html`)).toBe(
-      "original",
-    );
+    ).resolves.toBe(path.join(directory, "ohbaby-20261017-080000-other.html"));
+    expect(
+      files.get(path.join(directory, "ohbaby-20261017-080000-first.html")),
+    ).toBe("original");
     expect(files.size).toBe(3);
     expect(fs.mkdir).toHaveBeenCalledWith(directory, { recursive: true });
   });
@@ -72,7 +75,7 @@ describe("saveExportFile", () => {
           { directory: "/temporary/Downloads", filename, content: "safe" },
           fs,
         ),
-      ).resolves.toBe("/temporary/Downloads/safe.html");
+      ).resolves.toBe(path.join("/temporary/Downloads", "safe.html"));
     },
   );
 
