@@ -51,6 +51,10 @@ CommandService 有两条主要路径：
 1. Catalog path：加载、分类、过滤、下发 `UiCommandSpec[]`。
 2. Execution path：接收 resolved invocation，执行业务 handler，并发布后端内部命令事件。
 
+### TUI 本地执行命令
+
+`/export [html|jsonl]` 由命令目录提供发现、补全、参数提示和 surface 过滤，只在 TUI 中显示。TUI 解析 invocation 后在本地调用 `runSessionExport`，通过 SDK 的 `exportSession` 读取会话产物，再保存到运行 TUI 的机器的 Downloads；远程模式也由客户端保存。它不进入后端命令 handler，也不提交模型 prompt。`acceptsArguments` 必须保留，才能让显式格式和错误参数走到本地校验。
+
 ---
 
 ## 二、Design Pattern & Rationale（设计模式与理由）

@@ -33,6 +33,12 @@ import {
 import { OhbabyTerminalApp } from "./index.js";
 import { renderOhbabyLogo } from "./render/logo.js";
 import { createTheme } from "./theme/index.js";
+// eslint-disable-next-line no-restricted-imports -- Export acceptance must use the production command catalog, not a duplicated fixture.
+import {
+  buildCommandCatalog,
+  filterCommandCatalogBySurface,
+} from "../../../ohbaby-agent/src/commands/catalog.js";
+import * as exportSaving from "./session-export/save-export.js";
 import type {
   TerminalClient,
   TuiCommandCatalog,
@@ -260,6 +266,185 @@ afterEach(() => {
   }
 });
 
+describe("session export through the real TUI command catalog", () => {
+  const exportCatalog = filterCommandCatalogBySurface(
+    buildCommandCatalog(),
+    "tui",
+  );
+
+  it.each([
+    ["/export", "html"],
+    ["/export html", "html"],
+    ["/export jsonl", "jsonl"],
+  ] as const)(
+    "resolves %s and saves on the TUI machine",
+    async (input, format) => {
+      const client = createFakeClient(snapshot(), exportCatalog);
+      const exportSession = vi
+        .spyOn(client, "exportSession")
+        .mockResolvedValue({
+          filename: `fixture.${format}`,
+          content: "export fixture",
+          mimeType: "text/plain",
+          messageCount: 2,
+        });
+      const save = vi
+        .spyOn(exportSaving, "saveExportFile")
+        .mockResolvedValue(`/temporary/Downloads/fixture.${format}`);
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await flush();
+      app.stdin.write(input);
+      await flush();
+      app.stdin.write("\r");
+      const frame = await waitForFrame(app, (value) =>
+        value.includes("Exported 2 messages"),
+      );
+      expect(frame).toContain("notice Session exported:");
+      expect(frame.replace(/\s+/g, " ")).toContain("review it before sharing");
+      expect(exportSession).toHaveBeenCalledTimes(1);
+      expect(exportSession).toHaveBeenCalledWith({
+        sessionId: "session_1",
+        format,
+      });
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filename: `fixture.${format}`,
+          content: "export fixture",
+        }),
+      );
+      expect(client.executeCommand).not.toHaveBeenCalled();
+      expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["/export foo", "/export html extra"])(
+    "rejects %s without export or prompt calls",
+    async (input) => {
+      const client = createFakeClient(snapshot(), exportCatalog);
+      const exportSession = vi.spyOn(client, "exportSession");
+      const save = vi.spyOn(exportSaving, "saveExportFile");
+      const app = render(
+        <OhbabyTerminalApp
+          client={client}
+          subscribeEvents={client.subscribeEvents}
+        />,
+      );
+      await flush();
+      app.stdin.write(input);
+      await flush();
+      app.stdin.write("\r");
+      await waitForFrame(app, (value) =>
+        value.includes("Usage: /export [html|jsonl]"),
+      );
+      expect(exportSession).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+      expect(client.executeCommand).not.toHaveBeenCalled();
+      expect(client.submitPromptAccepted).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      new Error("Unsupported daemon rpc method: exportSession"),
+      "not supported",
+    ],
+    [Object.assign(new Error("Not Found"), { status: 404 }), "not supported"],
+    [new Error("Session storage is not available"), "not supported"],
+    [
+      Object.assign(new Error("empty"), { code: "EMPTY_SESSION" }),
+      "Nothing to export",
+    ],
+    [
+      Object.assign(new Error("permission denied"), { code: "EACCES" }),
+      "permission denied",
+    ],
+  ])("shows export failures and never saves: %s", async (error, message) => {
+    const client = createFakeClient(snapshot(), exportCatalog);
+    vi.spyOn(client, "exportSession").mockRejectedValue(error);
+    const save = vi.spyOn(exportSaving, "saveExportFile");
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/export");
+    await flush();
+    app.stdin.write("\r");
+    await waitForFrame(app, (value) => value.includes(message));
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("reports a local save failure after a successful backend export", async () => {
+    const client = createFakeClient(snapshot(), exportCatalog);
+    vi.spyOn(client, "exportSession").mockResolvedValue({
+      filename: "fixture.html",
+      content: "fixture",
+      mimeType: "text/html",
+      messageCount: 2,
+    });
+    vi.spyOn(exportSaving, "saveExportFile").mockRejectedValue(
+      Object.assign(new Error("disk full"), { code: "ENOSPC" }),
+    );
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/export");
+    await flush();
+    app.stdin.write("\r");
+    const frame = await waitForFrame(app, (value) =>
+      value.includes("disk full"),
+    );
+    expect(frame).toContain("Export failed:");
+    expect(frame).not.toContain("Session exported:");
+  });
+
+  it("reports no active session without contacting the export backend", async () => {
+    const client = createFakeClient(
+      { ...snapshot(), activeSessionId: null, sessions: [] },
+      exportCatalog,
+    );
+    const exportSession = vi.spyOn(client, "exportSession");
+    const save = vi.spyOn(exportSaving, "saveExportFile");
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/export");
+    await flush();
+    app.stdin.write("\r");
+    await waitForFrame(app, (value) => value.includes("No session to export"));
+    expect(exportSession).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("shows the production export argument hint in completion", async () => {
+    const client = createFakeClient(snapshot(), exportCatalog);
+    const app = render(
+      <OhbabyTerminalApp
+        client={client}
+        subscribeEvents={client.subscribeEvents}
+      />,
+    );
+    await flush();
+    app.stdin.write("/expo");
+    await waitForFrame(app, (value) => value.includes("/export [html|jsonl]"));
+  });
+});
+
 describe("OhbabyTerminalApp", () => {
   it("shows startup and active diagnostics warnings inside the TUI", async () => {
     const client = createFakeClient(snapshot());
@@ -286,7 +471,9 @@ describe("OhbabyTerminalApp", () => {
     expect(app.lastFrame()).toContain("Diagnostics");
     expect(app.lastFrame()).toContain("unavailable:");
     expect(app.lastFrame()).toContain("File logging became unavailable;");
-    expect(app.lastFrame()).toContain("continuing without it.");
+    expect(app.lastFrame()?.replace(/\s+/g, " ")).toContain(
+      "continuing without it.",
+    );
 
     app.unmount();
     expect(unsubscribe).toHaveBeenCalledTimes(1);

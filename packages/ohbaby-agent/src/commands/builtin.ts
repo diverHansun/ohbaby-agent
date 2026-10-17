@@ -45,6 +45,7 @@ const HELP_COMMAND_ORDER = [
   "sessions",
   "new",
   "compact",
+  "export",
   "goal",
   "permission",
   "mcps",
@@ -700,6 +701,17 @@ export function createBuiltinHandlers(
       id: "compact",
       execute(invocation, context): Promise<void> {
         return handleSessionCompact(options, invocation, context);
+      },
+    },
+    {
+      id: "export",
+      execute(_invocation, context): Promise<void> {
+        context.fail({
+          code: "INTERACTION_REQUIRED",
+          message: "Use /export in the TUI to save the session to Downloads",
+          recoverable: true,
+        });
+        return Promise.resolve();
       },
     },
     {

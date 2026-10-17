@@ -598,6 +598,7 @@ describe("CommandService", () => {
       "sessions",
       "new",
       "compact",
+      "export",
       "goal",
       "permission",
       "mcps",
@@ -605,6 +606,9 @@ describe("CommandService", () => {
       "help",
       "exit",
     ]);
+    expect(commands).toContainEqual(
+      expect.objectContaining({ id: "export", argsHint: "[html|jsonl]" }),
+    );
     expect(data).not.toHaveProperty("categories");
   });
 

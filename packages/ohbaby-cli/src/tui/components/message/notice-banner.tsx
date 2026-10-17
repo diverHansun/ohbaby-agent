@@ -19,12 +19,14 @@ export function NoticeBanner({
     <>
       {notices.map((notice) => (
         <Box flexDirection="row" key={notice.id} marginBottom={1}>
-          <Text color={noticeColor(notice.level, theme)}>notice</Text>
-          <Text dimColor> {notice.title}: </Text>
-          <Text>{notice.message}</Text>
-          {notice.source === undefined ? null : (
-            <Text dimColor> ({notice.source})</Text>
-          )}
+          <Text>
+            <Text color={noticeColor(notice.level, theme)}>notice</Text>
+            <Text dimColor> {notice.title}: </Text>
+            {notice.message}
+            {notice.source === undefined ? null : (
+              <Text dimColor> ({notice.source})</Text>
+            )}
+          </Text>
         </Box>
       ))}
       {commandNotices.map((notice) => (

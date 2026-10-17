@@ -21,6 +21,7 @@ describe("command catalog", () => {
         "sessions",
         "new",
         "compact",
+        "export",
         "resume",
         "permission",
         "mcps",
@@ -240,6 +241,22 @@ describe("command catalog", () => {
       ).commands.map((command) => command.id);
 
       expect(ids).toEqual(expect.arrayContaining(["mcps", "skills"]));
+    }
+  });
+
+  it("exposes /export with arguments only in the TUI", () => {
+    const catalog = buildCommandCatalog();
+    expect(
+      filterCommandCatalogBySurface(catalog, "tui").commands.find(
+        (command) => command.id === "export",
+      ),
+    ).toMatchObject({ acceptsArguments: true, argsHint: "[html|jsonl]" });
+    for (const surface of ["stdout", "headless"] as const) {
+      expect(
+        filterCommandCatalogBySurface(catalog, surface).commands.map(
+          (command) => command.id,
+        ),
+      ).not.toContain("export");
     }
   });
 

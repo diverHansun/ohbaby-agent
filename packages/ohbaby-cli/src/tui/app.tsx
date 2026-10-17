@@ -28,6 +28,12 @@ import {
   type TuiRecoveryState,
 } from "./session-recovery.js";
 import { createPendingPromptStorage } from "./pending-prompts.js";
+import {
+  describeExportError,
+  EXPORT_USAGE,
+  parseExportFormat,
+  runSessionExport,
+} from "./session-export/run-export.js";
 import { formatError } from "./format-error.js";
 import { DialogManager } from "./dialogs/manager.js";
 import { CommandPanelManager } from "./components/dialog/command-panel-manager.js";
@@ -161,8 +167,65 @@ export function OhbabyTerminalApp({
     },
     [activeSessionId],
   );
+  const exportNoticeSequenceRef = useRef(0);
+  const emitExportNotice = useCallback(
+    (level: "info" | "error", title: string, message: string): void => {
+      exportNoticeSequenceRef.current += 1;
+      store.dispatch({
+        notice: {
+          createdAt: new Date().toISOString(),
+          id: `export_notice_${String(exportNoticeSequenceRef.current)}`,
+          level,
+          message,
+          source: "export",
+          title,
+        },
+        type: "notice.emitted",
+      });
+    },
+    [store],
+  );
+  const runExportCommand = useCallback(
+    async (
+      invocation: Parameters<CoreAPI["executeCommand"]>[0],
+    ): ReturnType<CoreAPI["executeCommand"]> => {
+      const base = {
+        clientInvocationId: invocation.clientInvocationId,
+        commandRunId: `local_export_${invocation.clientInvocationId}`,
+        eventCount: 0,
+        outputCount: 0,
+      };
+      const fail = (message: string): ReturnType<CoreAPI["executeCommand"]> => {
+        emitExportNotice("error", "Export failed", message);
+        return Promise.resolve({
+          ...base,
+          error: { code: "EXPORT_FAILED", message, recoverable: true },
+          status: "failed",
+        });
+      };
+      const format = parseExportFormat(invocation.argv);
+      if (format === undefined) return fail(EXPORT_USAGE);
+      const sessionId = activeSessionIdRef.current;
+      if (sessionId === null) return fail("No session to export.");
+      try {
+        const outcome = await runSessionExport({ client, sessionId, format });
+        emitExportNotice(
+          "info",
+          "Session exported",
+          `Exported ${String(outcome.messageCount)} messages to ${outcome.path}\nThe file may contain command output or file contents; review it before sharing.`,
+        );
+        return { ...base, sessionId, status: "completed" };
+      } catch (caught) {
+        return fail(describeExportError(caught));
+      }
+    },
+    [client, emitExportNotice],
+  );
   const executePromptCommand = useCallback<CoreAPI["executeCommand"]>(
     async (invocation) => {
+      // /export runs locally so the file lands on this machine, even with a remote backend.
+      if (invocation.commandId === "export")
+        return runExportCommand(invocation);
       if (invocation.commandId !== "compact")
         return client.executeCommand(invocation);
       if (compactCommandRef.current)
@@ -178,7 +241,7 @@ export function OhbabyTerminalApp({
           compactCommandRef.current = null;
       }
     },
-    [client],
+    [client, runExportCommand],
   );
   const footerModel = useFooterModel(client, activeSessionId, subscribeEvents);
   const activeSession = useTuiStoreSelector(store, (state) =>
