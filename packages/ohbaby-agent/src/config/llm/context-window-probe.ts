@@ -60,7 +60,7 @@ export async function probeContextWindow(
     warning: detectionWarning(),
     reasoningReason,
   });
-  const headers =
+  const headers: Record<string, string> =
     input.interfaceProvider === "anthropic"
       ? { "anthropic-version": ANTHROPIC_VERSION, "x-api-key": input.apiKey }
       : { Authorization: `Bearer ${input.apiKey}` };

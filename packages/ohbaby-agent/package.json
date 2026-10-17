@@ -39,9 +39,11 @@
     "dev:inspect": "tsx watch --inspect src/index.ts",
     "prompt:generate": "node scripts/generate-system-prompt-assets.mjs",
     "prompt:check": "node scripts/generate-system-prompt-assets.mjs --check",
-    "build": "pnpm run prompt:check && rimraf dist && tsup && node scripts/copy-shell-assets.mjs && tsc -b --force",
+    "build": "pnpm run prompt:check && pnpm run export-assets:check && rimraf dist && tsup && node scripts/copy-shell-assets.mjs && tsc -b --force",
     "typecheck": "tsc -b",
-    "clean": "rimraf dist coverage"
+    "clean": "rimraf dist coverage",
+    "export-assets:generate": "node scripts/generate-session-export-assets.mjs",
+    "export-assets:check": "node scripts/generate-session-export-assets.mjs --check"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
@@ -63,6 +65,9 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "jsdom": "^25.0.1",
+    "marked": "^15.0.3",
     "tree-sitter-bash": "0.25.0",
     "tree-sitter-powershell": "0.25.10"
   }
