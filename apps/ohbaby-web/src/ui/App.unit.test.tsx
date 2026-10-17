@@ -40,6 +40,9 @@ interface FakeRuntime {
   readonly archiveSession: ReturnType<
     typeof vi.fn<(sessionId: string) => Promise<void>>
   >;
+  readonly exportSession: ReturnType<
+    typeof vi.fn<OhbabyWebRuntime["exportSession"]>
+  >;
   readonly compactSession: ReturnType<
     typeof vi.fn<UiBackendClient["compactSession"]>
   >;
@@ -3374,6 +3377,55 @@ describe("OhbabyWebApp slash command interactions", () => {
     ).toContain("thinking out loud");
   });
 
+  it.each([
+    {
+      error: Object.assign(new Error("Daemon request failed with HTTP 404"), {
+        status: 404,
+      }),
+      expected: "Export is not supported by this backend.",
+    },
+    {
+      error: Object.assign(new Error("Session not found"), {
+        status: 404,
+        code: "SESSION_NOT_FOUND",
+      }),
+      expected: "Session not found",
+    },
+  ])(
+    "shows the export failure without selecting the target: $expected",
+    async ({ error, expected }) => {
+      const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
+      const fake = createFakeRuntime({
+        snapshot: {
+          ...snapshotWithStatus({ kind: "idle" }),
+          activeSessionId: "session_1",
+          sessions: [
+            first,
+            {
+              createdAt: timestamp,
+              id: "session_2",
+              messages: [],
+              title: "Session 2",
+              updatedAt: timestamp,
+            },
+          ],
+        },
+      });
+      fake.exportSession.mockRejectedValue(error);
+      const app = mountApp(fake.runtime);
+      await clickButton(app.container, "Expand sessions");
+      await clickButton(app.container, "Actions for Session 2");
+      await clickButton(document.body, "Export");
+      await clickButton(document.body, "HTML");
+      expect(
+        app.container.querySelector(".ohb-error-banner")?.textContent,
+      ).toContain(expected);
+      expect(fake.exportSession).toHaveBeenCalledWith("session_2", "html");
+      expect(fake.selectSession).not.toHaveBeenCalled();
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+    },
+  );
+
   it("archives sidebar sessions after confirmation without selecting the row", async () => {
     const first = snapshotWithStatus({ kind: "idle" }).sessions[0];
     const fake = createFakeRuntime({
@@ -4630,6 +4682,9 @@ function createFakeRuntime(input: {
   const archiveSession = vi.fn<(sessionId: string) => Promise<void>>(() =>
     Promise.resolve(),
   );
+  const exportSession = vi.fn<OhbabyWebRuntime["exportSession"]>(() =>
+    Promise.reject(new Error("unused")),
+  );
   const connectModel = vi.fn<UiBackendClient["connectModel"]>(() =>
     Promise.resolve({
       apiKeyEnv: "ZHIPU_API_KEY",
@@ -4732,6 +4787,7 @@ function createFakeRuntime(input: {
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
+    exportSession: vi.fn(() => Promise.reject(new Error("Not implemented"))),
     archiveSession: vi.fn(() => Promise.resolve()),
     compactSession,
     steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
@@ -4832,6 +4888,7 @@ function createFakeRuntime(input: {
     createSession,
     editQueuedPrompt,
     executeSlashCommand,
+    exportSession,
     getDirectoryPickerRoots,
     hideWorkspace,
     listCommands,
@@ -4845,6 +4902,7 @@ function createFakeRuntime(input: {
       forgetUnknownPrompt: vi.fn(),
       abortSession,
       archiveSession,
+      exportSession,
       client,
       createSession,
       dispose: vi.fn(() => Promise.resolve()),

@@ -53,6 +53,7 @@ import {
 } from "../conversation/ConversationStream.js";
 import { DurationSampleContext } from "../conversation/use-execution-duration.js";
 import { PermissionModal } from "../permissions/PermissionModal.js";
+import { downloadTextFile } from "../shared/download-file.js";
 import { DirectoryPickerDialog } from "../workspace/directory-picker/DirectoryPickerDialog.js";
 import { ProjectRail } from "../workspace/ProjectRail.js";
 import { selectViewModel, type ViewModel } from "./selectors.js";
@@ -714,6 +715,28 @@ export function SessionScreen({
     },
     [runAction, runtime],
   );
+  const exportSession = useCallback(
+    (sessionId: string, format: "html" | "jsonl"): void => {
+      void runAction(async () => {
+        try {
+          downloadTextFile(await runtime.exportSession(sessionId, format));
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            "status" in error &&
+            error.status === 404 &&
+            (!("code" in error) || error.code === undefined)
+          ) {
+            throw new Error("Export is not supported by this backend.", {
+              cause: error,
+            });
+          }
+          throw error;
+        }
+      });
+    },
+    [runAction, runtime],
+  );
   const listCommands = useCallback(() => runtime.listWebCommands(), [runtime]);
   const openGoalPanel = useCallback((intent?: GoalPanelIntent) => {
     setStructuredOverlay({
@@ -920,6 +943,7 @@ export function SessionScreen({
         serverUrl={runtime.serverUrl}
         open={sessionSidebarOpen}
         onArchiveSession={archiveSession}
+        onExportSession={exportSession}
         onCreateSession={createSession}
         onSelectSession={selectSession}
         view={view}

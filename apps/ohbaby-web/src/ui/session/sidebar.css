@@ -190,6 +190,19 @@
 .ohb-session-menu svg {
   flex: none;
 }
+
+.ohb-session-menu .ohb-session-submenu-arrow {
+  margin-left: auto;
+  color: var(--session-muted);
+}
+
+.ohb-session-menu button[aria-expanded="true"] {
+  background: var(--session-menu-hover);
+}
+
+.ohb-session-submenu {
+  width: 120px;
+}
 .ohb-session-pin-error {
   margin: 4px 8px;
   color: var(--session-muted);

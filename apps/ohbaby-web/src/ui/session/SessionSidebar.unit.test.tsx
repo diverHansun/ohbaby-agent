@@ -13,6 +13,7 @@ let root: Root;
 let container: HTMLDivElement;
 const select = vi.fn();
 const archive = vi.fn<(id: string) => Promise<boolean>>();
+const exportSession = vi.fn();
 let directory = "";
 const entries = ["A", "B", "C"].map((id, i) => ({
   id,
@@ -26,6 +27,7 @@ function render(scope = directory, sessions = entries): void {
       <SessionSidebar
         open
         onArchiveSession={archive}
+        onExportSession={exportSession}
         onCreateSession={() => undefined}
         onSelectSession={select}
         workspace={{ selectedDirectory: scope, scopes: [] }}
@@ -70,6 +72,7 @@ beforeEach(() => {
   });
   select.mockReset();
   archive.mockReset().mockResolvedValue(true);
+  exportSession.mockReset();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -105,6 +108,51 @@ it("shares actions between ellipsis and context menu without selecting, latest p
   click("Unpin Chat C");
   expect(order()).toEqual(["Chat A", "Chat B", "Chat C"]);
   expect(select).not.toHaveBeenCalled();
+});
+
+it.each(["HTML", "JSONL"])(
+  "exports %s from the target row without selecting it",
+  (format) => {
+    click("Actions for Chat B");
+    const trigger = button("Actions for Chat B");
+    click("Export");
+    click(format);
+    expect(exportSession).toHaveBeenCalledOnce();
+    expect(exportSession).toHaveBeenCalledWith("B", format.toLowerCase());
+    expect(select).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  },
+);
+
+it("keeps submenu navigation separate and restores focus one level per Escape", () => {
+  click("Actions for Chat B");
+  const press = (key: string): void => {
+    act(() => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key, bubbles: true }),
+      );
+    });
+  };
+  press("End");
+  expect(document.activeElement).toBe(button("Export"));
+  press("ArrowRight");
+  expect(document.activeElement).toBe(button("HTML"));
+  press("ArrowUp");
+  expect(document.activeElement).toBe(button("JSONL"));
+  press("Home");
+  expect(document.activeElement).toBe(button("HTML"));
+  press("End");
+  expect(document.activeElement).toBe(button("JSONL"));
+  press("Escape");
+  expect(document.querySelectorAll('[role="menu"]')).toHaveLength(1);
+  expect(document.activeElement).toBe(button("Export"));
+  press("Home");
+  expect(document.activeElement).toBe(button("Pin"));
+  press("Escape");
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(document.activeElement).toBe(button("Actions for Chat B"));
+  expect(exportSession).not.toHaveBeenCalled();
 });
 
 it("restores menu focus on Escape and supports keyboard context opening", () => {

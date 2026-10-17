@@ -3,6 +3,7 @@ import {
   resolveSlashCommand,
   type UiBackendClient,
   type UiCommandCompletion,
+  type UiSessionExport,
   type UiSlashCommandInvocation,
   type UiWebCommandCatalog,
 } from "ohbaby-sdk";
@@ -40,6 +41,10 @@ export interface OhbabyWebRuntime {
   forgetUnknownPrompt(clientRequestId: string): void;
   abortSession(sessionId: string, runId?: string): Promise<void>;
   archiveSession(sessionId: string): Promise<void>;
+  exportSession(
+    sessionId: string,
+    format: "html" | "jsonl",
+  ): Promise<UiSessionExport>;
   createSession(): Promise<void>;
   dispose(): Promise<void>;
   executeSlashCommand(input: {
@@ -149,6 +154,13 @@ class BrowserOhbabyWebRuntime implements OhbabyWebRuntime {
 
   async archiveSession(sessionId: string): Promise<void> {
     await this.requireActiveClient().archiveSession({ sessionId });
+  }
+
+  exportSession(
+    sessionId: string,
+    format: "html" | "jsonl",
+  ): Promise<UiSessionExport> {
+    return this.requireActiveClient().exportSession({ sessionId, format });
   }
 
   async abortSession(sessionId: string, runId?: string): Promise<void> {

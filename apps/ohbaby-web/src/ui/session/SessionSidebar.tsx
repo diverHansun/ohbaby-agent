@@ -19,6 +19,7 @@ import {
 } from "./session-pins.js";
 import {
   SessionActionsMenu,
+  type SessionExportFormat,
   type SessionMenuAnchor,
 } from "./SessionActionsMenu.js";
 import { SessionRow } from "./SessionRow.js";
@@ -28,6 +29,10 @@ interface SidebarProps {
   readonly open: boolean;
   readonly serverUrl?: string;
   readonly onArchiveSession: (sessionId: string) => Promise<boolean>;
+  readonly onExportSession: (
+    sessionId: string,
+    format: SessionExportFormat,
+  ) => void;
   readonly onCreateSession: () => void;
   readonly onSelectSession: (sessionId: string) => void;
   readonly view: ViewModel;
@@ -242,6 +247,10 @@ function ProjectSessionSidebar(
           }}
           onArchive={() => {
             archive(menuSession.id);
+          }}
+          onExport={(format) => {
+            closeMenu(true);
+            props.onExportSession(menuSession.id, format);
           }}
         />
       ) : null}
