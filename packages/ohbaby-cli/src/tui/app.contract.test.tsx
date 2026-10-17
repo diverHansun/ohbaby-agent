@@ -5676,6 +5676,7 @@ function createFakeClient(
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
+    exportSession: vi.fn(() => Promise.reject(new Error("Not implemented"))),
     archiveSession: vi.fn(() => Promise.resolve()),
     compactSession: vi.fn(() =>
       Promise.resolve({

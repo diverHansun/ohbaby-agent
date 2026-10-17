@@ -98,6 +98,18 @@ export interface UiArchiveSessionInput {
   readonly sessionId: string;
 }
 
+export interface UiExportSessionInput {
+  readonly sessionId: string;
+  readonly format: "html" | "jsonl";
+}
+
+export interface UiSessionExport {
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly content: string;
+  readonly messageCount: number;
+}
+
 export interface UiPermissionUpdate {
   readonly level?: UiPermissionLevel;
   readonly mode?: UiPermissionMode;
@@ -112,6 +124,7 @@ export type UiUnsubscribe = () => void;
 
 export interface UiQueryClient
   extends Partial<UiSessionRecoveryClient>, Partial<UiSubagentReadClient> {
+  exportSession(input: UiExportSessionInput): Promise<UiSessionExport>;
   /** Explicit selection/startup barrier; never called by read endpoints. */
   initializeSession?(sessionId: string): Promise<void>;
   getSelectedSessionId(options?: {

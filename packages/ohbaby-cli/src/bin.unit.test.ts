@@ -1299,6 +1299,7 @@ function createCore(): {
   readonly acquirePromptEditLease: ReturnType<typeof vi.fn>;
   readonly abortRun: ReturnType<typeof vi.fn>;
   readonly updateSessionReasoning: ReturnType<typeof vi.fn>;
+  readonly exportSession: ReturnType<typeof vi.fn>;
   readonly archiveSession: ReturnType<typeof vi.fn>;
   readonly compactSession: ReturnType<typeof vi.fn>;
   readonly connectModel: ReturnType<typeof vi.fn>;
@@ -1343,6 +1344,7 @@ function createCore(): {
     updateSessionReasoning: vi.fn(() =>
       Promise.reject(new Error("Unused reasoning test stub")),
     ),
+    exportSession: vi.fn(() => Promise.reject(new Error("Not implemented"))),
     archiveSession: vi.fn(() => Promise.resolve()),
     steerQueuedPrompt: vi.fn(() => Promise.reject(new Error("unused"))),
     resendSteerInput: vi.fn(() => Promise.reject(new Error("unused"))),

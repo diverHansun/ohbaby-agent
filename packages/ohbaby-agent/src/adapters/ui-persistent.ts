@@ -493,6 +493,10 @@ function withStartupRecovery(
       await ready();
       return client.archiveSession(input);
     },
+    async exportSession(input): ReturnType<UiBackendClient["exportSession"]> {
+      await ready();
+      return client.exportSession(input);
+    },
     async probeModelContextWindow(
       input,
     ): ReturnType<UiBackendClient["probeModelContextWindow"]> {

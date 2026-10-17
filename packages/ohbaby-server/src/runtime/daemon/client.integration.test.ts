@@ -142,6 +142,10 @@ async function eventuallyEmit(
 }
 
 class FakeBackend implements UiBackendClient {
+  exportSession(): ReturnType<UiBackendClient["exportSession"]> {
+    return Promise.reject(new Error("Not implemented"));
+  }
+
   private readonly createdSessions: Awaited<
     ReturnType<UiBackendClient["getSessionIndex"]>
   >[number][] = [];

@@ -160,6 +160,7 @@ describe("daemon protocol", () => {
       "getSessionControl",
       "getPromptReceipt",
       "getSessionIndex",
+      "exportSession",
       "getSelectedSessionId",
       "getPermissionSnapshot",
       "createSession",

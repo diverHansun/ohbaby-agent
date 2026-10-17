@@ -19,6 +19,7 @@ function createFakeBackend(dispose: () => Promise<void>): UiBackendClient & {
   dispose(): Promise<void>;
 } {
   return {
+    exportSession: () => Promise.reject(new Error("Not implemented")),
     getSessionIndex: () => Promise.resolve([]),
     getSelectedSessionId: () => Promise.resolve(null),
     createSession: () =>

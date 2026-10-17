@@ -976,6 +976,12 @@ export class BrowserDaemonClient implements UiBackendClient {
     return (await this.http.updateSessionReasoning(input)).session;
   }
 
+  async exportSession(
+    input: Parameters<UiBackendClient["exportSession"]>[0],
+  ): ReturnType<UiBackendClient["exportSession"]> {
+    return (await this.http.exportSession(input)).export;
+  }
+
   async archiveSession(
     input: Parameters<UiBackendClient["archiveSession"]>[0],
   ): ReturnType<UiBackendClient["archiveSession"]> {

@@ -1,3 +1,4 @@
+import { parseSessionExportInput } from "../session-export.js";
 import {
   subagentReadForClient,
   subagentConversationReadForClient,
@@ -193,6 +194,14 @@ export async function callDaemonBackend(input: {
     input;
 
   switch (request.method) {
+    case "exportSession": {
+      if (!clientViews.isRegistered(request.clientId)) {
+        throw Object.assign(new Error("client is not registered"), {
+          code: "CLIENT_NOT_REGISTERED",
+        });
+      }
+      return backend.exportSession(parseSessionExportInput(request.params[0]));
+    }
     case "getSubagentConversationView":
     case "watchSubagentConversation":
     case "unwatchSubagentConversation": {

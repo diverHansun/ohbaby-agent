@@ -178,6 +178,10 @@ function createOneShotLlmClient(
 }
 
 class FakeBackend implements UiBackendClient {
+  exportSession(): ReturnType<UiBackendClient["exportSession"]> {
+    return Promise.reject(new Error("Not implemented"));
+  }
+
   getSessionView(): Promise<never> {
     return Promise.reject(new Error("view unused by abort fixture"));
   }
@@ -4761,4 +4765,298 @@ it("validates session reasoning and forwards raw choices through REST", async ()
   } finally {
     await handle.dispose();
   }
+});
+
+describe("session export transports", () => {
+  const artifact = {
+    filename: "archived-session.html",
+    mimeType: "text/html",
+    content: "<!doctype html><p>archived &amp; 完整</p>",
+    messageCount: 2,
+  };
+
+  async function withExportApp(
+    run: (
+      handle: ReturnType<typeof createApp>,
+      backend: FakeBackend,
+    ) => Promise<void>,
+  ): Promise<void> {
+    const backend = new FakeBackend();
+    Object.assign(backend, { exportSession: () => Promise.resolve(artifact) });
+    const handle = createApp(backend);
+    await handle.start();
+    try {
+      const registration = await handle.app.request("/v1/clients", {
+        method: "POST",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ clientId: "export_client" }),
+      });
+      expect(registration.status).toBe(200);
+      await run(handle, backend);
+    } finally {
+      await handle.dispose();
+    }
+  }
+
+  const headers = (): Record<string, string> => ({
+    ...authHeaders(),
+    "x-ohbaby-client-id": "export_client",
+  });
+  const rpc = (
+    handle: ReturnType<typeof createApp>,
+    params: unknown[],
+    clientId = "export_client",
+  ): Response | Promise<Response> =>
+    handle.app.request("/api/rpc", {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "export_rpc",
+        clientId,
+        method: "exportSession",
+        params,
+      }),
+    });
+
+  it.each([
+    { label: "missing token", requestHeaders: {}, status: 401 },
+    {
+      label: "invalid token",
+      requestHeaders: {
+        authorization: "Bearer wrong",
+        "x-ohbaby-client-id": "export_client",
+      },
+      status: 401,
+    },
+    {
+      label: "missing client header",
+      requestHeaders: authHeaders(),
+      status: 400,
+    },
+    {
+      label: "unknown client",
+      requestHeaders: { ...authHeaders(), "x-ohbaby-client-id": "unknown" },
+      status: 409,
+    },
+  ])("rejects $label before exporting", async ({ requestHeaders, status }) => {
+    await withExportApp(async (handle, backend) => {
+      const exportSession = vi.fn(() => Promise.resolve(artifact));
+      Object.assign(backend, { exportSession });
+      const response = await handle.app.request(
+        "/v1/sessions/archived/export?format=html",
+        { headers: requestHeaders },
+      );
+      expect(response.status).toBe(status);
+      expect(exportSession).not.toHaveBeenCalled();
+    });
+  });
+
+  it("requires the client header even when a query clientId is supplied", async () => {
+    await withExportApp(async (handle) => {
+      const response = await handle.app.request(
+        "/v1/sessions/archived/export?format=html&clientId=export_client",
+        { headers: authHeaders() },
+      );
+      expect(response.status).toBe(400);
+    });
+  });
+
+  it.each(["", "?format=xml"])(
+    "rejects invalid REST format %s with a stable code",
+    async (query) => {
+      await withExportApp(async (handle, backend) => {
+        const exportSession = vi.fn(() => Promise.resolve(artifact));
+        Object.assign(backend, { exportSession });
+        const response = await handle.app.request(
+          `/v1/sessions/archived/export${query}`,
+          { headers: headers() },
+        );
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+          ok: false,
+          error: { code: "INVALID_FORMAT" },
+        });
+        expect(exportSession).not.toHaveBeenCalled();
+      });
+    },
+  );
+
+  it.each(["html", "jsonl"] as const)(
+    "REST and RPC return %s for an unselected archived session without selecting it or emitting events",
+    async (format) => {
+      await withExportApp(async (handle, backend) => {
+        const observed: unknown[] = [];
+        const exportSession = vi.fn((input: unknown) => {
+          observed.push(input);
+          return Promise.resolve(artifact);
+        });
+        Object.assign(backend, { exportSession });
+        const initialize = vi.fn();
+        Object.assign(backend, { initializeSession: initialize });
+        const select = vi.spyOn(backend, "selectSession");
+        const events: unknown[] = [];
+        const unsubscribe = backend.subscribeEvents((event) =>
+          events.push(event),
+        );
+        const before = await backend.getSnapshot();
+        const rest = await handle.app.request(
+          `/v1/sessions/archived%2Fsession/export?format=${format}`,
+          { headers: headers() },
+        );
+        expect(rest.status).toBe(200);
+        expect(await rest.json()).toEqual({ ok: true, export: artifact });
+        const response = await rpc(handle, [
+          { sessionId: "archived/session", format },
+        ]);
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          id: "export_rpc",
+          ok: true,
+          result: artifact,
+        });
+        expect(observed).toEqual([
+          { sessionId: "archived/session", format },
+          { sessionId: "archived/session", format },
+        ]);
+        expect(initialize).not.toHaveBeenCalled();
+        expect(select).not.toHaveBeenCalled();
+        expect(await backend.getSnapshot()).toEqual(before);
+        expect(events).toEqual([]);
+        unsubscribe();
+      });
+    },
+  );
+
+  it.each([
+    ["SESSION_NOT_FOUND", 404],
+    ["EMPTY_SESSION", 400],
+    ["SUBAGENT_SESSION", 400],
+    ["INVALID_ARGUMENT", 400],
+    ["INVALID_FORMAT", 400],
+    ["UNEXPECTED_FAILURE", 500],
+  ] as const)(
+    "preserves %s and HTTP %s on REST and RPC",
+    async (code, status) => {
+      await withExportApp(async (handle, backend) => {
+        Object.assign(backend, {
+          exportSession: () =>
+            Promise.reject(Object.assign(new Error("export failed"), { code })),
+        });
+        const rest = await handle.app.request(
+          "/v1/sessions/archived/export?format=html",
+          { headers: headers() },
+        );
+        const response = await rpc(handle, [
+          { sessionId: "archived", format: "html" },
+        ]);
+        for (const result of [rest, response]) {
+          expect(result.status).toBe(status);
+          expect(await result.json()).toMatchObject({
+            ok: false,
+            error: { code, message: "export failed" },
+          });
+        }
+      });
+    },
+  );
+
+  it.each([
+    { params: [], code: "INVALID_ARGUMENT" },
+    { params: [null], code: "INVALID_ARGUMENT" },
+    { params: [[]], code: "INVALID_ARGUMENT" },
+    { params: [{ sessionId: "archived" }], code: "INVALID_FORMAT" },
+    {
+      params: [{ sessionId: "archived", format: "xml" }],
+      code: "INVALID_FORMAT",
+    },
+    { params: [{ sessionId: " ", format: "html" }], code: "INVALID_ARGUMENT" },
+    { params: [{ sessionId: 1, format: "jsonl" }], code: "INVALID_ARGUMENT" },
+  ])(
+    "rejects malformed RPC export arguments $params",
+    async ({ params, code }) => {
+      await withExportApp(async (handle, backend) => {
+        const exportSession = vi.fn(() => Promise.resolve(artifact));
+        Object.assign(backend, { exportSession });
+        const response = await rpc(handle, params);
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+          ok: false,
+          error: { code },
+        });
+        expect(exportSession).not.toHaveBeenCalled();
+      });
+    },
+  );
+
+  it("rejects unregistered RPC export without adding a universal RPC registration barrier", async () => {
+    await withExportApp(async (handle, backend) => {
+      const exportSession = vi.fn(() => Promise.resolve(artifact));
+      Object.assign(backend, { exportSession });
+      const response = await rpc(
+        handle,
+        [{ sessionId: "archived", format: "html" }],
+        "unknown",
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: { code: "CLIENT_NOT_REGISTERED" },
+      });
+      expect(exportSession).not.toHaveBeenCalled();
+      const legacy = await handle.app.request("/api/rpc", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          id: "legacy",
+          clientId: "unknown",
+          method: "getSessionIndex",
+          params: [],
+        }),
+      });
+      expect(legacy.status).toBe(200);
+    });
+  });
+
+  it("documents export format and response contract in OpenAPI", async () => {
+    await withExportApp(async (handle) => {
+      const document = (await (await handle.app.request("/doc")).json()) as {
+        paths: Record<string, unknown>;
+      };
+      expect(document.paths["/v1/sessions/{id}/export"]).toMatchObject({
+        get: {
+          parameters: expect.arrayContaining([
+            {
+              in: "query",
+              name: "format",
+              required: true,
+              schema: { enum: ["html", "jsonl"], type: "string" },
+            },
+          ]) as unknown,
+          responses: {
+            "200": {
+              content: {
+                "application/json": {
+                  schema: {
+                    properties: {
+                      export: {
+                        properties: {
+                          content: { type: "string" },
+                          messageCount: { type: "integer" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "400": {},
+            "401": {},
+            "404": {},
+            "409": {},
+            "500": {},
+          },
+        },
+      });
+    });
+  });
 });

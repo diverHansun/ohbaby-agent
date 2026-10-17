@@ -8,6 +8,8 @@ export type {
   UiSubmitPromptAndWaitOptions,
   UiWaitForPromptOptions,
   UiArchiveSessionInput,
+  UiExportSessionInput,
+  UiSessionExport,
   UiBackendClient,
   UiEventHandler,
   UiListCommandsQuery,

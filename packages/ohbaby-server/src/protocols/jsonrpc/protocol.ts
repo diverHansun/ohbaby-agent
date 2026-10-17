@@ -12,6 +12,7 @@ export const DAEMON_RPC_METHODS = [
   "getSessionControl",
   "getPromptReceipt",
   "getSessionIndex",
+  "exportSession",
   "getSelectedSessionId",
   "getPermissionSnapshot",
   "createSession",

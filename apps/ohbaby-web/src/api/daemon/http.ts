@@ -329,6 +329,18 @@ export class DaemonHttpClient {
     );
   }
 
+  exportSession(
+    input: Parameters<UiBackendClient["exportSession"]>[0],
+  ): Promise<{
+    ok: true;
+    export: Awaited<ReturnType<UiBackendClient["exportSession"]>>;
+  }> {
+    const query = new URLSearchParams({ format: input.format });
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/export?${query}`,
+    );
+  }
+
   archiveSession(sessionId: string): Promise<OkResponse> {
     return this.request(
       `/v1/sessions/${encodeURIComponent(sessionId)}/archive`,
@@ -568,7 +580,13 @@ export class DaemonHttpClient {
       method: options.method ?? "GET",
       signal: options.signal,
     });
-    const value = (await response.json()) as unknown;
+    let value: unknown;
+    try {
+      value = (await response.json()) as unknown;
+    } catch (error) {
+      if (response.ok) throw error;
+      value = undefined;
+    }
     if (!response.ok) {
       const message =
         isErrorBody(value) && typeof value.error?.message === "string"

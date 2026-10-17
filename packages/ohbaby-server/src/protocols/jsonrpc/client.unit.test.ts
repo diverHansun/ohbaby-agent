@@ -989,3 +989,71 @@ it("keeps reconnect backoff across short-lived hello connections", async () => {
     vi.useRealTimers();
   }
 });
+
+describe("remote session export", () => {
+  it.each([true, false])(
+    "forwards export input and preserves result/errors (success=%s)",
+    async (success) => {
+      const artifact = {
+        filename: "session.html",
+        mimeType: "text/html",
+        content: "<p>完整</p>",
+        messageCount: 1,
+      };
+      const requests: unknown[] = [];
+      const client = createRemoteUiBackendClient({
+        clientId: "client_export",
+        port: 4096,
+        startupIntent: undefined,
+        fetch: (_url, init) => {
+          const request = JSON.parse(requireStringBody(init)) as {
+            id: string;
+            method: string;
+            params: unknown[];
+          };
+          requests.push(request);
+          return Promise.resolve(
+            Response.json(
+              request.method === "initializeClient"
+                ? { id: request.id, ok: true }
+                : success
+                  ? { id: request.id, ok: true, result: artifact }
+                  : {
+                      id: request.id,
+                      ok: false,
+                      error: {
+                        message: "empty archive",
+                        code: "EMPTY_SESSION",
+                      },
+                    },
+              {
+                status:
+                  success || request.method === "initializeClient" ? 200 : 400,
+              },
+            ),
+          );
+        },
+      });
+      try {
+        const result = client.exportSession({
+          sessionId: "archive/session",
+          format: "html",
+        });
+        if (success) await expect(result).resolves.toEqual(artifact);
+        else
+          await expect(result).rejects.toMatchObject({
+            message: "empty archive",
+            code: "EMPTY_SESSION",
+          });
+        expect(requests).toContainEqual(
+          expect.objectContaining({
+            method: "exportSession",
+            params: [{ sessionId: "archive/session", format: "html" }],
+          }),
+        );
+      } finally {
+        await client.dispose();
+      }
+    },
+  );
+});

@@ -122,6 +122,10 @@ async function waitFor(
 }
 
 class FakeBackend implements UiBackendClient {
+  exportSession(): ReturnType<UiBackendClient["exportSession"]> {
+    return Promise.reject(new Error("Not implemented"));
+  }
+
   private nextPromptId = 0;
   private readonly promptCompletions = new Map<
     string,

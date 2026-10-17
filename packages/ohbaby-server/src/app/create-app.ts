@@ -1,4 +1,8 @@
 import {
+  parseSessionExportInput,
+  sessionExportErrorStatus,
+} from "../protocols/session-export.js";
+import {
   subagentReadForClient,
   subagentConversationReadForClient,
   watchSubagentConversationForClient,
@@ -1030,6 +1034,70 @@ function createOpenApiDocument(packageVersion: string | undefined): unknown {
           summary: "Archive a session",
         },
       },
+      "/v1/sessions/{id}/export": {
+        get: {
+          summary: "Export a session without changing its selection",
+          parameters: [
+            {
+              in: "path",
+              name: "id",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              in: "header",
+              name: "x-ohbaby-client-id",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              in: "query",
+              name: "format",
+              required: true,
+              schema: { type: "string", enum: ["html", "jsonl"] },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Session export content",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["ok", "export"],
+                    properties: {
+                      ok: { const: true },
+                      export: {
+                        type: "object",
+                        required: [
+                          "filename",
+                          "mimeType",
+                          "content",
+                          "messageCount",
+                        ],
+                        properties: {
+                          filename: { type: "string" },
+                          mimeType: { type: "string" },
+                          content: { type: "string" },
+                          messageCount: { type: "integer" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "400": {
+              description:
+                "Invalid format, invalid session argument, empty session, or subagent session",
+            },
+            "401": { description: "Invalid daemon token" },
+            "404": { description: "Session not found" },
+            "409": { description: "Client is not registered" },
+            "500": { description: "Export failed" },
+          },
+        },
+      },
       "/v1/sessions/{id}/context-window": {
         get: {
           responses: {
@@ -1357,18 +1425,20 @@ class DaemonServerAppRuntime {
         }
       } catch (error) {
         const status =
-          isRecord(error) && error.code === "SESSION_SCOPE_CHANGED"
-            ? 409
-            : isRecord(error) && error.code === "SESSION_RECOVERY_UNSUPPORTED"
-              ? 426
-              : isRecord(error) && error.code === "INVALID_SESSION_QUERY"
-                ? 400
-                : isDaemonForbiddenError(error)
-                  ? 403
-                  : isRecord(error) &&
-                      error.code === "INVALID_CLIENT_REQUEST_ID"
-                    ? 400
-                    : 500;
+          parsed.request.method === "exportSession"
+            ? sessionExportErrorStatus(error)
+            : isRecord(error) && error.code === "SESSION_SCOPE_CHANGED"
+              ? 409
+              : isRecord(error) && error.code === "SESSION_RECOVERY_UNSUPPORTED"
+                ? 426
+                : isRecord(error) && error.code === "INVALID_SESSION_QUERY"
+                  ? 400
+                  : isDaemonForbiddenError(error)
+                    ? 403
+                    : isRecord(error) &&
+                        error.code === "INVALID_CLIENT_REQUEST_ID"
+                      ? 400
+                      : 500;
         return context.json(
           createDaemonRpcFailure(parsed.request.id, error),
           status,
@@ -1445,6 +1515,34 @@ class DaemonServerAppRuntime {
         ok: true,
         sessions: await this.options.backend.getSessionIndex(),
       });
+    });
+
+    this.app.get("/v1/sessions/:id/export", async (context) => {
+      if (!this.isAuthorized(context.req.header("authorization"))) {
+        return context.json(webErrorBody("Unauthorized"), 401);
+      }
+      const clientId = asNonEmptyString(context.req.header(CLIENT_ID_HEADER));
+      if (!clientId) {
+        return context.json(webErrorBody("clientId is required"), 400);
+      }
+      if (!this.clientViews.isRegistered(clientId)) {
+        return context.json(webErrorBody("client is not registered"), 409);
+      }
+      try {
+        const input = parseSessionExportInput({
+          sessionId: context.req.param("id"),
+          format: context.req.query("format"),
+        });
+        const artifact = await this.options.backend.exportSession(input);
+        return context.json({ ok: true, export: artifact });
+      } catch (error) {
+        const failure = createDaemonRpcFailure("http", error);
+        if (failure.ok) throw new Error("Expected export failure");
+        return context.json(
+          { ok: false, error: failure.error },
+          sessionExportErrorStatus(error),
+        );
+      }
     });
 
     for (const [suffix, kind, field] of [

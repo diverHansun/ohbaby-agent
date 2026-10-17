@@ -5,6 +5,8 @@ import {
   type CleanupResult,
 } from "../runtime/shutdown.js";
 import { SessionExecutionGate } from "./session-execution.js";
+import { exportSession } from "../services/session-export/index.js";
+import { getAgentPackageVersion } from "../package-version.js";
 import { projectUnconsumedSteers } from "./ui-inprocess/steer-recovery.js";
 import { RunFinalizationError } from "../runtime/run-manager/errors.js";
 import { SubagentConversationProjection } from "./ui-inprocess/subagent-conversation.js";
@@ -4492,6 +4494,21 @@ export function createInProcessUiBackendClient(
 
     archiveSession(input: UiArchiveSessionInput): Promise<void> {
       return archiveSessionInternal(input);
+    },
+
+    async exportSession(input): ReturnType<UiBackendClient["exportSession"]> {
+      if (!options.sessionManager) {
+        throw new Error("Session storage is not available");
+      }
+      return exportSession(
+        {
+          sessionManager: options.sessionManager,
+          messageManager,
+          appVersion: getAgentPackageVersion(),
+          now: options.now,
+        },
+        input,
+      );
     },
 
     probeModelContextWindow(

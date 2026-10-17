@@ -153,6 +153,9 @@ describe("context window UI contract", () => {
       updateSessionReasoning(): ReturnType<CoreAPI["updateSessionReasoning"]> {
         return Promise.reject(new Error("Unused reasoning test stub"));
       },
+      exportSession(): ReturnType<CoreAPI["exportSession"]> {
+        return Promise.reject(new Error("Not implemented"));
+      },
       archiveSession(): ReturnType<CoreAPI["archiveSession"]> {
         return Promise.resolve();
       },
