@@ -1626,6 +1626,13 @@ it.each(["goal", "user"] as const)(
     const providerStarted = deferred();
     const finishFirst = deferred();
     const prompts = new InMemoryPromptSubmissionStore();
+    const assertCapacity = prompts.assertCapacity.bind(prompts);
+    prompts.assertCapacity = async (...args): Promise<void> => {
+      await assertCapacity(...args);
+      // Admission preflight is outside the owner: hold late user input until
+      // the winning goal is ready to steer, without blocking its startup.
+      if (first === "goal") await providerStarted.promise;
+    };
     const claim = prompts.claim.bind(prompts);
     let held = false;
     prompts.claim = async (id): ReturnType<typeof claim> => {
@@ -1700,9 +1707,23 @@ it.each(["goal", "user"] as const)(
           ? "goal wins owner admission"
           : "user wins owner claim",
       );
-      if (first === "goal")
-        expect((await prompts.get(accepted.promptId))?.status).toBe("queued");
-      else
+      if (first === "goal") {
+        const goalRun = client.getActiveGoalRunForSteer("one");
+        expect(goalRun).toBeDefined();
+        expect(accepted).toMatchObject({
+          status: "steered",
+          steer: {
+            status: "steered",
+            receipt: { acceptedTargetRunId: goalRun?.runId },
+          },
+        });
+        const prompt = await prompts.get(accepted.promptId);
+        expect(prompt?.status).toBe("steered");
+        expect(prompt?.runId).toBeUndefined();
+        expect(JSON.stringify(requests[0]?.messages)).not.toContain(
+          "user waits for goal",
+        );
+      } else
         expect(
           (await persistence.list("one")).filter(
             (record) => record.turnsUsed !== undefined,
@@ -1718,9 +1739,14 @@ it.each(["goal", "user"] as const)(
           .filter((record) => record.turnsUsed !== undefined)
           .map((record) => record.turnsUsed),
       ).toEqual([1]);
-      expect(requests).toHaveLength(3);
+      expect(requests).toHaveLength(first === "goal" ? 2 : 3);
+      if (first === "goal")
+        expect(JSON.stringify(requests[1]?.messages)).toContain(
+          "user waits for goal",
+        );
     } finally {
       releaseOwner.resolve();
+      providerStarted.resolve();
       finishFirst.resolve();
       await creating;
       await user;
