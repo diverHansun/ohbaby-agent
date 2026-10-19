@@ -1558,6 +1558,109 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
   });
 
+  it("collects Todo reminders from persisted history using the actual ordinary or Goal run lease", async () => {
+    const { composition, requests, workdir, messageManager } =
+      await createPromptCompositionForTest({ policyMode: "agent" });
+    const sessionId = "session_todo_reminder";
+    const todos = [{ content: "Verify Todo scope", status: "in_progress" }];
+    for (const workScopeId of [undefined, "goal:test"] as const) {
+      const owner = await messageManager.createMessage({
+        agent: "build",
+        role: "assistant",
+        sessionId,
+      });
+      await messageManager.appendPart(owner.id, {
+        type: "tool",
+        tool: "todo_write",
+        callId: `write-${workScopeId ?? "ordinary"}`,
+        state: {
+          status: "completed",
+          input: { todos },
+          output: "[in_progress] Verify Todo scope",
+          metadata: {
+            todos,
+            ...(workScopeId ? { internalWorkScopeId: workScopeId } : {}),
+          },
+        },
+      });
+    }
+    for (let index = 0; index < 10; index += 1) {
+      const message = await messageManager.createMessage({
+        agent: "build",
+        role: "assistant",
+        sessionId,
+      });
+      await messageManager.appendPart(message.id, {
+        type: "text",
+        text: "Progress",
+      });
+    }
+    const run = async (): Promise<void> => {
+      const result = await composition.startSession({
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Continue",
+        sessionId,
+      });
+      await composition.runManager.waitForCompletion(result.runId);
+    };
+    const ordinary = composition.todoWorkScopes.acquire(sessionId);
+    await run();
+    ordinary.release();
+    const goal = composition.todoWorkScopes.acquire(sessionId, "goal:test");
+    await run();
+    goal.release();
+    await run();
+    const reminders = (await messageManager.listBySession(sessionId))
+      .flatMap((message) => message.parts)
+      .filter((part) => part.metadata?.reminderType === "todo");
+    expect(reminders).toHaveLength(2);
+    expect(reminders[0].metadata?.key).not.toBe(reminders[1].metadata?.key);
+    expect(
+      requests[0]?.messages.some(
+        (message) =>
+          message.role === "user" &&
+          typeof message.content !== "string" &&
+          message.content.some(
+            (block) =>
+              block.type === "text" &&
+              block.text.includes("[in_progress] Verify Todo scope"),
+          ),
+      ),
+    ).toBe(true);
+    const firstReminder = (await messageManager.listBySession(sessionId)).find(
+      (message) =>
+        message.parts.some(
+          (part) => part.metadata?.reminderType === "environment",
+        ),
+    );
+    expect(
+      firstReminder?.parts.map((part) => part.metadata?.reminderType),
+    ).toEqual(["environment", "mode", "todo"]);
+
+    const beforeCompaction = await messageManager.listBySession(sessionId);
+    await messageManager.commitCompaction({
+      sessionId,
+      compactedAt: Date.now(),
+      expectedParts: beforeCompaction.flatMap((message) => message.parts),
+      summary: {
+        agent: "build",
+        text: "Progress summary without the Todo list.",
+        metadata: { compactionId: "todo-compaction" },
+      },
+    });
+    await run();
+    const restored = (await messageManager.listBySession(sessionId))
+      .flatMap((message) => message.parts)
+      .filter((part) => part.metadata?.reminderType === "todo");
+    expect(restored).toHaveLength(3);
+    expect(restored.at(-1)).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("Verify Todo scope") as string,
+    });
+    expect(restored.at(-1)?.time?.compacted).toBeUndefined();
+  });
+
   it("keeps primary system stable across mode changes and persists mode snapshots as user reminders", async () => {
     const { composition, requests, workdir, permissionState, messageManager } =
       await createPromptCompositionForTest({ policyMode: "plan" });

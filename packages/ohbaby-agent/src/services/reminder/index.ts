@@ -68,11 +68,14 @@ export function createReminderCollector(
     const latest = new Map<string, string>();
     for (const message of context.history) {
       if (!isSystemReminderMessage(message)) continue;
-      for (const part of message.parts)
+      for (const part of message.parts) {
+        if (part.type !== "text" || part.ignored || part.text.trim() === "")
+          continue;
         latest.set(
           String(part.metadata?.reminderType),
           String(part.metadata?.key),
         );
+      }
     }
     // Event facts survive retirement. Replay their original owners, including the
     // existing failed-history policy; a saved reminder alone is never evidence.

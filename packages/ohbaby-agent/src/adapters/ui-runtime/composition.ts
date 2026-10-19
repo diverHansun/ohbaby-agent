@@ -17,6 +17,7 @@ import { createEnvironmentReminderProvider } from "../../services/reminder/envir
 import { createMcpCatalogReminderProvider } from "../../services/reminder/mcp-catalog.js";
 import { createReminderCollector } from "../../services/reminder/index.js";
 import { createModeReminderProvider } from "../../services/reminder/mode.js";
+import { createTodoReminderProvider } from "../../services/reminder/todo.js";
 import { PermissionEvent } from "../../permission/events.js";
 import { randomUUID } from "node:crypto";
 import { activeModelBudgetProfiles } from "../../config/llm/model-profile.js";
@@ -634,6 +635,7 @@ export async function createUiRuntimeComposition(
         createEnvironmentReminderProvider(),
         createModeReminderProvider(options.permissionState),
         createMcpCatalogReminderProvider(resolveMcpToolNames),
+        createTodoReminderProvider(todoWorkScopes),
       ]),
       filterModelHistory: options.currentRunInputStore?.filterModelHistory.bind(
         options.currentRunInputStore,

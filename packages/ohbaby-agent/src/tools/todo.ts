@@ -418,6 +418,20 @@ export function recoverTodosFromMessages(
   onWarning?: (message: string, error?: unknown) => void,
   workScopeId?: TodoWorkScopeId,
 ): readonly TodoItem[] {
+  return (
+    recoverTodoSnapshotFromMessages(messages, onWarning, workScopeId)?.todos ??
+    []
+  );
+}
+
+/** The persisted successful write owns both the list and its reminder baseline. */
+export function recoverTodoSnapshotFromMessages(
+  messages: readonly MessageWithParts[],
+  onWarning?: (message: string, error?: unknown) => void,
+  workScopeId?: TodoWorkScopeId,
+):
+  | { readonly todos: readonly TodoItem[]; readonly assistantMessageId: string }
+  | undefined {
   for (
     let messageIndex = messages.length - 1;
     messageIndex >= 0;
@@ -444,7 +458,10 @@ export function recoverTodosFromMessages(
         if (recoveredWorkScopeId !== workScopeId) {
           continue;
         }
-        return parseTodos(part.state.input);
+        return {
+          todos: parseTodos(part.state.input),
+          assistantMessageId: message.info.id,
+        };
       } catch (error) {
         onWarning?.(
           `Ignoring invalid completed todo_write call ${part.callId} during recovery`,
@@ -453,7 +470,7 @@ export function recoverTodosFromMessages(
       }
     }
   }
-  return [];
+  return undefined;
 }
 
 function todoWorkScopeIdFromMetadata(
