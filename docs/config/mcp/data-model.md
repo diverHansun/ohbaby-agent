@@ -421,4 +421,4 @@ export const PROJECT_MCP_CONFIG_FILE = 'settings.json'
 
 stdio 的 `env` 不代表全量继承 `process.env`。SDK 默认安全变量继续继承，其他普通变量只有显式配置才进入子进程。代理设置以安装快照为基础，`env` 的非空同名逻辑键优先（跨层大写也优于基础层小写），同层小写优先，`ALL_PROXY` 后备。显式代理整组覆盖系统，不补另一协议；空白代理覆盖恢复继承。只有 `NO_PROXY` 仍跟随系统；`NO_PROXY=*` 明确全绕过。Windows 处理任意大小写代理别名，POSIX 生成同值大小写别名。
 
-系统读取失败、PAC 或不可等价转换的 bypass 让当前 stdio 连接失败。常见 `*.local` / `<local>` 自动系统配置必然失败；需要显式代理覆盖或明确全绕过。重连读取当前完成快照，已连接进程不热改环境。详细转换范围见 [MCP 接口](../../mcp/dfd-interface.md)。
+系统读取失败、PAC 或无效代理 URL 让当前 stdio 连接失败。bypass 采用尽力转换：`*.local` 转成 `.local`，`<local>` 和格式错误的网段等无法通用表达的规则省略，代理地址仍保留，进程可以启动。外部客户端的域名匹配语义可能不同；需要精确控制时显式配置代理与 `NO_PROXY`。重连读取当前完成快照，已连接进程不热改环境。详细转换范围见 [MCP 接口](../../mcp/dfd-interface.md)。

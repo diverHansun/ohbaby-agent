@@ -353,4 +353,4 @@ function normalizeConfig(raw: any): McpServerConfig {
 - [x] 说明了实现映射细节
 - [x] 预留了未来兼容性扩展方向
 
-运行时环境说明已更新：stdio 不全量 spread `process.env`。代理配置来源、跨层大小写优先级、严格系统 bypass 转换和连接失败契约见 [MCP 接口](dfd-interface.md#stdio-启动环境与失败边界)。本说明修正旧示例，不改变 JSON 配置格式。
+运行时环境说明已更新：stdio 不全量 spread `process.env`。代理配置来源、跨层大小写优先级、尽力系统 bypass 转换和连接失败契约见 [MCP 接口](dfd-interface.md#stdio-启动环境与失败边界)。本说明修正旧示例，不改变 JSON 配置格式。

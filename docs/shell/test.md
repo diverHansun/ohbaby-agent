@@ -20,3 +20,7 @@ pnpm typecheck
 ```
 
 发布包测试会取得全局 package-build-lock；与全仓 preflight/build 协调运行，避免终止持锁进程。完整构建、真实 CLI/主子代理审批和安装验收结果记录在本批验收文档，不用开发目录 import 代替。
+
+## 系统代理绕过回归
+
+`tests/integration/core/bash-tool-scheduler.integration.test.ts` 使用含 `*.local` / `*.crashlytics.com` / `<local>` 的系统代理配置，经过真实 permission 审批后执行 `echo ok`、`true` 和临时文件写入，断言退出码与文件内容。`tests/integration/network-proxy/child-routing.integration.test.ts` 验证 Shell / MCP 可以启动、curl 对域名后缀直连且无关域名仍走代理。不要再把常见 bypass 导致进程无法启动当作正确行为。

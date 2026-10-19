@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { spawn as nodeSpawn } from "node:child_process";
 import type {
   ChildProcess,
   SpawnOptionsWithoutStdio,
@@ -21,6 +22,7 @@ import {
 import type { PermissionInfo } from "../../../packages/ohbaby-agent/src/permission/index.js";
 import { createBashTool } from "../../../packages/ohbaby-agent/src/tools/bash.js";
 import type { SpawnCommand } from "../../../packages/ohbaby-agent/src/tools/bash.js";
+import { installSystemProxy } from "../../../packages/ohbaby-agent/src/utils/network-proxy/index.js";
 
 class FakeChildProcess extends EventEmitter {
   readonly pid = 123;
@@ -94,6 +96,52 @@ function request(
 }
 
 describe("bash tool scheduler integration", () => {
+  it.skipIf(process.platform === "win32")(
+    "executes real commands after approval with macOS wildcard and local proxy bypass rules",
+    async () => {
+      const installation = await installSystemProxy({
+        env: {},
+        readSystem: async () => ({
+          source: "system",
+          httpProxy: "http://127.0.0.1:1",
+          httpsProxy: "http://127.0.0.1:1",
+          bypass: [
+            "127.0.0.1",
+            "192.168.0.0/16",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "localhost",
+            "*.local",
+            "*.crashlytics.com",
+            "<local>",
+          ],
+        }),
+      });
+      try {
+        const { permissionUpdates, scheduler } = createHarness(
+          (file, args, options) => nodeSpawn(file, [...args], options),
+        );
+        const result = await scheduler.execute(
+          request(
+            "bash_system_proxy",
+            "echo ok && true && printf approved > approved.txt",
+          ),
+        );
+        expect(permissionUpdates).toEqual(["bash_system_proxy"]);
+        expect(result).toMatchObject({
+          status: "success",
+          metadata: { exitCode: 0 },
+        });
+        expect(result.output).toContain("ok");
+        expect(
+          await fs.readFile(path.join(workspace, "approved.txt"), "utf8"),
+        ).toBe("approved");
+      } finally {
+        await installation.dispose();
+      }
+    },
+  );
+
   it("runs approved bash commands through permission", async () => {
     const child = new FakeChildProcess();
     const spawn = vi.fn<SpawnCommand>(

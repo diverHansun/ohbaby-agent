@@ -16,12 +16,8 @@ const loopback = ["localhost", "127.0.0.1", "::1", "127.0.0.0/8"];
 const guidance =
   "Set explicit HTTP_PROXY / HTTPS_PROXY (with optional NO_PROXY), or choose NO_PROXY=* to bypass all proxies.";
 
-function unsupported(kind: string): never {
-  throw new ProxyConfigurationError(
-    `System proxy bypass ${kind} cannot be represented reliably for child processes. ${guidance}`,
-  );
-}
-
+// NO_PROXY is a client convention, not an exact system-policy transport.
+// Export common rules; unsupported bypass syntax must not block process startup.
 function systemBypass(rule: string): string | undefined {
   const host = rule.toLowerCase().replace(/^\[|\]$/g, "");
   const family = isIP(host);
@@ -48,7 +44,7 @@ function systemBypass(rule: string): string | undefined {
   if (rule.includes("/")) {
     const networkParts = rule.split("/");
     const [address = "", prefix = ""] = networkParts;
-    if (address.includes(":")) return unsupported("IPv6 CIDR");
+    if (address.includes(":")) return undefined;
     const parts = address.split(".");
     const normalized = parts
       .concat(Array<string>(Math.max(0, 4 - parts.length)).fill("0"))
@@ -60,7 +56,7 @@ function systemBypass(rule: string): string | undefined {
       !/^\d+$/.test(prefix) ||
       bits > 32
     )
-      return unsupported("invalid network");
+      return undefined;
     const octets = normalized.split(".").map(Number);
     const network = octets
       .map((octet, index) => {
@@ -70,12 +66,10 @@ function systemBypass(rule: string): string | undefined {
       .join(".");
     return `${network}/${String(bits)}`;
   }
-  if (host === "<local>") return unsupported("simple hostname rule (<local>)");
-  if (host.includes("*")) return unsupported("wildcard hostname rule");
-  if (host.includes(":")) return unsupported("host:port rule");
-  return unsupported(
-    host.startsWith(".") ? "subdomain rule" : "exact hostname rule",
-  );
+  const domain = host.replace(/^\*\./, ".");
+  if (domain === "<local>" || domain.includes("*") || domain.includes(":"))
+    return undefined;
+  return domain;
 }
 
 function externalProxy(value: string | undefined): string | undefined {

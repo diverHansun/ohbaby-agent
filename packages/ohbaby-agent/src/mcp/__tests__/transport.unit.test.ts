@@ -1,19 +1,23 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTransport } from "../core/transport.js";
+import { PROXY_ENVIRONMENT_KEYS } from "../../utils/network-proxy/policy.js";
 
 describe("createTransport", () => {
-  const originalSecret = process.env.OHBABY_MCP_SECRET;
-
-  afterEach(() => {
-    if (originalSecret === undefined) {
-      delete process.env.OHBABY_MCP_SECRET;
-    } else {
-      process.env.OHBABY_MCP_SECRET = originalSecret;
+  beforeEach(() => {
+    // Without an installed snapshot, proxy settings come from process.env;
+    // clear the developer shell's values so the expected env stays fixed.
+    for (const key of PROXY_ENVIRONMENT_KEYS) {
+      vi.stubEnv(key, undefined);
+      vi.stubEnv(key.toLowerCase(), undefined);
     }
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("passes only explicit stdio env values to the SDK transport", () => {
-    process.env.OHBABY_MCP_SECRET = "do-not-forward";
+    vi.stubEnv("OHBABY_MCP_SECRET", "do-not-forward");
 
     const transport = createTransport({
       args: [],

@@ -101,25 +101,40 @@ describe("child proxy environment", () => {
       }),
     ).toThrow(/PAC/);
   });
-  it.each([
-    "example.com",
-    ".example.com",
-    "*.local",
-    "foo*bar.test",
-    "host:80",
-    "<local>",
-    "::1/128",
-  ])(
-    "rejects non-equivalent system bypass %s even with ordinary NO_PROXY",
-    (rule) => {
-      expect(() =>
-        buildChildProxyEnvironment(
-          snapshot(
-            { NO_PROXY: "custom.test" },
-            { source: "system", httpProxy: "http://system:1", bypass: [rule] },
-          ),
+  it.each(["darwin", "linux", "win32"] as const)(
+    "%s: exports common system bypass rules without blocking on unsupported entries",
+    (platform) => {
+      const env = buildChildProxyEnvironment(
+        snapshot(
+          { NO_PROXY: "custom.test" },
+          {
+            source: "system",
+            httpProxy: "http://system:1",
+            httpsProxy: "http://system:2",
+            bypass: [
+              "Example.COM",
+              ".example.com",
+              "*.local",
+              "*.crashlytics.com",
+              "foo*bar.test",
+              "host:80",
+              "<local>",
+              "::1/128",
+              "foo/bar",
+              "192.168.1.0/33",
+              "10.0.0.0/8/1",
+            ],
+            excludeSimpleHostnames: true,
+          },
         ),
-      ).toThrow(/HTTP_PROXY.*HTTPS_PROXY.*NO_PROXY=\*/);
+        {},
+        platform,
+      );
+      expect(env.HTTP_PROXY).toBe("http://system:1/");
+      expect(env.HTTPS_PROXY).toBe("http://system:2/");
+      expect(env.NO_PROXY).toBe(
+        `${loopback},custom.test,example.com,.example.com,.local,.crashlytics.com`,
+      );
     },
   );
   it("does not evaluate unused bypass when system has no proxy or bypasses everything", () => {

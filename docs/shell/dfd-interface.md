@@ -23,3 +23,7 @@ PermissionCall、PermissionAskInput、PermissionPatternInput 与 PermissionPort.
 删除旧 `parseCommand`、`ParsedCommand`、`CommandDetail`、`detectPaths`、`getCommandRoots`、`analyzeShellCommandLight` 和 Git Bash 自动探测 helper；包根、shell、utils barrel 同步清理。通用 `matchesPattern` 保留。消费者需要改用异步 analyzeShellCommand 与真实完整性合同，不能依赖旧同步 parser。
 
 Windows 默认改为 pwsh → Windows PowerShell；Git Bash 仍可显式配置原生完整路径。没有执行失败后的解释器回退。
+
+## 子进程代理环境
+
+启动前从共享代理快照构造环境，规则见 [MCP 子进程代理环境契约](../mcp/dfd-interface.md#子进程代理环境契约)。常见系统域名绕过规则尽力转换为 `NO_PROXY`，无法通用表达的规则省略，不因 `*.local` / `<local>` 阻止本地命令启动。网络配置不改变 Shell 分析、审批与固定执行绑定。

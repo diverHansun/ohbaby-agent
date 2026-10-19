@@ -46,7 +46,7 @@ const stdioFixture = fileURLToPath(
   new URL("./fixtures/stdio-server.mjs", import.meta.url),
 );
 const curl = process.platform === "win32" ? "curl.exe" : "curl";
-const shell = process.platform === "win32" ? "cmd.exe" : "/bin/sh";
+const shell = process.platform === "win32" ? "powershell.exe" : "/bin/sh";
 
 async function listen(
   server: http.Server | https.Server,
@@ -246,7 +246,10 @@ describe("installed proxy to real child network clients", () => {
     const tool = bash(registry);
     const background = await tool.execute(
       {
-        command: `"${process.execPath}" -e "setTimeout(() => {}, 200)" && ${curlCommand("http://network.test/background")}`,
+        command:
+          process.platform === "win32"
+            ? `Start-Sleep -Milliseconds 200; ${curlCommand("http://network.test/background")}`
+            : `"${process.execPath}" -e "setTimeout(() => {}, 200)" && ${curlCommand("http://network.test/background")}`,
         run_in_background: true,
       },
       context(),
@@ -275,9 +278,9 @@ describe("installed proxy to real child network clients", () => {
     expect((await registry.waitForTerminal(jobId, "parent")).output).toContain(
       "PROXY_HTTP",
     );
-    expect(a.hits).toEqual([
-      "http://network.test/first",
+    expect([...a.hits].sort()).toEqual([
       "http://network.test/background",
+      "http://network.test/first",
     ]);
     expect(b.hits).toEqual([
       "http://network.test/new",
@@ -324,8 +327,9 @@ describe("installed proxy to real child network clients", () => {
     ".example.com",
     "host:80",
     "::1/128",
+    "foo*bar.test",
   ])(
-    "refuses system bypass %s before Shell/MCP process startup while Node remains usable",
+    "starts Shell/MCP with system bypass %s while retaining the proxy",
     async (rule) => {
       const proxy = await recordingProxy();
       const installation = await installSystemProxy({
@@ -341,25 +345,69 @@ describe("installed proxy to real child network clients", () => {
       const registry = new ShellJobRegistry({
         killTree: (child) => Shell.killTree(child),
       });
-      await expect(
-        bash(registry).execute({ command: "echo started" }, context()),
-      ).rejects.toThrow(/cannot be represented.*HTTP_PROXY.*NO_PROXY=\*/);
+      const result = await bash(registry).execute(
+        { command: "echo started" },
+        context(),
+      );
+      expect(result.output).toContain("started");
+      expect(result.metadata?.exitCode).toBe(0);
       expect(registry.hasActiveWork()).toBe(false);
       const directory = await mkdtemp(join(tmpdir(), "ohbaby-proxy-"));
       cleanups.push(() => rm(directory, { recursive: true, force: true }));
       const marker = join(directory, "started");
       const client = stdio({ SPAWN_MARKER: marker });
-      await expect(client.connect()).rejects.toThrow(/cannot be represented/);
-      expect(client.getStatus().status).toBe("failed");
-      await expect(access(marker)).rejects.toThrow();
+      await client.connect();
+      await access(marker);
+      expect((await probe(client, "http://network.test/stdio")).body).toBe(
+        "PROXY_HTTP",
+      );
+      expect(
+        (
+          await bash().execute(
+            { command: curlCommand("http://network.test/shell") },
+            context("subagent"),
+          )
+        ).output,
+      ).toContain("PROXY_HTTP");
       expect(await (await fetch("http://network.test/node")).text()).toBe(
         "PROXY_HTTP",
       );
-      const explicit = stdio({ HTTP_PROXY: proxy.url });
-      await explicit.connect();
-      await probe(explicit, "http://network.test/explicit");
+      expect(proxy.hits).toHaveLength(3);
     },
   );
+
+  it("curl bypasses wildcard domain suffixes without bypassing unrelated hosts", async () => {
+    const port = await listen(
+      http.createServer((_request, response) => response.end("DIRECT")),
+    );
+    const proxy = await recordingProxy();
+    const installation = await installSystemProxy({
+      env: {},
+      readSystem: async () => ({
+        source: "system",
+        httpProxy: proxy.url,
+        bypass: ["*.local", "<local>"],
+      }),
+    });
+    cleanups.push(() => installation.dispose());
+    for (const host of [
+      "printer.local",
+      "printer.local.evil.test",
+      "notlocal",
+    ]) {
+      const result = await bash().execute(
+        {
+          command: `${curlCommand(`http://${host}:${String(port)}`)} --resolve "${host}:${String(port)}:127.0.0.1"`,
+        },
+        context(),
+      );
+      expect(result.metadata?.exitCode).toBe(0);
+      expect(result.output.trim()).toBe(
+        host === "printer.local" ? "DIRECT" : "PROXY_HTTP",
+      );
+    }
+    expect(proxy.hits).toHaveLength(2);
+  });
 
   it.each(["read", "pac", "malformed"])(
     "fails cleanly on %s system configuration and permits explicit/all-bypass paths",
