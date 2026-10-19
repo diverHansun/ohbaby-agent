@@ -598,6 +598,22 @@ describe("createPersistentUiStateStore", () => {
       text: "Goal\n- raw summary text that belongs only in model context",
       type: "text",
     });
+    const reminder = await messageManager.createMessage({
+      agent: "build",
+      role: "user",
+      sessionId: session.id,
+    });
+    await messageManager.appendPart(reminder.id, {
+      type: "text",
+      synthetic: true,
+      text: "<system-reminder>internal environment</system-reminder>",
+      metadata: {
+        kind: "system-reminder:v1",
+        reminderType: "environment",
+        key: "environment-key",
+        anchorAssistantId: "owner",
+      },
+    });
     const store = createPersistentUiStateStore({
       messageManager,
       projectRoot: "D:/repo",
@@ -618,6 +634,7 @@ describe("createPersistentUiStateStore", () => {
       },
     ]);
     expect(JSON.stringify(messages)).not.toContain("raw summary text");
+    expect(JSON.stringify(messages)).not.toContain("internal environment");
   });
 
   it.each([undefined, "child-scope"])(

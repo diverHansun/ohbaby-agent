@@ -24,6 +24,7 @@ import type {
 import {
   isContextSummaryPart,
   isModelContextPart,
+  isSystemReminderPart,
 } from "../../core/message/index.js";
 import { SUMMARY_AGENT_NAME } from "../../core/context/constants.js";
 import { isActivePart } from "../../core/context/filters.js";
@@ -152,7 +153,7 @@ function toolPartToUiParts(part: ToolPart): UiMessagePart[] {
 }
 
 function partToUiParts(part: Part): UiMessagePart[] {
-  if (isModelContextPart(part)) {
+  if (isModelContextPart(part) || isSystemReminderPart(part)) {
     return [];
   }
   if (part.type === "model-state") return [];

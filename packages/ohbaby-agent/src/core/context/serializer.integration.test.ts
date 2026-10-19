@@ -546,133 +546,6 @@ describe("serializeForLlm database metadata projection", () => {
     );
   });
 
-  it("attaches one runtime part across managers and a database restart", async () => {
-    const seedManager = createMessageManager({
-      bus: createBus(),
-      store: createDatabaseMessageStore(),
-      idGenerator: createMessageIds("seed_"),
-      now: createClock(),
-    });
-    const user = await seedManager.createMessage({
-      agent: "build",
-      role: "user",
-      sessionId: "session_1",
-    });
-    await seedManager.appendPart(user.id, {
-      text: "race two managers",
-      type: "text",
-    });
-
-    let builders = 0;
-    let releaseBuild!: (value: undefined) => void;
-    let markBothBuilding!: (value: undefined) => void;
-    const buildReleased = new Promise<undefined>((resolve) => {
-      releaseBuild = resolve;
-    });
-    const bothBuilding = new Promise<undefined>((resolve) => {
-      markBothBuilding = resolve;
-    });
-    const systemPromptProvider = {
-      build: vi.fn().mockResolvedValue("stable"),
-      buildRuntimeContext: vi.fn(async () => {
-        builders += 1;
-        if (builders === 2) {
-          markBothBuilding(undefined);
-        }
-        await buildReleased;
-        return "runtime";
-      }),
-    };
-    const createManager = (
-      prefix: string,
-    ): ReturnType<typeof createContextManager> =>
-      createContextManager({
-        bus: createBus(),
-        llmClient: {
-          generateSummary: vi.fn().mockResolvedValue({
-            text: "summary",
-            summaryMessageId: "summary",
-            requests: [],
-          }),
-        },
-        messageManager: createMessageManager({
-          bus: createBus(),
-          store: createDatabaseMessageStore(),
-          idGenerator: createMessageIds(prefix),
-          now: createClock(),
-        }),
-        systemPromptProvider,
-        tokenCounter: {
-          estimateTokens: (content) => content.length,
-          getLimit: () => 100_000,
-        },
-      });
-    const input = {
-      directory: "/repo",
-      initiatingUserMessageId: user.id,
-      isSubagent: false,
-      sessionId: "session_1",
-      toolNames: [],
-    } as const;
-    const first = createManager("left_").createRunPromptSnapshot(input);
-    const second = createManager("right_").createRunPromptSnapshot(input);
-    await bothBuilding;
-    releaseBuild(undefined);
-    await Promise.all([first, second]);
-
-    expect(builders).toBe(2);
-    expect(
-      (await seedManager.listBySession("session_1"))
-        .flatMap((message) => message.parts)
-        .filter(isModelContextPart),
-    ).toHaveLength(1);
-
-    closeDatabase();
-    initDatabase({ dbPath: databasePath });
-    const reopenedMessageManager = createMessageManager({
-      bus: createBus(),
-      store: createDatabaseMessageStore(),
-      idGenerator: createMessageIds("reopened_"),
-      now: createClock(),
-    });
-    const rebuildRuntimeContext = vi.fn().mockResolvedValue({
-      text: "replacement",
-      summaryMessageId: "summary",
-      requests: [],
-    });
-    const reopenedContextManager = createContextManager({
-      bus: createBus(),
-      llmClient: {
-        generateSummary: vi.fn().mockResolvedValue({
-          text: "summary",
-          summaryMessageId: "summary",
-          requests: [],
-        }),
-      },
-      messageManager: reopenedMessageManager,
-      systemPromptProvider: {
-        build: vi.fn().mockResolvedValue("stable"),
-        buildRuntimeContext: rebuildRuntimeContext,
-      },
-      tokenCounter: {
-        estimateTokens: (content) => content.length,
-        getLimit: () => 100_000,
-      },
-    });
-    await reopenedContextManager.createRunPromptSnapshot(input);
-    await reopenedContextManager.createRunPromptSnapshot({
-      ...input,
-      initiatingUserMessageId: undefined,
-    });
-
-    expect(rebuildRuntimeContext).not.toHaveBeenCalled();
-    expect(
-      (await reopenedMessageManager.listBySession("session_1"))
-        .flatMap((message) => message.parts)
-        .filter(isModelContextPart),
-    ).toHaveLength(1);
-  });
-
   it("keeps persisted runtime context model-visible after a database round trip", async () => {
     const messageManager = createMessageManager({
       bus: createBus(),
@@ -730,11 +603,6 @@ describe("serializeForLlm database metadata projection", () => {
       "inspect caching",
     );
 
-    const buildRuntimeContext = vi.fn().mockResolvedValue({
-      text: "new runtime",
-      summaryMessageId: "summary",
-      requests: [],
-    });
     const contextManager = createContextManager({
       bus: createBus(),
       llmClient: {
@@ -747,7 +615,6 @@ describe("serializeForLlm database metadata projection", () => {
       messageManager: reopenedMessageManager,
       systemPromptProvider: {
         build: vi.fn().mockResolvedValue("stable"),
-        buildRuntimeContext,
       },
       tokenCounter: {
         estimateTokens: (content) => content.length,
@@ -769,7 +636,6 @@ describe("serializeForLlm database metadata projection", () => {
       tools: undefined,
     });
 
-    expect(buildRuntimeContext).not.toHaveBeenCalled();
     expect(
       JSON.stringify(resumed.request).split(
         "<environment_context>/repo</environment_context>",

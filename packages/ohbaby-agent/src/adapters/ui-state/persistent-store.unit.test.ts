@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   AssistantMessage,
   MessageWithParts,
+  TextPart,
   ToolState,
   UserMessage,
 } from "../../core/message/index.js";
@@ -122,6 +123,44 @@ describe("messageToUiMessage", () => {
         parts: [textPart("message_user", "hello"), runtimePart],
       })?.parts,
     ).toMatchObject([{ text: "hello", type: "text" }]);
+  });
+
+  it("hides trusted reminder parts while preserving user text with the same tags", () => {
+    const info: UserMessage = {
+      agent: "build",
+      id: "reminder",
+      role: "user",
+      sessionId: "session_1",
+      time: { created: 1 },
+    };
+    const text =
+      "<system-reminder>Current working directory: /private</system-reminder>";
+    const reminderPart = {
+      ...textPart(info.id, text),
+      synthetic: true,
+      metadata: {
+        kind: "system-reminder:v1",
+        reminderType: "environment",
+        key: "environment-key",
+        anchorAssistantId: "owner",
+      },
+    };
+    expect(messageToUiMessage({ info, parts: [reminderPart] })).toBeUndefined();
+    expect(
+      messageToUiMessage({ info, parts: [textPart(info.id, text)] })?.parts,
+    ).toMatchObject([{ type: "text", text }]);
+    expect(
+      messageToUiMessage({
+        info,
+        parts: [{ ...reminderPart, synthetic: false }],
+      })?.parts,
+    ).toMatchObject([{ type: "text", text }]);
+    expect(
+      messageToUiMessage({
+        info,
+        parts: [textPart(info.id, "actual request"), reminderPart],
+      })?.parts,
+    ).toMatchObject([{ type: "text", text: "actual request" }]);
   });
 
   it("omits todo tool calls and results from a persisted transcript", () => {
@@ -310,10 +349,7 @@ function assistantMessage(
   };
 }
 
-function textPart(
-  messageId: string,
-  text: string,
-): MessageWithParts["parts"][number] {
+function textPart(messageId: string, text: string): TextPart {
   return {
     id: `${messageId}_part_0`,
     messageId,

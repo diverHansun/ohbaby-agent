@@ -13,6 +13,8 @@ import { createSubagentResultArtifacts } from "../../agents/subagents/result-art
 import { createSubagentContinuationCoordinator } from "../../agents/subagents/continuation-coordinator.js";
 import { collectExecutionFacts } from "../../agents/subagents/execution-facts.js";
 import { createStorage } from "../../services/storage/index.js";
+import { createEnvironmentReminderProvider } from "../../services/reminder/environment.js";
+import { createMcpCatalogReminderProvider } from "../../services/reminder/mcp-catalog.js";
 import { createReminderCollector } from "../../services/reminder/index.js";
 import { createModeReminderProvider } from "../../services/reminder/mode.js";
 import { PermissionEvent } from "../../permission/events.js";
@@ -116,7 +118,6 @@ import {
 import {
   admitMcpTools,
   createSelectToolsTool,
-  generateMcpToolMenuPrompt,
   McpManager,
   McpToolMenu,
   ScopeToolSequence,
@@ -622,13 +623,6 @@ export async function createUiRuntimeComposition(
       }
       return resolveSubagentTaskKind(agentName);
     },
-    async runtimePromptsProvider(input) {
-      return [
-        generateMcpToolMenuPrompt({
-          toolNames: await resolveMcpToolNames(input),
-        }),
-      ];
-    },
     onSecurityFinding(finding) {
       options.onNotice?.(noticeFromPromptSecurityFinding(finding));
     },
@@ -637,7 +631,9 @@ export async function createUiRuntimeComposition(
     options.contextManager ??
     createContextManager({
       collectReminders: createReminderCollector([
+        createEnvironmentReminderProvider(),
         createModeReminderProvider(options.permissionState),
+        createMcpCatalogReminderProvider(resolveMcpToolNames),
       ]),
       filterModelHistory: options.currentRunInputStore?.filterModelHistory.bind(
         options.currentRunInputStore,

@@ -22,7 +22,7 @@ function escapeBoundaryValue(value: string): string {
     .replaceAll(">", "&gt;");
 }
 
-function formatDate(date: Date): string {
+export function formatEnvironmentDate(date: Date): string {
   const year = String(date.getFullYear()).padStart(4, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -36,8 +36,10 @@ async function defaultIsGitRepo(directory: string): Promise<boolean> {
     try {
       await fs.access(path.join(current, ".git"));
       return true;
-    } catch {
-      // Keep walking upward until the filesystem root.
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+      // A missing .git entry may still belong to a repository higher up.
     }
 
     const parent = path.dirname(current);
@@ -59,7 +61,7 @@ export async function detectEnvironment(
   return {
     cwd,
     platform: options.platform ?? process.platform,
-    date: formatDate((options.now ?? ((): Date => new Date()))()),
+    date: formatEnvironmentDate((options.now ?? ((): Date => new Date()))()),
     isGitRepo,
     ...(osVersion.trim() === "" ? {} : { osVersion }),
   };

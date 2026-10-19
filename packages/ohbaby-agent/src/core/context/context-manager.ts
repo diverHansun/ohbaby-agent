@@ -1,3 +1,4 @@
+import { formatEnvironmentDate } from "../system-prompt/layers/environment.js";
 import { setTimeout as sleep } from "node:timers/promises";
 import { emitDiagnostic, NOOP_LOGGER } from "../../observability/logger.js";
 import {
@@ -66,7 +67,6 @@ import {
 } from "../llm-client/retry.js";
 import type { ModelMessage } from "../llm-client/index.js";
 import {
-  isModelContextPart,
   SYSTEM_REMINDER_KIND,
   type MessageWithParts,
   type Part,
@@ -509,43 +509,17 @@ export function createContextManager(
     input: CreateRunPromptSnapshotInput,
   ): Promise<AgentRunPromptSnapshot> {
     const systemPrompt = await options.systemPromptProvider.build(input);
-    const initiatingUserMessageId = input.initiatingUserMessageId;
-    if (initiatingUserMessageId !== undefined) {
-      await mutationLane.run(
-        scopedSessionKey({
-          contextScopeId: input.contextScopeId,
-          sessionId: input.sessionId,
-        }),
-        async () => {
-          const history = await options.messageManager.listBySession(
-            input.sessionId,
-            { contextScopeId: input.contextScopeId },
-          );
-          const initiatingMessage = history.find(
-            (message) => message.info.id === initiatingUserMessageId,
-          );
-          if (initiatingMessage?.info.role !== "user") {
-            throw new Error(
-              `Initiating user message ${initiatingUserMessageId} is not present in the requested context scope`,
-            );
-          }
-          const alreadyAttached =
-            initiatingMessage.parts.some(isModelContextPart);
-          if (!alreadyAttached) {
-            const runtimeContext =
-              await options.systemPromptProvider.buildRuntimeContext?.(input);
-            if (runtimeContext !== undefined && runtimeContext.trim() !== "") {
-              await options.messageManager.appendModelContextPart(
-                initiatingMessage.info.id,
-                `\n\n${runtimeContext}`,
-              );
-            }
-          }
-        },
-      );
+    let environment: AgentRunPromptSnapshot["environment"];
+    try {
+      environment =
+        await options.systemPromptProvider.detectEnvironment?.(input);
+    } catch {
+      // Optional environment detection must not prevent a run from preparing.
     }
-
-    return deepFreeze({ systemPrompt });
+    return deepFreeze({
+      systemPrompt,
+      ...(environment === undefined ? {} : { environment }),
+    });
   }
 
   function summaryRequest(
@@ -1487,6 +1461,7 @@ export function createContextManager(
   async function collectReminders(
     input: PrepareTurnInput,
     context: AssembledContext,
+    date: string,
   ): Promise<readonly ReminderDraft[]> {
     if (
       input.reminderAnchorId === undefined ||
@@ -1494,6 +1469,10 @@ export function createContextManager(
     )
       return [];
     return options.collectReminders({
+      environment:
+        input.promptSnapshot?.environment === undefined
+          ? undefined
+          : { ...input.promptSnapshot.environment, date },
       agentName: input.agentName,
       contextScopeId: input.contextScopeId,
       history: context.history.filter(
@@ -1576,6 +1555,7 @@ export function createContextManager(
   ): Promise<PreparedTurn> {
     input.signal?.throwIfAborted();
     const startedAt = now();
+    const date = formatEnvironmentDate(new Date(startedAt));
     const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(input.sessionId, input.directory, {
       agentName: input.agentName,
@@ -1606,7 +1586,7 @@ export function createContextManager(
     };
     let candidate = reminderCandidate(
       input,
-      await collectReminders(input, assembled),
+      await collectReminders(input, assembled, date),
     );
     let tailDirectives = requestTail(candidate);
     const preparedBefore = measureContext({
@@ -1641,7 +1621,7 @@ export function createContextManager(
       // Compaction may have retired earlier state; re-check against the new history.
       candidate = reminderCandidate(
         input,
-        await collectReminders(input, finalContext),
+        await collectReminders(input, finalContext, date),
       );
       tailDirectives = requestTail(candidate);
     }

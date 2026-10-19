@@ -14,7 +14,7 @@ const ENVIRONMENT: EnvironmentInfo = {
 };
 
 describe("createSystemPromptProvider", () => {
-  it("keeps primary system stable and emits runtime context separately", async () => {
+  it("keeps primary system stable and exposes detected environment separately", async () => {
     const provider = createSystemPromptProvider({
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
       customInstructionLoader: vi
@@ -28,7 +28,7 @@ describe("createSystemPromptProvider", () => {
       isSubagent: false,
       toolNames: ["read", "bash"],
     });
-    const runtimeContext = await provider.buildRuntimeContext?.({
+    const environment = await provider.detectEnvironment?.({
       sessionId: "session_1",
       directory: "D:/repo",
       isSubagent: false,
@@ -39,32 +39,7 @@ describe("createSystemPromptProvider", () => {
     expect(prompt).toContain("Project-only rule");
     expect(prompt).not.toContain("D:/repo");
     expect(prompt).not.toContain("Available tools");
-    expect(runtimeContext).toContain("D:/repo");
-    expect(runtimeContext).not.toContain("Available tools");
-  });
-
-  it("places runtime provider content in the user-turn context only", async () => {
-    const provider = createSystemPromptProvider({
-      customInstructionLoader: vi.fn().mockResolvedValue([]),
-      environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
-      runtimePromptsProvider: vi
-        .fn()
-        .mockResolvedValue(["<mcp_tool_catalog>catalog</mcp_tool_catalog>"]),
-    });
-    const input = {
-      sessionId: "session_1",
-      directory: "D:/repo",
-      isSubagent: false,
-      toolNames: [] as readonly string[],
-    };
-
-    const system = await provider.build(input);
-    const runtime = await provider.buildRuntimeContext?.(input);
-
-    expect(system).not.toContain("mcp_tool_catalog");
-    expect(system).not.toContain("environment_context");
-    expect(runtime).toContain("environment_context");
-    expect(runtime).toContain("mcp_tool_catalog");
+    expect(environment).toEqual(ENVIRONMENT);
   });
 
   it("adds primary agent prompts without switching to subagent assembly", async () => {
@@ -207,25 +182,26 @@ describe("createSystemPromptProvider", () => {
     expect(availableSubagentRolesProvider).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps runtime-owned fragments out of the stable system prompt", async () => {
+  it("detects the execution directory while instructions retain the project root", async () => {
     const provider = createSystemPromptProvider({
-      customInstructionLoader: vi.fn().mockResolvedValue([]),
-      environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
-      runtimePromptsProvider: vi
-        .fn()
-        .mockResolvedValue(["<runtime_prompt>MCP menu</runtime_prompt>"]),
+      customInstructionLoader: (input) => [
+        {
+          scope: "project",
+          text: `Rules for ${input.projectRoot ?? input.directory}`,
+        },
+      ],
+      environmentDetector: (directory) => ({ ...ENVIRONMENT, cwd: directory }),
     });
-
     const input = {
       sessionId: "session_1",
-      directory: "D:/repo",
-      isSubagent: false,
-      toolNames: ["mcp_bad", "read"] as readonly string[],
+      directory: "/execution/child",
+      projectRoot: "/project",
+      isSubagent: true,
+      toolNames: [],
     };
-    const prompt = await provider.build(input);
-    const runtime = await provider.buildRuntimeContext?.(input);
-
-    expect(prompt).not.toContain("<runtime_prompt>MCP menu</runtime_prompt>");
-    expect(runtime).toContain("<runtime_prompt>MCP menu</runtime_prompt>");
+    expect(await provider.build(input)).toContain("Rules for /project");
+    expect(await provider.detectEnvironment?.(input)).toMatchObject({
+      cwd: "/execution/child",
+    });
   });
 });

@@ -1,3 +1,4 @@
+import type { EnvironmentInfo } from "../../core/system-prompt/types.js";
 import type { MessageWithParts } from "../../core/message/index.js";
 import { isSystemReminderMessage } from "../../core/message/origin.js";
 import { arrangeReminderHistory } from "../../core/context/reminder-history.js";
@@ -13,6 +14,7 @@ export const REMINDER_ORDER = [
 export type ReminderType = (typeof REMINDER_ORDER)[number];
 
 export interface ReminderContext {
+  readonly environment?: EnvironmentInfo;
   readonly sessionId: string;
   readonly contextScopeId?: string;
   readonly isSubagent: boolean;

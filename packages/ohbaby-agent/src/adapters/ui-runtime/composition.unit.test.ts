@@ -11,7 +11,7 @@ import {
 import { createBus } from "../../bus/index.js";
 import type { ContextManager } from "../../core/context/index.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
-import type { MessageManager } from "../../core/message/index.js";
+import type { MessageManager, Part } from "../../core/message/index.js";
 import type {
   InterfaceProviderRequest,
   InterfaceProviderStreamEvent,
@@ -1670,11 +1670,9 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
     await composition.runManager.waitForCompletion(first.runId);
 
-    const initialContent = requests[0]?.messages.find(
-      (message) => message.role === "user",
-    )?.content;
-    const initialRuntime =
-      typeof initialContent === "string" ? initialContent : "";
+    const initialRuntime = JSON.stringify(
+      requests[0]?.messages.filter((message) => message.role === "user"),
+    );
     const initialToolNames = requests[0]?.tools?.map((tool) => tool.name) ?? [];
     const initialRequestJson = JSON.stringify(requests[0]);
     expect(initialRuntime).toContain(`- ${toolName}`);
@@ -1727,6 +1725,86 @@ describe("createUiRuntimeComposition skill tools", () => {
     expect(selectedTool?.description).toBe(
       "MCP tool loaded on demand. Use its schema to perform the requested operation.",
     );
+  });
+
+  it("refreshes the bounded catalog from scoped unloaded tools without duplicate snapshots", async () => {
+    const names = Array.from(
+      { length: 23 },
+      (_, index) => `mcp_s6_server_t2_${String(index).padStart(2, "0")}`,
+    );
+    const { composition, requests, workdir, messageManager } =
+      await createPromptCompositionForTest({
+        mcpTools: names.map((name) => mcpTool(name)),
+        policyMode: "agent",
+      });
+    const run = async (sessionId: string): Promise<void> => {
+      const started = await composition.startSession({
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Continue",
+        sessionId,
+      });
+      await composition.runManager.waitForCompletion(started.runId);
+    };
+    const catalogParts = async (sessionId: string): Promise<Part[]> =>
+      (await messageManager.listBySession(sessionId))
+        .flatMap((message) => message.parts)
+        .filter((part) => part.metadata?.reminderType === "mcp-catalog");
+    await run("menu-primary");
+    await run("menu-primary");
+    const initial = await catalogParts("menu-primary");
+    expect(initial).toHaveLength(1);
+    expect(initial[0]?.type === "text" ? initial[0].text : "").toContain(
+      "3 additional tools omitted",
+    );
+    expect(
+      initial[0]?.type === "text" ? initial[0].text.match(/^- /gmu) : [],
+    ).toHaveLength(20);
+    const selected = names[0];
+    const loaded = await composition.toolScheduler.execute({
+      agentName: "build",
+      callId: "load-bounded-menu",
+      messageId: "message",
+      params: { tools: [selected] },
+      sessionId: "menu-primary",
+      toolName: "select_tools",
+    });
+    expect(loaded.status).toBe("success");
+    await run("menu-primary");
+    const changed = await catalogParts("menu-primary");
+    expect(changed).toHaveLength(2);
+    const latest = changed.at(-1);
+    expect(latest?.type === "text" ? latest.text : "").not.toContain(
+      `- ${selected}\n`,
+    );
+    expect(latest?.type === "text" ? latest.text : "").toContain(
+      "2 additional tools omitted",
+    );
+    expect(requests[2]?.tools?.some((tool) => tool.name === selected)).toBe(
+      true,
+    );
+    await run("menu-other");
+    const other = await catalogParts("menu-other");
+    expect(other[0]?.type === "text" ? other[0].text : "").toContain(
+      `- ${selected}\n`,
+    );
+    expect(requests[3]?.tools?.some((tool) => tool.name === selected)).toBe(
+      false,
+    );
+    const stored = await messageManager.listBySession("menu-primary");
+    expect(
+      stored
+        .flatMap((message) => message.parts)
+        .some((part) => part.metadata?.kind === "model-context:runtime:v1"),
+    ).toBe(false);
+    const firstReminder = stored.find((message) =>
+      message.parts.some(
+        (part) => part.metadata?.reminderType === "environment",
+      ),
+    );
+    expect(
+      firstReminder?.parts.map((part) => part.metadata?.reminderType),
+    ).toEqual(["environment", "mode", "mcp-catalog"]);
   });
 
   it("searches admitted MCP descriptions and loads a ranked candidate only when requested", async () => {

@@ -41,9 +41,6 @@ export interface SystemPromptProviderOptions {
   ) => Promise<EnvironmentInfo> | EnvironmentInfo;
   readonly onWarning?: (message: string, error?: unknown) => void;
   readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
-  readonly runtimePromptsProvider?: (
-    input: SystemPromptProviderInput,
-  ) => Promise<readonly string[]> | readonly string[];
   readonly taskKindResolver?: (
     input: SystemPromptProviderInput,
     agentName: string,
@@ -207,22 +204,12 @@ export function createSystemPromptProvider(
       }).join("\n\n");
     },
 
-    async buildRuntimeContext(
+    async detectEnvironment(
       input: SystemPromptProviderInput,
-    ): Promise<string> {
-      const [environment, runtimePrompts] = await Promise.all([
-        options.environmentDetector
-          ? options.environmentDetector(input.directory, input)
-          : detectEnvironment(input.directory),
-        options.runtimePromptsProvider?.(input) ?? [],
-      ]);
-      return compactPrompts([
-        generateEnvironmentPrompt({
-          info: environment,
-          minimal: input.isSubagent,
-        }),
-        ...runtimePrompts,
-      ]).join("\n\n");
+    ): Promise<EnvironmentInfo> {
+      return options.environmentDetector
+        ? options.environmentDetector(input.directory, input)
+        : detectEnvironment(input.directory);
     },
   };
 }

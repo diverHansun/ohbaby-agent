@@ -1,3 +1,5 @@
+import { createReminderCollector } from "../../services/reminder/index.js";
+import { createEnvironmentReminderProvider } from "../../services/reminder/environment.js";
 import { describe, expect, it, vi } from "vitest";
 import type {
   InterfaceProviderRequest,
@@ -499,12 +501,18 @@ describe("AgentInstance long task integration", () => {
           }),
       },
       messageManager,
+      collectReminders: createReminderCollector([
+        createEnvironmentReminderProvider(),
+      ]),
       systemPromptProvider: {
         build: () => Promise.resolve("Subagent long task integration."),
-        buildRuntimeContext: (input) =>
-          Promise.resolve(
-            `<environment_context>${input.contextScopeId ?? "primary"}:${input.directory}</environment_context>`,
-          ),
+        detectEnvironment: (input) =>
+          Promise.resolve({
+            cwd: input.directory,
+            platform: "linux",
+            date: "2026-10-19",
+            isGitRepo: true,
+          }),
       },
       tokenCounter: createSmallBudgetTokenCounter(),
     });
@@ -575,12 +583,11 @@ describe("AgentInstance long task integration", () => {
     expect(
       requests.every((request) => request.contextScopeId === "subagent_ac6"),
     ).toBe(true);
-    const runtimeMarker = "<environment_context>subagent_ac6:";
+    const runtimeMarker = "Current working directory:";
     expect(JSON.stringify(requests[0])).toContain(runtimeMarker);
     expect(
       requests.every(
-        (request) =>
-          JSON.stringify(request).split("<environment_context>").length <= 2,
+        (request) => JSON.stringify(request).split(runtimeMarker).length <= 2,
       ),
     ).toBe(true);
     expect(toolScheduler.executedCallIds).toHaveLength(51);
@@ -606,6 +613,6 @@ describe("AgentInstance long task integration", () => {
             part.type === "text" &&
             part.metadata?.kind === "model-context:runtime:v1",
         ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 });

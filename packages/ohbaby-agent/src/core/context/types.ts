@@ -7,6 +7,7 @@ import type { ModelOrigin } from "../../services/interface-providers/native-stat
 import type { BusInstance } from "../../bus/index.js";
 import type { ModelMessage, ModelToolDefinition } from "../llm-client/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
+import type { EnvironmentInfo } from "../system-prompt/types.js";
 import type { ReminderCollector } from "../../services/reminder/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
 import type { CompactionThresholds } from "./constants.js";
@@ -25,7 +26,9 @@ export interface SystemPromptProviderInput {
 
 export interface SystemPromptProvider {
   build(input: SystemPromptProviderInput): Promise<string>;
-  buildRuntimeContext?(input: SystemPromptProviderInput): Promise<string>;
+  detectEnvironment?(
+    input: SystemPromptProviderInput,
+  ): Promise<EnvironmentInfo>;
 }
 
 export interface TokenCounter {
@@ -97,10 +100,11 @@ export interface ContextAssemblyOptions {
 
 export interface AgentRunPromptSnapshot {
   readonly systemPrompt: string;
+  readonly environment?: EnvironmentInfo;
 }
 
 export interface CreateRunPromptSnapshotInput extends SystemPromptProviderInput {
-  /** Attach dynamic model-only context only for a newly initiated run. */
+  /** The initiating input, when this run starts from a new user message. */
   readonly initiatingUserMessageId?: string;
 }
 

@@ -92,6 +92,18 @@ describe("environment layer", () => {
     expect(isGitRepo).toHaveBeenCalledWith(tempDir);
   });
 
+  it("does not report a non-repository when the git probe fails to read the directory", async () => {
+    const denied = Object.assign(new Error("permission denied"), {
+      code: "EACCES",
+    });
+    const access = vi.spyOn(fs, "access").mockRejectedValueOnce(denied);
+    try {
+      await expect(detectEnvironment(tempDir)).rejects.toBe(denied);
+    } finally {
+      access.mockRestore();
+    }
+  });
+
   it("detects git repositories by walking upward from the working directory", async () => {
     const nested = path.join(tempDir, "repo", "src", "feature");
     await fs.mkdir(path.join(tempDir, "repo", ".git"), { recursive: true });
