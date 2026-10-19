@@ -367,7 +367,7 @@ describe("lifecycle tool scheduler integration", () => {
         environment: expect.objectContaining({
           workdir: "D:/workspace/session_1",
         }),
-        messageId: "message_1",
+        messageId: prepareTurn.mock.calls[0]?.[0]?.reminderAnchorId,
         sessionId: "session_1",
       }),
     );

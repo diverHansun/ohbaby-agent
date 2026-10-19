@@ -18,6 +18,17 @@ import type {
   InterfaceProviderStreamEvent,
 } from "../services/interface-providers/index.js";
 
+function latestInput(request: InterfaceProviderRequest | undefined): unknown {
+  return request?.messages.findLast(
+    (message) =>
+      message.role === "user" &&
+      (typeof message.content === "string" ||
+        !message.content.some(
+          (part) => "source" in part && part.source === "system-reminder",
+        )),
+  );
+}
+
 function deferred<T = void>(): {
   promise: Promise<T>;
   resolve: (value: T) => void;
@@ -557,7 +568,7 @@ it.each(["pause", "cancel", "replace"])(
         await vi.waitFor(async () => {
           expect((await persistence.list("one")).at(-1)?.type).toBe("clear");
         });
-        expect(JSON.stringify(requests[1]?.messages.at(-1))).toContain(
+        expect(JSON.stringify(latestInput(requests[1]))).toContain(
           "new objective",
         );
         expect(
@@ -841,7 +852,7 @@ it.each([
       expect(JSON.stringify(requests[1]?.messages)).toContain(
         "no longer has permission",
       );
-      expect(JSON.stringify(requests[2]?.messages.at(-1))).toContain(
+      expect(JSON.stringify(latestInput(requests[2]))).toContain(
         "new objective",
       );
       expect(
@@ -1701,7 +1712,7 @@ it.each(["goal", "user"] as const)(
       await creating;
       await providerStarted.promise;
       expect(requests).toHaveLength(1);
-      const firstText = JSON.stringify(requests[0]?.messages.at(-1));
+      const firstText = JSON.stringify(latestInput(requests[0]));
       expect(firstText).toContain(
         first === "goal"
           ? "goal wins owner admission"
@@ -1870,7 +1881,7 @@ it.each(["replace", "pause", "cancel"] as const)(
         await vi.waitFor(async () => {
           expect((await persistence.list("one")).at(-1)?.type).toBe("clear");
         });
-        expect(JSON.stringify(requests[0]?.messages.at(-1))).toContain(
+        expect(JSON.stringify(latestInput(requests[0]))).toContain(
           "new preparation objective",
         );
         expect(requests).toHaveLength(2);
@@ -1881,7 +1892,7 @@ it.each(["replace", "pause", "cancel"] as const)(
         );
         await client.waitForPrompt(user.promptId);
         expect(requests).toHaveLength(1);
-        expect(JSON.stringify(requests[0]?.messages.at(-1))).toContain(
+        expect(JSON.stringify(latestInput(requests[0]))).toContain(
           "successor user after preparation stop",
         );
         expect(requests[0]?.signal?.aborted).toBe(false);
@@ -1959,7 +1970,7 @@ it.each(["claim", "running"] as const)(
         expect((await persistence.list("one")).at(-1)?.type).toBe("clear");
       });
       expect(requests).toHaveLength(2);
-      expect(JSON.stringify(requests[0]?.messages.at(-1))).toContain(
+      expect(JSON.stringify(latestInput(requests[0]))).toContain(
         "new ledger preparation objective",
       );
       const oldRun = await ledger.get("preparing-old");

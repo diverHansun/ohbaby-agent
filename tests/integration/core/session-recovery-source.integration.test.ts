@@ -1,3 +1,5 @@
+import * as cryptoModule from "node:crypto";
+import * as contextModule from "../../../packages/ohbaby-agent/src/core/context/index.js";
 import { describe, expect, it, vi } from "vitest";
 import { applySessionChange, type UiSessionChangedEvent } from "ohbaby-sdk";
 import { createBus } from "../../../packages/ohbaby-agent/src/bus/index.js";
@@ -7,6 +9,11 @@ import {
 } from "../../../packages/ohbaby-agent/src/core/message/index.js";
 import { createInProcessUiBackendClient } from "../../../packages/ohbaby-agent/src/adapters/ui-inprocess.js";
 import type { LLMClientInstance } from "../../../packages/ohbaby-agent/src/core/llm-client/index.js";
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return { ...actual, randomUUID: vi.fn(actual.randomUUID) };
+});
+
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((r) => {
@@ -203,17 +210,42 @@ it("isolates pending display reasoning between independent runtimes even with co
     b = runtime("B");
   const scope = { sessionId: "same-session" };
   try {
-    const [receiptA, receiptB] = await Promise.all([
-      a.backend.submitPromptAccepted("continue A", {
+    // Force the preallocated assistant ID to collide, then restore real UUIDs
+    // at Context preparation so reminder, request, and reasoning IDs stay real.
+    const collidingAssistantId = "00000000-0000-4000-8000-000000000001";
+    const randomUUID = cryptoModule.randomUUID;
+    const ids = vi.spyOn(cryptoModule, "randomUUID");
+    const createContext = contextModule.createContextManager;
+    const contexts = vi
+      .spyOn(contextModule, "createContextManager")
+      .mockImplementation((options) => {
+        const context = createContext(options);
+        const prepare = context.prepareTurn.bind(context);
+        vi.spyOn(context, "prepareTurn").mockImplementation((input) => {
+          expect(input.reminderAnchorId).toBe(collidingAssistantId);
+          ids.mockImplementation(randomUUID);
+          return prepare(input);
+        });
+        return context;
+      });
+    let receiptA, receiptB;
+    try {
+      ids.mockReturnValue(collidingAssistantId);
+      receiptA = await a.backend.submitPromptAccepted("continue A", {
         ...scope,
         clientRequestId: "request-A",
-      }),
-      b.backend.submitPromptAccepted("continue B", {
+      });
+      await a.emitted.promise;
+      ids.mockReturnValue(collidingAssistantId);
+      receiptB = await b.backend.submitPromptAccepted("continue B", {
         ...scope,
         clientRequestId: "request-B",
-      }),
-    ]);
-    await Promise.all([a.emitted.promise, b.emitted.promise]);
+      });
+      await b.emitted.promise;
+    } finally {
+      ids.mockRestore();
+      contexts.mockRestore();
+    }
     const [viewA, viewB] = await Promise.all([
       a.backend.getSessionView(scope),
       b.backend.getSessionView(scope),

@@ -12,6 +12,8 @@ import {
 import {
   getMessageOrigin,
   isModelContextPart,
+  isSystemReminderMessage,
+  getReminderAnchorId,
 } from "../core/message/origin.js";
 import { InMemoryGoalPersistence } from "../goals/index.js";
 import { McpManager } from "../mcp/index.js";
@@ -31,7 +33,12 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 
 function latestUserText(request: InterfaceProviderRequest): string {
   const content = request.messages.findLast(
-    (message) => message.role === "user",
+    (message) =>
+      message.role === "user" &&
+      (typeof message.content === "string" ||
+        !message.content.some(
+          (part) => "source" in part && part.source === "system-reminder",
+        )),
   )?.content;
   return typeof content === "string" ? content : JSON.stringify(content);
 }
@@ -225,9 +232,26 @@ it("U2/U13 preserves goal text, display and runtime context across automatic and
       expect(latest).toContain(`<untrusted_objective>\n${objective}`);
       expect(latest).toContain(`Progress: ${String(index + 1)} continuation`);
       expect(latest).not.toContain("prior goal was replaced");
-      expect(latest).toContain("<environment_context>");
-      expect(latest).toContain("<mcp_tool_catalog>");
-      expect(latest).toContain(mcpToolName);
+      const reminderParts = request.messages.flatMap((message) =>
+        typeof message.content !== "string" &&
+        message.content !== null &&
+        message.content !== undefined
+          ? message.content.flatMap((part) =>
+              part.type === "text" && part.source === "system-reminder"
+                ? [part]
+                : [],
+            )
+          : [],
+      );
+      expect(
+        reminderParts.some((part) =>
+          part.text.includes("Current working directory:"),
+        ),
+      ).toBe(true);
+      expect(
+        reminderParts.some((part) => part.text.includes(mcpToolName)),
+      ).toBe(true);
+      expect(latest).not.toContain("<system-reminder>");
     }
     expect(JSON.stringify(goalRequests[2]?.messages)).toContain(wrongSummary);
     const systemMessages = (request: InterfaceProviderRequest): unknown =>
@@ -240,6 +264,20 @@ it("U2/U13 preserves goal text, display and runtime context across automatic and
     expect(latestUserText(agentRequests[4])).not.toContain(objective);
 
     const history = await messages.listBySession(sessionId);
+    const reminders = history.filter(isSystemReminderMessage);
+    expect(reminders.length).toBeGreaterThan(0);
+    for (const reminder of reminders) {
+      const owner = history.find(
+        (message) => message.info.id === getReminderAnchorId(reminder),
+      );
+      expect(owner?.info.role).toBe("assistant");
+      expect(owner?.info.runId).toBe(reminder.info.runId);
+      expect(
+        reminder.parts.every(
+          (part) => part.type === "text" && part.synthetic === true,
+        ),
+      ).toBe(true);
+    }
     const goalMessages = history.filter((message) =>
       message.parts.some(
         (part) =>
@@ -276,7 +314,7 @@ it("U2/U13 preserves goal text, display and runtime context across automatic and
           : `Goal auto-continue (turn ${String(index + 1)})`;
       expect(body).toMatchObject({ metadata: { displayText: display } });
       expect(body?.metadata?.kind).toBeUndefined();
-      expect(message.parts.filter(isModelContextPart)).toHaveLength(1);
+      expect(message.parts.filter(isModelContextPart)).toHaveLength(0);
       const liveText = events.flatMap((event) =>
         event.type === "message.appended" &&
         event.message.id === message.info.id

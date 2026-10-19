@@ -561,10 +561,15 @@ function persistentContentToText(content: unknown): string {
 function lastPersistentRequestMessageText(
   request: InterfaceProviderRequest,
 ): string {
-  return persistentContentToText(request.messages.at(-1)?.content).split(
-    "\n\n<environment_context>",
-    1,
-  )[0];
+  return persistentContentToText(
+    request.messages.findLast(
+      (message) =>
+        typeof message.content === "string" ||
+        !message.content?.some(
+          (part) => "source" in part && part.source === "system-reminder",
+        ),
+    )?.content,
+  ).split("\n\n<environment_context>", 1)[0];
 }
 
 function allPersistentRequestMessageText(
@@ -1357,8 +1362,45 @@ describe("createPersistentUiBackendClient", () => {
         )
         .get(sessionId ?? "");
       expect(sessionStats).toMatchObject({
-        message_count: 2,
+        // Session stats count durable core messages, including hidden reminders.
+        message_count: 3,
       });
+      const storedMessages = getDatabase()
+        .prepare<{ id: string; role: string }>(
+          `SELECT id, role FROM ${schema.message.tableName} WHERE session_id = ? ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(sessionId ?? "");
+      expect(sessionStats?.message_count).toBe(storedMessages.length);
+      expect(storedMessages.map((message) => message.role)).toEqual([
+        "user",
+        "user",
+        "assistant",
+      ]);
+      const reminderParts = getDatabase()
+        .prepare<{ data: string }>(
+          `SELECT data FROM ${schema.part.tableName} WHERE message_id = ? ORDER BY order_index ASC`,
+        )
+        .all(storedMessages[1].id)
+        .map((row) => JSON.parse(row.data) as unknown);
+      expect(reminderParts).toMatchObject([
+        {
+          synthetic: true,
+          metadata: {
+            kind: "system-reminder:v1",
+            reminderType: "environment",
+            anchorAssistantId: storedMessages[2].id,
+          },
+        },
+        {
+          synthetic: true,
+          metadata: {
+            kind: "system-reminder:v1",
+            reminderType: "mode",
+            key: "auto",
+            anchorAssistantId: storedMessages[2].id,
+          },
+        },
+      ]);
       expect(sessionStats?.last_message_at).toEqual(expect.any(Number));
 
       const restored = createPersistentUiBackendClient({
@@ -1427,8 +1469,34 @@ describe("createPersistentUiBackendClient", () => {
       await client.submitPromptAndWait("Continue this history", { sessionId });
       expect(requests).toHaveLength(1);
       const userMessages = requests[0]?.messages.filter(
-        (message) => message.role === "user",
+        (message) =>
+          message.role === "user" &&
+          (typeof message.content === "string" ||
+            !message.content.some(
+              (part) => "source" in part && part.source === "system-reminder",
+            )),
       );
+      expect(requests[0]?.messages.map((message) => message.role)).toEqual([
+        "system",
+        "user",
+        "user",
+        "assistant",
+        "user",
+      ]);
+      expect(requests[0]?.messages[2]).toMatchObject({
+        content: [
+          expect.objectContaining({
+            source: "system-reminder",
+            text: expect.stringContaining(
+              "Current working directory:",
+            ) as string,
+          }),
+          expect.objectContaining({
+            source: "system-reminder",
+            text: expect.stringContaining("Current mode: auto;") as string,
+          }),
+        ],
+      });
       expect(userMessages).toHaveLength(2);
       expect(userMessages[0].content).toContain("Remember this history");
       expect(userMessages[1].content).toContain("Continue this history");
@@ -2041,6 +2109,7 @@ describe("createPersistentUiBackendClient", () => {
         .all(childId);
       expect(childMessages.map((message) => message.role)).toEqual([
         "user",
+        "user",
         "assistant",
       ]);
       const childParts = getDatabase()
@@ -2051,6 +2120,32 @@ describe("createPersistentUiBackendClient", () => {
            ORDER BY created_at ASC, order_index ASC`,
         )
         .all(childId);
+      const childReminderParts = childParts
+        .map(
+          (row) =>
+            JSON.parse(row.data) as {
+              synthetic?: boolean;
+              metadata?: {
+                kind?: string;
+                reminderType?: string;
+                anchorAssistantId?: string;
+              };
+            },
+        )
+        .filter((part) => part.metadata?.kind === "system-reminder:v1");
+      const childAssistant = JSON.parse(childMessages[2].data) as {
+        id: string;
+      };
+      expect(childReminderParts).toMatchObject([
+        {
+          synthetic: true,
+          metadata: {
+            reminderType: "environment",
+            anchorAssistantId: childAssistant.id,
+          },
+        },
+      ]);
+      expect(childReminderParts).toHaveLength(1);
       const childTranscript = JSON.stringify(childParts);
       expect(childTranscript).toContain("Inspect persistent child files");
       expect(childTranscript).toContain("child transcript persisted");

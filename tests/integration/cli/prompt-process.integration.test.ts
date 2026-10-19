@@ -417,12 +417,28 @@ describe("CLI prompt process smoke", () => {
       });
       expect(mainRequest.body).not.toHaveProperty("temperature");
       const messages = mainRequest.body.messages;
-      expect(Array.isArray(messages) ? messages.at(-1) : null).toMatchObject({
-        content: expect.stringMatching(
-          /^hello\n\n<environment_context>[\s\S]*<\/environment_context>$/u,
-        ) as string,
-        role: "user",
-      });
+      expect(messages).toEqual([
+        expect.objectContaining({ role: "system" }),
+        { role: "user", content: "hello" },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: expect.stringMatching(
+                /^<system-reminder>\nCurrent working directory:[\s\S]*\n<\/system-reminder>$/u,
+              ),
+            },
+            {
+              type: "text",
+              text: "<system-reminder>\nCurrent mode: auto; prior plan-mode constraints have ended.\n</system-reminder>",
+            },
+          ],
+        },
+      ]);
+      expect(JSON.stringify(messages)).not.toContain(
+        '"source":"system-reminder"',
+      );
 
       // Title generation uses a small request-level output cap and does not
       // inherit the stale temperature stored in model.json.

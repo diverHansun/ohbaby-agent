@@ -25,13 +25,16 @@ import {
   createInMemoryMessageStore,
   createDatabaseMessageStore,
   createMessageManager,
-  isModelContextPart,
 } from "../core/message/index.js";
 import type {
   MessageIdGenerator,
   MessageManager,
   MessageStore,
 } from "../core/message/index.js";
+import {
+  isSystemReminderMessage,
+  getReminderAnchorId,
+} from "../core/message/origin.js";
 import { closeDatabase, initDatabase } from "../services/database/index.js";
 import {
   createDatabaseSessionStore,
@@ -550,7 +553,14 @@ function contentToText(content: unknown): string {
 }
 
 function lastRequestMessageText(request: InterfaceProviderRequest): string {
-  const message = request.messages.at(-1);
+  // Reminders are user-role host inputs appended after the actual input.
+  const message = request.messages.findLast(
+    (candidate) =>
+      typeof candidate.content === "string" ||
+      !candidate.content?.some(
+        (part) => "source" in part && part.source === "system-reminder",
+      ),
+  );
   return contentToText(message?.content);
 }
 
@@ -2319,7 +2329,8 @@ describe("createInProcessUiBackendClient", () => {
       const persistedParts = persistedMessages.flatMap(
         (message) => message.parts,
       );
-      expect(persistedParts.some(isModelContextPart)).toBe(true);
+      expect(persistedMessages.filter(isSystemReminderMessage)).toHaveLength(1);
+      expect(getReminderAnchorId(persistedMessages[1])).toBe(assistant?.id);
       expect(persistedParts.some((part) => part.type === "reasoning")).toBe(
         true,
       );
@@ -3148,7 +3159,27 @@ describe("createInProcessUiBackendClient", () => {
       expect(requests[0]?.messages.map((message) => message.role)).toEqual([
         "system",
         "user",
+        "user",
       ]);
+      expect(requests[0]?.messages[1]).toEqual({
+        role: "user",
+        content: "Use the prompt stack",
+      });
+      expect(requests[0]?.messages[2]).toMatchObject({
+        role: "user",
+        content: [
+          expect.objectContaining({
+            source: "system-reminder",
+            text: expect.stringContaining(
+              "Current working directory:",
+            ) as string,
+          }),
+          expect.objectContaining({
+            source: "system-reminder",
+            text: expect.stringContaining("Current mode: auto;") as string,
+          }),
+        ],
+      });
 
       const snapshot = await client.getSnapshot();
       expect(
@@ -3159,7 +3190,7 @@ describe("createInProcessUiBackendClient", () => {
     }
   });
 
-  it("passes TUI permission mode into the next model system prompt", async () => {
+  it("passes TUI permission mode in a reminder after the fixed system prompt", async () => {
     const requests: InterfaceProviderRequest[] = [];
     const directory = await mkdtemp(join(tmpdir(), "ohbaby-ui-mode-prompt-"));
     try {
@@ -3186,9 +3217,25 @@ describe("createInProcessUiBackendClient", () => {
         typeof requests[0]?.messages[0]?.content === "string"
           ? requests[0].messages[0].content
           : "";
-      expect(systemContent).toContain("Task: plan");
+      expect(systemContent).toContain("Task: agent");
+      expect(lastRequestMessageText(requests[0])).toBe("Plan this task");
+      expect(requests[0].messages.at(-1)).toMatchObject({
+        role: "user",
+        content: [
+          expect.objectContaining({
+            source: "system-reminder",
+            text: expect.stringContaining(
+              "Current working directory:",
+            ) as string,
+          }),
+          expect.objectContaining({
+            source: "system-reminder",
+            text: expect.stringContaining("Current mode: plan.") as string,
+          }),
+        ],
+      });
       expect(systemContent).toContain(
-        "Prefer analysis and read-only exploration unless the user explicitly asks to execute changes.",
+        "In plan mode, analyze the request and produce an executable plan.",
       );
     } finally {
       await rm(directory, { force: true, recursive: true });
@@ -6095,11 +6142,12 @@ describe("createInProcessUiBackendClient", () => {
   });
 
   it("persists prompt and assistant response through core message manager", async () => {
+    let messageTime = 1_700_000_000_000;
     const messageManager = createMessageManager({
       bus: createBus(),
       store: createInMemoryMessageStore(),
       idGenerator: createDeterministicMessageIds(),
-      now: () => 1_700_000_000_000,
+      now: () => ++messageTime,
     });
     const client = createInProcessUiBackendClient({
       messageManager,
@@ -6111,29 +6159,44 @@ describe("createInProcessUiBackendClient", () => {
     await client.submitPromptAndWait("Use core message");
 
     const persisted = await messageManager.listBySession("session_1");
-    expect(persisted).toMatchObject([
+    expect(persisted).toHaveLength(3);
+    const [user, reminder, assistant] = persisted;
+    expect(user).toMatchObject({
+      info: { id: "message_1", role: "user" },
+      parts: [{ id: "part_1", type: "text", text: "Use core message" }],
+    });
+    expect(user.parts).toHaveLength(1);
+    expect(isSystemReminderMessage(reminder)).toBe(true);
+    expect(reminder.parts).toMatchObject([
       {
-        info: { id: "message_1", role: "user" },
-        parts: [
-          { id: "part_1", type: "text", text: "Use core message" },
-          {
-            id: "part_2",
-            metadata: { kind: "model-context:runtime:v1" },
-            synthetic: true,
-            type: "text",
-          },
-        ],
+        id: "part_2",
+        synthetic: true,
+        metadata: {
+          kind: "system-reminder:v1",
+          reminderType: "environment",
+          anchorAssistantId: assistant.info.id,
+        },
       },
       {
-        info: {
-          id: "message_2",
-          role: "assistant",
-          parentId: "message_1",
-          finish: "stop",
+        id: "part_3",
+        synthetic: true,
+        metadata: {
+          kind: "system-reminder:v1",
+          reminderType: "mode",
+          key: "auto",
+          anchorAssistantId: assistant.info.id,
         },
-        parts: [{ id: "part_3", type: "text", text: "Core" }],
       },
     ]);
+    expect(assistant).toMatchObject({
+      info: { role: "assistant", parentId: user.info.id, finish: "stop" },
+      parts: [{ id: "part_4", type: "text", text: "Core" }],
+    });
+    expect(
+      (await client.getSnapshot()).sessions[0].messages.map(
+        (message) => message.id,
+      ),
+    ).toEqual([user.info.id, assistant.info.id]);
   });
 
   it.each([false, true])(
@@ -8207,7 +8270,21 @@ describe("createInProcessUiBackendClient", () => {
       expect(promptText.startsWith(`Discuss the ${label} goal`)).toBe(true);
       expect(promptText).not.toContain(`${label} goal objective`);
       expect(promptText).not.toContain("/goal resume");
-      expect(promptText).toContain("<environment_context>");
+      expect(requests[0].messages.at(-1)).toMatchObject({
+        role: "user",
+        content: [
+          expect.objectContaining({
+            source: "system-reminder",
+            text: expect.stringContaining(
+              "Current working directory:",
+            ) as string,
+          }),
+          expect.objectContaining({
+            source: "system-reminder",
+            text: expect.stringContaining("Current mode: auto;") as string,
+          }),
+        ],
+      });
 
       const snapshot = await client.getSnapshot();
       const userTexts = snapshot.sessions.flatMap((session) =>
