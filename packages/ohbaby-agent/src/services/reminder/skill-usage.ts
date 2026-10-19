@@ -1,4 +1,5 @@
 import type { MessageWithParts, ToolPart } from "../../core/message/index.js";
+import { escapeReminderValue } from "../../core/message/origin.js";
 import { isActivePart } from "../../core/context/filters.js";
 import { serializeHistoryMessages } from "../../core/context/serializer.js";
 import { slashSkillName } from "../../skill/usage.js";
@@ -128,14 +129,14 @@ export function createSkillUsageReminderProvider(
           const info = await sources.getSkill(name);
           const entries: string[] = [];
           if (info !== undefined && !info.disableModelInvocation && canInvoke)
-            entries.push(`skill(name=${JSON.stringify(name)})`);
+            entries.push(
+              `skill(name=${escapeReminderValue(JSON.stringify(name))})`,
+            );
           // User commands target the primary scope. A child cannot reread its body
           // through a user's primary slash command. Do not invent exact /name paths.
           if (info?.userInvocable && !context.isSubagent)
-            entries.push(
-              "ask the user to select its current available entry from /skills",
-            );
-          return `- ${name}: ${entries.length > 0 ? entries.join("; ") : "no currently available reread entry"}`;
+            entries.push("user can reload it with /skills");
+          return `- ${escapeReminderValue(name)}: ${entries.length > 0 ? entries.join("; ") : "no currently available reread entry"}`;
         }),
       );
       return {

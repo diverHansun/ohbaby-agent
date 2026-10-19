@@ -5,6 +5,7 @@ export { createMessageManager } from "./manager.js";
 export { createDatabaseMessageStore } from "./database-store.js";
 export { createInMemoryMessageStore } from "./store.js";
 export {
+  escapeReminderValue,
   getMessageOrigin,
   getReminderAnchorId,
   isContextSummaryPart,
@@ -12,6 +13,7 @@ export {
   isSystemReminderMessage,
   isSystemReminderPart,
   MODEL_CONTEXT_RUNTIME_KIND,
+  renderReminderText,
   SYSTEM_REMINDER_KIND,
 } from "./origin.js";
 export { toModelMessages } from "./converter.js";

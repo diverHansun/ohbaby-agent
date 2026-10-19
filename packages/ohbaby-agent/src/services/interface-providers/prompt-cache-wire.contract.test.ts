@@ -6,7 +6,7 @@ import type { ChatCompletionChunk } from "openai/resources/chat/completions/comp
 import { describe, expect, it, vi } from "vitest";
 import { resolvePromptCacheRequest } from "../../core/llm-client/prompt-cache.js";
 import type { PromptCachePolicy } from "../../config/index.js";
-import { renderReminderText } from "../reminder/index.js";
+import { renderReminderText } from "../../core/message/origin.js";
 import { PRIMARY_BASE_PROMPT } from "../../core/system-prompt/prompts/primary/base.js";
 import { computeBudgetReport } from "../../goals/budget.js";
 import { renderGoalTurnPrompt } from "../../goals/injection.js";

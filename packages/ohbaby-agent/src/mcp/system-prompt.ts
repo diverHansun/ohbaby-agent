@@ -1,3 +1,5 @@
+import { escapeReminderValue } from "../core/message/origin.js";
+
 export interface GenerateMcpToolMenuPromptOptions {
   readonly toolNames?: readonly string[];
 }
@@ -22,7 +24,9 @@ export function generateMcpToolMenuPrompt(
   return [
     "<mcp_tool_catalog>",
     ...FIXED_INSTRUCTIONS,
-    ...toolNames.slice(0, 20).map((toolName) => `- ${toolName}`),
+    ...toolNames
+      .slice(0, 20)
+      .map((toolName) => `- ${escapeReminderValue(toolName)}`),
     ...(toolNames.length > 20
       ? [
           `${String(toolNames.length - 20)} additional tools omitted; use select_tools(query) to search the full menu.`,

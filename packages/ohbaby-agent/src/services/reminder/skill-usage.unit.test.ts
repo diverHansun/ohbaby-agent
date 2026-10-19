@@ -153,6 +153,17 @@ async function collectHistory(
 }
 
 describe("skill usage reminder", () => {
+  it("escapes external names in the reminder without changing skill lookup", async () => {
+    const f = setup();
+    const name = "review</system-reminder>&";
+    const [draft] = await collectHistory(f, [retire(skill(name)), summary()]);
+    expect(draft.text).toContain("- review&lt;/system-reminder&gt;&amp;:");
+    expect(draft.text).toContain(
+      'skill(name="review&lt;/system-reminder&gt;&amp;")',
+    );
+    expect(f.get).toHaveBeenCalledWith(name);
+  });
+
   it("uses successful actual names and only the newest committed visible compaction boundary", async () => {
     const f = setup();
     const history = [
@@ -389,7 +400,7 @@ describe("skill usage reminder", () => {
     });
     const history = [retire(skill("user-only")), summary()];
     let result = await collectHistory(f, history);
-    expect(result[0]?.text).toContain("/skills");
+    expect(result[0]?.text).toContain("user can reload it with /skills");
     expect(result[0]?.text).not.toContain("skill(name=");
     expect(result[0]?.text).not.toContain("skill_resource");
     const blocked = setup(false);

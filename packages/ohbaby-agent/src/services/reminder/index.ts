@@ -28,6 +28,7 @@ export interface ReminderContext {
 
 export interface ReminderBody {
   readonly key: string;
+  /** Host-formatted body; external values must already be escaped. */
   readonly text: string;
 }
 
@@ -135,14 +136,4 @@ export function createReminderCollector(
         : [{ type: provider.type, key: body.key, text: body.text }];
     });
   };
-}
-
-/** External text cannot terminate the host wrapper or introduce other tags. */
-export function renderReminderText(text: string): string {
-  const escaped = text
-    .trim()
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return `<system-reminder>\n${escaped}\n</system-reminder>`;
 }

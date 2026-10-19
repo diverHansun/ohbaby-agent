@@ -1847,6 +1847,8 @@ describe("createUiRuntimeComposition skill tools", () => {
     const initialToolNames = requests[0]?.tools?.map((tool) => tool.name) ?? [];
     const initialRequestJson = JSON.stringify(requests[0]);
     expect(initialRuntime).toContain(`- ${toolName}`);
+    expect(initialRuntime).toContain("<mcp_tool_catalog>");
+    expect(initialRuntime).not.toContain("&lt;mcp_tool_catalog&gt;");
     expect(initialRuntime).toContain("search available MCP tools by query");
     expect(initialRuntime).not.toContain("A detailed MCP description");
     expect(initialToolNames).toContain("select_tools");
@@ -1890,7 +1892,11 @@ describe("createUiRuntimeComposition skill tools", () => {
       .filter((message) => message.role === "user")
       .at(-1)?.content;
     const selectedRuntime =
-      typeof selectedContent === "string" ? selectedContent : "";
+      typeof selectedContent === "string"
+        ? selectedContent
+        : (selectedContent ?? [])
+            .flatMap((block) => (block.type === "text" ? [block.text] : []))
+            .join("\n");
     expect(selectedRuntime).not.toContain("<mcp_tool_catalog>");
     expect(JSON.stringify(requests[0])).toBe(initialRequestJson);
     expect(selectedTool?.description).toBe(

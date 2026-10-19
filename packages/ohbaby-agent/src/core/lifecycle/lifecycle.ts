@@ -1,4 +1,4 @@
-import { renderReminderText } from "../../services/reminder/index.js";
+import { renderReminderText } from "../message/origin.js";
 import { isRuntimeInputSnapshotChanged } from "./runtime-input-error.js";
 import type { AgentStepRequestRecord } from "../llm-client/types.js";
 import { ModelObservationError } from "../llm-client/request-observation.js";

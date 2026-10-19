@@ -2957,17 +2957,97 @@ describe("anchored reminder requests", () => {
     expect(await messageManager.listBySession("session_1")).toEqual(before);
   });
 
-  it("rejects a save failure instead of returning a sendable request", async () => {
+  it("preserves complete post-compaction reminders for the lifecycle budget check", async () => {
+    const messageManager = createMessageManagerFixture();
+    for (let index = 0; index < 8; index += 1) {
+      await addTextMessage(messageManager, {
+        role: "assistant",
+        sessionId: "session_1",
+        text: `${String(index)}: ${"history ".repeat(750)}`,
+      });
+    }
+    const restoredText = "restored catalog ".repeat(8_000);
+    const { manager, measurements } = createManager({
+      messageManager,
+      collectReminders: (context) =>
+        Promise.resolve([
+          { type: "mode", key: "plan", text: "Current mode: plan." },
+          ...(context.history.some((message) =>
+            message.parts.some(isContextSummaryPart),
+          )
+            ? [
+                {
+                  type: "mcp-catalog" as const,
+                  key: "catalog",
+                  text: restoredText,
+                },
+              ]
+            : []),
+        ]),
+    });
+    const stepLimit = {
+      role: "user" as const,
+      content:
+        "<system-reminder>Maximum lifecycle steps reached.</system-reminder>",
+    };
+    const prepared = await manager.prepareTurn({
+      ...input,
+      force: true,
+      tailDirectives: [stepLimit],
+    });
+
+    expect(prepared.compaction?.status).toBe("compacted");
+    expect(prepared.usage.currentTokens).toBeGreaterThan(
+      prepared.usage.contextLimit,
+    );
+    expect(prepared.request.messages.at(-1)).toEqual(stepLimit);
+    expect(prepared.request.messages.at(-2)).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          source: "system-reminder",
+          text: "<system-reminder>\nCurrent mode: plan.\n</system-reminder>",
+        },
+        {
+          type: "text",
+          source: "system-reminder",
+          text: `<system-reminder>\n${restoredText.trim()}\n</system-reminder>`,
+        },
+      ],
+    });
+    expect(measurements.at(-1)).toEqual(prepared.request);
+    const saved = (await messageManager.listBySession("session_1")).filter(
+      isSystemReminderMessage,
+    );
+    expect(saved).toHaveLength(1);
+    expect(
+      saved[0].parts.map((part) => part.type === "text" && part.text),
+    ).toEqual([
+      "<system-reminder>\nCurrent mode: plan.\n</system-reminder>",
+      `<system-reminder>\n${restoredText.trim()}\n</system-reminder>`,
+    ]);
+  });
+
+  it("hides a partial save failure instead of returning or replaying an incomplete reminder", async () => {
     const messageManager = createMessageManagerFixture();
     const { manager } = createManager({ messageManager, collectReminders });
-    vi.spyOn(messageManager, "appendPart").mockRejectedValueOnce(
-      new Error("disk full"),
-    );
+    const appendPart = messageManager.appendPart.bind(messageManager);
+    vi.spyOn(messageManager, "appendPart")
+      .mockImplementationOnce(appendPart)
+      .mockRejectedValueOnce(new Error("disk full"));
     await expect(manager.prepareTurn(input)).rejects.toThrow("disk full");
+    const partial = (await messageManager.listBySession("session_1")).filter(
+      isSystemReminderMessage,
+    );
+    expect(partial).toHaveLength(1);
+    expect(partial[0].parts).toHaveLength(1);
     const recovered = await manager.prepareTurn({
       ...input,
       reminderAnchorId: "retry",
     });
-    expect(JSON.stringify(recovered.request.messages)).toContain("ENV");
+    const replay = JSON.stringify(recovered.request.messages);
+    expect(replay.match(/ENV/g)).toHaveLength(1);
+    expect(replay.match(/MODE/g)).toHaveLength(1);
   });
 });

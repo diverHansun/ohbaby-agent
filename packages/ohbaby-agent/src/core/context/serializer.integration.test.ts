@@ -13,6 +13,7 @@ import {
 import {
   createDatabaseMessageStore,
   createMessageManager,
+  escapeReminderValue,
   isModelContextPart,
   type MessageIdGenerator,
 } from "../message/index.js";
@@ -991,7 +992,7 @@ it("replays persisted reminder blocks byte-for-byte across SQLite reopen and hid
       audience: "both",
       collect: (): { key: string; text: string } => ({
         key: "a",
-        text: "ENV <outside> & data",
+        text: `ENV ${escapeReminderValue("<outside> & data")}`,
       }),
     },
     {

@@ -1,5 +1,9 @@
 import type { MessageWithParts } from "../../core/message/index.js";
-import { isSystemReminderMessage } from "../../core/message/origin.js";
+import {
+  escapeReminderValue,
+  isSystemReminderMessage,
+  renderReminderText,
+} from "../../core/message/origin.js";
 import { isActivePart } from "../../core/context/filters.js";
 import { isSummaryMessage } from "../../core/context/summary.js";
 import {
@@ -8,11 +12,7 @@ import {
   type TodoWorkScopeId,
   type TodoWorkScopeRegistry,
 } from "../../tools/todo.js";
-import {
-  renderReminderText,
-  type ReminderBody,
-  type ReminderProvider,
-} from "./index.js";
+import type { ReminderBody, ReminderProvider } from "./index.js";
 
 function reminderText(todos: readonly TodoItem[]): string {
   const unfinished = todos.filter((todo) => todo.status !== "completed");
@@ -22,7 +22,9 @@ function reminderText(todos: readonly TodoItem[]): string {
   ];
   return [
     "Current unfinished todos:",
-    ...prioritized.map((todo) => `[${todo.status}] ${todo.content}`),
+    ...prioritized.map(
+      (todo) => `[${todo.status}] ${escapeReminderValue(todo.content)}`,
+    ),
     "Use todo_read to read the complete list.",
   ].join("\n");
 }

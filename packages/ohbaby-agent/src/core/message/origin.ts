@@ -3,6 +3,19 @@ import type { MessageWithParts } from "./types.js";
 export const MODEL_CONTEXT_RUNTIME_KIND = "model-context:runtime:v1";
 export const SYSTEM_REMINDER_KIND = "system-reminder:v1";
 
+/** Escape external values before inserting them into a host reminder template. */
+export function escapeReminderValue(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+/** Keep host markup intact; providers escape their external values separately. */
+export function renderReminderText(text: string): string {
+  return `<system-reminder>\n${text.trim()}\n</system-reminder>`;
+}
+
 export type MessageOrigin =
   | "reminder"
   | "runtime"

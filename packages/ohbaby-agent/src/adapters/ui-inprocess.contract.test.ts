@@ -3176,7 +3176,7 @@ describe("createInProcessUiBackendClient", () => {
           }),
           expect.objectContaining({
             source: "system-reminder",
-            text: expect.stringContaining("Current mode: auto;") as string,
+            text: expect.stringContaining("Current mode: auto.") as string,
           }),
         ],
       });
@@ -8281,7 +8281,7 @@ describe("createInProcessUiBackendClient", () => {
           }),
           expect.objectContaining({
             source: "system-reminder",
-            text: expect.stringContaining("Current mode: auto;") as string,
+            text: expect.stringContaining("Current mode: auto.") as string,
           }),
         ],
       });

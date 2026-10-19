@@ -151,3 +151,20 @@ Pi 提出三项实现契约缺口，主审核实后采用以下修订：
 这些调整完善现有方案，不新增提醒框架。当前只修文档；业务代码和本地实施分支留到后续。
 
 本轮两个只读子代理分别核查源码可行性与两组文档一致性，均未发现阻塞项。主审核实并采纳一个措辞修正：TodoItem 只有 content／status，删除“保留条目 ID”的旧要求，避免误加字段。链接、代码围栏与空白检查通过；这些是规划复核结果，不是业务实现验收。
+
+## 12. 2026-10-19 实施后 Claude 审查补修
+
+用户授权核实截图反馈、修复后合并到 main，只推送 main 并删除本地 `feat/system-reminder`。本轮逐项核实，不将建议直接视为已证实问题。
+
+| 反馈 | 核实与处理 |
+| --- | --- |
+| MCP 整段被转义，接线测试存在空断言 | 成立。宿主模板保留 `<mcp_tool_catalog>`，仅 environment 字段、MCP 名称、Todo 内容、skill 名称等外部值转义；composition 测试实际提取数组 text blocks。先用两项失败测试复现，再修复。历史正文不回写。 |
+| 最终 reminder 超预算抛普通错误，绕过既有处理 | 专属异常成立，但截图“原来一定会发给 provider”的解释不完整。删除该普通 throw 后，完整请求交回既有生命周期：本地已知超预算时返回 `context_overflow`、不调用 provider；本地判断可发送而 provider 报 overflow 时才强制压缩重试一次。保留现有压缩与输入预算检查，补压缩后提醒超限及生命周期不发送用例，不新增恢复策略。 |
+| Todo 提醒没有 10 项上限 | 源码事实与反馈不同。`recoverTodoSnapshotFromMessages → parseTodos → parseTodoArray` 和写入共用 `MAX_TODO_ITEMS=10`，每项同样受 100 个 Unicode 字符限制。提醒拿不到合法的 11 项快照；补 10／11 边界验证，02／04 改为明确复用准入限制，不新增不可达的展示裁剪。 |
+| core 与 reminder 服务双向依赖 | 将纯文本包裹与外部值转义放到 `core/message/origin.ts`，与提醒来源常量一起；core 不再从 services 导入运行时函数。既有 type-only 提供者契约保留，不为消除类型箭头另拆一层。 |
+| 每步重复投影历史 | 记录为性能观察。有效历史投影、事件原 owner 判定、压缩后 skill 正文检查确有重复工作；arrange 仅投影有提醒 anchor 的 owner，skill 可见性扫描仅在有有效压缩时运行。尚无瓶颈测量，不加缓存或新失效规则。 |
+| 初次 auto 也声称结束 plan | 修正。初次 auto 仅说明当前模式，最近有效 mode 为 plan 时才追加旧约束结束；不增加模式历史状态表。 |
+| skill 的 /skills 入口描述冗长 | 简化为 `user can reload it with /skills`，权限与主／子边界不变。 |
+| 提醒保存不是单一原子操作 | 保留现有多步存储，补注释与第二个 part 保存失败的回归：准备失败不发请求，未创建 owner 的部分提醒不进入后续重放。 |
+
+本地参考实现也支持保留宿主标签：Claude 的 `wrapInSystemReminder`、Kimi 的 `wrapSystemReminder` 均直接包裹宿主模板；本轮额外保留 ohbaby 已约定的外部值转义。未改 Web／TUI 隐藏规则，导出仍保留 user 角色与正文 `<system-reminder>` 标签。测试、独立审查和合并安排记录在 06。

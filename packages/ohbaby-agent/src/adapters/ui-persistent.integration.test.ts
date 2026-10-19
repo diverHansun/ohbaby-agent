@@ -1493,7 +1493,7 @@ describe("createPersistentUiBackendClient", () => {
           }),
           expect.objectContaining({
             source: "system-reminder",
-            text: expect.stringContaining("Current mode: auto;") as string,
+            text: expect.stringContaining("Current mode: auto.") as string,
           }),
         ],
       });

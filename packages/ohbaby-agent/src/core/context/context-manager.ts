@@ -68,13 +68,11 @@ import {
 import type { ModelMessage } from "../llm-client/index.js";
 import {
   SYSTEM_REMINDER_KIND,
+  renderReminderText,
   type MessageWithParts,
   type Part,
 } from "../message/index.js";
-import {
-  renderReminderText,
-  type ReminderDraft,
-} from "../../services/reminder/index.js";
+import type { ReminderDraft } from "../../services/reminder/index.js";
 import { arrangeReminderHistory } from "./reminder-history.js";
 
 export {
@@ -1526,7 +1524,11 @@ export function createContextManager(
     };
   }
 
-  /** Persist the selected ordinary message's exact contents, without rendering again. */
+  /**
+   * Persist the selected message's exact contents, without rendering again.
+   * A partial save rejects preparation before its assistant is created, so the
+   * orphaned reminder cannot replay; a later preparation gets a new anchor.
+   */
   async function persistReminders(candidate: MessageWithParts): Promise<void> {
     const message = await options.messageManager.createMessage({
       id: candidate.info.id,
@@ -1666,10 +1668,8 @@ export function createContextManager(
       compaction?.status !== "inflated" &&
       (!input.force || compaction?.status === "compacted");
     if (ready && candidate !== undefined) {
-      if (!fitsRequest(usage, request.settings?.maxTokens))
-        throw new Error(
-          "Final reminder request exceeds the model input budget",
-        );
+      // Keep re-collected reminders whole; lifecycle applies its existing
+      // preparation budget check before sending and provider overflow recovery.
       await persistReminders(candidate);
     }
 

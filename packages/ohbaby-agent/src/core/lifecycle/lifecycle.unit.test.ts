@@ -4935,46 +4935,87 @@ describe("compaction failure boundaries", () => {
     },
   );
 
-  it("rejects a locally oversized ordinary request even when no old history can be compacted", async () => {
-    const requests: InterfaceProviderRequest[] = [];
-    const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(() =>
-        Promise.resolve(
-          preparedTurn(
-            [{ role: "user", content: "Oversized protected input" }],
-            {
-              ...SESSION_USAGE,
-              currentTokens: 120,
-              inputBudgetTokens: 119,
-            },
-          ),
-        ),
-      ),
-      llmClient: createSequentialFakeLLMClient(
-        [[{ textDelta: "Must not send", finishReason: "stop" }]],
-        requests,
-      ),
-      messageManager: createMessageManager({
+  it.each([false, true])(
+    "rejects a locally oversized request without creating or sending an assistant (after compaction=%s)",
+    async (afterCompaction) => {
+      const requests: InterfaceProviderRequest[] = [];
+      const messageManager = createMessageManager({
         bus: createBus(),
         store: createInMemoryMessageStore(),
-      }),
-      toolScheduler: {
-        executeBatch: vi.fn(),
-      } as unknown as ToolSchedulerInstance,
-    });
-    const { result } = await consumeLifecycleEvents(
-      lifecycle.run({
-        sessionId: "session",
-        directory: "/repo",
-        modelId: "fake-model",
-      }),
-    );
-    expect(result).toMatchObject({
-      success: false,
-      terminalReason: "context_overflow",
-    });
-    expect(requests).toHaveLength(0);
-  });
+      });
+      const lifecycle = new Lifecycle({
+        contextManager: createContextManagerMock(
+          (input) => {
+            const prepared = preparedTurn(
+              [
+                { role: "user", content: "Oversized protected input" },
+                ...(afterCompaction
+                  ? [
+                      {
+                        role: "user" as const,
+                        content: [
+                          {
+                            type: "text" as const,
+                            source: "system-reminder" as const,
+                            text: "<system-reminder>\nCurrent mode: plan.\n</system-reminder>",
+                          },
+                          {
+                            type: "text" as const,
+                            source: "system-reminder" as const,
+                            text: "<system-reminder>\nCurrent working directory: /repo\n</system-reminder>",
+                          },
+                        ],
+                      },
+                    ]
+                  : []),
+                ...(input.tailDirectives ?? []),
+              ],
+              {
+                ...SESSION_USAGE,
+                currentTokens: 120,
+                inputBudgetTokens: 119,
+              },
+            );
+            expect(input.tailDirectives?.at(-1)).toMatchObject({
+              role: "user",
+              content: expect.stringContaining(
+                "Maximum lifecycle steps reached",
+              ) as string,
+            });
+            return Promise.resolve(
+              afterCompaction
+                ? compactedTurn({ ...prepared, hasSummary: true })
+                : prepared,
+            );
+          },
+          { assembleRequestFromInput: false },
+        ),
+        llmClient: createSequentialFakeLLMClient(
+          [[{ textDelta: "Must not send", finishReason: "stop" }]],
+          requests,
+        ),
+        messageManager,
+        toolScheduler: {
+          executeBatch: vi.fn(),
+        } as unknown as ToolSchedulerInstance,
+      });
+      const { result } = await consumeLifecycleEvents(
+        lifecycle.run({
+          sessionId: "session",
+          directory: "/repo",
+          modelId: "fake-model",
+          maxSteps: 1,
+        }),
+      );
+      expect(result).toMatchObject({
+        success: false,
+        terminalReason: "context_overflow",
+        finalResponse: "The prepared request exceeds the model input budget",
+      });
+      expect(requests).toHaveLength(0);
+      expect(await messageManager.listBySession("session")).toEqual([]);
+    },
+  );
 
   it.each([false, true])(
     "does not award another force recovery after the same step's input snapshot changes (child=%s)",

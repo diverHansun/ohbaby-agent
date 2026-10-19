@@ -1,6 +1,6 @@
 # system-reminder 机制
 
-> 2026-10-19 完成分批实施与验收，分支 `feat/system-reminder`，实施基线 `8a16f5e2`。当前规则见 00、02、04；历史评审见 [05](./05-review-records.md)，批次记录见 [06](./06-implementation-acceptance.md)，浏览器及三协议真实请求结果见 [07](./07-live-acceptance.md)。仅本地提交，未 merge、未 push。
+> 2026-10-19 完成分批实施与验收，实施分支 `feat/system-reminder`，实施基线 `8a16f5e2`。当前规则见 00、02、04；历史评审见 [05](./05-review-records.md)，批次与合并前补修记录见 [06](./06-implementation-acceptance.md)，浏览器及三协议真实请求结果见 [07](./07-live-acceptance.md)。用户已授权补修验收后合并 main、仅推送 main，并删除本地实施分支。
 
 system-reminder 把服务已有的状态补给模型。有内容才提醒，不承担日志告警、权限授予或长期记忆职责。
 

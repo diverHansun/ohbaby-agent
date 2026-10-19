@@ -431,7 +431,7 @@ describe("CLI prompt process smoke", () => {
             },
             {
               type: "text",
-              text: "<system-reminder>\nCurrent mode: auto; prior plan-mode constraints have ended.\n</system-reminder>",
+              text: "<system-reminder>\nCurrent mode: auto.\n</system-reminder>",
             },
           ],
         },
