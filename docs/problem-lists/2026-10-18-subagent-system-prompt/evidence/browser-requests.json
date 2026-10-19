@@ -1,0 +1,1399 @@
+{
+  "testedCommit": "e60a1273",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "notes": [
+    "The first title request is auxiliary and has response_stream captureError; no usage conclusion is drawn for it.",
+    "First-process runtime-context checks used the wrong tag; that field was omitted. Corrected checks on all resumed requests pass.",
+    "Only synthetic fixtures were used; raw HTTP bodies and authorization headers are not retained."
+  ],
+  "summary": {
+    "totalHttpRequests": 11,
+    "agentRequests": 10,
+    "agentRequestsWithCacheRead": 9,
+    "agentPromptTokens": 75769,
+    "agentCacheHitTokens": 55296
+  },
+  "phases": [
+    {
+      "file": "browser-wire.json",
+      "sourceSha256": "7fa4499cfac482e691432b85473ac15b1b52af82dbc0d555b859ce3d7d61d43d",
+      "runtimeContextCheckValid": false,
+      "compiledCli": true,
+      "resume": false,
+      "observations": [
+        {
+          "sequence": 1,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 0,
+            "PROJECT_CHECK_ORCHID_V1": 0,
+            "PROJECT_CHECK_ORCHID_V2": 0
+          },
+          "globalBeforeProject": false,
+          "isSubagent": false,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user"
+          ]
+        },
+        {
+          "sequence": 2,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 1,
+            "PROJECT_CHECK_ORCHID_V1": 1,
+            "PROJECT_CHECK_ORCHID_V2": 0
+          },
+          "globalBeforeProject": true,
+          "isSubagent": false,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user"
+          ]
+        },
+        {
+          "sequence": 3,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 1,
+            "PROJECT_CHECK_ORCHID_V1": 1,
+            "PROJECT_CHECK_ORCHID_V2": 0
+          },
+          "globalBeforeProject": true,
+          "isSubagent": true,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user"
+          ]
+        },
+        {
+          "sequence": 4,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 1,
+            "PROJECT_CHECK_ORCHID_V1": 1,
+            "PROJECT_CHECK_ORCHID_V2": 0
+          },
+          "globalBeforeProject": true,
+          "isSubagent": true,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ]
+        },
+        {
+          "sequence": 5,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 1,
+            "PROJECT_CHECK_ORCHID_V1": 1,
+            "PROJECT_CHECK_ORCHID_V2": 0
+          },
+          "globalBeforeProject": true,
+          "isSubagent": false,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "tool"
+          ]
+        },
+        {
+          "sequence": 6,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 1,
+            "PROJECT_CHECK_ORCHID_V1": 0,
+            "PROJECT_CHECK_ORCHID_V2": 1
+          },
+          "globalBeforeProject": true,
+          "isSubagent": false,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "tool",
+            "assistant",
+            "user"
+          ]
+        },
+        {
+          "sequence": 7,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 1,
+            "PROJECT_CHECK_ORCHID_V1": 0,
+            "PROJECT_CHECK_ORCHID_V2": 1
+          },
+          "globalBeforeProject": true,
+          "isSubagent": true,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "user"
+          ]
+        },
+        {
+          "sequence": 8,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 1,
+            "PROJECT_CHECK_ORCHID_V1": 0,
+            "PROJECT_CHECK_ORCHID_V2": 1
+          },
+          "globalBeforeProject": true,
+          "isSubagent": false,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "tool",
+            "assistant",
+            "user",
+            "assistant",
+            "tool"
+          ]
+        }
+      ],
+      "wire": [
+        {
+          "sequence": 1,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [],
+            "results": [],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 0,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "48885a7e5ecc3e22aa7903979db30d7ba633f339426ffdfaed1b1824a63413a0",
+            "bytes": 1637
+          },
+          "tools": {
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "bytes": 2
+          },
+          "input": {
+            "sha256": "80d9c0a0e1dad8dc12bf358197037a1161725d824cdfa3bfb84131b126271498",
+            "bytes": 2076
+          },
+          "inputCount": 2,
+          "inputPrefixes": [
+            {
+              "sha256": "43b975678315e2dcb34ddd15273be4ff3a8ba7e0b35e24f2cb306df601920b33",
+              "bytes": 1590
+            },
+            {
+              "sha256": "80d9c0a0e1dad8dc12bf358197037a1161725d824cdfa3bfb84131b126271498",
+              "bytes": 2076
+            }
+          ],
+          "rawUsage": [],
+          "finalUsage": {},
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "43b975678315e2dcb34ddd15273be4ff3a8ba7e0b35e24f2cb306df601920b33",
+            "bytes": 1590
+          },
+          "status": 200,
+          "captureError": "response_stream"
+        },
+        {
+          "sequence": 2,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [],
+            "results": [],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 0,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "947a0f7259464a23f05ff170b20fffbc4b7805e165f930eec514f64dc53e0197",
+            "bytes": 18675
+          },
+          "tools": {
+            "sha256": "9ea1edf8cdd45d91b50b702565b0ed536541cf88eecc602f85354843b42dde1a",
+            "bytes": 17502
+          },
+          "input": {
+            "sha256": "436a5a4a7dccf182c8caabf6a48ad7e554f6a41c4bf0b57c7e630a87e7117041",
+            "bytes": 19460
+          },
+          "inputCount": 2,
+          "inputPrefixes": [
+            {
+              "sha256": "406364ed5df1ab6329a56f4849e3cd8958a065802210783d6ed0353ad8ebc379",
+              "bytes": 18628
+            },
+            {
+              "sha256": "436a5a4a7dccf182c8caabf6a48ad7e554f6a41c4bf0b57c7e630a87e7117041",
+              "bytes": 19460
+            }
+          ],
+          "rawUsage": [
+            {
+              "total_tokens": 8661,
+              "prompt_tokens": 8438,
+              "completion_tokens": 223,
+              "prompt_cache_hit_tokens": 3584,
+              "prompt_cache_miss_tokens": 4854,
+              "prompt_tokens_details": {
+                "cached_tokens": 3584
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 8661,
+            "prompt_tokens": 8438,
+            "completion_tokens": 223,
+            "prompt_cache_hit_tokens": 3584,
+            "prompt_cache_miss_tokens": 4854,
+            "prompt_tokens_details": {
+              "cached_tokens": 3584
+            }
+          },
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "406364ed5df1ab6329a56f4849e3cd8958a065802210783d6ed0353ad8ebc379",
+            "bytes": 18628
+          },
+          "status": 200
+        },
+        {
+          "sequence": 3,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [],
+            "results": [],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 0,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "95974c456d51defaaac6075f33811e75be78e1cbc13edc58e5b3d4a3c974500c",
+            "bytes": 3656
+          },
+          "tools": {
+            "sha256": "5b38ac4c3bd09d74842464854ecbaec92ce843be9789cd98104ac6b8f14cd7df",
+            "bytes": 10150
+          },
+          "input": {
+            "sha256": "229f531af71cc8753714f47ce66a780f30f1da42643b003ca436d2cce7089505",
+            "bytes": 4205
+          },
+          "inputCount": 2,
+          "inputPrefixes": [
+            {
+              "sha256": "a773eb8a3062bdc455ac02e2a9601ba8de63f958e45babf92321da8233eed370",
+              "bytes": 3609
+            },
+            {
+              "sha256": "229f531af71cc8753714f47ce66a780f30f1da42643b003ca436d2cce7089505",
+              "bytes": 4205
+            }
+          ],
+          "rawUsage": [
+            {
+              "total_tokens": 3548,
+              "prompt_tokens": 3509,
+              "completion_tokens": 39,
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 3509,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 3548,
+            "prompt_tokens": 3509,
+            "completion_tokens": 39,
+            "prompt_cache_hit_tokens": 0,
+            "prompt_cache_miss_tokens": 3509,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "a773eb8a3062bdc455ac02e2a9601ba8de63f958e45babf92321da8233eed370",
+            "bytes": 3609
+          },
+          "status": 200
+        },
+        {
+          "sequence": 4,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [
+              "e0770d68994bee5de1976c64fd2b2b2a18d6c297e8d17befcf624671b194b6b7"
+            ],
+            "results": [
+              "e0770d68994bee5de1976c64fd2b2b2a18d6c297e8d17befcf624671b194b6b7"
+            ],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 0,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "95974c456d51defaaac6075f33811e75be78e1cbc13edc58e5b3d4a3c974500c",
+            "bytes": 3656
+          },
+          "tools": {
+            "sha256": "5b38ac4c3bd09d74842464854ecbaec92ce843be9789cd98104ac6b8f14cd7df",
+            "bytes": 10150
+          },
+          "input": {
+            "sha256": "605fd2aea74f9864e71b04879c5d639b3171d087c8daf4bc8d87c8cb45ef42ab",
+            "bytes": 4740
+          },
+          "inputCount": 4,
+          "inputPrefixes": [
+            {
+              "sha256": "a773eb8a3062bdc455ac02e2a9601ba8de63f958e45babf92321da8233eed370",
+              "bytes": 3609
+            },
+            {
+              "sha256": "229f531af71cc8753714f47ce66a780f30f1da42643b003ca436d2cce7089505",
+              "bytes": 4205
+            },
+            {
+              "sha256": "ce25aed3e86aaf57fd11be5a1361141b57d08c21518b4ff69191e2e2523789c8",
+              "bytes": 4388
+            },
+            {
+              "sha256": "605fd2aea74f9864e71b04879c5d639b3171d087c8daf4bc8d87c8cb45ef42ab",
+              "bytes": 4740
+            }
+          ],
+          "rawUsage": [
+            {
+              "total_tokens": 3925,
+              "prompt_tokens": 3661,
+              "completion_tokens": 264,
+              "prompt_cache_hit_tokens": 3456,
+              "prompt_cache_miss_tokens": 205,
+              "prompt_tokens_details": {
+                "cached_tokens": 3456
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 3925,
+            "prompt_tokens": 3661,
+            "completion_tokens": 264,
+            "prompt_cache_hit_tokens": 3456,
+            "prompt_cache_miss_tokens": 205,
+            "prompt_tokens_details": {
+              "cached_tokens": 3456
+            }
+          },
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "a773eb8a3062bdc455ac02e2a9601ba8de63f958e45babf92321da8233eed370",
+            "bytes": 3609
+          },
+          "status": 200
+        },
+        {
+          "sequence": 5,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [
+              "f29b2e37c8a2c9dc74cce54f1d5f691586a29613d11ee87529268fa230cd4b46",
+              "6595128ae9bf42f59ab62bb9b7d1f8d1a58bc37271d263028dee01caa660f0f9"
+            ],
+            "results": [
+              "f29b2e37c8a2c9dc74cce54f1d5f691586a29613d11ee87529268fa230cd4b46",
+              "6595128ae9bf42f59ab62bb9b7d1f8d1a58bc37271d263028dee01caa660f0f9"
+            ],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 0,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "947a0f7259464a23f05ff170b20fffbc4b7805e165f930eec514f64dc53e0197",
+            "bytes": 18675
+          },
+          "tools": {
+            "sha256": "9ea1edf8cdd45d91b50b702565b0ed536541cf88eecc602f85354843b42dde1a",
+            "bytes": 17502
+          },
+          "input": {
+            "sha256": "2a5fcee899db27cece07c318b435f808b7608feac5478fdfaac94072717e1830",
+            "bytes": 22586
+          },
+          "inputCount": 5,
+          "inputPrefixes": [
+            {
+              "sha256": "406364ed5df1ab6329a56f4849e3cd8958a065802210783d6ed0353ad8ebc379",
+              "bytes": 18628
+            },
+            {
+              "sha256": "436a5a4a7dccf182c8caabf6a48ad7e554f6a41c4bf0b57c7e630a87e7117041",
+              "bytes": 19460
+            },
+            {
+              "sha256": "5d26ca06e44d96a7917504bf7c88d93b4b5317a1a3df01e12141523191ff7e18",
+              "bytes": 20312
+            },
+            {
+              "sha256": "70f57a82733f1e00adb8eb3a4c5a9401564658d187c9b5351c014329accb681f",
+              "bytes": 20664
+            },
+            {
+              "sha256": "2a5fcee899db27cece07c318b435f808b7608feac5478fdfaac94072717e1830",
+              "bytes": 22586
+            }
+          ],
+          "rawUsage": [
+            {
+              "total_tokens": 9600,
+              "prompt_tokens": 9341,
+              "completion_tokens": 259,
+              "prompt_cache_hit_tokens": 8576,
+              "prompt_cache_miss_tokens": 765,
+              "prompt_tokens_details": {
+                "cached_tokens": 8576
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 9600,
+            "prompt_tokens": 9341,
+            "completion_tokens": 259,
+            "prompt_cache_hit_tokens": 8576,
+            "prompt_cache_miss_tokens": 765,
+            "prompt_tokens_details": {
+              "cached_tokens": 8576
+            }
+          },
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "406364ed5df1ab6329a56f4849e3cd8958a065802210783d6ed0353ad8ebc379",
+            "bytes": 18628
+          },
+          "status": 200
+        },
+        {
+          "sequence": 6,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [
+              "f29b2e37c8a2c9dc74cce54f1d5f691586a29613d11ee87529268fa230cd4b46",
+              "6595128ae9bf42f59ab62bb9b7d1f8d1a58bc37271d263028dee01caa660f0f9"
+            ],
+            "results": [
+              "f29b2e37c8a2c9dc74cce54f1d5f691586a29613d11ee87529268fa230cd4b46",
+              "6595128ae9bf42f59ab62bb9b7d1f8d1a58bc37271d263028dee01caa660f0f9"
+            ],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 1,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "8bd297bb79ad474345d0c98327f3d304e752cb3f6c1223c4d97f6fb991e6a179",
+            "bytes": 18675
+          },
+          "tools": {
+            "sha256": "9ea1edf8cdd45d91b50b702565b0ed536541cf88eecc602f85354843b42dde1a",
+            "bytes": 17502
+          },
+          "input": {
+            "sha256": "0f34994a4184d5b2a8e72b6b890183416cf0935a166f101c381d442deae047f5",
+            "bytes": 24336
+          },
+          "inputCount": 7,
+          "inputPrefixes": [
+            {
+              "sha256": "fb76d497fbb118dc287d9f49b918ad822d6a2eadd5e4ac1d42beee3a5da2c117",
+              "bytes": 18628
+            },
+            {
+              "sha256": "4dd5b875abb396f43c444b3a81639853afcb6d5d31a8fda729b6813741be04cd",
+              "bytes": 19460
+            },
+            {
+              "sha256": "7f3d0a38c7b24ddc2298ccc9942d7b825c3013f193ae97e768f5461dc863cf96",
+              "bytes": 20312
+            },
+            {
+              "sha256": "0635fc9752d95e932c4600f60bca6c17d6c3b8636151ecf59d45c54c81cd132f",
+              "bytes": 20664
+            },
+            {
+              "sha256": "503df8e3b6b5190fae822f3240d5723cf99e235e46e4d845c83de39df7d9ee01",
+              "bytes": 22586
+            },
+            {
+              "sha256": "132b24e26fa1d64e9a122698fce37a45365be35dbe52b7c185c09d0459017e3f",
+              "bytes": 23640
+            },
+            {
+              "sha256": "0f34994a4184d5b2a8e72b6b890183416cf0935a166f101c381d442deae047f5",
+              "bytes": 24336
+            }
+          ],
+          "rawUsage": [
+            {
+              "total_tokens": 9982,
+              "prompt_tokens": 9803,
+              "completion_tokens": 179,
+              "prompt_cache_hit_tokens": 3712,
+              "prompt_cache_miss_tokens": 6091,
+              "prompt_tokens_details": {
+                "cached_tokens": 3712
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 9982,
+            "prompt_tokens": 9803,
+            "completion_tokens": 179,
+            "prompt_cache_hit_tokens": 3712,
+            "prompt_cache_miss_tokens": 6091,
+            "prompt_tokens_details": {
+              "cached_tokens": 3712
+            }
+          },
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "132b24e26fa1d64e9a122698fce37a45365be35dbe52b7c185c09d0459017e3f",
+            "bytes": 23640
+          },
+          "status": 200
+        },
+        {
+          "sequence": 7,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [
+              "e0770d68994bee5de1976c64fd2b2b2a18d6c297e8d17befcf624671b194b6b7"
+            ],
+            "results": [
+              "e0770d68994bee5de1976c64fd2b2b2a18d6c297e8d17befcf624671b194b6b7"
+            ],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 1,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "7437f2ac3de07f3d331cd4b57c17e3aba80775ed6dfad3f028d023e9369fb68d",
+            "bytes": 3656
+          },
+          "tools": {
+            "sha256": "5b38ac4c3bd09d74842464854ecbaec92ce843be9789cd98104ac6b8f14cd7df",
+            "bytes": 10150
+          },
+          "input": {
+            "sha256": "08439df5eaff8e67d6e2d150960af550a9ee9c0acaa8a3f3b3cda73cc2fef5bb",
+            "bytes": 6367
+          },
+          "inputCount": 6,
+          "inputPrefixes": [
+            {
+              "sha256": "19bce93f0c77e3ba91d52e62539d204f7a57710279f36e70ecfff11a0c57291f",
+              "bytes": 3609
+            },
+            {
+              "sha256": "99db2a9acb13be7b46e790d31a08a34673a2af9139964dc548ec99182d6878dd",
+              "bytes": 4205
+            },
+            {
+              "sha256": "0609829997ae9f5326e41cb358208b8138e46ca68160372c96969866f4eea8b4",
+              "bytes": 4388
+            },
+            {
+              "sha256": "3200f82ea7312d12d4699113654cf4d20db344ea43a483d71c699bef734f220d",
+              "bytes": 4740
+            },
+            {
+              "sha256": "5b8658cb53c39848747eaf33d4379a10526ecb9396538cea1313870dc329d6c4",
+              "bytes": 5827
+            },
+            {
+              "sha256": "08439df5eaff8e67d6e2d150960af550a9ee9c0acaa8a3f3b3cda73cc2fef5bb",
+              "bytes": 6367
+            }
+          ],
+          "rawUsage": [
+            {
+              "total_tokens": 4287,
+              "prompt_tokens": 4064,
+              "completion_tokens": 223,
+              "prompt_cache_hit_tokens": 512,
+              "prompt_cache_miss_tokens": 3552,
+              "prompt_tokens_details": {
+                "cached_tokens": 512
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 4287,
+            "prompt_tokens": 4064,
+            "completion_tokens": 223,
+            "prompt_cache_hit_tokens": 512,
+            "prompt_cache_miss_tokens": 3552,
+            "prompt_tokens_details": {
+              "cached_tokens": 512
+            }
+          },
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "5b8658cb53c39848747eaf33d4379a10526ecb9396538cea1313870dc329d6c4",
+            "bytes": 5827
+          },
+          "status": 200
+        },
+        {
+          "sequence": 8,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [
+              "f29b2e37c8a2c9dc74cce54f1d5f691586a29613d11ee87529268fa230cd4b46",
+              "6595128ae9bf42f59ab62bb9b7d1f8d1a58bc37271d263028dee01caa660f0f9",
+              "d36e21d59834b7a6125d7cae330e870e1ece44d8f256cd0900a1c58d167e987a"
+            ],
+            "results": [
+              "f29b2e37c8a2c9dc74cce54f1d5f691586a29613d11ee87529268fa230cd4b46",
+              "6595128ae9bf42f59ab62bb9b7d1f8d1a58bc37271d263028dee01caa660f0f9",
+              "d36e21d59834b7a6125d7cae330e870e1ece44d8f256cd0900a1c58d167e987a"
+            ],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 2,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "8bd297bb79ad474345d0c98327f3d304e752cb3f6c1223c4d97f6fb991e6a179",
+            "bytes": 18675
+          },
+          "tools": {
+            "sha256": "9ea1edf8cdd45d91b50b702565b0ed536541cf88eecc602f85354843b42dde1a",
+            "bytes": 17502
+          },
+          "input": {
+            "sha256": "c983591abfff27e097884b0db8a8e5138cb71609bb433b57e9ae1b70de57900d",
+            "bytes": 26460
+          },
+          "inputCount": 9,
+          "inputPrefixes": [
+            {
+              "sha256": "fb76d497fbb118dc287d9f49b918ad822d6a2eadd5e4ac1d42beee3a5da2c117",
+              "bytes": 18628
+            },
+            {
+              "sha256": "4dd5b875abb396f43c444b3a81639853afcb6d5d31a8fda729b6813741be04cd",
+              "bytes": 19460
+            },
+            {
+              "sha256": "7f3d0a38c7b24ddc2298ccc9942d7b825c3013f193ae97e768f5461dc863cf96",
+              "bytes": 20312
+            },
+            {
+              "sha256": "0635fc9752d95e932c4600f60bca6c17d6c3b8636151ecf59d45c54c81cd132f",
+              "bytes": 20664
+            },
+            {
+              "sha256": "503df8e3b6b5190fae822f3240d5723cf99e235e46e4d845c83de39df7d9ee01",
+              "bytes": 22586
+            },
+            {
+              "sha256": "132b24e26fa1d64e9a122698fce37a45365be35dbe52b7c185c09d0459017e3f",
+              "bytes": 23640
+            },
+            {
+              "sha256": "0f34994a4184d5b2a8e72b6b890183416cf0935a166f101c381d442deae047f5",
+              "bytes": 24336
+            },
+            {
+              "sha256": "fc8e05a32ba6efbd48ffef46fb0d5d2461a891c0c1a5235baada40657a90aea5",
+              "bytes": 25046
+            },
+            {
+              "sha256": "c983591abfff27e097884b0db8a8e5138cb71609bb433b57e9ae1b70de57900d",
+              "bytes": 26460
+            }
+          ],
+          "rawUsage": [
+            {
+              "total_tokens": 10559,
+              "prompt_tokens": 10431,
+              "completion_tokens": 128,
+              "prompt_cache_hit_tokens": 9856,
+              "prompt_cache_miss_tokens": 575,
+              "prompt_tokens_details": {
+                "cached_tokens": 9856
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 10559,
+            "prompt_tokens": 10431,
+            "completion_tokens": 128,
+            "prompt_cache_hit_tokens": 9856,
+            "prompt_cache_miss_tokens": 575,
+            "prompt_tokens_details": {
+              "cached_tokens": 9856
+            }
+          },
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "132b24e26fa1d64e9a122698fce37a45365be35dbe52b7c185c09d0459017e3f",
+            "bytes": 23640
+          },
+          "status": 200
+        }
+      ]
+    },
+    {
+      "file": "resumed-wire.json",
+      "sourceSha256": "0bfccd3225d16f8192fd58978c85325b3260d8a78f89a5a813944d7622e5d001",
+      "runtimeContextCheckValid": true,
+      "compiledCli": true,
+      "resume": true,
+      "observations": [
+        {
+          "sequence": 1,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 1,
+            "PROJECT_CHECK_ORCHID_V1": 0,
+            "PROJECT_CHECK_ORCHID_V2": 1
+          },
+          "globalBeforeProject": true,
+          "isSubagent": false,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "tool",
+            "assistant",
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "user"
+          ],
+          "hasRuntimeContext": true
+        },
+        {
+          "sequence": 2,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 1,
+            "PROJECT_CHECK_ORCHID_V1": 0,
+            "PROJECT_CHECK_ORCHID_V2": 1
+          },
+          "globalBeforeProject": true,
+          "isSubagent": true,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "user",
+            "assistant",
+            "user"
+          ],
+          "hasRuntimeContext": true
+        },
+        {
+          "sequence": 3,
+          "markers": {
+            "GLOBAL_CHECK_LIME": 1,
+            "PROJECT_CHECK_ORCHID_V1": 0,
+            "PROJECT_CHECK_ORCHID_V2": 1
+          },
+          "globalBeforeProject": true,
+          "isSubagent": false,
+          "hasAutomaticMemory": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "tool",
+            "assistant",
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "hasRuntimeContext": true
+        }
+      ],
+      "wire": [
+        {
+          "sequence": 1,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [
+              "f29b2e37c8a2c9dc74cce54f1d5f691586a29613d11ee87529268fa230cd4b46",
+              "6595128ae9bf42f59ab62bb9b7d1f8d1a58bc37271d263028dee01caa660f0f9",
+              "d36e21d59834b7a6125d7cae330e870e1ece44d8f256cd0900a1c58d167e987a"
+            ],
+            "results": [
+              "f29b2e37c8a2c9dc74cce54f1d5f691586a29613d11ee87529268fa230cd4b46",
+              "6595128ae9bf42f59ab62bb9b7d1f8d1a58bc37271d263028dee01caa660f0f9",
+              "d36e21d59834b7a6125d7cae330e870e1ece44d8f256cd0900a1c58d167e987a"
+            ],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 2,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "8bd297bb79ad474345d0c98327f3d304e752cb3f6c1223c4d97f6fb991e6a179",
+            "bytes": 18675
+          },
+          "tools": {
+            "sha256": "9ea1edf8cdd45d91b50b702565b0ed536541cf88eecc602f85354843b42dde1a",
+            "bytes": 17502
+          },
+          "input": {
+            "sha256": "5094dc001781ee5e2ca516eb9c32f6e254fea30749c0f790402ba0e102dd8fe9",
+            "bytes": 27644
+          },
+          "inputCount": 11,
+          "inputPrefixes": [
+            {
+              "sha256": "fb76d497fbb118dc287d9f49b918ad822d6a2eadd5e4ac1d42beee3a5da2c117",
+              "bytes": 18628
+            },
+            {
+              "sha256": "4dd5b875abb396f43c444b3a81639853afcb6d5d31a8fda729b6813741be04cd",
+              "bytes": 19460
+            },
+            {
+              "sha256": "7f3d0a38c7b24ddc2298ccc9942d7b825c3013f193ae97e768f5461dc863cf96",
+              "bytes": 20312
+            },
+            {
+              "sha256": "0635fc9752d95e932c4600f60bca6c17d6c3b8636151ecf59d45c54c81cd132f",
+              "bytes": 20664
+            },
+            {
+              "sha256": "503df8e3b6b5190fae822f3240d5723cf99e235e46e4d845c83de39df7d9ee01",
+              "bytes": 22586
+            },
+            {
+              "sha256": "132b24e26fa1d64e9a122698fce37a45365be35dbe52b7c185c09d0459017e3f",
+              "bytes": 23640
+            },
+            {
+              "sha256": "0f34994a4184d5b2a8e72b6b890183416cf0935a166f101c381d442deae047f5",
+              "bytes": 24336
+            },
+            {
+              "sha256": "fc8e05a32ba6efbd48ffef46fb0d5d2461a891c0c1a5235baada40657a90aea5",
+              "bytes": 25046
+            },
+            {
+              "sha256": "c983591abfff27e097884b0db8a8e5138cb71609bb433b57e9ae1b70de57900d",
+              "bytes": 26460
+            },
+            {
+              "sha256": "51bc152555917c23c5df78a8a56cae0360f7829bc75c1f1d08c13f0e24aa2ebe",
+              "bytes": 26949
+            },
+            {
+              "sha256": "5094dc001781ee5e2ca516eb9c32f6e254fea30749c0f790402ba0e102dd8fe9",
+              "bytes": 27644
+            }
+          ],
+          "rawUsage": [
+            {
+              "total_tokens": 10922,
+              "prompt_tokens": 10762,
+              "completion_tokens": 160,
+              "prompt_cache_hit_tokens": 10496,
+              "prompt_cache_miss_tokens": 266,
+              "prompt_tokens_details": {
+                "cached_tokens": 10496
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 10922,
+            "prompt_tokens": 10762,
+            "completion_tokens": 160,
+            "prompt_cache_hit_tokens": 10496,
+            "prompt_cache_miss_tokens": 266,
+            "prompt_tokens_details": {
+              "cached_tokens": 10496
+            }
+          },
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "51bc152555917c23c5df78a8a56cae0360f7829bc75c1f1d08c13f0e24aa2ebe",
+            "bytes": 26949
+          },
+          "status": 200
+        },
+        {
+          "sequence": 2,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [
+              "e0770d68994bee5de1976c64fd2b2b2a18d6c297e8d17befcf624671b194b6b7"
+            ],
+            "results": [
+              "e0770d68994bee5de1976c64fd2b2b2a18d6c297e8d17befcf624671b194b6b7"
+            ],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 2,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "7437f2ac3de07f3d331cd4b57c17e3aba80775ed6dfad3f028d023e9369fb68d",
+            "bytes": 3656
+          },
+          "tools": {
+            "sha256": "5b38ac4c3bd09d74842464854ecbaec92ce843be9789cd98104ac6b8f14cd7df",
+            "bytes": 10150
+          },
+          "input": {
+            "sha256": "4ccee3232cf94ba45326dcb2f8f453a811735bd3855034fe8b0cace75bc38a2e",
+            "bytes": 7932
+          },
+          "inputCount": 8,
+          "inputPrefixes": [
+            {
+              "sha256": "19bce93f0c77e3ba91d52e62539d204f7a57710279f36e70ecfff11a0c57291f",
+              "bytes": 3609
+            },
+            {
+              "sha256": "99db2a9acb13be7b46e790d31a08a34673a2af9139964dc548ec99182d6878dd",
+              "bytes": 4205
+            },
+            {
+              "sha256": "0609829997ae9f5326e41cb358208b8138e46ca68160372c96969866f4eea8b4",
+              "bytes": 4388
+            },
+            {
+              "sha256": "3200f82ea7312d12d4699113654cf4d20db344ea43a483d71c699bef734f220d",
+              "bytes": 4740
+            },
+            {
+              "sha256": "5b8658cb53c39848747eaf33d4379a10526ecb9396538cea1313870dc329d6c4",
+              "bytes": 5827
+            },
+            {
+              "sha256": "08439df5eaff8e67d6e2d150960af550a9ee9c0acaa8a3f3b3cda73cc2fef5bb",
+              "bytes": 6367
+            },
+            {
+              "sha256": "dd87463e40148ca414db040e8cdf6cba9d0ba07b7bea68e7c4ee0a68f00dd9ef",
+              "bytes": 7345
+            },
+            {
+              "sha256": "4ccee3232cf94ba45326dcb2f8f453a811735bd3855034fe8b0cace75bc38a2e",
+              "bytes": 7932
+            }
+          ],
+          "rawUsage": [
+            {
+              "total_tokens": 4539,
+              "prompt_tokens": 4442,
+              "completion_tokens": 97,
+              "prompt_cache_hit_tokens": 4224,
+              "prompt_cache_miss_tokens": 218,
+              "prompt_tokens_details": {
+                "cached_tokens": 4224
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 4539,
+            "prompt_tokens": 4442,
+            "completion_tokens": 97,
+            "prompt_cache_hit_tokens": 4224,
+            "prompt_cache_miss_tokens": 218,
+            "prompt_tokens_details": {
+              "cached_tokens": 4224
+            }
+          },
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "dd87463e40148ca414db040e8cdf6cba9d0ba07b7bea68e7c4ee0a68f00dd9ef",
+            "bytes": 7345
+          },
+          "status": 200
+        },
+        {
+          "sequence": 3,
+          "path": "/api/v1/chat/completions",
+          "kind": "generation",
+          "protocol": "openai-compatible",
+          "encryptedReasoningRequested": false,
+          "toolPairing": {
+            "calls": [
+              "f29b2e37c8a2c9dc74cce54f1d5f691586a29613d11ee87529268fa230cd4b46",
+              "6595128ae9bf42f59ab62bb9b7d1f8d1a58bc37271d263028dee01caa660f0f9",
+              "d36e21d59834b7a6125d7cae330e870e1ece44d8f256cd0900a1c58d167e987a",
+              "8ef8c181f3f6b78caa79728b345096949e4ba676a2fd8f57dc57b544211a2c50"
+            ],
+            "results": [
+              "f29b2e37c8a2c9dc74cce54f1d5f691586a29613d11ee87529268fa230cd4b46",
+              "6595128ae9bf42f59ab62bb9b7d1f8d1a58bc37271d263028dee01caa660f0f9",
+              "d36e21d59834b7a6125d7cae330e870e1ece44d8f256cd0900a1c58d167e987a",
+              "8ef8c181f3f6b78caa79728b345096949e4ba676a2fd8f57dc57b544211a2c50"
+            ],
+            "invalidIds": 0,
+            "duplicateCalls": 0,
+            "duplicateResults": 0,
+            "resultsBeforeCalls": 0,
+            "unmatchedResults": 0,
+            "unansweredCalls": 0
+          },
+          "nativeInputCount": 2,
+          "reasoning": {
+            "controlFields": [],
+            "config": {
+              "sha256": "a68ebf980e0ed7980922fc69ed4b137781b9736c0a023e82af006da86122ca09",
+              "bytes": 79
+            }
+          },
+          "system": {
+            "sha256": "8bd297bb79ad474345d0c98327f3d304e752cb3f6c1223c4d97f6fb991e6a179",
+            "bytes": 18675
+          },
+          "tools": {
+            "sha256": "9ea1edf8cdd45d91b50b702565b0ed536541cf88eecc602f85354843b42dde1a",
+            "bytes": 17502
+          },
+          "input": {
+            "sha256": "5e059511d10f7fc9122d17f148d12cfb145a65dc73b00eae3337856a7a9f0c1d",
+            "bytes": 29481
+          },
+          "inputCount": 13,
+          "inputPrefixes": [
+            {
+              "sha256": "fb76d497fbb118dc287d9f49b918ad822d6a2eadd5e4ac1d42beee3a5da2c117",
+              "bytes": 18628
+            },
+            {
+              "sha256": "4dd5b875abb396f43c444b3a81639853afcb6d5d31a8fda729b6813741be04cd",
+              "bytes": 19460
+            },
+            {
+              "sha256": "7f3d0a38c7b24ddc2298ccc9942d7b825c3013f193ae97e768f5461dc863cf96",
+              "bytes": 20312
+            },
+            {
+              "sha256": "0635fc9752d95e932c4600f60bca6c17d6c3b8636151ecf59d45c54c81cd132f",
+              "bytes": 20664
+            },
+            {
+              "sha256": "503df8e3b6b5190fae822f3240d5723cf99e235e46e4d845c83de39df7d9ee01",
+              "bytes": 22586
+            },
+            {
+              "sha256": "132b24e26fa1d64e9a122698fce37a45365be35dbe52b7c185c09d0459017e3f",
+              "bytes": 23640
+            },
+            {
+              "sha256": "0f34994a4184d5b2a8e72b6b890183416cf0935a166f101c381d442deae047f5",
+              "bytes": 24336
+            },
+            {
+              "sha256": "fc8e05a32ba6efbd48ffef46fb0d5d2461a891c0c1a5235baada40657a90aea5",
+              "bytes": 25046
+            },
+            {
+              "sha256": "c983591abfff27e097884b0db8a8e5138cb71609bb433b57e9ae1b70de57900d",
+              "bytes": 26460
+            },
+            {
+              "sha256": "51bc152555917c23c5df78a8a56cae0360f7829bc75c1f1d08c13f0e24aa2ebe",
+              "bytes": 26949
+            },
+            {
+              "sha256": "5094dc001781ee5e2ca516eb9c32f6e254fea30749c0f790402ba0e102dd8fe9",
+              "bytes": 27644
+            },
+            {
+              "sha256": "506459c6b94546b011a72be7ad1fdc698b55582901f76bd6fed544befe72b3f9",
+              "bytes": 28222
+            },
+            {
+              "sha256": "5e059511d10f7fc9122d17f148d12cfb145a65dc73b00eae3337856a7a9f0c1d",
+              "bytes": 29481
+            }
+          ],
+          "rawUsage": [
+            {
+              "total_tokens": 11400,
+              "prompt_tokens": 11318,
+              "completion_tokens": 82,
+              "prompt_cache_hit_tokens": 10880,
+              "prompt_cache_miss_tokens": 438,
+              "prompt_tokens_details": {
+                "cached_tokens": 10880
+              }
+            }
+          ],
+          "finalUsage": {
+            "total_tokens": 11400,
+            "prompt_tokens": 11318,
+            "completion_tokens": 82,
+            "prompt_cache_hit_tokens": 10880,
+            "prompt_cache_miss_tokens": 438,
+            "prompt_tokens_details": {
+              "cached_tokens": 10880
+            }
+          },
+          "model": "deepseek/deepseek-v4.1-flash",
+          "prefixBeforeLatestUser": {
+            "sha256": "51bc152555917c23c5df78a8a56cae0360f7829bc75c1f1d08c13f0e24aa2ebe",
+            "bytes": 26949
+          },
+          "status": 200
+        }
+      ]
+    }
+  ],
+  "persisted": {
+    "sessionCount": 2,
+    "childSessionCount": 1,
+    "subagentInstanceCount": 1,
+    "executions": [
+      {
+        "subagent_id": "subagent_mveuawfs_whvj72gx",
+        "child_session_id": "session_1792389286075_s0c4vy1",
+        "child_run_id": "subagent_run_mveuawg0_4iew969b",
+        "status": "completed",
+        "delegation_sequence": 1,
+        "started_at": 1792389286080,
+        "completed_at": 1792389290426,
+        "error": null
+      },
+      {
+        "subagent_id": "subagent_mveuawfs_whvj72gx",
+        "child_session_id": "session_1792389286075_s0c4vy1",
+        "child_run_id": "subagent_run_mveubmr9_95atzr20",
+        "status": "completed",
+        "delegation_sequence": 2,
+        "started_at": 1792389320181,
+        "completed_at": 1792389322763,
+        "error": null
+      },
+      {
+        "subagent_id": "subagent_mveuawfs_whvj72gx",
+        "child_session_id": "session_1792389286075_s0c4vy1",
+        "child_run_id": "subagent_run_mveuddf4_bnys6590",
+        "status": "completed",
+        "delegation_sequence": 3,
+        "started_at": 1792389401392,
+        "completed_at": 1792389404035,
+        "error": null
+      }
+    ],
+    "runs": [
+      {
+        "run_id": "run_e76f299c-962e-4cc9-87f2-fc882f2b615c",
+        "session_id": "session_1792389282986_q0v3701",
+        "status": "succeeded",
+        "owner_pid": 7261,
+        "error": null
+      },
+      {
+        "run_id": "subagent_run_mveuawg0_4iew969b",
+        "session_id": "session_1792389286075_s0c4vy1",
+        "status": "succeeded",
+        "owner_pid": 7261,
+        "error": null
+      },
+      {
+        "run_id": "run_ac7a997f-3618-4098-9be8-5711ab08e8b8",
+        "session_id": "session_1792389282986_q0v3701",
+        "status": "succeeded",
+        "owner_pid": 7261,
+        "error": null
+      },
+      {
+        "run_id": "subagent_run_mveubmr9_95atzr20",
+        "session_id": "session_1792389286075_s0c4vy1",
+        "status": "succeeded",
+        "owner_pid": 7261,
+        "error": null
+      },
+      {
+        "run_id": "run_62a6a316-74c2-4a97-b3c6-6050f819b652",
+        "session_id": "session_1792389282986_q0v3701",
+        "status": "succeeded",
+        "owner_pid": 9711,
+        "error": null
+      },
+      {
+        "run_id": "subagent_run_mveuddf4_bnys6590",
+        "session_id": "session_1792389286075_s0c4vy1",
+        "status": "succeeded",
+        "owner_pid": 9711,
+        "error": null
+      }
+    ],
+    "sessionProjectRootsEqual": true,
+    "ownedProcesses": [
+      7261,
+      9711
+    ],
+    "ownedServicePort": 59859,
+    "bothProcessesExited": true,
+    "portReleased": true
+  }
+}

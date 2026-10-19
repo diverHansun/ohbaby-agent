@@ -1,0 +1,4302 @@
+{
+  "anthropicPrefixProbe": {
+    "passed": true,
+    "httpRequests": 4,
+    "normalization": [
+      "Remove cache_control only",
+      "Represent plain string content as equivalent single text block"
+    ],
+    "checks": [
+      {
+        "fromInputCount": 1,
+        "toInputCount": 3,
+        "sequence": 4,
+        "exactPrefix": false,
+        "prefixAfterCacheControlAndTextWrapperNormalization": true,
+        "previousSemanticSha256": "05866bbee4c41783126e2a98ab66ef8823ccfaa4e2d269ccc4524db61a91d4b6",
+        "nextMatchingPrefixSemanticSha256": "05866bbee4c41783126e2a98ab66ef8823ccfaa4e2d269ccc4524db61a91d4b6"
+      }
+    ]
+  },
+  "auditMethod": "Independent arithmetic against captured numeric provider usage and provider-normalized values; exact wire-prefix hashes; in-memory instruction markers only. No prompt, tool output, headers, or credential material.",
+  "totalHttpRequestsByProfile": {
+    "zenmux-claude-sonnet5-anthropic-context": 19,
+    "zenmux-deepseek-v41-chat": 15,
+    "zenmux-gpt56-luna-responses-context": 15
+  },
+  "runs": [
+    {
+      "profile": "zenmux-claude-sonnet5-anthropic-context",
+      "sourceEvidence": "zenmux-claude-sonnet5-anthropic-context-compaction-1792389157289.json",
+      "failure": {
+        "phase": "compaction",
+        "code": "ASSERTION_FAILED"
+      },
+      "recordedAt": "2026-10-19T05:52:37.289Z",
+      "httpRequests": 6,
+      "generationRequests": 5,
+      "allHttpSuccessful": true,
+      "contextWindowTokens": 1000000,
+      "contextWindowSource": "detected",
+      "contextUpdates": [
+        {
+          "contextWindowRatio": 0.011298,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 11298,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 1192,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        },
+        {
+          "contextWindowRatio": 0.013737,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 13737,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 1361,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        },
+        {
+          "contextWindowRatio": 0.018087,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 18087,
+          "composition": {
+            "system-prompt": 4803,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 3704,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        },
+        {
+          "contextWindowRatio": 0.018971,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 18971,
+          "composition": {
+            "system-prompt": 4894,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 3768,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        },
+        {
+          "contextWindowRatio": 0.019364,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 19364,
+          "composition": {
+            "system-prompt": 4894,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 3788,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        }
+      ],
+      "instructionChecks": {
+        "profile": "zenmux-claude-sonnet5-anthropic-context",
+        "checks": [
+          {
+            "layer": "provider",
+            "sequence": 1,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "wire",
+            "sequence": 2,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "provider",
+            "sequence": 2,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 6,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          }
+        ]
+      },
+      "persistedUsageMatchesAllMainRequests": true,
+      "trackerChecks": [
+        {
+          "label": "run-1",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-2",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-3",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "after-compaction",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        }
+      ],
+      "usageChecks": [
+        {
+          "sequence": 2,
+          "purpose": "session-title",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 1174,
+            "output_tokens": 14,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 1174
+            },
+            "inputTokens": 1174,
+            "outputTokens": 14,
+            "totalTokens": 1188
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 3,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 2,
+            "output_tokens": 151,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 15784
+          },
+          "normalized": {
+            "reasoningTokens": 37,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 15784,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 15786,
+            "outputTokens": 151,
+            "totalTokens": 15937
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 4,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 2,
+            "output_tokens": 103,
+            "cache_read_input_tokens": 15784,
+            "cache_creation_input_tokens": 327
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 15784,
+              "cacheWrite": 327,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 16113,
+            "outputTokens": 103,
+            "totalTokens": 16216
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 5,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 2,
+            "output_tokens": 30,
+            "cache_read_input_tokens": 16111,
+            "cache_creation_input_tokens": 3341
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 16111,
+              "cacheWrite": 3341,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 19454,
+            "outputTokens": 30,
+            "totalTokens": 19484
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 6,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 2,
+            "output_tokens": 26,
+            "cache_read_input_tokens": 19452,
+            "cache_creation_input_tokens": 248
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 19452,
+              "cacheWrite": 248,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 19702,
+            "outputTokens": 26,
+            "totalTokens": 19728
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        }
+      ],
+      "allRawNormalizedUsageChecksPass": true,
+      "mainCacheReadTokens": [
+        0,
+        15784,
+        16111,
+        19452
+      ],
+      "prefixChecks": [
+        {
+          "fromSequence": 3,
+          "toSequence": 4,
+          "afterCompaction": false,
+          "previousCount": 1,
+          "nextCount": 3,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": false
+        },
+        {
+          "fromSequence": 4,
+          "toSequence": 5,
+          "afterCompaction": false,
+          "previousCount": 3,
+          "nextCount": 5,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": false
+        },
+        {
+          "fromSequence": 5,
+          "toSequence": 6,
+          "afterCompaction": false,
+          "previousCount": 5,
+          "nextCount": 7,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": false
+        }
+      ],
+      "checkpoints": [
+        {
+          "label": "run-1",
+          "messageCount": 3,
+          "requests": 3,
+          "httpRequests": 4,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 31899,
+            "cacheReadShare": 0.4948117495846265,
+            "cacheReadTokens": 15784
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 1
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "run-2",
+          "messageCount": 5,
+          "requests": 4,
+          "httpRequests": 5,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 51353,
+            "cacheReadShare": 0.6210932175335423,
+            "cacheReadTokens": 31895
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 1
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "run-3",
+          "messageCount": 7,
+          "requests": 5,
+          "httpRequests": 6,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 71055,
+            "cacheReadShare": 0.7226373935683625,
+            "cacheReadTokens": 51347
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 1
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "compaction-result",
+          "result": {
+            "status": "not-needed",
+            "usageBefore": {
+              "contextLimit": 1000000,
+              "currentTokens": 19364,
+              "inputBudgetTokens": 994880,
+              "modelId": "anthropic/claude-sonnet-5",
+              "remainingTokens": 975516,
+              "reservedOutputTokens": 4096,
+              "safetyMarginTokens": 1024,
+              "usageRatio": 0.019463653908009006
+            },
+            "usageAfter": {
+              "contextLimit": 1000000,
+              "currentTokens": 19364,
+              "inputBudgetTokens": 994880,
+              "modelId": "anthropic/claude-sonnet-5",
+              "remainingTokens": 975516,
+              "reservedOutputTokens": 4096,
+              "safetyMarginTokens": 1024,
+              "usageRatio": 0.019463653908009006
+            },
+            "compression": {
+              "status": "skipped",
+              "reason": "too-short",
+              "originalTokens": 0,
+              "newTokens": 0,
+              "savedTokens": 0
+            },
+            "sessionId": "session_1792389142591_3hnvga1"
+          }
+        },
+        {
+          "label": "after-compaction",
+          "messageCount": 7,
+          "requests": 5,
+          "httpRequests": 6,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 71055,
+            "cacheReadShare": 0.7226373935683625,
+            "cacheReadTokens": 51347
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 1
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        }
+      ],
+      "reopenFingerprintEqual": null,
+      "reopenNativeStatesEqual": null,
+      "allProviderRequestsSettled": true,
+      "permissionErrors": [],
+      "completions": [
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        }
+      ]
+    },
+    {
+      "profile": "zenmux-claude-sonnet5-anthropic-context",
+      "sourceEvidence": "zenmux-claude-sonnet5-anthropic-context-compaction-1792389307701.json",
+      "failure": null,
+      "recordedAt": "2026-10-19T05:55:07.701Z",
+      "httpRequests": 9,
+      "generationRequests": 8,
+      "allHttpSuccessful": true,
+      "contextWindowTokens": 1000000,
+      "contextWindowSource": "detected",
+      "contextUpdates": [
+        {
+          "contextWindowRatio": 0.021271,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 21271,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 11165,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        },
+        {
+          "contextWindowRatio": 0.025472,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 25472,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 11333,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        },
+        {
+          "contextWindowRatio": 0.056324,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 56324,
+          "composition": {
+            "system-prompt": 4803,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 33630,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        },
+        {
+          "contextWindowRatio": 0.058327,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 58327,
+          "composition": {
+            "system-prompt": 4894,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 33684,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        },
+        {
+          "contextWindowRatio": 0.014824,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 14824,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 73,
+            "summarized-conversation": 817,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        },
+        {
+          "contextWindowRatio": 0.014978,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 14978,
+          "composition": {
+            "system-prompt": 4803,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 102,
+            "summarized-conversation": 817,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        },
+        {
+          "contextWindowRatio": 0.011232,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 11232,
+          "composition": {
+            "system-prompt": 4894,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 142,
+            "summarized-conversation": 817,
+            "subagent-exchanges": 0
+          },
+          "modelId": "anthropic/claude-sonnet-5"
+        }
+      ],
+      "instructionChecks": {
+        "profile": "zenmux-claude-sonnet5-anthropic-context",
+        "checks": [
+          {
+            "layer": "provider",
+            "sequence": 1,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "wire",
+            "sequence": 2,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "provider",
+            "sequence": 2,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 6,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 6,
+            "purpose": "context-summary",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 7,
+            "purpose": "context-summary",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 7,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 8,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 8,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 9,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          }
+        ],
+        "controlledReadChecks": [
+          {
+            "toolName": "read",
+            "pathMatches": true,
+            "optionalKeys": []
+          }
+        ]
+      },
+      "persistedUsageMatchesAllMainRequests": true,
+      "trackerChecks": [
+        {
+          "label": "run-1",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-2",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-3",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "after-compaction",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-4",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-5",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "new-backend-only"
+        }
+      ],
+      "usageChecks": [
+        {
+          "sequence": 2,
+          "purpose": "session-title",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 1174,
+            "output_tokens": 14,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 1174
+            },
+            "inputTokens": 1174,
+            "outputTokens": 14,
+            "totalTokens": 1188
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 3,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 2,
+            "output_tokens": 174,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 29284
+          },
+          "normalized": {
+            "reasoningTokens": 60,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 29284,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 29286,
+            "outputTokens": 174,
+            "totalTokens": 29460
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 4,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 2,
+            "output_tokens": 87,
+            "cache_read_input_tokens": 29284,
+            "cache_creation_input_tokens": 350
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 29284,
+              "cacheWrite": 350,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 29636,
+            "outputTokens": 87,
+            "totalTokens": 29723
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 5,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 2,
+            "output_tokens": 17,
+            "cache_read_input_tokens": 29634,
+            "cache_creation_input_tokens": 30325
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 29634,
+              "cacheWrite": 30325,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 59961,
+            "outputTokens": 17,
+            "totalTokens": 59978
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 6,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 2,
+            "output_tokens": 23,
+            "cache_read_input_tokens": 59959,
+            "cache_creation_input_tokens": 235
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 59959,
+              "cacheWrite": 235,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 60196,
+            "outputTokens": 23,
+            "totalTokens": 60219
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 7,
+          "purpose": "context-summary",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 598,
+            "output_tokens": 1069,
+            "cache_read_input_tokens": 60194,
+            "cache_creation_input_tokens": 23
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 60194,
+              "cacheWrite": 23,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 598
+            },
+            "inputTokens": 60815,
+            "outputTokens": 1069,
+            "totalTokens": 61884
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 8,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 2,
+            "output_tokens": 9,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 15593
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 15593,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 15595,
+            "outputTokens": 9,
+            "totalTokens": 15604
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 9,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 2,
+            "output_tokens": 17,
+            "cache_read_input_tokens": 15593,
+            "cache_creation_input_tokens": 218
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 15593,
+              "cacheWrite": 218,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 2
+            },
+            "inputTokens": 15813,
+            "outputTokens": 17,
+            "totalTokens": 15830
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        }
+      ],
+      "allRawNormalizedUsageChecksPass": true,
+      "mainCacheReadTokens": [
+        0,
+        29284,
+        29634,
+        59959,
+        0,
+        15593
+      ],
+      "prefixChecks": [
+        {
+          "fromSequence": 3,
+          "toSequence": 4,
+          "afterCompaction": false,
+          "previousCount": 1,
+          "nextCount": 3,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": false
+        },
+        {
+          "fromSequence": 4,
+          "toSequence": 5,
+          "afterCompaction": false,
+          "previousCount": 3,
+          "nextCount": 5,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": false
+        },
+        {
+          "fromSequence": 5,
+          "toSequence": 6,
+          "afterCompaction": false,
+          "previousCount": 5,
+          "nextCount": 7,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": false
+        },
+        {
+          "fromSequence": 6,
+          "toSequence": 8,
+          "afterCompaction": true,
+          "previousCount": 7,
+          "nextCount": 5,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": false
+        },
+        {
+          "fromSequence": 8,
+          "toSequence": 9,
+          "afterCompaction": false,
+          "previousCount": 5,
+          "nextCount": 7,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": false
+        }
+      ],
+      "checkpoints": [
+        {
+          "label": "run-1",
+          "messageCount": 3,
+          "requests": 3,
+          "httpRequests": 4,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 58922,
+            "cacheReadShare": 0.49699602864804315,
+            "cacheReadTokens": 29284
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 1
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "run-2",
+          "messageCount": 5,
+          "requests": 4,
+          "httpRequests": 5,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 118883,
+            "cacheReadShare": 0.49559651085521056,
+            "cacheReadTokens": 58918
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 1
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "run-3",
+          "messageCount": 7,
+          "requests": 5,
+          "httpRequests": 6,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 179079,
+            "cacheReadShare": 0.6638243456798396,
+            "cacheReadTokens": 118877
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 1
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "compaction-result",
+          "result": {
+            "status": "compacted",
+            "usageBefore": {
+              "contextLimit": 1000000,
+              "currentTokens": 59286,
+              "inputBudgetTokens": 994880,
+              "modelId": "anthropic/claude-sonnet-5",
+              "remainingTokens": 935594,
+              "reservedOutputTokens": 4096,
+              "safetyMarginTokens": 1024,
+              "usageRatio": 0.059591106465101316
+            },
+            "usageAfter": {
+              "contextLimit": 1000000,
+              "currentTokens": 14824,
+              "inputBudgetTokens": 994880,
+              "modelId": "anthropic/claude-sonnet-5",
+              "remainingTokens": 980056,
+              "reservedOutputTokens": 4096,
+              "safetyMarginTokens": 1024,
+              "usageRatio": 0.014900289482148601
+            },
+            "compression": {
+              "status": "compressed",
+              "originalTokens": 33792,
+              "newTokens": 790,
+              "savedTokens": 33002,
+              "summaryMessageId": "fff11d4b-8010-453f-a803-dec49a4295e4",
+              "requests": [
+                {
+                  "compactionId": "643ac884-3eaf-4383-9276-7bef47fa6e27",
+                  "messageId": "fff11d4b-8010-453f-a803-dec49a4295e4",
+                  "attempt": 1,
+                  "requestId": "29c51ee0-7b9f-4e57-a477-a6306e5b2098",
+                  "purpose": "context-summary",
+                  "startedAt": 1792389287057,
+                  "outcome": "success",
+                  "firstTextAt": 1792389289101,
+                  "usage": {
+                    "reasoningTokens": 0,
+                    "inputBreakdown": {
+                      "cacheRead": 60194,
+                      "cacheWrite": 23,
+                      "observed": {
+                        "cacheRead": true,
+                        "cacheWrite": true
+                      },
+                      "uncached": 598
+                    },
+                    "inputTokens": 60815,
+                    "outputTokens": 1069,
+                    "totalTokens": 61884
+                  },
+                  "endedAt": 1792389302704
+                }
+              ],
+              "omittedParts": 0
+            },
+            "omittedParts": 0,
+            "sessionId": "session_1792389269281_nyy8t71"
+          }
+        },
+        {
+          "label": "after-compaction",
+          "messageCount": 8,
+          "requests": 6,
+          "httpRequests": 7,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 179079,
+            "cacheReadShare": 0.6638243456798396,
+            "cacheReadTokens": 118877
+          },
+          "persistedContext": {
+            "summaryParts": 1,
+            "summaryCharacters": 3147,
+            "retiredParts": 7,
+            "retiredNativeParts": 1,
+            "activeNativeParts": 0
+          },
+          "toolCalls": []
+        },
+        {
+          "label": "run-4",
+          "messageCount": 10,
+          "requests": 7,
+          "httpRequests": 8,
+          "answer": {
+            "project": false,
+            "release": false,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 194674,
+            "cacheReadShare": 0.6106465167408077,
+            "cacheReadTokens": 118877
+          },
+          "persistedContext": {
+            "summaryParts": 1,
+            "summaryCharacters": 3147,
+            "retiredParts": 7,
+            "retiredNativeParts": 1,
+            "activeNativeParts": 0
+          },
+          "toolCalls": []
+        },
+        {
+          "label": "run-5",
+          "messageCount": 10,
+          "requests": 8,
+          "httpRequests": 9,
+          "answer": {
+            "project": true,
+            "release": false,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 15813,
+            "cacheReadShare": 0.9860873964459622,
+            "cacheReadTokens": 15593
+          },
+          "persistedContext": {
+            "summaryParts": 1,
+            "summaryCharacters": 3147,
+            "retiredParts": 7,
+            "retiredNativeParts": 1,
+            "activeNativeParts": 0
+          },
+          "toolCalls": []
+        }
+      ],
+      "reopenFingerprintEqual": true,
+      "reopenNativeStatesEqual": true,
+      "allProviderRequestsSettled": true,
+      "permissionErrors": [],
+      "completions": [
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        }
+      ]
+    },
+    {
+      "profile": "zenmux-deepseek-v41-chat",
+      "sourceEvidence": "zenmux-deepseek-v41-chat-compaction-1792389153544.json",
+      "failure": {
+        "phase": "compaction",
+        "code": "ASSERTION_FAILED"
+      },
+      "recordedAt": "2026-10-19T05:52:33.544Z",
+      "httpRequests": 6,
+      "generationRequests": 5,
+      "allHttpSuccessful": true,
+      "contextWindowTokens": 1000000,
+      "contextWindowSource": "detected",
+      "contextUpdates": [
+        {
+          "contextWindowRatio": 0.011298,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 11298,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 1192,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        },
+        {
+          "contextWindowRatio": 0.010956,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 10956,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 1355,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        },
+        {
+          "contextWindowRatio": 0.013126,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 13126,
+          "composition": {
+            "system-prompt": 4803,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 3823,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        },
+        {
+          "contextWindowRatio": 0.013205,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 13205,
+          "composition": {
+            "system-prompt": 4894,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 3941,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        },
+        {
+          "contextWindowRatio": 0.013205,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 13205,
+          "composition": {
+            "system-prompt": 4894,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 3978,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        }
+      ],
+      "instructionChecks": {
+        "profile": "zenmux-deepseek-v41-chat",
+        "checks": [
+          {
+            "layer": "provider",
+            "sequence": 1,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "wire",
+            "sequence": 2,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "provider",
+            "sequence": 2,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 6,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          }
+        ]
+      },
+      "persistedUsageMatchesAllMainRequests": true,
+      "trackerChecks": [
+        {
+          "label": "run-1",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-2",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-3",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "after-compaction",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        }
+      ],
+      "usageChecks": [
+        {
+          "sequence": 2,
+          "purpose": "session-title",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 808,
+            "prompt_tokens": 802,
+            "completion_tokens": 6,
+            "prompt_cache_hit_tokens": 0,
+            "prompt_cache_miss_tokens": 802,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "normalized": {
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 802
+            },
+            "inputTokens": 802,
+            "outputTokens": 6,
+            "totalTokens": 808
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 3,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 10387,
+            "prompt_tokens": 10303,
+            "completion_tokens": 84,
+            "prompt_cache_hit_tokens": 0,
+            "prompt_cache_miss_tokens": 10303,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 10303
+            },
+            "inputTokens": 10303,
+            "outputTokens": 84,
+            "totalTokens": 10387
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 4,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 10703,
+            "prompt_tokens": 10517,
+            "completion_tokens": 186,
+            "prompt_cache_hit_tokens": 10368,
+            "prompt_cache_miss_tokens": 149,
+            "prompt_tokens_details": {
+              "cached_tokens": 10368
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 61,
+            "inputBreakdown": {
+              "cacheRead": 10368,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 149
+            },
+            "inputTokens": 10517,
+            "outputTokens": 186,
+            "totalTokens": 10703
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 5,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 12979,
+            "prompt_tokens": 12908,
+            "completion_tokens": 71,
+            "prompt_cache_hit_tokens": 10624,
+            "prompt_cache_miss_tokens": 2284,
+            "prompt_tokens_details": {
+              "cached_tokens": 10624
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 9,
+            "inputBreakdown": {
+              "cacheRead": 10624,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 2284
+            },
+            "inputTokens": 12908,
+            "outputTokens": 71,
+            "totalTokens": 12979
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 6,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 13169,
+            "prompt_tokens": 13134,
+            "completion_tokens": 35,
+            "prompt_cache_hit_tokens": 12928,
+            "prompt_cache_miss_tokens": 206,
+            "prompt_tokens_details": {
+              "cached_tokens": 12928
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 12928,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 206
+            },
+            "inputTokens": 13134,
+            "outputTokens": 35,
+            "totalTokens": 13169
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        }
+      ],
+      "allRawNormalizedUsageChecksPass": true,
+      "mainCacheReadTokens": [
+        0,
+        10368,
+        10624,
+        12928
+      ],
+      "prefixChecks": [
+        {
+          "fromSequence": 3,
+          "toSequence": 4,
+          "afterCompaction": false,
+          "previousCount": 2,
+          "nextCount": 4,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        },
+        {
+          "fromSequence": 4,
+          "toSequence": 5,
+          "afterCompaction": false,
+          "previousCount": 4,
+          "nextCount": 6,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        },
+        {
+          "fromSequence": 5,
+          "toSequence": 6,
+          "afterCompaction": false,
+          "previousCount": 6,
+          "nextCount": 8,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        }
+      ],
+      "checkpoints": [
+        {
+          "label": "run-1",
+          "messageCount": 3,
+          "requests": 3,
+          "httpRequests": 4,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 20820,
+            "cacheReadShare": 0.4979827089337176,
+            "cacheReadTokens": 10368
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 1
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "run-2",
+          "messageCount": 5,
+          "requests": 4,
+          "httpRequests": 5,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 33728,
+            "cacheReadShare": 0.6223908918406073,
+            "cacheReadTokens": 20992
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 2
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "run-3",
+          "messageCount": 7,
+          "requests": 5,
+          "httpRequests": 6,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 46862,
+            "cacheReadShare": 0.7238274081345226,
+            "cacheReadTokens": 33920
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 2
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "compaction-result",
+          "result": {
+            "status": "not-needed",
+            "usageBefore": {
+              "contextLimit": 1000000,
+              "currentTokens": 13205,
+              "inputBudgetTokens": 994880,
+              "modelId": "deepseek/deepseek-v4.1-flash",
+              "remainingTokens": 981675,
+              "reservedOutputTokens": 4096,
+              "safetyMarginTokens": 1024,
+              "usageRatio": 0.013272957542618206
+            },
+            "usageAfter": {
+              "contextLimit": 1000000,
+              "currentTokens": 13205,
+              "inputBudgetTokens": 994880,
+              "modelId": "deepseek/deepseek-v4.1-flash",
+              "remainingTokens": 981675,
+              "reservedOutputTokens": 4096,
+              "safetyMarginTokens": 1024,
+              "usageRatio": 0.013272957542618206
+            },
+            "compression": {
+              "status": "skipped",
+              "reason": "too-short",
+              "originalTokens": 0,
+              "newTokens": 0,
+              "savedTokens": 0
+            },
+            "sessionId": "session_1792389142570_3yrgsa1"
+          }
+        },
+        {
+          "label": "after-compaction",
+          "messageCount": 7,
+          "requests": 5,
+          "httpRequests": 6,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 46862,
+            "cacheReadShare": 0.7238274081345226,
+            "cacheReadTokens": 33920
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 2
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        }
+      ],
+      "reopenFingerprintEqual": null,
+      "reopenNativeStatesEqual": null,
+      "allProviderRequestsSettled": true,
+      "permissionErrors": [],
+      "completions": [
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        }
+      ]
+    },
+    {
+      "profile": "zenmux-deepseek-v41-chat",
+      "sourceEvidence": "zenmux-deepseek-v41-chat-compaction-1792389296483.json",
+      "failure": null,
+      "recordedAt": "2026-10-19T05:54:56.483Z",
+      "httpRequests": 9,
+      "generationRequests": 8,
+      "allHttpSuccessful": true,
+      "contextWindowTokens": 1000000,
+      "contextWindowSource": "detected",
+      "contextUpdates": [
+        {
+          "contextWindowRatio": 0.021271,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 21271,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 11165,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        },
+        {
+          "contextWindowRatio": 0.020594,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 20594,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 11399,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        },
+        {
+          "contextWindowRatio": 0.041277,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 41277,
+          "composition": {
+            "system-prompt": 4803,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 33802,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        },
+        {
+          "contextWindowRatio": 0.041116,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 41116,
+          "composition": {
+            "system-prompt": 4894,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 33967,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        },
+        {
+          "contextWindowRatio": 0.010015,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 10015,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 209,
+            "summarized-conversation": 509,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        },
+        {
+          "contextWindowRatio": 0.01012,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 10120,
+          "composition": {
+            "system-prompt": 4803,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 239,
+            "summarized-conversation": 509,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        },
+        {
+          "contextWindowRatio": 0.011102,
+          "contextWindowTokens": 1000000,
+          "currentTokens": 11102,
+          "composition": {
+            "system-prompt": 4894,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 320,
+            "summarized-conversation": 509,
+            "subagent-exchanges": 0
+          },
+          "modelId": "deepseek/deepseek-v4.1-flash"
+        }
+      ],
+      "instructionChecks": {
+        "profile": "zenmux-deepseek-v41-chat",
+        "checks": [
+          {
+            "layer": "provider",
+            "sequence": 1,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "wire",
+            "sequence": 2,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "provider",
+            "sequence": 2,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 6,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 6,
+            "purpose": "context-summary",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 7,
+            "purpose": "context-summary",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 7,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 8,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 8,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 9,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          }
+        ],
+        "controlledReadChecks": [
+          {
+            "toolName": "read",
+            "pathMatches": true,
+            "optionalKeys": []
+          }
+        ]
+      },
+      "persistedUsageMatchesAllMainRequests": true,
+      "trackerChecks": [
+        {
+          "label": "run-1",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-2",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-3",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "after-compaction",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-4",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-5",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "new-backend-only"
+        }
+      ],
+      "usageChecks": [
+        {
+          "sequence": 2,
+          "purpose": "session-title",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 809,
+            "prompt_tokens": 801,
+            "completion_tokens": 8,
+            "prompt_cache_hit_tokens": 128,
+            "prompt_cache_miss_tokens": 673,
+            "prompt_tokens_details": {
+              "cached_tokens": 128
+            }
+          },
+          "normalized": {
+            "inputBreakdown": {
+              "cacheRead": 128,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 673
+            },
+            "inputTokens": 801,
+            "outputTokens": 8,
+            "totalTokens": 809
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 3,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 19626,
+            "prompt_tokens": 19481,
+            "completion_tokens": 145,
+            "prompt_cache_hit_tokens": 8960,
+            "prompt_cache_miss_tokens": 10521,
+            "prompt_tokens_details": {
+              "cached_tokens": 8960
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 62,
+            "inputBreakdown": {
+              "cacheRead": 8960,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 10521
+            },
+            "inputTokens": 19481,
+            "outputTokens": 145,
+            "totalTokens": 19626
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 4,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 19928,
+            "prompt_tokens": 19755,
+            "completion_tokens": 173,
+            "prompt_cache_hit_tokens": 19584,
+            "prompt_cache_miss_tokens": 171,
+            "prompt_tokens_details": {
+              "cached_tokens": 19584
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 44,
+            "inputBreakdown": {
+              "cacheRead": 19584,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 171
+            },
+            "inputTokens": 19755,
+            "outputTokens": 173,
+            "totalTokens": 19928
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 5,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 40595,
+            "prompt_tokens": 40492,
+            "completion_tokens": 103,
+            "prompt_cache_hit_tokens": 19840,
+            "prompt_cache_miss_tokens": 20652,
+            "prompt_tokens_details": {
+              "cached_tokens": 19840
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 36,
+            "inputBreakdown": {
+              "cacheRead": 19840,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 20652
+            },
+            "inputTokens": 40492,
+            "outputTokens": 103,
+            "totalTokens": 40595
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 6,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 40789,
+            "prompt_tokens": 40749,
+            "completion_tokens": 40,
+            "prompt_cache_hit_tokens": 40576,
+            "prompt_cache_miss_tokens": 173,
+            "prompt_tokens_details": {
+              "cached_tokens": 40576
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 40576,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 173
+            },
+            "inputTokens": 40749,
+            "outputTokens": 40,
+            "totalTokens": 40789
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 7,
+          "purpose": "context-summary",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 41862,
+            "prompt_tokens": 41182,
+            "completion_tokens": 680,
+            "prompt_cache_hit_tokens": 40704,
+            "prompt_cache_miss_tokens": 478,
+            "prompt_tokens_details": {
+              "cached_tokens": 40704
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 213,
+            "inputBreakdown": {
+              "cacheRead": 40704,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 478
+            },
+            "inputTokens": 41182,
+            "outputTokens": 680,
+            "totalTokens": 41862
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 8,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 10084,
+            "prompt_tokens": 10038,
+            "completion_tokens": 46,
+            "prompt_cache_hit_tokens": 8832,
+            "prompt_cache_miss_tokens": 1206,
+            "prompt_tokens_details": {
+              "cached_tokens": 8832
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 11,
+            "inputBreakdown": {
+              "cacheRead": 8832,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 1206
+            },
+            "inputTokens": 10038,
+            "outputTokens": 46,
+            "totalTokens": 10084
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 9,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "total_tokens": 10266,
+            "prompt_tokens": 10229,
+            "completion_tokens": 37,
+            "prompt_cache_hit_tokens": 9984,
+            "prompt_cache_miss_tokens": 245,
+            "prompt_tokens_details": {
+              "cached_tokens": 9984
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 9984,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": false
+              },
+              "uncached": 245
+            },
+            "inputTokens": 10229,
+            "outputTokens": 37,
+            "totalTokens": 10266
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        }
+      ],
+      "allRawNormalizedUsageChecksPass": true,
+      "mainCacheReadTokens": [
+        8960,
+        19584,
+        19840,
+        40576,
+        8832,
+        9984
+      ],
+      "prefixChecks": [
+        {
+          "fromSequence": 3,
+          "toSequence": 4,
+          "afterCompaction": false,
+          "previousCount": 2,
+          "nextCount": 4,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        },
+        {
+          "fromSequence": 4,
+          "toSequence": 5,
+          "afterCompaction": false,
+          "previousCount": 4,
+          "nextCount": 6,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        },
+        {
+          "fromSequence": 5,
+          "toSequence": 6,
+          "afterCompaction": false,
+          "previousCount": 6,
+          "nextCount": 8,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        },
+        {
+          "fromSequence": 6,
+          "toSequence": 8,
+          "afterCompaction": true,
+          "previousCount": 8,
+          "nextCount": 6,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": false
+        },
+        {
+          "fromSequence": 8,
+          "toSequence": 9,
+          "afterCompaction": false,
+          "previousCount": 6,
+          "nextCount": 8,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        }
+      ],
+      "checkpoints": [
+        {
+          "label": "run-1",
+          "messageCount": 3,
+          "requests": 3,
+          "httpRequests": 4,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 39236,
+            "cacheReadShare": 0.7274951575084107,
+            "cacheReadTokens": 28544
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 2
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "run-2",
+          "messageCount": 5,
+          "requests": 4,
+          "httpRequests": 5,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 79728,
+            "cacheReadShare": 0.6068633353401566,
+            "cacheReadTokens": 48384
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 3
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "run-3",
+          "messageCount": 7,
+          "requests": 5,
+          "httpRequests": 6,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 120477,
+            "cacheReadShare": 0.7383982004863999,
+            "cacheReadTokens": 88960
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 3
+          },
+          "toolCalls": [
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "compaction-result",
+          "result": {
+            "status": "compacted",
+            "usageBefore": {
+              "contextLimit": 1000000,
+              "currentTokens": 40973,
+              "inputBudgetTokens": 994880,
+              "modelId": "deepseek/deepseek-v4.1-flash",
+              "remainingTokens": 953907,
+              "reservedOutputTokens": 4096,
+              "safetyMarginTokens": 1024,
+              "usageRatio": 0.041183861370215506
+            },
+            "usageAfter": {
+              "contextLimit": 1000000,
+              "currentTokens": 10015,
+              "inputBudgetTokens": 994880,
+              "modelId": "deepseek/deepseek-v4.1-flash",
+              "remainingTokens": 984865,
+              "reservedOutputTokens": 4096,
+              "safetyMarginTokens": 1024,
+              "usageRatio": 0.01006654068832422
+            },
+            "compression": {
+              "status": "compressed",
+              "originalTokens": 33965,
+              "newTokens": 484,
+              "savedTokens": 33481,
+              "summaryMessageId": "d7620d17-7fbd-418b-ad24-4d47fd418abd",
+              "requests": [
+                {
+                  "compactionId": "feed8bb5-2e50-4b1c-9381-615aab9209d2",
+                  "messageId": "d7620d17-7fbd-418b-ad24-4d47fd418abd",
+                  "attempt": 1,
+                  "requestId": "66ff33ca-6b0d-4c98-a123-c5c637404e2f",
+                  "purpose": "context-summary",
+                  "startedAt": 1792389285925,
+                  "outcome": "success",
+                  "firstTextAt": 1792389289449,
+                  "usage": {
+                    "reasoningTokens": 213,
+                    "inputBreakdown": {
+                      "cacheRead": 40704,
+                      "cacheWrite": 0,
+                      "observed": {
+                        "cacheRead": true,
+                        "cacheWrite": false
+                      },
+                      "uncached": 478
+                    },
+                    "inputTokens": 41182,
+                    "outputTokens": 680,
+                    "totalTokens": 41862
+                  },
+                  "endedAt": 1792389291607
+                }
+              ],
+              "omittedParts": 0
+            },
+            "omittedParts": 0,
+            "sessionId": "session_1792389269275_9kh9ak1"
+          }
+        },
+        {
+          "label": "after-compaction",
+          "messageCount": 8,
+          "requests": 6,
+          "httpRequests": 7,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 120477,
+            "cacheReadShare": 0.7383982004863999,
+            "cacheReadTokens": 88960
+          },
+          "persistedContext": {
+            "summaryParts": 1,
+            "summaryCharacters": 1931,
+            "retiredParts": 10,
+            "retiredNativeParts": 2,
+            "activeNativeParts": 1
+          },
+          "toolCalls": []
+        },
+        {
+          "label": "run-4",
+          "messageCount": 10,
+          "requests": 7,
+          "httpRequests": 8,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 130515,
+            "cacheReadShare": 0.7492778607822855,
+            "cacheReadTokens": 97792
+          },
+          "persistedContext": {
+            "summaryParts": 1,
+            "summaryCharacters": 1931,
+            "retiredParts": 10,
+            "retiredNativeParts": 2,
+            "activeNativeParts": 2
+          },
+          "toolCalls": []
+        },
+        {
+          "label": "run-5",
+          "messageCount": 10,
+          "requests": 8,
+          "httpRequests": 9,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 10229,
+            "cacheReadShare": 0.976048489588425,
+            "cacheReadTokens": 9984
+          },
+          "persistedContext": {
+            "summaryParts": 1,
+            "summaryCharacters": 1931,
+            "retiredParts": 10,
+            "retiredNativeParts": 2,
+            "activeNativeParts": 2
+          },
+          "toolCalls": []
+        }
+      ],
+      "reopenFingerprintEqual": true,
+      "reopenNativeStatesEqual": true,
+      "allProviderRequestsSettled": true,
+      "permissionErrors": [],
+      "completions": [
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        }
+      ]
+    },
+    {
+      "profile": "zenmux-gpt56-luna-responses-context",
+      "sourceEvidence": "zenmux-gpt56-luna-responses-context-compaction-1792389153193.json",
+      "failure": {
+        "phase": "first-read",
+        "code": "ASSERTION_FAILED"
+      },
+      "recordedAt": "2026-10-19T05:52:33.193Z",
+      "httpRequests": 5,
+      "generationRequests": 4,
+      "allHttpSuccessful": true,
+      "contextWindowTokens": 1050000,
+      "contextWindowSource": "detected",
+      "contextUpdates": [
+        {
+          "contextWindowRatio": 0.01076,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 11298,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 1192,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        },
+        {
+          "contextWindowRatio": 0.009635238095238096,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 10117,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 1329,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        },
+        {
+          "contextWindowRatio": 0.009149523809523809,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 9607,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 1514,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        }
+      ],
+      "instructionChecks": {
+        "profile": "zenmux-gpt56-luna-responses-context",
+        "checks": [
+          {
+            "layer": "provider",
+            "sequence": 1,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "wire",
+            "sequence": 2,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "provider",
+            "sequence": 2,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          }
+        ]
+      },
+      "persistedUsageMatchesAllMainRequests": true,
+      "trackerChecks": [
+        {
+          "label": "run-1",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        }
+      ],
+      "usageChecks": [
+        {
+          "sequence": 2,
+          "purpose": "session-title",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 798,
+            "output_tokens": 12,
+            "total_tokens": 810,
+            "input_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 798
+            },
+            "inputTokens": 798,
+            "outputTokens": 12,
+            "totalTokens": 810
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 3,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 8703,
+            "output_tokens": 53,
+            "total_tokens": 8756,
+            "input_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 8700
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 32,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 8700,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 8703,
+            "outputTokens": 53,
+            "totalTokens": 8756
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 4,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 8798,
+            "output_tokens": 81,
+            "total_tokens": 8879,
+            "input_tokens_details": {
+              "cached_tokens": 8700,
+              "cache_write_tokens": 95
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 16,
+            "inputBreakdown": {
+              "cacheRead": 8700,
+              "cacheWrite": 95,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 8798,
+            "outputTokens": 81,
+            "totalTokens": 8879
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 5,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 8998,
+            "output_tokens": 16,
+            "total_tokens": 9014,
+            "input_tokens_details": {
+              "cached_tokens": 8795,
+              "cache_write_tokens": 200
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 8795,
+              "cacheWrite": 200,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 8998,
+            "outputTokens": 16,
+            "totalTokens": 9014
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        }
+      ],
+      "allRawNormalizedUsageChecksPass": true,
+      "mainCacheReadTokens": [
+        0,
+        8700,
+        8795
+      ],
+      "prefixChecks": [
+        {
+          "fromSequence": 3,
+          "toSequence": 4,
+          "afterCompaction": false,
+          "previousCount": 1,
+          "nextCount": 4,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        },
+        {
+          "fromSequence": 4,
+          "toSequence": 5,
+          "afterCompaction": false,
+          "previousCount": 4,
+          "nextCount": 7,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        }
+      ],
+      "checkpoints": [
+        {
+          "label": "run-1",
+          "messageCount": 4,
+          "requests": 4,
+          "httpRequests": 5,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 26499,
+            "cacheReadShare": 0.6602135929657723,
+            "cacheReadTokens": 17495
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 3
+          },
+          "toolCalls": [
+            {
+              "name": "skill",
+              "status": "failed"
+            },
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        }
+      ],
+      "reopenFingerprintEqual": null,
+      "reopenNativeStatesEqual": null,
+      "allProviderRequestsSettled": true,
+      "permissionErrors": [],
+      "completions": [
+        {
+          "status": "succeeded"
+        }
+      ]
+    },
+    {
+      "profile": "zenmux-gpt56-luna-responses-context",
+      "sourceEvidence": "zenmux-gpt56-luna-responses-context-compaction-1792389299296.json",
+      "failure": null,
+      "recordedAt": "2026-10-19T05:54:59.296Z",
+      "httpRequests": 10,
+      "generationRequests": 9,
+      "allHttpSuccessful": true,
+      "contextWindowTokens": 1050000,
+      "contextWindowSource": "detected",
+      "contextUpdates": [
+        {
+          "contextWindowRatio": 0.020258095238095238,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 21271,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 11165,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        },
+        {
+          "contextWindowRatio": 0.018762857142857144,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 19701,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 11303,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        },
+        {
+          "contextWindowRatio": 0.018095238095238095,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 19000,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 11488,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        },
+        {
+          "contextWindowRatio": 0.03603047619047619,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 37832,
+          "composition": {
+            "system-prompt": 4803,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 33735,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        },
+        {
+          "contextWindowRatio": 0.03660095238095238,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 38431,
+          "composition": {
+            "system-prompt": 4894,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 33802,
+            "summarized-conversation": 0,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        },
+        {
+          "contextWindowRatio": 0.008797142857142858,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 9237,
+          "composition": {
+            "system-prompt": 4712,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 86,
+            "summarized-conversation": 329,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        },
+        {
+          "contextWindowRatio": 0.008892380952380952,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 9337,
+          "composition": {
+            "system-prompt": 4803,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 115,
+            "summarized-conversation": 329,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        },
+        {
+          "contextWindowRatio": 0.010254285714285714,
+          "contextWindowTokens": 1050000,
+          "currentTokens": 10767,
+          "composition": {
+            "system-prompt": 4894,
+            "builtin-tools": 3858,
+            "mcp": 139,
+            "skills": 1405,
+            "conversation": 164,
+            "summarized-conversation": 329,
+            "subagent-exchanges": 0
+          },
+          "modelId": "openai/gpt-5.6-luna"
+        }
+      ],
+      "instructionChecks": {
+        "profile": "zenmux-gpt56-luna-responses-context",
+        "checks": [
+          {
+            "layer": "provider",
+            "sequence": 1,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "wire",
+            "sequence": 2,
+            "purpose": "session-title",
+            "primary": false,
+            "project": false
+          },
+          {
+            "layer": "provider",
+            "sequence": 2,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 3,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 4,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 5,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 6,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 6,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 7,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 7,
+            "purpose": "context-summary",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 8,
+            "purpose": "context-summary",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 8,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 9,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "provider",
+            "sequence": 9,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          },
+          {
+            "layer": "wire",
+            "sequence": 10,
+            "purpose": "agent-step",
+            "primary": true,
+            "project": true
+          }
+        ],
+        "controlledReadChecks": [
+          {
+            "toolName": "read",
+            "pathMatches": true,
+            "optionalKeys": [
+              "limit"
+            ]
+          }
+        ]
+      },
+      "persistedUsageMatchesAllMainRequests": true,
+      "trackerChecks": [
+        {
+          "label": "run-1",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-2",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-3",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "after-compaction",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-4",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "current-backend-main-steps"
+        },
+        {
+          "label": "run-5",
+          "inputMatchesMainStepTotal": true,
+          "cacheReadMatchesMainStepTotal": true,
+          "ratioMatches": true,
+          "scope": "new-backend-only"
+        }
+      ],
+      "usageChecks": [
+        {
+          "sequence": 2,
+          "purpose": "session-title",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 800,
+            "output_tokens": 12,
+            "total_tokens": 812,
+            "input_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 0
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 800
+            },
+            "inputTokens": 800,
+            "outputTokens": 12,
+            "totalTokens": 812
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 3,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 17887,
+            "output_tokens": 54,
+            "total_tokens": 17941,
+            "input_tokens_details": {
+              "cached_tokens": 7465,
+              "cache_write_tokens": 10419
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 33,
+            "inputBreakdown": {
+              "cacheRead": 7465,
+              "cacheWrite": 10419,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 17887,
+            "outputTokens": 54,
+            "totalTokens": 17941
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 4,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 17983,
+            "output_tokens": 83,
+            "total_tokens": 18066,
+            "input_tokens_details": {
+              "cached_tokens": 17884,
+              "cache_write_tokens": 96
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 16,
+            "inputBreakdown": {
+              "cacheRead": 17884,
+              "cacheWrite": 96,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 17983,
+            "outputTokens": 83,
+            "totalTokens": 18066
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 5,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 18187,
+            "output_tokens": 16,
+            "total_tokens": 18203,
+            "input_tokens_details": {
+              "cached_tokens": 17980,
+              "cache_write_tokens": 204
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 17980,
+              "cacheWrite": 204,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 18187,
+            "outputTokens": 16,
+            "totalTokens": 18203
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 6,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 38767,
+            "output_tokens": 26,
+            "total_tokens": 38793,
+            "input_tokens_details": {
+              "cached_tokens": 18184,
+              "cache_write_tokens": 20580
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 12,
+            "inputBreakdown": {
+              "cacheRead": 18184,
+              "cacheWrite": 20580,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 38767,
+            "outputTokens": 26,
+            "totalTokens": 38793
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 7,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 38947,
+            "output_tokens": 16,
+            "total_tokens": 38963,
+            "input_tokens_details": {
+              "cached_tokens": 38764,
+              "cache_write_tokens": 180
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 38764,
+              "cacheWrite": 180,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 38947,
+            "outputTokens": 16,
+            "totalTokens": 38963
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 8,
+          "purpose": "context-summary",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 39350,
+            "output_tokens": 346,
+            "total_tokens": 39696,
+            "input_tokens_details": {
+              "cached_tokens": 38944,
+              "cache_write_tokens": 403
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 62,
+            "inputBreakdown": {
+              "cacheRead": 38944,
+              "cacheWrite": 403,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 39350,
+            "outputTokens": 346,
+            "totalTokens": 39696
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 9,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 8152,
+            "output_tokens": 18,
+            "total_tokens": 8170,
+            "input_tokens_details": {
+              "cached_tokens": 7465,
+              "cache_write_tokens": 684
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 9,
+            "inputBreakdown": {
+              "cacheRead": 7465,
+              "cacheWrite": 684,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 8152,
+            "outputTokens": 18,
+            "totalTokens": 8170
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        },
+        {
+          "sequence": 10,
+          "purpose": "agent-step",
+          "httpStatus": 200,
+          "raw": {
+            "input_tokens": 8315,
+            "output_tokens": 11,
+            "total_tokens": 8326,
+            "input_tokens_details": {
+              "cached_tokens": 8149,
+              "cache_write_tokens": 163
+            }
+          },
+          "normalized": {
+            "reasoningTokens": 0,
+            "inputBreakdown": {
+              "cacheRead": 8149,
+              "cacheWrite": 163,
+              "observed": {
+                "cacheRead": true,
+                "cacheWrite": true
+              },
+              "uncached": 3
+            },
+            "inputTokens": 8315,
+            "outputTokens": 11,
+            "totalTokens": 8326
+          },
+          "checks": {
+            "inputTokens": true,
+            "outputTokens": true,
+            "totalTokens": true,
+            "cacheRead": true,
+            "cacheWrite": true,
+            "uncached": true
+          }
+        }
+      ],
+      "allRawNormalizedUsageChecksPass": true,
+      "mainCacheReadTokens": [
+        7465,
+        17884,
+        17980,
+        18184,
+        38764,
+        7465,
+        8149
+      ],
+      "prefixChecks": [
+        {
+          "fromSequence": 3,
+          "toSequence": 4,
+          "afterCompaction": false,
+          "previousCount": 1,
+          "nextCount": 4,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        },
+        {
+          "fromSequence": 4,
+          "toSequence": 5,
+          "afterCompaction": false,
+          "previousCount": 4,
+          "nextCount": 7,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        },
+        {
+          "fromSequence": 5,
+          "toSequence": 6,
+          "afterCompaction": false,
+          "previousCount": 7,
+          "nextCount": 9,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        },
+        {
+          "fromSequence": 6,
+          "toSequence": 7,
+          "afterCompaction": false,
+          "previousCount": 9,
+          "nextCount": 12,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        },
+        {
+          "fromSequence": 7,
+          "toSequence": 9,
+          "afterCompaction": true,
+          "previousCount": 12,
+          "nextCount": 6,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": false
+        },
+        {
+          "fromSequence": 9,
+          "toSequence": 10,
+          "afterCompaction": false,
+          "previousCount": 6,
+          "nextCount": 9,
+          "systemUnchanged": true,
+          "toolsUnchanged": true,
+          "previousInputIsExactPrefix": true
+        }
+      ],
+      "checkpoints": [
+        {
+          "label": "run-1",
+          "messageCount": 4,
+          "requests": 4,
+          "httpRequests": 5,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 54057,
+            "cacheReadShare": 0.8015428159165325,
+            "cacheReadTokens": 43329
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 3
+          },
+          "toolCalls": [
+            {
+              "name": "skill",
+              "status": "failed"
+            },
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "run-2",
+          "messageCount": 6,
+          "requests": 5,
+          "httpRequests": 6,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 92824,
+            "cacheReadShare": 0.6626842195983798,
+            "cacheReadTokens": 61513
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 4
+          },
+          "toolCalls": [
+            {
+              "name": "skill",
+              "status": "failed"
+            },
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "run-3",
+          "messageCount": 8,
+          "requests": 6,
+          "httpRequests": 7,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 131771,
+            "cacheReadShare": 0.7609944524971352,
+            "cacheReadTokens": 100277
+          },
+          "persistedContext": {
+            "summaryParts": 0,
+            "summaryCharacters": 0,
+            "retiredParts": 0,
+            "retiredNativeParts": 0,
+            "activeNativeParts": 5
+          },
+          "toolCalls": [
+            {
+              "name": "skill",
+              "status": "failed"
+            },
+            {
+              "name": "read",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "compaction-result",
+          "result": {
+            "status": "compacted",
+            "usageBefore": {
+              "contextLimit": 1050000,
+              "currentTokens": 38705,
+              "inputBudgetTokens": 1044880,
+              "modelId": "openai/gpt-5.6-luna",
+              "remainingTokens": 1006175,
+              "reservedOutputTokens": 4096,
+              "safetyMarginTokens": 1024,
+              "usageRatio": 0.037042531199754994
+            },
+            "usageAfter": {
+              "contextLimit": 1050000,
+              "currentTokens": 9237,
+              "inputBudgetTokens": 1044880,
+              "modelId": "openai/gpt-5.6-luna",
+              "remainingTokens": 1035643,
+              "reservedOutputTokens": 4096,
+              "safetyMarginTokens": 1024,
+              "usageRatio": 0.008840249598039966
+            },
+            "compression": {
+              "status": "compressed",
+              "originalTokens": 33893,
+              "newTokens": 306,
+              "savedTokens": 33587,
+              "summaryMessageId": "10b4e2d7-a193-4789-b146-eee1064b40b7",
+              "requests": [
+                {
+                  "compactionId": "9a90c830-c6d5-4cfa-b288-9d845e1b7090",
+                  "messageId": "10b4e2d7-a193-4789-b146-eee1064b40b7",
+                  "attempt": 1,
+                  "requestId": "5c889cca-dadf-4ca2-99bd-edc88ee036b9",
+                  "purpose": "context-summary",
+                  "startedAt": 1792389290833,
+                  "outcome": "success",
+                  "firstTextAt": 1792389294146,
+                  "usage": {
+                    "reasoningTokens": 62,
+                    "inputBreakdown": {
+                      "cacheRead": 38944,
+                      "cacheWrite": 403,
+                      "observed": {
+                        "cacheRead": true,
+                        "cacheWrite": true
+                      },
+                      "uncached": 3
+                    },
+                    "inputTokens": 39350,
+                    "outputTokens": 346,
+                    "totalTokens": 39696
+                  },
+                  "endedAt": 1792389295498
+                }
+              ],
+              "omittedParts": 0
+            },
+            "omittedParts": 0,
+            "sessionId": "session_1792389269305_ct1o0h1"
+          }
+        },
+        {
+          "label": "after-compaction",
+          "messageCount": 9,
+          "requests": 7,
+          "httpRequests": 8,
+          "answer": {
+            "project": true,
+            "release": true,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 131771,
+            "cacheReadShare": 0.7609944524971352,
+            "cacheReadTokens": 100277
+          },
+          "persistedContext": {
+            "summaryParts": 1,
+            "summaryCharacters": 1214,
+            "retiredParts": 10,
+            "retiredNativeParts": 3,
+            "activeNativeParts": 2
+          },
+          "toolCalls": []
+        },
+        {
+          "label": "run-4",
+          "messageCount": 11,
+          "requests": 8,
+          "httpRequests": 9,
+          "answer": {
+            "project": false,
+            "release": false,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 139923,
+            "cacheReadShare": 0.7700092193563602,
+            "cacheReadTokens": 107742
+          },
+          "persistedContext": {
+            "summaryParts": 1,
+            "summaryCharacters": 1214,
+            "retiredParts": 10,
+            "retiredNativeParts": 3,
+            "activeNativeParts": 3
+          },
+          "toolCalls": []
+        },
+        {
+          "label": "run-5",
+          "messageCount": 11,
+          "requests": 9,
+          "httpRequests": 10,
+          "answer": {
+            "project": true,
+            "release": false,
+            "owner": true
+          },
+          "cache": {
+            "accountedInputTokens": 8315,
+            "cacheReadShare": 0.9800360793746242,
+            "cacheReadTokens": 8149
+          },
+          "persistedContext": {
+            "summaryParts": 1,
+            "summaryCharacters": 1214,
+            "retiredParts": 10,
+            "retiredNativeParts": 3,
+            "activeNativeParts": 4
+          },
+          "toolCalls": []
+        }
+      ],
+      "reopenFingerprintEqual": true,
+      "reopenNativeStatesEqual": true,
+      "allProviderRequestsSettled": true,
+      "permissionErrors": [],
+      "completions": [
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        },
+        {
+          "status": "succeeded"
+        }
+      ]
+    }
+  ]
+}
