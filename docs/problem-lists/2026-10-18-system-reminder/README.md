@@ -1,6 +1,6 @@
 # system-reminder 机制
 
-> 2026-10-19 开始分批实施，分支 `feat/system-reminder`，实施基线 `8a16f5e2`。当前规则见 00、02、04；历史评审见 [05](./05-review-records.md)，实施和验收进度见 [06](./06-implementation-acceptance.md)。
+> 2026-10-19 完成分批实施与验收，分支 `feat/system-reminder`，实施基线 `8a16f5e2`。当前规则见 00、02、04；历史评审见 [05](./05-review-records.md)，批次记录见 [06](./06-implementation-acceptance.md)，浏览器及三协议真实请求结果见 [07](./07-live-acceptance.md)。仅本地提交，未 merge、未 push。
 
 system-reminder 把服务已有的状态补给模型。有内容才提醒，不承担日志告警、权限授予或长期记忆职责。
 
@@ -16,6 +16,7 @@ system-reminder 把服务已有的状态补给模型。有内容才提醒，不�
 | [01](./01-problem-analysis-and-current-state.md) | 现状与源码依据 |
 | [02](./02-optimization-plan-and-change-scope.md) | 精简后的方案与改动面 |
 | [03](./03-reference-projects.md) | 六个参考项目与借鉴边界 |
-| [04](./04-test-and-acceptance.md) | 后续实施验收 |
+| [04](./04-test-and-acceptance.md) | 验收契约与场景 |
 | [05](./05-review-records.md) | 历史评审与本轮取舍 |
 | [06](./06-implementation-acceptance.md) | 分批实施、测试和审查记录 |
+| [07](./07-live-acceptance.md) | 全仓回归、浏览器、压缩与缓存真实验收 |
