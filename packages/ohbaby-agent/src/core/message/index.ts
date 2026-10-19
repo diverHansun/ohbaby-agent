@@ -6,9 +6,13 @@ export { createDatabaseMessageStore } from "./database-store.js";
 export { createInMemoryMessageStore } from "./store.js";
 export {
   getMessageOrigin,
+  getReminderAnchorId,
   isContextSummaryPart,
   isModelContextPart,
+  isSystemReminderMessage,
+  isSystemReminderPart,
   MODEL_CONTEXT_RUNTIME_KIND,
+  SYSTEM_REMINDER_KIND,
 } from "./origin.js";
 export { toModelMessages } from "./converter.js";
 export {

@@ -1,4 +1,4 @@
-import { getMessageOrigin } from "../message/origin.js";
+import { getMessageOrigin, getReminderAnchorId } from "../message/origin.js";
 import type { ModelOrigin } from "../../services/interface-providers/native-state.js";
 import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 import { serializeHistoryMessages } from "./serializer.js";
@@ -100,19 +100,28 @@ export interface ContextCutPoint {
   readonly keptMessages: readonly MessageWithParts[];
 }
 
-/** A persisted assistant owns its calls and results; synthetic inputs join their preceding group. */
+/**
+ * A persisted assistant owns its calls and results; synthetic inputs join their
+ * preceding group. Anchored reminders open the group of the assistant they anchor.
+ */
 export function historyGroups(
   history: readonly MessageWithParts[],
 ): readonly (readonly MessageWithParts[])[] {
   const groups: MessageWithParts[][] = [];
+  let reminderAnchor: string | undefined;
   for (const message of history) {
+    const anchor = getReminderAnchorId(message);
+    const joinsReminders =
+      message.info.role === "assistant" && message.info.id === reminderAnchor;
     if (
       groups.length === 0 ||
-      message.info.role === "assistant" ||
+      (anchor !== undefined && anchor !== reminderAnchor) ||
+      (message.info.role === "assistant" && !joinsReminders) ||
       (message.info.role === "user" && getMessageOrigin(message) === "user")
     )
       groups.push([]);
     groups[groups.length - 1].push(message);
+    reminderAnchor = anchor;
   }
   return groups;
 }

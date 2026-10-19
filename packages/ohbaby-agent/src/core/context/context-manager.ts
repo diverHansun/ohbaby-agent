@@ -67,9 +67,15 @@ import {
 import type { ModelMessage } from "../llm-client/index.js";
 import {
   isModelContextPart,
+  SYSTEM_REMINDER_KIND,
   type MessageWithParts,
   type Part,
 } from "../message/index.js";
+import {
+  renderReminderText,
+  type ReminderDraft,
+} from "../../services/reminder/index.js";
+import { arrangeReminderHistory } from "./reminder-history.js";
 
 export {
   decideCompactionRung,
@@ -429,14 +435,20 @@ export function createContextManager(
     readonly modelOrigin?: AssembledContext["modelOrigin"];
     readonly isSubagent: boolean;
     readonly rawHistory: readonly MessageWithParts[];
+    readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
     readonly sessionId: string;
     readonly contextScopeId?: string;
     readonly systemPrompt: string;
   }): AssembledContext {
-    const history = getActiveHistory(input.rawHistory);
+    const history = arrangeReminderHistory(
+      getActiveHistory(input.rawHistory),
+      input.activeReasoningByMessageId,
+      input.modelOrigin,
+    );
 
     return {
       systemPrompt: input.systemPrompt,
+      fullHistory: input.rawHistory,
       modelOrigin: input.modelOrigin,
       history,
       hasSummary: history.some(isSummaryMessage),
@@ -469,6 +481,7 @@ export function createContextManager(
     ]);
     return assembleFromRawHistory({
       modelOrigin: input.modelOrigin,
+      activeReasoningByMessageId: input.activeReasoningByMessageId,
       assembledAt: now(),
       contextScopeId: input.contextScopeId,
       rawHistory,
@@ -705,8 +718,13 @@ export function createContextManager(
       })
     ).filter((message) => sourceIds.has(message.info.id));
     if (
-      JSON.stringify(getActiveHistory(expectedMessages)) !==
-      JSON.stringify(sourceHistory)
+      JSON.stringify(
+        arrangeReminderHistory(
+          getActiveHistory(expectedMessages),
+          req.activeReasoningByMessageId,
+          req.assembled.modelOrigin,
+        ),
+      ) !== JSON.stringify(sourceHistory)
     )
       return {
         status: "failed",
@@ -1056,6 +1074,7 @@ export function createContextManager(
 
     return assembleFromRawHistory({
       modelOrigin: input.assembled.modelOrigin,
+      activeReasoningByMessageId: input.candidate.activeReasoningByMessageId,
       assembledAt: input.assembled.assembledAt,
       isSubagent: input.assembled.isSubagent,
       rawHistory: projectedHistory,
@@ -1130,6 +1149,7 @@ export function createContextManager(
     });
     const context = assembleFromRawHistory({
       modelOrigin: req.assembled.modelOrigin,
+      activeReasoningByMessageId: req.activeReasoningByMessageId,
       assembledAt: now(),
       contextScopeId: req.contextScopeId,
       isSubagent: req.isSubagent,
@@ -1464,13 +1484,102 @@ export function createContextManager(
     return mapOutcomeToCompactResult(outcome);
   }
 
+  async function collectReminders(
+    input: PrepareTurnInput,
+    context: AssembledContext,
+  ): Promise<readonly ReminderDraft[]> {
+    if (
+      input.reminderAnchorId === undefined ||
+      options.collectReminders === undefined
+    )
+      return [];
+    return options.collectReminders({
+      agentName: input.agentName,
+      contextScopeId: input.contextScopeId,
+      history: context.history.filter(
+        (message) =>
+          serializeHistoryMessages(
+            [message],
+            input.activeReasoningByMessageId,
+            input.modelOrigin,
+          ).length > 0,
+      ),
+      fullHistory: context.fullHistory ?? context.history,
+      protectedInputs: input.protectedInputs ?? [],
+      isSubagent: input.isSubagent ?? false,
+      sessionId: input.sessionId,
+    });
+  }
+
+  function reminderCandidate(
+    input: PrepareTurnInput,
+    drafts: readonly ReminderDraft[],
+  ): MessageWithParts | undefined {
+    if (input.reminderAnchorId === undefined || drafts.length === 0)
+      return undefined;
+    const id = randomUUID();
+    return {
+      info: {
+        id,
+        sessionId: input.sessionId,
+        contextScopeId: input.contextScopeId,
+        runId: input.runId,
+        agent: input.agentName ?? "default",
+        role: "user",
+        time: { created: now() },
+      },
+      parts: drafts.map((draft, orderIndex) => ({
+        id: `${id}:${String(orderIndex)}`,
+        messageId: id,
+        sessionId: input.sessionId,
+        contextScopeId: input.contextScopeId,
+        orderIndex,
+        type: "text",
+        synthetic: true,
+        metadata: {
+          kind: SYSTEM_REMINDER_KIND,
+          reminderType: draft.type,
+          key: draft.key,
+          anchorAssistantId: input.reminderAnchorId,
+        },
+        text: renderReminderText(draft.text),
+      })),
+    };
+  }
+
+  /** Persist the selected ordinary message's exact contents, without rendering again. */
+  async function persistReminders(candidate: MessageWithParts): Promise<void> {
+    const message = await options.messageManager.createMessage({
+      id: candidate.info.id,
+      sessionId: candidate.info.sessionId,
+      contextScopeId: candidate.info.contextScopeId,
+      runId: candidate.info.runId,
+      agent: candidate.info.agent ?? "default",
+      role: "user",
+    });
+    for (const part of candidate.parts) {
+      if (part.type !== "text") continue;
+      await options.messageManager.appendPart(message.id, {
+        type: "text",
+        synthetic: true,
+        metadata: part.metadata,
+        text: part.text,
+      });
+    }
+  }
+
   async function prepareTurnUnlocked(
-    input: PrepareTurnInput & { readonly inputIds?: readonly string[] },
+    input: PrepareTurnInput & {
+      readonly inputIds?: readonly string[];
+      readonly protectedTail?: readonly ModelMessage[];
+    },
   ): Promise<PreparedTurn> {
+    input.signal?.throwIfAborted();
     const startedAt = now();
     const isSubagent = input.isSubagent ?? false;
     const assembled = await assemble(input.sessionId, input.directory, {
       agentName: input.agentName,
+      activeReasoningByMessageId: input.activeReasoningByMessageId,
       modelOrigin: input.modelOrigin,
       contextScopeId: input.contextScopeId,
       projectRoot: input.projectRoot,
@@ -1478,10 +1587,32 @@ export function createContextManager(
       promptSnapshot: input.promptSnapshot,
       toolNames: input.toolNames,
     });
+    // Request tail order: current-run inputs, this anchor's reminders, directives.
+    const requestTail = (
+      candidate: MessageWithParts | undefined,
+    ): readonly ModelMessage[] | undefined => {
+      const tail = [
+        ...(input.protectedTail ?? []),
+        ...(candidate === undefined
+          ? []
+          : serializeHistoryMessages(
+              [candidate],
+              input.activeReasoningByMessageId,
+              input.modelOrigin,
+            )),
+        ...(input.tailDirectives ?? []),
+      ];
+      return tail.length === 0 ? undefined : tail;
+    };
+    let candidate = reminderCandidate(
+      input,
+      await collectReminders(input, assembled),
+    );
+    let tailDirectives = requestTail(candidate);
     const preparedBefore = measureContext({
       requestSettings: input.requestSettings,
       inputIds: input.inputIds,
-      tailDirectives: input.tailDirectives,
+      tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: assembled,
       isSubagent,
@@ -1492,7 +1623,7 @@ export function createContextManager(
     const outcome = await runCompaction({
       request: preparedBefore.request,
       reasoning: input.reasoning,
-      tailDirectives: input.tailDirectives,
+      tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       assembled,
       contextScopeId: input.contextScopeId,
@@ -1506,6 +1637,14 @@ export function createContextManager(
       usageBefore,
     });
     const finalContext = outcome.projectedContext;
+    if (finalContext !== assembled) {
+      // Compaction may have retired earlier state; re-check against the new history.
+      candidate = reminderCandidate(
+        input,
+        await collectReminders(input, finalContext),
+      );
+      tailDirectives = requestTail(candidate);
+    }
     const compaction =
       outcome.status === "not-needed"
         ? undefined
@@ -1513,7 +1652,7 @@ export function createContextManager(
     const finalMeasurement = measureContext({
       requestSettings: input.requestSettings,
       inputIds: input.inputIds,
-      tailDirectives: input.tailDirectives,
+      tailDirectives,
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       context: finalContext,
       isSubagent,
@@ -1527,11 +1666,32 @@ export function createContextManager(
         activeReasoningByMessageId: input.activeReasoningByMessageId,
         context: finalContext,
         request,
-        tailDirectives: input.tailDirectives,
+        tailDirectives,
         toolDefinitions: input.toolDefinitions,
       },
       options.tokenCounter,
     );
+    if (
+      input.protectedInputs !== undefined &&
+      input.inputIds?.length &&
+      compaction?.status !== "compacted" &&
+      usage.currentTokens > (usage.inputBudgetTokens ?? usage.contextLimit)
+    )
+      throw new Error(
+        "Current-run input batch exceeds the model input budget after context preparation",
+      );
+    const ready =
+      !input.signal?.aborted &&
+      compaction?.status !== "failed" &&
+      compaction?.status !== "inflated" &&
+      (!input.force || compaction?.status === "compacted");
+    if (ready && candidate !== undefined) {
+      if (!fitsRequest(usage, request.settings?.maxTokens))
+        throw new Error(
+          "Final reminder request exceeds the model input budget",
+        );
+      await persistReminders(candidate);
+    }
 
     options.bus.publish(ContextEvent.TurnPrepared, {
       ...scopedEventIdentity(input.sessionId, input.contextScopeId),
@@ -1615,9 +1775,7 @@ export function createContextManager(
       inputIds,
       // Reuse the measured request-tail pipeline, without making durable inputs
       // part of compressible history or replacing their message/ledger identity.
-      tailDirectives: protectedProjection.length
-        ? [...protectedProjection, ...(input.tailDirectives ?? [])]
-        : input.tailDirectives,
+      protectedTail: protectedProjection,
       reasoning:
         input.reasoning === undefined
           ? undefined
@@ -1631,15 +1789,6 @@ export function createContextManager(
       () => prepareTurnUnlocked(snapshot),
     );
     if (input.protectedInputs === undefined) return prepared;
-    if (
-      inputIds.length &&
-      prepared.compaction?.status !== "compacted" &&
-      prepared.usage.currentTokens >
-        (prepared.usage.inputBudgetTokens ?? prepared.usage.contextLimit)
-    )
-      throw new Error(
-        "Current-run input batch exceeds the model input budget after context preparation",
-      );
     return {
       ...prepared,
       request: deepFreeze({ ...prepared.request, inputIds }),

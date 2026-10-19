@@ -493,3 +493,93 @@ describe("native occupancy provenance", () => {
     },
   );
 });
+
+describe("reminder anchor projection", () => {
+  function reminder(anchor: string): MessageWithParts {
+    const base = textMessage(
+      "reminder",
+      "user",
+      "<system-reminder>state</system-reminder>",
+    );
+    return {
+      ...base,
+      parts: base.parts.map((part) => ({
+        ...part,
+        synthetic: true,
+        metadata: {
+          kind: "system-reminder:v1",
+          reminderType: "environment",
+          key: "state",
+          anchorAssistantId: anchor,
+        },
+      })),
+    };
+  }
+  it("hides native-only owners after a source switch and retains visible failure owners", async () => {
+    const { arrangeReminderHistory } = await import("./reminder-history.js");
+    const owner = nativeMessage();
+    const nativeOnly = {
+      ...owner,
+      parts: [{ ...owner.parts[0], modelState: state() }],
+    } as MessageWithParts;
+    expect(
+      arrangeReminderHistory([reminder("m1"), nativeOnly], undefined, {
+        ...origin,
+        model: "other",
+      }).map((m) => m.info.id),
+    ).not.toContain("reminder");
+    expect(
+      arrangeReminderHistory(
+        [reminder("m1"), nativeOnly],
+        undefined,
+        origin,
+      ).map((m) => m.info.id),
+    ).toEqual(["reminder", "m1"]);
+    const base = textMessage("failed", "assistant", "partial response");
+    if (base.info.role !== "assistant") throw new Error("fixture");
+    const failed: MessageWithParts = {
+      ...base,
+      info: {
+        ...base.info,
+        finish: "error",
+        error: { name: "MessageOutputLengthError" },
+      },
+    };
+    expect(
+      arrangeReminderHistory([failed, reminder("failed")]).map(
+        (m) => m.info.id,
+      ),
+    ).toEqual(["reminder", "failed"]);
+    const active = reminder("failed");
+    const inactive = {
+      ...active,
+      parts: active.parts.map((part) => ({ ...part, time: { compacted: 5 } })),
+    };
+    expect(
+      arrangeReminderHistory([failed, inactive]).map((m) => m.info.id),
+    ).toEqual(["failed"]);
+  });
+  it("keeps all reminders with their owner at a compaction boundary", async () => {
+    const { arrangeReminderHistory } = await import("./reminder-history.js");
+    const owner = textMessage("owner", "assistant", "answer");
+    const first = reminder("owner");
+    const second = { ...first, info: { ...first.info, id: "second-reminder" } };
+    const arranged = arrangeReminderHistory([
+      textMessage("old", "user", "x".repeat(1000)),
+      owner,
+      reminder("owner"),
+      second,
+    ]);
+    const cut = findCutPoint({
+      history: arranged,
+      keepRecentTokens: 1,
+      tokenCounter: counter,
+    });
+    expect(cut.firstKeptIndex).toBe(1);
+    expect(cut.keptMessages.map((message) => message.info.id)).toEqual([
+      "reminder",
+      "second-reminder",
+      "owner",
+    ]);
+  });
+});

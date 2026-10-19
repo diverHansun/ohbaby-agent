@@ -1,6 +1,6 @@
 # system-reminder 机制
 
-> 规划稿，2026-10-19 按 KISS 原则修订；代码基线 `e527285e`。本轮只调整文档，未实施。历史评审见 [05](./05-review-records.md)。
+> 2026-10-19 开始分批实施，分支 `feat/system-reminder`，实施基线 `8a16f5e2`。当前规则见 00、02、04；历史评审见 [05](./05-review-records.md)，实施和验收进度见 [06](./06-implementation-acceptance.md)。
 
 system-reminder 把服务已有的状态补给模型。有内容才提醒，不承担日志告警、权限授予或长期记忆职责。
 
@@ -8,7 +8,7 @@ system-reminder 把服务已有的状态补给模型。有内容才提醒，不�
 
 不新增请求冻结材料表、提醒专用准入协议、工具结果发送证明、通用预算降级框架或每提供者超时。
 
-先完成 [子代理提示词与说明统一加载](../2026-10-18-subagent-system-prompt/)，再实施本议题。项目／可选全局说明属于稳定系统提示词，不注册提醒器。
+[子代理提示词与说明统一加载](../2026-10-18-subagent-system-prompt/) 已完成前置验收。项目／可选全局说明属于稳定系统提示词，不注册提醒器。
 
 | 文档 | 内容 |
 | --- | --- |
@@ -18,3 +18,4 @@ system-reminder 把服务已有的状态补给模型。有内容才提醒，不�
 | [03](./03-reference-projects.md) | 六个参考项目与借鉴边界 |
 | [04](./04-test-and-acceptance.md) | 后续实施验收 |
 | [05](./05-review-records.md) | 历史评审与本轮取舍 |
+| [06](./06-implementation-acceptance.md) | 分批实施、测试和审查记录 |

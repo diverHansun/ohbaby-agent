@@ -119,10 +119,12 @@ function projectMessage(
   const content = Array.isArray(message.content)
     ? message.content.map((part: object) =>
         Object.fromEntries(
-          Object.entries(part).map(([key, value]) => [
-            key === "cacheControl" ? "cache_control" : key,
-            value,
-          ]),
+          Object.entries(part)
+            .filter(([key]) => key !== "source")
+            .map(([key, value]) => [
+              key === "cacheControl" ? "cache_control" : key,
+              value,
+            ]),
         ),
       )
     : message.content;

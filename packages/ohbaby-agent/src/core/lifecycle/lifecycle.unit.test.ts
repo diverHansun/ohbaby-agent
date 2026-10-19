@@ -1947,7 +1947,7 @@ describe("Lifecycle.run", () => {
       {
         content: "think ",
         delta: "think ",
-        messageId: "message_1",
+        messageId: prepareTurn.mock.calls[0][0].reminderAnchorId,
         runId: "run-real",
         partId: expect.any(String) as string,
         sessionId: "session_test",
@@ -1958,7 +1958,7 @@ describe("Lifecycle.run", () => {
       {
         content: "think about README",
         delta: "about README",
-        messageId: "message_1",
+        messageId: prepareTurn.mock.calls[0][0].reminderAnchorId,
         runId: "run-real",
         partId: expect.any(String) as string,
         sessionId: "session_test",
@@ -1968,7 +1968,7 @@ describe("Lifecycle.run", () => {
       },
       {
         content: "think about README",
-        messageId: "message_1",
+        messageId: prepareTurn.mock.calls[0][0].reminderAnchorId,
         runId: "run-real",
         partId: expect.any(String) as string,
         sessionId: "session_test",
@@ -2767,6 +2767,17 @@ describe("Lifecycle.run", () => {
     expect(requests[1]?.tools).toBe(forcedSnapshotTools);
     expect(requests[0]?.messages).toEqual(initialMessages);
     expect(requests[1]?.messages).toEqual(forcedMessages);
+    const anchors = prepareTurn.mock.calls.map(
+      ([input]) => input.reminderAnchorId,
+    );
+    expect(anchors[0]).toEqual(expect.any(String));
+    expect(anchors[1]).toEqual(expect.any(String));
+    expect(anchors[0]).not.toBe(anchors[1]);
+    expect(
+      (await messageManager.listBySession("session_test"))
+        .filter((message) => message.info.role === "assistant")
+        .map((message) => message.info.id),
+    ).toEqual(anchors);
     expect(updateCalibrationFactor.mock.calls).toEqual([
       ["session_test", 500, 222],
     ]);
@@ -5151,18 +5162,20 @@ describe("same-run durable input continuation", () => {
     const requests: InterfaceProviderRequest[] = [];
     const beforeStep = vi.fn().mockResolvedValue([]);
     let attempts = 0;
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const prepareTurn = vi.fn<ContextManager["prepareTurn"]>(() =>
+      Promise.resolve(preparedTurn([{ role: "user", content: "fresh" }])),
+    );
     const lifecycle = new Lifecycle({
-      contextManager: createContextManagerMock(() =>
-        Promise.resolve(preparedTurn([{ role: "user", content: "fresh" }])),
-      ),
+      contextManager: createContextManagerMock(prepareTurn),
       llmClient: createSequentialFakeLLMClient(
         [[{ textDelta: "Final", finishReason: "stop" }]],
         requests,
       ),
-      messageManager: createMessageManager({
-        bus: createBus(),
-        store: createInMemoryMessageStore(),
-      }),
+      messageManager,
       toolScheduler: {
         executeBatch: vi.fn(),
       } as unknown as ToolSchedulerInstance,
@@ -5189,5 +5202,106 @@ describe("same-run durable input continuation", () => {
     expect(result.terminalReason).toBe("max_steps_finalized");
     expect(beforeStep).toHaveBeenCalledTimes(2);
     expect(requests).toHaveLength(1);
+    const anchors = prepareTurn.mock.calls.map(
+      ([input]) => input.reminderAnchorId,
+    );
+    expect(anchors).toHaveLength(2);
+    expect(anchors.every((anchor) => typeof anchor === "string")).toBe(true);
+    expect(anchors[0]).not.toBe(anchors[1]);
+    const finalOwner = (await messageManager.listBySession("session")).find(
+      (message) =>
+        message.info.role === "assistant" && message.info.finish === "stop",
+    );
+    expect(finalOwner?.info.id).toBe(anchors[1]);
   });
 });
+
+it.each([false, true])(
+  "persists one anchored reminder for HTTP retries and sends nothing on save failure (saveFailure=%s)",
+  async (saveFailure) => {
+    const { createContextManager } =
+      await import("../context/context-manager.js");
+    const { createReminderCollector } =
+      await import("../../services/reminder/index.js");
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const contextManager = createContextManager({
+      bus: createBus(),
+      messageManager,
+      collectReminders: createReminderCollector([
+        {
+          type: "environment",
+          kind: "snapshot",
+          audience: "both",
+          collect: (): { key: string; text: string } => ({
+            key: "env",
+            text: "ENV",
+          }),
+        },
+      ]),
+      systemPromptProvider: { build: () => Promise.resolve("HOST") },
+      tokenCounter: {
+        estimateTokens: (text) => text.length,
+        getLimit: () => 128000,
+      },
+      llmClient: {
+        generateSummary: () => {
+          throw new Error("unexpected summary");
+        },
+      },
+    });
+    const prepare = vi.spyOn(contextManager, "prepareTurn");
+    if (saveFailure)
+      vi.spyOn(messageManager, "appendPart").mockRejectedValueOnce(
+        new Error("disk full"),
+      );
+    const requests: InterfaceProviderRequest[] = [];
+    const lifecycle = new Lifecycle({
+      contextManager,
+      messageManager,
+      llmClient: createFailThenSucceedLLMClient({
+        requests,
+        error: Object.assign(new Error("busy"), {
+          status: 503,
+          headers: { "retry-after-ms": "0" },
+        }),
+        events: [{ textDelta: "ANSWER", finishReason: "stop" }],
+      }),
+      toolScheduler: {
+        executeBatch: vi.fn(),
+      } as unknown as ToolSchedulerInstance,
+    });
+    const run = consumeLifecycleEvents(
+      lifecycle.run({
+        directory: "/repo",
+        modelId: "fake-model",
+        sessionId: "s",
+      }),
+    );
+    const result = saveFailure ? undefined : (await run).result;
+    if (saveFailure) await expect(run).rejects.toThrow("disk full");
+    const history = await messageManager.listBySession("s");
+    expect(prepare).toHaveBeenCalledTimes(1);
+    if (saveFailure) {
+      expect(requests).toEqual([]);
+      expect(history.some((message) => message.info.role === "assistant")).toBe(
+        false,
+      );
+    } else {
+      expect(result?.success).toBe(true);
+      expect(requests).toHaveLength(2);
+      expect(requests[0].messages).toBe(requests[1].messages);
+      const reminder = history
+        .flatMap((message) => message.parts)
+        .filter((part) => part.metadata?.kind === "system-reminder:v1");
+      expect(reminder).toHaveLength(1);
+      const owner = history.find(
+        (message) => message.info.role === "assistant",
+      );
+      expect(owner?.info.id).toBe(prepare.mock.calls[0][0].reminderAnchorId);
+      expect(reminder[0].metadata?.anchorAssistantId).toBe(owner?.info.id);
+    }
+  },
+);

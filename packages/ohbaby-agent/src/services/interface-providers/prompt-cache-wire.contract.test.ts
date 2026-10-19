@@ -1187,3 +1187,148 @@ describe("prompt-cache wire contract", () => {
     }
   });
 });
+
+it("preserves tool batches and separate reminder blocks on all wires without crossing the summary cache boundary", async () => {
+  const messages: ModelMessage[] = [
+    { role: "system", content: "HOST" },
+    {
+      role: "assistant",
+      content: null,
+      toolCalls: [
+        { callId: "a", name: "lookup", argumentsJson: "{}" },
+        { callId: "b", name: "lookup", argumentsJson: "{}" },
+      ],
+    },
+    { role: "tool", callId: "a", content: "TOOL-A" },
+    { role: "tool", callId: "b", content: "TOOL-B" },
+    { role: "user", content: "STEER" },
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "<system-reminder>ENV</system-reminder>",
+          source: "system-reminder",
+        },
+        {
+          type: "text",
+          text: "<system-reminder>MODE</system-reminder>",
+          source: "system-reminder",
+        },
+      ],
+    },
+    { role: "user", content: "STEP-LIMIT" },
+  ];
+  const anthropic = createAnthropicProvider({
+    id: "anthropic",
+    apiKey: "test-key",
+    baseUrl: "https://api.anthropic.com",
+  });
+  const stream = vi
+    .spyOn(anthropic.client.messages, "stream")
+    .mockReturnValue(emptyStream<RawMessageStreamEvent>());
+  const normal = {
+    model: "claude",
+    messages,
+    maxTokens: 128,
+    promptCache: {
+      strategy: "anthropic-explicit-last-block" as const,
+      reason: "test",
+    },
+  };
+  await anthropic.streamResponse(normal);
+  const wire = structuredClone(stream.mock.calls[0][0]);
+  await anthropic.streamResponse({
+    ...normal,
+    messages: [...messages, { role: "user", content: "SUMMARIZE" }],
+    promptCache: { ...normal.promptCache, messageBoundary: 6 },
+  });
+  const summaryWire = stream.mock.calls[1][0];
+  expect(summaryWire.messages.slice(0, -1)).toEqual(wire.messages);
+  expect(summaryWire.messages.at(-1)).toEqual({
+    role: "user",
+    content: "SUMMARIZE",
+  });
+  expect(wire.messages).toHaveLength(2);
+  expect(wire.messages[1]).toEqual({
+    role: "user",
+    content: [
+      { type: "tool_result", tool_use_id: "a", content: "TOOL-A" },
+      { type: "tool_result", tool_use_id: "b", content: "TOOL-B" },
+      { type: "text", text: "STEER" },
+      { type: "text", text: "<system-reminder>ENV</system-reminder>" },
+      { type: "text", text: "<system-reminder>MODE</system-reminder>" },
+      {
+        type: "text",
+        text: "STEP-LIMIT",
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+  });
+  await anthropic.streamResponse(normal);
+  expect(stream.mock.calls[2][0]).toEqual(wire);
+
+  const responses = createOpenAIResponsesProvider({
+    id: "openai",
+    apiKey: "test-key",
+    baseUrl: "https://api.openai.com/v1",
+  });
+  const responseCreate = vi
+    .spyOn(responses.client.responses, "create")
+    .mockResolvedValue(emptyStream() as never);
+  await responses.streamResponse({
+    ...normal,
+    model: "gpt",
+    promptCache: observeOnly(),
+  });
+  const responsesWire = responseCreate.mock.calls[0][0];
+  expect(responsesWire.instructions).toBe("HOST");
+  expect(responsesWire.input).toEqual([
+    { type: "function_call", call_id: "a", name: "lookup", arguments: "{}" },
+    { type: "function_call", call_id: "b", name: "lookup", arguments: "{}" },
+    { type: "function_call_output", call_id: "a", output: "TOOL-A" },
+    { type: "function_call_output", call_id: "b", output: "TOOL-B" },
+    { role: "user", content: "STEER" },
+    {
+      role: "user",
+      content: [
+        { type: "input_text", text: "<system-reminder>ENV</system-reminder>" },
+        { type: "input_text", text: "<system-reminder>MODE</system-reminder>" },
+      ],
+    },
+    { role: "user", content: "STEP-LIMIT" },
+  ]);
+  const chat = createOpenAICompatibleProvider({
+    id: "openai",
+    apiKey: "test-key",
+    baseUrl: "https://api.openai.com/v1",
+  });
+  const chatCreate = vi
+    .spyOn(chat.client.chat.completions, "create")
+    .mockResolvedValue(emptyStream<ChatCompletionChunk>() as never);
+  await chat.streamResponse({
+    ...normal,
+    model: "gpt",
+    promptCache: observeOnly(),
+  });
+  expect(chatCreate.mock.calls[0][0].messages.slice(2)).toEqual([
+    { role: "tool", tool_call_id: "a", content: "TOOL-A" },
+    { role: "tool", tool_call_id: "b", content: "TOOL-B" },
+    { role: "user", content: "STEER" },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "<system-reminder>ENV</system-reminder>" },
+        { type: "text", text: "<system-reminder>MODE</system-reminder>" },
+      ],
+    },
+    { role: "user", content: "STEP-LIMIT" },
+  ]);
+  for (const payload of [
+    wire,
+    summaryWire,
+    responsesWire,
+    chatCreate.mock.calls[0][0],
+  ])
+    expect(JSON.stringify(payload)).not.toContain('"source"');
+});

@@ -7,6 +7,7 @@ import type { ModelOrigin } from "../../services/interface-providers/native-stat
 import type { BusInstance } from "../../bus/index.js";
 import type { ModelMessage, ModelToolDefinition } from "../llm-client/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
+import type { ReminderCollector } from "../../services/reminder/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
 import type { CompactionThresholds } from "./constants.js";
 import type { Logger } from "../../observability/logger.js";
@@ -70,6 +71,8 @@ export interface ContextLLMClient {
 }
 
 export interface AssembledContext {
+  /** Shared ledger-filtered records, including retired parts for reminder event facts. */
+  readonly fullHistory?: readonly MessageWithParts[];
   readonly modelOrigin?: ModelOrigin;
   readonly systemPrompt: string;
   readonly history: readonly MessageWithParts[];
@@ -81,6 +84,7 @@ export interface AssembledContext {
 }
 
 export interface ContextAssemblyOptions {
+  readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
   readonly modelOrigin?: ModelOrigin;
   readonly agentName?: string;
   readonly contextScopeId?: string;
@@ -209,6 +213,8 @@ export interface PrepareTurnInput {
   readonly onCompactionStarted?: () => void;
   /** Ephemeral model-only directives measured and sent exactly once, but never persisted. */
   readonly tailDirectives?: readonly ModelMessage[];
+  /** Pre-allocated id of this step's assistant; enables reminders anchored to it. */
+  readonly reminderAnchorId?: string;
   readonly toolNames: readonly string[];
   readonly toolDefinitions?: readonly ToolDefinition[];
   readonly tools: readonly ModelToolDefinition[] | undefined;
@@ -264,6 +270,8 @@ export interface ContextManagerOptions {
   readonly bus: BusInstance;
   readonly messageManager: MessageManager;
   readonly systemPromptProvider: SystemPromptProvider;
+  /** Collects host reminders for requests that carry a reminder anchor. */
+  readonly collectReminders?: ReminderCollector;
   readonly tokenCounter: TokenCounter;
   readonly llmClient: ContextLLMClient;
   readonly now?: () => number;

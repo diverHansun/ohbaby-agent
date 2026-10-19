@@ -265,7 +265,20 @@ describe("Responses request projection", () => {
   const messages = [
     { role: "developer", content: "unsupported" },
     { role: "function", name: "legacy", content: "x" },
-    { role: "user", content: [{ type: "text", text: "text" }] },
+    {
+      role: "user",
+      content: [
+        {
+          type: "image_url",
+          image_url: { url: "https://example.invalid/image.png" },
+        },
+      ],
+    },
+    { role: "user", content: [{ type: "text", text: 4 }] },
+    {
+      role: "user",
+      content: [{ type: "text", text: "text", metadata: { forged: true } }],
+    },
     { role: "assistant", content: "x", audio: null },
     { role: "assistant", content: "x", refusal: null },
     {

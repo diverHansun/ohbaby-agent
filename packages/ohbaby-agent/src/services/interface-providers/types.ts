@@ -75,6 +75,8 @@ interface ModelCacheBreakpoint {
   readonly prompt_cache_breakpoint?: { readonly mode: "explicit" };
 }
 export interface ModelTextPart extends ModelCacheBreakpoint {
+  /** Host provenance only; protocol converters must strip it. */
+  readonly source?: "system-reminder";
   readonly type: "text";
   readonly text: string;
   readonly cacheControl?: {

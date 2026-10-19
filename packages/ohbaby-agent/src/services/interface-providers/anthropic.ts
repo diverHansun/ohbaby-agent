@@ -196,6 +196,23 @@ function convertMessages(
   const anthropicMessages: MessageParam[] = [];
   let pendingToolResults: ToolResultBlockParam[] = [];
 
+  const appendUserText = (content: string | TextBlockParam[]): void => {
+    const previous = anthropicMessages.at(-1);
+    if (previous?.role !== "user") {
+      anthropicMessages.push({ role: "user", content });
+      return;
+    }
+    const previousBlocks =
+      typeof previous.content === "string"
+        ? [{ type: "text" as const, text: previous.content }]
+        : previous.content;
+    const blocks =
+      typeof content === "string"
+        ? [{ type: "text" as const, text: content }]
+        : content;
+    previous.content = [...previousBlocks, ...blocks];
+  };
+
   const flushToolResults = (): void => {
     if (pendingToolResults.length === 0) {
       return;
@@ -239,10 +256,7 @@ function convertMessages(
       }
       case "user": {
         flushToolResults();
-        anthropicMessages.push({
-          role: "user",
-          content: normalizeTextBlocks(rawMessage.content, "user message"),
-        });
+        appendUserText(normalizeTextBlocks(rawMessage.content, "user message"));
         break;
       }
       case "assistant": {

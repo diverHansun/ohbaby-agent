@@ -45,6 +45,8 @@ Anthropic 在整批 tool_result 后追加并列 text block；真实用户文本�
 
 ## 5. 失败、内容大小与缓存
 
+MCP 菜单提醒最多列 20 个完整工具名，注明省略数量；其余仍可用 select_tools(query) 搜索，工具加载上限保持不变。
+
 各服务在生成时采用固定的小内容格式；可选服务取数失败就省略本次，不推进已提醒状态。不设每个提供者 50 ms 超时，不做通用预算降级或多轮裁剪。具体规则见 [02](./02-optimization-plan-and-change-scope.md)。
 
 提醒计入现有预算；摘要沿用同一 prepared 材料，压缩成功后重新检查缺失状态。已存入并用于请求的正文不再缩短，不回写旧工具结果，不靠剪整份 payload 腾空间。沿用 [既有缓存与压缩契约](../2026-10-10-compact-cache-and-tool-output/06-overall-acceptance.md)，不承诺固定缓存命中率。

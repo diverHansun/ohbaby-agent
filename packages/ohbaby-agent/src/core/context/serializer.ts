@@ -7,6 +7,7 @@ import {
 import type { ModelMessage } from "../llm-client/index.js";
 import type { MessageWithParts, Part, ToolPart } from "../message/index.js";
 import { isInterruptionFactPart } from "../message/interruption.js";
+import { isSystemReminderMessage } from "../message/origin.js";
 import { isActivePart } from "./filters.js";
 import {
   selectActiveInterruptionText,
@@ -89,6 +90,25 @@ function serializeMessageForLlm(
     return interruption === undefined
       ? serialized
       : [...serialized, { role: "assistant", content: interruption }];
+  }
+
+  if (isSystemReminderMessage({ info: message.info, parts })) {
+    return [
+      {
+        role: "user",
+        content: parts.flatMap((part) =>
+          part.type === "text" && !part.ignored
+            ? [
+                {
+                  type: "text" as const,
+                  text: part.text,
+                  source: "system-reminder" as const,
+                },
+              ]
+            : [],
+        ),
+      },
+    ];
   }
 
   const content = textContentFromParts(parts);

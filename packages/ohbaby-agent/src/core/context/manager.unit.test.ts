@@ -33,6 +33,14 @@ import { serializeForLlm } from "./serializer.js";
 import { isSummaryMessage, partitionSummary } from "./summary.js";
 import { estimatePreparedRequestHeuristic } from "./token-estimation.js";
 import { createHeuristicTokenCounter } from "../../services/llm-model/tokenCounting.js";
+import {
+  createReminderCollector,
+  type ReminderCollector,
+} from "../../services/reminder/index.js";
+import {
+  SYSTEM_REMINDER_KIND,
+  isSystemReminderMessage,
+} from "../message/origin.js";
 
 type WithDefaultToolInput<
   T extends { readonly toolNames: readonly string[]; readonly tools: unknown },
@@ -191,6 +199,7 @@ function createManager(
     readonly now?: () => number;
     readonly compressionThreshold?: number;
     readonly systemPromptProvider?: SystemPromptProvider;
+    readonly collectReminders?: ReminderCollector;
   } = {},
 ): ContextFixture {
   const bus = createBus();
@@ -221,6 +230,7 @@ function createManager(
     now: options.now ?? createClock(),
     onRequestMeasured: (request) => measurements.push(request),
     compressionThreshold: options.compressionThreshold,
+    collectReminders: options.collectReminders,
   });
   const manager: FixtureContextManager = {
     ...contextManager,
@@ -3296,5 +3306,174 @@ describe("ContextManager", () => {
     await expect(
       inflatedMessageManager.listBySession("session_inflated"),
     ).resolves.toHaveLength(3);
+  });
+});
+
+describe("anchored reminder requests", () => {
+  const input = {
+    sessionId: "session_1",
+    directory: "/repo",
+    modelId: "m",
+    reminderAnchorId: "owner",
+    runId: "run",
+  };
+  const collectReminders = createReminderCollector([
+    {
+      type: "environment",
+      kind: "snapshot",
+      audience: "both",
+      collect: (): { key: string; text: string } => ({
+        key: "env-a",
+        text: "ENV",
+      }),
+    },
+    {
+      type: "mode",
+      kind: "snapshot",
+      audience: "both",
+      collect: (): { key: string; text: string } => ({
+        key: "mode-a",
+        text: "MODE",
+      }),
+    },
+  ]);
+
+  it("keeps the measured candidate's separate reminder blocks on restart after protected steer", async () => {
+    const messageManager = createMessageManagerFixture();
+    const steer = await messageManager.createMessage({
+      id: "steer",
+      sessionId: "session_1",
+      runId: "run",
+      role: "user",
+      agent: "test",
+      runtimeInput: {
+        kind: "user-steer",
+        inputId: "input",
+        targetRunId: "run",
+        sourceId: "prompt",
+      },
+    });
+    await messageManager.appendPart(steer.id, { type: "text", text: "STEER" });
+    const protectedInputs = await messageManager.listBySession("session_1");
+    const { manager, measurements } = createManager({
+      messageManager,
+      collectReminders,
+    });
+    const prepared = await manager.prepareTurn({ ...input, protectedInputs });
+    const reminder = {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "<system-reminder>\nENV\n</system-reminder>",
+          source: "system-reminder",
+        },
+        {
+          type: "text",
+          text: "<system-reminder>\nMODE\n</system-reminder>",
+          source: "system-reminder",
+        },
+      ],
+    };
+    expect(prepared.request.messages.slice(-2)).toEqual([
+      { role: "user", content: "STEER" },
+      reminder,
+    ]);
+    expect(
+      measurements.every(
+        (request) => request.messages.at(-1)?.content !== undefined,
+      ),
+    ).toBe(true);
+    expect(measurements.at(-1)?.messages).toEqual(prepared.request.messages);
+    const saved = (await messageManager.listBySession("session_1")).filter(
+      isSystemReminderMessage,
+    );
+    expect(saved).toHaveLength(1);
+    expect(saved[0].parts.map((part) => part.metadata)).toEqual([
+      {
+        kind: SYSTEM_REMINDER_KIND,
+        reminderType: "environment",
+        key: "env-a",
+        anchorAssistantId: "owner",
+      },
+      {
+        kind: SYSTEM_REMINDER_KIND,
+        reminderType: "mode",
+        key: "mode-a",
+        anchorAssistantId: "owner",
+      },
+    ]);
+    await messageManager.createMessage({
+      id: "owner",
+      sessionId: "session_1",
+      role: "assistant",
+      agent: "test",
+    });
+    await messageManager.appendPart("owner", { type: "text", text: "ANSWER" });
+    // The ledger decides steer membership; reminders do not copy that state.
+    const restarted = createContextManager({
+      bus: createBus(),
+      messageManager,
+      collectReminders,
+      filterModelHistory: (history) => Promise.resolve(history),
+      systemPromptProvider: { build: () => Promise.resolve("system prompt") },
+      tokenCounter: createTokenCounter(),
+      llmClient: {
+        generateSummary: () => {
+          throw new Error("unexpected summary");
+        },
+      },
+    });
+    const replay = await restarted.prepareTurn({
+      ...input,
+      reminderAnchorId: "next",
+      toolNames: [],
+      tools: undefined,
+    });
+    expect(replay.request.messages).toEqual([
+      { role: "system", content: "system prompt" },
+      { role: "user", content: "STEER" },
+      reminder,
+      { role: "assistant", content: "ANSWER" },
+    ]);
+    expect(
+      (await messageManager.listBySession("session_1")).filter(
+        isSystemReminderMessage,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("regenerates orphaned candidates and does not persist cancelled or failed preparation", async () => {
+    const messageManager = createMessageManagerFixture();
+    const { manager } = createManager({ messageManager, collectReminders });
+    await manager.prepareTurn(input);
+    const next = await manager.prepareTurn({
+      ...input,
+      reminderAnchorId: "replacement",
+    });
+    expect(JSON.stringify(next.request.messages).match(/ENV/g)).toHaveLength(1);
+    const before = await messageManager.listBySession("session_1");
+    await expect(
+      manager.prepareTurn({ ...input, signal: AbortSignal.abort() }),
+    ).rejects.toThrow();
+    expect(await messageManager.listBySession("session_1")).toEqual(before);
+    const failed = await manager.prepareTurn({ ...input, force: true });
+    // A too-short force preparation is not sent by lifecycle recovery.
+    expect(failed.compaction).toBeUndefined();
+    expect(await messageManager.listBySession("session_1")).toEqual(before);
+  });
+
+  it("rejects a save failure instead of returning a sendable request", async () => {
+    const messageManager = createMessageManagerFixture();
+    const { manager } = createManager({ messageManager, collectReminders });
+    vi.spyOn(messageManager, "appendPart").mockRejectedValueOnce(
+      new Error("disk full"),
+    );
+    await expect(manager.prepareTurn(input)).rejects.toThrow("disk full");
+    const recovered = await manager.prepareTurn({
+      ...input,
+      reminderAnchorId: "retry",
+    });
+    expect(JSON.stringify(recovered.request.messages)).toContain("ENV");
   });
 });

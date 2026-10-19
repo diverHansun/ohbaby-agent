@@ -530,3 +530,64 @@ it.each([-1, 0, 1])(
     expect(generateSummary).toHaveBeenCalledTimes(headroom <= 0 ? 1 : 0);
   },
 );
+
+it("compacts retimed anchored history and persists only the final recollected reminder", async () => {
+  const generateSummary = vi.fn(successfulSummary);
+  let collection = 0;
+  const { manager, messages, input } = await fixture(generateSummary, {
+    collectReminders: () =>
+      Promise.resolve([
+        {
+          type: "environment",
+          key: `state-${String(++collection)}`,
+          text: `STATE-${String(collection)}`,
+        },
+      ]),
+  });
+  const history = await messages.listBySession("s");
+  const owner = history[1];
+  const late = await messages.createMessage({
+    sessionId: "s",
+    role: "user",
+    agent: "primary",
+  });
+  await messages.appendPart(late.id, {
+    type: "text",
+    synthetic: true,
+    text: "<system-reminder>OLD</system-reminder>",
+    metadata: {
+      kind: "system-reminder:v1",
+      reminderType: "environment",
+      key: "old",
+      anchorAssistantId: owner.info.id,
+    },
+  });
+  const result = await manager.prepareTurn({
+    ...input,
+    reminderAnchorId: "new-owner",
+  });
+  expect(result.compaction?.status).toBe("compacted");
+  expect(generateSummary).toHaveBeenCalledTimes(1);
+  expect(
+    JSON.stringify(generateSummary.mock.calls[0][0].request.messages),
+  ).toContain("STATE-1");
+  expect(JSON.stringify(result.request.messages)).toContain("STATE-2");
+  expect(JSON.stringify(result.request.messages)).not.toContain("STATE-1");
+  const after = await messages.listBySession("s");
+  const parts = after.flatMap((message) => message.parts);
+  expect(
+    parts.filter((part) => part.metadata?.anchorAssistantId === "new-owner"),
+  ).toMatchObject([{ text: "<system-reminder>\nSTATE-2\n</system-reminder>" }]);
+  const reminder = after.find((message) => message.info.id === late.id);
+  const compactedOwner = after.find(
+    (message) => message.info.id === owner.info.id,
+  );
+  if (!reminder || !compactedOwner)
+    throw new Error("Missing compacted owner or reminder");
+  expect(
+    reminder.parts.every((part) => part.time?.compacted !== undefined),
+  ).toBe(true);
+  expect(
+    compactedOwner.parts.every((part) => part.time?.compacted !== undefined),
+  ).toBe(true);
+});

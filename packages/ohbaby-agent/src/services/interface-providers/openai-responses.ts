@@ -60,7 +60,18 @@ function buildRequestParams(
         allowedKeys(message, ["role", "content"], "user message");
         input.push({
           role: "user",
-          content: string(message.content, "user content"),
+          content: Array.isArray(message.content)
+            ? message.content.map((rawPart) => {
+                const part = object(rawPart, "user text part");
+                allowedKeys(part, ["type", "text", "source"], "user text part");
+                if (part.type !== "text")
+                  rejectRequest("user content must contain text parts");
+                return {
+                  type: "input_text" as const,
+                  text: string(part.text, "user text"),
+                };
+              })
+            : string(message.content, "user content"),
         });
         break;
       case "assistant": {

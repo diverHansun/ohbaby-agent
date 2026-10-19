@@ -595,7 +595,9 @@ export class Lifecycle {
       const tailDirectives = isFinalStep
         ? [buildMaxStepsFinalizationMessage()]
         : undefined;
+      let assistantMessageId = randomUUID();
       let prepared = yield* this.prepareTurnWithProgress({
+        reminderAnchorId: assistantMessageId,
         runId: params.runId,
         protectedInputs,
         reasoning: mergeReasoningIntent(params.reasoning),
@@ -678,6 +680,7 @@ export class Lifecycle {
       let stepResult: StepResult;
       try {
         stepResult = yield* this.runModelStep({
+          assistantMessageId,
           request: prepared.request,
           params: runParams,
           parentMessageId,
@@ -734,7 +737,9 @@ export class Lifecycle {
         // Input admission may restart this step; it must not renew recovery.
         forceRecoveryStep = step;
 
+        assistantMessageId = randomUUID();
         prepared = yield* this.prepareTurnWithProgress({
+          reminderAnchorId: assistantMessageId,
           runId: params.runId,
           protectedInputs,
           reasoning: mergeReasoningIntent(params.reasoning),
@@ -788,6 +793,7 @@ export class Lifecycle {
         }
         try {
           stepResult = yield* this.runModelStep({
+            assistantMessageId,
             request: prepared.request,
             params: runParams,
             parentMessageId,
@@ -1371,6 +1377,7 @@ export class Lifecycle {
   }
 
   private async *runModelStep(input: {
+    readonly assistantMessageId: string;
     readonly request: PreparedModelRequest;
     readonly params: ModelStepParams;
     readonly parentMessageId?: string;
@@ -1399,6 +1406,7 @@ export class Lifecycle {
     let observedUsage: TokenUsage | undefined;
 
     const assistantMessage = await this.deps.messageManager.createMessage({
+      id: input.assistantMessageId,
       ...(params.contextScopeId === undefined
         ? {}
         : { contextScopeId: params.contextScopeId }),

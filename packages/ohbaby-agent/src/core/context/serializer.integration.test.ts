@@ -1089,3 +1089,135 @@ describe("serializeForLlm database metadata projection", () => {
     });
   });
 });
+
+it("replays persisted reminder blocks byte-for-byte across SQLite reopen and hides an abandoned anchor", async () => {
+  const { createReminderCollector } =
+    await import("../../services/reminder/index.js");
+  let messages = createMessageManager({
+    bus: createBus(),
+    store: createDatabaseMessageStore(),
+  });
+  const historical = await messages.createMessage({
+    sessionId: "session_1",
+    role: "assistant",
+    agent: "build",
+  });
+  await messages.appendPart(historical.id, {
+    type: "tool",
+    tool: "lookup",
+    callId: "lookup-1",
+    state: { status: "completed", input: {}, output: "UNCHANGED TOOL RESULT" },
+  });
+  const user = await messages.createMessage({
+    sessionId: "session_1",
+    role: "user",
+    agent: "build",
+  });
+  await messages.appendPart(user.id, {
+    type: "text",
+    text: "USER <system-reminder>literal</system-reminder>",
+  });
+  const before = await messages.listBySession("session_1");
+  const collectReminders = createReminderCollector([
+    {
+      type: "environment",
+      kind: "snapshot",
+      audience: "both",
+      collect: (): { key: string; text: string } => ({
+        key: "a",
+        text: "ENV <outside> & data",
+      }),
+    },
+    {
+      type: "mode",
+      kind: "snapshot",
+      audience: "both",
+      collect: (): { key: string; text: string } => ({
+        key: "mode",
+        text: "MODE",
+      }),
+    },
+  ]);
+  const manager = (): ReturnType<typeof createContextManager> =>
+    createContextManager({
+      bus: createBus(),
+      messageManager: messages,
+      collectReminders,
+      systemPromptProvider: { build: () => Promise.resolve("HOST") },
+      tokenCounter: {
+        estimateTokens: (text) => text.length,
+        getLimit: () => 128000,
+      },
+      llmClient: {
+        generateSummary: () => {
+          throw new Error("unexpected summary");
+        },
+      },
+    });
+  const input = {
+    sessionId: "session_1",
+    directory: "/repo",
+    modelId: "m",
+    toolNames: [],
+    tools: undefined,
+  };
+  await manager().prepareTurn({ ...input, reminderAnchorId: "abandoned" });
+  const prepared = await manager().prepareTurn({
+    ...input,
+    reminderAnchorId: "owner",
+  });
+  expect(JSON.stringify(prepared.request.messages).match(/ENV/g)).toHaveLength(
+    1,
+  );
+  await messages.createMessage({
+    id: "owner",
+    sessionId: "session_1",
+    role: "assistant",
+    agent: "build",
+  });
+  await messages.appendPart("owner", { type: "text", text: "ANSWER" });
+  closeDatabase();
+  initDatabase({ dbPath: databasePath });
+  messages = createMessageManager({
+    bus: createBus(),
+    store: createDatabaseMessageStore(),
+  });
+  const replay = await manager().prepareTurn({
+    ...input,
+    reminderAnchorId: "later",
+  });
+  expect(JSON.stringify(replay.request.messages.slice(0, -1))).toBe(
+    JSON.stringify(prepared.request.messages),
+  );
+  expect(replay.request.messages.at(-1)).toEqual({
+    role: "assistant",
+    content: "ANSWER",
+  });
+  const all = await messages.listBySession("session_1");
+  expect(
+    all.filter((message) =>
+      before.some((old) => old.info.id === message.info.id),
+    ),
+  ).toEqual(before);
+  expect(
+    all
+      .flatMap((message) => message.parts)
+      .filter((part) => part.metadata?.kind === "system-reminder:v1"),
+  ).toHaveLength(4);
+  const reminder = replay.request.messages.at(-2);
+  expect(reminder).toEqual({
+    role: "user",
+    content: [
+      {
+        type: "text",
+        source: "system-reminder",
+        text: "<system-reminder>\nENV &lt;outside&gt; &amp; data\n</system-reminder>",
+      },
+      {
+        type: "text",
+        source: "system-reminder",
+        text: "<system-reminder>\nMODE\n</system-reminder>",
+      },
+    ],
+  });
+});
