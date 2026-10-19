@@ -6,7 +6,7 @@
 
 ## 4.1 方法与测试范围
 
-遵循项目 [docs-test](../../../../docs-test/README.md) 的分类、命名、目录及 mock 规则。本轮采用既有 Vitest/Ink 测试设施，不另建全仓测试标准。局部 unit/contract 与源码放在一起；跨 SDK/store/App 的集成场景放 `tests/integration/cli/`。新文件使用 `.unit/.contract/.integration.test.ts(x)`。
+遵循既有项目测试规范的分类、命名、目录及 mock 规则。本轮采用既有 Vitest/Ink 测试设施，不另建全仓测试标准。局部 unit/contract 与源码放在一起；跨 SDK/store/App 的集成场景放 `tests/integration/cli/`。新文件使用 `.unit/.contract/.integration.test.ts(x)`。
 
 - unit：消息来源筛选、历史状态、短句生命周期、底栏字段与数字格式。
 - contract：实际 Ink 输出和 FakeTTY，检查控制序列、行列与可见内容。
@@ -69,9 +69,9 @@ pnpm exec vitest run packages/ohbaby-cli/src/tui/session-recovery.unit.test.ts p
 pnpm exec vitest run packages/ohbaby-cli/src/tui
 ```
 
-实施者将新增测试的精确文件路径纳入相关命令；跨模块集成测试依 `docs-test` 放置并显式执行，不能因尚无文件而把 passWithNoTests 当通过。若修改 SDK，再运行其相关 reader 测试及 Web 消费路径测试。
+实施者将新增测试的精确文件路径纳入相关命令；跨模块集成测试依既有项目测试规范放置并显式执行，不能因尚无文件而把 passWithNoTests 当通过。若修改 SDK，再运行其相关 reader 测试及 Web 消费路径测试。
 
-提交与 PR 按项目 `docs-test/ci-strategy.md` 的现有检查执行。至少完成相关测试、format、lint、typecheck；正式提交/合并时执行项目要求的 test/preflight/integration/build，不为本轮另建 CI。记录执行命令、实际结果和环境限制；其他任务造成的基线失败单独归因，不掩盖本轮失败，也不顺手修其代码。
+提交与 PR 按项目既有 CI 策略的现有检查执行。至少完成相关测试、format、lint、typecheck；正式提交/合并时执行项目要求的 test/preflight/integration/build，不为本轮另建 CI。记录执行命令、实际结果和环境限制；其他任务造成的基线失败单独归因，不掩盖本轮失败，也不顺手修其代码。
 
 | 完成项     | 通过标准                                                               |
 | ---------- | ---------------------------------------------------------------------- |

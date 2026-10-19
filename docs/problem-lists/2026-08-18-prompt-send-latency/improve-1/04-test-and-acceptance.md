@@ -1,6 +1,6 @@
 # 4. 测试与验收标准
 
-本仓库没有独立 `test-blueprint.md`。沿用 `docs-test/` 的 colocated 分类：`*.unit.test.ts` / `*.contract.test.ts` / `*.integration.test.ts` / `*.smoke.test.ts`；Web 特有约束见 [`docs/ohbaby-web/test.md`](../../../ohbaby-web/test.md)。本批围绕 01 的 P1–P10 和真实用户感知验收，不追求覆盖率数字。
+本仓库没有独立 `test-blueprint.md`。沿用既有项目测试规范的 colocated 分类：`*.unit.test.ts` / `*.contract.test.ts` / `*.integration.test.ts` / `*.smoke.test.ts`；Web 特有约束见 [`docs/ohbaby-web/test.md`](../../../ohbaby-web/test.md)。本批围绕 01 的 P1–P10 和真实用户感知验收，不追求覆盖率数字。
 
 ## 4.1 测试范围
 

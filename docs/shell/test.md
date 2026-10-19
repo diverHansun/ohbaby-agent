@@ -1,6 +1,6 @@
 # Shell 测试
 
-遵循 [项目测试规范](../../docs-test/README.md)。unit 就近验证解释器选择、AST 可靠事实、风险和政策；跨模块集成放 `tests/integration/shell-tools/`；已安装产物使用现有 CLI packaging smoke。
+遵循既有项目测试规范。unit 就近验证解释器选择、AST 可靠事实、风险和政策；跨模块集成放 `tests/integration/shell-tools/`；已安装产物使用现有 CLI packaging smoke。
 
 | 范围 | 关键行为与位置 |
 | --- | --- |

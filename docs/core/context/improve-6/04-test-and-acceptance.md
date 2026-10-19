@@ -1,6 +1,6 @@
 # 4. 测试与验收标准
 
-沿用仓库 `docs-test/`：`unit / contract / integration / smoke`。不新增第五种默认分类。真实 provider cache E2E 保持 opt-in，本批不把无凭据环境的命中当硬门。
+沿用仓库既有项目测试规范：`unit / contract / integration / smoke`。不新增第五种默认分类。真实 provider cache E2E 保持 opt-in，本批不把无凭据环境的命中当硬门。
 
 ## 4.1 测试范围
 

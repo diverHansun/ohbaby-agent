@@ -1,6 +1,6 @@
 # 第 1 批：测试与验收标准
 
-> 依据 [02](./02-optimization-plan-and-change-scope.md) 与 [plan/04 §4.8](../plan/04-test-and-acceptance.md)。这是待实施的验收目标，不是已通过的结果。用仓库已有 Vitest、fake provider 与仓库既有分类（`docs-test/classification.md`），不新建测试框架。
+> 依据 [02](./02-optimization-plan-and-change-scope.md) 与 [plan/04 §4.8](../plan/04-test-and-acceptance.md)。这是待实施的验收目标，不是已通过的结果。用仓库已有 Vitest、fake provider 与仓库既有分类，不新建测试框架。
 > `idle-watchdog.unit.test.ts` 等新文件按既有命名后缀在实施时创建；下列命令中的文件除标注「新增」外均已存在。
 
 ## 1. 分层与定向命令

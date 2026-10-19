@@ -2,7 +2,7 @@
 
 ## 4.1 测试原则
 
-项目测试分类与命名以 `docs-test/classification.md`、`docs-test/writing-guide.md` 为准。本议题延续 **co-located** 约定：server 相关 integration 测试放在 `packages/ohbaby-server/src/**` 邻近被测边界，不另造 `tests/integration/server/` 第二套目录。
+测试分类、命名与编写方式沿用既有约定。本议题延续 **co-located** 约定：server 相关 integration 测试放在 `packages/ohbaby-server/src/**` 邻近被测边界，不另造 `tests/integration/server/` 第二套目录。
 
 - 单元测试优先固化 **用户级 pid/state**、**InstanceStore**、**workspace router/dispatcher**、**claim 双写** 边界。
 - 集成测试使用 `app.fetch` 注入（ADR-001 测试 harness），避免不必要的真实端口（lock 与 listen 除外需少量真实端口用例）。

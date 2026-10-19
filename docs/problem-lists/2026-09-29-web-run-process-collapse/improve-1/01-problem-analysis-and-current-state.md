@@ -53,7 +53,7 @@ ConversationStream 已维护 sticky-bottom、历史加载高度补偿、`data-me
 
 [ConversationStream.unit.test.tsx](../../../../apps/ohbaby-web/src/ui/conversation/ConversationStream.unit.test.tsx) 已覆盖根/子会话过滤内部输入以及保留普通消息；[ExecutionProgress.unit.test.tsx](../../../../apps/ohbaby-web/src/ui/conversation/ExecutionProgress.unit.test.tsx) 已检查重新接受后的计时起点及恢复时间不冒充真实耗时。
 
-现有测试不能证明正常完成后整轮折叠、最终正文保留、steer 豁免、手动展开保持或折叠后的阅读位置。视觉间距和 hover 布局也不能仅靠 jsdom 判断。测试组织遵循 [docs-test](../../../../docs-test/README.md)，本轮补充范围见 04。
+现有测试不能证明正常完成后整轮折叠、最终正文保留、steer 豁免、手动展开保持或折叠后的阅读位置。视觉间距和 hover 布局也不能仅靠 jsdom 判断。测试组织遵循既有项目测试规范，本轮补充范围见 04。
 
 ## 与现有文档的关系
 

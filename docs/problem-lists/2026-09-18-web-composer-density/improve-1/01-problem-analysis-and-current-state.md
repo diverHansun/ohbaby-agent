@@ -94,7 +94,7 @@ composer 仍在 `apps/ohbaby-web/src/ui/App.tsx` 的 `Composer`。主按钮约 L
 | 连接态 | selectors 测 kind | 不测 DOM 有没有圆点 |
 | TUI | cli contract | 本轮必须继续绿、零改 |
 
-仓库无 `test-blueprint.md`，沿用 `docs-test/` + `docs/ohbaby-web/test.md`。`test.md` 写「像素级视觉回归 v0.1.6 不做」，本轮仍不做。
+仓库无 `test-blueprint.md`，沿用既有项目测试规范 + `docs/ohbaby-web/test.md`。`test.md` 写「像素级视觉回归 v0.1.6 不做」，本轮仍不做。
 
 ## 1.4 跨模块一致性
 

@@ -18,5 +18,5 @@ This file contains optional project instructions for `ohbaby-agent`; it is not a
 ## Current Status
 
 - The repository is currently documentation-first.
-- Architectural documents are primarily under `docs/`, `docs-plan/`, and `tutorials/`.
+- Architectural documents are primarily under `docs/` and `tutorials/`.
 - Keep technical framework and architecture intent unchanged when renaming or polishing documents.

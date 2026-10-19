@@ -2,7 +2,7 @@
 
 > 版本范围：goals 升级第 2 批的实施后文档，只描述本批阶段状态；上级目录保留原始设计，后续批次尚未包含。原始规划与验收标准见 [improve-2 方案](../../problem-lists/2026-10-13-goals-upgrade/improve-2/02-optimization-plan-and-change-scope.md)和[测试标准](../../problem-lists/2026-10-13-goals-upgrade/improve-2/04-test-and-acceptance.md)，实际验证与限制见[实施验收](../../problem-lists/2026-10-13-goals-upgrade/improve-2/05-implementation-acceptance.md)。
 
-测试遵循 [项目测试分类](../../../docs-test/classification.md)，就近使用 unit、contract、integration 命名。默认使用 fake provider；真实模型服从性测试保持显式 opt-in，不输出密钥。improve-2 验收基线见 [04-test-and-acceptance.md](../../problem-lists/2026-10-13-goals-upgrade/improve-2/04-test-and-acceptance.md)。
+测试遵循既有测试分类，就近使用 unit、contract、integration 命名。默认使用 fake provider；真实模型服从性测试保持显式 opt-in，不输出密钥。improve-2 验收基线见 [04-test-and-acceptance.md](../../problem-lists/2026-10-13-goals-upgrade/improve-2/04-test-and-acceptance.md)。
 
 ## 模块测试
 

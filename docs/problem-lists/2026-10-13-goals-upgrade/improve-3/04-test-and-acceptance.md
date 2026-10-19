@@ -1,6 +1,6 @@
 # 第 3 批测试与验收标准
 
-> 对照 [02](./02-optimization-plan-and-change-scope.md) 的 Stage 与 plan/04 的 B / D / U 场景；本批未实施，测试尚未运行。遵循 `docs-test/classification.md`：unit 只测局部逻辑、依赖替换；**integration 必须让真实 store / service / adapter 协作，不接受「一个 fake 配一个模块」充数**。竞态用可控 deferred 与 fake timers，LLM 用 fake provider；`*.e2e.test.ts` 默认被 vitest 配置排除。
+> 对照 [02](./02-optimization-plan-and-change-scope.md) 的 Stage 与 plan/04 的 B / D / U 场景；本批未实施，测试尚未运行。遵循既有测试分类：unit 只测局部逻辑、依赖替换；**integration 必须让真实 store / service / adapter 协作，不接受「一个 fake 配一个模块」充数**。竞态用可控 deferred 与 fake timers，LLM 用 fake provider；`*.e2e.test.ts` 默认被 vitest 配置排除。
 
 ## 4.1 测试范围与命令（已核实）
 

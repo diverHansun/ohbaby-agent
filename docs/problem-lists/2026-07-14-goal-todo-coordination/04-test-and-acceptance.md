@@ -2,7 +2,7 @@
 
 ## 1. 测试策略
 
-遵循仓库 `docs-test/classification.md`：
+遵循仓库既有测试分类：
 
 - 纯 scope/key/recovery 逻辑：unit；
 - Todo tool schema 与 adapter/UI 事件边界：contract；

@@ -1,7 +1,7 @@
 # 4. 总体验收基线
 
 > 对应 [02](./02-optimization-plan-and-change-scope.md) 的全部总体约束，不代表这些测试已实现或执行。
-> 各 improve 文档选择该批涉及的场景、具体测试文件和命令；归属见 [根 README](../README.md)，improve-5 收齐跨批组合。遵循仓库 `docs-test/classification.md`，不另建测试体系。
+> 各 improve 文档选择该批涉及的场景、具体测试文件和命令；归属见 [根 README](../README.md)，improve-5 收齐跨批组合。遵循仓库既有测试分类，不另建测试体系。
 
 ## 4.1 验证方法
 

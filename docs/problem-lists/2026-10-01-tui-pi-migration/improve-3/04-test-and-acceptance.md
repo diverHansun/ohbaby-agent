@@ -1,6 +1,6 @@
 # improve-3：测试与验收
 
-2026-10-03。**这是实施验收计划，未执行产品测试。** 遵循 [项目测试规则](../../../../docs-test/README.md)。前端用户用例见 [frontend/08](frontend/08-test-and-acceptance.md)，统一 fixture 见 [frontend/06](frontend/06-data-api-and-state.md)。
+2026-10-03。**这是实施验收计划，未执行产品测试。** 遵循既有项目测试规则。前端用户用例见 [frontend/08](frontend/08-test-and-acceptance.md)，统一 fixture 见 [frontend/06](frontend/06-data-api-and-state.md)。
 
 ## 1. 测试分层
 

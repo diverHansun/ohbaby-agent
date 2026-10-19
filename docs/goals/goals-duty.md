@@ -2,7 +2,7 @@
 
 本文档定义 `goals` 模块（`packages/ohbaby-agent/src/goals`）的设计目标与职责边界。
 
-> 术语说明：本文中的 **goal** 指用户通过 `/goal` 发起的、跨多个 Turn 持续推进的**可验证长任务目标**，是一份带生命周期状态的持久记录。它不同于 `docs-plan` 里的"设计目标（Design Goals）"，也不同于 agent 单轮对话中的普通 prompt。**objective** 指 goal 的目标描述文本，**completion criterion** 指其可判定的成功条件。
+> 术语说明：本文中的 **goal** 指用户通过 `/goal` 发起的、跨多个 Turn 持续推进的**可验证长任务目标**，是一份带生命周期状态的持久记录。它不同于模块设计文档里的"设计目标（Design Goals）"，也不同于 agent 单轮对话中的普通 prompt。**objective** 指 goal 的目标描述文本，**completion criterion** 指其可判定的成功条件。
 
 ---
 

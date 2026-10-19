@@ -17,7 +17,7 @@
 ## Global Constraints
 
 - 所有 import 使用 ESM 相对路径 + `.js` 后缀（如 `import { schema } from "../services/database/index.js"`），与现有代码一致。
-- 测试文件与被测文件同目录（co-located），命名 `<name>.unit.test.ts` / `<name>.integration.test.ts` / `<name>.contract.test.ts`（见 `docs-test/classification.md`）。
+- 测试文件与被测文件同目录（co-located），命名 `<name>.unit.test.ts` / `<name>.integration.test.ts` / `<name>.contract.test.ts`。
 - **禁止真实 LLM/网络调用**；续跑一律 fake runner / fake provider。
 - 接口字段一律 `readonly`；公共类型集中在 `types.ts`。
 - 命令从仓库根目录执行：`pnpm test:unit`、`pnpm test:integration`、`pnpm vitest run <file>`。

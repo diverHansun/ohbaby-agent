@@ -2,8 +2,6 @@
 
 本文档说明如何验证 `runtime/stream-bridge` 模块在协作环境中的正确性。
 
-测试分类标准参见 `docs-test/classification.md`，mock 边界规则参见 `docs-test/writing-guide.md`。
-
 ---
 
 ## 一、Test Scope（测试范围）

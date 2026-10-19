@@ -1,6 +1,6 @@
 # 4. 测试与验收标准
 
-> 实施发布门。测试分类遵循 [`docs-test/classification.md`](../../../../../docs-test/classification.md)；局部 unit 继续 colocated。本批只复用历史已存在的 colocated `client.integration.test.ts`，不新建同类错位文件；新增跨模块 integration 应放根 `tests/integration/`。Web 约定见 [`../../../test.md`](../../../test.md)。本批不新建 e2e 框架。
+> 实施发布门。沿用既有测试分类；局部 unit 继续 colocated。本批只复用历史已存在的 colocated `client.integration.test.ts`，不新建同类错位文件；新增跨模块 integration 应放根 `tests/integration/`。Web 约定见 [`../../../test.md`](../../../test.md)。本批不新建 e2e 框架。
 
 ## 4.1 测试策略
 

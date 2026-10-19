@@ -97,7 +97,7 @@ lifecycle llm:delta
 
 TUI 已有对等测试：`packages/ohbaby-cli/src/tui/store/events.unit.test.ts`「appends direct text deltas after a tool result instead of replacing earlier text」。Web `eventReducer.unit.test.ts` 无对应项。其现有纯文字累积测试从空 snapshot 直接发送稳定 messageId delta，并依赖 reducer 建草稿；Phase B 后必须先发 `message.appended`，不能只新增 missing-message 测试而漏改旧用例。
 
-项目测试规则见 `docs-test/`（unit colocated）。本议题以 unit 钉死 reducer 即可，不上 e2e。
+沿用既有项目测试规范（unit colocated）。本议题以 unit 钉死 reducer 即可，不上 e2e。
 
 ## 1.4 ohbaby-cli（对照，非改动模块）
 

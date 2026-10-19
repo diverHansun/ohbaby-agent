@@ -1,6 +1,6 @@
 # 4. 测试与验收合同
 
-> 本文定义本轮唯一验收 ID。当前是规划，不是通过报告。沿用仓库 [docs-test](../../../../docs-test/README.md)；Web 模块[测试视角](../../../ohbaby-web/improve-3/03-test-criteria.md)只映射这些 ID，不复制另一套标准。
+> 本文定义本轮唯一验收 ID。当前是规划，不是通过报告。沿用仓库既有项目测试规范；Web 模块[测试视角](../../../ohbaby-web/improve-3/03-test-criteria.md)只映射这些 ID，不复制另一套标准。
 
 ## 4.1 类型、位置与真实边界
 

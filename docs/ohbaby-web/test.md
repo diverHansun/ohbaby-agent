@@ -2,7 +2,7 @@
 
 > 围绕职责与交互边界验证，不围绕代码结构。前置：[`goals-duty.md`](./goals-duty.md)、[`dfd-interface.md`](./dfd-interface.md)、[`use-case.md`](./use-case.md)。
 >
-> **项目级测试规则**：遵循 `docs-test/`——四类 `*.unit.test.ts` / `*.contract.test.ts` / `*.integration.test.ts` / `*.smoke.test.ts`，源码旁 colocated，root Vitest。本文只补 web 特有场景。
+> **项目级测试规则**：遵循既有项目测试规范——四类 `*.unit.test.ts` / `*.contract.test.ts` / `*.integration.test.ts` / `*.smoke.test.ts`，源码旁 colocated，root Vitest。本文只补 web 特有场景。
 
 ---
 

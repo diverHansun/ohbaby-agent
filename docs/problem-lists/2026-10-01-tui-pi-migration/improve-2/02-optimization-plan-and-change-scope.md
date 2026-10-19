@@ -107,7 +107,7 @@ DoD：I2-T14–T16；前轮回滚/无变化输出/双行底栏无回归。20 项
 | CLI Permission | 内容层次、真实提示、局部正文翻页、错误与身份恢复             | 不更改后端授权政策                                          |
 | CLI Tasks      | 自动显隐、手动折叠/回看、按会话读取已有 Todo、计数/强调/缩进 | 不修改 Todo schema/执行策略，不删除隐藏数据                 |
 | SDK/Agent      | 阅读契约并回归共享行为                                       | 默认无协议/数据库变更；若发现必需接口缺口单列证据后调整规划 |
-| 测试/文档      | 局部 unit/contract、跨模块 integration、终端 fixture         | 使用 docs-test；不为本轮搭 Storybook/Web 测试平台           |
+| 测试/文档      | 局部 unit/contract、跨模块 integration、终端 fixture         | 使用既有测试规范；不为本轮搭 Storybook/Web 测试平台           |
 
 ## 2.5 数据、兼容与生命周期
 

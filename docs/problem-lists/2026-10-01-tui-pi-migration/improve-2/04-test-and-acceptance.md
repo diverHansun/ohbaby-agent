@@ -1,6 +1,6 @@
 # improve-2：测试与验收
 
-本文件规定未来实施的验证，不是通过记录。遵循 [docs-test](../../../../docs-test/README.md) 与 [CI 策略](../../../../docs-test/ci-strategy.md)。前端可观察验收见 [frontend/08](frontend/08-test-and-acceptance.md)。
+本文件规定未来实施的验证，不是通过记录。遵循既有项目测试规范与既有 CI 策略。前端可观察验收见 [frontend/08](frontend/08-test-and-acceptance.md)。
 
 ## 4.1 分层与落点
 

@@ -1,6 +1,6 @@
 # 4. 测试与验收标准
 
-> 项目测试规则：`docs-test/`。Web 见 [`docs/ohbaby-web/test.md`](../../ohbaby-web/test.md)。投影属 `ohbaby-agent` adapters，用 unit（必要时 persistent-store 现有 integration）。**不要求**改 TUI 测试文件；**不要求** Playwright。手工需同时看 Web 与（建议）TUI 一次 bash 失败。
+> 项目测试规则：既有项目测试规范。Web 见 [`docs/ohbaby-web/test.md`](../../ohbaby-web/test.md)。投影属 `ohbaby-agent` adapters，用 unit（必要时 persistent-store 现有 integration）。**不要求**改 TUI 测试文件；**不要求** Playwright。手工需同时看 Web 与（建议）TUI 一次 bash 失败。
 
 ## 4.1 测试范围
 

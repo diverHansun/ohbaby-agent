@@ -45,7 +45,7 @@ Write 的正式覆盖 diff 需要在文件锁内、写入之前取得有预算�
 
 已有 `app.contract.test.tsx`、`message-row.unit.test.tsx`、`tool-part.unit.test.ts`、transcript flicker 契约测试、`session-recovery.unit.test.ts`、SDK `session-sync.unit.test.ts`，可直接扩充真实失败用例。尚不能用这些文件存在来证明 Ctrl+O、真实 diff、回执自动查询和 pi 兼容已经通过。
 
-测试遵循 [docs-test](../../../../docs-test/README.md)：纯算法 unit、DTO contract、真实模块协作 integration、构建入口 smoke。终端回滚和复制需要真机，测试假终端不能替代。
+测试遵循既有项目测试规范：纯算法 unit、DTO contract、真实模块协作 integration、构建入口 smoke。终端回滚和复制需要真机，测试假终端不能替代。
 
 ## 3. 旧设计与目标差距
 

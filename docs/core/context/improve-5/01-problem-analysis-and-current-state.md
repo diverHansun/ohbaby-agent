@@ -377,7 +377,7 @@ scope 生命周期也尚未闭环。`cleanupClosedSubagentScope` 当前只释放
 - subagent 已有 contextScope 隔离测试，但没有 cache key、turn snapshot、tool order 和 usage parity 的联合契约。
 - 没有覆盖 closed subagent scope 的 ContextManager/MCP/tool-sequence 定向清理，也没有覆盖进程重启后的 tool epoch 语义。
 - `run.llm.complete` 的跨 worker/stream transport 没有 usage round-trip 测试。
-- 仓库已有 `docs-test/` 项目级测试方法论和 unit / contract / integration / smoke 分类脚本；本批沿用其 co-located + `tests/<type>/<domain>` 规则，不另建一套测试规范。
+- 仓库已有项目级测试方法论和 unit / contract / integration / smoke 分类脚本；本批沿用其 co-located + `tests/<type>/<domain>` 规则，不另建一套测试规范。
 - 当前 `scripts/run-real-smoke.mjs` 只接受 ZAI/智谱 key，并硬编码运行 TUI smoke 的若干 test name；即使新增 prompt-cache smoke，`pnpm test:smoke:real` 也不会自动发现，更无法覆盖 Anthropic。
 - 根 `vitest.config.ts` 默认排除 `*.e2e.test.ts`；`vitest.e2e.config.ts` 能发现 package E2E，但 `test:e2e:snapshot` 只显式运行 snapshot 场景。当前没有覆盖 improve-5 主/子代理、compiled server/Web、runtime-part 隐藏和 cache usage 观测的统一 E2E 入口。
 - 仓库已经具备真实发布形态：`pnpm build` 会构建 packages、`ohbaby-web` 并把 Web assets 复制到 `packages/ohbaby-cli/dist/web`；编译后可用 `node packages/ohbaby-cli/dist/bin.js serve` 启动生产 daemon + Web UI。但现有 improve-5 文档尚未把这条路径设为最终系统验收门。

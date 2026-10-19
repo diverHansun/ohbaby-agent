@@ -1,6 +1,6 @@
 # Shell / Glob 测试与验收标准
 
-> 后续实施验收契约，本次规划不宣称下列测试已通过。遵循 [项目测试规范](../../../../docs-test/README.md)。unit / contract 就近，跨模块集成放 `tests/integration/shell-tools/`，安装产物检查放 smoke。
+> 后续实施验收契约，本次规划不宣称下列测试已通过。遵循既有项目测试规范。unit / contract 就近，跨模块集成放 `tests/integration/shell-tools/`，安装产物检查放 smoke。
 
 ## Shell 关键场景
 

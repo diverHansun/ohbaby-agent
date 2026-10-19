@@ -4,8 +4,6 @@
 
 本文档说明如何验证 `runtime/heartbeat` 模块在协作环境中的正确性。
 
-测试分类标准参见 `docs-test/classification.md`，mock 边界规则参见 `docs-test/writing-guide.md`。
-
 ---
 
 ## 一、Test Scope（测试范围）
@@ -96,7 +94,7 @@
 
 **测试对象**：HeartbeatMachine（状态机核心）、DeferredQueue（队列逻辑）、mapSignalToTrigger（映射函数）
 
-**Mock 范围**（遵循 `writing-guide.md` unit 规则，mock 所有直接依赖）：
+**Mock 范围**（单元测试 mock 所有直接依赖）：
 - `runManager` → fake RunManager（记录 create() 调用，可配置返回值）
 - `scheduler` → fake Scheduler（记录 addFollowUp() 调用）
 - `Bus` → fake Bus（记录发布的事件，可手动 emit 订阅事件）

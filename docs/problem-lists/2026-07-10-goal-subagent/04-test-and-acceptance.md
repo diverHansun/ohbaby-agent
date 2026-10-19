@@ -3,7 +3,7 @@
 ## 4.1 测试原则
 
 - 围绕 **职责与交叉边界**，不围绕内部类名。
-- 遵循项目测试分类：`unit` / `contract` / `integration`（见 `docs-test/classification.md`）。
+- 遵循项目测试分类：`unit` / `contract` / `integration`。
 - 默认 deterministic 测试禁止真实 LLM API；另提供 opt-in 真实 API eval 验证模型服从 complete/subagent 收敛与“不发明预算”，默认 CI 跳过且不输出密钥。
 - goals/subagent 端口协作放在 `tests/integration/agents/goal-subagent-lifecycle.integration.test.ts`；需要从 `/goal`、`submitPrompt` 等 UI 公共入口验证 primary run 与 child run 时序的场景，放在 `ui-inprocess.contract.test.ts`，仍使用真实 runtime composition。
 - `GoalService` 的端口路由与预算 schema 等局部行为继续放 co-located unit/contract 测试。

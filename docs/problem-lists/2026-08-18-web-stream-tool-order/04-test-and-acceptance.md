@@ -1,6 +1,6 @@
 # 4. 测试与验收标准
 
-> 项目测试规则：`docs-test/`（unit colocated，`*.unit.test.ts`，root Vitest）。Web 场景约定见 [`docs/ohbaby-web/test.md`](../../ohbaby-web/test.md)。本议题**不要求 e2e / Playwright**；风险在纯 reducer。
+> 项目测试规则：既有项目测试规范（unit colocated，`*.unit.test.ts`，root Vitest）。Web 场景约定见 [`docs/ohbaby-web/test.md`](../../ohbaby-web/test.md)。本议题**不要求 e2e / Playwright**；风险在纯 reducer。
 
 ## 4.1 测试范围
 

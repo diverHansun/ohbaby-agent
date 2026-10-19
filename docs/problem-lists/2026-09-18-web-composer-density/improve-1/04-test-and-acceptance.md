@@ -1,6 +1,6 @@
 # 4. 测试与验收标准
 
-> 仓库无项目级 `test-blueprint.md`。沿用 `docs-test/` 与 `docs/ohbaby-web/test.md`：colocated vitest。本议题不引入视觉回归截图，不改 TUI 契约测（它们必须继续绿）。
+> 仓库无项目级 `test-blueprint.md`。沿用既有项目测试规范与 `docs/ohbaby-web/test.md`：colocated vitest。本议题不引入视觉回归截图，不改 TUI 契约测（它们必须继续绿）。
 
 ---
 

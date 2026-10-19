@@ -1,6 +1,6 @@
 # 测试与验收标准
 
-本页是未来实施的验收门，**本轮规划未运行或宣称通过这些测试**。遵循 [项目测试规范](../../../../docs-test/README.md) 和 [Web 测试职责](../../../ohbaby-web/test.md)：unit/contract 尽量就近，跨包 integration 放集中目录；真实模型单独 opt-in。浏览器端到端是行为验收层，不以基础 smoke 替代。
+本页是未来实施的验收门，**本轮规划未运行或宣称通过这些测试**。遵循既有项目测试规范和 [Web 测试职责](../../../ohbaby-web/test.md)：unit/contract 尽量就近，跨包 integration 放集中目录；真实模型单独 opt-in。浏览器端到端是行为验收层，不以基础 smoke 替代。
 
 ## 必须覆盖的风险
 
