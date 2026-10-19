@@ -132,8 +132,10 @@ ohbaby-agent 兼容的 skill 目录中发现，并作为 slash 命令出现在 C
 
 `OHBABY_HOME` 是可选的**完整配置根绝对路径**。macOS/Linux 默认
 `~/.ohbaby`，Windows 默认 `%USERPROFILE%\.ohbaby`。全局模型、密钥、MCP、
-skills、agents、tools、memory 与 daemon 状态都位于该根下；项目级配置位于
+skills、agents、tools、可选全局说明与 daemon 状态都位于该根下；项目级配置位于
 `<project>/.ohbaby`。
+
+`OHBABY.md`、`AGENTS.md`、`CLAUDE.md` 是可选说明文件，每个范围按此顺序选择首个可用文件。主、子代理都读取会话项目根下的项目说明和可选全局说明；项目约定优先，全局作为默认。它们不属于长期记忆功能。
 
 运行数据继续使用平台数据目录：
 

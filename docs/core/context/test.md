@@ -84,10 +84,10 @@ E2E 不替代 unit/contract/fault；real-provider skip 不等于 pass。
 - reopen 不重发 event、不调用 summary LLM；旧摘要、完整工具原文及 `time.compacted` 均按原契约读取，退场内容不复活。
 - `CompactionThresholds` 仅含 summary；类型检查与事件目录契约共同覆盖常量、导出、调用方和登记的一致性。
 
-### 4.5 Memory/prefix/cache
+### 4.5 说明文件与 prefix/cache
 
 - global/project `OHBABY.md` 路径边界、失败降级、run 内稳定；
-- subagent 不加载 Memory；
+- 主、子共用说明，选中文件只注入一次，历史字面 `<memory>` 不改写；
 - runtime metadata 不进入 UI/title/export；摘要请求继承普通 prepared 中模型可见的 runtime context，不额外复制或重建；
 - 同 tool epoch wire order 稳定，有意 epoch 变化只失效一次后重新稳定；
 - cache key 基于 session + scope，tool epoch 不写入 key；

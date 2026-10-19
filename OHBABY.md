@@ -1,12 +1,13 @@
 # OHBABY.md
 
-This is the canonical long-term project memory file for `ohbaby-agent`.
+This file contains optional project instructions for `ohbaby-agent`; it is not a long-term memory store.
 
 ## Compatibility
 
 - `CLAUDE.md` is the Anthropic Claude-compatible entry file.
 - `AGENTS.md` is the OpenAI Agents/Codex-compatible entry file.
-- Both should stay aligned with this file.
+- Ohbaby selects the first usable file in each scope: `OHBABY.md`, then `AGENTS.md`, then `CLAUDE.md`; it does not merge these aliases.
+- Optional global instructions provide defaults; project instructions take precedence. Current user requests, host permissions, and delegated task boundaries still apply.
 
 ## Project Identity
 

@@ -6,7 +6,7 @@
 
 ## 一、模块定位
 
-`system-prompt` 是系统提示词模板与分层组装中心，负责把静态提示词模板、任务契约、代理附加提示、MCP 精确名称公告、运行环境和用户自定义指令组装为最终 system prompt。
+`system-prompt` 是系统提示词模板与分层组装中心，负责把静态模板、任务契约、代理附加提示和可选说明组装为稳定 system prompt，并单独提供运行环境及调用方的 runtime 文本。
 
 如果没有该模块：
 
@@ -33,19 +33,16 @@ primary prompt 的层顺序是：
 2. task
 3. agent addon
 4. subagent roles
-5. MCP tools
-6. environment
-7. custom
+5. custom
 
 subagent prompt 的层顺序是：
 
 1. subagent base
 2. subagent task
 3. agent addon
-4. MCP tools
-5. minimal environment
+4. custom
 
-其中 subagent roles 和 MCP tools 是条件层：前者只在存在可用子代理角色时输出；后者只公告当前 session/context scope 中已准入但尚未加载的 MCP 精确本地名及固定说明，绝不复读 description 或 schema。
+subagent roles 仅由主代理输出。environment 与 MCP 菜单经 `buildRuntimeContext()` 进入 initiating user model-context，独立于以上稳定层；MCP 菜单只含当前 scope 内已准入而未加载的精确本地名及固定说明。
 
 ### G3: 运行时上下文延迟注入
 
@@ -53,11 +50,11 @@ subagent prompt 的层顺序是：
 
 ### G4: 安全加载用户自定义指令
 
-模块负责加载项目/全局的 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md` fallback，并对 prompt-like 内容做安全扫描和截断。
+主、子代理共用加载器，按会话项目根读取可选项目说明，同时保留可选全局说明。每个范围依次选择首个可用的 `OHBABY.md`、`AGENTS.md`、`CLAUDE.md`，不合并别名。保留配置子目录、旧路径回退、prompt-like 安全扫描和大小限制；缺失不新增警告。
 
 ### G5: 适配 ContextManager
 
-`createSystemPromptProvider()` 是面向 context manager 的适配器。它解析 agent name、task kind、environment、tools、未加载 MCP 工具名和 custom instructions，然后调用 `SystemPrompt.assemble()`。
+`createSystemPromptProvider()` 是面向 context manager 的适配器。`build()` 解析 agent name、task kind、roles、addon 和 custom instructions，再调用 `SystemPrompt.assemble()`；`buildRuntimeContext()` 独立生成环境和调用方 runtime 文本。
 
 ### G6: 分离稳定行为策略与工具接口契约
 
@@ -77,7 +74,7 @@ subagent prompt 的层顺序是：
 
 ### D3: 渲染运行时层
 
-生成 environment、MCP 精确名称公告、subagent roles、custom instructions、agent addon 等运行时层。
+渲染 subagent roles、custom instructions、agent addon 等稳定层；environment 与调用方 runtime 文本经独立方法输出，不在同一 run 内反复改写 system。
 
 ### D4: 安全加载 custom instructions
 
@@ -107,9 +104,9 @@ LLM provider、model 和 API 调用由服务层负责。本轮不实现 provider
 
 本模块不调用 LLM 来生成或重写 prompt。
 
-### N5: 不注入 memory
+### N5: 不提供长期记忆
 
-memory 与消息历史由 context 模块处理；system-prompt 只生成系统提示词层。
+说明文件属于项目／全局约定。独立 MemoryLoader 和自动 `<memory>` 注入已移除；本模块不增加长期记忆存储或主动记忆工具。消息历史仍由 Context 投影。
 
 ---
 
@@ -119,7 +116,7 @@ memory 与消息历史由 context 模块处理；system-prompt 只生成系统�
 - `.md` 文本在生成脚本中规范化换行，避免 Windows/Unix 换行影响输出。
 - `SystemPrompt.assemble()` 返回 `string[]`，不返回层元数据对象。
 - 继续使用 assembler 内的数组字面量表达层顺序，不引入 `LAYER_ORDER + sort`。
-- 子代理不加载 primary custom instructions。
+- 主、子代理共用说明，但保留各自身份；Global 先于 Project，项目具体约定优先。用户当前明确要求、宿主权限和委派边界仍优先于说明。
 - MCP loaded 集由运行时 composition 按 `sessionId + contextScopeId` 维护，跨 context compaction 保留；应用重启或无法恢复时清空，并在下一轮重新公告可加载工具。
 - 不为 Todo 等稳定行为新增专用动态 prompt layer；只有真正随运行时变化的上下文才进入 renderer。
 

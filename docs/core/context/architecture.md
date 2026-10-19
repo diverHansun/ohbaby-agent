@@ -93,7 +93,7 @@ packages/ohbaby-agent/src/core/context/
 
 ### 4.1 Run snapshot
 
-`AgentRunPromptSnapshot { systemPrompt, memory }` 在 initiating turn 创建，在同一 run 内保持稳定。目录、custom instruction 或 `OHBABY.md` 的变化只进入下一 run。
+`AgentRunPromptSnapshot { systemPrompt }` 在 initiating turn 创建，在同一 run 内保持稳定。目录、custom instruction 或 `OHBABY.md` 的变化只进入下一 run。
 
 ### 4.2 Prepared request
 
@@ -108,7 +108,7 @@ interface PreparedModelRequest {
 }
 ```
 
-- `messages` 已包含 system/memory、active history、active reasoning 和 `tailDirectives`。
+- `messages` 已包含 system、active history、active reasoning 和 `tailDirectives`。
 - `tools` 是当次已解析、已排序、已做 permission/admission 的 schema 快照。
 - `onRequestMeasured` 接收 detached/frozen 请求；Provider 发送同一快照。
 - final-step 从完整 tool set 派生 system tool names，但发送的 `tools` 为 `[]`。
@@ -190,7 +190,7 @@ capacityPressure = ordinaryInput >= ordinaryInputBudget
 | Context 存储范式 | 继续使用 MessageStore + 窄端口 | 不获得全量 event sourcing 的统一 replay，但避免高迁移复杂度 |
 | Compaction 修复 | `commitCompaction()` atomic port | 不增加 durable marker；当前 SQLite/in-memory 都能提供原子边界 |
 | 并发控制 | per-scope lane + atomic message/part snapshot precondition | 底层 Context mutation 按 scope 串行，手动请求在外层遇忙拒绝；跨 manager 冲突失败，不增加全局锁或持久化 revision |
-| Memory | primary run snapshot 只读 | 本轮不增加自动长期记忆、RAG 或 child MemoryView |
+| 项目／全局说明 | 经 SystemPromptProvider 加载并进入 run snapshot | 移除重复 memory 路线，不增加长期记忆或 RAG |
 | Provider window | 声明 budget + calibration + bounded recovery | 不持久化 observed adaptive ceiling |
 
 这些决策优先正确性、可靠性和隔离性；复杂度必须由可复现失败证据挣得。

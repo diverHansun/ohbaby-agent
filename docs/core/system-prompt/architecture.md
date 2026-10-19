@@ -19,8 +19,8 @@ flowchart TD
   prompts["prompts/*.md"] --> generated["templates.generated.ts"]
   generated --> assembler
   assembler --> layers["layers/* renderers"]
-  layers --> env["environment"]
-  layers --> mcpTools["MCP exact-name menu"]
+  provider --> runtime["buildRuntimeContext: environment + runtimePrompts"]
+  runtime --> initiating["initiating user model-context part"]
   layers --> custom["custom instructions"]
   assembler --> output["string[] prompt layers"]
 ```
@@ -39,7 +39,6 @@ packages/ohbaby-agent/src/core/system-prompt/
     custom.ts
     environment.ts
     index.ts
-    mcp-tools.ts
   services/
     custom-instruction-loader.ts
   prompts/
@@ -77,9 +76,8 @@ packages/ohbaby-agent/src/core/system-prompt/
 `layers/` 只放运行时层 renderer：
 
 - `base.ts`: 返回 primary base prompt（`generateBasePrompt`）。
-- `environment.ts`: 渲染 cwd、platform、date、git 状态和可用工具名。
-- `mcp-tools.ts`: 只渲染未加载 MCP 工具的精确本地名和固定使用说明；不接收 description 或 schema。
-- `custom.ts`: 渲染 custom instructions，不做路径解析、文件 I/O 或安全扫描。
+- `environment.ts`: 检测并渲染 cwd、platform、date、git 状态；完整环境还含 OS version，子代理使用 minimal 形式。输出由 `buildRuntimeContext()` 进入 initiating user 的 model-context part，不拼入稳定 system。
+- `custom.ts`: 按 scope 固定渲染 Global → Project，附上优先规则，不做路径解析、文件 I/O 或安全扫描。
 
 ### 2.3 services
 
@@ -95,7 +93,7 @@ packages/ohbaby-agent/src/core/system-prompt/
 - 解析 primary/subagent task kind。
 - 包装 `agentPromptAddon` 为 `<agent_prompt_addon>`。
 - 用运行时 role 列表替换 `subagent-roles.md` 中的 `{{ROLES}}` 占位符（函数式替换，避免 `$` 序列被解释）。
-- 渲染当前 session/context scope 的未加载 MCP 工具公告。
+- `buildRuntimeContext()` 组合环境和调用方提供的 runtime 文本；UI composition 当前在这里提供 scoped MCP 精确名称菜单。
 - 按固定层顺序返回 `string[]`。
 
 ---
@@ -105,16 +103,16 @@ packages/ohbaby-agent/src/core/system-prompt/
 primary prompt：
 
 ```text
-base -> primary task -> agent addon -> subagent roles -> mcp tools -> environment -> custom
+base -> primary task -> agent addon -> subagent roles -> custom
 ```
 
 subagent prompt：
 
 ```text
-subagent base -> subagent task -> agent addon -> mcp tools -> minimal environment
+subagent base -> subagent task -> agent addon -> custom
 ```
 
-MCP tools 层是条件层。只有存在已准入且尚未在当前 session/context scope 加载的 MCP 工具时才会出现。它只含精确本地名和固定说明；动态工具的 description/schema 仅在 `select_tools` 成功后通过原生 tools schema 发送。subagent roles 层也是条件层，只有存在可用 role 时才出现。
+subagent roles 只在主代理有可用 role 时出现。环境和 scoped MCP 菜单属于独立 runtime 文本，由 Context 在新 run 有 initiating user message 时幂等附着；恢复 run 缺少 initiating message 时不重复附着。MCP 菜单只含精确本地名和固定说明，description/schema 仅在 `select_tools` 成功后通过原生 tools 发送。本批保持该现有行为，尚未接入 system-reminder。
 
 ---
 
@@ -126,7 +124,7 @@ MCP tools 层是条件层。只有存在已准入且尚未在当前 session/cont
 
 ### Adapter
 
-`createSystemPromptProvider()` 将 context manager 的 `SystemPromptProviderInput` 适配为 `AssembleOptions`。
+`createSystemPromptProvider()` 将 context manager 的 `SystemPromptProviderInput` 适配为 `AssembleOptions`。主、子代理共用说明加载器，说明目录使用 `projectRoot ?? directory`；环境检测仍使用执行 `directory`。
 
 ### Layered Composition
 
@@ -139,7 +137,7 @@ MCP tools 层是条件层。只有存在已准入且尚未在当前 session/cont
 | 模块 | 关系 | 边界 |
 | --- | --- | --- |
 | agents | 调用/提供 addon | agent runtime prompt 只能作为 addon，不替换默认 identity/task |
-| context | 消费 provider | memory 与消息历史由 context 负责 |
+| context | 消费 provider | 固定 run 的 systemPrompt 快照并投影消息历史；无独立 memory 注入 |
 | ui-runtime | 提供 task/tool/environment resolver | permission mode 与工具注册不属于 system-prompt |
 | mcp integration | 对外部 MCP metadata 做准入并维护 loaded 集 | 失败、不可解析或不安全 metadata 不得进入公告或工具 schema |
 | tool-scheduler | 提供工具名/工具描述 | system-prompt 不执行工具、不审批权限 |

@@ -6,7 +6,7 @@
 
 ## 一、模块定位
 
-Context 把 durable Message history、run-local System/Memory snapshot、当次 ordered tools 和 ephemeral directives 投影为模型可见请求，并在达到占用阈值或出现容量压力时执行可解释、可恢复的摘要压缩。mask 与独立 prune 路径及其专属配置、事件和消费者已移除。
+Context 把 durable Message history、run-local systemPrompt snapshot、当次 ordered tools 和 ephemeral directives 投影为模型可见请求，并在达到占用阈值或出现容量压力时执行可解释、可恢复的摘要压缩。mask 与独立 prune 路径及其专属配置、事件和消费者已移除。
 
 ```text
 durable MessageStore
@@ -54,11 +54,11 @@ primary 与 subagent 都通过同一 `ContextManager`/Lifecycle 链路。隔离�
 
 - primary 的 `contextScopeId` 缺省，语义上是 primary scope，不表示“所有 scope”；
 - child/sibling scope 的 history、calibration、compaction floor、tool epoch 与 cache identity 互不污染；
-- subagent 不自动加载 `OHBABY.md` Memory。
+- 主、子代理共用可选说明文件，读取目录由 session projectRoot 决定；角色提示词与历史 scope 仍隔离。
 
 ### G5：稳定前缀与正确权限
 
-同一 run 的 System/Memory snapshot 稳定；runtime model context 只附着 initiating user message；同 tool epoch 的工具顺序稳定。缓存优化不能保留已失效的权限、工具或历史。
+同一 run 的 systemPrompt snapshot 稳定；runtime model context 只附着 initiating user message；同 tool epoch 的工具顺序稳定。缓存优化不能保留已失效的权限、工具或历史。
 
 ### G6：故障可解释、状态可恢复
 
@@ -72,7 +72,7 @@ durable store 是事实源。摘要正文、成功请求 records、遗漏 metada
 
 ### D1：创建 run-local prompt snapshot
 
-`createRunPromptSnapshot()` 在 initiating turn 捕获 SystemPrompt 与 Memory，并可向 initiating user message 幂等附着动态、仅模型可见的 runtime context。
+`createRunPromptSnapshot()` 在 initiating turn 捕获包含可选说明的 systemPrompt，并可向 initiating user message 幂等附着动态、仅模型可见的 runtime context。
 
 ### D2：组装 scoped durable history
 
@@ -80,7 +80,7 @@ durable store 是事实源。摘要正文、成功请求 records、遗漏 metada
 
 - 按 session/scope 读取 Message history；
 - 使用调用方提供或新建的 `AgentRunPromptSnapshot`；
-- primary 加载 Memory，subagent 使用空 Memory；
+- 无快照时经同一个 SystemPromptProvider 加载说明，透传 projectRoot；
 - 返回 `AssembledContext`，但不把工具 schema 固化为会话状态。
 
 ### D3：投影并测量一次请求
@@ -129,7 +129,6 @@ calibration factor 与成功 compaction floor 按 `sessionId + contextScopeId` �
 | 依赖 | Context 依赖的抽象 | 边界 |
 |---|---|---|
 | Message | `MessageManager.commitCompaction()` | durable history 与原子变更提交 |
-| Memory | `MemoryReader` | 只读 merged Memory |
 | SystemPrompt | `SystemPromptProvider` | run snapshot 内容 |
 | Token counting | `TokenCounter` | request heuristic 与 budget |
 | Summary LLM | `ContextLLMClient` | 只生成候选，不拥有提交 |

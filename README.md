@@ -152,7 +152,7 @@ skills.
 `OHBABY_HOME` is an optional **absolute path to the complete configuration
 root**. Its default is `~/.ohbaby` on macOS/Linux and
 `%USERPROFILE%\.ohbaby` on Windows. Global model, secret, MCP, skill, agent,
-tool, memory, and daemon-state files live below this root; project-scoped
+tool, optional global-instruction, and daemon-state files live below this root; project-scoped
 configuration lives below `<project>/.ohbaby`.
 
 Runtime data remains in the platform data directory:
@@ -171,7 +171,7 @@ detected; run `ohbaby serve stop` before retrying.
 
 Module designs, implementation notes, and problem lists live under [`docs/`](docs/).
 
-Agent-recognized memory files (highest priority first): `OHBABY.md`, `AGENTS.md`, `CLAUDE.md`.
+Optional instruction files, first usable per scope: `OHBABY.md`, `AGENTS.md`, `CLAUDE.md`. Primary and subagents share global defaults and instructions from the session project root; project instructions take precedence. These files are not a long-term memory service.
 
 ## 🛠️ Development
 

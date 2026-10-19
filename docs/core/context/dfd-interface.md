@@ -7,9 +7,9 @@
 ## 一、边界图
 
 ```text
-MemoryReader ───────┐
-SystemPromptProvider├─→ createRunPromptSnapshot()
-MessageManager ─────┘             │
+SystemPromptProvider ──┐
+MessageManager ────────┴─→ createRunPromptSnapshot()
+                                  │
                                   ▼
 ToolScheduler/MCP ── resolved names/schemas ─┐
 Lifecycle ── reasoning/tail directives ──────┼─→ prepareTurn()
@@ -32,9 +32,8 @@ Context 不访问 MCP registry、UI state 或 Provider transport；这些 adapte
 1. UI/CLI 接纳 prompt，创建 initiating user message
 2. Lifecycle 解析 agent identity、ordered tools、permission/MCP epoch
 3. Context.createRunPromptSnapshot()
-   3a. SystemPromptProvider.build()
-   3b. primary MemoryReader.load()；subagent 使用空 Memory
-   3c. dynamic runtime context append-if-absent 到 initiating message
+   3a. SystemPromptProvider.build(projectRoot, directory)；主、子共用说明加载
+   3b. dynamic runtime context append-if-absent 到 initiating message
 4. Context.prepareTurn()
    4a. assemble scoped active history
    4b. serialize messages + tools；固定 resolved request settings 与 inputIds
@@ -179,7 +178,7 @@ assemble(
 ): Promise<AssembledContext>
 ```
 
-调用方必须显式提供 `isSubagent`、`toolNames` 和可选 scope/snapshot。
+调用方必须显式提供 `isSubagent`、`toolNames` 和可选 scope/snapshot。`projectRoot` 取自已有会话；无快照的 assemble、prepareTurn、compact 同样透传。`directory` 保留执行环境语义，旧调用未提供项目根时才回退该目录。
 
 ### 7.3 Measurement
 
@@ -191,7 +190,7 @@ getUsage(input: {
 }): ContextUsage
 ```
 
-只测最终 provider-relevant messages/tools，不重复单算 system、Memory 或 tool schema。
+只测最终 provider-relevant messages/tools，不重复单算 system 或 tool schema。
 
 ### 7.4 Prepare
 

@@ -27,18 +27,16 @@ interface ContextIdentity {
 ```typescript
 interface AgentRunPromptSnapshot {
   readonly systemPrompt: string
-  readonly memory: MergedMemory
 }
 ```
 
-值对象，run-local immutable，不持久化。primary 在 initiating turn 读取 System/Memory；subagent 的 Memory 为空。文件变化只影响下一 run。
+值对象，run-local immutable，不持久化。primary 与 subagent 在 initiating turn 读取包含可选全局／项目说明的 systemPrompt。文件变化只影响下一 run。
 
 ### 2.2 `AssembledContext`
 
 ```typescript
 interface AssembledContext {
   readonly systemPrompt: string
-  readonly memory: MergedMemory
   readonly history: readonly MessageWithParts[]
   readonly hasSummary: boolean
   readonly assembledAt: number
@@ -67,7 +65,7 @@ interface PreparedModelRequest {
 
 它是测量和 Provider 发送的单一请求快照：
 
-- `messages` 已合入 system/memory、active history、reasoning 和 `tailDirectives`；
+- `messages` 已合入 system、active history、reasoning 和 `tailDirectives`；
 - `tools` 保留 caller 解析后的顺序和 schema；
 - 创建后深冻结，retry/lazy MCP/permission change 不得原地修改；
 - `settings` 固定 model、temperature、已解析 reasoning 与输出 maxTokens；`inputIds` 固定本次纳入的 run 输入；

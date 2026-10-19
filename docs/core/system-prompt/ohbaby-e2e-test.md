@@ -2,7 +2,7 @@
 
 ## Goal
 
-Verify that the final system prompt sent through the runtime data flow has the expected primary/subagent identity, task contract, MCP exact-name menu, environment, and custom-instruction boundaries.
+Verify that the final model request has the expected primary/subagent identity, task contract and custom instructions in its stable system content, with environment and scoped MCP menus in the separate runtime context.
 
 ## Scope
 
@@ -13,15 +13,13 @@ This checklist covers the `system-prompt` optimization branch. It validates dete
 ```text
 User prompt
   -> createInProcessUiBackendClient.submitPrompt
-  -> submitPromptInternal
-  -> runtime.buildPromptMessages
-  -> ContextManager.assemble
-  -> createSystemPromptProvider.build
-  -> SystemPrompt.assemble
-  -> system ChatCompletionMessage
-  -> RunManager
+  -> Agent runner / RunManager (projectRoot + execution directory)
   -> Lifecycle
-  -> LLM client
+  -> ContextManager.createRunPromptSnapshot
+  -> createSystemPromptProvider.build / SystemPrompt.assemble
+  -> ContextManager.prepareTurn
+  -> PreparedModelRequest
+  -> LLM client / protocol adapter
 ```
 
 ## Expected Prompt Shape
@@ -33,10 +31,7 @@ primary base identity
 + primary task contract: plan | agent
 + optional agent prompt add-on
 + optional subagent role guidance
-+ optional MCP exact-name menu for admitted, unloaded tools
-+ full environment
-+ custom instructions
-+ memory appended by runtime prompt-context
++ optional global / project instructions (Global -> Project)
 ```
 
 Subagent prompt:
@@ -45,15 +40,14 @@ Subagent prompt:
 subagent base identity
 + subagent task contract: explore | research | generic
 + optional agent prompt add-on
-+ optional MCP exact-name menu for admitted, unloaded tools
-+ minimal environment
++ optional global / project instructions (Global -> Project)
 ```
+
+Environment and scoped MCP menus are produced separately by `buildRuntimeContext()` and attached to the initiating user model-context part. The environment tag is `<environment_context>`; child runtime uses the minimal form. They are not part of the stable system string.
 
 Subagent prompt must not include:
 
 - primary identity text
-- project or global custom instructions
-- primary memory injection
 - recursive subagent tool permission text
 
 ## Deterministic Checks
@@ -61,7 +55,7 @@ Subagent prompt must not include:
 Run focused prompt tests:
 
 ```powershell
-pnpm vitest run packages/ohbaby-agent/src/core/system-prompt packages/ohbaby-agent/src/agents/manager.unit.test.ts
+pnpm exec vitest run packages/ohbaby-agent/src/core/system-prompt packages/ohbaby-agent/src/core/agents/runner.unit.test.ts
 ```
 
 Expected:
@@ -70,7 +64,7 @@ Expected:
 - subagent `explore`, `research`, and `generic` task contracts appear in assembled prompts
 - configured `AgentConfig.prompt` appears inside an add-on block
 - configured `AgentConfig.prompt` does not replace default base/task prompt text
-- subagent prompts omit custom instructions
+- primary and subagent prompts load optional scoped instructions exactly once; projectRoot selects files and directory describes execution
 
 Run runtime prompt data-flow tests:
 
@@ -127,9 +121,9 @@ $env:OHBABY_RUN_REAL_TUI_SMOKE = "1"; $env:OHBABY_RUN_REAL_SUBAGENT_SMOKE = "1";
 
 Expected:
 
-- the real model creates an `explore` child session through `task`
+- the real model creates an `explore` child session through `subagent_run`
 - the model resumes the same child session
-- background `agent_open`, `agent_eval`, `agent_status`, and `agent_close` continue to work
+- `subagent_status` and `subagent_close` continue to work
 - child workspace-tool execution remains isolated to the child session
 
 ## Prompt Format Inspection
@@ -138,21 +132,22 @@ Do not print full system prompts during real-provider runs. If a test needs to i
 
 ```typescript
 expect(systemPrompt).toContain("<primary_task>");
-expect(systemPrompt).toContain("<environment>");
+expect(systemPrompt).not.toContain("<environment_context>");
 expect(systemPrompt).not.toContain("<tool_guidance>");
 expect(systemPrompt).not.toContain("ZAI_API_KEY");
 expect(systemPrompt).not.toMatch(/OPENAI_API_KEY\s*=/);
 ```
 
-When an admitted MCP tool remains unloaded, additionally assert the menu contains its exact local name and fixed instructions, but not its server-supplied description or schema.
+Inspect the initiating user model-context part separately for `<environment_context>`. When an admitted MCP tool remains unloaded, assert that runtime menu contains its exact local name and fixed instructions, but not its server-supplied description or schema.
 
 For subagents:
 
 ```typescript
 expect(systemPrompt).toContain("<subagent_base>");
 expect(systemPrompt).toContain("<subagent_task>");
-expect(systemPrompt).toContain("<environment>");
-expect(systemPrompt).not.toContain("<custom_instructions>");
+expect(systemPrompt).not.toContain("<environment_context>");
+// With safe instruction files in the isolated project/global fixture:
+expect(systemPrompt).toContain("<custom_instructions>");
 expect(systemPrompt).not.toContain("You are Lychee");
 ```
 
@@ -165,10 +160,10 @@ The branch is acceptable only when:
 - runtime composition and in-process contract tests pass
 - `pnpm run typecheck` passes
 - `pnpm test` passes
-- real-provider smoke passes, or the final report records that no real key was present in the process environment
+- the final report distinguishes deterministic wire checks from real-model behavior; if real-provider smoke is not run, record that limitation explicitly
 - secret scan returns no matches
 
-## Execution Result: 2026-05-25
+## Execution Result: 2026-05-25 (historical; not evidence for the current change)
 
 Real-provider keys were loaded from the local root `ohbaby-e2e-test.md` file into the test process environment only. No key value was copied into this worktree document, test snapshot, or source file.
 
