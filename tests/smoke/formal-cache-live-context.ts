@@ -2,6 +2,7 @@ import type { NativeRealProfile } from "./reasoning-native-harness.js";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import type { UiPermissionRequest, UiSnapshot } from "ohbaby-sdk";
+import { MAX_READ_LIMIT } from "../../packages/ohbaby-agent/src/tools/utils/text-files.js";
 
 /** Profiles for the context migration gate. These are intentionally distinct from old cache probes. */
 export const LIVE_CONTEXT_PROFILES: readonly NativeRealProfile[] = [
@@ -92,11 +93,26 @@ export function classifyControlledRead(
 ): ControlledReadDecision {
   const input = call?.input ?? {};
   const path = input.file_path;
+  const { offset, limit, cursor } = input;
   const allowed =
     call?.name === "read" &&
-    Object.keys(input).length === 1 &&
+    Object.keys(input).every((key) =>
+      ["file_path", "offset", "limit", "cursor"].includes(key),
+    ) &&
     typeof path === "string" &&
-    resolve(workdir, path) === allowedFile;
+    resolve(workdir, path) === allowedFile &&
+    (offset === undefined ||
+      (typeof offset === "number" &&
+        Number.isSafeInteger(offset) &&
+        offset >= 1)) &&
+    (limit === undefined ||
+      (typeof limit === "number" &&
+        Number.isInteger(limit) &&
+        limit >= 1 &&
+        limit <= MAX_READ_LIMIT)) &&
+    (cursor === undefined ||
+      (typeof cursor === "string" && cursor.trim().length > 0)) &&
+    !(cursor !== undefined && offset !== undefined);
   const knownNames = new Set([
     "read",
     "bash",
@@ -106,7 +122,13 @@ export function classifyControlledRead(
     "grep",
     "skill",
   ]);
-  const knownKeys = new Set(["file_path", "command", "offset", "limit"]);
+  const knownKeys = new Set([
+    "file_path",
+    "command",
+    "offset",
+    "limit",
+    "cursor",
+  ]);
   return {
     allowed,
     toolName: call && knownNames.has(call.name) ? call.name : "unknown",

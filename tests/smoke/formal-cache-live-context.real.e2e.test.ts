@@ -37,9 +37,9 @@ describe.runIf(enabled)("production-backed context migration", () => {
     let phase: LiveContextPhase = "first-read";
     let evidencePath: string | undefined;
     try {
-      // Controlled redundant history gives the unchanged inflation guard useful material.
+      // Exceed the 20k recent-history retention floor so compaction can retire old turns.
       const compressibleHistory =
-        mode === "compaction" ? createCompactionNotes(30) : "";
+        mode === "compaction" ? createCompactionNotes(300) : "";
       const first = await session.submit(
         `Use the read tool once on the exact file ${session.readFilePath}. Report the Project, Release, and Owner fields exactly. This is a local read-only file; do not use shell commands.${compressibleHistory}`,
       );
@@ -68,7 +68,7 @@ describe.runIf(enabled)("production-backed context migration", () => {
       phase = "continuation";
       const second = await session.submit(
         "Without reading the file again, state who owns Project Cedar release 17. Use only the earlier conversation." +
-          (mode === "compaction" ? createCompactionNotes(60) : ""),
+          (mode === "compaction" ? createCompactionNotes(600) : ""),
       );
       expect(second.result.prompt.status).toBe("succeeded");
       expect(second.checkpoint.answer.owner).toBe(true);

@@ -64,7 +64,6 @@ it("allows only the exact local read path and records no argument values", () =>
   ).toBe(true);
   for (const call of [
     { name: "read", input: { file_path: "../private.md" } },
-    { name: "read", input: { file_path: "cache-note.md", offset: 1 } },
     {
       name: "bash",
       input: { command: "cat cache-note.md SYNTHETIC_SECRET_123" },
@@ -76,6 +75,78 @@ it("allows only the exact local read path and records no argument values", () =>
     expect(JSON.stringify(denied)).not.toContain("SYNTHETIC_SECRET_123");
     expect(denied.inputSha256).toMatch(/^[a-f0-9]{64}$/);
   }
+});
+
+it("accepts read pagination within production bounds for only the controlled file", () => {
+  const workdir = join(tmpdir(), "controlled-workspace");
+  const allowedFile = join(workdir, "cache-note.md");
+  const options: Record<string, unknown>[] = [
+    { offset: 1 },
+    { limit: 1 },
+    { offset: 1, limit: 2000 },
+    { offset: Number.MAX_SAFE_INTEGER, limit: 20_000 },
+    { cursor: "SYNTHETIC_CURSOR_123", limit: 2000 },
+  ];
+  for (const pagination of options) {
+    const decision = classifyControlledRead(
+      { name: "read", input: { file_path: "cache-note.md", ...pagination } },
+      workdir,
+      allowedFile,
+    );
+    expect(decision.allowed).toBe(true);
+    expect(JSON.stringify(decision)).not.toContain("SYNTHETIC_CURSOR_123");
+    expect(
+      classifyControlledRead(
+        { name: "read", input: { file_path: "../private.md", ...pagination } },
+        workdir,
+        allowedFile,
+      ).allowed,
+    ).toBe(false);
+  }
+});
+
+it("rejects invalid pagination, unknown keys, and other tools", () => {
+  const workdir = join(tmpdir(), "controlled-workspace");
+  const allowedFile = join(workdir, "cache-note.md");
+  const options: Record<string, unknown>[] = [
+    { offset: 0 },
+    { offset: -1 },
+    { offset: 1.5 },
+    { offset: Number.MAX_SAFE_INTEGER + 1 },
+    { offset: "1" },
+    { offset: null },
+    { limit: 0 },
+    { limit: 20_001 },
+    { limit: 1.5 },
+    { limit: Infinity },
+    { limit: "2000" },
+    { limit: null },
+    { cursor: "" },
+    { cursor: " " },
+    { cursor: 1 },
+    { cursor: null },
+    { cursor: "SYNTHETIC_CURSOR_123", offset: 1 },
+    { unknown: true },
+  ];
+  for (const pagination of options) {
+    expect(
+      classifyControlledRead(
+        { name: "read", input: { file_path: "cache-note.md", ...pagination } },
+        workdir,
+        allowedFile,
+      ).allowed,
+    ).toBe(false);
+  }
+  expect(
+    classifyControlledRead(
+      {
+        name: "edit",
+        input: { file_path: "cache-note.md", offset: 1, limit: 1 },
+      },
+      workdir,
+      allowedFile,
+    ).allowed,
+  ).toBe(false);
 });
 
 it("chooses one-time allow for the controlled read and deny for another tool", () => {
