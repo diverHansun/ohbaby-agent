@@ -164,9 +164,6 @@ async function setup(
           requests: [],
         }),
     },
-    memory: {
-      load: () => Promise.resolve({ global: "", project: "", merged: "" }),
-    },
     systemPromptProvider: {
       build: (): Promise<string> => Promise.resolve("system instruction"),
     },

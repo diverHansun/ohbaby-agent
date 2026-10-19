@@ -18,6 +18,7 @@ import type {
   PromptSecurityScanResult,
   PromptSecuritySource,
 } from "../security/index.js";
+import type { CustomInstruction } from "../types.js";
 
 export const CUSTOM_INSTRUCTIONS_FILE_NAME = "OHBABY.md";
 export const CUSTOM_INSTRUCTIONS_FALLBACK_FILE_NAMES = [
@@ -168,9 +169,10 @@ async function loadProjectInstructions(
   );
 }
 
+/** Returns global defaults first, then the more specific project instructions. */
 export async function loadCustomInstructions(
   options: CustomInstructionLoadOptions = {},
-): Promise<string[]> {
+): Promise<CustomInstruction[]> {
   const globalPath =
     options.globalPath ??
     getGlobalCustomInstructionsPath(options.homeDirectory);
@@ -196,12 +198,17 @@ export async function loadCustomInstructions(
               : { homeDirectory: options.homeDirectory }),
           }),
         ];
-  const instructions = await Promise.all([
-    loadProjectInstructions(options),
+  const [global, project] = await Promise.all([
     readFirstInstructionFile(globalPaths, options),
+    loadProjectInstructions(options),
   ]);
 
-  return instructions.filter(
-    (instruction): instruction is string => instruction !== undefined,
-  );
+  return [
+    ...(global === undefined
+      ? []
+      : [{ scope: "global" as const, text: global }]),
+    ...(project === undefined
+      ? []
+      : [{ scope: "project" as const, text: project }]),
+  ];
 }

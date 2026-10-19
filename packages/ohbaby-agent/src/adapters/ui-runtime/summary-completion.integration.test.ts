@@ -290,9 +290,6 @@ it.each([
           });
         },
       },
-      memory: {
-        load: () => Promise.resolve({ global: "", project: "", merged: "" }),
-      },
       systemPromptProvider: { build: () => Promise.resolve("Stable system") },
       tokenCounter: {
         estimateTokens: (text) => text.length,

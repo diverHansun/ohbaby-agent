@@ -17,6 +17,7 @@ import { loadCustomInstructions } from "./services/custom-instruction-loader.js"
 import type { PromptSecurityFinding } from "./security/index.js";
 import type {
   AssembleOptions,
+  CustomInstruction,
   EnvironmentInfo,
   PrimaryTaskKind,
   PromptTaskKind,
@@ -34,7 +35,7 @@ export interface SystemPromptProviderOptions {
   ) => Promise<string | undefined> | string | undefined;
   readonly customInstructionLoader?: (
     input: SystemPromptProviderInput,
-  ) => Promise<readonly string[]> | readonly string[];
+  ) => Promise<readonly CustomInstruction[]> | readonly CustomInstruction[];
   readonly environmentDetector?: (
     directory: string,
     input: SystemPromptProviderInput,
@@ -132,6 +133,7 @@ export const SystemPrompt = {
           resolveSubagentTaskKind(options.agentName, options.taskKind),
         ),
         generateAgentAddonPrompt(agentPromptAddon),
+        generateCustomInstructionsPrompt(options.customInstructions ?? []),
       ]);
     }
 
@@ -194,35 +196,24 @@ export function createSystemPromptProvider(
           : (options.availableSubagentRolesProvider?.(input) ?? []),
         options.taskKindResolver?.(input, agentName),
       ]);
-      const agentPromptAddon = await resolveAgentPromptAddon(
-        agentName,
-        input,
-        options,
-      );
-
-      if (input.isSubagent) {
-        return SystemPrompt.assemble({
-          agentName,
-          agentPromptAddon,
-          isSubagent: true,
-          taskKind,
-        }).join("\n\n");
-      }
-
-      const customInstructions = await (options.customInstructionLoader
-        ? options.customInstructionLoader(input)
-        : loadCustomInstructions({
-            onSecurityFinding: options.onSecurityFinding,
-            onWarning: options.onWarning,
-            projectDirectory: input.directory,
-          }));
+      const [agentPromptAddon, customInstructions] = await Promise.all([
+        resolveAgentPromptAddon(agentName, input, options),
+        options.customInstructionLoader
+          ? options.customInstructionLoader(input)
+          : loadCustomInstructions({
+              onSecurityFinding: options.onSecurityFinding,
+              onWarning: options.onWarning,
+              // Subagents may run in a workdir; instructions follow the session project.
+              projectDirectory: input.projectRoot ?? input.directory,
+            }),
+      ]);
 
       return SystemPrompt.assemble({
         agentName,
         agentPromptAddon,
         availableSubagentRoles,
         customInstructions,
-        isSubagent: false,
+        isSubagent: input.isSubagent,
         taskKind,
       }).join("\n\n");
     },

@@ -509,9 +509,6 @@ describe.each(protocols)("%s Context summary HTTP budget", (protocol) => {
         bus,
         messageManager,
         llmClient: createContextSummaryClient(f.client),
-        memory: {
-          load: () => Promise.resolve({ global: "", project: "", merged: "" }),
-        },
         systemPromptProvider: { build: () => Promise.resolve("Stable system") },
         tokenCounter: {
           estimateTokens: (text) => text.length,

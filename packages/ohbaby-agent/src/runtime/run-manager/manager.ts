@@ -407,6 +407,9 @@ export class RunManager {
         abortSignal: record.abortController.signal,
         agent: record.options.agent,
         directory: record.options.directory,
+        ...(record.options.projectRoot === undefined
+          ? {}
+          : { projectRoot: record.options.projectRoot }),
         isSubagent: record.options.isSubagent,
         initiatingUserMessageId: record.options.initiatingUserMessageId,
         maxSteps: record.options.maxSteps,

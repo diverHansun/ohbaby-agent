@@ -91,8 +91,6 @@ export function estimateContextOccupancyComposition(
     activeReasoningByMessageId: input.activeReasoningByMessageId,
     history: input.context.history,
     modelOrigin: input.context.modelOrigin,
-    isSubagent: input.context.isSubagent,
-    memory: input.context.memory,
     systemPrompt: input.context.systemPrompt,
   });
   if (input.tailDirectives !== undefined) {
@@ -120,8 +118,6 @@ export function estimateContextOccupancyComposition(
   payloads["system-prompt"].push(
     ...serializeForLlm({
       history: [],
-      isSubagent: input.context.isSubagent,
-      memory: input.context.memory,
       systemPrompt: input.context.systemPrompt,
     }).map(messageForEstimation),
   );

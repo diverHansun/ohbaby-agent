@@ -316,7 +316,6 @@ function createContextManagerMock(
     assemble: vi.fn(),
     compact: vi.fn(),
     createRunPromptSnapshot: vi.fn().mockResolvedValue({
-      memory: { global: "", merged: "", project: "" },
       systemPrompt: "",
     }),
     disposeScope: vi.fn(),
@@ -547,7 +546,6 @@ describe("Lifecycle.run", () => {
     const createRunPromptSnapshot = vi
       .fn<ContextManager["createRunPromptSnapshot"]>()
       .mockResolvedValue({
-        memory: { global: "", merged: "", project: "" },
         systemPrompt: "stable snapshot",
       });
     const contextManager = {

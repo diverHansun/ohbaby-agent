@@ -5,14 +5,8 @@ import {
   type ModelOrigin,
 } from "../../services/interface-providers/native-state.js";
 import type { ModelMessage } from "../llm-client/index.js";
-import type { MergedMemory } from "../memory/index.js";
 import type { MessageWithParts, Part, ToolPart } from "../message/index.js";
 import { isInterruptionFactPart } from "../message/interruption.js";
-import {
-  scanPromptLikeContent,
-  shouldLoadPromptLikeContent,
-  type PromptSecurityFinding,
-} from "../system-prompt/security/index.js";
 import { isActivePart } from "./filters.js";
 import {
   selectActiveInterruptionText,
@@ -24,55 +18,13 @@ import { formatToolResultContentForModel } from "./tool-metadata-projection.js";
 const INTERRUPTED_TOOL_RESULT =
   "Tool execution was interrupted before a durable result was recorded. Side effects may have occurred; verify before retrying.";
 
-export function appendMemoryToSystemPrompt(
-  systemPrompt: string,
-  memory: string,
-): string {
-  const trimmedMemory = memory.trim();
-  if (trimmedMemory === "") {
-    return systemPrompt;
-  }
-
-  return [systemPrompt.trim(), `<memory>\n${trimmedMemory}\n</memory>`]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-export function loadMemoryForPrompt(
-  memory: string,
-  onSecurityFinding?: (finding: PromptSecurityFinding) => void,
-): string {
-  const trimmedMemory = memory.trim();
-  if (trimmedMemory === "") {
-    return "";
-  }
-
-  const scan = scanPromptLikeContent(trimmedMemory, {
-    kind: "memory",
-    label: "Memory",
-  });
-  for (const finding of scan.findings) {
-    onSecurityFinding?.(finding);
-  }
-
-  return shouldLoadPromptLikeContent(scan) ? trimmedMemory : "";
-}
-
 export function serializeForLlm(input: {
   readonly modelOrigin?: ModelOrigin;
   readonly systemPrompt: string;
-  readonly memory: MergedMemory;
   readonly history: readonly MessageWithParts[];
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
-  readonly isSubagent: boolean;
-  readonly onSecurityFinding?: (finding: PromptSecurityFinding) => void;
 }): ModelMessage[] {
-  const systemPrompt = input.isSubagent
-    ? input.systemPrompt
-    : appendMemoryToSystemPrompt(
-        input.systemPrompt,
-        loadMemoryForPrompt(input.memory.merged, input.onSecurityFinding),
-      );
+  const systemPrompt = input.systemPrompt;
   const messages = serializeHistoryMessages(
     input.history,
     input.activeReasoningByMessageId,

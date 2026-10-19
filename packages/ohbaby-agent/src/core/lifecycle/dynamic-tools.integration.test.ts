@@ -55,9 +55,6 @@ it("measures and sends each changed toolset with ordered mixed tool results and 
           requests: [],
         }),
     },
-    memory: {
-      load: () => Promise.resolve({ global: "", project: "", merged: "" }),
-    },
     systemPromptProvider: { build: () => Promise.resolve("system") },
     tokenCounter: {
       estimateTokens: (text) => {

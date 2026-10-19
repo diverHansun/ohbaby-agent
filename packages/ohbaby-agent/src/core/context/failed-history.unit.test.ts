@@ -318,7 +318,6 @@ describe("failed history shared by requests and summary material", () => {
       hasSummary: false,
       history,
       isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
       sessionId: "session",
       systemPrompt: "",
     };

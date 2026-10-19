@@ -68,9 +68,6 @@ async function setup(
   const context = createContextManager({
     bus: createBus(),
     messageManager: messages,
-    memory: {
-      load: () => Promise.resolve({ global: "", project: "", merged: "" }),
-    },
     systemPromptProvider: { build: () => Promise.resolve("system") },
     tokenCounter: counter,
     llmClient: {

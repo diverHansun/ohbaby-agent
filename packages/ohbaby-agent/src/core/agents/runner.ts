@@ -212,6 +212,7 @@ export async function runAgent(
         isSubagent: scope.isSubagent,
         projectRoot: input.projectRoot,
       }),
+      projectRoot: input.projectRoot,
       isSubagent: scope.isSubagent,
       ...(userMessageId === undefined
         ? {}

@@ -96,6 +96,7 @@ export interface AgentRunCreateOptions {
   readonly parentMessageId?: string;
   readonly maxSteps?: number;
   readonly directory: string;
+  readonly projectRoot?: string;
   readonly modelId: string;
   readonly tools?: ModelToolDefinition[];
 }

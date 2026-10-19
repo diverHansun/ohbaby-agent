@@ -69,6 +69,8 @@ export interface LifecycleSessionParams {
   readonly sessionId: string;
   readonly contextScopeId?: string;
   readonly directory: string;
+  /** Session project root for project instructions; defaults to directory. */
+  readonly projectRoot?: string;
   readonly modelId: string;
   readonly agent?: string;
   /** User message created for this run; absent for resume/continuation runs. */

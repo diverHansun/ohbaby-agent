@@ -4,17 +4,11 @@ import type {
   ContextLLMClient,
   SummaryRequestResult,
 } from "../../core/context/index.js";
-import {
-  appendMemoryToSystemPrompt,
-  loadMemoryForPrompt,
-} from "../../core/context/index.js";
 import type { SummaryRequestRecord } from "../../core/llm-client/types.js";
 import type { LLMClientInstance } from "../../core/llm-client/index.js";
 import { streamResponse } from "../../core/llm-client/index.js";
 import type { PromptSecurityFinding } from "../../core/system-prompt/security/index.js";
 import { redactPromptSecrets } from "../../services/session/prompt-sanitizer.js";
-
-export { appendMemoryToSystemPrompt, loadMemoryForPrompt };
 
 export function noticeFromPromptSecurityFinding(
   finding: PromptSecurityFinding,
@@ -38,9 +32,6 @@ export function noticeFromPromptSecurityFinding(
 function sourceNameFromPromptSecurityFinding(
   finding: PromptSecurityFinding,
 ): string {
-  if (finding.sourceLabel === "Memory") {
-    return "Memory context";
-  }
   if (finding.sourceLabel.startsWith("Tool ")) {
     return "Tool description";
   }

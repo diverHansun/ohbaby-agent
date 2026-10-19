@@ -1,3 +1,7 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 import { createSystemPromptProvider } from "../assembler.js";
 import type { EnvironmentInfo } from "../types.js";
@@ -13,7 +17,9 @@ describe("createSystemPromptProvider", () => {
   it("keeps primary system stable and emits runtime context separately", async () => {
     const provider = createSystemPromptProvider({
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
-      customInstructionLoader: vi.fn().mockResolvedValue(["Project-only rule"]),
+      customInstructionLoader: vi
+        .fn()
+        .mockResolvedValue([{ scope: "project", text: "Project-only rule" }]),
     });
 
     const prompt = await provider.build({
@@ -65,7 +71,9 @@ describe("createSystemPromptProvider", () => {
     const provider = createSystemPromptProvider({
       agentNameResolver: vi.fn().mockResolvedValue("build"),
       agentPromptResolver: vi.fn().mockResolvedValue("Primary runtime prompt"),
-      customInstructionLoader: vi.fn().mockResolvedValue(["Project rule"]),
+      customInstructionLoader: vi
+        .fn()
+        .mockResolvedValue([{ scope: "project", text: "Project rule" }]),
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
     });
 
@@ -81,28 +89,69 @@ describe("createSystemPromptProvider", () => {
     expect(prompt).toContain("Project rule");
   });
 
-  it("does not load custom instructions for subagents", async () => {
+  it("loads custom instructions for subagents from the session project root", async () => {
     const customInstructionLoader = vi
       .fn()
-      .mockResolvedValue(["This must not be loaded"]);
+      .mockResolvedValue([{ scope: "project", text: "Subagent project rule" }]);
     const provider = createSystemPromptProvider({
       agentNameResolver: vi.fn().mockResolvedValue("explore"),
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
       customInstructionLoader,
     });
-
-    const prompt = await provider.build({
+    const input = {
       sessionId: "session_2",
-      directory: "D:/repo",
+      directory: "D:/repo/packages/worktree",
+      projectRoot: "D:/repo",
       isSubagent: true,
-      toolNames: ["read"],
-    });
+      toolNames: ["read"] as readonly string[],
+    };
+
+    const prompt = await provider.build(input);
 
     expect(prompt).toContain("exploration");
-    expect(prompt).not.toContain("This must not be loaded");
+    expect(prompt).toContain("Subagent project rule");
+    expect(prompt.indexOf("<agent_prompt_addon>")).toBeLessThan(
+      prompt.indexOf("Subagent project rule"),
+    );
     expect(prompt).toContain("Core Capabilities");
     expect(prompt).not.toContain("You are Lychee, an AI coding assistant");
-    expect(customInstructionLoader).not.toHaveBeenCalled();
+    expect(customInstructionLoader).toHaveBeenCalledWith(input);
+  });
+
+  it("reads default instruction files from projectRoot instead of the subagent workdir", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "ohbaby-provider-"));
+    try {
+      const workdir = path.join(root, "nested", "workdir");
+      await fs.mkdir(workdir, { recursive: true });
+      await fs.writeFile(path.join(root, "AGENTS.md"), "ROOT_RULE", "utf8");
+      await fs.writeFile(
+        path.join(workdir, "AGENTS.md"),
+        "WORKDIR_RULE",
+        "utf8",
+      );
+      const previousHome = process.env.OHBABY_HOME;
+      process.env.OHBABY_HOME = path.join(root, "empty-home");
+      try {
+        const provider = createSystemPromptProvider({
+          agentNameResolver: vi.fn().mockResolvedValue("generic"),
+        });
+        const prompt = await provider.build({
+          sessionId: "session_child",
+          directory: workdir,
+          projectRoot: root,
+          isSubagent: true,
+          toolNames: [],
+        });
+
+        expect(prompt).toContain("## Project Instructions\nROOT_RULE");
+        expect(prompt).not.toContain("WORKDIR_RULE");
+      } finally {
+        if (previousHome === undefined) delete process.env.OHBABY_HOME;
+        else process.env.OHBABY_HOME = previousHome;
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   it("resolves primary task kind through the provider", async () => {

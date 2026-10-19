@@ -266,6 +266,9 @@ export class RunWorker {
     return {
       currentRunInputs: this.deps.currentRunInputs,
       directory: this.context.directory,
+      ...(this.context.projectRoot === undefined
+        ? {}
+        : { projectRoot: this.context.projectRoot }),
       runId: this.context.runId,
       modelId: this.context.modelId,
       ...(this.context.reasoning === undefined

@@ -193,9 +193,6 @@ async function harness(
   const manager = createContextManager({
     bus,
     messageManager: createMessageManager({ bus, store }),
-    memory: {
-      load: () => Promise.resolve({ global: "", project: "", merged: "" }),
-    },
     systemPromptProvider: { build: () => Promise.resolve("") },
     tokenCounter: {
       estimateTokens: (text) => text.length,

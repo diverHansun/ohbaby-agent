@@ -6,20 +6,17 @@ import type { ReasoningIntent } from "../../services/interface-providers/reasoni
 import type { ModelOrigin } from "../../services/interface-providers/native-state.js";
 import type { BusInstance } from "../../bus/index.js";
 import type { ModelMessage, ModelToolDefinition } from "../llm-client/index.js";
-import type { MergedMemory } from "../memory/index.js";
 import type { MessageManager, MessageWithParts } from "../message/index.js";
 import type { ToolDefinition } from "../tool-scheduler/index.js";
 import type { CompactionThresholds } from "./constants.js";
 import type { Logger } from "../../observability/logger.js";
 
-export interface MemoryReader {
-  load(directory: string): Promise<MergedMemory>;
-}
-
 export interface SystemPromptProviderInput {
   readonly sessionId: string;
   readonly contextScopeId?: string;
   readonly directory: string;
+  /** Session project root for project instructions; defaults to directory. */
+  readonly projectRoot?: string;
   readonly isSubagent: boolean;
   readonly agentName?: string;
   readonly toolNames: readonly string[];
@@ -75,7 +72,6 @@ export interface ContextLLMClient {
 export interface AssembledContext {
   readonly modelOrigin?: ModelOrigin;
   readonly systemPrompt: string;
-  readonly memory: MergedMemory;
   readonly history: readonly MessageWithParts[];
   readonly hasSummary: boolean;
   readonly assembledAt: number;
@@ -88,6 +84,8 @@ export interface ContextAssemblyOptions {
   readonly modelOrigin?: ModelOrigin;
   readonly agentName?: string;
   readonly contextScopeId?: string;
+  /** Session project root for project instructions; defaults to directory. */
+  readonly projectRoot?: string;
   readonly isSubagent: boolean;
   readonly toolNames: readonly string[];
   readonly promptSnapshot?: AgentRunPromptSnapshot;
@@ -95,7 +93,6 @@ export interface ContextAssemblyOptions {
 
 export interface AgentRunPromptSnapshot {
   readonly systemPrompt: string;
-  readonly memory: MergedMemory;
 }
 
 export interface CreateRunPromptSnapshotInput extends SystemPromptProviderInput {
@@ -171,6 +168,8 @@ export interface CompactOptions {
   readonly modelOrigin?: ModelOrigin;
   readonly agentName?: string;
   readonly directory: string;
+  /** Session project root for project instructions; defaults to directory. */
+  readonly projectRoot?: string;
   readonly contextScopeId?: string;
   readonly force?: boolean;
   readonly isSubagent?: boolean;
@@ -198,9 +197,11 @@ export interface PrepareTurnInput {
   readonly sessionId: string;
   readonly contextScopeId?: string;
   readonly directory: string;
+  /** Session project root for project instructions; defaults to directory. */
+  readonly projectRoot?: string;
   readonly modelId: string;
   readonly signal?: AbortSignal;
-  /** Stable system and memory captured once for this lifecycle run. */
+  /** Stable system prompt captured once for this lifecycle run. */
   readonly promptSnapshot?: AgentRunPromptSnapshot;
   readonly agentName?: string;
   readonly activeReasoningByMessageId?: ReadonlyMap<string, string>;
@@ -261,7 +262,6 @@ export interface ContextManagerOptions {
     messages: readonly MessageWithParts[],
   ) => Promise<readonly MessageWithParts[]>;
   readonly bus: BusInstance;
-  readonly memory: MemoryReader;
   readonly messageManager: MessageManager;
   readonly systemPromptProvider: SystemPromptProvider;
   readonly tokenCounter: TokenCounter;

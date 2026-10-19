@@ -498,9 +498,6 @@ describe("AgentInstance long task integration", () => {
             requests: [],
           }),
       },
-      memory: {
-        load: () => Promise.resolve({ global: "", merged: "", project: "" }),
-      },
       messageManager,
       systemPromptProvider: {
         build: () => Promise.resolve("Subagent long task integration."),

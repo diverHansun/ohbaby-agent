@@ -63,7 +63,6 @@ it("records canonical totals and all seven buckets after retiring Chat measureme
   }));
   const context = {
     ...assembledContext(history),
-    memory: { global: "", project: "", merged: "memory note" },
     systemPrompt: "system instruction",
   };
   const tailDirectives = [
@@ -84,14 +83,14 @@ it("records canonical totals and all seven buckets after retiring Chat measureme
     toolDefinitions: definitions,
   };
   // Removing four nested tool envelopes, two call envelopes/IDs and the old
-  // reasoning key removes 184 ASCII characters: 1453 → 1269, 372 → 326 tokens.
+  // reasoning key removes 184 ASCII characters: 1417 → 1233, 363 → 317 tokens.
   expect(estimatePreparedRequestHeuristic(request, characterCounter())).toBe(
-    1269,
+    1233,
   );
   expect(
     estimateContextOccupancyComposition(input, characterCounter()),
   ).toEqual({
-    "system-prompt": 175,
+    "system-prompt": 139,
     "builtin-tools": 287,
     mcp: 148,
     skills: 138,
@@ -103,13 +102,13 @@ it("records canonical totals and all seven buckets after retiring Chat measureme
     estimatePreparedRequestHeuristic(request, {
       estimateTokens: estimateTokensForText,
     }),
-  ).toBe(326);
+  ).toBe(317);
   expect(
     estimateContextOccupancyComposition(input, {
       estimateTokens: estimateTokensForText,
     }),
   ).toEqual({
-    "system-prompt": 44,
+    "system-prompt": 35,
     "builtin-tools": 72,
     mcp: 37,
     skills: 35,
@@ -203,7 +202,6 @@ function assembledContext(
     ),
     history,
     isSubagent: false,
-    memory: { global: "", merged: "remember this", project: "" },
     sessionId: "session_1",
     systemPrompt: "system instructions",
   };
@@ -309,8 +307,6 @@ function matchingRequest(
       ...serializeForLlm({
         activeReasoningByMessageId,
         history: context.history,
-        isSubagent: context.isSubagent,
-        memory: context.memory,
         systemPrompt: context.systemPrompt,
       }),
       ...tailDirectives,

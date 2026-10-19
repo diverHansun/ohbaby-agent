@@ -70,7 +70,6 @@ import {
   type MessageWithParts,
   type Part,
 } from "../message/index.js";
-import type { MergedMemory } from "../memory/index.js";
 
 export {
   decideCompactionRung,
@@ -82,8 +81,6 @@ export type { CompactionRung, ContextCutPoint } from "./compaction-policy.js";
 const CALIBRATION_EMA_ALPHA = 0.5;
 const CALIBRATION_FACTOR_MIN = 0.5;
 const CALIBRATION_FACTOR_MAX = 3.0;
-
-const EMPTY_MEMORY: MergedMemory = { global: "", project: "", merged: "" };
 
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
   if (value === null || typeof value !== "object" || seen.has(value)) {
@@ -343,8 +340,6 @@ export function createContextManager(
       activeReasoningByMessageId: input.activeReasoningByMessageId,
       history: input.context.history,
       modelOrigin: input.context.modelOrigin,
-      isSubagent: input.isSubagent,
-      memory: input.context.memory,
       systemPrompt: input.context.systemPrompt,
     });
     const request: PreparedModelRequest = structuredClone({
@@ -433,7 +428,6 @@ export function createContextManager(
     readonly assembledAt: number;
     readonly modelOrigin?: AssembledContext["modelOrigin"];
     readonly isSubagent: boolean;
-    readonly memory: MergedMemory;
     readonly rawHistory: readonly MessageWithParts[];
     readonly sessionId: string;
     readonly contextScopeId?: string;
@@ -444,7 +438,6 @@ export function createContextManager(
     return {
       systemPrompt: input.systemPrompt,
       modelOrigin: input.modelOrigin,
-      memory: input.memory,
       history,
       hasSummary: history.some(isSummaryMessage),
       isSubagent: input.isSubagent,
@@ -459,15 +452,6 @@ export function createContextManager(
     directory: string,
     input: ContextAssemblyOptions,
   ): Promise<AssembledContext> {
-    let memory = input.promptSnapshot?.memory ?? EMPTY_MEMORY;
-    if (input.promptSnapshot === undefined && !input.isSubagent) {
-      try {
-        memory = await options.memory.load(directory);
-      } catch (error) {
-        options.onWarning?.("Unable to load memory for context", error);
-      }
-    }
-
     const [systemPrompt, rawHistory] = await Promise.all([
       input.promptSnapshot?.systemPrompt ??
         options.systemPromptProvider.build({
@@ -475,6 +459,7 @@ export function createContextManager(
           contextScopeId: input.contextScopeId,
           sessionId,
           directory,
+          projectRoot: input.projectRoot,
           isSubagent: input.isSubagent,
           toolNames: input.toolNames,
         }),
@@ -486,7 +471,6 @@ export function createContextManager(
       modelOrigin: input.modelOrigin,
       assembledAt: now(),
       contextScopeId: input.contextScopeId,
-      memory,
       rawHistory,
       sessionId,
       systemPrompt,
@@ -511,15 +495,6 @@ export function createContextManager(
   async function createRunPromptSnapshot(
     input: CreateRunPromptSnapshotInput,
   ): Promise<AgentRunPromptSnapshot> {
-    let memory = EMPTY_MEMORY;
-    if (!input.isSubagent) {
-      try {
-        memory = await options.memory.load(input.directory);
-      } catch (error) {
-        options.onWarning?.("Unable to load memory for context", error);
-      }
-    }
-
     const systemPrompt = await options.systemPromptProvider.build(input);
     const initiatingUserMessageId = input.initiatingUserMessageId;
     if (initiatingUserMessageId !== undefined) {
@@ -557,10 +532,7 @@ export function createContextManager(
       );
     }
 
-    return deepFreeze({
-      memory: { ...memory },
-      systemPrompt,
-    });
+    return deepFreeze({ systemPrompt });
   }
 
   function summaryRequest(
@@ -1086,7 +1058,6 @@ export function createContextManager(
       modelOrigin: input.assembled.modelOrigin,
       assembledAt: input.assembled.assembledAt,
       isSubagent: input.assembled.isSubagent,
-      memory: input.assembled.memory,
       rawHistory: projectedHistory,
       contextScopeId: input.assembled.contextScopeId,
       sessionId: input.assembled.sessionId,
@@ -1162,7 +1133,6 @@ export function createContextManager(
       assembledAt: now(),
       contextScopeId: req.contextScopeId,
       isSubagent: req.isSubagent,
-      memory: req.assembled.memory,
       rawHistory,
       sessionId: req.sessionId,
       systemPrompt: req.assembled.systemPrompt,
@@ -1465,6 +1435,7 @@ export function createContextManager(
       agentName: input.agentName,
       modelOrigin: input.modelOrigin,
       contextScopeId: input.contextScopeId,
+      projectRoot: input.projectRoot,
       isSubagent,
       toolNames: input.toolNames,
     });
@@ -1502,6 +1473,7 @@ export function createContextManager(
       agentName: input.agentName,
       modelOrigin: input.modelOrigin,
       contextScopeId: input.contextScopeId,
+      projectRoot: input.projectRoot,
       isSubagent,
       promptSnapshot: input.promptSnapshot,
       toolNames: input.toolNames,

@@ -44,6 +44,7 @@ export interface CreateRunOptions {
   readonly parentMessageId?: string;
   readonly maxSteps?: number;
   readonly directory: string;
+  readonly projectRoot?: string;
   readonly modelId: string;
   readonly tools?: LifecycleSessionParams["tools"];
 }
@@ -103,6 +104,7 @@ export interface RunContext {
   readonly parentMessageId?: string;
   readonly maxSteps?: number;
   readonly directory: string;
+  readonly projectRoot?: string;
   readonly modelId: string;
   readonly tools?: LifecycleSessionParams["tools"];
 }

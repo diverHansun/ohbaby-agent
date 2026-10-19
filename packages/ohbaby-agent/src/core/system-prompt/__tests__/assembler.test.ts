@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { SystemPrompt } from "../assembler.js";
+import type { CustomInstruction } from "../types.js";
+
+const project = (text: string): CustomInstruction => ({
+  scope: "project",
+  text,
+});
 
 describe("SystemPrompt", () => {
   it("assembles stable primary prompts without runtime environment or tools", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "build",
-      customInstructions: ["Prefer Vitest for tests."],
+      customInstructions: [project("Prefer Vitest for tests.")],
       isSubagent: false,
     });
     const fullPrompt = prompts.join("\n\n");
@@ -21,7 +27,7 @@ describe("SystemPrompt", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "build",
       agentPrompt: "Primary agent runtime prompt.",
-      customInstructions: ["Project custom instruction."],
+      customInstructions: [project("Project custom instruction.")],
       isSubagent: false,
     });
     const fullPrompt = prompts.join("\n\n");
@@ -74,7 +80,7 @@ describe("SystemPrompt", () => {
           role: "generic",
         },
       ],
-      customInstructions: ["Project rule."],
+      customInstructions: [project("Project rule.")],
       isSubagent: false,
       taskKind: "agent",
     });
@@ -114,7 +120,7 @@ describe("SystemPrompt", () => {
     );
   });
 
-  it("assembles subagent prompts without identity or custom instructions", () => {
+  it("assembles subagent prompts with custom instructions but without primary identity", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "explore",
       agentPrompt: "You are a focused exploration agent.",
@@ -125,7 +131,7 @@ describe("SystemPrompt", () => {
           role: "generic",
         },
       ],
-      customInstructions: ["This must not leak to subagents."],
+      customInstructions: [project("Subagents follow project rules.")],
       isSubagent: true,
     });
     const fullPrompt = prompts.join("\n\n");
@@ -133,7 +139,7 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).toContain("focused exploration agent");
     expect(fullPrompt).not.toContain("D:/repo");
     expect(fullPrompt).toContain("Core Capabilities");
-    expect(fullPrompt).not.toContain("This must not leak");
+    expect(fullPrompt).toContain("Subagents follow project rules.");
     expect(fullPrompt).not.toContain("Available tools");
     expect(fullPrompt).not.toContain("Subagent roles for subagent_run");
     // Primary identity must not leak into subagent prompts. "Core Capabilities"
@@ -145,14 +151,29 @@ describe("SystemPrompt", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "explore",
       agentPromptAddon: "Subagent addon.",
+      customInstructions: [project("Subagent project rule.")],
+      isSubagent: true,
+      taskKind: "explore",
+    });
+
+    expect(prompts).toHaveLength(4);
+    expect(prompts[0]).toContain("<subagent_base>");
+    expect(prompts[1]).toContain("<subagent_task>");
+    expect(prompts[2]).toContain("<agent_prompt_addon>");
+    expect(prompts[3]).toContain("<custom_instructions>");
+  });
+
+  it("adds no empty custom instruction layer to subagents without instructions", () => {
+    const prompts = SystemPrompt.assemble({
+      agentName: "explore",
+      agentPromptAddon: "Subagent addon.",
+      customInstructions: [],
       isSubagent: true,
       taskKind: "explore",
     });
 
     expect(prompts).toHaveLength(3);
-    expect(prompts[0]).toContain("<subagent_base>");
-    expect(prompts[1]).toContain("<subagent_task>");
-    expect(prompts[2]).toContain("<agent_prompt_addon>");
+    expect(prompts.join("\n\n")).not.toContain("<custom_instructions>");
   });
 
   it("includes the selected subagent task contract", () => {
@@ -180,18 +201,21 @@ describe("SystemPrompt", () => {
     expect(fullPrompt).toContain("Task: generic");
   });
 
-  it("does not include primary custom instructions in subagent prompts", () => {
+  it("includes custom instructions in subagent prompts without primary identity or Goal rules", () => {
     const prompts = SystemPrompt.assemble({
       agentName: "research",
-      customInstructions: ["Project-only rule"],
+      customInstructions: [project("Project-only rule")],
       isSubagent: true,
       taskKind: "research",
     });
 
     const fullPrompt = prompts.join("\n\n");
     expect(fullPrompt).toContain("Task: research");
-    expect(fullPrompt).not.toContain("Project-only rule");
+    expect(fullPrompt).toContain("Project-only rule");
     expect(fullPrompt).not.toContain("You are Lychee");
+    expect(fullPrompt).not.toContain("Goal mode");
+    expect(fullPrompt).toContain("Do not create further subagents.");
+    expect(fullPrompt).not.toContain("Do not load user custom instructions");
   });
 
   it("returns builtin agent prompts and undefined for unknown agents", () => {

@@ -75,9 +75,6 @@ async function runThroughTransport(
           requests: [],
         }),
     },
-    memory: {
-      load: () => Promise.resolve({ global: "", project: "", merged: "" }),
-    },
     systemPromptProvider: { build: () => Promise.resolve("system") },
     tokenCounter: {
       estimateTokens: (text) => Math.ceil(text.length / 4),

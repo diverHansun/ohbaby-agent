@@ -7,7 +7,6 @@ import { createContextManager } from "../core/context/index.js";
 import type {
   CompactResult,
   ContextManager,
-  MemoryReader,
   TokenCounter,
 } from "../core/context/index.js";
 import {
@@ -132,9 +131,6 @@ describe("goals x compact (integration)", () => {
       idGenerator: createMessageIds(),
       now: createClock(),
     });
-    const memory: MemoryReader = {
-      load: () => Promise.resolve({ global: "", merged: "", project: "" }),
-    };
     contextManager = createContextManager({
       bus: createBus(),
       llmClient: {
@@ -145,7 +141,6 @@ describe("goals x compact (integration)", () => {
             requests: [],
           }),
       },
-      memory,
       messageManager,
       systemPromptProvider: {
         build: () => Promise.resolve("system prompt"),

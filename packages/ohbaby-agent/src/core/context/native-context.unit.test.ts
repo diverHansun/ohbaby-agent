@@ -346,7 +346,6 @@ describe("native occupancy provenance", () => {
       history: [nativeMessage(false, toolName)],
       modelOrigin: origin,
       systemPrompt: "",
-      memory: { global: "", project: "", merged: "" },
       sessionId: "s",
       isSubagent: false,
       assembledAt: 1,

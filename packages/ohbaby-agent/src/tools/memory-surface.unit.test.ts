@@ -4,8 +4,8 @@ import {
   genericAgent,
   planAgent,
   researchAgent,
-} from "../../agents/builtin/index.js";
-import { createBuiltinTools } from "../../tools/index.js";
+} from "../agents/builtin/index.js";
+import { createBuiltinTools } from "./index.js";
 
 const ghostTools = [
   "memory_list",

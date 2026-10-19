@@ -48,8 +48,6 @@ runRealE2E("compact real ZenMux/Kimi e2e", () => {
         ),
         userMessage(`Reply with exactly: ${marker}`),
       ],
-      isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
       systemPrompt: "",
     });
 

@@ -23,12 +23,7 @@ export {
   getContextUsage,
 } from "./context-manager.js";
 export type { CompactionRung, ContextCutPoint } from "./context-manager.js";
-export {
-  appendMemoryToSystemPrompt,
-  loadMemoryForPrompt,
-  serializeForLlm,
-  serializeHistoryMessages,
-} from "./serializer.js";
+export { serializeForLlm, serializeHistoryMessages } from "./serializer.js";
 export {
   formatToolResultContentForModel,
   projectToolMetadataForModel,
@@ -51,7 +46,6 @@ export type {
   CreateRunPromptSnapshotInput,
   PreparedModelRequest,
   ContextUsage,
-  MemoryReader,
   PreparedTurn,
   PrepareTurnInput,
   SystemPromptProvider,

@@ -9,11 +9,7 @@ export type PromptSecurityCategory =
   | "unsafe_execution";
 
 export interface PromptSecuritySource {
-  readonly kind:
-    | "custom-instructions"
-    | "memory"
-    | "tool-description"
-    | "unknown";
+  readonly kind: "custom-instructions" | "tool-description" | "unknown";
   readonly label: string;
   readonly path?: string;
 }

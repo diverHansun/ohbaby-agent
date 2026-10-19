@@ -66,9 +66,6 @@ async function fixture(
   const manager = createContextManager({
     bus: createBus(),
     messageManager: messages,
-    memory: {
-      load: () => Promise.resolve({ global: "", project: "", merged: "" }),
-    },
     systemPromptProvider: { build: () => Promise.resolve("NORMAL SYSTEM") },
     tokenCounter: createHeuristicTokenCounter({ defaultLimit: 128000 }),
     llmClient: { generateSummary },

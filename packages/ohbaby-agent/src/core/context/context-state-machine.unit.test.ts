@@ -39,7 +39,6 @@ const SESSION_ID = "reference-session";
 const DIRECTORY = "/reference-workspace";
 const MODEL_ID = "reference-model";
 const SYSTEM_PROMPT = "reference system";
-const MEMORY = "reference memory";
 const ABORTED_RESULT = "Tool execution aborted by user";
 const PROPERTY_SEED = 0x4_05_2026;
 
@@ -137,14 +136,6 @@ function createHarness(isSubagent: boolean): ReferenceHarness {
             text: "reference-summary",
             summaryMessageId: input.summaryMessageId,
             requests: [],
-          }),
-      },
-      memory: {
-        load: () =>
-          Promise.resolve({
-            global: MEMORY,
-            merged: MEMORY,
-            project: "",
           }),
       },
       messageManager: harness.messageManager,
@@ -526,12 +517,8 @@ async function materializeModelView(
 }
 
 function expectedModelView(harness: ReferenceHarness): readonly ModelMessage[] {
-  const system =
-    harness.contextScopeId === undefined
-      ? `${SYSTEM_PROMPT}\n\n<memory>\n${MEMORY}\n</memory>`
-      : SYSTEM_PROMPT;
   return [
-    { content: system, role: "system" as const },
+    { content: SYSTEM_PROMPT, role: "system" as const },
     ...projectReferenceHistory(harness.reference),
   ];
 }

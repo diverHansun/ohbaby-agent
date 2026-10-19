@@ -72,7 +72,6 @@ function fixture(
     getUsage: vi.fn(),
     updateCalibrationFactor: vi.fn(),
     createRunPromptSnapshot: vi.fn().mockResolvedValue({
-      memory: { global: "", project: "", merged: "" },
       systemPrompt: "",
     }),
     prepareTurn: vi.fn().mockResolvedValue({

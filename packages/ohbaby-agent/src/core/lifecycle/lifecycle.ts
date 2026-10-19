@@ -583,6 +583,9 @@ export class Lifecycle {
           : { initiatingUserMessageId: params.initiatingUserMessageId }),
         agentName: params.agent,
         directory: params.directory,
+        ...(params.projectRoot === undefined
+          ? {}
+          : { projectRoot: params.projectRoot }),
         isSubagent: params.isSubagent ?? false,
         sessionId: params.sessionId,
         toolNames,

@@ -47,7 +47,6 @@ import {
   type LLMClientInstance,
 } from "../../core/llm-client/index.js";
 import type { MessageManager } from "../../core/message/index.js";
-import { createMemoryLoader } from "../../core/memory/index.js";
 import {
   createToolScheduler,
   type PermissionPort,
@@ -641,7 +640,6 @@ export async function createUiRuntimeComposition(
       bus: options.bus,
       llmClient: createContextSummaryClient(options.llmClient),
       logger: options.logger,
-      memory: createMemoryLoader(),
       messageManager: options.messageManager,
       now: options.now,
       onWarning(message, error) {

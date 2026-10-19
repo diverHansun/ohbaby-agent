@@ -23,7 +23,6 @@ import type {
   CompactOptions,
   ContextManager,
   ContextLLMClient,
-  MemoryReader,
   PreparedModelRequest,
   PrepareTurnInput,
   SystemPromptProvider,
@@ -56,7 +55,6 @@ interface ContextFixture {
   readonly compressed: readonly unknown[];
   readonly manager: FixtureContextManager;
   readonly measurements: readonly PreparedModelRequest[];
-  readonly memory: MemoryReader;
   readonly systemPromptProvider: SystemPromptProvider;
   readonly turnPrepared: readonly unknown[];
 }
@@ -188,7 +186,6 @@ function messageWithCompletedTool(input: {
 function createManager(
   options: {
     readonly messageManager?: MessageManager;
-    readonly memory?: MemoryReader;
     readonly tokenCounter?: TokenCounter;
     readonly llmClient?: ContextLLMClient;
     readonly now?: () => number;
@@ -203,22 +200,12 @@ function createManager(
   const compressed: unknown[] = [];
   const measurements: PreparedModelRequest[] = [];
   const turnPrepared: unknown[] = [];
-  const memory =
-    options.memory ??
-    ({
-      load: vi.fn().mockResolvedValue({
-        global: "global memory",
-        project: "project memory",
-        merged: "global memory\n---\nproject memory",
-      }),
-    } satisfies MemoryReader);
   const systemPromptProvider: SystemPromptProvider =
     options.systemPromptProvider ?? {
       build: vi.fn().mockResolvedValue("system prompt"),
     };
   const contextManager = createContextManager({
     bus,
-    memory,
     messageManager: options.messageManager ?? createMessageManagerFixture(),
     systemPromptProvider,
     tokenCounter: options.tokenCounter ?? createTokenCounter(),
@@ -276,7 +263,6 @@ function createManager(
     compressed,
     manager,
     measurements,
-    memory,
     systemPromptProvider,
     turnPrepared,
   };
@@ -689,7 +675,6 @@ describe("ContextManager", () => {
       directory: "/repo",
       modelId: "model-a",
       promptSnapshot: {
-        memory: { global: "", merged: "", project: "" },
         systemPrompt: "stable",
       },
       sessionId: "session_1",
@@ -827,7 +812,7 @@ describe("ContextManager", () => {
     expect(JSON.stringify(resumed.request)).not.toContain("child-runtime-2");
   });
 
-  it("keeps the current run stable and admits changed system, memory, and runtime only on the next user turn", async () => {
+  it("keeps the current run stable and admits changed system and runtime only on the next user turn", async () => {
     const messageManager = createMessageManagerFixture();
     const firstUser = await messageManager.createMessage({
       agent: "build",
@@ -841,14 +826,6 @@ describe("ContextManager", () => {
     });
     let version = 1;
     const { manager } = createManager({
-      memory: {
-        load: () =>
-          Promise.resolve({
-            global: "",
-            merged: `memory-${String(version)}`,
-            project: `memory-${String(version)}`,
-          }),
-      },
       messageManager,
       systemPromptProvider: {
         build: () => Promise.resolve(`stable-system-${String(version)}`),
@@ -884,7 +861,6 @@ describe("ContextManager", () => {
     });
     expect(reused.request).toEqual(reusedAgain.request);
     expect(JSON.stringify(reused.request)).toContain("stable-system-1");
-    expect(JSON.stringify(reused.request)).toContain("memory-1");
     expect(JSON.stringify(reused.request)).toContain("runtime-1");
     expect(JSON.stringify(reused.request)).not.toContain("runtime-2");
 
@@ -915,7 +891,6 @@ describe("ContextManager", () => {
 
     expect(afterSecondTurn[0]).toEqual(firstStored[0]);
     expect(JSON.stringify(next.request)).toContain("stable-system-2");
-    expect(JSON.stringify(next.request)).toContain("memory-2");
     expect(JSON.stringify(next.request)).toContain("runtime-1");
     expect(JSON.stringify(next.request)).toContain("runtime-2");
     expect(afterSecondTurn[1]?.parts.filter(isModelContextPart)).toHaveLength(
@@ -947,14 +922,6 @@ describe("ContextManager", () => {
       type: "text",
     });
     const { manager } = createManager({
-      memory: {
-        load: () =>
-          Promise.resolve({
-            global: "primary-memory",
-            merged: "primary-memory",
-            project: "",
-          }),
-      },
       messageManager,
       systemPromptProvider: {
         build: (input) =>
@@ -1006,12 +973,10 @@ describe("ContextManager", () => {
     const childWire = JSON.stringify(child.request);
 
     expect(primaryWire).toContain("stable-primary-/primary");
-    expect(primaryWire).toContain("primary-memory");
     expect(primaryWire).toContain("primary-/primary");
     expect(primaryWire).not.toContain("child request");
     expect(childWire).toContain("stable-subagent_1-/child");
     expect(childWire).toContain("subagent_1-/child");
-    expect(childWire).not.toContain("primary-memory");
     expect(childWire).not.toContain("primary request");
   });
 
@@ -1064,11 +1029,6 @@ describe("ContextManager", () => {
           summaryMessageId: "summary",
           requests: [],
         }),
-      },
-      memory: {
-        load: vi
-          .fn()
-          .mockResolvedValue({ global: "", merged: "", project: "" }),
       },
       messageManager,
       systemPromptProvider: {
@@ -1224,8 +1184,6 @@ describe("ContextManager", () => {
         }),
         messageWithText("user", "continue"),
       ],
-      isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
       systemPrompt: "",
     });
 
@@ -1350,7 +1308,7 @@ describe("ContextManager", () => {
     );
   });
 
-  it("assembles system prompt, memory, and message history", async () => {
+  it("assembles system prompt and message history", async () => {
     const messageManager = createMessageManagerFixture();
     await addTextMessage(messageManager, {
       sessionId: "session_1",
@@ -1371,9 +1329,79 @@ describe("ContextManager", () => {
     });
 
     expect(context.systemPrompt).toBe("system prompt");
-    expect(context.memory.merged).toContain("global memory");
     expect(context.history).toHaveLength(1);
     expect(context.hasSummary).toBe(false);
+  });
+
+  it.each(["assemble", "prepareTurn", "compact"] as const)(
+    "keeps the session project root separate from the workdir in %s without a snapshot",
+    async (entrypoint) => {
+      const { manager, measurements } = createManager({
+        systemPromptProvider: {
+          build: (input) =>
+            Promise.resolve(
+              `${input.projectRoot === "/repo" ? "ROOT_RULE" : "WORKDIR_RULE"}\nworkdir:${input.directory}`,
+            ),
+        },
+      });
+      const input = {
+        directory: "/repo/worktree",
+        projectRoot: "/repo",
+        sessionId: "child_session",
+        contextScopeId: "child_scope",
+        isSubagent: true,
+        modelId: "model-a",
+        toolNames: [],
+      };
+      let systemPrompt;
+      if (entrypoint === "assemble") {
+        systemPrompt = (
+          await manager.assemble(input.sessionId, input.directory, input)
+        ).systemPrompt;
+      } else if (entrypoint === "prepareTurn") {
+        systemPrompt = (await manager.prepareTurn(input)).request.messages[0]
+          ?.content;
+      } else {
+        await manager.compact(input.sessionId, { ...input, force: false });
+        systemPrompt = measurements[0]?.messages[0]?.content;
+      }
+
+      expect(systemPrompt).toBe("ROOT_RULE\nworkdir:/repo/worktree");
+    },
+  );
+
+  it("preserves literal memory tags in user and tool history", async () => {
+    const messageManager = createMessageManagerFixture();
+    await addTextMessage(messageManager, {
+      sessionId: "session_1",
+      role: "user",
+      text: "Keep <memory>user note</memory> verbatim",
+    });
+    await addCompletedToolMessage(messageManager, {
+      sessionId: "session_1",
+      output: "<memory>tool note</memory>",
+    });
+    const { manager } = createManager({ messageManager });
+
+    const prepared = await manager.prepareTurn({
+      sessionId: "session_1",
+      directory: "/repo",
+      modelId: "model-a",
+    });
+
+    expect(prepared.request.messages[0]).toEqual({
+      role: "system",
+      content: "system prompt",
+    });
+    expect(prepared.request.messages).toContainEqual({
+      role: "user",
+      content: "Keep <memory>user note</memory> verbatim",
+    });
+    expect(prepared.request.messages).toContainEqual({
+      role: "tool",
+      callId: "message_2_call",
+      content: "<memory>tool note</memory>",
+    });
   });
 
   it("serializes tool parts as assistant tool calls followed by tool results", async () => {
@@ -1416,8 +1444,6 @@ describe("ContextManager", () => {
     });
     const messages = serializeForLlm({
       history: context.history,
-      isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
       systemPrompt: "system prompt",
     });
 
@@ -1468,8 +1494,6 @@ describe("ContextManager", () => {
     const history = await messageManager.listBySession("session_1");
     const messages = serializeForLlm({
       history,
-      isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
       systemPrompt: "",
     });
 
@@ -1528,8 +1552,6 @@ describe("ContextManager", () => {
           ],
         },
       ],
-      isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
       systemPrompt: "",
     });
 
@@ -1579,8 +1601,6 @@ describe("ContextManager", () => {
           ],
         },
       ],
-      isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
       systemPrompt: "",
     });
 
@@ -1622,8 +1642,6 @@ describe("ContextManager", () => {
           ],
         },
       ],
-      isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
       systemPrompt: "",
     });
 
@@ -1664,8 +1682,6 @@ describe("ContextManager", () => {
         },
         messageWithText("user", "Retry after compaction"),
       ],
-      isSubagent: false,
-      memory: { global: "", project: "", merged: "" },
       systemPrompt: "system prompt",
     });
 
@@ -1980,15 +1996,9 @@ describe("ContextManager", () => {
     expect(wireEstimateCalls).toBe(5);
   });
 
-  it("commits expected part snapshots without reloading memory", async () => {
+  it("commits expected part snapshots without rebuilding the system prompt", async () => {
     const messageManager = createMessageManagerFixture();
     const listBySession = vi.spyOn(messageManager, "listBySession");
-    const loadMemory = vi
-      .fn<MemoryReader["load"]>()
-      .mockResolvedValue({ global: "", project: "", merged: "" });
-    const memory: MemoryReader = {
-      load: loadMemory,
-    };
     await addTextMessage(messageManager, {
       sessionId: "session_1",
       role: "user",
@@ -2009,7 +2019,9 @@ describe("ContextManager", () => {
       role: "assistant",
       text: "fourth long text".repeat(1000),
     });
+    const build = vi.fn().mockResolvedValue("system prompt");
     const { manager, measurements } = createManager({
+      systemPromptProvider: { build },
       llmClient: {
         generateSummary: vi.fn().mockResolvedValue({
           text: "## Goal\nshort",
@@ -2017,7 +2029,6 @@ describe("ContextManager", () => {
           requests: [],
         }),
       },
-      memory,
       messageManager,
     });
 
@@ -2047,7 +2058,7 @@ describe("ContextManager", () => {
       ).toHaveLength(1);
     }
     expect(listBySession).toHaveBeenCalledTimes(3);
-    expect(loadMemory).toHaveBeenCalledTimes(1);
+    expect(build).toHaveBeenCalledTimes(1);
     expect(onCompactionStarted).toHaveBeenCalledTimes(1);
   });
 
@@ -2092,34 +2103,6 @@ describe("ContextManager", () => {
     expect(onCompactionStarted.mock.invocationCallOrder[0]).toBeLessThan(
       generateSummary.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
-  });
-
-  it("skips memory for subagent context and degrades to empty memory on load failure", async () => {
-    const load = vi.fn().mockRejectedValue(new Error("cannot read memory"));
-    const memory: MemoryReader = {
-      load,
-    };
-    const { manager } = createManager({ memory });
-
-    await expect(
-      manager.assemble("session_1", "D:/repo", {
-        isSubagent: false,
-        toolNames: [],
-      }),
-    ).resolves.toMatchObject({
-      memory: { global: "", project: "", merged: "" },
-    });
-
-    const subagentContext = await manager.assemble("session_1", "D:/repo", {
-      isSubagent: true,
-      toolNames: [],
-    });
-    expect(subagentContext.memory).toEqual({
-      global: "",
-      project: "",
-      merged: "",
-    });
-    expect(load).toHaveBeenCalledTimes(1);
   });
 
   it("calculates fallback usage against the full context limit", () => {
@@ -2582,9 +2565,6 @@ describe("ContextManager", () => {
 
   it("summarizes complete active history without a preceding prune", async () => {
     const messageManager = createMessageManagerFixture();
-    const memory: MemoryReader = {
-      load: vi.fn().mockResolvedValue({ global: "", project: "", merged: "" }),
-    };
     const oldMessage = await messageManager.createMessage({
       sessionId: "session_1",
       role: "assistant",
@@ -2624,7 +2604,6 @@ describe("ContextManager", () => {
       });
     const { manager } = createManager({
       llmClient: { generateSummary },
-      memory,
       messageManager,
     });
 

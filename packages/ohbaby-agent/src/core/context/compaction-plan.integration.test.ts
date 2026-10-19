@@ -94,9 +94,6 @@ async function fixture(
     compressionThreshold,
     messageManager: messages,
     llmClient: { generateSummary: generate },
-    memory: {
-      load: () => Promise.resolve({ global: "", project: "", merged: "" }),
-    },
     systemPromptProvider: { build: () => Promise.resolve("SYSTEM") },
     tokenCounter: {
       ...counter,

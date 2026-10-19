@@ -74,9 +74,6 @@ function createManager(
   return createContextManager({
     bus,
     llmClient,
-    memory: {
-      load: () => Promise.resolve({ global: "", merged: "", project: "" }),
-    },
     messageManager,
     systemPromptProvider: {
       build: () => Promise.resolve("stable"),

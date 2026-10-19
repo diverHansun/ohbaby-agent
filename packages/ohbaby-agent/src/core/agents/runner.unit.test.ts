@@ -346,6 +346,7 @@ describe("runAgent", () => {
     expect(runCoordinator.create).toHaveBeenCalledWith({
       agent: "build",
       directory: "D:/repo",
+      projectRoot: "D:/repo",
       isSubagent: true,
       initiatingUserMessageId: "user_1",
       maxSteps: 5,
@@ -439,6 +440,30 @@ describe("runAgent", () => {
         initiatingUserMessageId: "user_1",
         isSubagent: false,
         sessionId: "session_primary",
+      }),
+    );
+  });
+
+  it("runs subagents in their workdir while keeping the session project root", async () => {
+    const runCoordinator = createRunCoordinator();
+
+    await runAgent(
+      createDeps({
+        runCoordinator: runCoordinator.coordinator,
+      }),
+      baseInput({
+        environment: {
+          workdir: "/repo/.worktrees/child",
+        } as ToolExecutionEnvironment,
+        projectRoot: "/repo",
+      }),
+    );
+
+    expect(runCoordinator.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directory: "/repo/.worktrees/child",
+        isSubagent: true,
+        projectRoot: "/repo",
       }),
     );
   });
