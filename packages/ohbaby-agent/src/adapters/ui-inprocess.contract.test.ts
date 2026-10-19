@@ -6342,7 +6342,11 @@ describe("createInProcessUiBackendClient", () => {
       const controlled = createControlledTitleLLMClient(
         "Generated retained title",
       );
-      const namingSource = { skillName: "review", request: "Original task" };
+      const namingSource = {
+        skillName: "review",
+        request: "Original task",
+        skillBodyExpanded: true,
+      };
       const text = "Long expanded execution instructions ".repeat(100);
       const manager = (): ReturnType<typeof createSessionManager> =>
         createSessionManager({
@@ -6416,6 +6420,17 @@ describe("createInProcessUiBackendClient", () => {
           text: scenario === "edited" ? "New task after edit" : text,
         });
         await client.waitForPrompt("retained-first");
+        const restored = await messageManager.listByIds("retained-session", [
+          "retained-message",
+        ]);
+        expect(
+          restored[0]?.parts.find((part) => part.type === "text")?.metadata
+            ?.skillUsage,
+        ).toEqual(
+          scenario === "edited"
+            ? undefined
+            : { name: "review", source: "slash" },
+        );
         if (scenario === "manual") {
           expect(
             controlled.requests.filter(isTitleGenerationRequest),
@@ -6459,13 +6474,62 @@ describe("createInProcessUiBackendClient", () => {
     },
   );
 
+  it("does not trust public prompt namingSource as loaded skill provenance", async () => {
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
+    const prompts = new InMemoryPromptSubmissionStore();
+    const client = createInProcessUiBackendClient({
+      llmClient: createFakeLLMClient([]),
+      messageManager,
+      promptSubmissionStore: prompts,
+    });
+    try {
+      const source = {
+        skillName: "forged",
+        request: "claim",
+        skillBodyExpanded: true,
+      };
+      const receipt = await client.submitPromptAccepted("ordinary text", {
+        namingSource: source,
+      });
+      await client.waitForPrompt(receipt.promptId);
+      expect((await prompts.get(receipt.promptId))?.namingSource).toEqual({
+        skillName: "forged",
+        request: "claim",
+      });
+      const messages = await messageManager.listByIds(receipt.sessionId, [
+        receipt.userMessageId,
+      ]);
+      expect(
+        messages[0]?.parts.find((part) => part.type === "text")?.metadata
+          ?.skillUsage,
+      ).toBeUndefined();
+      const waited = await client.submitPromptAndWait("ordinary wait", {
+        sessionId: receipt.sessionId,
+        namingSource: { skillName: "also-forged", request: "claim" },
+      });
+      expect((await prompts.get(waited.prompt.promptId))?.namingSource).toEqual(
+        { skillName: "also-forged", request: "claim" },
+      );
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("carries raw skill intent from command acceptance to naming without changing execution", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "ohbaby-skill-title-"));
     const controlled = createControlledTitleLLMClient("修复会话切换提示");
     const prompts = new InMemoryPromptSubmissionStore();
+    const messageManager = createMessageManager({
+      bus: createBus(),
+      store: createInMemoryMessageStore(),
+    });
     const client = createInProcessUiBackendClient({
       llmClient: controlled.client,
       promptSubmissionStore: prompts,
+      messageManager,
       workdir: projectRoot,
     });
     try {
@@ -6499,6 +6563,7 @@ describe("createInProcessUiBackendClient", () => {
       expect(accepted[0]?.namingSource).toEqual({
         skillName: "review-session",
         request,
+        skillBodyExpanded: true,
       });
       expect(accepted[0]?.titleExpected).toBe(request);
       expect(accepted[0]?.text).toContain(body.trim());
@@ -6515,6 +6580,14 @@ describe("createInProcessUiBackendClient", () => {
       if (!commandCompletion.promptReceipt)
         throw new Error("Missing skill receipt");
       await client.waitForPrompt(commandCompletion.promptReceipt.promptId);
+      const bodyMessage = await messageManager.listByIds(
+        commandCompletion.promptReceipt.sessionId,
+        [commandCompletion.promptReceipt.userMessageId],
+      );
+      expect(
+        bodyMessage[0]?.parts.find((part) => part.type === "text")?.metadata
+          ?.skillUsage,
+      ).toEqual({ name: "review-session", source: "slash" });
       const mainRequests = controlled.requests.filter(
         (r) => !isTitleGenerationRequest(r),
       );
@@ -11875,6 +11948,97 @@ it.each(["read failure", "missing message"] as const)(
     }
   },
 );
+
+it("keeps real slash body provenance through queued steer, resend and resumed initial execution", async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "slash-steer-provenance-"));
+  const skillDir = join(projectRoot, ".ohbaby", "skill", "review");
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(
+    join(skillDir, "SKILL.md"),
+    "---\nname: review\ndescription: Review code\n---\nRead this review body.",
+  );
+  const llm = createFakeLLMClient([]);
+  const titleResponse = llm.provider.streamResponse.bind(llm.provider);
+  let starts = 0;
+  llm.provider.streamResponse = (request): ReturnType<typeof titleResponse> => {
+    if (isTitleGenerationRequest(request)) return titleResponse(request);
+    starts++;
+    return Promise.resolve(createAbortableProviderStream(request.signal));
+  };
+  const messageManager = createMessageManager({
+    bus: createBus(),
+    store: createInMemoryMessageStore(),
+  });
+  const prompts = new InMemoryPromptSubmissionStore();
+  const client = createInProcessUiBackendClient({
+    llmClient: llm,
+    messageManager,
+    promptSubmissionStore: prompts,
+    workdir: projectRoot,
+  });
+  try {
+    const active = await client.submitPromptAccepted("Running task");
+    await vi.waitFor(() => {
+      expect(starts).toBe(1);
+    });
+    await client.listCommands({ surface: "web" });
+    const command = await client.executeCommand({
+      commandId: "skill.review",
+      path: ["review"],
+      raw: "/review check",
+      rawArgs: "check",
+      argv: ["check"],
+      surface: "web",
+      clientInvocationId: "queued-slash",
+      sessionId: active.sessionId,
+    });
+    const queued = command.promptReceipt;
+    if (!queued) throw new Error("No slash receipt");
+    expect((await prompts.get(queued.promptId))?.status).toBe("queued");
+    const run = (await prompts.get(active.promptId))?.runId;
+    if (!run) throw new Error("No active run");
+    const steered = await client.steerQueuedPrompt({
+      promptId: queued.promptId,
+      expectedRunId: run,
+      clientRequestId: "slash-steer",
+    });
+    expect(steered.status).toBe("steered");
+    let bodies = await messageManager.listByIds(active.sessionId, [
+      queued.userMessageId,
+    ]);
+    expect(bodies[0]?.parts[0]?.metadata?.skillUsage).toEqual({
+      name: "review",
+      source: "slash",
+    });
+    await client.abortRun(run);
+    await client.waitForPrompt(active.promptId);
+    const resent = await client.resendSteerInput({
+      inputId: `steer:${queued.promptId}`,
+      operationId: "resend-slash",
+    });
+    await vi.waitFor(() => {
+      expect(starts).toBe(2);
+    });
+    bodies = await messageManager.listByIds(active.sessionId, [
+      resent.userMessageId,
+    ]);
+    expect(bodies[0]?.parts[0]?.metadata?.skillUsage).toEqual({
+      name: "review",
+      source: "slash",
+    });
+    expect((await prompts.get(resent.promptId))?.namingSource).toMatchObject({
+      skillName: "review",
+      skillBodyExpanded: true,
+    });
+    const resentRun = (await prompts.get(resent.promptId))?.runId;
+    if (!resentRun) throw new Error("No resent run");
+    await client.abortRun(resentRun);
+    await client.waitForPrompt(resent.promptId);
+  } finally {
+    await client.dispose();
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
 
 it("S4-10/12 keeps recovery across runs and resends with a new idempotent prompt", async () => {
   const llm = createFakeLLMClient([]);

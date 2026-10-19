@@ -330,6 +330,7 @@ async function createPromptCompositionForTest(input: {
   readonly mcpTools?: readonly Tool[];
   readonly notices?: { readonly key?: string; readonly title: string }[];
   readonly policyMode: "ask" | "plan" | "agent";
+  readonly skillRegistry?: SkillRegistryPort;
 }): Promise<{
   readonly composition: Awaited<ReturnType<typeof createUiRuntimeComposition>>;
   readonly requests: InterfaceProviderRequest[];
@@ -360,7 +361,7 @@ async function createPromptCompositionForTest(input: {
         }
       : undefined,
     permissionState,
-    skillRegistry: createMutableSkillRegistry([]),
+    skillRegistry: input.skillRegistry ?? createMutableSkillRegistry([]),
     workdir,
   });
   return { composition, requests, permissionState, messageManager, workdir };
@@ -1556,6 +1557,73 @@ describe("createUiRuntimeComposition skill tools", () => {
       output: "A server resource",
       status: "success",
     });
+  });
+
+  it("wires skill usage to committed compaction and current metadata without loading bodies", async () => {
+    const registry = createMutableSkillRegistry([
+      skill("review", "Review changes"),
+    ]);
+    const load = vi.spyOn(registry, "load");
+    const read = vi.spyOn(registry, "readResource");
+    const { composition, messageManager, requests, workdir } =
+      await createPromptCompositionForTest({
+        policyMode: "agent",
+        skillRegistry: registry,
+      });
+    const sessionId = "skill-reminder";
+    const owner = await messageManager.createMessage({
+      agent: "build",
+      role: "assistant",
+      sessionId,
+    });
+    await messageManager.appendPart(owner.id, {
+      type: "tool",
+      tool: "skill",
+      callId: "used-skill",
+      state: {
+        status: "completed",
+        input: { name: "review" },
+        output: "Review instructions",
+        metadata: { name: "review", uiToolSource: "skill" },
+      },
+    });
+    await messageManager.commitCompaction({
+      sessionId,
+      compactedAt: Date.now(),
+      expectedParts: (await messageManager.listBySession(sessionId)).flatMap(
+        (m) => m.parts,
+      ),
+      summary: {
+        agent: "build",
+        text: "Completed review",
+        metadata: { compactionId: "committed-skill-boundary" },
+      },
+    });
+    for (let index = 0; index < 2; index++) {
+      const result = await composition.startSession({
+        agentName: "build",
+        projectRoot: workdir,
+        prompt: "Continue",
+        sessionId,
+      });
+      await composition.runManager.waitForCompletion(result.runId);
+    }
+    const reminders = (await messageManager.listBySession(sessionId))
+      .flatMap((m) => m.parts)
+      .filter((p) => p.metadata?.reminderType === "skill-usage");
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0]).toMatchObject({
+      metadata: { key: "committed-skill-boundary" },
+      text: expect.stringContaining('skill(name="review")') as string,
+    });
+    expect(JSON.stringify(requests[0]?.messages)).toContain(
+      "Previously used skills",
+    );
+    expect(JSON.stringify(requests[1]?.messages)).toContain(
+      "Previously used skills",
+    );
+    expect(load).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("collects Todo reminders from persisted history using the actual ordinary or Goal run lease", async () => {

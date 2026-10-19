@@ -45,7 +45,7 @@ for (const backend of ["memory", "sqlite"] as const)
   describe(`${backend} current-run inputs`, () => {
     // Fixture return shape follows the selected persistence implementation.
     // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
-    async function fixture() {
+    async function fixture(skillName?: string) {
       if (backend === "sqlite") {
         const dir = await mkdtemp(join(tmpdir(), "run-inputs-"));
         dirs.push(dir);
@@ -93,6 +93,9 @@ for (const backend of ["memory", "sqlite"] as const)
         sessionId: "session",
         userMessageId: "reserved-message",
         text: "Change the plan",
+        namingSource: skillName
+          ? { skillName, request: "change", ...{ skillBodyExpanded: true } }
+          : undefined,
         maxQueuedPrompts: 10,
       });
       const steer = {
@@ -104,6 +107,64 @@ for (const backend of ["memory", "sqlite"] as const)
       };
       return { ledger, queue, messages, messageStore, inputs, steer };
     }
+    it("persists slash provenance on the actual steer body across store reopen", async () => {
+      const f = await fixture("review");
+      const result = requireSteered(await f.inputs.steerQueued(f.steer));
+      expect(result.message.parts[0]?.metadata?.skillUsage).toEqual({
+        name: "review",
+        source: "slash",
+      });
+      const reopened =
+        backend === "sqlite"
+          ? createMessageManager({
+              bus: createBus(),
+              store: createDatabaseMessageStore({ db: getDatabase() }),
+            })
+          : f.messages;
+      const messages = await reopened.listByIds("session", [
+        result.message.info.id,
+      ]);
+      expect(messages[0]?.parts[0]?.metadata?.skillUsage).toEqual({
+        name: "review",
+        source: "slash",
+      });
+      expect(
+        requireSteered(await f.inputs.steerQueued(f.steer)).message.parts,
+      ).toEqual(messages[0]?.parts);
+    });
+    it("keeps a public naming hint separate from trusted slash body provenance", async () => {
+      const f = await fixture();
+      await f.queue.accept({
+        promptId: "hint",
+        clientRequestId: "hint",
+        scopeKey: "workspace",
+        sessionId: "session",
+        userMessageId: "hint-message",
+        text: "ordinary",
+        namingSource: { skillName: "review", request: "ordinary" },
+        maxQueuedPrompts: 10,
+      });
+      const result = requireSteered(
+        await f.inputs.steerQueued({
+          ...f.steer,
+          promptId: "hint",
+          clientRequestId: "hint-steer",
+        }),
+      );
+      expect(result.message.parts[0]?.metadata?.skillUsage).toBeUndefined();
+    });
+    it("clears slash provenance when queued body is edited before steering", async () => {
+      const f = await fixture("review");
+      const lease = await f.queue.acquireEditLease("queued", "editor", 10000);
+      await f.queue.commitEdit(
+        "queued",
+        lease.editLeaseId,
+        "replacement",
+        "editor",
+      );
+      const result = requireSteered(await f.inputs.steerQueued(f.steer));
+      expect(result.message.parts[0]?.metadata?.skillUsage).toBeUndefined();
+    });
     it("reads pending and closed Steer candidates without mutating records or waking execution", async () => {
       const f = await fixture();
       const { receipt } = requireSteered(await f.inputs.steerQueued(f.steer));

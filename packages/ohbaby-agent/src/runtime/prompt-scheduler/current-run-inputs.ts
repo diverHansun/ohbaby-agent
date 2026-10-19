@@ -1,3 +1,4 @@
+import { slashSkillUsage } from "../../skill/usage.js";
 import { RuntimeInputSnapshotChangedError } from "../../core/lifecycle/runtime-input-error.js";
 /* eslint-disable @typescript-eslint/require-await -- Synchronous domain transitions implement an async persistence contract. */
 import { isDeepStrictEqual } from "node:util";
@@ -411,6 +412,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
         return { status: "not-steered", reason: "target-sealed", prompt };
       const inputId = `steer:${prompt.promptId}`;
       const acceptedAt = this.nextAcceptedAt(input.expectedRunId);
+      const skillUsage = slashSkillUsage(prompt.namingSource);
       const message: MessageWithParts = {
         info: {
           id: prompt.userMessageId,
@@ -429,6 +431,7 @@ abstract class CurrentInputs implements CurrentRunInputStore {
             orderIndex: 0,
             type: "text",
             text: prompt.text,
+            ...(skillUsage === undefined ? {} : { metadata: { skillUsage } }),
           },
         ],
       };

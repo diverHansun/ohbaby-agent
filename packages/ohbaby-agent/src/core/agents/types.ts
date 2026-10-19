@@ -1,3 +1,4 @@
+import type { SlashSkillUsage } from "../../skill/usage.js";
 import type { ReasoningConfig } from "../../config/llm/types.js";
 import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type {
@@ -40,6 +41,7 @@ export interface AgentRunInput {
   readonly initialUserMessageId?: string;
   /** Original user text when model input includes execution-only context. */
   readonly displayUserText?: string;
+  readonly skillUsage?: SlashSkillUsage;
   readonly initialUserPrompt?: string;
   readonly parentMessageId?: string;
   readonly signal?: AbortSignal;
@@ -176,6 +178,7 @@ export interface AgentTurnInput {
   readonly initialUserMessageId?: string;
   /** Original user text when model input includes execution-only context. */
   readonly displayUserText?: string;
+  readonly skillUsage?: SlashSkillUsage;
   readonly prompt: string;
   readonly waitMode: AgentWaitMode;
   readonly signal?: AbortSignal;

@@ -1,3 +1,4 @@
+import type { SlashSkillUsage } from "../skill/usage.js";
 import type { ReasoningConfig } from "../config/llm/types.js";
 import type { ToolExecutionEnvironment } from "../core/tool-scheduler/index.js";
 import type { AgentRunResult } from "../core/agents/index.js";
@@ -69,6 +70,7 @@ export interface StartSessionParams {
   readonly initialUserMessageId?: string;
   /** Original user text when model input includes execution-only context. */
   readonly displayUserText?: string;
+  readonly skillUsage?: SlashSkillUsage;
   readonly sessionId: string;
   readonly projectRoot: string;
   readonly prompt: string;

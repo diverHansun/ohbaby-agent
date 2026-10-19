@@ -1,3 +1,4 @@
+import { createSkillUsageReminderProvider } from "../../services/reminder/skill-usage.js";
 import type { Logger } from "../../observability/logger.js";
 import {
   collectCleanup,
@@ -636,6 +637,13 @@ export async function createUiRuntimeComposition(
         createModeReminderProvider(options.permissionState),
         createMcpCatalogReminderProvider(resolveMcpToolNames),
         createTodoReminderProvider(todoWorkScopes),
+        createSkillUsageReminderProvider({
+          getSkill: (name) => skillRegistry.get(name),
+          canInvokeSkill: async (context) =>
+            (await resolvePromptTools(context)).some(
+              (tool) => tool.name === "skill" && tool.source === "skill",
+            ),
+        }),
       ]),
       filterModelHistory: options.currentRunInputStore?.filterModelHistory.bind(
         options.currentRunInputStore,

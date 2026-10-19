@@ -1,4 +1,10 @@
 import {
+  slashSkillUsage,
+  slashSkillName,
+  expandedSkillNamingSource,
+  publicNamingSource,
+} from "../skill/usage.js";
+import {
   collectCleanup,
   createShutdownOptions,
   type ShutdownOptions,
@@ -3428,6 +3434,7 @@ export function createInProcessUiBackendClient(
           agentName,
           reasoning: submitOptions?.reasoning,
           initialUserMessageId: userMessage.id,
+          skillUsage: slashSkillUsage(submitOptions?.namingSource),
           ...(submitOptions?.displayText === undefined
             ? {}
             : { displayUserText: submitOptions.displayText }),
@@ -3920,7 +3927,10 @@ export function createInProcessUiBackendClient(
       },
     },
     submitPromptAccepted(text, submitOptions) {
-      return submitPromptAcceptedInternal(text, submitOptions);
+      return submitPromptAcceptedInternal(text, {
+        ...submitOptions,
+        namingSource: expandedSkillNamingSource(submitOptions?.namingSource),
+      });
     },
     connectModel: connectModelInternal,
     setSearchApiKey: setSearchApiKeyInternal,
@@ -4233,14 +4243,21 @@ export function createInProcessUiBackendClient(
       text: string,
       submitOptions?: UiSubmitPromptAndWaitOptions,
     ): Promise<UiPromptCompletion> {
-      return submitPromptAndWaitInternal(text, submitOptions);
+      return submitPromptAndWaitInternal(text, {
+        ...submitOptions,
+        namingSource: publicNamingSource(submitOptions?.namingSource),
+      });
     },
 
     submitPromptAccepted(
       text: string,
       submitOptions?: SubmitPromptOptions,
     ): Promise<UiPromptReceipt> {
-      return submitPromptAcceptedInternal(text, submitOptions);
+      // Public naming hints are not evidence that the backend loaded a skill.
+      return submitPromptAcceptedInternal(text, {
+        ...submitOptions,
+        namingSource: publicNamingSource(submitOptions?.namingSource),
+      });
     },
 
     async steerQueuedPrompt(
@@ -4345,7 +4362,18 @@ export function createInProcessUiBackendClient(
           .join("");
         return submitPromptAcceptedWork(
           text,
-          { sessionId: source.sessionId, clientRequestId },
+          {
+            sessionId: source.sessionId,
+            clientRequestId,
+            ...(text === original.text &&
+            message.parts.some(
+              (part) =>
+                part.type === "text" &&
+                slashSkillName(part) === original.namingSource?.skillName,
+            )
+              ? { namingSource: original.namingSource }
+              : {}),
+          },
           source.sourceId,
         );
       });

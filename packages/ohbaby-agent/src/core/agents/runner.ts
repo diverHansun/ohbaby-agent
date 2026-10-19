@@ -69,6 +69,7 @@ async function writeInitialUserMessage(
     | "contextScopeId"
     | "initialUserMessageId"
     | "displayUserText"
+    | "skillUsage"
     | "initialUserPrompt"
     | "sessionId"
   >,
@@ -90,9 +91,18 @@ async function writeInitialUserMessage(
   });
   await deps.messageManager.appendPart(message.id, {
     text: input.initialUserPrompt,
-    ...(input.displayUserText === undefined
+    ...(input.displayUserText === undefined && input.skillUsage === undefined
       ? {}
-      : { metadata: { displayText: input.displayUserText } }),
+      : {
+          metadata: {
+            ...(input.displayUserText === undefined
+              ? {}
+              : { displayText: input.displayUserText }),
+            ...(input.skillUsage === undefined
+              ? {}
+              : { skillUsage: input.skillUsage }),
+          },
+        }),
     type: "text",
   });
   return message.id;
@@ -187,6 +197,7 @@ export async function runAgent(
     contextScopeId: scope.contextScopeId,
     initialUserMessageId: input.initialUserMessageId,
     displayUserText: input.displayUserText,
+    skillUsage: input.skillUsage,
     initialUserPrompt: input.initialUserPrompt,
     sessionId: scope.sessionId,
   });
