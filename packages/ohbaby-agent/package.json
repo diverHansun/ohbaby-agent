@@ -1,6 +1,6 @@
 {
   "name": "ohbaby-agent",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Backend runtime for ohbaby-agent",
   "type": "module",
   "publishConfig": {
