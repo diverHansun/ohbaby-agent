@@ -136,14 +136,15 @@ function assertMainRequest(requests, body, requestIndex) {
   if (serialized.includes("Available tools")) {
     throw new Error("compiled Web request reintroduced Available tools text");
   }
-  const expectedRuntimeParts = requestIndex === 2 ? 2 : 1;
-  if (countMarker(messages, "<environment_context>") !== expectedRuntimeParts) {
-    throw new Error("compiled Web request has an invalid runtime part count");
+  if (countMarker(messages, "Current working directory: ") !== 1) {
+    throw new Error(
+      "compiled Web request must contain one environment reminder",
+    );
   }
   const systemMessages = messages.filter(
     (message) => message?.role === "system",
   );
-  if (JSON.stringify(systemMessages).includes("<environment_context>")) {
+  if (JSON.stringify(systemMessages).includes("Current working directory: ")) {
     throw new Error("compiled Web runtime context leaked into system prompt");
   }
   if (requestIndex > 0) {
@@ -318,7 +319,7 @@ async function startScriptedProvider() {
         ),
         requestCount: mainRequests.length,
         runtimePartCounts: mainRequests.map((request) =>
-          countMarker(request.messages, "<environment_context>"),
+          countMarker(request.messages, "Current working directory: "),
         ),
         titleRequests,
         toolResultConsumed: JSON.stringify(mainRequests[1]).includes(
