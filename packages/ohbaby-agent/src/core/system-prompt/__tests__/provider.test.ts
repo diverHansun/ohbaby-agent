@@ -154,7 +154,7 @@ describe("createSystemPromptProvider", () => {
     }
   });
 
-  it("resolves primary task kind through the provider", async () => {
+  it("uses stable primary mode definitions even when a resolver returns plan", async () => {
     const provider = createSystemPromptProvider({
       environmentDetector: vi.fn().mockResolvedValue(ENVIRONMENT),
       taskKindResolver: vi.fn().mockResolvedValue("plan"),
@@ -167,10 +167,9 @@ describe("createSystemPromptProvider", () => {
       toolNames: ["read", "grep"],
     });
 
-    expect(prompt).toContain("Task: plan");
-    expect(prompt).toContain(
-      "Prefer analysis and read-only exploration unless the user explicitly asks to execute changes.",
-    );
+    expect(prompt).toContain("plan mode");
+    expect(prompt).toContain("auto mode");
+    expect(prompt).not.toContain("Task: plan");
   });
 
   it("injects subagent role guidance for primary prompts only", async () => {

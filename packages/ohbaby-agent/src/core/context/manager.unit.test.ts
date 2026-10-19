@@ -474,7 +474,7 @@ describe("ContextManager", () => {
     });
     const finalizationMessage = {
       content: "Summarize the completed work without calling tools.",
-      role: "system" as const,
+      role: "user" as const,
     };
 
     const prepared = await manager.prepareTurn({

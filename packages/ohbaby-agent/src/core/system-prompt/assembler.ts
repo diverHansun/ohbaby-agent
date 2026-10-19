@@ -19,7 +19,6 @@ import type {
   AssembleOptions,
   CustomInstruction,
   EnvironmentInfo,
-  PrimaryTaskKind,
   PromptTaskKind,
   SubagentRolePromptInfo,
   SubagentTaskKind,
@@ -69,18 +68,8 @@ function compactPrompts(prompts: readonly string[]): string[] {
   return prompts.filter((prompt) => prompt.trim() !== "");
 }
 
-function isPrimaryTaskKind(value: unknown): value is PrimaryTaskKind {
-  return value === "plan" || value === "agent";
-}
-
 function isSubagentTaskKind(value: unknown): value is SubagentTaskKind {
   return value === "explore" || value === "research" || value === "generic";
-}
-
-function resolvePrimaryTaskKind(
-  taskKind: PromptTaskKind | undefined,
-): PrimaryTaskKind {
-  return isPrimaryTaskKind(taskKind) ? taskKind : "agent";
 }
 
 function resolveSubagentTaskKind(
@@ -139,7 +128,7 @@ export const SystemPrompt = {
 
     return compactPrompts([
       generateBasePrompt(),
-      getPrimaryTaskPrompt(resolvePrimaryTaskKind(options.taskKind)),
+      getPrimaryTaskPrompt("agent"),
       generateAgentAddonPrompt(agentPromptAddon),
       generateSubagentRolesPrompt(options.availableSubagentRoles),
       generateCustomInstructionsPrompt(options.customInstructions ?? []),

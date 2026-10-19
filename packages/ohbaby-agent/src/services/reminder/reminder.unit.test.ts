@@ -1,14 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createReminderCollector,
   renderReminderText,
   type ReminderContext,
   type ReminderBody,
+  type ReminderType,
 } from "./index.js";
+import { createModeReminderProvider } from "./mode.js";
 import { isSystemReminderMessage } from "../../core/message/origin.js";
 import type { MessageWithParts } from "../../core/message/index.js";
 
-function reminder(key: string, anchor = "owner"): MessageWithParts {
+function reminder(
+  key: string,
+  anchor = "owner",
+  type: ReminderType = "skill-usage",
+): MessageWithParts {
   return {
     info: {
       id: `r-${key}`,
@@ -28,7 +34,7 @@ function reminder(key: string, anchor = "owner"): MessageWithParts {
         synthetic: true,
         metadata: {
           kind: "system-reminder:v1",
-          reminderType: "skill-usage",
+          reminderType: type,
           key,
           anchorAssistantId: anchor,
         },
@@ -286,4 +292,70 @@ it("retains completed native-only event owners from their original model but nev
       ],
     }),
   ).toHaveLength(1);
+});
+
+describe("mode reminder", () => {
+  it("reads current mode on each preparation and deduplicates only effective snapshots", async () => {
+    let mode: "plan" | "auto" = "plan";
+    const getMode = vi.fn(() => mode);
+    const collect = createReminderCollector([
+      createModeReminderProvider({ getMode }),
+    ]);
+    expect(await collect(context)).toEqual([
+      { type: "mode", key: "plan", text: "Current mode: plan." },
+    ]);
+    const history = [reminder("plan", "owner", "mode"), owner];
+    const effective = { ...context, history, fullHistory: history };
+    expect(await collect(effective)).toEqual([]);
+    mode = "auto";
+    expect(await collect(effective)).toEqual([
+      {
+        type: "mode",
+        key: "auto",
+        text: "Current mode: auto; prior plan-mode constraints have ended.",
+      },
+    ]);
+    mode = "plan";
+    const autoHistory = [reminder("auto", "owner", "mode"), owner];
+    expect(
+      await collect({
+        ...context,
+        history: autoHistory,
+        fullHistory: autoHistory,
+      }),
+    ).toEqual([{ type: "mode", key: "plan", text: "Current mode: plan." }]);
+    expect(await collect({ ...context, fullHistory: history })).toHaveLength(1);
+    expect(getMode).toHaveBeenCalledTimes(5);
+  });
+
+  it("does not read or emit primary mode in a child scope and cannot borrow another scope's snapshot", async () => {
+    const getMode = vi.fn(() => "plan" as const);
+    const collect = createReminderCollector([
+      createModeReminderProvider({ getMode }),
+    ]);
+    const childHistory = [reminder("plan", "owner", "mode"), owner].map(
+      (message) => ({
+        ...message,
+        info: { ...message.info, contextScopeId: "child" },
+      }),
+    );
+    expect(
+      await collect({
+        ...context,
+        contextScopeId: "child",
+        isSubagent: true,
+        history: childHistory,
+        fullHistory: childHistory,
+      }),
+    ).toEqual([]);
+    expect(getMode).not.toHaveBeenCalled();
+    expect(
+      await collect({
+        ...context,
+        history: childHistory,
+        fullHistory: childHistory,
+      }),
+    ).toHaveLength(1);
+    expect(getMode).toHaveBeenCalledTimes(1);
+  });
 });

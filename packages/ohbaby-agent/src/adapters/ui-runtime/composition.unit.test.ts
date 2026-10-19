@@ -333,6 +333,8 @@ async function createPromptCompositionForTest(input: {
 }): Promise<{
   readonly composition: Awaited<ReturnType<typeof createUiRuntimeComposition>>;
   readonly requests: InterfaceProviderRequest[];
+  readonly permissionState: ReturnType<typeof createPermissionState>;
+  readonly messageManager: MessageManager;
   readonly workdir: string;
 }> {
   const bus = createBus();
@@ -342,15 +344,16 @@ async function createPromptCompositionForTest(input: {
     initialMode: input.policyMode === "plan" ? "plan" : "auto",
   });
   const requests: InterfaceProviderRequest[] = [];
+  const messageManager = createMessageManager({
+    bus,
+    store: createInMemoryMessageStore(),
+  });
   const composition = await createUiRuntimeComposition({
     agentManager: new AgentManager(),
     bus,
     llmClient: recordingFakeLlmClient({ requests }),
     mcpManager: { getAllTools: () => Promise.resolve(input.mcpTools ?? []) },
-    messageManager: createMessageManager({
-      bus,
-      store: createInMemoryMessageStore(),
-    }),
+    messageManager,
     onNotice: input.notices
       ? (notice): void => {
           input.notices?.push(notice);
@@ -360,7 +363,7 @@ async function createPromptCompositionForTest(input: {
     skillRegistry: createMutableSkillRegistry([]),
     workdir,
   });
-  return { composition, requests, workdir };
+  return { composition, requests, permissionState, messageManager, workdir };
 }
 
 function mcpTool(
@@ -1555,31 +1558,61 @@ describe("createUiRuntimeComposition skill tools", () => {
     });
   });
 
-  it("passes current permission mode into primary system prompts", async () => {
-    const { composition, requests, workdir } =
-      await createPromptCompositionForTest({
-        policyMode: "plan",
+  it("keeps primary system stable across mode changes and persists mode snapshots as user reminders", async () => {
+    const { composition, requests, workdir, permissionState, messageManager } =
+      await createPromptCompositionForTest({ policyMode: "plan" });
+    const sessionId = "session_prompt_mode";
+    const run = async (prompt: string): Promise<void> => {
+      const result = await composition.startSession({
+        agentName: "build",
+        projectRoot: workdir,
+        prompt,
+        sessionId,
       });
-
-    const result = await composition.startSession({
-      agentName: "build",
-      projectRoot: workdir,
-      prompt: "Plan the work",
-      sessionId: "session_prompt_mode",
+      await composition.runManager.waitForCompletion(result.runId);
+    };
+    await run("Plan the work");
+    await run("Continue the plan");
+    permissionState.setMode("auto");
+    await run("Implement the plan");
+    permissionState.setMode("plan");
+    await run("Plan the next work");
+    const system = requests[0].messages[0];
+    expect(system.role).toBe("system");
+    expect(system.content).toContain("plan mode");
+    expect(system.content).toContain("auto mode");
+    expect(system.content).toContain("Subagent roles for subagent_run");
+    expect(requests.map((request) => request.messages[0])).toEqual([
+      system,
+      system,
+      system,
+      system,
+    ]);
+    const reminders = (await messageManager.listBySession(sessionId))
+      .flatMap((message) => message.parts)
+      .filter((part) => part.metadata?.reminderType === "mode");
+    expect(reminders.map((part) => part.metadata?.key)).toEqual([
+      "plan",
+      "auto",
+      "plan",
+    ]);
+    expect(reminders[1]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining(
+        "prior plan-mode constraints have ended",
+      ) as string,
     });
-    await composition.runManager.waitForCompletion(result.runId);
-
-    expect(requests[0]?.messages[0]?.role).toBe("system");
-    const systemContent =
-      typeof requests[0]?.messages[0]?.content === "string"
-        ? requests[0].messages[0].content
-        : "";
-    expect(systemContent).toContain("Task: plan");
-    expect(systemContent).toContain("Subagent roles for subagent_run");
-    expect(systemContent).toContain("generic");
-    expect(systemContent).toContain(
-      "build and plan are primary-agent modes, not subagent roles",
-    );
+    expect(
+      requests[0]?.messages.some(
+        (message) =>
+          message.role === "user" &&
+          typeof message.content !== "string" &&
+          message.content.some(
+            (part) =>
+              part.type === "text" && part.text.includes("Current mode: plan"),
+          ),
+      ),
+    ).toBe(true);
   });
 
   it("fails closed for unsafe MCP metadata before prompt or execution registration", async () => {

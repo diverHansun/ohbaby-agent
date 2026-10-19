@@ -13,6 +13,8 @@ import { createSubagentResultArtifacts } from "../../agents/subagents/result-art
 import { createSubagentContinuationCoordinator } from "../../agents/subagents/continuation-coordinator.js";
 import { collectExecutionFacts } from "../../agents/subagents/execution-facts.js";
 import { createStorage } from "../../services/storage/index.js";
+import { createReminderCollector } from "../../services/reminder/index.js";
+import { createModeReminderProvider } from "../../services/reminder/mode.js";
 import { PermissionEvent } from "../../permission/events.js";
 import { randomUUID } from "node:crypto";
 import { activeModelBudgetProfiles } from "../../config/llm/model-profile.js";
@@ -616,7 +618,7 @@ export async function createUiRuntimeComposition(
     },
     taskKindResolver(input, agentName) {
       if (!input.isSubagent) {
-        return options.permissionState.getMode() === "plan" ? "plan" : "agent";
+        return "agent";
       }
       return resolveSubagentTaskKind(agentName);
     },
@@ -634,6 +636,9 @@ export async function createUiRuntimeComposition(
   const contextManager =
     options.contextManager ??
     createContextManager({
+      collectReminders: createReminderCollector([
+        createModeReminderProvider(options.permissionState),
+      ]),
       filterModelHistory: options.currentRunInputStore?.filterModelHistory.bind(
         options.currentRunInputStore,
       ),

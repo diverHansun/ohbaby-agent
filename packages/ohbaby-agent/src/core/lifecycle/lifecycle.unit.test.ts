@@ -2270,7 +2270,7 @@ describe("Lifecycle.run", () => {
     expect(requests[0]?.tools).toHaveLength(1);
     expect(requests[1]?.tools).toEqual([]);
     expect(requests[1]?.messages.at(-1)).toMatchObject({
-      role: "system",
+      role: "user",
       content: expect.stringContaining(
         "Maximum lifecycle steps reached",
       ) as string,
@@ -2287,7 +2287,7 @@ describe("Lifecycle.run", () => {
       expect.objectContaining({
         tailDirectives: [
           expect.objectContaining({
-            role: "system",
+            role: "user",
             content: expect.stringContaining(
               "Maximum lifecycle steps reached",
             ) as string,
@@ -2297,6 +2297,22 @@ describe("Lifecycle.run", () => {
         tools: [],
       }),
     );
+    expect(requests[1]?.messages.at(-1)?.content).toContain(
+      "<system-reminder>",
+    );
+    expect(requests[1]?.messages.at(-1)?.content).toContain(
+      "Tools are disabled",
+    );
+    const stored = await messageManager.listBySession("session_test");
+    expect(
+      stored
+        .flatMap((message) => message.parts)
+        .some(
+          (part) =>
+            part.type === "text" &&
+            part.text.includes("Maximum lifecycle steps reached"),
+        ),
+    ).toBe(false);
     expect(result).toMatchObject({
       finalResponse: "Summary after limit.",
       finishReason: "stop",
@@ -5276,6 +5292,7 @@ it.each([false, true])(
     const run = consumeLifecycleEvents(
       lifecycle.run({
         directory: "/repo",
+        maxSteps: 1,
         modelId: "fake-model",
         sessionId: "s",
       }),
@@ -5293,6 +5310,22 @@ it.each([false, true])(
       expect(result?.success).toBe(true);
       expect(requests).toHaveLength(2);
       expect(requests[0].messages).toBe(requests[1].messages);
+      expect(requests[0].messages.at(-1)).toMatchObject({
+        role: "user",
+        content: expect.stringContaining(
+          "Maximum lifecycle steps reached",
+        ) as string,
+      });
+      expect(JSON.stringify(history)).not.toContain(
+        "Maximum lifecycle steps reached",
+      );
+      const replay = await contextManager.assemble("s", "/repo", {
+        isSubagent: false,
+        toolNames: [],
+      });
+      expect(JSON.stringify(replay.history)).not.toContain(
+        "Maximum lifecycle steps reached",
+      );
       const reminder = history
         .flatMap((message) => message.parts)
         .filter((part) => part.metadata?.kind === "system-reminder:v1");

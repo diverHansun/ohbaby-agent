@@ -6,6 +6,7 @@ import type { ChatCompletionChunk } from "openai/resources/chat/completions/comp
 import { describe, expect, it, vi } from "vitest";
 import { resolvePromptCacheRequest } from "../../core/llm-client/prompt-cache.js";
 import type { PromptCachePolicy } from "../../config/index.js";
+import { renderReminderText } from "../reminder/index.js";
 import { PRIMARY_BASE_PROMPT } from "../../core/system-prompt/prompts/primary/base.js";
 import { computeBudgetReport } from "../../goals/budget.js";
 import { renderGoalTurnPrompt } from "../../goals/injection.js";
@@ -1189,6 +1190,9 @@ describe("prompt-cache wire contract", () => {
 });
 
 it("preserves tool batches and separate reminder blocks on all wires without crossing the summary cache boundary", async () => {
+  const stepLimit = renderReminderText(
+    "Maximum lifecycle steps reached.\nTools are disabled for this final response.",
+  );
   const messages: ModelMessage[] = [
     { role: "system", content: "HOST" },
     {
@@ -1217,7 +1221,7 @@ it("preserves tool batches and separate reminder blocks on all wires without cro
         },
       ],
     },
-    { role: "user", content: "STEP-LIMIT" },
+    { role: "user", content: stepLimit },
   ];
   const anthropic = createAnthropicProvider({
     id: "anthropic",
@@ -1260,7 +1264,7 @@ it("preserves tool batches and separate reminder blocks on all wires without cro
       { type: "text", text: "<system-reminder>MODE</system-reminder>" },
       {
         type: "text",
-        text: "STEP-LIMIT",
+        text: stepLimit,
         cache_control: { type: "ephemeral" },
       },
     ],
@@ -1296,7 +1300,7 @@ it("preserves tool batches and separate reminder blocks on all wires without cro
         { type: "input_text", text: "<system-reminder>MODE</system-reminder>" },
       ],
     },
-    { role: "user", content: "STEP-LIMIT" },
+    { role: "user", content: stepLimit },
   ]);
   const chat = createOpenAICompatibleProvider({
     id: "openai",
@@ -1322,7 +1326,7 @@ it("preserves tool batches and separate reminder blocks on all wires without cro
         { type: "text", text: "<system-reminder>MODE</system-reminder>" },
       ],
     },
-    { role: "user", content: "STEP-LIMIT" },
+    { role: "user", content: stepLimit },
   ]);
   for (const payload of [
     wire,

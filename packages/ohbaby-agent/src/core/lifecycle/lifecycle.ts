@@ -1,3 +1,4 @@
+import { renderReminderText } from "../../services/reminder/index.js";
 import { isRuntimeInputSnapshotChanged } from "./runtime-input-error.js";
 import type { AgentStepRequestRecord } from "../llm-client/types.js";
 import { ModelObservationError } from "../llm-client/request-observation.js";
@@ -196,12 +197,14 @@ function createDefaultToolCallId(): () => string {
 
 function buildMaxStepsFinalizationMessage(): ModelMessage {
   return {
-    role: "system",
-    content: [
-      "Maximum lifecycle steps reached.",
-      "Tools are disabled for this final response.",
-      "Summarize completed work, state remaining work, and recommend the next user action.",
-    ].join("\n"),
+    role: "user",
+    content: renderReminderText(
+      [
+        "Maximum lifecycle steps reached.",
+        "Tools are disabled for this final response.",
+        "Summarize completed work, state remaining work, and recommend the next user action.",
+      ].join("\n"),
+    ),
   };
 }
 
