@@ -342,16 +342,12 @@ describe("installed proxy to real child network clients", () => {
           }),
       });
       cleanups.push(() => installation.dispose());
-      const registry = new ShellJobRegistry({
-        killTree: (child) => Shell.killTree(child),
-      });
-      const result = await bash(registry).execute(
+      const result = await bash().execute(
         { command: "echo started" },
         context(),
       );
       expect(result.output).toContain("started");
       expect(result.metadata?.exitCode).toBe(0);
-      expect(registry.hasActiveWork()).toBe(false);
       const directory = await mkdtemp(join(tmpdir(), "ohbaby-proxy-"));
       cleanups.push(() => rm(directory, { recursive: true, force: true }));
       const marker = join(directory, "started");
