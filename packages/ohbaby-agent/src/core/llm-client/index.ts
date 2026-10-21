@@ -17,7 +17,7 @@ export {
 } from "./idle-watchdog.js";
 
 // Export core functions
-export { createLLMClient } from "./client.js";
+export { createLLMClient } from "./create-llm-client.js";
 export { isContextOverflowError, ToolCallParseError } from "./errors.js";
 export {
   DEFAULT_PROVIDER_RETRY_POLICY,
@@ -29,7 +29,7 @@ export {
   providerErrorStatus,
   retryReason,
 } from "./retry.js";
-export type { CreateLLMClientOptions } from "./client.js";
+export type { CreateLLMClientOptions } from "./create-llm-client.js";
 export { streamResponse, resolvePreparedRequestSettings } from "./streaming.js";
 
 // Export type definitions for consumers

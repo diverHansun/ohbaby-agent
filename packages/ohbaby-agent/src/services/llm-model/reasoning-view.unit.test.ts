@@ -1,8 +1,6 @@
 import { expect, it } from "vitest";
-import {
-  reasoningCapabilityView,
-  resolveRequestReasoning,
-} from "./reasoning.js";
+import { reasoningCapabilityView } from "./reasoning-view.js";
+import { resolveRequestReasoning } from "../interface-providers/reasoning.js";
 const options = {
   provider: "custom",
   model: "m",

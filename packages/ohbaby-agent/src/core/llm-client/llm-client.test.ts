@@ -1,11 +1,10 @@
 /**
  * Integration tests for the LLM Client module.
  *
- * Tests the createLLMClient and streamResponse functions
- * with mocked config module and OpenAI API responses.
+ * Tests provider-backed client creation and streamResponse
+ * with explicit configuration and mocked provider responses.
  */
 
-import * as path from "node:path";
 import { APIConnectionError as OpenAIConnectionError } from "openai";
 import { APIConnectionError as AnthropicConnectionError } from "@anthropic-ai/sdk/error";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -30,7 +29,6 @@ import type {
 } from "./types.js";
 
 type AssistantMessage = ModelResponseSnapshot;
-type ConfigErrorWithCode = Error & { code: string };
 
 interface MockSdkClient {
   chat: {
@@ -97,13 +95,8 @@ function getAssistantMessage(response: StreamingResponse): AssistantMessage {
   return response.messageSnapshot;
 }
 
-// Mock the config module
-vi.mock("../../config/index.js", () => ({
-  getLLMConfig: vi.fn(),
-}));
-
-import { getLLMConfig } from "../../config/index.js";
-import type { LLMConfig } from "../../config/index.js";
+import { createLLMClientFromConfig } from "./client.js";
+import type { LLMConfig } from "../../config/llm/types.js";
 
 describe("LLM Client Integration Tests", () => {
   const mockConfig: LLMConfig = {
@@ -122,47 +115,15 @@ describe("LLM Client Integration Tests", () => {
     vi.resetAllMocks();
   });
 
-  describe("createLLMClient", () => {
-    it("should create client with config from config module", async () => {
-      vi.mocked(getLLMConfig).mockResolvedValue(mockConfig);
-
-      const client = await createLLMClient();
-
-      expect(client).toBeDefined();
-      expect(client.provider).toBeDefined();
-      expect(client.provider.client).toBeDefined();
-      expect(client.config).toBeDefined();
-      expect(client.config.provider).toBe("openai");
-      expect(client.config.model).toBe("gpt-4");
-      expect(client.config.baseUrl).toBe("https://api.openai.com/v1");
-      expect(client.config.apiKeyEnv).toBe("OPENAI_API_KEY");
-      expect(client.config.interfaceProvider).toBe("openai-compatible");
-      expect(client.config.temperature).toBe(0.7);
-      expect(client.config.maxTokens).toBe(4096);
-      expect("client" in client).toBe(false);
-    });
-
-    it("should pass project directory to config loading", async () => {
-      vi.mocked(getLLMConfig).mockResolvedValue(mockConfig);
-
-      await createLLMClient({ projectDirectory: "D:/repo" });
-
-      expect(getLLMConfig).toHaveBeenCalledWith({
-        envPath: path.join("D:/repo", ".env"),
-        projectDirectory: "D:/repo",
-      });
-    });
-
-    it("should not expose apiKey in returned config", async () => {
-      vi.mocked(getLLMConfig).mockResolvedValue(mockConfig);
-
-      const client = await createLLMClient();
+  describe("createLLMClientFromConfig", () => {
+    it("should not expose apiKey in returned config", () => {
+      const client = createLLMClientFromConfig(mockConfig);
 
       // apiKey should not be in the config object
       expect("apiKey" in client.config).toBe(false);
     });
 
-    it("should use different provider config", async () => {
+    it("should use different provider config", () => {
       const zhipuConfig: LLMConfig = {
         provider: "zhipu",
         model: "glm-4-plus",
@@ -174,9 +135,7 @@ describe("LLM Client Integration Tests", () => {
         temperature: 0.2,
         maxTokens: 2048,
       };
-      vi.mocked(getLLMConfig).mockResolvedValue(zhipuConfig);
-
-      const client = await createLLMClient();
+      const client = createLLMClientFromConfig(zhipuConfig);
 
       expect(client.config.provider).toBe("zhipu");
       expect(client.config.model).toBe("glm-4-plus");
@@ -187,22 +146,8 @@ describe("LLM Client Integration Tests", () => {
       expect(client.config.maxTokens).toBe(2048);
     });
 
-    it("should propagate ConfigError from config module", async () => {
-      const configError = new Error(
-        "Configuration file not found",
-      ) as ConfigErrorWithCode;
-      configError.code = "FILE_NOT_FOUND";
-      vi.mocked(getLLMConfig).mockRejectedValue(configError);
-
-      await expect(createLLMClient()).rejects.toThrow(
-        "Configuration file not found",
-      );
-    });
-
-    it("should expose the provider SDK client through provider.client", async () => {
-      vi.mocked(getLLMConfig).mockResolvedValue(mockConfig);
-
-      const client = await createLLMClient();
+    it("should expose the provider SDK client through provider.client", () => {
+      const client = createLLMClientFromConfig(mockConfig);
       const providerClient = client.provider.client as OpenAIClientLike;
 
       expect(providerClient.chat).toBeDefined();
@@ -1162,10 +1107,8 @@ describe("LLM Client Integration Tests", () => {
       expect(typeof streamResponse).toBe("function");
     });
 
-    it("should work with ES module imports", async () => {
-      vi.mocked(getLLMConfig).mockResolvedValue(mockConfig);
-
-      const client = await createLLMClient();
+    it("should work with ES module imports", () => {
+      const client = createLLMClientFromConfig(mockConfig);
 
       expect(client).toBeDefined();
       const gen = streamResponse(client, []);

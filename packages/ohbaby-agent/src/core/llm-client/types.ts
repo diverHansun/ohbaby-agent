@@ -13,7 +13,7 @@ import type {
   InterfaceProviderInstance,
   InterfaceProviderTokenUsage,
 } from "../../services/interface-providers/index.js";
-import type { LLMConfig } from "../../config/index.js";
+import type { LLMConfig } from "../../config/llm/types.js";
 import type { ModelState } from "../../services/interface-providers/native-state.js";
 import type { ReasoningIntent } from "../../services/interface-providers/reasoning.js";
 import type { ProviderRetryEvent } from "./retry.js";

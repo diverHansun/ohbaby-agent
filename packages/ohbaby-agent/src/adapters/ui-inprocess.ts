@@ -37,10 +37,8 @@ import type {
 import type { ResolveRequestReasoningOptions } from "../services/interface-providers/reasoning.js";
 import { validateReasoningConfig } from "../config/llm/validation.js";
 import type { ReasoningConfig } from "../config/llm/types.js";
-import {
-  reasoningCapabilityView,
-  resolveRequestReasoning,
-} from "../services/interface-providers/reasoning.js";
+import { resolveRequestReasoning } from "../services/interface-providers/reasoning.js";
+import { reasoningCapabilityView } from "../services/llm-model/reasoning-view.js";
 import { currentDiscoveryState } from "../config/llm/apply-active-model-config.js";
 import {
   coordinateModelConfig,

@@ -1,7 +1,5 @@
-import {
-  reasoningCapabilityView,
-  capabilitiesFor,
-} from "../../services/interface-providers/reasoning.js";
+import { capabilitiesFor } from "../../services/interface-providers/reasoning.js";
+import { reasoningCapabilityView } from "../../services/llm-model/reasoning-view.js";
 import type { UiReasoningCapabilityView } from "ohbaby-sdk";
 import { modelProfileRouteKey, normalizedEndpoint } from "./model-profile.js";
 import {
