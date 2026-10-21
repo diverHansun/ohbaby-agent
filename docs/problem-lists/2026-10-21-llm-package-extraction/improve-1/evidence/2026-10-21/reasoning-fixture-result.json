@@ -1,7 +1,0 @@
-{
-  "chunk_id": "c315f5",
-  "wall_time_seconds": 0.65775975,
-  "exit_code": 0,
-  "original_token_count": 249,
-  "output": "{\"activeSessionStable\":true,\"followupFinalAfterRefresh\":1,\"followupFinalBeforeRefresh\":1,\"followupUserAfterRefresh\":1,\"runtimeMarkersVisible\":false,\"titleContainsRuntimeMarker\":false,\"toolFinalAfterRefresh\":1,\"toolFinalBeforeRefresh\":1,\"toolPanelCompleted\":true}\r\nE2E_UI_EVIDENCE_PASS {\"activeSessionStable\":true,\"followupFinalAfterRefresh\":1,\"followupFinalBeforeRefresh\":1,\"followupUserAfterRefresh\":1,\"runtimeMarkersVisible\":false,\"titleContainsRuntimeMarker\":false,\"toolFinalAfterRefresh\":1,\"toolFinalBeforeRefresh\":1,\"toolPanelCompleted\":true}\r\nE2E_BACKEND_PASS {\"keyPresent\":true,\"keyStable\":true,\"requestCount\":3,\"runtimePartCounts\":[1,1,1],\"titleRequests\":1,\"toolResultConsumed\":true}\r\nE2E_CLEANUP_PASS {\"finalStatus\":\"stopped\",\"pidReleased\":true,\"portReleased\":true}\r\nE2E_DIAGNOSTICS_PASS {\"eventCount\":5,\"events\":[\"diagnostics.started\",\"migration.config.completed\",\"migration.data.completed\",\"server.started\",\"server.stopped\"],\"file\":\"2026-10-21T12-53-54-015Z-96494-a4ebeb35.jsonl\"}\r\n"
-}

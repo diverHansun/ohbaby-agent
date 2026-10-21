@@ -9,7 +9,7 @@
 | 规划复核 | 补齐 server 测试消费者、包装层类型来源、脚本与发布文档清单 | `c3aff07d` | 完成 |
 | Stage 1  | 在 agent 内拆开纯客户端、配置日志包装层和 UI 投影          | `08f383c7` | 完成 |
 | Stage 2  | 新建 `packages/ohbaby-llm` 并迁移实现、消费者和构建配置    | `e58a0a1a` | 完成 |
-| Stage 3  | 打包安装验证、脚本和模块文档                               | `302930cc` | 完成 |
+| Stage 3  | 打包安装验证、脚本和模块文档                               | `302930cc` | 完成（TUI 真实模型对话待补） |
 
 Stage 1 是迁移前的中间状态。最终 LLM 实现进入 `packages/ohbaby-llm`；agent 的 `core/llm-client/` 仅保留读取配置、接入日志的包装函数和依赖 agent 的测试，不保留第二份实现。
 
@@ -28,7 +28,7 @@ Stage 1 是迁移前的中间状态。最终 LLM 实现进入 `packages/ohbaby-l
 ### Stage 2
 
 - S2-1：新包 44 个 TypeScript 文件边界检查通过，依赖只有 `openai`、`@anthropic-ai/sdk`、`zod`。
-- S2-2：agent 567、server 40、sdk 260 个导出名与基线完全一致。
+- S2-2：agent 567、server 40、sdk 260 个导出名与基线完全一致，源码和 dist 两种口径都已对比（Stage 2 结果；5.6 的改动没有改变 agent 导出名）。
 - S2-3：agent 旧 providers 目录已移除；客户端目录只保留包装层、入口和两份依赖 agent 的测试。纯配置文件已迁入新包。
 - S2-4 至 S2-6：重点测试 27 个文件、710 个用例通过；全量 `pnpm run preflight` 通过，578 个文件通过、6 个跳过，6841 个用例通过、17 个跳过。
 - 五包打包安装冒烟、编译产物三种协议的文本和工具调用回归通过。
@@ -58,8 +58,6 @@ Stage 1 是迁移前的中间状态。最终 LLM 实现进入 `packages/ohbaby-l
 - 同端点、模型和客户端另发一次诊断请求，省略该可选控制后成功。共 16 次 HTTP，15 条路由均得到过成功响应；这不等于原配置 15/15 通过，也不证明该路由支持关闭推理。
 - 该序列化行为与抽包前一致，本轮没有为绕过供应商拒绝而修改生产配置或放宽仓库测试。
 
-证据：[原配置结果](./evidence/2026-10-21/real-process-results.json)、[智谱诊断请求](./evidence/2026-10-21/real-process-targeted.json)。
-
 ### Web 真实端到端手工测试
 
 启动编译后的 CLI/server/Web，在三个隔离配置下分别使用 Zenmux Chat（DeepSeek）、Responses（Luna）、Anthropic（Sonnet）。每组均通过浏览器输入，请模型读取 `fixture.txt`，下一轮不调用工具复述标记，再刷新检查历史。
@@ -71,8 +69,6 @@ Stage 1 是迁移前的中间状态。最终 LLM 实现进入 `packages/ohbaby-l
 - `/connect` 将同一隔离会话从 Sonnet 切换到 DeepSeek 的 Anthropic 路由，下一次请求使用新模型；刷新后推理选项为 Off、minimal、low、medium、high、xhigh、max，当前值 medium。
 - 短会话执行 `/compact` 正常提示 `Nothing to compact`。加入合成填充文本和一轮短回复后再次压缩，显示 `26,022 -> 7,601 tokens`（本地估算）。压缩后新提问不重复给出标记，仍得到原标记；刷新后压缩记录与回复保留。
 - 真实供应商不保证返回可见推理正文，因此另用本地 HTTP fixture 发出合成 `reasoning_content`，手工展开 Thought 检查正文。它验证编译后的解析和 Web 渲染链路，不冒充真实模型推理内容。补充 fixture 首次因启动时 stdin 未保持交互而无法回传验收结果，清理后使用 PTY 重跑；最终退出 0，后端断言、诊断和进程/端口清理均通过。
-
-证据：[推理显示截图](./evidence/2026-10-21/reasoning-web.png)、[推理 fixture 结果](./evidence/2026-10-21/reasoning-fixture-result.json)、[Web 操作记录](./evidence/2026-10-21/real-web-observations.json)、[真实缓存面板](./evidence/2026-10-21/real-web-anthropic-status.png)、[压缩后续聊](./evidence/2026-10-21/real-web-compaction.png)。
 
 ## 5.4 请求结构、消息顺序、窗口占用和 cache hit
 
@@ -98,14 +94,21 @@ Stage 1 是迁移前的中间状态。最终 LLM 实现进入 `packages/ohbaby-l
 
 **证据限制。** 临时 runner 首次退出 1：一处是审计代码漏读 Responses 的 `input_tokens_details.cache_write_tokens`，已用保留的原始 usage 离线纠正；另一处是上述 Anthropic 原始前缀严格断言不成立，保留为限制，没有改称该断言通过。Luna 还多尝试了一次失败的 skill 调用，随后 read 成功，不能称为“严格只尝试一次工具”。这些情况没有通过修改生产代码或放宽仓库测试掩盖。
 
-证据：[专项报告](./evidence/2026-10-21/real-context/REPORT.md)、[逐请求核算](./evidence/2026-10-21/real-context/assessment.json)、[独立证据复审](./evidence/2026-10-21/context-evidence-review.md)。原始采集数据一并保留，完整请求正文只在采集时计算摘要，不进入仓库。
-
 ## 5.5 复审与交付状态
 
 - 子代理按阶段审查规格与代码质量，最终整分支复审通过。关闭了两项独立 CLI 构建名单遗漏和两处文档测试路径错误。
 - Pi 使用用户指定的 `opencode-go/gemini-4-argon-contributor`、medium，在同一独立会话中完成三阶段只读复核；完整原文已在实施会话展示。最终结论为可提交，并要求如实保留智谱限制。
 - 追加的独立证据审查重算了 10 个主请求的 usage、缓存分母和 context 校准结果。纠正了“源码验证误称 dist”和“未报告 cache-write 误称实测 0”两处报告措辞，未发现新的抽包回归。
-- 04 §4.5 的对话、流式、工具、推理显示、模型切换、压缩与标题已有上述手工记录。footer/cache 的数值依据固定输出回归、真实原始 usage 核算和当前界面检查；未另做抽取前后 UI 截图对比。各组范围如上，不把 fixture 当成真实供应商结果。
+- 04 §4.5 的对话、流式、工具、推理显示、模型切换、压缩与标题已有上述手工记录，但真实模型只走了 Web。TUI 只用本地 HTTP fixture 验证过，没有和真实模型对话，因此 04 §4.6「4.5 全部手工确认」尚未完全满足，需补测一次 TUI 真实对话。footer/cache 的数值依据固定输出回归、真实原始 usage 核算和当前界面检查；未另做抽取前后 UI 截图对比。各组范围如上，不把 fixture 当成真实供应商结果。
 - 本轮实现完成，验收含上述明确限制，等待用户审查。当前分支保留；没有 merge、push 或发布 npm 包。后续前端重构尚未开始。
 
-证据目录：[2026-10-21](./evidence/2026-10-21/)。完整命令日志位于本机 `/tmp/ohbaby-llm-extraction-20261021/`，仓库保留可复核的结果、摘要和截图。
+测试日志、截图、采集数据和详细诊断报告仅保留在本地，不纳入后续提交。原 `evidence/2026-10-21/` 产物已按用户要求从当前分支移除，历史验收摘要保留。
+
+## 5.6 审查后修正：包类型去除 agent 概念
+
+整分支审查发现，`ohbaby-llm` 虽然没有依赖 agent，类型里却还带着 agent 的概念。这一节记录对应的修正，以及新增的中立取消判断。
+
+- **请求观测改为中立类型。** 包里只保留 `ModelRequestAttempt`，字段是 `requestId`、`attempt`、计时、`usage` 和 `outcome`。`streamResponse` 去掉了 `requestOwner`、`summaryOwner` 和 `onSummaryRequestRecord`，普通请求和摘要请求统一走 `beforeRequestAttempt` 与 `onRequestObservation`。`AgentStepRequestRecord`、`SummaryRequestRecord` 和 `ModelRequestRecord` 迁回 agent 的 `core/message/types.ts`，`runId`、`step`、`compactionId` 等字段由 lifecycle 和摘要客户端在回调里补上。落库字段与之前一致。
+- **摘要路径有两处行为变化。** 一是摘要流里现在也会产出 `requestObservation` 帧，摘要循环会忽略这些帧。二是提前关闭生成器时，会真正中断 HTTP 流。记录的 outcome 和错误类型不变。
+- **新增中立的取消判断。** 包新增 `isAbortError(error)`，同时识别 OpenAI 和 Anthropic 两家 SDK 的取消错误。原来从 `openai` 转出的 `APIUserAbortError` 只认 OpenAI，现在保留并标记为 deprecated。agent 根入口不新增导出，导出名仍是 567 个。
+- **刻意保留。** `LLMRequestPurpose` 的取值会驱动缓存、推理和重试逻辑，属于请求语义，这次不改。`model.json` 的配置类型也留在包里，等确定要对外复用时再迁回 agent。
