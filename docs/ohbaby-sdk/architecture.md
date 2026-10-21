@@ -101,25 +101,51 @@ Slash command 解析拆成纯词法解析和 catalog resolver。
 
 ## 三、Module Structure & File Layout（模块结构与文件组织）
 
-建议结构：
+当前结构（`src/index.ts` 是唯一公开出口）：
 
 ```
 packages/ohbaby-sdk/src/
-├── index.ts                 # 对外出口
-├── client.ts                # UiBackendClient 契约
-├── prompt.ts                # receipt、队列实体与严格终态
-├── command-record.ts        # 记录合同、脱敏与 fail-open helper
-├── events.ts                # UiEvent union 与事件命名
-├── snapshot.ts              # UiSnapshot / runtime state
-├── rpc/
-│   ├── types.ts             # CoreAPI / SDKAPI 正反向端口
-│   └── proxy.ts             # receiver-safe in-process RPC seam
-├── slash-command/
-│   ├── types.ts             # UiCommandSpec / invocation / result metadata
-│   ├── parse.ts             # parseSlashInput()
-│   └── resolve.ts           # resolveCommand(), filterCommandCatalog()
-└── interaction.ts           # UiInteractionRequest / response
+├── index.ts                 # 对外出口，保留全部既有导出
+├── contract/                # client、DTO、事件与协议纯 helper
+│   ├── client.ts
+│   ├── events.ts
+│   ├── snapshot.ts
+│   ├── prompt.ts
+│   ├── permission.ts
+│   ├── interaction.ts
+│   ├── subagent.ts
+│   ├── compact.ts
+│   ├── connect-model.ts
+│   ├── connect-search.ts
+│   ├── context-window.ts
+│   ├── prompt-cache-usage.ts
+│   ├── global-sessions.ts
+│   ├── error-code.ts
+│   ├── workspace-directory-header.ts
+│   ├── session-view.ts
+│   ├── execution.ts
+│   ├── run-inputs.ts
+│   └── prompt-queue-order.ts
+├── sync/                    # 客户端同步与只读投影
+│   ├── session-sync.ts
+│   ├── permission-sync.ts
+│   ├── subagent-reader.ts
+│   └── subagent-conversation-reader.ts
+├── slash-command/           # 命令契约、解析、解析结果与记录
+│   ├── types.ts
+│   ├── parse.ts
+│   ├── resolve.ts
+│   ├── web-passthrough.ts
+│   └── command-record.ts
+├── in-process-rpc/          # 进程内传输 seam，不是网络 JSON-RPC
+│   ├── types.ts
+│   └── proxy.ts
+└── util/
+    ├── duration.ts
+    └── loopback-host.ts
 ```
+
+测试与被测源文件放在同一目录。`contract/` 不依赖 `sync/`、`util/` 或 `in-process-rpc/`。`contract/` 可以引用 `slash-command/types.ts`；该文件引用 `contract/prompt.ts`，目录层面双向但文件级无环。目录用于明确职责，不增加新的 barrel 或公开子路径。
 
 ### 对外稳定接口
 

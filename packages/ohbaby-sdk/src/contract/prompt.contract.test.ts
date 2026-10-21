@@ -8,7 +8,7 @@ import type {
   UiPromptReceipt,
   UiSubmitPromptAndWaitOptions,
   UiWaitForPromptOptions,
-} from "./index.js";
+} from "../index.js";
 
 const runtimeError: UiPromptError = {
   code: "RUNTIME_ERROR",

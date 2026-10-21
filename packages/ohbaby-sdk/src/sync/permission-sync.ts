@@ -2,8 +2,8 @@ import type {
   UiPermissionBinding,
   UiPermissionSnapshot,
   UiPermissionEvent,
-} from "./permission.js";
-import type { UiPermissionRequest } from "./snapshot.js";
+} from "../contract/permission.js";
+import type { UiPermissionRequest } from "../contract/snapshot.js";
 
 export type PermissionSyncEvent = UiPermissionEvent;
 export interface PermissionSyncState {

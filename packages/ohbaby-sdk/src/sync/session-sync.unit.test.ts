@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSessionSync } from "./session-sync.js";
-import type { UiSessionView } from "./session-view.js";
+import type { UiSessionView } from "../contract/session-view.js";
 function view(revision = 0, text = "base"): UiSessionView {
   return {
     version: {

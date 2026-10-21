@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { UiEvent, UiSnapshot } from "./index.js";
+import type { UiEvent, UiSnapshot } from "../index.js";
 
 type UiPermissionState = NonNullable<UiSnapshot["permission"]>;
 

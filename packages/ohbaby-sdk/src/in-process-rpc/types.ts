@@ -1,4 +1,4 @@
-import type { UiBackendClient, UiQueryClient } from "../client.js";
+import type { UiBackendClient, UiQueryClient } from "../contract/client.js";
 
 /** Fake-RPC forward seam: the backend contract without its reverse event port. */
 export type CoreAPI = Omit<UiBackendClient, "subscribeEvents">;

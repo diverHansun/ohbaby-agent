@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import * as sdk from "./index.js";
+import * as sdk from "../index.js";
 it.each([
   [0, "0s"],
   [59, "59s"],

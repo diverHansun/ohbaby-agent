@@ -6,7 +6,7 @@ import type {
   UiMessage,
   UiPromptCompletion,
   UiSnapshot,
-} from "./index.js";
+} from "../index.js";
 
 function promptCompletion(): UiPromptCompletion {
   return {

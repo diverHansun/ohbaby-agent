@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   UiPermissionBinding,
   UiPermissionSnapshot,
-} from "./permission.js";
-import type { UiPermissionRequest } from "./snapshot.js";
+} from "../contract/permission.js";
+import type { UiPermissionRequest } from "../contract/snapshot.js";
 import {
   createPermissionSync,
   type PermissionSyncEvent,

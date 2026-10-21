@@ -14,7 +14,7 @@ import type {
   UiSlashCommandAction,
   UiSlashCommandError,
   UiSlashCommandOutput,
-} from "./slash-command/types.js";
+} from "../slash-command/types.js";
 import type { UiInteractionRequest } from "./interaction.js";
 import type { UiContextWindowUsage } from "./context-window.js";
 import type {

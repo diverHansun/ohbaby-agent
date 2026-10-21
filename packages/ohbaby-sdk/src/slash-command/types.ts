@@ -1,4 +1,4 @@
-import type { UiPromptReceipt } from "../prompt.js";
+import type { UiPromptReceipt } from "../contract/prompt.js";
 
 export type UiSlashCommandSurface =
   | "tui"

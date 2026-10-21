@@ -5,7 +5,7 @@ import type {
   UiPromptCommandClient,
   UiPromptQueueCommandClient,
   UiQueryClient,
-} from "./index.js";
+} from "../index.js";
 
 type HasKey<T, Key extends PropertyKey> = Key extends keyof T ? true : false;
 

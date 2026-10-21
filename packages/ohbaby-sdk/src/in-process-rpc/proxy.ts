@@ -1,4 +1,4 @@
-import { isStableErrorCode } from "../error-code.js";
+import { isStableErrorCode } from "../contract/error-code.js";
 
 interface SerializedError {
   readonly code?: string;

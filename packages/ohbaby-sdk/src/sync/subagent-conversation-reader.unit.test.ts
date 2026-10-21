@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { UiMessage } from "./snapshot.js";
-import type { UiEvent } from "./events.js";
+import type { UiMessage } from "../contract/snapshot.js";
+import type { UiEvent } from "../contract/events.js";
 import {
   compareSubagentMessages,
   createSubagentConversationReader,
@@ -9,7 +9,7 @@ import type {
   UiSubagentConversationSelection,
   UiSubagentConversationView,
   UiSubagentExecution,
-} from "./subagent.js";
+} from "../contract/subagent.js";
 
 function execution(id: string, sequence = 1): UiSubagentExecution {
   return {

@@ -54,6 +54,14 @@
 
 ---
 
+### 2.6 目录与公开接口回归
+
+SDK 测试与源文件共同归入 `contract/`、`sync/`、`slash-command/`、`in-process-rpc/` 和 `util/`；测试仍从根 `index.ts` 验证公开入口。`in-process-rpc/proxy.unit.test.ts` 保留 receiver、JSON clone、错误与 AbortSignal 边界的既有断言。
+
+纯目录迁移时，使用 TypeScript checker 的 `getExportsOfModule()` 对比迁移前后根入口的排序导出名，覆盖四个 `export *`；同时检查旧路径残留和 `contract/` 依赖方向。运行 SDK 定向测试及 `pnpm test -- --no-file-parallelism` 全量回归，并通过 lint/typecheck。既有测试断言不因目录变化而调整。
+
+---
+
 ## 三、关键测试用例
 
 ```typescript

@@ -15,12 +15,12 @@ export type {
   UiListCommandsQuery,
   UiPermissionUpdate,
   UiUnsubscribe,
-} from "./client.js";
-export { submitPromptAndWait } from "./client.js";
+} from "./contract/client.js";
+export { submitPromptAndWait } from "./contract/client.js";
 export {
   SESSION_MOVED_ERROR_CODE,
   globalSessionRequestDirectory,
-} from "./global-sessions.js";
+} from "./contract/global-sessions.js";
 export type {
   UiDefaultWorkspace,
   UiGlobalSession,
@@ -29,12 +29,12 @@ export type {
   UiSessionSearchMatchType,
   UiSessionSearchPage,
   UiSessionSearchResult,
-} from "./global-sessions.js";
+} from "./contract/global-sessions.js";
 export {
   buildUiCommandDetails,
   executeRecordedUiCommand,
   summarizeUiCommandError,
-} from "./command-record.js";
+} from "./slash-command/command-record.js";
 export type {
   ExecuteRecordedUiCommandOptions,
   UiCommandCorrelation,
@@ -45,8 +45,8 @@ export type {
   UiCommandObservationDiagnostic,
   UiCommandRecord,
   UiCommandRecorder,
-} from "./command-record.js";
-export { isUiPromptNamingSource } from "./prompt.js";
+} from "./slash-command/command-record.js";
+export { isUiPromptNamingSource } from "./contract/prompt.js";
 export type {
   UiAcceptedSteerOutcome,
   UiSteerSkipReason,
@@ -70,19 +70,19 @@ export type {
   UiAcquirePromptEditLeaseInput,
   UiRenewPromptEditLeaseInput,
   UiReleasePromptEditLeaseInput,
-} from "./prompt.js";
+} from "./contract/prompt.js";
 export type {
   UiCompactSessionCompressionResult,
   UiCompactSessionOptions,
   UiCompactSessionResult,
   UiCompactSessionStatus,
   UiCompactSessionUsage,
-} from "./compact.js";
+} from "./contract/compact.js";
 export type {
   UiContextOccupancyComposition,
   UiContextWindowUsage,
-} from "./context-window.js";
-export type { UiPromptCacheUsage } from "./prompt-cache-usage.js";
+} from "./contract/context-window.js";
+export type { UiPromptCacheUsage } from "./contract/prompt-cache-usage.js";
 export type {
   UiCurrentModelConfig,
   UiReasoningConfig,
@@ -93,23 +93,23 @@ export type {
   UiConnectModelResult,
   UiProbeModelContextWindowInput,
   UiProbeModelContextWindowResult,
-} from "./connect-model.js";
+} from "./contract/connect-model.js";
 export {
   connectUrlPathWarning,
   inferConnectModelInterfaceProvider,
   isConnectModelInterfaceProvider,
-} from "./connect-model.js";
+} from "./contract/connect-model.js";
 export {
   WORKSPACE_DIRECTORY_ENCODING_HEADER,
   WORKSPACE_DIRECTORY_ENCODING_PERCENT_UTF8,
   WORKSPACE_DIRECTORY_HEADER,
   workspaceDirectoryHeaders,
-} from "./workspace-directory-header.js";
+} from "./contract/workspace-directory-header.js";
 export type {
   UiSearchProvider,
   UiSetSearchApiKeyInput,
   UiSetSearchApiKeyResult,
-} from "./connect-search.js";
+} from "./contract/connect-search.js";
 export type {
   UiEvent,
   UiContextWindowUpdatedEvent,
@@ -130,7 +130,7 @@ export type {
   UiRuntimeUpdatedEvent,
   UiSnapshotReplacedEvent,
   UiSessionResyncRequiredEvent,
-} from "./events.js";
+} from "./contract/events.js";
 export type {
   UiCommandCompletion,
   UiCommandAction,
@@ -171,7 +171,7 @@ export type {
   UiInteractionRequest,
   UiInteractionResponse,
   UiInteractionSubject,
-} from "./interaction.js";
+} from "./contract/interaction.js";
 export type {
   UiMessage,
   UiMessagePart,
@@ -199,7 +199,7 @@ export type {
   UiTodoItem,
   UiTodoStatus,
   UiSessionTodoList,
-} from "./snapshot.js";
+} from "./contract/snapshot.js";
 export {
   parseSlashCommandInput,
   parseSlashInput,
@@ -232,12 +232,15 @@ export type {
   UiWebOverlayCommandId,
   UiWebPassthroughCommandId,
 } from "./slash-command/web-passthrough.js";
-export type { CoreAPI, SDKAPI } from "./rpc/types.js";
-export { createRPC } from "./rpc/proxy.js";
-export { isStableErrorCode } from "./error-code.js";
-export { isLoopbackHost } from "./loopback-host.js";
+export type { CoreAPI, SDKAPI } from "./in-process-rpc/types.js";
+export { createRPC } from "./in-process-rpc/proxy.js";
+export { isStableErrorCode } from "./contract/error-code.js";
+export { isLoopbackHost } from "./util/loopback-host.js";
 
-export { isUiReasoningConfig, UI_REASONING_STATUSES } from "./connect-model.js";
+export {
+  isUiReasoningConfig,
+  UI_REASONING_STATUSES,
+} from "./contract/connect-model.js";
 
 export type {
   UiPermissionResyncRequiredEvent,
@@ -248,20 +251,20 @@ export type {
   UiSessionIndexEntry,
   UiPermissionEvent,
   UiPermissionUnavailableEvent,
-} from "./permission.js";
+} from "./contract/permission.js";
 
-export { createPermissionSync } from "./permission-sync.js";
-export * from "./session-view.js";
-export * from "./session-sync.js";
+export { createPermissionSync } from "./sync/permission-sync.js";
+export * from "./contract/session-view.js";
+export * from "./sync/session-sync.js";
 export type {
   PermissionSync,
   PermissionSyncState,
   PermissionSyncOptions,
   PermissionSyncEvent,
-} from "./permission-sync.js";
+} from "./sync/permission-sync.js";
 
-export * from "./execution.js";
-export * from "./duration.js";
+export * from "./contract/execution.js";
+export * from "./util/duration.js";
 
 export type {
   UiSubagentBudget,
@@ -277,16 +280,16 @@ export type {
   UiSubagentConversationSelection,
   UiSubagentConversationUnwatchQuery,
   UiSubagentReadClient,
-} from "./subagent.js";
-export { createSubagentReader } from "./subagent-reader.js";
-export type { UiSubagentReaderState } from "./subagent-reader.js";
+} from "./contract/subagent.js";
+export { createSubagentReader } from "./sync/subagent-reader.js";
+export type { UiSubagentReaderState } from "./sync/subagent-reader.js";
 export {
   compareSubagentMessages,
   createSubagentConversationReader,
-} from "./subagent-conversation-reader.js";
-export type { UiSubagentConversationReaderState } from "./subagent-conversation-reader.js";
+} from "./sync/subagent-conversation-reader.js";
+export type { UiSubagentConversationReaderState } from "./sync/subagent-conversation-reader.js";
 
-export { getUnconsumedSteers } from "./run-inputs.js";
-export { compareUiPromptQueueOrder } from "./prompt-queue-order.js";
+export { getUnconsumedSteers } from "./contract/run-inputs.js";
+export { compareUiPromptQueueOrder } from "./contract/prompt-queue-order.js";
 
 export { isUiCommandCompletion } from "./slash-command/types.js";

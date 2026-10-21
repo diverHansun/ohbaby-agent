@@ -1,7 +1,10 @@
-import { applySessionChange, sameSessionGeneration } from "./session-view.js";
-import type { UiBackendClient } from "./client.js";
-import type { UiEvent } from "./events.js";
-import type { UiMessage } from "./snapshot.js";
+import {
+  applySessionChange,
+  sameSessionGeneration,
+} from "../contract/session-view.js";
+import type { UiBackendClient } from "../contract/client.js";
+import type { UiEvent } from "../contract/events.js";
+import type { UiMessage } from "../contract/snapshot.js";
 import type {
   UiSubagentConversationChangedEvent,
   UiSubagentConversationQuery,
@@ -9,7 +12,7 @@ import type {
   UiSubagentConversationUnwatchQuery,
   UiSubagentConversationView,
   UiSubagentExecution,
-} from "./subagent.js";
+} from "../contract/subagent.js";
 
 export interface UiSubagentConversationReaderState {
   readonly selected?: UiSubagentExecution;

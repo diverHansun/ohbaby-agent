@@ -4,7 +4,7 @@ import {
   type UiSessionScope,
   type UiSessionView,
   type UiSessionRecoveryEvent,
-} from "./session-view.js";
+} from "../contract/session-view.js";
 
 export interface SessionSyncState {
   readonly status: "idle" | "syncing" | "ready" | "error";

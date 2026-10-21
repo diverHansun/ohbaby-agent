@@ -3,7 +3,7 @@ import { createSubagentReader } from "./subagent-reader.js";
 import type {
   UiSubagentExecutionList,
   UiSubagentExecutionView,
-} from "./subagent.js";
+} from "../contract/subagent.js";
 const list: UiSubagentExecutionList = {
   executions: [],
   hasMore: false,

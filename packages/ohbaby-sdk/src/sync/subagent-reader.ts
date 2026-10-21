@@ -2,7 +2,7 @@ import type {
   UiSubagentReadClient,
   UiSubagentExecutionList,
   UiSubagentExecutionView,
-} from "./subagent.js";
+} from "../contract/subagent.js";
 
 export interface UiSubagentReaderState {
   readonly list?: UiSubagentExecutionList;

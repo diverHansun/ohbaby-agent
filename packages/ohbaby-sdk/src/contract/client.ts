@@ -18,7 +18,7 @@ import type {
   UiSlashCommandCatalog,
   UiSlashCommandInvocation,
   UiSlashCommandSurface,
-} from "./slash-command/types.js";
+} from "../slash-command/types.js";
 import type {
   UiCompactSessionOptions,
   UiCompactSessionResult,

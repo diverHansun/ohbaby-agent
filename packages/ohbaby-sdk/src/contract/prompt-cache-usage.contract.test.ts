@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { UiPromptCacheUsage } from "./index.js";
+import type { UiPromptCacheUsage } from "../index.js";
 
 describe("prompt cache usage UI contract", () => {
   it("represents session-scoped cache-read accounting", () => {
