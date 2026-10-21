@@ -50,7 +50,7 @@ interface HeuristicTokenCounter {
 
 ### TokenUsage（非本模块产物）
 
-`TokenUsage` 表示 provider 返回的真实 usage，来源在 `services/providers` 和 `core/llm-client` 的流式响应中。它不是本模块的估算结果，由 llm-client 透传给上层消费者。`core/context` 的对话级估算会优先采信历史中已回传的真实 `TokenUsage`（anchor），仅对未回传的尾部调用本模块的 `estimateTokens`。
+`TokenUsage` 表示 provider 返回的真实 usage，来源在 `ohbaby-llm/src/providers` 和 `ohbaby-llm/src/client` 的流式响应中。它不是本模块的估算结果，由 llm-client 透传给上层消费者。`core/context` 的对话级估算会优先采信历史中已回传的真实 `TokenUsage`（anchor），仅对未回传的尾部调用本模块的 `estimateTokens`。
 
 ## 设计约束
 

@@ -4,7 +4,7 @@
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { channel } from "node:diagnostics_channel";
-import { createInterfaceProvider } from "../packages/ohbaby-agent/src/services/interface-providers/index.ts";
+import { createInterfaceProvider } from "../packages/ohbaby-llm/src/providers/index.ts";
 import { installSystemProxy } from "../packages/ohbaby-agent/src/utils/network-proxy/index.ts";
 
 if (process.env.OHBABY_REAL_NETWORK_TEST !== "1") {

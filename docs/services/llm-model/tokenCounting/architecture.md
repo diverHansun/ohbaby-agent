@@ -33,21 +33,24 @@ packages/ohbaby-agent/src/services/llm-model/
 ## 与 LLM 三层的关系
 
 ```text
-services/providers
+ohbaby-llm/src/providers
   厂商 SDK/API、请求转换、流事件归一化、abort 判断
 
-core/llm-client
-  配置绑定、provider 调用、stream 聚合、tool call 参数完成态解析
+ohbaby-llm/src/client
+  已解析配置绑定、provider 调用、stream 聚合、tool call 参数完成态解析
+
+agent core/llm-client/create-llm-client.ts
+  配置文件与环境变量 IO 接线、诊断 logger 回调
 
 services/llm-model
   模型元数据、token 估算、上下文限制；无网络 I/O
 ```
 
-`services/llm-model` 当前只暴露文本级估算（`estimateTokensForText`）与可注入的 `HeuristicTokenCounter`，不再持有消息级输入类型。对话历史的结构化估算由 `core/context` 在领域消息（`MessageWithParts`）上完成。`core/llm-client` 仍保留 `ChatCompletionMessage`，表达 provider/lifecycle 的消息输入边界。
+`services/llm-model` 当前只暴露文本级估算（`estimateTokensForText`）与可注入的 `HeuristicTokenCounter`，不再持有消息级输入类型。对话历史的结构化估算由 `core/context` 在领域消息（`MessageWithParts`）上完成。`ohbaby-llm` 提供自有 `ModelMessage`，表达 provider/lifecycle 的消息输入边界。配置纯类型、校验和 profile 函数在 `ohbaby-llm/src/config/`；配置 IO、模型探测与 `reasoningCapabilityView` 仍在 agent。
 
 ## 设计取舍
 
 1. 当前 token counter 是启发式估算器，不追求与任何厂商 tokenizer 完全一致。
 2. `TokenUsage` 表示 provider 返回的真实 usage；估算 token 只用于上下文规划。
 3. 未知模型使用保守默认 context limit，避免上层误以为可用窗口过大。
-4. 未来若接入真实 tokenizer，应作为本模块的新实现或策略注入，不应放入 `core/llm-client` 或 provider adapter。
+4. 未来若接入真实 tokenizer，应作为本模块的新实现或策略注入，不应放入 `ohbaby-llm/src/client` 或 provider adapter。

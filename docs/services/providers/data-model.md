@@ -1,138 +1,43 @@
 # providers 模块的数据模型
 
-## 核心类型
+源码定义以 `packages/ohbaby-llm/src/providers/types.ts`、`native-state.ts` 和 `reasoning.ts` 为准，公开符号通过 `ohbaby-llm` 导入。
 
-### ProviderKind
+## 配置与实例
 
-```typescript
-type ProviderKind = 'openai-compatible' | 'anthropic';
-```
+- `InterfaceProviderKind`：`openai-compatible | openai-responses | anthropic`，唯一类型定义在同包 `src/config/types.ts`，providers 再导出。
+- `CreateInterfaceProviderOptions`：`id`、可选 `interfaceProvider`、`apiKey`、`baseUrl` 和可选 `tokenUsageReporter`。只绑定连接，不绑定请求模型。
+- `InterfaceProviderInstance`：`id`、`kind`、SDK `client`、`streamResponse(request)`、`isAbortError(error)` 和可选 `streamStart`。
 
-当前是 provider 内部实现分类，不等同于用户配置里的原始 `provider` 字符串。
+## 消息与请求
 
-### CreateProviderOptions
+`ModelMessage` 为自有消息联合类型，包含 system、developer、user、assistant、tool。assistant 可携带 `toolCalls`、推理和经校验的 `modelState`；tool 使用 `callId` 关联调用。不同协议对内容类型的支持以各 adapter 校验为准。
 
-```typescript
-interface CreateProviderOptions {
-  provider: string;
-  apiKey: string;
-  baseUrl: string;
-}
-```
+`ModelToolDefinition` 使用 `name`、可选 `description` 和 `inputSchema`；`ModelToolCall` 使用 `callId`、`name` 和原始 `argumentsJson`。共享层不复用 OpenAI SDK 消息或工具类型。
 
-说明：
+`InterfaceProviderRequest` 包含 model、messages、maxTokens、promptCache，以及可选 temperature、reasoning、tools、signal、onActivity、purpose、sessionId、contextScopeId。`onActivity` 必须同步、轻量且不抛异常。
 
-- 这是连接级配置，不包含 `model`、`temperature`、`maxTokens`
-- 这样 provider 可以被复用到不同模型调用上
+## 规范化事件
 
-### ProviderRequest
+`InterfaceProviderStreamEvent` 的字段均为可选：
 
-```typescript
-interface ProviderRequest {
-  model: string;
-  messages: ChatCompletionMessageParam[];
-  temperature: number;
-  maxTokens: number;
-  tools?: ChatCompletionCreateParams['tools'];
-  signal?: AbortSignal;
-}
-```
+| 字段                               | 含义                                                       |
+| ---------------------------------- | ---------------------------------------------------------- |
+| `textDelta` / `reasoningTextDelta` | 正文和推理的独立增量                                       |
+| `toolCallDeltas`                   | 按 index 累积的 id、name、argumentsDelta；不提前解析 JSON  |
+| `finishReason` / `rawFinishReason` | 共享终态与厂商原始停止值                                   |
+| `tokenUsage` / `reasoningTokens`   | 规范化用量及原生输出的推理 token 信息                      |
+| `nativeOutput`                     | 当前协议支持的原生输出，交由 client 在耗尽后校验并构造状态 |
 
-说明：
+共享 `InterfaceProviderFinishReason` 为 `stop | tool_calls | length | content_filter`。例如 Chat `function_call` 映射为 `tool_calls`；Anthropic `end_turn`、`stop_sequence`、`pause_turn` 映射为 `stop`，`tool_use` 映射为 `tool_calls`，`max_tokens` 映射为 `length`；原始值另行保留。
 
-- 当前 provider 层仍以 OpenAI-compatible message/tool 类型作为统一输入边界
-- Anthropic provider 会在内部把这些输入转成 Messages API 形态
+## 用量与缓存
 
-### ProviderTokenUsage
+`InterfaceProviderTokenUsage` 使用 `inputTokens`、`outputTokens` 和 `totalTokens = inputTokens + outputTokens`。input 包含缓存部分；可选 `inputBreakdown` 区分 uncached/cacheRead/cacheWrite，并记录字段是否被观测。可选 `reasoningTokens` 是 output 的子项，不重复计入 total；缺失与明确的 0 不等价。
 
-```typescript
-interface ProviderTokenUsage {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-}
-```
+`InterfaceProviderPromptCache` 是按 strategy 区分的联合类型，包括 observe-only、OpenAI keyed implicit 和两种 Anthropic 策略。策略由 client 解析，adapter 只发对应控制字段；Responses 维持 observe-only。
 
-这是 provider 层统一后的 usage 形状，`core/llm-client` 已直接复用它，不再依赖 OpenAI 的 `CompletionUsage`。
+## 原生状态与最终完成
 
-### ProviderToolCallDelta
+`NativeOutput` 按协议区分；`ModelState` 记录来源和可重放状态。原生状态只能在同源及投影校验通过时使用，不代表任意厂商 output 都有共享表达。
 
-```typescript
-interface ProviderToolCallDelta {
-  index: number;
-  id?: string;
-  name?: string;
-  argumentsDelta?: string;
-}
-```
-
-说明：
-
-- `index` 用于跨 chunk 累积同一个工具调用
-- `argumentsDelta` 始终是原始 JSON 片段，不在 provider 内提前解析
-
-### ProviderStreamEvent
-
-```typescript
-interface ProviderStreamEvent {
-  textDelta?: string;
-  toolCallDeltas?: ProviderToolCallDelta[];
-  finishReason?: ProviderFinishReason;
-  rawFinishReason?: string;
-  tokenUsage?: ProviderTokenUsage;
-}
-```
-
-设计说明：
-
-- 这是 provider 对上游暴露的唯一流式事件模型
-- `rawFinishReason` 用于保留厂商特有语义，例如：
-  - OpenAI-compatible: `function_call`
-  - Anthropic: `pause_turn`
-
-### ProviderInstance
-
-```typescript
-interface ProviderInstance<TClient = any> {
-  id: string;
-  kind: ProviderKind;
-  client: TClient;
-  streamChatCompletion(request: ProviderRequest): Promise<AsyncIterable<ProviderStreamEvent>>;
-  isAbortError(error: unknown): boolean;
-}
-```
-
-设计说明：
-
-- 当前 `ProviderInstance` 已经吸收了早期文档中的 adapter 三件套职责
-- `client` 只在 provider 内部和少数调试/测试场景需要直接访问
-- 对 `core/llm-client` 来说，真正稳定的边界是 `streamChatCompletion()` 和 `isAbortError()`
-
-## 共享完成原因模型
-
-```typescript
-type ProviderFinishReason = 'stop' | 'tool_calls' | 'length' | 'content_filter';
-```
-
-当前映射策略：
-
-| 厂商原始值 | 共享值 | 备注 |
-|---|---|---|
-| `stop` | `stop` | OpenAI-compatible |
-| `function_call` | `tool_calls` | OpenAI 旧值，raw 保留 |
-| `tool_calls` | `tool_calls` | OpenAI-compatible |
-| `end_turn` | `stop` | Anthropic |
-| `stop_sequence` | `stop` | Anthropic |
-| `pause_turn` | `stop` | Anthropic，raw 保留 |
-| `tool_use` | `tool_calls` | Anthropic |
-| `max_tokens` | `length` | Anthropic |
-
-## 当前模型边界
-
-1. **provider 输入边界仍复用 OpenAI-compatible message/tool 类型**
-   - 这是当前实现的简化点
-   - 未来若需要完全摆脱 OpenAI SDK 类型，再引入独立消息模型
-
-2. **provider 不返回最终完成态对象**
-   - 不存在 `CompletedResponse`
-   - 最终完成态由 `core/llm-client` 在累积 normalized event 后构建
+provider 不返回最终 `StreamingResponse`。client 必须等待流耗尽，校验终态、工具参数及 native 投影；上层不能仅凭一个 provider 终态事件执行工具或持久化成功。

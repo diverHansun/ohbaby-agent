@@ -1,136 +1,36 @@
 # llm-client 模块的测试策略
 
-## 当前文档范围
+## 范围与位置
 
-本文件描述的是**当前实现**的测试策略：`createLLMClient()` 依赖 `config/llm` 与 `services/interface-providers`，`streamChatCompletion()` 消费 provider 输出的归一化流事件并构造最终 `StreamingResponse`。
+纯 client 测试位于 `packages/ohbaby-llm/src/client/`，只依赖本包配置合同、providers 和测试 fixture。agent 包装层及跨模块合同保留在 agent，避免新包反向依赖 agent。
 
-## 测试目标
+文档列出当前测试职责，不表示本次编辑已经执行测试；执行结果见本议题验收记录。
 
-通过单元和集成测试验证：
+## 本包测试
 
-1. `createLLMClient()` 正确读取配置并创建对应的 provider client
-2. `streamChatCompletion()` 正确累积文本内容与工具调用片段
-3. 流结束时 `parsedToolCalls`、`finishReason`、`tokenUsage` 输出正确
-4. 请求参数 `model`、`temperature`、`maxTokens`、`tools` 正确交付 provider；wire 参数由 provider contract tests 验证
-5. 配置错误或 API 错误能够按预期传播
+| 文件（相对 `packages/ohbaby-llm/src/client/`）                  | 验证内容                                                                                                            |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `llm-client.test.ts`                                            | 显式配置工厂、不在返回 config 暴露密钥、provider 绑定、请求参数、正文和工具片段累积、取消与重试                     |
+| `completion.unit.test.ts`                                       | EOF 后唯一完成、晚到 usage/error、合法空 stop、无本地信号 provider abort、取消不伪造正文、非法工具 JSON/native 投影 |
+| `model-snapshot.unit.test.ts`、`native-state.unit.test.ts`      | 中间快照、工具原始参数、原生状态只在正常耗尽后发布                                                                  |
+| `retry.unit.test.ts`、`errors.unit.test.ts`                     | 错误分类、Retry-After、退避及 overflow 边界                                                                         |
+| `prompt-cache.unit.test.ts`                                     | 策略选择、稳定键、scope 隔离、跨重试复用和 observe-only 边界                                                        |
+| `idle-watchdog.unit.test.ts`、`stream-idle.integration.test.ts` | 等待点计时、原始活动续时、消费者空档、partial 不重放、取消竞争与迟到清理                                            |
+| `request-observation.unit.test.ts`                              | 请求记录回调、尝试准入、观测保存失败、真实接收时间与取消                                                            |
 
-## 当前已有测试范围
+纯配置校验测试位于 `packages/ohbaby-llm/src/config/__tests__/validation.unit.test.ts`。协议转换测试见 [providers 测试策略](../../services/providers/test.md)。
 
-当前测试文件是 `src/core/llm-client/llm-client.test.ts`，已覆盖以下行为。
+## 留在 agent 的测试
 
-### 1. createLLMClient()
-
-| 用例 | 当前状态 | 验证点 |
-|------|------|-------|
-| 正常加载配置 | 已有测试 | 返回 `client` 与裁剪后的 `config` |
-| 不暴露 apiKey | 已有测试 | `client.config` 中不含 `apiKey` |
-| 不同 provider/baseUrl 配置 | 已有测试 | `zhipu` 这类 OpenAI-compatible 配置可被绑定 |
-| 配置错误传播 | 已有测试 | `getLLMConfig()` 抛错时直接向上抛 |
-| SDK 能力存在 | provider 单测 | 默认 Chat 使用 `client.chat.completions.create`；显式 `openai-responses` 使用 `client.responses.create` |
-
-### 2. streamChatCompletion() 基本流
-
-| 用例 | 当前状态 | 验证点 |
-|------|------|-------|
-| 简单文本累积 | 已有测试 | `completeMessage.content` 随 chunk 增长 |
-| 工具调用累积与解析 | 已有测试 | `tool_calls[].function.arguments` 拼接正确，最终 `parsedToolCalls` 正确 |
-| 空响应占位文本 | 已有测试 | 无文本时返回 `(Empty response)` |
-| 配置透传到请求 | 已有测试 | `model`、`temperature`、`maxTokens` 正确交付 provider |
-| tools 透传 | 已有测试 | 本地 function tools 原样交付 provider |
-| provider wire 参数 | provider contract tests | 默认 Chat 的 `stream_options.include_usage`/cache、Anthropic 参数映射不变；Responses 不发 cache 或 continuation 控制字段 |
-
-### 3. 模块导出
-
-| 用例 | 当前状态 | 验证点 |
-|------|------|-------|
-| 导出函数存在 | 已有测试 | `createLLMClient`、`streamChatCompletion` 可导入 |
-| ES Module 形态可用 | 已有测试 | 返回的 generator 可被 `for-await-of` 使用 |
-
-## 建议补充的测试
-
-以下用例与当前实现强相关，但还应补上，以避免文档和行为继续漂移。
-
-### 1. 中断场景
-
-| 用例 | 预期 |
-|------|------|
-| 中途中断抛 `APIUserAbortError` | 返回部分结果，不重新抛异常 |
-| 中断且尚无文本 | `completeMessage.content === '(Interrupted)'` |
-| 中断时存在未完成 tool_calls | `parsedToolCalls === undefined` |
-
-### 2. 边界情况
-
-| 用例 | 预期 |
-|------|------|
-| 0 chunk 返回 | 明确当前行为是“不产生任何 yield”还是“补一个最终响应” |
-| 单 chunk 同时包含 content 与 finish_reason | 正确生成最终响应 |
-| tool_calls JSON 非法 | 在解析阶段抛出明确错误 |
-| API 不返回 usage | `tokenUsage` 为 `undefined` |
-
-### 3. 错误传播
-
-| 用例 | 预期 |
-|------|------|
-| 网络错误 | 原样抛出 |
-| 认证错误 | 原样抛出 |
-| 非 `APIUserAbortError` 的异常 | 不应被误判为中断 |
-
-## 建议的验证方式
-
-### 1. createLLMClient()
-
-- Mock `getLLMConfig()` 返回不同配置
-- 断言 `LLMClientInstance.config` 被正确裁剪与绑定
-- 避免在单元测试中发起真实网络请求
-
-### 2. streamChatCompletion()
-
-- 在 provider 边界 mock 对应 SDK stream（默认 Chat 为 `client.chat.completions.create`，显式 Responses 为 `client.responses.create`）返回异步迭代器
-- 收集所有 `StreamingResponse`
-- 分别校验中间态和最终态，而不只看最后一个响应
-- Responses fixture 的 message added 必须是 `in_progress` + `content=[]`；唯一 output_text 由唯一 content-part added 建立，并在 part done/item done/terminal 保持有序一致。
-
-### 3. 参数构造
-
-- 检查 `create()` 的第一个参数是否包含：
-  - `model`
-  - `temperature`
-  - `max_tokens`
-  - `stream: true`
-  - `stream_options: { include_usage: true }`
-  - `tools`（如有）
-
-## 覆盖重点
-
-| 模块部分 | 优先级 | 说明 |
-|---------|-------|------|
-| `createLLMClient()` | 高 | 配置读取是所有流式调用的入口 |
-| `streamChatCompletion()` 主流程 | 高 | 当前模块的核心价值所在 |
-| tool_calls 累积与解析 | 高 | 最容易在流式协议改动时出错 |
-| 中断处理 | 高 | 用户体验强相关，当前已覆盖部分结果返回 |
-| 错误传播 | 中 | 保证调用方能区分中断和真正故障 |
+- `packages/ohbaby-agent/src/core/llm-client/llm-client.test.ts` 验证 `createLLMClient` 默认项目和 `.env` 路径、显式配置选项、配置错误传播与 token normalization 诊断回调。
+- 同目录 `sdk-retry.integration.test.ts` 用安装的真实 SDK 和本地 fetch stub 验证 SDK 重试关闭、项目层重试预算与空闲行为；不调用外部模型。
+- `packages/ohbaby-agent/src/core/context/prompt-cache-wire.contract.test.ts`、`packages/ohbaby-agent/src/core/lifecycle/openai-responses.integration.test.ts` 验证依赖 agent 的 wire/配置合同，直接导入 `ohbaby-llm`。
+- Lifecycle/Context、server 和 CLI 的集成测试验证结果接受、用量持久化、摘要恢复及取消。这些属于上层接线，不搬进本包。
 
 ## 维护原则
 
-### 1. 文档必须描述当前真实边界
-当前测试文档必须与 `src/core/llm-client/` 和 `src/services/interface-providers/` 下的真实代码一致。
-
-### 2. 中间态与最终态都要验证
-流式接口最容易只验证最终结果，遗漏中间累积逻辑。
-
-### 3. 明确记录已覆盖与待补齐项
-测试文档不应把“未来计划测试”写成“当前已有覆盖”。
-
-## 后续重构提示
-
-当前 provider 单测已独立维护在 `docs/services/providers/test.md` 对应的源码测试文件中。llm-client 测试只关注消息累积、完成态构造和中断处理，不重复验证 provider 的协议转换细节。
-
-## 请求空闲保护测试（2026-10-15）
-
-- `idle-watchdog.unit.test.ts`：默认/覆盖阈值、pulse、消费者空档、取消、dispose、迟到异常与输入校验。
-- `stream-idle.integration.test.ts`：四个等待点、partial 不重放、取消竞争、opening 在退避期间及 finally 后迟到、next 迟到、慢持久化不污染 first-text/endedAt、建流与首事件分别计时。
-- `sdk-retry.integration.test.ts`：安装的三种真实 SDK 配合本地 fetch stub；无归一化输出的原始事件持续续时；挂住的 HTTP body 只按应用层预算重试，无 SDK 隐藏重试。
-- `core/lifecycle/failed-history.integration.test.ts`：partial idle 以 APIError 落库，正文保留但不进入后续模型历史或摘要。
-- `packages/ohbaby-server/src/runtime/daemon/model-idle.e2e.test.ts`：真实 HTTP daemon、SQLite 和 goal driver 的故障链路；付费三协议请求需显式设置 `OHBABY_RUN_IDLE_REAL_E2E=1`，使用 DeepSeek 官方 `deepseek-flash`，凭据 `DEEPSEEK_API_KEY` 只从环境或根 `.env` 读取。三种请求都显式关闭 thinking。使用现有 `vitest.e2e.config.ts` 运行；不依赖浏览器。
-
-本批范围与实际验收结果分别见 [04](../../problem-lists/2026-10-13-goals-upgrade/improve-1/04-test-and-acceptance.md) 和 [05](../../problem-lists/2026-10-13-goals-upgrade/improve-1/05-implementation-acceptance.md)。
+- 分别校验中间帧与最终帧；不能只断言最后一帧的正文。
+- 正常完成必须同时具备 provider 终态、生成器耗尽和校验通过；无终态空流是中断，显式空 stop 是合法终态。
+- 取消返回已有真实片段，不期待 `(Interrupted)` 或 `(Empty response)` 占位文本。
+- 重试测试在 fetch 边界核对 HTTP 次数和项目 `retry` 帧，确认没有 SDK 隐藏重试；已有输出不重放，配置 IO 和日志测试留在 agent。
+- 协议 wire 参数由 provider 测试验证，不在 client 测试重复实现 adapter。
