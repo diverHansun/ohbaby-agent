@@ -1,0 +1,86 @@
+{
+  "provider": "zenmux",
+  "credentialSource": "root .env, injected into isolated child environment; never written into model.json",
+  "syntheticMarker": "REAL_WEB_LLM_EXTRACTION_OK",
+  "prompt": "Use the read tool to read fixture.txt in this workspace. Then reply with only the exact marker from that file. Do not edit files or run shell commands.",
+  "followup": "Without using tools, repeat the exact marker from the previous tool result, and nothing else.",
+  "cases": [
+    {
+      "protocol": "openai-compatible",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "session": "session_1792585896971_bzencb1",
+      "reasoningSelection": "Off",
+      "tool": "read fixture.txt, success",
+      "firstReply": "REAL_WEB_LLM_EXTRACTION_OK",
+      "followupReply": "REAL_WEB_LLM_EXTRACTION_OK",
+      "refreshPreservedBothTurns": true,
+      "title": "Read fixture.txt and reply with marker",
+      "stopped": true
+    },
+    {
+      "protocol": "openai-responses",
+      "model": "openai/gpt-5.6-luna",
+      "session": "session_1792586066305_y9rilh1",
+      "reasoningSelection": "medium",
+      "tool": "read fixture.txt, success",
+      "firstReply": "REAL_WEB_LLM_EXTRACTION_OK",
+      "followupReply": "REAL_WEB_LLM_EXTRACTION_OK",
+      "refreshPreservedBothTurns": true,
+      "title": "Read fixture.txt and return its exact marker",
+      "stopped": true
+    },
+    {
+      "protocol": "anthropic",
+      "model": "anthropic/claude-sonnet-5",
+      "session": "session_1792586182749_fnp9dh1",
+      "reasoningSelection": "medium",
+      "tool": "read fixture.txt, success",
+      "firstReply": "REAL_WEB_LLM_EXTRACTION_OK",
+      "followupReply": "REAL_WEB_LLM_EXTRACTION_OK",
+      "refreshPreservedBothTurns": true,
+      "title": "Read fixture.txt and return exact marker",
+      "contextDisplay": "approximately 12.2K / 131.1K, 9%",
+      "contextWindowSource": "explicit test profile, not detected model capacity",
+      "statusCacheHitDisplay": "66%",
+      "stopped": true
+    }
+  ],
+  "supplementalManual": {
+    "modelSwitch": {
+      "from": "anthropic/claude-sonnet-5",
+      "to": "deepseek/deepseek-v4.1-flash",
+      "protocol": "anthropic",
+      "newModelUsedByNextRequest": true,
+      "reasoningOptionsAfterRefresh": [
+        "Off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "selection": "medium"
+    },
+    "compaction": {
+      "initialShortSession": "Nothing to compact",
+      "syntheticFillerCharacters": 88000,
+      "beforeEstimatedTokens": 26022,
+      "afterEstimatedTokens": 7601,
+      "followupWithoutRestatingMarker": "REAL_WEB_LLM_EXTRACTION_OK",
+      "refreshPreservedCompactionAndReply": true
+    },
+    "daemonStopped": true,
+    "credentialLeak": false
+  },
+  "reasoningFixture": {
+    "session": "session_1792587261946_uxsvx71",
+    "syntheticReasoning": "Checking the synthetic fixture before replying.",
+    "expandedAndVisible": true,
+    "toolAndFollowupPassed": true,
+    "refreshPreservedBothReplies": true,
+    "fixtureExitCode": 0,
+    "cleanup": "process and port released",
+    "initialHarnessAttempt": "stdin was not interactive; interrupted after manual checks, cleaned up, rerun with tty passed"
+  }
+}

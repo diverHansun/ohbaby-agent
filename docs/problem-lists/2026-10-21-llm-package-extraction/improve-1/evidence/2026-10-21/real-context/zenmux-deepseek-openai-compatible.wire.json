@@ -1,0 +1,759 @@
+{
+  "profile": "zenmux-deepseek-openai-compatible",
+  "recordedAt": "2026-10-21T12:41:41.870Z",
+  "entry": "createPersistentUiBackendClient.submitPromptAndWait",
+  "productionPrompt": true,
+  "contextWindowTokens": 1000000,
+  "contextWindowSource": "detected",
+  "maxOutputTokens": 4096,
+  "providerRequests": [
+    {
+      "id": 1,
+      "purpose": "session-title",
+      "sessionId": "session_1792586493318_q8vpea1",
+      "messageCount": 2,
+      "replayStateCount": 0,
+      "replayStateHashes": [],
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 256,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 153
+        },
+        "inputTokens": 409,
+        "outputTokens": 8,
+        "totalTokens": 417
+      }
+    },
+    {
+      "id": 2,
+      "purpose": "agent-step",
+      "sessionId": "session_1792586493318_q8vpea1",
+      "messageCount": 3,
+      "replayStateCount": 0,
+      "replayStateHashes": [],
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 7680,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 1643
+        },
+        "inputTokens": 9323,
+        "outputTokens": 82,
+        "totalTokens": 9405
+      }
+    },
+    {
+      "id": 3,
+      "purpose": "agent-step",
+      "sessionId": "session_1792586493318_q8vpea1",
+      "messageCount": 5,
+      "replayStateCount": 0,
+      "replayStateHashes": [],
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 9344,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 190
+        },
+        "inputTokens": 9534,
+        "outputTokens": 13,
+        "totalTokens": 9547
+      }
+    },
+    {
+      "id": 4,
+      "purpose": "agent-step",
+      "sessionId": "session_1792586493318_q8vpea1",
+      "messageCount": 7,
+      "replayStateCount": 0,
+      "replayStateHashes": [],
+      "exhausted": true,
+      "settled": true,
+      "usage": {
+        "inputBreakdown": {
+          "cacheRead": 9344,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 240
+        },
+        "inputTokens": 9584,
+        "outputTokens": 8,
+        "totalTokens": 9592
+      }
+    }
+  ],
+  "contextUpdates": [
+    {
+      "contextWindowRatio": 0.010299,
+      "contextWindowTokens": 1000000,
+      "currentTokens": 10299,
+      "composition": {
+        "system-prompt": 4679,
+        "builtin-tools": 3858,
+        "mcp": 139,
+        "skills": 1405,
+        "conversation": 219,
+        "summarized-conversation": 0,
+        "subagent-exchanges": 0
+      },
+      "estimatedAt": "2026-10-21T12:41:33.384Z",
+      "modelId": "deepseek/deepseek-v4.1-flash",
+      "sessionId": "session_1792586493318_q8vpea1"
+    },
+    {
+      "contextWindowRatio": 0.009965,
+      "contextWindowTokens": 1000000,
+      "currentTokens": 9965,
+      "composition": {
+        "system-prompt": 4679,
+        "builtin-tools": 3858,
+        "mcp": 139,
+        "skills": 1405,
+        "conversation": 381,
+        "summarized-conversation": 0,
+        "subagent-exchanges": 0
+      },
+      "estimatedAt": "2026-10-21T12:41:36.661Z",
+      "modelId": "deepseek/deepseek-v4.1-flash",
+      "sessionId": "session_1792586493318_q8vpea1"
+    },
+    {
+      "contextWindowRatio": 0.00981,
+      "contextWindowTokens": 1000000,
+      "currentTokens": 9810,
+      "composition": {
+        "system-prompt": 4679,
+        "builtin-tools": 3858,
+        "mcp": 139,
+        "skills": 1405,
+        "conversation": 446,
+        "summarized-conversation": 0,
+        "subagent-exchanges": 0
+      },
+      "estimatedAt": "2026-10-21T12:41:39.970Z",
+      "modelId": "deepseek/deepseek-v4.1-flash",
+      "sessionId": "session_1792586493318_q8vpea1"
+    }
+  ],
+  "nativeFingerprints": [],
+  "nativeSnapshots": [],
+  "permissionDecisions": [],
+  "permissionErrors": [],
+  "wire": [
+    {
+      "sequence": 1,
+      "path": "/api/v1/models",
+      "kind": "metadata",
+      "status": 200
+    },
+    {
+      "sequence": 2,
+      "context": {
+        "purpose": "session-title",
+        "id": 1
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "encryptedReasoningRequested": false,
+      "toolPairing": {
+        "calls": [],
+        "results": [],
+        "invalidIds": 0,
+        "duplicateCalls": 0,
+        "duplicateResults": 0,
+        "resultsBeforeCalls": 0,
+        "unmatchedResults": 0,
+        "unansweredCalls": 0
+      },
+      "nativeInputCount": 0,
+      "reasoning": {
+        "controlFields": [
+          "reasoning"
+        ],
+        "config": {
+          "sha256": "4d2d2eb47dcfd24ba6575a7139ae7dcf6ec78f052fb4083a860a15a6a575284e",
+          "bytes": 92
+        }
+      },
+      "system": {
+        "sha256": "48885a7e5ecc3e22aa7903979db30d7ba633f339426ffdfaed1b1824a63413a0",
+        "bytes": 1637
+      },
+      "tools": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "input": {
+        "sha256": "0688d4e5933a9792b41fa3db44adfee531cc504160bd67b8a28a6bd0ae78b090",
+        "bytes": 1949
+      },
+      "inputCount": 2,
+      "inputPrefixes": [
+        {
+          "sha256": "43b975678315e2dcb34ddd15273be4ff3a8ba7e0b35e24f2cb306df601920b33",
+          "bytes": 1590
+        },
+        {
+          "sha256": "0688d4e5933a9792b41fa3db44adfee531cc504160bd67b8a28a6bd0ae78b090",
+          "bytes": 1949
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 417,
+          "prompt_tokens": 409,
+          "completion_tokens": 8,
+          "prompt_cache_hit_tokens": 256,
+          "prompt_cache_miss_tokens": 153,
+          "prompt_tokens_details": {
+            "cached_tokens": 256
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 417,
+        "prompt_tokens": 409,
+        "completion_tokens": 8,
+        "prompt_cache_hit_tokens": 256,
+        "prompt_cache_miss_tokens": 153,
+        "prompt_tokens_details": {
+          "cached_tokens": 256
+        }
+      },
+      "model": "deepseek/deepseek-v4.1-flash",
+      "prefixBeforeLatestUser": {
+        "sha256": "43b975678315e2dcb34ddd15273be4ff3a8ba7e0b35e24f2cb306df601920b33",
+        "bytes": 1590
+      },
+      "status": 200
+    },
+    {
+      "sequence": 3,
+      "context": {
+        "purpose": "agent-step",
+        "id": 2
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "encryptedReasoningRequested": false,
+      "toolPairing": {
+        "calls": [],
+        "results": [],
+        "invalidIds": 0,
+        "duplicateCalls": 0,
+        "duplicateResults": 0,
+        "resultsBeforeCalls": 0,
+        "unmatchedResults": 0,
+        "unansweredCalls": 0
+      },
+      "nativeInputCount": 0,
+      "reasoning": {
+        "controlFields": [
+          "reasoning"
+        ],
+        "config": {
+          "sha256": "4d2d2eb47dcfd24ba6575a7139ae7dcf6ec78f052fb4083a860a15a6a575284e",
+          "bytes": 92
+        }
+      },
+      "system": {
+        "sha256": "c53e813d17f1bc6c3b925559d9bb8f7500424aa012ad5b2f98a6e00067d55d2e",
+        "bytes": 18710
+      },
+      "tools": {
+        "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+        "bytes": 21868
+      },
+      "input": {
+        "sha256": "17e634fab44c9afb06edb675afa2ca8b731ebf5b3096a5326e7d03ed39ad162f",
+        "bytes": 19484
+      },
+      "inputCount": 3,
+      "inputPrefixes": [
+        {
+          "sha256": "861bdaf5f02a8501c719498946a5b99e664a253b6ff00d76810ca31193186832",
+          "bytes": 18663
+        },
+        {
+          "sha256": "532345208614a866709d7b8c4059ce20378d44dd93b77a78f2e4d04622e8f96e",
+          "bytes": 19022
+        },
+        {
+          "sha256": "17e634fab44c9afb06edb675afa2ca8b731ebf5b3096a5326e7d03ed39ad162f",
+          "bytes": 19484
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 9405,
+          "prompt_tokens": 9323,
+          "completion_tokens": 82,
+          "prompt_cache_hit_tokens": 7680,
+          "prompt_cache_miss_tokens": 1643,
+          "prompt_tokens_details": {
+            "cached_tokens": 7680
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 9405,
+        "prompt_tokens": 9323,
+        "completion_tokens": 82,
+        "prompt_cache_hit_tokens": 7680,
+        "prompt_cache_miss_tokens": 1643,
+        "prompt_tokens_details": {
+          "cached_tokens": 7680
+        }
+      },
+      "model": "deepseek/deepseek-v4.1-flash",
+      "prefixBeforeLatestUser": {
+        "sha256": "532345208614a866709d7b8c4059ce20378d44dd93b77a78f2e4d04622e8f96e",
+        "bytes": 19022
+      },
+      "status": 200
+    },
+    {
+      "sequence": 4,
+      "context": {
+        "purpose": "agent-step",
+        "id": 3
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "encryptedReasoningRequested": false,
+      "toolPairing": {
+        "calls": [
+          "210f150263ef12a7ecb0420327afcfa064d12c5b9c0f30c42ed2aab628296618"
+        ],
+        "results": [
+          "210f150263ef12a7ecb0420327afcfa064d12c5b9c0f30c42ed2aab628296618"
+        ],
+        "invalidIds": 0,
+        "duplicateCalls": 0,
+        "duplicateResults": 0,
+        "resultsBeforeCalls": 0,
+        "unmatchedResults": 0,
+        "unansweredCalls": 0
+      },
+      "nativeInputCount": 0,
+      "reasoning": {
+        "controlFields": [
+          "reasoning"
+        ],
+        "config": {
+          "sha256": "4d2d2eb47dcfd24ba6575a7139ae7dcf6ec78f052fb4083a860a15a6a575284e",
+          "bytes": 92
+        }
+      },
+      "system": {
+        "sha256": "c53e813d17f1bc6c3b925559d9bb8f7500424aa012ad5b2f98a6e00067d55d2e",
+        "bytes": 18710
+      },
+      "tools": {
+        "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+        "bytes": 21868
+      },
+      "input": {
+        "sha256": "c1e98e0ff8c0aa770f1b1dd2ccba89884f0414132e492bc0b7432d37e88b20aa",
+        "bytes": 20161
+      },
+      "inputCount": 5,
+      "inputPrefixes": [
+        {
+          "sha256": "861bdaf5f02a8501c719498946a5b99e664a253b6ff00d76810ca31193186832",
+          "bytes": 18663
+        },
+        {
+          "sha256": "532345208614a866709d7b8c4059ce20378d44dd93b77a78f2e4d04622e8f96e",
+          "bytes": 19022
+        },
+        {
+          "sha256": "17e634fab44c9afb06edb675afa2ca8b731ebf5b3096a5326e7d03ed39ad162f",
+          "bytes": 19484
+        },
+        {
+          "sha256": "d5a93597c8b22627a8aef51d08b66eee1dbcda8557b13d50c7495e2c8965bbc2",
+          "bytes": 19756
+        },
+        {
+          "sha256": "c1e98e0ff8c0aa770f1b1dd2ccba89884f0414132e492bc0b7432d37e88b20aa",
+          "bytes": 20161
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 9547,
+          "prompt_tokens": 9534,
+          "completion_tokens": 13,
+          "prompt_cache_hit_tokens": 9344,
+          "prompt_cache_miss_tokens": 190,
+          "prompt_tokens_details": {
+            "cached_tokens": 9344
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 9547,
+        "prompt_tokens": 9534,
+        "completion_tokens": 13,
+        "prompt_cache_hit_tokens": 9344,
+        "prompt_cache_miss_tokens": 190,
+        "prompt_tokens_details": {
+          "cached_tokens": 9344
+        }
+      },
+      "model": "deepseek/deepseek-v4.1-flash",
+      "prefixBeforeLatestUser": {
+        "sha256": "532345208614a866709d7b8c4059ce20378d44dd93b77a78f2e4d04622e8f96e",
+        "bytes": 19022
+      },
+      "status": 200
+    },
+    {
+      "sequence": 5,
+      "context": {
+        "purpose": "agent-step",
+        "id": 4
+      },
+      "path": "/api/v1/chat/completions",
+      "kind": "generation",
+      "protocol": "openai-compatible",
+      "encryptedReasoningRequested": false,
+      "toolPairing": {
+        "calls": [
+          "210f150263ef12a7ecb0420327afcfa064d12c5b9c0f30c42ed2aab628296618"
+        ],
+        "results": [
+          "210f150263ef12a7ecb0420327afcfa064d12c5b9c0f30c42ed2aab628296618"
+        ],
+        "invalidIds": 0,
+        "duplicateCalls": 0,
+        "duplicateResults": 0,
+        "resultsBeforeCalls": 0,
+        "unmatchedResults": 0,
+        "unansweredCalls": 0
+      },
+      "nativeInputCount": 0,
+      "reasoning": {
+        "controlFields": [
+          "reasoning"
+        ],
+        "config": {
+          "sha256": "4d2d2eb47dcfd24ba6575a7139ae7dcf6ec78f052fb4083a860a15a6a575284e",
+          "bytes": 92
+        }
+      },
+      "system": {
+        "sha256": "c53e813d17f1bc6c3b925559d9bb8f7500424aa012ad5b2f98a6e00067d55d2e",
+        "bytes": 18710
+      },
+      "tools": {
+        "sha256": "304cf8fb67dbcf83828984fa6d6e09a8a68c62f129a6eff4333d96a3b305691d",
+        "bytes": 21868
+      },
+      "input": {
+        "sha256": "6cbed1899dbd2b23d86e8022a044c79c3e021e4e3be4fb1b84c135abb13323fe",
+        "bytes": 20423
+      },
+      "inputCount": 7,
+      "inputPrefixes": [
+        {
+          "sha256": "861bdaf5f02a8501c719498946a5b99e664a253b6ff00d76810ca31193186832",
+          "bytes": 18663
+        },
+        {
+          "sha256": "532345208614a866709d7b8c4059ce20378d44dd93b77a78f2e4d04622e8f96e",
+          "bytes": 19022
+        },
+        {
+          "sha256": "17e634fab44c9afb06edb675afa2ca8b731ebf5b3096a5326e7d03ed39ad162f",
+          "bytes": 19484
+        },
+        {
+          "sha256": "d5a93597c8b22627a8aef51d08b66eee1dbcda8557b13d50c7495e2c8965bbc2",
+          "bytes": 19756
+        },
+        {
+          "sha256": "c1e98e0ff8c0aa770f1b1dd2ccba89884f0414132e492bc0b7432d37e88b20aa",
+          "bytes": 20161
+        },
+        {
+          "sha256": "8b8ba5a90ff219b61c6f39f2ba3a42d19611055a8d79f52b3a420d8657968a88",
+          "bytes": 20235
+        },
+        {
+          "sha256": "6cbed1899dbd2b23d86e8022a044c79c3e021e4e3be4fb1b84c135abb13323fe",
+          "bytes": 20423
+        }
+      ],
+      "rawUsage": [
+        {
+          "total_tokens": 9592,
+          "prompt_tokens": 9584,
+          "completion_tokens": 8,
+          "prompt_cache_hit_tokens": 9344,
+          "prompt_cache_miss_tokens": 240,
+          "prompt_tokens_details": {
+            "cached_tokens": 9344
+          }
+        }
+      ],
+      "finalUsage": {
+        "total_tokens": 9592,
+        "prompt_tokens": 9584,
+        "completion_tokens": 8,
+        "prompt_cache_hit_tokens": 9344,
+        "prompt_cache_miss_tokens": 240,
+        "prompt_tokens_details": {
+          "cached_tokens": 9344
+        }
+      },
+      "model": "deepseek/deepseek-v4.1-flash",
+      "prefixBeforeLatestUser": {
+        "sha256": "8b8ba5a90ff219b61c6f39f2ba3a42d19611055a8d79f52b3a420d8657968a88",
+        "bytes": 20235
+      },
+      "status": 200
+    }
+  ],
+  "checkpoints": [
+    {
+      "label": "run-1",
+      "cache": {
+        "accountedInputTokens": 18857,
+        "cacheReadShare": 0.9027947181418041,
+        "cacheReadTokens": 17024,
+        "sessionId": "session_1792586493318_q8vpea1"
+      },
+      "persisted": {
+        "runs": [
+          {
+            "status": "succeeded"
+          }
+        ],
+        "usageParts": [
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 7680,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 1643
+              },
+              "inputTokens": 9323,
+              "outputTokens": 82,
+              "totalTokens": 9405
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9344,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 190
+              },
+              "inputTokens": 9534,
+              "outputTokens": 13,
+              "totalTokens": 9547
+            }
+          }
+        ],
+        "context": {
+          "summaryParts": 0,
+          "summaryCharacters": 0,
+          "retiredParts": 0,
+          "retiredNativeParts": 0,
+          "activeNativeParts": 0
+        },
+        "completedTools": [
+          {
+            "allowed": true,
+            "toolName": "read",
+            "inputKeys": [
+              "file_path"
+            ],
+            "inputSha256": "82e9855c5dc1f810b89af64b540abf3977e0c427c7f7a03cff0951c1097e61fd"
+          }
+        ]
+      },
+      "messageCount": 3,
+      "answer": {
+        "sha256": "819bee2a975789659f70c4af40bb750908ce566cf49b87f30be1c4f78b1f68b6",
+        "characters": 40,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 3,
+      "httpRequests": 4
+    },
+    {
+      "label": "run-2",
+      "cache": {
+        "accountedInputTokens": 28441,
+        "cacheReadShare": 0.9271122675011427,
+        "cacheReadTokens": 26368,
+        "sessionId": "session_1792586493318_q8vpea1"
+      },
+      "persisted": {
+        "runs": [
+          {
+            "status": "succeeded"
+          },
+          {
+            "status": "succeeded"
+          }
+        ],
+        "usageParts": [
+          {
+            "partType": "tool",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 7680,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 1643
+              },
+              "inputTokens": 9323,
+              "outputTokens": 82,
+              "totalTokens": 9405
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9344,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 190
+              },
+              "inputTokens": 9534,
+              "outputTokens": 13,
+              "totalTokens": 9547
+            }
+          },
+          {
+            "partType": "text",
+            "usage": {
+              "inputBreakdown": {
+                "cacheRead": 9344,
+                "cacheWrite": 0,
+                "observed": {
+                  "cacheRead": true,
+                  "cacheWrite": false
+                },
+                "uncached": 240
+              },
+              "inputTokens": 9584,
+              "outputTokens": 8,
+              "totalTokens": 9592
+            }
+          }
+        ],
+        "context": {
+          "summaryParts": 0,
+          "summaryCharacters": 0,
+          "retiredParts": 0,
+          "retiredNativeParts": 0,
+          "activeNativeParts": 0
+        },
+        "completedTools": [
+          {
+            "allowed": true,
+            "toolName": "read",
+            "inputKeys": [
+              "file_path"
+            ],
+            "inputSha256": "82e9855c5dc1f810b89af64b540abf3977e0c427c7f7a03cff0951c1097e61fd"
+          }
+        ]
+      },
+      "messageCount": 5,
+      "answer": {
+        "sha256": "036b71ad701784c736f7dad3936b56116b28a9e82730fb42d488990bc872cc89",
+        "characters": 34,
+        "project": true,
+        "release": true,
+        "owner": true
+      },
+      "toolCalls": [
+        {
+          "name": "read",
+          "status": "completed"
+        }
+      ],
+      "privateStateVisible": false,
+      "requests": 4,
+      "httpRequests": 5
+    }
+  ],
+  "completions": [
+    {
+      "status": "succeeded"
+    },
+    {
+      "status": "succeeded"
+    }
+  ],
+  "events": {
+    "session.changed": 71,
+    "session.updated": 4,
+    "prompt.submitted": 2,
+    "prompt.updated": 6,
+    "message.appended": 2,
+    "runtime.updated": 4,
+    "run.updated": 4,
+    "context.window.updated": 3,
+    "session.index.invalidated": 1,
+    "command.started": 2,
+    "command.result.delivered": 2
+  }
+}

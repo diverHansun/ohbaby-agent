@@ -1,0 +1,508 @@
+[
+  {
+    "profile": "zenmux-deepseek-openai-compatible",
+    "status": "PASS",
+    "httpRequests": 5,
+    "contextWindow": {
+      "tokens": 1000000,
+      "source": "detected"
+    },
+    "assertions": {
+      "rawNormalizedUsage": true,
+      "preparedMessagePrefix": true,
+      "exactCalibratedHeuristic": true,
+      "cacheStatusCumulativeMatchesMainRequests": true,
+      "stableSystemAndTools": true,
+      "toolPairing": true,
+      "exactlyOneCompletedRead": true,
+      "twoSuccessfulTurns": true
+    },
+    "rawAudits": [
+      {
+        "sequence": 3,
+        "rawInput": 9323,
+        "rawCacheRead": 7680,
+        "rawCacheWrite": 0,
+        "normalized": {
+          "inputBreakdown": {
+            "cacheRead": 7680,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 1643
+          },
+          "inputTokens": 9323,
+          "outputTokens": 82,
+          "totalTokens": 9405
+        },
+        "equal": true,
+        "hit": true
+      },
+      {
+        "sequence": 4,
+        "rawInput": 9534,
+        "rawCacheRead": 9344,
+        "rawCacheWrite": 0,
+        "normalized": {
+          "inputBreakdown": {
+            "cacheRead": 9344,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 190
+          },
+          "inputTokens": 9534,
+          "outputTokens": 13,
+          "totalTokens": 9547
+        },
+        "equal": true,
+        "hit": true
+      },
+      {
+        "sequence": 5,
+        "rawInput": 9584,
+        "rawCacheRead": 9344,
+        "rawCacheWrite": 0,
+        "normalized": {
+          "inputBreakdown": {
+            "cacheRead": 9344,
+            "cacheWrite": 0,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": false
+            },
+            "uncached": 240
+          },
+          "inputTokens": 9584,
+          "outputTokens": 8,
+          "totalTokens": 9592
+        },
+        "equal": true,
+        "hit": true
+      }
+    ],
+    "prefixAudit": [
+      {
+        "before": 2,
+        "after": 3,
+        "retained": true
+      },
+      {
+        "before": 3,
+        "after": 4,
+        "retained": true
+      }
+    ],
+    "calibration": [
+      {
+        "providerSequence": 2,
+        "heuristicTokens": 10299,
+        "factor": 1,
+        "expectedCurrentTokens": 10299,
+        "actualCurrentTokens": 10299,
+        "equal": true,
+        "rawProviderInput": 9323
+      },
+      {
+        "providerSequence": 3,
+        "heuristicTokens": 10461,
+        "factor": 0.9526167589086318,
+        "expectedCurrentTokens": 9965,
+        "actualCurrentTokens": 9965,
+        "equal": true,
+        "rawProviderInput": 9534
+      },
+      {
+        "providerSequence": 4,
+        "heuristicTokens": 10526,
+        "factor": 0.9320009518661312,
+        "expectedCurrentTokens": 9810,
+        "actualCurrentTokens": 9810,
+        "equal": true,
+        "rawProviderInput": 9584
+      }
+    ],
+    "cacheTotals": {
+      "input": 28441,
+      "read": 26368,
+      "write": 0
+    },
+    "backendStatusCache": {
+      "accountedInputTokens": 28441,
+      "cacheReadTokens": 26368,
+      "cacheReadShare": 0.9271122675011427
+    },
+    "checkpoints": [
+      {
+        "label": "first-read",
+        "currentTokens": 9965,
+        "window": 1000000,
+        "ratio": 0.009965
+      },
+      {
+        "label": "followup",
+        "currentTokens": 9810,
+        "window": 1000000,
+        "ratio": 0.00981
+      }
+    ],
+    "limitations": []
+  },
+  {
+    "profile": "zenmux-luna-openai-responses",
+    "status": "PASS_WITH_LIMITATIONS",
+    "httpRequests": 6,
+    "contextWindow": {
+      "tokens": 1050000,
+      "source": "detected"
+    },
+    "assertions": {
+      "rawNormalizedUsage": true,
+      "preparedMessagePrefix": true,
+      "exactCalibratedHeuristic": true,
+      "cacheStatusCumulativeMatchesMainRequests": true,
+      "stableSystemAndTools": true,
+      "toolPairing": true,
+      "exactlyOneCompletedRead": true,
+      "twoSuccessfulTurns": true
+    },
+    "rawAudits": [
+      {
+        "sequence": 3,
+        "rawInput": 7748,
+        "rawCacheRead": 0,
+        "rawCacheWrite": 7745,
+        "normalized": {
+          "reasoningTokens": 0,
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 7745,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 7748,
+          "outputTokens": 19,
+          "totalTokens": 7767
+        },
+        "equal": true,
+        "hit": false
+      },
+      {
+        "sequence": 4,
+        "rawInput": 7809,
+        "rawCacheRead": 7745,
+        "rawCacheWrite": 61,
+        "normalized": {
+          "reasoningTokens": 0,
+          "inputBreakdown": {
+            "cacheRead": 7745,
+            "cacheWrite": 61,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 7809,
+          "outputTokens": 63,
+          "totalTokens": 7872
+        },
+        "equal": true,
+        "hit": true
+      },
+      {
+        "sequence": 5,
+        "rawInput": 7991,
+        "rawCacheRead": 7806,
+        "rawCacheWrite": 182,
+        "normalized": {
+          "reasoningTokens": 0,
+          "inputBreakdown": {
+            "cacheRead": 7806,
+            "cacheWrite": 182,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 7991,
+          "outputTokens": 16,
+          "totalTokens": 8007
+        },
+        "equal": true,
+        "hit": true
+      },
+      {
+        "sequence": 6,
+        "rawInput": 8046,
+        "rawCacheRead": 7988,
+        "rawCacheWrite": 55,
+        "normalized": {
+          "reasoningTokens": 0,
+          "inputBreakdown": {
+            "cacheRead": 7988,
+            "cacheWrite": 55,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 3
+          },
+          "inputTokens": 8046,
+          "outputTokens": 12,
+          "totalTokens": 8058
+        },
+        "equal": true,
+        "hit": true
+      }
+    ],
+    "prefixAudit": [
+      {
+        "before": 2,
+        "after": 3,
+        "retained": true
+      },
+      {
+        "before": 3,
+        "after": 4,
+        "retained": true
+      },
+      {
+        "before": 4,
+        "after": 5,
+        "retained": true
+      }
+    ],
+    "calibration": [
+      {
+        "providerSequence": 2,
+        "heuristicTokens": 10299,
+        "factor": 1,
+        "expectedCurrentTokens": 10299,
+        "actualCurrentTokens": 10299,
+        "equal": true,
+        "rawProviderInput": 7748
+      },
+      {
+        "providerSequence": 3,
+        "heuristicTokens": 10399,
+        "factor": 0.8761530245654918,
+        "expectedCurrentTokens": 9111,
+        "actualCurrentTokens": 9111,
+        "equal": true,
+        "rawProviderInput": 7809
+      },
+      {
+        "providerSequence": 4,
+        "heuristicTokens": 10563,
+        "factor": 0.8135453073591956,
+        "expectedCurrentTokens": 8593,
+        "actualCurrentTokens": 8593,
+        "equal": true,
+        "rawProviderInput": 7991
+      },
+      {
+        "providerSequence": 5,
+        "heuristicTokens": 10629,
+        "factor": 0.785026937500482,
+        "expectedCurrentTokens": 8344,
+        "actualCurrentTokens": 8344,
+        "equal": true,
+        "rawProviderInput": 8046
+      }
+    ],
+    "cacheTotals": {
+      "input": 31594,
+      "read": 23539,
+      "write": 8043
+    },
+    "backendStatusCache": {
+      "accountedInputTokens": 31594,
+      "cacheReadTokens": 23539,
+      "cacheReadShare": 0.7450465278217383
+    },
+    "checkpoints": [
+      {
+        "label": "first-read",
+        "currentTokens": 8593,
+        "window": 1050000,
+        "ratio": 0.008183809523809524
+      },
+      {
+        "label": "followup",
+        "currentTokens": 8344,
+        "window": 1050000,
+        "ratio": 0.007946666666666666
+      }
+    ],
+    "limitations": [
+      "EXTRA_SKILL_TOOL_ATTEMPT_FAILED_BEFORE_ONE_SUCCESSFUL_READ; TWO_TOOL_EXCHANGES_PAIR_CORRECTLY"
+    ]
+  },
+  {
+    "profile": "zenmux-sonnet-anthropic",
+    "status": "PASS_WITH_LIMITATIONS",
+    "httpRequests": 5,
+    "contextWindow": {
+      "tokens": 1000000,
+      "source": "detected"
+    },
+    "assertions": {
+      "rawNormalizedUsage": true,
+      "preparedMessagePrefix": true,
+      "exactCalibratedHeuristic": true,
+      "cacheStatusCumulativeMatchesMainRequests": true,
+      "stableSystemAndTools": true,
+      "toolPairing": true,
+      "exactlyOneCompletedRead": true,
+      "twoSuccessfulTurns": true
+    },
+    "rawAudits": [
+      {
+        "sequence": 3,
+        "rawInput": 14366,
+        "rawCacheRead": 0,
+        "rawCacheWrite": 14364,
+        "normalized": {
+          "reasoningTokens": 0,
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 14364,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 14366,
+          "outputTokens": 113,
+          "totalTokens": 14479
+        },
+        "equal": true,
+        "hit": false
+      },
+      {
+        "sequence": 4,
+        "rawInput": 14654,
+        "rawCacheRead": 0,
+        "rawCacheWrite": 14652,
+        "normalized": {
+          "reasoningTokens": 0,
+          "inputBreakdown": {
+            "cacheRead": 0,
+            "cacheWrite": 14652,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 14654,
+          "outputTokens": 24,
+          "totalTokens": 14678
+        },
+        "equal": true,
+        "hit": false
+      },
+      {
+        "sequence": 5,
+        "rawInput": 14730,
+        "rawCacheRead": 14652,
+        "rawCacheWrite": 76,
+        "normalized": {
+          "reasoningTokens": 0,
+          "inputBreakdown": {
+            "cacheRead": 14652,
+            "cacheWrite": 76,
+            "observed": {
+              "cacheRead": true,
+              "cacheWrite": true
+            },
+            "uncached": 2
+          },
+          "inputTokens": 14730,
+          "outputTokens": 17,
+          "totalTokens": 14747
+        },
+        "equal": true,
+        "hit": true
+      }
+    ],
+    "prefixAudit": [
+      {
+        "before": 2,
+        "after": 3,
+        "retained": true
+      },
+      {
+        "before": 3,
+        "after": 4,
+        "retained": true
+      }
+    ],
+    "calibration": [
+      {
+        "providerSequence": 2,
+        "heuristicTokens": 10299,
+        "factor": 1,
+        "expectedCurrentTokens": 10299,
+        "actualCurrentTokens": 10299,
+        "equal": true,
+        "rawProviderInput": 14366
+      },
+      {
+        "providerSequence": 3,
+        "heuristicTokens": 10462,
+        "factor": 1.197446354014953,
+        "expectedCurrentTokens": 12528,
+        "actualCurrentTokens": 12528,
+        "equal": true,
+        "rawProviderInput": 14654
+      },
+      {
+        "providerSequence": 4,
+        "heuristicTokens": 10527,
+        "factor": 1.2990672794735443,
+        "expectedCurrentTokens": 13675,
+        "actualCurrentTokens": 13675,
+        "equal": true,
+        "rawProviderInput": 14730
+      }
+    ],
+    "cacheTotals": {
+      "input": 43750,
+      "read": 14652,
+      "write": 29092
+    },
+    "backendStatusCache": {
+      "accountedInputTokens": 43750,
+      "cacheReadTokens": 14652,
+      "cacheReadShare": 0.33490285714285717
+    },
+    "checkpoints": [
+      {
+        "label": "first-read",
+        "currentTokens": 12528,
+        "window": 1000000,
+        "ratio": 0.012528
+      },
+      {
+        "label": "followup",
+        "currentTokens": 13675,
+        "window": 1000000,
+        "ratio": 0.013675
+      }
+    ],
+    "limitations": [
+      "ANTHROPIC_WIRE_PREFIX_BYTES_CHANGE_WITH_MOVING_CACHE_CONTROL; PROVIDER_NEUTRAL_MESSAGE_PREFIX_HASHES_RETAINED; SEMANTIC_WIRE_HASH_WITHOUT_CACHE_CONTROL_NOT_CAPTURED"
+    ]
+  }
+]

@@ -1,0 +1,87 @@
+{
+  "root": "/tmp/ohbaby-llm-extraction-20261021/packed-6tgdf90e",
+  "packages": [
+    {
+      "name": "ohbaby-sdk",
+      "version": "0.1.16",
+      "fileCount": 71,
+      "workspaceRanges": false,
+      "testDeclarations": false,
+      "dependencies": {}
+    },
+    {
+      "name": "ohbaby-llm",
+      "version": "0.1.16",
+      "fileCount": 49,
+      "workspaceRanges": false,
+      "testDeclarations": false,
+      "dependencies": {
+        "@anthropic-ai/sdk": "^0.124.0",
+        "openai": "^7.13.0",
+        "zod": "^3.24.1"
+      }
+    },
+    {
+      "name": "ohbaby-agent",
+      "version": "0.1.16",
+      "fileCount": 831,
+      "workspaceRanges": false,
+      "testDeclarations": false,
+      "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.29.0",
+        "@tavily/core": "^0.6.4",
+        "@vscode/ripgrep": "1.18.0",
+        "agent-base": "^7",
+        "axios": "^1.7.7",
+        "chalk": "^5.4.1",
+        "diff": "8.0.2",
+        "dotenv": "^16.4.7",
+        "exa-js": "^2.0.12",
+        "https-proxy-agent": "^7",
+        "undici": "^7",
+        "web-tree-sitter": "0.25.10",
+        "yaml": "^2.8.1",
+        "zod": "^3.24.1",
+        "ohbaby-sdk": "0.1.16",
+        "ohbaby-llm": "0.1.16"
+      }
+    },
+    {
+      "name": "ohbaby-server",
+      "version": "0.1.16",
+      "fileCount": 91,
+      "workspaceRanges": false,
+      "testDeclarations": false,
+      "dependencies": {
+        "@hono/node-server": "^2.0.5",
+        "hono": "^4.12.25",
+        "ohbaby-agent": "0.1.16",
+        "ohbaby-sdk": "0.1.16"
+      }
+    },
+    {
+      "name": "ohbaby-cli",
+      "version": "0.1.16",
+      "fileCount": 198,
+      "workspaceRanges": false,
+      "testDeclarations": false,
+      "dependencies": {
+        "@earendil-works/pi-tui": "1.0.1",
+        "chalk": "^5.4.1",
+        "figlet": "^1.11.0",
+        "ink": "8.0.0",
+        "ink-gradient": "4.0.1",
+        "react": "19.3.0",
+        "string-width": "8.3.0",
+        "yargs": "^17.7.2",
+        "ohbaby-sdk": "0.1.16",
+        "ohbaby-agent": "0.1.16",
+        "ohbaby-server": "0.1.16"
+      }
+    }
+  ],
+  "cliVersion": "0.1.16",
+  "cliHelp": true,
+  "publicLlmImport": "LLM public entry imports OK",
+  "exitCode": 0
+}

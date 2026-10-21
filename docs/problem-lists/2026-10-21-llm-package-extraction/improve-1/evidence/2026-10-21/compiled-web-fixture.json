@@ -1,0 +1,28 @@
+{
+  "command": "node scripts/run-compiled-web-e2e.mjs",
+  "exitCode": 0,
+  "backend": {
+    "keyPresent": true,
+    "keyStable": true,
+    "requestCount": 3,
+    "runtimePartCounts": [
+      1,
+      1,
+      1
+    ],
+    "titleRequests": 1,
+    "toolResultConsumed": true
+  },
+  "cleanup": {
+    "finalStatus": "stopped",
+    "pidReleased": true,
+    "portReleased": true
+  },
+  "diagnosticEvents": [
+    "diagnostics.started",
+    "migration.config.completed",
+    "migration.data.completed",
+    "server.started",
+    "server.stopped"
+  ]
+}

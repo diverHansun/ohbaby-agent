@@ -1,0 +1,50 @@
+{
+  "at": "2026-10-21T12:31:55.280Z",
+  "node": "v24.20.0",
+  "packageEntry": "packages/ohbaby-llm/dist/index.js",
+  "syntheticPrompt": "Reply with exactly OK.",
+  "sdkRetries": 0,
+  "applicationRetries": 0,
+  "timeoutMs": 45000,
+  "concurrency": 2,
+  "results": [
+    {
+      "id": "zhipu-glm-openai-compatible",
+      "provider": "zhipu",
+      "model": "glm-5.3-flash",
+      "protocol": "openai-compatible",
+      "endpoint": "https://open.bigmodel.cn/api/paas/v4",
+      "attempt": 2,
+      "reasoningEnabled": false,
+      "diagnostic": "omit-optional-thinking-control",
+      "ok": true,
+      "frames": 44,
+      "textCharacters": 2,
+      "responseText": "OK",
+      "isComplete": true,
+      "streamStopReason": "provider_finished",
+      "finishReason": "stop",
+      "rawFinishReason": "stop",
+      "tokenUsage": {
+        "reasoningTokens": 41,
+        "inputBreakdown": {
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "observed": {
+            "cacheRead": true,
+            "cacheWrite": false
+          },
+          "uncached": 17
+        },
+        "inputTokens": 17,
+        "outputTokens": 44,
+        "totalTokens": 61
+      },
+      "requests": 1,
+      "httpStatuses": [
+        200
+      ],
+      "elapsedMs": 2614
+    }
+  ]
+}

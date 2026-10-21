@@ -8,8 +8,8 @@
 
 ## 轮次与边界
 
-| 轮次 | 开启日期 | 触发 | 内容 |
-|---|---|---|---|
+| 轮次                                    | 开启日期   | 触发 | 内容                                                        |
+| --------------------------------------- | ---------- | ---- | ----------------------------------------------------------- |
 | [improve-1](improve-1/00-discussion.md) | 2026-10-21 | 首轮 | 先在 agent 内解开耦合，再把代码挪进新包，最后补齐构建与发布 |
 
 本轮包括：
@@ -24,14 +24,14 @@
 
 ## 文档地图
 
-| 文件 | 内容 |
-|---|---|
-| [00-discussion.md](improve-1/00-discussion.md) | 已确认的决策与边界 |
+| 文件                                                                                           | 内容                               |
+| ---------------------------------------------------------------------------------------------- | ---------------------------------- |
+| [00-discussion.md](improve-1/00-discussion.md)                                                 | 已确认的决策与边界                 |
 | [01-problem-analysis-and-current-state.md](improve-1/01-problem-analysis-and-current-state.md) | LLM 代码的现状与耦合点，带代码锚点 |
-| [02-optimization-plan-and-change-scope.md](improve-1/02-optimization-plan-and-change-scope.md) | 方案、三个实施阶段、关键改动清单 |
-| [03-reference-projects.md](improve-1/03-reference-projects.md) | 参考项目的 LLM 包设计 |
-| [04-test-and-acceptance.md](improve-1/04-test-and-acceptance.md) | 测试与验收标准 |
-| 05-implementation-acceptance.md | 预留：实施完成后由验收模式写入，规划期不存在 |
+| [02-optimization-plan-and-change-scope.md](improve-1/02-optimization-plan-and-change-scope.md) | 方案、三个实施阶段、关键改动清单   |
+| [03-reference-projects.md](improve-1/03-reference-projects.md)                                 | 参考项目的 LLM 包设计              |
+| [04-test-and-acceptance.md](improve-1/04-test-and-acceptance.md)                               | 测试与验收标准                     |
+| [05-implementation-acceptance.md](improve-1/05-implementation-acceptance.md)                   | 分阶段实施结果、测试和复审记录     |
 
 02 是后续实施的依据，04 是验收依据。本轮实施后分批提交，等待用户审查，不 merge、push 或发布 npm 包。
 
